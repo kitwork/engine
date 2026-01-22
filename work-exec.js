@@ -1,18 +1,18 @@
-const work = worker(); // Không name, không router, không cron
+const w = work(); // Anonymous, immediate task
 
-// THỰC THI: Chạy ngay lập tức khi file được nạp vào VM
-// Ví dụ: Sửa lỗi dữ liệu hàng loạt trong một lần duy nhất
+// Task for data migration or emergency patching
+print("--- [", now().text(), "] Starting Emergency Patch ---");
 
-print("--- Đang thực hiện bản vá khẩn cấp ---");
+let corrupted = db().from("users").where(status == "unknown").take(100);
 
-let corrupted = db().from("users").where(status == "unknown").get();
+// Chaining to get length and format
+print("Detected", corrupted.len().string(), "corrupted records.");
 
-corrupted.each((user) => {
+corrupted.get().each((user) => {
     db().from("users")
         .where(id == user.id)
-        .update({ status: "active" });
+        .update({ status: "active", patched: true });
 });
 
-print("Đã vá " + corrupted.len() + " người dùng.");
-
-// Tự động giải phóng ID và thoát sau khi dòng cuối cùng kết thúc
+print("Patching complete.");
+// Work organism will die automatically after this line execution

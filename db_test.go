@@ -56,7 +56,7 @@ func TestValueChainingDX(t *testing.T) {
 		t.Fatalf("Build failed: %v", err)
 	}
 
-	res := e.Trigger(context.Background(), w)
+	e.Trigger(context.Background(), w)
 	resp := w.Response
 
 	t.Run("Check Chaining Results", func(t *testing.T) {

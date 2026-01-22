@@ -1,42 +1,91 @@
-# Kitwork Standard Library Specification
+# Kitwork Standard Library (STDLIB) Specification
 
-Tài liệu này định nghĩa các API tiêu chuẩn cung cấp cho môi trường script JS của Kitwork.
+This document details the built-in functions, context methods, and value prototypes available in the Kitwork script environment.
 
-## 1. Core Modules (Tích hợp sẵn)
+## 1. Global Context Functions
 
-### Console
-Cung cấp các hàm in ấn cơ bản.
-- `print(...args)`: In dữ liệu ra STDOUT (đã hiện thực).
-- `debug(...args)`: In dữ liệu kèm theo timestamp và vị trí file.
+These functions are available everywhere. Many are shortcuts (aliases) to the current `work` context.
 
-### Worker (Linh hồn của Engine)
-- `worker(config)`: Khởi tạo định nghĩa worker.
-- `router(method, path)`: Định nghĩa endpoint.
-- `retry(duration)`: Cấu hình cơ chế thử lại.
+### `work(options)`
+Creates or defines the current logic organism.
+- **options**: String (name) or Object `{ name: "..." }`.
+- **Returns**: `Work` context object.
 
-## 2. I/O Modules (Dự kiến)
+### `db()`
+Initializes a fluent database query builder.
+- **Returns**: `DBQuery` object.
 
-### Module `fetch` (HTTP Client)
-Cung cấp khả năng gọi API bên ngoài.
-- `fetch(url, options)`: Trả về một Response object.
-- Hỗ trợ methods: `GET`, `POST`, `JSON payload`.
+### `now()`
+Returns the current system time.
+- **Returns**: `Time` value.
 
-### Module `sql` (Database Client)
-Tích hợp trực tiếp với database của hệ thống.
-- `sql.query(statement, args...)`: Trả về mảng dữ liệu.
-- `sql.exec(statement, args...)`: Thực thi lệnh không lấy dữ liệu (Insert/Update).
-- An toàn trước SQL Injection nhờ cơ chế `Prepared Statements` của Go.
+### `json(data)`
+Alias for `work.json(data)`. Sets the primary response as JSON and returns the `work` context for chaining.
 
-## 3. Data Modules
+---
 
-### Module `json`
-- `json.parse(string)`: Chuyển chuỗi thành Object JS.
-- `json.stringify(object)`: Chuyển Object thành chuỗi JSON.
+## 2. Work Context (`w.`)
 
-### Module `time`
-- `time.now()`: Lấy thời gian hiện tại.
-- `time.sleep(duration)`: Tạm dừng script (tận dụng `time.Sleep` của Go).
+The `work` object (often assigned to `const w`) holds both metadata and runtime behavior.
 
-## 4. Bảo mật Standard Library
-- **Safe Imports:** Chỉ các module được phép mới có thể được nạp vào script.
-- **Go Context Awareness:** Mọi tác vụ I/O trong StdLib đều phải tuân thủ `context.Context` từ Go để có thể hủy bỏ (Cancel) khi cần thiết (ví dụ: request HTTP quá lâu).
+### Directives (Discovery Phase)
+These methods are used by the engine to "learn" about the script's infrastructure.
+- **`.router(method, path)`**: Registers an HTTP endpoint.
+- **`.retry(count, interval)`**: Defines a retry policy.
+- **`.version(semver)`**: Tags the script version.
+
+### Response Handlers (Execution Phase)
+- **`.json(value)`**: Encapsulates a value into a JSON response.
+- **`.text(value)`**: Returns raw text.
+- **`.html(value)`**: Returns HTML content.
+
+---
+
+## 3. Database Builder (`db().`)
+
+### `.from(tableName)`
+Sets the target table.
+
+### `.take(n)` or `.limit(n)`
+Limits the number of results.
+
+### `.get()`
+Executes the query and returns an **Array of Objects**.
+*Note: If a script ends with a DB builder object without calling `.get()`, the engine automatically executes it.*
+
+---
+
+## 4. Value Prototypes (Chaining)
+
+Every value in Kitwork (numbers, strings, booleans, results) supports method chaining for fast transformations.
+
+### Casting
+- **`.string()`**: Force convert value to string.
+- **`.int()`**: Force convert value to integer.
+- **`.float()`**: Force convert value to floating point.
+
+### Formatting
+- **`.json()`**: Wraps the value as the final JSON response (useful at the end of a chain).
+- **`.text()`**: Converts value to its most readable text representation.
+
+---
+
+## 5. Examples
+
+### Advanced Chaining
+```javascript
+let count = db().from("logs").take(100).get().len();
+return count.string().json(); // "100" as JSON
+```
+
+### Full Context Usage
+```javascript
+work("OrderProcess")
+  .router("POST", "/process")
+  .retry(5, "5s");
+
+let order = payload.json();
+print("Processing:", order.id);
+
+return db().from("inventory").take(1); // Auto-executes .get() and returns JSON
+```

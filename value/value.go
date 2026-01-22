@@ -158,7 +158,7 @@ func (v Value) Invoke(name string, args ...Value) Value {
 	if attr.K == Func {
 		// TRƯỜNG HỢP A: Hàm Prototype (Native Go func)
 		// Cần truyền 'v' vào làm tham số đầu tiên (target)
-		if fn, ok := attr.V.(func(Value, ...Value) Value); ok {
+		if fn, ok := attr.V.(Method); ok {
 			return fn(v, args...)
 		}
 
@@ -176,8 +176,7 @@ func (v Value) Call(args ...Value) Value {
 	}
 
 	// Trường hợp 1: V là hàm Prototype (Native)
-	// Ép kiểu về func(Value, ...Value) Value
-	if fn, ok := v.V.(func(Value, ...Value) Value); ok {
+	if fn, ok := v.V.(Method); ok {
 		return fn(Value{K: Nil}, args...)
 	}
 

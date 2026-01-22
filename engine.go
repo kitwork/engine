@@ -58,11 +58,6 @@ func (e *Engine) registerBuiltins() {
 	})
 
 	e.stdlib.Set("work", fn)
-
-	// db() -> Trả về DBQuery builder
-	e.stdlib.Set("db", value.NewFunc(func(args ...value.Value) value.Value {
-		return value.New(NewDBQuery())
-	}))
 }
 
 // Build: Biến source JS thành một Work Blueprint hoàn chỉnh

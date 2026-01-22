@@ -54,6 +54,11 @@ func NewRuntime(ctx context.Context, work *Work, global *compiler.Environment) *
 			return work.Now()
 		}))
 
+		// Alias: db() -> work.db()
+		env.Set("db", value.NewFunc(func(args ...value.Value) value.Value {
+			return value.New(work.DB())
+		}))
+
 		// Chia sẻ luôn đối tượng 'w' và 'context' vào script nếu cần
 		env.Set("w", wVal)
 		env.Set("context", wVal)

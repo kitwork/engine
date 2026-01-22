@@ -47,6 +47,10 @@ func (w *Work) Now() value.Value {
 	return value.New(time.Now())
 }
 
+func (w *Work) DB() *DBQuery {
+	return NewDBQuery()
+}
+
 func (w *Work) Router(method, path string) *Work {
 	w.Routes = append(w.Routes, &Router{Method: strings.ToUpper(method), Path: path})
 	return w

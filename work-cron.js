@@ -1,8 +1,8 @@
-const work = worker({ name: "DatabaseBackup" });
+const w = work({ name: "DatabaseBackup" });
 
 // CHỈ THỊ: Engine tự nhận diện đây là CRON vì không có router
-work.daily("01:00");
-work.timeout("30m"); // Backup có thể tốn thời gian
+w.daily("01:00");
+w.timeout("30m"); // Backup có thể tốn thời gian
 
 print("--- Bắt đầu sao lưu hệ thống ---");
 
