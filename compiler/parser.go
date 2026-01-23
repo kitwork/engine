@@ -21,6 +21,7 @@ const (
 	CALL        // f(x)
 	INDEX       // a[0]
 	MEMBER      // a.b
+	ARROW       // =>
 )
 
 var precedences = map[token.Kind]int{
@@ -38,6 +39,7 @@ var precedences = map[token.Kind]int{
 	token.Assign:      ASSIGN,
 	token.LogicalAnd:  AND,
 	token.LogicalOr:   OR,
+	token.FatArrow:    ARROW,
 }
 
 type (
@@ -88,6 +90,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerInfix(token.LeftParen, p.parseCallExpression)
 	p.registerInfix(token.Dot, p.parseDotExpression)
 	p.registerInfix(token.LeftBracket, p.parseIndexExpression)
+	p.registerInfix(token.FatArrow, p.parseArrowFunction)
 
 	p.nextToken()
 	p.nextToken()
@@ -124,9 +127,13 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseVarStatement()
 	case token.Return:
 		return p.parseReturnStatement()
+	case token.If:
+		// Trong cấu trúc này, If là Expression nhưng cũng có thể dùng như Statement
+		return p.parseExpressionStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
+
 }
 
 // Trong parser.go
@@ -291,16 +298,26 @@ func (p *Parser) parseIfExpression() Expression {
 	if !p.expectPeek(token.RightParen) {
 		return nil
 	}
-	if !p.expectPeek(token.LeftBrace) {
-		return nil
+
+	if p.peekTokenIs(token.LeftBrace) {
+		p.nextToken()
+		exp.Consequence = p.parseBlockStatement()
+	} else {
+		p.nextToken()
+		stmt := p.parseStatement()
+		exp.Consequence = &BlockStatement{Statements: []Statement{stmt}}
 	}
-	exp.Consequence = p.parseBlockStatement()
+
 	if p.peekTokenIs(token.Else) {
 		p.nextToken()
-		if !p.expectPeek(token.LeftBrace) {
-			return nil
+		if p.peekTokenIs(token.LeftBrace) {
+			p.nextToken()
+			exp.Alternative = p.parseBlockStatement()
+		} else {
+			p.nextToken()
+			stmt := p.parseStatement()
+			exp.Alternative = &BlockStatement{Statements: []Statement{stmt}}
 		}
-		exp.Alternative = p.parseBlockStatement()
 	}
 	return exp
 }
@@ -350,12 +367,66 @@ func (p *Parser) parseIndexExpression(left Expression) Expression {
 }
 
 func (p *Parser) parseGroupedExpression() Expression {
-	p.nextToken()
-	exp := p.parseExpression(LOWEST)
-	if !p.expectPeek(token.RightParen) {
+	// Nếu là () => ...
+	if p.peekTokenIs(token.RightParen) {
+		p.nextToken() // Sang dấu )
+		p.nextToken() // Vượt qua )
+		return &ParameterList{Token: p.curToken, Parameters: []*Identifier{}}
+	}
+
+	exps := p.parseExpressionList(token.RightParen)
+
+	// Nếu tiếp sau là =>, biến list này thành ParameterList
+	if p.peekTokenIs(token.FatArrow) {
+		params := make([]*Identifier, len(exps))
+		for i, e := range exps {
+			if id, ok := e.(*Identifier); ok {
+				params[i] = id
+			}
+		}
+		return &ParameterList{Token: p.curToken, Parameters: params}
+	}
+
+	if len(exps) == 0 {
 		return nil
 	}
-	return exp
+	return exps[0]
+}
+
+func (p *Parser) parseArrowFunction(left Expression) Expression {
+	tok := p.curToken // =>
+	p.nextToken()
+
+	var params []*Identifier
+	if id, ok := left.(*Identifier); ok {
+		params = []*Identifier{id}
+	} else if pl, ok := left.(*ParameterList); ok {
+		params = pl.Parameters
+	}
+
+	// Xử lý block { } hoặc single expression
+	if p.curTokenIs(token.LeftBrace) {
+		return &FunctionLiteral{
+			Token:      tok,
+			Parameters: params,
+			Body:       p.parseBlockStatement(),
+		}
+	}
+
+	// Single expression body: a => a * 2 -> { return a * 2 }
+	body := &BlockStatement{
+		Statements: []Statement{
+			&ReturnStatement{
+				ReturnValue: p.parseExpression(LOWEST),
+			},
+		},
+	}
+
+	return &FunctionLiteral{
+		Token:      tok,
+		Parameters: params,
+		Body:       body,
+	}
 }
 
 /* =============================================================================

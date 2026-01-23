@@ -203,6 +203,35 @@ func (c *Compiler) Compile(node Node) error {
 		propIndex := c.addConstant(value.NewString(n.Property.Value))
 		c.emit(opcode.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
 		c.emit(opcode.GET)
+
+	case *FunctionLiteral:
+		// 1. Nhảy qua thân hàm (không muốn thực thi ngay)
+		jumpOver := c.emit(opcode.JUMP, 0, 0)
+
+		startIP := len(c.instructions)
+
+		// 2. Biên dịch thân hàm
+		c.Compile(n.Body)
+
+		// Đảm bảo luôn có Return ở cuối thân hàm
+		// Nếu statement cuối là return thì thôi, nhưng ta cứ emit cho chắc
+		c.emit(opcode.RETURN)
+
+		endIP := len(c.instructions)
+		c.patchUint16(jumpOver+1, uint16(endIP))
+
+		// 3. Đẩy thông tin Lambda lên stack dưới dạng Constant
+		params := make([]string, len(n.Parameters))
+		for i, p := range n.Parameters {
+			params[i] = p.Value
+		}
+
+		fnData := &value.ScriptFunction{
+			Address:    startIP,
+			ParamNames: params,
+		}
+		idx := c.addConstant(value.New(fnData))
+		c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
 	}
 
 	return nil

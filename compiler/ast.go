@@ -276,7 +276,23 @@ func (ol *ObjectLiteral) String() string {
 	return out.String()
 }
 
+// ParameterList: Dùng tạm để chứa danh sách tham số trước khi định nghĩa Lambda
+type ParameterList struct {
+	Token      token.Token
+	Parameters []*Identifier
+}
+
+func (pl *ParameterList) expressionNode() {}
+func (pl *ParameterList) String() string {
+	params := []string{}
+	for _, p := range pl.Parameters {
+		params = append(params, p.String())
+	}
+	return "(" + strings.Join(params, ", ") + ")"
+}
+
 // FunctionLiteral: async (x, y) => { }
+
 type FunctionLiteral struct {
 	Token      token.Token
 	Parameters []*Identifier

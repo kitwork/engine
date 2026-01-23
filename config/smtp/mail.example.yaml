@@ -1,0 +1,4 @@
+host: "smtp.example.com"
+port: 587
+user: "user@example.com"
+password: "YOUR_PASSWORD_HERE"

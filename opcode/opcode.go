@@ -30,6 +30,7 @@ const (
 	COMPARE // So sánh hai giá trị trên Stack (hành vi do operand quyết định)
 	JUMP    // Nhảy không điều kiện đến instruction pointer
 	UNLESS  // Nhảy nếu giá trị Boolean trên Stack là false = IF_FALSE / IF_NOT
+	ITER    // Vòng lặp tối ưu: Tự động kiểm tra + Lấy phần tử + Jump nếu hết
 	HALT    // Dừng thực thi ngay lập tức
 
 	// =====================

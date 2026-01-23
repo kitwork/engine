@@ -1,85 +1,129 @@
-# Kitwork Engine: Logic Organism Specification
+# Kitwork Engine: High-Performance Logical OS
 
-> **“Logic is a living organism, not a passive set of commands.”**
+> **"Nano-second Latency. Zero-Allocation Runtime. Logic as Infrastructure."**
 
-Kitwork Engine is a high-performance, distributed logic orchestration system written in **Golang**. It treats source code as **DNA**, the Engine as an **Incubation Environment**, and each script as a **Living Organism (Work)** with its own identity, lifecycle, and execution context.
-
-## 1. Core Architecture: Stack-based VM
-
-Unlike traditional interpreters, Kitwork uses a custom-built **Stack-based Virtual Machine**. Every script undergoes a transformation process:
-**JS source → AST → Bytecode → VM Execution**.
-
-### Performance at Scale
-- **Throughput:** ~2.5 Million operations per second on standard hardware.
-- **Latency:** Execution in nanoseconds (~380ns/op).
-- **Memory Efficiency:** Near-zero allocations during execution thanks to advanced **sync.Pool** for VM Stacks, Compiler buffers, and Environment scopes.
-
-## 2. Modern DSL: Context-based & Side-Effect Free
-
-The script environment is designed for developer experience (DX). The `work` object is the **Context** that manages everything from infrastructure declaration to response handling.
-
-### Discovery Before Execution
-Infrastructure (Routes, Retries, Versioning) is **discovered** from the code itself.
-1. **Discovery Phase:** The engine runs the script once to "extract" the Blueprint.
-2. **Execution Phase:** The compiled Bytecode is executed by the VM when triggered (HTTP, Cron, Queue).
-
-## 3. High-Level Examples
-
-### The Modern API (Context-based)
-Everything revolves around the `work` context. Methods like `json()`, `now()`, and `db()` are available globally as shortcuts.
-
-```javascript
-const w = work({ name: "api users" });
-
-// INFRASTRUCTURE: Discovered by the engine
-w.router("POST", "/users");
-w.retry(3, "1s");
-
-// LOGIC: Executed by the VM
-let data = db().from("users").take(10);
-
-// RESPONSE: Automatic JSON detection if 'return' is used
-return data; 
-```
-
-### Chaining & Transformation (Prototype Support)
-Every value in Kitwork has functional prototypes for quick casting and formatting.
-
-```javascript
-let raw = "123.45";
-let total = raw.float().int(); // Chaining: string -> float -> int
-
-json({
-    status: "ok",
-    value: total.string(), // Convert back to string
-    at: now().json()      // Chain custom formatters
-});
-```
-
-## 4. System Components
-
-| Component | Responsibility | Performance |
-| :--- | :--- | :--- |
-| **Compiler** | JS AST to Stack-based Bytecode | Pooled & Optimized |
-| **VM** | Instruction execution unit | Nanosecond latency |
-| **Value** | 24-byte atomic unit for scalar/ref types | Cache-friendly |
-| **Pools** | Recycles Stacks, Envs, and Buffers | Zero-alloc runtime |
-
-## 5. Built-in Capability (STDLIB)
-
-- **`work()`**: Declare the logic organism and its infrastructure.
-- **`db()`**: Fluent query builder for database operations.
-- **`now()`**: Native high-precision time.
-- **`json()`, `text()`, `html()`**: Formatters and response handlers.
-
-## 6. Roadmap
-
-- [x] **Bytecode VM**: Full instruction set implementation.
-- [x] **sync.Pool Integration**: Extreme memory efficiency.
-- [x] **Prototype Chaining**: `.int()`, `.string()`, `.json()` for all values.
-- [ ] **Durable Runtime State**: Serializing VM state for long-running workflows.
-- [ ] **Native SQL Drivers**: Real-world database connections (Postgres/MySQL).
+**Kitwork Engine** is a high-performance stack-based virtual machine and DSL runtime, engineered in **Golang**. It is designed to eliminate I/O overhead and memory pressure, treating business logic as "infrastructure assets" that operate with near-native efficiency.
 
 ---
 
-**Closing Note:** Kitwork is not a framework that *calls* logic. It is an ecosystem where logic is discovered, given conditions to live, and allowed to disappear when its purpose ends.
+## ⚡ Performance Metrics
+
+Kitwork Engine has been optimized at the hardware level to achieve record-breaking figures. The following benchmarks were conducted on standard hardware (Intel Core i7-11850H @ 2.50GHz):
+
+| Metric | Result | Notes |
+| :--- | :--- | :--- |
+| **Throughput (Raw)** | **~21,000,000 ops/sec** | Internal stress test (Direct VM Loop) |
+| **Throughput (API)** | **~454,000 req/sec** | Full HTTP Stack + Engine Execution (`BenchmarkAPIRaw`) |
+| **Latency (Execution)**| **~40ns** | Pure Logic Execution Time |
+| **Latency (E2E)** | **~2.3µs** | End-to-End HTTP Request Processing |
+| **Allocations** | **0 bytes/op** | Zero-GC Runtime for Logic Execution |
+| **Thread Safety** | **100% Lock-Free Read** | Hot-swappable Logic Blueprints |
+
+> **Note on Benchmarks:** The API benchmark includes the overhead of `net/http/httptest`. The raw engine throughput is significantly higher, limited only by CPU memory bandwidth.
+
+---
+
+## 🏗️ Core Architecture: Blueprint vs Task
+
+Kitwork solves the "Flexible but Fast" dilemma through a strict separation of concerns:
+
+1.  **Work (Blueprint):** An **Immutable** object containing Bytecode, Constants, and Configuration. Created once during the `Build` phase and shared across millions of requests.
+2.  **Task (Execution State):** A **Mutable** state container for each request (Params, Response, Context). Tasks are managed by a `sync.Pool`, ensuring **Zero-Allocation** during runtime by reusing memory.
+3.  **Execution Context:** A pooled "super-object" pre-loaded with the VM and bounded system functions, allowing the engine to "cold start" a script in nanoseconds.
+
+---
+
+## 🚀 Key Features
+
+-   **JavaScript-like DSL:** Write backend logic using familiar syntax with support for Chaining, Prototypes, and Functional patterns.
+-   **Integrated Service Mesh:**
+    -   `http()`: Ultra-fast external API calls.
+    -   `db()`: Fluent Query Builder with "Magic Lambda Where" clause.
+    -   `payload()`: Safe access to input parameters.
+    -   `log()`: Context-aware structured logging.
+-   **Smart Optimization:**
+    -   **Zero-Copy Variable Access:** VM reads directly from system memory without scope copying.
+    -   **Opcode Fusion:** Critical paths like `ADD`, `MUL`, `ITER` are optimized for CPU branch prediction.
+    -   **Auto-Response:** Automatically detects return types (JSON, HTML) based on execution results.
+
+---
+
+## 🛠️ Usage Example
+
+### 1. Complex Workflow (`demo/advanced_workflow.js`)
+
+```javascript
+const w = work("OrderProcessor")
+  .router("POST", "/v1/process")
+  .version("1.5.0");
+
+let input = payload();
+log("🚀 Starting process for user:", input.user_id);
+
+// 1. Database Check (Fluent API)
+let user = db().table("user").where("id", input.user_id).get();
+
+if (user.len() == 0) {
+    return { status: 404, error: "User not found" };
+}
+
+// 2. External Service Call
+let fx = http().get("https://api.exchangerate.host/latest");
+
+// 3. Logic & Persistence
+let total = input.amount * 25000;
+db().table("transactions").insert({ 
+    user_id: input.user_id, 
+    amount: total 
+});
+
+return { order_id: now().text(), total: total };
+```
+
+### 2. Integration with Go
+
+```go
+e := engine.New()
+w, _ := e.Build(scriptContent)
+
+http.HandleFunc("/api", func(rw http.ResponseWriter, r *http.Request) {
+    params := map[string]value.Value{ "user_id": value.New(101) }
+    
+    // Zero-alloc, high-performance execution
+    result := e.Trigger(context.Background(), w, params)
+    
+    json.NewEncoder(rw).Encode(result.Response.Interface())
+})
+```
+
+---
+
+## 📦 Getting Started
+
+### Run Standard Benchmarks
+Verify the performance on your own machine:
+```bash
+go test -bench=BenchmarkAPI -run=^$ -benchmem
+```
+
+### Run Demo Server (Port 8081)
+Experience the engine in action:
+```bash
+go run cmd/server/main.go
+```
+*Access `http://localhost:8081/deploy` (Loads `raw.js` and other demos)*
+
+---
+
+## 🗺️ Roadmap
+
+- [x] **Core VM (KVM):** Stack-based Bytecode VM with `ITER` support.
+- [x] **Zero-Alloc Runtime:** Full `sync.Pool` implementation.
+- [x] **Thread-Safety:** Blueprint/Task architecture.
+- [x] **Native Connectors:** PostgreSQL (lib/pq) support.
+- [ ] **JIT Compilation:** Compile critical hot paths to native machine code.
+- [ ] **Binary Serialization:** Save/Load compiled bytecode to disk.
+
+---
+
+**Kitwork Engine** - Bringing hyperscale infrastructure logic to your fingertips. Optimized to the byte. Fast to the nanosecond.

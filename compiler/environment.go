@@ -46,7 +46,17 @@ func (e *Environment) Set(name string, val value.Value) value.Value {
 	return val
 }
 
-// All trả về tất cả các biến có sẵn trong scope hiện tại (bao gồm cả scope cha)
+// Store trả về map lưu trữ trực tiếp của environment này (zero-copy)
+func (e *Environment) Store() map[string]value.Value {
+	return e.store
+}
+
+// Outer trả về environment cha
+func (e *Environment) Outer() *Environment {
+	return e.outer
+}
+
+// All trả về tất cả các biến (Warning: slow, copies data)
 func (e *Environment) All() map[string]value.Value {
 	res := make(map[string]value.Value)
 	if e.outer != nil {

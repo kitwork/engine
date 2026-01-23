@@ -1,0 +1,37 @@
+# --- Secrets & Config ---
+.env
+.env.*
+config/config.yaml
+config/database/master.yaml
+config/server/http.yaml
+config/smtp/mail.yaml
+
+# Keep example configs
+!config/*.example.yaml
+!config/**/*.example.yaml
+
+# Logic code should be committed
+# internal/security/config.go
+
+# --- Go Binaries ---
+# Chặn tất cả các file thực thi server build ra
+/cmd/server/server.exe
+/cmd/server/main.exe
+*.exe
+*.test
+*.out
+
+# --- Logs & Output ---
+*.log
+test_output.txt
+debug.txt
+
+# --- IDE & OS ---
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Temporary ---
+tmp/
+temp/

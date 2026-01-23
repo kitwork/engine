@@ -184,6 +184,12 @@ func Evaluator(node Node, env *Environment) value.Value {
 		// Invoke sẽ tự động ưu tiên Prototype Table trước, sau đó mới tới Reflection
 		return target.Invoke(n.Method.Value, args...)
 
+	case *FunctionLiteral:
+		// Trong giai đoạn Discovery, ta không thực thi hàm, chỉ cần đánh dấu là một Function
+		return value.Value{K: value.Func, V: n}
+
+	case *ParameterList:
+		return NULL_VAL
 	}
 
 	return NULL_VAL

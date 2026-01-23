@@ -1,0 +1,13 @@
+type: "postgres"
+user: "postgres"
+password: "YOUR_PASSWORD_HERE"
+name: "postgres"
+host: "localhost"
+port: 5432
+ssl: "disable"
+timezone: "Asia/Ho_Chi_Minh"
+timeout: 5
+max_open: 50
+max_idle: 10
+lifetime: 12
+max_limit: 60
