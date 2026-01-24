@@ -1,0 +1,5 @@
+{
+  "port": 8082,
+  "debug": true,
+  "source": "./"
+}

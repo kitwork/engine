@@ -61,11 +61,11 @@ const (
 	Let
 	If
 	Else
-	For
-	In
+	// For
+	// In
 	Return
-	Async
-	Await
+	// Go
+	// Defer
 )
 
 // String trả về chuỗi đại diện cho Kind (Hữu ích cho Debug/Error Reporting)
@@ -141,16 +141,16 @@ func (k Kind) String() string {
 		return "if"
 	case Else:
 		return "else"
-	case For:
-		return "for"
-	case In:
-		return "in"
+	// case For:
+	// 	return "for"
+	// case In:
+	// 	return "in"
 	case Return:
 		return "return"
-	case Async:
-		return "async"
-	case Await:
-		return "await"
+	// case Go:
+	// 	return "go"
+	// case Defer:
+	// 	return "defer"
 	default:
 		return fmt.Sprintf("KIND(%d)", k)
 	}
@@ -174,18 +174,18 @@ func (t Token) String() string {
 }
 
 var Keywords = map[string]Kind{
-	"const":  Const,
-	"let":    Let,
-	"if":     If,
-	"else":   Else,
-	"for":    For,
-	"in":     In,
+	"const": Const,
+	"let":   Let,
+	"if":    If,
+	"else":  Else,
+	// "for":    For,
+	// "in":     In,
 	"return": Return,
-	"async":  Async,
-	"await":  Await,
-	"true":   Boolean,
-	"false":  Boolean,
-	"null":   Null,
+	// "go":     Go,
+	// "defer":  Defer,
+	"true":  Boolean,
+	"false": Boolean,
+	"null":  Null,
 }
 
 func LookupIdentifier(ident string) Kind {

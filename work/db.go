@@ -139,12 +139,12 @@ func (q *DBQuery) Get() value.Value {
 	}
 
 	// DEBUG LOG
-	log.Printf("[DB] Executing SQL: %s | Args: %v\n", query, q.whereArgs)
+	fmt.Printf("[DB] Executing SQL: %s | Args: %v\n", query, q.whereArgs)
 
 	rows, err := db.QueryContext(context.Background(), query, q.whereArgs...)
 
 	if err != nil {
-		log.Printf("[DB] Query Error: %v | SQL: %s\n", err, query)
+		fmt.Printf("[DB] Query Error: %v | SQL: %s\n", err, query)
 		return value.Value{K: value.Nil}
 	}
 	defer rows.Close()

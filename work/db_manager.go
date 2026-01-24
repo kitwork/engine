@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kitwork/engine/internal/security"
+	"github.com/kitwork/engine/security"
 	_ "github.com/lib/pq"
 )
 

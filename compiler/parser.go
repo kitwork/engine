@@ -74,6 +74,9 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(token.Minus, p.parsePrefixExpression)
 	p.registerPrefix(token.LeftParen, p.parseGroupedExpression)
 	p.registerPrefix(token.If, p.parseIfExpression)
+	// p.registerPrefix(token.For, p.parseForStatement)
+	// p.registerPrefix(token.Defer, p.parseDeferStatement)
+	// p.registerPrefix(token.Go, p.parseSpawnStatement)
 	p.registerPrefix(token.LeftBracket, p.parseArrayLiteral)
 	p.registerPrefix(token.LeftBrace, p.parseObjectLiteral)
 
@@ -90,6 +93,8 @@ func NewParser(l *Lexer) *Parser {
 	p.registerInfix(token.LeftParen, p.parseCallExpression)
 	p.registerInfix(token.Dot, p.parseDotExpression)
 	p.registerInfix(token.LeftBracket, p.parseIndexExpression)
+	p.registerInfix(token.LogicalAnd, p.parseInfixExpression)
+	p.registerInfix(token.LogicalOr, p.parseInfixExpression)
 	p.registerInfix(token.FatArrow, p.parseArrowFunction)
 
 	p.nextToken()
@@ -127,9 +132,9 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseVarStatement()
 	case token.Return:
 		return p.parseReturnStatement()
-	case token.If:
-		// Trong cấu trúc này, If là Expression nhưng cũng có thể dùng như Statement
-		return p.parseExpressionStatement()
+	// case token.If, token.For, token.Defer, token.Go:
+	// 	// Trong cấu trúc này, If, For, Defer và Go là Expression/Statement linh hoạt
+	// 	return p.parseExpressionStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -140,11 +145,50 @@ func (p *Parser) parseStatement() Statement {
 func (p *Parser) parseVarStatement() Statement {
 	stmt := &VarStatement{Token: p.curToken}
 
-	if !p.expectPeek(token.Identifier) {
-		return nil
+	if p.peekTokenIs(token.LeftBrace) {
+		// Destructuring Object: const { a, b } = ...
+		p.nextToken() // cur: {
+		stmt.DestructMode = DestructObject
+		stmt.Names = []*Identifier{}
+		for !p.peekTokenIs(token.RightBrace) {
+			p.nextToken() // cur: identifier
+			if !p.curTokenIs(token.Identifier) {
+				return nil
+			}
+			stmt.Names = append(stmt.Names, &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()})
+			if p.peekTokenIs(token.Comma) {
+				p.nextToken()
+			}
+		}
+		if !p.expectPeek(token.RightBrace) {
+			return nil
+		}
+	} else if p.peekTokenIs(token.LeftBracket) {
+		// Destructuring Array: const [ a, b ] = ...
+		p.nextToken() // cur: [
+		stmt.DestructMode = DestructArray
+		stmt.Names = []*Identifier{}
+		for !p.peekTokenIs(token.RightBracket) {
+			p.nextToken() // cur: identifier
+			if !p.curTokenIs(token.Identifier) {
+				return nil
+			}
+			stmt.Names = append(stmt.Names, &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()})
+			if p.peekTokenIs(token.Comma) {
+				p.nextToken()
+			}
+		}
+		if !p.expectPeek(token.RightBracket) {
+			return nil
+		}
+	} else {
+		// Standard: const a = ...
+		if !p.expectPeek(token.Identifier) {
+			return nil
+		}
+		stmt.Names = []*Identifier{{Token: p.curToken, Value: p.curToken.Value.Text()}}
+		stmt.DestructMode = DestructNone
 	}
-	// Lúc này curToken đang là Identifier (tên biến)
-	stmt.Name = &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
 
 	if !p.expectPeek(token.Assign) {
 		return nil
@@ -322,6 +366,51 @@ func (p *Parser) parseIfExpression() Expression {
 	return exp
 }
 
+func (p *Parser) parseForStatement() Expression {
+	exp := &ForStatement{Token: p.curToken}
+
+	if !p.expectPeek(token.LeftParen) {
+		return nil
+	}
+
+	if !p.expectPeek(token.Identifier) {
+		return nil
+	}
+	exp.Item = &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
+
+	// if !p.expectPeek(token.In) {
+	// 	return nil
+	// }
+
+	p.nextToken()
+	exp.Iterable = p.parseExpression(LOWEST)
+
+	if !p.expectPeek(token.RightParen) {
+		return nil
+	}
+
+	if !p.expectPeek(token.LeftBrace) {
+		return nil
+	}
+	exp.Body = p.parseBlockStatement()
+
+	return exp
+}
+
+func (p *Parser) parseDeferStatement() Expression {
+	stmt := &DeferStatement{Token: p.curToken}
+	p.nextToken()
+	stmt.Fn = p.parseExpression(LOWEST)
+	return stmt
+}
+
+func (p *Parser) parseSpawnStatement() Expression {
+	stmt := &SpawnStatement{Token: p.curToken}
+	p.nextToken()
+	stmt.Fn = p.parseExpression(LOWEST)
+	return stmt
+}
+
 func (p *Parser) parseArrayLiteral() Expression {
 	return &ArrayLiteral{
 		Token:    p.curToken,
@@ -370,7 +459,6 @@ func (p *Parser) parseGroupedExpression() Expression {
 	// Nếu là () => ...
 	if p.peekTokenIs(token.RightParen) {
 		p.nextToken() // Sang dấu )
-		p.nextToken() // Vượt qua )
 		return &ParameterList{Token: p.curToken, Parameters: []*Identifier{}}
 	}
 

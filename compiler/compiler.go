@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/kitwork/engine/opcode"
 	"github.com/kitwork/engine/value"
@@ -46,6 +47,8 @@ func (c *Compiler) Compile(node Node) error {
 				}
 			}
 		}
+		// Luôn kết thúc Program bằng HALT
+		c.emit(opcode.HALT)
 
 	case *ExpressionStatement:
 		return c.Compile(n.Expression)
@@ -81,6 +84,10 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(opcode.COMPARE, 4)
 		case "<=":
 			c.emit(opcode.COMPARE, 5)
+		case "&&":
+			c.emit(opcode.AND)
+		case "||":
+			c.emit(opcode.OR)
 		}
 
 	case *PrefixExpression:
@@ -88,10 +95,13 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
-		if n.Operator == "-" {
+		switch n.Operator {
+		case "-":
 			constIndex := c.addConstant(value.New(-1))
 			c.emit(opcode.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
 			c.emit(opcode.MUL)
+		case "!":
+			c.emit(opcode.NOT)
 		}
 
 	case *Literal:
@@ -107,20 +117,77 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
-		symbolIndex := c.addConstant(value.NewString(n.Name.Value))
-		c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+
+		if n.DestructMode == DestructObject {
+			for _, id := range n.Names {
+				c.emit(opcode.DUP)
+				symbolIndex := c.addConstant(value.NewString(id.Value))
+				c.emit(opcode.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+				c.emit(opcode.GET)
+				c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+				c.emit(opcode.POP)
+			}
+		} else if n.DestructMode == DestructArray {
+			for i, id := range n.Names {
+				c.emit(opcode.DUP)
+				idxIndex := c.addConstant(value.New(i))
+				c.emit(opcode.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
+				c.emit(opcode.GET)
+				symbolIndex := c.addConstant(value.NewString(id.Value))
+				c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+				c.emit(opcode.POP)
+			}
+		} else {
+			symbolIndex := c.addConstant(value.NewString(n.Names[0].Value))
+			c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+		}
 		c.emit(opcode.POP)
 
 	case *AssignmentExpression:
-		err := c.Compile(n.Value)
-		if err != nil {
-			return err
-		}
 		if id, ok := n.Name.(*Identifier); ok {
+			err := c.Compile(n.Value)
+			if err != nil {
+				return err
+			}
 			symbolIndex := c.addConstant(value.NewString(id.Value))
 			c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-		} else {
-			return nil
+		} else if mem, ok := n.Name.(*MemberExpression); ok {
+			c.Compile(mem.Object)
+			propIndex := c.addConstant(value.NewString(mem.Property.Value))
+			c.emit(opcode.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
+			c.Compile(n.Value)
+			c.emit(opcode.SET)
+		} else if obj, ok := n.Name.(*ObjectLiteral); ok {
+			err := c.Compile(n.Value)
+			if err != nil {
+				return err
+			}
+			for k := range obj.Pairs {
+				if id, ok := k.(*Identifier); ok {
+					c.emit(opcode.DUP)
+					symbolIndex := c.addConstant(value.NewString(id.Value))
+					c.emit(opcode.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+					c.emit(opcode.GET)
+					c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+					c.emit(opcode.POP)
+				}
+			}
+		} else if arr, ok := n.Name.(*ArrayLiteral); ok {
+			err := c.Compile(n.Value)
+			if err != nil {
+				return err
+			}
+			for i, el := range arr.Elements {
+				if id, ok := el.(*Identifier); ok {
+					c.emit(opcode.DUP)
+					idxIndex := c.addConstant(value.New(i))
+					c.emit(opcode.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
+					c.emit(opcode.GET)
+					symbolIndex := c.addConstant(value.NewString(id.Value))
+					c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+					c.emit(opcode.POP)
+				}
+			}
 		}
 
 	case *IfExpression:
@@ -128,66 +195,83 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
-		unlessPos := c.emit(opcode.UNLESS, 0, 0)
+		falsePos := c.emit(opcode.FALSE, 0, 0)
 		err = c.Compile(n.Consequence)
 		if err != nil {
 			return err
 		}
+
 		if n.Alternative != nil {
 			jumpPos := c.emit(opcode.JUMP, 0, 0)
-			c.patchUint16(unlessPos+1, uint16(len(c.instructions)))
+			c.patchUint16(falsePos+1, uint16(len(c.instructions)))
 			err = c.Compile(n.Alternative)
 			if err != nil {
 				return err
 			}
 			c.patchUint16(jumpPos+1, uint16(len(c.instructions)))
 		} else {
-			c.patchUint16(unlessPos+1, uint16(len(c.instructions)))
+			c.patchUint16(falsePos+1, uint16(len(c.instructions)))
 		}
+
+	case *ForStatement:
+		c.Compile(n.Iterable)
+		constZero := c.addConstant(value.New(0))
+		c.emit(opcode.PUSH, byte(constZero>>8), byte(constZero&0xFF))
+		loopStart := len(c.instructions)
+		exitJump := c.emit(opcode.ITER, 0, 0)
+		symbolIndex := c.addConstant(value.NewString(n.Item.Value))
+		c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+		c.emit(opcode.POP)
+		c.Compile(n.Body)
+		c.emit(opcode.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
+		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
+		c.emit(opcode.POP)
+		c.emit(opcode.POP)
 
 	case *BlockStatement:
 		for _, s := range n.Statements {
-			err := c.Compile(s)
-			if err != nil {
-				return err
-			}
+			c.Compile(s)
 		}
-
-	case *CallExpression:
-		for _, arg := range n.Arguments {
-			err := c.Compile(arg)
-			if err != nil {
-				return err
-			}
-		}
-		err := c.Compile(n.Function)
-		if err != nil {
-			return err
-		}
-		c.emit(opcode.CALL, byte(len(n.Arguments)))
 
 	case *ReturnStatement:
 		if n.ReturnValue != nil {
-			err := c.Compile(n.ReturnValue)
-			if err != nil {
-				return err
-			}
+			c.Compile(n.ReturnValue)
+		} else {
+			constNull := c.addConstant(value.Value{K: value.Nil})
+			c.emit(opcode.PUSH, byte(constNull>>8), byte(constNull&0xFF))
 		}
 		c.emit(opcode.RETURN)
 
+	case *CallExpression:
+		c.Compile(n.Function)
+		for _, arg := range n.Arguments {
+			c.Compile(arg)
+		}
+		c.emit(opcode.CALL, byte(len(n.Arguments)))
+
 	case *ObjectLiteral:
 		c.emit(opcode.MAKE, 0)
-		for k, v := range n.Pairs {
-			if id, ok := k.(*Identifier); ok {
-				methIndex := c.addConstant(value.NewString(id.Value))
-				c.emit(opcode.PUSH, byte(methIndex>>8), byte(methIndex&0xFF))
-			} else {
-				c.Compile(k)
-			}
-			c.Compile(v)
+		for key, val := range n.Pairs {
+			c.emit(opcode.DUP)
+			c.Compile(key)
+			c.Compile(val)
 			c.emit(opcode.SET)
-			// Không POP target ở đây để cặp key-value tiếp theo tiếp tục dùng target đó
+			c.emit(opcode.POP)
 		}
+
+	case *ArrayLiteral:
+		c.emit(opcode.MAKE, 1)
+		for _, el := range n.Elements {
+			c.emit(opcode.DUP)
+			c.Compile(el)
+			c.emit(opcode.SET)
+			c.emit(opcode.POP)
+		}
+
+	case *IndexExpression:
+		c.Compile(n.Left)
+		c.Compile(n.Index)
+		c.emit(opcode.GET)
 
 	case *MethodCallExpression:
 		c.Compile(n.Object)
@@ -205,31 +289,22 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(opcode.GET)
 
 	case *FunctionLiteral:
-		// 1. Nhảy qua thân hàm (không muốn thực thi ngay)
 		jumpOver := c.emit(opcode.JUMP, 0, 0)
-
 		startIP := len(c.instructions)
-
-		// 2. Biên dịch thân hàm
 		c.Compile(n.Body)
-
-		// Đảm bảo luôn có Return ở cuối thân hàm
-		// Nếu statement cuối là return thì thôi, nhưng ta cứ emit cho chắc
 		c.emit(opcode.RETURN)
-
 		endIP := len(c.instructions)
 		c.patchUint16(jumpOver+1, uint16(endIP))
 
-		// 3. Đẩy thông tin Lambda lên stack dưới dạng Constant
 		params := make([]string, len(n.Parameters))
 		for i, p := range n.Parameters {
 			params[i] = p.Value
 		}
-
 		fnData := &value.ScriptFunction{
 			Address:    startIP,
 			ParamNames: params,
 		}
+		fmt.Printf("[Compiler] Created ScriptFunction with Address: %d\n", startIP)
 		idx := c.addConstant(value.New(fnData))
 		c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
 	}
@@ -237,7 +312,6 @@ func (c *Compiler) Compile(node Node) error {
 	return nil
 }
 
-// Reset xóa sạch trạng thái để tái sử dụng Compiler từ sync.Pool
 func (c *Compiler) Reset() {
 	if c.instructions != nil {
 		c.instructions = c.instructions[:0]
@@ -247,7 +321,6 @@ func (c *Compiler) Reset() {
 	}
 }
 
-// ByteCodeResult trả về kết quả biên dịch cuối cùng
 func (c *Compiler) ByteCodeResult() *Bytecode {
 	bc := &Bytecode{
 		Instructions: make([]byte, len(c.instructions)),

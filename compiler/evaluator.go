@@ -6,7 +6,7 @@ import (
 
 // Hằng số nội bộ để tối ưu hiệu năng
 var (
-	NULL_VAL = value.NewNull()
+	NULL_VAL = value.NULL
 )
 
 // Evaluator là hàm thực thi chính, duyệt qua các nút của cây AST
@@ -44,13 +44,21 @@ func Evaluator(node Node, env *Environment) value.Value {
 		return Evaluator(n.Expression, env)
 
 	case *VarStatement:
-		// Thực thi biểu thức bên phải dấu =
 		val := Evaluator(n.Value, env)
 		if val.IsInvalid() {
 			return val
 		}
-		// Lưu vào Environment
-		env.Set(n.Name.Value, val)
+		if n.DestructMode == DestructObject {
+			for _, id := range n.Names {
+				env.Set(id.Value, val.Get(id.Value))
+			}
+		} else if n.DestructMode == DestructArray {
+			for i, id := range n.Names {
+				env.Set(id.Value, val.Index(i))
+			}
+		} else if len(n.Names) > 0 {
+			env.Set(n.Names[0].Value, val)
+		}
 		return NULL_VAL
 
 	case *ReturnStatement:
@@ -185,8 +193,17 @@ func Evaluator(node Node, env *Environment) value.Value {
 		return target.Invoke(n.Method.Value, args...)
 
 	case *FunctionLiteral:
-		// Trong giai đoạn Discovery, ta không thực thi hàm, chỉ cần đánh dấu là một Function
-		return value.Value{K: value.Func, V: n}
+		// Create a placeholder ScriptFunction with Address=0
+		// Trigger() will update this with the correct bytecode address
+		params := make([]string, len(n.Parameters))
+		for i, p := range n.Parameters {
+			params[i] = p.Value
+		}
+		sFn := &value.ScriptFunction{
+			Address:    0, // Placeholder, will be updated by Trigger()
+			ParamNames: params,
+		}
+		return value.New(sFn)
 
 	case *ParameterList:
 		return NULL_VAL
