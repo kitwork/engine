@@ -57,6 +57,13 @@ func (vm *Runtime) FastReset(code []byte, constants []value.Value, globals map[s
 	// vm.Vars stores reused builtins, do not clear them.
 }
 
+func (vm *Runtime) Defer(fn *value.ScriptFunction) {
+	if vm.FrameIdx >= 0 {
+		f := &vm.Frames[vm.FrameIdx]
+		f.Defers = append(f.Defers, fn)
+	}
+}
+
 func (vm *Runtime) Run() value.Value {
 	//fmt.Printf("[VM Run] Starting execution, bytecode length: %d\n", len(vm.Bytecode))
 	for vm.FrameIdx >= 0 {
@@ -236,7 +243,14 @@ func (vm *Runtime) Run() value.Value {
 			}
 			target := vm.pop()
 
-			if target.IsArray() && (m == "map" || m == "filter") && len(args) > 0 {
+			fmt.Printf("[VM INVOKE] %s on %s with %d args\n", m, target.K.String(), n)
+
+			if m == "len" || m == "length" {
+				vm.push(value.New(float64(target.Len())))
+				continue
+			}
+
+			if target.IsArray() && (m == "map" || m == "filter" || m == "each") && len(args) > 0 {
 				if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
 					ptr := target.V.(*[]value.Value)
 					arr := *ptr
@@ -245,24 +259,29 @@ func (vm *Runtime) Run() value.Value {
 						val := vm.ExecuteLambda(sFn, []value.Value{item})
 						if m == "map" {
 							resArr = append(resArr, val)
-						} else if val.Truthy() {
+						} else if m == "filter" && val.Truthy() {
 							resArr = append(resArr, item)
 						}
 					}
-					vm.push(value.New(resArr))
+					if m == "each" {
+						vm.push(target)
+					} else {
+						vm.push(value.New(resArr))
+					}
 					continue
 				}
 			}
+
 			vm.push(target.Invoke(m, args...))
 
 		case opcode.CALL:
 			n := int(vm.Bytecode[f.IP])
 			f.IP++
-			fn := vm.pop()
 			args := make([]value.Value, n)
 			for i := n - 1; i >= 0; i-- {
 				args[i] = vm.pop()
 			}
+			fn := vm.pop()
 
 			if fn.K == value.Func {
 				if s, ok := fn.V.(*value.ScriptFunction); ok {
@@ -290,6 +309,7 @@ func (vm *Runtime) Run() value.Value {
 					vm.push(value.Value{K: value.Nil})
 				}
 			} else {
+				fmt.Printf("[VM CALL] Calling %s with %d args\n", fn.Text(), len(args))
 				vm.call(fn.Text(), args...)
 			}
 
@@ -501,11 +521,11 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 			// fmt.Printf("VM: OpCall Triggered at IP %d\n", f.IP-1)
 			n := int(vm.Bytecode[f.IP])
 			f.IP++
-			fn := vm.pop()
 			fnArgs := make([]value.Value, n)
 			for i := n - 1; i >= 0; i-- {
 				fnArgs[i] = vm.pop()
 			}
+			fn := vm.pop()
 			if fn.K == value.Func {
 				if s, ok := fn.V.(*value.ScriptFunction); ok {
 					vm.FrameIdx++

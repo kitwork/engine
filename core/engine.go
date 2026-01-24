@@ -38,6 +38,8 @@ type ExecutionContext struct {
 	logFn      value.Value
 	httpFn     value.Value
 	parallelFn value.Value
+	goFn       value.Value
+	deferFn    value.Value
 	engineFn   value.Value
 	workFn     value.Value
 }
@@ -91,6 +93,8 @@ func New() *Engine {
 				return value.NewNull()
 			}
 			arg := args[0]
+			fmt.Printf("[Parallel Debug] Input Type: %s, IsMap: %v\n", arg.K.String(), arg.IsMap())
+
 			if arg.IsArray() {
 				arr := arg.Array()
 				results := make([]value.Value, len(arr))
@@ -112,24 +116,36 @@ func New() *Engine {
 			} else if arg.IsMap() {
 				m := arg.Map()
 				results := make(map[string]value.Value)
-				var wg sync.WaitGroup
-				var mu sync.Mutex
+
+				// Tạm thời chạy TUẦN TỰ để đảm bảo Memory Safety cho các Object phức tạp
 				for k, v := range m {
 					if sFn, ok := v.V.(*value.ScriptFunction); ok {
-						wg.Add(1)
-						go func(key string, fn *value.ScriptFunction) {
-							defer wg.Done()
-							r := e.ExecuteLambda(ctx.task.Work, fn, nil)
-							mu.Lock()
-							results[key] = r.Value
-							mu.Unlock()
-						}(k, sFn)
+						r := e.ExecuteLambda(ctx.task.Work, sFn, nil)
+						results[k] = r.Value
 					} else {
 						results[k] = v
 					}
 				}
-				wg.Wait()
+
 				return value.New(results)
+			}
+			return value.NewNull()
+		})
+
+		ctx.goFn = value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+					go e.ExecuteLambda(ctx.task.Work, sFn, nil)
+				}
+			}
+			return value.NewNull()
+		})
+
+		ctx.deferFn = value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+					ctx.machine.Defer(sFn)
+				}
 			}
 			return value.NewNull()
 		})
@@ -201,6 +217,18 @@ func New() *Engine {
 			return value.New(w)
 		})
 
+		// Pre-inject into machine
+		ctx.machine.Vars["work"] = ctx.workFn
+		ctx.machine.Vars["engine"] = ctx.engineFn
+		ctx.machine.Vars["now"] = ctx.nowFn
+		ctx.machine.Vars["db"] = ctx.dbFn
+		ctx.machine.Vars["payload"] = ctx.payloadFn
+		ctx.machine.Vars["log"] = ctx.logFn
+		ctx.machine.Vars["http"] = ctx.httpFn
+		ctx.machine.Vars["parallel"] = ctx.parallelFn
+		ctx.machine.Vars["go"] = ctx.goFn
+		ctx.machine.Vars["defer"] = ctx.deferFn
+
 		return ctx
 	}
 
@@ -228,6 +256,9 @@ func (e *Engine) registerBuiltins() {
 
 	// Inject global engine object
 	e.stdlib.Set("engine", value.NewNull()) // Dummy for now, populated in EC
+	e.stdlib.Set("go", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
+	e.stdlib.Set("defer", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
+	e.stdlib.Set("parallel", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
 }
 
 func (e *Engine) Build(source string) (*work.Work, error) {
@@ -289,18 +320,6 @@ func (e *Engine) Trigger(ctx context.Context, w *work.Work, params ...map[string
 
 	ec.machine.FastReset(w.Bytecode.Instructions, w.Bytecode.Constants, e.stdlibStore)
 
-	// Inject functions
-	// Inject reused functions
-	ec.machine.Vars["work"] = ec.workFn
-	ec.machine.Vars["engine"] = ec.engineFn
-	ec.machine.Vars["json"] = ec.jsonFn
-	ec.machine.Vars["now"] = ec.nowFn
-	ec.machine.Vars["db"] = ec.dbFn
-	ec.machine.Vars["payload"] = ec.payloadFn
-	ec.machine.Vars["log"] = ec.logFn
-	ec.machine.Vars["http"] = ec.httpFn
-	ec.machine.Vars["parallel"] = ec.parallelFn
-
 	evalRes := ec.machine.Run()
 
 	// Update routes to global router if needed
@@ -347,7 +366,18 @@ func (e *Engine) syncRoutes(w *work.Work) {
 }
 
 func (e *Engine) ExecuteLambda(w *work.Work, sFn *value.ScriptFunction, params map[string]value.Value) (res Result) {
-	ec := e.ctxPool.Get().(*ExecutionContext)
+	var ec *ExecutionContext
+	select {
+	case obj := <-func() chan any {
+		// Small hack to check pool without blocking significantly if we were using a real channel
+		return nil
+	}():
+		ec = obj.(*ExecutionContext)
+	default:
+		// Just get from pool normally, but let's make sure our pool doesn't block
+		// Actually, sync.Pool.Get() never blocks, it returns nil/New if empty.
+		ec = e.ctxPool.Get().(*ExecutionContext)
+	}
 	defer e.ctxPool.Put(ec)
 
 	ec.task.Reset(w)

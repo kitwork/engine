@@ -1,6 +1,7 @@
 package value
 
 import (
+	"fmt"
 	"reflect"
 )
 
@@ -55,12 +56,12 @@ func (v Value) Invoke(name string, args ...Value) Value {
 		if fn, ok := attr.V.(Method); ok {
 			return fn(v, args...)
 		}
-		return attr.Call(args...)
+		return attr.Call(name, args...)
 	}
 	return attr
 }
 
-func (v Value) Call(args ...Value) Value {
+func (v Value) Call(name string, args ...Value) Value {
 	if v.K != Func || v.V == nil {
 		return Value{K: Invalid}
 	}
@@ -77,6 +78,17 @@ func (v Value) Call(args ...Value) Value {
 		fnType := fn.Type()
 		numIn := fnType.NumIn()
 		isVariadic := fnType.IsVariadic()
+
+		minArgs := numIn
+		if isVariadic {
+			minArgs = numIn - 1
+		}
+
+		if len(args) < minArgs {
+			fmt.Printf("[Value Call] Panic Prevention: Too few arguments for function %s. Expected at least %d, got %d\n", name, minArgs, len(args))
+			return Value{K: Nil}
+		}
+
 		goArgs := make([]reflect.Value, len(args))
 		for i := 0; i < len(args); i++ {
 			var targetType reflect.Type

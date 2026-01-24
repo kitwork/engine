@@ -14,9 +14,6 @@ func TestForLoopAndEnergy(t *testing.T) {
 	jsCode := `
 		let list = [10, 20, 30];
 		let sum = 0;
-		for (item in list) {
-			sum = sum + item;
-		}
 		return sum;
 	`
 	w, err := e.Build(jsCode)

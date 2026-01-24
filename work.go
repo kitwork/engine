@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kitwork/engine/core"
@@ -124,11 +126,7 @@ func loadLogic(e *core.Engine, dir string) {
 }
 
 func bootServer(e *core.Engine, serverPort int) {
-	port := "8080"
-	if serverPort != 0 {
-		port = fmt.Sprintf("%d", serverPort)
-	}
-
+	port := "8094"
 	fmt.Printf("🚀 Kitwork Engine online at http://localhost:%s\n", port)
 
 	work.GlobalRouter.Mu.RLock()
@@ -142,18 +140,22 @@ func bootServer(e *core.Engine, serverPort int) {
 		path := r.URL.Path
 		method := r.Method
 
+		fmt.Printf("[HTTP] Incoming %s %s\n", method, path)
+
 		var matchedRoute *work.Route
 		work.GlobalRouter.Mu.RLock()
-		for _, rt := range work.GlobalRouter.Routes {
+		for i := range work.GlobalRouter.Routes {
+			rt := &work.GlobalRouter.Routes[i]
 			if rt.Method == method && rt.Path == path {
-				matched := rt
-				matchedRoute = &matched
+				matchedRoute = rt
+				fmt.Printf("[HTTP] Matched route: %s %s\n", rt.Method, rt.Path)
 				break
 			}
 		}
 		work.GlobalRouter.Mu.RUnlock()
 
 		if matchedRoute == nil {
+			fmt.Printf("[HTTP] No match found for %s %s\n", method, path)
 			http.NotFound(w, r)
 			return
 		}
@@ -176,8 +178,28 @@ func bootServer(e *core.Engine, serverPort int) {
 		if responseVal.K == value.Nil {
 			responseVal = res.Value
 		}
-		json.NewEncoder(w).Encode(responseVal.Interface())
+
+		outputData, _ := json.Marshal(responseVal.Interface())
+		fmt.Printf("[HTTP] Response: %s\n", string(outputData))
+		w.Write(outputData)
 	})
 
-	http.ListenAndServe(":"+port, nil)
+	p, _ := strconv.Atoi(port)
+	for {
+		addr := fmt.Sprintf(":%s", strconv.Itoa(p))
+		l, err := net.Listen("tcp", addr)
+		if err == nil {
+			l.Close()
+			fmt.Printf("🚀 Kitwork Engine online at http://localhost:%d\n", p)
+			err = http.ListenAndServe(addr, nil)
+			if err != nil {
+				fmt.Printf("❌ Server Failed: %v\n", err)
+			}
+			break
+		}
+		p++
+		if p > 9000 {
+			break
+		}
+	}
 }

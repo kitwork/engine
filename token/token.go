@@ -61,11 +61,7 @@ const (
 	Let
 	If
 	Else
-	// For
-	// In
 	Return
-	// Go
-	// Defer
 )
 
 // String trả về chuỗi đại diện cho Kind (Hữu ích cho Debug/Error Reporting)

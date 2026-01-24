@@ -253,19 +253,28 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(opcode.MAKE, 0)
 		for key, val := range n.Pairs {
 			c.emit(opcode.DUP)
-			c.Compile(key)
+			// Nếu key là Identifier, ta coi như chuỗi (JS style: { name: "..." })
+			if id, ok := key.(*Identifier); ok {
+				idx := c.addConstant(value.NewString(id.Value))
+				c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+			} else {
+				c.Compile(key)
+			}
 			c.Compile(val)
 			c.emit(opcode.SET)
-			c.emit(opcode.POP)
+			c.emit(opcode.POP) // Loại bỏ giá trị dư từ SET (SET đẩy lại target lên stack)
 		}
 
 	case *ArrayLiteral:
-		c.emit(opcode.MAKE, 1)
-		for _, el := range n.Elements {
+		c.emit(opcode.MAKE, 1) // 1 for Array
+		for i, el := range n.Elements {
 			c.emit(opcode.DUP)
+			// Push the index as the key for SET
+			idx := c.addConstant(value.New(float64(i)))
+			c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
 			c.Compile(el)
 			c.emit(opcode.SET)
-			c.emit(opcode.POP)
+			c.emit(opcode.POP) // SET pushes target back, but we duped it already
 		}
 
 	case *IndexExpression:

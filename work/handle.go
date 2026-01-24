@@ -39,7 +39,7 @@ func (w *Work) LoadFromConfig(data map[string]any) {
 			if rm, ok := r.(map[string]any); ok {
 				method, _ := rm["method"].(string)
 				path, _ := rm["path"].(string)
-				w.Router(method, path)
+				w.Router(value.New(method), value.New(path))
 			}
 		}
 	}
@@ -49,8 +49,12 @@ func NewWork(name string) *Work {
 	return &Work{Name: name}
 }
 
-func (w *Work) Router(method, path string) *Work {
-	method = strings.ToUpper(method)
+func (w *Work) Router(args ...value.Value) *Work {
+	if len(args) < 2 {
+		return w
+	}
+	method := strings.ToUpper(args[0].Text())
+	path := args[1].Text()
 	fmt.Printf("[Router] %s: Called for %s %s\n", w.Name, method, path)
 	// Check if route already exists
 	for i, r := range w.Routes {
@@ -67,6 +71,11 @@ func (w *Work) Router(method, path string) *Work {
 	w.Routes = append(w.Routes, &StaticRoute{Method: method, Path: path})
 	return w
 }
+
+func (w *Work) Get(path string) *Work    { return w.Router(value.New("GET"), value.New(path)) }
+func (w *Work) Post(path string) *Work   { return w.Router(value.New("POST"), value.New(path)) }
+func (w *Work) Put(path string) *Work    { return w.Router(value.New("PUT"), value.New(path)) }
+func (w *Work) Delete(path string) *Work { return w.Router(value.New("DELETE"), value.New(path)) }
 
 func (w *Work) Handle(fn value.Value) *Work {
 	if len(w.Routes) > 0 {

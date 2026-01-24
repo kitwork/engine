@@ -10,7 +10,7 @@ import (
    ============================================================================= */
 
 func (v Value) Len() int {
-	if !v.IsObject() {
+	if v.V == nil {
 		return 0
 	}
 	switch v.K {
@@ -22,10 +22,24 @@ func (v Value) Len() int {
 		if ptr, ok := v.V.(*[]Value); ok {
 			return len(*ptr)
 		}
-		return len(v.V.([]Value))
+		if arr, ok := v.V.([]Value); ok {
+			return len(arr)
+		}
 	case Map:
-		return len(v.V.(map[string]Value))
+		if m, ok := v.V.(map[string]Value); ok {
+			return len(m)
+		}
 	}
+
+	// Reflection fallback for robustness
+	rv := reflect.ValueOf(v.V)
+	if rv.Kind() == reflect.Ptr {
+		rv = rv.Elem()
+	}
+	if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array || rv.Kind() == reflect.Map {
+		return rv.Len()
+	}
+
 	return 0
 }
 
