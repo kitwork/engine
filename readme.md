@@ -14,29 +14,16 @@ Kitwork operates on three core components that live at your project root:
 2.  **`work.js`**: Implement your business logic using modern JavaScript syntax.
 3.  **`work.exe`**: The universal binary that boots your environment instantly.
 
-### 1. Declarative Infrastructure (`work.yaml` or `work.json`)
+### 1. Declarative Infrastructure 
 Choose your preferred format to define routes:
 
-**YAML (`work.yaml`)**
-```yaml
-name: "OrderSystem"
-version: "1.0.0"
-routes:
-  - method: "GET"
-    path: "/status"
-  - method: "POST"
-    path: "/order"
-```
-
-**JSON (`work.json`)**
-```json
-{
-  "name": "InventoryAPI",
-  "version": "1.2.0",
-  "routes": [
-    { "method": "GET", "path": "/items" }
-  ]
-}
+**YAML (`work.js`)**
+```js
+engine.run({
+    "port": 8085,
+    "debug": true,
+    "source": "./src/api"
+});
 ```
 
 ### 2. Modern Logic Engine (`work.js`)
