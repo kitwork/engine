@@ -11,14 +11,8 @@
 ## 📚 Table of Contents
 - [🚀 Quick Start](#-quick-start)
 - [🧠 Core Concepts](#-core-concepts)
-- [🌐 Web Stack Primitives](#-web-stack-primitives)
-  - [Zero-Copy Routing](#zero-copy-routing)
-  - [Request & Response Mapping](#request--response-mapping)
-  - [Security & Cookies](#security--cookies)
 - [🗄️ Database (Structured Query Builder)](#️-database-structured-query-builder)
-  - [Parameter-based Schema Inference](#parameter-based-schema-inference)
-  - [Smart Operator Inference](#smart-operator-inference)
-  - [Analytical Terminal Methods](#analytical-terminal-methods)
+- [🌐 Web Stack Primitives](#-web-stack-primitives)
 - [⚡ Industrial Concurrency](#-industrial-concurrency)
 - [📦 Explicit Caching System](#-explicit-caching-system)
 - [🛠️ Performance Markers](#-performance-markers)
@@ -44,6 +38,57 @@ work("Service")
 *   **Nanosecond VM**: A proprietary stack-based VM that executes bytecode instructions in ~70ns.
 *   **Logic as Infrastructure**: Your business logic is decoupled from the server implementation.
 *   **Zero-GC Pressure**: The engine pools task contexts and VM stacks, ensuring consistent performance without GC pauses.
+
+## 🗄️ Database (Structured Query Builder)
+A high-performance SDK designed for complex logic execution. Kitwork leverages **Parameter-based Schema Inference** and **Operator Persistence** to eliminate boilerplate while maintaining 100% predictable SQL output.
+
+### 🚀 Industrial One-Liners
+Kitwork is engineered to collapse traditional multi-line queries into single, readable statements.
+```javascript
+// 1. Fetch exactly one record by any criteria
+const user = db().from("users").find(u => u.email == "admin@kitwork.vn");
+
+// 2. Immediate top-N results with zero configuration
+const topUsers = db().from("users").take(5);
+
+// 3. Find the most recent entry with architectural sorting
+const lastOrder = db().from("orders").last();
+
+// 4. Batch lookup using automatic Set Inclusion (IN)
+const activeItems = db().from("products").where(p => p.id == [10, 20, 30]).take();
+```
+
+### ⚙️ Inference-driven Joins
+The Kitwork VM reflects on Lambda parameter names to identify schema relationships. No strings required for table identifiers.
+```javascript
+// Variable 'orders' is automatically reflected to the "orders" table context
+db().from("users")
+    .join((orders) => orders.user_id == users.id)
+    .take();
+```
+
+### 🧠 Operator Persistence (Smart Detection)
+The engine infers the correct SQL operator based on data patterns at execution time.
+- **Pattern Match (LIKE)**: `u.name == "%Apple%"` ➔ `WHERE name LIKE $1`
+- **Set Inclusion (IN)**: `u.id == [1, 2, 3]` ➔ `WHERE id IN ($1, $2, $3)`
+
+### 📈 Analytical Grouping & Aggregates
+Handle complex data transformations directly at the storage layer with industrial reliability.
+```javascript
+const stats = db().from("orders")
+    .group("user_id")
+    .having(o => o.total_amount > 1000)
+    .orderBy("total_amount", "DESC")
+    .take(10);
+```
+
+### 🛠 Terminal Execution Methods
+| Method | Description | SQL Projection |
+| :----- | :---------- | :------------- |
+| **`.take(n?)`** | Finalizes query and returns Array results. | `SELECT ... LIMIT n` |
+| **`.one()`** | Returns a single Object (Record) or Null. | `FETCH FIRST 1 ROWS ONLY` |
+| **`.last()`** | Architectural internal reverse-sort to fetch latest entry. | `ORDER BY id DESC LIMIT 1` |
+| **`.find(id/fn)`** | High-speed lookup by Primary Key or Lambda reference. | `WHERE id = $1 LIMIT 1` |
 
 ## 🌐 Web Stack Primitives
 
@@ -76,31 +121,6 @@ cookie("session_id", "secret-token", {
     maxAge: 3600    // 1-hour expiration
 });
 ```
-
-## 🗄️ Elite ORM (The Magic DB)
-The most intuitive database SDK ever built for a scripting environment.
-
-### 🌟 Magic Lambda Join (Double Inference)
-Parameters in Kitwork aren't just variables; they are **Schema References**. The engine infers join logic directly from your parameter names.
-```javascript
-// Variable 'orders' automatically maps to table "orders"
-db().from("users")
-    .join((orders, users) => orders.user_id == users.id)
-    .take();
-```
-
-### 🧠 Smart Operator Inference
-Stop typing `.like()` or `.in()`. Let the data speak for itself.
-*   **Auto-Pattern**: `u.name == "Apple%"` ➔ `WHERE name LIKE 'Apple%'`
-*   **Auto-Set**: `u.id == [1, 2, 3]` ➔ `WHERE id IN (1, 2, 3)`
-
-### 🛠 Elite Terminal Methods
-| Method | Description | SQL Result |
-| :----- | :---------- | :--------- |
-| **`.take(n?)`** | Execute the query and return Array. | `SELECT * LIMIT n` |
-| **`.one()`** | Return a single Object or null. | `LIMIT 1` |
-| **`.last()`** | Smart ordering to fetch latest record. | `ORDER BY id DESC LIMIT 1` |
-| **`.find(id/fn)`** | Lookup by Primary Key or Lambda. | `WHERE id = $1 LIMIT 1` |
 
 ## ⚡ Industrial Concurrency
 High-concurrency logic made simple and safe.
