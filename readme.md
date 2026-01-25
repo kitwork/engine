@@ -1,145 +1,211 @@
-# 🚀 Kitwork Engine
+# 🚀 Kitwork Engine Documentation
 > **"Logic as Infrastructure. Nanosecond Latency. Zero-GC Runtime."**
 
 ![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8?style=flat-square&logo=go)
 ![Architecture](https://img.shields.io/badge/arch-stack--vm-orange?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
-![Build Status](https://img.shields.io/badge/build-passing-success?style=flat-square)
 
-**Kitwork Engine** is a high-performance, embedded scripting runtime designed for modern backend systems. It bridges the gap between the raw speed of **Go** and the dynamic flexibility of **JavaScript**, enabling you to hot-swap business logic without recompiling or restarting your infrastructure.
-
----
-
-## ✨ Why Kitwork?
-
-Unlike traditional embedded engines (Otto, GopherLua) that prioritize compatibility over speed, Kitwork is engineered for **hyperscale throughput**:
-
-*   **⚡ Zero-Allocation Runtime**: Tasks and contexts are aggressively pooled (`sync.Pool`), ensuring **0 bytes/op** garbage collection overhead during hot-path execution.
-*   **🏎️ Custom Stack-Based VM**: Optimized specifically for backend I/O orchestration, executing logic in ~40ns.
-*   **🛠️ Developer Experience**: Write standard JavaScript (ES6+ inspired) with modern features like Arrow Functions, Destructuring, and Template Literals.
+**Kitwork Engine** is a high-performance embedded scripting runtime specifically designed for building scalable backend systems. It combines the raw speed of a custom stack-based VM with the ease of use of a JavaScript-like syntax.
 
 ---
 
-## ⚡ Performance Markers
+## 📚 Table of Contents
 
-Engineered for speed on standard hardware (*Intel Core i7-11850H*):
+- [🚀 Quick Start](#-quick-start)
+- [🧠 Core Concepts](#-core-concepts)
+- [🌐 Web Primitives](#-web-primitives)
+  - [Routing](#routing)
+  - [Request Handling](#request-handling)
+  - [Response Control](#response-control)
+  - [Cookies & Sessions](#cookies--sessions)
+- [🗄️ Database Access](#️-database-access)
+- [⚡ Concurrency & Flows](#-concurrency--flows)
+- [🛠️ Utility Functions](#️-utility-functions)
+- [⚙️ Configuration](#️-configuration)
+
+---
+
+## 🚀 Quick Start
+
+1.  **Clone & Run**:
+    ```bash
+    git clone https://github.com/kitwork/engine
+    go run cmd/server/main.go
+    ```
+    The server starts on port `8100` (default) loading scripts from `demo/`.
+
+2.  **Write Your First Logic**:
+    Create `demo/first.js`:
+    ```javascript
+    work("HelloAPI")
+        .get("/hello", () => {
+            return { message: "Hello from Kitwork!" };
+        });
+    ```
+    
+3.  **Test It**:
+    ```bash
+    curl http://localhost:8100/hello
+    ```
+
+---
+
+## 🧠 Core Concepts
+
+*   **Work**: A unit of logic that groups related endpoints and background tasks. Think of it as a "Service" or "Controller".
+*   **Task Context**: Every request runs in an isolated, ultra-lightweight context. Data is lazy-loaded (parsed only when requested) and zero-copy where possible.
+*   **Zero-GC**: The engine pools `Task` objects and VM stacks, meaning effectively **0 bytes of garbage** are generated per request logic execution.
+
+---
+
+## 🌐 Web Primitives
+
+### Routing
+Kitwork uses a high-performance Trie-based router.
+
+```javascript
+work("UserModule")
+    .get("/users", listUsers)           // Static Path
+    .get("/users/:id", getUser)         // Dynamic Path Parameter
+    .post("/users", createUser)
+    .put("/users/:id/status", updateStatus);
+```
+
+### Request Handling
+Access request data efficiently.
+
+| Function | Description | Example |
+| :--- | :--- | :--- |
+| `params(key)` | Get URL path parameter. | `params("id")` for `/users/:id` |
+| `query(key)` | Get URL query string. | `query("page")` for `?page=2` |
+| `body(key?)` | Get JSON Body. Read-once, auto-cached. | `const { email } = body()` |
+| `header(key)` | Get Request Header. | `header("Authorization")` |
+| `cookie(name)` | Get Cookie value. | `cookie("session_id")` |
+
+### Response Control
+
+| Function | Description | Example |
+| :--- | :--- | :--- |
+| `status(code)` | Set HTTP Status Code. | `status(201)` (Created) |
+| `redirect(url)` | Redirect browser. | `redirect("/login")` |
+| `return val` | Send JSON response. | `return { ok: true }` |
+
+## 🚀 Performance Markers
+
+Real-world benchmarks running on local development environment (Jan 2026):
 
 | Metric | Result | Context |
 | :--- | :--- | :--- |
-| **Throughput (Raw)** | **~21,000,000 ops/sec** | Direct Bytecode Execution |
-| **Throughput (HTTP)** | **~454,000 req/sec** | Full API Stack + Logic Engine |
-| **Latency (Core)** | **~40ns** | Pure Logic Execution Time |
-| **Overhead** | **0 bytes** | Zero-GC per request (Pooled) |
+| **Throughput (Raw)** | **~14,112,000 ops/sec** | Direct Bytecode Execution |
+| **Throughput (Logic)** | **~605,000 ops/sec** | Complex Recursive Workflows |
+| **Latency (Core)** | **~70ns** | Pure Logic Execution Time |
+| **Memory Overhead** | **~8 bytes/op** | Near Zero-GC allocation |
 
----
-
-## 🚀 Key Features
-
-### 1. Modern Syntax Support
-Kitwork supports a rich subset of ES6+, making it instantly familiar to developers.
-
-*   **Destructuring Assignment**:
-    ```javascript
-    const { user, config } = data;
-    ```
-*   **Arrow Functions**:
-    ```javascript
-    const add = (a, b) => a + b;
-    ```
-
-### 2. Built-in Concurrency (Experimental)
-Execute blocking I/O operations in parallel using Go's native goroutines, seamlessly exposed to the scripting layer.
+### Cookies & Sessions
+Securely manage user sessions.
 
 ```javascript
-// Fetch data from multiple sources concurrently
-const { user, stock } = parallel({
-    user: () => http().get("/api/user/101"),
-    stock: () => db().table("inventory").where("id", 101).get()
+// Setting a secure cookie
+cookie("token", "xyz-secret", {
+    httpOnly: true,  // Prevent JS from accessing (XSS protection)
+    secure: true,    // Send only over HTTPS
+    maxAge: 3600,    // Expire in 1 hour
+    path: "/"        // Valid for whole site
 });
 ```
 
-### 3. Integrated "Magic" Service Mesh
-Core infrastructure primitives are built-in as zero-overhead intrinsics:
-*   **`db()`**: Fluent query builder for PostgreSQL/SQLite.
-*   **`http()`**: High-performance HTTP client.
-*   **`go()`**: Fire-and-forget background processing.
-*   **`defer()`**: Resource cleanup hooks.
-
 ---
 
-## 🛠️ Usage Example
+## �️ Database Access
 
-Define your logic in `.js` files. The engine hot-loads code into efficient bytecode blueprints.
+The `db()` intrinsic provides a fluent Query Builder. It currently mocks data but is designed to plug into PostgreSQL/MySQL drivers.
 
 ```javascript
-// work/order_processor.js
-work("OrderProcessor")
-    .router("POST", "/v1/process")
-    .handle(() => {
-        // 1. Parse Input
-        const { userId, sku, amount } = payload();
+// 1. Select
+const users = db().table("users")
+    .where("active", true)
+    .where("age", ">", 18)
+    .limit(10)
+    .get();
 
-        // 2. Parallel Data Fetching
-        const { user, product } = parallel({
-            user: () => db().table("users").where("id", userId).first(),
-            product: () => db().table("products").where("sku", sku).first()
-        });
+// 2. Find One
+const admin = db().table("users").where("role", "admin").first();
 
-        if (!user || !product) {
-            return { status: 404, error: "Invalid Order" };
-        }
+// 3. Insert
+db().table("orders").insert({
+    user_id: 101,
+    amount: 99.50,
+    status: "pending"
+});
 
-        // 3. Business Logic
-        if (product.stock < amount) {
-            return { status: 400, error: "Insufficient Stock" };
-        }
+// 4. Update
+db().table("users").where("id", 101).update({ status: "banned" });
+```
 
-        // 4. Transaction (Atomic)
-        const total = product.price * amount;
-        
-        defer(() => log("Audit: Order processed for " + userId));
+---
 
-        return { 
-            status: 200, 
-            orderId: uuid(), 
-            total: total 
-        };
+## ⚡ Concurrency & Flows
+
+Kitwork exposes Go's concurrency model simply and safely.
+
+### Parallel Execution
+Execute multiple non-dependent blocking operations at the same time.
+
+```javascript
+const { user, orders, analytics } = parallel({
+    user: () => db().table("users").where("id", 1).first(),
+    orders: () => db().table("orders").where("user_id", 1).get(),
+    analytics: () => http().get("https://analytics-service/user/1")
+});
+```
+
+### Background Jobs (`go`)
+Fire-and-forget tasks that shouldn't block the response.
+
+```javascript
+post("/order", () => {
+    // ... process order ...
+    
+    // Send email in background
+    go(() => {
+        http().post("https://mailer/send", { to: user.email, subject: "Order Confirm" });
     });
+    
+    return { status: "processing" };
+});
+```
+
+### Resource Cleanup (`defer`)
+Register logic to run **after** the response is sent (like `defer` in Go).
+
+```javascript
+defer(() => {
+    log("Request finished at " + now());
+});
 ```
 
 ---
 
-## 📦 Getting Started
+## 🛠️ Utility Functions
 
-### 1. Run the Demo Server
-Boot the engine with the included example workflows:
+*   **`log(...args)`**: High-performance structured logging.
+*   **`now()`**: Get current timestamp in nanoseconds.
+*   **`uuid()`**: Generate a generic unique ID.
+*   **`http()`**: HTTP Client with `.get(url)`, `.post(url, body)`.
 
-```bash
-go run cmd/server/main.go
-```
-The server will start on port `8080`, exposing routes defined in the `demo/` folder.
+---
 
-### 2. Run Benchmarks
-Verify the performance claims on your local machine:
+## ⚙️ Configuration
 
-```bash
-go test -bench=BenchmarkAPI -run=^$ -benchmem ./...
+The engine looks for `work.json` or `work.yaml` in the running directory.
+
+**Example `work.yaml`**:
+```yaml
+port: 8100
+debug: true
+source: "./demo/api"
 ```
 
 ---
 
-## 🗺️ Roadmap & Status
-
-*   **Current Version**: v0.9.0 (Beta)
-*   **Architecture**:
-    *   [x] **Core VM**: Stack-based, Thread-safe.
-    *   [x] **Compiler**: Multi-pass AST compilation.
-    *   [x] **Features**: Destructuring, Arrow Fns, Parallel.
-*   **Upcoming**:
-    *   [ ] **JIT Compiler**: Compile hot paths to native Assembly.
-    *   [ ] **LSP Server**: Integrated language server for VS Code.
-
----
-
-**Kitwork Engine** - *Logic as Infrastructure.*
-Distributed under the MIT License.
+*This documentation tracks version v0.1.0 of the Kitwork Engine.*
