@@ -1,6 +1,11 @@
 work("UserAPI")
-    .router("GET", "/api/db/users");
+    .router("GET", "/api/db/users").handle(() => {
 
-return db().table("user")
-    .where(u => u.is_active == true)
-    .get();
+        const id = query("id")
+
+
+        return db().table("user")
+            .where(u => u.id == id)
+            .get();
+
+    });

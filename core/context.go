@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -156,6 +159,71 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		return value.NewNull()
 	})
 	ctx.httpFn = value.NewFunc(func(args ...value.Value) value.Value { return value.New(ctx.task.HTTP()) })
+	ctx.cacheFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.NewNull()
+		}
+		key := args[0].Text()
+
+		// Pattern: cache(key) -> Get only
+		if len(args) == 1 {
+			if val, ok := work.GetCache(key); ok {
+				return val
+			}
+			return value.NewNull()
+		}
+
+		// Pattern: cache(key, value, ttl) OR cache(key, ttl, callback)
+		if len(args) >= 3 {
+			arg1 := args[1]
+			arg2 := args[2]
+
+			// Helper to parse TTL
+			parseTTL := func(v value.Value) time.Duration {
+				var d time.Duration
+				switch {
+				case v.IsNumeric():
+					d = time.Duration(v.Float()) * time.Second
+				case v.IsString():
+					str := v.Text()
+					if strings.HasSuffix(str, "d") {
+						if days, err := strconv.Atoi(strings.TrimSuffix(str, "d")); err == nil {
+							d = time.Duration(days) * 24 * time.Hour
+						}
+					} else {
+						if parsed, err := time.ParseDuration(str); err == nil {
+							d = parsed
+						}
+					}
+				}
+				return d
+			}
+
+			// Case A: cache(key, ttl, callback)
+			if arg2.IsCallable() {
+				if val, ok := work.GetCache(key); ok {
+					return val
+				}
+				if sFn, ok := arg2.V.(*value.ScriptFunction); ok {
+					res := e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
+					ttl := parseTTL(arg1)
+					if ttl > 0 {
+						work.SetCache(key, res.Value, ttl)
+					}
+					return res.Value
+				}
+			} else {
+				// Case B: cache(key, value, ttl)
+				ttl := parseTTL(arg2)
+				if ttl > 0 {
+					work.SetCache(key, arg1, ttl)
+				}
+				return arg1
+			}
+		}
+
+		return value.NewNull()
+	})
 
 	ctx.queryFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if ctx.task.Request == nil {
@@ -345,6 +413,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.machine.Vars["parallel"] = ctx.parallelFn
 	ctx.machine.Vars["go"] = ctx.goFn
 	ctx.machine.Vars["defer"] = ctx.deferFn
+	ctx.machine.Vars["cache"] = ctx.cacheFn
 
 	return ctx
 }

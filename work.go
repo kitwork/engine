@@ -19,83 +19,90 @@ import (
 )
 
 type Config struct {
-	Port     int                   `yaml:"port"`
-	Debug    bool                  `yaml:"debug"`
-	Sources  []string              `yaml:"source"`
-	Database security.DBConfig     `yaml:"database"`
-	Server   security.ServerConfig `yaml:"server"`
-	SMTP     security.SMTPConfig   `yaml:"smtp"`
+	Port      int      `yaml:"port"`
+	Debug     bool     `yaml:"debug"`
+	Sources   []string `yaml:"source"`
+	Databases []string `yaml:"databases"`
+	SMTPS     []string `yaml:"smtp"`
 }
 
-// Run bắt đầu môi trường Kitwork Engine với config đầy đủ
+// Run starts the Kitwork Engine using the provided Config.
+// It will automatically discover modular configs and database settings within cfg.Sources.
 func Run(cfg *Config) {
+	if cfg == nil {
+		cfg = &Config{}
+	}
+
 	e := core.New()
 
-	// Khởi tạo Config nội bộ
+	// 1. Map Base Config
 	e.Config.Port = cfg.Port
-	if e.Config.Port == 0 && cfg.Server.Port != 0 {
-		e.Config.Port = cfg.Server.Port
+	if e.Config.Port == 0 {
+		e.Config.Port = 8080 // Default port
 	}
-	e.Config.Debug = cfg.Debug || cfg.Server.Debug
+	e.Config.Debug = cfg.Debug
 	e.Config.Sources = cfg.Sources
 	if len(e.Config.Sources) == 0 {
 		e.Config.Sources = []string{"./"}
 	}
 
-	// Khởi tạo DB nếu có config
-	if cfg.Database.Type != "" {
-		if err := work.InitDB(cfg.Database); err != nil {
-			fmt.Printf("❌ Database connection failed: %v\n", err)
+	// 2. Automated Discovery & Initialization
+	// Load explicitly defined databases from files
+	for _, dbPath := range cfg.Databases {
+		if data, err := os.ReadFile(dbPath); err == nil {
+			var dbCfg security.DBConfig
+			if err := yaml.Unmarshal(data, &dbCfg); err == nil {
+				if err := work.InitDB(dbCfg); err == nil {
+					fmt.Printf("✅ Database Connected from file: %s\n", dbPath)
+				} else {
+					fmt.Printf("❌ Database Connection Failed (%s): %v\n", dbPath, err)
+				}
+			}
 		} else {
-			fmt.Println("✅ Database Connected")
+			fmt.Printf("⚠️  Database config file not found: %s\n", dbPath)
 		}
 	}
 
-	for _, dir := range e.Config.Sources {
-		// 1. Quét Config (JSON/YAML)
-		loadConfigs(e, dir)
+	// Load explicitly defined SMTP from files
+	for _, smtpPath := range cfg.SMTPS {
+		if data, err := os.ReadFile(smtpPath); err == nil {
+			var smtpCfg security.SMTPConfig
+			if err := yaml.Unmarshal(data, &smtpCfg); err == nil {
+				fmt.Printf("📧 SMTP Config Loaded from file: %s (Host: %s)\n", smtpPath, smtpCfg.Host)
+			}
+		} else {
+			fmt.Printf("⚠️  SMTP config file not found: %s\n", smtpPath)
+		}
+	}
 
-		// 2. Quét Logic (JS)
+	// 3. Automated Discovery & Initialization
+	// This will scan each source for work.yaml, logic, and DATABASE configs.
+	for _, dir := range e.Config.Sources {
+		if e.Config.Debug {
+			fmt.Printf("📦 Loading source: %s\n", dir)
+		}
+		loadConfigs(e, dir)
 		loadLogic(e, dir)
 	}
 
-	// 3. Đồng bộ Router
+	// 3. Finalize & Fire
 	e.SyncRegistry()
-
-	// 4. Khởi động Server
 	bootServer(e, e.Config.Port)
 }
 
-// LoadConfig nạp cấu hình từ file config.yaml ở root hoặc các file modular
+// LoadConfig loads the root configuration file (config.yaml).
 func LoadConfig(dir string) (*Config, error) {
 	cfg := &Config{}
 
-	// Thử nạp từ file config.yaml tổng hợp ở root trước
-	if data, err := os.ReadFile(filepath.Join(dir, "config.yaml")); err == nil {
+	// Root config
+	path := filepath.Join(dir, "config.yaml")
+	if data, err := os.ReadFile(path); err == nil {
 		yaml.Unmarshal(data, cfg)
-	}
-
-	// Nếu chưa có các module thì thử nạp từ thư mục modular (tương thích ngược)
-	secCfg, err := security.LoadConfigFromDir(dir)
-	if err == nil {
-		if cfg.Database.Type == "" {
-			cfg.Database = secCfg.Database
-		}
-		if cfg.Server.Port == 0 {
-			cfg.Server = secCfg.Server
-		}
-		if cfg.SMTP.Host == "" {
-			cfg.SMTP = secCfg.SMTP
-		}
+	} else if os.IsNotExist(err) {
+		fmt.Printf("ℹ️  config.yaml not found at %s. Using default settings.\n", path)
 	}
 
 	// Set defaults
-	if cfg.Database.Type == "" {
-		cfg.Database.Type = "postgres"
-	}
-	if cfg.Port == 0 && cfg.Server.Port != 0 {
-		cfg.Port = cfg.Server.Port
-	}
 	if cfg.Port == 0 {
 		cfg.Port = 8080
 	}
@@ -151,6 +158,20 @@ func loadConfigs(e *core.Engine, dir string) {
 
 			if e.Config.Debug {
 				fmt.Printf("📦 Config loaded: %s [%s]\n", w.Name, f)
+			}
+
+			// SUPPORT MODULAR DB INITIALIZATION
+			if dbRaw, ok := data["database"]; ok {
+				var dbCfg security.DBConfig
+				// Convert map to struct via JSON (easiest way in Go for generic maps)
+				jsonData, _ := json.Marshal(dbRaw)
+				json.Unmarshal(jsonData, &dbCfg)
+
+				if dbCfg.Type != "" {
+					if err := work.InitDB(dbCfg); err == nil {
+						fmt.Printf("✅ Database Connected (from %s)\n", f)
+					}
+				}
 			}
 		}
 	}

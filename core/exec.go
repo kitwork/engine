@@ -29,6 +29,7 @@ type ExecutionContext struct {
 	bodyFn     value.Value
 	paramsFn   value.Value
 	cookieFn   value.Value
+	cacheFn    value.Value
 }
 
 func (e *Engine) Trigger(ctx context.Context, w *work.Work, req *http.Request, writer http.ResponseWriter, params ...map[string]value.Value) Result {

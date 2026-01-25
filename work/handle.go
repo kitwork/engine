@@ -116,6 +116,10 @@ func (w *Work) Version(v string) *Work {
 	return w
 }
 
+func (w *Work) Cache(duration any) *Work {
+	return w
+}
+
 // Task đại diện cho một phiên thực thi (Mutable Context)
 type Task struct {
 	Work    *Work

@@ -58,7 +58,7 @@ func TestEnginePerformance(t *testing.T) {
 	source := "let price = 100; let tax = 0.1; price * (1 + tax)"
 
 	t.Log("Running Stress Test with 100,000 iterations...")
-	engine.Test(source, 100_000)
+	engine.Test(source, 1_000_000)
 }
 
 func TestComplexWorkflowStress(t *testing.T) {

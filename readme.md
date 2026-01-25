@@ -19,6 +19,7 @@
   - [Response Control](#response-control)
   - [Cookies & Sessions](#cookies--sessions)
 - [🗄️ Database Access](#️-database-access)
+- [📦 Caching System](#-caching-system)
 - [⚡ Concurrency & Flows](#-concurrency--flows)
 - [🛠️ Utility Functions](#️-utility-functions)
 - [⚙️ Configuration](#️-configuration)
@@ -116,31 +117,84 @@ cookie("token", "xyz-secret", {
 
 ---
 
-## �️ Database Access
+## 🗄️ Database Access (Ultra-Smart Query Builder)
 
-The `db()` intrinsic provides a fluent Query Builder. It currently mocks data but is designed to plug into PostgreSQL/MySQL drivers.
+Kitwork Engine cung cấp một bộ SDK truy vấn cơ sở dữ liệu mạnh mẽ, tối giản và thông minh bậc nhất. Triết lý của chúng tôi là **"Simple is the new Smart"** — chỉ cần dùng hàm `.where()` cho hầu hết mọi nhu cầu.
+
+### 🌟 Magic Lambda Syntax
+Thay vì dùng chuỗi văn bản, Kitwork sử dụng hàm mũi tên (Lambda) để tương tác với các cột. Nó an toàn, tránh lỗi gõ nhầm và hỗ trợ gợi ý code hoàn hảo.
 
 ```javascript
-// 1. Select
-const users = db().table("users")
-    .where("active", true)
-    .where("age", ">", 18)
+// Tối giản, an toàn và trực quan
+db().table("user").where(u => u.username == "boss").get();
+```
+
+### 🧠 Thông minh hóa toán tử (Smart Detection)
+Engine tự động suy luận (Inference) toán tử SQL phù hợp dựa trên dữ liệu bạn cung cấp, giúp code của bạn trông "sạch" và giống ngôn ngữ tự nhiên hơn:
+
+*   **Tự động nhận diện `LIKE`**: Khi chuỗi chứa ký tự `%`.
+    ```javascript
+    // Dịch thành: WHERE "username" LIKE 'Apple%'
+    db().table("user").where(u => u.username == "Apple%").get();
+    ```
+*   **Tự động nhận diện `IN`**: Khi giá trị là một Mảng (Array).
+    ```javascript
+    // Dịch thành: WHERE "id" IN (10, 20, 30)
+    db().table("user").where(u => u.id == [10, 20, 30]).get();
+    ```
+
+### 🛠 Các phím tắt quyền lực
+| Tính năng | Cú pháp | SQL dự kiến |
+| :--- | :--- | :--- |
+| Tìm nhanh theo ID | `.find(1)` | `WHERE "id" = 1` |
+| Lấy nhanh bản ghi đầu | `.first()` | `LIMIT 1` |
+| Sắp xếp dữ liệu | `.orderBy("age", "DESC")` | `ORDER BY "age" DESC` |
+| Phân trang (Pagination) | `.limit(10).offset(10)` | `LIMIT 10 OFFSET 10` |
+
+```javascript
+// Query phức tạp chỉ trong vài dòng
+const users = db().table("user")
+    .where(u => u.role == "admin")
+    .where(u => u.is_active == true)
+    .orderBy("created_at", "DESC")
     .limit(10)
     .get();
-
-// 2. Find One
-const admin = db().table("users").where("role", "admin").first();
-
-// 3. Insert
-db().table("orders").insert({
-    user_id: 101,
-    amount: 99.50,
-    status: "pending"
-});
-
-// 4. Update
-db().table("users").where("id", 101).update({ status: "banned" });
 ```
+
+### 📈 Thống kê (Aggregates) & Chỉnh sửa
+```javascript
+// Thống kê
+let total = db().table("orders").sum("amount");
+let average = db().table("products").avg("price");
+
+// Ghi dữ liệu
+db().table("user").insert({ name: "Alice", age: 25 });
+db().table("user").where(u => u.id == 1).update({ status: "active" });
+db().table("user").where(u => u.id == 99).delete();
+```
+
+---
+
+## 📦 Caching System
+
+Kitwork provides a high-performance, explicit caching mechanism. Unlike "magic" caching, Kitwork requires an explicit **Key** to ensure data consistency and predictability.
+
+### Usage Patterns
+
+| Pattern | Description | Example |
+| :--- | :--- | :--- |
+| `cache(key)` | **Get**: Retrieve a value from the global cache. | `const data = cache("my_key")` |
+| `cache(key, value, ttl)` | **Set**: Manually store a value with a specific TTL. | `cache("user_1", userData, "1h")` |
+| `cache(key, ttl, callback)` | **Get or Set**: Retrieve value; if missing, execute callback, store result, and return. | `const data = cache("list", "1d", () => db().get())` |
+
+### TTL Formats
+The duration parameter supports flexible, human-readable strings:
+*   **Standard**: `"30s"`, `"15m"`, `"1h"`, `"2h45m"` (Standard Go durations)
+*   **Extended**: `"1d"`, `"7d"` (Day-based durations)
+*   **Numeric**: `60` (Defaults to seconds)
+
+### Why Explicit Caching?
+By using explicit keys, you avoid the "stale data" layout issues common in automatic caches. You know exactly what is cached and can easily implement cache invalidation logic.
 
 ---
 

@@ -5,9 +5,14 @@ import (
 )
 
 func main() {
-	cfg, err := engine.LoadConfig("./")
-	if err != nil {
-		cfg = &engine.Config{Port: 8081}
+	// Khởi tạo Config với danh sách các tệp Database và SMTP cụ thể
+	cfg := &engine.Config{
+		Port:      8081,
+		Debug:     true,
+		Sources:   []string{"./demo"},
+		Databases: []string{"config/database/master.yaml"},
+		SMTPS:     []string{"config/smtp/mail.yaml"}, // Nạp cấu hình SMTP từ file
 	}
+
 	engine.Run(cfg)
 }

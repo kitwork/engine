@@ -5,11 +5,19 @@ import (
 	"fmt"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kitwork/engine/security"
+	"github.com/kitwork/engine/value"
 	_ "github.com/lib/pq"
 )
 
 var globalDB *sql.DB
+var globalCache *lru.Cache[string, CacheItem]
+
+type CacheItem struct {
+	Value     value.Value
+	ExpiresAt time.Time
+}
 
 // InitDB khởi tạo kết nối Database toàn cục dựa trên cấu hình bảo mật
 func InitDB(cfg security.DBConfig) error {
@@ -30,9 +38,45 @@ func InitDB(cfg security.DBConfig) error {
 	}
 
 	globalDB = db
+
+	// Init Cache with default size 1000
+	cache, err := lru.New[string, CacheItem](1000)
+	if err != nil {
+		return err
+	}
+	globalCache = cache
+
 	return nil
 }
 
 func GetDB() *sql.DB {
 	return globalDB
+}
+
+func GetCache(key string) (value.Value, bool) {
+	if globalCache == nil {
+		return value.Value{K: value.Nil}, false
+	}
+
+	item, ok := globalCache.Get(key)
+	if !ok {
+		return value.Value{K: value.Nil}, false
+	}
+
+	if time.Now().After(item.ExpiresAt) {
+		globalCache.Remove(key)
+		return value.Value{K: value.Nil}, false
+	}
+
+	return item.Value, true
+}
+
+func SetCache(key string, val value.Value, ttl time.Duration) {
+	if globalCache == nil {
+		return
+	}
+	globalCache.Add(key, CacheItem{
+		Value:     val,
+		ExpiresAt: time.Now().Add(ttl),
+	})
 }
