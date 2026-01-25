@@ -47,7 +47,8 @@ func init() {
 		Table[ops[i]] = Operator
 	}
 
-	// 6. Dấu ngoặc kép/đơn (Quote)
+	// 6. Dấu ngoặc kép/đơn/huyền (Quote)
 	Table['"'] = Quote
 	Table['\''] = Quote
+	Table['`'] = Quote
 }

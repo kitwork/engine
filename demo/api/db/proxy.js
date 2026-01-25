@@ -1,8 +1,5 @@
-// ==========================================
-// ADVANCED: GENERIC PROXY PATTERN
-// ==========================================
-// Minh họa sức mạnh của Generic Proxy: 
-// Cùng một cú pháp nhưng chạy 2 chế độ khác nhau.
+work("ProxyDemo")
+    .router("GET", "/api/db/proxy");
 
 // 1. Mock External Service
 let notifyService = (email) => {
@@ -13,7 +10,7 @@ let notifyService = (email) => {
 // 2. Direct Execution Mode (Chạy thật trên RAM)
 let users = db().table("user").limit(3).get();
 log("--- DIRECT EXEC ---");
-users.map(u => {
+users.each(u => {
     if (u.is_active) {
         notifyService(u.email);
     }

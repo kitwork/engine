@@ -96,17 +96,11 @@ func (vm *Runtime) Run() value.Value {
 			f.IP += 2
 			val := vm.Constants[idx]
 			if sFn, ok := val.V.(*value.ScriptFunction); ok {
-				fmt.Printf("[VM PUSH] ScriptFunction from constants[%d] with Address: %d\n", idx, sFn.Address)
+				// fmt.Printf("[VM PUSH] ScriptFunction from constants[%d] with Address: %d\n", idx, sFn.Address)
 				closure := &value.ScriptFunction{
 					Address:    sFn.Address,
 					ParamNames: sFn.ParamNames,
-					Scope:      make(map[string]value.Value),
-				}
-				for k, v := range f.Vars {
-					closure.Scope[k] = v
-				}
-				for k, v := range vm.Vars {
-					closure.Scope[k] = v
+					Scope:      f.Vars, // Use reference to support recursion and mutability
 				}
 				vm.push(value.New(closure))
 			} else {
@@ -142,6 +136,15 @@ func (vm *Runtime) Run() value.Value {
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
 			val := vm.peek()
+
+			// Closure support: check if it exists in closure scope first
+			if f.Fn != nil && f.Fn.Scope != nil {
+				if _, ok := f.Fn.Scope[name]; ok {
+					f.Fn.Scope[name] = val
+					continue
+				}
+			}
+
 			f.Vars[name] = val
 
 		case opcode.GET:
@@ -191,10 +194,18 @@ func (vm *Runtime) Run() value.Value {
 			}
 		case opcode.AND:
 			b, a := vm.pop(), vm.pop()
-			vm.push(value.ToBool(a.Truthy() && b.Truthy()))
+			if !a.Truthy() {
+				vm.push(a)
+			} else {
+				vm.push(b)
+			}
 		case opcode.OR:
 			b, a := vm.pop(), vm.pop()
-			vm.push(value.ToBool(a.Truthy() || b.Truthy()))
+			if a.Truthy() {
+				vm.push(a)
+			} else {
+				vm.push(b)
+			}
 		case opcode.NOT:
 			a := vm.pop()
 			vm.push(value.ToBool(!a.Truthy()))
@@ -289,13 +300,7 @@ func (vm *Runtime) Run() value.Value {
 					newFrame := &vm.Frames[vm.FrameIdx]
 					newFrame.IP = s.Address
 					newFrame.Fn = s
-					if newFrame.Vars == nil {
-						newFrame.Vars = make(map[string]value.Value)
-					} else {
-						for k := range newFrame.Vars {
-							delete(newFrame.Vars, k)
-						}
-					}
+					newFrame.Vars = make(map[string]value.Value) // Fresh map for each call
 					for i, name := range s.ParamNames {
 						if i < len(args) {
 							newFrame.Vars[name] = args[i]
@@ -403,12 +408,10 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 			f.IP += 2
 			val := vm.Constants[idx]
 			if sFn, ok := val.V.(*value.ScriptFunction); ok {
-				closure := &value.ScriptFunction{Address: sFn.Address, ParamNames: sFn.ParamNames, Scope: make(map[string]value.Value)}
-				for k, v := range f.Vars {
-					closure.Scope[k] = v
-				}
-				for k, v := range vm.Vars {
-					closure.Scope[k] = v
+				closure := &value.ScriptFunction{
+					Address:    sFn.Address,
+					ParamNames: sFn.ParamNames,
+					Scope:      f.Vars,
 				}
 				vm.push(value.New(closure))
 			} else {
@@ -441,7 +444,16 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
-			f.Vars[name] = vm.peek()
+			val := vm.peek()
+
+			if f.Fn != nil && f.Fn.Scope != nil {
+				if _, ok := f.Fn.Scope[name]; ok {
+					f.Fn.Scope[name] = val
+					continue
+				}
+			}
+
+			f.Vars[name] = val
 		case opcode.ADD:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Add(b))
@@ -475,10 +487,18 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 			}
 		case opcode.AND:
 			b, a := vm.pop(), vm.pop()
-			vm.push(value.ToBool(a.Truthy() && b.Truthy()))
+			if !a.Truthy() {
+				vm.push(a)
+			} else {
+				vm.push(b)
+			}
 		case opcode.OR:
 			b, a := vm.pop(), vm.pop()
-			vm.push(value.ToBool(a.Truthy() || b.Truthy()))
+			if a.Truthy() {
+				vm.push(a)
+			} else {
+				vm.push(b)
+			}
 		case opcode.NOT:
 			a := vm.pop()
 			vm.push(value.ToBool(!a.Truthy()))
@@ -532,13 +552,7 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 					nf := &vm.Frames[vm.FrameIdx]
 					nf.IP = s.Address
 					nf.Fn = s
-					if nf.Vars == nil {
-						nf.Vars = make(map[string]value.Value)
-					} else {
-						for k := range nf.Vars {
-							delete(nf.Vars, k)
-						}
-					}
+					nf.Vars = make(map[string]value.Value) // Fresh map
 					for i, name := range s.ParamNames {
 						if i < len(fnArgs) {
 							nf.Vars[name] = fnArgs[i]

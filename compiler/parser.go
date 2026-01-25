@@ -25,21 +25,23 @@ const (
 )
 
 var precedences = map[token.Kind]int{
-	token.Equal:       EQUALS,
-	token.NotEqual:    EQUALS,
-	token.Less:        LESSGREATER,
-	token.Greater:     LESSGREATER,
-	token.Plus:        SUM,
-	token.Minus:       SUM,
-	token.Star:        PRODUCT,
-	token.Slash:       PRODUCT,
-	token.LeftParen:   CALL,
-	token.LeftBracket: INDEX,
-	token.Dot:         MEMBER,
-	token.Assign:      ASSIGN,
-	token.LogicalAnd:  AND,
-	token.LogicalOr:   OR,
-	token.FatArrow:    ARROW,
+	token.Equal:        EQUALS,
+	token.NotEqual:     EQUALS,
+	token.Less:         LESSGREATER,
+	token.Greater:      LESSGREATER,
+	token.LessEqual:    LESSGREATER,
+	token.GreaterEqual: LESSGREATER,
+	token.Plus:         SUM,
+	token.Minus:        SUM,
+	token.Star:         PRODUCT,
+	token.Slash:        PRODUCT,
+	token.LeftParen:    CALL,
+	token.LeftBracket:  INDEX,
+	token.Dot:          MEMBER,
+	token.Assign:       ASSIGN,
+	token.LogicalAnd:   AND,
+	token.LogicalOr:    OR,
+	token.FatArrow:     ARROW,
 }
 
 type (
@@ -89,6 +91,8 @@ func NewParser(l *Lexer) *Parser {
 	p.registerInfix(token.NotEqual, p.parseInfixExpression)
 	p.registerInfix(token.Less, p.parseInfixExpression)
 	p.registerInfix(token.Greater, p.parseInfixExpression)
+	p.registerInfix(token.LessEqual, p.parseInfixExpression)
+	p.registerInfix(token.GreaterEqual, p.parseInfixExpression)
 	p.registerInfix(token.Assign, p.parseInfixExpression)
 	p.registerInfix(token.LeftParen, p.parseCallExpression)
 	p.registerInfix(token.Dot, p.parseDotExpression)
@@ -423,12 +427,16 @@ func (p *Parser) parseObjectLiteral() Expression {
 	for !p.peekTokenIs(token.RightBrace) {
 		p.nextToken()
 		key := p.parseExpression(LOWEST)
-		if !p.expectPeek(token.Colon) {
-			return nil
+
+		if p.peekTokenIs(token.Colon) {
+			p.nextToken()
+			p.nextToken()
+			val := p.parseExpression(LOWEST)
+			obj.Pairs[key] = val
+		} else {
+			obj.Pairs[key] = key
 		}
-		p.nextToken()
-		val := p.parseExpression(LOWEST)
-		obj.Pairs[key] = val
+
 		if !p.peekTokenIs(token.RightBrace) && !p.expectPeek(token.Comma) {
 			return nil
 		}

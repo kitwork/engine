@@ -1,8 +1,5 @@
-// ==========================================
-// BASICS: OBJECT & MATH
-// ==========================================
-
-log("🧮 Doing strict math...");
+work("logic")
+    .router("GET", "/api/logic");
 
 let price = 100.0;
 let tax = 0.1;
@@ -15,7 +12,6 @@ let summary = {
 };
 
 if (total > 100) {
-    log("⚠️ High value order!");
     summary.is_expensive = true;
 } else {
     summary.is_expensive = false;

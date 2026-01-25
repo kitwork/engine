@@ -3,42 +3,21 @@ package security
 import (
 	"os"
 
+	"github.com/kitwork/engine/security/database"
+	"github.com/kitwork/engine/security/server"
+	"github.com/kitwork/engine/security/smtp"
 	"gopkg.in/yaml.v3"
 )
 
-// DBConfig chứa thông tin kết nối Database
-type DBConfig struct {
-	Type     string `yaml:"type"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Name     string `yaml:"name"`
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	SSLMode  string `yaml:"ssl"`
-	Timezone string `yaml:"timezone"`
-	Timeout  int    `yaml:"timeout"`
-	MaxOpen  int    `yaml:"max_open"`
-	MaxIdle  int    `yaml:"max_idle"`
-	Lifetime int    `yaml:"lifetime"`
-	MaxLimit int    `yaml:"max_limit"`
-}
-
-type ServerConfig struct {
-	Port  int  `yaml:"port"`
-	Debug bool `yaml:"debug"`
-}
-
-type SMTPConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-}
+// Re-export types using aliases for backward compatibility
+type DBConfig = database.Config
+type ServerConfig = server.Config
+type SMTPConfig = smtp.Config
 
 type Config struct {
-	Database DBConfig
-	Server   ServerConfig
-	SMTP     SMTPConfig
+	Database database.Config
+	Server   server.Config
+	SMTP     smtp.Config
 }
 
 // LoadConfigFromDir reads modular config files from a directory

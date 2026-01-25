@@ -2,16 +2,12 @@ package main
 
 import (
 	"github.com/kitwork/engine"
-	"github.com/kitwork/engine/security"
 )
 
 func main() {
-	// Load config from directory
-	cfg, err := security.LoadConfigFromDir("./config")
+	cfg, err := engine.LoadConfig("./")
 	if err != nil {
-		panic(err)
+		cfg = &engine.Config{Port: 8081}
 	}
-
-	// Start Engine
 	engine.Run(cfg)
 }

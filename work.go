@@ -18,9 +18,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type Config struct {
+	Port     int                   `yaml:"port"`
+	Debug    bool                  `yaml:"debug"`
+	Sources  []string              `yaml:"source"`
+	Database security.DBConfig     `yaml:"database"`
+	Server   security.ServerConfig `yaml:"server"`
+	SMTP     security.SMTPConfig   `yaml:"smtp"`
+}
+
 // Run bắt đầu môi trường Kitwork Engine với config đầy đủ
-func Run(cfg *security.Config) {
+func Run(cfg *Config) {
 	e := core.New()
+
+	// Khởi tạo Config nội bộ
+	e.Config.Port = cfg.Port
+	if e.Config.Port == 0 && cfg.Server.Port != 0 {
+		e.Config.Port = cfg.Server.Port
+	}
+	e.Config.Debug = cfg.Debug || cfg.Server.Debug
+	e.Config.Sources = cfg.Sources
+	if len(e.Config.Sources) == 0 {
+		e.Config.Sources = []string{"./"}
+	}
 
 	// Khởi tạo DB nếu có config
 	if cfg.Database.Type != "" {
@@ -31,19 +51,59 @@ func Run(cfg *security.Config) {
 		}
 	}
 
-	sourceDir := "./"
+	for _, dir := range e.Config.Sources {
+		// 1. Quét Config (JSON/YAML)
+		loadConfigs(e, dir)
 
-	// 1. Quét Config (JSON/YAML)
-	loadConfigs(e, sourceDir)
-
-	// 2. Quét Logic (JS)
-	loadLogic(e, sourceDir)
+		// 2. Quét Logic (JS)
+		loadLogic(e, dir)
+	}
 
 	// 3. Đồng bộ Router
 	e.SyncRegistry()
 
 	// 4. Khởi động Server
-	bootServer(e, cfg.Server.Port)
+	bootServer(e, e.Config.Port)
+}
+
+// LoadConfig nạp cấu hình từ file config.yaml ở root hoặc các file modular
+func LoadConfig(dir string) (*Config, error) {
+	cfg := &Config{}
+
+	// Thử nạp từ file config.yaml tổng hợp ở root trước
+	if data, err := os.ReadFile(filepath.Join(dir, "config.yaml")); err == nil {
+		yaml.Unmarshal(data, cfg)
+	}
+
+	// Nếu chưa có các module thì thử nạp từ thư mục modular (tương thích ngược)
+	secCfg, err := security.LoadConfigFromDir(dir)
+	if err == nil {
+		if cfg.Database.Type == "" {
+			cfg.Database = secCfg.Database
+		}
+		if cfg.Server.Port == 0 {
+			cfg.Server = secCfg.Server
+		}
+		if cfg.SMTP.Host == "" {
+			cfg.SMTP = secCfg.SMTP
+		}
+	}
+
+	// Set defaults
+	if cfg.Database.Type == "" {
+		cfg.Database.Type = "postgres"
+	}
+	if cfg.Port == 0 && cfg.Server.Port != 0 {
+		cfg.Port = cfg.Server.Port
+	}
+	if cfg.Port == 0 {
+		cfg.Port = 8080
+	}
+	if len(cfg.Sources) == 0 {
+		cfg.Sources = []string{"./"}
+	}
+
+	return cfg, nil
 }
 
 func loadConfigs(e *core.Engine, dir string) {
@@ -78,8 +138,15 @@ func loadConfigs(e *core.Engine, dir string) {
 			if d, ok := data["debug"].(bool); ok {
 				e.Config.Debug = d
 			}
-			if s, ok := data["source"].(string); ok {
-				e.Config.Source = s
+			if str, ok := data["source"].(string); ok {
+				e.Config.Sources = append(e.Config.Sources, str)
+			}
+			if ss, ok := data["source"].([]any); ok {
+				for _, s := range ss {
+					if str, ok := s.(string); ok {
+						e.Config.Sources = append(e.Config.Sources, str)
+					}
+				}
 			}
 
 			if e.Config.Debug {
@@ -113,7 +180,7 @@ func loadLogic(e *core.Engine, dir string) {
 				}
 
 				fmt.Printf("[loadLogic] Calling Trigger for Work: %s (bytecode: %v)\n", w.Name, w.Bytecode != nil)
-				e.Trigger(context.TODO(), w)
+				e.Trigger(context.TODO(), w, nil, nil)
 			} else {
 				fmt.Printf("❌ Code Error in %s: %v\n", path, err)
 			}
@@ -126,7 +193,7 @@ func loadLogic(e *core.Engine, dir string) {
 }
 
 func bootServer(e *core.Engine, serverPort int) {
-	port := "8094"
+	port := strconv.Itoa(serverPort)
 	fmt.Printf("🚀 Kitwork Engine online at http://localhost:%s\n", port)
 
 	work.GlobalRouter.Mu.RLock()
@@ -143,13 +210,20 @@ func bootServer(e *core.Engine, serverPort int) {
 		fmt.Printf("[HTTP] Incoming %s %s\n", method, path)
 
 		var matchedRoute *work.Route
+		pathParams := make(map[string]value.Value)
+
 		work.GlobalRouter.Mu.RLock()
 		for i := range work.GlobalRouter.Routes {
 			rt := &work.GlobalRouter.Routes[i]
-			if rt.Method == method && rt.Path == path {
-				matchedRoute = rt
-				fmt.Printf("[HTTP] Matched route: %s %s\n", rt.Method, rt.Path)
-				break
+			if rt.Method == method {
+				if params, ok := matchRoute(path, rt.Path); ok {
+					matchedRoute = rt
+					for k, v := range params {
+						pathParams[k] = value.New(v)
+					}
+					fmt.Printf("[HTTP] Matched route: %s %s\n", rt.Method, rt.Path)
+					break
+				}
 			}
 		}
 		work.GlobalRouter.Mu.RUnlock()
@@ -160,25 +234,52 @@ func bootServer(e *core.Engine, serverPort int) {
 			return
 		}
 
-		params := make(map[string]value.Value)
+		// 1. URL Query Params
+		queryParams := make(map[string]value.Value)
 		for k, v := range r.URL.Query() {
 			if len(v) > 0 {
-				params[k] = value.New(v[0])
+				queryParams[k] = value.New(v[0])
 			}
 		}
 
-		res := e.ExecuteLambda(matchedRoute.Work, matchedRoute.Fn, params)
+		// 2. JSON Body Params
+		bodyParams := make(map[string]value.Value)
+		if r.Method != "GET" && r.Body != nil {
+			var bodyData map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&bodyData); err == nil {
+				for k, v := range bodyData {
+					bodyParams[k] = value.New(v)
+				}
+			}
+		}
+
+		res := e.ExecuteLambda(matchedRoute.Work, matchedRoute.Fn, r, w, queryParams, bodyParams, pathParams)
 		if res.Error != "" {
 			http.Error(w, res.Error, 500)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
 		responseVal := res.Response
 		if responseVal.K == value.Nil {
 			responseVal = res.Value
 		}
 
+		if res.ResType == "html" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			htmlContent := ""
+			if responseVal.K == value.Map {
+				m := responseVal.Interface().(map[string]any)
+				template, _ := m["template"].(string)
+				data, _ := m["data"].(map[string]any)
+				htmlContent = renderTemplate(template, data)
+			} else {
+				htmlContent = responseVal.Text()
+			}
+			w.Write([]byte(htmlContent))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		outputData, _ := json.Marshal(responseVal.Interface())
 		fmt.Printf("[HTTP] Response: %s\n", string(outputData))
 		w.Write(outputData)
@@ -202,4 +303,36 @@ func bootServer(e *core.Engine, serverPort int) {
 			break
 		}
 	}
+}
+
+func renderTemplate(tmpl string, data map[string]any) string {
+	res := tmpl
+	for k, v := range data {
+		placeholder := "{{" + k + "}}"
+		res = strings.ReplaceAll(res, placeholder, fmt.Sprintf("%v", v))
+	}
+	return res
+}
+
+func matchRoute(path, routePath string) (map[string]string, bool) {
+	if path == routePath {
+		return nil, true
+	}
+
+	pSegments := strings.Split(strings.Trim(path, "/"), "/")
+	rSegments := strings.Split(strings.Trim(routePath, "/"), "/")
+
+	if len(pSegments) != len(rSegments) {
+		return nil, false
+	}
+
+	params := make(map[string]string)
+	for i := 0; i < len(rSegments); i++ {
+		if strings.HasPrefix(rSegments[i], ":") {
+			params[rSegments[i][1:]] = pSegments[i]
+		} else if rSegments[i] != pSegments[i] {
+			return nil, false
+		}
+	}
+	return params, true
 }

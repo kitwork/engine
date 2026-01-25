@@ -43,5 +43,8 @@ func (v Value) Truthy() bool {
 	if v.IsImmediate() {
 		return v.N > 0
 	}
+	if v.K == String {
+		return v.V != nil && v.V.(string) != ""
+	}
 	return v.IsObject()
 }

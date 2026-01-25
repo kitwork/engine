@@ -1,0 +1,350 @@
+package core
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"sync"
+
+	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/value"
+	"github.com/kitwork/engine/work"
+)
+
+func newExecutionContext(e *Engine) *ExecutionContext {
+	ctx := &ExecutionContext{
+		machine: runtime.New(nil, nil),
+		task:    &work.Task{},
+	}
+
+	// Map Builtins to Context
+	ctx.jsonFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 {
+			ctx.task.JSON(args[0])
+		}
+		return value.New(ctx.task)
+	})
+	ctx.htmlFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) >= 1 {
+			ctx.task.HTML(args[0], args[1:]...)
+		}
+		return value.New(ctx.task)
+	})
+
+	// Parallel implementation
+	ctx.parallelFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.NewNull()
+		}
+		arg := args[0]
+		if e.Config.Debug {
+			fmt.Printf("[Parallel Debug] Input Type: %s, IsMap: %v\n", arg.K.String(), arg.IsMap())
+		}
+
+		if arg.IsArray() {
+			arr := arg.Array()
+			results := make([]value.Value, len(arr))
+			var wg sync.WaitGroup
+			for i, v := range arr {
+				if sFn, ok := v.V.(*value.ScriptFunction); ok {
+					wg.Add(1)
+					go func(idx int, fn *value.ScriptFunction) {
+						defer wg.Done()
+						r := e.ExecuteLambda(ctx.task.Work, fn, ctx.task.Request, ctx.task.Writer, nil)
+						results[idx] = r.Value
+					}(i, sFn)
+				} else {
+					results[i] = v
+				}
+			}
+			wg.Wait()
+			return value.New(results)
+		} else if arg.IsMap() {
+			m := arg.Map()
+			results := make(map[string]value.Value)
+
+			// Tạm thời chạy TUẦN TỰ để đảm bảo Memory Safety cho các Object phức tạp
+			for k, v := range m {
+				if sFn, ok := v.V.(*value.ScriptFunction); ok {
+					r := e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
+					results[k] = r.Value
+				} else {
+					results[k] = v
+				}
+			}
+
+			return value.New(results)
+		}
+		return value.NewNull()
+	})
+
+	ctx.goFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 {
+			if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+				go e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
+			}
+		}
+		return value.NewNull()
+	})
+
+	ctx.deferFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 {
+			if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+				ctx.machine.Defer(sFn)
+			}
+		}
+		return value.NewNull()
+	})
+
+	// engine object for chaining
+	var runtimeObj map[string]value.Value
+	runtimeObj = map[string]value.Value{
+		"source": value.NewFunc(func(args ...value.Value) value.Value {
+			for _, arg := range args {
+				e.Config.Sources = append(e.Config.Sources, arg.Text())
+			}
+			return value.New(runtimeObj)
+		}),
+		"debug": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				e.Config.Debug = args[0].IsTrue()
+			}
+			return value.New(runtimeObj)
+		}),
+	}
+
+	ctx.engineFn = value.New(map[string]value.Value{
+		"run": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				arg := args[0]
+				if arg.IsMap() {
+					cfg, _ := arg.Interface().(map[string]any)
+					if p, ok := cfg["port"].(float64); ok {
+						e.Config.Port = int(p)
+					}
+					if d, ok := cfg["debug"].(bool); ok {
+						e.Config.Debug = d
+					}
+					if s, ok := cfg["source"].(string); ok {
+						e.Config.Sources = append(e.Config.Sources, s)
+					}
+					if ss, ok := cfg["source"].([]any); ok {
+						for _, s := range ss {
+							if str, ok := s.(string); ok {
+								e.Config.Sources = append(e.Config.Sources, str)
+							}
+						}
+					}
+				} else if arg.IsNumeric() {
+					e.Config.Port = int(arg.N)
+				}
+			}
+			return value.New(runtimeObj)
+		}),
+	})
+
+	ctx.nowFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.task.Now() })
+	ctx.dbFn = value.NewFunc(func(args ...value.Value) value.Value {
+		db := ctx.task.DB()
+		db.SetExecutor(ctx.machine)
+		return value.New(db)
+	})
+	ctx.payloadFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.task.Payload() })
+	ctx.logFn = value.NewFunc(func(args ...value.Value) value.Value {
+		ctx.task.Log(args...)
+		return value.NewNull()
+	})
+	ctx.httpFn = value.NewFunc(func(args ...value.Value) value.Value { return value.New(ctx.task.HTTP()) })
+
+	ctx.queryFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if ctx.task.Request == nil {
+			return value.NewNull()
+		}
+
+		// Always get from Request (Go caches URL.Query anyway)
+		r := ctx.task.Request
+		if len(args) == 0 {
+			res := make(map[string]value.Value)
+			for k, v := range r.URL.Query() {
+				if len(v) > 0 {
+					res[k] = value.New(v[0])
+				}
+			}
+			return value.New(res)
+		}
+		key := args[0].Text()
+		return value.New(r.URL.Query().Get(key))
+	})
+
+	type contextKey string
+	const bodyCacheKey contextKey = "kitwork_body"
+
+	ctx.bodyFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if ctx.task.Request == nil {
+			return value.NewNull()
+		}
+
+		// Try to get from Request Context cache first (very clean)
+		if cached := ctx.task.Request.Context().Value(bodyCacheKey); cached != nil {
+			b := cached.(value.Value)
+			if len(args) == 0 {
+				return b
+			}
+			return b.Get(args[0].Text())
+		}
+
+		// Parse body ONCE and store back into Request Context
+		if ctx.task.Request.Body != nil {
+			var bodyData map[string]any
+			json.NewDecoder(ctx.task.Request.Body).Decode(&bodyData)
+			res := make(map[string]value.Value)
+			for k, v := range bodyData {
+				res[k] = value.New(v)
+			}
+			bodyVal := value.New(res)
+
+			// Store in context for next time
+			importCtx := context.WithValue(ctx.task.Request.Context(), bodyCacheKey, bodyVal)
+			ctx.task.Request = ctx.task.Request.WithContext(importCtx)
+
+			if len(args) == 0 {
+				return bodyVal
+			}
+			return bodyVal.Get(args[0].Text())
+		}
+
+		return value.NewNull()
+	})
+
+	ctx.paramsFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return ctx.task.GetParams()
+		}
+		key := args[0].Text()
+		if val, ok := ctx.task.Params[key]; ok {
+			return val
+		}
+		return value.NewNull()
+	})
+
+	ctx.cookieFn = value.NewFunc(func(args ...value.Value) value.Value {
+		// GET Cookie
+		if len(args) == 1 {
+			if ctx.task.Request != nil {
+				c, err := ctx.task.Request.Cookie(args[0].Text())
+				if err == nil {
+					return value.New(c.Value)
+				}
+			}
+			return value.NewNull()
+		}
+
+		// SET Cookie
+		if len(args) >= 2 && ctx.task.Writer != nil {
+			name := args[0].Text()
+			val := args[1].Text()
+			c := &http.Cookie{
+				Name:  name,
+				Value: val,
+				Path:  "/", // Default path
+			}
+
+			// Options handling
+			if len(args) > 2 && args[2].IsMap() {
+				opts := args[2].Map()
+				if v, ok := opts["path"]; ok {
+					c.Path = v.Text()
+				}
+				if v, ok := opts["domain"]; ok {
+					c.Domain = v.Text()
+				}
+				if v, ok := opts["maxAge"]; ok {
+					c.MaxAge = int(v.N)
+				}
+				if v, ok := opts["secure"]; ok {
+					c.Secure = v.Truthy()
+				}
+				if v, ok := opts["httpOnly"]; ok {
+					c.HttpOnly = v.Truthy()
+				}
+			}
+			http.SetCookie(ctx.task.Writer, c)
+		}
+		return value.NewNull()
+	})
+
+	ctx.machine.Vars["header"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if r := ctx.task.Request; r != nil {
+			if len(args) == 0 {
+				res := make(map[string]value.Value)
+				for k, v := range r.Header {
+					if len(v) > 0 {
+						res[k] = value.New(v[0])
+					}
+				}
+				return value.New(res)
+			}
+			key := args[0].Text()
+			return value.New(r.Header.Get(key))
+		}
+		return value.NewNull()
+	})
+
+	ctx.machine.Vars["status"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 && ctx.task.Writer != nil {
+			code := int(args[0].N)
+			ctx.task.Writer.WriteHeader(code)
+		}
+		return value.NewNull()
+	})
+
+	ctx.machine.Vars["redirect"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 && ctx.task.Request != nil && ctx.task.Writer != nil {
+			url := args[0].Text()
+			code := http.StatusFound
+			if len(args) > 1 {
+				code = int(args[1].N)
+			}
+			http.Redirect(ctx.task.Writer, ctx.task.Request, url, code)
+		}
+		return value.NewNull()
+	})
+
+	ctx.workFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.NewNull()
+		}
+		name := args[0].Text()
+		if e.Config.Debug {
+			fmt.Printf("[Trigger work()] Called for: %s\n", name)
+		}
+		if w, ok := e.Registry[name]; ok {
+			return value.New(w)
+		}
+		w := work.NewWork(name)
+		e.Registry[name] = w
+		return value.New(w)
+	})
+
+	// Pre-inject into machine
+	ctx.machine.Vars["json"] = ctx.jsonFn
+	ctx.machine.Vars["html"] = ctx.htmlFn
+	ctx.machine.Vars["query"] = ctx.queryFn
+	ctx.machine.Vars["body"] = ctx.bodyFn
+	ctx.machine.Vars["params"] = ctx.paramsFn
+	ctx.machine.Vars["payload"] = ctx.payloadFn
+	ctx.machine.Vars["work"] = ctx.workFn
+	ctx.machine.Vars["cookie"] = ctx.cookieFn
+	ctx.machine.Vars["engine"] = ctx.engineFn
+	ctx.machine.Vars["now"] = ctx.nowFn
+	ctx.machine.Vars["db"] = ctx.dbFn
+	ctx.machine.Vars["payload"] = ctx.payloadFn
+	ctx.machine.Vars["log"] = ctx.logFn
+	ctx.machine.Vars["http"] = ctx.httpFn
+	ctx.machine.Vars["parallel"] = ctx.parallelFn
+	ctx.machine.Vars["go"] = ctx.goFn
+	ctx.machine.Vars["defer"] = ctx.deferFn
+
+	return ctx
+}

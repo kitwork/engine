@@ -119,8 +119,12 @@ func (k Kind) String() string {
 		return "!="
 	case Greater:
 		return ">"
+	case GreaterEqual:
+		return ">="
 	case Less:
 		return "<"
+	case LessEqual:
+		return "<="
 	case Plus:
 		return "+"
 	case Minus:

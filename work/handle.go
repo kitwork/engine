@@ -2,6 +2,7 @@ package work
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -72,10 +73,22 @@ func (w *Work) Router(args ...value.Value) *Work {
 	return w
 }
 
-func (w *Work) Get(path string) *Work    { return w.Router(value.New("GET"), value.New(path)) }
-func (w *Work) Post(path string) *Work   { return w.Router(value.New("POST"), value.New(path)) }
-func (w *Work) Put(path string) *Work    { return w.Router(value.New("PUT"), value.New(path)) }
-func (w *Work) Delete(path string) *Work { return w.Router(value.New("DELETE"), value.New(path)) }
+func (w *Work) Get(args ...value.Value) *Work    { return w.routerWithHandler("GET", args...) }
+func (w *Work) Post(args ...value.Value) *Work   { return w.routerWithHandler("POST", args...) }
+func (w *Work) Put(args ...value.Value) *Work    { return w.routerWithHandler("PUT", args...) }
+func (w *Work) Delete(args ...value.Value) *Work { return w.routerWithHandler("DELETE", args...) }
+
+func (w *Work) routerWithHandler(method string, args ...value.Value) *Work {
+	if len(args) == 0 {
+		return w
+	}
+	path := args[0].Text()
+	w.Router(value.New(method), value.New(path))
+	if len(args) > 1 {
+		w.Handle(args[1])
+	}
+	return w
+}
 
 func (w *Work) Handle(fn value.Value) *Work {
 	if len(w.Routes) > 0 {
@@ -103,10 +116,14 @@ func (w *Work) Version(v string) *Work {
 	return w
 }
 
-// Task đại diện cho một phiên thực thi (Mutable)
+// Task đại diện cho một phiên thực thi (Mutable Context)
 type Task struct {
-	Work     *Work
-	Params   map[string]value.Value
+	Work    *Work
+	Request *http.Request
+	Writer  http.ResponseWriter
+
+	Params map[string]value.Value // URL Path params like :id
+
 	Response value.Value
 	ResType  string
 	Config   map[string]string
@@ -114,24 +131,31 @@ type Task struct {
 
 func (t *Task) Reset(w *Work) {
 	t.Work = w
+	t.Request = nil
+	t.Writer = nil
 	t.Response = value.Value{K: value.Nil}
 	t.ResType = "json"
 
-	if t.Params != nil {
+	if t.Params == nil {
+		t.Params = make(map[string]value.Value)
+	} else {
 		for k := range t.Params {
 			delete(t.Params, k)
 		}
-	} else {
-		t.Params = make(map[string]value.Value)
 	}
 
-	if t.Config != nil {
+	if t.Config == nil {
+		t.Config = make(map[string]string)
+	} else {
 		for k := range t.Config {
 			delete(t.Config, k)
 		}
-	} else {
-		t.Config = make(map[string]string)
 	}
+}
+
+func (t *Task) SetRequest(r *http.Request, w http.ResponseWriter) {
+	t.Request = r
+	t.Writer = w
 }
 
 func (t *Task) JSON(val value.Value) {
@@ -151,10 +175,23 @@ func (t *Task) HTML(template value.Value, data ...value.Value) {
 	t.ResType = "html"
 }
 
-func (t *Task) Now() value.Value     { return value.New(time.Now()) }
-func (t *Task) DB() *DBQuery         { return NewDBQuery() }
-func (t *Task) HTTP() *HTTPClient    { return NewHTTPClient(t) }
-func (t *Task) Payload() value.Value { return value.New(t.Params) }
+func (t *Task) Now() value.Value  { return value.New(time.Now()) }
+func (t *Task) DB() *DBQuery      { return NewDBQuery() }
+func (t *Task) HTTP() *HTTPClient { return NewHTTPClient(t) }
+
+func (t *Task) GetQuery() value.Value  { return value.NewNull() }
+func (t *Task) SetQuery(v value.Value) {}
+func (t *Task) GetBody() value.Value   { return value.NewNull() }
+func (t *Task) SetBody(v value.Value)  {}
+func (t *Task) GetParams() value.Value { return value.New(t.Params) }
+
+func (t *Task) Payload() value.Value {
+	res := make(map[string]value.Value)
+	for k, v := range t.Params {
+		res[k] = v
+	}
+	return value.New(res)
+}
 func (t *Task) Log(args ...value.Value) {
 	fmt.Printf("[%s] [%s] ", time.Now().Format("15:04:05"), t.Work.Name)
 	for _, arg := range args {

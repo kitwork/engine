@@ -47,8 +47,8 @@ func (c *Compiler) Compile(node Node) error {
 				}
 			}
 		}
-		// Luôn kết thúc Program bằng HALT
-		c.emit(opcode.HALT)
+		// Luôn kết thúc Program bằng RETURN để đảm bảo thực thi defer
+		c.emit(opcode.RETURN)
 
 	case *ExpressionStatement:
 		return c.Compile(n.Expression)
