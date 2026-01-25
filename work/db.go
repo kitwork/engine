@@ -12,13 +12,16 @@ import (
 
 // SQLProxyHandler implements value.ProxyHandler to capture SQL conditions
 type SQLProxyHandler struct {
-	Column   string
-	Operator string
-	Value    value.Value
+	TableName string
+	Column    string
+	Operator  string
+	Value     value.Value
 }
 
 func (h *SQLProxyHandler) OnGet(key string) value.Value {
-	return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: &SQLProxyHandler{Column: key}}}
+	return value.Value{K: value.Proxy, V: &value.ProxyData{
+		Handler: &SQLProxyHandler{TableName: h.TableName, Column: key},
+	}}
 }
 
 func (h *SQLProxyHandler) OnCompare(op string, other value.Value) value.Value {
@@ -49,6 +52,9 @@ type DBQuery struct {
 	method     string
 	conditions []string
 	whereArgs  []any
+	joins      []string
+	groups     []string
+	havings    []string
 	executor   LambdaExecutor
 }
 
@@ -175,13 +181,9 @@ func (q *DBQuery) Where(args ...value.Value) *DBQuery {
 	return q
 }
 
-func (q *DBQuery) Take(n float64) *DBQuery {
+func (q *DBQuery) Limit(n float64) *DBQuery {
 	q.limit = int(n)
 	return q
-}
-
-func (q *DBQuery) Limit(n float64) *DBQuery {
-	return q.Take(n)
 }
 
 func (q *DBQuery) Offset(n float64) *DBQuery {
@@ -202,10 +204,21 @@ func (q *DBQuery) OrderBy(column string, direction ...string) *DBQuery {
 	return q
 }
 
-func (q *DBQuery) Find(id any) value.Value {
+func (q *DBQuery) Find(idOrFn any) value.Value {
+	// SMART FIND: If it's a Lambda, treat it as a Where condition
+	switch v := idOrFn.(type) {
+	case value.Value:
+		if v.K == value.Func {
+			return q.Where(v).One()
+		}
+	case *value.ScriptFunction:
+		return q.Where(value.Value{K: value.Func, V: v}).One()
+	}
+
+	// TRADITIONAL FIND: Primary Key lookup
 	q.conditions = []string{"\"id\" = $1"}
-	q.whereArgs = []any{id}
-	return q.First()
+	q.whereArgs = []any{idOrFn}
+	return q.One()
 }
 
 func (q *DBQuery) Insert(data value.Value) *DBQuery {
@@ -256,6 +269,137 @@ func (q *DBQuery) NotNull(column string) *DBQuery {
 	return q
 }
 
+func (q *DBQuery) Join(tableOrFn any, args ...value.Value) *DBQuery {
+	return q.joinInternal("JOIN", tableOrFn, args...)
+}
+
+func (q *DBQuery) LeftJoin(tableOrFn any, args ...value.Value) *DBQuery {
+	return q.joinInternal("LEFT JOIN", tableOrFn, args...)
+}
+
+func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *DBQuery {
+	var tableName string
+	var sFn *value.ScriptFunction
+
+	// 1. Phân tích Lambda để lấy tên bảng từ Parameter Names
+	switch v := tableOrFn.(type) {
+	case string:
+		tableName = v
+		if len(args) > 0 && args[0].K == value.Func {
+			sFn, _ = args[0].V.(*value.ScriptFunction)
+		}
+	case value.Value:
+		if v.K == value.Func {
+			sFn, _ = v.V.(*value.ScriptFunction)
+		}
+	case *value.ScriptFunction:
+		sFn = v
+	}
+
+	// Nếu là Lambda, tự động lấy tên bảng từ biến đầu tiên người dùng đặt
+	if sFn != nil && tableName == "" && len(sFn.ParamNames) > 0 {
+		tableName = sFn.ParamNames[0]
+	}
+
+	if tableName == "" {
+		return q
+	}
+
+	sqlJoin := fmt.Sprintf("%s \"%s\"", typ, tableName)
+
+	// 2. Xử lý logic ON (Inject đúng tên bảng vào Proxy)
+	if sFn != nil {
+		// Elite Logic: Lấy tên bảng trực tiếp từ cách người dùng đặt tên biến trong JS
+		joinTableAlias := sFn.ParamNames[0]
+		primaryTableAlias := q.table // Mặc định
+		if len(sFn.ParamNames) > 1 {
+			primaryTableAlias = sFn.ParamNames[1]
+		}
+
+		hJoin := &SQLProxyHandler{TableName: joinTableAlias}
+		pJoin := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: hJoin}}
+
+		hPrimary := &SQLProxyHandler{TableName: primaryTableAlias}
+		pPrimary := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: hPrimary}}
+
+		// Thực thi Lambda: (orders, users) => orders.user_id == users.id
+		res := q.executor.ExecuteLambda(sFn, []value.Value{pJoin, pPrimary})
+
+		if res.K == value.Proxy {
+			if d, ok := res.V.(*value.ProxyData); ok {
+				if filter, ok := d.Handler.(*SQLProxyHandler); ok {
+					if filter.Value.K == value.Proxy {
+						if otherData, ok := filter.Value.V.(*value.ProxyData); ok {
+							if otherFilter, ok := otherData.Handler.(*SQLProxyHandler); ok {
+								// Sinh ra SQL chuẩn xác dựa trên tên bảng/biến
+								sqlJoin += fmt.Sprintf(" ON \"%s\".\"%s\" = \"%s\".\"%s\"",
+									filter.TableName, filter.Column,
+									otherFilter.TableName, otherFilter.Column)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	q.joins = append(q.joins, sqlJoin)
+	return q
+}
+
+func (q *DBQuery) On(args ...value.Value) *DBQuery {
+	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
+		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+			handler := &SQLProxyHandler{}
+			proxy := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: handler}}
+			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
+			if res.K == value.Proxy {
+				if d, ok := res.V.(*value.ProxyData); ok {
+					if filter, ok := d.Handler.(*SQLProxyHandler); ok {
+						// Custom On condition: users.id = orders.user_id
+						// We don't use $n placeholders for JOIN ON usually, but raw columns
+						last := len(q.joins) - 1
+						if last >= 0 {
+							q.joins[last] += fmt.Sprintf(" ON \"%s\" = \"%s\"", filter.Column, filter.Value.Text())
+						}
+					}
+				}
+			}
+		}
+	}
+	return q
+}
+
+func (q *DBQuery) Group(columns ...string) *DBQuery {
+	q.groups = append(q.groups, columns...)
+	return q
+}
+
+func (q *DBQuery) Having(args ...value.Value) *DBQuery {
+	// Re-use logic from Where for Having
+	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
+		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+			handler := &SQLProxyHandler{}
+			proxy := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: handler}}
+			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
+			if res.K == value.Proxy {
+				if d, ok := res.V.(*value.ProxyData); ok {
+					if filter, ok := d.Handler.(*SQLProxyHandler); ok {
+						op := filter.Operator
+						if op == "==" || op == "" {
+							op = "="
+						}
+						argCount := len(q.whereArgs) + 1
+						q.havings = append(q.havings, fmt.Sprintf("%s %s $%d", filter.Column, op, argCount))
+						q.whereArgs = append(q.whereArgs, filter.Value.Interface())
+					}
+				}
+			}
+		}
+	}
+	return q
+}
+
 func (q *DBQuery) Like(columnOrFn any, pattern ...string) *DBQuery {
 	// Support Lambda approach: .like(u => u.name == "Apple%")
 	switch v := columnOrFn.(type) {
@@ -299,6 +443,21 @@ func (q *DBQuery) Max(column string) value.Value {
 }
 
 func (q *DBQuery) Get() value.Value {
+	return q.executeGet()
+}
+
+func (q *DBQuery) All() value.Value {
+	return q.Get()
+}
+
+func (q *DBQuery) Take(args ...value.Value) value.Value {
+	if len(args) > 0 {
+		q.limit = int(args[0].Float())
+	}
+	return q.Get()
+}
+
+func (q *DBQuery) executeGet() value.Value {
 	db := GetDB()
 	if db == nil {
 		return q.mockGet()
@@ -321,6 +480,12 @@ func (q *DBQuery) Get() value.Value {
 
 	query := fmt.Sprintf("SELECT %s FROM \"%s\"", selectedFields, q.table)
 
+	// 1. JOINS
+	for _, join := range q.joins {
+		query += " " + join
+	}
+
+	// 2. WHERE
 	if len(q.conditions) > 0 {
 		query += " WHERE "
 		for i, cond := range q.conditions {
@@ -333,6 +498,34 @@ func (q *DBQuery) Get() value.Value {
 		}
 	}
 
+	// 3. GROUP BY
+	if len(q.groups) > 0 {
+		query += " GROUP BY "
+		for i, g := range q.groups {
+			if i > 0 {
+				query += ", "
+			}
+			query += fmt.Sprintf("\"%s\"", g)
+		}
+	}
+
+	// 4. HAVING
+	if len(q.havings) > 0 {
+		query += " HAVING "
+		for i, h := range q.havings {
+			if i > 0 {
+				query += " AND "
+			}
+			query += h
+		}
+	}
+
+	// 5. ORDER BY
+	if q.order != "" {
+		query += fmt.Sprintf(" ORDER BY %s", q.order)
+	}
+
+	// 6. LIMIT & OFFSET
 	if q.limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", q.limit)
 	} else {
@@ -341,10 +534,6 @@ func (q *DBQuery) Get() value.Value {
 
 	if q.offset > 0 {
 		query += fmt.Sprintf(" OFFSET %d", q.offset)
-	}
-
-	if q.order != "" {
-		query += fmt.Sprintf(" ORDER BY %s", q.order)
 	}
 
 	// DEBUG LOG
@@ -383,6 +572,7 @@ func (q *DBQuery) Get() value.Value {
 }
 
 func (q *DBQuery) First() value.Value {
+	// First implies Limit 1 and take result
 	q.limit = 1
 	res := q.Get()
 	if res.K == value.Array {
@@ -393,6 +583,24 @@ func (q *DBQuery) First() value.Value {
 		}
 	}
 	return value.NewNull()
+}
+
+func (q *DBQuery) One() value.Value {
+	return q.First()
+}
+
+func (q *DBQuery) Last() value.Value {
+	// Simple logic: If no order, order by id DESC. If exists, flip it.
+	if q.order == "" {
+		q.OrderBy("id", "DESC")
+	} else {
+		if strings.Contains(strings.ToUpper(q.order), "ASC") {
+			q.order = strings.Replace(strings.ToUpper(q.order), "ASC", "DESC", 1)
+		} else {
+			q.order = strings.Replace(strings.ToUpper(q.order), "DESC", "ASC", 1)
+		}
+	}
+	return q.First()
 }
 
 func (q *DBQuery) mockGet() value.Value {
