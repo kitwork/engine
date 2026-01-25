@@ -119,40 +119,40 @@ cookie("token", "xyz-secret", {
 
 ## 🗄️ Database Access (Ultra-Smart Query Builder)
 
-Kitwork Engine cung cấp một bộ SDK truy vấn cơ sở dữ liệu mạnh mẽ, tối giản và thông minh bậc nhất. Triết lý của chúng tôi là **"Simple is the new Smart"** — chỉ cần dùng hàm `.where()` cho hầu hết mọi nhu cầu.
+Kitwork Engine provides a powerful, minimalist, and elite database query SDK. Our philosophy is **"Simple is the new Smart"** — use the `.where()` function for almost every need.
 
 ### 🌟 Magic Lambda Syntax
-Thay vì dùng chuỗi văn bản, Kitwork sử dụng hàm mũi tên (Lambda) để tương tác với các cột. Nó an toàn, tránh lỗi gõ nhầm và hỗ trợ gợi ý code hoàn hảo.
+Instead of error-prone strings, Kitwork uses arrow functions (Lambdas) to interact with columns. It's safe, prevents typos, and supports perfect code autocompletion.
 
 ```javascript
-// Tối giản, an toàn và trực quan
+// Minimalist, safe, and intuitive
 db().table("user").where(u => u.username == "boss").get();
 ```
 
-### 🧠 Thông minh hóa toán tử (Smart Detection)
-Engine tự động suy luận (Inference) toán tử SQL phù hợp dựa trên dữ liệu bạn cung cấp, giúp code của bạn trông "sạch" và giống ngôn ngữ tự nhiên hơn:
+### 🧠 Smart Operator Detection
+The engine automatically infers the appropriate SQL operator based on the data you provide, making your code look "clean" and more like natural language:
 
-*   **Tự động nhận diện `LIKE`**: Khi chuỗi chứa ký tự `%`.
+*   **Auto-LIKE Detection**: Triggered when a string contains the `%` character.
     ```javascript
-    // Dịch thành: WHERE "username" LIKE 'Apple%'
+    // Becomes: WHERE "username" LIKE 'Apple%'
     db().table("user").where(u => u.username == "Apple%").get();
     ```
-*   **Tự động nhận diện `IN`**: Khi giá trị là một Mảng (Array).
+*   **Auto-IN Detection**: Triggered when the value is an Array.
     ```javascript
-    // Dịch thành: WHERE "id" IN (10, 20, 30)
+    // Becomes: WHERE "id" IN (10, 20, 30)
     db().table("user").where(u => u.id == [10, 20, 30]).get();
     ```
 
-### 🛠 Các phím tắt quyền lực
-| Tính năng | Cú pháp | SQL dự kiến |
+### 🛠 Power Shortcuts
+| Feature | Syntax | Expected SQL |
 | :--- | :--- | :--- |
-| Tìm nhanh theo ID | `.find(1)` | `WHERE "id" = 1` |
-| Lấy nhanh bản ghi đầu | `.first()` | `LIMIT 1` |
-| Sắp xếp dữ liệu | `.orderBy("age", "DESC")` | `ORDER BY "age" DESC` |
-| Phân trang (Pagination) | `.limit(10).offset(10)` | `LIMIT 10 OFFSET 10` |
+| Quick Find by ID | `.find(1)` | `WHERE "id" = 1` |
+| Get First Record | `.first()` | `LIMIT 1` |
+| Ordering Data | `.orderBy("age", "DESC")` | `ORDER BY "age" DESC` |
+| Pagination | `.limit(10).offset(10)` | `LIMIT 10 OFFSET 10` |
 
 ```javascript
-// Query phức tạp chỉ trong vài dòng
+// Complex query in just a few lines
 const users = db().table("user")
     .where(u => u.role == "admin")
     .where(u => u.is_active == true)
@@ -161,13 +161,13 @@ const users = db().table("user")
     .get();
 ```
 
-### 📈 Thống kê (Aggregates) & Chỉnh sửa
+### 📈 Aggregates & Mutations
 ```javascript
-// Thống kê
+// Aggregates
 let total = db().table("orders").sum("amount");
 let average = db().table("products").avg("price");
 
-// Ghi dữ liệu
+// Data Mutations
 db().table("user").insert({ name: "Alice", age: 25 });
 db().table("user").where(u => u.id == 1).update({ status: "active" });
 db().table("user").where(u => u.id == 99).delete();
