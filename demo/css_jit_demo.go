@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -115,7 +116,11 @@ func GenerateUltimateJITCSS(html string) string {
 		{`^(duration)-(\d+)$`, "duration"},
 		{`^(rotate)-(-?\d+)$`, "rotate"},
 		{`^(scale)-(\d+)$`, "scale"},
+		{`^(backdrop-filter-blur)-(\d+)$`, "backdrop-filter"},
+		{`^(object)-(contain|cover|fill|none|scale-down)$`, "object-fit"},
 		{`^(translate)-(x|y)-(-?\d+)(-(percent))?$`, "translate"},
+		{`^(cube-size)-(\d+)$`, "cube-size"},
+		{`^(cube-duration)-(\d+)(s|ms)?$`, "cube-duration"},
 		{`^container$`, "container"},
 	}
 
@@ -316,6 +321,19 @@ func GenerateUltimateJITCSS(html string) string {
 						}
 						cssContent = fmt.Sprintf("opacity: %s;", v)
 					}
+				case "backdrop-filter":
+					cssContent = fmt.Sprintf("backdrop-filter: blur(%spx); -webkit-backdrop-filter: blur(%spx);", match[2], match[2])
+				case "object-fit":
+					cssContent = fmt.Sprintf("object-fit: %s;", match[2])
+				case "cube-size":
+					size, _ := strconv.Atoi(match[2])
+					cssContent = fmt.Sprintf("--cube-size: %dpx; --cube-face-translate-z: %dpx;", size, size/2)
+				case "cube-duration":
+					unit := match[3]
+					if unit == "" {
+						unit = "s"
+					}
+					cssContent = fmt.Sprintf("--cube-duration: %s%s;", match[2], unit)
 				}
 				break
 			}

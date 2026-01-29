@@ -1,322 +1,132 @@
-/* Core 3D Cube Logic */
-.cube-area,
-[data-desktop-class~="cube-area"],
-[data-laptop-class~="cube-area"],
-[data-tablet-class~="cube-area"],
-[data-mobile-class~="cube-area"] {
+/* Kitwork Holographic Cube - Inspired by Logic Core Image */
+.cube-area {
     perspective: 1000px;
-    position: absolute;
+    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
 }
 
-.cube,
-[data-desktop-class~="cube"],
-[data-laptop-class~="cube"],
-[data-tablet-class~="cube"],
-[data-mobile-class~="cube"] {
+/* Container for light haze effect around the cube */
+.cube-area::after {
+    content: '';
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    transition: all 2s ease-in-out;
+    width: 150%;
+    height: 150%;
+    background: radial-gradient(circle, rgba(248, 34, 68, 0.15) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: -1;
 }
 
-/* The Block */
-.cube-block,
-[data-desktop-class~="cube-block"],
-[data-laptop-class~="cube-block"],
-[data-tablet-class~="cube-block"],
-[data-mobile-class~="cube-block"] {
-    --cube-size: 120px;
-    --cube-face-translate-z: calc(var(--cube-size) / 2);
-    --cube-font-size: 32px;
-    --cube-border-color: #fff;
-    --cube-border-size: 1px;
-
+.cube-block {
+    width: var(--cube-size, 120px);
+    height: var(--cube-size, 120px);
     position: relative;
-    width: var(--cube-size);
-    height: var(--cube-size);
     transform-style: preserve-3d;
     transform: rotateX(-45deg) rotateY(-45deg) rotateZ(0deg);
-    transition: transform 1s ease-in-out;
 }
 
-.cube-inner,
-[data-desktop-class~="cube-inner"],
-[data-laptop-class~="cube-inner"],
-[data-tablet-class~="cube-inner"],
-[data-mobile-class~="cube-inner"] {
+.cube-inner {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: var(--cube-size);
-    height: var(--cube-size);
+    width: 100%;
+    height: 100%;
     transform-style: preserve-3d;
 }
 
-/* Faces */
-.cube-face,
-[data-desktop-class~="cube-face"],
-[data-laptop-class~="cube-face"],
-[data-tablet-class~="cube-face"],
-[data-mobile-class~="cube-face"] {
+/* Faces: Pure Neon Line Style from Image */
+.cube-face {
     position: absolute;
-    width: var(--cube-size);
-    height: var(--cube-size);
-    border: var(--cube-border-size) solid var(--cube-border-color);
+    width: 100%;
+    height: 100%;
+    /* Bright Neon Edges */
+
     display: flex;
     justify-content: center;
     align-items: center;
-    font-size: var(--cube-font-size);
-    background: linear-gradient(45deg, rgba(248, 34, 68, 0.6), rgba(243, 3, 43, 0.2));
-    color: #fff;
-    font-weight: bold;
+    /* Transparent Body with subtle brand tint (Haze) */
+    background: linear-gradient(rgba(var(--color-brand-rgb), 0.8), rgba(var(--color-brand-rgb), 0.6));
+
+    border: 1px solid rgba(var(--color-brand-rgb), 0.8);
+    /* Brighter center line for hot-core look */
+    box-shadow: 0 0 6px rgba(var(--color-brand-rgb), 0.9);
 }
 
+/* Inner Core: Brighter and more focused */
+.cube-block.is-inner {
+    --cube-size: calc(var(--parent-size, 120px) * 0.4);
+    --cube-face-translate-z: calc(var(--cube-size) / 2);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate3d(-50%, -50%, 0);
+}
+
+.cube-block.is-inner .cube-face {
+    background: rgba(255, 77, 0, 0.1);
+    border: 1px solid rgba(var(--color-white-rgb), 0.8);
+    /* Brighter center line for hot-core look */
+    box-shadow: 0 0 6px rgba(var(--color-orange-rgb), 0.9);
+}
+
+/* 3D Transform Logic */
 .cube-face:nth-child(1) {
-    transform: rotateY(0deg) translateZ(var(--cube-face-translate-z));
+    transform: rotateY(0deg) translateZ(var(--cube-face-translate-z, 60px));
 }
 
 .cube-face:nth-child(2) {
-    transform: rotateY(90deg) translateZ(var(--cube-face-translate-z));
+    transform: rotateY(90deg) translateZ(var(--cube-face-translate-z, 60px));
 }
 
 .cube-face:nth-child(3) {
-    transform: rotateY(180deg) translateZ(var(--cube-face-translate-z));
+    transform: rotateY(180deg) translateZ(var(--cube-face-translate-z, 60px));
 }
 
 .cube-face:nth-child(4) {
-    transform: rotateY(-90deg) translateZ(var(--cube-face-translate-z));
+    transform: rotateY(-90deg) translateZ(var(--cube-face-translate-z, 60px));
 }
 
 .cube-face:nth-child(5) {
-    transform: rotateX(90deg) translateZ(var(--cube-face-translate-z));
+    transform: rotateX(90deg) translateZ(var(--cube-face-translate-z, 60px));
 }
 
 .cube-face:nth-child(6) {
-    transform: rotateX(-90deg) translateZ(var(--cube-face-translate-z));
+    transform: rotateX(-90deg) translateZ(var(--cube-face-translate-z, 60px));
 }
 
-/* Animations */
+
+@keyframes rotateCube {
+    0% {
+        transform: rotateX(0deg) rotateY(0deg);
+    }
+
+    100% {
+        transform: rotateX(360deg) rotateY(360deg);
+    }
+}
+
+@keyframes rotateCubeCenter {
+    0% {
+        transform: translate(-50%, -50%) rotateX(0deg) rotateY(0deg);
+    }
+
+    100% {
+        transform: translate(-50%, -50%) rotateX(360deg) rotateY(360deg);
+    }
+}
+
 .cube-rotate {
-    animation: rotateCube var(--cube-duration, 8s) infinite linear;
+    animation: rotateCube var(--cube-duration, 15s) infinite linear;
 }
 
 .cube-rotate-center {
-    animation: rotateCubeCenter var(--cube-duration, 6s) infinite linear;
+    animation: rotateCube var(--cube-duration, 20s) infinite linear;
 }
 
-/* Durations */
-.cube-duration-1 {
-    --cube-duration: 1s;
+.cube-rotate-inner {
+    animation: rotateInner var(--cube-duration, 8s) infinite linear;
 }
 
-.cube-duration-2 {
-    --cube-duration: 2s;
-}
-
-.cube-duration-3 {
-    --cube-duration: 3s;
-}
-
-.cube-duration-4 {
-    --cube-duration: 4s;
-}
-
-.cube-duration-5 {
-    --cube-duration: 5s;
-}
-
-.cube-duration-6 {
-    --cube-duration: 6s;
-}
-
-.cube-duration-8 {
-    --cube-duration: 8s;
-}
-
-.cube-duration-10 {
-    --cube-duration: 10s;
-}
-
-.cube-duration-12 {
-    --cube-duration: 12s;
-}
-
-/* Sizes (Smart Calculation) */
-/* Usage: Add .cube-size-50 to set size to 50px */
-.cube-size-10 {
-    --cube-size: 10px;
-}
-
-.cube-size-20 {
-    --cube-size: 20px;
-}
-
-.cube-size-30 {
-    --cube-size: 30px;
-}
-
-.cube-size-40 {
-    --cube-size: 40px;
-}
-
-.cube-size-50 {
-    --cube-size: 50px;
-}
-
-.cube-size-60 {
-    --cube-size: 60px;
-}
-
-.cube-size-70 {
-    --cube-size: 70px;
-}
-
-.cube-size-80 {
-    --cube-size: 80px;
-}
-
-.cube-size-90 {
-    --cube-size: 90px;
-}
-
-.cube-size-100 {
-    --cube-size: 100px;
-}
-
-.cube-size-120 {
-    --cube-size: 120px;
-}
-
-.cube-size-150 {
-    --cube-size: 150px;
-}
-
-.cube-size-200 {
-    --cube-size: 200px;
-}
-
-.cube-size-250 {
-    --cube-size: 250px;
-}
-
-.cube-size-300 {
-    --cube-size: 300px;
-}
-
-/* Responsive Utility Overrides */
-/* Desktop */
-@media (max-width: 2060px) {
-    [data-desktop-class~="cube-size-10"] {
-        --cube-size: 10px;
-    }
-
-    [data-desktop-class~="cube-size-20"] {
-        --cube-size: 20px;
-    }
-
-    [data-desktop-class~="cube-size-40"] {
-        --cube-size: 40px;
-    }
-
-    [data-desktop-class~="cube-size-50"] {
-        --cube-size: 50px;
-    }
-
-    [data-desktop-class~="cube-size-60"] {
-        --cube-size: 60px;
-    }
-
-    [data-desktop-class~="cube-size-80"] {
-        --cube-size: 80px;
-    }
-
-    [data-desktop-class~="cube-size-100"] {
-        --cube-size: 100px;
-    }
-
-    [data-desktop-class~="cube-size-120"] {
-        --cube-size: 120px;
-    }
-
-    [data-desktop-class~="cube-size-200"] {
-        --cube-size: 200px;
-    }
-}
-
-/* Laptop */
-@media (max-width: 1532px) {
-    [data-laptop-class~="cube-size-10"] {
-        --cube-size: 10px;
-    }
-
-    [data-laptop-class~="cube-size-50"] {
-        --cube-size: 50px;
-    }
-
-    [data-laptop-class~="cube-size-80"] {
-        --cube-size: 80px;
-    }
-
-    [data-laptop-class~="cube-size-100"] {
-        --cube-size: 100px;
-    }
-}
-
-/* Tablet */
-@media (max-width: 1148px) {
-    [data-tablet-class~="cube-size-10"] {
-        --cube-size: 10px;
-    }
-
-    [data-tablet-class~="cube-size-50"] {
-        --cube-size: 50px;
-    }
-
-    [data-tablet-class~="cube-size-80"] {
-        --cube-size: 80px;
-    }
-
-    [data-tablet-class~="cube-size-100"] {
-        --cube-size: 100px;
-    }
-}
-
-/* Mobile */
-@media (max-width: 766px) {
-    [data-mobile-class~="cube-size-10"] {
-        --cube-size: 10px;
-    }
-
-    [data-mobile-class~="cube-size-20"] {
-        --cube-size: 20px;
-    }
-
-    [data-mobile-class~="cube-size-30"] {
-        --cube-size: 30px;
-    }
-
-    [data-mobile-class~="cube-size-40"] {
-        --cube-size: 40px;
-    }
-
-    [data-mobile-class~="cube-size-50"] {
-        --cube-size: 50px;
-    }
-
-    [data-mobile-class~="cube-size-60"] {
-        --cube-size: 60px;
-    }
-
-    [data-mobile-class~="cube-size-80"] {
-        --cube-size: 80px;
-    }
-
-    [data-mobile-class~="cube-size-100"] {
-        --cube-size: 100px;
-    }
+/* Global Glow Utility */
+.glow-extreme {
+    filter: drop-shadow(0 0 20px rgba(255, 77, 0, 0.5));
 }
