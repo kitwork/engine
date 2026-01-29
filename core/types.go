@@ -12,8 +12,14 @@ type Result struct {
 	Energy   uint64
 }
 
+type Asset struct {
+	Dir  string
+	Path string
+}
+
 type GlobalConfig struct {
 	Port    int
 	Sources []string
+	Assets  []Asset
 	Debug   bool
 }

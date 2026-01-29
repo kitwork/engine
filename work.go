@@ -18,10 +18,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type Asset struct {
+	Dir  string `yaml:"dir"`
+	Path string `yaml:"path"`
+}
+
 type Config struct {
 	Port      int      `yaml:"port"`
 	Debug     bool     `yaml:"debug"`
 	Sources   []string `yaml:"source"`
+	Assets    []Asset  `yaml:"assets"`
 	Databases []string `yaml:"databases"`
 	SMTPS     []string `yaml:"smtp"`
 }
@@ -44,6 +50,14 @@ func Run(cfg *Config) {
 	e.Config.Sources = cfg.Sources
 	if len(e.Config.Sources) == 0 {
 		e.Config.Sources = []string{"./"}
+	}
+
+	// Map Assets
+	for _, a := range cfg.Assets {
+		e.Config.Assets = append(e.Config.Assets, core.Asset{
+			Dir:  a.Dir,
+			Path: a.Path,
+		})
 	}
 
 	// 2. Automated Discovery & Initialization
@@ -188,7 +202,7 @@ func loadLogic(e *core.Engine, dir string) {
 			w, err := e.Build(string(content))
 			if err == nil {
 				if e.Config.Debug {
-					fmt.Printf("📜 Logic loaded: %s\n", path)
+					fmt.Printf("📜 Logic loaded: %s (Registry size: %d)\n", path, len(e.Registry))
 				}
 
 				// GLOBAL BYTECODE PROPAGATION
@@ -223,6 +237,26 @@ func bootServer(e *core.Engine, serverPort int) {
 		fmt.Printf(" - %s %s (Fn Address: %d)\n", r.Method, r.Path, r.Fn.Address)
 	}
 	work.GlobalRouter.Mu.RUnlock()
+
+	// Register Static Assets
+	for _, asset := range e.Config.Assets {
+		prefix := "/" + strings.Trim(asset.Path, "/") + "/"
+		if prefix == "//" { // Root asset
+			prefix = "/"
+		}
+
+		if e.Config.Debug {
+			fmt.Printf("📂 Asset Registered: Path=%s -> Dir=%s\n", prefix, asset.Dir)
+		}
+
+		handler := http.StripPrefix(strings.TrimSuffix(prefix, "/"), http.FileServer(http.Dir(asset.Dir)))
+		// Wrap handler with Cache-Control
+		cacheHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=31536000") // 1 year
+			handler.ServeHTTP(w, r)
+		})
+		http.Handle(prefix, cacheHandler)
+	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

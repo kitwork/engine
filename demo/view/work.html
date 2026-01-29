@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITWORK | Logic Execution Core</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;600;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/public/css/jit.css">
+    <style>
+        :root {
+            --color-white-rgb: 255, 255, 255;
+            --color-brand-hex: #f82244;
+            --color-brand-rgb: 248, 34, 68;
+            --color-gray-rgb: 128, 128, 128;
+            --color-profession-rgb: 10, 10, 12;
+            --color-elegant-rgb: 24, 24, 28;
+            --color-black-rgb: 0, 0, 0;
+            --color-success-rgb: 0, 255, 128;
+            --color-info-rgb: 34, 136, 255;
+        }
+
+        body {
+            margin: 0;
+            background: rgb(var(--color-profession-rgb));
+            color: rgb(var(--color-white-rgb));
+            font-family: 'Outfit', sans-serif;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .industrial-grid {
+            background-image: radial-gradient(rgba(var(--color-brand-rgb), 0.1) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        .glow-text {
+            text-shadow: 0 0 60px rgba(var(--color-brand-rgb), 0.4);
+        }
+
+        .monospace {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .terminal-window {
+            background: rgb(var(--color-black-rgb));
+            border: 1px solid rgb(var(--color-elegant-rgb));
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .terminal-header {
+            background: rgb(var(--color-elegant-rgb));
+            padding: 12px 20px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .code-keyword {
+            color: rgb(var(--color-brand-rgb));
+        }
+
+        .code-func {
+            color: rgb(var(--color-info-rgb));
+        }
+
+        .code-string {
+            color: rgb(var(--color-success-rgb));
+        }
+
+        .code-comment {
+            color: #555;
+        }
+
+        .feature-card {
+            background: rgba(var(--color-elegant-rgb), 0.3);
+            border: 1px solid rgb(var(--color-elegant-rgb));
+            padding: 40px;
+            border-radius: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(var(--color-brand-rgb), 0.4);
+            background: rgba(var(--color-elegant-rgb), 0.6);
+        }
+
+        .step-number {
+            width: 40px;
+            height: 40px;
+            background: rgba(var(--color-brand-rgb), 0.1);
+            color: rgb(var(--color-brand-rgb));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+        }
+    </style>
+</head>
+
+<body class="industrial-grid">
+
+    <!-- Navbar -->
+    <header
+        class="position-fixed top-0 left-0 width-full z-index-overlay background-profession/90 border-bottom-1 border-elegant padding-y-20">
+        <nav class="container display-flex flex-row justify-between items-center">
+            <div class="flex-row items-center gap-12">
+                <div
+                    class="width-32 height-32 background-brand rounded-4 flex-row items-center justify-center font-900 text-white">
+                    K</div>
+                <span class="font-900 font-size-22 letter-spacing--1">KITWORK</span>
+            </div>
+            <div class="flex-row gap-32 mobile:hidden">
+                <a href="#features"
+                    class="text-gray font-size-14 font-600 hover:text-white transition-all uppercase letter-spacing-1"
+                    style="text-decoration:none">Why Kitwork?</a>
+                <a href="#code"
+                    class="text-gray font-size-14 font-600 hover:text-white transition-all uppercase letter-spacing-1"
+                    style="text-decoration:none">Showcase</a>
+                <a href="#quickstart"
+                    class="text-gray font-size-14 font-600 hover:text-white transition-all uppercase letter-spacing-1"
+                    style="text-decoration:none">Quick Start</a>
+            </div>
+            <button
+                class="background-brand text-white font-900 font-size-12 padding-x-20 padding-y-10 rounded-4 hover:opacity-80 transition-all border-0 uppercase">Get
+                Started</button>
+        </nav>
+    </header>
+
+    <!-- Hero -->
+    <section class="padding-top-180 padding-bottom-120">
+        <div class="container display-flex flex-row gap-80 items-center tablet:flex-column">
+            <div class="width-55-percent tablet:width-full">
+                <div
+                    class="inline-block background-brand/10 text-brand font-size-12 font-900 padding-x-12 padding-y-4 rounded-4 margin-bottom-24 letter-spacing-1">
+                    NANOSECOND LOGIC ENGINE
+                </div>
+                <h1
+                    class="font-900 font-size-88 line-height-1 letter-spacing--4 margin-bottom-32 glow-text mobile:font-size-48">
+                    Build Faster.<br><span class="text-brand">Execute Smarter.</span>
+                </h1>
+                <p class="text-gray font-size-22 line-height-1.5 margin-bottom-48 max-width-600">
+                    Kitwork is the execution core that simplifies how you build, schedule, and run complex business
+                    logic—deterministically and without waste.
+                </p>
+                <div class="flex-row gap-16 mobile:flex-column">
+                    <button
+                        class="background-white text-black font-900 font-size-16 padding-x-40 padding-y-20 rounded-8 hover:background-brand hover:text-white transition-all border-0 cursor-pointer">Start
+                        Building Now</button>
+                    <button
+                        class="border-1 border-elegant text-white font-900 font-size-16 padding-x-40 padding-y-20 rounded-8 hover:background-elegant transition-all cursor-pointer">Read
+                        the Manifesto</button>
+                </div>
+            </div>
+
+            <!-- Hero Terminal -->
+            <div class="width-45-percent tablet:width-full">
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <div class="dot" style="background: #ff5f56"></div>
+                        <div class="dot" style="background: #ffbd2e"></div>
+                        <div class="dot" style="background: #27c93f"></div>
+                        <span class="text-gray font-size-11 margin-left-auto monospace">hello_kitwork.js</span>
+                    </div>
+                    <div class="padding-32 font-size-14 line-height-1.6 monospace">
+                        <div><span class="code-keyword">work</span>(<span class="code-string">"Service"</span>)</div>
+                        <div class="margin-left-20">.<span class="code-func">get</span>(<span
+                                class="code-string">"/hello"</span>, () => {</div>
+                        <div class="margin-left-40"><span class="code-keyword">return</span> {</div>
+                        <div class="margin-left-60">status: <span class="code-string">"Online"</span>,</div>
+                        <div class="margin-left-60">engine: <span class="code-string">"Kitwork Core"</span>,</div>
+                        <div class="margin-left-60">perf: <span class="code-string">"14M ops/s"</span></div>
+                        <div class="margin-left-40">};</div>
+                        <div class="margin-left-20">});</div>
+                        <div class="margin-top-20 code-comment">// Execution latency: ~70ns</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Metrics Bar -->
+    <section class="padding-y-60 background-elegant/50 border-y-1 border-elegant">
+        <div
+            class="container flex-row justify-between tablet:grid tablet:grid-columns-2 tablet:gap-40 mobile:grid-columns-1">
+            <div class="text-center">
+                <div class="font-900 font-size-32 text-brand line-height-1">14.1M</div>
+                <div class="text-gray font-size-11 uppercase letter-spacing-2 margin-top-8">Instructions / Sec</div>
+            </div>
+            <div class="text-center">
+                <div class="font-900 font-size-32 text-white line-height-1">~70ns</div>
+                <div class="text-gray font-size-11 uppercase letter-spacing-2 margin-top-8">VM Latency</div>
+            </div>
+            <div class="text-center">
+                <div class="font-900 font-size-32 text-white line-height-1">ZERO-GC</div>
+                <div class="text-gray font-size-11 uppercase letter-spacing-2 margin-top-8">Memory Pressure</div>
+            </div>
+            <div class="text-center">
+                <div class="font-900 font-size-32 text-brand line-height-1">99.9%</div>
+                <div class="text-gray font-size-11 uppercase letter-spacing-2 margin-top-8">Uptime Record</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Industrial One-Liners (Familiarity Section) -->
+    <section id="code" class="padding-y-140">
+        <div class="container">
+            <div class="text-center margin-bottom-80">
+                <h2 class="font-900 font-size-48 margin-bottom-20">Complexity, Collapsed.</h2>
+                <p class="text-gray font-size-18">Stop writing boilerplate. Focus on your business logic.</p>
+            </div>
+            <div class="grid grid-columns-2 gap-40 tablet:grid-columns-1">
+                <div class="flex-column gap-32">
+                    <div class="feature-card">
+                        <h3 class="font-900 font-size-22 margin-bottom-12">Smart Query Inference</h3>
+                        <p class="text-gray line-height-1.6">The engine reflects on your lambda parameters to identify
+                            tables and relationships automatically. No magic strings, just logic.</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3 class="font-900 font-size-22 margin-bottom-12">Operator Persistence</h3>
+                        <p class="text-gray line-height-1.6">Automatic SQL operator detection (LIKE, IN, GT) based on
+                            your data patterns at runtime.</p>
+                    </div>
+                </div>
+                <div class="terminal-window">
+                    <div class="terminal-header">
+                        <span class="text-gray font-size-11 monospace">industrial_one_liners.js</span>
+                    </div>
+                    <div class="padding-32 font-size-14 line-height-1.8 monospace">
+                        <div class="code-comment">// Fetch exactly one record</div>
+                        <div><span class="code-keyword">const</span> user = <span class="code-func">db</span>().<span
+                                class="code-func">from</span>(<span class="code-string">"users"</span>).<span
+                                class="code-func">find</span>(u => u.email == <span
+                                class="code-string">"admin@kitwork.vn"</span>);</div>
+
+                        <div class="margin-top-24 code-comment">// Batch lookup via automatic Set Inclusion (IN)</div>
+                        <div><span class="code-keyword">const</span> items = <span class="code-func">db</span>().<span
+                                class="code-func">from</span>(<span class="code-string">"products"</span>).<span
+                                class="code-func">where</span>(p => p.id == [<span class="code-string">1, 2,
+                                3</span>]).<span class="code-func">take</span>();</div>
+
+                        <div class="margin-top-24 code-comment">// Inference-driven Joins</div>
+                        <div><span class="code-func">db</span>().<span class="code-func">from</span>(<span
+                                class="code-string">"users"</span>)</div>
+                        <div class="margin-left-20">.<span class="code-func">join</span>((orders) => orders.user_id ==
+                            users.id)</div>
+                        <div class="margin-left-20">.<span class="code-func">take</span>();</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section id="quickstart" class="padding-y-120 background-elegant/20 border-y-1 border-elegant">
+        <div class="container">
+            <div class="text-center margin-bottom-80">
+                <h2 class="font-900 font-size-48">Ready in 30 Seconds.</h2>
+            </div>
+            <div class="grid grid-columns-3 gap-32 mobile:grid-columns-1">
+                <div class="text-center">
+                    <div class="step-number margin-x-auto margin-bottom-24">1</div>
+                    <h4 class="font-900 font-size-18 margin-bottom-12">Clone</h4>
+                    <pre
+                        class="background-black padding-16 rounded-8 font-size-12 text-gray border-1 border-elegant">git clone kitwork/engine</pre>
+                </div>
+                <div class="text-center">
+                    <div class="step-number margin-x-auto margin-bottom-24">2</div>
+                    <h4 class="font-900 font-size-18 margin-bottom-12">Initialize</h4>
+                    <pre
+                        class="background-black padding-16 rounded-8 font-size-12 text-gray border-1 border-elegant">go run cmd/server/main.go</pre>
+                </div>
+                <div class="text-center">
+                    <div class="step-number margin-x-auto margin-bottom-24">3</div>
+                    <h4 class="font-900 font-size-18 margin-bottom-12">Execute</h4>
+                    <pre
+                        class="background-black padding-16 rounded-8 font-size-12 text-gray border-1 border-elegant">Build your logic in JS</pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="padding-y-100 border-top-1 border-elegant">
+        <div class="container flex-row justify-between items-center mobile:flex-column mobile:gap-40">
+            <div class="flex-column gap-8">
+                <span class="font-900 font-size-24">KITWORK</span>
+                <span class="text-gray font-size-12 uppercase letter-spacing-1">Industrial Execution Core</span>
+            </div>
+            <div class="text-gray font-size-14">
+                © 2026 // deterministically, efficiently, and without waste.
+            </div>
+        </div>
+    </footer>
+
+</body>
+
+</html>

@@ -42,27 +42,40 @@ work("Service")
 ## 🗄️ Database (Structured Query Builder)
 A high-performance SDK designed for complex logic execution. Kitwork leverages **Parameter-based Schema Inference** and **Operator Persistence** to eliminate boilerplate while maintaining 100% predictable SQL output.
 
+### 🌟 Modern Entity-Style Syntax
+Kitwork 1.0 introduces **Proxy-based Entity Resolution**, allowing you to access tables as if they were native properties.
+```javascript
+// 1. Fetch exactly one record (Entity Framework Style)
+const user = db.user.find(u => u.email == "admin@kitwork.vn");
+
+// 2. Multi-Database support with property chaining
+const remoteUser = db("secondary").user.take(5);
+
+// 3. Chainable aggregates that return raw values
+const totalAmount = db.orders.where(o => o.status == "paid").sum("amount");
+
+// 4. Batch lookup using automatic Set Inclusion (IN)
+const activeItems = db.products.where(p => p.id == [10, 20, 30]).toList();
+```
+
 ### 🚀 Industrial One-Liners
 Kitwork is engineered to collapse traditional multi-line queries into single, readable statements.
 ```javascript
-// 1. Fetch exactly one record by any criteria
-const user = db().from("users").find(u => u.email == "admin@kitwork.vn");
+// Find the most recent entry with architectural sorting
+const lastOrder = db.orders.last();
 
-// 2. Immediate top-N results with zero configuration
-const topUsers = db().from("users").take(5);
+// Immediate top-N results
+const topUsers = db.user.take(5);
 
-// 3. Find the most recent entry with architectural sorting
-const lastOrder = db().from("orders").last();
-
-// 4. Batch lookup using automatic Set Inclusion (IN)
-const activeItems = db().from("products").where(p => p.id == [10, 20, 30]).take();
+// Check if a record exists
+const hasAdmin = db.user.where(u => u.role == "admin").any();
 ```
 
 ### ⚙️ Inference-driven Joins
 The Kitwork VM reflects on Lambda parameter names to identify schema relationships. No strings required for table identifiers.
 ```javascript
 // Variable 'orders' is automatically reflected to the "orders" table context
-db().from("users")
+db.users
     .join((orders) => orders.user_id == users.id)
     .take();
 ```
@@ -72,23 +85,23 @@ The engine infers the correct SQL operator based on data patterns at execution t
 - **Pattern Match (LIKE)**: `u.name == "%Apple%"` ➔ `WHERE name LIKE $1`
 - **Set Inclusion (IN)**: `u.id == [1, 2, 3]` ➔ `WHERE id IN ($1, $2, $3)`
 
-### 📈 Analytical Grouping & Aggregates
-Handle complex data transformations directly at the storage layer with industrial reliability.
+### 📈 Analytical Aggregates
+Handle complex data transformations with high-performance terminal methods.
 ```javascript
-const stats = db().from("orders")
-    .group("user_id")
-    .having(o => o.total_amount > 1000)
-    .orderBy("total_amount", "DESC")
-    .take(10);
+const count = db.orders.count();
+const average = db.products.avg("price");
+const maxPrice = db.products.max("price");
 ```
 
 ### 🛠 Terminal Execution Methods
 | Method | Description | SQL Projection |
 | :----- | :---------- | :------------- |
 | **`.take(n?)`** | Finalizes query and returns Array results. | `SELECT ... LIMIT n` |
-| **`.one()`** | Returns a single Object (Record) or Null. | `FETCH FIRST 1 ROWS ONLY` |
-| **`.last()`** | Architectural internal reverse-sort to fetch latest entry. | `ORDER BY id DESC LIMIT 1` |
-| **`.find(id/fn)`** | High-speed lookup by Primary Key or Lambda reference. | `WHERE id = $1 LIMIT 1` |
+| **`.toList()`** | Alias for `.get()`, returns all matched records. | `SELECT ...` |
+| **`.one()`** | Returns a single Object (Record) or Null. | `LIMIT 1` |
+| **`.find(id/fn)`** | High-speed lookup. If Fn is used, returns single record. | `WHERE ... LIMIT 1` |
+| **`.firstOrDefault()`** | EF Style alias for `.first()`. | `LIMIT 1` |
+| **`.sum(col)`** | Returns the sum of a column as a number. | `SELECT SUM(col) ...` |
 
 ## 🌐 Web Stack Primitives
 
@@ -105,12 +118,11 @@ work("App")
 ### Request & Response Mapping
 | Function | Description | Example |
 | :------- | :---------- | :------ |
-| `params(key)` | Dynamic path parameters. | `const id = params("id")` |
-| `query(key)` | URL query string data. | `const p = query("page")` |
-| `body(key?)` | JSON request payload (Lazy-load). | `const email = body("email")` |
 | `header(key)` | Request headers. | `const auth = header("Authorization")` |
 | `status(code)` | Set HTTP status code. | `status(201)` |
 | `redirect(url)`| Immediate redirect. | `redirect("/home")` |
+| **`readfile(path)`** | Reads a local file content. | `const html = readfile("view.html")` |
+| **`html(content)`**| Returns HTML response. | `return html("<h1>Hi</h1>")` |
 
 ### Security & Cookies
 Modern security defaults out-of-the-box.
@@ -178,6 +190,6 @@ smtps: ["config/smtp/service.yaml"]
 - ⚙️ Core Engine & Bytecode Development
 - ⚡ High-Performance Runtime (Golang)
 - 📜 Scripting Syntax & Logic Design
-- 🚀 [kitwork.vn](https://kitwork.vn)
+- 🚀 [kitwork](https://kitwork.io)
 
 **Support Development** → [Sponsor KitWork / Huỳnh Nhân Quốc](https://github.com/sponsors/huynhnhanquoc)

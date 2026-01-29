@@ -1,0 +1,43 @@
+/* Group Hover Utilities */
+
+/* Parent Hover triggers Child Style */
+[data-group-class~="hover"]:hover [data-group-hover-class~="display-block"] {
+    display: block;
+}
+
+[data-group-class~="hover"]:hover [data-group-hover-class~="display-flex"] {
+    display: flex;
+}
+
+[data-group-class~="hover"]:hover [data-group-hover-class~="opacity-100"] {
+    opacity: 1;
+}
+
+/* Spacing Variables */
+[data-group-class~="hover"]:hover [data-group-hover-class~="inset-0"] {
+    --val: 0px;
+}
+
+[data-group-class~="hover"]:hover [data-group-hover-class~="inset-4"] {
+    --val: 4px;
+}
+
+/* Apply Logic */
+[data-group-class~="hover"]:hover [data-group-hover-class*="inset-"] {
+    inset: var(--val);
+}
+
+[data-group-class~="hover"]:hover [data-group-hover-class*="top-"] {
+    top: var(--val);
+}
+
+/* Aspect Ratio */
+[data-group-class~="hover"]:hover [data-group-hover-class~="aspect-ratio-1:1"] {
+    --aspect-ratio: 100%;
+}
+
+[data-group-class~="hover"]:hover [data-group-hover-class*="aspect-ratio-"]::before {
+    content: "";
+    display: block;
+    padding-top: var(--aspect-ratio);
+}

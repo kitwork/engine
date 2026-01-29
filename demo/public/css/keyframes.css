@@ -1,0 +1,212 @@
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes ping {
+
+    100%,
+    75% {
+        transform: scale(2);
+        opacity: 0;
+    }
+}
+
+@keyframes pulse {
+    50% {
+        opacity: 0.5;
+    }
+}
+
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(-25%);
+        animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
+    }
+
+    50% {
+        transform: none;
+        animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
+    }
+}
+
+@keyframes progress-bar {
+    0% {
+        background-position: 32%0, 32%0, 50%0;
+    }
+
+    2% {
+        background-position: 32%0, 32%0, 50%0;
+    }
+
+    21% {
+        background-position: 32%0, -18%0, 0 0;
+    }
+
+    42% {
+        background-position: 32%0, -68%0, -27%0;
+    }
+
+    50% {
+        background-position: 32%0, -93%0, -46%0;
+    }
+
+    56% {
+        background-position: 32%0, -118%0, -68%0;
+    }
+
+    66% {
+        background-position: -11%0, -200%0, -100%0;
+    }
+
+    71% {
+        background-position: -32%0, -200%0, -100%0;
+    }
+
+    79% {
+        background-position: -54%0, -242%0, -100%0;
+    }
+
+    86% {
+        background-position: -68%0, -268%0, -100%0;
+    }
+
+    100% {
+        background-position: -100%0, -300%0, -100%0;
+    }
+}
+
+@keyframes matter-progress-circular {
+    0% {
+        transform: rotate(0);
+    }
+
+    12.5% {
+        transform: rotate(180deg);
+        animation-timing-function: linear;
+    }
+
+    25% {
+        transform: rotate(630deg);
+    }
+
+    37.5% {
+        transform: rotate(810deg);
+        animation-timing-function: linear;
+    }
+
+    50% {
+        transform: rotate(1260deg);
+    }
+
+    62.5% {
+        transform: rotate(1440deg);
+        animation-timing-function: linear;
+    }
+
+    75% {
+        transform: rotate(1890deg);
+    }
+
+    87.5% {
+        transform: rotate(2070deg);
+        animation-timing-function: linear;
+    }
+
+    100% {
+        transform: rotate(2520deg);
+    }
+}
+
+@keyframes matter-progress-circular {
+    0% {
+        transform: rotate(0);
+    }
+
+    12.5% {
+        transform: rotate(180deg);
+        animation-timing-function: linear;
+    }
+
+    25% {
+        transform: rotate(630deg);
+    }
+
+    37.5% {
+        transform: rotate(810deg);
+        animation-timing-function: linear;
+    }
+
+    50% {
+        transform: rotate(1260deg);
+    }
+
+    62.5% {
+        transform: rotate(1440deg);
+        animation-timing-function: linear;
+    }
+
+    75% {
+        transform: rotate(1890deg);
+    }
+
+    87.5% {
+        transform: rotate(2070deg);
+        animation-timing-function: linear;
+    }
+
+    100% {
+        transform: rotate(2520deg);
+    }
+}
+
+@keyframes matter-progress-circular-pseudo {
+    0% {
+        -webkit-clip-path: polygon(50%50%, 37%0, 50%0, 50%0, 50%0, 50%0);
+        clip-path: polygon(50%50%, 37%0, 50%0, 50%0, 50%0, 50%0);
+    }
+
+    18% {
+        -webkit-clip-path: polygon(50%50%, 37%0, 100%0, 100%0, 100%0, 100%0);
+        clip-path: polygon(50%50%, 37%0, 100%0, 100%0, 100%0, 100%0);
+    }
+
+    53% {
+        -webkit-clip-path: polygon(50%50%, 37%0, 100%0, 100%100%, 100%100%, 100%100%);
+        clip-path: polygon(50%50%, 37%0, 100%0, 100%100%, 100%100%, 100%100%);
+    }
+
+    88% {
+        -webkit-clip-path: polygon(50%50%, 37%0, 100%0, 100%100%, 0 100%, 0 100%);
+        clip-path: polygon(50%50%, 37%0, 100%0, 100%100%, 0 100%, 0 100%);
+    }
+
+    100% {
+        -webkit-clip-path: polygon(50%50%, 37%0, 100%0, 100%100%, 0 100%, 0 63%);
+        clip-path: polygon(50%50%, 37%0, 100%0, 100%100%, 0 100%, 0 63%);
+    }
+}
+
+
+@keyframes rotateCube {
+    0% {
+        transform: rotateX(0deg) rotateY(0deg);
+    }
+
+    100% {
+        transform: rotateX(360deg) rotateY(360deg);
+    }
+}
+
+@keyframes rotateCubeCenter {
+    0% {
+        transform: translate(-50%, -50%) rotateX(0deg) rotateY(0deg);
+    }
+
+    100% {
+        transform: translate(-50%, -50%) rotateX(360deg) rotateY(360deg);
+    }
+}

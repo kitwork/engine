@@ -1,0 +1,180 @@
+/* Laptop Responsive Utilities (Max-Width: 1532px) */
+@media (max-width: 1532px) {
+
+    /* Display */
+    [data-laptop-class~="display-none"] {
+        display: none;
+    }
+
+    [data-laptop-class~="display-block"] {
+        display: block;
+    }
+
+    [data-laptop-class~="display-flex"] {
+        display: flex;
+    }
+
+    [data-laptop-class~="display-grid"] {
+        display: grid;
+    }
+
+    [data-laptop-class~="display-inline"] {
+        display: inline;
+    }
+
+    [data-laptop-class~="display-inline-block"] {
+        display: inline-block;
+    }
+
+    /* Dimensions */
+    [data-laptop-class~="w-full"] {
+        width: 100%;
+    }
+
+    [data-laptop-class~="h-full"] {
+        height: 100%;
+    }
+
+    /* Space Scale Variable Mapping */
+    [data-laptop-class~="inset-0"],
+    [data-laptop-class~="top-0"],
+    [data-laptop-class~="left-0"] {
+        --val: 0px;
+    }
+
+    [data-laptop-class~="inset-1"],
+    [data-laptop-class~="top-1"],
+    [data-laptop-class~="left-1"] {
+        --val: 1px;
+    }
+
+    [data-laptop-class~="inset-2"],
+    [data-laptop-class~="top-2"],
+    [data-laptop-class~="left-2"] {
+        --val: 2px;
+    }
+
+    [data-laptop-class~="inset-3"],
+    [data-laptop-class~="top-3"],
+    [data-laptop-class~="left-3"] {
+        --val: 3px;
+    }
+
+    [data-laptop-class~="inset-4"],
+    [data-laptop-class~="top-4"],
+    [data-laptop-class~="left-4"] {
+        --val: 4px;
+    }
+
+    [data-laptop-class~="inset-5"],
+    [data-laptop-class~="top-5"],
+    [data-laptop-class~="left-5"] {
+        --val: 5px;
+    }
+
+    [data-laptop-class~="inset-6"],
+    [data-laptop-class~="top-6"],
+    [data-laptop-class~="left-6"] {
+        --val: 6px;
+    }
+
+    [data-laptop-class~="inset-8"],
+    [data-laptop-class~="top-8"],
+    [data-laptop-class~="left-8"] {
+        --val: 8px;
+    }
+
+    [data-laptop-class~="inset-9"],
+    [data-laptop-class~="top-9"],
+    [data-laptop-class~="left-9"] {
+        --val: 9px;
+    }
+
+    [data-laptop-class~="inset-10"],
+    [data-laptop-class~="top-10"],
+    [data-laptop-class~="left-10"] {
+        --val: 10px;
+    }
+
+    [data-laptop-class~="inset-12"],
+    [data-laptop-class~="top-12"],
+    [data-laptop-class~="left-12"] {
+        --val: 12px;
+    }
+
+    [data-laptop-class~="inset-16"],
+    [data-laptop-class~="top-16"],
+    [data-laptop-class~="left-16"] {
+        --val: 16px;
+    }
+
+    [data-laptop-class~="inset-20"],
+    [data-laptop-class~="top-20"],
+    [data-laptop-class~="left-20"] {
+        --val: 20px;
+    }
+
+    [data-laptop-class~="inset-24"],
+    [data-laptop-class~="top-24"],
+    [data-laptop-class~="left-24"] {
+        --val: 24px;
+    }
+
+    [data-laptop-class~="inset-32"],
+    [data-laptop-class~="top-32"],
+    [data-laptop-class~="left-32"] {
+        --val: 32px;
+    }
+
+    [data-laptop-class~="inset-48"],
+    [data-laptop-class~="top-48"],
+    [data-laptop-class~="left-48"] {
+        --val: 48px;
+    }
+
+    [data-laptop-class~="inset-64"],
+    [data-laptop-class~="top-64"],
+    [data-laptop-class~="left-64"] {
+        --val: 64px;
+    }
+
+    /* Apply Variable Logic */
+    [data-laptop-class*="inset-"] {
+        inset: var(--val);
+    }
+
+    [data-laptop-class*="top-"] {
+        top: var(--val);
+    }
+
+    [data-laptop-class*="left-"] {
+        left: var(--val);
+    }
+
+    [data-laptop-class*="right-"] {
+        right: var(--val);
+    }
+
+    [data-laptop-class*="bottom-"] {
+        bottom: var(--val);
+    }
+
+    /* Aspect Ratio */
+    [data-laptop-class~="aspect-ratio-16:9"] {
+        --aspect-ratio: 56.25%;
+    }
+
+    [data-laptop-class~="aspect-ratio-1:1"] {
+        --aspect-ratio: 100%;
+    }
+
+    [data-laptop-class~="aspect-ratio-4:3"] {
+        --aspect-ratio: 75%;
+    }
+
+    [data-laptop-class*="aspect-ratio-"]::before {
+        content: "";
+        display: block;
+        padding-top: var(--aspect-ratio);
+    }
+}

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITWORK | Industrial Logic Engine</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;600;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/public/css/jit.css">
+    <style>
+        :root {
+            --color-white-rgb: 255, 255, 255;
+            --color-black-rgb: 0, 0, 0;
+            --color-red-rgb: 255, 0, 0;
+            --color-deeppink-rgb: 255, 20, 147;
+            --color-orangered-rgb: 255, 69, 0;
+            --color-gold-rgb: 255, 217, 0;
+            --color-darkviolet-rgb: 148, 0, 211;
+            --color-lime-rgb: 0, 255, 0;
+            --color-deepskyblue-rgb: 0, 191, 255;
+            --color-peace-rgb: 136, 102, 255;
+            --color-primary-rgb: 66, 66, 255;
+            --color-warning-rgb: 255, 104, 36;
+            --color-positive-rgb: 136, 36, 255;
+            --color-gray-rgb: 128, 128, 128;
+            --color-default-rgb: 226, 232, 246;
+            --color-danger-rgb: 255, 66, 66;
+            --color-success-rgb: 2, 216, 66;
+            --color-info-rgb: 34, 136, 255;
+            --color-special-rgb: 36, 2, 36;
+            --color-dark-rgb: 2, 2, 36;
+            --color-elegant-rgb: 36, 36, 36;
+            --color-stylish-rgb: 36, 36, 66;
+            --color-unique-rgb: 2, 36, 66;
+            --color-profession-rgb: 22, 22, 27;
+            --color-light-rgb: 242, 244, 246;
+            --color-ghost-rgb: 248, 248, 255;
+            --color-lavender-rgb: 230, 230, 250;
+
+            /* Kitwork Brand */
+            --color-brand-hex: #f82244;
+            --color-brand-rgb: 248, 34, 68;
+        }
+
+        body {
+            margin: 0;
+            background: rgb(var(--color-profession-rgb));
+            color: rgb(var(--color-white-rgb));
+            font-family: 'Outfit', sans-serif;
+            overflow-x: hidden;
+        }
+
+        .industrial-grid {
+            background-image: linear-gradient(rgba(var(--color-brand-rgb), 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--color-brand-rgb), 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        .glow-text {
+            text-shadow: 0 0 60px rgba(var(--color-brand-rgb), 0.4);
+        }
+
+        .glass-header {
+            background: rgba(var(--color-profession-rgb), 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+
+<body class="industrial-grid">
+
+    <!-- Header -->
+    <header
+        class="position-fixed top-0 left-0 width-full z-index-overlay glass-header border-bottom-1 border-elegant padding-y-20">
+        <nav class="container display-flex flex-row justify-between items-center">
+            <div class="flex-row items-center gap-12">
+                <div
+                    class="width-32 height-32 background-brand rounded-4 flex-row items-center justify-center font-900 text-white">
+                    K</div>
+                <span class="font-900 font-size-24 letter-spacing--1 text-white">KITWORK</span>
+            </div>
+            <div class="flex-row gap-32 mobile:hidden">
+                <a href="#" class="text-gray font-size-14 font-600 hover:text-brand transition-all"
+                    style="text-decoration:none">CORE</a>
+                <a href="#" class="text-gray font-size-14 font-600 hover:text-brand transition-all"
+                    style="text-decoration:none">NODE</a>
+                <a href="#" class="text-gray font-size-14 font-600 hover:text-brand transition-all"
+                    style="text-decoration:none">ARCH</a>
+            </div>
+            <button
+                class="background-brand text-white font-900 font-size-12 padding-x-24 padding-y-10 rounded-full hover:scale-105 transition-all cursor-pointer border-0">SYSTEM
+                ONLINE</button>
+        </nav>
+    </header>
+
+    <!-- Hero -->
+    <main class="padding-top-200 padding-bottom-120">
+        <div class="container text-center">
+            <div
+                class="inline-block background-brand/10 border-1 border-brand/20 text-brand font-size-11 font-900 padding-x-14 padding-y-6 rounded-4 margin-bottom-32">
+                INDUSTRIAL INFRASTRUCTURE v2.0
+            </div>
+            <h1
+                class="font-900 font-size-100 line-height-1 letter-spacing--3 margin-bottom-32 glow-text mobile:font-size-56">
+                NANOSECOND<br><span class="text-brand">INDUSTRIAL</span> CORE.
+            </h1>
+            <p
+                class="text-gray font-size-22 max-width-800 margin-x-auto line-height-1.5 margin-bottom-56 mobile:font-size-18">
+                The backbone of high-concurrency architectures. Engineered for scale,
+                designed for absolute structural integrity and speed.
+            </p>
+            <div class="flex-row justify-center gap-20 mobile:flex-column mobile:items-stretch">
+                <button
+                    class="background-white text-profession font-900 font-size-16 padding-x-48 padding-y-22 rounded-8 hover:background-brand hover:text-white transition-all cursor-pointer border-0">GET
+                    THE NODE</button>
+                <button
+                    class="border-1 border-elegant text-white font-900 font-size-16 padding-x-48 padding-y-22 rounded-8 hover:background-elegant transition-all cursor-pointer">DOCUMENTATION</button>
+            </div>
+        </div>
+    </main>
+
+    <!-- Metrics -->
+    <section class="padding-y-100 background-elegant/30 border-y-1 border-elegant">
+        <div class="container">
+            <div class="grid grid-columns-3 gap-40 mobile:grid-columns-1">
+                <div class="padding-40 border-left-1 border-brand">
+                    <div class="text-brand font-900 font-size-12 margin-bottom-12 letter-spacing-2">PERFORMANCE</div>
+                    <div class="font-900 font-size-56 text-white line-height-1">14.1M</div>
+                    <div class="text-gray font-size-14 margin-top-12">Total operations per micro-tick</div>
+                </div>
+                <div class="padding-40 border-left-1 border-elegant">
+                    <div class="text-gray font-size-12 margin-bottom-12 letter-spacing-2 font-900">MEMORY</div>
+                    <div class="font-900 font-size-56 text-white line-height-1">ZERO</div>
+                    <div class="text-gray font-size-14 margin-top-12">Dynamic runtime allocation overhead</div>
+                </div>
+                <div class="padding-40 border-left-1 border-elegant">
+                    <div class="text-gray font-size-12 margin-bottom-12 letter-spacing-2 font-900">UPTIME</div>
+                    <div class="font-900 font-size-56 text-white line-height-1">99.9%</div>
+                    <div class="text-gray font-size-14 margin-top-12">Industrial node network reliability</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Architecture Grid -->
+    <section class="padding-y-160">
+        <div class="container">
+            <div class="margin-bottom-100 text-center">
+                <h2 class="font-900 font-size-56 mobile:font-size-36">Built for Logic Architects.</h2>
+                <div class="width-80 height-4 background-brand margin-x-auto margin-top-24"></div>
+            </div>
+            <div class="grid grid-columns-3 gap-32 mobile:grid-columns-1">
+                <div
+                    class="background-elegant border-1 border-elegant padding-48 rounded-20 hover:border-brand/40 transition-all group">
+                    <div class="font-900 font-size-36 margin-bottom-24 text-brand">01</div>
+                    <h3 class="font-900 font-size-26 margin-bottom-16">Pure Logic</h3>
+                    <p class="text-gray line-height-1.6 font-size-16">A stateless execution environment designed for
+                        complex workflow orchestration.</p>
+                </div>
+                <div
+                    class="background-elegant border-1 border-elegant padding-48 rounded-20 hover:border-brand/40 transition-all">
+                    <div class="font-900 font-size-36 margin-bottom-24 text-brand">02</div>
+                    <h3 class="font-900 font-size-26 margin-bottom-16">Nano Shield</h3>
+                    <p class="text-gray line-height-1.6 font-size-16">Hardware-level protection for sensitive logic
+                        paths and distributed state data.</p>
+                </div>
+                <div
+                    class="background-elegant border-1 border-elegant padding-48 rounded-20 hover:border-brand/40 transition-all">
+                    <div class="font-900 font-size-36 margin-bottom-24 text-brand">03</div>
+                    <h3 class="font-900 font-size-26 margin-bottom-16">Auto Scaler</h3>
+                    <p class="text-gray line-height-1.6 font-size-16">Intelligent resource pooling that responds to
+                        traffic spikes in sub-millisecond time.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="padding-y-100 border-top-1 border-elegant background-elegant/10">
+        <div class="container flex-row justify-between items-center mobile:flex-column mobile:gap-40">
+            <div class="flex-column gap-12">
+                <div class="font-900 font-size-24 text-white">KITWORK.</div>
+                <span class="text-gray font-size-14 font-600 letter-spacing-1">HIGH-DENSITY LOGIC SYSTEMS</span>
+            </div>
+            <div class="flex-row gap-48">
+                <div class="flex-column gap-12">
+                    <span class="text-white font-900 font-size-12 uppercase letter-spacing-1">Network</span>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Status</a>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Nodes</a>
+                </div>
+                <div class="flex-column gap-12">
+                    <span class="text-white font-900 font-size-12 uppercase letter-spacing-1">Legal</span>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Protocol</a>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">License</a>
+                </div>
+            </div>
+        </div>
+        <div class="container margin-top-80 text-center text-elegant font-900 font-size-12 letter-spacing-2">
+            PROUDLY ENGINEERED BY KITWORK.IO // INDUSTRIAL ENGINE
+        </div>
+    </footer>
+
+</body>
+
+</html>

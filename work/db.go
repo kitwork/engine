@@ -56,6 +56,7 @@ type DBQuery struct {
 	groups     []string
 	havings    []string
 	executor   LambdaExecutor
+	connection string
 }
 
 func NewDBQuery() *DBQuery {
@@ -232,7 +233,8 @@ func (q *DBQuery) selectField(fields ...string) *DBQuery {
 }
 
 func (q *DBQuery) Select(fields ...string) *DBQuery {
-	return q.selectField(fields...)
+	q.fields = fields
+	return q
 }
 
 func (q *DBQuery) Or(args ...value.Value) *DBQuery {
@@ -424,22 +426,22 @@ func (q *DBQuery) Like(columnOrFn any, pattern ...string) *DBQuery {
 
 func (q *DBQuery) Sum(column string) value.Value {
 	q.method = fmt.Sprintf("SUM(\"%s\")", column)
-	return q.Get()
+	return q.aggregate()
 }
 
 func (q *DBQuery) Avg(column string) value.Value {
 	q.method = fmt.Sprintf("AVG(\"%s\")", column)
-	return q.Get()
+	return q.aggregate()
 }
 
 func (q *DBQuery) Min(column string) value.Value {
 	q.method = fmt.Sprintf("MIN(\"%s\")", column)
-	return q.Get()
+	return q.aggregate()
 }
 
 func (q *DBQuery) Max(column string) value.Value {
 	q.method = fmt.Sprintf("MAX(\"%s\")", column)
-	return q.Get()
+	return q.aggregate()
 }
 
 func (q *DBQuery) Get() value.Value {
@@ -457,8 +459,12 @@ func (q *DBQuery) Take(args ...value.Value) value.Value {
 	return q.Get()
 }
 
+func (q *DBQuery) ToList() value.Value {
+	return q.Get()
+}
+
 func (q *DBQuery) executeGet() value.Value {
-	db := GetDB()
+	db := GetDB(q.connection)
 	if db == nil {
 		return q.mockGet()
 	}
@@ -538,8 +544,8 @@ func (q *DBQuery) executeGet() value.Value {
 
 	// DEBUG LOG
 	fmt.Printf("[DB] Executing SQL: %s | Args: %v\n", query, q.whereArgs)
-
 	rows, err := db.QueryContext(context.Background(), query, q.whereArgs...)
+	fmt.Printf("[DB] Query completed. Err: %v\n", err)
 
 	if err != nil {
 		fmt.Printf("[DB] Query Error: %v | SQL: %s\n", err, query)
@@ -567,6 +573,7 @@ func (q *DBQuery) executeGet() value.Value {
 		}
 		res = append(res, value.New(rowMap))
 	}
+	fmt.Printf("[DB] Rows scanned: %d\n", len(res))
 
 	return value.New(res)
 }
@@ -576,7 +583,8 @@ func (q *DBQuery) First() value.Value {
 	q.limit = 1
 	res := q.Get()
 	if res.K == value.Array {
-		if arr, ok := res.V.([]value.Value); ok {
+		if ptr, ok := res.V.(*[]value.Value); ok {
+			arr := *ptr
 			if len(arr) > 0 {
 				return arr[0]
 			}
@@ -587,6 +595,23 @@ func (q *DBQuery) First() value.Value {
 
 func (q *DBQuery) One() value.Value {
 	return q.First()
+}
+
+func (q *DBQuery) FirstOrDefault() value.Value {
+	return q.First()
+}
+
+func (q *DBQuery) SingleOrDefault() value.Value {
+	return q.One()
+}
+
+func (q *DBQuery) Any() value.Value {
+	q.limit = 1
+	res := q.Get()
+	if ptr, ok := res.V.(*[]value.Value); ok {
+		return value.New(len(*ptr) > 0)
+	}
+	return value.New(false)
 }
 
 func (q *DBQuery) Last() value.Value {
@@ -601,6 +626,26 @@ func (q *DBQuery) Last() value.Value {
 		}
 	}
 	return q.First()
+}
+
+func (q *DBQuery) aggregate() value.Value {
+	res := q.First()
+	if m, ok := res.V.(map[string]value.Value); ok {
+		// Return the first value found in the map (the aggregate result)
+		for _, v := range m {
+			return v
+		}
+	}
+	return res
+}
+
+func (q *DBQuery) Count(field ...string) value.Value {
+	target := "*"
+	if len(field) > 0 {
+		target = fmt.Sprintf("\"%s\"", field[0])
+	}
+	q.method = fmt.Sprintf("COUNT(%s)", target)
+	return q.aggregate()
 }
 
 func (q *DBQuery) mockGet() value.Value {

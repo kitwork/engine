@@ -1,0 +1,36 @@
+   :root {
+        --root-sizing: 0.0625rem;
+        --root-screen-mini: 342px;
+        --root-screen-small: 620px;
+        --root-screen-medium: 768px;
+        --root-screen-large: 992px;
+        --root-screen-great: 1260px;
+        --root-screen-wide: 1520px;
+        --color-white-rgb: 255, 255, 255;
+        --color-black-rgb: 0, 0, 0;
+        --color-red-rgb: 255, 0, 0;
+        --color-deeppink-rgb: 255, 20, 147;
+        --color-orangered-rgb: 255, 69, 0;
+        --color-gold-rgb: 255, 217, 0;
+        --color-darkviolet-rgb: 148, 0, 211;
+        --color-lime-rgb: 0, 255, 0;
+        --color-deepskyblue-rgb: 0, 191, 255;
+        --color-peace-rgb: 136, 102, 255;
+        --color-primary-rgb: 66, 66, 255;
+        --color-warning-rgb: 255, 104, 36;
+        --color-positive-rgb: 136, 36, 255;
+        --color-gray-rgb: 128, 128, 128;
+        --color-default-rgb: 226, 232, 246;
+        --color-danger-rgb: 255, 66, 66;
+        --color-success-rgb: 2, 216, 66;
+        --color-info-rgb: 34, 136, 255;
+        --color-special-rgb: 36, 2, 36;
+        --color-dark-rgb: 2, 2, 36;
+        --color-elegant-rgb: 36, 36, 36;
+        --color-stylish-rgb: 36, 36, 66;
+        --color-unique-rgb: 2, 36, 66;
+        --color-profession-rgb: 22, 22, 27;
+        --color-light-rgb: 242, 244, 246;
+        --color-ghost-rgb: 248, 248, 255;
+        --color-lavender-rgb: 230, 230, 250;
+    }

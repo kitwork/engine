@@ -179,8 +179,14 @@ func (t *Task) HTML(template value.Value, data ...value.Value) {
 	t.ResType = "html"
 }
 
-func (t *Task) Now() value.Value  { return value.New(time.Now()) }
-func (t *Task) DB() *DBQuery      { return NewDBQuery() }
+func (t *Task) Now() value.Value { return value.New(time.Now()) }
+func (t *Task) DB(conn ...string) *DBQuery {
+	q := NewDBQuery()
+	if len(conn) > 0 {
+		q.connection = conn[0]
+	}
+	return q
+}
 func (t *Task) HTTP() *HTTPClient { return NewHTTPClient(t) }
 
 func (t *Task) GetQuery() value.Value  { return value.NewNull() }

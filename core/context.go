@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,11 +149,11 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	})
 
 	ctx.nowFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.task.Now() })
-	ctx.dbFn = value.NewFunc(func(args ...value.Value) value.Value {
-		db := ctx.task.DB()
-		db.SetExecutor(ctx.machine)
-		return value.New(db)
-	})
+
+	// industrial db proxy: hỗ trợ cả db() và db.from()
+	dbHandler := &dbProxyHandler{ec: ctx}
+	ctx.dbFn = value.Value{K: value.Proxy, V: &value.ProxyData{Handler: dbHandler}}
+
 	ctx.payloadFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.task.Payload() })
 	ctx.logFn = value.NewFunc(func(args ...value.Value) value.Value {
 		ctx.task.Log(args...)
@@ -402,18 +403,126 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.machine.Vars["body"] = ctx.bodyFn
 	ctx.machine.Vars["params"] = ctx.paramsFn
 	ctx.machine.Vars["payload"] = ctx.payloadFn
-	ctx.machine.Vars["work"] = ctx.workFn
+	ctx.machine.Vars["work"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.NewNull()
+		}
+		name := args[0].Text()
+
+		// 1. Exact match
+		if w, ok := e.Registry[name]; ok {
+			return value.New(w)
+		}
+
+		// 2. Case-insensitive match
+		for k, w := range e.Registry {
+			if strings.EqualFold(k, name) {
+				return value.New(w)
+			}
+		}
+
+		w := work.NewWork(name)
+		e.Registry[name] = w
+		return value.New(w)
+	})
 	ctx.machine.Vars["cookie"] = ctx.cookieFn
 	ctx.machine.Vars["engine"] = ctx.engineFn
 	ctx.machine.Vars["now"] = ctx.nowFn
 	ctx.machine.Vars["db"] = ctx.dbFn
-	ctx.machine.Vars["payload"] = ctx.payloadFn
 	ctx.machine.Vars["log"] = ctx.logFn
 	ctx.machine.Vars["http"] = ctx.httpFn
 	ctx.machine.Vars["parallel"] = ctx.parallelFn
 	ctx.machine.Vars["go"] = ctx.goFn
 	ctx.machine.Vars["defer"] = ctx.deferFn
 	ctx.machine.Vars["cache"] = ctx.cacheFn
+	ctx.machine.Vars["readfile"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.NewNull()
+		}
+		path := args[0].Text()
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return value.NewNull()
+		}
+		return value.New(string(content))
+	})
 
 	return ctx
+}
+
+type dbProxyHandler struct {
+	ec *ExecutionContext
+}
+
+func (h *dbProxyHandler) OnGet(key string) value.Value {
+	// Reserved methods list (case-insensitive check)
+	lowerKey := strings.ToLower(key)
+	switch lowerKey {
+	case "from", "table", "select", "where", "limit", "offset", "orderby", "join",
+		"group", "groupby", "having", "get", "first", "one", "last", "take",
+		"sum", "avg", "min", "max", "count", "find", "any", "tolist", "firstordefault", "singleordefault",
+		"insert", "update", "delete", "exec", "raw":
+
+		// Return a bound function that creates a fresh DBQuery and calls the target method
+		return value.NewFunc(func(args ...value.Value) value.Value {
+			query := h.ec.task.DB()
+			query.SetExecutor(h.ec.machine)
+			vQuery := value.New(query)
+			return vQuery.Invoke(key, args...)
+		})
+	}
+
+	// Entity syntax: db.user -> returns a DBQuery with table already set
+	query := h.ec.task.DB()
+	query.SetExecutor(h.ec.machine)
+	query.Table(key)
+	return value.New(query)
+}
+
+func (h *dbProxyHandler) OnCompare(op string, other value.Value) value.Value {
+	return value.NewNull()
+}
+
+func (h *dbProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
+	// db() direct call -> returns a Proxy bound to a new query (supports db("conn").user)
+	conn := ""
+	if len(args) > 0 {
+		conn = args[0].Text()
+	}
+	query := h.ec.task.DB(conn)
+	query.SetExecutor(h.ec.machine)
+
+	return value.Value{K: value.Proxy, V: &value.ProxyData{
+		Handler: &queryProxyHandler{ec: h.ec, query: query},
+	}}
+}
+
+type queryProxyHandler struct {
+	ec    *ExecutionContext
+	query *work.DBQuery
+}
+
+func (h *queryProxyHandler) OnGet(key string) value.Value {
+	vQuery := value.New(h.query)
+	// Priority 1: Check if it's a method on DBQuery via reflection
+	attr := vQuery.Get(key)
+	if attr.K != value.Nil && attr.K != value.Invalid {
+		return attr
+	}
+
+	// Priority 2: Treat as Table/Entity name if no method found
+	h.query.Table(key)
+	return vQuery
+}
+
+func (h *queryProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
+	vQuery := value.New(h.query)
+	if method == "" {
+		return vQuery
+	}
+	return vQuery.Invoke(method, args...)
+}
+
+func (h *queryProxyHandler) OnCompare(op string, other value.Value) value.Value {
+	return value.NewNull()
 }

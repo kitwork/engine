@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/kitwork/engine/energy"
 	"github.com/kitwork/engine/opcode"
@@ -254,8 +255,6 @@ func (vm *Runtime) Run() value.Value {
 			}
 			target := vm.pop()
 
-			fmt.Printf("[VM INVOKE] %s on %s with %d args\n", m, target.K.String(), n)
-
 			if m == "len" || m == "length" {
 				vm.push(value.New(float64(target.Len())))
 				continue
@@ -310,11 +309,17 @@ func (vm *Runtime) Run() value.Value {
 					vm.push(m(value.Value{K: value.Nil}, args...))
 				} else if g, ok := fn.V.(func(...value.Value) value.Value); ok {
 					vm.push(g(args...))
+				} else if _, ok := fn.V.(reflect.Value); ok {
+					vm.push(fn.Call(fn.Text(), args...))
 				} else {
 					vm.push(value.Value{K: value.Nil})
 				}
+			} else if fn.K == value.Proxy {
+				if d, ok := fn.V.(*value.ProxyData); ok && d.Handler != nil {
+					// Use empty method name to signify a direct call to the proxy
+					vm.push(d.Handler.OnInvoke("", args...))
+				}
 			} else {
-				fmt.Printf("[VM CALL] Calling %s with %d args\n", fn.Text(), len(args))
 				vm.call(fn.Text(), args...)
 			}
 
@@ -561,9 +566,18 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 				} else if m, ok := fn.V.(value.Method); ok {
 					vm.push(m(value.Value{K: value.Nil}, fnArgs...))
 				} else if g, ok := fn.V.(func(...value.Value) value.Value); ok {
+					fmt.Printf("[VM CALL] Executing Go func (%T) with %d args\n", g, len(fnArgs))
 					vm.push(g(fnArgs...))
+				} else if _, ok := fn.V.(reflect.Value); ok {
+					fmt.Printf("[VM CALL] Executing reflect.Value call with %d args\n", len(fnArgs))
+					vm.push(fn.Call(fn.Text(), fnArgs...))
 				} else {
+					fmt.Printf("[VM CALL] Unknown func type: %T (Kind: %s)\n", fn.V, fn.K.String())
 					vm.push(value.Value{K: value.Nil})
+				}
+			} else if fn.K == value.Proxy {
+				if d, ok := fn.V.(*value.ProxyData); ok && d.Handler != nil {
+					vm.push(d.Handler.OnInvoke("", fnArgs...))
 				}
 			} else {
 				vm.call(fn.Text(), fnArgs...)

@@ -1,0 +1,25 @@
+/* Invalid State Utilities */
+
+/* Display (when invalid) */
+[data-invalid-class~="display-none"]:invalid {
+    display: none;
+}
+
+[data-invalid-class~="display-block"]:invalid {
+    display: block;
+}
+
+[data-invalid-class~="border-red"]:invalid {
+    border-color: red;
+}
+
+/* Aspect Ratio */
+[data-invalid-class~="aspect-ratio-1:1"]:invalid {
+    --aspect-ratio: 100%;
+}
+
+[data-invalid-class*="aspect-ratio-"]:invalid::before {
+    content: "";
+    display: block;
+    padding-top: var(--aspect-ratio);
+}

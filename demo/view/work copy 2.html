@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KITWORK | Logic Execution Core</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;600;900&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/public/css/jit.css">
+    <style>
+        :root {
+            --color-white-rgb: 255, 255, 255;
+            --color-black-rgb: 0, 0, 0;
+            --color-brand-hex: #f82244;
+            --color-brand-rgb: 248, 34, 68;
+            --color-gray-rgb: 128, 128, 128;
+            --color-profession-rgb: 10, 10, 12;
+            --color-elegant-rgb: 20, 20, 24;
+            --color-accent-rgb: 0, 120, 255;
+            --color-success-rgb: 0, 255, 128;
+        }
+
+        body {
+            margin: 0;
+            background: rgb(var(--color-profession-rgb));
+            color: rgb(var(--color-white-rgb));
+            font-family: 'Outfit', sans-serif;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .industrial-grid {
+            background-image:
+                linear-gradient(rgba(var(--color-brand-rgb), 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(var(--color-brand-rgb), 0.05) 1px, transparent 1px);
+            background-size: 100px 100px;
+        }
+
+        .glow-text {
+            text-shadow: 0 0 80px rgba(var(--color-brand-rgb), 0.5);
+        }
+
+        .monospace {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Industrial Decor */
+        .execution-lane {
+            position: relative;
+            border-left: 2px solid rgb(var(--color-elegant-rgb));
+            padding-left: 32px;
+        }
+
+        .execution-lane::before {
+            content: '';
+            position: absolute;
+            left: -7px;
+            top: 0;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: rgb(var(--color-brand-rgb));
+            box-shadow: 0 0 10px rgb(var(--color-brand-rgb));
+        }
+
+        .manifesto-card {
+            background: rgba(var(--color-elegant-rgb), 0.4);
+            border: 1px solid rgb(var(--color-elegant-rgb));
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .manifesto-card:hover {
+            border-color: rgba(var(--color-brand-rgb), 0.4);
+            background: rgba(var(--color-elegant-rgb), 0.8);
+            transform: translateY(-5px);
+        }
+
+        @keyframes pulse-energy {
+            0% {
+                opacity: 0.3;
+            }
+
+            50% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0.3;
+            }
+        }
+
+        .energy-beam {
+            height: 2px;
+            background: linear-gradient(90deg, transparent, rgb(var(--color-brand-rgb)), transparent);
+            animation: pulse-energy 2s infinite;
+        }
+    </style>
+</head>
+
+<body class="industrial-grid">
+
+    <!-- Navigation (Canonical Governance) -->
+    <header
+        class="position-fixed top-0 left-0 width-full z-index-overlay background-profession/80 border-bottom-1 border-elegant padding-y-24">
+        <nav class="container display-flex flex-row justify-between items-center">
+            <div class="flex-row items-center gap-16">
+                <div
+                    class="width-32 height-32 background-brand rounded-2 flex-row items-center justify-center font-900 text-white">
+                    K</div>
+                <div class="flex-column">
+                    <span class="font-900 font-size-22 letter-spacing--1 text-white line-height-1">KITWORK</span>
+                    <span class="text-brand font-size-9 font-900 letter-spacing-1 uppercase">Logic Core</span>
+                </div>
+            </div>
+            <div class="flex-row gap-40 mobile:hidden">
+                <a href="#"
+                    class="text-gray font-size-11 font-900 letter-spacing-2 hover:text-brand transition-all uppercase"
+                    style="text-decoration:none">Philosophy</a>
+                <a href="#"
+                    class="text-gray font-size-11 font-900 letter-spacing-2 hover:text-brand transition-all uppercase"
+                    style="text-decoration:none">Performance</a>
+                <a href="#"
+                    class="text-gray font-size-11 font-900 letter-spacing-2 hover:text-brand transition-all uppercase"
+                    style="text-decoration:none">Protocol</a>
+            </div>
+            <button
+                class="border-1 border-brand text-brand font-900 font-size-11 padding-x-20 padding-y-10 rounded-2 hover:background-brand hover:text-white transition-all cursor-pointer letter-spacing-1 uppercase">Initialize
+                Node</button>
+        </nav>
+    </header>
+
+    <!-- Brand North Star Section -->
+    <main class="padding-top-240 padding-bottom-160">
+        <div class="container">
+            <div class="display-flex flex-row gap-80 items-start tablet:flex-column">
+                <div class="width-60-percent tablet:width-full">
+                    <div
+                        class="inline-block background-brand/10 border-1 border-brand/20 text-brand font-size-11 font-900 padding-x-16 padding-y-6 rounded-2 margin-bottom-40 letter-spacing-2 uppercase">
+                        Execution Core Protocol
+                    </div>
+                    <h1
+                        class="font-900 font-size-100 line-height-0.9 letter-spacing--5 margin-bottom-48 glow-text mobile:font-size-56">
+                        TURN LOGIC<br>INTO <span class="text-brand">EXECUTION.</span>
+                    </h1>
+                    <p
+                        class="text-gray font-size-24 max-width-600 line-height-1.4 margin-bottom-64 mobile:font-size-18">
+                        Independent of infrastructure. Deterministic by design.
+                        Efficient <span class="text-white font-600">without waste.</span>
+                    </p>
+                    <div class="flex-row gap-24 mobile:flex-column">
+                        <button
+                            class="background-text-main text-profession font-900 font-size-16 padding-x-56 padding-y-24 rounded-2 hover:background-brand hover:text-white transition-all cursor-pointer border-0 uppercase">Deploy
+                            Core</button>
+                        <button
+                            class="border-1 border-elegant text-white font-900 font-size-16 padding-x-56 padding-y-24 rounded-2 hover:background-brand transition-all cursor-pointer uppercase">The
+                            Manifesto</button>
+                    </div>
+                </div>
+                <!-- Logic Unit Diagram -->
+                <div class="width-40-percent tablet:width-full flex-column gap-20">
+                    <div class="execution-lane">
+                        <span class="text-brand font-900 font-size-12 uppercase letter-spacing-1">Atomic Unit</span>
+                        <div class="font-900 font-size-28 margin-top-8">Compiled Logic</div>
+                        <p class="text-gray font-size-14 line-height-1.5">No OS overhead. Pure bytecode interpretation.
+                        </p>
+                    </div>
+                    <div class="execution-lane">
+                        <span class="text-gray font-900 font-size-12 uppercase letter-spacing-1">Lifecycle</span>
+                        <div class="font-900 font-size-28 margin-top-8">Deterministic Execution</div>
+                        <p class="text-gray font-size-14 line-height-1.5">Explicit memory bounds. Zero-copy routing.</p>
+                    </div>
+                    <div class="execution-lane">
+                        <span class="text-gray font-900 font-size-12 uppercase letter-spacing-1">State</span>
+                        <div class="font-900 font-size-28 margin-top-8">Work Produced</div>
+                        <p class="text-gray font-size-14 line-height-1.5">Termination with immediate reclamation.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Philosophy Pillars (The 4 Steps) -->
+    <section class="padding-y-160 background-elegant/20 border-y-1 border-elegant">
+        <div class="container text-center margin-bottom-100">
+            <h2 class="font-900 font-size-56 margin-bottom-24 mobile:font-size-36">Core Governance Model.</h2>
+            <div class="energy-beam margin-x-auto width-160"></div>
+        </div>
+        <div class="container">
+            <div class="grid grid-columns-4 gap-24 tablet:grid-columns-2 mobile:grid-columns-1">
+                <div class="manifesto-card padding-48 rounded-4">
+                    <div class="font-900 font-size-48 text-elegant line-height-1 margin-bottom-20">01</div>
+                    <h3 class="font-900 font-size-24 margin-bottom-16">COMPILE</h3>
+                    <p class="text-gray line-height-1.6">Turning logic into first-class execution units independent of
+                        servers.</p>
+                </div>
+                <div class="manifesto-card padding-48 rounded-4">
+                    <div class="font-900 font-size-48 text-elegant line-height-1 margin-bottom-20">02</div>
+                    <h3 class="font-900 font-size-24 margin-bottom-16">SCHEDULE</h3>
+                    <p class="text-gray line-height-1.6">Centralized authority managing concurrency without
+                        thread-locks.</p>
+                </div>
+                <div class="manifesto-card padding-48 rounded-4">
+                    <div class="font-900 font-size-48 text-elegant line-height-1 margin-bottom-20">03</div>
+                    <h3 class="font-900 font-size-24 margin-bottom-16">EXECUTE</h3>
+                    <p class="text-gray line-height-1.6">Maximizing useful work per unit of resource allocation.</p>
+                </div>
+                <div class="manifesto-card padding-48 rounded-4">
+                    <div class="font-900 font-size-48 text-elegant line-height-1 margin-bottom-20">04</div>
+                    <h3 class="font-900 font-size-24 margin-bottom-16">TERMINATE</h3>
+                    <p class="text-gray line-height-1.6">Immediate cleanup. Absolute waste-free memory governance.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Energy Section (Industrial Thinking) -->
+    <section class="padding-y-160">
+        <div class="container">
+            <div class="grid grid-columns-2 gap-100 items-center tablet:grid-columns-1">
+                <div class="background-elegant border-1 border-elegant padding-80 rounded-4 shadow-giant">
+                    <div class="monospace text-brand font-size-14 margin-bottom-32">// Energy Model: Work/Allocation
+                    </div>
+                    <div class="font-900 font-size-80 line-height-1 text-white margin-bottom-32">14.1M+</div>
+                    <p class="text-gray font-size-18 line-height-1.6">
+                        Performance is <span class="text-white">infrastructure</span>. We treat resource pressure as an
+                        engineering constraint, not a variable.
+                    </p>
+                    <div class="margin-top-48 flex-row gap-32 border-top-1 border-elegant padding-top-32">
+                        <div class="flex-column">
+                            <span class="font-900 font-size-24 text-white">0.02ms</span>
+                            <span class="text-gray font-size-11 uppercase letter-spacing-1">Latency Floor</span>
+                        </div>
+                        <div class="flex-column">
+                            <span class="font-900 font-size-24 text-white">0.0B</span>
+                            <span class="text-gray font-size-11 uppercase letter-spacing-1">Alloc Overheads</span>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <span class="text-brand font-900 font-size-12 uppercase letter-spacing-2">The Energy Ratio</span>
+                    <h2 class="font-900 font-size-64 line-height-1 margin-y-32 mobile:font-size-44">Efficiency Over
+                        Abstraction.</h2>
+                    <p class="text-gray font-size-20 line-height-1.6 margin-bottom-48">
+                        Kitwork follows kernel-like governance for execution. We emphasize predictable latency over
+                        excessive configuration layers.
+                    </p>
+                    <div class="flex-column gap-20">
+                        <div class="flex-row items-center gap-16 manifesto-card padding-20 rounded-2">
+                            <div class="width-8 height-8 background-brand rounded-full"></div>
+                            <span class="font-900 font-size-14 uppercase letter-spacing-1">Bounded Memory Usage</span>
+                        </div>
+                        <div class="flex-row items-center gap-16 manifesto-card padding-20 rounded-2">
+                            <div class="width-8 height-8 background-elegant border-1 border-brand rounded-full"></div>
+                            <span class="font-900 font-size-14 uppercase letter-spacing-1">Centralized Execution
+                                Authority</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- North Star CTA -->
+    <section class="padding-y-120 background-brand text-center relative overflow-hidden">
+        <div class="container">
+            <h2
+                class="font-900 font-size-64 text-white line-height-1 margin-bottom-40 letter-spacing--3 mobile:font-size-44">
+                Deterministically. Efficiently. <br>Without Waste.
+            </h2>
+            <button
+                class="background-white text-brand font-900 font-size-14 padding-x-64 padding-y-24 rounded-2 hover:opacity-90 transition-all border-0 uppercase letter-spacing-2 cursor-pointer">Start
+                Execution Core</button>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="padding-y-120 background-profession border-top-1 border-elegant">
+        <div class="container flex-row justify-between items-start tablet:flex-column tablet:gap-80">
+            <div class="flex-column gap-24">
+                <div class="font-900 font-size-32 text-white letter-spacing--1">KITWORK</div>
+                <p class="text-gray font-size-16 max-width-360 line-height-1.6">
+                    Kitwork defines execution behavior beneath frameworks and platforms, remaining independent of
+                    infrastructure.
+                </p>
+            </div>
+            <div class="flex-row gap-100 mobile:gap-60">
+                <div class="flex-column gap-24">
+                    <span class="text-white font-900 font-size-11 uppercase letter-spacing-2">Philosophy</span>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Determinism</a>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Governance</a>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Pillars</a>
+                </div>
+                <div class="flex-column gap-24">
+                    <span class="text-white font-900 font-size-11 uppercase letter-spacing-2">Technical</span>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Runtime Core</a>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Scheduler</a>
+                    <a href="#" class="text-gray font-size-14 hover:text-brand transition-all"
+                        style="text-decoration:none">Memory Model</a>
+                </div>
+            </div>
+        </div>
+        <div class="container margin-top-120 text-center border-top-1 border-elegant padding-top-60">
+            <div class="text-elegant font-900 font-size-10 letter-spacing-4 uppercase">
+                Kitwork: Logic into Execution // Canonical Grade Core
+            </div>
+        </div>
+    </footer>
+
+</body>
+
+</html>
