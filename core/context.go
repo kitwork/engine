@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -434,9 +435,40 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.machine.Vars["http"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.httpFn}}
 	ctx.machine.Vars["cache"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.cacheFn}}
 
-	ctx.machine.Vars["parallel"] = ctx.parallelFn
-	ctx.machine.Vars["go"] = ctx.goFn
 	ctx.machine.Vars["defer"] = ctx.deferFn
+	ctx.machine.Vars["random"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.New(rand.Float64())
+		}
+		arg := args[0]
+		// 1. Array: pick random item
+		if arg.K == value.Array {
+			ptr := arg.V.(*[]value.Value)
+			arr := *ptr
+			if len(arr) == 0 {
+				return value.NewNull()
+			}
+			return arr[rand.Intn(len(arr))]
+		}
+		// 2. Number: random range
+		if arg.K == value.Number {
+			if len(args) == 1 {
+				// random(max) -> 0..max-1
+				if arg.N <= 0 {
+					return value.New(0)
+				}
+				return value.New(float64(rand.Intn(int(arg.N))))
+			}
+			// random(min, max) -> min..max-1
+			min := int(arg.N)
+			max := int(args[1].N)
+			if max <= min {
+				return value.New(float64(min))
+			}
+			return value.New(float64(rand.Intn(max-min) + min))
+		}
+		return value.New(rand.Float64())
+	})
 	ctx.machine.Vars["readfile"] = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) == 0 {
 			return value.NewNull()
@@ -470,15 +502,23 @@ func (h *dbProxyHandler) OnCompare(op string, other value.Value) value.Value {
 }
 
 func (h *dbProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
-	// db() direct call -> returns a Proxy bound to a new query (supports db("conn").user)
-	conn := ""
-	if len(args) > 0 {
-		conn = args[0].Text()
+	// 1. Direct call db() or db("conn")
+	if method == "" {
+		conn := ""
+		if len(args) > 0 {
+			conn = args[0].Text()
+		}
+		query := h.ec.task.DB(conn)
+		query.SetExecutor(h.ec.machine)
+		return value.Value{K: value.Proxy, V: &queryProxyHandler{ec: h.ec, query: query}}
 	}
-	query := h.ec.task.DB(conn)
-	query.SetExecutor(h.ec.machine)
 
-	return value.Value{K: value.Proxy, V: &queryProxyHandler{ec: h.ec, query: query}}
+	// 2. Method call via proxy db.from("user")
+	// Start a fresh query and delegate the method call
+	query := h.ec.task.DB()
+	query.SetExecutor(h.ec.machine)
+	handler := &queryProxyHandler{ec: h.ec, query: query}
+	return handler.OnInvoke(method, args...)
 }
 
 type queryProxyHandler struct {

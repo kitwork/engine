@@ -3,9 +3,9 @@ package work
 import (
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/kitwork/engine/value"
 )
@@ -49,6 +49,7 @@ type DBQuery struct {
 	joins      []string
 	groups     []string
 	havings    []string
+	returning  []string
 	executor   LambdaExecutor
 	connection string
 }
@@ -193,9 +194,18 @@ func (q *DBQuery) Skip(n float64) *DBQuery {
 }
 
 func (q *DBQuery) OrderBy(column string, direction ...string) *DBQuery {
+	// If column contains a space, it might be "id desc", split it
+	parts := strings.Split(strings.TrimSpace(column), " ")
+	if len(parts) > 1 {
+		col := parts[0]
+		dir := strings.ToUpper(parts[1])
+		q.order = fmt.Sprintf("\"%s\" %s", col, dir)
+		return q
+	}
+
 	dir := "ASC"
 	if len(direction) > 0 {
-		dir = direction[0]
+		dir = strings.ToUpper(direction[0])
 	}
 	q.order = fmt.Sprintf("\"%s\" %s", column, dir)
 	return q
@@ -206,30 +216,240 @@ func (q *DBQuery) Find(idOrFn any) value.Value {
 	switch v := idOrFn.(type) {
 	case value.Value:
 		if v.K == value.Func {
-			return q.Where(v).One()
+			return q.Where(v).First()
 		}
+		// If it's a primitive value inside a value.Value, use it as ID
+		q.conditions = []string{"\"id\" = $1"}
+		q.whereArgs = []any{v.Interface()}
+		return q.First()
 	case *value.ScriptFunction:
-		return q.Where(value.Value{K: value.Func, V: v}).One()
+		return q.Where(value.Value{K: value.Func, V: v}).First()
 	}
 
 	// TRADITIONAL FIND: Primary Key lookup
 	q.conditions = []string{"\"id\" = $1"}
 	q.whereArgs = []any{idOrFn}
-	return q.One()
+	return q.First()
 }
 
-func (q *DBQuery) Insert(data value.Value) *DBQuery {
-	fmt.Printf("[DB] (Mock) INSERT INTO %s | Data: %s\n", q.table, data.Text())
-	return q
+func (q *DBQuery) Create(data value.Value) value.Value {
+	return q.Insert(data)
 }
 
-func (q *DBQuery) selectField(fields ...string) *DBQuery {
-	q.fields = append(q.fields, fields...)
-	return q
+func (q *DBQuery) Insert(data value.Value) value.Value {
+	db := GetDB(q.connection)
+	if q.table == "" {
+		return value.Value{K: value.Nil}
+	}
+
+	if data.K != value.Map {
+		return value.Value{K: value.Nil}
+	}
+
+	m := data.V.(map[string]value.Value)
+	var cols []string
+	var placeholders []string
+	var args []any
+	i := 1
+	for k, v := range m {
+		cols = append(cols, fmt.Sprintf("\"%s\"", k))
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i))
+		args = append(args, v.Interface())
+		i++
+	}
+
+	returningClause := "RETURNING *"
+	if len(q.returning) > 0 {
+		var quoted []string
+		for _, f := range q.returning {
+			quoted = append(quoted, fmt.Sprintf("\"%s\"", f))
+		}
+		returningClause = "RETURNING " + strings.Join(quoted, ", ")
+	}
+
+	query := fmt.Sprintf("INSERT INTO \"%s\" (%s) VALUES (%s) %s",
+		q.table, strings.Join(cols, ", "), strings.Join(placeholders, ", "), returningClause)
+
+	if db == nil {
+		fmt.Printf("[DB] Error: No database connection found for %s\n", q.connection)
+		return value.Value{K: value.Nil}
+	}
+
+	fmt.Printf("[DB] Executing SQL: %s | Args: %v\n", query, args)
+	rows, err := db.QueryContext(context.Background(), query, args...)
+	if err != nil {
+		fmt.Printf("[DB] Insert Error: %v\n", err)
+		return value.Value{K: value.Nil}
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		columns, _ := rows.Columns()
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err == nil {
+			rowMap := make(map[string]value.Value)
+			for i, col := range columns {
+				rowMap[col] = value.New(values[i])
+			}
+			return value.New(rowMap)
+		}
+	}
+
+	return value.Value{K: value.Nil}
+}
+
+func (q *DBQuery) Update(data value.Value) value.Value {
+	db := GetDB(q.connection)
+	if q.table == "" {
+		return value.Value{K: value.Nil}
+	}
+
+	if data.K != value.Map {
+		return value.Value{K: value.Nil}
+	}
+
+	m := data.V.(map[string]value.Value)
+	var sets []string
+	var args []any
+	i := 1
+	for k, v := range m {
+		sets = append(sets, fmt.Sprintf("\"%s\" = $%d", k, i))
+		args = append(args, v.Interface())
+		i++
+	}
+
+	returningClause := "RETURNING *"
+	if len(q.returning) > 0 {
+		var quoted []string
+		for _, f := range q.returning {
+			quoted = append(quoted, fmt.Sprintf("\"%s\"", f))
+		}
+		returningClause = "RETURNING " + strings.Join(quoted, ", ")
+	}
+
+	query := fmt.Sprintf("UPDATE \"%s\" SET %s", q.table, strings.Join(sets, ", "))
+
+	// Build WHERE with offset placeholders
+	if len(q.conditions) == 0 {
+		fmt.Printf("[DB] Update Error: Missing WHERE clause. Bulk updates are blocked for safety.\n")
+		return value.Value{K: value.Nil}
+	}
+
+	query += " WHERE "
+	for j, cond := range q.conditions {
+		if j > 0 && cond != "OR" && q.conditions[j-1] != "OR" {
+			query += " AND "
+		} else if j > 0 && cond != "OR" {
+			query += " "
+		}
+
+		adjustedCond := cond
+		for p := len(q.whereArgs); p >= 1; p-- {
+			oldP := fmt.Sprintf("$%d", p)
+			newP := fmt.Sprintf("$%d", p+i-1)
+			adjustedCond = strings.ReplaceAll(adjustedCond, oldP, newP)
+		}
+		query += adjustedCond
+	}
+	args = append(args, q.whereArgs...)
+
+	query += " " + returningClause
+
+	if db == nil {
+		fmt.Printf("[DB] Error: No database connection found for %s\n", q.connection)
+		return value.Value{K: value.Nil}
+	}
+
+	fmt.Printf("[DB] Executing SQL: %s | Args: %v\n", query, args)
+	rows, err := db.QueryContext(context.Background(), query, args...)
+	if err != nil {
+		fmt.Printf("[DB] Update Error: %v\n", err)
+		return value.Value{K: value.Nil}
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		columns, _ := rows.Columns()
+		values := make([]any, len(columns))
+		valuePtrs := make([]any, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err == nil {
+			rowMap := make(map[string]value.Value)
+			for i, col := range columns {
+				rowMap[col] = value.New(values[i])
+			}
+			return value.New(rowMap)
+		}
+	}
+
+	return value.Value{K: value.Nil}
+}
+
+func (q *DBQuery) Delete() value.Value {
+	// SOFT DELETE implementation: sets deleted_at = NOW()
+	// If the table doesn't have deleted_at, this will fail in DB,
+	// but this is the standard Kitwork behavior for Delete().
+	return q.Update(value.New(map[string]value.Value{
+		"deleted_at": value.New(time.Now()),
+	}))
+}
+
+func (q *DBQuery) Remove() value.Value {
+	return q.Destroy()
+}
+
+func (q *DBQuery) Destroy() value.Value {
+	db := GetDB(q.connection)
+	if q.table == "" {
+		return value.Value{K: value.Nil}
+	}
+
+	query := fmt.Sprintf("DELETE FROM \"%s\"", q.table)
+
+	if len(q.conditions) > 0 {
+		query += " WHERE "
+		for j, cond := range q.conditions {
+			if j > 0 && cond != "OR" && q.conditions[j-1] != "OR" {
+				query += " AND "
+			} else if j > 0 && cond != "OR" {
+				query += " "
+			}
+			query += cond
+		}
+	} else {
+		// SAFETY: Don't allow destroy all without where?
+		fmt.Printf("[DB] WARNING: Attempting hard DESTROY without WHERE on table %s. Blocked for safety.\n", q.table)
+		return value.Value{K: value.Nil}
+	}
+
+	if db == nil {
+		fmt.Printf("[DB] Error: No database connection found for %s\n", q.connection)
+		return value.Value{K: value.Nil}
+	}
+
+	fmt.Printf("[DB] Executing SQL: %s | Args: %v\n", query, q.whereArgs)
+	res, err := db.ExecContext(context.Background(), query, q.whereArgs...)
+	if err != nil {
+		fmt.Printf("[DB] Destroy Error: %v\n", err)
+		return value.Value{K: value.Nil}
+	}
+	affected, _ := res.RowsAffected()
+	return value.New(affected)
 }
 
 func (q *DBQuery) Select(fields ...string) *DBQuery {
 	q.fields = fields
+	return q
+}
+
+func (q *DBQuery) Returning(fields ...string) *DBQuery {
+	q.returning = fields
 	return q
 }
 
@@ -436,8 +656,8 @@ func (q *DBQuery) Get() value.Value {
 	return q.executeGet()
 }
 
-func (q *DBQuery) All() value.Value {
-	return q.Get()
+func (q *DBQuery) List() value.Value {
+	return q.executeGet()
 }
 
 func (q *DBQuery) Take(args ...value.Value) value.Value {
@@ -455,7 +675,8 @@ func (q *DBQuery) ToList() value.Value {
 func (q *DBQuery) executeGet() value.Value {
 	db := GetDB(q.connection)
 	if db == nil {
-		return q.mockGet()
+		fmt.Printf("[DB] Error: No database connection found for %s\n", q.connection)
+		return value.Value{K: value.Nil}
 	}
 
 	selectedFields := "*"
@@ -567,7 +788,12 @@ func (q *DBQuery) executeGet() value.Value {
 	return value.New(res)
 }
 
-func (q *DBQuery) First() value.Value {
+func (q *DBQuery) First(args ...value.Value) value.Value {
+	// If first arg is a Lambda, apply as Where
+	if len(args) > 0 {
+		q.Where(args[0])
+	}
+
 	// First implies Limit 1 and take result
 	q.limit = 1
 	res := q.Get()
@@ -594,7 +820,10 @@ func (q *DBQuery) SingleOrDefault() value.Value {
 	return q.One()
 }
 
-func (q *DBQuery) Any() value.Value {
+func (q *DBQuery) Exists(args ...value.Value) value.Value {
+	if len(args) > 0 {
+		q.Where(args[0])
+	}
 	q.limit = 1
 	res := q.Get()
 	if ptr, ok := res.V.(*[]value.Value); ok {
@@ -635,22 +864,6 @@ func (q *DBQuery) Count(field ...string) value.Value {
 	}
 	q.method = fmt.Sprintf("COUNT(%s)", target)
 	return q.aggregate()
-}
-
-func (q *DBQuery) mockGet() value.Value {
-	log.Println("[DB] WARNING: Using Mock DB!")
-	limit := q.limit
-	if limit == 0 {
-		limit = 2
-	}
-	res := make([]value.Value, 0)
-	for i := 1; i <= limit; i++ {
-		row := make(map[string]value.Value)
-		row["id"] = value.New(i)
-		row["username"] = value.New(fmt.Sprintf("mock_user_%d", i))
-		res = append(res, value.New(row))
-	}
-	return value.New(res)
 }
 
 func (q *DBQuery) String() string {
