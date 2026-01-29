@@ -14,6 +14,7 @@
 - [🚀 Quick Start](#-quick-start)
 - [🧠 Core Philosophy](#-core-philosophy)
 - [🗄️ Database (Industrial Query Builder)](#️-database-industrial-query-builder)
+- [🎨 JIT CSS Engine](#-jit-css-engine)
 - [🌐 Web Stack Primitives](#-web-stack-primitives)
 - [⚡ Industrial Concurrency](#-industrial-concurrency)
 - [📦 Explicit Caching System](#-explicit-caching-system)
@@ -62,7 +63,7 @@ Kitwork introduces **Proxy-based Entity Resolution**, allowing you to access tab
 ```javascript
 // 1. Fetch exactly one record (ID or Lambda)
 const user = db.user.find(1);
-const active = db.user.find(u => u.email == "admin@kitwork.vn");
+const active = db.user.find(u => u.email == "admin@kitwork.io");
 
 // 2. Multi-Database support with property chaining
 const remoteUser = db("secondary").user.limit(5).list();
@@ -72,15 +73,15 @@ const activeItems = db.products.where(p => p.id == [10, 20, 30]).list();
 ```
 
 ### ✍️ Writing Data (Strict & Returning)
-Lệnh ghi dữ liệu trong Kitwork luôn an toàn và trả về đầy đủ đối tượng từ Database.
+Data writing operations in Kitwork are safe and return full objects from the database by default.
 ```javascript
-// 1. Create: Trả về FULL OBJECT (bao gồm id, created_at tự sinh)
+// 1. Create: Returns the FULL OBJECT (including auto-generated id, created_at)
 const newUser = db.user.create({
     username: "kitwork_pro",
     email: "pro@kitwork.io"
 });
 
-// 2. Update: STRICT MODE (Bắt buộc có .where() để bảo mật)
+// 2. Update: STRICT MODE (Requires .where() for security)
 const updated = db.user
     .where(u => u.id == newUser.id)
     .update({ is_active: true });
@@ -90,39 +91,29 @@ db.user.where(u => u.id == 1).delete();  // Soft Delete (sets deleted_at)
 db.user.where(u => u.id == 1).destroy(); // Hard Delete (physical removal)
 ```
 
-### 🚀 Industrial One-Liners
-Kitwork is engineered to collapse traditional multi-line queries into single, readable statements.
-```javascript
-const lastOrder = db.orders.last();                        // Most recent entry
-const topUsers = db.user.limit(5).list();                  // Immediate top-N results
-const hasAdmin = db.user.exists(u => u.role == "admin");   // Exist check with lambda
+---
+
+## 🎨 JIT CSS Engine
+Kitwork includes a high-performance **Just-In-Time (JIT) CSS Generator** written in Go. It scans your HTML files and generates only the utility classes you actually use, ensuring minimal bundle size and maximum performance.
+
+### ⚡ Key Features:
+- **Zero-Config Generation**: No complex Webpack/Vite setups required.
+- **Atomic Reliability**: Every utility class is mapped to deterministic CSS rules.
+- **Dynamic 3D Support**: Native support for 3D components like cubes, including responsive sizing and duration.
+
+```bash
+# Generate CSS on the fly
+go run demo/css_jit_demo.go
 ```
 
-### ⚙️ Inference-driven Joins & Aggregates
-```javascript
-// Variable 'orders' is automatically reflected to the "orders" table context
-db.users.join((orders) => orders.user_id == users.id).list();
-
-// Analytical Aggregates
-const total = db.orders.where(o => o.status == "paid").sum("amount");
-const count = db.orders.count();
-const avgPrice = db.products.avg("price");
+Example Utility Usage:
+```html
+<div class="cube-area cube-size-120 tablet:cube-size-80">
+    <div class="cube-block cube-rotate-center">
+        <!-- 3D Logic Visuals -->
+    </div>
+</div>
 ```
-
-### 🛠 Terminal Execution Methods
-| Method | Description | SQL Projection |
-| :----- | :---------- | :------------- |
-| **`.list()`** | Fetch collections. Returns Array. | `SELECT ...` |
-| **`.find(id/fn)`** | High-speed lookup. Returns Object/Null. | `WHERE ... LIMIT 1` |
-| **`.first(fn?)`** | Returns the first matched record. | `LIMIT 1` |
-| **`.one()`** | Alias for `.first()`. | `LIMIT 1` |
-| **`.exists(fn?)`** | Checks if record exists. Returns Bool. | `LIMIT 1` |
-| **`.create(data)`** | Insert & **Return Full Object**. | `INSERT ... RETURNING *` |
-| **`.update(data)`** | Update & **Return Object** (Strict where). | `UPDATE ... RETURNING *` |
-| **`.delete()`** | **Soft Delete** (sets deleted_at). | `UPDATE ... SET deleted_at` |
-| **`.destroy()`** | **Hard Delete** (Strict where). | `DELETE FROM ...` |
-| **`.sum(col)`** | Returns column sum. | `SELECT SUM(col) ...` |
-| **`.returning(f..)`**| Custom returning fields. | `RETURNING f1, f2` |
 
 ---
 
@@ -180,15 +171,15 @@ const data = cache("top_sales", "1h", () => {
 ---
 
 ## ☁️ Cloud-Native Built-ins
-Các hàm tiện ích hệ thống được thiết kế cho Agentic Workflows:
+System utility functions designed for Agentic Workflows:
 *   **`random()`**: 
-    - `random(n)`: Số nguyên 0..n-1.
-    - `random(min, max)`: Dải số nguyên.
-    - `random(array)`: Chọn ngẫu nhiên từ mảng.
-    - `random()`: Số thực 0..1.
-*   **`now()`**: Trả về thời gian thực của hệ thống (Proxy).
-*   **`readfile(path)`**: Đọc file tốc độ cao (I/O optimized).
-*   **`log(...args)`**: Ghi log ngữ cảnh (context-aware logging).
+    - `random(n)`: Integer 0..n-1.
+    - `random(min, max)`: Integer range.
+    - `random(array)`: Random selection from array.
+    - `random()`: Float 0..1.
+*   **`now()`**: Returns system real-time (Proxy).
+*   **`readfile(path)`**: High-speed file reading (I/O optimized).
+*   **`log(...args)`**: Context-aware logging.
 
 ---
 
