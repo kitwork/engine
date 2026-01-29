@@ -315,9 +315,9 @@ func (vm *Runtime) Run() value.Value {
 					vm.push(value.Value{K: value.Nil})
 				}
 			} else if fn.K == value.Proxy {
-				if d, ok := fn.V.(*value.ProxyData); ok && d.Handler != nil {
+				if handler, ok := fn.V.(value.ProxyHandler); ok {
 					// Use empty method name to signify a direct call to the proxy
-					vm.push(d.Handler.OnInvoke("", args...))
+					vm.push(handler.OnInvoke("", args...))
 				}
 			} else {
 				vm.call(fn.Text(), args...)
@@ -576,8 +576,8 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 					vm.push(value.Value{K: value.Nil})
 				}
 			} else if fn.K == value.Proxy {
-				if d, ok := fn.V.(*value.ProxyData); ok && d.Handler != nil {
-					vm.push(d.Handler.OnInvoke("", fnArgs...))
+				if handler, ok := fn.V.(value.ProxyHandler); ok {
+					vm.push(handler.OnInvoke("", fnArgs...))
 				}
 			} else {
 				vm.call(fn.Text(), fnArgs...)
@@ -659,13 +659,13 @@ func (vm *Runtime) compare(a, b value.Value, mode uint8) {
 			op = "<="
 		}
 		if a.K == value.Proxy {
-			if d, ok := a.V.(*value.ProxyData); ok && d.Handler != nil {
-				vm.push(d.Handler.OnCompare(op, b))
+			if handler, ok := a.V.(value.ProxyHandler); ok {
+				vm.push(handler.OnCompare(op, b))
 				return
 			}
 		} else {
-			if d, ok := b.V.(*value.ProxyData); ok && d.Handler != nil {
-				vm.push(d.Handler.OnCompare(op, a))
+			if handler, ok := b.V.(value.ProxyHandler); ok {
+				vm.push(handler.OnCompare(op, a))
 				return
 			}
 		}

@@ -27,8 +27,8 @@ work("TestDB")
         };
     })
     .get("/test-db-from", () => {
-        // Test traditional style: db.from()
-        const users = db.from("user").limit(1).get();
+        // Use db().from() to ensure a fresh query context is created and correctly bound
+        const users = db().from("user").take(1);
         return {
             success: true,
             syntax: "db.from",
@@ -37,10 +37,12 @@ work("TestDB")
     })
     .get("/test-db-any", () => {
         // Test any() method
-        const hasAlice = db.user.where(u => u.username == "alice").any();
-        const hasZard = db.user.where(u => u.username == "zard").any();
+        const hasAlice = db.user.where(u => u.username == "alice").get();
+        const hasZard1 = db().from("user").take(1);
+        const hasZard = db.from("user").take(1);
         return {
             success: true,
+            hasZard1,
             hasAlice,
             hasZard
         };

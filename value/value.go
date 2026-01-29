@@ -18,12 +18,6 @@ type ProxyHandler interface {
 	OnInvoke(method string, args ...Value) Value
 }
 
-// ProxyData là thùng chứa dữ liệu biểu tượng
-type ProxyData struct {
-	Handler ProxyHandler
-	Context any // Ví dụ: Tên cột, hoặc chuỗi query đang xây dựng
-}
-
 type ScriptFunction struct {
 	Address    int
 	ParamNames []string
@@ -46,8 +40,8 @@ func (v Value) Invoke(name string, args ...Value) Value {
 
 	// Nếu là Proxy, ưu tiên hỏi Handler
 	if v.K == Proxy {
-		if data, ok := v.V.(*ProxyData); ok && data.Handler != nil {
-			return data.Handler.OnInvoke(name, args...)
+		if handler, ok := v.V.(ProxyHandler); ok {
+			return handler.OnInvoke(name, args...)
 		}
 	}
 

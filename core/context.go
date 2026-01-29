@@ -152,7 +152,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 
 	// industrial db proxy: hỗ trợ cả db() và db.from()
 	dbHandler := &dbProxyHandler{ec: ctx}
-	ctx.dbFn = value.Value{K: value.Proxy, V: &value.ProxyData{Handler: dbHandler}}
+	ctx.dbFn = value.Value{K: value.Proxy, V: dbHandler}
 
 	ctx.payloadFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.task.Payload() })
 	ctx.logFn = value.NewFunc(func(args ...value.Value) value.Value {
@@ -428,13 +428,15 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.machine.Vars["cookie"] = ctx.cookieFn
 	ctx.machine.Vars["engine"] = ctx.engineFn
 	ctx.machine.Vars["now"] = ctx.nowFn
-	ctx.machine.Vars["db"] = ctx.dbFn
-	ctx.machine.Vars["log"] = ctx.logFn
-	ctx.machine.Vars["http"] = ctx.httpFn
+	// Wrap core services into Smart Proxies (Go Template Style)
+	ctx.machine.Vars["db"] = value.Value{K: value.Proxy, V: &dbProxyHandler{ec: ctx}}
+	ctx.machine.Vars["log"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.logFn}}
+	ctx.machine.Vars["http"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.httpFn}}
+	ctx.machine.Vars["cache"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.cacheFn}}
+
 	ctx.machine.Vars["parallel"] = ctx.parallelFn
 	ctx.machine.Vars["go"] = ctx.goFn
 	ctx.machine.Vars["defer"] = ctx.deferFn
-	ctx.machine.Vars["cache"] = ctx.cacheFn
 	ctx.machine.Vars["readfile"] = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) == 0 {
 			return value.NewNull()
@@ -476,9 +478,7 @@ func (h *dbProxyHandler) OnInvoke(method string, args ...value.Value) value.Valu
 	query := h.ec.task.DB(conn)
 	query.SetExecutor(h.ec.machine)
 
-	return value.Value{K: value.Proxy, V: &value.ProxyData{
-		Handler: &queryProxyHandler{ec: h.ec, query: query},
-	}}
+	return value.Value{K: value.Proxy, V: &queryProxyHandler{ec: h.ec, query: query}}
 }
 
 type queryProxyHandler struct {
@@ -498,6 +498,10 @@ func (h *queryProxyHandler) OnGet(key string) value.Value {
 	vQuery := value.New(h.query)
 	// Priority 1: Check if it's a method on DBQuery via reflection
 	attr := vQuery.Get(key)
+	if attr.K != value.Func {
+		// Auto-correct case: take -> Take
+		attr = vQuery.Get(strings.Title(key))
+	}
 	if attr.K == value.Func {
 		// Return a wrapped function that routes through OnInvoke
 		return value.NewFunc(func(args ...value.Value) value.Value {
@@ -511,7 +515,7 @@ func (h *queryProxyHandler) OnGet(key string) value.Value {
 	}
 
 	// Always return the proxy to allow further chaining
-	return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+	return value.Value{K: value.Proxy, V: h}
 }
 
 func (h *queryProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
@@ -521,7 +525,7 @@ func (h *queryProxyHandler) OnInvoke(method string, args ...value.Value) value.V
 	if lowerMethod == "from" || lowerMethod == "table" {
 		if len(args) > 0 {
 			h.query.Table(args[0].Text())
-			return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+			return value.Value{K: value.Proxy, V: h}
 		}
 	}
 
@@ -530,17 +534,22 @@ func (h *queryProxyHandler) OnInvoke(method string, args ...value.Value) value.V
 		// If table is still empty and we have a string arg, it's likely db.from("user") case
 		if len(args) == 1 && h.query.GetTable() == "" {
 			h.query.Table(args[0].Text())
-			return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+			return value.Value{K: value.Proxy, V: h}
 		}
 		return vQuery
 	}
 
+	// Try Invoke directly
 	res := vQuery.Invoke(method, args...)
+	if res.K == value.Invalid || res.K == value.Nil {
+		// Auto-correct case: take -> Take
+		res = vQuery.Invoke(strings.Title(method), args...)
+	}
 
 	// If the result is a *DBQuery, wrap it back in a proxy for continuous chaining
 	if res.K == value.Struct {
 		if _, ok := res.V.(*work.DBQuery); ok {
-			return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+			return value.Value{K: value.Proxy, V: h}
 		}
 	}
 
@@ -548,5 +557,29 @@ func (h *queryProxyHandler) OnInvoke(method string, args ...value.Value) value.V
 }
 
 func (h *queryProxyHandler) OnCompare(op string, other value.Value) value.Value {
+	return value.NewNull()
+}
+
+type genericServiceProxy struct {
+	fn value.Value // The original service function (ctx.logFn, etc)
+}
+
+func (h *genericServiceProxy) OnGet(key string) value.Value {
+	// Equivalent to service().key access
+	serviceInstance := h.fn.Call("", []value.Value{}...)
+	return serviceInstance.Get(key)
+}
+
+func (h *genericServiceProxy) OnInvoke(method string, args ...value.Value) value.Value {
+	// If calling the proxy directly, call the underlying function
+	if method == "" {
+		return h.fn.Call("", args...)
+	}
+	// If calling a method (rare for the entry proxy), invoke on instance
+	serviceInstance := h.fn.Call("", []value.Value{}...)
+	return serviceInstance.Call(method, args...)
+}
+
+func (h *genericServiceProxy) OnCompare(op string, other value.Value) value.Value {
 	return value.NewNull()
 }

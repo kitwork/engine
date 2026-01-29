@@ -128,8 +128,8 @@ func (v Value) Get(key string) Value {
 		}
 	case Proxy:
 		// Tracking keys through a generic proxy
-		if d, ok := v.V.(*ProxyData); ok && d.Handler != nil {
-			return d.Handler.OnGet(key)
+		if handler, ok := v.V.(ProxyHandler); ok {
+			return handler.OnGet(key)
 		}
 	}
 

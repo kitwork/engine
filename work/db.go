@@ -19,22 +19,16 @@ type SQLProxyHandler struct {
 }
 
 func (h *SQLProxyHandler) OnGet(key string) value.Value {
-	return value.Value{K: value.Proxy, V: &value.ProxyData{
-		Handler: &SQLProxyHandler{TableName: h.TableName, Column: key},
-	}}
+	return value.Value{K: value.Proxy, V: &SQLProxyHandler{TableName: h.TableName, Column: key}}
 }
 
 func (h *SQLProxyHandler) OnCompare(op string, other value.Value) value.Value {
-	return value.Value{K: value.Proxy, V: &value.ProxyData{
-		Handler: &SQLProxyHandler{Column: h.Column, Operator: op, Value: other},
-	}}
+	return value.Value{K: value.Proxy, V: &SQLProxyHandler{Column: h.Column, Operator: op, Value: other}}
 }
 
 func (h *SQLProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
 	if len(args) > 0 {
-		return value.Value{K: value.Proxy, V: &value.ProxyData{
-			Handler: &SQLProxyHandler{Column: h.Column, Operator: method, Value: args[0]},
-		}}
+		return value.Value{K: value.Proxy, V: &SQLProxyHandler{Column: h.Column, Operator: method, Value: args[0]}}
 	}
 	return value.Value{K: value.Nil}
 }
@@ -90,82 +84,80 @@ func (q *DBQuery) Where(args ...value.Value) *DBQuery {
 		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
 			// Create a Proxy with SQL handler
 			handler := &SQLProxyHandler{}
-			proxy := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: handler}}
+			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
 
 			if res.K == value.Proxy {
-				if d, ok := res.V.(*value.ProxyData); ok {
-					if filter, ok := d.Handler.(*SQLProxyHandler); ok {
-						op := filter.Operator
-						val := filter.Value
+				if filter, ok := res.V.(*SQLProxyHandler); ok {
+					op := filter.Operator
+					val := filter.Value
 
-						// 1. Mapping JS operators to SQL Base
-						switch strings.ToLower(op) {
-						case "==", "===", "":
-							op = "="
-						case "like":
+					// 1. Mapping JS operators to SQL Base
+					switch strings.ToLower(op) {
+					case "==", "===", "":
+						op = "="
+					case "like":
+						op = "LIKE"
+					case "in":
+						op = "IN"
+					case "!=", "!==":
+						op = "<>"
+					case ">", "<", ">=", "<=":
+						op = strings.ToLower(op)
+					}
+
+					// --- SMART DETECTION BLOCK ---
+					// 1. Auto-LIKE: Nếu chuỗi có dấu %
+					if op == "=" && val.K == value.String {
+						if strings.Contains(val.Text(), "%") {
 							op = "LIKE"
-						case "in":
-							op = "IN"
-						case "!=", "!==":
-							op = "<>"
-						case ">", "<", ">=", "<=":
-							op = strings.ToLower(op)
 						}
+					}
 
-						// --- SMART DETECTION BLOCK ---
-						// 1. Auto-LIKE: Nếu chuỗi có dấu %
-						if op == "=" && val.K == value.String {
-							if strings.Contains(val.Text(), "%") {
-								op = "LIKE"
-							}
-						}
+					// 2. Auto-IN: Nếu giá trị là một Array
+					if op == "=" && val.K == value.Array {
+						op = "IN"
+					}
+					// ------------------------------
 
-						// 2. Auto-IN: Nếu giá trị là một Array
-						if op == "=" && val.K == value.Array {
-							op = "IN"
-						}
-						// ------------------------------
-
-						// Handle IN pattern logic
-						if op == "IN" {
-							var list []any
-							// TRÍ TUỆ NHÂN TẠO: Tự động trích xuất phần tử từ mọi loại mảng
-							vRaw := val.Interface()
-							rv := reflect.ValueOf(vRaw)
-							if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-								for i := 0; i < rv.Len(); i++ {
-									item := rv.Index(i).Interface()
-									if v, ok := item.(value.Value); ok {
-										list = append(list, v.Interface())
-									} else {
-										list = append(list, item)
-									}
+					// Handle IN pattern logic
+					if op == "IN" {
+						var list []any
+						// TRÍ TUỆ NHÂN TẠO: Tự động trích xuất phần tử từ mọi loại mảng
+						vRaw := val.Interface()
+						rv := reflect.ValueOf(vRaw)
+						if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+							for i := 0; i < rv.Len(); i++ {
+								item := rv.Index(i).Interface()
+								if v, ok := item.(value.Value); ok {
+									list = append(list, v.Interface())
+								} else {
+									list = append(list, item)
 								}
-							} else {
-								list = []any{vRaw}
 							}
-
-							placeholders := []string{}
-							for _, v := range list {
-								q.whereArgs = append(q.whereArgs, v)
-								placeholders = append(placeholders, fmt.Sprintf("$%d", len(q.whereArgs)))
-							}
-
-							if len(placeholders) == 0 {
-								q.conditions = append(q.conditions, "1=0")
-							} else {
-								q.conditions = append(q.conditions, fmt.Sprintf("\"%s\" IN (%s)", filter.Column, strings.Join(placeholders, ", ")))
-							}
-							return q
+						} else {
+							list = []any{vRaw}
 						}
 
-						// Standard Operator Execution
-						argCount := len(q.whereArgs) + 1
-						q.conditions = append(q.conditions, fmt.Sprintf("\"%s\" %s $%d", filter.Column, op, argCount))
-						q.whereArgs = append(q.whereArgs, val.Interface())
+						placeholders := []string{}
+						for _, v := range list {
+							q.whereArgs = append(q.whereArgs, v)
+							placeholders = append(placeholders, fmt.Sprintf("$%d", len(q.whereArgs)))
+						}
+
+						if len(placeholders) == 0 {
+							q.conditions = append(q.conditions, "1=0")
+						} else {
+							q.conditions = append(q.conditions, fmt.Sprintf("\"%s\" IN (%s)", filter.Column, strings.Join(placeholders, ", ")))
+						}
 						return q
 					}
+
+					// Standard Operator Execution
+					argCount := len(q.whereArgs) + 1
+					q.conditions = append(q.conditions, fmt.Sprintf("\"%s\" %s $%d", filter.Column, op, argCount))
+					q.whereArgs = append(q.whereArgs, val.Interface())
+					return q
 				}
 			}
 		}
@@ -323,26 +315,22 @@ func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *
 		}
 
 		hJoin := &SQLProxyHandler{TableName: joinTableAlias}
-		pJoin := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: hJoin}}
+		pJoin := value.Value{K: value.Proxy, V: hJoin}
 
 		hPrimary := &SQLProxyHandler{TableName: primaryTableAlias}
-		pPrimary := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: hPrimary}}
+		pPrimary := value.Value{K: value.Proxy, V: hPrimary}
 
 		// Thực thi Lambda: (orders, users) => orders.user_id == users.id
 		res := q.executor.ExecuteLambda(sFn, []value.Value{pJoin, pPrimary})
 
 		if res.K == value.Proxy {
-			if d, ok := res.V.(*value.ProxyData); ok {
-				if filter, ok := d.Handler.(*SQLProxyHandler); ok {
-					if filter.Value.K == value.Proxy {
-						if otherData, ok := filter.Value.V.(*value.ProxyData); ok {
-							if otherFilter, ok := otherData.Handler.(*SQLProxyHandler); ok {
-								// Sinh ra SQL chuẩn xác dựa trên tên bảng/biến
-								sqlJoin += fmt.Sprintf(" ON \"%s\".\"%s\" = \"%s\".\"%s\"",
-									filter.TableName, filter.Column,
-									otherFilter.TableName, otherFilter.Column)
-							}
-						}
+			if filter, ok := res.V.(*SQLProxyHandler); ok {
+				if filter.Value.K == value.Proxy {
+					if otherFilter, ok := filter.Value.V.(*SQLProxyHandler); ok {
+						// Sinh ra SQL chuẩn xác dựa trên tên bảng/biến
+						sqlJoin += fmt.Sprintf(" ON \"%s\".\"%s\" = \"%s\".\"%s\"",
+							filter.TableName, filter.Column,
+							otherFilter.TableName, otherFilter.Column)
 					}
 				}
 			}
@@ -357,17 +345,15 @@ func (q *DBQuery) On(args ...value.Value) *DBQuery {
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
 		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
 			handler := &SQLProxyHandler{}
-			proxy := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: handler}}
+			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
 			if res.K == value.Proxy {
-				if d, ok := res.V.(*value.ProxyData); ok {
-					if filter, ok := d.Handler.(*SQLProxyHandler); ok {
-						// Custom On condition: users.id = orders.user_id
-						// We don't use $n placeholders for JOIN ON usually, but raw columns
-						last := len(q.joins) - 1
-						if last >= 0 {
-							q.joins[last] += fmt.Sprintf(" ON \"%s\" = \"%s\"", filter.Column, filter.Value.Text())
-						}
+				if filter, ok := res.V.(*SQLProxyHandler); ok {
+					// Custom On condition: users.id = orders.user_id
+					// We don't use $n placeholders for JOIN ON usually, but raw columns
+					last := len(q.joins) - 1
+					if last >= 0 {
+						q.joins[last] += fmt.Sprintf(" ON \"%s\" = \"%s\"", filter.Column, filter.Value.Text())
 					}
 				}
 			}
@@ -386,19 +372,17 @@ func (q *DBQuery) Having(args ...value.Value) *DBQuery {
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
 		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
 			handler := &SQLProxyHandler{}
-			proxy := value.Value{K: value.Proxy, V: &value.ProxyData{Handler: handler}}
+			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
 			if res.K == value.Proxy {
-				if d, ok := res.V.(*value.ProxyData); ok {
-					if filter, ok := d.Handler.(*SQLProxyHandler); ok {
-						op := filter.Operator
-						if op == "==" || op == "" {
-							op = "="
-						}
-						argCount := len(q.whereArgs) + 1
-						q.havings = append(q.havings, fmt.Sprintf("%s %s $%d", filter.Column, op, argCount))
-						q.whereArgs = append(q.whereArgs, filter.Value.Interface())
+				if filter, ok := res.V.(*SQLProxyHandler); ok {
+					op := filter.Operator
+					if op == "==" || op == "" {
+						op = "="
 					}
+					argCount := len(q.whereArgs) + 1
+					q.havings = append(q.havings, fmt.Sprintf("%s %s $%d", filter.Column, op, argCount))
+					q.whereArgs = append(q.whereArgs, filter.Value.Interface())
 				}
 			}
 		}
@@ -459,8 +443,9 @@ func (q *DBQuery) All() value.Value {
 func (q *DBQuery) Take(args ...value.Value) value.Value {
 	if len(args) > 0 {
 		q.limit = int(args[0].Float())
+		return q.Get()
 	}
-	return q.Get()
+	return q.First()
 }
 
 func (q *DBQuery) ToList() value.Value {
