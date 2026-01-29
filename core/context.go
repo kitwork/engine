@@ -455,28 +455,12 @@ type dbProxyHandler struct {
 }
 
 func (h *dbProxyHandler) OnGet(key string) value.Value {
-	// Reserved methods list (case-insensitive check)
-	lowerKey := strings.ToLower(key)
-	switch lowerKey {
-	case "from", "table", "select", "where", "limit", "offset", "orderby", "join",
-		"group", "groupby", "having", "get", "first", "one", "last", "take",
-		"sum", "avg", "min", "max", "count", "find", "any", "tolist", "firstordefault", "singleordefault",
-		"insert", "update", "delete", "exec", "raw":
-
-		// Return a bound function that creates a fresh DBQuery and calls the target method
-		return value.NewFunc(func(args ...value.Value) value.Value {
-			query := h.ec.task.DB()
-			query.SetExecutor(h.ec.machine)
-			vQuery := value.New(query)
-			return vQuery.Invoke(key, args...)
-		})
-	}
-
-	// Entity syntax: db.user -> returns a DBQuery with table already set
+	// Start a fresh query and wrap it in a queryProxyHandler
 	query := h.ec.task.DB()
 	query.SetExecutor(h.ec.machine)
-	query.Table(key)
-	return value.New(query)
+
+	handler := &queryProxyHandler{ec: h.ec, query: query}
+	return handler.OnGet(key)
 }
 
 func (h *dbProxyHandler) OnCompare(op string, other value.Value) value.Value {
@@ -503,24 +487,64 @@ type queryProxyHandler struct {
 }
 
 func (h *queryProxyHandler) OnGet(key string) value.Value {
+	lowerKey := strings.ToLower(key)
+	// Special handling for entry-point methods to ensure they are always captured
+	if lowerKey == "from" || lowerKey == "table" {
+		return value.NewFunc(func(args ...value.Value) value.Value {
+			return h.OnInvoke(lowerKey, args...)
+		})
+	}
+
 	vQuery := value.New(h.query)
 	// Priority 1: Check if it's a method on DBQuery via reflection
 	attr := vQuery.Get(key)
-	if attr.K != value.Nil && attr.K != value.Invalid {
-		return attr
+	if attr.K == value.Func {
+		// Return a wrapped function that routes through OnInvoke
+		return value.NewFunc(func(args ...value.Value) value.Value {
+			return h.OnInvoke(key, args...)
+		})
 	}
 
-	// Priority 2: Treat as Table/Entity name if no method found
-	h.query.Table(key)
-	return vQuery
+	// Priority 2: If we are accessing a property (db.user), assume it's a table name
+	if h.query.GetTable() == "" {
+		h.query.Table(key)
+	}
+
+	// Always return the proxy to allow further chaining
+	return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
 }
 
 func (h *queryProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
 	vQuery := value.New(h.query)
+
+	lowerMethod := strings.ToLower(method)
+	if lowerMethod == "from" || lowerMethod == "table" {
+		if len(args) > 0 {
+			h.query.Table(args[0].Text())
+			return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+		}
+	}
+
+	// Handle direct call on proxy: db.from("user") or db.table("user")
 	if method == "" {
+		// If table is still empty and we have a string arg, it's likely db.from("user") case
+		if len(args) == 1 && h.query.GetTable() == "" {
+			h.query.Table(args[0].Text())
+			return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+		}
 		return vQuery
 	}
-	return vQuery.Invoke(method, args...)
+
+	res := vQuery.Invoke(method, args...)
+
+	// If the result is a *DBQuery, wrap it back in a proxy for continuous chaining
+	if res.K == value.Struct {
+		if _, ok := res.V.(*work.DBQuery); ok {
+			return value.Value{K: value.Proxy, V: &value.ProxyData{Handler: h}}
+		}
+	}
+
+	return res
 }
 
 func (h *queryProxyHandler) OnCompare(op string, other value.Value) value.Value {

@@ -72,6 +72,10 @@ func (q *DBQuery) Table(table string) *DBQuery {
 	return q
 }
 
+func (q *DBQuery) GetTable() string {
+	return q.table
+}
+
 func (q *DBQuery) From(table string) *DBQuery {
 	return q.Table(table)
 }
