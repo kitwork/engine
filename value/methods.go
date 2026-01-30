@@ -1,6 +1,7 @@
 package value
 
 import (
+	"encoding/json"
 	"math/rand"
 	"strings"
 )
@@ -17,10 +18,18 @@ func (v Value) ToFloat(_ ...Value) Value  { v.K = Number; return v }
 func (v Value) Length(_ ...Value) Value   { v.N = float64(v.Len()); v.K = Number; return v }
 
 func (v Value) ToJson(args ...Value) Value {
-	if len(args) > 0 && args[0].V == "string" {
-		v.V = string(v.ToJSON())
-		v.K = String
-		return v
+	if len(args) > 0 {
+		if args[0].V == "string" {
+			v.V = string(v.ToJSON())
+			v.K = String
+			return v
+		}
+	} else if v.K == String {
+		// If no args and it's a string, try to PARSE it
+		var data any
+		if err := json.Unmarshal([]byte(v.String()), &data); err == nil {
+			return New(data)
+		}
 	}
 	return v
 }

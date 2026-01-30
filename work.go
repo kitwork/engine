@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/security"
@@ -289,7 +291,27 @@ func bootServer(e *core.Engine, serverPort int) {
 			return
 		}
 
-		// 1. URL Query Params
+		// 1. FAST-PATH: Resource Serving (File or Assets)
+		if matchedRoute.Work.ResourcePath != "" {
+			info, err := os.Stat(matchedRoute.Work.ResourcePath)
+			if err == nil {
+				if info.IsDir() {
+					// Directory mode: handle wildcard/prefix
+					prefix := strings.TrimSuffix(matchedRoute.Path, "*")
+					subPath := strings.TrimPrefix(path, prefix)
+					target := filepath.Join(matchedRoute.Work.ResourcePath, subPath)
+					fmt.Printf("[HTTP] Serving Asset: %s\n", target)
+					http.ServeFile(w, r, target)
+				} else {
+					// File mode: serve directly
+					fmt.Printf("[HTTP] Serving File: %s\n", matchedRoute.Work.ResourcePath)
+					http.ServeFile(w, r, matchedRoute.Work.ResourcePath)
+				}
+				return
+			}
+		}
+
+		// 2. URL Query Params
 		queryParams := make(map[string]value.Value)
 		for k, v := range r.URL.Query() {
 			if len(v) > 0 {
@@ -304,6 +326,45 @@ func bootServer(e *core.Engine, serverPort int) {
 			if err := json.NewDecoder(r.Body).Decode(&bodyData); err == nil {
 				for k, v := range bodyData {
 					bodyParams[k] = value.New(v)
+				}
+			}
+		}
+
+		// 3. Cache Check (RAM)
+		cacheKey := ""
+		if matchedRoute.Work.CacheDuration > 0 {
+			cacheKey = "work:" + matchedRoute.Work.Name + ":" + r.URL.String()
+			if cached, ok := work.GetCache(cacheKey); ok {
+				fmt.Printf("[HTTP] Cache Hit: %s\n", cacheKey)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Cache", "HIT")
+				outputData, _ := json.Marshal(cached.Interface())
+				w.Write(outputData)
+				return
+			}
+		}
+
+		// 4. Static Stack Check (DISK)
+		stackPath := ""
+		if matchedRoute.Work.StaticDuration > 0 {
+			hashedName := fmt.Sprintf("%x", sha256.Sum256([]byte(r.URL.String())))
+			stackPath = filepath.Join(".stack", matchedRoute.Work.Name, hashedName)
+
+			if info, err := os.Stat(stackPath); err == nil {
+				if time.Since(info.ModTime()) < matchedRoute.Work.StaticDuration {
+					// Potentially verify checksum if enabled
+					valid := true
+					if matchedRoute.Work.StaticCheck {
+						// Logic for checksum verification
+						valid = verifyChecksum(stackPath)
+					}
+
+					if valid {
+						fmt.Printf("[HTTP] Stack Hit: %s\n", stackPath)
+						w.Header().Set("X-Stack", "HIT")
+						http.ServeFile(w, r, stackPath)
+						return
+					}
 				}
 			}
 		}
@@ -337,6 +398,22 @@ func bootServer(e *core.Engine, serverPort int) {
 		w.Header().Set("Content-Type", "application/json")
 		outputData, _ := json.Marshal(responseVal.Interface())
 		fmt.Printf("[HTTP] Response: %s\n", string(outputData))
+
+		// Save to cache (RAM)
+		if cacheKey != "" && res.Error == "" {
+			work.SetCache(cacheKey, responseVal, matchedRoute.Work.CacheDuration)
+		}
+
+		// Save to stack (DISK)
+		if stackPath != "" && res.Error == "" {
+			os.MkdirAll(filepath.Dir(stackPath), 0755)
+			data, _ := json.Marshal(responseVal.Interface())
+			os.WriteFile(stackPath, data, 0644)
+			if matchedRoute.Work.StaticCheck {
+				writeChecksum(stackPath)
+			}
+		}
+
 		w.Write(outputData)
 	})
 
@@ -390,4 +467,19 @@ func matchRoute(path, routePath string) (map[string]string, bool) {
 		}
 	}
 	return params, true
+}
+func writeChecksum(path string) {
+	data, _ := os.ReadFile(path)
+	hash := sha256.Sum256(data)
+	os.WriteFile(path+".sha256", []byte(fmt.Sprintf("%x", hash)), 0644)
+}
+
+func verifyChecksum(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	hash := sha256.Sum256(data)
+	expected, _ := os.ReadFile(path + ".sha256")
+	return fmt.Sprintf("%x", hash) == string(expected)
 }

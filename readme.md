@@ -17,7 +17,10 @@
 - [🎨 JIT CSS Engine](#-jit-css-engine)
 - [🌐 Web Stack Primitives](#-web-stack-primitives)
 - [⚡ Industrial Concurrency](#-industrial-concurrency)
-- [📦 Explicit Caching System](#-explicit-caching-system)
+- [📦 Multi-layer Caching](#-multi-layer-caching)
+- [🏗️ Static Resource Serving](#️-static-resource-serving)
+- [🧩 Functional Data Processing](#-functional-data-processing)
+- [🔄 Execution Lifecycle Hooks](#-execution-lifecycle-hooks)
 - [☁️ Cloud-Native Built-ins](#️-cloud-native-built-ins)
 - [🛠️ Performance Markers](#-performance-markers)
 - [⚙️ Modular Configuration](#️-modular-configuration)
@@ -139,33 +142,79 @@ work("App")
 | `status(code)`| Set HTTP status code. | `status(201)` |
 | `redirect(url)`| Immediate redirect. | `redirect("/home")` |
 | `cookie(k, v)`| Secure cookie management. | `cookie("token", val, { secure: true })` |
+| `http.get(url)` | REAL HTTP GET (Auto-parse JSON). | `let res = http.get(url)` |
+| `http.post(url, b)`| REAL HTTP POST. | `let res = http.post(url, {key: 1})` |
 
 ---
 
-## ⚡ Industrial Concurrency
-High-concurrency logic made simple and safe.
+## 📦 Multi-layer Caching
+Kitwork offers a hybrid caching strategy to balance between RAM speed and Disk persistence.
 
-### High-Performance Parallelism
-Execute independent tasks concurrently to maximize I/O utilization.
-```javascript
-const { user, profile } = parallel({
-    user: () => db.user.find(1),
-    profile: () => http.get("https://api.svc/profile/1")
-});
-```
-
-### Advanced Flow Control
-*   **`go(() => ...)`**: Dispatch heavy tasks to background workers.
-*   **`defer(() => ...)`**: Lifecycle management to run logic **after** the response is sent.
-
----
-
-## 📦 Explicit Caching System
-Predictable caching with human-readable duration strings (e.g., "1d", "1h30m").
+### RAM Cache (LRU)
+Predictable in-memory caching with human-readable duration strings (e.g., "1h30m").
 ```javascript
 const data = cache("top_sales", "1h", () => {
     return db.orders.where(o => o.amount > 1000).list();
 });
+```
+
+### Disk Stacking (Static Snapshot)
+Tĩnh hóa (Statify) your dynamic responses directly to disk. It uses **OS Metadata (ModTime)** for extreme efficiency.
+```javascript
+work("GoldPrice")
+    .get("/api/gold")
+    .static("10m") // Serve static snapshot for 10 minutes
+    .handle(() => http.get("https://api.gold/latest"));
+```
+*   **Security**: Use `.static({ duration: "1h", check: true })` to enable **SHA256 Checksum** verification, preventing manual tampering with cached files.
+
+---
+
+## 🏗️ Static Resource Serving
+Bypass the Script Engine entirely for maximum throughput (Zero-VM overhead).
+
+### Unified Asset Serving
+The `.assets()` method is polymorphic; it automatically detects whether you are serving a single file or an entire directory.
+
+```javascript
+// 1. Directory Mapping (Wildcard)
+work("Static").get("/assets/*").assets("./dist/assets");
+
+// 2. Single File Alias
+work("Manifest").get("/site.webmanifest").assets("./public/manifest.json");
+
+// 3. Explicit File Serving
+work("Logo").get("/favicon.ico").file("./logo.png");
+```
+
+---
+
+## 🧩 Functional Data Processing
+Transform and filter data using native bytecode-optimized operations. These run directly in the core VM, making them significantly faster than manual loops.
+
+```javascript
+const result = rawList
+    .map(item => ({ 
+        id: item.id, 
+        price: item.val * 1.5 
+    }))
+    .filter(item => item.price > 100);
+```
+*   **Note**: Always wrap returned objects in parentheses `({ })` when using arrow functions.
+
+---
+
+## 🔄 Execution Lifecycle Hooks
+Decouple business logic from post-processing and error management.
+
+```javascript
+work("Transaction")
+    .handle((req) => {
+        if (!req.body().amount) fail("Amount is required");
+        return db.pay(req.body());
+    })
+    .done((res) => log(`Paid: ${res.txId}`))
+    .fail((err) => log(`Alert Admin: ${err}`));
 ```
 
 ---

@@ -1,7 +1,11 @@
 package work
 
 import (
-	"fmt"
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"time"
 
 	"github.com/kitwork/engine/value"
 )
@@ -15,21 +19,52 @@ func NewHTTPClient(t *Task) *HTTPClient {
 }
 
 func (c *HTTPClient) Get(url string) value.Value {
-	// Mock implementation
-	fmt.Printf("[%s] HTTP GET -> %s\n", c.task.Work.Name, url)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return value.Value{K: value.Invalid, V: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
 
 	res := make(map[string]value.Value)
-	res["status"] = value.New(200)
-	res["body"] = value.New(fmt.Sprintf("Response from %s", url))
+	res["status"] = value.New(resp.StatusCode)
+
+	// Try to parse as JSON if possible
+	var jsonData any
+	if err := json.Unmarshal(body, &jsonData); err == nil {
+		res["body"] = value.New(jsonData)
+	} else {
+		res["body"] = value.New(string(body))
+	}
+
 	return value.New(res)
 }
 
-func (c *HTTPClient) Post(url string, body value.Value) value.Value {
-	// Mock implementation
-	fmt.Printf("[%s] HTTP POST -> %s | Body: %s\n", c.task.Work.Name, url, body.Text())
+func (c *HTTPClient) Post(url string, bodyVal value.Value) value.Value {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(bodyVal.Interface())
+
+	resp, err := client.Post(url, "application/json", &buf)
+	if err != nil {
+		return value.Value{K: value.Invalid, V: err.Error()}
+	}
+	defer resp.Body.Close()
+
+	resBody, _ := io.ReadAll(resp.Body)
 
 	res := make(map[string]value.Value)
-	res["status"] = value.New(201)
-	res["id"] = value.New("req_12345")
+	res["status"] = value.New(resp.StatusCode)
+
+	var jsonData any
+	if err := json.Unmarshal(resBody, &jsonData); err == nil {
+		res["body"] = value.New(jsonData)
+	} else {
+		res["body"] = value.New(string(resBody))
+	}
+
 	return value.New(res)
 }

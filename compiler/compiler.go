@@ -316,6 +316,26 @@ func (c *Compiler) Compile(node Node) error {
 		fmt.Printf("[Compiler] Created ScriptFunction with Address: %d\n", startIP)
 		idx := c.addConstant(value.New(fnData))
 		c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+
+	case *TemplateLiteral:
+		if len(n.Parts) == 0 {
+			idx := c.addConstant(value.NewString(""))
+			c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+			return nil
+		}
+		// Compile first part
+		err := c.Compile(n.Parts[0])
+		if err != nil {
+			return err
+		}
+		// Compile and ADD subsequent parts
+		for i := 1; i < len(n.Parts); i++ {
+			err := c.Compile(n.Parts[i])
+			if err != nil {
+				return err
+			}
+			c.emit(opcode.ADD)
+		}
 	}
 
 	return nil

@@ -65,6 +65,10 @@ func (vm *Runtime) Defer(fn *value.ScriptFunction) {
 	}
 }
 
+func (vm *Runtime) Stop() {
+	vm.FrameIdx = -1
+}
+
 func (vm *Runtime) Run() value.Value {
 	//fmt.Printf("[VM Run] Starting execution, bytecode length: %d\n", len(vm.Bytecode))
 	for vm.FrameIdx >= 0 {
@@ -591,7 +595,48 @@ func (vm *Runtime) ExecuteLambda(s *value.ScriptFunction, args []value.Value) va
 				ivArgs[i] = vm.pop()
 			}
 			target := vm.pop()
-			vm.push(target.Invoke(m, ivArgs...))
+
+			handled := false
+			// Special Handling for Functional Methods (Map, Filter, Find)
+			if target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
+				callback := ivArgs[0].V.(*value.ScriptFunction)
+				arr := *target.V.(*[]value.Value)
+
+				switch m {
+				case "map":
+					resArr := make([]value.Value, len(arr))
+					for i, item := range arr {
+						resArr[i] = vm.ExecuteLambda(callback, []value.Value{item, value.New(float64(i))})
+					}
+					vm.push(value.New(resArr))
+					handled = true
+				case "filter":
+					resArr := []value.Value{}
+					for i, item := range arr {
+						if vm.ExecuteLambda(callback, []value.Value{item, value.New(float64(i))}).Truthy() {
+							resArr = append(resArr, item)
+						}
+					}
+					vm.push(value.New(resArr))
+					handled = true
+				case "find":
+					for i, item := range arr {
+						if vm.ExecuteLambda(callback, []value.Value{item, value.New(float64(i))}).Truthy() {
+							vm.push(item)
+							handled = true
+							break
+						}
+					}
+					if !handled {
+						vm.push(value.Value{K: value.Nil})
+						handled = true
+					}
+				}
+			}
+
+			if !handled {
+				vm.push(target.Invoke(m, ivArgs...))
+			}
 		case opcode.GET:
 			keyVal := vm.pop()
 			target := vm.pop()

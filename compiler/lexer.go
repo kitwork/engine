@@ -140,7 +140,11 @@ func (l *Lexer) NextToken() token.Token {
 		return tok
 
 	case character.Quote:
-		tok.Kind = token.String
+		if l.ch == '`' {
+			tok.Kind = token.Template
+		} else {
+			tok.Kind = token.String
+		}
 		str := l.readString(l.ch)
 		tok.Value = value.NewString(str)
 		tok.Length = int16(len(str))

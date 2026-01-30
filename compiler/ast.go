@@ -411,3 +411,26 @@ func (mce *MethodCallExpression) String() string {
 	out.WriteString(")")
 	return out.String()
 }
+
+// TemplateLiteral: `Hello ${user.name}`
+type TemplateLiteral struct {
+	Token token.Token
+	Parts []Expression // Alternating Literal (strings) and Expressions
+}
+
+func (tl *TemplateLiteral) expressionNode() {}
+func (tl *TemplateLiteral) String() string {
+	var out bytes.Buffer
+	out.WriteString("`")
+	for _, p := range tl.Parts {
+		if lit, ok := p.(*Literal); ok && lit.Token.Kind == token.String {
+			out.WriteString(lit.Value.Text())
+		} else {
+			out.WriteString("${")
+			out.WriteString(p.String())
+			out.WriteString("}")
+		}
+	}
+	out.WriteString("`")
+	return out.String()
+}

@@ -19,12 +19,18 @@ type StaticRoute struct {
 
 // Work là Blueprint (Bản thiết kế) - IMMUTABLE
 type Work struct {
-	Name       string
-	Routes     []*StaticRoute
-	Retries    int
-	TimeoutDur time.Duration
-	Ver        string
-	Bytecode   *compiler.Bytecode
+	Name           string
+	Routes         []*StaticRoute
+	Retries        int
+	TimeoutDur     time.Duration
+	Ver            string
+	Bytecode       *compiler.Bytecode
+	DoneHandler    *value.ScriptFunction
+	FailHandler    *value.ScriptFunction
+	CacheDuration  time.Duration
+	StaticDuration time.Duration
+	StaticCheck    bool
+	ResourcePath   string
 }
 
 func (w *Work) LoadFromConfig(data map[string]any) {
@@ -117,6 +123,75 @@ func (w *Work) Version(v string) *Work {
 }
 
 func (w *Work) Cache(duration any) *Work {
+	w.CacheDuration = parseDuration(duration)
+	return w
+}
+
+func (w *Work) Static(args ...any) *Work {
+	if len(args) == 0 {
+		return w
+	}
+	arg := args[0]
+	switch v := arg.(type) {
+	case string, float64, int:
+		w.StaticDuration = parseDuration(v)
+	case value.Value:
+		if v.IsMap() {
+			m := v.Map()
+			if d, ok := m["duration"]; ok {
+				w.StaticDuration = parseDuration(d)
+			}
+			if c, ok := m["check"]; ok {
+				w.StaticCheck = c.IsTrue()
+			}
+		} else {
+			w.StaticDuration = parseDuration(v)
+		}
+	}
+	return w
+}
+
+func (w *Work) File(path string) *Work {
+	w.ResourcePath = path
+	return w
+}
+
+func (w *Work) Assets(path string) *Work {
+	w.ResourcePath = path
+	return w
+}
+
+func parseDuration(val any) time.Duration {
+	switch v := val.(type) {
+	case string:
+		d, _ := time.ParseDuration(v)
+		return d
+	case float64:
+		return time.Duration(v) * time.Second
+	case int:
+		return time.Duration(v) * time.Second
+	case value.Value:
+		if v.IsString() {
+			d, _ := time.ParseDuration(v.Text())
+			return d
+		} else if v.IsNumeric() {
+			return time.Duration(v.Float()) * time.Second
+		}
+	}
+	return 0
+}
+
+func (w *Work) Done(fn value.Value) *Work {
+	if sFn, ok := fn.V.(*value.ScriptFunction); ok {
+		w.DoneHandler = sFn
+	}
+	return w
+}
+
+func (w *Work) Fail(fn value.Value) *Work {
+	if sFn, ok := fn.V.(*value.ScriptFunction); ok {
+		w.FailHandler = sFn
+	}
 	return w
 }
 
@@ -130,6 +205,7 @@ type Task struct {
 
 	Response value.Value
 	ResType  string
+	Error    string
 	Config   map[string]string
 }
 
@@ -139,6 +215,7 @@ func (t *Task) Reset(w *Work) {
 	t.Writer = nil
 	t.Response = value.Value{K: value.Nil}
 	t.ResType = "json"
+	t.Error = ""
 
 	if t.Params == nil {
 		t.Params = make(map[string]value.Value)
@@ -214,4 +291,14 @@ func (t *Task) Print(args ...value.Value) {
 		fmt.Print(arg.Text(), " ")
 	}
 	fmt.Println()
+}
+
+func (t *Task) Done(args ...value.Value) {
+	if len(args) > 0 {
+		t.Response = args[0]
+	}
+}
+
+func (t *Task) Fail(err value.Value) {
+	t.Error = err.Text()
 }

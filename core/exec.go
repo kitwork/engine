@@ -30,6 +30,8 @@ type ExecutionContext struct {
 	paramsFn   value.Value
 	cookieFn   value.Value
 	cacheFn    value.Value
+	doneFn     value.Value
+	failFn     value.Value
 }
 
 func (e *Engine) Trigger(ctx context.Context, w *work.Work, req *http.Request, writer http.ResponseWriter, params ...map[string]value.Value) Result {
@@ -67,10 +69,21 @@ func (e *Engine) Trigger(ctx context.Context, w *work.Work, req *http.Request, w
 
 	evalRes := ec.machine.Run()
 
+	// 2. Lifecycle hooks
+	if ec.task.Error != "" {
+		if w.FailHandler != nil {
+			ec.machine.ExecuteLambda(w.FailHandler, []value.Value{value.NewString(ec.task.Error)})
+		}
+	} else {
+		if w.DoneHandler != nil {
+			ec.machine.ExecuteLambda(w.DoneHandler, []value.Value{ec.task.Response})
+		}
+	}
+
 	// Update routes to global router if needed
 	e.syncRoutes(w)
 
-	return Result{Value: evalRes, Response: ec.task.Response, ResType: ec.task.ResType, Energy: ec.machine.Energy}
+	return Result{Value: evalRes, Response: ec.task.Response, ResType: ec.task.ResType, Error: ec.task.Error, Energy: ec.machine.Energy}
 }
 
 func (e *Engine) ExecuteLambda(w *work.Work, sFn *value.ScriptFunction, req *http.Request, writer http.ResponseWriter, params ...map[string]value.Value) (res Result) {
@@ -97,5 +110,17 @@ func (e *Engine) ExecuteLambda(w *work.Work, sFn *value.ScriptFunction, req *htt
 	// Combine all for the single 'params' argument usually passed to lambdas (req object)
 	combined := ec.task.Payload()
 	evalRes := ec.machine.ExecuteLambda(sFn, []value.Value{combined})
-	return Result{Value: evalRes, Response: ec.task.Response, ResType: ec.task.ResType, Energy: ec.machine.Energy}
+
+	// Lifecycle hooks
+	if ec.task.Error != "" {
+		if w.FailHandler != nil {
+			ec.machine.ExecuteLambda(w.FailHandler, []value.Value{value.NewString(ec.task.Error)})
+		}
+	} else {
+		if w.DoneHandler != nil {
+			ec.machine.ExecuteLambda(w.DoneHandler, []value.Value{ec.task.Response})
+		}
+	}
+
+	return Result{Value: evalRes, Response: ec.task.Response, ResType: ec.task.ResType, Error: ec.task.Error, Energy: ec.machine.Energy}
 }

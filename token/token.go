@@ -17,6 +17,7 @@ const (
 	Identifier // work, db, cleanup
 	Number     // 123, 0.5
 	String     // "02:00", 'logs'
+	Template   // `Hello ${name}`
 	Boolean    // true, false
 	Null
 
@@ -79,6 +80,8 @@ func (k Kind) String() string {
 		return "NUMBER"
 	case String:
 		return "STRING"
+	case Template:
+		return "TEMPLATE"
 	case Boolean:
 		return "BOOLEAN"
 	case Null:

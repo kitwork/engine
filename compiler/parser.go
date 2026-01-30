@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kitwork/engine/token"
+	"github.com/kitwork/engine/value"
 )
 
 // Bảng độ ưu tiên
@@ -72,6 +73,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(token.String, p.parseLiteral)
 	p.registerPrefix(token.Boolean, p.parseLiteral)
 	p.registerPrefix(token.Null, p.parseLiteral)
+	p.registerPrefix(token.Template, p.parseTemplateLiteral)
 	p.registerPrefix(token.LogicalNot, p.parsePrefixExpression)
 	p.registerPrefix(token.Minus, p.parsePrefixExpression)
 	p.registerPrefix(token.LeftParen, p.parseGroupedExpression)
@@ -274,6 +276,62 @@ func (p *Parser) parseIdentifier() Expression {
 
 func (p *Parser) parseLiteral() Expression {
 	return &Literal{Token: p.curToken, Value: p.curToken.Value}
+}
+
+func (p *Parser) parseTemplateLiteral() Expression {
+	fullText := p.curToken.Value.Text()
+	tl := &TemplateLiteral{Token: p.curToken, Parts: []Expression{}}
+
+	start := 0
+	for i := 0; i < len(fullText); i++ {
+		// Look for ${
+		if i+1 < len(fullText) && fullText[i] == '$' && fullText[i+1] == '{' {
+			// 1. Add previous string part if exists
+			if i > start {
+				tl.Parts = append(tl.Parts, &Literal{
+					Token: token.Token{Kind: token.String},
+					Value: value.NewString(fullText[start:i]),
+				})
+			}
+
+			// 2. Parse expression inside ${ }
+			exprStr := ""
+			i += 2 // skip ${
+			braceCount := 1
+			exprStart := i
+			for i < len(fullText) && braceCount > 0 {
+				if fullText[i] == '{' {
+					braceCount++
+				} else if fullText[i] == '}' {
+					braceCount--
+				}
+				if braceCount > 0 {
+					i++
+				}
+			}
+			exprStr = fullText[exprStart:i]
+
+			// Sub-parse the expression
+			subLexer := NewLexer(exprStr)
+			subParser := NewParser(subLexer)
+			expr := subParser.parseExpression(LOWEST)
+			if expr != nil {
+				tl.Parts = append(tl.Parts, expr)
+			}
+
+			start = i + 1 // skip }
+		}
+	}
+
+	// Add trailing string part
+	if start < len(fullText) {
+		tl.Parts = append(tl.Parts, &Literal{
+			Token: token.Token{Kind: token.String},
+			Value: value.NewString(fullText[start:]),
+		})
+	}
+
+	return tl
 }
 
 func (p *Parser) parseInfixExpression(left Expression) Expression {

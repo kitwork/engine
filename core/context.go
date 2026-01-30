@@ -102,6 +102,20 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		return value.NewNull()
 	})
 
+	ctx.doneFn = value.NewFunc(func(args ...value.Value) value.Value {
+		ctx.task.Done(args...)
+		ctx.machine.Stop()
+		return value.NewNull()
+	})
+
+	ctx.failFn = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 {
+			ctx.task.Fail(args[0])
+		}
+		ctx.machine.Stop()
+		return value.NewNull()
+	})
+
 	// engine object for chaining
 	var runtimeObj map[string]value.Value
 	runtimeObj = map[string]value.Value{
@@ -434,6 +448,8 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.machine.Vars["log"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.logFn}}
 	ctx.machine.Vars["http"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.httpFn}}
 	ctx.machine.Vars["cache"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.cacheFn}}
+	ctx.machine.Vars["done"] = ctx.doneFn
+	ctx.machine.Vars["fail"] = ctx.failFn
 
 	ctx.machine.Vars["defer"] = ctx.deferFn
 	ctx.machine.Vars["random"] = value.NewFunc(func(args ...value.Value) value.Value {
@@ -617,7 +633,7 @@ func (h *genericServiceProxy) OnInvoke(method string, args ...value.Value) value
 	}
 	// If calling a method (rare for the entry proxy), invoke on instance
 	serviceInstance := h.fn.Call("", []value.Value{}...)
-	return serviceInstance.Call(method, args...)
+	return serviceInstance.Invoke(method, args...)
 }
 
 func (h *genericServiceProxy) OnCompare(op string, other value.Value) value.Value {

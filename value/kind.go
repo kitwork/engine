@@ -153,6 +153,9 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Compact, true
 		case "unique":
 			return Value.Unique, true
+		case "map", "filter", "find":
+			// Functional methods handled directly by Runtime for callback execution power
+			return func(target Value, args ...Value) Value { return Value{K: Nil} }, true
 		}
 	case Map:
 		switch name {
