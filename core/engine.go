@@ -7,6 +7,7 @@ import (
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
+	"github.com/robfig/cron/v3"
 )
 
 type Engine struct {
@@ -17,6 +18,7 @@ type Engine struct {
 	compilerPool sync.Pool
 	ctxPool      sync.Pool
 	Config       GlobalConfig
+	scheduler    *cron.Cron
 }
 
 func New() *Engine {
@@ -28,7 +30,9 @@ func New() *Engine {
 		stdlibStore: stdlib.Store(),
 		cache:       cache,
 		Registry:    make(map[string]*work.Work),
+		scheduler:   cron.New(cron.WithSeconds()), // Support second-level precision if needed
 	}
+	e.scheduler.Start()
 
 	e.compilerPool.New = func() any { return compiler.NewCompiler() }
 

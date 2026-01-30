@@ -7,10 +7,12 @@ import (
 )
 
 type Route struct {
-	Method string
-	Path   string
-	Fn     *value.ScriptFunction
-	Work   *Work // Exec context
+	Method   string
+	Path     string
+	Fn       *value.ScriptFunction
+	Work     *Work // Exec context
+	Redirect *Redirect
+	Template *Template
 }
 
 type Router struct {

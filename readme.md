@@ -15,12 +15,14 @@
 - [🧠 Core Philosophy](#-core-philosophy)
 - [🗄️ Database (Industrial Query Builder)](#️-database-industrial-query-builder)
 - [🎨 JIT CSS Engine](#-jit-css-engine)
+- [🖼️ Render & Layout System](#-render--layout-system)
 - [🌐 Web Stack Primitives](#-web-stack-primitives)
 - [⚡ Industrial Concurrency](#-industrial-concurrency)
 - [📦 Multi-layer Caching](#-multi-layer-caching)
 - [🏗️ Static Resource Serving](#️-static-resource-serving)
 - [🧩 Functional Data Processing](#-functional-data-processing)
 - [🔄 Execution Lifecycle Hooks](#-execution-lifecycle-hooks)
+- [⏰ Background Task Scheduling (.schedule())](#-background-task-scheduling-schedule)
 - [☁️ Cloud-Native Built-ins](#️-cloud-native-built-ins)
 - [🛠️ Performance Markers](#-performance-markers)
 - [⚙️ Modular Configuration](#️-modular-configuration)
@@ -99,9 +101,11 @@ db.user.where(u => u.id == 1).destroy(); // Hard Delete (physical removal)
 ## 🎨 JIT CSS Engine
 Kitwork includes a high-performance **Just-In-Time (JIT) CSS Generator** written in Go. It scans your HTML files and generates only the utility classes you actually use, ensuring minimal bundle size and maximum performance.
 
-### ⚡ Key Features:
+### ⚡ Power Features:
 - **Zero-Config Generation**: No complex Webpack/Vite setups required.
-- **Atomic Reliability**: Every utility class is mapped to deterministic CSS rules.
+- **Deep Tech UI**: Built-in support for futuristic interactions (`hover:translate-y--2px`, `hover:shadow-glow`).
+- **Smart Aliases**: Use `bg-` for `background-`, `font-mono` for code, and standard utility syntax.
+- **Explicit Units**: Full control with explicit sizing (e.g., `width-30pct`, `border-1px`, `opacity-80`).
 - **Dynamic 3D Support**: Native support for 3D components like cubes, including responsive sizing and duration.
 
 ```bash
@@ -109,18 +113,45 @@ Kitwork includes a high-performance **Just-In-Time (JIT) CSS Generator** written
 go run demo/css_jit_demo.go
 ```
 
-Example Utility Usage:
+Example Deep Tech Component:
 ```html
-<div class="cube-area cube-size-120 tablet:cube-size-80">
-    <div class="cube-block cube-rotate-center">
-        <!-- 3D Logic Visuals -->
-    </div>
-</div>
+<button class="bg-brand text-white rounded-4px hover:translate-y--2px hover:shadow-glow transition-all">
+    <span class="font-mono uppercase">Deploy Node</span>
+</button>
 ```
 
 ---
 
-## 🌐 Web Stack Primitives
+## 🎨 Render & Layout System
+Kitwork features a zero-allocation template engine designed for maximum throughput. It supports component-based architecture via **Smart Layout Injection**.
+
+### 🧩 Smart Layouts (`.layout()`)
+Inject partials (like navbars, footers) directly into your main view.
+Partials are pre-loaded and available as **Raw Placeholders** (prefixed with `$`).
+
+```javascript
+work("Dashboard")
+    .get("/admin", () => ({ user: "Admin" }))
+    .layout({ 
+        $navbar: "view/components/navbar.html", // Maps to {{ $navbar }}
+        $footer: "view/components/footer.html"  // Maps to {{ $footer }}
+    })
+    .render("view/dashboard.html");
+```
+
+### 🛡️ Smart Security (Syntax)
+The engine automatically distinguishes between trusted layouts and unsafe user data based on the variable syntax.
+
+| Syntax | Behavior | Use Case |
+| :--- | :--- | :--- |
+| `{{ $variable }}` | **Raw HTML** (Unescaped) | Layouts, Trusted Components |
+| `{{ variable }}` | **Auto-Escaped** (Safe) | User Input, Database Content |
+
+> **Analogy**: Think of `$` as a "System Flag". If it has a dollar sign, it's trusted infrastructure. If not, it's treated as untrusted data.
+
+---
+
+## �🌐 Web Stack Primitives
 
 ### Zero-Copy Routing
 Kitwork uses a high-performance Trie-based router for maximum throughput.
@@ -129,6 +160,11 @@ work("App")
     .get("/users", listUsers)           // Static
     .get("/users/:id", getUser)         // Dynamic: params("id")
     .post("/users", createUser)          // POST Payload
+    
+// 2. High-Performance Static Redirects
+work("Legacy")
+    .get("/old-api").redirect("/api/v1/hello")
+    .get("/google").redirect("https://google.com", 301);
 ```
 
 ### Request & Response Mapping
@@ -140,7 +176,7 @@ work("App")
 | `header(key)` | Request headers. | `const auth = header("Authorization")` |
 | `body()` | Full Raw Body or JSON. | `const raw = body()` |
 | `status(code)`| Set HTTP status code. | `status(201)` |
-| `redirect(url)`| Immediate redirect. | `redirect("/home")` |
+| `redirect(url, code?)`| Logic-based redirect inside handler. | `redirect("/home")` |
 | `cookie(k, v)`| Secure cookie management. | `cookie("token", val, { secure: true })` |
 | `http.get(url)` | REAL HTTP GET (Auto-parse JSON). | `let res = http.get(url)` |
 | `http.post(url, b)`| REAL HTTP POST. | `let res = http.post(url, {key: 1})` |
@@ -216,6 +252,51 @@ work("Transaction")
     .done((res) => log(`Paid: ${res.txId}`))
     .fail((err) => log(`Alert Admin: ${err}`));
 ```
+
+---
+
+## ⏰ Background Task Scheduling (.schedule())
+Decouple business logic from request-cycles. Kitwork includes an industrial background scheduler that executes your business rules with nanosecond precision using a human-centric semantic API.
+
+### ⚡ Atomic Scheduling & Logic Inheritance
+The `.schedule()` family of methods allows you to assign recurring rituals to any Work blueprint. Tasks automatically inherit logic from the primary `.handle()` method, ensuring zero redundancy.
+
+```javascript
+work("DailyOperations")
+    .handle(() => {
+        log("Atomic Pulse: Running critical bank synchronization...");
+        db.orders.where(o => o.status == "pending").update({ processed: true });
+    })
+    // 1. Variadic Semantic Times
+    .daily("01:00", "13:00") 
+    
+    // 2. Precise Hour Markers (Minutes 0 and 30)
+    .hourly(0, 30)
+    
+    // 3. Intervals
+    .every("5m")
+    
+    // 4. Weekly/Monthly Milestones
+    .weekly("MONDAY 08:30")
+    .monthly("1st")
+    
+    // 5. Advanced Config & Custom Handlers
+    .schedule("0 45 22 * * *", (res) => {
+        log("Nightly Audit Complete");
+    });
+```
+
+### 🧠 Smart Parser Capabilities
+Kitwork's **Universal Scheduler Parser** handles multiple semantic formats automatically:
+- **Time Strings**: `"13:00"` (Daily at 1 PM).
+- **Durations**: `"3s"`, `"10m"`, `"1h"` (Simple intervals).
+- **Pure Numbers**: `2000` (Every 2000ms).
+- **Day-Time Combinations**: `"MONDAY 14:30"` (Weekly on Mondays).
+- **Variadic Arguments**: Pass multiple times directly as separate arguments.
+
+- **Unified Runtime**: JS for both APIs and Cron jobs.
+- **Persistence**: Tasks are auto-mapped and initiated during engine boot.
+- **Zero-Boilerplate**: No arrays or complex objects required for basic multi-scheduling.
 
 ---
 

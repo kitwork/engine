@@ -104,22 +104,25 @@ func (v Value) Get(key string) Value {
 		return New(v.K.String())
 	}
 
-	// ƯU TIÊN 1: Tra cứu Prototype Table (Fix lỗi upper, type, len)
-	// Kind.GetMethod sẽ quét map tĩnh đã đăng ký trong InitStandardLibrary
+	// ƯU TIÊN 1: Tra cứu Dynamic (Struct) - Cho phép Overriding các hàm Global
+	if v.K == Struct {
+		res := v.reflect(key)
+		if res.K != Nil {
+			return res
+		}
+	}
+
+	// ƯU TIÊN 2: Tra cứu Prototype Table (Fix lỗi upper, type, len)
 	if fn, ok := v.K.Method(key); ok {
 		return Value{K: Func, V: fn}
 	}
 
-	// Nếu không phải Prototype, kiểm tra xem có phải Object/Struct không
 	if !v.IsObject() {
-		return Value{K: Nil} // Trả về Nil để tránh gãy chuỗi (Safety)
+		return Value{K: Nil}
 	}
 
-	// ƯU TIÊN 2: Tra cứu Dynamic (Reflection hoặc Map)
+	// ƯU TIÊN 3: Tra cứu Map/Proxy còn lại
 	switch v.K {
-	case Struct:
-
-		return v.reflect(key)
 	case Map:
 		if m := v.Map(); m != nil {
 			if val, ok := m[key]; ok {

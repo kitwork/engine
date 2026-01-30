@@ -10,11 +10,22 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// StaticRoute đại diện cho một rule điều hướng tĩnh
 type StaticRoute struct {
-	Method  string
-	Path    string
-	Handler *value.ScriptFunction
+	Method   string
+	Path     string
+	Handler  *value.ScriptFunction
+	Redirect *Redirect
+	Template *Template
+}
+
+type Template struct {
+	Page   string
+	Layout map[string]string
+}
+
+type Redirect struct {
+	URL  string
+	Code int
 }
 
 // Work là Blueprint (Bản thiết kế) - IMMUTABLE
@@ -31,6 +42,8 @@ type Work struct {
 	StaticDuration time.Duration
 	StaticCheck    bool
 	ResourcePath   string
+	Schedules      []*ScheduleRule
+	PrimaryHandler *value.ScriptFunction
 }
 
 func (w *Work) LoadFromConfig(data map[string]any) {
@@ -96,6 +109,77 @@ func (w *Work) routerWithHandler(method string, args ...value.Value) *Work {
 	return w
 }
 
+func (w *Work) Redirect(url string, code ...int) *Work {
+	if len(w.Routes) > 0 {
+		lastRoute := w.Routes[len(w.Routes)-1]
+		lastRoute.Redirect = &Redirect{
+			URL:  url,
+			Code: http.StatusFound,
+		}
+		if len(code) > 0 {
+			lastRoute.Redirect.Code = code[0]
+		}
+	}
+	return w
+}
+
+func (w *Work) Render(arg any) *Work {
+	if len(w.Routes) > 0 {
+		last := w.Routes[len(w.Routes)-1]
+		if last.Template == nil {
+			last.Template = &Template{}
+		}
+
+		var v value.Value
+		switch val := arg.(type) {
+		case string:
+			last.Template.Page = val
+			return w
+		case value.Value:
+			v = val
+		case *value.Value:
+			v = *val
+		default:
+			return w
+		}
+
+		if v.IsString() {
+			last.Template.Page = v.Text()
+		} else if v.IsMap() {
+			m := v.Map()
+			if main, ok := m["main"]; ok {
+				last.Template.Page = main.Text()
+			}
+			if last.Template.Layout == nil {
+				last.Template.Layout = make(map[string]string)
+			}
+			for k, val := range m {
+				if k != "main" {
+					last.Template.Layout[k] = val.Text()
+				}
+			}
+		}
+	}
+	return w
+}
+
+func (w *Work) Layout(arg value.Value) *Work {
+	if len(w.Routes) > 0 && arg.IsMap() {
+		last := w.Routes[len(w.Routes)-1]
+		if last.Template == nil {
+			last.Template = &Template{}
+		}
+		if last.Template.Layout == nil {
+			last.Template.Layout = make(map[string]string)
+		}
+		m := arg.Map()
+		for k, v := range m {
+			last.Template.Layout[k] = v.Text()
+		}
+	}
+	return w
+}
+
 func (w *Work) Handle(fn value.Value) *Work {
 	if len(w.Routes) > 0 {
 		lastRoute := w.Routes[len(w.Routes)-1]
@@ -107,7 +191,11 @@ func (w *Work) Handle(fn value.Value) *Work {
 			fmt.Printf("[Handle] %s: WARNING: fn.V is not *ScriptFunction, type: %T\n", w.Name, fn.V)
 		}
 	} else {
-		fmt.Printf("[Handle] %s: WARNING: No routes to attach handler to\n", w.Name)
+		// No routes? This becomes the primary handler for the work unit (used by schedules)
+		if sFn, ok := fn.V.(*value.ScriptFunction); ok {
+			w.PrimaryHandler = sFn
+			fmt.Printf("[Handle] %s: Setting primary handler with Address: %d\n", w.Name, sFn.Address)
+		}
 	}
 	return w
 }
@@ -214,7 +302,7 @@ func (t *Task) Reset(w *Work) {
 	t.Request = nil
 	t.Writer = nil
 	t.Response = value.Value{K: value.Nil}
-	t.ResType = "json"
+	t.ResType = ""
 	t.Error = ""
 
 	if t.Params == nil {

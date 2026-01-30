@@ -291,7 +291,14 @@ func bootServer(e *core.Engine, serverPort int) {
 			return
 		}
 
-		// 1. FAST-PATH: Resource Serving (File or Assets)
+		// 1. FAST-PATH: Redirect Support
+		if matchedRoute.Redirect != nil {
+			fmt.Printf("[HTTP] Redirecting %s -> %s (%d)\n", path, matchedRoute.Redirect.URL, matchedRoute.Redirect.Code)
+			http.Redirect(w, r, matchedRoute.Redirect.URL, matchedRoute.Redirect.Code)
+			return
+		}
+
+		// 2. FAST-PATH: Resource Serving (File or Assets)
 		if matchedRoute.Work.ResourcePath != "" {
 			info, err := os.Stat(matchedRoute.Work.ResourcePath)
 			if err == nil {
@@ -380,6 +387,49 @@ func bootServer(e *core.Engine, serverPort int) {
 			responseVal = res.Value
 		}
 
+		// 5. NEW: Auto-Render Logic (Low-latency rendering)
+		var t *work.Template = matchedRoute.Template
+
+		// Fallback to Work unit routes if global router is stale
+		if t == nil || t.Page == "" {
+			for _, r := range matchedRoute.Work.Routes {
+				if r.Method == matchedRoute.Method && r.Path == matchedRoute.Path {
+					t = r.Template
+					break
+				}
+			}
+		}
+
+		if t != nil && t.Page != "" && res.ResType != "json" {
+			tmpl, err := os.ReadFile(t.Page)
+			if err != nil {
+				fmt.Printf("❌ Template Error: %v (Path: %s)\n", err, t.Page)
+				http.Error(w, "Template not found", 404)
+				return
+			}
+			dataMap := make(map[string]any)
+			if responseVal.K == value.Map {
+				dataMap = responseVal.Interface().(map[string]any)
+			} else {
+				dataMap["value"] = responseVal.Interface()
+			}
+
+			// Composite Rendering: Pre-render Layout partials
+			for key, partPath := range t.Layout {
+				partTmpl, err := os.ReadFile(partPath)
+				if err == nil {
+					// Render partial with SAME data context
+					renderedPart := work.Render(string(partTmpl), dataMap)
+					dataMap[key] = renderedPart
+				}
+			}
+
+			htmlContent := work.Render(string(tmpl), dataMap)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(htmlContent))
+			return
+		}
+
 		if res.ResType == "html" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			htmlContent := ""
@@ -387,7 +437,7 @@ func bootServer(e *core.Engine, serverPort int) {
 				m := responseVal.Interface().(map[string]any)
 				template, _ := m["template"].(string)
 				data, _ := m["data"].(map[string]any)
-				htmlContent = renderTemplate(template, data)
+				htmlContent = work.Render(template, data)
 			} else {
 				htmlContent = responseVal.Text()
 			}
@@ -395,6 +445,7 @@ func bootServer(e *core.Engine, serverPort int) {
 			return
 		}
 
+		// Fallback to JSON if ResType is empty or explicitly "json"
 		w.Header().Set("Content-Type", "application/json")
 		outputData, _ := json.Marshal(responseVal.Interface())
 		fmt.Printf("[HTTP] Response: %s\n", string(outputData))
@@ -437,18 +488,17 @@ func bootServer(e *core.Engine, serverPort int) {
 	}
 }
 
-func renderTemplate(tmpl string, data map[string]any) string {
-	res := tmpl
-	for k, v := range data {
-		placeholder := "{{" + k + "}}"
-		res = strings.ReplaceAll(res, placeholder, fmt.Sprintf("%v", v))
-	}
-	return res
-}
-
 func matchRoute(path, routePath string) (map[string]string, bool) {
 	if path == routePath {
 		return nil, true
+	}
+
+	// Handle Wildcard at the end: /assets/*
+	if strings.HasSuffix(routePath, "*") {
+		prefix := strings.TrimSuffix(routePath, "*")
+		if strings.HasPrefix(path, prefix) {
+			return nil, true
+		}
 	}
 
 	pSegments := strings.Split(strings.Trim(path, "/"), "/")
