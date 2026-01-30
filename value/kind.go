@@ -126,6 +126,8 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Split, true
 		case "replace":
 			return Value.Replace, true
+		case "capitalize":
+			return Value.Capitalize, true
 		}
 	case Array:
 		switch name {
@@ -141,6 +143,16 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Join, true
 		case "reverse":
 			return Value.Reverse, true
+		case "shuffle":
+			return Value.Shuffle, true
+		case "random":
+			return Value.Random, true
+		case "at", "index":
+			return Value.ItemAt, true
+		case "compact":
+			return Value.Compact, true
+		case "unique":
+			return Value.Unique, true
 		}
 	case Map:
 		switch name {
@@ -150,6 +162,8 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Delete, true
 		case "has":
 			return Value.Has, true
+		case "merge":
+			return Value.Merge, true
 		}
 	}
 

@@ -44,7 +44,7 @@
     justify-content: center;
     align-items: center;
     /* Transparent Body with subtle brand tint (Haze) */
-    background: linear-gradient(rgba(var(--color-brand-rgb), 0.8), rgba(var(--color-brand-rgb), 0.6));
+    background: linear-gradient(rgba(var(--color-brand-rgb), 0.8), rgba(var(--color-brand-rgb), 0.6), rgba(var(--color-brand-rgb), 0.2));
 
     border: 1px solid rgba(var(--color-brand-rgb), 0.8);
     /* Brighter center line for hot-core look */

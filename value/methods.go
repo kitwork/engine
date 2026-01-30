@@ -1,6 +1,7 @@
 package value
 
 import (
+	"math/rand"
 	"strings"
 )
 
@@ -32,6 +33,15 @@ func (v Value) Upper(_ ...Value) Value {
 
 func (v Value) Lower(_ ...Value) Value {
 	return New(strings.ToLower(v.Text()))
+}
+
+func (v Value) Capitalize(_ ...Value) Value {
+	s := v.String()
+	if len(s) == 0 {
+		return v
+	}
+	// Note: Strings in Go are UTF-8, but for simple capitalize, this works.
+	return New(strings.ToUpper(s[:1]) + s[1:])
 }
 
 func (v Value) Trim(_ ...Value) Value {
@@ -89,6 +99,20 @@ func (v Value) Push(args ...Value) Value {
 	return v
 }
 
+func (v Value) ItemAt(args ...Value) Value {
+	if ptr, ok := v.V.(*[]Value); ok && len(args) > 0 {
+		a := *ptr
+		idx := int(args[0].N)
+		if idx < 0 {
+			idx = len(a) + idx
+		}
+		if idx >= 0 && idx < len(a) {
+			return a[idx]
+		}
+	}
+	return Value{K: Nil}
+}
+
 func (v Value) Pop(_ ...Value) Value {
 	if ptr, ok := v.V.(*[]Value); ok && len(*ptr) > 0 {
 		idx := len(*ptr) - 1
@@ -115,6 +139,38 @@ func (v Value) Unshift(args ...Value) Value {
 	return v
 }
 
+func (v Value) Compact(_ ...Value) Value {
+	if ptr, ok := v.V.(*[]Value); ok {
+		a := *ptr
+		res := make([]Value, 0)
+		for _, item := range a {
+			if item.K != Nil && item.Truthy() {
+				res = append(res, item)
+			}
+		}
+		*ptr = res
+	}
+	return v
+}
+
+func (v Value) Unique(_ ...Value) Value {
+	if ptr, ok := v.V.(*[]Value); ok {
+		a := *ptr
+		seen := make(map[any]bool)
+		res := make([]Value, 0)
+		for _, item := range a {
+			// Basic uniqueness by interface value
+			key := item.Interface()
+			if !seen[key] {
+				seen[key] = true
+				res = append(res, item)
+			}
+		}
+		*ptr = res
+	}
+	return v
+}
+
 func (v Value) Reverse(_ ...Value) Value {
 	if ptr, ok := v.V.(*[]Value); ok {
 		a := *ptr
@@ -123,6 +179,44 @@ func (v Value) Reverse(_ ...Value) Value {
 		}
 	}
 	return v
+}
+
+func (v Value) Shuffle(_ ...Value) Value {
+	if ptr, ok := v.V.(*[]Value); ok {
+		a := *ptr
+		rand.Shuffle(len(a), func(i, j int) {
+			a[i], a[j] = a[j], a[i]
+		})
+	}
+	return v
+}
+
+func (v Value) Random(args ...Value) Value {
+	if ptr, ok := v.V.(*[]Value); ok && len(*ptr) > 0 {
+		a := *ptr
+		count := 1
+		if len(args) > 0 {
+			count = int(args[0].N)
+		}
+
+		if count <= 1 {
+			return a[rand.Intn(len(a))]
+		}
+
+		// Multi-sample: return a new array
+		if count > len(a) {
+			count = len(a)
+		}
+		// Copy and shuffle to get 'count' unique items
+		tmp := make([]Value, len(a))
+		copy(tmp, a)
+		rand.Shuffle(len(tmp), func(i, j int) {
+			tmp[i], tmp[j] = tmp[j], tmp[i]
+		})
+		res := tmp[:count]
+		return Value{K: Array, V: &res}
+	}
+	return Value{K: Nil}
 }
 
 func (v Value) Join(args ...Value) Value {
@@ -171,6 +265,18 @@ func (v Value) Delete(args ...Value) Value {
 	if len(args) > 0 {
 		if m, ok := v.V.(map[string]Value); ok {
 			delete(m, args[0].Text())
+		}
+	}
+	return v
+}
+
+func (v Value) Merge(args ...Value) Value {
+	if len(args) > 0 && args[0].IsMap() {
+		if m, ok := v.V.(map[string]Value); ok {
+			other := args[0].Map()
+			for k, val := range other {
+				m[k] = val
+			}
 		}
 	}
 	return v
