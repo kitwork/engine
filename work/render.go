@@ -34,6 +34,10 @@ func Render(tmpl string, data map[string]any) string {
 
 		// 4. Truy xuất giá trị
 		val := resolvePath(key, data)
+		if val == nil && isRaw {
+			// fallback: check original key if $ prefix was stripped
+			val = resolvePath(rawKey, data)
+		}
 		if val == nil {
 			return ""
 		}

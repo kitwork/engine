@@ -8,435 +8,468 @@ import (
 	"strings"
 )
 
+// ============================================================================
+// KITWORK INDUSTRIAL SYSTEM (v14.0) - THE ARCHITECT CORE
+// ============================================================================
+
+const ExplicitUnit = "px"
+
+var (
+	Colors = map[string]string{
+		"brand":   "248, 34, 68", // Industrial Red
+		"white":   "255, 255, 255",
+		"black":   "5, 5, 5",
+		"gray":    "140, 140, 140",
+		"elegant": "12, 12, 12",
+		"dark":    "8, 8, 8",
+		"success": "34, 197, 94",
+		"gold":    "234, 179, 8",
+	}
+
+	Order       = []string{"brand", "white", "black", "gray", "elegant", "dark", "success", "gold"}
+	AlphaScales = []int{2, 5, 8, 10, 20, 30, 40, 50, 60, 80}
+
+	Queries = map[string]string{
+		"tablet": "@media (max-width: 992px)",
+		"mobile": "@media (max-width: 620px)",
+	}
+
+	States = map[string]string{
+		"hover":       "hover",
+		"group-hover": ".group:hover &",
+	}
+
+	Scale = []int{0, 1, 2, 4, 8, 12, 16, 20, 24, 32, 40, 48, 56, 64, 72, 82, 96, 110, 120, 140, 160, 200, 240, 320, 480}
+
+	ShadowLevels = map[string]string{
+		"soft":       "0 2px 10px rgba(0,0,0,0.1)",
+		"industrial": "0 10px 30px -10px rgba(0,0,0,0.5)",
+		"glow":       "0 0 40px rgba(248, 34, 68, 0.15)",
+		"great":      "0 30px 60px -12px rgba(0,0,0,0.6)",
+		"system":     "0 0 0 1px rgba(255, 255, 255, 0.05), 0 20px 40px -12px rgba(0,0,0,0.8)",
+		"core":       "0 0 0 1px rgba(248, 34, 68, 0.1), 0 20px 40px -12px rgba(248, 34, 68, 0.1)",
+	}
+)
+
+type ClassResolver func(m []string, neg bool) string
+
+var Registry = []struct {
+	Pattern string
+	Solve   ClassResolver
+}{
+	// 1. ARCHITECTURAL INFRASTRUCTURE
+	{`^container$`, func(_ []string, _ bool) string {
+		return "width: 100%; max-width: 1280px; margin-inline: auto; padding-inline: 32px;"
+	}},
+	{`^(background)-(gradient|grid|haze)-(brand|white|dark)$`, func(m []string, _ bool) string {
+		color := m[3]
+		rgb := Colors[color]
+		if m[2] == "grid" {
+			return fmt.Sprintf("background-image: radial-gradient(circle at 1px 1px, rgba(%s, 0.05) 1px, transparent 0); background-size: 32px 32px;", rgb)
+		}
+		if m[2] == "haze" {
+			return fmt.Sprintf("background: radial-gradient(circle at 50%% 20%%, rgba(%s, 0.12), transparent 70%%);", rgb)
+		}
+		if m[2] == "gradient" && color == "brand" {
+			return "background: linear-gradient(135deg, #f82244 0%, #d61b3c 100%);"
+		}
+		return ""
+	}},
+	{`^(blur)-(small|medium|large|none)$`, func(m []string, _ bool) string {
+		v := map[string]string{"small": "4px", "medium": "16px", "large": "40px", "none": "0"}
+		return "backdrop-filter: blur(" + v[m[2]] + "); -webkit-backdrop-filter: blur(" + v[m[2]] + ");"
+	}},
+
+	// 2. SPATIAL & SIZING (THE PRECISION ENGINE)
+	{`^(margin|padding)-(x|y)-([0-9%.-]+[a-z]*|none|auto)$`, func(m []string, neg bool) string {
+		p, axis, val := m[1], m[2], transformUnit(m[3])
+		if neg {
+			val = "-" + val
+		}
+		if axis == "x" {
+			return fmt.Sprintf("%s-left: %s; %s-right: %s;", p, val, p, val)
+		}
+		return fmt.Sprintf("%s-top: %s; %s-bottom: %s;", p, val, p, val)
+	}},
+	{`^(gap)-(x|y)-([0-9%.-]+[a-z]*|none)$`, func(m []string, _ bool) string {
+		axis, val := m[2], transformUnit(m[3])
+		if axis == "x" {
+			return "column-gap: " + val + ";"
+		}
+		return "row-gap: " + val + ";"
+	}},
+	{`^(margin|padding|gap|top|bottom|left|right)-([0-9%.-]+[a-z]*|none|auto)$`, func(m []string, neg bool) string {
+		p, val := m[1], transformUnit(m[2])
+		if m[2] == "none" {
+			return p + ": none;"
+		}
+		if neg {
+			val = "-" + val
+		}
+		return fmt.Sprintf("%s: %s;", p, val)
+	}},
+	{`^(border|outline)-(top|bottom|left|right)-([0-9%.-]+[a-z]*|none)$`, func(m []string, _ bool) string {
+		p, axis, val := m[1], m[2], transformUnit(m[3])
+		if m[3] == "none" {
+			return fmt.Sprintf("%s-%s: none;", p, axis)
+		}
+		return fmt.Sprintf("%s-%s: %s solid;", p, axis, val)
+	}},
+	{`^(border|outline)-([0-9%.-]+[a-z]*|none)$`, func(m []string, _ bool) string {
+		p, val := m[1], transformUnit(m[2])
+		if m[2] == "none" {
+			return p + ": none;"
+		}
+		return fmt.Sprintf("%s: %s solid;", p, val)
+	}},
+	{`^(width|height|max-width|min-width|max-height|min-height)-([0-9%.-]+[a-z]*|full|screen|auto|fit)$`, func(m []string, _ bool) string {
+		p, val := m[1], transformUnit(m[2])
+		if m[2] == "full" {
+			val = "100%"
+		} else if m[2] == "screen" {
+			if p == "width" || p == "max-width" {
+				val = "100vw"
+			} else {
+				val = "100vh"
+			}
+		} else if m[2] == "fit" {
+			val = "fit-content"
+		}
+		return fmt.Sprintf("%s: %s;", p, val)
+	}},
+	{`^(aspect)-(video|square|auto)$`, func(m []string, _ bool) string {
+		v := map[string]string{"video": "16 / 9", "square": "1 / 1", "auto": "auto"}
+		return "aspect-ratio: " + v[m[2]] + ";"
+	}},
+
+	// 3. COLOR SYSTEM (THE INDUSTRIAL PALETTE)
+	{`^(background|color|border|text)-([a-zA-Z]+)(?:-([0-9]+))?$`, func(m []string, _ bool) string {
+		tg, color, alpha := m[1], m[2], m[3]
+		if tg == "text" {
+			tg = "color"
+		} else if tg == "background" {
+			tg = "background-color"
+		} else if tg == "border" {
+			tg = "border-color"
+		}
+		rgb, ok := Colors[color]
+		if !ok {
+			return ""
+		}
+		if alpha != "" {
+			return fmt.Sprintf("%s: rgba(%s, %.2f);", tg, rgb, float64(mustInt(alpha))/100.0)
+		}
+		return fmt.Sprintf("%s: rgb(%s);", tg, rgb)
+	}},
+	{`^(border)-(top|bottom|left|right)-([a-zA-Z]+)(?:-([0-9]+))?$`, func(m []string, _ bool) string {
+		axis, color, alpha := m[2], m[3], m[4]
+		rgb, ok := Colors[color]
+		if !ok {
+			return ""
+		}
+		if alpha != "" {
+			return fmt.Sprintf("border-%s-color: rgba(%s, %.2f);", axis, rgb, float64(mustInt(alpha))/100.0)
+		}
+		return fmt.Sprintf("border-%s-color: rgb(%s);", axis, rgb)
+	}},
+	{`^(opacity)-(\d+)$`, func(m []string, _ bool) string {
+		return fmt.Sprintf("opacity: %.2f;", float64(mustInt(m[2]))/100.0)
+	}},
+
+	// 4. TYPOGRAPHY (THE HIERARCHY ENGINE)
+	{`^(font)-(outfit|mono|bold|medium|light|semibold|black|900|500)$`, func(m []string, _ bool) string {
+		w := map[string]string{"bold": "700", "medium": "500", "500": "500", "light": "300", "semibold": "600", "black": "900", "900": "900"}
+		if weight, ok := w[m[2]]; ok {
+			return "font-weight: " + weight + ";"
+		}
+		if m[2] == "outfit" {
+			return "font-family: 'Outfit', sans-serif;"
+		}
+		return "font-family: 'JetBrains Mono', monospace;"
+	}},
+	{`^(text|font-size)-([0-9]+[a-z]*)$`, func(m []string, _ bool) string {
+		return "font-size: " + transformUnit(m[2]) + ";"
+	}},
+	{`^(italic|uppercase|lowercase|capitalize|underline|text-clip|glow-brand)$`, func(m []string, _ bool) string {
+		v := m[1]
+		if v == "italic" {
+			return "font-style: italic;"
+		}
+		if v == "underline" {
+			return "text-decoration: underline;"
+		}
+		if v == "text-clip" {
+			return "background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;"
+		}
+		if v == "glow-brand" {
+			return "text-shadow: 0 0 30px rgba(248, 34, 68, 0.4);"
+		}
+		return "text-transform: " + v + ";"
+	}},
+	{`^(text)-(center|left|right|justify)$`, func(m []string, _ bool) string { return "text-align: " + m[2] + ";" }},
+	{`^(tracking|letter-spacing)-([0-9%.-]+[a-z]*)$`, func(m []string, neg bool) string {
+		val := transformUnit(m[2])
+		if neg {
+			val = "-" + val
+		}
+		return "letter-spacing: " + val + ";"
+	}},
+	{`^(line-height)-([0-9%.-]+[a-z]*)$`, func(m []string, _ bool) string {
+		val := m[2]
+		if isNumeric(val) {
+			f, _ := strconv.ParseFloat(val, 64)
+			if f > 10 {
+				val = fmt.Sprintf("%.1f%%", f)
+			} else {
+				val = fmt.Sprintf("%.1f", f)
+			}
+		}
+		return "line-height: " + val + ";"
+	}},
+	{`^(white-space)-(nowrap|pre|pre-wrap|pre-line)$`, func(m []string, _ bool) string { return "white-space: " + m[2] + ";" }},
+
+	// 5. LAYOUT & INTERACTION
+	{`^(display)-(flex|grid|block|inline-block|none)$`, func(m []string, _ bool) string { return "display: " + m[2] + ";" }},
+	{`^(flex)-(row|column|wrap|grow|1|auto)$`, func(m []string, _ bool) string {
+		if m[2] == "grow" {
+			return "flex-grow: 1;"
+		} else if m[2] == "1" {
+			return "flex: 1 1 0%;"
+		}
+		return "flex-direction: " + m[2] + ";"
+	}},
+	{`^(justify|items)-(start|end|center|between|around|evenly)$`, func(m []string, _ bool) string {
+		p, v := m[1], m[2]
+		if v == "start" || v == "end" {
+			v = "flex-" + v
+		} else if v == "between" || v == "around" || v == "evenly" {
+			v = "space-" + v
+		}
+		if p == "justify" {
+			return "justify-content: " + v + ";"
+		}
+		return "align-items: " + v + ";"
+	}},
+	{`^(grid-columns)-(\d+)$`, func(m []string, _ bool) string {
+		return fmt.Sprintf("grid-template-columns: repeat(%s, minmax(0, 1fr));", m[2])
+	}},
+	{`^(grid-span)-(\d+)$`, func(m []string, _ bool) string {
+		return fmt.Sprintf("grid-column: span %s / span %s;", m[2], m[2])
+	}},
+	{`^(grid-column)-(start|end)-(\d+)$`, func(m []string, _ bool) string {
+		return fmt.Sprintf("grid-column-%s: %s;", m[2], m[3])
+	}},
+	{`^(position)-(relative|absolute|fixed|sticky)$`, func(m []string, _ bool) string { return "position: " + m[2] + ";" }},
+	{`^(z-index)-([a-z0-9-]+)$`, func(m []string, neg bool) string {
+		val := m[2]
+		if neg {
+			val = "-" + val
+		}
+		return "z-index: " + val + ";"
+	}},
+	{`^(rounded)-(top|bottom|left|right)-([0-9%.-]+[a-z]*)$`, func(m []string, _ bool) string {
+		axis, val := m[2], transformUnit(m[3])
+		if axis == "top" {
+			return fmt.Sprintf("border-top-left-radius: %s; border-top-right-radius: %s;", val, val)
+		}
+		if axis == "bottom" {
+			return fmt.Sprintf("border-bottom-left-radius: %s; border-bottom-right-radius: %s;", val, val)
+		}
+		if axis == "left" {
+			return fmt.Sprintf("border-top-left-radius: %s; border-bottom-left-radius: %s;", val, val)
+		}
+		return fmt.Sprintf("border-top-right-radius: %s; border-bottom-right-radius: %s;", val, val)
+	}},
+	{`^(rounded)-([0-9%.-]+[a-z]*)$`, func(m []string, _ bool) string { return "border-radius: " + transformUnit(m[2]) + ";" }},
+	{`^(shadow)-(soft|industrial|glow|great)$`, func(m []string, _ bool) string { return "box-shadow: " + ShadowLevels[m[2]] + ";" }},
+	{`^(transition)-(all|none)$`, func(m []string, _ bool) string { return "transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);" }},
+	{`^(translate)-(x|y)-([0-9%.-]+[a-z]*)$`, func(m []string, neg bool) string {
+		axis, val := m[2], transformUnit(m[3])
+		if neg {
+			val = "-" + val
+		}
+		return fmt.Sprintf("transform: translate%s(%s);", strings.ToUpper(axis), val)
+	}},
+	{`^(overflow)-(hidden|auto|scroll|hidden-x|hidden-y|auto-x|auto-y)$`, func(m []string, _ bool) string {
+		v := m[2]
+		if strings.HasSuffix(v, "-x") {
+			return "overflow-x: " + strings.TrimSuffix(v, "-x") + ";"
+		}
+		if strings.HasSuffix(v, "-y") {
+			return "overflow-y: " + strings.TrimSuffix(v, "-y") + ";"
+		}
+		return "overflow: " + v + ";"
+	}},
+	{`^(cursor)-(pointer|default|not-allowed)$`, func(m []string, _ bool) string { return "cursor: " + m[2] + ";" }},
+	{`^(pointer-events)-(none|auto)$`, func(m []string, _ bool) string { return "pointer-events: " + m[2] + ";" }},
+}
+
 func main() {
-	inputPath := "demo/view/work.html"
-	content, err := ioutil.ReadFile(inputPath)
-	if err != nil {
-		fmt.Printf("Error reading input file (%s): %v\n", inputPath, err)
-		return
-	}
-	htmlContent := string(content)
-
-	fmt.Printf("Analyzing %s...\n", inputPath)
-
-	css := GenerateUltimateJITCSS(htmlContent)
-
-	outputPath := "demo/public/css/jit.css"
-	err = ioutil.WriteFile(outputPath, []byte(css), 0644)
-	if err != nil {
-		fmt.Printf("Error writing output file (%s): %v\n", outputPath, err)
-		return
-	}
-
-	fmt.Printf("Success! Generated CSS written to %s\n", outputPath)
-	fmt.Printf("Total CSS Size: %d bytes\n", len(css))
+	htmlPath := "demo/view/work.html"
+	html, _ := ioutil.ReadFile(htmlPath)
+	framework := GenerateFramework()
+	jit := GenerateJIT(string(html))
+	_ = ioutil.WriteFile("demo/public/css/framework.css", []byte(framework), 0644)
+	_ = ioutil.WriteFile("demo/public/css/jit.css", []byte(jit), 0644)
+	fmt.Printf("\n--- Kitwork Industrial System v14.0 ---\nFW: %d | JIT: %d\n", len(framework), len(strings.Split(jit, "}\n"))-1)
 }
 
-func GenerateUltimateJITCSS(html string) string {
-	cssBuckets := make(map[string]*strings.Builder)
-	keys := []string{"pocket", "mobile", "tablet", "laptop", "desktop", "cinema"}
-	for _, k := range keys {
-		cssBuckets[k] = &strings.Builder{}
+func GenerateFramework() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Framework v14.0 - THE ARCHITECT'S SKELETON */\n\n:root {\n")
+	for _, k := range Order {
+		fmt.Fprintf(&b, "\t--color-%s-rgb: %s;\n", k, Colors[k])
 	}
-	generated := make(map[string]bool)
+	b.WriteString("}\n\n* { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }\n\n")
 
-	mediaQueries := map[string]string{
-		"cinema":  "@media (min-width: 1536px)",
-		"desktop": "@media (min-width: 1280px)",
-		"laptop":  "@media (max-width: 1200px)",
-		"tablet":  "@media (max-width: 900px)",
-		"mobile":  "@media (max-width: 600px)",
-	}
+	gen := func(c string) { b.WriteString(resolve(c)) }
+	gen("container")
+	gen("transition-all")
+	gen("font-outfit")
+	gen("font-mono")
+	gen("background-grid-brand")
+	gen("background-haze-brand")
+	gen("background-gradient-brand")
 
-	parseFullContext := func(fullClass string) (string, string, bool, bool, string) {
-		screen, pseudo, isGroup, isNegative, remaining := "pocket", "", false, false, fullClass
-		screens := []string{"cinema", "desktop", "laptop", "tablet", "mobile"}
-		for _, s := range screens {
-			if strings.HasPrefix(remaining, s+":") {
-				screen = s
-				remaining = strings.TrimPrefix(remaining, s+":")
-				break
+	for _, v := range Scale {
+		s := strconv.Itoa(v) + "px"
+		for _, p := range []string{"margin", "padding", "gap"} {
+			gen(p + "-" + s)
+			gen(p + "-x-" + s)
+			gen(p + "-y-" + s)
+			if v != 0 && p == "margin" {
+				gen("-" + p + "-" + s)
 			}
 		}
-		if strings.HasPrefix(remaining, "group-hover:") {
-			isGroup, remaining = true, strings.TrimPrefix(remaining, "group-hover:")
-		} else {
-			states := []string{"hover", "focus", "active"}
-			for _, s := range states {
-				if strings.HasPrefix(remaining, s+":") {
-					pseudo, remaining = s, strings.TrimPrefix(remaining, s+":")
-					break
-				}
+		for _, p := range []string{"top", "bottom", "left", "right"} {
+			gen(p + "-" + s)
+			if v != 0 {
+				gen("-" + p + "-" + s)
 			}
 		}
-		if strings.HasPrefix(remaining, "-") {
-			isNegative, remaining = true, strings.TrimPrefix(remaining, "-")
-		}
-		return screen, pseudo, isGroup, isNegative, remaining
+		gen("text-" + s)
 	}
 
-	type Pattern struct {
-		Reg  string
-		Type string
-	}
-
-	// TRẬT TỰ ƯU TIÊN: Cụ thể nhất -> Tổng quát nhất
-	// Helper để xử lý giá trị có đơn vị
-	parseValue := func(val string) string {
-		if val == "auto" || val == "full" || val == "screen" || val == "min" || val == "max" {
-			return val
-		}
-		// Hỗ trợ các đơn vị tường minh
-		if strings.HasSuffix(val, "px") {
-			return val // Giữ nguyên 60px
-		}
-		if strings.HasSuffix(val, "-percent") {
-			return strings.TrimSuffix(val, "-percent") + "%" // 45-percent -> 45%
-		}
-		if strings.HasSuffix(val, "pct") {
-			return strings.TrimSuffix(val, "pct") + "%" // 50pct -> 50%
-		}
-		if strings.HasSuffix(val, "%") {
-			return val // 50% -> 50%
-		}
-		if strings.HasSuffix(val, "vh") || strings.HasSuffix(val, "vw") || strings.HasSuffix(val, "rem") || strings.HasSuffix(val, "em") {
-			return val
-		}
-		// Mặc định là px nếu là số
-		if _, err := strconv.Atoi(val); err == nil {
-			return val + "px"
-		}
-		return val
-	}
-
-	// TRẬT TỰ ƯU TIÊN: Cụ thể nhất -> Tổng quát nhất
-	orderedPatterns := []Pattern{
-		// 1. Spacing & Borders (Hỗ trợ đơn vị: margin-60px, padding-5pct...)
-		{`^(margin|padding|border)-(x|y)-([a-z0-9%.-]+)$`, "spacing-axis"},
-		{`^(margin|padding|border)-(top|bottom|left|right)-([a-z0-9%.-]+)$`, "spacing-dir"},
-		{`^(margin|padding)-([a-z0-9%.-]+)$`, "spacing-all"},
-		{`^(border)-(\d+(?:px|rem|em|%)?)$`, "border-all"},
-
-		// 2. Sizing
-		{`^(width|height|max-width|min-width|max-height|min-height)-([a-z0-9%.-]+)$`, "sizing"},
-
-		// 3. Typo (Kích thước chữ & Weight)
-		{`^(font-size|text|font)-(\d+[a-z0-9%.-]*|bold|medium|light)$`, "typo-size"},
-		{`^(line-height)-([0-9.]+)$`, "line-height"},
-		{`^(letter-spacing)-(-?[\d.]+(px|em|rem)?)$`, "letter-spacing"},
-		{`^(font-family)-([a-zA-Z0-9-]+)$`, "font-family"},
-		{`^(font)-(mono|sans|serif)$`, "font-family"},
-		{`^(text)-(center|left|right|justify|uppercase|lowercase|capitalize)$`, "text-style"},
-
-		// ... (Giữ nguyên các pattern khác)
-		{`^(flex)-(row|column|row-reverse|column-reverse)$`, "flex-direction"},
-		{`^(justify)-(start|end|center|between|around|evenly)$`, "justify-content"},
-		{`^(items)-(start|end|center|baseline|stretch)$`, "align-items"},
-		{`^(gap)-([a-z0-9%.-]+)$`, "gap"},
-		{`^(grid-columns)-(\d+)$`, "grid-columns"},
-		{`^(display-)?(flex|grid|block|inline|inline-block|inline-flex|hidden)$`, "display"},
-		{`^(position)-(relative|absolute|fixed|sticky)$`, "position"},
-		{`^(z-index)-(\d+|sticky|overlay|above|below|behind)$`, "z-index"},
-
-		// 5. Colors & Decor
-		{`^(background|bg|color|text|border)-([a-zA-Z0-9]+)(?:-(\d+))?$`, "color"},
-		{`^(rounded|opacity)-([a-z0-9%.-]+)$`, "misc-val"},
-		{`^(shadow)-(small|medium|larger|giant)$`, "shadow"},
-		{`^(shadow)-(brand|glow)$`, "shadow-color"},
-		{`^(translate)-(x|y)-(-?[a-z0-9]+)$`, "transform-move"},
-		{`^(transition)-(all|colors|opacity|transform)$`, "transition"},
-		{`^(duration)-(\d+)$`, "duration"},
-		{`^(rotate)-(-?\d+)$`, "rotate"},
-		{`^(scale)-(\d+)$`, "scale"},
-		{`^(backdrop-filter-blur)-(\d+)$`, "backdrop-filter"},
-		{`^(object)-(contain|cover|fill|none|scale-down)$`, "object-fit"},
-		{`^(translate)-(x|y)-(-?\d+)(-(percent))?$`, "translate"},
-		{`^(cube-size)-(\d+)$`, "cube-size"},
-		{`^(cube-duration)-(\d+)(s|ms)?$`, "cube-duration"},
-		{`^container$`, "container"},
-	}
-
-	reClass := regexp.MustCompile(`class="([^"]+)"`)
-	matchesHTML := reClass.FindAllStringSubmatch(html, -1)
-	allClasses := []string{}
-	for _, m := range matchesHTML {
-		allClasses = append(allClasses, strings.Split(m[1], " ")...)
-	}
-
-	for _, className := range allClasses {
-		className = strings.TrimSpace(className)
-		if className == "" || generated[className] {
+	for _, name := range Order {
+		if name == "white" {
 			continue
+		} // white utilities at the end
+		gen("text-" + name)
+		gen("background-" + name)
+		for _, a := range AlphaScales {
+			gen(fmt.Sprintf("background-%s-%d", name, a))
 		}
-		screen, pseudo, isGroup, isNegative, coreClass := parseFullContext(className)
-		cssContent := ""
+	}
+	// white utilities at the end (match user preference)
+	gen("text-white")
+	gen("background-white")
+	for _, a := range AlphaScales {
+		gen(fmt.Sprintf("background-white-%d", a))
+	}
 
-		for _, pat := range orderedPatterns {
-			re := regexp.MustCompile(pat.Reg)
-			match := re.FindStringSubmatch(coreClass)
-			if len(match) > 0 {
-				switch pat.Type {
-				case "container":
-					cssContent = "width: 100%; margin-left: auto; margin-right: auto; max-width: 1280px; padding-left: 1.5rem; padding-right: 1.5rem;"
-				case "display":
-					val := match[2]
-					if val == "hidden" {
-						cssContent = "display: none;"
-					} else {
-						cssContent = fmt.Sprintf("display: %s;", val)
-					}
-				case "position":
-					cssContent = fmt.Sprintf("position: %s;", match[2])
-				case "z-index":
-					val, zMap := match[2], map[string]string{"sticky": "100", "above": "10", "below": "-1", "behind": "-10", "overlay": "1000"}
-					if m, ok := zMap[val]; ok {
-						val = m
-					}
-					if isNegative {
-						val = "-" + val
-					}
-					cssContent = fmt.Sprintf("z-index: %s;", val)
-				case "flex-direction":
-					cssContent = fmt.Sprintf("flex-direction: %s;", match[2])
-				case "justify-content":
-					v := match[2]
-					if v == "start" || v == "end" {
-						v = "flex-" + v
-					}
-					if v == "between" || v == "around" || v == "evenly" {
-						v = "space-" + v
-					}
-					cssContent = fmt.Sprintf("justify-content: %s;", v)
-				case "align-items":
-					v := match[2]
-					if v == "start" || v == "end" {
-						v = "flex-" + v
-					}
-					cssContent = fmt.Sprintf("align-items: %s;", v)
-				case "grid-columns":
-					cssContent = fmt.Sprintf("grid-template-columns: repeat(%s, minmax(0, 1fr));", match[2])
+	for _, d := range []string{"flex", "grid", "block", "none"} {
+		gen("display-" + d)
+	}
+	gen("width-full")
+	gen("height-full")
+	return b.String()
+}
 
-				case "gap":
-					cssContent = fmt.Sprintf("gap: %s;", parseValue(match[2]))
-				case "sizing":
-					prop, val := match[1], parseValue(match[2])
-					if val == "full" {
-						val = "100%"
-					}
-					if val == "screen" {
-						if strings.Contains(prop, "width") {
-							val = "100vw"
-						} else {
-							val = "100vh"
-						}
-					}
-					cssContent = fmt.Sprintf("%s: %s;", prop, val)
-				case "spacing-axis":
-					prop, axis, val := match[1], match[2], parseValue(match[3])
-					if isNegative && prop == "margin" {
-						val = "-" + val
-					}
-					if prop == "border" {
-						if axis == "x" {
-							cssContent = fmt.Sprintf("border-left-width: %s; border-right-width: %s; border-left-style: solid; border-right-style: solid;", val, val)
-						} else {
-							cssContent = fmt.Sprintf("border-top-width: %s; border-bottom-width: %s; border-top-style: solid; border-bottom-style: solid;", val, val)
-						}
-					} else {
-						if axis == "x" {
-							cssContent = fmt.Sprintf("%s-left: %s; %s-right: %s;", prop, val, prop, val)
-						} else {
-							cssContent = fmt.Sprintf("%s-top: %s; %s-bottom: %s;", prop, val, prop, val)
-						}
-					}
-				case "spacing-dir":
-					prop, dir, val := match[1], match[2], parseValue(match[3])
-					if isNegative && prop == "margin" {
-						val = "-" + val
-					}
-					if prop == "border" {
-						cssContent = fmt.Sprintf("border-%s-width: %s; border-%s-style: solid;", dir, val, dir)
-					} else {
-						cssContent = fmt.Sprintf("%s-%s: %s;", prop, dir, val)
-					}
-				case "spacing-all":
-					prop, val := match[1], parseValue(match[2])
-					if isNegative && prop == "margin" {
-						val = "-" + val
-					}
-					cssContent = fmt.Sprintf("%s: %s;", prop, val)
-
-				case "color":
-					// Regex: ^(background|color|text|border)-([a-zA-Z0-9]+)(?:[-/](\d+))?$
-					pStr, pre, cName, op := "color", match[1], match[2], match[3]
-					// cName có thể là "white" hoặc "gray-400" (nếu sau này có scale)
-					// Logic mới: Nếu cName kết thúc bằng số, mà không có op riêng, thì đó là tên màu.
-					// Nếu có op riêng (do match[4] bắt được), thì đó là opacity.
-
-					if pre == "background" || pre == "bg" {
-						pStr = "background-color"
-					}
-					if pre == "border" {
-						pStr = "border-color"
-					}
-					if cName == "transparent" {
-						cssContent = fmt.Sprintf("%s: transparent;", pStr)
-					} else if cName == "current" {
-						cssContent = fmt.Sprintf("%s: currentColor;", pStr)
-					} else {
-						vV := fmt.Sprintf("var(--color-%s-rgb)", cName)
-						if op != "" {
-							var f float64
-							fmt.Sscanf(op, "%f", &f)
-							if f > 1 {
-								f /= 100.0
-							}
-							cssContent = fmt.Sprintf("%s: rgba(%s, %.2g);", pStr, vV, f)
-						} else {
-							cssContent = fmt.Sprintf("%s: rgb(%s);", pStr, vV)
-						}
-					}
-				case "text-style":
-					if match[2] == "center" || match[2] == "left" || match[2] == "right" || match[2] == "justify" {
-						cssContent = fmt.Sprintf("text-align: %s;", match[2])
-					} else {
-						cssContent = fmt.Sprintf("text-transform: %s;", match[2])
-					}
-				case "font-family":
-					if match[2] == "mono" {
-						cssContent = "font-family: 'JetBrains Mono', monospace;"
-					} else if match[2] == "sans" {
-						cssContent = "font-family: 'Outfit', sans-serif;"
-					} else {
-						cssContent = fmt.Sprintf("font-family: '%s', sans-serif;", match[2])
-					}
-				case "line-height":
-					cssContent = fmt.Sprintf("line-height: %s;", match[2])
-				case "shadow":
-					sM := map[string]string{"small": "0 1px 2px 0 rgba(0,0,0,0.05)", "medium": "0 4px 6px -1px rgba(0,0,0,0.1)", "larger": "0 10px 15px -3px rgba(0,0,0,0.1)", "giant": "0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)"}
-					cssContent = fmt.Sprintf("box-shadow: %s;", sM[match[2]])
-				case "shadow-color":
-					if match[2] == "brand" {
-						cssContent = "box-shadow: 0 4px 14px 0 rgba(var(--color-brand-rgb), 0.39);"
-					} else if match[2] == "glow" {
-						cssContent = "box-shadow: 0 0 20px rgba(var(--color-brand-rgb), 0.5);"
-					}
-				case "transform-move":
-					axis, val := strings.ToUpper(match[2]), parseValue(match[3])
-					// Fix: handle negative values explicitly if regex allows '-2px' but parseValue might need hints?
-					// parseValue handles it if passed correctly. regex is -?[a-z0-9]+
-					// If val is '2px', axis='Y' -> translateY(2px)
-					// If val is '-3px', -> translateY(-3px)
-					cssContent = fmt.Sprintf("transform: translate%s(%s);", axis, val)
-				case "border-width":
-					d, v := match[2], match[3]
-					cssContent = fmt.Sprintf("border-%s-width: %spx; border-%s-style: solid;", d, v, d)
-				case "border-all":
-					cssContent = fmt.Sprintf("border-width: %s; border-style: solid;", parseValue(match[2]))
-
-				// ... (Các case khác cập nhật tương tự với parseValue)
-				case "typo-size":
-					pre, val := match[1], match[2]
-					isW := (val == "bold" || val == "medium" || val == "light" || (strings.HasPrefix(pre, "font") && len(val) == 3 && strings.HasSuffix(val, "00")))
-					if isW {
-						cssContent = fmt.Sprintf("font-weight: %s;", val)
-					} else {
-						cssContent = fmt.Sprintf("font-size: %s;", parseValue(val))
-					}
-				case "letter-spacing":
-					cssContent = fmt.Sprintf("letter-spacing: %s;", parseValue(match[2]))
-
-				case "misc-val":
-					pre, rawVal := match[1], match[2]
-					if pre == "rounded" {
-						val := parseValue(rawVal)
-						if rawVal == "full" {
-							val = "9999px"
-						}
-						cssContent = fmt.Sprintf("border-radius: %s;", val)
-					} else {
-						// Opacity logic
-						v := rawVal
-						if v == "100" {
-							v = "1"
-						} else if !strings.Contains(v, ".") {
-							v = "0." + v
-						}
-						cssContent = fmt.Sprintf("opacity: %s;", v)
-					}
-				case "transition":
-					val := match[2]
-					if val == "all" {
-						cssContent = "transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-					} else if val == "colors" {
-						cssContent = "transition-property: color, background-color, border-color, text-decoration-color, fill, stroke; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-					} else if val == "opacity" {
-						cssContent = "transition-property: opacity; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-					} else if val == "transform" {
-						cssContent = "transition-property: transform; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;"
-					}
-				case "duration":
-					cssContent = fmt.Sprintf("transition-duration: %sms;", match[2])
-				case "rotate":
-					cssContent = fmt.Sprintf("transform: rotate(%sdeg);", match[2])
-				case "scale":
-					v := match[2]
-					if len(v) > 0 && !strings.Contains(v, ".") && v != "100" {
-						v = "0." + v // scale-95 -> 0.95
-					} else if v == "100" {
-						v = "1"
-					}
-					cssContent = fmt.Sprintf("transform: scale(%s);", v)
-				case "backdrop-filter":
-					cssContent = fmt.Sprintf("backdrop-filter: blur(%spx); -webkit-backdrop-filter: blur(%spx);", match[2], match[2])
-				case "object-fit":
-					cssContent = fmt.Sprintf("object-fit: %s;", match[2])
-				case "translate":
-					axis, val := match[2], parseValue(match[3])
-					if strings.HasSuffix(val, "-percent") { // Fix regex capture layout if needed, but parseValue handles it
-						val = strings.TrimSuffix(val, "-percent") + "%"
-					}
-					// match[4] might be "-percent" if I used that regex, let's check parseValue usage
-					cssContent = fmt.Sprintf("transform: translate%s(%s);", strings.ToUpper(axis), val)
-				case "cube-size":
-					size, _ := strconv.Atoi(match[2])
-					cssContent = fmt.Sprintf("--cube-size: %dpx; --cube-face-translate-z: %dpx;", size, size/2)
-				case "cube-duration":
-					unit := match[3]
-					if unit == "" {
-						unit = "s"
-					}
-					cssContent = fmt.Sprintf("--cube-duration: %s%s;", match[2], unit)
+func GenerateJIT(html string) string {
+	var b strings.Builder
+	seen := make(map[string]bool)
+	re := regexp.MustCompile(`class="([^"]+)"`)
+	for _, m := range re.FindAllStringSubmatch(html, -1) {
+		for _, class := range strings.Fields(m[1]) {
+			if !seen[class] {
+				if css := resolve(class); css != "" {
+					b.WriteString(css)
+					seen[class] = true
 				}
+			}
+		}
+	}
+	return b.String()
+}
+
+func resolve(full string) string {
+	sc, st, neg, core := parse(full)
+	for _, reg := range Registry {
+		if m := regexp.MustCompile(reg.Pattern).FindStringSubmatch(core); len(m) > 0 {
+			css := reg.Solve(m, neg)
+			if css == "" {
+				continue
+			}
+			esc := strings.NewReplacer(":", "\\:", ".", "\\.", "/", "\\/").Replace(full)
+			sel := "." + esc
+			if full[0] == '-' {
+				sel = ".\\-" + strings.TrimPrefix(esc, "-")
+			}
+			if st != "" {
+				if strings.Contains(States[st], "&") {
+					sel = strings.ReplaceAll(States[st], "&", sel)
+				} else {
+					sel += ":" + States[st]
+				}
+			}
+			if sc != "" {
+				return fmt.Sprintf("%s {\n\t%s { %s }\n}\n", Queries[sc], sel, css)
+			}
+			return fmt.Sprintf("%s { %s }\n", sel, css)
+		}
+	}
+	return ""
+}
+
+func parse(f string) (sc, st string, neg bool, core string) {
+	core = f
+	if strings.HasPrefix(core, "-") {
+		neg = true
+		core = strings.TrimPrefix(core, "-")
+	}
+	for {
+		changed := false
+		for k := range Queries {
+			if strings.HasPrefix(core, k+":") {
+				sc = k
+				core = strings.TrimPrefix(core, k+":")
+				changed = true
 				break
 			}
 		}
-
-		if cssContent != "" {
-			esc := strings.ReplaceAll(className, ":", "\\:")
-			esc = strings.ReplaceAll(esc, ".", "\\.")
-			esc = strings.ReplaceAll(esc, "/", "\\/")
-			if strings.HasPrefix(esc, "-") {
-				esc = "\\" + esc
+		for k := range States {
+			if strings.HasPrefix(core, k+":") {
+				st = k
+				core = strings.TrimPrefix(core, k+":")
+				changed = true
+				break
 			}
-			sel := "." + esc
-			if isGroup {
-				sel = ".group:hover ." + esc
-			} else if pseudo != "" {
-				sel += ":" + pseudo
-			}
-			cssBuckets[screen].WriteString(fmt.Sprintf("\t%s { %s }\n", sel, cssContent))
-			generated[className] = true
+		}
+		if !changed {
+			break
 		}
 	}
-
-	var final strings.Builder
-	final.WriteString("/* Kitwork Industrial Engine JIT */\n")
-	final.WriteString(cssBuckets["pocket"].String())
-	for _, s := range []string{"mobile", "tablet", "laptop", "desktop", "cinema"} {
-		if content := cssBuckets[s].String(); content != "" {
-			final.WriteString(fmt.Sprintf("\n/* %s */\n%s {\n%s}\n", s, mediaQueries[s], content))
-		}
+	if !neg && strings.HasPrefix(core, "-") {
+		neg = true
+		core = strings.TrimPrefix(core, "-")
 	}
-	return final.String()
+	return
 }
+
+func transformUnit(s string) string {
+	if s == "none" || s == "0" {
+		return "0"
+	}
+	if strings.HasSuffix(s, "pct") {
+		return strings.TrimSuffix(s, "pct") + "%"
+	}
+	if strings.HasSuffix(s, "px") || strings.HasSuffix(s, "rem") || strings.HasSuffix(s, "vh") || strings.HasSuffix(s, "vw") || strings.HasSuffix(s, "em") || strings.HasSuffix(s, "%") {
+		return s
+	}
+	if isNumeric(s) {
+		return s + ExplicitUnit
+	}
+	return s
+}
+func isNumeric(s string) bool { _, err := strconv.Atoi(s); return err == nil }
+func mustInt(s string) int    { i, _ := strconv.Atoi(s); return i }

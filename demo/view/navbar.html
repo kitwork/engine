@@ -1,35 +1,40 @@
-<!-- Header (JIT Enabled) -->
-<header class="padding-y-32px">
-    <nav class="container display-flex justify-between items-center">
-        <div class="display-flex items-center gap-16px">
-            <span class="font-900 font-size-28px text-white letter-spacing--2px">KITWORK<span
+<header
+    class="position-fixed top-0px left-0px width-full z-index-100 background-black-30 blur-medium border-bottom-1px border-white-5">
+    <nav class="container height-72px display-flex justify-between items-center">
+        <div class="display-flex items-center gap-12px">
+            <span class="font-black font-size-24px text-white -letter-spacing-2px">KITWORK<span
                     class="text-brand">.</span></span>
-            <span class="badge">NANOSECOND CORE</span>
+            <div
+                class="background-white-5 text-white-50 font-size-10px font-900 padding-y-4px padding-x-8px rounded-4px border-1px border-white-10 uppercase letter-spacing-1px">
+                v2.4.0
+            </div>
         </div>
-        <div class="display-flex gap-40px mobile:hidden">
-            <a href="#philosophy"
-                class="text-gray font-size-11px font-900 uppercase no-underline hover:text-white transition-all">Philosophy</a>
+
+        <div class="display-flex gap-32px tablet:display-none">
             <a href="#orm"
-                class="text-gray font-size-11px font-900 uppercase no-underline hover:text-white transition-all">Smart
+                class="text-white-50 font-size-11px font-900 uppercase underline-none hover:text-white transition-all">Smart
                 ORM</a>
+            <a href="#scheduler"
+                class="text-white-50 font-size-11px font-900 uppercase underline-none hover:text-white transition-all">Scheduler</a>
             <a href="#vm"
-                class="text-gray font-size-11px font-900 uppercase no-underline hover:text-white transition-all">Stack
-                VM</a>
-            <a href="#builtins"
-                class="text-gray font-size-11px font-900 uppercase no-underline hover:text-white transition-all">Built-ins</a>
-            <a href="#architect"
-                class="text-gray font-size-11px font-900 uppercase no-underline hover:text-white transition-all">Architect</a>
+                class="text-white-50 font-size-11px font-900 uppercase underline-none hover:text-white transition-all">Benchmarks</a>
         </div>
+
         <div class="display-flex items-center gap-16px">
-            <a href="https://github.com/kitwork/engine" class="text-white opacity-40 hover:opacity-100 transition-all">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+            <a href="https://github.com/kitwork/engine"
+                class="text-white-40 hover:text-white transition-all duration-300">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
                     <path
-                        d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.041-1.416-4.041-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+                        d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22">
+                    </path>
                 </svg>
             </a>
             <button
-                class="background-brand text-white rounded-4px hover:translate-y--3px hover:shadow-brand transition-all font-900 uppercase font-size-11px padding-y-10px padding-x-24px border-0 cursor-pointer">Init
-                Node</button>
+                class="background-brand text-white font-black font-size-11px uppercase padding-y-12px padding-x-24px rounded-4px border-none outline-none cursor-pointer transition-all hover:shadow-glow hover:-translate-y-2px">
+                Launch Core
+            </button>
         </div>
     </nav>
 </header>
+<div class="height-72px"></div>

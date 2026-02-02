@@ -4,495 +4,306 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KITWORK | Sovereign Logic Runtime</title>
+    <title>KITWORK | Sovereign Logic Infrastructure</title>
     <link
-        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;600;900&family=Inter:wght@400;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;700&display=swap"
         rel="stylesheet">
     <link rel="icon" href="/public/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="/public/css/reboot.css">
-    <link rel="stylesheet" href="/public/css/cube.css">
+    <link rel="stylesheet" href="/public/css/framework.css">
     <link rel="stylesheet" href="/public/css/jit.css">
-    <style>
-        :root {
-            --color-brand: #f82244;
-            --color-brand-rgb: 248, 34, 68;
-            --color-black: #050505;
-            --color-black-rgb: 5, 5, 5;
-            --color-dark: #0a0a0a;
-            --color-dark-rgb: 10, 10, 10;
-            --color-elegant: #121212;
-            --color-elegant-rgb: 18, 18, 18;
-            --color-white: #ffffff;
-            --color-white-rgb: 255, 255, 255;
-            --color-gray: #8899aa;
-            --color-gray-rgb: 136, 153, 170;
-            --color-transparent-rgb: 0, 0, 0;
-
-            --glass: rgba(255, 255, 255, 0.02);
-            --glass-border: rgba(255, 255, 255, 0.05);
-            --brand-glow: rgba(248, 34, 68, 0.1);
-        }
-
-        body {
-            background-color: var(--color-black);
-            color: #fff;
-            font-family: 'Outfit', sans-serif;
-            overflow-x: hidden;
-            scroll-behavior: smooth;
-            line-height: 1.6;
-        }
-
-        /* --- BACKGROUND SYSTEM --- */
-        .logic-grid {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-image: radial-gradient(circle at 2px 2px, rgba(248, 34, 68, 0.04) 1px, transparent 0);
-            background-size: 50px 50px;
-            z-index: -2;
-        }
-
-        .ambient-haze {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: radial-gradient(circle at 50% 30%, var(--brand-glow), transparent 70%);
-            z-index: -1;
-            pointer-events: none;
-        }
-
-        /* --- TYPOGRAPHY & BRAND --- */
-        .brand-gradient {
-            background: linear-gradient(135deg, #f82244 0%, #ff5858 100%);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .glow-text {
-            text-shadow: 0 0 40px rgba(var(--color-brand-rgb), 0.4);
-        }
-
-        /* --- UI ELEMENTS --- */
-        .terminal-panel {
-            background: var(--color-elegant);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.8);
-            overflow: hidden;
-        }
-
-        .terminal-header {
-            padding: 12px 20px;
-            background: rgba(255, 255, 255, 0.03);
-            border-bottom: 1px solid var(--glass-border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-
-
-        .badge {
-            display: inline-block;
-            background: rgba(var(--color-brand-rgb), 0.08);
-            color: var(--color-brand);
-            font-size: 10px;
-            font-weight: 900;
-            padding: 6px 14px;
-            border-radius: 4px;
-            border: 1px solid rgba(var(--color-brand-rgb), 0.2);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-
-        /* --- CODE COLORS --- */
-        .code-keyword {
-            color: #f82244;
-            font-weight: bold;
-        }
-
-        .code-func {
-            color: #4ade80;
-        }
-
-        .code-string {
-            color: #fbbf24;
-        }
-
-        .code-comment {
-            color: #556677;
-            font-style: italic;
-        }
-
-        .code-num {
-            color: #818cf8;
-        }
-
-        /* --- SECTION BOXES --- */
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 40px;
-        }
-
-        .spec-card {
-            background: var(--glass);
-            border: 1px solid var(--glass-border);
-            padding: 48px;
-            border-radius: 16px;
-            transition: 0.4s;
-        }
-
-        .spec-card:hover {
-            border-color: var(--color-brand);
-            background: rgba(var(--color-brand-rgb), 0.02);
-        }
-
-        .bench-value {
-            font-size: 64px;
-            font-weight: 900;
-            line-height: 1;
-        }
-
-        @media (max-width: 900px) {
-            .feature-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
 </head>
 
-<body>
+<body
+    class="background-black text-white font-outfit overflow-hidden-x scroll-behavior-smooth line-height-180 letter-spacing-0.5px">
 
-    <div class="logic-grid"></div>
-    <div class="ambient-haze"></div>
+    <!-- Ambient Layer: Industrial Atmosphere -->
+    <div
+        class="position-fixed top-0px left-0px width-full height-72px z-index-100 pointer-events-none background-black-40 blur-medium border-bottom-1px border-white-5">
+    </div>
+    <div class="position-fixed top-0px left-0px width-full height-full background-grid-brand opacity-8 -z-index-2">
+    </div>
+    <div
+        class="position-fixed top-0px left-0px width-full height-full background-haze-brand opacity-15 -z-index-1 pointer-events-none">
+    </div>
 
-    <!-- Header (JIT Enabled) -->
     {{ $navbar }}
 
-    <!-- Hero -->
-    <main class="padding-top-120px padding-bottom-200px">
-        <div class="container text-center">
-            <div class="badge margin-bottom-32px">THE SOVEREIGN RUNTIME FOR LOGIC INFRASTRUCTURE</div>
-            <h1 class="font-900 font-size-120px line-height-0.9 letter-spacing--6px glow-text margin-bottom-40px">
-                Complexity, <br><span class="brand-gradient">Collapsed.</span>
-            </h1>
-            <p class="text-gray font-size-28px line-height-1.4 max-width-800px margin-x-auto margin-bottom-64px">
-                Bridge the gap between Go’s raw performance and the flexibility of logic. Execute mission-critical
-                business rules at <span class="text-white">70ns precision</span> on a proprietary Stack-based VM.
-            </p>
-            <div class="display-flex justify-center gap-24px">
-                <button
-                    class="background-brand text-white rounded-4px hover:translate-y--3px hover:shadow-brand transition-all font-900 uppercase font-size-11px padding-y-12px padding-x-24px border-0 cursor-pointer">Initialize
-                    Repository</button>
-                <button
-                    class="text-white font-900 font-size-14px padding-y-20px border-0 background-transparent cursor-pointer hover:text-brand transition-all uppercase letter-spacing-2px">View
-                    Benchmarks</button>
-            </div>
-
-            <!-- Hero Code -->
-            <div class="margin-top-120px">
-                <div class="terminal-panel max-width-900px margin-x-auto text-left">
-                    <div class="terminal-header display-flex justify-between items-center">
-                        <span class="text-gray font-size-10px font-mono uppercase">Quickstart / logic_deploy.js</span>
-                        <div class="display-flex gap-16px">
-                            <span class="text-brand font-900 font-size-10px">STAR 1.2K</span>
-                            <span class="text-white-40 font-900 font-size-10px">FORK 240</span>
-                        </div>
+    <!-- HERO: THE INDUSTRIAL HEARTBEAT -->
+    <main class="padding-top-280px padding-bottom-200px tablet:padding-top-160px position-relative">
+        <div class="container">
+            <div class="display-grid grid-columns-12 gap-x-82px items-center">
+                <div class="grid-span-7 tablet:grid-span-12">
+                    <div
+                        class="display-inline-flex items-center gap-x-12px background-brand-10 text-brand font-black font-size-11px padding-y-10px padding-x-20px rounded-full border-1px border-brand-20 uppercase letter-spacing-3px margin-bottom-56px">
+                        <span class="width-8px height-8px rounded-full background-brand shadow-glow"></span>
+                        Architectural Pulse v14.8
                     </div>
-                    <div class="padding-48px font-mono font-size-15px line-height-1.8">
-                        <div><span class="code-comment">// High-performance logic definition</span></div>
-                        <div><span class="code-keyword">work</span>(<span class="code-string">"CoreService"</span>)
+
+                    <h1
+                        class="font-black font-size-124px tablet:font-size-82px mobile:font-size-56px line-height-100 -letter-spacing-4px margin-bottom-48px">
+                        Logic as <br><span class="background-gradient-brand text-clip">Identity.</span>
+                    </h1>
+
+                    <p
+                        class="text-white-80 font-size-26px tablet:font-size-22px line-height-160 max-width-640px margin-bottom-82px letter-spacing-1px">
+                        Redefining performance with a sovereign <b>Stack-VM</b>. Execute critical business logic at
+                        <b>70ns precision</b>, bypassing traditional runtime overhead.
+                    </p>
+
+                    <div class="display-flex gap-x-32px mobile:flex-column mobile:gap-y-20px">
+                        <button
+                            class="background-brand text-white font-black font-size-13px uppercase padding-y-24px padding-x-64px rounded-4px border-none cursor-pointer transition-all hover:shadow-glow-brand hover:-translate-y-4px letter-spacing-2px">
+                            Verify Core
+                        </button>
+                        <button
+                            class="border-1px border-white-20 text-white font-black font-size-13px uppercase padding-y-24px padding-x-64px rounded-4px background-black-30 hover:background-white-5 transition-all letter-spacing-2px">
+                            Documentation
+                        </button>
+                    </div>
+                </div>
+
+                <div class="grid-span-5 tablet:display-none">
+                    <div
+                        class="background-elegant border-1px border-brand-30 rounded-32px padding-56px shadow-core position-relative transition-all hover:border-brand">
+                        <div
+                            class="position-absolute -top-14px -left-14px background-brand text-white font-mono font-size-11px font-bold padding-y-8px padding-x-16px rounded-4px shadow-glow">
+                            RUNTIME_INSPECT</div>
+                        <div class="font-mono font-size-15px line-height-200">
+                            <div class="text-white-20 italic">// Bytecode Pipeline</div>
+                            <div class="display-flex justify-between margin-top-20px">
+                                <span class="text-brand font-bold">OP_CONST</span>
+                                <span class="text-white-40">0x00A1</span>
+                            </div>
+                            <div class="display-flex justify-between">
+                                <span class="text-brand font-bold">OP_FETCH</span>
+                                <span class="text-white-40">db_shard_1</span>
+                            </div>
+                            <div class="display-flex justify-between">
+                                <span class="text-brand font-bold">OP_TRANSFORM</span>
+                                <span class="text-success shadow-glow">70ns</span>
+                            </div>
+                            <div class="margin-y-32px border-bottom-1px border-white-10"></div>
+                            <div class="display-flex items-center gap-x-12px">
+                                <div class="width-10px height-10px rounded-full background-success animate-pulse"></div>
+                                <span class="text-success font-black font-size-13px uppercase letter-spacing-2px">State:
+                                    Stable</span>
+                            </div>
                         </div>
-                        <div class="padding-left-24px">.<span class="code-func">get</span>(<span
-                                class="code-string">"/v2/validate"</span>)</div>
-                        <div class="padding-left-24px">.<span class="code-func">handle</span>(req => {</div>
-                        <div class="padding-left-48px"><span class="code-keyword">const</span> user = db.user.<span
-                                class="code-func">find</span>(u => u.id == req.id);</div>
-                        <div class="padding-left-48px"><span class="code-keyword">if</span> (!user) <span
-                                class="code-func">fail</span>(<span class="code-string">"User Protocol Failure"</span>);
-                        </div>
-                        <div class="padding-left-48px"><span class="code-keyword">return</span> { status: <span
-                                class="code-string">"VALIDATED"</span>, entropy: <span class="code-func">random</span>()
-                            };</div>
-                        <div class="padding-left-24px">})</div>
-                        <div class="padding-left-24px">.<span class="code-func">done</span>(res => <span
-                                class="code-func">log</span>(<span class="code-string">"Logic Sync"</span>, res));</div>
                     </div>
                 </div>
             </div>
         </div>
     </main>
 
-    <!-- Tactical Deployment -->
-    <section id="deploy" class="padding-y-160px border-top-1 border-white-5">
+    <!-- 02. CORE PILLARS (The Industrial Foundation) -->
+    <section class="padding-y-200px background-dark position-relative">
         <div class="container">
-            <div class="text-center margin-bottom-100px">
+            <div class="display-grid grid-columns-3 gap-x-64px tablet:grid-columns-1 tablet:gap-y-82px">
+                <div class="transition-all hover:-translate-y-8px">
+                    <div class="font-black font-size-56px text-brand margin-bottom-40px opacity-20">01</div>
+                    <h3 class="font-black font-size-40px margin-bottom-32px letter-spacing-1px">Zero-Copy Runtime.</h3>
+                    <p class="text-white-50 line-height-180 font-size-18px">Eliminate mid-tier latency. Data remains in
+                        native memory space, manipulated directly by bytecode pointers for absolute velocity.</p>
+                </div>
+                <div class="transition-all hover:-translate-y-8px">
+                    <div class="font-black font-size-56px text-gold margin-bottom-40px opacity-20">02</div>
+                    <h3 class="font-black font-size-40px margin-bottom-32px letter-spacing-1px">Deterministic Execution.
+                    </h3>
+                    <p class="text-white-50 line-height-180 font-size-18px">Every instruction executes in predicted
+                        timeframes. No GC pauses, no jitter—just pure, industrial consistency.</p>
+                </div>
+                <div class="transition-all hover:-translate-y-8px">
+                    <div class="font-black font-size-56px text-success margin-bottom-40px opacity-20">03</div>
+                    <h3 class="font-black font-size-40px margin-bottom-32px letter-spacing-1px">Sovereign Persistence.
+                    </h3>
+                    <p class="text-white-50 line-height-180 font-size-18px">Database queries as logical extensions of
+                        the runtime. Proxy resolution ensures your data is as flexible as your code.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 03. DEPLOYMENT ARCHITECTURE (The Work Model) -->
+    <section id="deployment" class="padding-y-200px background-black border-top-1px border-white-5">
+        <div class="container">
+            <div class="max-width-900px margin-bottom-110px">
+                <h4 class="text-brand font-black font-size-12px uppercase letter-spacing-5px margin-bottom-24px">
+                    Tactical Deployment</h4>
+                <h2 class="font-black font-size-72px tablet:font-size-56px -letter-spacing-3px">Work Units.</h2>
+                <p class="text-white-60 font-size-22px margin-top-32px line-height-160">Kitwork logic is packaged into
+                    immutable <b>Work Units</b>—single-binary entities that carry their own dependencies, routes, and
+                    persistence logic.</p>
+            </div>
+
+            <div class="display-grid grid-columns-2 gap-x-82px tablet:grid-columns-1 items-start">
                 <div
-                    class="display-flex justify-center gap-24px text-gray font-900 font-size-12px uppercase letter-spacing-4px margin-bottom-24px">
-                    <span>Deterministically.</span>
-                    <span class="text-brand">•</span>
-                    <span>Efficiently.</span>
-                    <span class="text-brand">•</span>
-                    <span>Without Waste.</span>
-                </div>
-                <h2 class="font-900 font-size-64px glow-text">Tactical Deployment.</h2>
-            </div>
-
-            <div class="display-grid grid-columns-3 gap-40px tablet:grid-columns-1">
-                <!-- Step 01 -->
-                <div class="position-relative">
-                    <div class="font-900 font-size-120px text-white-5 position-absolute top--40 left--20">01</div>
-                    <div class="position-relative">
-                        <span class="badge margin-bottom-24px">Initialize</span>
-                        <h3 class="font-900 font-size-24px text-white margin-bottom-16px">Clone Core Infra</h3>
-                        <p class="text-gray font-size-16px margin-bottom-32px">Pull the industrial logic engine directly
-                            into your local environment to begin development.</p>
+                    class="background-dark-50 border-1px border-white-10 rounded-24px padding-56px shadow-system transition-all hover:border-brand-40">
+                    <div class="display-flex items-center gap-x-20px margin-bottom-40px">
                         <div
-                            class="terminal-panel padding-16px font-mono font-size-12px background-black border-brand-20">
-                            <span class="text-brand">$</span> git clone kitwork/engine
+                            class="width-48px height-48px background-brand text-white rounded-full display-flex items-center justify-center font-black font-size-18px">
+                            1</div>
+                        <div class="font-black font-size-24px text-white letter-spacing-1px">Discovery & Compilation
                         </div>
                     </div>
+                    <p class="text-white-40 font-size-17px line-height-170">The engine scans specified sources,
+                        automatically discovering `work.js` files and compiling them into highly-optimized bytecode
+                        during the bootstrap phase.</p>
                 </div>
-
-                <!-- Step 02 -->
-                <div class="position-relative">
-                    <div class="font-900 font-size-120px text-white-5 position-absolute top--40 left--20">02</div>
-                    <div class="position-relative">
-                        <span class="badge margin-bottom-24px">Configure</span>
-                        <h3 class="font-900 font-size-24px text-white margin-bottom-16px">Spawn Execution Node</h3>
-                        <p class="text-gray font-size-16px margin-bottom-32px">Boot up the specialized Runtime Server
-                            designed for isolated, high-velocity logic execution.</p>
+                <div
+                    class="background-dark-50 border-1px border-white-10 rounded-24px padding-56px shadow-system tablet:margin-top-40px transition-all hover:border-brand-40">
+                    <div class="display-flex items-center gap-x-20px margin-bottom-40px">
                         <div
-                            class="terminal-panel padding-16px font-mono font-size-12px background-black border-brand-20">
-                            <span class="text-brand">$</span> go run cmd/server/main.go
-                        </div>
+                            class="width-48px height-48px background-brand text-white rounded-full display-flex items-center justify-center font-black font-size-18px">
+                            2</div>
+                        <div class="font-black font-size-24px text-white letter-spacing-1px">Isolated Sandbox</div>
                     </div>
-                </div>
-
-                <!-- Step 03 -->
-                <div class="position-relative">
-                    <div class="font-900 font-size-120px text-white-5 position-absolute top--40 left--20">03</div>
-                    <div class="position-relative">
-                        <span class="badge margin-bottom-24px">Execute</span>
-                        <h3 class="font-900 font-size-24px text-white margin-bottom-16px">Deploy Atomic Logic</h3>
-                        <p class="text-gray font-size-16px margin-bottom-32px">Build your business rules in clean JS.
-                            Kitwork handles the rest - scaling, persistence, and performance.</p>
-                        <div
-                            class="margin-top-40px background-brand-5 border-1 border-brand-20 rounded-8 padding-24px text-center">
-                            <div
-                                class="text-white font-900 font-size-12px uppercase letter-spacing-2px margin-bottom-16px">
-                                Ready for Industrial Production</div>
-                            <button
-                                class="background-brand text-white rounded-4px hover:translate-y--3px hover:shadow-brand transition-all font-900 uppercase font-size-11px padding-y-12px padding-x-24px width-full border-0 cursor-pointer">Deploy
-                                Sample Node</button>
-                        </div>
-                    </div>
+                    <p class="text-white-40 font-size-17px line-height-170">Each unit operates in its own memory-safe
+                        sandbox. Logic flows are firewalled, ensuring that failures in one system never compromise the
+                        sovereign core.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Philosophy -->
-    <section id="philosophy" class="padding-y-160px border-top-1 border-white-5 background-dark-50">
+    <!-- 04. PERFORMANCE BENCHMARKS (Data Truth) -->
+    <section id="vm" class="padding-y-200px background-dark border-top-1px border-white-5">
         <div class="container">
-            <div class="text-center margin-bottom-100px">
-                <h2 class="font-900 font-size-72px glow-text">Core <span class="text-brand">Philosophy.</span></h2>
-            </div>
-            <div class="feature-grid">
-                <div class="spec-card">
-                    <h3 class="font-900 font-size-28px margin-bottom-20px">Nanosecond Execution</h3>
-                    <p class="text-gray font-size-18px">A proprietary stack-based VM that executes bytecode instructions
-                        in ~70ns. Zero reflection, zero overhead during logic runtime.</p>
-                </div>
-                <div class="spec-card">
-                    <h3 class="font-900 font-size-28px margin-bottom-20px">Zero-GC Pressure</h3>
-                    <p class="text-gray font-size-18px">The engine pools task contexts and VM stacks, ensuring
-                        consistent performance without GC pauses even under heavy concurrency.</p>
-                </div>
-                <div class="spec-card">
-                    <h3 class="font-900 font-size-28px margin-bottom-20px">Logic as Infrastructure</h3>
-                    <p class="text-gray font-size-18px">Decouples business rules from server implementation. Your logic
-                        becomes a portable asset, executed by a high-velocity core.</p>
-                </div>
-                <div class="spec-card">
-                    <h3 class="font-900 font-size-28px margin-bottom-20px">Agent-Native Design</h3>
-                    <p class="text-gray font-size-18px">Built for the future of AI. The engine’s bytecode and task
-                        context are designed to be easily manipulated by AI agents while remaining 100% predictable for
-                        humans.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ORM (Showing explicitly percent usage) -->
-    <section id="orm" class="padding-y-160px border-top-1 border-white-5">
-        <div class="container">
-            <div class="display-flex flex-row gap-100px items-start tablet:flex-column">
-                <div class="width-45pct tablet:width-full position-sticky top-120">
-                    <span class="text-brand font-900 uppercase letter-spacing-4px font-size-12px">Smart Query
-                        Builder</span>
-                    <h2 class="font-900 font-size-82px margin-y-32px glow-text line-height-0.9">Smart ORM. <br> Native
-                        Feel.</h2>
-                    <p class="text-gray font-size-22px line-height-1.6">Kitwork leverages <strong>Proxy-based Entity
-                            Resolution</strong> to eliminate boilerplate. No more SQL strings; just pure, predictable
-                        logic.</p>
-                    <ul class="display-flex flex-column gap-24px no-list-style padding-0 margin-top-60px">
-                        <li class="display-flex gap-16px">
-                            <div class="width-12px height-2px background-brand margin-top-12px"></div>
-                            <div><strong>Proxy Entity:</strong> Access tables as native properties.</div>
-                        </li>
-                        <li class="display-flex gap-16px">
-                            <div class="width-12px height-2px background-brand margin-top-12px"></div>
-                            <div><strong>Lambda Filters:</strong> Write natural JS conditions.</div>
-                        </li>
-                        <li class="display-flex gap-16px">
-                            <div class="width-12px height-2px background-brand margin-top-12px"></div>
-                            <div><strong>Auto IN:</strong> Batch lookup using array inclusion.</div>
-                        </li>
-                        <li class="display-flex gap-16px">
-                            <div class="width-12px height-2px background-brand margin-top-12px"></div>
-                            <div><strong>Strict Updates:</strong> Secure data writing by default.</div>
-                        </li>
-                    </ul>
-                </div>
-                <div class="width-55pct tablet:width-full">
-                    <div class="terminal-panel">
-                        <div class="terminal-header"><span
-                                class="text-gray font-size-10px font-mono">orm_operations.js</span></div>
-                        <div class="padding-48px font-mono font-size-14px line-height-1.8">
-                            <div><span class="code-comment">// 1. Lambda-based Filtering</span></div>
-                            <div><span class="code-keyword">const</span> active = db.user.<span
-                                    class="code-func">find</span>(u => u.email == <span
-                                    class="code-string">"admin@kitwork.io"</span>);</div>
-                            <br>
-                            <div><span class="code-comment">// 2. Batch Lookup with Automatic IN</span></div>
-                            <div><span class="code-keyword">const</span> items = db.products.<span
-                                    class="code-func">where</span>(p => p.id == [<span class="code-num">10, 20,
-                                    30</span>]).<span class="code-func">list</span>();</div>
-                            <br>
-                            <div><span class="code-comment">// 3. Strict Update (Secure)</span></div>
-                            <div>db.user.<span class="code-func">where</span>(u => u.id == <span
-                                    class="code-num">1</span>).<span class="code-func">update</span>({ active: <span
-                                    class="code-num">true</span> });</div>
-                            <br>
-                            <div><span class="code-comment">// 4. Full Object Return (Insert)</span></div>
-                            <div><span class="code-keyword">const</span> newUser = db.user.<span
-                                    class="code-func">create</span>({ name: <span class="code-string">"New Node"</span>
-                                });</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- VM & Performance -->
-    <section id="vm" class="padding-y-160px border-y-1 border-white-5 background-elegant">
-        <div class="container">
-            <div class="text-center margin-bottom-120px">
-                <span class="text-brand font-900 uppercase letter-spacing-4px font-size-12px">Performance Markers</span>
-                <h2 class="font-900 font-size-72px glow-text margin-top-16px">Deterministic Power.</h2>
-            </div>
-            <div
-                class="display-flex flex-row justify-between tablet:grid tablet:grid-columns-2 tablet:gap-60px mobile:grid-columns-1">
-                <div class="text-center">
-                    <div class="bench-value brand-gradient">14.1M</div>
-                    <div class="text-gray font-size-11px font-900 uppercase letter-spacing-4px margin-top-20px">Insn /
-                        Second</div>
-                    <div class="text-gray-40 font-size-10px margin-top-8px">Raw VM Throughput</div>
-                </div>
-                <div class="text-center">
-                    <div class="bench-value text-white">605K</div>
-                    <div class="text-gray font-size-11px font-900 uppercase letter-spacing-4px margin-top-20px">Logic
-                        Ops / s</div>
-                    <div class="text-gray-40 font-size-10px margin-top-8px">Real-world Data Mapping</div>
-                </div>
-                <div class="text-center">
-                    <div class="bench-value text-white">70ns</div>
-                    <div class="text-gray font-size-11px font-900 uppercase letter-spacing-4px margin-top-20px">Core
-                        Latency</div>
-                    <div class="text-gray-40 font-size-10px margin-top-8px">Per Operation Timing</div>
-                </div>
-                <div class="text-center">
-                    <div class="bench-value brand-gradient">ZERO</div>
-                    <div class="text-gray font-size-11px font-900 uppercase letter-spacing-4px margin-top-20px">GC Pause
-                    </div>
-                    <div class="text-gray-40 font-size-10px margin-top-8px">Resource Pooling Impact</div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Built-ins Section -->
-    <section id="builtins" class="padding-y-160px border-top-1 border-white-5">
-        <div class="container">
-            <div class="text-center margin-bottom-100px">
-                <span class="text-brand font-900 uppercase letter-spacing-4px font-size-12px">Standard Library</span>
-                <h2 class="font-900 font-size-72px glow-text margin-top-16px">Cloud-Native Built-ins.</h2>
-            </div>
-            <div class="display-grid grid-columns-4 gap-24px tablet:grid-columns-2 mobile:grid-columns-1">
-                <div class="logic-card text-center">
-                    <div class="font-mono text-brand font-900 margin-bottom-16px">random()</div>
-                    <p class="text-gray font-size-14px">Optimized entropy source supporting integers, ranges, and array
-                        selection.</p>
-                </div>
-                <div class="logic-card text-center">
-                    <div class="font-mono text-brand font-900 margin-bottom-16px">now()</div>
-                    <p class="text-gray font-size-14px">Proxy-based system time resolution with nanosecond precision.
+            <div class="display-grid grid-columns-12 gap-x-82px items-center">
+                <div class="grid-span-5 tablet:grid-span-12">
+                    <h4 class="text-brand font-black font-size-12px uppercase letter-spacing-5px margin-bottom-24px">
+                        Technical Dominance</h4>
+                    <h2 class="font-black font-size-72px tablet:font-size-56px -letter-spacing-4px margin-bottom-48px">
+                        Proven <br>Velocity.</h2>
+                    <p class="text-white-70 font-size-20px line-height-180 margin-bottom-64px letter-spacing-0.5px">
+                        Benchmarks don't lie. Kitwork outpaces traditional interpretation by orders of magnitude through
+                        its optimized bytecode executor.
                     </p>
+                    <div class="display-flex flex-column gap-y-32px">
+                        <div
+                            class="display-flex justify-between items-end border-bottom-1px border-white-10 padding-bottom-16px">
+                            <span
+                                class="text-white-40 font-black uppercase font-size-13px letter-spacing-3px">Insn/sec</span>
+                            <span class="text-brand font-black font-size-40px letter-spacing-1px">14.1M</span>
+                        </div>
+                        <div
+                            class="display-flex justify-between items-end border-bottom-1px border-white-10 padding-bottom-16px">
+                            <span class="text-white-40 font-black uppercase font-size-13px letter-spacing-3px">Logic
+                                Ops</span>
+                            <span class="text-white font-black font-size-40px letter-spacing-1px">605K</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="logic-card text-center">
-                    <div class="font-mono text-brand font-900 margin-bottom-16px">readfile()</div>
-                    <p class="text-gray font-size-14px">High-speed I/O optimized file reading for logic assets.</p>
-                </div>
-                <div class="logic-card text-center">
-                    <div class="font-mono text-brand font-900 margin-bottom-16px">log()</div>
-                    <p class="text-gray font-size-14px">Context-aware logging designed for debugging industrial
-                        workflows.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Architect Section -->
-    <section id="architect" class="padding-y-160px border-top-1 border-white-5 background-dark-50">
-        <div class="container">
-            <div
-                class="terminal-panel padding-60px display-flex flex-row gap-60px items-center tablet:flex-column tablet:text-center">
-                <div class="width-30pct tablet:width-full display-flex justify-center">
+                <div class="grid-span-7 tablet:grid-span-12 tablet:margin-top-82px">
                     <div
-                        class="width-200px height-200px rounded-full border-1 border-brand-30 display-flex items-center justify-center background-brand-5">
-                        <span class="font-900 font-size-72px brand-gradient">HNQ</span>
-                    </div>
-                </div>
-                <div class="width-70pct tablet:width-full">
-                    <span class="text-brand font-900 uppercase letter-spacing-4px font-size-12px">Logic Engine
-                        Architect</span>
-                    <h2 class="font-900 font-size-48px margin-y-24px">Huỳnh Nhân Quốc</h2>
-                    <p class="text-gray font-size-18px line-height-1.8 margin-bottom-32px">
-                        "Performance is not an afterthought; it is the infrastructure."<br>
-                        Architecting the bridge between Go performance and high-level logic flexibility.
-                    </p>
-                    <div class="display-flex gap-20px tablet:justify-center">
-                        <a href="https://github.com/huynhnhanquoc"
-                            class="padding-y-12px padding-x-32px font-size-11px no-underline background-brand text-white rounded-4px hover:translate-y--3px hover:shadow-brand transition-all font-900 uppercase">GitHub
-                            Profile</a>
-                        <a href="https://github.com/sponsors/huynhnhanquoc"
-                            class="glass-panel text-white font-900 font-size-11px padding-x-32px padding-y-12px no-underline border-0 hover:background-white-10 transition-all uppercase rounded-4px">Sponsor
-                            Project</a>
+                        class="background-black border-1px border-brand-20 rounded-32px padding-64px shadow-great overflow-hidden position-relative">
+                        <div
+                            class="position-absolute top-0px right-0px background-brand-10 text-brand font-mono font-size-10px padding-y-8px padding-x-24px border-bottom-1px border-left-1px border-brand-20">
+                            PERF_VAL_STABLE</div>
+                        <div class="font-mono font-size-18px line-height-200">
+                            <span class="text-brand font-bold">work</span>(<span class="text-gold">"Benchmark"</span>)
+                            <div class="padding-left-32px border-left-2px border-brand-20 margin-y-24px">
+                                .<span class="text-success">handle</span>(() => {<br>
+                                <span class="padding-left-32px text-white-30 italic">// Universal data
+                                    transformation</span><br>
+                                <span class="padding-left-32px font-bold text-white">return db.data.list().map(x => x *
+                                    2);</span><br>
+                                })
+                            </div>
+                            <span class="text-white-30 italic font-size-14px">// Result: 0.00014s (Full Stack
+                                Latency)</span>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Footer -->
+    <!-- 05. CORE SCHEDULER (The Heartbeat) -->
+    <section id="scheduler" class="padding-y-200px background-black border-top-1px border-white-5">
+        <div class="container text-center">
+            <h4 class="text-gold font-black font-size-12px uppercase letter-spacing-5px margin-bottom-24px">Timed
+                Infrastructure</h4>
+            <h2 class="font-black font-size-72px tablet:font-size-56px -letter-spacing-4px margin-bottom-32px">The
+                Sovereign Heartbeat.</h2>
+            <p
+                class="text-white-60 font-size-22px max-width-800px margin-x-auto margin-bottom-110px line-height-160 letter-spacing-0.5px">
+                Kitwork's scheduler is integrated directly into the VM heartbeat, executing rituals with nanosecond
+                precision independent of network state.</p>
+
+            <div class="display-grid grid-columns-3 gap-x-48px tablet:grid-columns-1 tablet:gap-y-48px text-left">
+                <div
+                    class="background-elegant border-top-4px border-top-brand padding-56px rounded-16px shadow-system transition-all hover:border-brand">
+                    <div class="font-mono text-brand font-bold font-size-16px margin-bottom-24px">.daily("01:00")</div>
+                    <div class="text-white font-black font-size-24px margin-bottom-16px letter-spacing-1px">Phase Sync
+                    </div>
+                    <p class="text-white-40 font-size-16px line-height-170">Ideal for heavy resource pooling and
+                        periodic system re-indexing without request overhead.</p>
+                </div>
+                <div
+                    class="background-elegant border-top-4px border-top-gold padding-56px rounded-16px shadow-system transition-all hover:border-gold">
+                    <div class="font-mono text-gold font-bold font-size-16px margin-bottom-24px">.every("5m")</div>
+                    <div class="text-white font-black font-size-24px margin-bottom-16px letter-spacing-1px">Universal
+                        Interv</div>
+                    <p class="text-white-40 font-size-16px line-height-170">Universal parser handling durations from
+                        nanoseconds to days with absolute bytecode accuracy.</p>
+                </div>
+                <div
+                    class="background-elegant border-top-4px border-top-success padding-56px rounded-16px shadow-system transition-all hover:border-success">
+                    <div class="font-mono text-success font-bold font-size-16px margin-bottom-24px">.weekly("MON")</div>
+                    <div class="text-white font-black font-size-24px margin-bottom-16px letter-spacing-1px">Industrial
+                        Ritual</div>
+                    <p class="text-white-40 font-size-16px line-height-170">Complex chronological alignments for
+                        enterprise-grade compliance monitoring systems.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 06. RENDER PIPELINE (Secure Velocity) -->
+    <section id="rendering" class="padding-y-200px background-dark border-top-1px border-white-5">
+        <div class="container">
+            <div class="display-grid grid-columns-12 gap-x-82px items-center">
+                <div class="grid-span-5 tablet:grid-span-12 tablet:margin-bottom-82px">
+                    <h4 class="text-success font-black font-size-12px uppercase letter-spacing-5px margin-bottom-24px">
+                        Zero-Allocation Pipeline</h4>
+                    <h2 class="font-black font-size-64px tablet:font-size-56px -letter-spacing-4px margin-bottom-40px">
+                        Trusted Trust.</h2>
+                    <p class="text-white-60 font-size-20px line-height-180 margin-bottom-56px letter-spacing-0.5px">
+                        Bypass escaping for trusted components. Kitwork's template engine pre-compiles layouts,
+                        separating infrastructure from unverified user data.
+                    </p>
+                    <div
+                        class="background-black-30 border-1px border-white-10 padding-32px rounded-16px display-inline-flex items-center gap-x-24px">
+                        <div class="text-brand shadow-glow font-black font-size-20px">0.01ms</div>
+                        <div class="text-white-30 font-bold uppercase font-size-11px letter-spacing-2px">Rendering
+                            Latency</div>
+                    </div>
+                </div>
+                <div class="grid-span-7 tablet:grid-span-12">
+                    <div class="display-grid grid-columns-2 gap-32px mobile:grid-columns-1">
+                        <div
+                            class="background-black border-top-4px border-top-gold padding-56px rounded-16px shadow-system">
+                            <code class="text-gold font-bold font-size-22px">{{ $variable }}</code>
+                            <h5 class="font-black font-size-26px margin-top-24px margin-bottom-16px letter-spacing-1px">
+                                Sovereign Layout</h5>
+                            <p class="text-white-40 line-height-170 font-size-15px">Raw HTML injection for internally
+                                verified assets. Maximum speed, zero allocation overhead.</p>
+                        </div>
+                        <div
+                            class="background-black border-top-4px border-top-success padding-56px rounded-16px shadow-system">
+                            <code class="text-success font-bold font-size-22px">{{ variable }}</code>
+                            <h5 class="font-black font-size-26px margin-top-24px margin-bottom-16px letter-spacing-1px">
+                                XSS Hardening</h5>
+                            <p class="text-white-40 line-height-170 font-size-15px">Automatic character escaping for all
+                                external content. Secure by industrial default.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     {{ $footer }}
 
 </body>

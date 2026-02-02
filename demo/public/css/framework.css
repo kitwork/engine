@@ -1,0 +1,594 @@
+/* Kitwork Industrial Framework v14.0 - THE ARCHITECT'S SKELETON */
+
+:root {
+	--color-brand-rgb: 248, 34, 68;
+	--color-white-rgb: 255, 255, 255;
+	--color-black-rgb: 5, 5, 5;
+	--color-gray-rgb: 140, 140, 140;
+	--color-elegant-rgb: 12, 12, 12;
+	--color-dark-rgb: 8, 8, 8;
+	--color-success-rgb: 34, 197, 94;
+	--color-gold-rgb: 234, 179, 8;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+
+.container { width: 100%; max-width: 1280px; margin-inline: auto; padding-inline: 32px; }
+.transition-all { transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.font-outfit { font-family: 'Outfit', sans-serif; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+.background-grid-brand { background-image: radial-gradient(circle at 1px 1px, rgba(248, 34, 68, 0.05) 1px, transparent 0); background-size: 32px 32px; }
+.background-haze-brand { background: radial-gradient(circle at 50% 20%, rgba(248, 34, 68, 0.12), transparent 70%); }
+.background-gradient-brand { background: linear-gradient(135deg, #f82244 0%, #d61b3c 100%); }
+.margin-0px { margin: 0px; }
+.margin-x-0px { margin-left: 0px; margin-right: 0px; }
+.margin-y-0px { margin-top: 0px; margin-bottom: 0px; }
+.padding-0px { padding: 0px; }
+.padding-x-0px { padding-left: 0px; padding-right: 0px; }
+.padding-y-0px { padding-top: 0px; padding-bottom: 0px; }
+.gap-0px { gap: 0px; }
+.gap-x-0px { column-gap: 0px; }
+.gap-y-0px { row-gap: 0px; }
+.top-0px { top: 0px; }
+.bottom-0px { bottom: 0px; }
+.left-0px { left: 0px; }
+.right-0px { right: 0px; }
+.text-0px { font-size: 0px; }
+.margin-1px { margin: 1px; }
+.margin-x-1px { margin-left: 1px; margin-right: 1px; }
+.margin-y-1px { margin-top: 1px; margin-bottom: 1px; }
+.\-margin-1px { margin: -1px; }
+.padding-1px { padding: 1px; }
+.padding-x-1px { padding-left: 1px; padding-right: 1px; }
+.padding-y-1px { padding-top: 1px; padding-bottom: 1px; }
+.gap-1px { gap: 1px; }
+.gap-x-1px { column-gap: 1px; }
+.gap-y-1px { row-gap: 1px; }
+.top-1px { top: 1px; }
+.\-top-1px { top: -1px; }
+.bottom-1px { bottom: 1px; }
+.\-bottom-1px { bottom: -1px; }
+.left-1px { left: 1px; }
+.\-left-1px { left: -1px; }
+.right-1px { right: 1px; }
+.\-right-1px { right: -1px; }
+.text-1px { font-size: 1px; }
+.margin-2px { margin: 2px; }
+.margin-x-2px { margin-left: 2px; margin-right: 2px; }
+.margin-y-2px { margin-top: 2px; margin-bottom: 2px; }
+.\-margin-2px { margin: -2px; }
+.padding-2px { padding: 2px; }
+.padding-x-2px { padding-left: 2px; padding-right: 2px; }
+.padding-y-2px { padding-top: 2px; padding-bottom: 2px; }
+.gap-2px { gap: 2px; }
+.gap-x-2px { column-gap: 2px; }
+.gap-y-2px { row-gap: 2px; }
+.top-2px { top: 2px; }
+.\-top-2px { top: -2px; }
+.bottom-2px { bottom: 2px; }
+.\-bottom-2px { bottom: -2px; }
+.left-2px { left: 2px; }
+.\-left-2px { left: -2px; }
+.right-2px { right: 2px; }
+.\-right-2px { right: -2px; }
+.text-2px { font-size: 2px; }
+.margin-4px { margin: 4px; }
+.margin-x-4px { margin-left: 4px; margin-right: 4px; }
+.margin-y-4px { margin-top: 4px; margin-bottom: 4px; }
+.\-margin-4px { margin: -4px; }
+.padding-4px { padding: 4px; }
+.padding-x-4px { padding-left: 4px; padding-right: 4px; }
+.padding-y-4px { padding-top: 4px; padding-bottom: 4px; }
+.gap-4px { gap: 4px; }
+.gap-x-4px { column-gap: 4px; }
+.gap-y-4px { row-gap: 4px; }
+.top-4px { top: 4px; }
+.\-top-4px { top: -4px; }
+.bottom-4px { bottom: 4px; }
+.\-bottom-4px { bottom: -4px; }
+.left-4px { left: 4px; }
+.\-left-4px { left: -4px; }
+.right-4px { right: 4px; }
+.\-right-4px { right: -4px; }
+.text-4px { font-size: 4px; }
+.margin-8px { margin: 8px; }
+.margin-x-8px { margin-left: 8px; margin-right: 8px; }
+.margin-y-8px { margin-top: 8px; margin-bottom: 8px; }
+.\-margin-8px { margin: -8px; }
+.padding-8px { padding: 8px; }
+.padding-x-8px { padding-left: 8px; padding-right: 8px; }
+.padding-y-8px { padding-top: 8px; padding-bottom: 8px; }
+.gap-8px { gap: 8px; }
+.gap-x-8px { column-gap: 8px; }
+.gap-y-8px { row-gap: 8px; }
+.top-8px { top: 8px; }
+.\-top-8px { top: -8px; }
+.bottom-8px { bottom: 8px; }
+.\-bottom-8px { bottom: -8px; }
+.left-8px { left: 8px; }
+.\-left-8px { left: -8px; }
+.right-8px { right: 8px; }
+.\-right-8px { right: -8px; }
+.text-8px { font-size: 8px; }
+.margin-12px { margin: 12px; }
+.margin-x-12px { margin-left: 12px; margin-right: 12px; }
+.margin-y-12px { margin-top: 12px; margin-bottom: 12px; }
+.\-margin-12px { margin: -12px; }
+.padding-12px { padding: 12px; }
+.padding-x-12px { padding-left: 12px; padding-right: 12px; }
+.padding-y-12px { padding-top: 12px; padding-bottom: 12px; }
+.gap-12px { gap: 12px; }
+.gap-x-12px { column-gap: 12px; }
+.gap-y-12px { row-gap: 12px; }
+.top-12px { top: 12px; }
+.\-top-12px { top: -12px; }
+.bottom-12px { bottom: 12px; }
+.\-bottom-12px { bottom: -12px; }
+.left-12px { left: 12px; }
+.\-left-12px { left: -12px; }
+.right-12px { right: 12px; }
+.\-right-12px { right: -12px; }
+.text-12px { font-size: 12px; }
+.margin-16px { margin: 16px; }
+.margin-x-16px { margin-left: 16px; margin-right: 16px; }
+.margin-y-16px { margin-top: 16px; margin-bottom: 16px; }
+.\-margin-16px { margin: -16px; }
+.padding-16px { padding: 16px; }
+.padding-x-16px { padding-left: 16px; padding-right: 16px; }
+.padding-y-16px { padding-top: 16px; padding-bottom: 16px; }
+.gap-16px { gap: 16px; }
+.gap-x-16px { column-gap: 16px; }
+.gap-y-16px { row-gap: 16px; }
+.top-16px { top: 16px; }
+.\-top-16px { top: -16px; }
+.bottom-16px { bottom: 16px; }
+.\-bottom-16px { bottom: -16px; }
+.left-16px { left: 16px; }
+.\-left-16px { left: -16px; }
+.right-16px { right: 16px; }
+.\-right-16px { right: -16px; }
+.text-16px { font-size: 16px; }
+.margin-20px { margin: 20px; }
+.margin-x-20px { margin-left: 20px; margin-right: 20px; }
+.margin-y-20px { margin-top: 20px; margin-bottom: 20px; }
+.\-margin-20px { margin: -20px; }
+.padding-20px { padding: 20px; }
+.padding-x-20px { padding-left: 20px; padding-right: 20px; }
+.padding-y-20px { padding-top: 20px; padding-bottom: 20px; }
+.gap-20px { gap: 20px; }
+.gap-x-20px { column-gap: 20px; }
+.gap-y-20px { row-gap: 20px; }
+.top-20px { top: 20px; }
+.\-top-20px { top: -20px; }
+.bottom-20px { bottom: 20px; }
+.\-bottom-20px { bottom: -20px; }
+.left-20px { left: 20px; }
+.\-left-20px { left: -20px; }
+.right-20px { right: 20px; }
+.\-right-20px { right: -20px; }
+.text-20px { font-size: 20px; }
+.margin-24px { margin: 24px; }
+.margin-x-24px { margin-left: 24px; margin-right: 24px; }
+.margin-y-24px { margin-top: 24px; margin-bottom: 24px; }
+.\-margin-24px { margin: -24px; }
+.padding-24px { padding: 24px; }
+.padding-x-24px { padding-left: 24px; padding-right: 24px; }
+.padding-y-24px { padding-top: 24px; padding-bottom: 24px; }
+.gap-24px { gap: 24px; }
+.gap-x-24px { column-gap: 24px; }
+.gap-y-24px { row-gap: 24px; }
+.top-24px { top: 24px; }
+.\-top-24px { top: -24px; }
+.bottom-24px { bottom: 24px; }
+.\-bottom-24px { bottom: -24px; }
+.left-24px { left: 24px; }
+.\-left-24px { left: -24px; }
+.right-24px { right: 24px; }
+.\-right-24px { right: -24px; }
+.text-24px { font-size: 24px; }
+.margin-32px { margin: 32px; }
+.margin-x-32px { margin-left: 32px; margin-right: 32px; }
+.margin-y-32px { margin-top: 32px; margin-bottom: 32px; }
+.\-margin-32px { margin: -32px; }
+.padding-32px { padding: 32px; }
+.padding-x-32px { padding-left: 32px; padding-right: 32px; }
+.padding-y-32px { padding-top: 32px; padding-bottom: 32px; }
+.gap-32px { gap: 32px; }
+.gap-x-32px { column-gap: 32px; }
+.gap-y-32px { row-gap: 32px; }
+.top-32px { top: 32px; }
+.\-top-32px { top: -32px; }
+.bottom-32px { bottom: 32px; }
+.\-bottom-32px { bottom: -32px; }
+.left-32px { left: 32px; }
+.\-left-32px { left: -32px; }
+.right-32px { right: 32px; }
+.\-right-32px { right: -32px; }
+.text-32px { font-size: 32px; }
+.margin-40px { margin: 40px; }
+.margin-x-40px { margin-left: 40px; margin-right: 40px; }
+.margin-y-40px { margin-top: 40px; margin-bottom: 40px; }
+.\-margin-40px { margin: -40px; }
+.padding-40px { padding: 40px; }
+.padding-x-40px { padding-left: 40px; padding-right: 40px; }
+.padding-y-40px { padding-top: 40px; padding-bottom: 40px; }
+.gap-40px { gap: 40px; }
+.gap-x-40px { column-gap: 40px; }
+.gap-y-40px { row-gap: 40px; }
+.top-40px { top: 40px; }
+.\-top-40px { top: -40px; }
+.bottom-40px { bottom: 40px; }
+.\-bottom-40px { bottom: -40px; }
+.left-40px { left: 40px; }
+.\-left-40px { left: -40px; }
+.right-40px { right: 40px; }
+.\-right-40px { right: -40px; }
+.text-40px { font-size: 40px; }
+.margin-48px { margin: 48px; }
+.margin-x-48px { margin-left: 48px; margin-right: 48px; }
+.margin-y-48px { margin-top: 48px; margin-bottom: 48px; }
+.\-margin-48px { margin: -48px; }
+.padding-48px { padding: 48px; }
+.padding-x-48px { padding-left: 48px; padding-right: 48px; }
+.padding-y-48px { padding-top: 48px; padding-bottom: 48px; }
+.gap-48px { gap: 48px; }
+.gap-x-48px { column-gap: 48px; }
+.gap-y-48px { row-gap: 48px; }
+.top-48px { top: 48px; }
+.\-top-48px { top: -48px; }
+.bottom-48px { bottom: 48px; }
+.\-bottom-48px { bottom: -48px; }
+.left-48px { left: 48px; }
+.\-left-48px { left: -48px; }
+.right-48px { right: 48px; }
+.\-right-48px { right: -48px; }
+.text-48px { font-size: 48px; }
+.margin-56px { margin: 56px; }
+.margin-x-56px { margin-left: 56px; margin-right: 56px; }
+.margin-y-56px { margin-top: 56px; margin-bottom: 56px; }
+.\-margin-56px { margin: -56px; }
+.padding-56px { padding: 56px; }
+.padding-x-56px { padding-left: 56px; padding-right: 56px; }
+.padding-y-56px { padding-top: 56px; padding-bottom: 56px; }
+.gap-56px { gap: 56px; }
+.gap-x-56px { column-gap: 56px; }
+.gap-y-56px { row-gap: 56px; }
+.top-56px { top: 56px; }
+.\-top-56px { top: -56px; }
+.bottom-56px { bottom: 56px; }
+.\-bottom-56px { bottom: -56px; }
+.left-56px { left: 56px; }
+.\-left-56px { left: -56px; }
+.right-56px { right: 56px; }
+.\-right-56px { right: -56px; }
+.text-56px { font-size: 56px; }
+.margin-64px { margin: 64px; }
+.margin-x-64px { margin-left: 64px; margin-right: 64px; }
+.margin-y-64px { margin-top: 64px; margin-bottom: 64px; }
+.\-margin-64px { margin: -64px; }
+.padding-64px { padding: 64px; }
+.padding-x-64px { padding-left: 64px; padding-right: 64px; }
+.padding-y-64px { padding-top: 64px; padding-bottom: 64px; }
+.gap-64px { gap: 64px; }
+.gap-x-64px { column-gap: 64px; }
+.gap-y-64px { row-gap: 64px; }
+.top-64px { top: 64px; }
+.\-top-64px { top: -64px; }
+.bottom-64px { bottom: 64px; }
+.\-bottom-64px { bottom: -64px; }
+.left-64px { left: 64px; }
+.\-left-64px { left: -64px; }
+.right-64px { right: 64px; }
+.\-right-64px { right: -64px; }
+.text-64px { font-size: 64px; }
+.margin-72px { margin: 72px; }
+.margin-x-72px { margin-left: 72px; margin-right: 72px; }
+.margin-y-72px { margin-top: 72px; margin-bottom: 72px; }
+.\-margin-72px { margin: -72px; }
+.padding-72px { padding: 72px; }
+.padding-x-72px { padding-left: 72px; padding-right: 72px; }
+.padding-y-72px { padding-top: 72px; padding-bottom: 72px; }
+.gap-72px { gap: 72px; }
+.gap-x-72px { column-gap: 72px; }
+.gap-y-72px { row-gap: 72px; }
+.top-72px { top: 72px; }
+.\-top-72px { top: -72px; }
+.bottom-72px { bottom: 72px; }
+.\-bottom-72px { bottom: -72px; }
+.left-72px { left: 72px; }
+.\-left-72px { left: -72px; }
+.right-72px { right: 72px; }
+.\-right-72px { right: -72px; }
+.text-72px { font-size: 72px; }
+.margin-82px { margin: 82px; }
+.margin-x-82px { margin-left: 82px; margin-right: 82px; }
+.margin-y-82px { margin-top: 82px; margin-bottom: 82px; }
+.\-margin-82px { margin: -82px; }
+.padding-82px { padding: 82px; }
+.padding-x-82px { padding-left: 82px; padding-right: 82px; }
+.padding-y-82px { padding-top: 82px; padding-bottom: 82px; }
+.gap-82px { gap: 82px; }
+.gap-x-82px { column-gap: 82px; }
+.gap-y-82px { row-gap: 82px; }
+.top-82px { top: 82px; }
+.\-top-82px { top: -82px; }
+.bottom-82px { bottom: 82px; }
+.\-bottom-82px { bottom: -82px; }
+.left-82px { left: 82px; }
+.\-left-82px { left: -82px; }
+.right-82px { right: 82px; }
+.\-right-82px { right: -82px; }
+.text-82px { font-size: 82px; }
+.margin-96px { margin: 96px; }
+.margin-x-96px { margin-left: 96px; margin-right: 96px; }
+.margin-y-96px { margin-top: 96px; margin-bottom: 96px; }
+.\-margin-96px { margin: -96px; }
+.padding-96px { padding: 96px; }
+.padding-x-96px { padding-left: 96px; padding-right: 96px; }
+.padding-y-96px { padding-top: 96px; padding-bottom: 96px; }
+.gap-96px { gap: 96px; }
+.gap-x-96px { column-gap: 96px; }
+.gap-y-96px { row-gap: 96px; }
+.top-96px { top: 96px; }
+.\-top-96px { top: -96px; }
+.bottom-96px { bottom: 96px; }
+.\-bottom-96px { bottom: -96px; }
+.left-96px { left: 96px; }
+.\-left-96px { left: -96px; }
+.right-96px { right: 96px; }
+.\-right-96px { right: -96px; }
+.text-96px { font-size: 96px; }
+.margin-110px { margin: 110px; }
+.margin-x-110px { margin-left: 110px; margin-right: 110px; }
+.margin-y-110px { margin-top: 110px; margin-bottom: 110px; }
+.\-margin-110px { margin: -110px; }
+.padding-110px { padding: 110px; }
+.padding-x-110px { padding-left: 110px; padding-right: 110px; }
+.padding-y-110px { padding-top: 110px; padding-bottom: 110px; }
+.gap-110px { gap: 110px; }
+.gap-x-110px { column-gap: 110px; }
+.gap-y-110px { row-gap: 110px; }
+.top-110px { top: 110px; }
+.\-top-110px { top: -110px; }
+.bottom-110px { bottom: 110px; }
+.\-bottom-110px { bottom: -110px; }
+.left-110px { left: 110px; }
+.\-left-110px { left: -110px; }
+.right-110px { right: 110px; }
+.\-right-110px { right: -110px; }
+.text-110px { font-size: 110px; }
+.margin-120px { margin: 120px; }
+.margin-x-120px { margin-left: 120px; margin-right: 120px; }
+.margin-y-120px { margin-top: 120px; margin-bottom: 120px; }
+.\-margin-120px { margin: -120px; }
+.padding-120px { padding: 120px; }
+.padding-x-120px { padding-left: 120px; padding-right: 120px; }
+.padding-y-120px { padding-top: 120px; padding-bottom: 120px; }
+.gap-120px { gap: 120px; }
+.gap-x-120px { column-gap: 120px; }
+.gap-y-120px { row-gap: 120px; }
+.top-120px { top: 120px; }
+.\-top-120px { top: -120px; }
+.bottom-120px { bottom: 120px; }
+.\-bottom-120px { bottom: -120px; }
+.left-120px { left: 120px; }
+.\-left-120px { left: -120px; }
+.right-120px { right: 120px; }
+.\-right-120px { right: -120px; }
+.text-120px { font-size: 120px; }
+.margin-140px { margin: 140px; }
+.margin-x-140px { margin-left: 140px; margin-right: 140px; }
+.margin-y-140px { margin-top: 140px; margin-bottom: 140px; }
+.\-margin-140px { margin: -140px; }
+.padding-140px { padding: 140px; }
+.padding-x-140px { padding-left: 140px; padding-right: 140px; }
+.padding-y-140px { padding-top: 140px; padding-bottom: 140px; }
+.gap-140px { gap: 140px; }
+.gap-x-140px { column-gap: 140px; }
+.gap-y-140px { row-gap: 140px; }
+.top-140px { top: 140px; }
+.\-top-140px { top: -140px; }
+.bottom-140px { bottom: 140px; }
+.\-bottom-140px { bottom: -140px; }
+.left-140px { left: 140px; }
+.\-left-140px { left: -140px; }
+.right-140px { right: 140px; }
+.\-right-140px { right: -140px; }
+.text-140px { font-size: 140px; }
+.margin-160px { margin: 160px; }
+.margin-x-160px { margin-left: 160px; margin-right: 160px; }
+.margin-y-160px { margin-top: 160px; margin-bottom: 160px; }
+.\-margin-160px { margin: -160px; }
+.padding-160px { padding: 160px; }
+.padding-x-160px { padding-left: 160px; padding-right: 160px; }
+.padding-y-160px { padding-top: 160px; padding-bottom: 160px; }
+.gap-160px { gap: 160px; }
+.gap-x-160px { column-gap: 160px; }
+.gap-y-160px { row-gap: 160px; }
+.top-160px { top: 160px; }
+.\-top-160px { top: -160px; }
+.bottom-160px { bottom: 160px; }
+.\-bottom-160px { bottom: -160px; }
+.left-160px { left: 160px; }
+.\-left-160px { left: -160px; }
+.right-160px { right: 160px; }
+.\-right-160px { right: -160px; }
+.text-160px { font-size: 160px; }
+.margin-200px { margin: 200px; }
+.margin-x-200px { margin-left: 200px; margin-right: 200px; }
+.margin-y-200px { margin-top: 200px; margin-bottom: 200px; }
+.\-margin-200px { margin: -200px; }
+.padding-200px { padding: 200px; }
+.padding-x-200px { padding-left: 200px; padding-right: 200px; }
+.padding-y-200px { padding-top: 200px; padding-bottom: 200px; }
+.gap-200px { gap: 200px; }
+.gap-x-200px { column-gap: 200px; }
+.gap-y-200px { row-gap: 200px; }
+.top-200px { top: 200px; }
+.\-top-200px { top: -200px; }
+.bottom-200px { bottom: 200px; }
+.\-bottom-200px { bottom: -200px; }
+.left-200px { left: 200px; }
+.\-left-200px { left: -200px; }
+.right-200px { right: 200px; }
+.\-right-200px { right: -200px; }
+.text-200px { font-size: 200px; }
+.margin-240px { margin: 240px; }
+.margin-x-240px { margin-left: 240px; margin-right: 240px; }
+.margin-y-240px { margin-top: 240px; margin-bottom: 240px; }
+.\-margin-240px { margin: -240px; }
+.padding-240px { padding: 240px; }
+.padding-x-240px { padding-left: 240px; padding-right: 240px; }
+.padding-y-240px { padding-top: 240px; padding-bottom: 240px; }
+.gap-240px { gap: 240px; }
+.gap-x-240px { column-gap: 240px; }
+.gap-y-240px { row-gap: 240px; }
+.top-240px { top: 240px; }
+.\-top-240px { top: -240px; }
+.bottom-240px { bottom: 240px; }
+.\-bottom-240px { bottom: -240px; }
+.left-240px { left: 240px; }
+.\-left-240px { left: -240px; }
+.right-240px { right: 240px; }
+.\-right-240px { right: -240px; }
+.text-240px { font-size: 240px; }
+.margin-320px { margin: 320px; }
+.margin-x-320px { margin-left: 320px; margin-right: 320px; }
+.margin-y-320px { margin-top: 320px; margin-bottom: 320px; }
+.\-margin-320px { margin: -320px; }
+.padding-320px { padding: 320px; }
+.padding-x-320px { padding-left: 320px; padding-right: 320px; }
+.padding-y-320px { padding-top: 320px; padding-bottom: 320px; }
+.gap-320px { gap: 320px; }
+.gap-x-320px { column-gap: 320px; }
+.gap-y-320px { row-gap: 320px; }
+.top-320px { top: 320px; }
+.\-top-320px { top: -320px; }
+.bottom-320px { bottom: 320px; }
+.\-bottom-320px { bottom: -320px; }
+.left-320px { left: 320px; }
+.\-left-320px { left: -320px; }
+.right-320px { right: 320px; }
+.\-right-320px { right: -320px; }
+.text-320px { font-size: 320px; }
+.margin-480px { margin: 480px; }
+.margin-x-480px { margin-left: 480px; margin-right: 480px; }
+.margin-y-480px { margin-top: 480px; margin-bottom: 480px; }
+.\-margin-480px { margin: -480px; }
+.padding-480px { padding: 480px; }
+.padding-x-480px { padding-left: 480px; padding-right: 480px; }
+.padding-y-480px { padding-top: 480px; padding-bottom: 480px; }
+.gap-480px { gap: 480px; }
+.gap-x-480px { column-gap: 480px; }
+.gap-y-480px { row-gap: 480px; }
+.top-480px { top: 480px; }
+.\-top-480px { top: -480px; }
+.bottom-480px { bottom: 480px; }
+.\-bottom-480px { bottom: -480px; }
+.left-480px { left: 480px; }
+.\-left-480px { left: -480px; }
+.right-480px { right: 480px; }
+.\-right-480px { right: -480px; }
+.text-480px { font-size: 480px; }
+.text-brand { color: rgb(248, 34, 68); }
+.background-brand { background-color: rgb(248, 34, 68); }
+.background-brand-2 { background-color: rgba(248, 34, 68, 0.02); }
+.background-brand-5 { background-color: rgba(248, 34, 68, 0.05); }
+.background-brand-8 { background-color: rgba(248, 34, 68, 0.08); }
+.background-brand-10 { background-color: rgba(248, 34, 68, 0.10); }
+.background-brand-20 { background-color: rgba(248, 34, 68, 0.20); }
+.background-brand-30 { background-color: rgba(248, 34, 68, 0.30); }
+.background-brand-40 { background-color: rgba(248, 34, 68, 0.40); }
+.background-brand-50 { background-color: rgba(248, 34, 68, 0.50); }
+.background-brand-60 { background-color: rgba(248, 34, 68, 0.60); }
+.background-brand-80 { background-color: rgba(248, 34, 68, 0.80); }
+.text-black { color: rgb(5, 5, 5); }
+.background-black { background-color: rgb(5, 5, 5); }
+.background-black-2 { background-color: rgba(5, 5, 5, 0.02); }
+.background-black-5 { background-color: rgba(5, 5, 5, 0.05); }
+.background-black-8 { background-color: rgba(5, 5, 5, 0.08); }
+.background-black-10 { background-color: rgba(5, 5, 5, 0.10); }
+.background-black-20 { background-color: rgba(5, 5, 5, 0.20); }
+.background-black-30 { background-color: rgba(5, 5, 5, 0.30); }
+.background-black-40 { background-color: rgba(5, 5, 5, 0.40); }
+.background-black-50 { background-color: rgba(5, 5, 5, 0.50); }
+.background-black-60 { background-color: rgba(5, 5, 5, 0.60); }
+.background-black-80 { background-color: rgba(5, 5, 5, 0.80); }
+.text-gray { color: rgb(140, 140, 140); }
+.background-gray { background-color: rgb(140, 140, 140); }
+.background-gray-2 { background-color: rgba(140, 140, 140, 0.02); }
+.background-gray-5 { background-color: rgba(140, 140, 140, 0.05); }
+.background-gray-8 { background-color: rgba(140, 140, 140, 0.08); }
+.background-gray-10 { background-color: rgba(140, 140, 140, 0.10); }
+.background-gray-20 { background-color: rgba(140, 140, 140, 0.20); }
+.background-gray-30 { background-color: rgba(140, 140, 140, 0.30); }
+.background-gray-40 { background-color: rgba(140, 140, 140, 0.40); }
+.background-gray-50 { background-color: rgba(140, 140, 140, 0.50); }
+.background-gray-60 { background-color: rgba(140, 140, 140, 0.60); }
+.background-gray-80 { background-color: rgba(140, 140, 140, 0.80); }
+.text-elegant { color: rgb(12, 12, 12); }
+.background-elegant { background-color: rgb(12, 12, 12); }
+.background-elegant-2 { background-color: rgba(12, 12, 12, 0.02); }
+.background-elegant-5 { background-color: rgba(12, 12, 12, 0.05); }
+.background-elegant-8 { background-color: rgba(12, 12, 12, 0.08); }
+.background-elegant-10 { background-color: rgba(12, 12, 12, 0.10); }
+.background-elegant-20 { background-color: rgba(12, 12, 12, 0.20); }
+.background-elegant-30 { background-color: rgba(12, 12, 12, 0.30); }
+.background-elegant-40 { background-color: rgba(12, 12, 12, 0.40); }
+.background-elegant-50 { background-color: rgba(12, 12, 12, 0.50); }
+.background-elegant-60 { background-color: rgba(12, 12, 12, 0.60); }
+.background-elegant-80 { background-color: rgba(12, 12, 12, 0.80); }
+.text-dark { color: rgb(8, 8, 8); }
+.background-dark { background-color: rgb(8, 8, 8); }
+.background-dark-2 { background-color: rgba(8, 8, 8, 0.02); }
+.background-dark-5 { background-color: rgba(8, 8, 8, 0.05); }
+.background-dark-8 { background-color: rgba(8, 8, 8, 0.08); }
+.background-dark-10 { background-color: rgba(8, 8, 8, 0.10); }
+.background-dark-20 { background-color: rgba(8, 8, 8, 0.20); }
+.background-dark-30 { background-color: rgba(8, 8, 8, 0.30); }
+.background-dark-40 { background-color: rgba(8, 8, 8, 0.40); }
+.background-dark-50 { background-color: rgba(8, 8, 8, 0.50); }
+.background-dark-60 { background-color: rgba(8, 8, 8, 0.60); }
+.background-dark-80 { background-color: rgba(8, 8, 8, 0.80); }
+.text-success { color: rgb(34, 197, 94); }
+.background-success { background-color: rgb(34, 197, 94); }
+.background-success-2 { background-color: rgba(34, 197, 94, 0.02); }
+.background-success-5 { background-color: rgba(34, 197, 94, 0.05); }
+.background-success-8 { background-color: rgba(34, 197, 94, 0.08); }
+.background-success-10 { background-color: rgba(34, 197, 94, 0.10); }
+.background-success-20 { background-color: rgba(34, 197, 94, 0.20); }
+.background-success-30 { background-color: rgba(34, 197, 94, 0.30); }
+.background-success-40 { background-color: rgba(34, 197, 94, 0.40); }
+.background-success-50 { background-color: rgba(34, 197, 94, 0.50); }
+.background-success-60 { background-color: rgba(34, 197, 94, 0.60); }
+.background-success-80 { background-color: rgba(34, 197, 94, 0.80); }
+.text-gold { color: rgb(234, 179, 8); }
+.background-gold { background-color: rgb(234, 179, 8); }
+.background-gold-2 { background-color: rgba(234, 179, 8, 0.02); }
+.background-gold-5 { background-color: rgba(234, 179, 8, 0.05); }
+.background-gold-8 { background-color: rgba(234, 179, 8, 0.08); }
+.background-gold-10 { background-color: rgba(234, 179, 8, 0.10); }
+.background-gold-20 { background-color: rgba(234, 179, 8, 0.20); }
+.background-gold-30 { background-color: rgba(234, 179, 8, 0.30); }
+.background-gold-40 { background-color: rgba(234, 179, 8, 0.40); }
+.background-gold-50 { background-color: rgba(234, 179, 8, 0.50); }
+.background-gold-60 { background-color: rgba(234, 179, 8, 0.60); }
+.background-gold-80 { background-color: rgba(234, 179, 8, 0.80); }
+.text-white { color: rgb(255, 255, 255); }
+.background-white { background-color: rgb(255, 255, 255); }
+.background-white-2 { background-color: rgba(255, 255, 255, 0.02); }
+.background-white-5 { background-color: rgba(255, 255, 255, 0.05); }
+.background-white-8 { background-color: rgba(255, 255, 255, 0.08); }
+.background-white-10 { background-color: rgba(255, 255, 255, 0.10); }
+.background-white-20 { background-color: rgba(255, 255, 255, 0.20); }
+.background-white-30 { background-color: rgba(255, 255, 255, 0.30); }
+.background-white-40 { background-color: rgba(255, 255, 255, 0.40); }
+.background-white-50 { background-color: rgba(255, 255, 255, 0.50); }
+.background-white-60 { background-color: rgba(255, 255, 255, 0.60); }
+.background-white-80 { background-color: rgba(255, 255, 255, 0.80); }
+.display-flex { display: flex; }
+.display-grid { display: grid; }
+.display-block { display: block; }
+.display-none { display: none; }
+.width-full { width: 100%; }
+.height-full { height: 100%; }

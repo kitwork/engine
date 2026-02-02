@@ -1,0 +1,370 @@
+package main
+
+import (
+	"fmt"
+	"io/ioutil"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+// --- 1. CORE MODELS ---
+
+type Color struct{ R, G, B int }
+
+func (c Color) String() string { return fmt.Sprintf("%d, %d, %d", c.R, c.G, c.B) }
+func Hex(h string) Color {
+	h = strings.TrimPrefix(h, "#")
+	if len(h) == 3 {
+		h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
+	}
+	val, _ := strconv.ParseUint(h, 16, 32)
+	return Color{int(val >> 16), int((val >> 8) & 0xFF), int(val & 0xFF)}
+}
+
+type Pattern struct {
+	Reg  string
+	Type string
+}
+
+// --- 2. CONFIGURATION & REGISTRY ---
+
+var (
+	Colors = map[string]Color{
+		"white": Hex("#FFFFFF"), "black": Hex("#000000"), "gray": Hex("#808080"),
+		"red": Hex("#FF0000"), "blue": Hex("#4242FF"), "kitwork": Hex("#f82244"),
+		"primary": Hex("#4242FF"), "success": Hex("#02D842"), "danger": Hex("#FF4242"),
+		"warning": Hex("#FF6824"), "info": Hex("#2288FF"), "ghost": Hex("#F8F8FF"),
+	}
+
+	MediaQueries = map[string]string{
+		"mobile": "@media (max-width: 600px)", "tablet": "@media (max-width: 900px)",
+		"laptop": "@media (max-width: 1200px)", "desktop": "@media (min-width: 1280px)",
+	}
+
+	// TRẬT TỰ ƯU TIÊN: Cụ thể nhất -> Tổng quát nhất
+	OrderedPatterns = []Pattern{
+		// 1. Spacing & Borders
+		{`^(margin|padding|border)-(x|y)-([a-z0-9%.-]+)$`, "spacing-axis"},
+		{`^(margin|padding|border)-(top|bottom|left|right)-([a-z0-9%.-]+)$`, "spacing-dir"},
+		{`^(margin|padding)-([a-z0-9%.-]+)$`, "spacing-all"},
+		{`^(border)-(\d+(?:px|rem|em|%)?)$`, "border-all"},
+
+		// 2. Sizing
+		{`^(width|height|max-width|min-width|max-height|min-height)-([a-z0-9%.-]+)$`, "sizing"},
+
+		// 3. Typo
+		{`^(font-size|text|font)-(\d+[a-z0-9%.-]*|bold|medium|light|semibold|black|normal)$`, "typo-size"},
+		{`^(line-height)-([0-9.]+)$`, "line-height"},
+		{`^(letter-spacing)-(-?[\d.]+(px|em|rem)?)$`, "letter-spacing"},
+		{`^(font-family)-([a-zA-Z0-9-]+)$`, "font-family"},
+		{`^(font)-(mono|sans|serif)$`, "font-family-alias"},
+		{`^(text)-(center|left|right|justify|uppercase|lowercase|capitalize)$`, "text-style"},
+
+		// 4. Layout
+		{`^(flex)-(row|column|row-reverse|column-reverse|wrap|grow|shrink-0)$`, "flex-direction"},
+		{`^(justify)-(start|end|center|between|around|evenly)$`, "justify-content"},
+		{`^(items)-(start|end|center|baseline|stretch)$`, "align-items"},
+		{`^(gap)-([a-z0-9%.-]+)$`, "gap"},
+		{`^(grid-columns)-(\d+)$`, "grid-columns"},
+		{`^(display-)?(flex|grid|block|inline|inline-block|inline-flex|hidden)$`, "display"},
+
+		// 5. Positioning
+		{`^(position)-(relative|absolute|fixed|sticky)$`, "position"},
+		{`^(top|bottom|left|right)-([a-z0-9%.-]+)$`, "offset"},
+		{`^(z-index)-(\d+|sticky|overlay|above|below|behind)$`, "z-index"},
+
+		// 6. Colors & Decor
+		{`^(background|bg|color|text|border)-([a-zA-Z0-9]+)$`, "color"},
+		{`^(rounded|opacity)-([a-z0-9%.-]+)$`, "misc-val"},
+		{`^(shadow)-(small|medium|larger|wide)$`, "shadow"},
+		{`^(translate)-(x|y)-(-?[a-z0-9%]+)$`, "transform-move"},
+		{`^(transition)-(all|colors|opacity|transform)$`, "transition"},
+		{`^(duration)-(\d+)$`, "duration"},
+		{`^(rotate)-(-?\d+)$`, "rotate"},
+		{`^(scale)-(\d+)$`, "scale"},
+		{`^container$`, "container"},
+	}
+
+	SpacingScale = []int{0, 2, 4, 8, 12, 16, 20, 24, 32, 40, 48, 64, 80, 100, 120, 160, 200, 240, 320, 400}
+	TypoScale    = []int{10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48, 56, 64, 72}
+)
+
+// --- 3. EXECUTION ---
+
+func main() {
+	html, _ := ioutil.ReadFile("demo/view/work.html")
+	framework := GenerateFullFramework()
+	jit := GenerateJIT(string(html))
+
+	_ = ioutil.WriteFile("demo/public/css/framework.css", []byte(framework), 0644)
+	_ = ioutil.WriteFile("demo/public/css/jit.css", []byte(jit), 0644)
+
+	fmt.Printf("Full Power Build Complete! FW: %d | JIT: %d\n", len(framework), len(jit))
+}
+
+func GenerateFullFramework() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Framework - Complete Build */\n\n:root {\n")
+	for k, v := range Colors {
+		fmt.Fprintf(&b, "\t--color-%s-rgb: %s;\n", k, v.String())
+	}
+	b.WriteString("}\n\n* { box-sizing: border-box; }\n\n")
+
+	// 1. Spacing (Master Build)
+	for _, prop := range []string{"margin", "padding"} {
+		for _, v := range SpacingScale {
+			val := strconv.Itoa(v)
+			for _, suffix := range []string{"", "-top", "-bottom", "-left", "-right", "-x", "-y"} {
+				b.WriteString(resolveClass(prop+suffix+"-"+val, false))
+			}
+		}
+	}
+
+	// 2. Typography
+	for _, v := range TypoScale {
+		b.WriteString(resolveClass("text-"+strconv.Itoa(v), false))
+	}
+	for _, w := range []string{"light", "normal", "medium", "semibold", "bold", "black"} {
+		b.WriteString(resolveClass("font-"+w, false))
+	}
+	for _, a := range []string{"left", "center", "right", "justify"} {
+		b.WriteString(resolveClass("text-"+a, false))
+	}
+	for _, t := range []string{"uppercase", "lowercase", "capitalize"} {
+		b.WriteString(resolveClass("text-"+t, false))
+	}
+
+	// 3. Layout & Colors
+	for _, d := range []string{"flex", "grid", "block", "inline-block", "none"} {
+		b.WriteString(resolveClass("display-"+d, false))
+	}
+	for name := range Colors {
+		b.WriteString(resolveClass("text-"+name, false))
+		b.WriteString(resolveClass("background-"+name, false))
+		b.WriteString(resolveClass("border-"+name, false))
+	}
+
+	// 4. Decorations
+	for _, v := range []int{0, 2, 4, 8, 12, 16, 24, 32, 48, 9999} {
+		val := strconv.Itoa(v)
+		if v == 9999 {
+			val = "full"
+		}
+		b.WriteString(resolveClass("rounded-"+val, false))
+	}
+	b.WriteString(resolveClass("container", false))
+
+	return b.String()
+}
+
+func GenerateJIT(html string) string {
+	generated := make(map[string]bool)
+	var b strings.Builder
+	b.WriteString("/* JIT Dynamic Patch */\n\n")
+	re := regexp.MustCompile(`class="([^"]+)"`)
+	for _, m := range re.FindAllStringSubmatch(html, -1) {
+		for _, class := range strings.Fields(m[1]) {
+			if !generated[class] {
+				if css := resolveClass(class, true); css != "" {
+					b.WriteString(css)
+					generated[class] = true
+				}
+			}
+		}
+	}
+	return b.String()
+}
+
+func resolveClass(full string, isJIT bool) string {
+	sc, ps, gr, neg, core := parseCtx(full)
+	for _, p := range OrderedPatterns {
+		re := regexp.MustCompile(p.Reg)
+		if m := re.FindStringSubmatch(core); len(m) > 0 {
+			css := buildProp(p.Type, m, neg)
+			if css == "" {
+				continue
+			}
+			esc := strings.NewReplacer(":", "\\:", ".", "\\.", "/", "\\/").Replace(full)
+			sel := "." + esc
+			if gr {
+				sel = ".group:hover " + sel
+			} else if ps != "" {
+				sel += ":" + ps
+			}
+			if sc != "def" {
+				return fmt.Sprintf("\n%s {\n\t%s { %s }\n}\n", MediaQueries[sc], sel, css)
+			}
+			return fmt.Sprintf("%s { %s }\n", sel, css)
+		}
+	}
+	return ""
+}
+
+func buildProp(t string, m []string, neg bool) string {
+	switch t {
+	case "spacing-axis":
+		p, ax, v := m[1], m[2], parseV(m[3])
+		if neg && p == "margin" {
+			v = "-" + v
+		}
+		if ax == "x" {
+			return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", p, v)
+		}
+		return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", p, v)
+	case "spacing-dir":
+		p, dir, v := m[1], m[2], parseV(m[3])
+		if neg && p == "margin" {
+			v = "-" + v
+		}
+		if p == "border" {
+			return fmt.Sprintf("border-%s-width: %s; border-%s-style: solid;", dir, v, dir)
+		}
+		return fmt.Sprintf("%s-%s: %s;", p, dir, v)
+	case "spacing-all":
+		p, v := m[1], parseV(m[2])
+		if neg && p == "margin" {
+			v = "-" + v
+		}
+		return fmt.Sprintf("%s: %s;", p, v)
+	case "border-all":
+		return fmt.Sprintf("border-width: %s; border-style: solid;", parseV(m[2]))
+	case "sizing":
+		return fmt.Sprintf("%s: %s;", m[1], parseV(m[2]))
+	case "typo-size":
+		v := m[2]
+		if _, err := strconv.Atoi(v); err == nil {
+			return "font-size: " + v + "px;"
+		}
+		weights := map[string]string{"light": "300", "normal": "400", "medium": "500", "semibold": "600", "bold": "700", "black": "900"}
+		if val, ok := weights[v]; ok {
+			return "font-weight: " + val + ";"
+		}
+		return ""
+	case "line-height":
+		return "line-height: " + m[2] + ";"
+	case "letter-spacing":
+		return "letter-spacing: " + m[2] + ";"
+	case "font-family":
+		return "font-family: " + m[2] + ";"
+	case "font-family-alias":
+		return "font-family: " + m[2] + ", sans-serif;"
+	case "text-style":
+		if strings.HasSuffix(m[2], "case") || m[2] == "capitalize" {
+			return "text-transform: " + m[2] + ";"
+		}
+		return "text-align: " + m[2] + ";"
+	case "flex-direction":
+		if m[2] == "wrap" {
+			return "flex-wrap: wrap;"
+		}
+		if m[2] == "grow" {
+			return "flex-grow: 1;"
+		}
+		if m[2] == "shrink-0" {
+			return "flex-shrink: 0;"
+		}
+		return "flex-direction: " + m[2] + ";"
+	case "justify-content":
+		v := m[2]
+		if v == "start" || v == "end" {
+			v = "flex-" + v
+		} else if v == "between" || v == "around" || v == "evenly" {
+			v = "space-" + v
+		}
+		return "justify-content: " + v + ";"
+	case "align-items":
+		v := m[2]
+		if v == "start" || v == "end" {
+			v = "flex-" + v
+		}
+		return "align-items: " + v + ";"
+	case "gap":
+		return "gap: " + parseV(m[2]) + ";"
+	case "grid-columns":
+		return fmt.Sprintf("grid-template-columns: repeat(%s, minmax(0, 1fr));", m[2])
+	case "display":
+		v := m[2]
+		if v == "hidden" {
+			v = "none"
+		}
+		return "display: " + v + ";"
+	case "position":
+		return "position: " + m[2] + ";"
+	case "offset":
+		return m[1] + ": " + parseV(m[2]) + ";"
+	case "z-index":
+		v := m[2]
+		z := map[string]string{"sticky": "100", "overlay": "1000", "above": "10", "below": "-1", "behind": "-10"}
+		if val, ok := z[v]; ok {
+			v = val
+		}
+		return "z-index: " + v + ";"
+	case "color":
+		t, c := m[1], m[2]
+		if t == "bg" || t == "background" {
+			t = "background-color"
+		}
+		return fmt.Sprintf("%s: rgb(var(--color-%s-rgb));", t, c)
+	case "misc-val":
+		if m[1] == "rounded" {
+			return "border-radius: " + parseV(m[2]) + ";"
+		}
+		f, _ := strconv.Atoi(m[2])
+		return fmt.Sprintf("opacity: %.2f;", float64(f)/100.0)
+	case "shadow":
+		s := map[string]string{"small": "0 1px 2px rgba(0,0,0,0.1)", "medium": "0 4px 6px rgba(0,0,0,0.1)", "giant": "0 20px 25px rgba(0,0,0,0.15)"}
+		return "box-shadow: " + s[m[2]] + ";"
+	case "transform-move":
+		return fmt.Sprintf("transform: translate%s(%s);", strings.ToUpper(m[1]), parseV(m[2]))
+	case "transition":
+		return "transition: " + m[2] + " 0.3s ease;"
+	case "duration":
+		return "transition-duration: " + m[2] + "ms;"
+	case "rotate":
+		return "transform: rotate(" + m[2] + "deg);"
+	case "scale":
+		return "transform: scale(" + m[2] + ");"
+	case "container":
+		return "width: 100%; margin-inline: auto; padding-inline: 1.5rem; max-width: 1200px;"
+	}
+	return ""
+}
+
+func parseCtx(f string) (s, p string, g, n bool, core string) {
+	core = f
+	s = "def"
+	for k := range MediaQueries {
+		if strings.HasPrefix(core, k+":") {
+			s = k
+			core = strings.TrimPrefix(core, k+":")
+			break
+		}
+	}
+	if strings.HasPrefix(core, "group-hover:") {
+		g = true
+		core = strings.TrimPrefix(core, "group-hover:")
+	}
+	for _, x := range []string{"hover", "focus", "active"} {
+		if strings.HasPrefix(core, x+":") {
+			p = x
+			core = strings.TrimPrefix(core, x+":")
+			break
+		}
+	}
+	if strings.HasPrefix(core, "-") {
+		n = true
+		core = strings.TrimPrefix(core, "-")
+	}
+	return
+}
+
+func parseV(v string) string {
+	if _, err := strconv.Atoi(v); err == nil {
+		return v + "px"
+	}
+	if v == "full" {
+		return "100%"
+	}
+	return v
+}
