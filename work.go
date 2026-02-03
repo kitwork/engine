@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/core"
+	"github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/security"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
@@ -259,6 +260,28 @@ func bootServer(e *core.Engine, serverPort int) {
 		})
 		http.Handle(prefix, cacheHandler)
 	}
+
+	// Internal API: JIT CSS Generator
+	http.HandleFunc("/_kitwork/jit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", 405)
+			return
+		}
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", 400)
+			return
+		}
+
+		cssOutput := css.GenerateJIT(req.Content)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"css": cssOutput,
+		})
+	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

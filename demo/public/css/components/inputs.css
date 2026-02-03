@@ -1,0 +1,13 @@
+/* Kitwork Industrial Components: INPUTS */
+.input, .select, .textarea {
+	width: 100%; padding: 10px 16px; 
+	background-color: rgba(255,255,255,0.03); 
+	border: 1px solid rgba(255,255,255,0.1); 
+	border-radius: 4px; 
+	color: #fff; font-family: 'Outfit', sans-serif; font-size: 14px;
+	transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: rgba(var(--color-brand-rgb), 0.5); box-shadow: 0 0 0 2px rgba(var(--color-brand-rgb), 0.1); }
+::placeholder { color: rgba(255,255,255,0.3); }
+.input-sm { padding: 6px 12px; font-size: 12px; }
+.input-lg { padding: 14px 20px; font-size: 16px; }
