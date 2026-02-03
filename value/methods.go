@@ -53,6 +53,10 @@ func (v Value) Capitalize(_ ...Value) Value {
 	return New(strings.ToUpper(s[:1]) + s[1:])
 }
 
+func (v Value) Safe(_ ...Value) Value {
+	return Value{K: String, V: SafeHTML(v.Text())}
+}
+
 func (v Value) Trim(_ ...Value) Value {
 	return New(strings.TrimSpace(v.Text()))
 }
@@ -293,7 +297,15 @@ func (v Value) Merge(args ...Value) Value {
 
 // --- Common ---
 
-func (v Value) HTML(_ ...Value) Value { return v }
+func (v Value) HTML(_ ...Value) Value {
+	return Value{
+		K: Map,
+		V: map[string]Value{
+			"__is_safe_html": TRUE,
+			"content":        {K: String, V: v.Text()},
+		},
+	}
+}
 
 func (v Value) Render(args ...Value) Value {
 	res := map[string]Value{"template": v, "__is_html": TRUE}

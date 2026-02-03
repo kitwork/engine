@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-gray-900 text-white p-10 font-sans">
+    <h1 class="text-3xl font-bold text-teal-400 mb-6">{{ title }}</h1>
+
+    <!-- Numeric Comparison in Logic -->
+    <div class="mb-6 p-4 bg-gray-800 rounded border border-gray-700">
+        <h3 class="text-xl font-bold mb-3">1. User Level (Level: {{ user.level }})</h3>
+        {{ if user.level >= 3 }}
+        <span class="px-3 py-1 bg-yellow-500 text-black font-bold rounded">🌟 VIP USER</span>
+        {{ else }}
+        {{ if user.level > 1 }}
+        <span class="px-3 py-1 bg-blue-500 text-white rounded">REGULAR USER</span>
+        {{ else }}
+        <span class="px-3 py-1 bg-gray-500 text-white rounded">NEW USER</span>
+        {{ end }}
+        {{ end }}
+    </div>
+
+    <!-- Modulo Operator / Zebra Striping -->
+    <div class="mb-6">
+        <h3 class="text-xl font-bold text-blue-400 mb-3">2. Zebra Striped Table (items)</h3>
+        <table class="w-full text-left border-collapse">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="p-2">Index</th>
+                    <th class="p-2">Name</th>
+                    <th class="p-2">Price</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ range i, item := items }}
+                <tr class="{{ if i % 2 == 0 }} bg-gray-800 {{ else }} bg-gray-700 {{ end }}">
+                    <td class="p-2">{{ i }}</td>
+                    <td class="p-2">{{ item.name }} </td>
+                    <td class="p-2 text-green-400">${{ item.price }}</td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Security / XSS Prevention Test -->
+    <div class="mb-6 p-4 bg-red-900/30 border border-red-500 rounded">
+        <h3 class="text-xl font-bold text-red-400 mb-3">3. Security / XSS Prevention</h3>
+        <p class="mb-2">Malicious Input included: <code>&lt;script&gt;alert('HACKED')&lt;/script&gt;</code></p>
+
+        <div class="bg-black p-3 rounded font-mono text-sm">
+            <span class="text-gray-400">Escaped (Default):</span>
+            <span class="text-white">{{ malicious }}</span>
+        </div>
+
+        <p class="mt-2 text-xs text-gray-500">
+            Note: The script tag above should be displayed as text, NOT executed.
+        </p>
+    </div>
+
+    <!-- HTML Injection Test -->
+    <div class="mb-6 p-4 bg-gray-800 rounded border border-gray-600">
+        <h3 class="text-xl font-bold text-orange-400 mb-3">4. HTML Content Handling</h3>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-black p-3 rounded">
+                <p class="text-xs text-gray-400 mb-1">Standard Output (Safe):</p>
+                <div class="text-white border-l-2 border-green-500 pl-2">
+                    {{ htmlInjection }}
+                </div>
+                <p class="mt-1 text-xs text-gray-600">HTML tags are escaped & visible.</p>
+            </div>
+
+            <div class="bg-black p-3 rounded">
+                <p class="text-xs text-gray-400 mb-1">Raw Output ($ prefix):</p>
+                <div class="text-white border-l-2 border-red-500 pl-2">
+                    {{ $htmlInjection }}
+                </div>
+                <p class="mt-1 text-xs text-gray-600">HTML is rendered by browser.</p>
+            </div>
+
+            <div class="bg-black p-3 rounded col-span-2">
+                <p class="text-xs text-gray-400 mb-1">Backend Safe (.html()):</p>
+                <div class="text-white border-l-2 border-blue-500 pl-2">
+                    {{ legacySafe }}
+                </div>
+                <p class="mt-1 text-xs text-gray-600">No $ prefix needed in View. Backend declared consistent.</p>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>

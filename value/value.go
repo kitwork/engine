@@ -11,6 +11,9 @@ var (
 	FALSE = NewBool(false)
 )
 
+// SafeHTML marks a string as safe to render without escaping.
+type SafeHTML string
+
 // ProxyHandler cho phép các module khác nhau định nghĩa cách xử lý logic biểu tượng
 type ProxyHandler interface {
 	OnGet(key string) Value

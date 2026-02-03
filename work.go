@@ -15,6 +15,7 @@ import (
 
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/jit/css"
+	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/security"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
@@ -442,12 +443,12 @@ func bootServer(e *core.Engine, serverPort int) {
 				partTmpl, err := os.ReadFile(partPath)
 				if err == nil {
 					// Render partial with SAME data context
-					renderedPart := work.Render(string(partTmpl), dataMap)
+					renderedPart := render.Render(string(partTmpl), dataMap)
 					dataMap[key] = renderedPart
 				}
 			}
 
-			htmlContent := work.Render(string(tmpl), dataMap)
+			htmlContent := render.Render(string(tmpl), dataMap)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte(htmlContent))
 			return
@@ -460,7 +461,7 @@ func bootServer(e *core.Engine, serverPort int) {
 				m := responseVal.Interface().(map[string]any)
 				template, _ := m["template"].(string)
 				data, _ := m["data"].(map[string]any)
-				htmlContent = work.Render(template, data)
+				htmlContent = render.Render(template, data)
 			} else {
 				htmlContent = responseVal.Text()
 			}

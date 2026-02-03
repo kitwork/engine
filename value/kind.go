@@ -128,6 +128,8 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Replace, true
 		case "capitalize":
 			return Value.Capitalize, true
+		case "safe":
+			return Value.Safe, true
 		}
 	case Array:
 		switch name {
