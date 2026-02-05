@@ -12,7 +12,7 @@ import (
 // ScheduleRule đại diện cho một rule lập lịch (Cron)
 type ScheduleRule struct {
 	Cron    string
-	Handler *value.ScriptFunction
+	Handler *value.Script
 }
 
 // Schedule is the universal entry point for recurring tasks.
@@ -21,11 +21,11 @@ func (w *Work) Schedule(args ...value.Value) *Work {
 		return w
 	}
 
-	var handler *value.ScriptFunction = w.PrimaryHandler
+	var handler *value.Script = w.MainHandler
 	var definitions []string
 
 	for _, arg := range args {
-		if sFn, ok := arg.V.(*value.ScriptFunction); ok {
+		if sFn, ok := arg.V.(*value.Script); ok {
 			handler = sFn
 		} else {
 			if arg.IsNumeric() {
@@ -53,10 +53,10 @@ func (w *Work) Cron(args ...value.Value) *Work {
 
 // Every registers tasks to run every N duration.
 func (w *Work) Every(args ...value.Value) *Work {
-	var handler *value.ScriptFunction = w.PrimaryHandler
+	var handler *value.Script = w.MainHandler
 	var durations []string
 	for _, arg := range args {
-		if sFn, ok := arg.V.(*value.ScriptFunction); ok {
+		if sFn, ok := arg.V.(*value.Script); ok {
 			handler = sFn
 		} else {
 			durations = append(durations, arg.Text())
@@ -75,10 +75,10 @@ func (w *Work) Daily(args ...value.Value) *Work {
 
 // Hourly registers tasks for specific minutes. .hourly(0, 15, "30", "45")
 func (w *Work) Hourly(args ...value.Value) *Work {
-	var handler *value.ScriptFunction = w.PrimaryHandler
+	var handler *value.Script = w.MainHandler
 	var mins []string
 	for _, arg := range args {
-		if sFn, ok := arg.V.(*value.ScriptFunction); ok {
+		if sFn, ok := arg.V.(*value.Script); ok {
 			handler = sFn
 		} else {
 			if arg.IsNumeric() {
@@ -103,12 +103,12 @@ func (w *Work) Hourly(args ...value.Value) *Work {
 
 // Weekly registers tasks for specific days. .weekly("MON 09:00", "FRI 17:00")
 func (w *Work) Weekly(args ...value.Value) *Work {
-	var handler *value.ScriptFunction = w.PrimaryHandler
+	var handler *value.Script = w.MainHandler
 	var hasDefinition bool
 	var definitions []value.Value
 
 	for _, arg := range args {
-		if sFn, ok := arg.V.(*value.ScriptFunction); ok {
+		if sFn, ok := arg.V.(*value.Script); ok {
 			handler = sFn
 		} else {
 			hasDefinition = true
@@ -125,12 +125,12 @@ func (w *Work) Weekly(args ...value.Value) *Work {
 
 // Monthly registers tasks for specific days of month. .monthly("1st 12:00")
 func (w *Work) Monthly(args ...value.Value) *Work {
-	var handler *value.ScriptFunction = w.PrimaryHandler
+	var handler *value.Script = w.MainHandler
 	var hasDefinition bool
 	var patterns []string
 
 	for _, arg := range args {
-		if sFn, ok := arg.V.(*value.ScriptFunction); ok {
+		if sFn, ok := arg.V.(*value.Script); ok {
 			handler = sFn
 		} else {
 			hasDefinition = true
@@ -149,7 +149,7 @@ func (w *Work) Monthly(args ...value.Value) *Work {
 	return w
 }
 
-func (w *Work) registerSchedule(cron string, handler *value.ScriptFunction) {
+func (w *Work) registerSchedule(cron string, handler *value.Script) {
 	if cron == "" || handler == nil {
 		return
 	}

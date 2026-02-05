@@ -32,6 +32,7 @@ type ExecutionContext struct {
 	cacheFn    value.Value
 	doneFn     value.Value
 	failFn     value.Value
+	argsBuffer []value.Value // Reusable buffer for lambda args (Zero-Alloc optimization)
 }
 
 func (e *Engine) Trigger(ctx context.Context, w *work.Work, req *http.Request, writer http.ResponseWriter, params ...map[string]value.Value) Result {
@@ -86,7 +87,7 @@ func (e *Engine) Trigger(ctx context.Context, w *work.Work, req *http.Request, w
 	return Result{Value: evalRes, Response: ec.task.Response, ResType: ec.task.ResType, Error: ec.task.Error, Energy: ec.machine.Energy}
 }
 
-func (e *Engine) ExecuteLambda(w *work.Work, sFn *value.ScriptFunction, req *http.Request, writer http.ResponseWriter, params ...map[string]value.Value) (res Result) {
+func (e *Engine) ExecuteLambda(w *work.Work, sFn *value.Script, req *http.Request, writer http.ResponseWriter, params ...map[string]value.Value) (res Result) {
 	ec := e.ctxPool.Get().(*ExecutionContext)
 	defer e.ctxPool.Put(ec)
 
@@ -109,7 +110,12 @@ func (e *Engine) ExecuteLambda(w *work.Work, sFn *value.ScriptFunction, req *htt
 
 	// Combine all for the single 'params' argument usually passed to lambdas (req object)
 	combined := ec.task.Payload()
-	evalRes := ec.machine.ExecuteLambda(sFn, []value.Value{combined})
+
+	// OPTIMIZATION: Reuse args buffer (Zero-Alloc Slice)
+	ec.argsBuffer = ec.argsBuffer[:0]
+	ec.argsBuffer = append(ec.argsBuffer, combined)
+
+	evalRes := ec.machine.ExecuteLambda(sFn, ec.argsBuffer)
 
 	// Lifecycle hooks
 	if ec.task.Error != "" {

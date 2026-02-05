@@ -185,18 +185,12 @@ func resolveVar(rawKey string, data any, scope map[string]value.Value) string {
 	}
 
 	// Double unwrap pattern for complex Values
-	// 1. Check for SafeHTML type directly
-	if safe, ok := val.V.(value.SafeHTML); ok {
-		return string(safe)
-	}
-	// 2. Check for Value-wrapped SafeHTML
-	if v, ok := val.V.(value.Value); ok {
-		if safe, ok := v.V.(value.SafeHTML); ok {
-			return string(safe)
-		}
+	// 1. Check for Enum Flag (Fastest & Preferred)
+	if val.S == value.SafeHTML {
+		return val.String()
 	}
 
-	// 3. Check for Safe Map Wrapper (from JS .html() output)
+	// 3. Check for Safe Map Wrapper (Legacy/Fallback)
 	if val.IsMap() {
 		m := val.Map()
 		if _, isSafe := m["__is_safe_html"]; isSafe {

@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kitwork/engine/core"
@@ -400,6 +402,74 @@ func bootServer(e *core.Engine, serverPort int) {
 			}
 		}
 
+		// 4. SPECIAL: Benchmark Mode
+		if matchedRoute.BenchmarkIters > 0 {
+			iters := matchedRoute.BenchmarkIters
+			workerCount := runtime.GOMAXPROCS(0) // Auto-detect optimal workers
+			if workerCount < 1 {
+				workerCount = 1
+			}
+			// Ensure workerCount doesn't exceed iterations
+			if iters < workerCount {
+				workerCount = iters
+			}
+
+			// Prepare Memory Stats
+			var msBefore, msAfter runtime.MemStats
+			runtime.GC() // Force GC before starting to get clean state
+			runtime.ReadMemStats(&msBefore)
+
+			start := time.Now()
+			var wg sync.WaitGroup
+			wg.Add(workerCount)
+
+			// Dummy Writer for benchmark
+			dummyWriter := &DummyWriter{HeaderMap: make(http.Header)}
+
+			itersPerWorker := iters / workerCount
+
+			for i := 0; i < workerCount; i++ {
+				// Handle remainder iterations for the last worker
+				count := itersPerWorker
+				if i == workerCount-1 {
+					count = iters - (itersPerWorker * (workerCount - 1))
+				}
+
+				go func(c int) {
+					defer wg.Done()
+					for j := 0; j < c; j++ {
+						e.ExecuteLambda(matchedRoute.Work, matchedRoute.Fn, r, dummyWriter, queryParams, bodyParams, pathParams)
+					}
+				}(count)
+			}
+			wg.Wait()
+			duration := time.Since(start)
+
+			// Collect Memory Stats
+			runtime.ReadMemStats(&msAfter)
+
+			// Metrics
+			throughput := float64(iters) / duration.Seconds()
+			latency := duration / time.Duration(iters)
+			totalAlloc := msAfter.TotalAlloc - msBefore.TotalAlloc
+			gcCycles := msAfter.NumGC - msBefore.NumGC
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"benchmark":    true,
+				"iterations":   iters,
+				"workers":      workerCount,
+				"duration":     duration.String(),
+				"throughput":   fmt.Sprintf("%.0f req/s", throughput),
+				"latency":      latency.String(),
+				"latency_ns":   latency.Nanoseconds(),
+				"alloc_bytes":  totalAlloc,
+				"alloc_per_op": totalAlloc / uint64(iters),
+				"gc_cycles":    gcCycles,
+			})
+			return
+		}
+
 		res := e.ExecuteLambda(matchedRoute.Work, matchedRoute.Fn, r, w, queryParams, bodyParams, pathParams)
 		if res.Error != "" {
 			http.Error(w, res.Error, 500)
@@ -431,11 +501,13 @@ func bootServer(e *core.Engine, serverPort int) {
 				http.Error(w, "Template not found", 404)
 				return
 			}
-			dataMap := make(map[string]any)
+			dataMap := make(map[string]value.Value)
 			if responseVal.K == value.Map {
-				dataMap = responseVal.Interface().(map[string]any)
+				for k, v := range responseVal.Map() {
+					dataMap[k] = v
+				}
 			} else {
-				dataMap["value"] = responseVal.Interface()
+				dataMap["value"] = responseVal
 			}
 
 			// Composite Rendering: Pre-render Layout partials
@@ -443,12 +515,14 @@ func bootServer(e *core.Engine, serverPort int) {
 				partTmpl, err := os.ReadFile(partPath)
 				if err == nil {
 					// Render partial with SAME data context
-					renderedPart := render.Render(string(partTmpl), dataMap)
-					dataMap[key] = renderedPart
+					// Must wrap dataMap in Value to pass to Render
+					renderedPart := render.Render(string(partTmpl), value.New(dataMap))
+					// Mark as SafeHTML to avoid double escaping in layout
+					dataMap[key] = value.Value{K: value.String, V: renderedPart, S: value.SafeHTML}
 				}
 			}
 
-			htmlContent := render.Render(string(tmpl), dataMap)
+			htmlContent := render.Render(string(tmpl), value.New(dataMap))
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte(htmlContent))
 			return
@@ -458,14 +532,20 @@ func bootServer(e *core.Engine, serverPort int) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			htmlContent := ""
 			if responseVal.K == value.Map {
-				m := responseVal.Interface().(map[string]any)
-				template, _ := m["template"].(string)
-				data, _ := m["data"].(map[string]any)
-				htmlContent = render.Render(template, data)
+				templateVal := responseVal.Get("template")
+				dataVal := responseVal.Get("data")
+				htmlContent = render.Render(templateVal.Text(), dataVal)
 			} else {
 				htmlContent = responseVal.Text()
 			}
 			w.Write([]byte(htmlContent))
+			return
+		}
+
+		// AUTO-DETECT: SafeHTML Result -> Render as HTML
+		if res.ResType == "" && responseVal.S == value.SafeHTML {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Write([]byte(responseVal.Text()))
 			return
 		}
 
@@ -557,3 +637,12 @@ func verifyChecksum(path string) bool {
 	expected, _ := os.ReadFile(path + ".sha256")
 	return fmt.Sprintf("%x", hash) == string(expected)
 }
+
+// DummyWriter discards output for benchmark mode
+type DummyWriter struct {
+	HeaderMap http.Header
+}
+
+func (d *DummyWriter) Header() http.Header         { return d.HeaderMap }
+func (d *DummyWriter) Write(b []byte) (int, error) { return len(b), nil }
+func (d *DummyWriter) WriteHeader(statusCode int)  {}

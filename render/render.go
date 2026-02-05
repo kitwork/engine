@@ -7,7 +7,7 @@ package render
 // - {{ range variable }} ... {{ end }}
 // - {{ range i, v := list }} ... {{ end }}
 // - {{ $variable }} (Legacy/Explicit Raw)
-func Render(tmpl string, data map[string]any) string {
+func Render(tmpl string, data any) string {
 	tokens := specializeTokens(tmpl)
 	node := parse(tokens)
 	return eval(node, data)

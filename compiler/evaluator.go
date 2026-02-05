@@ -199,7 +199,7 @@ func Evaluator(node Node, env *Environment) value.Value {
 		for i, p := range n.Parameters {
 			params[i] = p.Value
 		}
-		sFn := &value.ScriptFunction{
+		sFn := &value.Script{
 			Address:    0, // Placeholder, will be updated by Trigger()
 			ParamNames: params,
 		}

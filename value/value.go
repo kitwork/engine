@@ -11,9 +11,6 @@ var (
 	FALSE = NewBool(false)
 )
 
-// SafeHTML marks a string as safe to render without escaping.
-type SafeHTML string
-
 // ProxyHandler cho phép các module khác nhau định nghĩa cách xử lý logic biểu tượng
 type ProxyHandler interface {
 	OnGet(key string) Value
@@ -21,16 +18,11 @@ type ProxyHandler interface {
 	OnInvoke(method string, args ...Value) Value
 }
 
-type ScriptFunction struct {
-	Address    int
-	ParamNames []string
-	Scope      map[string]Value
-}
-
 type Value struct {
 	N float64
 	V any
 	K Kind
+	S Sub
 }
 
 func (v Value) Prototype(name string, fn Method)  { v.K.Prototype(name, fn) }
@@ -68,7 +60,7 @@ func (v Value) Call(name string, args ...Value) Value {
 	if goFn, ok := v.V.(func(...Value) Value); ok {
 		return goFn(args...)
 	}
-	if _, ok := v.V.(*ScriptFunction); ok {
+	if _, ok := v.V.(*Script); ok {
 		return Value{K: Invalid, V: "Use VM to call ScriptFunction"}
 	}
 	if fn, ok := v.V.(reflect.Value); ok {

@@ -9,9 +9,10 @@ const w = work("pricegood")
             return { status: res.status, error: "Failed to fetch gold price" };
         }
 
-        log("test cache")
+        const dataBody = res.body.data
 
-        const data = res.body.data.map(item => ({
+
+        const data = dataBody.map(item => ({
             name: item.tensp,
             buy: item.giamua,
             sell: item.giaban

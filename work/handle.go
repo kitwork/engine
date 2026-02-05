@@ -11,11 +11,15 @@ import (
 )
 
 type StaticRoute struct {
-	Method   string
-	Path     string
-	Handler  *value.ScriptFunction
-	Redirect *Redirect
-	Template *Template
+	Method         string
+	Path           string
+	HandledBy      *Work
+	Fn             *value.Script
+	Template       *Template
+	Redirect       *Redirect
+	Handler        *value.Script
+	IsRaw          bool
+	BenchmarkIters int // Nếu > 0, chạy chế độ Benchmark
 }
 
 type Template struct {
@@ -32,18 +36,37 @@ type Redirect struct {
 type Work struct {
 	Name           string
 	Routes         []*StaticRoute
+	lastRoute      *StaticRoute // Track route cuối cùng để chain .benchmark()
 	Retries        int
 	TimeoutDur     time.Duration
 	Ver            string
 	Bytecode       *compiler.Bytecode
-	DoneHandler    *value.ScriptFunction
-	FailHandler    *value.ScriptFunction
 	CacheDuration  time.Duration
 	StaticDuration time.Duration
 	StaticCheck    bool
+	StaticDir      string
+	StaticPrefix   string
 	ResourcePath   string
-	Schedules      []*ScheduleRule
-	PrimaryHandler *value.ScriptFunction
+
+	Schedules []*ScheduleRule
+
+	DoneHandler *value.Script
+	FailHandler *value.Script
+	MainHandler *value.Script
+}
+
+// Benchmark configures the last added route to run in benchmark mode
+func (w *Work) Benchmark(args ...value.Value) *Work {
+	if w.lastRoute == nil {
+		fmt.Println("⚠️ .benchmark() called but no route was added previously")
+		return w
+	}
+	iters := 1000
+	if len(args) > 0 {
+		iters = int(args[0].N)
+	}
+	w.lastRoute.BenchmarkIters = iters
+	return w
 }
 
 func (w *Work) LoadFromConfig(data map[string]any) {
@@ -81,14 +104,18 @@ func (w *Work) Router(args ...value.Value) *Work {
 		if r.Method == method && r.Path == path {
 			fmt.Printf("[Router] %s: Route exists, moving to end\n", w.Name)
 			// Move existing route to the end so .handle() can update it
+			rObj := w.Routes[i]
 			w.Routes = append(w.Routes[:i], w.Routes[i+1:]...) // Remove
-			w.Routes = append(w.Routes, r)                     // Re-add at end
+			w.Routes = append(w.Routes, rObj)                  // Re-add at end
+			w.lastRoute = rObj                                 // Track
 			return w
 		}
 	}
 	// Route doesn't exist, add new one
 	fmt.Printf("[Router] %s: Adding new route\n", w.Name)
-	w.Routes = append(w.Routes, &StaticRoute{Method: method, Path: path})
+	newRoute := &StaticRoute{Method: method, Path: path}
+	w.Routes = append(w.Routes, newRoute)
+	w.lastRoute = newRoute // Track
 	return w
 }
 
@@ -183,7 +210,7 @@ func (w *Work) Layout(arg value.Value) *Work {
 func (w *Work) Handle(fn value.Value) *Work {
 	if len(w.Routes) > 0 {
 		lastRoute := w.Routes[len(w.Routes)-1]
-		if sFn, ok := fn.V.(*value.ScriptFunction); ok {
+		if sFn, ok := fn.V.(*value.Script); ok {
 			fmt.Printf("[Handle] %s: Setting handler for %s %s with Address: %d (was: %v)\n",
 				w.Name, lastRoute.Method, lastRoute.Path, sFn.Address, lastRoute.Handler)
 			lastRoute.Handler = sFn
@@ -192,8 +219,8 @@ func (w *Work) Handle(fn value.Value) *Work {
 		}
 	} else {
 		// No routes? This becomes the primary handler for the work unit (used by schedules)
-		if sFn, ok := fn.V.(*value.ScriptFunction); ok {
-			w.PrimaryHandler = sFn
+		if sFn, ok := fn.V.(*value.Script); ok {
+			w.MainHandler = sFn
 			fmt.Printf("[Handle] %s: Setting primary handler with Address: %d\n", w.Name, sFn.Address)
 		}
 	}
@@ -270,14 +297,14 @@ func parseDuration(val any) time.Duration {
 }
 
 func (w *Work) Done(fn value.Value) *Work {
-	if sFn, ok := fn.V.(*value.ScriptFunction); ok {
+	if sFn, ok := fn.V.(*value.Script); ok {
 		w.DoneHandler = sFn
 	}
 	return w
 }
 
 func (w *Work) Fail(fn value.Value) *Work {
-	if sFn, ok := fn.V.(*value.ScriptFunction); ok {
+	if sFn, ok := fn.V.(*value.Script); ok {
 		w.FailHandler = sFn
 	}
 	return w
@@ -360,8 +387,14 @@ func (t *Task) GetBody() value.Value   { return value.NewNull() }
 func (t *Task) SetBody(v value.Value)  {}
 func (t *Task) GetParams() value.Value { return value.New(t.Params) }
 
+// Shared empty map to avoid allocation
+var zeroPayload = value.New(map[string]value.Value{})
+
 func (t *Task) Payload() value.Value {
-	res := make(map[string]value.Value)
+	if len(t.Params) == 0 {
+		return zeroPayload
+	}
+	res := make(map[string]value.Value, len(t.Params))
 	for k, v := range t.Params {
 		res[k] = v
 	}

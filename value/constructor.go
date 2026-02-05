@@ -62,7 +62,7 @@ func New(i any) Value {
 		return Value{K: Array, V: v}
 	case map[string]Value:
 		return Value{K: Map, V: v}
-	case *ScriptFunction:
+	case *Script:
 		return Value{K: Func, V: v}
 	default:
 		return Parse(i)

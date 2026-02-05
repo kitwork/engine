@@ -19,8 +19,9 @@ import (
 
 func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx := &ExecutionContext{
-		machine: runtime.New(nil, nil),
-		task:    &work.Task{},
+		machine:    runtime.New(nil, nil),
+		task:       &work.Task{},
+		argsBuffer: make([]value.Value, 0, 10),
 	}
 
 	// Map Builtins to Context
@@ -52,9 +53,9 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 			results := make([]value.Value, len(arr))
 			var wg sync.WaitGroup
 			for i, v := range arr {
-				if sFn, ok := v.V.(*value.ScriptFunction); ok {
+				if sFn, ok := v.V.(*value.Script); ok {
 					wg.Add(1)
-					go func(idx int, fn *value.ScriptFunction) {
+					go func(idx int, fn *value.Script) {
 						defer wg.Done()
 						r := e.ExecuteLambda(ctx.task.Work, fn, ctx.task.Request, ctx.task.Writer, nil)
 						results[idx] = r.Value
@@ -71,7 +72,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 
 			// Tạm thời chạy TUẦN TỰ để đảm bảo Memory Safety cho các Object phức tạp
 			for k, v := range m {
-				if sFn, ok := v.V.(*value.ScriptFunction); ok {
+				if sFn, ok := v.V.(*value.Script); ok {
 					r := e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
 					results[k] = r.Value
 				} else {
@@ -86,7 +87,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 
 	ctx.goFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) > 0 {
-			if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+			if sFn, ok := args[0].V.(*value.Script); ok {
 				go e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
 			}
 		}
@@ -95,7 +96,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 
 	ctx.deferFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) > 0 {
-			if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+			if sFn, ok := args[0].V.(*value.Script); ok {
 				ctx.machine.Defer(sFn)
 			}
 		}
@@ -220,7 +221,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 				if val, ok := work.GetCache(key); ok {
 					return val
 				}
-				if sFn, ok := arg2.V.(*value.ScriptFunction); ok {
+				if sFn, ok := arg2.V.(*value.Script); ok {
 					res := e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
 					ttl := parseTTL(arg1)
 					if ttl > 0 {

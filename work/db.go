@@ -34,7 +34,7 @@ func (h *SQLProxyHandler) OnInvoke(method string, args ...value.Value) value.Val
 }
 
 type LambdaExecutor interface {
-	ExecuteLambda(fn *value.ScriptFunction, args []value.Value) value.Value
+	ExecuteLambda(fn *value.Script, args []value.Value) value.Value
 }
 
 type DBQuery struct {
@@ -82,7 +82,7 @@ func (q *DBQuery) Where(args ...value.Value) *DBQuery {
 
 	// MAGIC WHERE: If first arg is a Lambda
 	if args[0].K == value.Func && q.executor != nil {
-		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+		if sFn, ok := args[0].V.(*value.Script); ok {
 			// Create a Proxy with SQL handler
 			handler := &SQLProxyHandler{}
 			proxy := value.Value{K: value.Proxy, V: handler}
@@ -222,7 +222,7 @@ func (q *DBQuery) Find(idOrFn any) value.Value {
 		q.conditions = []string{"\"id\" = $1"}
 		q.whereArgs = []any{v.Interface()}
 		return q.First()
-	case *value.ScriptFunction:
+	case *value.Script:
 		return q.Where(value.Value{K: value.Func, V: v}).First()
 	}
 
@@ -465,7 +465,7 @@ func (q *DBQuery) In(columnOrFn any, vals ...any) *DBQuery {
 		if v.K == value.Func {
 			return q.Where(v)
 		}
-	case *value.ScriptFunction:
+	case *value.Script:
 		return q.Where(value.Value{K: value.Func, V: v})
 	}
 
@@ -497,20 +497,20 @@ func (q *DBQuery) LeftJoin(tableOrFn any, args ...value.Value) *DBQuery {
 
 func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *DBQuery {
 	var tableName string
-	var sFn *value.ScriptFunction
+	var sFn *value.Script
 
 	// 1. Phân tích Lambda để lấy tên bảng từ Parameter Names
 	switch v := tableOrFn.(type) {
 	case string:
 		tableName = v
 		if len(args) > 0 && args[0].K == value.Func {
-			sFn, _ = args[0].V.(*value.ScriptFunction)
+			sFn, _ = args[0].V.(*value.Script)
 		}
 	case value.Value:
 		if v.K == value.Func {
-			sFn, _ = v.V.(*value.ScriptFunction)
+			sFn, _ = v.V.(*value.Script)
 		}
-	case *value.ScriptFunction:
+	case *value.Script:
 		sFn = v
 	}
 
@@ -563,7 +563,7 @@ func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *
 
 func (q *DBQuery) On(args ...value.Value) *DBQuery {
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
-		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+		if sFn, ok := args[0].V.(*value.Script); ok {
 			handler := &SQLProxyHandler{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
@@ -590,7 +590,7 @@ func (q *DBQuery) Group(columns ...string) *DBQuery {
 func (q *DBQuery) Having(args ...value.Value) *DBQuery {
 	// Re-use logic from Where for Having
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
-		if sFn, ok := args[0].V.(*value.ScriptFunction); ok {
+		if sFn, ok := args[0].V.(*value.Script); ok {
 			handler := &SQLProxyHandler{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
@@ -617,7 +617,7 @@ func (q *DBQuery) Like(columnOrFn any, pattern ...string) *DBQuery {
 		if v.K == value.Func {
 			return q.Where(v)
 		}
-	case *value.ScriptFunction:
+	case *value.Script:
 		return q.Where(value.Value{K: value.Func, V: v})
 	}
 

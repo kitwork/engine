@@ -102,8 +102,7 @@ func (k Kind) Method(name string) (Method, bool) {
 		return Value.Length, true
 	case "html":
 		return Value.HTML, true
-	case "render":
-		return Value.Render, true
+
 	}
 
 	// 2. TYPE-SPECIFIC METHODS
@@ -128,8 +127,8 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Replace, true
 		case "capitalize":
 			return Value.Capitalize, true
-		case "safe":
-			return Value.Safe, true
+			// case "safe":
+			// 	return Value.Safe, true
 		}
 	case Array:
 		switch name {

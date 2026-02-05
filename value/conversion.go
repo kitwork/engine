@@ -16,9 +16,6 @@ func (v Value) String() string {
 	if s, ok := v.V.(string); ok {
 		return s
 	}
-	if safe, ok := v.V.(SafeHTML); ok {
-		return string(safe)
-	}
 	if v.K == Number || v.K == Bool || v.K == Nil {
 		return v.Text()
 	}
@@ -150,6 +147,6 @@ func (v Value) ByteSlice() []byte {
 }
 
 func (v Value) ToJSON() []byte {
-	data, _ := json.Marshal(v.Interface())
+	data, _ := json.Marshal(v)
 	return data
 }

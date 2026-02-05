@@ -309,7 +309,7 @@ func (c *Compiler) Compile(node Node) error {
 		for i, p := range n.Parameters {
 			params[i] = p.Value
 		}
-		fnData := &value.ScriptFunction{
+		fnData := &value.Script{
 			Address:    startIP,
 			ParamNames: params,
 		}

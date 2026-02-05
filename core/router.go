@@ -25,11 +25,12 @@ func (e *Engine) syncRoutes(w *work.Work) {
 			if existing.Method == rt.Method && existing.Path == rt.Path {
 				work.GlobalRouter.Routes[i].Fn = rt.Handler
 				if work.GlobalRouter.Routes[i].Fn == nil {
-					work.GlobalRouter.Routes[i].Fn = &value.ScriptFunction{Address: 0}
+					work.GlobalRouter.Routes[i].Fn = &value.Script{Address: 0}
 				}
 				work.GlobalRouter.Routes[i].Work = w
 				work.GlobalRouter.Routes[i].Redirect = rt.Redirect
 				work.GlobalRouter.Routes[i].Template = rt.Template
+				work.GlobalRouter.Routes[i].BenchmarkIters = rt.BenchmarkIters
 				exists = true
 				break
 			}
@@ -37,12 +38,13 @@ func (e *Engine) syncRoutes(w *work.Work) {
 		if !exists {
 			h := rt.Handler
 			if h == nil {
-				h = &value.ScriptFunction{Address: 0}
+				h = &value.Script{Address: 0}
 			}
 			work.GlobalRouter.Routes = append(work.GlobalRouter.Routes, work.Route{
 				Method: rt.Method, Path: rt.Path, Fn: h, Work: w,
-				Redirect: rt.Redirect,
-				Template: rt.Template,
+				Redirect:       rt.Redirect,
+				Template:       rt.Template,
+				BenchmarkIters: rt.BenchmarkIters,
 			})
 		}
 		work.GlobalRouter.Mu.Unlock()
