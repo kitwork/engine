@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"html"
+	"strconv"
 	"strings"
 
 	"github.com/kitwork/engine/value"
@@ -138,7 +139,7 @@ func eval(n *node, data any, locals ...map[string]value.Value) (out string) {
 					newScope[n.valVar] = item
 				}
 				for _, child := range n.children {
-					sb.WriteString(eval(child, item, newScope)) // item is value.Value
+					sb.WriteString(eval(child, item, newScope))
 				}
 			}
 		} else if val.IsMap() {
@@ -156,6 +157,14 @@ func eval(n *node, data any, locals ...map[string]value.Value) (out string) {
 				}
 			}
 		}
+
+	case nodeLet:
+		// Evaluate the expression (right-hand side)
+		val := resolveValue(n.val, data, scope)
+		// Assign to current scope
+		if scope != nil {
+			scope[n.keyVar] = val
+		}
 	}
 	return sb.String()
 }
@@ -169,45 +178,45 @@ func copyMap(src map[string]value.Value) map[string]value.Value {
 }
 
 func resolveVar(rawKey string, data any, scope map[string]value.Value) string {
-	isRaw := strings.HasPrefix(rawKey, "$")
-	key := rawKey
-	if isRaw {
-		key = strings.TrimPrefix(rawKey, "$")
+	// 1. Handle Raw Output Explicitly: raw(variable)
+	if strings.HasPrefix(rawKey, "raw(") && strings.HasSuffix(rawKey, ")") {
+		innerKey := rawKey[4 : len(rawKey)-1]
+		val := resolveValue(innerKey, data, scope)
+		return val.String() // No Escape
 	}
 
-	val := resolveValue(key, data, scope)
-	if val.IsNil() && isRaw {
-		val = resolveValue(rawKey, data, scope)
+	// 2. Global/Root Access: Only strict $.variable or $
+	if rawKey == "$" || strings.HasPrefix(rawKey, "$.") {
+		return html.EscapeString(resolveValue(rawKey, data, scope).String())
 	}
 
-	if val.IsNil() {
-		return ""
-	}
+	// 3. Standard Local Access
+	val := resolveValue(rawKey, data, scope)
 
-	// Double unwrap pattern for complex Values
-	// 1. Check for Enum Flag (Fastest & Preferred)
+	// Check for SafeHTML flag (set by .html() in JS or raw() wrapper)
 	if val.S == value.SafeHTML {
 		return val.String()
 	}
 
-	// 3. Check for Safe Map Wrapper (Legacy/Fallback)
-	if val.IsMap() {
-		m := val.Map()
-		if _, isSafe := m["__is_safe_html"]; isSafe {
-			if content, hasContent := m["content"]; hasContent {
-				return content.String()
-			}
-		}
-	}
-
-	strVal := val.String()
-	if isRaw {
-		return strVal
-	}
-	return html.EscapeString(strVal)
+	return html.EscapeString(val.String())
 }
 
 func resolveValue(path string, data any, scope map[string]value.Value) value.Value {
+	// 0. (Removed) Auto-Normalize $var -> $.var
+	// We allow users to use $ for local vars if they want (e.g. let $a = 1)
+	// So explicit $.var is required for Root Access, or just use 'this' or standard lookup.
+
+	// 1. Literal Handling (Number & String)
+	// Check for Quoted String: "value" or 'value'
+	if (strings.HasPrefix(path, `"`) && strings.HasSuffix(path, `"`)) ||
+		(strings.HasPrefix(path, `'`) && strings.HasSuffix(path, `'`)) {
+		return value.New(path[1 : len(path)-1])
+	}
+	// Check for Number
+	if val, err := strconv.ParseFloat(path, 64); err == nil {
+		return value.New(val)
+	}
+
 	// Root Context Wrapper
 	var current value.Value
 	if v, ok := data.(value.Value); ok {
@@ -220,12 +229,20 @@ func resolveValue(path string, data any, scope map[string]value.Value) value.Val
 		return current
 	}
 
+	// Handle Explicit Data Access (.prop) -> Go Style
+	if strings.HasPrefix(path, ".") {
+		cleanPath := strings.TrimPrefix(path, ".")
+		// Bypass Scope, Traverse Direct Data
+		return traverse(current, strings.Split(cleanPath, "."))
+	}
+
 	parts := strings.Split(path, ".")
 	if len(parts) == 0 {
 		return value.NewNull()
 	}
 
 	// Priority 1: Check Scope (locals)
+	// Try Exact Match
 	if val, ok := scope[parts[0]]; ok {
 		current = val
 		if len(parts) > 1 {
@@ -233,9 +250,32 @@ func resolveValue(path string, data any, scope map[string]value.Value) value.Val
 		}
 		return current
 	}
+	// Try Alias Match ($var -> var)
+	if strings.HasPrefix(parts[0], "$") {
+		noDollar := strings.TrimPrefix(parts[0], "$")
+		if val, ok := scope[noDollar]; ok {
+			current = val
+			if len(parts) > 1 {
+				return traverse(current, parts[1:])
+			}
+			return current
+		}
+	}
 
 	// Priority 2: Check Data (context)
-	return traverse(current, parts)
+	// Try Exact Match
+	res := traverse(current, parts)
+	if !res.IsNil() {
+		return res
+	}
+
+	// Try Alias Match ($var -> var)
+	if strings.HasPrefix(parts[0], "$") {
+		parts[0] = strings.TrimPrefix(parts[0], "$")
+		return traverse(current, parts)
+	}
+
+	return res
 }
 
 func traverse(current value.Value, parts []string) value.Value {

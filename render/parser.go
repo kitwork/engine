@@ -10,6 +10,7 @@ const (
 	nodeVar
 	nodeIf
 	nodeRange
+	nodeLet // New: Assignment
 )
 
 type node struct {
@@ -82,27 +83,43 @@ func parse(tokens []string) *node {
 				addChild(current, n)
 				stack = append(stack, n)
 
-			case "range":
+			case "for": // Clean Syntax: 'for' only
 				n := &node{typ: nodeRange}
 
-				if assignIdx := indexOf(parts, ":="); assignIdx > -1 {
-					// range i, v := list
-					vars := strings.ReplaceAll(strings.Join(parts[1:assignIdx], " "), ",", " ")
-					varParts := strings.Fields(vars)
-					if len(varParts) > 0 {
-						n.keyVar = varParts[0]
+				if inIdx := indexOf(parts, "in"); inIdx > -1 {
+					// Pattern: for item in list OR for (i, item) in list
+					varsPart := strings.Join(parts[1:inIdx], "")
+
+					// Tuple syntax handling: (i,v)
+					if strings.HasPrefix(varsPart, "(") && strings.HasSuffix(varsPart, ")") {
+						inner := varsPart[1 : len(varsPart)-1]
+						subParts := strings.Split(inner, ",")
+						if len(subParts) > 1 {
+							n.keyVar = subParts[0]
+							n.valVar = subParts[1]
+						} else {
+							n.valVar = subParts[0]
+						}
+					} else {
+						// Single variable: item in list
+						n.valVar = parts[1]
 					}
-					if len(varParts) > 1 {
-						n.valVar = varParts[1]
-					}
-					n.val = parts[assignIdx+1] // Target List
+					n.val = parts[inIdx+1] // list
 				} else {
-					// range list
+					// for list (Implicit '.' point to item)
 					n.val = parts[1]
 				}
 
 				addChild(current, n)
 				stack = append(stack, n)
+
+			case "let": // New Logic: let x = y
+				if len(parts) >= 4 && parts[2] == "=" {
+					// parts[1] is variable name
+					// parts[3] is value expression (simple)
+					n := &node{typ: nodeLet, keyVar: parts[1], val: parts[3]}
+					addChild(current, n)
+				}
 
 			case "else":
 				if current.typ == nodeIf {

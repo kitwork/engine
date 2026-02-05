@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>System Users</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+{{ let a = 1 }}
+
+<body class="bg-slate-900 text-white p-10 font-sans">
+    <div class="fixed top-0 right-0 bg-red-500 text-white p-2">Diff Test: a = {{ $a }}</div>
+
+    <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-blue-400">User Management</h1>
+            <div class="bg-blue-900 px-4 py-2 rounded">
+                Current Viewer: <span class="font-bold text-yellow-300">{{ $.currentUser }}</span>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto relative shadow-md sm:rounded-lg">
+            <table class="w-full text-sm text-left text-gray-400">
+                <thead class="text-xs text-gray-200 uppercase bg-slate-700">
+                    <tr>
+                        <th scope="col" class="py-3 px-6">ID & Info {{ $a }}</th>
+                        <th scope="col" class="py-3 px-6">Name</th>
+                        <th scope="col" class="py-3 px-6">Tags (Nested Loop)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ for (i, user) in users }}
+                    <tr class="bg-slate-800 border-b border-gray-700 hover:bg-slate-700 transition">
+                        <td class="py-4 px-6 font-medium text-white whitespace-nowrap">
+                            #{{ user.id }} <span class="text-xs text-green-400">test(a={{ $a }})</span><br>
+                            <span class="text-xs text-gray-500">{{ email }}</span>
+                        </td>
+                        <td class="py-4 px-6">
+                            {{ user.username }}
+                        </td>
+                        <td class="py-4 px-6">
+                            <div class="flex flex-wrap gap-1">
+                                {{ for $tag in $user.tags }}
+                                <span
+                                    class="bg-purple-900 text-purple-200 px-2 py-0.5 rounded text-xs border border-purple-700">
+                                    {{ $tag }}
+                                    <!-- Test Global Access inside Nested Loop -->
+                                    <span class="opacity-50 text-[10px] ml-1" title="Global Viewer">by {{ $.currentUser
+                                        }}</span>
+                                </span>
+                                {{ end }}
+                            </div>
+                        </td>
+                    </tr>
+                    {{ end }}
+
+                    {{ if $.users.length == 0 }}
+                    <tr>
+                        <td colspan="3" class="text-center py-6 text-gray-500">
+                            No users found in database.
+                        </td>
+                    </tr>
+                    {{ end }}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="mt-4 text-sm text-gray-500">
+            Total Users: <span class="font-bold text-white">{{ $users.length }}</span>
+        </div>
+    </div>
+
+</body>
+
+</html>
