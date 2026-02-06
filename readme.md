@@ -6,7 +6,6 @@
 ![Energy](https://img.shields.io/badge/energy-green-00ff00?style=flat-square)
 ![Docs](https://img.shields.io/badge/docs-complete-blue?style=flat-square)
 
----
 
 ## The New Standard.
 
@@ -14,7 +13,6 @@ Kitwork replaces the modern cloud stack with **Living Logic**.
 We built an engine where the Developer Experience (DX) is prioritized above all else.
 No boilerplate. No config files. Just **Intent**.
 
----
 
 ## 📊 Industrial Performance Metrics
 We don't guess. We measure. Kitwork is engineered for **High-Frequency Logic**.
@@ -32,7 +30,6 @@ We don't guess. We measure. Kitwork is engineered for **High-Frequency Logic**.
 
 > *"It runs faster than you can think."*
 
----
 
 ## ⚡ The Code Experience
 
@@ -162,7 +159,7 @@ The template engine is logic-less but intelligent. It compiles to Go Bytecode fo
 
 <!-- 3. Loops using Ternary Operator -->
 <ul>
-    {{ range i, item := items }}
+     {{ for (i, item) in items }}
         <!-- Ternary logic directly in attributes -->
         <li class="{{ i % 2 == 0 ? 'background-light' : 'background-dark'}} border-red">
             {{ i }}: {{ item.name }} - ${{ item.price }}
@@ -176,7 +173,6 @@ The template engine is logic-less but intelligent. It compiles to Go Bytecode fo
 
 
 
----
 
 ## 📚 Complete API Reference
 
@@ -259,7 +255,6 @@ Inside a handler `(ctx) => ...`:
 | `json(str)` | Parse JSON string. |
 | `json_encode(val)` | Serialize to JSON string. |
 
----
 
 ## 🌌 The Energy Economy
 
@@ -275,7 +270,6 @@ Your code pays for its existence. **Spam is solved by physics.**
 
 > *When `Energy < 0`, the script sleeps.*
 
----
 
 ## 🏗 Core Architecture
 
