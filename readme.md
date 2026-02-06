@@ -1,4 +1,4 @@
-# 🚀 Kitwork Engine (v14.2)
+# 🚀 Kitwork Engine
 > **"High-Performance Sovereign Logic Infrastructure & Nanosecond Runtime."**
 
 ![Go Version](https://img.shields.io/badge/go-1.21%2B-00ADD8?style=flat-square&logo=go)
