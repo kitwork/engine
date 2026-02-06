@@ -41,6 +41,7 @@ type DBQuery struct {
 	table      string
 	fields     []string
 	limit      int
+	maxLimit   int // Developer-defined safety cap
 	offset     int
 	order      string
 	method     string
@@ -181,6 +182,11 @@ func (q *DBQuery) Where(args ...value.Value) *DBQuery {
 
 func (q *DBQuery) Limit(n float64) *DBQuery {
 	q.limit = int(n)
+	return q
+}
+
+func (q *DBQuery) Limited(n float64) *DBQuery {
+	q.maxLimit = int(n)
 	return q
 }
 
@@ -742,11 +748,26 @@ func (q *DBQuery) executeGet() value.Value {
 	}
 
 	// 6. LIMIT & OFFSET
-	if q.limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", q.limit)
-	} else {
-		query += " LIMIT 60"
+	// Priority:
+	// 1. Safety Cap (Limited): Defaults to DefaultDBMaxLimit if not set.
+	// 2. User Limit (Take/Limit): Subject to Safety Cap.
+
+	safetyCap := DefaultDBMaxLimit
+	if q.maxLimit > 0 {
+		safetyCap = q.maxLimit
 	}
+
+	finalLimit := q.limit
+	if finalLimit <= 0 {
+		finalLimit = DefaultDBLimit // Soft default if user didn't specify .take()
+	}
+
+	// Enforce Safety Cap
+	if finalLimit > safetyCap {
+		finalLimit = safetyCap
+	}
+
+	query += fmt.Sprintf(" LIMIT %d", finalLimit)
 
 	if q.offset > 0 {
 		query += fmt.Sprintf(" OFFSET %d", q.offset)
@@ -808,16 +829,8 @@ func (q *DBQuery) First(args ...value.Value) value.Value {
 	return value.NewNull()
 }
 
-func (q *DBQuery) One() value.Value {
-	return q.First()
-}
-
-func (q *DBQuery) FirstOrDefault() value.Value {
-	return q.First()
-}
-
 func (q *DBQuery) SingleOrDefault() value.Value {
-	return q.One()
+	return q.First()
 }
 
 func (q *DBQuery) Exists(args ...value.Value) value.Value {

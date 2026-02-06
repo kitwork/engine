@@ -87,23 +87,7 @@ work("MediaCDN")
     .assets("./storage/user_files"); 
 ```
 
-### 4. Logic-Aware Rendering
-Composite layouts with static caching at the edge.
-
-```javascript
-work("Dashboard")
-    .get("/admin", () => {
-        return { user: "Admin", stats: "active"};
-    })
-    .layout({ 
-        nav: "view/nav.html", 
-        footer: "view/footer.html" 
-    })
-    .render("view/dashboard.html")
-    .static("30d"); // Serve dynamic content as static (Page Cache)
-```
-
-### 5. Native Benchmarking
+### 4. Native Benchmarking
 Unsure about performance? Test it inline.
 
 ```javascript
@@ -114,7 +98,7 @@ work("HelloWorld")
     .benchmark(5000); // Runs 5000 iterations on startup & prints report
 ```
 
-### 6. Human-Readable Scheduling
+### 5. Human-Readable Scheduling
 Forget Cron syntax. Speak natural language.
 
 ```javascript
@@ -126,6 +110,71 @@ work("SleekScheduler")
     .monthly("1st")                 // Run on the 1st of month
     .every("10s");                  // Run every 10 seconds
 ```
+
+### 6. Logic-Aware Rendering
+Composite layouts with trusted trust.
+
+```javascript
+work("Dashboard")
+    .get("/admin", () => {
+        // 1. Query: Get recent high-value orders
+        var orders = db.orders
+            .where(o => o.status == "paid")
+            .orderBy("total", "desc")
+            .take(20);
+
+        // 2. Transform: Compute view-specific logic (e.g. Tax & Badges)
+        // The View receives processed data, keeping templates logic-less.
+        var viewData = orders.map(o => {
+            o.tax = o.total * 0.08;
+            o.is_vip = o.total > 1000;
+            o.formatted_date = date(o.created_at, "YYYY-MM-DD");
+            return o;
+        });
+
+        return { 
+            title: "Q3 Sales Report",
+            user: "Admin",
+            items: viewData 
+        };
+    })
+    .layout({ nav: "view/nav.html" })
+    .render("view/dashboard.html");
+```
+
+#### 🎨 Template Syntax (view/dashboard.html)
+The template engine is logic-less but intelligent. It compiles to Go Bytecode for speed.
+
+```html
+<!-- 1. Variables (Auto-Escaped for XSS Protection) -->
+<h1>Hello, {{ user.name }}</h1>
+
+<!-- 2. Logic (Conditionals & Nested) -->
+{{ if user.level >= 3 }}
+    <span class="badge">🌟 VIP USER</span>
+{{ else }}
+    {{ if user.level > 1 }}
+        <span>REGULAR USER</span>
+    {{ else }}
+        <span>NEW USER</span>
+    {{ end }}
+{{ end }}
+
+<!-- 3. Loops using Ternary Operator -->
+<ul>
+    {{ range i, item := items }}
+        <!-- Ternary logic directly in attributes -->
+        <li class="{{ i % 2 == 0 ? 'background-light' : 'background-dark'}} border-red">
+            {{ i }}: {{ item.name }} - ${{ item.price }}
+        </li>
+    {{ /range }}
+</ul>
+
+<!-- 4. Raw HTML (Explicit Bypass) -->
+<div>{{ $article.content }}</div>
+```
+
+
 
 ---
 
@@ -154,6 +203,7 @@ Here is the exhaustive list of capabilities built into the engine.
 | **Avg** | `db.orders.avg("total")` | Aggregate Average. |
 | **Min/Max** | `db.orders.min("price")` | Aggregate Min/Max. |
 | **Page** | `skip(10)`, `take(5)` | Limit & Offset helpers. |
+| **Limited**| `limited(120)` | **Safety Cap**: Max rows allowed (Default 120). |
 | **Order** | `orderBy("date", "desc")` | Sorting. |
 | **Create** | `create({ ... })` | Insert new record. |
 | **Update** | `update({ ... })` | Update matching records. |
