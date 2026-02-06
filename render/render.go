@@ -14,8 +14,15 @@ func Render(tmpl string, data any) string {
 	node := parse(tokens)
 
 	// Global Scope Injection: Inject '$' as Root Context
-	initialScope := map[string]value.Value{
-		"$": value.New(data),
+	initialScope := make(map[string]value.Value)
+	valData := value.New(data)
+	initialScope["$"] = valData
+
+	// Flatten Data Map into Scope so 'users' is accessible in loops
+	if valData.IsMap() {
+		for k, v := range valData.Map() {
+			initialScope[k] = v
+		}
 	}
 
 	return eval(node, data, initialScope)

@@ -80,6 +80,16 @@ func (a Value) Div(b Value) Value {
 	return Value{K: Invalid}
 }
 
+func (a Value) Mod(b Value) Value {
+	if a.K == Number && b.K == Number {
+		if b.N == 0 {
+			return Value{K: Nil}
+		}
+		return Value{K: Number, N: float64(int64(a.N) % int64(b.N))}
+	}
+	return Value{K: Invalid}
+}
+
 // Deep equality
 func (a Value) Equal(b Value) bool {
 	if a.K != b.K {

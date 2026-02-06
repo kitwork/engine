@@ -2,8 +2,10 @@ package value
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/rand"
 	"strings"
+	"time"
 )
 
 /* =============================================================================
@@ -12,10 +14,29 @@ import (
 
 // --- Casting & Conversion ---
 
-func (v Value) ToString(_ ...Value) Value { v.V = v.Text(); v.K = String; return v }
-func (v Value) Integer(_ ...Value) Value  { v.N = float64(int64(v.N)); v.K = Number; return v }
-func (v Value) ToFloat(_ ...Value) Value  { v.K = Number; return v }
-func (v Value) Length(_ ...Value) Value   { v.N = float64(v.Len()); v.K = Number; return v }
+func (v Value) ToString(args ...Value) Value {
+	if len(args) > 0 {
+		format := args[0].Text()
+
+		// Date Formatting
+		if v.K == Time {
+			layout := convertStrftime(format)
+			t := time.Unix(0, int64(v.N))
+			return NewString(t.Format(layout))
+		}
+
+		// Generic Formatting
+		if strings.Contains(format, "%") {
+			return NewString(fmt.Sprintf(format, v.Interface()))
+		}
+	}
+	v.V = v.Text()
+	v.K = String
+	return v
+}
+func (v Value) Integer(_ ...Value) Value { v.N = float64(int64(v.N)); v.K = Number; return v }
+func (v Value) ToFloat(_ ...Value) Value { v.K = Number; return v }
+func (v Value) Length(_ ...Value) Value  { v.N = float64(v.Len()); v.K = Number; return v }
 
 func (v Value) ToJson(args ...Value) Value {
 	if len(args) > 0 {

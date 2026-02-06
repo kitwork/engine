@@ -201,12 +201,45 @@ func resolveVar(rawKey string, data any, scope map[string]value.Value) string {
 	return html.EscapeString(val.String())
 }
 
-func resolveValue(path string, data any, scope map[string]value.Value) value.Value {
-	// 0. (Removed) Auto-Normalize $var -> $.var
-	// We allow users to use $ for local vars if they want (e.g. let $a = 1)
-	// So explicit $.var is required for Root Access, or just use 'this' or standard lookup.
+// Helper to find operator index identifying parenthesis balance
+func findSplitIndex(s string, checkFn func(int) bool, last bool) int {
+	level := 0
+	if last {
+		for i := len(s) - 1; i >= 0; i-- {
+			if s[i] == ')' {
+				level++
+				continue
+			}
+			if s[i] == '(' {
+				level--
+				continue
+			}
+			if level == 0 && checkFn(i) {
+				return i
+			}
+		}
+	} else {
+		for i := 0; i < len(s); i++ {
+			if s[i] == '(' {
+				level++
+				continue
+			}
+			if s[i] == ')' {
+				level--
+				continue
+			}
+			if level == 0 && checkFn(i) {
+				return i
+			}
+		}
+	}
+	return -1
+}
 
-	// 1. Literal Handling (Number & String)
+func resolveValue(path string, data any, scope map[string]value.Value) value.Value {
+	path = strings.TrimSpace(path)
+
+	// 0. Literal Handling (Highest Priority)
 	// Check for Quoted String: "value" or 'value'
 	if (strings.HasPrefix(path, `"`) && strings.HasSuffix(path, `"`)) ||
 		(strings.HasPrefix(path, `'`) && strings.HasSuffix(path, `'`)) {
@@ -217,7 +250,174 @@ func resolveValue(path string, data any, scope map[string]value.Value) value.Val
 		return value.New(val)
 	}
 
-	// Root Context Wrapper
+	// 1. Operator Support (Low -> High Precedence)
+
+	// A. Ternary (cond ? true : false)
+	// Use findSplitIndex
+	qIdx := findSplitIndex(path, func(i int) bool { return path[i] == '?' }, false)
+	if qIdx > -1 {
+		// Find corresponding ':'
+		// We need to find ':' AFTER qIdx, balanced.
+		remainder := path[qIdx+1:]
+		cIdxRel := findSplitIndex(remainder, func(i int) bool { return remainder[i] == ':' }, false)
+		if cIdxRel > -1 {
+			cIdx := qIdx + 1 + cIdxRel
+
+			condRaw := path[:qIdx]
+			trueRaw := path[qIdx+1 : cIdx]
+			falseRaw := path[cIdx+1:]
+
+			cond := resolveValue(condRaw, data, scope)
+			if cond.Truthy() {
+				return resolveValue(trueRaw, data, scope)
+			}
+			return resolveValue(falseRaw, data, scope)
+		}
+	}
+
+	// B. Logical Operators (||, &&)
+	// Null Coalescing (??)
+	if idx := findSplitIndex(path, func(i int) bool {
+		return path[i] == '?' && i+1 < len(path) && path[i+1] == '?'
+	}, false); idx > -1 {
+		leftRaw := strings.TrimSpace(path[:idx])
+		rightRaw := strings.TrimSpace(path[idx+2:])
+		left := resolveValue(leftRaw, data, scope)
+		if left.IsNil() || left.String() == "null" || left.String() == "" {
+			return resolveValue(rightRaw, data, scope)
+		}
+		return left
+	}
+	// OR (||)
+	if idx := findSplitIndex(path, func(i int) bool {
+		return path[i] == '|' && i+1 < len(path) && path[i+1] == '|'
+	}, false); idx > -1 {
+		leftRaw := strings.TrimSpace(path[:idx])
+		rightRaw := strings.TrimSpace(path[idx+2:])
+		left := resolveValue(leftRaw, data, scope)
+		if !left.Truthy() {
+			return resolveValue(rightRaw, data, scope)
+		}
+		return left
+	}
+	// AND (&&)
+	if idx := findSplitIndex(path, func(i int) bool {
+		return path[i] == '&' && i+1 < len(path) && path[i+1] == '&'
+	}, false); idx > -1 {
+		leftRaw := strings.TrimSpace(path[:idx])
+		rightRaw := strings.TrimSpace(path[idx+2:])
+		left := resolveValue(leftRaw, data, scope)
+		if left.Truthy() {
+			return resolveValue(rightRaw, data, scope)
+		}
+		return left // Return false/falsy value
+	}
+
+	// C. Comparison (==, !=, >=, <=, >, <)
+	ops := []string{"==", "!=", ">=", "<=", ">", "<"}
+	for _, op := range ops {
+		target := op
+		if idx := findSplitIndex(path, func(i int) bool {
+			if i+len(target) > len(path) {
+				return false
+			}
+			return path[i:i+len(target)] == target
+		}, false); idx > -1 {
+			leftRaw := strings.TrimSpace(path[:idx])
+			rightRaw := strings.TrimSpace(path[idx+len(target):])
+
+			left := resolveValue(leftRaw, data, scope)
+			right := resolveValue(rightRaw, data, scope)
+
+			switch target {
+			case "==":
+				return value.ToBool(left.Equal(right))
+			case "!=":
+				return value.ToBool(left.NotEqual(right))
+			case ">=":
+				return value.ToBool(left.GreaterEqual(right))
+			case "<=":
+				return value.ToBool(left.LessEqual(right))
+			case ">":
+				return value.ToBool(left.Greater(right))
+			case "<":
+				return value.ToBool(left.Less(right))
+			}
+		}
+	}
+
+	// D. Arithmetic
+	// Arithmetic (+, -). Use findSplitIndex with last=true for Left-Associativity
+	if idx := findSplitIndex(path, func(i int) bool {
+		return (path[i] == '+' || path[i] == '-') && i > 0
+	}, true); idx > 0 {
+		op := path[idx]
+		// Skip if scientific notation 'e-'?
+		if idx > 0 && (path[idx-1] == 'e' || path[idx-1] == 'E') {
+			// naive skip, but findSplitIndex loop goes backwards.
+			// Ideally we should allow helper to return Multiple matches? No.
+			// Just assume for now if we hit 'e-', it might be operator if balance 0.
+			// But 1e-10 is literal check. Literal check is done before.
+			// Wait: literal check failed (because it contains -).
+			// So 1e-10 falls here. And we split at -.
+			// Left: 1e, Right: 10.
+			// resolve(1e) -> variable? fail.
+			// resolve(10) -> 10.
+			// fail.
+			// So scientific notation support requires smarter lexing.
+			// For templates, we can ignore complex scientific notation for now.
+		}
+
+		leftRaw := strings.TrimSpace(path[:idx])
+		rightRaw := strings.TrimSpace(path[idx+1:])
+
+		left := resolveValue(leftRaw, data, scope)
+		right := resolveValue(rightRaw, data, scope)
+
+		if op == '+' {
+			return left.Add(right)
+		}
+		if op == '-' {
+			return left.Sub(right)
+		}
+	}
+
+	// Multiplicative (*, /, %)
+	// Higher Precedence (Checked AFTER Additive)
+	if idx := findSplitIndex(path, func(i int) bool {
+		c := path[i]
+		return c == '*' || c == '/' || c == '%'
+	}, true); idx > 0 {
+		op := path[idx]
+		leftRaw := strings.TrimSpace(path[:idx])
+		rightRaw := strings.TrimSpace(path[idx+1:])
+
+		left := resolveValue(leftRaw, data, scope)
+		right := resolveValue(rightRaw, data, scope)
+
+		if op == '*' {
+			return left.Mul(right)
+		}
+		if op == '/' {
+			return left.Div(right)
+		}
+		if op == '%' {
+			return left.Mod(right)
+		}
+	}
+
+	// 3. Unwrap Parentheses (Fallback if no operator matched at top level)
+	// This handles (a + b) -> a + b
+	if strings.HasPrefix(path, "(") && strings.HasSuffix(path, ")") {
+		inner := strings.TrimSpace(path[1 : len(path)-1])
+		// Optimization: Check empty ()
+		if inner == "" {
+			return value.NewNull()
+		}
+		return resolveValue(inner, data, scope)
+	}
+
+	// 4. Variable Lookup (Fallback)
 	var current value.Value
 	if v, ok := data.(value.Value); ok {
 		current = v

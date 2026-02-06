@@ -6,6 +6,7 @@ work("UserView")
         // Since db might not have tags, let's map it
         var enrichedUsers = allUsers.map(u => {
             u.tags = ["TagA_" + u.id, "TagB_" + u.id];
+
             return u;
         });
 

@@ -3,9 +3,31 @@ package value
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 	"unsafe"
 )
+
+// Strftime to Go Layout Converter
+func convertStrftime(format string) string {
+	// Common replacements
+	r := strings.NewReplacer(
+		"%Y", "2006",
+		"%y", "06",
+		"%m", "01",
+		"%d", "02",
+		"%H", "15",
+		"%I", "03",
+		"%M", "04",
+		"%S", "05",
+		"%p", "PM",
+		"%a", "Mon",
+		"%A", "Monday",
+		"%b", "Jan",
+		"%B", "January",
+	)
+	return r.Replace(format)
+}
 
 func (v Value) Text() string {
 	buf := make([]byte, 0, 64)
@@ -16,10 +38,8 @@ func (v Value) String() string {
 	if s, ok := v.V.(string); ok {
 		return s
 	}
-	if v.K == Number || v.K == Bool || v.K == Nil {
-		return v.Text()
-	}
-	return ""
+	// Fallback to Text() for Time, Duration, Map, Array, Nil, etc.
+	return v.Text()
 }
 
 func (v Value) Append(b []byte) []byte {

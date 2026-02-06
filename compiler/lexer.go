@@ -246,6 +246,15 @@ func (l *Lexer) NextToken() token.Token {
 				tok.Kind = token.LogicalOr
 				tok.Value = value.NewString("||")
 			}
+		case '?':
+			if l.peekChar() == '?' {
+				l.readChar()
+				tok.Kind = token.NullCoalescing
+				tok.Value = value.NewString("??")
+			} else {
+				tok.Kind = token.Illegal
+				tok.Value = value.NewString("?")
+			}
 		}
 
 	case character.Space:

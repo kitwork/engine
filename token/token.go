@@ -40,11 +40,12 @@ const (
 	Colon     // :
 
 	// --- Logic & So sánh ---
-	LogicalAnd // &&
-	LogicalOr  // ||
-	LogicalNot // !
-	Equal      // ==
-	NotEqual   // !=
+	LogicalAnd     // &&
+	LogicalOr      // ||
+	NullCoalescing // ??
+	LogicalNot     // !
+	Equal          // ==
+	NotEqual       // !=
 
 	Greater      // >
 	GreaterEqual //>=
@@ -114,6 +115,8 @@ func (k Kind) String() string {
 		return "&&"
 	case LogicalOr:
 		return "||"
+	case NullCoalescing:
+		return "??"
 	case LogicalNot:
 		return "!"
 	case Equal:
@@ -217,6 +220,8 @@ func (k Kind) Precedence() int {
 	case LogicalAnd:
 		return 5
 	case LogicalOr:
+		return 4
+	case NullCoalescing:
 		return 4
 	case Assign:
 		return 3

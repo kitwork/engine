@@ -25,25 +25,31 @@
                     <tr>
                         <th scope="col" class="py-3 px-6">ID & Info {{ $a }}</th>
                         <th scope="col" class="py-3 px-6">Name</th>
+                        <th scope="col" class="py-3 px-6">Ngày Tạo</th>
                         <th scope="col" class="py-3 px-6">Tags (Nested Loop)</th>
                     </tr>
                 </thead>
                 <tbody>
                     {{ for (i, user) in users }}
-                    <tr class="bg-slate-800 border-b border-gray-700 hover:bg-slate-700 transition">
+                    <tr class='{{ i == users.length - 1 ? "bg-slate-300" : "bg-slate-800" }} border-b border-gray-700 hover:bg-slate-700
+                        transition'>
                         <td class="py-4 px-6 font-medium text-white whitespace-nowrap">
-                            #{{ user.id }} <span class="text-xs text-green-400">test(a={{ $a }})</span><br>
+                            #{{ user.id * 2 }}
+                            <span class="text-xs text-green-400">test(a={{ $a }})</span><br>
                             <span class="text-xs text-gray-500">{{ email }}</span>
                         </td>
                         <td class="py-4 px-6">
                             {{ user.username }}
                         </td>
+                        <td class="py-4 px-6 text-gray-400 text-xs font-mono">
+                            {{ user.created_at }}
+                        </td>
                         <td class="py-4 px-6">
                             <div class="flex flex-wrap gap-1">
-                                {{ for $tag in $user.tags }}
+                                {{ for tag in user.tags }}
                                 <span
                                     class="bg-purple-900 text-purple-200 px-2 py-0.5 rounded text-xs border border-purple-700">
-                                    {{ $tag }}
+                                    {{ tag }}
                                     <!-- Test Global Access inside Nested Loop -->
                                     <span class="opacity-50 text-[10px] ml-1" title="Global Viewer">by {{ $.currentUser
                                         }}</span>

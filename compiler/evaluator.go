@@ -305,6 +305,12 @@ func evalInfixExpression(op string, left, right value.Value) value.Value {
 			return left
 		}
 		return right
+	case "??":
+		// Handle standard Nil and string "null" (edge case)
+		if left.IsNil() || left.String() == "null" {
+			return right
+		}
+		return left
 
 	default:
 		return value.Value{K: value.Invalid}
