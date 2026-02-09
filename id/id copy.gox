@@ -1,0 +1,253 @@
+package id
+
+import (
+	"crypto/rand"
+	"math/big"
+	"time"
+)
+
+// --- CONFIG ---
+
+var (
+	// Default Epoch: 2025-01-01 00:00:00 UTC
+	epoch = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+
+	charset36 = []byte("0123456789abcdefghijklmnopqrstuvwxyz")
+	charset62 = []byte("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	charset58 = []byte("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+)
+
+// SetEpoch thiết lập mốc thời gian bắt đầu cho việc sinh Short ID.
+func SetEpoch(t time.Time) {
+	epoch = t.UnixMilli()
+}
+
+// --- PUBLIC API ---
+
+// Generate (Wrapper) gọi hàm Gen() mặc định.
+func Generate() string {
+	return Gen()
+}
+
+// Gen là hàm Smart Generator đa năng.
+// - Gen(): Trả về ID chuẩn 36 ký tự (Base36). Phù hợp Primary Key.
+// - Gen(len): Trả về ID độ dài 'len' (Base62), tự động chọn thuật toán tối ưu.
+func Gen(lengths ...int) string {
+	if len(lengths) == 0 {
+		return generate(charset36, 36)
+	}
+
+	length := lengths[0]
+
+	// Chiến lược tự động (Auto Strategy):
+	if length < 22 {
+		return genShortAdaptive(length, charset62)
+	}
+	return generate(charset62, length)
+}
+
+// Gen36: ID chuẩn 36 ký tự (Base36).
+func Gen36() string {
+	return generate(charset36, 36)
+}
+
+// Gen26: ID 26 ký tự (Base26 - Alpha Only). URL Friendly.
+func Gen26() string {
+	return generate([]byte("abcdefghijklmnopqrstuvwxyz"), 26)
+}
+
+// Gen62: ID 22 ký tự (Base62). Shortest Global Unique.
+func Gen62() string {
+	return generate(charset62, 22)
+}
+
+// Gen58: ID 22 ký tự (Base58). Human Friendly.
+func Gen58() string {
+	return generate(charset58, 22)
+}
+
+// Gen6: Short ID 6 ký tự (Base62).
+func Gen6() string {
+	return genShortAdaptive(6, charset62)
+}
+
+// Gen8: Short ID 8 ký tự (Base62).
+func Gen8() string {
+	return genShortAdaptive(8, charset62)
+}
+
+// Gen6_58: Short ID 6 ký tự (Base58).
+func Gen6_58() string {
+	return genShortAdaptive(6, charset58)
+}
+
+// Gen8_58: Short ID 8 ký tự (Base58).
+func Gen8_58() string {
+	return genShortAdaptive(8, charset58)
+}
+
+// GenShort: Alias gọi Smart Gen (nhưng tường minh là tạo Short ID).
+func GenShort(length int) string {
+	return genShortAdaptive(length, charset62)
+}
+
+// --- CORE LOGIC (Short ID) ---
+
+func genShortAdaptive(length int, originalCharset []byte) string {
+	if length < 1 {
+		length = 1
+	}
+
+	charsetLen := len(originalCharset)
+	avail := make([]byte, charsetLen)
+	copy(avail, originalCharset)
+
+	// --- CASE 1: SIÊU NGẮN (< 6) -> Random Thuần túy ---
+	if length < 6 {
+		shuffledAvail := shuffleRemaining(avail)
+		if length > len(shuffledAvail) {
+			length = len(shuffledAvail)
+		}
+		return string(shuffledAvail[:length])
+	}
+
+	// --- CASE 2: ĐỦ DÀI (Time Encoding) ---
+	var t uint64
+	var jitterMax int64
+	now := time.Now()
+
+	// Điều chỉnh ngưỡng Milliseconds/Seconds.
+	// Để chịu tải cao (Concurrency), ta cần Random Part đủ lớn.
+	// - Length >= 10: Dùng Milliseconds (~7 chars Time, còn lại 3+ Ramdom).
+	// - Length < 10:  Dùng Seconds (~5 chars Time, còn lại 3-4 Random).
+	//   Ví dụ ID 8: 5 Time + 3 Random -> 62^3 = 238,000 ops/sec (mỗi giây).
+	//   Nếu dùng Millis ở length 8: 7 Time + 1 Random -> 62 ops/ms = 62,000 ops/sec. (Yếu hơn 4 lần).
+
+	if length >= 10 {
+		// MILLISECONDS Mode
+		ms := now.UnixMilli()
+		if ms < epoch {
+			ms = epoch
+		}
+		t = uint64(ms - epoch)
+		jitterMax = 10
+	} else {
+		// SECONDS Mode
+		s := now.Unix()
+		epochSec := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).Unix()
+		if s < epochSec {
+			s = epochSec
+		}
+		t = uint64(s - epochSec)
+		jitterMax = 1
+	}
+
+	// Apply Jitter
+	if jitterMax > 1 {
+		jitter, _ := rand.Int(rand.Reader, big.NewInt(jitterMax))
+		t = (t * uint64(jitterMax)) + uint64(jitter.Int64())
+	}
+
+	// Tính toán Time Part length
+	timeLen := 0
+	capacity := new(big.Int).SetUint64(1)
+	tBig := new(big.Int).SetUint64(t)
+
+	for i := 0; i < charsetLen; i++ {
+		term := big.NewInt(int64(charsetLen - i))
+		capacity.Mul(capacity, term)
+		timeLen++
+		if capacity.Cmp(tBig) > 0 {
+			break
+		}
+	}
+
+	if timeLen > length {
+		timeLen = length
+	}
+
+	// Mã hóa Time Part
+	tsChars := encodeTimePart(t, &avail, timeLen, charsetLen)
+
+	// Random Part (Phần còn lại sau khi trừ Time Part)
+	randomLen := length - timeLen
+	shuffledAvail := shuffleRemaining(avail)
+	if randomLen > len(shuffledAvail) {
+		randomLen = len(shuffledAvail)
+	}
+	rndChars := shuffledAvail[:randomLen]
+
+	return string(tsChars) + string(rndChars)
+}
+
+// --- CORE LOGIC (Long ID) ---
+
+func generate(originalCharset []byte, totalLen int) string {
+	charsetLen := len(originalCharset)
+	avail := make([]byte, charsetLen)
+	copy(avail, originalCharset)
+
+	t := uint64(time.Now().UnixNano())
+	jitter, _ := rand.Int(rand.Reader, big.NewInt(100))
+	t = (t / 100 * 100) + uint64(jitter.Int64())
+
+	timeLen := 0
+	capacity := new(big.Int).SetUint64(1)
+	tBig := new(big.Int).SetUint64(t)
+
+	for i := 0; i < charsetLen; i++ {
+		term := big.NewInt(int64(charsetLen - i))
+		capacity.Mul(capacity, term)
+		timeLen++
+
+		if capacity.Cmp(tBig) > 0 {
+			break
+		}
+	}
+
+	if timeLen > totalLen {
+		timeLen = totalLen
+	}
+
+	tsChars := encodeTimePart(t, &avail, timeLen, charsetLen)
+
+	randomLen := totalLen - timeLen
+	shuffledAvail := shuffleRemaining(avail)
+	if randomLen > len(shuffledAvail) {
+		randomLen = len(shuffledAvail)
+	}
+	rndChars := shuffledAvail[:randomLen]
+
+	return string(tsChars) + string(rndChars)
+}
+
+func encodeTimePart(t uint64, avail *[]byte, timeLen int, charsetLen int) []byte {
+	idxs := make([]int, timeLen)
+	currentT := t
+
+	startBase := uint64(charsetLen - (timeLen - 1))
+
+	for i := timeLen - 1; i >= 0; i-- {
+		base := startBase + uint64((timeLen-1)-i)
+		idxs[i] = int(currentT % base)
+		currentT /= base
+	}
+
+	var res []byte
+	for _, idx := range idxs {
+		char := (*avail)[idx]
+		res = append(res, char)
+		*avail = append((*avail)[:idx], (*avail)[idx+1:]...)
+	}
+	return res
+}
+
+func shuffleRemaining(avail []byte) []byte {
+	limit := len(avail)
+	for i := limit - 1; i > 0; i-- {
+		num, _ := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		j := num.Int64()
+		avail[i], avail[j] = avail[j], avail[i]
+	}
+	return avail
+}

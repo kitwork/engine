@@ -125,7 +125,7 @@ work("Dashboard")
         var viewData = orders.map(o => {
             o.tax = o.total * 0.08;
             o.is_vip = o.total > 1000;
-            o.formatted_date = date(o.created_at, "YYYY-MM-DD");
+            o.formatted_date = o.created_at.string("%Y-%m-%d");
             return o;
         });
 

@@ -207,6 +207,7 @@ func loadLogic(e *core.Engine, dir string) {
 			content, _ := os.ReadFile(path)
 			w, err := e.Build(string(content))
 			if err == nil {
+				w.SourcePath, _ = filepath.Abs(path) // Track Source Path
 				if e.Config.Debug {
 					fmt.Printf("📜 Logic loaded: %s (Registry size: %d)\n", path, len(e.Registry))
 				}
@@ -263,6 +264,147 @@ func bootServer(e *core.Engine, serverPort int) {
 		})
 		http.Handle(prefix, cacheHandler)
 	}
+
+	// Internal API: System Introspection (Routes)
+	http.HandleFunc("/_kitwork/routes", func(w http.ResponseWriter, r *http.Request) {
+		work.GlobalRouter.Mu.RLock()
+		defer work.GlobalRouter.Mu.RUnlock()
+
+		var routes []map[string]string
+		for _, r := range work.GlobalRouter.Routes {
+			wn := "global"
+			if r.Work != nil {
+				wn = r.Work.Name
+			}
+			routes = append(routes, map[string]string{
+				"method": r.Method,
+				"path":   r.Path,
+				"work":   wn,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(routes)
+	})
+
+	// Internal API: View Source Code (Safe Read based on Work Name + Tenant)
+	http.HandleFunc("/_kitwork/source", func(w http.ResponseWriter, r *http.Request) {
+		workName := r.URL.Query().Get("work")
+		tenantID := r.URL.Query().Get("tenant") // Optional Tenant Filter
+
+		if workName == "" {
+			http.Error(w, "Missing work name", 400)
+			return
+		}
+
+		e.RegistryMu.RLock()
+		workUnit, ok := e.Registry[workName]
+
+		if !ok {
+			e.RegistryMu.RUnlock()
+			http.Error(w, "Work unit not found", 404)
+			return
+		}
+
+		// Grab data before unlocking to be safe (though Work is mostly immutable pointer in Registry)
+		unitPath := workUnit.SourcePath
+		unitTenant := workUnit.TenantID
+		e.RegistryMu.RUnlock()
+
+		// Tenant Isolation Check
+		if tenantID != "" && unitTenant != tenantID {
+			http.Error(w, "Work unit does not belong to this tenant", 403)
+			return
+		}
+
+		if unitPath == "" {
+			http.Error(w, "Source not available (compiled from memory?)", 404)
+			return
+		}
+
+		// SECURITY: Verify file is within allowed tenant directories if necessary
+		// For now we rely on SourcePath being set by the trusted engine
+
+		content, err := os.ReadFile(unitPath)
+		if err != nil {
+			http.Error(w, "Failed to read source file", 500)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Write(content)
+	})
+
+	// Internal API: Hot Deploy Work Unit (Serverless Deployment)
+	http.HandleFunc("/_kitwork/deploy", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			http.Error(w, "Method not allowed", 405)
+			return
+		}
+
+		// TODO: Add Master Key Authentication here
+
+		var req struct {
+			Content string `json:"content"`
+			Path    string `json:"path"` // Relative path to save file (canonical)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid JSON", 400)
+			return
+		}
+
+		if req.Content == "" {
+			http.Error(w, "Content required", 400)
+			return
+		}
+
+		// 1. Hot Compile (Virtual Machine check)
+		newWork, err := e.Build(req.Content)
+		if err != nil {
+			fmt.Printf("❌ Hot Deploy Failed: %v\n", err)
+			http.Error(w, fmt.Sprintf("Compilation Failed: %v", err), 400)
+			return
+		}
+
+		// 2. Persistence (Write to Disk)
+		// If path is provided, we save it to become permanent
+		if req.Path != "" {
+			// Validate path to prevent directory traversal
+			if strings.Contains(req.Path, "..") {
+				http.Error(w, "Invalid path", 400)
+				return
+			}
+
+			// Use first source directory as default root
+			rootDir := "./"
+			if len(e.Config.Sources) > 0 {
+				rootDir = e.Config.Sources[0]
+			}
+			fullPath := filepath.Join(rootDir, req.Path)
+
+			er := os.MkdirAll(filepath.Dir(fullPath), 0755)
+			if er == nil {
+				os.WriteFile(fullPath, []byte(req.Content), 0644)
+				newWork.SourcePath, _ = filepath.Abs(fullPath)
+			}
+		}
+
+		// 3. Hot Swap (Thread-Safe Registry Update)
+		e.RegistryMu.Lock()
+		e.Registry[newWork.Name] = newWork
+		e.RegistryMu.Unlock()
+
+		// 4. Trigger Initialization (Run top-level logic)
+		e.Trigger(context.TODO(), newWork, nil, nil)
+
+		fmt.Printf("🔥 Hot Deployed: %s (v%s)\n", newWork.Name, newWork.Ver)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "deployed",
+			"work":    newWork.Name,
+			"version": newWork.Ver,
+		})
+	})
 
 	// Internal API: JIT CSS Generator
 	http.HandleFunc("/_kitwork/jit", func(w http.ResponseWriter, r *http.Request) {

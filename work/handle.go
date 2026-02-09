@@ -35,11 +35,13 @@ type Redirect struct {
 // Work là Blueprint (Bản thiết kế) - IMMUTABLE
 type Work struct {
 	Name           string
+	TenantID       string // Multi-tenancy Isolation
 	Routes         []*StaticRoute
 	lastRoute      *StaticRoute // Track route cuối cùng để chain .benchmark()
 	Retries        int
 	TimeoutDur     time.Duration
 	Ver            string
+	Description    string
 	Bytecode       *compiler.Bytecode
 	CacheDuration  time.Duration
 	StaticDuration time.Duration
@@ -47,6 +49,7 @@ type Work struct {
 	StaticDir      string
 	StaticPrefix   string
 	ResourcePath   string
+	SourcePath     string // Absolute path to the source file
 
 	Schedules []*ScheduleRule
 
@@ -73,6 +76,9 @@ func (w *Work) LoadFromConfig(data map[string]any) {
 	fmt.Printf("DEBUG: Loading Work Config: %+v\n", data)
 	if name, ok := data["name"].(string); ok {
 		w.Name = name
+	}
+	if desc, ok := data["description"].(string); ok {
+		w.Description = desc
 	}
 	if ver, ok := data["version"].(string); ok {
 		w.Ver = ver
@@ -229,6 +235,11 @@ func (w *Work) Handle(fn value.Value) *Work {
 
 func (w *Work) Retry(times int, _ string) *Work {
 	w.Retries = times
+	return w
+}
+
+func (w *Work) Desc(d string) *Work {
+	w.Description = d
 	return w
 }
 

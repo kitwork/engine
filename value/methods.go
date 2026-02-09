@@ -25,6 +25,15 @@ func (v Value) ToString(args ...Value) Value {
 			return NewString(t.Format(layout))
 		}
 
+		// Numeric Formatting (Pattern vs Printf)
+		if v.IsNumeric() {
+			if strings.Contains(format, "%") {
+				return NewString(fmt.Sprintf(format, v.Interface()))
+			}
+			// Use C# Style Pattern (e.g. "#,##0.00")
+			return NewString(formatNumericPattern(v.Float(), format))
+		}
+
 		// Generic Formatting
 		if strings.Contains(format, "%") {
 			return NewString(fmt.Sprintf(format, v.Interface()))
