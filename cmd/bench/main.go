@@ -15,20 +15,12 @@ func main() {
 
 	// In mẫu ID
 	fmt.Println("--- ID EXAMPLES ---")
-	fmt.Println("Gen()      :", id.Gen())   // Default 36 chars Base36
-	fmt.Println("Gen(6)     :", id.Gen(6))  // Smart Short (Seconds)
-	fmt.Println("Gen(8)     :", id.Gen(8))  // Smart Short (Millis)
-	fmt.Println("Gen(12)    :", id.Gen(12)) // Smart Medium (Millis + More Random)
-	fmt.Println("Gen(30)    :", id.Gen(30)) // Smart Long (UnixNano)
-	fmt.Println("-------------------")
-	fmt.Println("Gen36()    :", id.Gen36())
-	fmt.Println("Gen26()    :", id.Gen26())
-	fmt.Println("Gen62()    :", id.Gen62())
-	fmt.Println("Gen58()    :", id.Gen58())
-	fmt.Println("Gen6()     :", id.Gen6())
-	fmt.Println("Gen8()     :", id.Gen8())
-	fmt.Println("Gen6_58()  :", id.Gen6_58())
-	fmt.Println("Gen8_58()  :", id.Gen8_58())
+	fmt.Println("Gen36()    :", id.Charset(36).Must(36))
+	fmt.Println("Gen26()    :", id.Charset(26).Must(26))
+	fmt.Println("Gen62()    :", id.Charset(62).Must(62))
+	fmt.Println("Gen58()    :", id.Charset(58).Must(58))
+	fmt.Println("Gen8()     :", id.Charset(62).Must(8))
+
 	fmt.Println("-------------------")
 
 	fmt.Printf("🚀 Starting Benchmark: %d goroutines generating Gener(8) concurrently...\n", total)
@@ -40,7 +32,7 @@ func main() {
 			defer wg.Done()
 
 			// Sinh ID 8 ký tự bằng hàm Smart Gen
-			val := id.Gen(8)
+			val := id.Shortlink()
 
 			// Kiểm tra trùng (Store trả về true nếu đã có key)
 			if _, loaded := ids.LoadOrStore(val, true); loaded {

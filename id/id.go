@@ -4,122 +4,234 @@ package id
 
 import (
 	"crypto/rand"
+	"fmt"
 	"math/big"
 	"time"
 )
 
+// Generator encapsulates the logic and state for ID generation.
+type Generator struct {
+	epoch      int64
+	charset    []byte
+	err        error
+	repeat     bool
+	increasing bool
+}
+
 var (
 	// Default Epoch set to 2025-01-01 00:00:00 UTC.
 	// Used for generating sortable short IDs.
-	epoch = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	since = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Predefined charsets for different ID flavors.
-	charset10 = []byte("0123456789")
-	charset26 = []byte("abcdefghijklmnopqrstuvwxyz")
-	charset36 = []byte("0123456789abcdefghijklmnopqrstuvwxyz")
-	charset58 = []byte("123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ")
-	charset62 = []byte("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	digits = "0123456789"
+	lower  = "abcdefghijklmnopqrstuvwxyz"
+	upper  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+	// Base58 excludes ambiguous characters: 0, O, I, l
+	base58 = "123456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ"
+
+	charset10 = []byte(digits)
+	charset26 = []byte(lower)
+	charset36 = []byte(digits + lower)
+	charset58 = []byte(base58)
+	charset62 = []byte(digits + lower + upper)
 )
 
-// SetEpoch updates the starting point for short ID generation.
-// This allows for shorter IDs by storing time as an offset from this date.
-func SetEpoch(t time.Time) {
-	epoch = t.UnixMilli()
+// --- Fluent API Builders ---
+
+// New returns a new Generator.
+// If no arguments are provided, it uses the default epoch (2025-01-01).
+// If a time argument is provided, it uses that as the epoch.
+func New(t ...time.Time) *Generator {
+	if len(t) == 0 {
+		return &Generator{epoch: since.UnixMilli()}
+	}
+	if len(t) > 1 {
+		return &Generator{err: fmt.Errorf("id: too many epochs provided")}
+	}
+	ts := t[0].UnixMilli()
+	if ts < 0 {
+		return &Generator{err: fmt.Errorf("id: epoch must be non-negative")}
+	}
+	if ts > time.Now().UnixMilli() {
+		return &Generator{err: fmt.Errorf("id: epoch must be in the past")}
+	}
+	return &Generator{epoch: ts}
 }
 
-// --- Smart Discovery API ---
+// Charset sets the charset for the generator based on length.
+// Supported lengths: 10, 26, 36, 58, 62.
+func (g *Generator) Charset(n int) *Generator {
+	switch n {
+	case 10:
+		g.charset = charset10
+	case 26:
+		g.charset = charset26
+	case 36:
+		g.charset = charset36
+	case 58:
+		g.charset = charset58
+	case 62:
+		g.charset = charset62
+	default:
+		g.err = fmt.Errorf("id: unsupported charset length %d", n)
+	}
+	return g
+}
 
-// Gen is the main entry point for the package.
-// Calling Gen() without arguments returns a standard 36-character Base36 sortable ID.
-// Calling Gen(length) returns an ID of the specified length with the best strategy:
-//   - length <= 8: High-entropy Pure Random ID (to prevent collisions in tight spaces).
-//   - 8 < length < 22: Time-based sortable ID using custom Epoch (max efficiency).
-//   - length >= 22: Time-based sortable ID using UnixNano (Globally unique).
-func Gen(lengths ...int) string {
-	if len(lengths) == 0 {
-		return generate(charset36, 36)
+// Repeat configures the generator to allow repeated characters (Standard Random).
+// If false (default), it creates a permutation (Partial Shuffle, unique characters).
+func (g *Generator) Repeat(repeat bool) *Generator {
+	g.repeat = repeat
+	return g
+}
+
+// Increasing configures the generator to produce time-based sortable IDs.
+func (g *Generator) Increasing(increasing bool) *Generator {
+	g.increasing = increasing
+	return g
+}
+
+// --- Global Helpers ---
+
+// Charset is a shortcut for New().Charset(n).
+func Charset(n int) *Generator {
+	return New().Charset(n)
+}
+
+// Entity returns a 36-char Base36 ID (e.g. Database Keys).
+func Entity() string {
+	return Charset(36).Must(36)
+}
+
+// Short returns a 6-char Base62 Random ID (e.g. Short Codes).
+func Short() string {
+	return Charset(62).Repeat(true).Must(6)
+}
+
+// Shortlink returns an 8-char Base58 ID (e.g. URLs).
+func Shortlink() string {
+	return Charset(58).Must(8)
+}
+
+// --- Execution Methods ---
+
+// Must generates an ID of the specified length or panics on error.
+// It automatically selects the strategy based on configuration:
+// 1. Increasing=true -> Time-based Sortable.
+// 2. Repeat=true     -> Random with Replacement.
+// 3. Default         -> Random Permutation (No Replacement).
+func (g *Generator) Must(length int) string {
+	if g.err != nil {
+		panic(g.err)
 	}
 
-	length := lengths[0]
+	var res string
+	var err error
 
-	// High-traffic collision prevention for small lengths.
-	if length <= 8 {
-		return genPureRandom(length, charset62)
+	if g.increasing {
+		res, err = g.Generate(length)
+	} else if g.repeat {
+		res = genRandomRepeated(length, g.charset)
+	} else {
+		res, err = g.Random(length)
 	}
 
-	// Mid-range: Sortable but efficient.
+	if err != nil {
+		panic(err)
+	}
+	return res
+}
+
+// Generate creates a Sortable ID.
+func (g *Generator) Generate(lengths ...int) (string, error) {
+	if g.err != nil {
+		return "", g.err
+	}
+
+	length := 22
+	if len(lengths) > 0 && lengths[0] > 0 {
+		length = lengths[0]
+	}
+
+	cs := g.charset
+	if len(cs) == 0 {
+		cs = charset62
+	}
+
 	if length < 22 {
-		return genShortAdaptive(length, charset62)
+		return genShortAdaptive(length, cs, g.epoch), nil
 	}
 
-	// Long-range: Globally unique using high-precision timestamp.
-	return generate(charset62, length)
+	return generate(cs, length), nil
 }
 
-// Generate is an alias for Gen() to provide a standard naming convention.
-func Generate() string {
-	return Gen()
+// Random creates a Random ID (No Repeats).
+func (g *Generator) Random(lengths ...int) (string, error) {
+	if g.err != nil {
+		return "", g.err
+	}
+
+	length := 22
+	if len(lengths) > 0 && lengths[0] > 0 {
+		length = lengths[0]
+	}
+
+	cs := g.charset
+	if len(cs) == 0 {
+		cs = charset62
+	}
+
+	return genPureRandom(length, cs), nil
 }
-
-// --- Specific Purpose API ---
-
-// Gen10 returns a 10-character numeric-only ID.
-func Gen10() string { return generate(charset10, 10) }
-
-// Gen26 returns a 26-character lowercase alphabet ID.
-func Gen26() string { return generate(charset26, 26) }
-
-// Gen36 returns a 36-character alphanumeric ID (lowercase + digits).
-func Gen36() string { return generate(charset36, 36) }
-
-// Gen62 returns a 22-character high-density alphanumeric ID.
-func Gen62() string { return generate(charset62, 22) }
-
-// Gen58 returns a 22-character human-friendly ID (excludes 0, O, I, l).
-func Gen58() string { return generate(charset58, 22) }
-
-// GenShort returns a Base62 ID of the given length using adaptive time strategy.
-func GenShort(l int) string { return Gen(l) }
-
-// Gen6 returns a 6-character high-entropy Base62 ID.
-func Gen6() string { return Gen(6) }
-
-// Gen8 returns an 8-character high-entropy Base62 ID.
-func Gen8() string { return Gen(8) }
-
-// Gen6_58 returns a 6-character human-friendly Base58 ID.
-func Gen6_58() string { return genPureRandom(6, charset58) }
-
-// Gen8_58 returns an 8-character human-friendly Base58 ID.
-func Gen8_58() string { return genPureRandom(8, charset58) }
 
 // --- Internal Engine ---
 
-// genPureRandom generates a high-entropy ID by selecting random characters from the charset.
-// Suitable for small lengths where time-encoding would lead to collisions.
 func genPureRandom(length int, charset []byte) string {
-	res := make([]byte, length)
-	limit := big.NewInt(int64(len(charset)))
+	l := len(charset)
+	if length > l {
+		length = l
+	}
+
+	avail := make([]byte, l)
+	copy(avail, charset)
+
 	for i := 0; i < length; i++ {
-		num, _ := rand.Int(rand.Reader, limit)
+		num, _ := rand.Int(rand.Reader, big.NewInt(int64(l-i)))
+		j := int(num.Int64()) + i
+		avail[i], avail[j] = avail[j], avail[i]
+	}
+
+	return string(avail[:length])
+}
+
+func genRandomRepeated(length int, charset []byte) string {
+	l := big.NewInt(int64(len(charset)))
+	res := make([]byte, length)
+	for i := 0; i < length; i++ {
+		num, _ := rand.Int(rand.Reader, l)
 		res[i] = charset[num.Int64()]
 	}
 	return string(res)
 }
 
-// genShortAdaptive uses a custom epoch to encode milliseconds into the ID.
-func genShortAdaptive(length int, charset []byte) string {
+func genShortAdaptive(length int, charset []byte, instanceEpoch int64) string {
 	charsetLen := len(charset)
 	avail := make([]byte, charsetLen)
 	copy(avail, charset)
 
 	now := time.Now().UnixMilli()
-	if now < epoch {
-		now = epoch
+	targetEpoch := instanceEpoch
+	if targetEpoch == 0 {
+		targetEpoch = since.UnixMilli()
 	}
-	t := uint64(now - epoch)
 
-	// Add 2 digits of jitter for millisecond collisions.
+	if now < targetEpoch {
+		now = targetEpoch
+	}
+	t := uint64(now - targetEpoch)
+
 	jitter, _ := rand.Int(rand.Reader, big.NewInt(100))
 	t = (t * 100) + uint64(jitter.Int64())
 
@@ -147,7 +259,6 @@ func genShortAdaptive(length int, charset []byte) string {
 	return string(tsChars) + string(shuffledAvail[:randomLen])
 }
 
-// generate uses UnixNano to create a globally unique sortable ID.
 func generate(charset []byte, totalLen int) string {
 	charsetLen := len(charset)
 	avail := make([]byte, charsetLen)
