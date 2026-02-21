@@ -459,7 +459,20 @@ func bootServer(e *core.Engine, serverPort int) {
 			return
 		}
 
-		// 1. FAST-PATH: Redirect Support
+		// 1. FAST-PATH: JIT CSS Support
+		if matchedRoute.IsJIT {
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+			// User explicitly requested NO CACHE for JIT routes handled by Work
+			// If no specific handler is attached (Address == 0), serve the default framework
+			if matchedRoute.Fn == nil || matchedRoute.Fn.Address == 0 {
+				w.Write([]byte(css.GenerateFramework()))
+				return
+			}
+			// If a handler IS attached, we fall through to ExecuteLambda below.
+			// The Content-Type is already set to text/css.
+		}
+
+		// 2. FAST-PATH: Redirect Support
 		if matchedRoute.Redirect != nil {
 			fmt.Printf("[HTTP] Redirecting %s -> %s (%d)\n", path, matchedRoute.Redirect.URL, matchedRoute.Redirect.Code)
 			http.Redirect(w, r, matchedRoute.Redirect.URL, matchedRoute.Redirect.Code)
@@ -467,20 +480,20 @@ func bootServer(e *core.Engine, serverPort int) {
 		}
 
 		// 2. FAST-PATH: Resource Serving (File or Assets)
-		if matchedRoute.Work.ResourcePath != "" {
-			info, err := os.Stat(matchedRoute.Work.ResourcePath)
+		if matchedRoute.Work.CoreRender.ResourcePath != "" {
+			info, err := os.Stat(matchedRoute.Work.CoreRender.ResourcePath)
 			if err == nil {
 				if info.IsDir() {
 					// Directory mode: handle wildcard/prefix
 					prefix := strings.TrimSuffix(matchedRoute.Path, "*")
 					subPath := strings.TrimPrefix(path, prefix)
-					target := filepath.Join(matchedRoute.Work.ResourcePath, subPath)
+					target := filepath.Join(matchedRoute.Work.CoreRender.ResourcePath, subPath)
 					fmt.Printf("[HTTP] Serving Asset: %s\n", target)
 					http.ServeFile(w, r, target)
 				} else {
 					// File mode: serve directly
-					fmt.Printf("[HTTP] Serving File: %s\n", matchedRoute.Work.ResourcePath)
-					http.ServeFile(w, r, matchedRoute.Work.ResourcePath)
+					fmt.Printf("[HTTP] Serving File: %s\n", matchedRoute.Work.CoreRender.ResourcePath)
+					http.ServeFile(w, r, matchedRoute.Work.CoreRender.ResourcePath)
 				}
 				return
 			}
@@ -507,7 +520,7 @@ func bootServer(e *core.Engine, serverPort int) {
 
 		// 3. Cache Check (RAM)
 		cacheKey := ""
-		if matchedRoute.Work.CacheDuration > 0 {
+		if matchedRoute.Work.CoreRender.CacheDuration > 0 {
 			cacheKey = "work:" + matchedRoute.Work.Name + ":" + r.URL.String()
 			if cached, ok := work.GetCache(cacheKey); ok {
 				fmt.Printf("[HTTP] Cache Hit: %s\n", cacheKey)
@@ -521,15 +534,15 @@ func bootServer(e *core.Engine, serverPort int) {
 
 		// 4. Static Stack Check (DISK)
 		stackPath := ""
-		if matchedRoute.Work.StaticDuration > 0 {
+		if matchedRoute.Work.CoreRender.StaticDuration > 0 {
 			hashedName := fmt.Sprintf("%x", sha256.Sum256([]byte(r.URL.String())))
 			stackPath = filepath.Join(".stack", matchedRoute.Work.Name, hashedName)
 
 			if info, err := os.Stat(stackPath); err == nil {
-				if time.Since(info.ModTime()) < matchedRoute.Work.StaticDuration {
+				if time.Since(info.ModTime()) < matchedRoute.Work.CoreRender.StaticDuration {
 					// Potentially verify checksum if enabled
 					valid := true
-					if matchedRoute.Work.StaticCheck {
+					if matchedRoute.Work.CoreRender.StaticCheck {
 						// Logic for checksum verification
 						valid = verifyChecksum(stackPath)
 					}
@@ -628,7 +641,7 @@ func bootServer(e *core.Engine, serverPort int) {
 
 		// Fallback to Work unit routes if global router is stale
 		if t == nil || t.Page == "" {
-			for _, r := range matchedRoute.Work.Routes {
+			for _, r := range matchedRoute.Work.CoreRouter.Routes {
 				if r.Method == matchedRoute.Method && r.Path == matchedRoute.Path {
 					t = r.Template
 					break
@@ -691,6 +704,12 @@ func bootServer(e *core.Engine, serverPort int) {
 			return
 		}
 
+		// CUSTOM: JIT CSS Result (from Work handler) -> Render as Text
+		if matchedRoute.IsJIT {
+			w.Write([]byte(responseVal.Text()))
+			return
+		}
+
 		// Fallback to JSON if ResType is empty or explicitly "json"
 		w.Header().Set("Content-Type", "application/json")
 		outputData, _ := json.Marshal(responseVal.Interface())
@@ -698,7 +717,7 @@ func bootServer(e *core.Engine, serverPort int) {
 
 		// Save to cache (RAM)
 		if cacheKey != "" && res.Error == "" {
-			work.SetCache(cacheKey, responseVal, matchedRoute.Work.CacheDuration)
+			work.SetCache(cacheKey, responseVal, matchedRoute.Work.CoreRender.CacheDuration)
 		}
 
 		// Save to stack (DISK)
@@ -706,7 +725,7 @@ func bootServer(e *core.Engine, serverPort int) {
 			os.MkdirAll(filepath.Dir(stackPath), 0755)
 			data, _ := json.Marshal(responseVal.Interface())
 			os.WriteFile(stackPath, data, 0644)
-			if matchedRoute.Work.StaticCheck {
+			if matchedRoute.Work.CoreRender.StaticCheck {
 				writeChecksum(stackPath)
 			}
 		}

@@ -15,10 +15,10 @@ func (e *Engine) SyncRegistry() {
 }
 
 func (e *Engine) syncRoutes(w *work.Work) {
-	if w.Routes == nil {
+	if w.CoreRouter.Routes == nil {
 		return
 	}
-	for _, rt := range w.Routes {
+	for _, rt := range w.CoreRouter.Routes {
 		work.GlobalRouter.Mu.Lock()
 		exists := false
 		for i, existing := range work.GlobalRouter.Routes {
@@ -31,6 +31,7 @@ func (e *Engine) syncRoutes(w *work.Work) {
 				work.GlobalRouter.Routes[i].Redirect = rt.Redirect
 				work.GlobalRouter.Routes[i].Template = rt.Template
 				work.GlobalRouter.Routes[i].BenchmarkIters = rt.BenchmarkIters
+				work.GlobalRouter.Routes[i].IsJIT = rt.IsJIT
 				exists = true
 				break
 			}
@@ -45,6 +46,7 @@ func (e *Engine) syncRoutes(w *work.Work) {
 				Redirect:       rt.Redirect,
 				Template:       rt.Template,
 				BenchmarkIters: rt.BenchmarkIters,
+				IsJIT:          rt.IsJIT,
 			})
 		}
 		work.GlobalRouter.Mu.Unlock()
@@ -52,10 +54,10 @@ func (e *Engine) syncRoutes(w *work.Work) {
 }
 
 func (e *Engine) syncSchedules(w *work.Work) {
-	if w.Schedules == nil {
+	if w.CoreSchedule.Schedules == nil {
 		return
 	}
-	for _, s := range w.Schedules {
+	for _, s := range w.CoreSchedule.Schedules {
 		cronExpr := s.Cron
 		handler := s.Handler
 		workUnit := w

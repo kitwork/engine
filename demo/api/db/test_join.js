@@ -12,7 +12,7 @@ db().from("users")
 log("Test 3: Group and Having");
 db().from("orders")
     .group("user_id")
-    .having(o => o.total_price > 1000)
+    .having(o => o.total_price in [1000, 2000])
     .take();
 
 log("=== SUPER MAGIC JOIN VERIFICATION COMPLETE ===");

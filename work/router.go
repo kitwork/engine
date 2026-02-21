@@ -14,6 +14,7 @@ type Route struct {
 	Redirect       *Redirect
 	Template       *Template
 	BenchmarkIters int
+	IsJIT          bool
 }
 
 type Router struct {
@@ -29,6 +30,14 @@ func (r *Router) Get(path string, fn value.Value) *Router {
 
 func (r *Router) Post(path string, fn value.Value) *Router {
 	return r.register("POST", path, fn)
+}
+
+// JIT registers a route that serves the JIT CSS framework
+func (r *Router) JIT(path string) *Router {
+	r.Mu.Lock()
+	defer r.Mu.Unlock()
+	r.Routes = append(r.Routes, Route{Method: "GET", Path: path, IsJIT: true})
+	return r
 }
 
 func (r *Router) register(method, path string, fn value.Value) *Router {

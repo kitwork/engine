@@ -22,7 +22,7 @@ let rate = 25000;
 let total_vnd = input.amount * rate;
 
 // Mock transaction table insert
-db().table("transactions").insert({ user_id: input.user_id, amount: total_vnd });
+db().transactions.insert({ user_id: input.user_id, amount: total_vnd });
 
 log("✅ Done!");
 return { order_id: now().text(), total: total_vnd };

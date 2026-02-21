@@ -22,4 +22,3 @@ const w = work("pricegood")
             success: true, data: data, count: data.length
         };
     })
-    .version("1.5.0");

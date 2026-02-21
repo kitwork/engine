@@ -2,74 +2,31 @@ package work
 
 import (
 	"fmt"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/value"
 )
 
-type StaticRoute struct {
-	Method         string
-	Path           string
-	HandledBy      *Work
-	Fn             *value.Script
-	Template       *Template
-	Redirect       *Redirect
-	Handler        *value.Script
-	IsRaw          bool
-	BenchmarkIters int // Nếu > 0, chạy chế độ Benchmark
-}
-
-type Template struct {
-	Page   string
-	Layout map[string]string
-}
-
-type Redirect struct {
-	URL  string
-	Code int
-}
-
 // Work là Blueprint (Bản thiết kế) - IMMUTABLE
 type Work struct {
-	Name           string
-	TenantID       string // Multi-tenancy Isolation
-	Routes         []*StaticRoute
-	lastRoute      *StaticRoute // Track route cuối cùng để chain .benchmark()
-	Retries        int
-	TimeoutDur     time.Duration
-	Ver            string
-	Description    string
-	Bytecode       *compiler.Bytecode
-	CacheDuration  time.Duration
-	StaticDuration time.Duration
-	StaticCheck    bool
-	StaticDir      string
-	StaticPrefix   string
-	ResourcePath   string
-	SourcePath     string // Absolute path to the source file
+	Name        string
+	TenantID    string // Multi-tenancy Isolation
+	Ver         string
+	Description string
+	Retries     int
+	TimeoutDur  time.Duration
+	Bytecode    *compiler.Bytecode
+	SourcePath  string // Absolute path to the source file
 
-	Schedules []*ScheduleRule
+	// Modular Cores
+	CoreRouter   *RouterCore
+	CoreRender   *RenderCore
+	CoreSchedule *ScheduleCore
 
 	DoneHandler *value.Script
 	FailHandler *value.Script
 	MainHandler *value.Script
-}
-
-// Benchmark configures the last added route to run in benchmark mode
-func (w *Work) Benchmark(args ...value.Value) *Work {
-	if w.lastRoute == nil {
-		fmt.Println("⚠️ .benchmark() called but no route was added previously")
-		return w
-	}
-	iters := 1000
-	if len(args) > 0 {
-		iters = int(args[0].N)
-	}
-	w.lastRoute.BenchmarkIters = iters
-	return w
 }
 
 func (w *Work) LoadFromConfig(data map[string]any) {
@@ -88,134 +45,24 @@ func (w *Work) LoadFromConfig(data map[string]any) {
 			if rm, ok := r.(map[string]any); ok {
 				method, _ := rm["method"].(string)
 				path, _ := rm["path"].(string)
-				w.Router(value.New(method), value.New(path))
+				w.CoreRouter.Routes = append(w.CoreRouter.Routes, &StaticRoute{Method: method, Path: path}) // Simplified for now
 			}
 		}
 	}
 }
 
 func NewWork(name string) *Work {
-	return &Work{Name: name}
-}
-
-func (w *Work) Router(args ...value.Value) *Work {
-	if len(args) < 2 {
-		return w
+	return &Work{
+		Name:         name,
+		CoreRouter:   &RouterCore{},
+		CoreRender:   &RenderCore{},
+		CoreSchedule: &ScheduleCore{},
 	}
-	method := strings.ToUpper(args[0].Text())
-	path := args[1].Text()
-	fmt.Printf("[Router] %s: Called for %s %s\n", w.Name, method, path)
-	// Check if route already exists
-	for i, r := range w.Routes {
-		if r.Method == method && r.Path == path {
-			fmt.Printf("[Router] %s: Route exists, moving to end\n", w.Name)
-			// Move existing route to the end so .handle() can update it
-			rObj := w.Routes[i]
-			w.Routes = append(w.Routes[:i], w.Routes[i+1:]...) // Remove
-			w.Routes = append(w.Routes, rObj)                  // Re-add at end
-			w.lastRoute = rObj                                 // Track
-			return w
-		}
-	}
-	// Route doesn't exist, add new one
-	fmt.Printf("[Router] %s: Adding new route\n", w.Name)
-	newRoute := &StaticRoute{Method: method, Path: path}
-	w.Routes = append(w.Routes, newRoute)
-	w.lastRoute = newRoute // Track
-	return w
-}
-
-func (w *Work) Get(args ...value.Value) *Work    { return w.routerWithHandler("GET", args...) }
-func (w *Work) Post(args ...value.Value) *Work   { return w.routerWithHandler("POST", args...) }
-func (w *Work) Put(args ...value.Value) *Work    { return w.routerWithHandler("PUT", args...) }
-func (w *Work) Delete(args ...value.Value) *Work { return w.routerWithHandler("DELETE", args...) }
-
-func (w *Work) routerWithHandler(method string, args ...value.Value) *Work {
-	if len(args) == 0 {
-		return w
-	}
-	path := args[0].Text()
-	w.Router(value.New(method), value.New(path))
-	if len(args) > 1 {
-		w.Handle(args[1])
-	}
-	return w
-}
-
-func (w *Work) Redirect(url string, code ...int) *Work {
-	if len(w.Routes) > 0 {
-		lastRoute := w.Routes[len(w.Routes)-1]
-		lastRoute.Redirect = &Redirect{
-			URL:  url,
-			Code: http.StatusFound,
-		}
-		if len(code) > 0 {
-			lastRoute.Redirect.Code = code[0]
-		}
-	}
-	return w
-}
-
-func (w *Work) Render(arg any) *Work {
-	if len(w.Routes) > 0 {
-		last := w.Routes[len(w.Routes)-1]
-		if last.Template == nil {
-			last.Template = &Template{}
-		}
-
-		var v value.Value
-		switch val := arg.(type) {
-		case string:
-			last.Template.Page = val
-			return w
-		case value.Value:
-			v = val
-		case *value.Value:
-			v = *val
-		default:
-			return w
-		}
-
-		if v.IsString() {
-			last.Template.Page = v.Text()
-		} else if v.IsMap() {
-			m := v.Map()
-			if main, ok := m["main"]; ok {
-				last.Template.Page = main.Text()
-			}
-			if last.Template.Layout == nil {
-				last.Template.Layout = make(map[string]string)
-			}
-			for k, val := range m {
-				if k != "main" {
-					last.Template.Layout[k] = val.Text()
-				}
-			}
-		}
-	}
-	return w
-}
-
-func (w *Work) Layout(arg value.Value) *Work {
-	if len(w.Routes) > 0 && arg.IsMap() {
-		last := w.Routes[len(w.Routes)-1]
-		if last.Template == nil {
-			last.Template = &Template{}
-		}
-		if last.Template.Layout == nil {
-			last.Template.Layout = make(map[string]string)
-		}
-		m := arg.Map()
-		for k, v := range m {
-			last.Template.Layout[k] = v.Text()
-		}
-	}
-	return w
 }
 
 func (w *Work) Handle(fn value.Value) *Work {
-	if len(w.Routes) > 0 {
-		lastRoute := w.Routes[len(w.Routes)-1]
+	if len(w.CoreRouter.Routes) > 0 {
+		lastRoute := w.CoreRouter.Routes[len(w.CoreRouter.Routes)-1]
 		if sFn, ok := fn.V.(*value.Script); ok {
 			fmt.Printf("[Handle] %s: Setting handler for %s %s with Address: %d (was: %v)\n",
 				w.Name, lastRoute.Method, lastRoute.Path, sFn.Address, lastRoute.Handler)
@@ -249,41 +96,12 @@ func (w *Work) Version(v string) *Work {
 }
 
 func (w *Work) Cache(duration any) *Work {
-	w.CacheDuration = parseDuration(duration)
-	return w
-}
-
-func (w *Work) Static(args ...any) *Work {
-	if len(args) == 0 {
-		return w
+	dur := parseDuration(duration)
+	if w.CoreRouter.LastRoute != nil {
+		w.CoreRouter.LastRoute.CacheDuration = dur
+	} else {
+		w.CoreRender.CacheDuration = dur
 	}
-	arg := args[0]
-	switch v := arg.(type) {
-	case string, float64, int:
-		w.StaticDuration = parseDuration(v)
-	case value.Value:
-		if v.IsMap() {
-			m := v.Map()
-			if d, ok := m["duration"]; ok {
-				w.StaticDuration = parseDuration(d)
-			}
-			if c, ok := m["check"]; ok {
-				w.StaticCheck = c.IsTrue()
-			}
-		} else {
-			w.StaticDuration = parseDuration(v)
-		}
-	}
-	return w
-}
-
-func (w *Work) File(path string) *Work {
-	w.ResourcePath = path
-	return w
-}
-
-func (w *Work) Assets(path string) *Work {
-	w.ResourcePath = path
 	return w
 }
 
@@ -319,118 +137,4 @@ func (w *Work) Fail(fn value.Value) *Work {
 		w.FailHandler = sFn
 	}
 	return w
-}
-
-// Task đại diện cho một phiên thực thi (Mutable Context)
-type Task struct {
-	Work    *Work
-	Request *http.Request
-	Writer  http.ResponseWriter
-
-	Params map[string]value.Value // URL Path params like :id
-
-	Response value.Value
-	ResType  string
-	Error    string
-	Config   map[string]string
-}
-
-func (t *Task) Reset(w *Work) {
-	t.Work = w
-	t.Request = nil
-	t.Writer = nil
-	t.Response = value.Value{K: value.Nil}
-	t.ResType = ""
-	t.Error = ""
-
-	if t.Params == nil {
-		t.Params = make(map[string]value.Value)
-	} else {
-		for k := range t.Params {
-			delete(t.Params, k)
-		}
-	}
-
-	if t.Config == nil {
-		t.Config = make(map[string]string)
-	} else {
-		for k := range t.Config {
-			delete(t.Config, k)
-		}
-	}
-}
-
-func (t *Task) SetRequest(r *http.Request, w http.ResponseWriter) {
-	t.Request = r
-	t.Writer = w
-}
-
-func (t *Task) JSON(val value.Value) {
-	t.Response = val
-	t.ResType = "json"
-}
-
-func (t *Task) HTML(template value.Value, data ...value.Value) {
-	if len(data) > 0 {
-		res := make(map[string]value.Value)
-		res["template"] = template
-		res["data"] = data[0]
-		t.Response = value.New(res)
-	} else {
-		t.Response = template
-	}
-	t.ResType = "html"
-}
-
-func (t *Task) Now() value.Value { return value.New(time.Now()) }
-func (t *Task) DB(conn ...string) *DBQuery {
-	q := NewDBQuery()
-	if len(conn) > 0 {
-		q.connection = conn[0]
-	}
-	return q
-}
-func (t *Task) HTTP() *HTTPClient { return NewHTTPClient(t) }
-
-func (t *Task) GetQuery() value.Value  { return value.NewNull() }
-func (t *Task) SetQuery(v value.Value) {}
-func (t *Task) GetBody() value.Value   { return value.NewNull() }
-func (t *Task) SetBody(v value.Value)  {}
-func (t *Task) GetParams() value.Value { return value.New(t.Params) }
-
-// Shared empty map to avoid allocation
-var zeroPayload = value.New(map[string]value.Value{})
-
-func (t *Task) Payload() value.Value {
-	if len(t.Params) == 0 {
-		return zeroPayload
-	}
-	res := make(map[string]value.Value, len(t.Params))
-	for k, v := range t.Params {
-		res[k] = v
-	}
-	return value.New(res)
-}
-func (t *Task) Log(args ...value.Value) {
-	fmt.Printf("[%s] [%s] ", time.Now().Format("15:04:05"), t.Work.Name)
-	for _, arg := range args {
-		fmt.Print(arg.Text(), " ")
-	}
-	fmt.Println()
-}
-func (t *Task) Print(args ...value.Value) {
-	for _, arg := range args {
-		fmt.Print(arg.Text(), " ")
-	}
-	fmt.Println()
-}
-
-func (t *Task) Done(args ...value.Value) {
-	if len(args) > 0 {
-		t.Response = args[0]
-	}
-}
-
-func (t *Task) Fail(err value.Value) {
-	t.Error = err.Text()
 }
