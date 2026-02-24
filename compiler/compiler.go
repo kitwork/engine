@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/kitwork/engine/opcode"
 	"github.com/kitwork/engine/value"
@@ -309,11 +308,11 @@ func (c *Compiler) Compile(node Node) error {
 		for i, p := range n.Parameters {
 			params[i] = p.Value
 		}
+		n.Address = startIP // Propagate address back to AST node
 		fnData := &value.Script{
 			Address:    startIP,
 			ParamNames: params,
 		}
-		fmt.Printf("[Compiler] Created ScriptFunction with Address: %d\n", startIP)
 		idx := c.addConstant(value.New(fnData))
 		c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
 

@@ -19,7 +19,7 @@ func Test(source string, iterations ...int) {
 
 	e := core.New()
 	e.Config.Debug = false
-	w, err := e.Build(source)
+	w, err := e.Build(source, "", "", "")
 	if err != nil {
 		fmt.Printf("❌ Build Error: %v\n", err)
 		return

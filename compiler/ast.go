@@ -360,6 +360,7 @@ type FunctionLiteral struct {
 	Token      token.Token
 	Parameters []*Identifier
 	Body       *BlockStatement
+	Address    int // Compiled bytecode address
 }
 
 func (fl *FunctionLiteral) expressionNode() {}

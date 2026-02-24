@@ -2,7 +2,6 @@ package work
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/kitwork/engine/value"
@@ -10,33 +9,24 @@ import (
 
 // Task đại diện cho một phiên thực thi (Mutable Context)
 type Task struct {
-	Work    *Work
-	Request *http.Request
-	Writer  http.ResponseWriter
+	Work *Work
 
-	Params map[string]value.Value // URL Path params like :id
-
-	Response value.Value
-	ResType  string
+	Response Response
 	Error    string
 	Config   map[string]string
 }
 
 func (t *Task) Reset(w *Work) {
 	t.Work = w
-	t.Request = nil
-	t.Writer = nil
-	t.Response = value.Value{K: value.Nil}
-	t.ResType = ""
-	t.Error = ""
-
-	if t.Params == nil {
-		t.Params = make(map[string]value.Value)
-	} else {
-		for k := range t.Params {
-			delete(t.Params, k)
+	t.Response.Data = value.Value{K: value.Nil}
+	t.Response.Type = ""
+	t.Response.StatusCode = 0
+	if t.Response.Headers != nil {
+		for k := range t.Response.Headers {
+			delete(t.Response.Headers, k)
 		}
 	}
+	t.Error = ""
 
 	if t.Config == nil {
 		t.Config = make(map[string]string)
@@ -47,14 +37,11 @@ func (t *Task) Reset(w *Work) {
 	}
 }
 
-func (t *Task) SetRequest(r *http.Request, w http.ResponseWriter) {
-	t.Request = r
-	t.Writer = w
-}
+// Removed SetRequest
 
 func (t *Task) JSON(val value.Value) {
-	t.Response = val
-	t.ResType = "json"
+	t.Response.Data = val
+	t.Response.Type = "json"
 }
 
 func (t *Task) HTML(template value.Value, data ...value.Value) {
@@ -62,11 +49,22 @@ func (t *Task) HTML(template value.Value, data ...value.Value) {
 		res := make(map[string]value.Value)
 		res["template"] = template
 		res["data"] = data[0]
-		t.Response = value.New(res)
+		t.Response.Data = value.New(res)
 	} else {
-		t.Response = template
+		t.Response.Data = template
 	}
-	t.ResType = "html"
+	t.Response.Type = "html"
+}
+
+func (t *Task) Status(code int) {
+	t.Response.Code = code
+}
+
+func (t *Task) Header(key, val string) {
+	if t.Response.Headers == nil {
+		t.Response.Headers = make(map[string]string)
+	}
+	t.Response.Headers[key] = val
 }
 
 func (t *Task) Now() value.Value { return value.New(time.Now()) }
@@ -77,27 +75,7 @@ func (t *Task) DB(conn ...string) *DBQuery {
 	}
 	return q
 }
-func (t *Task) HTTP() *HTTPClient { return NewHTTPClient(t) }
-
-func (t *Task) GetQuery() value.Value  { return value.NewNull() }
-func (t *Task) SetQuery(v value.Value) {}
-func (t *Task) GetBody() value.Value   { return value.NewNull() }
-func (t *Task) SetBody(v value.Value)  {}
-func (t *Task) GetParams() value.Value { return value.New(t.Params) }
-
-// Shared empty map to avoid allocation
-var zeroPayload = value.New(map[string]value.Value{})
-
-func (t *Task) Payload() value.Value {
-	if len(t.Params) == 0 {
-		return zeroPayload
-	}
-	res := make(map[string]value.Value, len(t.Params))
-	for k, v := range t.Params {
-		res[k] = v
-	}
-	return value.New(res)
-}
+func (t *Task) Fetch() *Fetch { return NewFetch(t) }
 func (t *Task) Log(args ...value.Value) {
 	fmt.Printf("[%s] [%s] ", time.Now().Format("15:04:05"), t.Work.Name)
 	for _, arg := range args {
@@ -114,7 +92,7 @@ func (t *Task) Print(args ...value.Value) {
 
 func (t *Task) Done(args ...value.Value) {
 	if len(args) > 0 {
-		t.Response = args[0]
+		t.Response.Data = args[0]
 	}
 }
 

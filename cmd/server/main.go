@@ -6,8 +6,8 @@ func main() {
 	// Khởi tạo Config với danh sách các tệp Database và SMTP cụ thể
 	cfg := &engine.Config{
 		Port:    8081,
-		Debug:   false,
-		Sources: []string{"./demo"},
+		Debug:   true,
+		Sources: []string{"./demo", "./public"},
 		Assets: []engine.Asset{
 			{Dir: "./demo/public", Path: "/public"},
 		},

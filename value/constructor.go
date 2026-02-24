@@ -75,6 +75,10 @@ func NewString(s string) Value {
 	return New(s)
 }
 
+func NewSafeHTML(s string) Value {
+	return Value{K: String, V: s, S: SafeHTML}
+}
+
 // NewBool - Tận dụng hàm ToBool hoặc New(bool) bạn đã viết
 func NewBool(b bool) Value {
 	return ToBool(b)

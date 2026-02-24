@@ -3,76 +3,42 @@ package core
 import (
 	"fmt"
 
-	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
 )
 
 func (e *Engine) SyncRegistry() {
-	for _, w := range e.Registry {
-		e.syncRoutes(w)
-		e.syncSchedules(w)
+	e.RegistryMu.RLock()
+	defer e.RegistryMu.RUnlock()
+
+	for _, c := range e.Crons {
+		for _, cronExpr := range c.Schedules {
+			handler := c.GetHandle()
+			if handler == nil {
+				continue
+			}
+
+			// Capture variables
+			cronLocal := cronExpr
+			cLocal := c
+			hLocal := handler
+
+			_, err := e.scheduler.AddFunc(cronLocal, func() {
+				if e.Config.Debug {
+					fmt.Printf("⏰ [Scheduler] Executing task for %s (%s)\n", cLocal.Name, cronLocal)
+				}
+				e.ExecuteLambda(&cLocal.Work, hLocal, nil, nil)
+			})
+			if err != nil {
+				fmt.Printf("❌ [Scheduler] Failed to register task for %s (%s): %v\n", cLocal.Name, cronLocal, err)
+			} else if e.Config.Debug {
+				fmt.Printf("✅ [Scheduler] Registered task for %s (%s)\n", cLocal.Name, cronLocal)
+			}
+		}
 	}
 }
 
 func (e *Engine) syncRoutes(w *work.Work) {
-	if w.CoreRouter.Routes == nil {
-		return
-	}
-	for _, rt := range w.CoreRouter.Routes {
-		work.GlobalRouter.Mu.Lock()
-		exists := false
-		for i, existing := range work.GlobalRouter.Routes {
-			if existing.Method == rt.Method && existing.Path == rt.Path {
-				work.GlobalRouter.Routes[i].Fn = rt.Handler
-				if work.GlobalRouter.Routes[i].Fn == nil {
-					work.GlobalRouter.Routes[i].Fn = &value.Script{Address: 0}
-				}
-				work.GlobalRouter.Routes[i].Work = w
-				work.GlobalRouter.Routes[i].Redirect = rt.Redirect
-				work.GlobalRouter.Routes[i].Template = rt.Template
-				work.GlobalRouter.Routes[i].BenchmarkIters = rt.BenchmarkIters
-				work.GlobalRouter.Routes[i].IsJIT = rt.IsJIT
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			h := rt.Handler
-			if h == nil {
-				h = &value.Script{Address: 0}
-			}
-			work.GlobalRouter.Routes = append(work.GlobalRouter.Routes, work.Route{
-				Method: rt.Method, Path: rt.Path, Fn: h, Work: w,
-				Redirect:       rt.Redirect,
-				Template:       rt.Template,
-				BenchmarkIters: rt.BenchmarkIters,
-				IsJIT:          rt.IsJIT,
-			})
-		}
-		work.GlobalRouter.Mu.Unlock()
-	}
 }
 
 func (e *Engine) syncSchedules(w *work.Work) {
-	if w.CoreSchedule.Schedules == nil {
-		return
-	}
-	for _, s := range w.CoreSchedule.Schedules {
-		cronExpr := s.Cron
-		handler := s.Handler
-		workUnit := w
-
-		_, err := e.scheduler.AddFunc(cronExpr, func() {
-			if e.Config.Debug {
-				fmt.Printf("⏰ [Scheduler] Executing task for %s (%s)\n", workUnit.Name, cronExpr)
-			}
-			e.ExecuteLambda(workUnit, handler, nil, nil)
-		})
-
-		if err != nil {
-			fmt.Printf("❌ [Scheduler] Failed to register task for %s (%s): %v\n", workUnit.Name, cronExpr, err)
-		} else if e.Config.Debug {
-			fmt.Printf("✅ [Scheduler] Registered task for %s (%s)\n", workUnit.Name, cronExpr)
-		}
-	}
 }

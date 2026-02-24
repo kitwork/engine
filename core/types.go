@@ -2,12 +2,12 @@ package core
 
 import (
 	"github.com/kitwork/engine/value"
+	"github.com/kitwork/engine/work"
 )
 
 type Result struct {
 	Value    value.Value
-	Response value.Value
-	ResType  string
+	Response work.Response
 	Error    string
 	Energy   uint64
 }

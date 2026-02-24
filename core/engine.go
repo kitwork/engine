@@ -3,8 +3,6 @@ package core
 import (
 	"sync"
 
-	"strings"
-
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/value"
@@ -18,6 +16,8 @@ type Engine struct {
 	cache        *lru.Cache[string, *work.Work]
 	Registry     map[string]*work.Work // Exposed for Sync
 	RegistryMu   sync.RWMutex          // Mutex for Registry
+	Routers      []*work.Router        // Active HTTP routes
+	Crons        []*work.Cron          // Active Cron jobs
 	compilerPool sync.Pool
 	ctxPool      sync.Pool
 	Config       GlobalConfig
@@ -33,6 +33,8 @@ func New() *Engine {
 		stdlibStore: stdlib.Store(),
 		cache:       cache,
 		Registry:    make(map[string]*work.Work),
+		Routers:     make([]*work.Router, 0),
+		Crons:       make([]*work.Cron, 0),
 		scheduler:   cron.New(cron.WithSeconds()), // Support second-level precision if needed
 	}
 	e.scheduler.Start()
@@ -60,7 +62,7 @@ func (e *Engine) registerBuiltins() {
 		if w, ok := e.Registry[name]; ok {
 			return value.New(w)
 		}
-		w := work.NewWork(name)
+		w := work.New(name)
 		e.Registry[name] = w
 		return value.New(w)
 	}))
@@ -75,40 +77,7 @@ func (e *Engine) registerBuiltins() {
 	e.stdlib.Set("defer", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
 	e.stdlib.Set("parallel", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
 	e.stdlib.Set("routes", value.NewFunc(func(args ...value.Value) value.Value {
-		work.GlobalRouter.Mu.RLock()
-		defer work.GlobalRouter.Mu.RUnlock()
-
-		var routes []value.Value
-		for _, r := range work.GlobalRouter.Routes {
-			// Extract params from path segments (e.g. /users/:id)
-			var params []value.Value
-			for _, seg := range strings.Split(r.Path, "/") {
-				if strings.HasPrefix(seg, ":") {
-					params = append(params, value.New(strings.TrimPrefix(seg, ":")))
-				}
-			}
-
-			data := map[string]value.Value{
-				"method": value.New(r.Method),
-				"path":   value.New(r.Path),
-				"params": value.New(params),
-			}
-			if r.Work != nil {
-				// Richer Work Metadata
-				wInfo := map[string]value.Value{
-					"name":        value.New(r.Work.Name),
-					"description": value.New(r.Work.Description),
-					"version":     value.New(r.Work.Ver),
-					"retries":     value.New(r.Work.Retries),
-					"timeout":     value.New(r.Work.TimeoutDur.String()),
-				}
-				if r.Work.TenantID != "" {
-					wInfo["tenant"] = value.New(r.Work.TenantID)
-				}
-				data["work"] = value.New(wInfo)
-			}
-			routes = append(routes, value.New(data))
-		}
-		return value.New(routes)
+		// GlobalRouter was removed. For now, return empty or implement new registry search.
+		return value.New([]value.Value{})
 	}))
 }

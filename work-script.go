@@ -11,7 +11,7 @@ import (
 // Script thực thi một đoạn mã script và trả về kết quả chi tiết
 func Script(source string) *Result {
 	e := core.New()
-	w, err := e.Build(source)
+	w, err := e.Build(source, "", "", "")
 	if err != nil {
 		return &Result{errors: err}
 	}
@@ -22,7 +22,7 @@ func Script(source string) *Result {
 	}
 
 	// Ưu tiên trả về Response (từ json/html) nếu có, nếu không trả về Value cuối cùng
-	val := res.Response
+	val := res.Response.Data
 	if val.K == value.Nil {
 		val = res.Value
 	}

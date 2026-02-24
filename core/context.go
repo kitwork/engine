@@ -21,6 +21,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx := &ExecutionContext{
 		machine:    runtime.New(nil, nil),
 		task:       &work.Task{},
+		reqCtx:     &work.Request{},
 		argsBuffer: make([]value.Value, 0, 10),
 	}
 
@@ -57,7 +58,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 					wg.Add(1)
 					go func(idx int, fn *value.Script) {
 						defer wg.Done()
-						r := e.ExecuteLambda(ctx.task.Work, fn, ctx.task.Request, ctx.task.Writer, nil)
+						r := e.ExecuteLambda(ctx.task.Work, fn, ctx.reqCtx.Request, ctx.reqCtx.Writer, nil)
 						results[idx] = r.Value
 					}(i, sFn)
 				} else {
@@ -73,7 +74,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 			// Tạm thời chạy TUẦN TỰ để đảm bảo Memory Safety cho các Object phức tạp
 			for k, v := range m {
 				if sFn, ok := v.V.(*value.Script); ok {
-					r := e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
+					r := e.ExecuteLambda(ctx.task.Work, sFn, ctx.reqCtx.Request, ctx.reqCtx.Writer, nil)
 					results[k] = r.Value
 				} else {
 					results[k] = v
@@ -88,7 +89,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.goFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) > 0 {
 			if sFn, ok := args[0].V.(*value.Script); ok {
-				go e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
+				go e.ExecuteLambda(ctx.task.Work, sFn, ctx.reqCtx.Request, ctx.reqCtx.Writer, nil)
 			}
 		}
 		return value.NewNull()
@@ -170,12 +171,12 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	dbHandler := &dbProxyHandler{ec: ctx}
 	ctx.dbFn = value.Value{K: value.Proxy, V: dbHandler}
 
-	ctx.payloadFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.task.Payload() })
+	ctx.payloadFn = value.NewFunc(func(args ...value.Value) value.Value { return ctx.reqCtx.Payload() })
 	ctx.logFn = value.NewFunc(func(args ...value.Value) value.Value {
 		ctx.task.Log(args...)
 		return value.NewNull()
 	})
-	ctx.httpFn = value.NewFunc(func(args ...value.Value) value.Value { return value.New(ctx.task.HTTP()) })
+	ctx.fetchFn = value.NewFunc(func(args ...value.Value) value.Value { return value.New(ctx.task.Fetch()) })
 	ctx.cacheFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) == 0 {
 			return value.NewNull()
@@ -222,7 +223,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 					return val
 				}
 				if sFn, ok := arg2.V.(*value.Script); ok {
-					res := e.ExecuteLambda(ctx.task.Work, sFn, ctx.task.Request, ctx.task.Writer, nil)
+					res := e.ExecuteLambda(ctx.task.Work, sFn, ctx.reqCtx.Request, ctx.reqCtx.Writer, nil)
 					ttl := parseTTL(arg1)
 					if ttl > 0 {
 						work.SetCache(key, res.Value, ttl)
@@ -243,12 +244,12 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	})
 
 	ctx.queryFn = value.NewFunc(func(args ...value.Value) value.Value {
-		if ctx.task.Request == nil {
+		if ctx.reqCtx.Request == nil {
 			return value.NewNull()
 		}
 
 		// Always get from Request (Go caches URL.Query anyway)
-		r := ctx.task.Request
+		r := ctx.reqCtx.Request
 		if len(args) == 0 {
 			res := make(map[string]value.Value)
 			for k, v := range r.URL.Query() {
@@ -266,12 +267,20 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	const bodyCacheKey contextKey = "kitwork_body"
 
 	ctx.bodyFn = value.NewFunc(func(args ...value.Value) value.Value {
-		if ctx.task.Request == nil {
+		// Priority 1: Check pre-parsed body in reqCtx
+		if ctx.reqCtx.Body.K == value.Map {
+			if len(args) == 0 {
+				return ctx.reqCtx.Body
+			}
+			return ctx.reqCtx.Body.Get(args[0].Text())
+		}
+
+		if ctx.reqCtx.Request == nil {
 			return value.NewNull()
 		}
 
-		// Try to get from Request Context cache first (very clean)
-		if cached := ctx.task.Request.Context().Value(bodyCacheKey); cached != nil {
+		// Priority 2: Try to get from Request Context cache
+		if cached := ctx.reqCtx.Request.Context().Value(bodyCacheKey); cached != nil {
 			b := cached.(value.Value)
 			if len(args) == 0 {
 				return b
@@ -280,9 +289,9 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		}
 
 		// Parse body ONCE and store back into Request Context
-		if ctx.task.Request.Body != nil {
+		if ctx.reqCtx.Request.Body != nil {
 			var bodyData map[string]any
-			json.NewDecoder(ctx.task.Request.Body).Decode(&bodyData)
+			json.NewDecoder(ctx.reqCtx.Request.Body).Decode(&bodyData)
 			res := make(map[string]value.Value)
 			for k, v := range bodyData {
 				res[k] = value.New(v)
@@ -290,8 +299,8 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 			bodyVal := value.New(res)
 
 			// Store in context for next time
-			importCtx := context.WithValue(ctx.task.Request.Context(), bodyCacheKey, bodyVal)
-			ctx.task.Request = ctx.task.Request.WithContext(importCtx)
+			importCtx := context.WithValue(ctx.reqCtx.Request.Context(), bodyCacheKey, bodyVal)
+			ctx.reqCtx.Request = ctx.reqCtx.Request.WithContext(importCtx)
 
 			if len(args) == 0 {
 				return bodyVal
@@ -304,10 +313,10 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 
 	ctx.paramsFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) == 0 {
-			return ctx.task.GetParams()
+			return value.New(ctx.reqCtx.Params)
 		}
 		key := args[0].Text()
-		if val, ok := ctx.task.Params[key]; ok {
+		if val, ok := ctx.reqCtx.Params[key]; ok {
 			return val
 		}
 		return value.NewNull()
@@ -316,8 +325,8 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	ctx.cookieFn = value.NewFunc(func(args ...value.Value) value.Value {
 		// GET Cookie
 		if len(args) == 1 {
-			if ctx.task.Request != nil {
-				c, err := ctx.task.Request.Cookie(args[0].Text())
+			if ctx.reqCtx.Request != nil {
+				c, err := ctx.reqCtx.Request.Cookie(args[0].Text())
 				if err == nil {
 					return value.New(c.Value)
 				}
@@ -326,7 +335,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		}
 
 		// SET Cookie
-		if len(args) >= 2 && ctx.task.Writer != nil {
+		if len(args) >= 2 && ctx.reqCtx.Writer != nil {
 			name := args[0].Text()
 			val := args[1].Text()
 			c := &http.Cookie{
@@ -354,13 +363,44 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 					c.HttpOnly = v.Truthy()
 				}
 			}
-			http.SetCookie(ctx.task.Writer, c)
+			http.SetCookie(ctx.reqCtx.Writer, c)
 		}
 		return value.NewNull()
 	})
 
-	ctx.machine.Vars["header"] = value.NewFunc(func(args ...value.Value) value.Value {
-		if r := ctx.task.Request; r != nil {
+	var responseObj map[string]value.Value
+	responseObj = map[string]value.Value{
+		"status": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				ctx.task.Status(int(args[0].N))
+			}
+			return value.New(responseObj)
+		}),
+		"header": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) >= 2 {
+				ctx.task.Header(args[0].Text(), args[1].Text())
+			}
+			return value.New(responseObj)
+		}),
+		"redirect": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 && ctx.reqCtx.Request != nil && ctx.reqCtx.Writer != nil {
+				url := args[0].Text()
+				code := http.StatusFound
+				if len(args) > 1 {
+					code = int(args[1].N)
+				}
+				http.Redirect(ctx.reqCtx.Writer, ctx.reqCtx.Request, url, code)
+			}
+			return value.New(responseObj)
+		}),
+		"json":   ctx.jsonFn,
+		"html":   ctx.htmlFn,
+		"cookie": ctx.cookieFn,
+	}
+	ctx.machine.Vars["response"] = value.New(responseObj)
+
+	requestHeaderFn := value.NewFunc(func(args ...value.Value) value.Value {
+		if r := ctx.reqCtx.Request; r != nil {
 			if len(args) == 0 {
 				res := make(map[string]value.Value)
 				for k, v := range r.Header {
@@ -376,25 +416,18 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		return value.NewNull()
 	})
 
-	ctx.machine.Vars["status"] = value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) > 0 && ctx.task.Writer != nil {
-			code := int(args[0].N)
-			ctx.task.Writer.WriteHeader(code)
-		}
-		return value.NewNull()
+	ctx.machine.Vars["request"] = value.New(map[string]value.Value{
+		"header": requestHeaderFn,
+		"query":  ctx.queryFn,
+		"body":   ctx.bodyFn,
+		"params": ctx.paramsFn,
+		"cookie": ctx.cookieFn,
 	})
 
-	ctx.machine.Vars["redirect"] = value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) > 0 && ctx.task.Request != nil && ctx.task.Writer != nil {
-			url := args[0].Text()
-			code := http.StatusFound
-			if len(args) > 1 {
-				code = int(args[1].N)
-			}
-			http.Redirect(ctx.task.Writer, ctx.task.Request, url, code)
-		}
-		return value.NewNull()
-	})
+	// Legacy aliases
+	ctx.machine.Vars["status"] = responseObj["status"]
+	ctx.machine.Vars["redirect"] = responseObj["redirect"]
+	ctx.machine.Vars["header"] = requestHeaderFn
 
 	ctx.workFn = value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) == 0 {
@@ -407,7 +440,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		if w, ok := e.Registry[name]; ok {
 			return value.New(w)
 		}
-		w := work.NewWork(name)
+		w := work.New(name)
 		e.Registry[name] = w
 		return value.New(w)
 	})
@@ -437,7 +470,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 			}
 		}
 
-		w := work.NewWork(name)
+		w := work.New(name)
 		e.Registry[name] = w
 		return value.New(w)
 	})
@@ -447,7 +480,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 	// Wrap core services into Smart Proxies (Go Template Style)
 	ctx.machine.Vars["db"] = value.Value{K: value.Proxy, V: &dbProxyHandler{ec: ctx}}
 	ctx.machine.Vars["log"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.logFn}}
-	ctx.machine.Vars["http"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.httpFn}}
+	ctx.machine.Vars["fetch"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.fetchFn}}
 	ctx.machine.Vars["cache"] = value.Value{K: value.Proxy, V: &genericServiceProxy{fn: ctx.cacheFn}}
 	ctx.machine.Vars["done"] = ctx.doneFn
 	ctx.machine.Vars["fail"] = ctx.failFn

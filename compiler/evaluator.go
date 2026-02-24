@@ -200,7 +200,7 @@ func Evaluator(node Node, env *Environment) value.Value {
 			params[i] = p.Value
 		}
 		sFn := &value.Script{
-			Address:    0, // Placeholder, will be updated by Trigger()
+			Address:    n.Address, // Will be correct if Compiler ran first
 			ParamNames: params,
 		}
 		return value.New(sFn)

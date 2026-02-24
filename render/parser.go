@@ -10,7 +10,8 @@ const (
 	nodeVar
 	nodeIf
 	nodeRange
-	nodeLet // New: Assignment
+	nodeLet     // New: Assignment
+	nodePartial // Dùng chung cho include/layout
 )
 
 type node struct {
@@ -124,6 +125,12 @@ func parse(tokens []string) *node {
 			case "else":
 				if current.typ == nodeIf {
 					current.parsingElse = true
+				}
+
+			case "include", "layout":
+				if len(parts) > 1 {
+					n := &node{typ: nodePartial, val: strings.Trim(parts[1], `"'`)}
+					addChild(current, n)
 				}
 
 			case "end":

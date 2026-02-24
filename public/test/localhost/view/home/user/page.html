@@ -1,0 +1,23 @@
+<div class="max-w-4xl mx-auto p-6">
+    <h1 class="text-3xl font-bold text-green-400 mb-6">Feature-Based User List</h1>
+    <p class="mb-4 text-gray-400">This page logic and template are in the same folder (Angular Style).</p>
+
+    <div class="bg-slate-800 rounded-lg p-4 shadow-xl">
+        <table class="w-full text-left">
+            <thead>
+                <tr class="text-blue-400 border-b border-slate-700">
+                    <th class="p-2">Name</th>
+                    <th class="p-2">Email</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ for user in users }}
+                <tr class="border-b border-slate-700/50">
+                    <td class="p-2">{{ user.username }}</td>
+                    <td class="p-2 text-gray-400">{{ user.email }}</td>
+                </tr>
+                {{ end }}
+            </tbody>
+        </table>
+    </div>
+</div>

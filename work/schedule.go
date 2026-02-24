@@ -9,102 +9,80 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// ScheduleRule đại diện cho một rule lập lịch (Cron)
-type ScheduleRule struct {
-	Cron    string
-	Handler *value.Script
+// Cron đại diện cho một tác vụ lập lịch
+type Cron struct {
+	Work
+	Schedules []string
 }
 
-type ScheduleCore struct {
-	Schedules      []*ScheduleRule
-	PendingHandler *value.Script
+func (c *Cron) Handle(fn value.Value) *Cron {
+	if sFn, ok := fn.V.(*value.Script); ok {
+		c.handle = sFn
+	}
+	return c
+}
+
+func (c *Cron) registerSchedule(cronExpr string) {
+	if cronExpr == "" {
+		return
+	}
+	for _, s := range c.Schedules {
+		if s == cronExpr {
+			return
+		}
+	}
+	c.Schedules = append(c.Schedules, cronExpr)
 }
 
 // Schedule is the universal entry point for recurring tasks.
-func (w *Work) Schedule(args ...value.Value) *Work {
+func (c *Cron) Schedule(args ...value.Value) *Cron {
 	if len(args) == 0 {
-		return w
+		return c
 	}
-
-	var handler *value.Script
-	var definitions []string
 
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			handler = sFn
-			w.CoreSchedule.PendingHandler = sFn // Store for fluent chaining
+			c.handle = sFn
 		} else {
+			def := ""
 			if arg.IsNumeric() {
-				definitions = append(definitions, fmt.Sprintf("%v", arg.Interface()))
+				def = fmt.Sprintf("%v", arg.Interface())
 			} else {
-				definitions = append(definitions, arg.Text())
+				def = arg.Text()
+			}
+			cronExpr := smartParse(def)
+			if cronExpr != "" {
+				c.registerSchedule(cronExpr)
 			}
 		}
 	}
 
-	// Use pending handler if none provided in args
-	if handler == nil {
-		handler = w.CoreSchedule.PendingHandler
-	}
-	// Fallback to MainHandler if still nil
-	if handler == nil {
-		handler = w.MainHandler
-	}
-
-	for _, def := range definitions {
-		cronExpr := smartParse(def)
-		if cronExpr != "" && handler != nil {
-			w.registerSchedule(cronExpr, handler)
-		}
-	}
-
-	return w
-}
-
-// Cron is an alias for Schedule, supporting the same universal parsing.
-func (w *Work) Cron(args ...value.Value) *Work {
-	return w.Schedule(args...)
+	return c
 }
 
 // Every registers tasks to run every N duration.
-func (w *Work) Every(args ...value.Value) *Work {
-	var handler *value.Script
-	var durations []string
+func (c *Cron) Every(args ...value.Value) *Cron {
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			handler = sFn
-			w.CoreSchedule.PendingHandler = sFn
+			c.handle = sFn
 		} else {
-			durations = append(durations, arg.Text())
+			c.registerSchedule("@every " + arg.Text())
 		}
 	}
-
-	if handler == nil {
-		handler = w.CoreSchedule.PendingHandler
-	}
-	if handler == nil {
-		handler = w.MainHandler
-	}
-
-	for _, d := range durations {
-		w.registerSchedule("@every "+d, handler)
-	}
-	return w
+	return c
 }
 
 // Daily registers tasks for specific times. .daily("13:00", "01:00")
-func (w *Work) Daily(args ...value.Value) *Work {
-	return w.Schedule(args...)
+func (c *Cron) Daily(args ...value.Value) *Cron {
+	return c.Schedule(args...)
 }
 
 // Hourly registers tasks for specific minutes. .hourly(0, 15, "30", "45")
-func (w *Work) Hourly(args ...value.Value) *Work {
-	var handler *value.Script
+func (c *Cron) Hourly(args ...value.Value) *Cron {
 	var mins []string
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			handler = sFn
-			w.CoreSchedule.PendingHandler = sFn
+			c.handle = sFn
 		} else {
 			if arg.IsNumeric() {
 				mins = append(mins, fmt.Sprintf("%d", int(arg.N)))
@@ -114,100 +92,55 @@ func (w *Work) Hourly(args ...value.Value) *Work {
 		}
 	}
 
-	if handler == nil {
-		handler = w.CoreSchedule.PendingHandler
-	}
-	if handler == nil {
-		handler = w.MainHandler
-	}
-
 	if len(mins) == 0 {
-		w.registerSchedule("@hourly", handler)
+		c.registerSchedule("@hourly")
 	} else {
 		for _, m := range mins {
 			// Clean numeric or semantic minute
 			cleanM := strings.TrimRight(strings.ToLower(m), "m")
-			w.registerSchedule(fmt.Sprintf("0 %s * * * *", cleanM), handler)
+			c.registerSchedule(fmt.Sprintf("0 %s * * * *", cleanM))
 		}
 	}
-	return w
+	return c
 }
 
 // Weekly registers tasks for specific days. .weekly("MON 09:00", "FRI 17:00")
-func (w *Work) Weekly(args ...value.Value) *Work {
-	var handler *value.Script
+func (c *Cron) Weekly(args ...value.Value) *Cron {
 	var hasDefinition bool
-	var definitions []value.Value
 
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			handler = sFn
-			w.CoreSchedule.PendingHandler = sFn
+			c.handle = sFn
 		} else {
 			hasDefinition = true
-			definitions = append(definitions, arg)
+			c.Schedule(arg)
 		}
 	}
 
-	if handler == nil {
-		handler = w.CoreSchedule.PendingHandler
-	}
-	if handler == nil {
-		handler = w.MainHandler
-	}
-
 	if !hasDefinition {
-		w.registerSchedule("@weekly", handler)
-		return w
+		c.registerSchedule("@weekly")
 	}
-	return w.Schedule(definitions...)
+	return c
 }
 
 // Monthly registers tasks for specific days of month. .monthly("1st 12:00")
-func (w *Work) Monthly(args ...value.Value) *Work {
-	var handler *value.Script
+func (c *Cron) Monthly(args ...value.Value) *Cron {
 	var hasDefinition bool
-	var patterns []string
 
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			handler = sFn
-			w.CoreSchedule.PendingHandler = sFn
+			c.handle = sFn
 		} else {
 			hasDefinition = true
-			patterns = append(patterns, arg.Text())
+			c.registerSchedule(monthlyParse(arg.Text()))
 		}
-	}
-
-	if handler == nil {
-		handler = w.CoreSchedule.PendingHandler
-	}
-	if handler == nil {
-		handler = w.MainHandler
 	}
 
 	if !hasDefinition {
-		w.registerSchedule("@monthly", handler)
-		return w
+		c.registerSchedule("@monthly")
 	}
 
-	for _, p := range patterns {
-		w.registerSchedule(monthlyParse(p), handler)
-	}
-	return w
-}
-
-func (w *Work) registerSchedule(cron string, handler *value.Script) {
-	if cron == "" || handler == nil {
-		return
-	}
-	for i, s := range w.CoreSchedule.Schedules {
-		if s.Cron == cron {
-			w.CoreSchedule.Schedules[i].Handler = handler
-			return
-		}
-	}
-	w.CoreSchedule.Schedules = append(w.CoreSchedule.Schedules, &ScheduleRule{Cron: cron, Handler: handler})
+	return c
 }
 
 func smartParse(input string) string {

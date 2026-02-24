@@ -339,6 +339,9 @@ func (vm *Runtime) Run() value.Value {
 }
 
 func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Value {
+	if s == nil {
+		return value.Value{K: value.Nil}
+	}
 	vm.FrameIdx++
 	f := &vm.Frames[vm.FrameIdx]
 	f.IP = s.Address

@@ -9,11 +9,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/jit/css"
@@ -151,8 +149,8 @@ func loadConfigs(e *core.Engine, dir string) {
 				continue
 			}
 
-			w := work.NewWork("generic")
-			w.LoadFromConfig(data)
+			w := work.New("generic")
+			w.Config(data)
 			e.RegisterWork(w)
 
 			// Update global config if present in file
@@ -205,23 +203,47 @@ func loadLogic(e *core.Engine, dir string) {
 		} // Skip read errors
 		if !info.IsDir() && strings.HasSuffix(info.Name(), ".js") {
 			content, _ := os.ReadFile(path)
-			w, err := e.Build(string(content))
+
+			// Extract tenant and domain from path: public/[tenant]/[domain]/...
+			tenantID := ""
+			domain := ""
+			relPath, _ := filepath.Rel(dir, path)
+			parts := strings.Split(filepath.ToSlash(relPath), "/")
+			if len(parts) >= 2 {
+				// We assume direct structure if not in 'public' root
+				// But we should check if dir itself is 'public'
+				if strings.Contains(dir, "public") {
+					tenantID = parts[0]
+					if len(parts) >= 2 {
+						domain = parts[1]
+					}
+				}
+			}
+
+			w, err := e.Build(string(content), tenantID, domain, path)
 			if err == nil {
 				w.SourcePath, _ = filepath.Abs(path) // Track Source Path
 				if e.Config.Debug {
-					fmt.Printf("📜 Logic loaded: %s (Registry size: %d)\n", path, len(e.Registry))
+					fmt.Printf("📜 Logic loaded: %s (Tenant: %s, Domain: %s)\n", path, tenantID, domain)
 				}
 
 				// GLOBAL BYTECODE PROPAGATION
-				if w.Bytecode != nil {
-					for _, other := range e.Registry {
-						if other.Bytecode == nil {
-							other.Bytecode = w.Bytecode
+				if w.GetBytecode() != nil {
+					// Also propagate to all routers and crons registered during Build
+					e.RegistryMu.Lock()
+					for _, rt := range e.Routers {
+						if rt.Work.Entity == tenantID && rt.Work.Domain == domain && rt.Work.GetBytecode() == nil {
+							rt.Work.SetBytecode(w.GetBytecode())
 						}
 					}
+					for _, c := range e.Crons {
+						if c.Work.Entity == tenantID && c.Work.Domain == domain && c.Work.GetBytecode() == nil {
+							c.Work.SetBytecode(w.GetBytecode())
+						}
+					}
+					e.RegistryMu.Unlock()
 				}
 
-				fmt.Printf("[loadLogic] Calling Trigger for Work: %s (bytecode: %v)\n", w.Name, w.Bytecode != nil)
 				e.Trigger(context.TODO(), w, nil, nil)
 			} else {
 				fmt.Printf("❌ Code Error in %s: %v\n", path, err)
@@ -238,268 +260,202 @@ func bootServer(e *core.Engine, serverPort int) {
 	port := strconv.Itoa(serverPort)
 	fmt.Printf("🚀 Kitwork Engine online at http://localhost:%s\n", port)
 
-	work.GlobalRouter.Mu.RLock()
-	fmt.Printf("🔍 Routes registered: %d\n", len(work.GlobalRouter.Routes))
-	for _, r := range work.GlobalRouter.Routes {
-		fmt.Printf(" - %s %s (Fn Address: %d)\n", r.Method, r.Path, r.Fn.Address)
-	}
-	work.GlobalRouter.Mu.RUnlock()
+	e.RegistryMu.RLock()
+	fmt.Printf("🔍 Routes registered: %d\n", len(e.Routers))
+	e.RegistryMu.RUnlock()
 
-	// Register Static Assets
-	for _, asset := range e.Config.Assets {
-		prefix := "/" + strings.Trim(asset.Path, "/") + "/"
-		if prefix == "//" { // Root asset
-			prefix = "/"
-		}
-
-		if e.Config.Debug {
-			fmt.Printf("📂 Asset Registered: Path=%s -> Dir=%s\n", prefix, asset.Dir)
-		}
-
-		handler := http.StripPrefix(strings.TrimSuffix(prefix, "/"), http.FileServer(http.Dir(asset.Dir)))
-		// Wrap handler with Cache-Control
-		cacheHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Cache-Control", "public, max-age=31536000") // 1 year
-			handler.ServeHTTP(w, r)
-		})
-		http.Handle(prefix, cacheHandler)
-	}
-
-	// Internal API: System Introspection (Routes)
+	// --- API NỘI BỘ (ADMIN & TOOLS) ---
 	http.HandleFunc("/_kitwork/routes", func(w http.ResponseWriter, r *http.Request) {
-		work.GlobalRouter.Mu.RLock()
-		defer work.GlobalRouter.Mu.RUnlock()
-
-		var routes []map[string]string
-		for _, r := range work.GlobalRouter.Routes {
-			wn := "global"
-			if r.Work != nil {
-				wn = r.Work.Name
-			}
-			routes = append(routes, map[string]string{
-				"method": r.Method,
-				"path":   r.Path,
-				"work":   wn,
-			})
+		e.RegistryMu.RLock()
+		defer e.RegistryMu.RUnlock()
+		var res []map[string]string
+		for _, rt := range e.Routers {
+			res = append(res, map[string]string{"method": rt.Method, "path": rt.Path, "work": rt.Work.Name})
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(routes)
+		json.NewEncoder(w).Encode(res)
 	})
 
-	// Internal API: View Source Code (Safe Read based on Work Name + Tenant)
 	http.HandleFunc("/_kitwork/source", func(w http.ResponseWriter, r *http.Request) {
 		workName := r.URL.Query().Get("work")
-		tenantID := r.URL.Query().Get("tenant") // Optional Tenant Filter
-
-		if workName == "" {
-			http.Error(w, "Missing work name", 400)
-			return
-		}
-
 		e.RegistryMu.RLock()
-		workUnit, ok := e.Registry[workName]
-
-		if !ok {
-			e.RegistryMu.RUnlock()
-			http.Error(w, "Work unit not found", 404)
-			return
-		}
-
-		// Grab data before unlocking to be safe (though Work is mostly immutable pointer in Registry)
-		unitPath := workUnit.SourcePath
-		unitTenant := workUnit.TenantID
+		wUnit, ok := e.Registry[workName]
 		e.RegistryMu.RUnlock()
-
-		// Tenant Isolation Check
-		if tenantID != "" && unitTenant != tenantID {
-			http.Error(w, "Work unit does not belong to this tenant", 403)
+		if !ok || wUnit.SourcePath == "" {
+			http.Error(w, "Source not found", 404)
 			return
 		}
-
-		if unitPath == "" {
-			http.Error(w, "Source not available (compiled from memory?)", 404)
-			return
-		}
-
-		// SECURITY: Verify file is within allowed tenant directories if necessary
-		// For now we rely on SourcePath being set by the trusted engine
-
-		content, err := os.ReadFile(unitPath)
-		if err != nil {
-			http.Error(w, "Failed to read source file", 500)
-			return
-		}
-
+		content, _ := os.ReadFile(wUnit.SourcePath)
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Write(content)
 	})
 
-	// Internal API: Hot Deploy Work Unit (Serverless Deployment)
+	http.HandleFunc("/_kitwork/jit", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Content string `json:"content"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"css": css.GenerateJIT(req.Content)})
+	})
+
 	http.HandleFunc("/_kitwork/deploy", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "Method not allowed", 405)
 			return
 		}
-
-		// TODO: Add Master Key Authentication here
-
 		var req struct {
 			Content string `json:"content"`
-			Path    string `json:"path"` // Relative path to save file (canonical)
+			Path    string `json:"path"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid JSON", 400)
 			return
 		}
 
-		if req.Content == "" {
-			http.Error(w, "Content required", 400)
-			return
-		}
-
-		// 1. Hot Compile (Virtual Machine check)
-		newWork, err := e.Build(req.Content)
+		newWork, err := e.Build(req.Content, "", "", req.Path)
 		if err != nil {
-			fmt.Printf("❌ Hot Deploy Failed: %v\n", err)
-			http.Error(w, fmt.Sprintf("Compilation Failed: %v", err), 400)
+			http.Error(w, fmt.Sprintf("Build Failed: %v", err), 400)
 			return
 		}
 
-		// 2. Persistence (Write to Disk)
-		// If path is provided, we save it to become permanent
+		// Persistence (Optional)
 		if req.Path != "" {
-			// Validate path to prevent directory traversal
-			if strings.Contains(req.Path, "..") {
-				http.Error(w, "Invalid path", 400)
-				return
-			}
-
-			// Use first source directory as default root
-			rootDir := "./"
-			if len(e.Config.Sources) > 0 {
-				rootDir = e.Config.Sources[0]
-			}
-			fullPath := filepath.Join(rootDir, req.Path)
-
-			er := os.MkdirAll(filepath.Dir(fullPath), 0755)
-			if er == nil {
-				os.WriteFile(fullPath, []byte(req.Content), 0644)
-				newWork.SourcePath, _ = filepath.Abs(fullPath)
-			}
+			fullPath := filepath.Join(e.Config.Sources[0], req.Path)
+			os.MkdirAll(filepath.Dir(fullPath), 0755)
+			os.WriteFile(fullPath, []byte(req.Content), 0644)
+			newWork.SourcePath, _ = filepath.Abs(fullPath)
 		}
 
-		// 3. Hot Swap (Thread-Safe Registry Update)
 		e.RegistryMu.Lock()
 		e.Registry[newWork.Name] = newWork
 		e.RegistryMu.Unlock()
 
-		// 4. Trigger Initialization (Run top-level logic)
 		e.Trigger(context.TODO(), newWork, nil, nil)
 
-		fmt.Printf("🔥 Hot Deployed: %s (v%s)\n", newWork.Name, newWork.Ver)
-
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "deployed",
-			"work":    newWork.Name,
-			"version": newWork.Ver,
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "deployed",
+			"work":   newWork.Name,
 		})
 	})
 
-	// Internal API: JIT CSS Generator
-	http.HandleFunc("/_kitwork/jit", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "Method not allowed", 405)
-			return
-		}
-		var req struct {
-			Content string `json:"content"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", 400)
-			return
-		}
-
-		cssOutput := css.GenerateJIT(req.Content)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"css": cssOutput,
-		})
-	})
-
+	// --- HANDLER CHÍNH (ROUTING + ASSETS) ---
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// Recovery from Panics
+		defer func() {
+			if rec := recover(); rec != nil {
+				fmt.Printf("[CRITICAL] Panic Recovered: %v\n", rec)
+				debug.PrintStack()
+				http.Error(w, "Internal Server Error (Panic)", http.StatusInternalServerError)
+			}
+		}()
+
 		path := r.URL.Path
 		method := r.Method
 
-		fmt.Printf("[HTTP] Incoming %s %s\n", method, path)
+		e.RegistryMu.RLock()
 
-		var matchedRoute *work.Route
+		// 1. TÌM ROUTE
+		var matchedRoute *work.Router
 		pathParams := make(map[string]value.Value)
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
 
-		work.GlobalRouter.Mu.RLock()
-		for i := range work.GlobalRouter.Routes {
-			rt := &work.GlobalRouter.Routes[i]
-			if rt.Method == method {
+		if e.Config.Debug {
+			fmt.Printf("[DEBUG] Request Host: %s, Total Routers: %d\n", host, len(e.Routers))
+		}
+		for _, rt := range e.Routers {
+			if e.Config.Debug {
+				fmt.Printf("[DEBUG] Checking Route: Domain=%s, Method=%s, Path=%s (Request: Host=%s, Path=%s)\n", rt.Work.Domain, rt.Method, rt.Path, host, path)
+			}
+			if rt.Work.Domain != "" && rt.Work.Domain != host && rt.Work.Domain != "localhost" && host != "127.0.0.1" {
+				continue
+			}
+			if rt.Method == method || rt.Method == "ANY" {
 				if params, ok := matchRoute(path, rt.Path); ok {
 					matchedRoute = rt
 					for k, v := range params {
 						pathParams[k] = value.New(v)
 					}
-					fmt.Printf("[HTTP] Matched route: %s %s\n", rt.Method, rt.Path)
 					break
 				}
 			}
 		}
-		work.GlobalRouter.Mu.RUnlock()
+
+		if matchedRoute == nil && e.Config.Debug {
+			fmt.Printf("[DEBUG] No Route Matched for: %s %s (Host: %s)\n", method, path, host)
+		}
+
+		if matchedRoute != nil && e.Config.Debug {
+			fmt.Printf("[DEBUG] Matched Route TemplatePath: '%s'\n", matchedRoute.Work.TemplatePath)
+		}
+
+		// 2. TÌM ASSET TĨNH (Nếu không có route)
+		if matchedRoute == nil && (method == "GET" || method == "HEAD") {
+			if e.Config.Debug && path == "/favicon.ico" {
+				fmt.Printf("[DEBUG] Checking assets for %s. Asset count: %d\n", path, len(e.Config.Assets))
+			}
+			for _, asset := range e.Config.Assets {
+				cleanAssetPath := "/" + strings.Trim(asset.Path, "/")
+				info, err := os.Stat(asset.Dir)
+				if err != nil {
+					if e.Config.Debug {
+						fmt.Printf("[ASSET] Skip %s: %v\n", asset.Dir, err)
+					}
+					continue
+				}
+
+				if !info.IsDir() {
+					// Khớp chính xác file đơn lẻ (Ví dụ: /favicon.ico)
+					if path == cleanAssetPath {
+						if e.Config.Debug {
+							fmt.Printf("[ASSET] Serving File: %s -> %s\n", path, asset.Dir)
+						}
+						e.RegistryMu.RUnlock()
+						w.Header().Set("Cache-Control", "public, max-age=31536000")
+						http.ServeFile(w, r, asset.Dir)
+						return
+					}
+				} else {
+					// Khớp thư mục (Ví dụ: /public/*)
+					prefix := cleanAssetPath
+					if !strings.HasSuffix(prefix, "/") {
+						prefix += "/"
+					}
+					if path == cleanAssetPath || strings.HasPrefix(path, prefix) {
+						rel := ""
+						if path != cleanAssetPath {
+							rel = strings.TrimPrefix(path, prefix)
+						}
+						full := filepath.Join(asset.Dir, rel)
+
+						if fi, err := os.Stat(full); err == nil && !fi.IsDir() {
+							if e.Config.Debug {
+								fmt.Printf("[ASSET] Serving Prefix Match: %s -> %s\n", path, full)
+							}
+							e.RegistryMu.RUnlock()
+							w.Header().Set("Cache-Control", "public, max-age=31536000")
+							http.ServeFile(w, r, full)
+							return
+						}
+					}
+				}
+			}
+		}
+		e.RegistryMu.RUnlock()
 
 		if matchedRoute == nil {
-			fmt.Printf("[HTTP] No match found for %s %s\n", method, path)
+			fmt.Printf("[HTTP] 404: %s\n", path)
 			http.NotFound(w, r)
 			return
 		}
 
-		// 1. FAST-PATH: JIT CSS Support
-		if matchedRoute.IsJIT {
-			w.Header().Set("Content-Type", "text/css; charset=utf-8")
-			// User explicitly requested NO CACHE for JIT routes handled by Work
-			// If no specific handler is attached (Address == 0), serve the default framework
-			if matchedRoute.Fn == nil || matchedRoute.Fn.Address == 0 {
-				w.Write([]byte(css.GenerateFramework()))
-				return
-			}
-			// If a handler IS attached, we fall through to ExecuteLambda below.
-			// The Content-Type is already set to text/css.
-		}
+		fmt.Printf("[HTTP] Matched: %s %s\n", method, path)
 
-		// 2. FAST-PATH: Redirect Support
-		if matchedRoute.Redirect != nil {
-			fmt.Printf("[HTTP] Redirecting %s -> %s (%d)\n", path, matchedRoute.Redirect.URL, matchedRoute.Redirect.Code)
-			http.Redirect(w, r, matchedRoute.Redirect.URL, matchedRoute.Redirect.Code)
-			return
-		}
-
-		// 2. FAST-PATH: Resource Serving (File or Assets)
-		if matchedRoute.Work.CoreRender.ResourcePath != "" {
-			info, err := os.Stat(matchedRoute.Work.CoreRender.ResourcePath)
-			if err == nil {
-				if info.IsDir() {
-					// Directory mode: handle wildcard/prefix
-					prefix := strings.TrimSuffix(matchedRoute.Path, "*")
-					subPath := strings.TrimPrefix(path, prefix)
-					target := filepath.Join(matchedRoute.Work.CoreRender.ResourcePath, subPath)
-					fmt.Printf("[HTTP] Serving Asset: %s\n", target)
-					http.ServeFile(w, r, target)
-				} else {
-					// File mode: serve directly
-					fmt.Printf("[HTTP] Serving File: %s\n", matchedRoute.Work.CoreRender.ResourcePath)
-					http.ServeFile(w, r, matchedRoute.Work.CoreRender.ResourcePath)
-				}
-				return
-			}
-		}
-
-		// 2. URL Query Params
+		// 3. THỰC THI LOGIC
 		queryParams := make(map[string]value.Value)
 		for k, v := range r.URL.Query() {
 			if len(v) > 0 {
@@ -507,9 +463,8 @@ func bootServer(e *core.Engine, serverPort int) {
 			}
 		}
 
-		// 2. JSON Body Params
 		bodyParams := make(map[string]value.Value)
-		if r.Method != "GET" && r.Body != nil {
+		if method != "GET" && r.Body != nil {
 			var bodyData map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&bodyData); err == nil {
 				for k, v := range bodyData {
@@ -518,219 +473,187 @@ func bootServer(e *core.Engine, serverPort int) {
 			}
 		}
 
-		// 3. Cache Check (RAM)
-		cacheKey := ""
-		if matchedRoute.Work.CoreRender.CacheDuration > 0 {
-			cacheKey = "work:" + matchedRoute.Work.Name + ":" + r.URL.String()
-			if cached, ok := work.GetCache(cacheKey); ok {
-				fmt.Printf("[HTTP] Cache Hit: %s\n", cacheKey)
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Cache", "HIT")
-				outputData, _ := json.Marshal(cached.Interface())
-				w.Write(outputData)
-				return
-			}
-		}
-
-		// 4. Static Stack Check (DISK)
-		stackPath := ""
-		if matchedRoute.Work.CoreRender.StaticDuration > 0 {
-			hashedName := fmt.Sprintf("%x", sha256.Sum256([]byte(r.URL.String())))
-			stackPath = filepath.Join(".stack", matchedRoute.Work.Name, hashedName)
-
-			if info, err := os.Stat(stackPath); err == nil {
-				if time.Since(info.ModTime()) < matchedRoute.Work.CoreRender.StaticDuration {
-					// Potentially verify checksum if enabled
-					valid := true
-					if matchedRoute.Work.CoreRender.StaticCheck {
-						// Logic for checksum verification
-						valid = verifyChecksum(stackPath)
-					}
-
-					if valid {
-						fmt.Printf("[HTTP] Stack Hit: %s\n", stackPath)
-						w.Header().Set("X-Stack", "HIT")
-						http.ServeFile(w, r, stackPath)
-						return
-					}
-				}
-			}
-		}
-
-		// 4. SPECIAL: Benchmark Mode
-		if matchedRoute.BenchmarkIters > 0 {
-			iters := matchedRoute.BenchmarkIters
-			workerCount := runtime.GOMAXPROCS(0) // Auto-detect optimal workers
-			if workerCount < 1 {
-				workerCount = 1
-			}
-			// Ensure workerCount doesn't exceed iterations
-			if iters < workerCount {
-				workerCount = iters
-			}
-
-			// Prepare Memory Stats
-			var msBefore, msAfter runtime.MemStats
-			runtime.GC() // Force GC before starting to get clean state
-			runtime.ReadMemStats(&msBefore)
-
-			start := time.Now()
-			var wg sync.WaitGroup
-			wg.Add(workerCount)
-
-			// Dummy Writer for benchmark
-			dummyWriter := &DummyWriter{HeaderMap: make(http.Header)}
-
-			itersPerWorker := iters / workerCount
-
-			for i := 0; i < workerCount; i++ {
-				// Handle remainder iterations for the last worker
-				count := itersPerWorker
-				if i == workerCount-1 {
-					count = iters - (itersPerWorker * (workerCount - 1))
-				}
-
-				go func(c int) {
-					defer wg.Done()
-					for j := 0; j < c; j++ {
-						e.ExecuteLambda(matchedRoute.Work, matchedRoute.Fn, r, dummyWriter, queryParams, bodyParams, pathParams)
-					}
-				}(count)
-			}
-			wg.Wait()
-			duration := time.Since(start)
-
-			// Collect Memory Stats
-			runtime.ReadMemStats(&msAfter)
-
-			// Metrics
-			throughput := float64(iters) / duration.Seconds()
-			latency := duration / time.Duration(iters)
-			totalAlloc := msAfter.TotalAlloc - msBefore.TotalAlloc
-			gcCycles := msAfter.NumGC - msBefore.NumGC
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"benchmark":    true,
-				"iterations":   iters,
-				"workers":      workerCount,
-				"duration":     duration.String(),
-				"throughput":   fmt.Sprintf("%.0f req/s", throughput),
-				"latency":      latency.String(),
-				"latency_ns":   latency.Nanoseconds(),
-				"alloc_bytes":  totalAlloc,
-				"alloc_per_op": totalAlloc / uint64(iters),
-				"gc_cycles":    gcCycles,
-			})
-			return
-		}
-
-		res := e.ExecuteLambda(matchedRoute.Work, matchedRoute.Fn, r, w, queryParams, bodyParams, pathParams)
+		res := e.ExecuteLambda(&matchedRoute.Work, matchedRoute.GetDone(), r, w, queryParams, bodyParams, pathParams)
 		if res.Error != "" {
 			http.Error(w, res.Error, 500)
 			return
 		}
 
-		responseVal := res.Response
+		responseVal := res.Response.Data
 		if responseVal.K == value.Nil {
 			responseVal = res.Value
 		}
 
-		// 5. NEW: Auto-Render Logic (Low-latency rendering)
-		var t *work.Template = matchedRoute.Template
-
-		// Fallback to Work unit routes if global router is stale
-		if t == nil || t.Page == "" {
-			for _, r := range matchedRoute.Work.CoreRouter.Routes {
-				if r.Method == matchedRoute.Method && r.Path == matchedRoute.Path {
-					t = r.Template
-					break
-				}
+		// Apply buffered headers
+		if res.Response.Headers != nil {
+			for k, v := range res.Response.Headers {
+				w.Header().Set(k, v)
 			}
 		}
 
-		if t != nil && t.Page != "" && res.ResType != "json" {
-			tmpl, err := os.ReadFile(t.Page)
-			if err != nil {
-				fmt.Printf("❌ Template Error: %v (Path: %s)\n", err, t.Page)
-				http.Error(w, "Template not found", 404)
+		// Apply status code
+		if res.Response.StatusCode != 0 {
+			w.WriteHeader(res.Response.StatusCode)
+		}
+
+		// --- 3. RENDERING LOGIC ---
+		tmplPath := matchedRoute.Work.TemplatePath
+		renderData := responseVal.Interface()
+		if renderData == nil {
+			renderData = make(map[string]any)
+		}
+
+		// If script called html(template, data), override TemplatePath
+		if res.Response.Type == "html" && responseVal.K == value.Map {
+			tVal := responseVal.Get("template")
+			if tVal.K == value.String {
+				tmplPath = tVal.Text()
+			}
+			dVal := responseVal.Get("data")
+			if dVal.K != value.Nil {
+				renderData = dVal.Interface()
+			}
+		}
+
+		if tmplPath != "" {
+			finalPath := tmplPath
+			if !filepath.IsAbs(finalPath) {
+				// 1. NGĂN XẾP ƯU TIÊN 1: Tìm ngay bên cạnh file JS (Angular Style / Co-location)
+				// Sử dụng SourcePath của Work (ví dụ index.js) để làm gốc
+				if matchedRoute.Work.SourcePath != "" {
+					dir := filepath.Dir(matchedRoute.Work.SourcePath)
+					possible := filepath.Join(dir, tmplPath)
+					if _, err := os.Stat(possible); err == nil {
+						finalPath = possible
+						goto found
+					}
+				}
+
+				// 2. NGĂN XẾP ƯU TIÊN 2: Tìm trong folder 'pages' chuẩn
+				globalViewDir := ""
+				if matchedRoute.Work.Entity != "" && matchedRoute.Work.Domain != "" {
+					globalViewDir = filepath.Join("public", matchedRoute.Work.Entity, matchedRoute.Work.Domain, "pages")
+				}
+
+				if globalViewDir != "" {
+					p := filepath.Join(globalViewDir, tmplPath)
+					if _, err := os.Stat(p); err == nil {
+						finalPath = p
+						goto found
+					}
+				}
+			}
+
+			// Nếu không tìm thấy tệp tin
+			if _, err := os.Stat(finalPath); err != nil {
+				fmt.Printf("[HTTP] Template Not Found: %s (Check your path in index.js)\n", tmplPath)
+			}
+
+		found:
+			content, err := os.ReadFile(finalPath)
+			if err == nil {
+				// Re-resolve globalViewDir for shell discovery
+				globalViewDir := ""
+				if matchedRoute.Work.Entity != "" && matchedRoute.Work.Domain != "" {
+					globalViewDir = filepath.Join("public", matchedRoute.Work.Entity, matchedRoute.Work.Domain, "pages")
+				}
+
+				// 1. Render the Page Fragment
+				rendered := render.RenderWithDir(string(content), renderData, filepath.Dir(finalPath), globalViewDir)
+
+				// 2. Automatic Shell Wrapping ("All read through index")
+				var shellPath string
+
+				// Priority 1: Use explicit shell defined in render.template()
+				if matchedRoute.Work.ShellPath != "" {
+					// Thử tìm shell tương đối so với pages root
+					sp := filepath.Join(globalViewDir, matchedRoute.Work.ShellPath)
+					if _, err := os.Stat(sp); err == nil {
+						shellPath = sp
+					} else {
+						shellPath = matchedRoute.Work.ShellPath
+					}
+				}
+
+				// Priority 2: Standard Bubble-up search for index.html
+				if shellPath == "" {
+					searchDir := filepath.Dir(finalPath)
+					for {
+						p := filepath.Join(searchDir, "index.html")
+						if _, err := os.Stat(p); err == nil {
+							shellPath = p
+							break
+						}
+						if searchDir == globalViewDir || searchDir == "." || searchDir == "/" {
+							break
+						}
+						parent := filepath.Dir(searchDir)
+						if parent == searchDir {
+							break
+						}
+						searchDir = parent
+					}
+				}
+
+				if shellPath != "" && finalPath != shellPath {
+					if shellContent, err := os.ReadFile(shellPath); err == nil {
+						// Prepare shell data: Copy original data and add 'page'
+						shellData := make(map[string]any)
+						if m, ok := renderData.(map[string]any); ok {
+							for k, v := range m {
+								shellData[k] = v
+							}
+						} else if m, ok := renderData.(map[string]interface{}); ok {
+							for k, v := range m {
+								shellData[k] = v
+							}
+						}
+
+						// Inject the rendered fragment as 'page'
+						// Use value.NewSafeHTML to tell the engine NOT to escape this string
+						shellData["page"] = value.NewSafeHTML(rendered)
+
+						// Render the Shell
+						rendered = render.RenderWithDir(string(shellContent), shellData, filepath.Dir(shellPath), globalViewDir)
+					}
+				}
+
+				if w.Header().Get("Content-Type") == "" {
+					w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				}
+				w.Write([]byte(rendered))
 				return
-			}
-			dataMap := make(map[string]value.Value)
-			if responseVal.K == value.Map {
-				for k, v := range responseVal.Map() {
-					dataMap[k] = v
-				}
 			} else {
-				dataMap["value"] = responseVal
+				fmt.Printf("[HTTP] Template Error: %v (Final Path: %s)\n", err, finalPath)
 			}
-
-			// Composite Rendering: Pre-render Layout partials
-			for key, partPath := range t.Layout {
-				partTmpl, err := os.ReadFile(partPath)
-				if err == nil {
-					// Render partial with SAME data context
-					// Must wrap dataMap in Value to pass to Render
-					renderedPart := render.Render(string(partTmpl), value.New(dataMap))
-					// Mark as SafeHTML to avoid double escaping in layout
-					dataMap[key] = value.Value{K: value.String, V: renderedPart, S: value.SafeHTML}
-				}
-			}
-
-			htmlContent := render.Render(string(tmpl), value.New(dataMap))
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(htmlContent))
-			return
 		}
 
-		if res.ResType == "html" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			htmlContent := ""
-			if responseVal.K == value.Map {
-				templateVal := responseVal.Get("template")
-				dataVal := responseVal.Get("data")
-				htmlContent = render.Render(templateVal.Text(), dataVal)
-			} else {
-				htmlContent = responseVal.Text()
+		if res.Response.Type == "html" {
+			if w.Header().Get("Content-Type") == "" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			}
-			w.Write([]byte(htmlContent))
-			return
-		}
-
-		// AUTO-DETECT: SafeHTML Result -> Render as HTML
-		if res.ResType == "" && responseVal.S == value.SafeHTML {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Write([]byte(responseVal.Text()))
 			return
 		}
 
-		// CUSTOM: JIT CSS Result (from Work handler) -> Render as Text
-		if matchedRoute.IsJIT {
+		// AUTO-DETECT: SafeHTML Result -> Render as HTML
+		if res.Response.Type == "" && responseVal.S == value.SafeHTML {
+			if w.Header().Get("Content-Type") == "" {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			}
 			w.Write([]byte(responseVal.Text()))
 			return
 		}
 
 		// Fallback to JSON if ResType is empty or explicitly "json"
-		w.Header().Set("Content-Type", "application/json")
-		outputData, _ := json.Marshal(responseVal.Interface())
-		fmt.Printf("[HTTP] Response: %s\n", string(outputData))
-
-		// Save to cache (RAM)
-		if cacheKey != "" && res.Error == "" {
-			work.SetCache(cacheKey, responseVal, matchedRoute.Work.CoreRender.CacheDuration)
-		}
-
-		// Save to stack (DISK)
-		if stackPath != "" && res.Error == "" {
-			os.MkdirAll(filepath.Dir(stackPath), 0755)
-			data, _ := json.Marshal(responseVal.Interface())
-			os.WriteFile(stackPath, data, 0644)
-			if matchedRoute.Work.CoreRender.StaticCheck {
-				writeChecksum(stackPath)
+		if res.Response.Type == "json" || res.Response.Type == "" {
+			if w.Header().Get("Content-Type") == "" {
+				w.Header().Set("Content-Type", "application/json")
 			}
+			outputData, _ := json.Marshal(responseVal.Interface())
+			fmt.Printf("[HTTP] Response: %s\n", string(outputData))
+			w.Write(outputData)
 		}
-
-		w.Write(outputData)
 	})
 
 	p, _ := strconv.Atoi(port)

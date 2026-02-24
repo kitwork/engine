@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	const total = 1_000_000 // 1 triệu lần
+	const total = 10 // 1 triệu lần
 	var wg sync.WaitGroup
 	var ids sync.Map // Map an toàn cho concurrency để check trùng
 

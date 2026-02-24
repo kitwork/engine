@@ -10,15 +10,15 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-type HTTPClient struct {
+type Fetch struct {
 	task *Task
 }
 
-func NewHTTPClient(t *Task) *HTTPClient {
-	return &HTTPClient{task: t}
+func NewFetch(t *Task) *Fetch {
+	return &Fetch{task: t}
 }
 
-func (c *HTTPClient) Get(url string) value.Value {
+func (c *Fetch) Get(url string) value.Value {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -42,7 +42,7 @@ func (c *HTTPClient) Get(url string) value.Value {
 	return value.New(res)
 }
 
-func (c *HTTPClient) Post(url string, bodyVal value.Value) value.Value {
+func (c *Fetch) Post(url string, bodyVal value.Value) value.Value {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	var buf bytes.Buffer
