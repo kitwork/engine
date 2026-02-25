@@ -7,9 +7,9 @@ func main() {
 	cfg := &engine.Config{
 		Port:    8081,
 		Debug:   true,
-		Sources: []string{"./demo", "./public"},
+		Sources: []string{"./public"},
 		Assets: []engine.Asset{
-			{Dir: "./demo/public", Path: "/public"},
+			{Dir: "/public"},
 		},
 		Databases: []string{"config/database/master.yaml"},
 		SMTPS:     []string{"config/smtp/mail.yaml"}, // Nạp cấu hình SMTP từ file

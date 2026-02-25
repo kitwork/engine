@@ -15,3 +15,6 @@ const (
 	DefaultWorkerRetry = 0
 	DefaultStaticCache = 24 * time.Hour
 )
+
+type Standard struct {
+}

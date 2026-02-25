@@ -20,7 +20,7 @@ func (t *Task) Reset(w *Work) {
 	t.Work = w
 	t.Response.Data = value.Value{K: value.Nil}
 	t.Response.Type = ""
-	t.Response.StatusCode = 0
+	t.Response.Code = 0
 	if t.Response.Headers != nil {
 		for k := range t.Response.Headers {
 			delete(t.Response.Headers, k)

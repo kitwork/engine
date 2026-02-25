@@ -492,8 +492,8 @@ func bootServer(e *core.Engine, serverPort int) {
 		}
 
 		// Apply status code
-		if res.Response.StatusCode != 0 {
-			w.WriteHeader(res.Response.StatusCode)
+		if res.Response.Code != 0 {
+			w.WriteHeader(res.Response.Code)
 		}
 
 		// --- 3. RENDERING LOGIC ---

@@ -54,7 +54,7 @@ func (e *Engine) RegisterWork(w *work.Work) {
 }
 
 func (e *Engine) registerBuiltins() {
-	e.stdlib.Set("work", value.NewFunc(func(args ...value.Value) value.Value {
+	e.stdlib.Set("kitwork", value.NewFunc(func(args ...value.Value) value.Value {
 		name := "unnamed"
 		if len(args) > 0 {
 			name = args[0].Text()
