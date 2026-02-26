@@ -1,7 +1,7 @@
 // ==========================================
 // KHỞI TẠO VÀ THIẾT LẬP TÀI NGUYÊN (RESOURCES)
 // ==========================================
-const app = kitwork({ debug: true })
+const app = kitwork()
 const entity = app.entity()
 const logger = app.log({ folder: "/logs" })
 
@@ -64,13 +64,6 @@ task.schedule(() => {
 }).every("5s")
 
 
-// ==========================================
-// THIẾT LẬP ROUTE BẰNG FILE CON (MODULARIZATION)
-// ==========================================
-// Sử dụng include để Engine nạp cấu hình từ các file khác vào AST chính
-app.include("routes/web.js")
-app.include("routes/api.js")
-// app.include("jobs/test.js")
 
 // Khởi tạo router chính với rate limit và body limit
 const router = app.router().rateLimit(10).bodyLimit(1024 * 1024 * 10)
@@ -197,3 +190,4 @@ apiUser.get("/:id").handle((request, response) => {
     }
     return response.status(200).json(user)
 });
+``

@@ -1,6 +1,8 @@
 package work
 
-import "github.com/kitwork/engine/value"
+import (
+	"github.com/kitwork/engine/value"
+)
 
 type Handle struct {
 	guard *value.Script

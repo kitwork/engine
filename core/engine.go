@@ -53,6 +53,18 @@ func (e *Engine) RegisterWork(w *work.Work) {
 	e.Registry[w.Name] = w
 }
 
+func (e *Engine) AddRouter(r *work.Router) {
+	e.RegistryMu.Lock()
+	e.Routers = append(e.Routers, r)
+	e.RegistryMu.Unlock()
+}
+
+func (e *Engine) AddCron(c *work.Cron) {
+	e.RegistryMu.Lock()
+	e.Crons = append(e.Crons, c)
+	e.RegistryMu.Unlock()
+}
+
 func (e *Engine) registerBuiltins() {
 	e.stdlib.Set("kitwork", value.NewFunc(func(args ...value.Value) value.Value {
 		name := "unnamed"
@@ -62,7 +74,7 @@ func (e *Engine) registerBuiltins() {
 		if w, ok := e.Registry[name]; ok {
 			return value.New(w)
 		}
-		w := work.New(name)
+		w := work.New(name, "", "", "")
 		e.Registry[name] = w
 		return value.New(w)
 	}))

@@ -17,7 +17,7 @@ type Cron struct {
 
 func (c *Cron) Handle(fn value.Value) *Cron {
 	if sFn, ok := fn.V.(*value.Script); ok {
-		c.handle = sFn
+		c.handle.done = sFn
 	}
 	return c
 }
@@ -42,7 +42,7 @@ func (c *Cron) Schedule(args ...value.Value) *Cron {
 
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			c.handle = sFn
+			c.handle.done = sFn
 		} else {
 			def := ""
 			if arg.IsNumeric() {
@@ -64,7 +64,7 @@ func (c *Cron) Schedule(args ...value.Value) *Cron {
 func (c *Cron) Every(args ...value.Value) *Cron {
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			c.handle = sFn
+			c.handle.done = sFn
 		} else {
 			c.registerSchedule("@every " + arg.Text())
 		}
@@ -82,7 +82,7 @@ func (c *Cron) Hourly(args ...value.Value) *Cron {
 	var mins []string
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			c.handle = sFn
+			c.handle.done = sFn
 		} else {
 			if arg.IsNumeric() {
 				mins = append(mins, fmt.Sprintf("%d", int(arg.N)))
@@ -110,7 +110,7 @@ func (c *Cron) Weekly(args ...value.Value) *Cron {
 
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			c.handle = sFn
+			c.handle.done = sFn
 		} else {
 			hasDefinition = true
 			c.Schedule(arg)
@@ -129,7 +129,7 @@ func (c *Cron) Monthly(args ...value.Value) *Cron {
 
 	for _, arg := range args {
 		if sFn, ok := arg.V.(*value.Script); ok {
-			c.handle = sFn
+			c.handle.done = sFn
 		} else {
 			hasDefinition = true
 			c.registerSchedule(monthlyParse(arg.Text()))

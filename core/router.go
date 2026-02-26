@@ -12,7 +12,7 @@ func (e *Engine) SyncRegistry() {
 
 	for _, c := range e.Crons {
 		for _, cronExpr := range c.Schedules {
-			handler := c.GetHandle()
+			handler := c.GetDone()
 			if handler == nil {
 				continue
 			}

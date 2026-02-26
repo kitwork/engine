@@ -440,7 +440,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 		if w, ok := e.Registry[name]; ok {
 			return value.New(w)
 		}
-		w := work.New(name)
+		w := work.New(name, "", "", "")
 		e.Registry[name] = w
 		return value.New(w)
 	})
@@ -470,7 +470,7 @@ func newExecutionContext(e *Engine) *ExecutionContext {
 			}
 		}
 
-		w := work.New(name)
+		w := work.New(name, "", "", "")
 		e.Registry[name] = w
 		return value.New(w)
 	})

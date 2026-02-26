@@ -14,26 +14,20 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/core"
-	"github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/render"
-	"github.com/kitwork/engine/security"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
 	"gopkg.in/yaml.v3"
 )
 
-type Asset struct {
-	Dir  string `yaml:"dir"`
-	Path string `yaml:"path"`
-}
-
 type Config struct {
-	Port      int      `yaml:"port"`
-	Debug     bool     `yaml:"debug"`
-	Sources   []string `yaml:"source"`
-	Assets    []Asset  `yaml:"assets"`
-	Databases []string `yaml:"databases"`
-	SMTPS     []string `yaml:"smtp"`
+	Port    int      `yaml:"port"`
+	Debug   bool     `yaml:"debug"`
+	Sources []string `yaml:"source"`
+	Master  []string `yaml:"master"`
+
+	Identity string `yaml:"identity"`
+	Domain   string `yaml:"domain"`
 }
 
 // Run starts the Kitwork Engine using the provided Config.
@@ -56,50 +50,13 @@ func Run(cfg *Config) {
 		e.Config.Sources = []string{"./"}
 	}
 
-	// Map Assets
-	for _, a := range cfg.Assets {
-		e.Config.Assets = append(e.Config.Assets, core.Asset{
-			Dir:  a.Dir,
-			Path: a.Path,
-		})
-	}
-
-	// 2. Automated Discovery & Initialization
-	// Load explicitly defined databases from files
-	for _, dbPath := range cfg.Databases {
-		if data, err := os.ReadFile(dbPath); err == nil {
-			var dbCfg security.DBConfig
-			if err := yaml.Unmarshal(data, &dbCfg); err == nil {
-				if err := work.InitDB(dbCfg); err == nil {
-					fmt.Printf("✅ Database Connected from file: %s\n", dbPath)
-				} else {
-					fmt.Printf("❌ Database Connection Failed (%s): %v\n", dbPath, err)
-				}
-			}
-		} else {
-			fmt.Printf("⚠️  Database config file not found: %s\n", dbPath)
-		}
-	}
-
-	// Load explicitly defined SMTP from files
-	for _, smtpPath := range cfg.SMTPS {
-		if data, err := os.ReadFile(smtpPath); err == nil {
-			var smtpCfg security.SMTPConfig
-			if err := yaml.Unmarshal(data, &smtpCfg); err == nil {
-				fmt.Printf("📧 SMTP Config Loaded from file: %s (Host: %s)\n", smtpPath, smtpCfg.Host)
-			}
-		} else {
-			fmt.Printf("⚠️  SMTP config file not found: %s\n", smtpPath)
-		}
-	}
-
 	// 3. Automated Discovery & Initialization
 	// This will scan each source for work.yaml, logic, and DATABASE configs.
 	for _, dir := range e.Config.Sources {
 		if e.Config.Debug {
 			fmt.Printf("📦 Loading source: %s\n", dir)
 		}
-		loadConfigs(e, dir)
+
 		loadLogic(e, dir)
 	}
 
@@ -131,128 +88,81 @@ func LoadConfig(dir string) (*Config, error) {
 	return cfg, nil
 }
 
-func loadConfigs(e *core.Engine, dir string) {
-	patterns := []string{"work.json", "work.yaml", "work.yml"}
-	for _, p := range patterns {
-		files, _ := filepath.Glob(filepath.Join(dir, p))
-		for _, f := range files {
-			content, _ := os.ReadFile(f)
-			data := make(map[string]any)
-			var err error
-			if strings.HasSuffix(f, ".json") {
-				err = json.Unmarshal(content, &data)
-			} else {
-				err = yaml.Unmarshal(content, &data)
-			}
-			if err != nil {
-				fmt.Printf("❌ Config error [%s]: %v\n", f, err)
-				continue
-			}
-
-			w := work.New("generic")
-			w.Config(data)
-			e.RegisterWork(w)
-
-			// Update global config if present in file
-			if p, ok := data["port"].(int); ok {
-				e.Config.Port = p
-			}
-			if p, ok := data["port"].(float64); ok {
-				e.Config.Port = int(p)
-			}
-			if d, ok := data["debug"].(bool); ok {
-				e.Config.Debug = d
-			}
-			if str, ok := data["source"].(string); ok {
-				e.Config.Sources = append(e.Config.Sources, str)
-			}
-			if ss, ok := data["source"].([]any); ok {
-				for _, s := range ss {
-					if str, ok := s.(string); ok {
-						e.Config.Sources = append(e.Config.Sources, str)
-					}
-				}
-			}
-
-			if e.Config.Debug {
-				fmt.Printf("📦 Config loaded: %s [%s]\n", w.Name, f)
-			}
-
-			// SUPPORT MODULAR DB INITIALIZATION
-			if dbRaw, ok := data["database"]; ok {
-				var dbCfg security.DBConfig
-				// Convert map to struct via JSON (easiest way in Go for generic maps)
-				jsonData, _ := json.Marshal(dbRaw)
-				json.Unmarshal(jsonData, &dbCfg)
-
-				if dbCfg.Type != "" {
-					if err := work.InitDB(dbCfg); err == nil {
-						fmt.Printf("✅ Database Connected (from %s)\n", f)
-					}
-				}
-			}
-		}
-	}
-}
-
 func loadLogic(e *core.Engine, dir string) {
-	// Recursive walk to find all .js files
+	// PHA 1: Tìm và nạp file gốc (work.js) để khởi tạo Context / App trước
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
-		} // Skip read errors
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".js") {
-			content, _ := os.ReadFile(path)
-
-			// Extract tenant and domain from path: public/[tenant]/[domain]/...
-			tenantID := ""
-			domain := ""
-			relPath, _ := filepath.Rel(dir, path)
-			parts := strings.Split(filepath.ToSlash(relPath), "/")
-			if len(parts) >= 2 {
-				// We assume direct structure if not in 'public' root
-				// But we should check if dir itself is 'public'
-				if strings.Contains(dir, "public") {
-					tenantID = parts[0]
-					if len(parts) >= 2 {
-						domain = parts[1]
-					}
-				}
-			}
-
-			w, err := e.Build(string(content), tenantID, domain, path)
-			if err == nil {
-				w.SourcePath, _ = filepath.Abs(path) // Track Source Path
-				if e.Config.Debug {
-					fmt.Printf("📜 Logic loaded: %s (Tenant: %s, Domain: %s)\n", path, tenantID, domain)
-				}
-
-				// GLOBAL BYTECODE PROPAGATION
-				if w.GetBytecode() != nil {
-					// Also propagate to all routers and crons registered during Build
-					e.RegistryMu.Lock()
-					for _, rt := range e.Routers {
-						if rt.Work.Entity == tenantID && rt.Work.Domain == domain && rt.Work.GetBytecode() == nil {
-							rt.Work.SetBytecode(w.GetBytecode())
-						}
-					}
-					for _, c := range e.Crons {
-						if c.Work.Entity == tenantID && c.Work.Domain == domain && c.Work.GetBytecode() == nil {
-							c.Work.SetBytecode(w.GetBytecode())
-						}
-					}
-					e.RegistryMu.Unlock()
-				}
-
-				e.Trigger(context.TODO(), w, nil, nil)
-			} else {
-				fmt.Printf("❌ Code Error in %s: %v\n", path, err)
-			}
+		}
+		if !info.IsDir() && info.Name() == "work.js" {
+			compileAndRun(e, dir, path)
 		}
 		return nil
 	})
 	if err != nil && e.Config.Debug {
-		fmt.Printf("⚠️  Warning: Error walking directory %s: %v\n", dir, err)
+		fmt.Printf("⚠️  Warning: Error walking directory %s (Phase 1): %v\n", dir, err)
+	}
+
+	// PHA 2: Chạy các file JS khác (routes, api, jobs, etc.)
+	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Bỏ qua work.js vì đã nạp ở Pha 1
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".js") && info.Name() != "work.js" {
+			compileAndRun(e, dir, path)
+		}
+		return nil
+	})
+	if err != nil && e.Config.Debug {
+		fmt.Printf("⚠️  Warning: Error walking directory %s (Phase 2): %v\n", dir, err)
+	}
+}
+
+// Hàm helper để tránh lặp code khi Build & Trigger
+func compileAndRun(e *core.Engine, dir, path string) {
+	content, _ := os.ReadFile(path)
+
+	// Extract tenant and domain from path: public/[tenant]/[domain]/...
+	tenantID := ""
+	domain := ""
+	relPath, _ := filepath.Rel(dir, path)
+	parts := strings.Split(filepath.ToSlash(relPath), "/")
+	if len(parts) >= 2 {
+		if strings.Contains(dir, "public") {
+			tenantID = parts[0]
+			if len(parts) >= 2 {
+				domain = parts[1]
+			}
+		}
+	}
+
+	w, err := e.Build(string(content), tenantID, domain, path)
+	if err == nil {
+		w.SourcePath, _ = filepath.Abs(path) // Track Source Path
+		if e.Config.Debug {
+			fmt.Printf("📜 Logic loaded: %s (Tenant: %s, Domain: %s)\n", path, tenantID, domain)
+		}
+
+		// GLOBAL BYTECODE PROPAGATION
+		if w.GetBytecode() != nil {
+			e.RegistryMu.Lock()
+			for _, rt := range e.Routers {
+				if rt.Work.Entity == tenantID && rt.Work.Domain == domain && rt.Work.GetBytecode() == nil {
+					rt.Work.SetBytecode(w.GetBytecode())
+				}
+			}
+			for _, c := range e.Crons {
+				if c.Work.Entity == tenantID && c.Work.Domain == domain && c.Work.GetBytecode() == nil {
+					c.Work.SetBytecode(w.GetBytecode())
+				}
+			}
+			e.RegistryMu.Unlock()
+		}
+
+		e.Trigger(context.TODO(), w, nil, nil)
+	} else {
+		fmt.Printf("❌ Code Error in %s: %v\n", path, err)
 	}
 }
 
@@ -263,82 +173,6 @@ func bootServer(e *core.Engine, serverPort int) {
 	e.RegistryMu.RLock()
 	fmt.Printf("🔍 Routes registered: %d\n", len(e.Routers))
 	e.RegistryMu.RUnlock()
-
-	// --- API NỘI BỘ (ADMIN & TOOLS) ---
-	http.HandleFunc("/_kitwork/routes", func(w http.ResponseWriter, r *http.Request) {
-		e.RegistryMu.RLock()
-		defer e.RegistryMu.RUnlock()
-		var res []map[string]string
-		for _, rt := range e.Routers {
-			res = append(res, map[string]string{"method": rt.Method, "path": rt.Path, "work": rt.Work.Name})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(res)
-	})
-
-	http.HandleFunc("/_kitwork/source", func(w http.ResponseWriter, r *http.Request) {
-		workName := r.URL.Query().Get("work")
-		e.RegistryMu.RLock()
-		wUnit, ok := e.Registry[workName]
-		e.RegistryMu.RUnlock()
-		if !ok || wUnit.SourcePath == "" {
-			http.Error(w, "Source not found", 404)
-			return
-		}
-		content, _ := os.ReadFile(wUnit.SourcePath)
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Write(content)
-	})
-
-	http.HandleFunc("/_kitwork/jit", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Content string `json:"content"`
-		}
-		json.NewDecoder(r.Body).Decode(&req)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"css": css.GenerateJIT(req.Content)})
-	})
-
-	http.HandleFunc("/_kitwork/deploy", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "Method not allowed", 405)
-			return
-		}
-		var req struct {
-			Content string `json:"content"`
-			Path    string `json:"path"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid JSON", 400)
-			return
-		}
-
-		newWork, err := e.Build(req.Content, "", "", req.Path)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Build Failed: %v", err), 400)
-			return
-		}
-
-		// Persistence (Optional)
-		if req.Path != "" {
-			fullPath := filepath.Join(e.Config.Sources[0], req.Path)
-			os.MkdirAll(filepath.Dir(fullPath), 0755)
-			os.WriteFile(fullPath, []byte(req.Content), 0644)
-			newWork.SourcePath, _ = filepath.Abs(fullPath)
-		}
-
-		e.RegistryMu.Lock()
-		e.Registry[newWork.Name] = newWork
-		e.RegistryMu.Unlock()
-
-		e.Trigger(context.TODO(), newWork, nil, nil)
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"status": "deployed",
-			"work":   newWork.Name,
-		})
-	})
 
 	// --- HANDLER CHÍNH (ROUTING + ASSETS) ---
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -496,8 +330,6 @@ func bootServer(e *core.Engine, serverPort int) {
 			w.WriteHeader(res.Response.Code)
 		}
 
-		// --- 3. RENDERING LOGIC ---
-		tmplPath := matchedRoute.Work.TemplatePath
 		renderData := responseVal.Interface()
 		if renderData == nil {
 			renderData = make(map[string]any)
@@ -560,63 +392,6 @@ func bootServer(e *core.Engine, serverPort int) {
 
 				// 1. Render the Page Fragment
 				rendered := render.RenderWithDir(string(content), renderData, filepath.Dir(finalPath), globalViewDir)
-
-				// 2. Automatic Shell Wrapping ("All read through index")
-				var shellPath string
-
-				// Priority 1: Use explicit shell defined in render.template()
-				if matchedRoute.Work.ShellPath != "" {
-					// Thử tìm shell tương đối so với pages root
-					sp := filepath.Join(globalViewDir, matchedRoute.Work.ShellPath)
-					if _, err := os.Stat(sp); err == nil {
-						shellPath = sp
-					} else {
-						shellPath = matchedRoute.Work.ShellPath
-					}
-				}
-
-				// Priority 2: Standard Bubble-up search for index.html
-				if shellPath == "" {
-					searchDir := filepath.Dir(finalPath)
-					for {
-						p := filepath.Join(searchDir, "index.html")
-						if _, err := os.Stat(p); err == nil {
-							shellPath = p
-							break
-						}
-						if searchDir == globalViewDir || searchDir == "." || searchDir == "/" {
-							break
-						}
-						parent := filepath.Dir(searchDir)
-						if parent == searchDir {
-							break
-						}
-						searchDir = parent
-					}
-				}
-
-				if shellPath != "" && finalPath != shellPath {
-					if shellContent, err := os.ReadFile(shellPath); err == nil {
-						// Prepare shell data: Copy original data and add 'page'
-						shellData := make(map[string]any)
-						if m, ok := renderData.(map[string]any); ok {
-							for k, v := range m {
-								shellData[k] = v
-							}
-						} else if m, ok := renderData.(map[string]interface{}); ok {
-							for k, v := range m {
-								shellData[k] = v
-							}
-						}
-
-						// Inject the rendered fragment as 'page'
-						// Use value.NewSafeHTML to tell the engine NOT to escape this string
-						shellData["page"] = value.NewSafeHTML(rendered)
-
-						// Render the Shell
-						rendered = render.RenderWithDir(string(shellContent), shellData, filepath.Dir(shellPath), globalViewDir)
-					}
-				}
 
 				if w.Header().Get("Content-Type") == "" {
 					w.Header().Set("Content-Type", "text/html; charset=utf-8")

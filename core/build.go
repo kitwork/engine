@@ -17,10 +17,7 @@ func (e *Engine) Build(source string, tenantID string, domain string, sourcePath
 		return nil, errors.New(p.Errors()[0])
 	}
 
-	w := work.New("temp")
-	w.Entity = tenantID
-	w.Domain = domain
-	w.SourcePath = sourcePath
+	w := work.New("temp", tenantID, domain, sourcePath)
 
 	env := compiler.NewEnclosedEnvironment(e.stdlib)
 	env.Set("kitwork", value.NewFunc(func(args ...value.Value) value.Value {
@@ -34,21 +31,20 @@ func (e *Engine) Build(source string, tenantID string, domain string, sourcePath
 			}
 		}
 
-		if _, ok := e.Registry[name]; ok {
-			// We return our DSL object
-			return value.New(createAppObj(e, tenantID, domain, sourcePath))
+		e.RegistryMu.Lock()
+		defer e.RegistryMu.Unlock()
+
+		if existing, ok := e.Registry[name]; ok {
+			// Ensure it has access to register items backward
+			existing.EngineRegistry = e
+			return value.New(existing)
 		}
 
-		w.Name = name
-		w.Entity = tenantID
-		w.Domain = domain
-		w.SourcePath = sourcePath
+		newWork := work.New(name, tenantID, domain, sourcePath)
+		newWork.EngineRegistry = e
+		e.Registry[name] = newWork
 
-		e.RegistryMu.Lock()
-		e.Registry[name] = w
-		e.RegistryMu.Unlock()
-
-		return value.New(createAppObj(e, tenantID, domain, sourcePath))
+		return value.New(newWork)
 	}))
 
 	c := e.compilerPool.Get().(*compiler.Compiler)
@@ -56,10 +52,10 @@ func (e *Engine) Build(source string, tenantID string, domain string, sourcePath
 	if err := c.Compile(prog); err == nil {
 		w.SetBytecode(c.ByteCodeResult())
 		if e.Config.Debug {
-			fmt.Printf("[Build] Assigned bytecode to Work: %s (bytecode length: %d)\n", w.Name, len(w.GetBytecode().Instructions))
+			fmt.Printf("[Build] Assigned bytecode to Work (bytecode length: %d)\n", len(w.GetBytecode().Instructions))
 		}
 	} else {
-		fmt.Printf("[Build] Compile error for Work: %s - %v\n", w.Name, err)
+		fmt.Printf("[Build] Compile error for Work: %v\n", err)
 	}
 
 	compiler.Evaluator(prog, env) // Now can read addresses from AST

@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -38,6 +39,7 @@ type LambdaExecutor interface {
 }
 
 type DBQuery struct {
+	db         *sql.DB
 	table      string
 	fields     []string
 	limit      int
@@ -243,7 +245,7 @@ func (q *DBQuery) Create(data value.Value) value.Value {
 }
 
 func (q *DBQuery) Insert(data value.Value) value.Value {
-	db := GetDB(q.connection)
+	db := q.db
 	if q.table == "" {
 		return value.Value{K: value.Nil}
 	}
@@ -309,7 +311,7 @@ func (q *DBQuery) Insert(data value.Value) value.Value {
 }
 
 func (q *DBQuery) Update(data value.Value) value.Value {
-	db := GetDB(q.connection)
+	db := q.db
 	if q.table == "" {
 		return value.Value{K: value.Nil}
 	}
@@ -411,7 +413,7 @@ func (q *DBQuery) Remove() value.Value {
 }
 
 func (q *DBQuery) Destroy() value.Value {
-	db := GetDB(q.connection)
+	db := q.db
 	if q.table == "" {
 		return value.Value{K: value.Nil}
 	}
@@ -679,7 +681,7 @@ func (q *DBQuery) ToList() value.Value {
 }
 
 func (q *DBQuery) executeGet() value.Value {
-	db := GetDB(q.connection)
+	db := q.db
 	if db == nil {
 		fmt.Printf("[DB] Error: No database connection found for %s\n", q.connection)
 		return value.Value{K: value.Nil}
