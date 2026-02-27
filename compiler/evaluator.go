@@ -199,9 +199,9 @@ func Evaluator(node Node, env *Environment) value.Value {
 		for i, p := range n.Parameters {
 			params[i] = p.Value
 		}
-		sFn := &value.Script{
-			Address:    n.Address, // Will be correct if Compiler ran first
-			ParamNames: params,
+		sFn := &value.Lambda{
+			Address: n.Address, // Will be correct if Compiler ran first
+			Params:  params,
 		}
 		return value.New(sFn)
 

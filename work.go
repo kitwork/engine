@@ -2,8 +2,9 @@ package engine
 
 import (
 	"fmt"
+	"net/http"
 
-	"github.com/kitwork/engine/script"
+	"github.com/kitwork/engine/core"
 )
 
 type Config struct {
@@ -13,20 +14,13 @@ type Config struct {
 }
 
 func Run(cfg *Config) {
+	fmt.Printf("Bắt đầu khởi động Engine tại cổng %d, dùng thư mục: %s\n", cfg.Port, cfg.Source)
+	fmt.Println("Truy cập thử: http://localhost:3000/test")
 
-	// engine := core.New("public")
+	engine := core.New(cfg.Source)
 
-	source := `
-			let a = 1;
-			let b = 2;
-			return a + b;
-		`
-	// Hoặc gán built-in nếu bạn muốn chạy kèm các thư viện: engine.Builtins("localhost")
-	res, err := script.Stress(source, 1_000_000)
+	err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), engine)
 	if err != nil {
-		fmt.Println("Lỗi:", err)
-	} else {
-		// Sẽ in ra: "Kết quả là: 300"
-		fmt.Println("Kết quả là:", res.Interface())
+		fmt.Println("Lỗi chạy server:", err)
 	}
 }

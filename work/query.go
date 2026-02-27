@@ -35,7 +35,7 @@ func (h *SQLProxyHandler) OnInvoke(method string, args ...value.Value) value.Val
 }
 
 type LambdaExecutor interface {
-	ExecuteLambda(fn *value.Script, args []value.Value) value.Value
+	ExecuteLambda(fn *value.Lambda, args []value.Value) value.Value
 }
 
 type DBQuery struct {
@@ -85,7 +85,7 @@ func (q *DBQuery) Where(args ...value.Value) *DBQuery {
 
 	// MAGIC WHERE: If first arg is a Lambda
 	if args[0].K == value.Func && q.executor != nil {
-		if sFn, ok := args[0].V.(*value.Script); ok {
+		if sFn, ok := args[0].V.(*value.Lambda); ok {
 			// Create a Proxy with SQL handler
 			handler := &SQLProxyHandler{}
 			proxy := value.Value{K: value.Proxy, V: handler}
@@ -230,7 +230,7 @@ func (q *DBQuery) Find(idOrFn any) value.Value {
 		q.conditions = []string{"\"id\" = $1"}
 		q.whereArgs = []any{v.Interface()}
 		return q.First()
-	case *value.Script:
+	case *value.Lambda:
 		return q.Where(value.Value{K: value.Func, V: v}).First()
 	}
 
@@ -473,7 +473,7 @@ func (q *DBQuery) In(columnOrFn any, vals ...any) *DBQuery {
 		if v.K == value.Func {
 			return q.Where(v)
 		}
-	case *value.Script:
+	case *value.Lambda:
 		return q.Where(value.Value{K: value.Func, V: v})
 	}
 
@@ -505,26 +505,26 @@ func (q *DBQuery) LeftJoin(tableOrFn any, args ...value.Value) *DBQuery {
 
 func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *DBQuery {
 	var tableName string
-	var sFn *value.Script
+	var sFn *value.Lambda
 
 	// 1. Phân tích Lambda để lấy tên bảng từ Parameter Names
 	switch v := tableOrFn.(type) {
 	case string:
 		tableName = v
 		if len(args) > 0 && args[0].K == value.Func {
-			sFn, _ = args[0].V.(*value.Script)
+			sFn, _ = args[0].V.(*value.Lambda)
 		}
 	case value.Value:
 		if v.K == value.Func {
-			sFn, _ = v.V.(*value.Script)
+			sFn, _ = v.V.(*value.Lambda)
 		}
-	case *value.Script:
+	case *value.Lambda:
 		sFn = v
 	}
 
 	// Nếu là Lambda, tự động lấy tên bảng từ biến đầu tiên người dùng đặt
-	if sFn != nil && tableName == "" && len(sFn.ParamNames) > 0 {
-		tableName = sFn.ParamNames[0]
+	if sFn != nil && tableName == "" && len(sFn.Params) > 0 {
+		tableName = sFn.Params[0]
 	}
 
 	if tableName == "" {
@@ -536,10 +536,10 @@ func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *
 	// 2. Xử lý logic ON (Inject đúng tên bảng vào Proxy)
 	if sFn != nil {
 		// Elite Logic: Lấy tên bảng trực tiếp từ cách người dùng đặt tên biến trong JS
-		joinTableAlias := sFn.ParamNames[0]
+		joinTableAlias := sFn.Params[0]
 		primaryTableAlias := q.table // Mặc định
-		if len(sFn.ParamNames) > 1 {
-			primaryTableAlias = sFn.ParamNames[1]
+		if len(sFn.Params) > 1 {
+			primaryTableAlias = sFn.Params[1]
 		}
 
 		hJoin := &SQLProxyHandler{TableName: joinTableAlias}
@@ -571,7 +571,7 @@ func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *
 
 func (q *DBQuery) On(args ...value.Value) *DBQuery {
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
-		if sFn, ok := args[0].V.(*value.Script); ok {
+		if sFn, ok := args[0].V.(*value.Lambda); ok {
 			handler := &SQLProxyHandler{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
@@ -598,7 +598,7 @@ func (q *DBQuery) Group(columns ...string) *DBQuery {
 func (q *DBQuery) Having(args ...value.Value) *DBQuery {
 	// Re-use logic from Where for Having
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
-		if sFn, ok := args[0].V.(*value.Script); ok {
+		if sFn, ok := args[0].V.(*value.Lambda); ok {
 			handler := &SQLProxyHandler{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
@@ -625,7 +625,7 @@ func (q *DBQuery) Like(columnOrFn any, pattern ...string) *DBQuery {
 		if v.K == value.Func {
 			return q.Where(v)
 		}
-	case *value.Script:
+	case *value.Lambda:
 		return q.Where(value.Value{K: value.Func, V: v})
 	}
 

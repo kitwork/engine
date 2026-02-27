@@ -208,9 +208,9 @@ func resolveVar(rawKey string, data any, scope map[string]value.Value) string {
 	}
 
 	val := resolveValue(rawKey, data, scope)
-	if val.S == value.SafeHTML {
-		return val.String()
-	}
+	// if val.S == value.SafeHTML {
+	// 	return val.String()
+	// }
 
 	return html.EscapeString(val.String())
 }

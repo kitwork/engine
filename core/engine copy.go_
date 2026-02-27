@@ -1,0 +1,325 @@
+package core
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path"
+	"strings"
+
+	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/value"
+	"github.com/kitwork/engine/work"
+)
+
+type Engine struct {
+	stdlib   *compiler.Environment
+	Source   string
+	Bytecode *compiler.Bytecode
+	Routes   map[string]value.Value
+}
+
+func New(source string) *Engine {
+	stdlib := compiler.NewEnvironment()
+	e := &Engine{
+		Source: source,
+		stdlib: stdlib,
+		Routes: make(map[string]value.Value),
+	}
+	e.Builtins()
+	return e
+}
+
+func (e *Engine) Builtins() {
+	kitwork := make(map[string]value.Value)
+
+	// kitwork.router()
+	kitwork["router"] = value.NewFunc(func(args ...value.Value) value.Value {
+		return e.createRouter("")
+	})
+
+	// Add other mocks for app.js compatibility
+	mockFunc := value.NewFunc(func(args ...value.Value) value.Value {
+		m := make(map[string]value.Value)
+		chain := value.New(m)
+		f := value.NewFunc(func(a ...value.Value) value.Value { return chain })
+		m["layout"] = f
+		m["schedule"] = f
+		m["every"] = f
+		m["daily"] = f
+		m["fail"] = f
+		m["done"] = f
+		m["template"] = f
+		m["bind"] = f
+		m["status"] = f
+		m["redirect"] = f
+		m["forward"] = f
+		m["cache"] = f
+		m["folder"] = f
+		m["file"] = f
+		m["rateLimit"] = f
+		m["bodyLimit"] = f
+		m["handle"] = f // for kitwork.get().handle()
+		return chain
+	})
+
+	kitwork["entity"] = mockFunc
+	kitwork["log"] = mockFunc
+	kitwork["http"] = mockFunc
+	kitwork["smtp"] = mockFunc
+	kitwork["chrome"] = mockFunc
+	kitwork["database"] = mockFunc
+	kitwork["postgres"] = mockFunc
+	kitwork["redis"] = mockFunc
+	kitwork["render"] = mockFunc
+	kitwork["cron"] = mockFunc
+
+	// kitwork.get() -> returns a route directly
+	kitwork["get"] = value.NewFunc(func(args ...value.Value) value.Value {
+		p := ""
+		if len(args) > 0 {
+			p = args[0].String()
+		}
+		return e.createRoute(p)
+	})
+
+	e.stdlib.Set("kitwork", value.New(kitwork))
+}
+
+func (e *Engine) createRouter(prefix string) value.Value {
+	m := make(map[string]value.Value)
+	chain := value.New(m)
+
+	m["get"] = value.NewFunc(func(args ...value.Value) value.Value {
+		p := prefix
+		if len(args) > 0 {
+			p += args[0].String()
+		}
+		return e.createRoute(p)
+	})
+
+	m["base"] = value.NewFunc(func(args ...value.Value) value.Value {
+		newPrefix := prefix
+		if len(args) > 0 {
+			newPrefix += args[0].String()
+		}
+		return e.createRouter(newPrefix)
+	})
+
+	m["group"] = m["base"]
+
+	f := value.NewFunc(func(a ...value.Value) value.Value { return chain })
+	m["rateLimit"] = f
+	m["bodyLimit"] = f
+
+	return chain
+}
+
+func (e *Engine) createRoute(path string) value.Value {
+	m := make(map[string]value.Value)
+	chain := value.New(m)
+
+	m["handle"] = value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) > 0 {
+			e.Routes[path] = args[0]
+			fmt.Printf("[Registry] Registered: %s\n", path)
+		}
+		return chain
+	})
+
+	f := value.NewFunc(func(a ...value.Value) value.Value { return chain })
+	m["redirect"] = f
+	m["forward"] = f
+	m["cache"] = f
+	m["fail"] = f
+	m["done"] = f
+	m["status"] = f
+	m["folder"] = f
+	m["file"] = f
+
+	return chain
+}
+
+func (e *Engine) identity(hostname string) string {
+	return "localhost"
+}
+
+func (e *Engine) path(hostname string) string {
+	identity := e.identity(hostname)
+	return path.Join(e.Source, identity, "app.js")
+}
+
+// func RegisterMockRouter(route string, callback value.Value) {
+// 	mockRoute = route
+// 	mockCallback = callback
+// }
+
+// load là Blueprint Phase: Chạy file JS duy nhất 1 lần để nhồi Blueprint vào Memory
+func (e *Engine) load(hostname string) error {
+	path := e.path(hostname)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("[Blueprint] File Not Found: %s\n", path)
+		return nil // Avoid crash for now
+	}
+
+	l := compiler.NewLexer(string(content))
+	p := compiler.NewParser(l)
+	prog := p.ParseProgram()
+
+	if len(p.Errors()) > 0 {
+		return fmt.Errorf("[Blueprint] Parse Error: %v", p.Errors())
+	}
+
+	// 1. Biên dịch AST thành Bytecode để giải quyết các địa chỉ của Lambda
+	c := compiler.NewCompiler()
+	if err := c.Compile(prog); err == nil {
+		e.Bytecode = c.ByteCodeResult()
+	} else {
+		return fmt.Errorf("[Blueprint] Compile Error: %v", err)
+	}
+
+	// 2. Khi gọi Evaluator -> Các lệnh app.router().get() sẽ thực thi -> Tiêm cài đặt vào Registry
+	compiler.Evaluator(prog, e.stdlib)
+	fmt.Printf("[Blueprint] Đã nạp thành công thiết kế cho Host: %s\n", hostname)
+
+	return nil
+}
+
+// Work là VM Phase: Gọi Bytecode đã nạp chạy cực nhanh
+func (e *Engine) Work(hostname string, r *http.Request) (*work.Response, error) {
+	resp := new(work.Response)
+
+	fmt.Printf("[Work] Checking route: %s\n", r.URL.Path)
+
+	// Tìm route khớp
+	if callback, ok := e.Routes[r.URL.Path]; ok && callback.K == value.Func {
+		fmt.Printf("[Work] Found callback for %s\n", r.URL.Path)
+
+		// Chuẩn bị Response
+		jsResponse := make(map[string]value.Value)
+		jsResponse["json"] = value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				resp.JSON(args[0])
+			}
+			return value.NewNull()
+		})
+		jsResponse["html"] = value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				resp.HTML(args[0])
+			}
+			return value.NewNull()
+		})
+		jsResponse["status"] = value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 {
+				resp.Status(int(args[0].Float()))
+			}
+			return value.New(jsResponse)
+		})
+		valResp := value.New(jsResponse)
+
+		// Thực thi JS Lambda ngay bây giờ
+		if lambda, ok := callback.V.(*value.Lambda); ok && e.Bytecode != nil {
+			vm := runtime.New(e.Bytecode.Instructions, e.Bytecode.Constants)
+			vm.Globals = e.stdlib.Store()
+
+			// Chuẩn bị Request
+			jsRequest := make(map[string]value.Value)
+			jsRequest["params"] = value.NewFunc(func(a ...value.Value) value.Value {
+				return value.NewNull()
+			})
+			jsRequest["query"] = value.NewFunc(func(a ...value.Value) value.Value {
+				return value.NewNull()
+			})
+			valReq := value.New(jsRequest)
+
+			// Chuẩn bị Context
+			jsContext := make(map[string]value.Value)
+			jsContext["request"] = valReq
+			jsContext["response"] = valResp
+			valCtx := value.New(jsContext)
+
+			// Quyết định đối số dựa trên số lượng param của Lambda
+			var finalArgs []value.Value
+			switch len(lambda.Params) {
+			case 1:
+				// Nếu chỉ có 1 param, có thể là context HOẶC response tùy người dùng thiết kế
+				// Nhưng dựa vào `app.js` và `work.js`, có chỗ dùng `response`, có chỗ dùng `context`
+				// Thường thì ta ưu tiên truyền Context có chứa cả hai.
+				// TUY NHIÊN, nểu người dùng viết `handle((response) => { response.json(...) })`
+				// thì context.json sẽ fail.
+				// Để an toàn và linh hoạt nhất, ta có thể inject các method của response VÀO context.
+				for k, v := range jsResponse {
+					jsContext[k] = v
+				}
+				finalArgs = []value.Value{valCtx}
+			case 2:
+				// (request, response)
+				finalArgs = []value.Value{valReq, valResp}
+			default:
+				// (request, response, context)
+				finalArgs = []value.Value{valReq, valResp, valCtx}
+			}
+
+			fmt.Printf("[Work] Executing Lambda with %d args\n", len(finalArgs))
+			vm.ExecuteLambda(lambda, finalArgs)
+		} else {
+			fmt.Printf("[Work] Lambda not found or nil bytecode (lambda: %v, bytecode: %v)\n", callback.V != nil, e.Bytecode != nil)
+		}
+
+		if resp.Code() == 0 {
+			resp.Status(200)
+		}
+		return resp, nil
+	}
+
+	resp.Status(http.StatusNotFound)
+	return resp, nil
+}
+
+func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Printf("[CRITICAL] Panic Recovered: %v\n", rec)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+	}()
+
+	domain := strings.Split(r.Host, ":")[0]
+
+	// Dành cho Prototype: Luôn nạp Blueprint (Sẽ dời ra ngoài lúc Boot sau)
+	e.load(domain)
+
+	response, err := e.Work(domain, r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("[ServeHTTP] Response Type: %s, Code: %d\n", response.Type(), response.Code())
+
+	switch response.Type() {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(response.Code())
+		if response.Data().Interface() != nil {
+			b, _ := json.Marshal(response.Data().Interface())
+			w.Write(b)
+		}
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(response.Code())
+		if response.Data().String() != "" {
+			w.Write([]byte(response.Data().String()))
+		}
+	default:
+		// Not matched or missing response
+		if response.Code() == http.StatusNotFound {
+			http.NotFound(w, r)
+		} else {
+			w.WriteHeader(response.Code())
+		}
+	}
+}

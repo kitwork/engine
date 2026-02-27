@@ -8,8 +8,8 @@ import (
 type Frame struct {
 	IP     int
 	Vars   map[string]value.Value // Local scope
-	Fn     *value.Script          // Hàm đang được thực thi
-	Defers []*value.Script        // Deferred functions
+	Fn     *value.Lambda          // Hàm đang được thực thi
+	Defers []*value.Lambda        // Deferred functions
 }
 
 type Runtime struct {
@@ -21,7 +21,7 @@ type Runtime struct {
 	Frames    []Frame                // Call Stack
 	FrameIdx  int                    // Hiện tại đang ở Frame nào
 	Energy    uint64                 // Năng lượng tiêu thụ
-	Spawner   func(s *value.Script)
+	Spawner   func(s *value.Lambda)
 }
 
 func New(code []byte, constants []value.Value) *Runtime {

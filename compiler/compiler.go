@@ -309,9 +309,9 @@ func (c *Compiler) Compile(node Node) error {
 			params[i] = p.Value
 		}
 		n.Address = startIP // Propagate address back to AST node
-		fnData := &value.Script{
-			Address:    startIP,
-			ParamNames: params,
+		fnData := &value.Lambda{
+			Address: startIP,
+			Params:  params,
 		}
 		idx := c.addConstant(value.New(fnData))
 		c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))

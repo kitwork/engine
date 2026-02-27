@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path"
 	"strings"
 
@@ -42,24 +41,24 @@ func (e *Engine) path(hostname string) string {
 	return path.Join(e.Source, identity, hostname, "work.js")
 }
 
-func (e *Engine) load(hostname string) error {
-	path := e.path(hostname)
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
+// func (e *Engine) load(hostname string) error {
+// 	path := e.path(hostname)
+// 	content, err := os.ReadFile(path)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	l := compiler.NewLexer(string(content))
-	p := compiler.NewParser(l)
-	prog := p.ParseProgram()
-	if len(p.Errors()) > 0 {
-		return fmt.Errorf("compile error: %s", p.Errors()[0])
-	}
+// 	l := compiler.NewLexer(string(content))
+// 	p := compiler.NewParser(l)
+// 	prog := p.ParseProgram()
+// 	if len(p.Errors()) > 0 {
+// 		return fmt.Errorf("compile error: %s", p.Errors()[0])
+// 	}
 
-	compiler.Evaluator(prog, e.stdlib)
+// 	compiler.Evaluator(prog, e.stdlib)
 
-	return nil
-}
+// 	return nil
+// }
 
 func (e *Engine) Work(hostname string, r *http.Request) (*work.Response, error) {
 	resp := new(work.Response)
@@ -118,39 +117,3 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 }
-
-// for _, rt := range e.Routes {
-// 	if rt.Method == r.Method || rt.Method == "ANY" {
-// 		if r.URL.Path == rt.Path || strings.HasPrefix(r.URL.Path, strings.TrimRight(rt.Path, "/")+"/") {
-
-// 			if rt.IsFolder {
-// 				fullPath := filepath.Join(e.Kw.Path(), rt.StaticPath)
-// 				prefix := rt.Path
-// 				http.StripPrefix(prefix, http.FileServer(http.Dir(fullPath))).ServeHTTP(w, r)
-// 				return
-// 			}
-// 			if rt.IsFile {
-// 				fullPath := filepath.Join(e.Kw.Path(), rt.StaticPath)
-// 				http.ServeFile(w, r, fullPath)
-// 				return
-// 			}
-
-// 			if rt.GetHandle() != nil && rt.GetHandle().GetMain() != nil {
-// 				resObj := map[string]value.Value{
-// 					"json": value.NewFunc(func(args ...value.Value) value.Value {
-// 						w.Header().Set("Content-Type", "application/json")
-// 						if len(args) > 0 {
-// 							b, _ := json.Marshal(args[0].Interface())
-// 							w.Write(b)
-// 						}
-// 						return value.NewNull()
-// 					}),
-// 				}
-
-// 				machine := runtime.New(nil, nil)
-// 				machine.ExecuteLambda(rt.GetHandle().GetMain(), []value.Value{value.New(resObj)})
-// 				return
-// 			}
-// 		}
-// 	}
-// }

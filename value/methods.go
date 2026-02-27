@@ -320,13 +320,3 @@ func (v Value) Merge(args ...Value) Value {
 	}
 	return v
 }
-
-// --- Common ---
-
-func (v Value) HTML(_ ...Value) Value {
-	return Value{
-		K: String,
-		V: v.Text(),
-		S: SafeHTML,
-	}
-}

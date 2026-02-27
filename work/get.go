@@ -43,8 +43,3 @@ func (r *Get) Forward(target value.Value) *Forward {
 		target: target,
 	}
 }
-
-func (r *Get) Handle(cb value.Value) *Handle {
-	h := &Handle{}
-	return h.Main(cb)
-}

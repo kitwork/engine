@@ -58,7 +58,6 @@ func (k Kind) String() string {
 		return "any"
 	case Proxy:
 		return "proxy"
-
 	default:
 		return "unknown"
 	}
@@ -100,8 +99,6 @@ func (k Kind) Method(name string) (Method, bool) {
 		return Value.ToJson, true
 	case "len", "length":
 		return Value.Length, true
-	case "html":
-		return Value.HTML, true
 
 	}
 

@@ -35,6 +35,10 @@ func (r *Response) Data() value.Value {
 	return r.data
 }
 
+func (r *Response) Bytes() value.Value {
+	return r.data
+}
+
 // func (r *Response) Header(key, val string) {
 // 	if r.Headers == nil {
 // 		r.Headers = make(map[string]string)

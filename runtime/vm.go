@@ -9,7 +9,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-func (vm *Runtime) Defer(fn *value.Script) {
+func (vm *Runtime) Defer(fn *value.Lambda) {
 	if vm.FrameIdx >= 0 {
 		f := &vm.Frames[vm.FrameIdx]
 		f.Defers = append(f.Defers, fn)
@@ -47,11 +47,11 @@ func (vm *Runtime) Run() value.Value {
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			val := vm.Constants[idx]
-			if sFn, ok := val.V.(*value.Script); ok {
+			if sFn, ok := val.V.(*value.Lambda); ok {
 				// fmt.Printf("[VM PUSH] ScriptFunction from constants[%d] with Address: %d\n", idx, sFn.Address)
-				closure := &value.Script{
+				closure := &value.Lambda{
 					Address:    sFn.Address,
-					ParamNames: sFn.ParamNames,
+					Params: sFn.Params,
 					Scope:      f.Vars, // Use reference to support recursion and mutability
 				}
 				vm.push(value.New(closure))
@@ -209,7 +209,7 @@ func (vm *Runtime) Run() value.Value {
 			handled := false
 			// Special Handling for Functional Methods (Map, Filter, Find)
 			if target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
-				callback := ivArgs[0].V.(*value.Script)
+				callback := ivArgs[0].V.(*value.Lambda)
 				arr := *target.V.(*[]value.Value)
 
 				switch m {
@@ -257,7 +257,7 @@ func (vm *Runtime) Run() value.Value {
 			}
 			fn := vm.pop()
 			if fn.K == value.Func {
-				if s, ok := fn.V.(*value.Script); ok {
+				if s, ok := fn.V.(*value.Lambda); ok {
 					vm.FrameIdx++
 					nf := &vm.Frames[vm.FrameIdx]
 					nf.IP = s.Address
@@ -273,7 +273,7 @@ func (vm *Runtime) Run() value.Value {
 						}
 					}
 
-					for i, name := range s.ParamNames {
+					for i, name := range s.Params {
 						if i < len(args) {
 							nf.Vars[name] = args[i]
 						}
@@ -316,12 +316,12 @@ func (vm *Runtime) Run() value.Value {
 			return vm.pop()
 		case opcode.DEFER:
 			fn := vm.pop()
-			if s, ok := fn.V.(*value.Script); ok {
+			if s, ok := fn.V.(*value.Lambda); ok {
 				f.Defers = append(f.Defers, s)
 			}
 		case opcode.SPAWN:
 			fn := vm.pop()
-			if s, ok := fn.V.(*value.Script); ok && vm.Spawner != nil {
+			if s, ok := fn.V.(*value.Lambda); ok && vm.Spawner != nil {
 				vm.Spawner(s)
 			}
 		case opcode.POP:
@@ -338,7 +338,7 @@ func (vm *Runtime) Run() value.Value {
 	return value.Value{K: value.Nil}
 }
 
-func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Value {
+func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 	if s == nil {
 		return value.Value{K: value.Nil}
 	}
@@ -355,7 +355,7 @@ func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Valu
 			delete(f.Vars, k)
 		}
 	}
-	for i, name := range s.ParamNames {
+	for i, name := range s.Params {
 		if i < len(args) {
 			f.Vars[name] = args[i]
 		}
@@ -391,10 +391,10 @@ func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Valu
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			val := vm.Constants[idx]
-			if sFn, ok := val.V.(*value.Script); ok {
-				closure := &value.Script{
+			if sFn, ok := val.V.(*value.Lambda); ok {
+				closure := &value.Lambda{
 					Address:    sFn.Address,
-					ParamNames: sFn.ParamNames,
+					Params: sFn.Params,
 					Scope:      f.Vars,
 				}
 				vm.push(value.New(closure))
@@ -501,12 +501,12 @@ func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Valu
 			}
 		case opcode.DEFER:
 			fn := vm.pop()
-			if s, ok := fn.V.(*value.Script); ok {
+			if s, ok := fn.V.(*value.Lambda); ok {
 				f.Defers = append(f.Defers, s)
 			}
 		case opcode.SPAWN:
 			fn := vm.pop()
-			if s, ok := fn.V.(*value.Script); ok && vm.Spawner != nil {
+			if s, ok := fn.V.(*value.Lambda); ok && vm.Spawner != nil {
 				vm.Spawner(s)
 			}
 		case opcode.RETURN:
@@ -531,13 +531,13 @@ func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Valu
 			}
 			fn := vm.pop()
 			if fn.K == value.Func {
-				if s, ok := fn.V.(*value.Script); ok {
+				if s, ok := fn.V.(*value.Lambda); ok {
 					vm.FrameIdx++
 					nf := &vm.Frames[vm.FrameIdx]
 					nf.IP = s.Address
 					nf.Fn = s
 					nf.Vars = make(map[string]value.Value) // Fresh map
-					for i, name := range s.ParamNames {
+					for i, name := range s.Params {
 						if i < len(fnArgs) {
 							nf.Vars[name] = fnArgs[i]
 						}
@@ -575,7 +575,7 @@ func (vm *Runtime) ExecuteLambda(s *value.Script, args []value.Value) value.Valu
 			handled := false
 			// Special Handling for Functional Methods (Map, Filter, Find)
 			if target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
-				callback := ivArgs[0].V.(*value.Script)
+				callback := ivArgs[0].V.(*value.Lambda)
 				arr := *target.V.(*[]value.Value)
 
 				switch m {

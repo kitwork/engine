@@ -62,7 +62,7 @@ func New(i any) Value {
 		return Value{K: Array, V: v}
 	case map[string]Value:
 		return Value{K: Map, V: v}
-	case *Script:
+	case *Lambda:
 		return Value{K: Func, V: v}
 	default:
 		return Parse(i)
@@ -73,10 +73,6 @@ func New(i any) Value {
 // NewString - Đã có hàm New(any) trong gói value xử lý cực tốt
 func NewString(s string) Value {
 	return New(s)
-}
-
-func NewSafeHTML(s string) Value {
-	return Value{K: String, V: s, S: SafeHTML}
 }
 
 // NewBool - Tận dụng hàm ToBool hoặc New(bool) bạn đã viết
