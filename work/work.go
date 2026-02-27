@@ -21,7 +21,7 @@ func New(source, identity, host string) *KitWork {
 }
 
 func (w *KitWork) Path() string {
-	return filepath.Join("public", w.entity.Identity, w.entity.Host)
+	return filepath.Join(w.source, w.entity.Identity, w.entity.Host)
 }
 
 type Work struct {

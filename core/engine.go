@@ -1,95 +1,156 @@
 package core
 
 import (
-	"sync"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path"
+	"strings"
 
-	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/kitwork/engine/compiler"
-	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
-	"github.com/robfig/cron/v3"
 )
 
 type Engine struct {
-	stdlib       *compiler.Environment
-	stdlibStore  map[string]value.Value
-	cache        *lru.Cache[string, *work.Work]
-	Registry     map[string]*work.Work // Exposed for Sync
-	RegistryMu   sync.RWMutex          // Mutex for Registry
-	Routers      []*work.Router        // Active HTTP routes
-	Crons        []*work.Cron          // Active Cron jobs
-	compilerPool sync.Pool
-	ctxPool      sync.Pool
-	Config       GlobalConfig
-	scheduler    *cron.Cron
+	stdlib *compiler.Environment
+	Source string
+
+	// CacheRouter map[string]http.HandlerFunc // GET:kitwork.vn/path ....
+	// CacheDomain map[string]string           // kitwork.vn -> identity
 }
 
-func New() *Engine {
-	cache, _ := lru.New[string, *work.Work](2048)
-	stdlib := compiler.NewEnvironment()
-
-	e := &Engine{
-		stdlib:      stdlib,
-		stdlibStore: stdlib.Store(),
-		cache:       cache,
-		Registry:    make(map[string]*work.Work),
-		Routers:     make([]*work.Router, 0),
-		Crons:       make([]*work.Cron, 0),
-		scheduler:   cron.New(cron.WithSeconds()), // Support second-level precision if needed
+func New(source string) *Engine {
+	return &Engine{
+		Source: source,
 	}
-	e.scheduler.Start()
+}
 
-	e.compilerPool.New = func() any { return compiler.NewCompiler() }
+// func (e *Engine) Builtins() {
+// 	e.stdlib.Set("kitwork", value.NewFunc(func(args ...value.Value) value.Value {
+// 		kw := work.New(e.Source, )
+// 		return value.New(kw)
+// 	}))
+// }
 
-	e.ctxPool.New = func() any {
-		return newExecutionContext(e)
+func (e *Engine) identity(hostname string) string {
+	return "test"
+}
+
+func (e *Engine) path(hostname string) string {
+	identity := e.identity(hostname)
+	return path.Join(e.Source, identity, hostname, "work.js")
+}
+
+func (e *Engine) load(hostname string) error {
+	path := e.path(hostname)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
 	}
 
-	e.registerBuiltins()
-	return e
+	l := compiler.NewLexer(string(content))
+	p := compiler.NewParser(l)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		return fmt.Errorf("compile error: %s", p.Errors()[0])
+	}
+
+	compiler.Evaluator(prog, e.stdlib)
+
+	return nil
 }
 
-func (e *Engine) RegisterWork(w *work.Work) {
-	e.Registry[w.Name] = w
+func (e *Engine) Work(hostname string, r *http.Request) (*work.Response, error) {
+	resp := new(work.Response)
+	resp.Status(http.StatusOK)
+	return resp, nil
 }
 
-func (e *Engine) AddRouter(r *work.Router) {
-	e.RegistryMu.Lock()
-	e.Routers = append(e.Routers, r)
-	e.RegistryMu.Unlock()
-}
+func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
-func (e *Engine) AddCron(c *work.Cron) {
-	e.RegistryMu.Lock()
-	e.Crons = append(e.Crons, c)
-	e.RegistryMu.Unlock()
-}
-
-func (e *Engine) registerBuiltins() {
-	e.stdlib.Set("kitwork", value.NewFunc(func(args ...value.Value) value.Value {
-		name := "unnamed"
-		if len(args) > 0 {
-			name = args[0].Text()
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Printf("[CRITICAL] Panic Recovered: %v\n", rec)
+			// debug.PrintStack()
+			http.Error(w, "Internal Server Error (Panic)", http.StatusInternalServerError)
 		}
-		if w, ok := e.Registry[name]; ok {
-			return value.New(w)
-		}
-		w := work.New(name, "", "", "")
-		e.Registry[name] = w
-		return value.New(w)
-	}))
+	}()
 
-	// Inject global engine object
-	e.stdlib.Set("engine", value.NewNull()) // Dummy for now, populated in EC
-	e.stdlib.Set("json", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("html", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("query", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("params", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("go", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("defer", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("parallel", value.NewFunc(func(args ...value.Value) value.Value { return value.NewNull() }))
-	e.stdlib.Set("routes", value.NewFunc(func(args ...value.Value) value.Value {
-		// GlobalRouter was removed. For now, return empty or implement new registry search.
-		return value.New([]value.Value{})
-	}))
+	domain := strings.Split(r.Host, ":")[0]
+
+	response, err := e.Work(domain, r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(response.Code())
+	switch response.Type() {
+	case "json":
+		w.Header().Set("Content-Type", "application/json")
+		if response.Data().Interface() != nil {
+			b, _ := json.Marshal(response.Data().Interface())
+			w.Write(b)
+		}
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if response.Data().String() != "" {
+			w.Write([]byte(response.Data().String()))
+		}
+	case "text":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		if response.Data().String() != "" {
+			w.Write([]byte(response.Data().String()))
+		}
+	case "redirect":
+		http.Redirect(w, r, e.path(domain), http.StatusSeeOther)
+	case "file":
+		http.ServeFile(w, r, e.path(domain))
+	case "folder":
+		http.FileServer(http.Dir(e.path(domain))).ServeHTTP(w, r)
+	case "empty":
+		// Do nothing, Header OK is enough
+	case "error":
+		w.WriteHeader(http.StatusInternalServerError)
+	default:
+		http.NotFound(w, r)
+	}
+
 }
+
+// for _, rt := range e.Routes {
+// 	if rt.Method == r.Method || rt.Method == "ANY" {
+// 		if r.URL.Path == rt.Path || strings.HasPrefix(r.URL.Path, strings.TrimRight(rt.Path, "/")+"/") {
+
+// 			if rt.IsFolder {
+// 				fullPath := filepath.Join(e.Kw.Path(), rt.StaticPath)
+// 				prefix := rt.Path
+// 				http.StripPrefix(prefix, http.FileServer(http.Dir(fullPath))).ServeHTTP(w, r)
+// 				return
+// 			}
+// 			if rt.IsFile {
+// 				fullPath := filepath.Join(e.Kw.Path(), rt.StaticPath)
+// 				http.ServeFile(w, r, fullPath)
+// 				return
+// 			}
+
+// 			if rt.GetHandle() != nil && rt.GetHandle().GetMain() != nil {
+// 				resObj := map[string]value.Value{
+// 					"json": value.NewFunc(func(args ...value.Value) value.Value {
+// 						w.Header().Set("Content-Type", "application/json")
+// 						if len(args) > 0 {
+// 							b, _ := json.Marshal(args[0].Interface())
+// 							w.Write(b)
+// 						}
+// 						return value.NewNull()
+// 					}),
+// 				}
+
+// 				machine := runtime.New(nil, nil)
+// 				machine.ExecuteLambda(rt.GetHandle().GetMain(), []value.Value{value.New(resObj)})
+// 				return
+// 			}
+// 		}
+// 	}
+// }

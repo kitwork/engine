@@ -5,8 +5,7 @@ import "github.com/kitwork/engine"
 func main() {
 	// Khởi tạo Config với danh sách các tệp Database và SMTP cụ thể
 	cfg := &engine.Config{
-		Port:    8080,
-		Sources: []string{"./public"},
+		Port: 8080,
 
 		Master: []string{"config/database/master.yaml"}, // MasterDB
 	}
