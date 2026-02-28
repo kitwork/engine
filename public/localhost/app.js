@@ -1,12 +1,16 @@
-const router = kitwork.router()
-// GIAO DIỆN & SSR (SERVER-SIDE RENDERING)
-// ==========================================
-// Quản lý tài nguyên Tĩnh
+const { router } = kitwork; // Dùng Destructuring để kích hoạt Getter tự động của chúng ta
+
 router.get("/assets").folder("/assets");
 router.get("/favicon.ico").file("/assets/favicon.ico");
 
-const api = router.base("/api");
-
-api.get("/test").handle((response) => {
-    return response.json({ message: "Test" })
+router.get("/hello").handle((req, res) => {
+    return res.json({ message: "hello" })
 });
+
+router.get("/print").handle((req, res) => {
+    const name = req.query("name")
+    print(name);
+    return res.json({ message: name })
+});
+
+router.get("/").redirect("/welcome");

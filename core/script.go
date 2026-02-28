@@ -1,7 +1,8 @@
-package script
+package core
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -11,12 +12,111 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-func Test(source string, iterations int) (value.Value, error) {
-	return New().Test(source, iterations)
+func Source(source string) *Script {
+	return &Script{
+		Source: source,
+	}
 }
 
-func (s *Script) Test(source string, iterations int) (value.Value, error) {
-	code, err := s.code(source)
+type Script struct {
+	Source string
+}
+
+func (s *Script) Readfile() (string, error) {
+	return readFile(s.Source)
+}
+
+func (s *Script) Content() (string, error) {
+	if strings.HasSuffix(s.Source, ".js") {
+		return readFile(s.Source)
+	}
+	return s.Source, nil
+}
+
+func (s *Script) Run(timeouts ...time.Duration) (value.Value, error) {
+	content, err := s.Content()
+	if err != nil {
+		return value.Value{K: value.Invalid}, err
+	}
+
+	l := compiler.NewLexer(content)
+	p := compiler.NewParser(l)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		return value.Value{K: value.Invalid}, fmt.Errorf("compile error: %s", p.Errors()[0])
+	}
+
+	stdlib := compiler.NewEnvironment()
+	timeout := 6 * time.Second //
+	if len(timeouts) > 0 {
+		timeout = timeouts[0]
+	}
+	if timeout > 12*time.Second {
+		timeout = 12 * time.Second
+	}
+	// ⏳ Tính năng chống treo hệ thống (Timeout Handling)
+	if timeout > 0 {
+		// Tạo channel để nhận kết quả từ goroutine thực thi
+		done := make(chan value.Value, 1) // Buffer 1 để tránh goroutine rò rỉ nếu bị timeout
+		errChan := make(chan error, 1)
+
+		go func() {
+			defer func() {
+				// Bắt lỗi Panic nếu có trong lúc chạy script
+				if r := recover(); r != nil {
+					errChan <- fmt.Errorf("panic inside script evaluator: %v", r)
+				}
+			}()
+
+			res := compiler.Evaluator(prog, stdlib)
+			if res.IsInvalid() {
+				errChan <- fmt.Errorf("runtime error during Evaluation")
+			} else {
+				done <- res
+			}
+		}()
+
+		// Dùng Select để "đua" giữa kênh Trả-về và kênh Chờ-giờ
+		select {
+		case res := <-done:
+			return res, nil
+		case evalErr := <-errChan:
+			return value.Value{K: value.Invalid}, evalErr
+		case <-time.After(timeout):
+			return value.Value{K: value.Invalid}, fmt.Errorf("script execution timed out after %v", timeout)
+		}
+	}
+
+	// Chạy bình thường nếu không set Timeout
+	res := compiler.Evaluator(prog, stdlib)
+	if res.IsInvalid() {
+		return value.Value{K: value.Invalid}, fmt.Errorf("runtime error during Evaluation")
+	}
+	return res, nil
+}
+
+func (s *Script) Blueprint() (*compiler.Bytecode, error) {
+	content, err := s.Content()
+	if err != nil {
+		return nil, err
+	}
+
+	l := compiler.NewLexer(content)
+	p := compiler.NewParser(l)
+	prog := p.ParseProgram()
+	if len(p.Errors()) > 0 {
+		return nil, fmt.Errorf("assemble error: %s", p.Errors()[0])
+	}
+
+	c := compiler.NewCompiler()
+	if err := c.Compile(prog); err != nil {
+		return nil, err
+	}
+	return c.ByteCodeResult(), nil
+}
+
+func (s *Script) Test(iterations int) (value.Value, error) {
+	code, err := s.Content()
 	if err != nil {
 		return value.Value{K: value.Invalid}, err
 	}
@@ -127,4 +227,12 @@ func (s *Script) Test(source string, iterations int) (value.Value, error) {
 	fmt.Println(strings.Repeat("=", 45))
 
 	return lastResult, nil
+}
+
+func readFile(source string) (string, error) {
+	content, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
 }

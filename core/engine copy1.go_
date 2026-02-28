@@ -1,0 +1,122 @@
+package core
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path"
+	"strings"
+
+	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/value"
+	"github.com/kitwork/engine/work"
+)
+
+type Engine struct {
+	stdlib   *compiler.Environment
+	Source   string
+	Bytecode *compiler.Bytecode
+	KitWork  *work.KitWork
+}
+
+func New(source string) *Engine {
+	stdlib := compiler.NewEnvironment()
+	e := &Engine{
+		Source:  source,
+		stdlib:  stdlib,
+		KitWork: work.New(source),
+	}
+	e.Builtins()
+	return e
+}
+
+func (e *Engine) Builtins() {
+	// Đăng ký "kitwork" vào môi trường JS, sử dụng KitWork struct từ package work
+	e.stdlib.Set("kitwork", value.NewFunc(e.KitWork.Invoke))
+}
+
+func (e *Engine) identity(hostname string) string {
+	return "localhost"
+}
+
+func (e *Engine) path(hostname string) string {
+	identity := e.identity(hostname)
+	return path.Join(e.Source, identity, "app.js")
+}
+
+func (e *Engine) load(hostname string) error {
+	// Reset Routes trước khi load lại Blueprint
+	e.KitWork.Routes = make(map[string]value.Value)
+
+	path := e.path(hostname)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	l := compiler.NewLexer(string(content))
+	p := compiler.NewParser(l)
+	prog := p.ParseProgram()
+
+	c := compiler.NewCompiler()
+	if err := c.Compile(prog); err == nil {
+		e.Bytecode = c.ByteCodeResult()
+	}
+
+	compiler.Evaluator(prog, e.stdlib)
+	return nil
+}
+
+func (e *Engine) Work(hostname string, r *http.Request) (*work.Response, error) {
+	resp := new(work.Response)
+	fmt.Printf("[Engine.Work] Checking route: %s (Registered: %d)\n", r.URL.Path, len(e.KitWork.Routes))
+
+	// Lấy callback từ Routes đã được định nghĩa trong blueprint
+	if callback, ok := e.KitWork.Routes[r.URL.Path]; ok && callback.K == value.Func {
+
+		fmt.Printf("[Engine.Work] Lambda Type: %T, Bytecode is nil: %v\n", callback.V, e.Bytecode == nil)
+		if lambda, ok := callback.V.(*value.Lambda); ok && e.Bytecode != nil {
+			fmt.Printf("[Engine.Work] Executing VM for lambda address: %d\n", lambda.Address)
+			vm := runtime.New(e.Bytecode.Instructions, e.Bytecode.Constants)
+			vm.Globals = e.stdlib.Store()
+
+			// Thực thi Lambda(response)
+			vm.ExecuteLambda(lambda, []value.Value{valResp})
+		}
+
+		if resp.Code() == 0 {
+			resp.Status(200)
+		}
+		return resp, nil
+	}
+
+	resp.Status(http.StatusNotFound)
+	return resp, nil
+}
+
+func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	domain := strings.Split(r.Host, ":")[0]
+	fmt.Printf("[ServeHTTP] Request: %s %s\n", r.Method, r.URL.Path)
+
+	// Tải blueprint và đăng ký các routes mới
+	e.load(domain)
+
+	response, err := e.Work(domain, r)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	if response.Type() == "json" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(response.Code())
+		b, _ := json.Marshal(response.Data().Interface())
+		w.Write(b)
+	} else if response.Code() == http.StatusNotFound {
+		http.NotFound(w, r)
+	} else {
+		w.WriteHeader(response.Code())
+	}
+}

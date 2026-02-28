@@ -35,8 +35,12 @@ func (r *Response) Data() value.Value {
 	return r.data
 }
 
-func (r *Response) Bytes() value.Value {
-	return r.data
+func (r *Response) String() string {
+	return r.data.String()
+}
+
+func (r *Response) Bytes() []byte {
+	return []byte(r.data.String())
 }
 
 // func (r *Response) Header(key, val string) {

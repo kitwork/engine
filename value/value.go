@@ -32,6 +32,7 @@ func (v Value) Invoke(name string, args ...Value) Value {
 		}
 	}
 
+	fmt.Printf("[Value] Invoking method: %s on kind: %s\n", name, v.K.String())
 	attr := v.Get(name)
 	if attr.K == Func {
 		if fn, ok := attr.V.(Method); ok {

@@ -50,9 +50,9 @@ func (vm *Runtime) Run() value.Value {
 			if sFn, ok := val.V.(*value.Lambda); ok {
 				// fmt.Printf("[VM PUSH] ScriptFunction from constants[%d] with Address: %d\n", idx, sFn.Address)
 				closure := &value.Lambda{
-					Address:    sFn.Address,
-					Params: sFn.Params,
-					Scope:      f.Vars, // Use reference to support recursion and mutability
+					Address: sFn.Address,
+					Params:  sFn.Params,
+					Scope:   f.Vars, // Use reference to support recursion and mutability
 				}
 				vm.push(value.New(closure))
 			} else {
@@ -374,6 +374,7 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 		}
 
 		op := opcode.Opcode(vm.Bytecode[f.IP])
+		fmt.Printf("[VM] IP: %d, OP: %d\n", f.IP, op)
 		f.IP++
 
 		// Safety check for operations that read operands
@@ -393,9 +394,9 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 			val := vm.Constants[idx]
 			if sFn, ok := val.V.(*value.Lambda); ok {
 				closure := &value.Lambda{
-					Address:    sFn.Address,
-					Params: sFn.Params,
-					Scope:      f.Vars,
+					Address: sFn.Address,
+					Params:  sFn.Params,
+					Scope:   f.Vars,
 				}
 				vm.push(value.New(closure))
 			} else {

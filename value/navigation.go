@@ -104,8 +104,8 @@ func (v Value) Get(key string) Value {
 		return New(v.K.String())
 	}
 
-	// ƯU TIÊN 1: Tra cứu Dynamic (Struct) - Cho phép Overriding các hàm Global
-	if v.K == Struct {
+	// ƯU TIÊN 1: Tra cứu Dynamic (Struct/Func) - Cho phép gọi field của một Hàm (Object-like Function)
+	if v.K == Struct || v.K == Func {
 		res := v.reflect(key)
 		if res.K != Nil {
 			return res
@@ -170,12 +170,28 @@ func (v Value) reflect(key string) Value {
 	for i := 0; i < ptrRt.NumMethod(); i++ {
 		m := ptrRt.Method(i)
 		if strings.EqualFold(m.Name, key) {
-			return Value{K: Func, V: ptrRv.Method(i)}
+			method := ptrRv.Method(i)
+			// OPTIMIZATION: Nếu method có 0 tham số, tự động gọi nó (Getter Pattern)
+			if method.Type().NumIn() == 0 {
+				results := method.Call(nil)
+				if len(results) > 0 {
+					return New(results[0].Interface())
+				}
+				return Value{K: Nil}
+			}
+			return Value{K: Func, V: method}
 		}
 	}
 
-	// Tìm Field (hỗ trợ 'table' cho 'Table')
 	rv := ptrRv
+	// Nếu là một Method (Func), ta muốn soi vào cái Receiver (Struct cha) của nó
+	if rv.Kind() == reflect.Func {
+		// Go không cho phép lấy Receiver trực tiếp từ reflect.Value của một Method
+		// một cách dễ dàng nếu nó đã được gán.
+		// TUY NHIÊN, nếu v.V là bản thân cái Pointer Struct (mà ta đánh dấu là Func),
+		// thì ta sẽ soi trực tiếp.
+	}
+
 	for rv.Kind() == reflect.Ptr {
 		rv = rv.Elem()
 	}
@@ -183,7 +199,6 @@ func (v Value) reflect(key string) Value {
 		rt := rv.Type()
 		for i := 0; i < rt.NumField(); i++ {
 			f := rt.Field(i)
-			// f.PkgPath is empty for exported fields
 			if f.PkgPath == "" && strings.EqualFold(f.Name, key) {
 				return New(rv.Field(i).Interface())
 			}

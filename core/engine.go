@@ -1,13 +1,14 @@
 package core
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"path"
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
 )
 
@@ -41,29 +42,33 @@ func (e *Engine) path(hostname string) string {
 	return path.Join(e.Source, identity, hostname, "work.js")
 }
 
-// func (e *Engine) load(hostname string) error {
-// 	path := e.path(hostname)
-// 	content, err := os.ReadFile(path)
-// 	if err != nil {
-// 		return err
-// 	}
+func (e *Engine) HandleRouter(w http.ResponseWriter, r *http.Request) error {
+	domain := strings.Split(r.Host, ":")[0]
+	source := path.Join(e.Source, domain, "app.js")
+	fmt.Printf("[HandleRouter] Domain: %s, Source: %s\n", domain, source)
 
-// 	l := compiler.NewLexer(string(content))
-// 	p := compiler.NewParser(l)
-// 	prog := p.ParseProgram()
-// 	if len(p.Errors()) > 0 {
-// 		return fmt.Errorf("compile error: %s", p.Errors()[0])
-// 	}
+	// 1. Biên dịch Blueprint (Bytecode)
+	bc, err := Source(source).Blueprint()
+	if err != nil {
+		return err
+	}
 
-// 	compiler.Evaluator(prog, e.stdlib)
+	// 2. Khởi tạo VM, Môi trường và KitWork Provider
+	vm := runtime.New(bc.Instructions, bc.Constants)
+	kw := work.New()
+	stdlib := compiler.NewEnvironment()
 
-// 	return nil
-// }
+	// Đăng ký kitwork là Object (cho phép kitwork.router nhờ Getter)
+	stdlib.Set("kitwork", value.New(kw))
 
-func (e *Engine) Work(hostname string, r *http.Request) (*work.Response, error) {
-	resp := new(work.Response)
-	resp.Status(http.StatusOK)
-	return resp, nil
+	vm.Globals = stdlib.Store()
+
+	// 3. Thực thi Script để nạp các Routes
+	vm.Run()
+
+	// 4. Kiểm tra và thực hiện Logics dựa trên Routes đã đăng ký
+
+	return kw.Server(w, r)
 }
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -76,44 +81,9 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	domain := strings.Split(r.Host, ":")[0]
-
-	response, err := e.Work(domain, r)
-	if err != nil {
+	if err := e.HandleRouter(w, r); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-
-	w.WriteHeader(response.Code())
-	switch response.Type() {
-	case "json":
-		w.Header().Set("Content-Type", "application/json")
-		if response.Data().Interface() != nil {
-			b, _ := json.Marshal(response.Data().Interface())
-			w.Write(b)
-		}
-	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if response.Data().String() != "" {
-			w.Write([]byte(response.Data().String()))
-		}
-	case "text":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		if response.Data().String() != "" {
-			w.Write([]byte(response.Data().String()))
-		}
-	case "redirect":
-		http.Redirect(w, r, e.path(domain), http.StatusSeeOther)
-	case "file":
-		http.ServeFile(w, r, e.path(domain))
-	case "folder":
-		http.FileServer(http.Dir(e.path(domain))).ServeHTTP(w, r)
-	case "empty":
-		// Do nothing, Header OK is enough
-	case "error":
-		w.WriteHeader(http.StatusInternalServerError)
-	default:
-		http.NotFound(w, r)
 	}
 
 }
