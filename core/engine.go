@@ -16,13 +16,13 @@ type Engine struct {
 	stdlib *compiler.Environment
 	Source string
 
-	// CacheRouter map[string]http.HandlerFunc // GET:kitwork.vn/path ....
-	// CacheDomain map[string]string           // kitwork.vn -> identity
+	cache map[string]*work.KitWork
 }
 
 func New(source string) *Engine {
 	return &Engine{
 		Source: source,
+		cache:  make(map[string]*work.KitWork),
 	}
 }
 
@@ -42,15 +42,15 @@ func (e *Engine) path(hostname string) string {
 	return path.Join(e.Source, identity, hostname, "work.js")
 }
 
-func (e *Engine) HandleRouter(w http.ResponseWriter, r *http.Request) error {
-	domain := strings.Split(r.Host, ":")[0]
-	source := path.Join(e.Source, domain, "app.js")
-	fmt.Printf("[HandleRouter] Domain: %s, Source: %s\n", domain, source)
-
+func (e *Engine) Load(hostname string) (*work.KitWork, error) {
+	if kitwork, ok := e.cache[hostname]; ok {
+		return kitwork, nil
+	}
+	source := path.Join(e.Source, hostname, "app.js")
 	// 1. Biên dịch Blueprint (Bytecode)
 	bc, err := Source(source).Blueprint()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 2. Khởi tạo VM, Môi trường và KitWork Provider
@@ -65,10 +65,8 @@ func (e *Engine) HandleRouter(w http.ResponseWriter, r *http.Request) error {
 
 	// 3. Thực thi Script để nạp các Routes
 	vm.Run()
-
-	// 4. Kiểm tra và thực hiện Logics dựa trên Routes đã đăng ký
-
-	return kw.Server(w, r)
+	e.cache[hostname] = kw
+	return kw, nil
 }
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -81,9 +79,48 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if err := e.HandleRouter(w, r); err != nil {
+	domain := strings.Split(r.Host, ":")[0]
+	// 4. Kiểm tra và thực hiện Logics dựa trên Routes đã đăng ký
+	kitwork, err := e.Load(domain)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	response := kitwork.Request(r)
+
+	switch response.Type() {
+	case "redirect":
+		http.Redirect(w, r, response.String(), http.StatusSeeOther)
+	case "text":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(response.Code())
+		w.Write(response.Bytes())
+		break
+	case "json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(response.Code())
+		w.Write(response.Bytes())
+		break
+	case "html":
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(response.Code())
+		w.Write(response.Bytes())
+		break
+	case "file":
+		http.ServeFile(w, r, response.String())
+		break
+	case "folder":
+		http.FileServer(http.Dir(response.String())).ServeHTTP(w, r)
+		break
+	case "empty":
+		// No action needed for empty response
+		break
+	case "error":
+		w.WriteHeader(http.StatusInternalServerError)
+		break
+	default:
+		http.NotFound(w, r)
+	}
+	return
 }

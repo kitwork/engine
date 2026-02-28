@@ -24,6 +24,9 @@ func (r *Response) Status(code int) {
 }
 
 func (r *Response) Code() int {
+	if r.code == 0 {
+		return 200
+	}
 	return r.code
 }
 

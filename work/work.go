@@ -10,6 +10,10 @@ type KitWork struct {
 	routes map[string]*Response
 }
 
+func (w *KitWork) Request(request *http.Request) *Response {
+	return &Response{kind: "text", data: value.New("Hello World")}
+}
+
 func New(args ...value.Value) *KitWork {
 	return &KitWork{
 		routes: make(map[string]*Response),
@@ -65,40 +69,4 @@ func (g *Get) Handle(callback value.Value) *Response {
 	resp := &Response{kind: "handle", data: callback}
 	g.work.routes[g.path] = resp
 	return resp
-}
-
-func (kit *KitWork) Server(w http.ResponseWriter, r *http.Request) error {
-	response := kit.routes[r.URL.Path]
-
-	switch response.Type() {
-	case "redirect":
-		http.Redirect(w, r, response.String(), http.StatusSeeOther)
-	case "handle":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(response.Code())
-		w.Write([]byte("Halle"))
-	case "text":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(response.Code())
-		w.Write(response.Bytes())
-	case "json":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(response.Code())
-		w.Write(response.Bytes())
-	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(response.Code())
-		w.Write(response.Bytes())
-	case "file":
-		http.ServeFile(w, r, response.String())
-	case "folder":
-		http.FileServer(http.Dir(response.String())).ServeHTTP(w, r)
-	case "empty":
-		// No action needed for empty response
-	case "error":
-		w.WriteHeader(http.StatusInternalServerError)
-	default:
-		http.NotFound(w, r)
-	}
-	return nil
 }
