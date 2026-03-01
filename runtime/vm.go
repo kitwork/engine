@@ -68,17 +68,30 @@ func (vm *Runtime) Run() value.Value {
 			} else if f.Fn != nil && f.Fn.Scope != nil {
 				if v, ok := f.Fn.Scope[name]; ok {
 					vm.push(v)
+
 				} else if v, ok := vm.Vars[name]; ok {
 					vm.push(v)
-				} else if v, ok := vm.Globals[name]; ok {
-					vm.push(v)
+				} else if vm.Globals != nil {
+					if v, ok := vm.Globals[name]; ok {
+						vm.push(v)
+					} else {
+						vm.push(value.Value{K: value.Nil})
+					}
 				} else {
 					vm.push(value.Value{K: value.Nil})
 				}
-			} else if v, ok := vm.Vars[name]; ok {
-				vm.push(v)
+
 			} else if v, ok := vm.Globals[name]; ok {
 				vm.push(v)
+			} else {
+				vm.push(value.Value{K: value.Nil})
+			}
+
+		case opcode.BUILTIN:
+			idx := vm.Bytecode[f.IP]
+			f.IP++
+			if int(idx) < len(vm.Builtins) {
+				vm.push(vm.Builtins[idx])
 			} else {
 				vm.push(value.Value{K: value.Nil})
 			}
@@ -89,7 +102,8 @@ func (vm *Runtime) Run() value.Value {
 			name := vm.Constants[idx].V.(string)
 			val := vm.peek()
 
-			// Closure support: check if it exists in closure scope first
+			// Logic lưu biến thông minh:
+			// 1. Nếu là Closure scope (biến bên ngoài hàm) -> lưu vào đó
 			if f.Fn != nil && f.Fn.Scope != nil {
 				if _, ok := f.Fn.Scope[name]; ok {
 					f.Fn.Scope[name] = val
@@ -97,7 +111,13 @@ func (vm *Runtime) Run() value.Value {
 				}
 			}
 
-			f.Vars[name] = val
+			// 2. Nếu ở Frame gốc (main script của request) -> lưu vào vm.Vars
+			if vm.FrameIdx == 0 {
+				vm.Vars[name] = val
+			} else {
+				// 3. Nếu ở trong hàm -> lưu vào biến cục bộ của hàm đó
+				f.Vars[name] = val
+			}
 
 		case opcode.GET:
 			keyVal := vm.pop()
@@ -281,13 +301,13 @@ func (vm *Runtime) Run() value.Value {
 				} else if m, ok := fn.V.(value.Method); ok {
 					vm.push(m(value.Value{K: value.Nil}, args...))
 				} else if g, ok := fn.V.(func(...value.Value) value.Value); ok {
-					fmt.Printf("[VM CALL] Executing Go func (%T) with %d args\n", g, len(args))
+					// fmt.Printf("[VM CALL] Executing Go func (%T) with %d args\n", g, len(args))
 					vm.push(g(args...))
 				} else if _, ok := fn.V.(reflect.Value); ok {
-					fmt.Printf("[VM CALL] Executing reflect.Value call with %d args\n", len(args))
+					// fmt.Printf("[VM CALL] Executing reflect.Value call with %d args\n", len(args))
 					vm.push(fn.Call(fn.Text(), args...))
 				} else {
-					fmt.Printf("[VM CALL] Unknown func type: %T (Kind: %s)\n", fn.V, fn.K.String())
+					// fmt.Printf("[VM CALL] Unknown func type: %T (Kind: %s)\n", fn.V, fn.K.String())
 					vm.push(value.Value{K: value.Nil})
 				}
 			} else if fn.K == value.Proxy {
@@ -374,7 +394,7 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 		}
 
 		op := opcode.Opcode(vm.Bytecode[f.IP])
-		fmt.Printf("[VM] IP: %d, OP: %d\n", f.IP, op)
+		// fmt.Printf("[VM] IP: %d, OP: %d\n", f.IP, op)
 		f.IP++
 
 		// Safety check for operations that read operands
@@ -413,18 +433,35 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 					vm.push(v)
 				} else if v, ok := vm.Vars[name]; ok {
 					vm.push(v)
-				} else if v, ok := vm.Globals[name]; ok {
-					vm.push(v)
+				} else if vm.Globals != nil {
+					if v, ok := vm.Globals[name]; ok {
+						vm.push(v)
+					} else {
+						vm.push(value.Value{K: value.Nil})
+					}
 				} else {
 					vm.push(value.Value{K: value.Nil})
 				}
 			} else if v, ok := vm.Vars[name]; ok {
 				vm.push(v)
-			} else if v, ok := vm.Globals[name]; ok {
-				vm.push(v)
+			} else if vm.Globals != nil {
+				if v, ok := vm.Globals[name]; ok {
+					vm.push(v)
+				} else {
+					vm.push(value.Value{K: value.Nil})
+				}
 			} else {
 				vm.push(value.Value{K: value.Nil})
 			}
+		case opcode.BUILTIN:
+			idx := vm.Bytecode[f.IP]
+			f.IP++
+			if int(idx) < len(vm.Builtins) {
+				vm.push(vm.Builtins[idx])
+			} else {
+				vm.push(value.Value{K: value.Nil})
+			}
+
 		case opcode.STORE:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
@@ -546,13 +583,13 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 				} else if m, ok := fn.V.(value.Method); ok {
 					vm.push(m(value.Value{K: value.Nil}, fnArgs...))
 				} else if g, ok := fn.V.(func(...value.Value) value.Value); ok {
-					fmt.Printf("[VM CALL] Executing Go func (%T) with %d args\n", g, len(fnArgs))
+					// fmt.Printf("[VM CALL] Executing Go func (%T) with %d args\n", g, len(fnArgs))
 					vm.push(g(fnArgs...))
 				} else if _, ok := fn.V.(reflect.Value); ok {
-					fmt.Printf("[VM CALL] Executing reflect.Value call with %d args\n", len(fnArgs))
+					// fmt.Printf("[VM CALL] Executing reflect.Value call with %d args\n", len(fnArgs))
 					vm.push(fn.Call(fn.Text(), fnArgs...))
 				} else {
-					fmt.Printf("[VM CALL] Unknown func type: %T (Kind: %s)\n", fn.V, fn.K.String())
+					// fmt.Printf("[VM CALL] Unknown func type: %T (Kind: %s)\n", fn.V, fn.K.String())
 					vm.push(value.Value{K: value.Nil})
 				}
 			} else if fn.K == value.Proxy {

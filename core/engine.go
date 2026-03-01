@@ -3,45 +3,35 @@ package core
 import (
 	"fmt"
 	"net/http"
-	"path"
 	"strings"
 
-	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
 )
 
 type Engine struct {
 	Source string
-	cache  map[string]*work.Host
+	cache  map[string]*work.Tenant
 }
 
 func New(source string) *Engine {
 	return &Engine{
 		Source: source,
-		cache:  make(map[string]*work.Host),
+		cache:  make(map[string]*work.Tenant),
 	}
 }
 
-func (e *Engine) Load(hostname string) (*work.Host, error) {
-	if h, ok := e.cache[hostname]; ok {
-		return h, nil
+func (e *Engine) load(hostname string) (*work.Tenant, error) {
+	if t, ok := e.cache[hostname]; ok {
+		return t, nil
 	}
 
-	sourcePath := path.Join(e.Source, hostname, "app.js")
-	bc, err := Source(sourcePath).Blueprint()
+	tenant, err := work.NewTenant(e.Source, hostname)
 	if err != nil {
 		return nil, err
 	}
 
-	// Tạo Host mới từ Bytecode
-	host := work.NewHost(bc)
-
-	// Nạp Router cho Host bằng cách chạy script khởi tạo
-	host.VM.Globals["kitwork"] = value.New(host.Provider())
-	host.VM.Run()
-
-	e.cache[hostname] = host
-	return host, nil
+	e.cache[hostname] = tenant
+	return tenant, nil
 }
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,12 +43,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	domain := strings.Split(r.Host, ":")[0]
-	host, err := e.Load(domain)
+	tenant, err := e.load(domain)
 	if err != nil {
 		http.Error(w, err.Error(), 404)
 		return
 	}
 
-	// Bàn giao toàn bộ quyền xử lý cho Host
-	host.Serve(w, r)
+	// Bàn giao toàn bộ quyền xử lý cho Tenant
+	tenant.Serve(w, r)
 }

@@ -8,12 +8,13 @@ const (
 	// DATA FLOW
 	// =====================
 
-	PUSH  Opcode = iota // Đẩy literal/hằng số lên Stack
-	POP                 // Loại bỏ giá trị trên đỉnh Stack
-	LOAD                // Tải giá trị từ Vars/Context lên Stack (theo index)
-	STORE               // Lưu giá trị từ Stack vào Vars/Context (theo index)
-	GET                 // Lấy thuộc tính/phần tử (obj.prop)
-	DUP                 // Sao chép giá trị trên cùng của stack
+	PUSH    Opcode = iota // Đẩy literal/hằng số lên Stack
+	POP                   // Loại bỏ giá trị trên đỉnh Stack
+	LOAD                  // Tải giá trị từ Vars/Context lên Stack (theo index)
+	STORE                 // Lưu giá trị từ Stack vào Vars/Context (theo index)
+	GET                   // Lấy thuộc tính/phần tử (obj.prop)
+	DUP                   // Sao chép giá trị trên cùng của stack
+	BUILTIN               // Tải hàm hệ thống theo index (Siêu nhanh)
 
 	// =====================
 	// ARITHMETIC

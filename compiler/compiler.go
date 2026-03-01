@@ -108,6 +108,10 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(opcode.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
 
 	case *Identifier:
+		if n.Value == "kitwork" {
+			c.emit(opcode.BUILTIN, 0)
+			return nil
+		}
 		symbolIndex := c.addConstant(value.NewString(n.Value))
 		c.emit(opcode.LOAD, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 

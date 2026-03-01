@@ -16,8 +16,9 @@ type Runtime struct {
 	Bytecode  []byte
 	Constants []value.Value
 	Stack     []value.Value
-	Vars      map[string]value.Value // Module/Global scope
-	Globals   map[string]value.Value // Engine Builtins
+	Vars      map[string]value.Value // Biến của từng Request (Cho phép ghi)
+	Globals   map[string]value.Value // Chung cho toàn bộ Host (Chỉ đọc)
+	Builtins  []value.Value          // Mảng các hàm hệ thống (Siêu nhanh - Index lookup)
 	Frames    []Frame                // Call Stack
 	FrameIdx  int                    // Hiện tại đang ở Frame nào
 	Energy    uint64                 // Năng lượng tiêu thụ
@@ -35,7 +36,7 @@ func New(code []byte, constants []value.Value) *Runtime {
 	}
 	// Khởi tạo Frame gốc (Main entry)
 	vm.FrameIdx = 0
-	vm.Frames[0] = Frame{IP: 0, Vars: make(map[string]value.Value)}
+	vm.Frames[0] = Frame{IP: 0, Vars: vm.Vars} // TRANG BỊ VŨ KHÍ: Frame 0 chính là vm.Vars
 	return vm
 }
 
@@ -45,13 +46,17 @@ func (vm *Runtime) FastReset(code []byte, constants []value.Value, globals map[s
 	vm.Stack = vm.Stack[:0]
 	vm.Globals = globals
 	vm.FrameIdx = 0
-	// Reset Frame 0
-	vm.Frames[0].IP = 0
-	vm.Frames[0].Defers = vm.Frames[0].Defers[:0]
-	for k := range vm.Frames[0].Vars {
-		delete(vm.Frames[0].Vars, k)
+	vm.Energy = 0
+
+	// RECYCLE MAP: Trình dọn dẹp Map cực nhanh không tốn RAM
+	for k := range vm.Vars {
+		delete(vm.Vars, k)
 	}
-	// vm.Vars stores reused builtins, do not clear them.
+
+	// Đồng bộ lại Frame gốc
+	vm.Frames[0].IP = 0
+	vm.Frames[0].Vars = vm.Vars
+	vm.Frames[0].Defers = vm.Frames[0].Defers[:0]
 }
 
 func (vm *Runtime) Stop() {

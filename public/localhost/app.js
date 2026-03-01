@@ -1,18 +1,27 @@
-const { router } = kitwork();
+const { router, log } = kitwork();
+
+router.get("/favicon.ico").file("public/localhost/assets/favicon.ico");
 
 const api = router.base("/api");
 
-api.get("/hello").handle(() => {
-    return "Hello from Kitwork!";
+api.get("/hello").handle((context) => {
+    log.Print("Hello from HUB!");
+    return context.response.json({ message: "Hello from HUB!" });
 });
 
-router.get("/user/:id").handle((req, res) => {
-    const id = req.param("id");
-    const q = req.query("q");
-    return res.json({
+router.get("/user/:id").handle((request, response) => {
+    // Test Named Request/Response style
+
+    const id = request.param("id");
+    const q = request.query("q");
+    return response.json({
         id_val: id,
-        q_val: q
+        q_val: q,
+        style: "named"
     });
 });
 
-router.get("/").handle((req, res) => "Welcome home");
+router.get("/").handle((request, response) => {
+    const name = request.query("name") || "Kitwork";
+    return response.status(200).html("<h1>Welcome to " + name + "</h1>");
+});
