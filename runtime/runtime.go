@@ -30,6 +30,7 @@ func New(code []byte, constants []value.Value) *Runtime {
 		Constants: constants,
 		Stack:     make([]value.Value, 0, 1024),
 		Vars:      make(map[string]value.Value),
+		Globals:   make(map[string]value.Value),
 		Frames:    make([]Frame, 64), // Tối đa 64 tầng gọi hàm (đủ dùng)
 	}
 	// Khởi tạo Frame gốc (Main entry)

@@ -1,16 +1,18 @@
-const { router } = kitwork; // Dùng Destructuring để kích hoạt Getter tự động của chúng ta
+const { router } = kitwork();
 
-router.get("/assets").folder("/assets");
-router.get("/favicon.ico").file("/assets/favicon.ico");
+const api = router.base("/api");
 
-router.get("/hello").handle((req, res) => {
-    return res.json({ message: "hello" })
+api.get("/hello").handle(() => {
+    return "Hello from Kitwork!";
 });
 
-router.get("/print").handle((req, res) => {
-    const name = req.query("name")
-    print(name);
-    return res.json({ message: name })
+router.get("/user/:id").handle((req, res) => {
+    const id = req.param("id");
+    const q = req.query("q");
+    return res.json({
+        id_val: id,
+        q_val: q
+    });
 });
 
-router.get("/").redirect("/welcome");
+router.get("/").handle((req, res) => "Welcome home");
