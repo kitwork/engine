@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/kitwork/engine/value"
 )
@@ -27,6 +28,9 @@ type Router struct {
 
 	params map[string]string
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
+
+	// Cache configuration
+	cacheTTL time.Duration
 }
 
 // --- ENGINE LOGIC ---
@@ -155,5 +159,13 @@ func (r *Router) Directory(path string) *Router {
 
 func (r *Router) Redirect(url string) *Router {
 	r.response.Redirect(value.New(url))
+	return r
+}
+
+func (r *Router) Cache(v value.Value) *Router {
+	d, err := time.ParseDuration(v.String())
+	if err == nil {
+		r.cacheTTL = d
+	}
 	return r
 }

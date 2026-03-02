@@ -26,12 +26,22 @@ router.get("/").handle((request, response) => {
     return response.status(200).html("<h1>Welcome to " + name + "</h1>");
 });
 
-router.get("/test-fetch").handle((ctx) => {
-    const res = fetch("https://jsonplaceholder.typicode.com/todos/1");
-    const data = res.json();
-    return ctx.json({
-        outside: data,
-        status: res.status,
-        ok: res.ok
+router.get("/api/gold").cache("5s")
+    .catch(() => log.Print("Failed to fetch gold price"))
+    .then(() => log.Print("Gold price fetched successfully"))
+    .handle((response) => {
+
+        const fetch = http.get("https://edge-api.pnj.io/ecom-frontend/v1/get-gold-price?zone=11");
+
+
+        if (fetch.status != 200) {
+            return response.status(500).json({ status: fetch.status, error: "Failed to fetch gold price" })
+        }
+        const data = fetch.json().data.map(item => ({
+            name: item.tensp,
+            buy: item.giamua,
+            sell: item.giaban
+        })).filter(item => item.sell > 10000);
+
+        return response.status(200).json({ success: true, count: data.length, data: data });
     });
-});

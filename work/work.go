@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"sync"
 
@@ -30,6 +31,7 @@ func NewEntity(identity string, domain string) *Entity {
 	}
 }
 
+// Router struct is defined in router.go
 type Config struct {
 	source string
 }
@@ -60,6 +62,21 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Kiểm tra cache
+	if matched.cacheTTL > 0 {
+		cacheKey := matched.Method + ":" + matched.Path
+		t.cacheLock.RLock()
+		if cached, ok := t.cache[cacheKey]; ok && time.Now().Before(cached.ExpireAt) {
+			t.cacheLock.RUnlock()
+			ctxRouter := *matched
+			ctxRouter.request = r
+			ctxRouter.response = cached.Response
+			ctxRouter.responder(w)
+			return
+		}
+		t.cacheLock.RUnlock()
+	}
+
 	if matched.response != nil && matched.response.IsSend() {
 		ctxRouter := *matched
 		ctxRouter.request = r
@@ -76,10 +93,10 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	ctxRouter.params = params
 	ctxRouter.response = &Response{} // Response riêng cho lượt chạy này
 
-	ctxRouter.run(vm, w)
+	ctxRouter.run(vm, w, matched)
 }
 
-func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter) {
+func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Router) {
 	vm.FastReset(r.tenant.bytecode.Instructions, r.tenant.bytecode.Constants, r.tenant.vm.Globals)
 
 	reqObj := &Request{router: r}
@@ -152,6 +169,17 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter) {
 
 	// Gửi phản hồi cuối cùng
 	r.responder(w)
+
+	// 4. Lưu cache nếu thành công
+	if original != nil && original.cacheTTL > 0 && r.err == nil && r.response.IsSend() {
+		cacheKey := original.Method + ":" + original.Path
+		r.tenant.cacheLock.Lock()
+		r.tenant.cache[cacheKey] = &CachedResult{
+			Response: r.response,
+			ExpireAt: time.Now().Add(original.cacheTTL),
+		}
+		r.tenant.cacheLock.Unlock()
+	}
 }
 
 func matchRoute(path, routePath string) (map[string]string, bool) {

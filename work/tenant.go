@@ -2,6 +2,8 @@ package work
 
 import (
 	"path/filepath"
+	"sync"
+	"time"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
@@ -15,6 +17,14 @@ type Tenant struct {
 	bytecode *compiler.Bytecode
 	vm       *runtime.Runtime
 	routes   []*Router
+
+	cacheLock sync.RWMutex
+	cache     map[string]*CachedResult
+}
+
+type CachedResult struct {
+	Response *Response
+	ExpireAt time.Time
 }
 
 func (t *Tenant) joinPath(paths ...string) string {
@@ -41,6 +51,7 @@ func NewTenant(source string, domain string) (*Tenant, error) {
 			Identity: "test",
 			Domain:   domain,
 		},
+		cache: make(map[string]*CachedResult),
 	}
 
 	bytecode, err := script.Bytecode(tenant.appfile())
@@ -52,31 +63,16 @@ func NewTenant(source string, domain string) (*Tenant, error) {
 	tenant.vm = runtime.New(bytecode.Instructions, bytecode.Constants)
 	tenant.routes = make([]*Router, 0)
 
-	// TỐI ƯU SIÊU CẤP: Đăng ký kitwork vào Builtin Index 0
+	// TỐI ƯU: Đăng ký kitwork vào Builtin Index 0, trả về Struct KitWork
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
-		kw := tenant.Config(args...)
-		res := make(map[string]value.Value)
-		res["router"] = value.New(kw.Router())
-		res["log"] = value.New(kw.Log())
-		res["http"] = value.New(kw.HTTP())
-		// res["render"] = value.New(kw.Render()) // Giả sử có Render()
-		return value.New(res)
+		return value.New(tenant.Config(args...))
 	})
 	tenant.vm.Builtins = []value.Value{kitworkFunc}
 
-	// Giữ lại trong Globals cho các trường hợp đặc biệt
+	// Giữ lại trong Globals
 	tenant.vm.Globals["kitwork"] = kitworkFunc
 
-	// Hỗ trợ HTTP Fetch
-	httpObj := tenant.Config().HTTP()
-	tenant.vm.Globals["http"] = value.New(httpObj)
-	tenant.vm.Globals["fetch"] = value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) == 0 {
-			return value.NewNil()
-		}
-		return value.New(httpObj.Fetch(args[0], args[1:]...))
-	})
-
+	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
 	tenant.vm.Run()
 	return tenant, nil
 }
