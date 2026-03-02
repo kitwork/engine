@@ -16,6 +16,7 @@ func (v Value) IsNumeric() bool {
 	}
 }
 
+func (v Value) IsNumber() bool    { return v.K == Number }
 func (v Value) IsBool() bool      { return v.K == Bool }
 func (v Value) IsTrue() bool      { return v.K == Bool && v.N > 0 }
 func (v Value) IsString() bool    { return v.K == String }
