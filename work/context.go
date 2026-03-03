@@ -19,46 +19,50 @@ func (c *Context) tenant() *Tenant { return c.router().tenant }
 func (c *Context) Request() *Request   { return c.request }
 func (c *Context) Response() *Response { return c.router().response }
 
+func (c *Context) Req() *Request  { return c.Request() }
+func (c *Context) Res() *Response { return c.Response() }
+
 // --- SHORTCUTS CHO JAVASCRIPT (Fluid API) ---
 
-func (c *Context) JSON(v value.Value, code ...int) *Context { c.Response().JSON(v, code...); return c }
-func (c *Context) HTML(v value.Value, code ...int) *Context { c.Response().HTML(v, code...); return c }
-func (c *Context) Text(v value.Value, code ...int) *Context { c.Response().Text(v, code...); return c }
-func (c *Context) Status(code int) *Context                 { c.Response().Status(code); return c }
-func (c *Context) Redirect(url string, code ...int) *Context {
+func (c *Context) JSON(v value.Value, code ...int) { c.Response().JSON(v, code...) }
+func (c *Context) HTML(v value.Value, code ...int) { c.Response().HTML(v, code...) }
+func (c *Context) Text(v value.Value, code ...int) { c.Response().Text(v, code...) }
+func (c *Context) Status(code int) *Response       { return c.Response().Status(code) }
+func (c *Context) Redirect(url string, code ...int) {
 	c.Response().Redirect(value.New(url), code...)
-	return c
 }
-func (c *Context) File(path string, code ...int) *Context {
+func (c *Context) File(path string, code ...int) {
 	c.Response().File(c.tenant().joinPath(path), code...)
-	return c
 }
 
-func (c *Context) Abort(code int, message ...string) *Context {
-	msg := "Operation Aborted"
-	if len(message) > 0 {
-		msg = message[0]
-	}
-	c.Response().ErrorString(msg, code)
-	return c
-}
-
-func (c *Context) Error(v value.Value) *Context {
+func (c *Context) Error(v value.Value) {
 	c.request.router.err = fmt.Errorf("%s", v.String())
-	return c
-}
-
-func (c *Context) GetError() value.Value {
-	if c.request.router.err == nil {
-		return value.Value{K: value.Nil}
-	}
-	return value.New(c.request.router.err.Error())
 }
 
 func (c *Context) Param(key string) value.Value { return c.request.Param(key) }
 func (c *Context) Query(key string) value.Value { return c.request.Query(key) }
 
-func (c *Context) argsLambda(lambda *value.Lambda) []value.Value {
+func (c *Context) Path() value.Value           { return c.request.Path() }
+func (c *Context) Method() value.Value         { return c.request.Method() }
+func (c *Context) Host() value.Value           { return c.request.Host() }
+func (c *Context) IP() value.Value             { return c.request.IP() }
+func (c *Context) Body() value.Value           { return c.request.Body() }
+func (c *Context) JSONBody() value.Value       { return c.request.JSON() }
+func (c *Context) Header(k string) value.Value { return c.request.Header(k) }
+func (c *Context) Headers() value.Value        { return c.request.Headers() }
+func (c *Context) UserAgent() value.Value      { return c.request.UserAgent() }
+func (c *Context) IsAJAX() value.Value         { return c.request.IsAJAX() }
+func (c *Context) IsJSON() value.Value         { return c.request.IsJSON() }
+
+func (c *Context) Cookie(name string) value.Value          { return c.request.Cookie(name) }
+func (c *Context) Cookies() value.Value                    { return c.request.Cookies() }
+func (c *Context) Hostname() value.Value                   { return c.request.Hostname() }
+func (c *Context) Secure() value.Value                     { return c.request.Secure() }
+func (c *Context) OriginalURL() value.Value                { return c.request.OriginalURL() }
+func (c *Context) FullURL() value.Value                    { return c.request.FullURL() }
+func (c *Context) SaveFile(field, dest string) value.Value { return c.request.SaveFile(field, dest) }
+
+func (c *Context) arguments(lambda *value.Lambda) []value.Value {
 	if lambda == nil {
 		return nil
 	}

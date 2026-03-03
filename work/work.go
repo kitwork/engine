@@ -106,7 +106,7 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 
 	// 1. Chạy Guards (Middleware style)
 	for _, guard := range r.guards {
-		gArgs := ctxObj.argsLambda(guard)
+		gArgs := ctxObj.arguments(guard)
 		result := vm.ExecuteLambda(guard, gArgs)
 
 		// A. Nếu Guard tự gửi phản hồi (ctx.json, ...)
@@ -135,7 +135,7 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 	// 2. Chạy Handle chính (Chỉ khi chưa có lỗi và chưa gửi response)
 	if r.err == nil && !r.response.IsSend() {
 		if r.handle != nil {
-			hArgs := ctxObj.argsLambda(r.handle)
+			hArgs := ctxObj.arguments(r.handle)
 			result := vm.ExecuteLambda(r.handle, hArgs)
 			// Tự động nhận diện kết quả trả về của Handle
 			if !r.response.IsSend() && result.Truthy() {
@@ -151,19 +151,19 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 	// 3. HẬU XỬ LÝ: Catch (Có lỗi) vs Then (Hoàn tất sạch sẽ)
 	if r.err != nil {
 		if r.catch != nil {
-			fArgs := ctxObj.argsLambda(r.catch)
+			fArgs := ctxObj.arguments(r.catch)
 			vm.ExecuteLambda(r.catch, fArgs)
 		}
 	} else {
 		if r.then != nil {
-			dArgs := ctxObj.argsLambda(r.then)
+			dArgs := ctxObj.arguments(r.then)
 			vm.ExecuteLambda(r.then, dArgs)
 		}
 	}
 
 	// 4. FINALLY: Luôn luôn chạy cuối cùng cho mọi request
 	if r.final != nil {
-		fArgs := ctxObj.argsLambda(r.final)
+		fArgs := ctxObj.arguments(r.final)
 		vm.ExecuteLambda(r.final, fArgs)
 	}
 
@@ -186,17 +186,39 @@ func matchRoute(path, routePath string) (map[string]string, bool) {
 	if path == routePath {
 		return nil, true
 	}
-	pS, rS := strings.Split(strings.Trim(path, "/"), "/"), strings.Split(strings.Trim(routePath, "/"), "/")
-	if len(pS) != len(rS) {
-		return nil, false
+	pS := strings.Split(strings.Trim(path, "/"), "/")
+	rS := strings.Split(strings.Trim(routePath, "/"), "/")
+
+	// Xử lý trường hợp chuỗi rỗng sau khi trim
+	if len(pS) == 1 && pS[0] == "" {
+		pS = []string{}
 	}
+	if len(rS) == 1 && rS[0] == "" {
+		rS = []string{}
+	}
+
 	params := make(map[string]string)
-	for i := range rS {
+	for i := 0; i < len(rS); i++ {
+		// Nếu gặp wildcard *, khớp toàn bộ phần còn lại
+		if rS[i] == "*" {
+			return params, true
+		}
+
+		if i >= len(pS) {
+			return nil, false
+		}
+
 		if strings.HasPrefix(rS[i], ":") {
 			params[rS[i][1:]] = pS[i]
 		} else if rS[i] != pS[i] {
 			return nil, false
 		}
 	}
+
+	// Nếu không có wildcard, độ dài phải khớp chính xác
+	if len(pS) > len(rS) {
+		return nil, false
+	}
+
 	return params, true
 }

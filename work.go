@@ -14,8 +14,6 @@ type Config struct {
 }
 
 func Run(cfg *Config) {
-	fmt.Printf("Bắt đầu khởi động Engine tại cổng %d, dùng thư mục: %s\n", cfg.Port, cfg.Source)
-	fmt.Println("Truy cập thử: http://localhost:3000/test")
 
 	engine := core.New(cfg.Source)
 

@@ -4,6 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+<<<<<<< HEAD
+=======
+	"sync"
+>>>>>>> 02e7701 (work 46 - render handle)
 	"time"
 
 	"github.com/kitwork/engine/value"
@@ -29,8 +33,16 @@ type Router struct {
 	params map[string]string
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
 
+<<<<<<< HEAD
 	// Cache configuration
 	cacheTTL time.Duration
+=======
+	// Cache feature
+	cacheTTL  time.Duration
+	cacheRes  *Response
+	cacheExp  time.Time
+	cacheLock sync.RWMutex
+>>>>>>> 02e7701 (work 46 - render handle)
 }
 
 // --- ENGINE LOGIC ---
