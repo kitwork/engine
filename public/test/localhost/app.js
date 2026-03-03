@@ -17,7 +17,6 @@ api.get("/").handle((context) => {
     return context.response.json({ message: "Hello from HUB!" });
 });
 
-
 api.get("/gold").cache("5s")
     .catch(() => log.Print("Failed to fetch gold price"))
     .then(() => log.Print("Gold price fetched successfully"))
