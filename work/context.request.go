@@ -3,13 +3,16 @@ package work
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/kitwork/engine/value"
 )
@@ -226,20 +229,88 @@ func (r *Request) Page() value.Value {
 	if r.router == nil {
 		return value.Value{K: value.Nil}
 	}
-	pattern := r.router.Path
 
-	// Quy tắc: Đổi :name thành {name} để khớp với cấu trúc thư mục Render
-	resolved := pattern
-	for name := range r.router.params {
-		if name != "*" {
-			old := ":" + name
-			new := "[" + name + "]"
-			resolved = strings.ReplaceAll(resolved, old, new)
+	// Tách pattern thành các segment (ví dụ: ["users", ":id?"])
+	patternSegments := strings.Split(strings.Trim(r.router.Path, "/"), "/")
+	var resolvedSegments []string
+
+	for _, seg := range patternSegments {
+		if strings.HasPrefix(seg, ":") {
+			// Đây là tham số (:id hoặc :id?)
+			isOptional := strings.HasSuffix(seg, "?")
+			name := seg[1:]
+			if isOptional {
+				name = name[:len(name)-1]
+			}
+
+			// Kiểm tra xem tham số này có dữ liệu thực tế không
+			if val, ok := r.router.params[name]; ok && val != "" {
+				// CÓ dữ liệu -> Chuyển thành folder động [name]
+				resolvedSegments = append(resolvedSegments, "["+name+"]")
+			} else {
+				// KHÔNG có dữ liệu
+				if !isOptional {
+					// Nếu bắt buộc nhưng thiếu (hiếm khi xảy ra nếu route đã khớp)
+					resolvedSegments = append(resolvedSegments, "["+name+"]")
+				}
+				// Nếu là optional và thiếu -> Bỏ qua segment này (về trang danh sách cha)
+			}
+		} else {
+			// Segment tĩnh (ví dụ: "users")
+			resolvedSegments = append(resolvedSegments, seg)
 		}
 	}
 
-	// Trả về path sạch (không có dấu / ở đầu/cuối)
-	return value.New(strings.Trim(resolved, "/"))
+	return value.New(strings.Join(resolvedSegments, "/"))
+}
+
+func (r *Request) Benchmark(vals ...value.Value) value.Value {
+	if len(vals) < 2 {
+		return value.New(map[string]interface{}{"error": "Benchmark requires iterations and a callback"})
+	}
+	count := int(vals[0].N)
+	lambda, ok := vals[1].V.(*value.Lambda)
+	if !ok {
+		return value.New(map[string]interface{}{"error": "Second argument must be a function"})
+	}
+
+	// 1. Chuẩn bị đo lường bộ nhớ
+	var m1, m2 runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&m1)
+
+	// 2. Thực thi và đo thời gian
+	vm := r.router.tenant.vm
+	hArgs := []value.Value{} // Callback thường không có tham số
+
+	start := time.Now()
+	for i := 0; i < count; i++ {
+		vm.ExecuteLambda(lambda, hArgs)
+	}
+	duration := time.Since(start)
+
+	// 3. Kết thúc đo lường
+	runtime.ReadMemStats(&m2)
+
+	// 4. Tính toán các chỉ số "khủng"
+	allocBytes := m2.TotalAlloc - m1.TotalAlloc
+	gcCycles := m2.NumGC - m1.NumGC
+	ops := float64(count) / duration.Seconds()
+
+	res := make(map[string]interface{})
+	res["iterations"] = count
+	res["duration"] = duration.String()
+	res["ops_per_sec"] = fmt.Sprintf("%.0f", ops)
+	res["avg_latency"] = (duration / time.Duration(count)).String()
+
+	// Memory stats
+	res["memory"] = map[string]interface{}{
+		"total_alloc_mb": fmt.Sprintf("%.2f MB", float64(allocBytes)/1024/1024),
+		"alloc_per_op":   fmt.Sprintf("%d bytes", allocBytes/uint64(count)),
+		"gc_cycles":      gcCycles,
+	}
+
+	return value.New(res)
 }
 
 func (r *Request) Body() value.Value {

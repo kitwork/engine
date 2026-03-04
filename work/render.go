@@ -181,6 +181,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 			case "page", "body", "content":
 				// Nạp trang con động
 				pagePath := r.getPagePath()
+
 				if raw, err := os.ReadFile(pagePath); err == nil {
 					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
 				} else {

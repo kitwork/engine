@@ -3,10 +3,10 @@ package work
 import (
 	"fmt"
 	"net/http"
+	goruntime "runtime"
 	"strings"
-	"time"
-
 	"sync"
+	"time"
 
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -136,6 +136,43 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 	if r.err == nil && !r.response.IsSend() {
 		if r.handle != nil {
 			hArgs := ctxObj.arguments(r.handle)
+
+			// KIỂM TRA BENCHMARK
+			if r.benchmarkCount > 0 {
+				var m1, m2 goruntime.MemStats
+				goruntime.GC()
+				goruntime.ReadMemStats(&m1)
+
+				start := time.Now()
+				for i := 0; i < r.benchmarkCount; i++ {
+					vm.ExecuteLambda(r.handle, hArgs)
+				}
+				duration := time.Since(start)
+				goruntime.ReadMemStats(&m2)
+
+				// Tính toán chỉ số chi tiết
+				allocBytes := m2.TotalAlloc - m1.TotalAlloc
+				gcCycles := m2.NumGC - m1.NumGC
+				ops := float64(r.benchmarkCount) / duration.Seconds()
+
+				report := map[string]interface{}{
+					"iterations":  r.benchmarkCount,
+					"duration":    duration.String(),
+					"ops_per_sec": fmt.Sprintf("%.0f", ops),
+					"avg_latency": (duration / time.Duration(r.benchmarkCount)).String(),
+					"memory": map[string]interface{}{
+						"total_alloc_mb": fmt.Sprintf("%.2f MB", float64(allocBytes)/1024/1024),
+						"alloc_per_op":   fmt.Sprintf("%d bytes", allocBytes/uint64(r.benchmarkCount)),
+						"gc_cycles":      gcCycles,
+					},
+				}
+
+				// Ghi đè Response bằng báo cáo JSON
+				r.response.JSON(value.New(report))
+				r.responder(w)
+				return
+			}
+
 			result := vm.ExecuteLambda(r.handle, hArgs)
 			// Tự động nhận diện kết quả trả về của Handle
 			if !r.response.IsSend() && result.Truthy() {
@@ -199,23 +236,36 @@ func matchRoute(path, routePath string) (map[string]string, bool) {
 
 	params := make(map[string]string)
 	for i := 0; i < len(rS); i++ {
-		// Nếu gặp wildcard *, khớp toàn bộ phần còn lại
+		// 1. Xử lý Wildcard *
 		if rS[i] == "*" {
 			return params, true
 		}
 
-		if i >= len(pS) {
-			return nil, false
+		// 2. Kiểm tra nếu là tham số động (:name hoặc :name?)
+		if strings.HasPrefix(rS[i], ":") {
+			isOptional := strings.HasSuffix(rS[i], "?")
+			paramName := rS[i][1:]
+			if isOptional {
+				paramName = paramName[:len(paramName)-1]
+			}
+
+			if i < len(pS) {
+				// Nếu có dữ liệu trong path thực tế, gán vào params
+				params[paramName] = pS[i]
+			} else if !isOptional {
+				// Nếu là tham số bắt buộc nhưng không có dữ liệu -> FAIL
+				return nil, false
+			}
+			continue
 		}
 
-		if strings.HasPrefix(rS[i], ":") {
-			params[rS[i][1:]] = pS[i]
-		} else if rS[i] != pS[i] {
+		// 3. Nếu là đường dẫn tĩnh
+		if i >= len(pS) || rS[i] != pS[i] {
 			return nil, false
 		}
 	}
 
-	// Nếu không có wildcard, độ dài phải khớp chính xác
+	// Nếu path thực tế dài hơn route định nghĩa và không có wildcard -> FAIL
 	if len(pS) > len(rS) {
 		return nil, false
 	}

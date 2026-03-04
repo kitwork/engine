@@ -30,7 +30,13 @@ type Router struct {
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
 
 	// Cache configuration
-	cacheTTL time.Duration
+	cacheTTL       time.Duration
+	benchmarkCount int // Số lần chạy lặp để đo hiệu năng
+}
+
+func (r *Router) Benchmark(v value.Value) *Router {
+	r.benchmarkCount = int(v.N)
+	return r
 }
 
 // --- ENGINE LOGIC ---
@@ -61,6 +67,13 @@ func (r *Router) responder(w http.ResponseWriter) {
 	if r.response.Code() == 0 {
 		r.response.Status(200)
 	}
+
+	// // 2.5 Bơm Headers (nếu có)
+	// if r.response.headers != nil {
+	// 	for k, v := range r.response.headers {
+	// 		w.Header().Set(k, v)
+	// 	}
+	// }
 
 	// 3. Xử lý phản hồi dựa trên kind
 	switch kind {

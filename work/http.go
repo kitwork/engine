@@ -11,6 +11,17 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
+var sharedTransport = &http.Transport{
+	MaxIdleConns:        100,
+	IdleConnTimeout:     90 * time.Second,
+	MaxIdleConnsPerHost: 100,
+}
+
+var sharedClient = &http.Client{
+	Transport: sharedTransport,
+	Timeout:   10 * time.Second,
+}
+
 type HTTP struct {
 	timeout time.Duration
 	headers map[string]string
@@ -88,7 +99,15 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{Timeout: timeout}
+	client := sharedClient
+	if h.timeout > 0 {
+		// Tạo client tạm thời nhưng vẫn dùng chung Transport để giữ Keep-Alive
+		client = &http.Client{
+			Transport: sharedTransport,
+			Timeout:   h.timeout,
+		}
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return value.New(HTTPResponse{Status: 0, Error: err.Error()})
