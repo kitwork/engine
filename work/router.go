@@ -4,10 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-<<<<<<< HEAD
-=======
-	"sync"
->>>>>>> 02e7701 (work 46 - render handle)
 	"time"
 
 	"github.com/kitwork/engine/value"
@@ -33,16 +29,8 @@ type Router struct {
 	params map[string]string
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
 
-<<<<<<< HEAD
 	// Cache configuration
 	cacheTTL time.Duration
-=======
-	// Cache feature
-	cacheTTL  time.Duration
-	cacheRes  *Response
-	cacheExp  time.Time
-	cacheLock sync.RWMutex
->>>>>>> 02e7701 (work 46 - render handle)
 }
 
 // --- ENGINE LOGIC ---
@@ -76,6 +64,15 @@ func (r *Router) responder(w http.ResponseWriter) {
 
 	// 3. Xử lý phản hồi dựa trên kind
 	switch kind {
+	case "render":
+		result, err := r.render()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(r.response.Code())
+		w.Write(result)
 	case "redirect":
 		http.Redirect(w, request, data.String(), http.StatusSeeOther)
 	case "text":
@@ -114,6 +111,16 @@ func (r *Router) responder(w http.ResponseWriter) {
 	default:
 		http.NotFound(w, request)
 	}
+}
+
+func (r *Router) render() ([]byte, error) {
+
+	render := NewRender(r.tenant).
+		Page(value.New(r.request.URL.Path)).
+		Layout(value.New(r.response.page.layout)).
+		Template(value.New(r.response.page.template)).
+		Bind(r.response.data)
+	return []byte(render.String()), nil
 }
 
 func (r *Router) New(method, path string) *Router {

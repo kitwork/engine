@@ -43,7 +43,7 @@ func (r *Request) Query(key string) value.Value {
 	return value.New(u.Query().Get(key))
 }
 
-func (r *Request) Param(key string) value.Value {
+func (r *Request) Params(key string) value.Value {
 	if v, ok := r.router.params[key]; ok {
 		return value.New(v)
 	}
@@ -186,16 +186,60 @@ func (r *Request) Secure() value.Value {
 	return value.New(r.Scheme().String() == "https")
 }
 
-func (r *Request) FullURL() value.Value {
-	return value.New(r.Scheme().String() + "://" + r.Host().String() + r.Path().String())
+func (r *Request) URL() value.Value {
+	// Reconstruct full URL: scheme://host + RequestURI (path?query)
+	req := r.request()
+	if req == nil {
+		return value.Value{K: value.Nil}
+	}
+	return value.New(r.Scheme().String() + "://" + r.Host().String() + req.URL.RequestURI())
 }
 
-func (r *Request) OriginalURL() value.Value {
+func (r *Request) Href() value.Value {
+	return r.URL()
+}
+
+func (r *Request) URI() value.Value {
 	req := r.request()
 	if req == nil {
 		return value.Value{K: value.Nil}
 	}
 	return value.New(req.URL.RequestURI())
+}
+
+func (r *Request) OriginalURL() value.Value {
+	return r.URI()
+}
+
+func (r *Request) Pattern() value.Value {
+	if r.router == nil {
+		return value.Value{K: value.Nil}
+	}
+	return value.New(r.router.Path)
+}
+
+func (r *Request) Route() value.Value {
+	return r.Pattern()
+}
+
+func (r *Request) Page() value.Value {
+	if r.router == nil {
+		return value.Value{K: value.Nil}
+	}
+	pattern := r.router.Path
+
+	// Quy tắc: Đổi :name thành {name} để khớp với cấu trúc thư mục Render
+	resolved := pattern
+	for name := range r.router.params {
+		if name != "*" {
+			old := ":" + name
+			new := "[" + name + "]"
+			resolved = strings.ReplaceAll(resolved, old, new)
+		}
+	}
+
+	// Trả về path sạch (không có dấu / ở đầu/cuối)
+	return value.New(strings.Trim(resolved, "/"))
 }
 
 func (r *Request) Body() value.Value {

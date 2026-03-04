@@ -20,6 +20,9 @@ type Tenant struct {
 
 	cacheLock sync.RWMutex
 	cache     map[string]*CachedResult
+
+	cacheNodeLock sync.RWMutex
+	cacheNode     map[string]*node
 }
 
 type CachedResult struct {
@@ -71,12 +74,6 @@ func NewTenant(source string, domain string) (*Tenant, error) {
 
 	// Giữ lại trong Globals
 	tenant.vm.Globals["kitwork"] = kitworkFunc
-<<<<<<< HEAD
-=======
-	tenant.vm.Globals["render"] = value.NewFunc(func(args ...value.Value) value.Value {
-		return value.New(tenant.Config().Render(args...))
-	})
->>>>>>> 02e7701 (work 46 - render handle)
 
 	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
 	tenant.vm.Run()

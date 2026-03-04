@@ -27,11 +27,24 @@ func (w *KitWork) Render(args ...value.Value) *Render {
 	return r
 }
 
+func NewRender(tenant *Tenant) *Render {
+	return &Render{
+		tenant: tenant,
+		layout: make(map[string]string),
+	}
+}
+
 type Render struct {
 	tenant *Tenant
 	path   string // Thư mục gốc, ví dụ: /pages/home
 	page   string // Thư mục trang con, ví dụ: contact/profile
 	layout map[string]string
+	global value.Value // Dữ liệu dùng chung cho mọi bản render
+}
+
+func (r *Render) Global(val value.Value) *Render {
+	r.global = val
+	return r
 }
 
 func (r *Render) Layout(val value.Value) *Render {
@@ -120,14 +133,22 @@ func (r *Render) tmpl(data any) string {
 	// Đệ quy nạp các thành phần lồng nhau (layouts, includes, page)
 	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
 
-	// 2. GIAI ĐOẠN BIND: Render dữ liệu vào template "phẳng" đã ráp nối xong
+	// 2. GIAI ĐOẠN BIND: Render dữ liệu vào các biến
 	scope := make(map[string]value.Value)
 
+	// A. Nạp dữ liệu Global (Nếu có)
+	if !r.global.IsBlank() && r.global.IsMap() {
+		for k, v := range r.global.Map() {
+			scope[k] = v
+		}
+	}
+
+	// B. Nạp dữ liệu cụ thể của Request ($)
 	valData := value.New(data)
 	scope["$"] = valData
 	if valData.IsMap() {
 		for k, v := range valData.Map() {
-			scope[k] = v
+			scope[k] = v // Ghi đè Global nếu trùng key
 		}
 	}
 

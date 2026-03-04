@@ -39,8 +39,8 @@ func (c *Context) Error(v value.Value) {
 	c.request.router.err = fmt.Errorf("%s", v.String())
 }
 
-func (c *Context) Param(key string) value.Value { return c.request.Param(key) }
-func (c *Context) Query(key string) value.Value { return c.request.Query(key) }
+func (c *Context) Params(key string) value.Value { return c.request.Params(key) }
+func (c *Context) Query(key string) value.Value  { return c.request.Query(key) }
 
 func (c *Context) Path() value.Value           { return c.request.Path() }
 func (c *Context) Method() value.Value         { return c.request.Method() }
@@ -59,7 +59,11 @@ func (c *Context) Cookies() value.Value                    { return c.request.Co
 func (c *Context) Hostname() value.Value                   { return c.request.Hostname() }
 func (c *Context) Secure() value.Value                     { return c.request.Secure() }
 func (c *Context) OriginalURL() value.Value                { return c.request.OriginalURL() }
-func (c *Context) FullURL() value.Value                    { return c.request.FullURL() }
+func (c *Context) URL() value.Value                        { return c.request.URL() }
+func (c *Context) Href() value.Value                       { return c.request.Href() }
+func (c *Context) URI() value.Value                        { return c.request.URI() }
+func (c *Context) Pattern() value.Value                    { return c.request.Pattern() }
+func (c *Context) Route() value.Value                      { return c.request.Route() }
 func (c *Context) SaveFile(field, dest string) value.Value { return c.request.SaveFile(field, dest) }
 
 func (c *Context) arguments(lambda *value.Lambda) []value.Value {

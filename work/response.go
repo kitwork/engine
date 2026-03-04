@@ -4,11 +4,17 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
+type page struct {
+	template string
+	layout   string
+}
+
 type Response struct {
 	data value.Value
 	kind string
 	code int
-	// headers map[string]string
+
+	page *page
 }
 
 func (r *Response) IsSend() bool {
@@ -86,6 +92,10 @@ func (r *Response) Text(data value.Value, code ...int) {
 	r.Return(data, "text", code...)
 }
 
+func (r *Response) Render(data value.Value, code ...int) {
+	r.Return(data, "render", code...)
+}
+
 func (r *Response) Error(data value.Value, code ...int) {
 	r.ErrorString(data.String(), code...)
 }
@@ -107,11 +117,50 @@ func (r *Response) Status(code int) *Response {
 	return r
 }
 
+func (r *Response) Template(index string) *Response {
+	if r.page == nil {
+		r.page = &page{}
+	}
+	r.page.template = index
+	return r
+}
+
+func (r *Response) Layout(layout string) *Response {
+	if r.page == nil {
+		r.page = &page{}
+	}
+	r.page.layout = layout
+	return r
+}
+
 func (r *Response) Code() int {
 	return r.code
 }
 
 func (r *Response) toBytes() []byte {
+	// if r.kind == "render" {
+	// 	// Trường hợp A: Dùng một bộ Render đã config sẵn (như 'home')
+	// 	if r.renderer != nil {
+	// 		return []byte(r.renderer.tmpl(r.data.Interface()))
+	// 	}
+
+	// 	// Trường hợp B: Dùng cấu hình ad-hoc qua .template().layout()
+	// 	if r.page != nil {
+	// 		// Tạo một renderer tạm thời dựa trên cấu hình trong r.page
+	// 		// Note: r.router and r.router.tenant.Render() are placeholders.
+	// 		// You would need to ensure r.router is initialized and provides a way to get a Renderer.
+	// 		if r.router != nil {
+	// 			engine := r.router.tenantRender() // Assuming tenantRender returns a Renderer
+	// 			if r.page.template != "" {
+	// 				engine.Template(value.New(r.page.template))
+	// 			}
+	// 			if r.page.layout != "" {
+	// 				engine.Layout(value.New(r.page.layout))
+	// 			}
+	// 			return []byte(engine.tmpl(r.data.Interface()))
+	// 		}
+	// 	}
+	// }
 	return []byte(r.data.String())
 }
 
