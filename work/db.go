@@ -10,7 +10,6 @@ import (
 )
 
 func (w *KitWork) Database(vals ...value.Value) *Database {
-	fmt.Println(1233)
 	db := &Database{
 		tenant: w.tenant,
 		config: &database.Config{},
@@ -47,9 +46,10 @@ func (d *Database) Config(config *database.Config) *Database {
 	return d
 }
 
-func (d *Database) Table(table string) *DBQuery {
-	return &DBQuery{
+func (d *Database) Table(table string) *Query {
+	return &Query{
 		db:    d.db(),
 		table: table,
+		vm:    d.tenant.vm,
 	}
 }

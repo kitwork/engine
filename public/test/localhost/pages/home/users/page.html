@@ -6,6 +6,7 @@
         <table class="w-full text-left">
             <thead>
                 <tr class="text-blue-400 border-b border-slate-700">
+                    <th class="p-2">ID</th>
                     <th class="p-2">Name</th>
                     <th class="p-2">Email</th>
                 </tr>
@@ -13,8 +14,12 @@
             <tbody>
                 {{ for user in users }}
                 <tr class="border-b border-slate-700/50">
+                    <td class="p-2">
+                        <a href="/users/{{ user.id }}">{{ user.id }}</a>
+                    </td>
                     <td class="p-2">{{ user.username }}</td>
                     <td class="p-2 text-gray-400">{{ user.email }}</td>
+
                 </tr>
                 {{ end }}
             </tbody>

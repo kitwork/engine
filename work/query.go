@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -34,10 +35,6 @@ func (h *SQLProxyHandler) OnInvoke(method string, args ...value.Value) value.Val
 	return value.Value{K: value.Nil}
 }
 
-type LambdaExecutor interface {
-	ExecuteLambda(fn *value.Lambda, args []value.Value) value.Value
-}
-
 type DBQuery struct {
 	db         *sql.DB
 	table      string
@@ -53,7 +50,7 @@ type DBQuery struct {
 	groups     []string
 	havings    []string
 	returning  []string
-	executor   LambdaExecutor
+	executor   *runtime.Runtime
 	connection string
 }
 
@@ -61,7 +58,7 @@ func NewDBQuery() *DBQuery {
 	return &DBQuery{method: "select"}
 }
 
-func (q *DBQuery) SetExecutor(e LambdaExecutor) {
+func (q *DBQuery) SetExecutor(e *runtime.Runtime) {
 	q.executor = e
 }
 
@@ -664,7 +661,10 @@ func (q *DBQuery) Get() value.Value {
 	return q.executeGet()
 }
 
-func (q *DBQuery) List() value.Value {
+func (q *DBQuery) List(args ...value.Value) value.Value {
+	if len(args) > 0 {
+		q.Where(args[0])
+	}
 	return q.executeGet()
 }
 

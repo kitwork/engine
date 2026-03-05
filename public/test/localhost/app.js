@@ -27,17 +27,20 @@ router.get("/hello").handle((response) => {
 });
 
 
-router.get("/testdb").handle((response) => {
-    const users = db.find((user) => {
-        return user.username == "alice"
-    })
-    log.Print(users);
-    return response.json(users);
+router.get("/test-query").handle((response) => {
+
+    return response.json({
+        list: db.table("user").list(10),
+        find: db.table("user").find((user) => user.id == 1),
+        first: db.table("user").first(),
+        count: db.table("user").count(),
+        sum: db.table("user").sum("id"),
+        avg: db.table("user").avg("id"),
+        min: db.table("user").min("id"),
+        max: db.table("user").max("id"),
+        raw: db.table("user").where(user => user.id > 10).orderBy("id", "desc").offset(5).limit(10).list()
+    });
 });
-// router.get("/test-api").benchmark(10000).handle((req, res) => {
-//     // Dùng HTTP Client của Kitwork để gọi
-//     http.get("http://localhost:8080/hello");
-// });
 
 const global = {
     name: "kitwork1",
@@ -65,11 +68,13 @@ api.get("/gold").cache("5s")
         if (fetch.status != 200) {
             return response.status(500).json({ status: fetch.status, error: "Failed to fetch gold price" })
         }
-        const data = fetch.json().data.map(item => ({
+
+        const body = fetch.json()
+        const data = body.data.map(item => ({
             name: item.tensp,
             buy: item.giamua,
             sell: item.giaban
-        })).filter(item => item.sell > 10000);
+        }));
 
         return response.status(200).json({ success: true, count: data.length, data: data });
     });
@@ -81,10 +86,10 @@ router.get("/users/:id?").handle((request, response) => {
     const binding = {}
     if (!id) {
         // TRANG DANH SÁCH (vì không có id)
-        binding.users = [{ username: "kitwork1", email: "1@kit.com" }, { username: "kitwork2", email: "2@kit.com" }];
+        binding.users = db.table("user").list();
     } else {
         // TRANG CHI TIẾT (vì có id)
-        binding.user = { id: id, username: "User " + id };
+        binding.user = db.table("user").where(user => user.id == id).first();
     }
     const view = page.bind(binding)
     return response.html(view);

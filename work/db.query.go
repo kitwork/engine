@@ -1,359 +1,470 @@
 package work
 
-// // SQLProxy represents a connected database, allowing access to tables
-// type SQLProxy struct {
-// 	db     *sql.DB
-// 	vm     *runtime.Runtime
-// 	tenant *Tenant
-// }
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"reflect"
+	"strings"
+	"time"
 
-// func (s *SQLProxy) OnGet(key string) value.Value {
-// 	// e.g. db.users
-// 	return value.Value{K: value.Proxy, V: &QueryBuilder{
-// 		db:     s.db,
-// 		table:  key,,
-// 	}}
-// }
+	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/value"
+)
 
-// func (s *SQLProxy) OnInvoke(method string, args ...value.Value) value.Value { return value.Value{} }
-// func (s *SQLProxy) OnCompare(op string, other value.Value) value.Value      { return value.Value{} }
+// ==========================================
+// CORE DATA STRUCTURES (AST)
+// ==========================================
 
-// // QueryBuilder represents the industrial fluent query builder for a specific table
-// type QueryBuilder struct {
-// 	db     *sql.DB
-// 	table  string
-// 	wheres []string
-// 	args   []any
-// 	orders []string
-// 	limit  int
-// 	offset int
-// }
+// Condition represents a single logical filter in a WHERE or HAVING clause.
+type Condition struct {
+	Column   string
+	Operator string
+	Value    any
+	Logic    string // "AND" or "OR"
+}
 
-// func (q *QueryBuilder) OnGet(key string) value.Value {
-// 	// Columns reference: p.name
-// 	return value.Value{K: value.Proxy, V: &ColumnProxy{name: key}}
-// }
+// OrderQuery represents a sort direction for a column.
+type OrderQuery struct {
+	Column    string
+	Direction string // "ASC" or "DESC"
+}
 
-// func (q *QueryBuilder) OnInvoke(method string, args ...value.Value) value.Value {
-// 	switch method {
-// 	case "where":
-// 		if len(args) > 0 && args[0].K == value.Func {
-// 			lambda := args[0].V.(*value.Lambda)
-// 			row := value.Value{K: value.Proxy, V: &RowProxy{table: q.table}}
-// 			res := q.vm.ExecuteLambda(lambda, []value.Value{row})
-// 			if res.K == value.Proxy {
-// 				if cond, ok := res.V.(*ConditionProxy); ok {
-// 					q.wheres = append(q.wheres, cond.SQL)
-// 					q.args = append(q.args, cond.Args...)
-// 				}
-// 			}
-// 		}
-// 	case "sort", "orderBy":
-// 		if len(args) > 0 {
-// 			direction := "ASC"
-// 			if len(args) > 1 {
-// 				direction = strings.ToUpper(args[1].String())
-// 			}
-// 			col := ""
-// 			// Magic lambda for sort: sort(u => u.id)
-// 			if args[0].K == value.Func {
-// 				lambda := args[0].V.(*value.Lambda)
-// 				row := value.Value{K: value.Proxy, V: &RowProxy{table: q.table}}
-// 				res := q.vm.ExecuteLambda(lambda, []value.Value{row})
-// 				if cp, ok := res.V.(*ColumnProxy); ok {
-// 					col = cp.name
-// 				}
-// 			} else {
-// 				col = args[0].String()
-// 			}
-// 			if col != "" {
-// 				q.orders = append(q.orders, fmt.Sprintf("%s %s", col, direction))
-// 			}
-// 		}
-// 	case "limit", "take":
-// 		if len(args) > 0 {
-// 			q.limit = int(args[0].N)
-// 		}
-// 	case "skip", "offset":
-// 		if len(args) > 0 {
-// 			q.offset = int(args[0].N)
-// 		}
+// JoinQuery represents a SQL JOIN operation.
+type JoinQuery struct {
+	Type  string // e.g., "JOIN", "LEFT JOIN"
+	Table string
+	On    string // The JOIN condition string (e.g. "users.id = orders.user_id")
+}
 
-// 	// Execution Methods
-// 	case "list":
-// 		return q.execute("list")
-// 	case "first":
-// 		return q.execute("first")
-// 	case "count":
-// 		return q.execute("count")
-// 	case "exists":
-// 		return q.execute("exists")
+// Query is the main builder object that holds the state of the query (AST).
+type Query struct {
+	vm *runtime.Runtime
+	db *sql.DB
 
-// 	// Mutators
-// 	case "create", "insert":
-// 		return q.executeMutator("create", args...)
-// 	case "update":
-// 		return q.executeMutator("update", args...)
-// 	case "delete":
-// 		return q.executeMutator("delete", args...)
-// 	case "destroy":
-// 		return q.executeMutator("destroy", args...)
-// 	}
+	table      string
+	fields     []string
+	conditions []Condition
+	joins      []JoinQuery
+	orders     []OrderQuery
+	groups     []string
+	havings    []Condition
 
-// 	return value.Value{K: value.Proxy, V: q}
-// }
+	limit  int
+	offset int
+}
 
-// func (q *QueryBuilder) OnCompare(op string, other value.Value) value.Value { return value.Value{} }
+// (SQLProxyHandler is defined in query.go)
 
-// func (q *QueryBuilder) buildSQL(method string) (string, []any) {
-// 	var sb strings.Builder
-// 	switch method {
-// 	case "count":
-// 		sb.WriteString("SELECT COUNT(*) FROM ")
-// 	case "exists":
-// 		sb.WriteString("SELECT EXISTS(SELECT 1 FROM ")
-// 	default:
-// 		sb.WriteString("SELECT * FROM ")
-// 	}
-// 	sb.WriteString(q.table)
+// ==========================================
+// AST BUILDER METHODS (Fluent API)
+// ==========================================
 
-// 	if len(q.wheres) > 0 {
-// 		sb.WriteString(" WHERE ")
-// 		sb.WriteString(strings.Join(q.wheres, " AND "))
-// 	}
+func (q *Query) Table(name string) *Query {
+	q.table = name
+	return q
+}
 
-// 	if method != "count" && method != "exists" {
-// 		if len(q.orders) > 0 {
-// 			sb.WriteString(" ORDER BY ")
-// 			sb.WriteString(strings.Join(q.orders, ", "))
-// 		}
-// 		if q.limit > 0 {
-// 			sb.WriteString(fmt.Sprintf(" LIMIT %d", q.limit))
-// 		}
-// 		if q.offset > 0 {
-// 			sb.WriteString(fmt.Sprintf(" OFFSET %d", q.offset))
-// 		}
-// 	}
+func (q *Query) Select(fields ...string) *Query {
+	q.fields = fields
+	return q
+}
 
-// 	if method == "exists" {
-// 		sb.WriteString(")")
-// 	}
+func (q *Query) Where(args ...value.Value) *Query {
+	return q.addCondition("AND", args...)
+}
 
-// 	return sb.String(), q.args
-// }
+func (q *Query) Or(args ...value.Value) *Query {
+	return q.addCondition("OR", args...)
+}
 
-// func (q *QueryBuilder) execute(method string) value.Value {
-// 	sqlStr, args := q.buildSQL(method)
+func (q *Query) In(column string, vals any) *Query {
+	return q.add("AND", column, "IN", vals)
+}
 
-// 	if q.db == nil {
-// 		return value.New(map[string]any{"error": "no database connection"})
-// 	}
+func (q *Query) add(logic, column, operator string, value any) *Query {
+	q.conditions = append(q.conditions, Condition{
+		Column:   column,
+		Operator: operator,
+		Value:    value,
+		Logic:    logic,
+	})
+	return q
+}
 
-// 	switch method {
-// 	case "count":
-// 		var count int64
-// 		if err := q.db.QueryRow(sqlStr, args...).Scan(&count); err != nil {
-// 			return value.New(0)
-// 		}
-// 		return value.New(count)
-// 	case "exists":
-// 		var exists bool
-// 		if err := q.db.QueryRow(sqlStr, args...).Scan(&exists); err != nil {
-// 			return value.New(false)
-// 		}
-// 		return value.New(exists)
-// 	case "first":
-// 		rows, err := q.db.Query(sqlStr, args...)
-// 		if err != nil {
-// 			return value.Value{K: value.Nil}
-// 		}
-// 		defer rows.Close()
-// 		if rows.Next() {
-// 			return q.scanRow(rows)
-// 		}
-// 		return value.Value{K: value.Nil}
-// 	default: // list
-// 		rows, err := q.db.Query(sqlStr, args...)
-// 		if err != nil {
-// 			return value.New([]any{})
-// 		}
-// 		defer rows.Close()
-// 		var res []value.Value
-// 		for rows.Next() {
-// 			res = append(res, q.scanRow(rows))
-// 		}
-// 		return value.New(res)
-// 	}
-// }
+func (q *Query) isNull(column string) *Query {
+	return q.add("AND", column, "IS NULL", nil)
+}
 
-// func (q *QueryBuilder) executeMutator(method string, args ...value.Value) value.Value {
-// 	if q.db == nil {
-// 		return value.New(map[string]any{"error": "no database connection"})
-// 	}
+func (q *Query) notNull(column string) *Query {
+	return q.add("AND", column, "IS NOT NULL", nil)
+}
 
-// 	switch method {
-// 	case "create":
-// 		if len(args) == 0 || !args[0].IsMap() {
-// 			return value.New(map[string]any{"error": "create requires a map of values"})
-// 		}
-// 		data := args[0].Map()
-// 		cols := make([]string, 0, len(data))
-// 		placeholders := make([]string, 0, len(data))
-// 		vals := make([]any, 0, len(data))
-// 		for k, v := range data {
-// 			cols = append(cols, k)
-// 			placeholders = append(placeholders, "?")
-// 			vals = append(vals, v.Interface())
-// 		}
-// 		sqlStr := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING *", q.table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-// 		rows, err := q.db.Query(sqlStr, vals...)
-// 		if err != nil {
-// 			return value.New(map[string]any{"error": err.Error()})
-// 		}
-// 		defer rows.Close()
-// 		if rows.Next() {
-// 			return q.scanRow(rows)
-// 		}
-// 		return value.Value{K: value.Nil}
+func (q *Query) Limit(n int) *Query {
+	q.limit = n
+	return q
+}
 
-// 	case "update":
-// 		if len(args) == 0 || !args[0].IsMap() {
-// 			return value.New(map[string]any{"error": "update requires a map of values"})
-// 		}
-// 		if len(q.wheres) == 0 {
-// 			return value.New(map[string]any{"error": "update requires a where clause for safety"})
-// 		}
-// 		data := args[0].Map()
-// 		sets := make([]string, 0, len(data))
-// 		vals := make([]any, 0, len(data))
-// 		for k, v := range data {
-// 			sets = append(sets, fmt.Sprintf("%s = ?", k))
-// 			vals = append(vals, v.Interface())
-// 		}
-// 		vals = append(vals, q.args...) // Add where clause args
-// 		sqlStr := fmt.Sprintf("UPDATE %s SET %s WHERE %s RETURNING *", q.table, strings.Join(sets, ", "), strings.Join(q.wheres, " AND "))
-// 		rows, err := q.db.Query(sqlStr, vals...)
-// 		if err != nil {
-// 			return value.New(map[string]any{"error": err.Error()})
-// 		}
-// 		defer rows.Close()
-// 		if rows.Next() {
-// 			return q.scanRow(rows)
-// 		}
-// 		return value.Value{K: value.Nil}
+func (q *Query) Offset(n int) *Query {
+	q.offset = n
+	return q
+}
 
-// 	case "delete":
-// 		// Soft delete usually means UPDATE deleted_at = NOW()
-// 		if len(q.wheres) == 0 {
-// 			return value.New(map[string]any{"error": "delete requires a where clause"})
-// 		}
-// 		sqlStr := fmt.Sprintf("UPDATE %s SET deleted_at = NOW() WHERE %s", q.table, strings.Join(q.wheres, " AND "))
-// 		res, err := q.db.Exec(sqlStr, q.args...)
-// 		if err != nil {
-// 			return value.New(map[string]any{"error": err.Error()})
-// 		}
-// 		affected, _ := res.RowsAffected()
-// 		return value.New(map[string]any{"rows_affected": affected})
+func (q *Query) OrderBy(column string, direction ...string) *Query {
+	dir := "ASC"
+	if len(direction) > 0 {
+		dir = strings.ToUpper(direction[0])
+	}
 
-// 	case "destroy":
-// 		if len(q.wheres) == 0 {
-// 			return value.New(map[string]any{"error": "destroy requires a where clause"})
-// 		}
-// 		sqlStr := fmt.Sprintf("DELETE FROM %s WHERE %s", q.table, strings.Join(q.wheres, " AND "))
-// 		res, err := q.db.Exec(sqlStr, q.args...)
-// 		if err != nil {
-// 			return value.New(map[string]any{"error": err.Error()})
-// 		}
-// 		affected, _ := res.RowsAffected()
-// 		return value.New(map[string]any{"rows_affected": affected})
-// 	}
+	// Handle "id desc" string format
+	parts := strings.Split(strings.TrimSpace(column), " ")
+	if len(parts) > 1 {
+		column = parts[0]
+		dir = strings.ToUpper(parts[1])
+	}
 
-// 	return value.Value{K: value.Nil}
-// }
+	q.orders = append(q.orders, OrderQuery{Column: column, Direction: dir})
+	return q
+}
 
-// func (q *QueryBuilder) scanRow(rows *sql.Rows) value.Value {
-// 	cols, _ := rows.Columns()
-// 	values := make([]any, len(cols))
-// 	ptrs := make([]any, len(cols))
-// 	for i := range values {
-// 		ptrs[i] = &values[i]
-// 	}
-// 	if err := rows.Scan(ptrs...); err != nil {
-// 		return value.Value{K: value.Nil}
-// 	}
-// 	m := make(map[string]value.Value)
-// 	for i, name := range cols {
-// 		// handle basic types from SQL
-// 		m[name] = value.New(values[i])
-// 	}
-// 	return value.New(m)
-// }
+func (q *Query) GroupBy(columns ...string) *Query {
+	q.groups = append(q.groups, columns...)
+	return q
+}
 
-// // Proxies for Magic Lambdas
+func (q *Query) Group(columns ...string) *Query {
+	return q.GroupBy(columns...)
+}
 
-// type RowProxy struct {
-// 	table string
-// }
+func (q *Query) Join(table string, on string) *Query {
+	q.joins = append(q.joins, JoinQuery{Type: "JOIN", Table: table, On: on})
+	return q
+}
 
-// func (r *RowProxy) OnGet(key string) value.Value {
-// 	return value.Value{K: value.Proxy, V: &ColumnProxy{name: key}}
-// }
-// func (r *RowProxy) OnInvoke(m string, a ...value.Value) value.Value    { return value.Value{} }
-// func (r *RowProxy) OnCompare(op string, other value.Value) value.Value { return value.Value{} }
+func (q *Query) LeftJoin(table string, on string) *Query {
+	q.joins = append(q.joins, JoinQuery{Type: "LEFT JOIN", Table: table, On: on})
+	return q
+}
 
-// type ColumnProxy struct {
-// 	name string
-// }
+// ==========================================
+// INTERNAL HELPERS
+// ==========================================
 
-// func (c *ColumnProxy) OnGet(key string) value.Value { return value.Value{} }
-// func (c *ColumnProxy) OnInvoke(m string, a ...value.Value) value.Value {
-// 	return value.Value{}
-// }
-// func (c *ColumnProxy) OnCompare(op string, other value.Value) value.Value {
-// 	sqlOp := op
-// 	if op == "==" {
-// 		sqlOp = "="
-// 	}
+func (q *Query) addCondition(logic string, args ...value.Value) *Query {
+	if len(args) == 0 {
+		return q
+	}
 
-// 	// Logic IN if other is array
-// 	if other.K == value.Array {
-// 		arr := other.Array()
-// 		placeholders := make([]string, len(arr))
-// 		args := make([]any, len(arr))
-// 		for i, v := range arr {
-// 			placeholders[i] = "?"
-// 			args[i] = v.Interface()
-// 		}
-// 		return value.Value{K: value.Proxy, V: &ConditionProxy{
-// 			SQL:  fmt.Sprintf("%s IN (%s)", c.name, strings.Join(placeholders, ", ")),
-// 			Args: args,
-// 		}}
-// 	}
+	// 1. Magic Lambda Support (u) => u.id == 1
+	if args[0].K == value.Func && q.vm != nil {
+		if sFn, ok := args[0].V.(*value.Lambda); ok {
+			// Auto-infer table if not set
+			if q.table == "" && len(sFn.Params) > 0 {
+				q.table = sFn.Params[0]
+			}
 
-// 	// Logic LIKE if other is string with %
-// 	if other.K == value.String {
-// 		str := other.String()
-// 		if strings.Contains(str, "%") {
-// 			return value.Value{K: value.Proxy, V: &ConditionProxy{
-// 				SQL:  fmt.Sprintf("%s LIKE ?", c.name),
-// 				Args: []any{str},
-// 			}}
-// 		}
-// 	}
+			proxy := value.Value{K: value.Proxy, V: &SQLProxyHandler{TableName: q.table}}
+			res := q.vm.ExecuteLambda(sFn, []value.Value{proxy})
 
-// 	return value.Value{K: value.Proxy, V: &ConditionProxy{
-// 		SQL:  fmt.Sprintf("%s %s ?", c.name, sqlOp),
-// 		Args: []any{other.Interface()},
-// 	}}
-// }
+			if res.K == value.Proxy {
+				if filter, ok := res.V.(*SQLProxyHandler); ok {
+					op := q.mapOperator(filter.Operator)
+					val := filter.Value
 
-// type ConditionProxy struct {
-// 	SQL  string
-// 	Args []any
-// }
+					// Smart Detection (Auto-LIKE, Auto-IN)
+					if op == "=" && val.K == value.String && strings.Contains(val.Text(), "%") {
+						op = "LIKE"
+					}
+					if op == "=" && val.K == value.Array {
+						op = "IN"
+					}
 
-// func (c *ConditionProxy) OnGet(key string) value.Value                    { return value.Value{} }
-// func (c *ConditionProxy) OnInvoke(m string, a ...value.Value) value.Value { return value.Value{} }
-// func (c *ConditionProxy) OnCompare(op string, other value.Value) value.Value {
-// 	return value.Value{}
-// }
+					q.conditions = append(q.conditions, Condition{
+						Column:   filter.Column,
+						Operator: op,
+						Value:    val.Interface(),
+						Logic:    logic,
+					})
+					return q
+				}
+			}
+		}
+	}
+
+	// 2. Traditional Args: .where("id", 1) or .where("id", ">", 1)
+	if len(args) == 2 {
+		q.conditions = append(q.conditions, Condition{Column: args[0].Text(), Operator: "=", Value: args[1].Interface(), Logic: logic})
+	} else if len(args) == 3 {
+		q.conditions = append(q.conditions, Condition{Column: args[0].Text(), Operator: args[1].Text(), Value: args[2].Interface(), Logic: logic})
+	}
+	return q
+}
+
+func (q *Query) mapOperator(op string) string {
+	switch strings.ToLower(op) {
+	case "==", "===", "":
+		return "="
+	case "!=", "!==":
+		return "<>"
+	case "gt":
+		return ">"
+	case "lt":
+		return "<"
+	case "gte":
+		return ">="
+	case "lte":
+		return "<="
+	default:
+		return strings.ToUpper(op)
+	}
+}
+
+// ==========================================
+// EXECUTORS
+// ==========================================
+
+func (q *Query) list(limit int) value.Value {
+	q.limit = limit
+	return q.run()
+}
+
+func (q *Query) first() value.Value {
+	q.limit = 1
+	return q.run()
+}
+
+func (q *Query) Find(idOrFn any) value.Value {
+	// SMART FIND: If it's a Lambda, treat it as a Where condition
+	if v, ok := idOrFn.(value.Value); ok && v.K == value.Func {
+		return q.Where(v).first()
+	}
+
+	// TRADITIONAL FIND: Primary Key lookup
+	q.conditions = append(q.conditions, Condition{
+		Column:   "id",
+		Operator: "=",
+		Value:    idOrFn,
+		Logic:    "AND",
+	})
+	q.limit = 1
+	return q.run()
+}
+
+func (q *Query) find(col, op string, val any) value.Value {
+	q.conditions = append(q.conditions, Condition{
+		Column:   col,
+		Operator: op,
+		Value:    val,
+		Logic:    "AND",
+	})
+	return q.run()
+}
+
+func (q *Query) Count(column ...string) value.Value {
+	col := "*"
+	if len(column) > 0 {
+		col = column[0]
+	}
+	q.fields = []string{fmt.Sprintf("COUNT(%s)", col)}
+	return q.run()
+}
+
+func (q *Query) Sum(column string) value.Value {
+	q.fields = []string{fmt.Sprintf("SUM(\"%s\")", column)}
+	return q.run()
+}
+
+func (q *Query) Avg(column string) value.Value {
+	q.fields = []string{fmt.Sprintf("AVG(\"%s\")", column)}
+	return q.run()
+}
+
+func (q *Query) Min(column string) value.Value {
+	q.fields = []string{fmt.Sprintf("MIN(\"%s\")", column)}
+	return q.run()
+}
+
+func (q *Query) Max(column string) value.Value {
+	q.fields = []string{fmt.Sprintf("MAX(\"%s\")", column)}
+	return q.run()
+}
+
+// ==========================================
+// SQL GENERATION & EXECUTION
+// ==========================================
+
+func (q *Query) run() value.Value {
+	// For now, let's keep it in "Preview Mode" as requested earlier,
+	// but this can easily call .execute() to run for real.
+	return q.toQuery().Raw()
+}
+
+func (q *Query) RawQuery() value.Value {
+	return q.toQuery().Raw()
+}
+
+func (q *Query) toQuery() *SQLQuery {
+	var sql strings.Builder
+	var args []any
+	argCount := 1
+
+	// 1. SELECT
+	sql.WriteString("SELECT ")
+	if len(q.fields) == 0 {
+		sql.WriteString("*")
+	} else {
+		for i, f := range q.fields {
+			if i > 0 {
+				sql.WriteString(", ")
+			}
+			if strings.Contains(f, "(") || strings.Contains(f, " ") {
+				sql.WriteString(f)
+			} else {
+				sql.WriteString(fmt.Sprintf("\"%s\"", f))
+			}
+		}
+	}
+
+	// 2. FROM
+	sql.WriteString(fmt.Sprintf(" FROM \"%s\"", q.table))
+
+	// 3. JOIN
+	for _, j := range q.joins {
+		sql.WriteString(fmt.Sprintf(" %s \"%s\" ON %s", j.Type, j.Table, j.On))
+	}
+
+	// 4. WHERE
+	if len(q.conditions) > 0 {
+		sql.WriteString(" WHERE ")
+		for i, cond := range q.conditions {
+			if i > 0 {
+				sql.WriteString(fmt.Sprintf(" %s ", cond.Logic))
+			}
+
+			// 1. Handle Parameterless Operators (IS NULL, etc.)
+			if strings.Contains(strings.ToUpper(cond.Operator), "NULL") {
+				sql.WriteString(fmt.Sprintf("\"%s\" %s", cond.Column, cond.Operator))
+				continue
+			}
+
+			// 2. Handle IN Operator Special Case
+			if strings.ToUpper(cond.Operator) == "IN" {
+				rv := reflect.ValueOf(cond.Value)
+				if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
+					var placeholders []string
+					for j := 0; j < rv.Len(); j++ {
+						placeholders = append(placeholders, fmt.Sprintf("$%d", argCount))
+						args = append(args, rv.Index(j).Interface())
+						argCount++
+					}
+					sql.WriteString(fmt.Sprintf("\"%s\" IN (%s)", cond.Column, strings.Join(placeholders, ", ")))
+					continue
+				}
+			}
+
+			// 3. Standard Operator
+			sql.WriteString(fmt.Sprintf("\"%s\" %s $%d", cond.Column, cond.Operator, argCount))
+			args = append(args, cond.Value)
+			argCount++
+		}
+	}
+
+	// 5. GROUP BY
+	if len(q.groups) > 0 {
+		sql.WriteString(" GROUP BY ")
+		for i, g := range q.groups {
+			if i > 0 {
+				sql.WriteString(", ")
+			}
+			sql.WriteString(fmt.Sprintf("\"%s\"", g))
+		}
+	}
+
+	// 6. ORDER BY
+	if len(q.orders) > 0 {
+		sql.WriteString(" ORDER BY ")
+		for i, o := range q.orders {
+			if i > 0 {
+				sql.WriteString(", ")
+			}
+			sql.WriteString(fmt.Sprintf("\"%s\" %s", o.Column, o.Direction))
+		}
+	}
+
+	// 7. LIMIT & OFFSET
+	if q.limit > 0 {
+		sql.WriteString(fmt.Sprintf(" LIMIT %d", q.limit))
+	}
+	if q.offset > 0 {
+		sql.WriteString(fmt.Sprintf(" OFFSET %d", q.offset))
+	}
+
+	return &SQLQuery{
+		db:    q.db,
+		Query: sql.String(),
+		Args:  args,
+	}
+}
+
+// SQLQuery is a helper to execute the generated SQL.
+type SQLQuery struct {
+	db    *sql.DB
+	Query string
+	Args  []any
+}
+
+func (s *SQLQuery) execute() value.Value {
+	if s.db == nil {
+		return value.Value{K: value.Nil}
+	}
+
+	rows, err := s.db.QueryContext(context.Background(), s.Query, s.Args...)
+	if err != nil {
+		fmt.Printf("[DB] Execution Error: %v\n", err)
+		return value.Value{K: value.Nil}
+	}
+	defer rows.Close()
+
+	columns, _ := rows.Columns()
+	var results []value.Value
+
+	for rows.Next() {
+		values := make([]any, len(columns))
+		ptrs := make([]any, len(columns))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(ptrs...); err != nil {
+			continue
+		}
+
+		row := make(map[string]value.Value)
+		for i, col := range columns {
+			row[col] = value.New(values[i])
+		}
+		results = append(results, value.New(row))
+	}
+
+	return value.New(results)
+}
+
+func (s *SQLQuery) Raw() value.Value {
+	raw := s.Query
+	for i := len(s.Args); i >= 1; i-- {
+		placeholder := fmt.Sprintf("$%d", i)
+		val := s.Args[i-1]
+		var valStr string
+
+		switch v := val.(type) {
+		case string:
+			valStr = fmt.Sprintf("'%s'", strings.ReplaceAll(v, "'", "''"))
+		case time.Time:
+			valStr = fmt.Sprintf("'%s'", v.Format(time.RFC3339))
+		default:
+			valStr = fmt.Sprintf("%v", v)
+		}
+		raw = strings.ReplaceAll(raw, placeholder, valStr)
+	}
+	return value.New(raw)
+}

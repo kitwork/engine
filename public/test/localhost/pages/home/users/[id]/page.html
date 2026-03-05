@@ -11,7 +11,10 @@
                 </tr>
             </thead>
             <tbody>
-                {{ $user }}
+                <tr class="border-b border-slate-700/50">
+                    <td class="p-2">{{ user.username }}</td>
+                    <td class="p-2 text-gray-400">{{ user.email }}</td>
+                </tr>
             </tbody>
         </table>
     </div>
