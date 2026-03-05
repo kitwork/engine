@@ -884,3 +884,127 @@ func (q *DBQuery) Count(field ...string) value.Value {
 func (q *DBQuery) String() string {
 	return fmt.Sprintf("DBQuery on %s", q.table)
 }
+
+func (q *DBQuery) toSQL() (string, []any) {
+	// 1️⃣ Chọn các trường (SELECT …)
+	selectedFields := "*"
+	if len(q.fields) > 0 {
+		selectedFields = ""
+		for i, f := range q.fields {
+			if i > 0 {
+				selectedFields += ", "
+			}
+			selectedFields += fmt.Sprintf("\"%s\"", f)
+		}
+	}
+	// Nếu đang thực hiện một hàm aggregate (SUM, AVG, …) thì dùng method đã lưu
+	if strings.Contains(q.method, "(") {
+		selectedFields = q.method
+	}
+	// 2️⃣ Câu lệnh cơ bản SELECT … FROM …
+	query := fmt.Sprintf("SELECT %s FROM \"%s\"", selectedFields, q.table)
+	// 3️⃣ JOINS
+	for _, join := range q.joins {
+		query += " " + join
+	}
+	// 4️⃣ WHERE
+	if len(q.conditions) > 0 {
+		query += " WHERE "
+		for i, cond := range q.conditions {
+			if i > 0 && cond != "OR" && q.conditions[i-1] != "OR" {
+				query += " AND "
+			} else if i > 0 && cond != "OR" {
+				query += " "
+			}
+			query += cond
+		}
+	}
+	// 5️⃣ GROUP BY
+	if len(q.groups) > 0 {
+		query += " GROUP BY "
+		for i, g := range q.groups {
+			if i > 0 {
+				query += ", "
+			}
+			query += fmt.Sprintf("\"%s\"", g)
+		}
+	}
+	// 6️⃣ HAVING
+	if len(q.havings) > 0 {
+		query += " HAVING "
+		for i, h := range q.havings {
+			if i > 0 {
+				query += " AND "
+			}
+			query += h
+		}
+	}
+	// 7️⃣ ORDER BY
+	if q.order != "" {
+		query += fmt.Sprintf(" ORDER BY %s", q.order)
+	}
+	// 8️⃣ LIMIT & OFFSET (có safety caps)
+	safetyCap := DefaultDBMaxLimit
+	if q.maxLimit > 0 {
+		safetyCap = q.maxLimit
+	}
+	finalLimit := q.limit
+	if finalLimit <= 0 {
+		finalLimit = DefaultDBLimit // nếu người dùng không gọi .take()
+	}
+	if finalLimit > safetyCap {
+		finalLimit = safetyCap
+	}
+	query += fmt.Sprintf(" LIMIT %d", finalLimit)
+	if q.offset > 0 {
+		query += fmt.Sprintf(" OFFSET %d", q.offset)
+	}
+	// Trả về câu lệnh và slice các giá trị placeholder đã được thu thập trong q.whereArgs
+	return query, q.whereArgs
+}
+
+// Raw returns a Kitwork `value.Value` that contains both the generated SQL string
+// **and** the slice of arguments that will be bound to the placeholders.
+// This is useful for debugging, logging, or any scenario where you want to see the
+// exact query that will be sent to the database without actually executing it.
+func (q *DBQuery) Raw() value.Value {
+	// 1️⃣ Xây dựng câu SQL và các tham số (đã có trong ToSQL)
+	sqlStr, sqlArgs := q.toSQL()
+
+	// 2️⃣ Chuyển []any → []value.Value để phù hợp với hệ thống value của Kitwork
+	vals := make([]value.Value, len(sqlArgs))
+	for i, a := range sqlArgs {
+		vals[i] = value.New(a)
+	}
+
+	// 3️⃣ Trả về một object JavaScript dạng:
+	//    { sql: "<chuỗi SQL>", args: [arg1, arg2, …] }
+	return value.New(map[string]value.Value{
+		"sql":  value.New(sqlStr),
+		"args": value.New(vals),
+	})
+}
+
+type SQL struct {
+	Query string
+	Args  []any
+}
+
+func (q *DBQuery) ToSQL() SQL {
+	query, args := q.toSQL()
+	return SQL{
+		Query: query,
+		Args:  args,
+	}
+}
+
+func (q *SQL) Raw() value.Value {
+	// 1️⃣ Xây dựng câu SQL và các tham số (đã có trong ToSQL)
+
+	// 2️⃣ Trả về một object JavaScript dạng:
+	//    { sql: "<chuỗi SQL>", args: [arg1, arg2, …] }
+	return value.New(SQL{
+		Query: q.Query,
+		Args:  q.Args,
+	})
+}

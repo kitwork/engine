@@ -1,6 +1,7 @@
 package work
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
 	goruntime "runtime"
@@ -34,6 +35,8 @@ func NewEntity(identity string, domain string) *Entity {
 // Router struct is defined in router.go
 type Config struct {
 	source string
+
+	master *sql.DB
 }
 
 func (t *Tenant) Config(vals ...value.Value) *KitWork { return &KitWork{tenant: t} }

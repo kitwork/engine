@@ -1,12 +1,39 @@
-const { router, log, render, http } = kitwork();
+const { router, log, render, http, database } = kitwork();
+
+
+
+const db = database({
+    type: "postgres",
+    user: "postgres",
+    password: "db.kitwork.io@03122025",
+    name: "postgres",
+    host: "152.42.253.164",
+    port: 5432,
+    ssl: "require",
+    timezone: "Asia/Ho_Chi_Minh",
+    timeout: 5,
+    max_open: 50,
+    max_idle: 10,
+    lifetime: 12,
+    max_limit: 60,
+})
+
 
 router.get("/favicon.ico").file("/assets/favicon.ico");
 
 
-router.get("/hello").handle(() => {
-    return "hello world"
+router.get("/hello").handle((response) => {
+    return response.text("hello world");
 });
 
+
+router.get("/testdb").handle((response) => {
+    const users = db.find((user) => {
+        return user.username == "alice"
+    })
+    log.Print(users);
+    return response.json(users);
+});
 // router.get("/test-api").benchmark(10000).handle((req, res) => {
 //     // Dùng HTTP Client của Kitwork để gọi
 //     http.get("http://localhost:8080/hello");

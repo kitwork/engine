@@ -4,29 +4,48 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	"github.com/kitwork/engine/security"
 )
 
-var Master *sql.DB
+func Connect(cfg *Config) (*sql.DB, error) {
+	return cfg.Connect()
+}
 
-// InitDB khởi tạo kết nối Database toàn cục dựa trên cấu hình bảo mật
-func InitDB(cfg security.DBConfig) error {
+type Config struct {
+	Driver   string `yaml:"driver"` // postgres, mysql, sqlite
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Name     string `yaml:"name"`
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	SSLMode  string `yaml:"ssl"`
+	Timezone string `yaml:"timezone"`
+	Timeout  int    `yaml:"timeout"`
+	MaxOpen  int    `yaml:"max_open"`
+	MaxIdle  int    `yaml:"max_idle"`
+	Lifetime int    `yaml:"lifetime"`
+	MaxLimit int    `yaml:"max_limit"`
+}
+
+func (d *Config) Connect() (*sql.DB, error) {
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s timezone=%s connect_timeout=%d",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Name, cfg.SSLMode, cfg.Timezone, cfg.Timeout)
+		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode, d.Timezone, d.Timeout)
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	db.SetMaxOpenConns(cfg.MaxOpen)
-	db.SetMaxIdleConns(cfg.MaxIdle)
-	db.SetConnMaxLifetime(time.Duration(cfg.Lifetime) * time.Minute)
+	db.SetMaxOpenConns(d.MaxOpen)
+	db.SetMaxIdleConns(d.MaxIdle)
+	db.SetConnMaxLifetime(time.Duration(d.Lifetime) * time.Minute)
 
 	if err := db.Ping(); err != nil {
-		return err
+		return nil, err
 	}
+	return db, nil
+}
 
-	return nil
+func (d *Config) DSN() string {
+	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s timezone=%s connect_timeout=%d",
+		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode, d.Timezone, d.Timeout)
 }

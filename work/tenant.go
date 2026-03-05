@@ -1,6 +1,7 @@
 package work
 
 import (
+	"database/sql"
 	"path/filepath"
 	"sync"
 	"time"
@@ -21,8 +22,13 @@ type Tenant struct {
 	cacheLock sync.RWMutex
 	cache     map[string]*CachedResult
 
-	cacheNodeLock sync.RWMutex
-	cacheNode     map[string]*node
+	databases map[string]*sql.DB
+	dbMu      sync.Mutex
+}
+
+type cache struct {
+	sync.RWMutex
+	data map[string]*CachedResult
 }
 
 type CachedResult struct {
