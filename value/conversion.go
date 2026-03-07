@@ -113,7 +113,8 @@ func (v Value) Interface() any {
 	}
 }
 
-func (v Value) Int() int64     { return int64(v.N) }
+func (v Value) Int() int       { return int(v.N) }
+func (v Value) Int64() int64   { return int64(v.N) }
 func (v Value) Float() float64 { return v.N }
 
 func (v Value) Bytes() []byte {

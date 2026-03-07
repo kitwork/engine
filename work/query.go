@@ -12,29 +12,6 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// SQLProxyHandler implements value.ProxyHandler to capture SQL conditions
-type SQLProxyHandler struct {
-	TableName string
-	Column    string
-	Operator  string
-	Value     value.Value
-}
-
-func (h *SQLProxyHandler) OnGet(key string) value.Value {
-	return value.Value{K: value.Proxy, V: &SQLProxyHandler{TableName: h.TableName, Column: key}}
-}
-
-func (h *SQLProxyHandler) OnCompare(op string, other value.Value) value.Value {
-	return value.Value{K: value.Proxy, V: &SQLProxyHandler{Column: h.Column, Operator: op, Value: other}}
-}
-
-func (h *SQLProxyHandler) OnInvoke(method string, args ...value.Value) value.Value {
-	if len(args) > 0 {
-		return value.Value{K: value.Proxy, V: &SQLProxyHandler{Column: h.Column, Operator: method, Value: args[0]}}
-	}
-	return value.Value{K: value.Nil}
-}
-
 type DBQuery struct {
 	db         *sql.DB
 	table      string
@@ -84,12 +61,12 @@ func (q *DBQuery) Where(args ...value.Value) *DBQuery {
 	if args[0].K == value.Func && q.executor != nil {
 		if sFn, ok := args[0].V.(*value.Lambda); ok {
 			// Create a Proxy with SQL handler
-			handler := &SQLProxyHandler{}
+			handler := &SQLProxy{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
 
 			if res.K == value.Proxy {
-				if filter, ok := res.V.(*SQLProxyHandler); ok {
+				if filter, ok := res.V.(*SQLProxy); ok {
 					op := filter.Operator
 					val := filter.Value
 
@@ -539,19 +516,19 @@ func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *
 			primaryTableAlias = sFn.Params[1]
 		}
 
-		hJoin := &SQLProxyHandler{TableName: joinTableAlias}
+		hJoin := &SQLProxy{TableName: joinTableAlias}
 		pJoin := value.Value{K: value.Proxy, V: hJoin}
 
-		hPrimary := &SQLProxyHandler{TableName: primaryTableAlias}
+		hPrimary := &SQLProxy{TableName: primaryTableAlias}
 		pPrimary := value.Value{K: value.Proxy, V: hPrimary}
 
 		// Thực thi Lambda: (orders, users) => orders.user_id == users.id
 		res := q.executor.ExecuteLambda(sFn, []value.Value{pJoin, pPrimary})
 
 		if res.K == value.Proxy {
-			if filter, ok := res.V.(*SQLProxyHandler); ok {
+			if filter, ok := res.V.(*SQLProxy); ok {
 				if filter.Value.K == value.Proxy {
-					if otherFilter, ok := filter.Value.V.(*SQLProxyHandler); ok {
+					if otherFilter, ok := filter.Value.V.(*SQLProxy); ok {
 						// Sinh ra SQL chuẩn xác dựa trên tên bảng/biến
 						sqlJoin += fmt.Sprintf(" ON \"%s\".\"%s\" = \"%s\".\"%s\"",
 							filter.TableName, filter.Column,
@@ -569,11 +546,11 @@ func (q *DBQuery) joinInternal(typ string, tableOrFn any, args ...value.Value) *
 func (q *DBQuery) On(args ...value.Value) *DBQuery {
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
 		if sFn, ok := args[0].V.(*value.Lambda); ok {
-			handler := &SQLProxyHandler{}
+			handler := &SQLProxy{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
 			if res.K == value.Proxy {
-				if filter, ok := res.V.(*SQLProxyHandler); ok {
+				if filter, ok := res.V.(*SQLProxy); ok {
 					// Custom On condition: users.id = orders.user_id
 					// We don't use $n placeholders for JOIN ON usually, but raw columns
 					last := len(q.joins) - 1
@@ -596,11 +573,11 @@ func (q *DBQuery) Having(args ...value.Value) *DBQuery {
 	// Re-use logic from Where for Having
 	if len(args) > 0 && args[0].K == value.Func && q.executor != nil {
 		if sFn, ok := args[0].V.(*value.Lambda); ok {
-			handler := &SQLProxyHandler{}
+			handler := &SQLProxy{}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.executor.ExecuteLambda(sFn, []value.Value{proxy})
 			if res.K == value.Proxy {
-				if filter, ok := res.V.(*SQLProxyHandler); ok {
+				if filter, ok := res.V.(*SQLProxy); ok {
 					op := filter.Operator
 					if op == "==" || op == "" {
 						op = "="

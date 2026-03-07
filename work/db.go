@@ -46,10 +46,45 @@ func (d *Database) Config(config *database.Config) *Database {
 	return d
 }
 
-func (d *Database) Table(table string) *Query {
+func (d *Database) NewQuery() *Query {
 	return &Query{
-		db:    d.db(),
-		table: table,
-		vm:    d.tenant.vm,
+		db: d.db(),
+		vm: d.tenant.vm,
 	}
+}
+
+func (d *Database) Table(table string) *Query {
+	return d.NewQuery().Table(table)
+}
+
+func (d *Database) Select(fields ...string) *Query {
+	return d.NewQuery().Select(fields...)
+}
+
+func (d *Database) Where(args ...value.Value) *Query {
+	return d.NewQuery().Where(args...)
+}
+
+func (d *Database) Limit(limit int) *Query {
+	return d.NewQuery().Limit(limit)
+}
+
+func (d *Database) Find(args ...value.Value) value.Value {
+	return d.NewQuery().Find(args...)
+}
+
+func (d *Database) First(args ...value.Value) value.Value {
+	return d.NewQuery().First(args...)
+}
+
+func (d *Database) List(args ...value.Value) value.Value {
+	return d.NewQuery().List(args...)
+}
+
+func (d *Database) Count(args ...value.Value) value.Value {
+	return d.NewQuery().Count(args...)
+}
+
+func (d *Database) Exists(args ...value.Value) value.Value {
+	return d.NewQuery().Exists(args...)
 }

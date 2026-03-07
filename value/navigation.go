@@ -89,6 +89,25 @@ func (v Value) Array() []Value {
 	return nil
 }
 
+func (v Value) First() Value {
+	return v.Index(0)
+}
+
+func (v Value) Last() Value {
+	return v.Index(v.Len() - 1)
+}
+
+func (v Value) Val() Value {
+	if v.K == Map {
+		m := v.Map()
+		// Return the first value found (maps are unordered anyway)
+		for _, val := range m {
+			return val
+		}
+	}
+	return v
+}
+
 func (v Value) Set(key string, val Value) {
 	if v.K == Map {
 		v.Map()[key] = val

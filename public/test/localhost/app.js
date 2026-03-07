@@ -28,17 +28,24 @@ router.get("/hello").handle((response) => {
 
 
 router.get("/test-query").handle((response) => {
-
     return response.json({
-        list: db.table("user").list(10),
-        find: db.table("user").find((user) => user.id == 1),
+        // 1. Scoping & Shortcuts
+        find: db.table("user").find("username", "grace"),
+        find_short: db.find((user) => user.username == "grace"),
+        find_complex: db.table("user").find("id", ">", 5),
+
         first: db.table("user").first(),
+        first_short: db.first((user) => user.id == 5),
+
+        list: db.table("user").list(2),
+        list_short: db.limit(3).list((user) => user.id > 5),
+
+        exists: db.where((user) => user.username == "grace").exists(),
+
+        count_short: db.where((user) => user.id < 5).count((user) => user.is_active == false),
         count: db.table("user").count(),
-        sum: db.table("user").sum("id"),
-        avg: db.table("user").avg("id"),
-        min: db.table("user").min("id"),
-        max: db.table("user").max("id"),
-        raw: db.table("user").where(user => user.id > 10).orderBy("id", "desc").offset(5).limit(10).list()
+        count_active: db.table("user").count("is_active"),
+
     });
 });
 

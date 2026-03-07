@@ -147,6 +147,10 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Random, true
 		case "at", "index":
 			return Value.ItemAt, true
+		case "first":
+			return func(v Value, _ ...Value) Value { return v.First() }, true
+		case "last":
+			return func(v Value, _ ...Value) Value { return v.Last() }, true
 		case "compact":
 			return Value.Compact, true
 		case "unique":
