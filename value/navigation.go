@@ -97,7 +97,10 @@ func (v Value) Last() Value {
 	return v.Index(v.Len() - 1)
 }
 
-func (v Value) Val() Value {
+func (v Value) One() Value {
+	if v.K == Array {
+		return v.First()
+	}
 	if v.K == Map {
 		m := v.Map()
 		// Return the first value found (maps are unordered anyway)

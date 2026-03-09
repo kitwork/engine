@@ -40,12 +40,27 @@ router.get("/test-query").handle((response) => {
         list: db.table("user").list(2),
         list_short: db.limit(3).list((user) => user.id > 5),
 
-        exists: db.where((user) => user.username == "grace").exists(),
+        exists: db.exists((user) => user.username == "grace1"),
 
-        count_short: db.where((user) => user.id < 5).count((user) => user.is_active == false),
         count: db.table("user").count(),
-        count_active: db.table("user").count("is_active"),
+        count_active: db.count((user) => user.is_active == true),
 
+        create: db.table("user").create({
+            username: "test2",
+            email: "test@gmail.com",
+            is_active: true,
+        }),
+
+        update: db.table("user").where(user => user.id == 53).update({
+            username: "test14",
+            email: "test@gmail.com",
+            is_active: true,
+        }),
+
+        delete: db.where(user => user.id == 52).remove(),
+
+        join: db.join((order, user) => order.id == user.id).list(),
+        join_where: db.where((order, user) => order.id == user.id).list(),
     });
 });
 
@@ -93,10 +108,10 @@ router.get("/users/:id?").handle((request, response) => {
     const binding = {}
     if (!id) {
         // TRANG DANH SÁCH (vì không có id)
-        binding.users = db.table("user").list();
+        binding.users = db.table("user").list(5);
     } else {
         // TRANG CHI TIẾT (vì có id)
-        binding.user = db.table("user").where(user => user.id == id).first();
+        binding.user = db.where(user => user.id == id).first();
     }
     const view = page.bind(binding)
     return response.html(view);

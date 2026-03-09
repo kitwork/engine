@@ -88,3 +88,35 @@ func (d *Database) Count(args ...value.Value) value.Value {
 func (d *Database) Exists(args ...value.Value) value.Value {
 	return d.NewQuery().Exists(args...)
 }
+
+func (d *Database) Create(args ...value.Value) value.Value {
+	return d.NewQuery().Create(args...)
+}
+
+func (d *Database) Update(args ...value.Value) value.Value {
+	return d.NewQuery().Update(args...)
+}
+
+func (d *Database) Save(args ...value.Value) value.Value {
+	return d.NewQuery().Save(args...)
+}
+
+func (d *Database) Delete() value.Value {
+	return d.NewQuery().Delete()
+}
+
+func (d *Database) Remove() value.Value {
+	return d.NewQuery().Remove()
+}
+
+func (d *Database) OrderBy(col string, dir ...string) *Query {
+	return d.NewQuery().OrderBy(col, dir...)
+}
+
+func (d *Database) GroupBy(cols ...string) *Query {
+	return d.NewQuery().GroupBy(cols...)
+}
+
+func (d *Database) Join(args ...value.Value) *Query {
+	return d.NewQuery().Join(args...)
+}
