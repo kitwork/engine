@@ -1,6 +1,8 @@
-const { router, log, render, http, database } = kitwork();
+const { router, log, render, http, database, go } = kitwork();
 
-
+go(() => {
+    log.Print("Hello from HUB!");
+})
 
 const db = database({
     type: "postgres",
@@ -61,6 +63,8 @@ router.get("/test-query").handle((response) => {
 
         join: db.join((order, user) => order.id == user.id).list(),
         join_where: db.where((order, user) => order.id == user.id).list(),
+        raw_test: db.table("user").where(u => u.username == "alice%").Raw(),
+        last_user: db.table("user").Last(),
     });
 });
 
@@ -75,6 +79,8 @@ const notfound = render("/pages/home/notfound.html").global(global).layout("/lay
 const api = router.group("/api");
 
 api.get("/").handle((context) => {
+
+
     log.Print("Hello from HUB!");
     return context.response.json({ message: "Hello from HUB!" });
 });
@@ -117,7 +123,30 @@ router.get("/users/:id?").handle((request, response) => {
     return response.html(view);
 });
 
+router.get("/background").handle((response) => {
+    log.Print("Request received, starting background task...");
+    
+    go(() => {
+        log.Print("Background task is running...");
+        // Simulate some work
+        log.Print("Background task completed successfully!");
+    });
+
+    return response.text("Background task started!");
+});
+
+router.get("/background-db").handle((response) => {
+    go(() => {
+        log.Print("Fetching users in background...");
+        const users = db.table("user").list(3);
+        log.Print("Users fetched in background: " + users.length);
+    });
+    return response.text("DB Background task started!");
+});
+
+
 router.get("/*").handle((request, response) => {
     const view = notfound.bind(null)
     return response.html(view);
 });
+

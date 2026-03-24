@@ -145,6 +145,29 @@ func (q *Query) Where(args ...value.Value) *Query {
 
 			if res.K == value.Proxy {
 				if filter, ok := res.V.(*SQLProxy); ok {
+					op := filter.Operator
+					val := filter.Value
+
+					// 1. Mapping JS operators to SQL Base
+					switch strings.ToLower(op) {
+					case "==", "===", "":
+						op = "="
+					case "!=", "!==":
+						op = "<>"
+					}
+
+					// SMART DETECTION: Auto-LIKE
+					if op == "=" && val.IsString() {
+						if strings.Contains(val.String(), "%") {
+							op = "LIKE"
+						}
+					}
+
+					// SMART DETECTION: Auto-IN
+					if op == "=" && val.IsArray() {
+						op = "IN"
+					}
+
 					// Nếu Value bên phải cũng là một Proxy -> So sánh chéo hai cột
 					if filter.Value.K == value.Proxy {
 						if otherFilter, ok := filter.Value.V.(*SQLProxy); ok {
@@ -158,7 +181,7 @@ func (q *Query) Where(args ...value.Value) *Query {
 							}
 							q.conditions = append(q.conditions, Condition{
 								Column:   leftCol,
-								Operator: filter.Operator,
+								Operator: op,
 								Value:    rightCol,
 								Logic:    "AND",
 								IsColumn: true,
@@ -172,7 +195,7 @@ func (q *Query) Where(args ...value.Value) *Query {
 					if filter.TableName != "" {
 						col = filter.TableName + "." + filter.Column
 					}
-					return q.and(col, filter.Operator, filter.Value)
+					return q.and(col, op, filter.Value)
 				}
 			}
 		}
@@ -633,6 +656,19 @@ func (q *Query) getSQL() (string, []any) {
 	return query, whereArgs
 }
 
+func (q *Query) ToSQL() map[string]any {
+	sql, args := q.getSQL()
+	return map[string]any{
+		"sql":  sql,
+		"args": args,
+	}
+}
+
+func (q *Query) Raw() value.Value {
+	res := q.ToSQL()
+	return value.New(res)
+}
+
 func quoteCol(col string) string {
 	if strings.Contains(col, ".") {
 		parts := strings.SplitN(col, ".", 2)
@@ -979,4 +1015,35 @@ func (q *Query) remove() value.Value {
 	}
 	affected, _ := res.RowsAffected()
 	return value.New(affected)
+}
+func (q *Query) Take(n int) *Query { return q.Limit(n) }
+
+func (q *Query) SingleOrDefault() value.Value { return q.First() }
+
+func (q *Query) ToList() value.Value { return q.List() }
+
+func (q *Query) Last() value.Value {
+	if len(q.orders) == 0 {
+		q.OrderBy("id", "DESC")
+	} else {
+		// Flip first order
+		o := &q.orders[0]
+		if strings.ToUpper(o.Direction) == "ASC" {
+			o.Direction = "DESC"
+		} else {
+			o.Direction = "ASC"
+		}
+	}
+	return q.First()
+}
+
+func (q *Query) Like(args ...value.Value) *Query {
+	if len(args) == 2 {
+		return q.and(args[0].Text(), "LIKE", args[1])
+	}
+	if len(args) == 1 && args[0].IsCallable() {
+		// Just use where logic
+		return q.Where(args[0])
+	}
+	return q
 }
