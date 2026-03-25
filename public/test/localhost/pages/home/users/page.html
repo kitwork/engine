@@ -1,28 +1,37 @@
-<div class="max-w-4xl mx-auto p-6">
-    <h1 class="text-3xl font-bold text-green-400 mb-6">Feature-Based User List</h1>
-    <p class="mb-4 text-gray-400">This page logic and template are in the same folder (Angular Style).</p>
+<div class="max-w-5xl mx-auto p-6 md:p-12 animate-[fadeInUp_0.8s_ease_forwards]">
+    <div class="mb-10">
+        <h1 class="text-4xl md:text-5xl font-black text-brand mb-3 tracking-tight">Users Directory</h1>
+        <p class="text-tokyo-text text-lg">Ultrafast data fetching from Postgres via Kitwork ORM.</p>
+    </div>
 
-    <div class="bg-slate-800 rounded-lg p-4 shadow-xl">
-        <table class="w-full text-left">
+    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-2xl p-2 md:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.5)] backdrop-blur-md overflow-x-auto">
+        <table class="w-full text-left border-collapse">
             <thead>
-                <tr class="text-blue-400 border-b border-slate-700">
-                    <th class="p-2">ID</th>
-                    <th class="p-2">Name</th>
-                    <th class="p-2">Email</th>
+                <tr>
+                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">ID</th>
+                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">Username</th>
+                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">Email Address</th>
+                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">Action</th>
                 </tr>
             </thead>
             <tbody>
                 {{ for user in users }}
-                <tr class="border-b border-slate-700/50">
-                    <td class="p-2">
-                        <a href="/users/{{ user.id }}">{{ user.id }}</a>
+                <tr class="hover:bg-white/5 transition-colors border-b border-tokyo-border last:border-none">
+                    <td class="p-4 text-tokyo-muted font-mono text-sm">#{{ user.id }}</td>
+                    <td class="p-4 font-bold text-[1.1rem] text-tokyo-text">{{ user.username }}</td>
+                    <td class="p-4 text-tokyo-muted">{{ user.email }}</td>
+                    <td class="p-4">
+                        <a href="/users/{{ user.id }}" class="inline-block text-brand-light font-bold text-sm bg-brand/10 hover:bg-brand/30 hover:text-white px-4 py-2 rounded-lg transition-all hover:shadow-[0_0_15px_rgba(248,34,68,0.4)]">
+                            View Details &rarr;
+                        </a>
                     </td>
-                    <td class="p-2">{{ user.username }}</td>
-                    <td class="p-2 text-gray-400">{{ user.email }}</td>
-
                 </tr>
                 {{ end }}
             </tbody>
         </table>
     </div>
 </div>
+
+<style>
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+</style>

@@ -1,0 +1,63 @@
+/* Kitwork Industrial Components: BADGES */
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.5; white-space: nowrap; }
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; background-color: currentColor; }
+.badge-stylish { background-color: rgba(36, 36, 66, 0.1); color: rgb(36, 36, 66); border: 1px solid rgba(36, 36, 66, 0.2); }
+.badge-solid-stylish { background-color: rgb(36, 36, 66); color: #FFFFFF; border: none; }
+.badge-unique { background-color: rgba(2, 36, 66, 0.1); color: rgb(2, 36, 66); border: 1px solid rgba(2, 36, 66, 0.2); }
+.badge-solid-unique { background-color: rgb(2, 36, 66); color: #FFFFFF; border: none; }
+.badge-profession { background-color: rgba(22, 22, 27, 0.1); color: rgb(22, 22, 27); border: 1px solid rgba(22, 22, 27, 0.2); }
+.badge-solid-profession { background-color: rgb(22, 22, 27); color: #FFFFFF; border: none; }
+.badge-ghost { background-color: rgba(248, 248, 255, 0.1); color: rgb(248, 248, 255); border: 1px solid rgba(248, 248, 255, 0.2); }
+.badge-solid-ghost { background-color: rgb(248, 248, 255); color: #000000; border: none; }
+.badge-danger { background-color: rgba(255, 66, 66, 0.1); color: rgb(255, 66, 66); border: 1px solid rgba(255, 66, 66, 0.2); }
+.badge-solid-danger { background-color: rgb(255, 66, 66); color: #FFFFFF; border: none; }
+.badge-success { background-color: rgba(2, 216, 66, 0.1); color: rgb(2, 216, 66); border: 1px solid rgba(2, 216, 66, 0.2); }
+.badge-solid-success { background-color: rgb(2, 216, 66); color: #FFFFFF; border: none; }
+.badge-default { background-color: rgba(226, 232, 246, 0.1); color: rgb(226, 232, 246); border: 1px solid rgba(226, 232, 246, 0.2); }
+.badge-solid-default { background-color: rgb(226, 232, 246); color: #000000; border: none; }
+.badge-orangered { background-color: rgba(255, 69, 0, 0.1); color: rgb(255, 69, 0); border: 1px solid rgba(255, 69, 0, 0.2); }
+.badge-solid-orangered { background-color: rgb(255, 69, 0); color: #FFFFFF; border: none; }
+.badge-lime { background-color: rgba(0, 255, 0, 0.1); color: rgb(0, 255, 0); border: 1px solid rgba(0, 255, 0, 0.2); }
+.badge-solid-lime { background-color: rgb(0, 255, 0); color: #FFFFFF; border: none; }
+.badge-kitwork { background-color: rgba(248, 34, 68, 0.1); color: rgb(248, 34, 68); border: 1px solid rgba(248, 34, 68, 0.2); }
+.badge-solid-kitwork { background-color: rgb(248, 34, 68); color: #FFFFFF; border: none; }
+.badge-peace { background-color: rgba(136, 102, 255, 0.1); color: rgb(136, 102, 255); border: 1px solid rgba(136, 102, 255, 0.2); }
+.badge-solid-peace { background-color: rgb(136, 102, 255); color: #FFFFFF; border: none; }
+.badge-positive { background-color: rgba(136, 36, 255, 0.1); color: rgb(136, 36, 255); border: 1px solid rgba(136, 36, 255, 0.2); }
+.badge-solid-positive { background-color: rgb(136, 36, 255); color: #FFFFFF; border: none; }
+.badge-info { background-color: rgba(34, 136, 255, 0.1); color: rgb(34, 136, 255); border: 1px solid rgba(34, 136, 255, 0.2); }
+.badge-solid-info { background-color: rgb(34, 136, 255); color: #FFFFFF; border: none; }
+.badge-brand { background-color: rgba(248, 34, 68, 0.1); color: rgb(248, 34, 68); border: 1px solid rgba(248, 34, 68, 0.2); }
+.badge-solid-brand { background-color: rgb(248, 34, 68); color: #FFFFFF; border: none; }
+.badge-deepskyblue { background-color: rgba(0, 191, 255, 0.1); color: rgb(0, 191, 255); border: 1px solid rgba(0, 191, 255, 0.2); }
+.badge-solid-deepskyblue { background-color: rgb(0, 191, 255); color: #FFFFFF; border: none; }
+.badge-blue { background-color: rgba(66, 66, 255, 0.1); color: rgb(66, 66, 255); border: 1px solid rgba(66, 66, 255, 0.2); }
+.badge-solid-blue { background-color: rgb(66, 66, 255); color: #FFFFFF; border: none; }
+.badge-dark { background-color: rgba(18, 18, 18, 0.1); color: rgb(18, 18, 18); border: 1px solid rgba(18, 18, 18, 0.2); }
+.badge-solid-dark { background-color: rgb(18, 18, 18); color: #FFFFFF; border: none; }
+.badge-lavender { background-color: rgba(230, 230, 250, 0.1); color: rgb(230, 230, 250); border: 1px solid rgba(230, 230, 250, 0.2); }
+.badge-solid-lavender { background-color: rgb(230, 230, 250); color: #000000; border: none; }
+.badge-white { background-color: rgba(255, 255, 255, 0.1); color: rgb(255, 255, 255); border: 1px solid rgba(255, 255, 255, 0.2); }
+.badge-solid-white { background-color: rgb(255, 255, 255); color: #000000; border: none; }
+.badge-gray { background-color: rgba(128, 128, 128, 0.1); color: rgb(128, 128, 128); border: 1px solid rgba(128, 128, 128, 0.2); }
+.badge-solid-gray { background-color: rgb(128, 128, 128); color: #FFFFFF; border: none; }
+.badge-red { background-color: rgba(255, 0, 0, 0.1); color: rgb(255, 0, 0); border: 1px solid rgba(255, 0, 0, 0.2); }
+.badge-solid-red { background-color: rgb(255, 0, 0); color: #FFFFFF; border: none; }
+.badge-black { background-color: rgba(0, 0, 0, 0.1); color: rgb(0, 0, 0); border: 1px solid rgba(0, 0, 0, 0.2); }
+.badge-solid-black { background-color: rgb(0, 0, 0); color: #FFFFFF; border: none; }
+.badge-gold { background-color: rgba(255, 217, 0, 0.1); color: rgb(255, 217, 0); border: 1px solid rgba(255, 217, 0, 0.2); }
+.badge-solid-gold { background-color: rgb(255, 217, 0); color: #000000; border: none; }
+.badge-warning { background-color: rgba(255, 104, 36, 0.1); color: rgb(255, 104, 36); border: 1px solid rgba(255, 104, 36, 0.2); }
+.badge-solid-warning { background-color: rgb(255, 104, 36); color: #FFFFFF; border: none; }
+.badge-light { background-color: rgba(242, 244, 246, 0.1); color: rgb(242, 244, 246); border: 1px solid rgba(242, 244, 246, 0.2); }
+.badge-solid-light { background-color: rgb(242, 244, 246); color: #000000; border: none; }
+.badge-darkviolet { background-color: rgba(148, 0, 211, 0.1); color: rgb(148, 0, 211); border: 1px solid rgba(148, 0, 211, 0.2); }
+.badge-solid-darkviolet { background-color: rgb(148, 0, 211); color: #FFFFFF; border: none; }
+.badge-elegant { background-color: rgba(36, 36, 36, 0.1); color: rgb(36, 36, 36); border: 1px solid rgba(36, 36, 36, 0.2); }
+.badge-solid-elegant { background-color: rgb(36, 36, 36); color: #FFFFFF; border: none; }
+.badge-deeppink { background-color: rgba(255, 20, 147, 0.1); color: rgb(255, 20, 147); border: 1px solid rgba(255, 20, 147, 0.2); }
+.badge-solid-deeppink { background-color: rgb(255, 20, 147); color: #FFFFFF; border: none; }
+.badge-primary { background-color: rgba(66, 66, 255, 0.1); color: rgb(66, 66, 255); border: 1px solid rgba(66, 66, 255, 0.2); }
+.badge-solid-primary { background-color: rgb(66, 66, 255); color: #FFFFFF; border: none; }
+.badge-special { background-color: rgba(36, 2, 36, 0.1); color: rgb(36, 2, 36); border: 1px solid rgba(36, 2, 36, 0.2); }
+.badge-solid-special { background-color: rgb(36, 2, 36); color: #FFFFFF; border: none; }

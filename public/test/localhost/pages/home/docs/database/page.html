@@ -1,0 +1,43 @@
+<div class="max-w-4xl mx-auto p-6 md:p-12 animate-[fadeInUp_0.8s_ease_forwards]">
+    <div class="mb-8">
+        <a href="/docs" class="inline-flex items-center gap-2 text-tokyo-muted hover:text-[#bb9af7] transition-colors text-sm uppercase font-bold tracking-widest mb-8">
+            &larr; Back to Docs Hub
+        </a>
+        <h1 class="text-4xl md:text-5xl font-black text-white mb-4 tracking-tight">Database <span class="text-[#bb9af7]">ORM</span></h1>
+        <p class="text-tokyo-text text-lg leading-relaxed">Kitwork features a built-in natively compiled Query Builder that avoids raw SQL entirely while running at maximum CGO speeds.</p>
+    </div>
+
+    <div class="space-y-12">
+        <section>
+            <h3 class="text-2xl font-black text-[#bb9af7] mb-4">Retrieving Data</h3>
+            <p class="text-tokyo-muted mb-6">Chain filters safely without SQL Injection vulnerabilities.</p>
+            <div class="bg-tokyo-panel rounded-xl border border-tokyo-border p-6 font-mono text-[14px] leading-loose">
+                <!-- @formatter:off -->
+<span class="text-[tokyo-muted] italic">// Select Multiple Rows</span>
+<span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">users</span> = <span class="text-[#7dcfff]">db</span>.<span class="text-[#7dcfff]">table</span>(<span class="text-[#9ece6a]">"user"</span>).<span class="text-[#9ece6a]">limit</span>(<span class="text-brand">50</span>).<span class="text-[#9ece6a]">list</span>();
+
+<span class="text-[tokyo-muted] italic">// Filter Single Row using Where Condition</span>
+<span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">admin</span> = <span class="text-[#7dcfff]">db</span>.<span class="text-[#7dcfff]">table</span>(<span class="text-[#9ece6a]">"user"</span>).<span class="text-[#9ece6a]">where</span>(<span class="text-tokyo-text">u</span> => <span class="text-tokyo-text">u.role == "admin"</span>).<span class="text-[#9ece6a]">first</span>();
+                <!-- @formatter:on -->
+            </div>
+        </section>
+
+        <section>
+            <h3 class="text-2xl font-black text-[#bb9af7] mb-4">Inserting &amp; Updating</h3>
+            <p class="text-tokyo-muted mb-6">Create or update records dynamically using pure JSON mapping objects.</p>
+            <div class="bg-tokyo-panel rounded-xl border border-tokyo-border p-6 font-mono text-[14px] leading-loose">
+                <!-- @formatter:off -->
+<span class="text-[#7dcfff]">db</span>.<span class="text-[#7dcfff]">table</span>(<span class="text-[#9ece6a]">"user"</span>).<span class="text-[#9ece6a]">create</span>({
+    <span class="text-tokyo-text">username: </span> <span class="text-[#9ece6a]">"hacker101"</span>,
+    <span class="text-tokyo-text">email: </span> <span class="text-[#9ece6a]">"test@kitwork.io"</span>,
+    <span class="text-tokyo-text">is_active: </span> <span class="text-[#bb9af7]">true</span>
+});
+
+<span class="text-[#7dcfff]">db</span>.<span class="text-[#7dcfff]">table</span>(<span class="text-[#9ece6a]">"user"</span>).<span class="text-[#9ece6a]">where</span>(<span class="text-tokyo-text">u</span> => <span class="text-tokyo-text">u.id == 5</span>).<span class="text-[#9ece6a]">update</span>({
+    <span class="text-tokyo-text">is_active: </span> <span class="text-[#bb9af7]">false</span>
+});
+                <!-- @formatter:on -->
+            </div>
+        </section>
+    </div>
+</div>

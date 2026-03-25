@@ -1,0 +1,40 @@
+<div class="max-w-4xl mx-auto p-6 md:p-12 animate-[fadeInUp_0.8s_ease_forwards]">
+    <div class="mb-8">
+        <a href="/docs" class="inline-flex items-center gap-2 text-tokyo-muted hover:text-[#9ece6a] transition-colors text-sm uppercase font-bold tracking-widest mb-8">
+            &larr; Back to Docs Hub
+        </a>
+        <h1 class="text-4xl md:text-5xl font-black text-white mb-4 tracking-tight">Parallel <span class="text-[#9ece6a]">Goroutines</span></h1>
+        <p class="text-tokyo-text text-lg leading-relaxed">Unlike NodeJS which relies on a single-threaded Event Loop, Kitwork empowers you to spin up real, isolated multi-threaded processes directly from your JavaScript Code.</p>
+    </div>
+
+    <div class="space-y-12">
+        <section>
+            <h3 class="text-2xl font-black text-[#9ece6a] mb-4">The `go()` Function</h3>
+            <p class="text-tokyo-muted mb-6">Whenever you wrap an execution block inside <code>go()</code>, Kitwork safely extracts that block and executes it across its Sovereign VM pool.</p>
+            <div class="bg-tokyo-panel rounded-xl border border-tokyo-border p-6 font-mono text-[14px] leading-loose">
+                <!-- @formatter:off -->
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/register"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-tokyo-text">request, response</span>) => {
+    <span class="text-tokyo-muted italic">// 1. Save info immediately</span>
+    <span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">data</span> = <span class="text-[#7dcfff]">request</span>.<span class="text-[#9ece6a]">body</span>();
+    
+    <span class="text-tokyo-muted italic">// 2. Spin up Async background worker</span>
+    <span class="text-[#9ece6a]">go</span>(() => {
+        <span class="text-tokyo-muted italic">// This executes separately. </span>
+        <span class="text-tokyo-muted italic">// Response will NOT wait for this.</span>
+        <span class="text-[#7dcfff]">network</span>.<span class="text-[#9ece6a]">sendEmail</span>(<span class="text-tokyo-text">data.email</span>, <span class="text-[#9ece6a]">"Welcome!"</span>);
+        <span class="text-[#7dcfff]">log</span>.<span class="text-[#9ece6a]">Print</span>(<span class="text-[#9ece6a]">"Welcome Email sent to: "</span> + <span class="text-tokyo-text">data.email</span>);
+    });
+
+    <span class="text-tokyo-muted italic">// 3. Return response instantly (0ms latency!)</span>
+    <span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">json</span>({ <span class="text-tokyo-text">success: true</span> });
+});
+                <!-- @formatter:on -->
+            </div>
+        </section>
+
+        <section class="bg-[#9ece6a]/10 border border-[#9ece6a]/20 p-8 rounded-2xl relative overflow-hidden mt-12">
+            <h3 class="text-2xl font-black text-white mb-2 relative z-10">Why use Goroutines?</h3>
+            <p class="text-[#9ece6a]/70 relative z-10 leading-relaxed max-w-2xl">Standard Javascript runtimes block the execution thread while hashing passwords, processing images, or computing heavy loops. The `go()` keyword eliminates these bottlenecks entirely. Never block your HTTP routers again.</p>
+        </section>
+    </div>
+</div>

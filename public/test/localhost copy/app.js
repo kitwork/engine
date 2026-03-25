@@ -20,9 +20,6 @@ const db = database({
 
 router.get("/favicon.ico").file("/assets/favicon.ico");
 
-// Serve absolute sovereign assets from demo/public relative to project root
-router.get("/public/*").directory("./demo/public");
-
 
 router.get("/hello").handle((response) => {
     return response.text("hello world");
@@ -69,7 +66,7 @@ router.get("/test-query").handle((response) => {
 });
 
 const global = {
-    name: "kitwork",
+    name: "kitwork1",
     logo: "/assets/logo.png",
     favicon: "/assets/favicon.ico",
     title: "Chào mừng tới kitwork",
@@ -106,13 +103,6 @@ api.get("/gold").cache("5s")
 
         return response.status(200).json({ success: true, count: data.length, data: data });
     });
-
-router.get("/docs/:site?").handle((request, response) => {
-
-    const binding = {}
-    const view = home.page(request.path()).bind(binding);
-    return response.html(view);
-});
 
 router.get("/users/:id?").handle((request, response) => {
     const page = home.page(request.page())

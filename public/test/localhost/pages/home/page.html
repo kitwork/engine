@@ -1,1 +1,220 @@
-Xin chào trang chủ
+<main class="py-20 md:py-32 relative max-w-7xl mx-auto px-6">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+        <!-- Text Column -->
+        <div class="animate-[fadeInUp_0.8s_ease_forwards]">
+            <div
+                class="inline-flex items-center gap-3 bg-brand/10 text-brand font-black text-[11px] py-2 px-5 rounded-full border border-brand/20 uppercase tracking-[3px] mb-8">
+                <span class="w-2 h-2 rounded-full bg-brand shadow-[0_0_10px_#f82244]"></span>
+                Bytecode VM
+            </div>
+
+            <h1 class="font-black text-5xl md:text-[5rem] leading-[1.1] tracking-tight mb-8 text-white">
+                Kitwork<br><span
+                    class="bg-gradient-to-r from-brand-light to-brand bg-clip-text text-transparent">Engine.</span>
+            </h1>
+
+            <p class="text-tokyo-text text-lg md:text-xl leading-relaxed max-w-xl mb-12">
+                Ultrafast, lightweight, and built on Go. Write web applications in JavaScript with the extreme
+                performance of our proprietary Stack-Based Bytecode Engine.
+            </p>
+
+            <div class="flex flex-col sm:flex-row gap-4">
+                <a href="/users"
+                    class="bg-gradient-to-r from-brand to-brand-light text-tokyo-bg font-black text-sm uppercase py-4 px-10 rounded hover:-translate-y-1 hover:shadow-[0_10px_30px_rgba(248,34,68,0.3)] transition-all duration-300 tracking-widest text-center">
+                    Users Demo
+                </a>
+                <a href="/test-query" target="_blank"
+                    class="border border-tokyo-border text-tokyo-text font-black text-sm uppercase py-4 px-10 rounded bg-white/5 hover:bg-white/10 hover:-translate-y-1 transition-all duration-300 tracking-widest text-center">
+                    Test Database
+                </a>
+            </div>
+        </div>
+
+        <!-- Code Column -->
+        <div class="bg-tokyo-bg border border-tokyo-border rounded-2xl p-6 md:p-8 shadow-[0_20px_50px_rgba(0,0,0,0.5),0_0_30px_rgba(248,34,68,0.15)] relative overflow-hidden w-full lg:mt-16 animate-[fadeInUp_0.8s_ease_forwards]"
+            style="animation-delay: 0.2s; opacity: 0;">
+            <div
+                class="absolute top-0 left-0 right-0 flex justify-between items-center bg-tokyo-panel border-b border-tokyo-border px-5 py-3">
+                <div class="flex gap-2">
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="w-1.5 h-1.5 rounded-full bg-brand shadow-[0_0_8px_#f82244] animate-pulse"></span>
+                    <span
+                        class="font-mono text-[10px] font-bold text-brand-light uppercase tracking-widest">app.js</span>
+                </div>
+            </div>
+
+            <!-- Formatter immune code block -->
+            <div class="font-mono text-[14px] leading-[1.8] code-content mt-8">
+                <span class="text-[#bb9af7]">const</span> { <span class="text-tokyo-text">router, log, database,
+                    go</span> } = <span class="text-[#7dcfff]">kitwork</span>();<br>
+                <br>
+                <span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">db</span> = <span
+                    class="text-[#7dcfff]">database</span>({ <span class="text-tokyo-text">type</span>: <span
+                    class="text-[#9ece6a]">"postgres"</span> });<br>
+                <br>
+                <span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span
+                    class="text-[#9ece6a]">"/users/:id?"</span>).<span class="text-[#9ece6a]">handle</span>((<span
+                    class="text-tokyo-text">req, res</span>) => {<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-tokyo-muted italic">// 1. Database query via ORM</span><br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">const</span> <span
+                    class="text-tokyo-text">users</span> = <span class="text-[#7dcfff]">db.user</span>.<span
+                    class="text-[#9ece6a]">limit</span>(<span class="text-brand">5</span>).<span
+                    class="text-[#9ece6a]">list</span>();<br>
+                <br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-tokyo-muted italic">// 2. Spin up parallel
+                    Goroutine</span><br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#9ece6a]">go</span>(() => {<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#7dcfff]">log</span>.<span
+                    class="text-[#9ece6a]">Print</span>(<span class="text-[#9ece6a]">"⚡ Isolated background
+                    sync"</span>);<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;});<br>
+                <br>
+                &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">return</span> <span
+                    class="text-[#7dcfff]">res</span>.<span class="text-[#9ece6a]">json</span>({ <span
+                    class="text-tokyo-text">data: users</span> });<br>
+                });
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<section class="py-32 bg-tokyo-bg relative border-t border-tokyo-border overflow-hidden">
+    <!-- Ambient glowing light -->
+    <div
+        class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-3xl h-1/2 bg-brand/5 blur-[120px] rounded-full pointer-events-none">
+    </div>
+
+    <div class="max-w-7xl mx-auto px-6 relative z-10">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+            <!-- Module 01 -->
+            <div
+                class="group relative bg-tokyo-panel/40 backdrop-blur border border-tokyo-border p-8 rounded-2xl hover:bg-tokyo-panel/80 transition-all duration-500 hover:-translate-y-2 hover:shadow-[0_20px_40px_rgba(224,175,104,0.1)] overflow-hidden">
+                <div
+                    class="absolute top-0 left-0 w-0 h-1 bg-gradient-to-r from-transparent via-[#e0af68] to-[#ffc777] group-hover:w-full transition-all duration-700">
+                </div>
+                <!-- Watermark -->
+                <div
+                    class="absolute -right-6 -bottom-10 font-black text-[8rem] leading-none text-tokyo-bg opacity-30 group-hover:text-[#e0af68]/5 group-hover:scale-110 transition-all duration-700 select-none">
+                    01</div>
+
+                <div class="relative z-10">
+                    <div
+                        class="w-12 h-12 rounded-xl bg-tokyo-bg border border-tokyo-border flex items-center justify-center text-[#e0af68] font-black text-lg mb-8 group-hover:scale-110 transition-transform duration-500 group-hover:border-[#e0af68]/40">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                    </div>
+                    <h3
+                        class="font-black text-xl mb-4 tracking-wide text-white group-hover:text-[#e0af68] transition-colors duration-300">
+                        Blazing Fast</h3>
+                    <p class="text-tokyo-muted leading-relaxed text-[0.9rem]">Built on Google's Go language. Capable of
+                        serving millions of concurrent web requests almost instantly without breaking a sweat.</p>
+                </div>
+            </div>
+
+            <!-- Module 02 -->
+            <div class="group relative bg-tokyo-panel/40 backdrop-blur border border-tokyo-border p-8 rounded-2xl hover:bg-tokyo-panel/80 transition-all duration-500 hover:-translate-y-2 hover:shadow-[0_20px_40px_rgba(187,154,247,0.1)] overflow-hidden"
+                style="transition-delay: 50ms;">
+                <div
+                    class="absolute top-0 left-0 w-0 h-1 bg-gradient-to-r from-transparent via-[#bb9af7] to-[#d5bfff] group-hover:w-full transition-all duration-700">
+                </div>
+                <!-- Watermark -->
+                <div
+                    class="absolute -right-6 -bottom-10 font-black text-[8rem] leading-none text-tokyo-bg opacity-30 group-hover:text-[#bb9af7]/5 group-hover:scale-110 transition-all duration-700 select-none">
+                    02</div>
+
+                <div class="relative z-10">
+                    <div
+                        class="w-12 h-12 rounded-xl bg-tokyo-bg border border-tokyo-border flex items-center justify-center text-[#bb9af7] font-black text-lg mb-8 group-hover:scale-110 transition-transform duration-500 group-hover:border-[#bb9af7]/40">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m14-6h2m-2 6h2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                    </div>
+                    <h3
+                        class="font-black text-xl mb-4 tracking-wide text-white group-hover:text-[#bb9af7] transition-colors duration-300">
+                        VM JS Engine</h3>
+                    <p class="text-tokyo-muted leading-relaxed text-[0.9rem]">Run JavaScript without the heavy V8
+                        engine. Kitwork uses a custom Stack-Based Virtual Machine capable of 14.1M ops/sec.</p>
+                </div>
+            </div>
+
+            <!-- Module 03 -->
+            <div class="group relative bg-tokyo-panel/40 backdrop-blur border border-tokyo-border p-8 rounded-2xl hover:bg-tokyo-panel/80 transition-all duration-500 hover:-translate-y-2 hover:shadow-[0_20px_40px_rgba(158,206,106,0.1)] overflow-hidden"
+                style="transition-delay: 100ms;">
+                <div
+                    class="absolute top-0 left-0 w-0 h-1 bg-gradient-to-r from-transparent via-[#9ece6a] to-[#bbf382] group-hover:w-full transition-all duration-700">
+                </div>
+                <!-- Watermark -->
+                <div
+                    class="absolute -right-6 -bottom-10 font-black text-[8rem] leading-none text-tokyo-bg opacity-30 group-hover:text-[#9ece6a]/5 group-hover:scale-110 transition-all duration-700 select-none">
+                    03</div>
+
+                <div class="relative z-10">
+                    <div
+                        class="w-12 h-12 rounded-xl bg-tokyo-bg border border-tokyo-border flex items-center justify-center text-[#9ece6a] font-black text-lg mb-8 group-hover:scale-110 transition-transform duration-500 group-hover:border-[#9ece6a]/40">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M19 11l-7 4-7-4m14-4l-7 4-7-4m14 8l-7 4-7-4" />
+                        </svg>
+                    </div>
+                    <h3
+                        class="font-black text-xl mb-4 tracking-wide text-white group-hover:text-[#9ece6a] transition-colors duration-300">
+                        True Goroutines</h3>
+                    <p class="text-tokyo-muted leading-relaxed text-[0.9rem]">Say goodbye to the NodeJS Event-Loop
+                        bottleneck. Use the custom `go()` function within JavaScript to spin up parallel background
+                        tasks instantly.</p>
+                </div>
+            </div>
+
+            <!-- Module 04 -->
+            <div class="group relative bg-tokyo-panel/40 backdrop-blur border border-tokyo-border p-8 rounded-2xl hover:bg-tokyo-panel/80 transition-all duration-500 hover:-translate-y-2 hover:shadow-[0_20px_40px_rgba(248,34,68,0.1)] overflow-hidden"
+                style="transition-delay: 150ms;">
+                <div
+                    class="absolute top-0 left-0 w-0 h-1 bg-gradient-to-r from-transparent via-brand to-brand-light group-hover:w-full transition-all duration-700">
+                </div>
+                <!-- Watermark -->
+                <div
+                    class="absolute -right-6 -bottom-10 font-black text-[8rem] leading-none text-tokyo-bg opacity-30 group-hover:text-brand/5 group-hover:scale-110 transition-all duration-700 select-none">
+                    04</div>
+
+                <div class="relative z-10">
+                    <div
+                        class="w-12 h-12 rounded-xl bg-tokyo-bg border border-tokyo-border flex items-center justify-center text-brand font-black text-lg mb-8 group-hover:scale-110 transition-transform duration-500 group-hover:border-brand/40">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+                        </svg>
+                    </div>
+                    <h3
+                        class="font-black text-xl mb-4 tracking-wide text-white group-hover:text-brand-light transition-colors duration-300">
+                        Built-in Database</h3>
+                    <p class="text-tokyo-muted leading-relaxed text-[0.9rem]">Connect and query your SQL database
+                        natively. Use our elegant, easy-to-use API without needing to install any bulky external
+                        drivers.</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<style>
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+</style>

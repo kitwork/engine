@@ -1,0 +1,193 @@
+/* Kitwork Industrial Components: BUTTONS */
+.btn { 
+	display: inline-flex; align-items: center; justify-content: center; 
+	border: 1px solid transparent; border-radius: 4px; 
+	font-weight: 600; font-family: 'Outfit', sans-serif; cursor: pointer; 
+	transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); 
+	outline: none; text-decoration: none; user-select: none;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+.btn-sm { padding: 4px 12px; font-size: 12px; height: 28px; }
+.btn-md { padding: 8px 16px; font-size: 14px; height: 36px; }
+.btn-lg { padding: 12px 24px; font-size: 16px; height: 48px; }
+.btn-black { background-color: rgb(0, 0, 0); color: #FFFFFF; }
+.btn-black:hover { box-shadow: 0 0 20px rgba(0, 0, 0, 0.4); }
+.btn-outline-black { background-color: transparent; border-color: rgba(0, 0, 0, 0.5); color: rgb(0, 0, 0); }
+.btn-outline-black:hover { border-color: rgb(0, 0, 0); background-color: rgba(0, 0, 0, 0.05); }
+.btn-ghost-black { background-color: transparent; color: rgb(0, 0, 0); }
+.btn-ghost-black:hover { background-color: rgba(0, 0, 0, 0.1); }
+.btn-gold { background-color: rgb(255, 217, 0); color: #000000; }
+.btn-gold:hover { box-shadow: 0 0 20px rgba(255, 217, 0, 0.4); }
+.btn-outline-gold { background-color: transparent; border-color: rgba(255, 217, 0, 0.5); color: rgb(255, 217, 0); }
+.btn-outline-gold:hover { border-color: rgb(255, 217, 0); background-color: rgba(255, 217, 0, 0.05); }
+.btn-ghost-gold { background-color: transparent; color: rgb(255, 217, 0); }
+.btn-ghost-gold:hover { background-color: rgba(255, 217, 0, 0.1); }
+.btn-warning { background-color: rgb(255, 104, 36); color: #FFFFFF; }
+.btn-warning:hover { box-shadow: 0 0 20px rgba(255, 104, 36, 0.4); }
+.btn-outline-warning { background-color: transparent; border-color: rgba(255, 104, 36, 0.5); color: rgb(255, 104, 36); }
+.btn-outline-warning:hover { border-color: rgb(255, 104, 36); background-color: rgba(255, 104, 36, 0.05); }
+.btn-ghost-warning { background-color: transparent; color: rgb(255, 104, 36); }
+.btn-ghost-warning:hover { background-color: rgba(255, 104, 36, 0.1); }
+.btn-light { background-color: rgb(242, 244, 246); color: #000000; }
+.btn-light:hover { box-shadow: 0 0 20px rgba(242, 244, 246, 0.4); }
+.btn-outline-light { background-color: transparent; border-color: rgba(242, 244, 246, 0.5); color: rgb(242, 244, 246); }
+.btn-outline-light:hover { border-color: rgb(242, 244, 246); background-color: rgba(242, 244, 246, 0.05); }
+.btn-ghost-light { background-color: transparent; color: rgb(242, 244, 246); }
+.btn-ghost-light:hover { background-color: rgba(242, 244, 246, 0.1); }
+.btn-darkviolet { background-color: rgb(148, 0, 211); color: #FFFFFF; }
+.btn-darkviolet:hover { box-shadow: 0 0 20px rgba(148, 0, 211, 0.4); }
+.btn-outline-darkviolet { background-color: transparent; border-color: rgba(148, 0, 211, 0.5); color: rgb(148, 0, 211); }
+.btn-outline-darkviolet:hover { border-color: rgb(148, 0, 211); background-color: rgba(148, 0, 211, 0.05); }
+.btn-ghost-darkviolet { background-color: transparent; color: rgb(148, 0, 211); }
+.btn-ghost-darkviolet:hover { background-color: rgba(148, 0, 211, 0.1); }
+.btn-elegant { background-color: rgb(36, 36, 36); color: #FFFFFF; }
+.btn-elegant:hover { box-shadow: 0 0 20px rgba(36, 36, 36, 0.4); }
+.btn-outline-elegant { background-color: transparent; border-color: rgba(36, 36, 36, 0.5); color: rgb(36, 36, 36); }
+.btn-outline-elegant:hover { border-color: rgb(36, 36, 36); background-color: rgba(36, 36, 36, 0.05); }
+.btn-ghost-elegant { background-color: transparent; color: rgb(36, 36, 36); }
+.btn-ghost-elegant:hover { background-color: rgba(36, 36, 36, 0.1); }
+.btn-deeppink { background-color: rgb(255, 20, 147); color: #FFFFFF; }
+.btn-deeppink:hover { box-shadow: 0 0 20px rgba(255, 20, 147, 0.4); }
+.btn-outline-deeppink { background-color: transparent; border-color: rgba(255, 20, 147, 0.5); color: rgb(255, 20, 147); }
+.btn-outline-deeppink:hover { border-color: rgb(255, 20, 147); background-color: rgba(255, 20, 147, 0.05); }
+.btn-ghost-deeppink { background-color: transparent; color: rgb(255, 20, 147); }
+.btn-ghost-deeppink:hover { background-color: rgba(255, 20, 147, 0.1); }
+.btn-primary { background-color: rgb(66, 66, 255); color: #FFFFFF; }
+.btn-primary:hover { box-shadow: 0 0 20px rgba(66, 66, 255, 0.4); }
+.btn-outline-primary { background-color: transparent; border-color: rgba(66, 66, 255, 0.5); color: rgb(66, 66, 255); }
+.btn-outline-primary:hover { border-color: rgb(66, 66, 255); background-color: rgba(66, 66, 255, 0.05); }
+.btn-ghost-primary { background-color: transparent; color: rgb(66, 66, 255); }
+.btn-ghost-primary:hover { background-color: rgba(66, 66, 255, 0.1); }
+.btn-special { background-color: rgb(36, 2, 36); color: #FFFFFF; }
+.btn-special:hover { box-shadow: 0 0 20px rgba(36, 2, 36, 0.4); }
+.btn-outline-special { background-color: transparent; border-color: rgba(36, 2, 36, 0.5); color: rgb(36, 2, 36); }
+.btn-outline-special:hover { border-color: rgb(36, 2, 36); background-color: rgba(36, 2, 36, 0.05); }
+.btn-ghost-special { background-color: transparent; color: rgb(36, 2, 36); }
+.btn-ghost-special:hover { background-color: rgba(36, 2, 36, 0.1); }
+.btn-stylish { background-color: rgb(36, 36, 66); color: #FFFFFF; }
+.btn-stylish:hover { box-shadow: 0 0 20px rgba(36, 36, 66, 0.4); }
+.btn-outline-stylish { background-color: transparent; border-color: rgba(36, 36, 66, 0.5); color: rgb(36, 36, 66); }
+.btn-outline-stylish:hover { border-color: rgb(36, 36, 66); background-color: rgba(36, 36, 66, 0.05); }
+.btn-ghost-stylish { background-color: transparent; color: rgb(36, 36, 66); }
+.btn-ghost-stylish:hover { background-color: rgba(36, 36, 66, 0.1); }
+.btn-unique { background-color: rgb(2, 36, 66); color: #FFFFFF; }
+.btn-unique:hover { box-shadow: 0 0 20px rgba(2, 36, 66, 0.4); }
+.btn-outline-unique { background-color: transparent; border-color: rgba(2, 36, 66, 0.5); color: rgb(2, 36, 66); }
+.btn-outline-unique:hover { border-color: rgb(2, 36, 66); background-color: rgba(2, 36, 66, 0.05); }
+.btn-ghost-unique { background-color: transparent; color: rgb(2, 36, 66); }
+.btn-ghost-unique:hover { background-color: rgba(2, 36, 66, 0.1); }
+.btn-profession { background-color: rgb(22, 22, 27); color: #FFFFFF; }
+.btn-profession:hover { box-shadow: 0 0 20px rgba(22, 22, 27, 0.4); }
+.btn-outline-profession { background-color: transparent; border-color: rgba(22, 22, 27, 0.5); color: rgb(22, 22, 27); }
+.btn-outline-profession:hover { border-color: rgb(22, 22, 27); background-color: rgba(22, 22, 27, 0.05); }
+.btn-ghost-profession { background-color: transparent; color: rgb(22, 22, 27); }
+.btn-ghost-profession:hover { background-color: rgba(22, 22, 27, 0.1); }
+.btn-ghost { background-color: rgb(248, 248, 255); color: #000000; }
+.btn-ghost:hover { box-shadow: 0 0 20px rgba(248, 248, 255, 0.4); }
+.btn-outline-ghost { background-color: transparent; border-color: rgba(248, 248, 255, 0.5); color: rgb(248, 248, 255); }
+.btn-outline-ghost:hover { border-color: rgb(248, 248, 255); background-color: rgba(248, 248, 255, 0.05); }
+.btn-ghost-ghost { background-color: transparent; color: rgb(248, 248, 255); }
+.btn-ghost-ghost:hover { background-color: rgba(248, 248, 255, 0.1); }
+.btn-danger { background-color: rgb(255, 66, 66); color: #FFFFFF; }
+.btn-danger:hover { box-shadow: 0 0 20px rgba(255, 66, 66, 0.4); }
+.btn-outline-danger { background-color: transparent; border-color: rgba(255, 66, 66, 0.5); color: rgb(255, 66, 66); }
+.btn-outline-danger:hover { border-color: rgb(255, 66, 66); background-color: rgba(255, 66, 66, 0.05); }
+.btn-ghost-danger { background-color: transparent; color: rgb(255, 66, 66); }
+.btn-ghost-danger:hover { background-color: rgba(255, 66, 66, 0.1); }
+.btn-success { background-color: rgb(2, 216, 66); color: #FFFFFF; }
+.btn-success:hover { box-shadow: 0 0 20px rgba(2, 216, 66, 0.4); }
+.btn-outline-success { background-color: transparent; border-color: rgba(2, 216, 66, 0.5); color: rgb(2, 216, 66); }
+.btn-outline-success:hover { border-color: rgb(2, 216, 66); background-color: rgba(2, 216, 66, 0.05); }
+.btn-ghost-success { background-color: transparent; color: rgb(2, 216, 66); }
+.btn-ghost-success:hover { background-color: rgba(2, 216, 66, 0.1); }
+.btn-default { background-color: rgb(226, 232, 246); color: #000000; }
+.btn-default:hover { box-shadow: 0 0 20px rgba(226, 232, 246, 0.4); }
+.btn-outline-default { background-color: transparent; border-color: rgba(226, 232, 246, 0.5); color: rgb(226, 232, 246); }
+.btn-outline-default:hover { border-color: rgb(226, 232, 246); background-color: rgba(226, 232, 246, 0.05); }
+.btn-ghost-default { background-color: transparent; color: rgb(226, 232, 246); }
+.btn-ghost-default:hover { background-color: rgba(226, 232, 246, 0.1); }
+.btn-orangered { background-color: rgb(255, 69, 0); color: #FFFFFF; }
+.btn-orangered:hover { box-shadow: 0 0 20px rgba(255, 69, 0, 0.4); }
+.btn-outline-orangered { background-color: transparent; border-color: rgba(255, 69, 0, 0.5); color: rgb(255, 69, 0); }
+.btn-outline-orangered:hover { border-color: rgb(255, 69, 0); background-color: rgba(255, 69, 0, 0.05); }
+.btn-ghost-orangered { background-color: transparent; color: rgb(255, 69, 0); }
+.btn-ghost-orangered:hover { background-color: rgba(255, 69, 0, 0.1); }
+.btn-lime { background-color: rgb(0, 255, 0); color: #FFFFFF; }
+.btn-lime:hover { box-shadow: 0 0 20px rgba(0, 255, 0, 0.4); }
+.btn-outline-lime { background-color: transparent; border-color: rgba(0, 255, 0, 0.5); color: rgb(0, 255, 0); }
+.btn-outline-lime:hover { border-color: rgb(0, 255, 0); background-color: rgba(0, 255, 0, 0.05); }
+.btn-ghost-lime { background-color: transparent; color: rgb(0, 255, 0); }
+.btn-ghost-lime:hover { background-color: rgba(0, 255, 0, 0.1); }
+.btn-kitwork { background-color: rgb(248, 34, 68); color: #FFFFFF; }
+.btn-kitwork:hover { box-shadow: 0 0 20px rgba(248, 34, 68, 0.4); }
+.btn-outline-kitwork { background-color: transparent; border-color: rgba(248, 34, 68, 0.5); color: rgb(248, 34, 68); }
+.btn-outline-kitwork:hover { border-color: rgb(248, 34, 68); background-color: rgba(248, 34, 68, 0.05); }
+.btn-ghost-kitwork { background-color: transparent; color: rgb(248, 34, 68); }
+.btn-ghost-kitwork:hover { background-color: rgba(248, 34, 68, 0.1); }
+.btn-peace { background-color: rgb(136, 102, 255); color: #FFFFFF; }
+.btn-peace:hover { box-shadow: 0 0 20px rgba(136, 102, 255, 0.4); }
+.btn-outline-peace { background-color: transparent; border-color: rgba(136, 102, 255, 0.5); color: rgb(136, 102, 255); }
+.btn-outline-peace:hover { border-color: rgb(136, 102, 255); background-color: rgba(136, 102, 255, 0.05); }
+.btn-ghost-peace { background-color: transparent; color: rgb(136, 102, 255); }
+.btn-ghost-peace:hover { background-color: rgba(136, 102, 255, 0.1); }
+.btn-positive { background-color: rgb(136, 36, 255); color: #FFFFFF; }
+.btn-positive:hover { box-shadow: 0 0 20px rgba(136, 36, 255, 0.4); }
+.btn-outline-positive { background-color: transparent; border-color: rgba(136, 36, 255, 0.5); color: rgb(136, 36, 255); }
+.btn-outline-positive:hover { border-color: rgb(136, 36, 255); background-color: rgba(136, 36, 255, 0.05); }
+.btn-ghost-positive { background-color: transparent; color: rgb(136, 36, 255); }
+.btn-ghost-positive:hover { background-color: rgba(136, 36, 255, 0.1); }
+.btn-info { background-color: rgb(34, 136, 255); color: #FFFFFF; }
+.btn-info:hover { box-shadow: 0 0 20px rgba(34, 136, 255, 0.4); }
+.btn-outline-info { background-color: transparent; border-color: rgba(34, 136, 255, 0.5); color: rgb(34, 136, 255); }
+.btn-outline-info:hover { border-color: rgb(34, 136, 255); background-color: rgba(34, 136, 255, 0.05); }
+.btn-ghost-info { background-color: transparent; color: rgb(34, 136, 255); }
+.btn-ghost-info:hover { background-color: rgba(34, 136, 255, 0.1); }
+.btn-brand { background-color: rgb(248, 34, 68); color: #FFFFFF; }
+.btn-brand:hover { box-shadow: 0 0 20px rgba(248, 34, 68, 0.4); }
+.btn-outline-brand { background-color: transparent; border-color: rgba(248, 34, 68, 0.5); color: rgb(248, 34, 68); }
+.btn-outline-brand:hover { border-color: rgb(248, 34, 68); background-color: rgba(248, 34, 68, 0.05); }
+.btn-ghost-brand { background-color: transparent; color: rgb(248, 34, 68); }
+.btn-ghost-brand:hover { background-color: rgba(248, 34, 68, 0.1); }
+.btn-deepskyblue { background-color: rgb(0, 191, 255); color: #FFFFFF; }
+.btn-deepskyblue:hover { box-shadow: 0 0 20px rgba(0, 191, 255, 0.4); }
+.btn-outline-deepskyblue { background-color: transparent; border-color: rgba(0, 191, 255, 0.5); color: rgb(0, 191, 255); }
+.btn-outline-deepskyblue:hover { border-color: rgb(0, 191, 255); background-color: rgba(0, 191, 255, 0.05); }
+.btn-ghost-deepskyblue { background-color: transparent; color: rgb(0, 191, 255); }
+.btn-ghost-deepskyblue:hover { background-color: rgba(0, 191, 255, 0.1); }
+.btn-blue { background-color: rgb(66, 66, 255); color: #FFFFFF; }
+.btn-blue:hover { box-shadow: 0 0 20px rgba(66, 66, 255, 0.4); }
+.btn-outline-blue { background-color: transparent; border-color: rgba(66, 66, 255, 0.5); color: rgb(66, 66, 255); }
+.btn-outline-blue:hover { border-color: rgb(66, 66, 255); background-color: rgba(66, 66, 255, 0.05); }
+.btn-ghost-blue { background-color: transparent; color: rgb(66, 66, 255); }
+.btn-ghost-blue:hover { background-color: rgba(66, 66, 255, 0.1); }
+.btn-dark { background-color: rgb(18, 18, 18); color: #FFFFFF; }
+.btn-dark:hover { box-shadow: 0 0 20px rgba(18, 18, 18, 0.4); }
+.btn-outline-dark { background-color: transparent; border-color: rgba(18, 18, 18, 0.5); color: rgb(18, 18, 18); }
+.btn-outline-dark:hover { border-color: rgb(18, 18, 18); background-color: rgba(18, 18, 18, 0.05); }
+.btn-ghost-dark { background-color: transparent; color: rgb(18, 18, 18); }
+.btn-ghost-dark:hover { background-color: rgba(18, 18, 18, 0.1); }
+.btn-lavender { background-color: rgb(230, 230, 250); color: #000000; }
+.btn-lavender:hover { box-shadow: 0 0 20px rgba(230, 230, 250, 0.4); }
+.btn-outline-lavender { background-color: transparent; border-color: rgba(230, 230, 250, 0.5); color: rgb(230, 230, 250); }
+.btn-outline-lavender:hover { border-color: rgb(230, 230, 250); background-color: rgba(230, 230, 250, 0.05); }
+.btn-ghost-lavender { background-color: transparent; color: rgb(230, 230, 250); }
+.btn-ghost-lavender:hover { background-color: rgba(230, 230, 250, 0.1); }
+.btn-white { background-color: rgb(255, 255, 255); color: #000000; }
+.btn-white:hover { box-shadow: 0 0 20px rgba(255, 255, 255, 0.4); }
+.btn-outline-white { background-color: transparent; border-color: rgba(255, 255, 255, 0.5); color: rgb(255, 255, 255); }
+.btn-outline-white:hover { border-color: rgb(255, 255, 255); background-color: rgba(255, 255, 255, 0.05); }
+.btn-ghost-white { background-color: transparent; color: rgb(255, 255, 255); }
+.btn-ghost-white:hover { background-color: rgba(255, 255, 255, 0.1); }
+.btn-gray { background-color: rgb(128, 128, 128); color: #FFFFFF; }
+.btn-gray:hover { box-shadow: 0 0 20px rgba(128, 128, 128, 0.4); }
+.btn-outline-gray { background-color: transparent; border-color: rgba(128, 128, 128, 0.5); color: rgb(128, 128, 128); }
+.btn-outline-gray:hover { border-color: rgb(128, 128, 128); background-color: rgba(128, 128, 128, 0.05); }
+.btn-ghost-gray { background-color: transparent; color: rgb(128, 128, 128); }
+.btn-ghost-gray:hover { background-color: rgba(128, 128, 128, 0.1); }
+.btn-red { background-color: rgb(255, 0, 0); color: #FFFFFF; }
+.btn-red:hover { box-shadow: 0 0 20px rgba(255, 0, 0, 0.4); }
+.btn-outline-red { background-color: transparent; border-color: rgba(255, 0, 0, 0.5); color: rgb(255, 0, 0); }
+.btn-outline-red:hover { border-color: rgb(255, 0, 0); background-color: rgba(255, 0, 0, 0.05); }
+.btn-ghost-red { background-color: transparent; color: rgb(255, 0, 0); }
+.btn-ghost-red:hover { background-color: rgba(255, 0, 0, 0.1); }

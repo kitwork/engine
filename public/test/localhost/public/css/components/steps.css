@@ -1,0 +1,15 @@
+/* Kitwork Industrial Components: STEPS */
+.steps { display: flex; align-items: center; width: 100%; }
+.step-item { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }
+.step-item:not(:last-child)::after { content: ''; position: absolute; top: 16px; left: 50%; width: 100%; height: 2px; background-color: rgba(255,255,255,0.1); z-index: 0; }
+.step-marker { width: 32px; height: 32px; border-radius: 50%; background-color: #121212; border: 2px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; z-index: 1; font-weight: bold; font-size: 12px; color: rgba(255,255,255,0.5); transition: all 0.3s ease; }
+.step-label { margin-top: 12px; font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; }
+.step-item.active-primary:not(:last-child)::after { background-color: rgb(66, 66, 255); }
+.step-item.active-primary .step-marker { border-color: rgb(66, 66, 255); color: rgb(66, 66, 255); background-color: rgba(66, 66, 255, 0.1); box-shadow: 0 0 15px rgba(66, 66, 255, 0.3); }
+.step-item.active-primary .step-label { color: rgb(66, 66, 255); }
+.step-item.active-success:not(:last-child)::after { background-color: rgb(2, 216, 66); }
+.step-item.active-success .step-marker { border-color: rgb(2, 216, 66); color: rgb(2, 216, 66); background-color: rgba(2, 216, 66, 0.1); box-shadow: 0 0 15px rgba(2, 216, 66, 0.3); }
+.step-item.active-success .step-label { color: rgb(2, 216, 66); }
+.step-item.active-brand:not(:last-child)::after { background-color: rgb(248, 34, 68); }
+.step-item.active-brand .step-marker { border-color: rgb(248, 34, 68); color: rgb(248, 34, 68); background-color: rgba(248, 34, 68, 0.1); box-shadow: 0 0 15px rgba(248, 34, 68, 0.3); }
+.step-item.active-brand .step-label { color: rgb(248, 34, 68); }

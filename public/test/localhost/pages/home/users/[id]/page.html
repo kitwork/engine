@@ -1,27 +1,47 @@
-<div class="max-w-4xl mx-auto p-6">
-    <h1 class="text-3xl font-bold text-green-400 mb-6">Feature-Based User List</h1>
-    <p class="mb-4 text-gray-400">This page logic and template are in the same folder (Angular Style).</p>
+<div class="max-w-2xl mx-auto p-6 animate-[fadeInUp_0.8s_ease_forwards]">
+    <div class="mb-6 text-center">
+        <a href="/users" class="inline-flex items-center gap-2 text-brand-light font-bold px-4 py-2 bg-brand/10 rounded-lg hover:bg-brand/30 hover:text-white transition-all hover:-translate-x-1">
+            &larr; Back to Directory
+        </a>
+    </div>
+    
+    <div class="text-center mb-10">
+        <h1 class="text-4xl md:text-[2.5rem] font-black text-brand mb-2 tracking-tight">User Profile</h1>
+        <p class="text-tokyo-text">Dynamic `[id]` route rendered by Kitwork</p>
+    </div>
 
-    <div class="bg-slate-800 rounded-lg p-4 shadow-xl">
-        <table class="w-full text-left">
-            <thead>
-                <tr class="text-blue-400 border-b border-slate-700">
-                    <th class="p-2">Name</th>
-                    <th class="p-2">Email</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{ if user }}
-                <tr class="border-b border-slate-700/50">
-                    <td class="p-2">{{ user.username }}</td>
-                    <td class="p-2 text-gray-400">{{ user.email }}</td>
-                </tr>
-                {{ else }}
-                <tr>
-                    <td class="p-2">Không tìm thấy user</td>
-                </tr>
-                {{ end }}
-            </tbody>
-        </table>
+    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-3xl p-10 md:p-12 shadow-[0_15px_40px_rgba(0,0,0,0.6)] backdrop-blur-md relative overflow-hidden max-w-lg mx-auto">
+        <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-light to-brand"></div>
+        
+        {{ if user }}
+        <div class="w-24 h-24 rounded-full bg-gradient-to-br from-brand-light to-brand flex items-center justify-center text-4xl font-black text-tokyo-bg mx-auto mb-10 shadow-[0_10px_25px_rgba(248,34,68,0.4)] uppercase">
+            {{ user.username[0] | upper }}
+        </div>
+        
+        <div class="text-center mb-6">
+            <div class="text-brand-light text-[0.85rem] uppercase tracking-[1.5px] font-bold mb-1">Username</div>
+            <div class="text-2xl text-tokyo-text font-bold tracking-tight">{{ user.username }}</div>
+        </div>
+        
+        <div class="text-center mb-8">
+            <div class="text-brand-light text-[0.85rem] uppercase tracking-[1.5px] font-bold mb-1">Email Address</div>
+            <div class="text-[1.2rem] text-tokyo-text font-medium">{{ user.email }}</div>
+        </div>
+        
+        <div class="text-center pt-8 border-t border-tokyo-border">
+            <div class="text-tokyo-muted text-[0.75rem] uppercase tracking-[2px] font-bold mb-2">User ID</div>
+            <div class="text-tokyo-muted font-mono tracking-wide text-lg">#{{ user.id }}</div>
+        </div>
+        {{ else }}
+        <div class="text-center py-10">
+            <div class="text-6xl mb-4">🚷</div>
+            <h3 class="text-2xl font-black text-brand-accent mb-2">User Not Found!</h3>
+            <p class="text-tokyo-muted">The user with this ID does not exist in the database.</p>
+        </div>
+        {{ end }}
     </div>
 </div>
+
+<style>
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+</style>

@@ -1,0 +1,65 @@
+/* Kitwork Industrial Components: CARDS */
+.card { background-color: #121212; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+.card-header { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.card-body { padding: 24px; flex: 1; }
+.card-footer { padding: 16px 24px; background-color: rgba(0,0,0,0.2); border-top: 1px solid rgba(255,255,255,0.05); }
+.card-orangered { border-color: rgba(255, 69, 0, 0.2); }
+.card-orangered .card-header { border-bottom-color: rgba(255, 69, 0, 0.1); color: rgb(255, 69, 0); }
+.card-lime { border-color: rgba(0, 255, 0, 0.2); }
+.card-lime .card-header { border-bottom-color: rgba(0, 255, 0, 0.1); color: rgb(0, 255, 0); }
+.card-kitwork { border-color: rgba(248, 34, 68, 0.2); }
+.card-kitwork .card-header { border-bottom-color: rgba(248, 34, 68, 0.1); color: rgb(248, 34, 68); }
+.card-peace { border-color: rgba(136, 102, 255, 0.2); }
+.card-peace .card-header { border-bottom-color: rgba(136, 102, 255, 0.1); color: rgb(136, 102, 255); }
+.card-positive { border-color: rgba(136, 36, 255, 0.2); }
+.card-positive .card-header { border-bottom-color: rgba(136, 36, 255, 0.1); color: rgb(136, 36, 255); }
+.card-info { border-color: rgba(34, 136, 255, 0.2); }
+.card-info .card-header { border-bottom-color: rgba(34, 136, 255, 0.1); color: rgb(34, 136, 255); }
+.card-brand { border-color: rgba(248, 34, 68, 0.2); }
+.card-brand .card-header { border-bottom-color: rgba(248, 34, 68, 0.1); color: rgb(248, 34, 68); }
+.card-deepskyblue { border-color: rgba(0, 191, 255, 0.2); }
+.card-deepskyblue .card-header { border-bottom-color: rgba(0, 191, 255, 0.1); color: rgb(0, 191, 255); }
+.card-blue { border-color: rgba(66, 66, 255, 0.2); }
+.card-blue .card-header { border-bottom-color: rgba(66, 66, 255, 0.1); color: rgb(66, 66, 255); }
+.card-dark { border-color: rgba(18, 18, 18, 0.2); }
+.card-dark .card-header { border-bottom-color: rgba(18, 18, 18, 0.1); color: rgb(18, 18, 18); }
+.card-lavender { border-color: rgba(230, 230, 250, 0.2); }
+.card-lavender .card-header { border-bottom-color: rgba(230, 230, 250, 0.1); color: rgb(230, 230, 250); }
+.card-white { border-color: rgba(255, 255, 255, 0.2); }
+.card-white .card-header { border-bottom-color: rgba(255, 255, 255, 0.1); color: rgb(255, 255, 255); }
+.card-gray { border-color: rgba(128, 128, 128, 0.2); }
+.card-gray .card-header { border-bottom-color: rgba(128, 128, 128, 0.1); color: rgb(128, 128, 128); }
+.card-red { border-color: rgba(255, 0, 0, 0.2); }
+.card-red .card-header { border-bottom-color: rgba(255, 0, 0, 0.1); color: rgb(255, 0, 0); }
+.card-black { border-color: rgba(0, 0, 0, 0.2); }
+.card-black .card-header { border-bottom-color: rgba(0, 0, 0, 0.1); color: rgb(0, 0, 0); }
+.card-gold { border-color: rgba(255, 217, 0, 0.2); }
+.card-gold .card-header { border-bottom-color: rgba(255, 217, 0, 0.1); color: rgb(255, 217, 0); }
+.card-warning { border-color: rgba(255, 104, 36, 0.2); }
+.card-warning .card-header { border-bottom-color: rgba(255, 104, 36, 0.1); color: rgb(255, 104, 36); }
+.card-light { border-color: rgba(242, 244, 246, 0.2); }
+.card-light .card-header { border-bottom-color: rgba(242, 244, 246, 0.1); color: rgb(242, 244, 246); }
+.card-darkviolet { border-color: rgba(148, 0, 211, 0.2); }
+.card-darkviolet .card-header { border-bottom-color: rgba(148, 0, 211, 0.1); color: rgb(148, 0, 211); }
+.card-elegant { border-color: rgba(36, 36, 36, 0.2); }
+.card-elegant .card-header { border-bottom-color: rgba(36, 36, 36, 0.1); color: rgb(36, 36, 36); }
+.card-deeppink { border-color: rgba(255, 20, 147, 0.2); }
+.card-deeppink .card-header { border-bottom-color: rgba(255, 20, 147, 0.1); color: rgb(255, 20, 147); }
+.card-primary { border-color: rgba(66, 66, 255, 0.2); }
+.card-primary .card-header { border-bottom-color: rgba(66, 66, 255, 0.1); color: rgb(66, 66, 255); }
+.card-special { border-color: rgba(36, 2, 36, 0.2); }
+.card-special .card-header { border-bottom-color: rgba(36, 2, 36, 0.1); color: rgb(36, 2, 36); }
+.card-stylish { border-color: rgba(36, 36, 66, 0.2); }
+.card-stylish .card-header { border-bottom-color: rgba(36, 36, 66, 0.1); color: rgb(36, 36, 66); }
+.card-unique { border-color: rgba(2, 36, 66, 0.2); }
+.card-unique .card-header { border-bottom-color: rgba(2, 36, 66, 0.1); color: rgb(2, 36, 66); }
+.card-profession { border-color: rgba(22, 22, 27, 0.2); }
+.card-profession .card-header { border-bottom-color: rgba(22, 22, 27, 0.1); color: rgb(22, 22, 27); }
+.card-ghost { border-color: rgba(248, 248, 255, 0.2); }
+.card-ghost .card-header { border-bottom-color: rgba(248, 248, 255, 0.1); color: rgb(248, 248, 255); }
+.card-danger { border-color: rgba(255, 66, 66, 0.2); }
+.card-danger .card-header { border-bottom-color: rgba(255, 66, 66, 0.1); color: rgb(255, 66, 66); }
+.card-success { border-color: rgba(2, 216, 66, 0.2); }
+.card-success .card-header { border-bottom-color: rgba(2, 216, 66, 0.1); color: rgb(2, 216, 66); }
+.card-default { border-color: rgba(226, 232, 246, 0.2); }
+.card-default .card-header { border-bottom-color: rgba(226, 232, 246, 0.1); color: rgb(226, 232, 246); }

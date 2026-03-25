@@ -1,0 +1,53 @@
+<div class="max-w-4xl mx-auto p-6 md:p-12 animate-[fadeInUp_0.8s_ease_forwards]">
+    <div class="mb-8">
+        <a href="/docs" class="inline-flex items-center gap-2 text-tokyo-muted hover:text-[#e0af68] transition-colors text-sm uppercase font-bold tracking-widest mb-8">
+            &larr; Back to Docs Hub
+        </a>
+        <h1 class="text-4xl md:text-5xl font-black text-white mb-4 tracking-tight">Routing <span class="text-[#e0af68]">&amp; Config</span></h1>
+        <p class="text-tokyo-text text-lg leading-relaxed">Kitwork uses a high-performance Radix Tree router written natively in Go. This allows static routing, parameter binding, and catch-all logic with zero overhead.</p>
+    </div>
+
+    <div class="space-y-12">
+        <section>
+            <h3 class="text-2xl font-black text-[#e0af68] mb-4">Static Endpoints</h3>
+            <p class="text-tokyo-muted mb-6">Routes are mapped via the underlying fast Go router. Define standard HTTP verbs like <code>get()</code> or <code>post()</code>.</p>
+            <div class="bg-tokyo-panel rounded-xl border border-tokyo-border p-6 font-mono text-[14px] leading-loose">
+                <!-- @formatter:off -->
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/about"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-tokyo-text">request, response</span>) => {
+    <span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">text</span>(<span class="text-[#9ece6a]">"Kitwork is ready."</span>);
+});
+                <!-- @formatter:on -->
+            </div>
+        </section>
+
+        <section>
+            <h3 class="text-2xl font-black text-[#e0af68] mb-4">Dynamic Parameters</h3>
+            <p class="text-tokyo-muted mb-6">You can extract path parameters safely using <code>:param</code> syntax inside the URL declaration.</p>
+            <div class="bg-tokyo-panel rounded-xl border border-tokyo-border p-6 font-mono text-[14px] leading-loose">
+                <!-- @formatter:off -->
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/users/:id"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-tokyo-text">request, response</span>) => {
+    <span class="text-tokyo-muted italic">// Fetch user parameter from the request object</span>
+    <span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">uid</span> = <span class="text-[#7dcfff]">request</span>.<span class="text-[#9ece6a]">params</span>(<span class="text-[#9ece6a]">"id"</span>);
+    
+    <span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">json</span>({ <span class="text-tokyo-text">user_id: uid</span> });
+});
+                <!-- @formatter:on -->
+            </div>
+        </section>
+        
+        <section>
+            <h3 class="text-2xl font-black text-[#e0af68] mb-4">Template Rendering</h3>
+            <p class="text-tokyo-muted mb-6">Return fully compiled HTML templates using the Go template engine.</p>
+            <div class="bg-tokyo-panel rounded-xl border border-tokyo-border p-6 font-mono text-[14px] leading-loose">
+                <!-- @formatter:off -->
+<span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">home</span> = <span class="text-[#9ece6a]">render</span>(<span class="text-[#9ece6a]">"/pages/home"</span>).<span class="text-[#9ece6a]">layout</span>(<span class="text-[#9ece6a]">"/layouts/home"</span>);
+
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-tokyo-text">request, response</span>) => {
+    <span class="text-[#bb9af7]">const</span> <span class="text-tokyo-text">page</span> = <span class="text-[#7dcfff]">home</span>.<span class="text-[#9ece6a]">page</span>(<span class="text-[#9ece6a]">"index.html"</span>);
+    <span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">html</span>(<span class="text-[#7dcfff]">page</span>.<span class="text-[#9ece6a]">bind</span>({ <span class="text-tokyo-text">title: "Dashboard"</span> }));
+});
+                <!-- @formatter:on -->
+            </div>
+        </section>
+    </div>
+</div>

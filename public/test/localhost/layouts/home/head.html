@@ -1,5 +1,77 @@
 <head>
     <meta charset="UTF-8">
-    <title>Kitwork Full-Stack</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title ?? "Kitwork Sovereign Logic Engine" }}</title>
+    <meta name="description" content="Kitwork Engine is an industrial-grade logic infrastructure.">
+    <!-- Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;900&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            DEFAULT: '#f82244',
+                            light: '#ff758f',
+                            accent: '#f7768e',
+                        },
+                        tokyo: {
+                            bg: '#1a1b26',
+                            panel: '#1f2335',
+                            border: '#292e42',
+                            text: '#c0caf5',
+                            muted: '#565f89'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                        mono: ['Fira Code', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #1a1b26;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: -20%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(248, 34, 68, 0.15) 0%, transparent 60%);
+            filter: blur(100px);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #1a1b26;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #292e42;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #565f89;
+        }
+    </style>
 </head>
