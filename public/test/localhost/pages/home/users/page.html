@@ -4,7 +4,7 @@
         <p class="text-tokyo-text text-lg">Ultrafast data fetching from Postgres via Kitwork ORM.</p>
     </div>
 
-    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-2xl p-2 md:p-6 shadow-[0_10px_30px_rgba(0,0,0,0.5)] backdrop-blur-md overflow-x-auto">
+    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-2xl p-2 md:p-6 outline outline-1 outline-tokyo-border outline-offset-4 backdrop-blur-md overflow-x-auto">
         <table class="w-full text-left border-collapse">
             <thead>
                 <tr>
@@ -16,12 +16,12 @@
             </thead>
             <tbody>
                 {{ for user in users }}
-                <tr class="hover:bg-white/5 transition-colors border-b border-tokyo-border last:border-none">
+                <tr class="hover:bg-black/5 transition-colors border-b border-tokyo-border last:border-none">
                     <td class="p-4 text-tokyo-muted font-mono text-sm">#{{ user.id }}</td>
                     <td class="p-4 font-bold text-[1.1rem] text-tokyo-text">{{ user.username }}</td>
                     <td class="p-4 text-tokyo-muted">{{ user.email }}</td>
                     <td class="p-4">
-                        <a href="/users/{{ user.id }}" class="inline-block text-brand-light font-bold text-sm bg-brand/10 hover:bg-brand/30 hover:text-white px-4 py-2 rounded-lg transition-all hover:shadow-[0_0_15px_rgba(248,34,68,0.4)]">
+                        <a href="/users/{{ user.id }}" class="inline-block text-brand-light font-bold text-sm bg-brand/10 hover:bg-brand/30 hover:text-tokyo-text px-4 py-2 rounded-lg transition-all hover:scale-110 hover:outline hover:outline-1 hover:outline-brand hover:outline-offset-2">
                             View Details &rarr;
                         </a>
                     </td>

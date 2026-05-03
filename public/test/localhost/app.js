@@ -75,8 +75,10 @@ const global = {
     title: "Chào mừng tới kitwork",
 }
 const home = render("/pages/home").global(global).layout("/layouts/home")
-const notfound = render("/pages/home/notfound.html").global(global).layout("/layouts/home")
+const notfound = render("/pages/home").page("notfound").global(global).layout("/layouts/home")
 const api = router.group("/api");
+
+
 
 api.get("/").handle((context) => {
 
@@ -106,6 +108,12 @@ api.get("/gold").cache("5s")
 
         return response.status(200).json({ success: true, count: data.length, data: data });
     });
+
+router.get("/").handle((request, response) => {
+    const binding = {}
+    const view = home.page("/").bind(binding);
+    return response.html(view);
+});
 
 router.get("/docs/:site?").handle((request, response) => {
 
@@ -156,4 +164,6 @@ router.get("/*").handle((request, response) => {
     const view = notfound.bind(null)
     return response.html(view);
 });
+
+router.notfound("*")
 

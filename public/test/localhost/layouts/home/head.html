@@ -21,11 +21,11 @@
                             accent: '#f7768e',
                         },
                         tokyo: {
-                            bg: '#1a1b26',
-                            panel: '#1f2335',
-                            border: '#292e42',
-                            text: '#c0caf5',
-                            muted: '#565f89'
+                            bg: '#fcfcfd',
+                            panel: '#ffffff',
+                            border: '#f1f3f5',
+                            text: '#242442',
+                            muted: '#6e7687'
                         }
                     },
                     fontFamily: {
@@ -39,7 +39,7 @@
 
     <style>
         body {
-            background-color: #1a1b26;
+            background-color: #fcfcfd;
         }
         body::before {
             content: '';
@@ -57,21 +57,23 @@
 
         /* Custom scrollbar */
         ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+            width: 10px;
+            height: 10px;
         }
 
         ::-webkit-scrollbar-track {
-            background: #1a1b26;
+            background: #f9fafb;
+            border-left: 1px solid #f3f4f6;
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #292e42;
-            border-radius: 4px;
+            background: #d1d5db;
+            border: 2px solid #f9fafb;
+            border-radius: 10px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #565f89;
+            background: #f82244;
         }
     </style>
 </head>

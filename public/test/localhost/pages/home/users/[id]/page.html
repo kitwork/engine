@@ -1,6 +1,6 @@
 <div class="max-w-2xl mx-auto p-6 animate-[fadeInUp_0.8s_ease_forwards]">
     <div class="mb-6 text-center">
-        <a href="/users" class="inline-flex items-center gap-2 text-brand-light font-bold px-4 py-2 bg-brand/10 rounded-lg hover:bg-brand/30 hover:text-white transition-all hover:-translate-x-1">
+        <a href="/users" class="inline-flex items-center gap-2 text-brand-light font-bold px-4 py-2 bg-brand/10 rounded-lg hover:bg-brand/30 hover:text-tokyo-text transition-all hover:-translate-x-1">
             &larr; Back to Directory
         </a>
     </div>
@@ -10,11 +10,11 @@
         <p class="text-tokyo-text">Dynamic `[id]` route rendered by Kitwork</p>
     </div>
 
-    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-3xl p-10 md:p-12 shadow-[0_15px_40px_rgba(0,0,0,0.6)] backdrop-blur-md relative overflow-hidden max-w-lg mx-auto">
+    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-3xl p-10 md:p-12 outline outline-1 outline-tokyo-border outline-offset-4 backdrop-blur-md relative overflow-hidden max-w-lg mx-auto">
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-light to-brand"></div>
         
         {{ if user }}
-        <div class="w-24 h-24 rounded-full bg-gradient-to-br from-brand-light to-brand flex items-center justify-center text-4xl font-black text-tokyo-bg mx-auto mb-10 shadow-[0_10px_25px_rgba(248,34,68,0.4)] uppercase">
+        <div class="w-24 h-24 rounded-full bg-gradient-to-br from-brand-light to-brand flex items-center justify-center text-4xl font-black text-tokyo-bg mx-auto mb-10 outline outline-2 outline-brand outline-offset-4 uppercase">
             {{ user.username[0] | upper }}
         </div>
         

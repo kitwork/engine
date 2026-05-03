@@ -133,4 +133,12 @@ go run cmd/server/main.go
 ```
 
 ---
+
+## ✒️ Author's Note
+
+> *"While the world is busy using AI to automate everything, I choose to breathe a soul into every line of code. I write code like essays, like unspoken confessions. I use AI not to replace myself, but as a mirror to reflect my own inner world. I expose this system to the world simply because it is beautiful, crazy, and dreamy."*
+> 
+> — **Huỳnh Nhân Quốc**, *Indie-Stack Developer*
+
+---
 *© 2024-2025 Kitwork Foundation. Industrial Logic Infrastructure.*
