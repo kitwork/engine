@@ -16,6 +16,14 @@ import (
 // RENDER SERVICE & FLUENT API
 // ----------------------------------------------------------------------------
 
+func renderfile(filenames ...string) string {
+	file := "index"
+	if len(filenames) > 0 {
+		file = filenames[0]
+	}
+	return file + extension + ".html"
+}
+
 func (w *KitWork) Render(args ...value.Value) *Render {
 	r := &Render{
 		tenant: w.tenant,
@@ -40,6 +48,13 @@ type Render struct {
 	page   string // Thư mục trang con, ví dụ: contact/profile
 	layout map[string]string
 	global value.Value // Dữ liệu dùng chung cho mọi bản render
+	shell  Layout      // Cache cho các thành phần core (navbar, footer, head)
+}
+
+type Layout struct {
+	Navbar string
+	Footer string
+	Head   string
 }
 
 func (r *Render) Global(val value.Value) *Render {
@@ -61,10 +76,27 @@ func (r *Render) Layout(val value.Value) *Render {
 					continue
 				}
 				name := layout.Name()
+
+				// Tự động nạp vào Shell Cache nếu đúng tên mặc định
+				switch name {
+				case "_navbar_" + extension + ".html", "_navbar_":
+					if raw, err := os.ReadFile(filepath.Join(path, name)); err == nil {
+						r.shell.Navbar = string(raw)
+					}
+				case "_footer_" + extension + ".html", "_footer_":
+					if raw, err := os.ReadFile(filepath.Join(path, name)); err == nil {
+						r.shell.Footer = string(raw)
+					}
+				case "_head_" + extension + ".html", "_head_":
+					if raw, err := os.ReadFile(filepath.Join(path, name)); err == nil {
+						r.shell.Head = string(raw)
+					}
+				}
+
 				// Lưu cả tên có đuôi và không đuôi để dễ truy cập
 				r.layout[name] = filepath.Join(path, name)
-				if strings.HasSuffix(name, ".kitwork.html") {
-					r.layout[strings.TrimSuffix(name, ".kitwork.html")] = filepath.Join(path, name)
+				if strings.HasSuffix(name, renderfile()) {
+					r.layout[strings.TrimSuffix(name, renderfile())] = filepath.Join(path, name)
 				} else if ext := filepath.Ext(name); ext != "" {
 					r.layout[strings.TrimSuffix(name, ext)] = filepath.Join(path, name)
 				}
@@ -103,17 +135,17 @@ func (r *Render) Template(vals ...value.Value) *Render {
 
 func (r *Render) getIndexPath() string {
 	// r.index bây giờ chỉ lưu tên file, r.path lưu thư mục
-	return r.tenant.joinPath(path.Join(r.path, "index.kitwork.html"))
+	return r.tenant.joinPath(path.Join(r.path, renderfile()))
 }
 
 func (r *Render) getPagePath() string {
 	// Kết quả: path + page_name + page.kitwork.html
-	return r.tenant.joinPath(path.Join(r.path, r.page, "page.kitwork.html"))
+	return r.tenant.joinPath(path.Join(r.path, r.page, renderfile("page")))
 }
 
 func (r *Render) getNotFoundPath() string {
-	// Kết quả: path + page_name + notfound.kitwork.html
-	return r.tenant.joinPath(path.Join(r.path, "notfound.kitwork.html"))
+	// Kết quả: path + 404.kitwork.html
+	return r.tenant.joinPath(path.Join(r.path, renderfile("404")))
 }
 
 func (r *Render) Page(vals ...value.Value) *Render {
@@ -162,7 +194,7 @@ func (r *Render) tmpl(data any) string {
 
 // assemble thực hiện quét template và nạp các thành phần thô một cách đệ quy
 func (r *Render) assemble(content string, currentDir string, depth int) string {
-	if depth > 10 { // Giới hạn đệ quy để tránh treo hệ thống
+	if depth > 10 {
 		return "<!-- Error: Template recursion too deep -->"
 	}
 
@@ -170,83 +202,95 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 	var sb strings.Builder
 
 	for _, t := range tokens {
-		if strings.HasPrefix(t, "{{") && strings.HasSuffix(t, "}}") {
-			tag := strings.TrimSpace(t[2 : len(t)-2])
-			parts := strings.Fields(tag)
-			if len(parts) == 0 {
-				sb.WriteString(t)
-				continue
-			}
+		if !strings.HasPrefix(t, "{{") || !strings.HasSuffix(t, "}}") {
+			sb.WriteString(t)
+			continue
+		}
 
-			cmd := parts[0]
-			switch cmd {
-			case "_page_":
-				// Nạp trang con động
-				pagePath := r.getPagePath()
+		tag := strings.TrimSpace(t[2 : len(t)-2])
+		parts := strings.Fields(tag)
+		if len(parts) == 0 {
+			sb.WriteString(t)
+			continue
+		}
 
-				if raw, err := os.ReadFile(pagePath); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
+		cmd := parts[0]
+
+		switch {
+		case cmd == "_page_":
+			// A. Nạp trang con động từ Router
+			pagePath := r.getPagePath()
+			if raw, err := os.ReadFile(pagePath); err == nil {
+				sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
+			} else {
+				// Fallback 404
+				nfPath := r.getNotFoundPath()
+				if raw, err := os.ReadFile(nfPath); err == nil {
+					sb.WriteString(r.assemble(string(raw), filepath.Dir(nfPath), depth+1))
 				} else {
-					// Fallback sang notfound
-					nfPath := r.getNotFoundPath()
-					if raw, err := os.ReadFile(nfPath); err == nil {
-						sb.WriteString(r.assemble(string(raw), filepath.Dir(nfPath), depth+1))
-					} else {
-						sb.WriteString(fmt.Sprintf("<!-- 404: %v -->", pagePath))
-					}
-				}
-
-		case "_navbar_", "_footer_", "_head_":
-			// 2. Xử lý các Component cốt lõi (Short-syntax)
-			// Tự động tìm file: _navbar_.kitwork.html, _footer_.kitwork.html...
-			fname := cmd + ".kitwork.html"
-			found := false
-
-			// A. Thử tìm trong Layout Map (ưu tiên nạp từ RAM nếu có)
-			if pathVal, ok := r.layout[fname]; ok {
-				if raw, err := os.ReadFile(pathVal); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
-					found = true
-				}
-			} else if pathVal, ok := r.layout[cmd]; ok {
-				if raw, err := os.ReadFile(pathVal); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
-					found = true
+					sb.WriteString(fmt.Sprintf("<!-- 404: %v -->", pagePath))
 				}
 			}
 
-			// B. Tìm tương đối trong thư mục hiện tại
-			if !found {
-				fullPath := filepath.Join(currentDir, fname)
-				if raw, err := os.ReadFile(fullPath); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
-					found = true
-				}
+		case cmd == "_navbar_", cmd == "_footer_", cmd == "_head_":
+			// B. Ưu tiên nạp từ Shell Cache (RAM)
+			var cached string
+			if cmd == "_navbar_" {
+				cached = r.shell.Navbar
+			} else if cmd == "_footer_" {
+				cached = r.shell.Footer
+			} else if cmd == "_head_" {
+				cached = r.shell.Head
 			}
 
-			// C. Cuối cùng thử tìm trong thư mục views global
-			if !found {
-				globalPath := r.tenant.joinPath("views", fname)
-				if raw, err := os.ReadFile(globalPath); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
-					found = true
-				}
+			if cached != "" {
+				sb.WriteString(r.assemble(cached, currentDir, depth+1))
+			} else {
+				// Nếu RAM trống, thử tìm trên đĩa
+				sb.WriteString(r.resolvePartial(cmd, currentDir, depth))
 			}
 
-			if !found {
-				sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", fname))
-			}
+		case strings.HasPrefix(cmd, "_") && strings.HasSuffix(cmd, "_"):
+			// C. Nạp các Partial/Component tự do khác
+			sb.WriteString(r.resolvePartial(cmd, currentDir, depth))
 
-			default:
-				// Các tag khác như if, for, biến... giữ nguyên để giai đoạn Bind xử lý
-				sb.WriteString(t)
-			}
-		} else {
-			// Text bình thường
+		default:
+			// D. Các thẻ dữ liệu (if, for, biến)
 			sb.WriteString(t)
 		}
 	}
 	return sb.String()
+}
+
+// resolvePartial hỗ trợ tìm kiếm file mẫu trên đĩa cứng (Disk Fallback)
+func (r *Render) resolvePartial(cmd string, currentDir string, depth int) string {
+	fname := renderfile(cmd)
+
+	// 1. Tìm trong layout map
+	if pathVal, ok := r.layout[fname]; ok {
+		if raw, err := os.ReadFile(pathVal); err == nil {
+			return r.assemble(string(raw), filepath.Dir(pathVal), depth+1)
+		}
+	}
+	if pathVal, ok := r.layout[cmd]; ok {
+		if raw, err := os.ReadFile(pathVal); err == nil {
+			return r.assemble(string(raw), filepath.Dir(pathVal), depth+1)
+		}
+	}
+
+	// 2. Tìm tương đối trong thư mục hiện tại
+	fullPath := filepath.Join(currentDir, fname)
+	if raw, err := os.ReadFile(fullPath); err == nil {
+		return r.assemble(string(raw), filepath.Dir(fullPath), depth+1)
+	}
+
+	// 3. Tìm trong views global
+	globalPath := r.tenant.joinPath("views", fname)
+	if raw, err := os.ReadFile(globalPath); err == nil {
+		return r.assemble(string(raw), filepath.Dir(globalPath), depth+1)
+	}
+
+	return fmt.Sprintf("<!-- Missing partial: %v -->", fname)
 }
 
 func (r *Render) Bind(data value.Value) value.Value {

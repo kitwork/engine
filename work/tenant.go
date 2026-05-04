@@ -12,6 +12,9 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
+const kitwork = "kitwork"
+const extension = "." + kitwork
+
 type Tenant struct {
 	config   *Config
 	entity   *Entity
@@ -43,7 +46,7 @@ func (t *Tenant) joinPath(paths ...string) string {
 }
 
 func (t *Tenant) appfile(filenames ...string) string {
-	file := "app.kitwork.js"
+	file := "app" + extension + ".js"
 	if len(filenames) > 0 {
 		file = filenames[0]
 	}
@@ -79,7 +82,7 @@ func NewTenant(source string, domain string) (*Tenant, error) {
 	tenant.vm.Builtins = []value.Value{kitworkFunc}
 
 	// Giữ lại trong Globals
-	tenant.vm.Globals["kitwork"] = kitworkFunc
+	tenant.vm.Globals[kitwork] = kitworkFunc
 
 	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
 	tenant.vm.Run()

@@ -19,10 +19,10 @@ const db = database({
 
 
 router.get("/favicon.ico").file("/assets/favicon.ico");
-
+router.get("/taiwindcss.js").file("/assets/js/taiwindcss.js");
 // Serve absolute sovereign assets from demo/public relative to project root
 router.get("/public/*").directory("./demo/public");
-
+router.get("/assets/*").directory("./assets/*");
 
 router.get("/hello").handle((response) => {
     return response.text("hello world");
@@ -165,5 +165,4 @@ router.get("/*").handle((request, response) => {
     return response.html(view);
 });
 
-router.notfound("*")
 

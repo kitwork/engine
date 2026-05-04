@@ -1,11 +1,10 @@
 <main class="py-20 md:py-32 relative max-w-7xl mx-auto px-6">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
         <!-- Text Column -->
-        <div class="animate-[fadeInUp_0.8s_ease_forwards]">
+        <div>
             <div
                 class="inline-flex items-center gap-3 bg-brand/10 text-brand font-black text-[11px] py-2 px-5 rounded-full border border-brand/20 uppercase tracking-[3px] mb-8">
-                <span
-                    class="w-2 h-2 rounded-full bg-brand animate-pulse outline outline-1 outline-brand outline-offset-2"></span>
+                <span class="w-2 h-2 rounded-full bg-brand outline outline-1 outline-brand outline-offset-2"></span>
                 Bytecode VM
             </div>
 
@@ -15,8 +14,9 @@
             </h1>
 
             <p class="text-gray-900 text-lg md:text-xl leading-relaxed max-w-xl mb-12">
-                Ultrafast, lightweight, and built on Go. Write web applications in JavaScript with the extreme
-                performance of our proprietary Stack-Based Bytecode Engine.
+                Ultrafast, lightweight, and built on Go. We don't run heavy JavaScript. We use a familiar <strong
+                    class="font-bold text-brand">JavaScript Blueprint</strong> compiled directly into bytecode for the
+                extreme performance of our proprietary Stack Virtual Machine Engine.
             </p>
 
             <div class="flex flex-col sm:flex-row gap-4">
@@ -32,8 +32,8 @@
         </div>
 
         <!-- Code Column -->
-        <div class="bg-[#242442] border-2 border-brand/20 rounded-2xl p-6 md:p-8 relative overflow-hidden w-full lg:mt-16 animate-[fadeInUp_0.8s_ease_forwards]"
-            style="animation-delay: 0.2s; opacity: 0;">
+        <div
+            class="bg-[#242442] border-2 border-brand/20 rounded-2xl p-6 md:p-8 relative overflow-hidden w-full lg:mt-16">
             <div
                 class="absolute top-0 left-0 right-0 flex justify-between items-center bg-[#1a1a32] border-b border-[#2d2d52] px-5 py-3">
                 <div class="flex gap-2">
@@ -43,8 +43,9 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <span
-                        class="w-1.5 h-1.5 rounded-full bg-brand animate-pulse outline outline-1 outline-brand outline-offset-2"></span>
-                    <span class="font-mono text-[10px] font-bold text-[#a9b1d6] uppercase tracking-widest">app.js</span>
+                        class="w-1.5 h-1.5 rounded-full bg-brand outline outline-1 outline-brand outline-offset-2"></span>
+                    <span
+                        class="font-mono text-[10px] font-bold text-[#a9b1d6] uppercase tracking-widest">app.kitwork.js</span>
                 </div>
             </div>
 
@@ -144,10 +145,11 @@
                     <h3
                         class="font-black text-xl mb-4 tracking-wide text-gray-900 group-hover:text-brand-light transition-colors duration-300">
                         Blazing Fast</h3>
-                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Built on <strong
-                            class="font-bold text-gray-900">Google's Go language</strong>. Capable of serving <strong
-                            class="font-bold text-brand">millions of concurrent</strong> web requests almost instantly
-                        without breaking a sweat.</p>
+                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Engineered on a <strong
+                            class="font-bold text-gray-900">high performance Go architecture</strong>. Bypasses
+                        traditional server bottlenecks to effortlessly serve <strong
+                            class="font-bold text-brand">millions of concurrent requests</strong> with near zero
+                        latency.</p>
                 </div>
             </div>
 
@@ -172,11 +174,12 @@
                     </div>
                     <h3
                         class="font-black text-xl mb-4 tracking-wide text-gray-900 group-hover:text-brand-light transition-colors duration-300">
-                        VM JS Engine</h3>
-                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Run JavaScript without the heavy <strong
-                            class="font-bold text-gray-900">V8 engine</strong>. Kitwork uses a custom <strong
-                            class="font-bold text-gray-900">Stack-Based Virtual Machine</strong> capable of <strong
-                            class="font-bold text-brand">14.1M ops/sec</strong>.</p>
+                        JS Blueprint</h3>
+                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Leave the bloated <strong
+                            class="font-bold text-gray-900">V8 engine</strong> behind. Kitwork doesn't execute pure JS.
+                        It uses a familiar <strong class="font-bold text-gray-900">blueprint dialect</strong> compiled
+                        straight to our bare metal <strong class="font-bold text-gray-900">Stack VM</strong>, achieving
+                        <strong class="font-bold text-brand">14.1M ops per sec</strong>.</p>
                 </div>
             </div>
 
@@ -202,11 +205,11 @@
                     <h3
                         class="font-black text-xl mb-4 tracking-wide text-gray-900 group-hover:text-brand-light transition-colors duration-300">
                         True Goroutines</h3>
-                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Say goodbye to the <strong
-                            class="font-bold text-gray-900">NodeJS Event-Loop</strong> bottleneck. Use the custom <code
+                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Shatter the <strong
+                            class="font-bold text-gray-900">NodeJS Event Loop</strong> illusion. Use our native <code
                             class="font-mono text-brand bg-brand/5 px-1.5 py-0.5 rounded font-bold border border-brand/10">go()</code>
-                        function within JavaScript to spin up <strong class="font-bold text-brand">parallel background
-                            tasks</strong> instantly.</p>
+                        function inside JavaScript to spawn <strong class="font-bold text-brand">truly
+                            parallel</strong>, isolated background tasks instantly.</p>
                 </div>
             </div>
 
@@ -231,11 +234,11 @@
                     </div>
                     <h3
                         class="font-black text-xl mb-4 tracking-wide text-gray-900 group-hover:text-brand-light transition-colors duration-300">
-                        Built-in Database</h3>
-                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">Connect and query your <strong
-                            class="font-bold text-brand">SQL database natively</strong>. Use our elegant, <strong
-                            class="font-bold text-gray-900">easy-to-use API</strong> without needing to install any
-                        bulky external drivers.</p>
+                        Integrated Database</h3>
+                    <p class="text-gray-500 leading-relaxed text-[0.9rem]">No messy configurations or bulky external
+                        drivers. Kitwork <strong class="font-bold text-brand">natively binds</strong> to your SQL
+                        database, offering a fluent, <strong class="font-bold text-gray-900">zero latency Query
+                            Builder</strong> right out of the box.</p>
                 </div>
             </div>
 
@@ -247,10 +250,10 @@
 <section class="py-32 bg-gray-50/30 relative border-t border-gray-200 overflow-hidden">
     <div class="max-w-7xl mx-auto px-6 relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
         <!-- Text -->
-        <div class="animate-[fadeInUp_0.8s_ease_forwards]">
+        <div>
             <div
                 class="inline-flex items-center gap-3 bg-brand/10 text-brand font-black text-[11px] py-2 px-5 rounded-full border border-brand/20 uppercase tracking-[3px] mb-8">
-                <span class="w-2 h-2 rounded-full bg-brand animate-pulse"></span>
+                <span class="w-2 h-2 rounded-full bg-brand"></span>
                 The Energy Economy
             </div>
             <h2 class="font-black text-4xl md:text-5xl leading-tight mb-6 text-gray-900">
@@ -265,17 +268,17 @@
                 <li class="flex items-center gap-4 text-gray-500">
                     <span
                         class="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center font-bold text-sm outline outline-1 outline-brand outline-offset-2">C</span>
-                    <span><strong class="text-gray-900">CPU (Calc)</strong> — Thinking is cheap.</span>
+                    <span><strong class="text-gray-900">CPU (Calc)</strong> | Thinking is cheap.</span>
                 </li>
                 <li class="flex items-center gap-4 text-gray-500">
                     <span
                         class="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center font-bold text-sm outline outline-1 outline-brand outline-offset-2">R</span>
-                    <span><strong class="text-gray-900">RAM (Alloc)</strong> — Memory is finite space.</span>
+                    <span><strong class="text-gray-900">RAM (Alloc)</strong> | Memory is finite space.</span>
                 </li>
                 <li class="flex items-center gap-4 text-gray-500">
                     <span
                         class="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center font-bold text-sm outline outline-1 outline-brand outline-offset-2">N</span>
-                    <span><strong class="text-gray-900">Network</strong> — Communication is expensive.</span>
+                    <span><strong class="text-gray-900">Network</strong> | Communication is expensive.</span>
                 </li>
             </ul>
         </div>
@@ -291,7 +294,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <span
-                        class="w-1.5 h-1.5 rounded-full bg-brand animate-pulse outline outline-1 outline-brand outline-offset-2"></span>
+                        class="w-1.5 h-1.5 rounded-full bg-brand outline outline-1 outline-brand outline-offset-2"></span>
                     <span
                         class="font-mono text-[10px] font-bold text-[#a9b1d6] uppercase tracking-widest">scheduler.js</span>
                 </div>
@@ -354,21 +357,25 @@
 
 <!-- Author's Note -->
 <section class="py-20 bg-brand/[0.02] relative overflow-hidden border-t border-brand/10">
-    <div class="max-w-4xl mx-auto px-6 relative z-10 animate-[fadeInUp_1s_ease_forwards]">
+    <div class="max-w-4xl mx-auto px-6 relative z-10">
 
         <div class="flex flex-col md:flex-row gap-8 md:gap-12 items-center pt-8">
 
             <!-- Left Column: Author Info -->
-            <div class="flex-shrink-0 flex flex-col items-center text-center w-full md:w-56 md:border-r border-brand/10 md:pr-10">
-                <a href="https://github.com/huynhnhanquoc" target="_blank" class="inline-block hover:scale-105 transition-transform duration-300">
+            <div
+                class="flex-shrink-0 flex flex-col items-center text-center w-full md:w-56 md:border-r border-brand/10 md:pr-10">
+                <a href="https://github.com/huynhnhanquoc" target="_blank"
+                    class="inline-block hover:scale-105 transition-transform duration-300">
                     <img src="https://kitnext.com//upload/2wjqpur0ife35a49yklnxbc6g1dohz78vstm/media/1767499200307878152_qka7xtmpvfgz8b4yn1wirolu52jhec09ds36.jpg"
                         alt="Huỳnh Nhân Quốc"
                         class="w-20 h-20 rounded-full object-cover border-2 border-white mb-4 shadow-sm">
                 </a>
 
-                <a href="https://github.com/huynhnhanquoc" target="_blank" class="font-bold text-sm tracking-wide text-gray-900 uppercase hover:text-brand transition-colors duration-300">Huỳnh Nhân Quốc</a>
+                <a href="https://github.com/huynhnhanquoc" target="_blank"
+                    class="font-bold text-sm tracking-wide text-gray-900 uppercase hover:text-brand transition-colors duration-300">Huỳnh
+                    Nhân Quốc</a>
                 <div class="text-brand font-semibold text-xs mt-1.5 whitespace-nowrap">
-                    Indie-Stack Developer
+                    Indie Stack Developer
                 </div>
             </div>
 

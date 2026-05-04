@@ -1,33 +1,36 @@
-<div class="max-w-2xl mx-auto p-6 animate-[fadeInUp_0.8s_ease_forwards]">
+<div class="max-w-2xl mx-auto p-6">
     <div class="mb-6 text-center">
-        <a href="/users" class="inline-flex items-center gap-2 text-brand-light font-bold px-4 py-2 bg-brand/10 rounded-lg hover:bg-brand/30 hover:text-tokyo-text transition-all hover:-translate-x-1">
+        <a href="/users"
+            class="inline-flex items-center gap-2 text-brand-light font-bold px-4 py-2 bg-brand/10 rounded-lg hover:bg-brand/30 hover:text-tokyo-text transition-all hover:-translate-x-1">
             &larr; Back to Directory
         </a>
     </div>
-    
+
     <div class="text-center mb-10">
         <h1 class="text-4xl md:text-[2.5rem] font-black text-brand mb-2 tracking-tight">User Profile</h1>
         <p class="text-tokyo-text">Dynamic `[id]` route rendered by Kitwork</p>
     </div>
 
-    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-3xl p-10 md:p-12 outline outline-1 outline-tokyo-border outline-offset-4 backdrop-blur-md relative overflow-hidden max-w-lg mx-auto">
+    <div
+        class="bg-tokyo-panel/80 border border-tokyo-border rounded-3xl p-10 md:p-12 outline outline-1 outline-tokyo-border outline-offset-4 backdrop-blur-md relative overflow-hidden max-w-lg mx-auto">
         <div class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-light to-brand"></div>
-        
+
         {{ if user }}
-        <div class="w-24 h-24 rounded-full bg-gradient-to-br from-brand-light to-brand flex items-center justify-center text-4xl font-black text-tokyo-bg mx-auto mb-10 outline outline-2 outline-brand outline-offset-4 uppercase">
+        <div
+            class="w-24 h-24 rounded-full bg-gradient-to-br from-brand-light to-brand flex items-center justify-center text-4xl font-black text-tokyo-bg mx-auto mb-10 outline outline-2 outline-brand outline-offset-4 uppercase">
             {{ user.username[0] | upper }}
         </div>
-        
+
         <div class="text-center mb-6">
             <div class="text-brand-light text-[0.85rem] uppercase tracking-[1.5px] font-bold mb-1">Username</div>
             <div class="text-2xl text-tokyo-text font-bold tracking-tight">{{ user.username }}</div>
         </div>
-        
+
         <div class="text-center mb-8">
             <div class="text-brand-light text-[0.85rem] uppercase tracking-[1.5px] font-bold mb-1">Email Address</div>
             <div class="text-[1.2rem] text-tokyo-text font-medium">{{ user.email }}</div>
         </div>
-        
+
         <div class="text-center pt-8 border-t border-tokyo-border">
             <div class="text-tokyo-muted text-[0.75rem] uppercase tracking-[2px] font-bold mb-2">User ID</div>
             <div class="text-tokyo-muted font-mono tracking-wide text-lg">#{{ user.id }}</div>
@@ -41,7 +44,3 @@
         {{ end }}
     </div>
 </div>
-
-<style>
-@keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-</style>
