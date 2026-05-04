@@ -43,7 +43,7 @@ func (t *Tenant) joinPath(paths ...string) string {
 }
 
 func (t *Tenant) appfile(filenames ...string) string {
-	file := "app.js"
+	file := "app.kitwork.js"
 	if len(filenames) > 0 {
 		file = filenames[0]
 	}

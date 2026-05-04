@@ -74,8 +74,8 @@ const global = {
     favicon: "/assets/favicon.ico",
     title: "Chào mừng tới kitwork",
 }
-const home = render("/pages/home").global(global).layout("/layouts/home")
-const notfound = render("/pages/home").page("notfound").global(global).layout("/layouts/home")
+const home = render("/pages/home").global(global).layout("/pages/home")
+const notfound = render("/pages/home").page("notfound").global(global).layout("/pages/home")
 const api = router.group("/api");
 
 

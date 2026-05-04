@@ -63,7 +63,9 @@ func (r *Render) Layout(val value.Value) *Render {
 				name := layout.Name()
 				// Lưu cả tên có đuôi và không đuôi để dễ truy cập
 				r.layout[name] = filepath.Join(path, name)
-				if ext := filepath.Ext(name); ext != "" {
+				if strings.HasSuffix(name, ".kitwork.html") {
+					r.layout[strings.TrimSuffix(name, ".kitwork.html")] = filepath.Join(path, name)
+				} else if ext := filepath.Ext(name); ext != "" {
 					r.layout[strings.TrimSuffix(name, ext)] = filepath.Join(path, name)
 				}
 			}
@@ -101,17 +103,17 @@ func (r *Render) Template(vals ...value.Value) *Render {
 
 func (r *Render) getIndexPath() string {
 	// r.index bây giờ chỉ lưu tên file, r.path lưu thư mục
-	return r.tenant.joinPath(path.Join(r.path, "index.html"))
+	return r.tenant.joinPath(path.Join(r.path, "index.kitwork.html"))
 }
 
 func (r *Render) getPagePath() string {
-	// Kết quả: path + page_name + page.html
-	return r.tenant.joinPath(path.Join(r.path, r.page, "page.html"))
+	// Kết quả: path + page_name + page.kitwork.html
+	return r.tenant.joinPath(path.Join(r.path, r.page, "page.kitwork.html"))
 }
 
 func (r *Render) getNotFoundPath() string {
-	// Kết quả: path + page_name + page.html
-	return r.tenant.joinPath(path.Join(r.path, "notfound.html"))
+	// Kết quả: path + page_name + notfound.kitwork.html
+	return r.tenant.joinPath(path.Join(r.path, "notfound.kitwork.html"))
 }
 
 func (r *Render) Page(vals ...value.Value) *Render {
@@ -200,8 +202,8 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					continue
 				}
 				fname := strings.Trim(parts[1], `"'`)
-				if !strings.HasSuffix(fname, ".html") {
-					fname += ".html"
+				if !strings.HasSuffix(fname, ".kitwork.html") {
+					fname += ".kitwork.html"
 				}
 
 				found := false
@@ -211,7 +213,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
 						found = true
 					}
-				} else if pathVal, ok := r.layout[strings.TrimSuffix(fname, ".html")]; ok {
+				} else if pathVal, ok := r.layout[strings.TrimSuffix(fname, ".kitwork.html")]; ok {
 					if raw, err := os.ReadFile(pathVal); err == nil {
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
 						found = true
