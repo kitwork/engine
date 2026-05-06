@@ -11,6 +11,12 @@ import (
 
 func (w *KitWork) Router() *Router { return &Router{tenant: w.tenant} }
 
+func NewRouter(tenant *Tenant) *Router {
+	return &Router{
+		tenant: tenant,
+	}
+}
+
 type Router struct {
 	tenant   *Tenant
 	Method   string
@@ -95,7 +101,11 @@ func (r *Router) responder(w http.ResponseWriter) {
 	case "file":
 		http.ServeFile(w, request, data.String())
 	case "directory":
-		http.FileServer(http.Dir(data.String())).ServeHTTP(w, request)
+		dirPath := strings.TrimSuffix(data.String(), "*")
+		dirPath = strings.TrimSuffix(dirPath, "/")
+
+		prefix := strings.TrimSuffix(r.Path, "*")
+		http.StripPrefix(prefix, http.FileServer(http.Dir(dirPath))).ServeHTTP(w, request)
 	case "bytes":
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(r.response.Code())

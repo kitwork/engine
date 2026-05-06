@@ -74,8 +74,7 @@ const global = {
     favicon: "/assets/favicon.ico",
     title: "Chào mừng tới kitwork",
 }
-const home = render("/pages/home").global(global).layout("/pages/home")
-const notfound = render("/pages/home").page("notfound").global(global).layout("/pages/home")
+const home = render.directory("views").global(global).notfound("404")
 const api = router.group("/api");
 
 
@@ -109,15 +108,9 @@ api.get("/gold").cache("5s")
         return response.status(200).json({ success: true, count: data.length, data: data });
     });
 
-router.get("/").handle((request, response) => {
-    const binding = {}
-    const view = home.page("/").bind(binding);
-    return response.html(view);
-});
 
 router.get("/docs/:site?").handle((request, response) => {
-
-    const binding = {}
+    const binding = { request: request }
     const view = home.page(request.path()).bind(binding);
     return response.html(view);
 });
@@ -126,7 +119,7 @@ router.get("/users/:id?").handle((request, response) => {
     const page = home.page(request.page())
 
     const id = request.params("id");
-    const binding = {}
+    const binding = { request: request }
     if (!id) {
         // TRANG DANH SÁCH (vì không có id)
         binding.users = db.table("user").list(5);
@@ -159,9 +152,16 @@ router.get("/background-db").handle((response) => {
     return response.text("DB Background task started!");
 });
 
+router.get("/dashboard").handle((request, response) => {
+    const binding = {}
+    const view = dashboard.page(request.page()).bind(binding);
+    return response.html(view);
+});
+
 
 router.get("/*").handle((request, response) => {
-    const view = notfound.bind(null)
+    const binding = { path: request.path() }
+    const view = home.page(request.path()).bind(binding);
     return response.html(view);
 });
 

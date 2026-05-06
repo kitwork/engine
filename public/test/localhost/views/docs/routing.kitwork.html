@@ -1,0 +1,116 @@
+<div class="max-w-7xl mx-auto p-6 md:p-12 pt-24 md:pt-32">
+    
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
+        
+        <!-- Column 1: Navigation Sidebar (Left) -->
+        <div class="lg:col-span-3 order-2 lg:order-1">
+            <div class="sticky top-32 space-y-8">
+                <div>
+                    <h3 class="font-black text-[10px] text-gray-400 uppercase tracking-[0.2em] mb-4">Documentation</h3>
+                    <ul class="space-y-3">
+                        <li>
+                            <a href="/docs" class="flex items-center gap-3 text-gray-500 dark:text-gray-400 hover:text-brand font-medium text-sm px-3 py-2 transition-all">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+                                Docs Hub
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/docs/routing" class="flex items-center gap-3 text-brand font-bold text-sm bg-brand/5 px-3 py-2 rounded-lg border border-brand/10">
+                                <div class="w-1.5 h-1.5 rounded-full bg-brand"></div>
+                                Routing Basics
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/docs/database" class="flex items-center gap-3 text-gray-500 dark:text-gray-400 hover:text-brand font-medium text-sm px-3 py-2 transition-all group">
+                                <div class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-700 group-hover:bg-brand transition-colors"></div>
+                                Query Builder
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/docs/async" class="flex items-center gap-3 text-gray-500 dark:text-gray-400 hover:text-brand font-medium text-sm px-3 py-2 transition-all group">
+                                <div class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-700 group-hover:bg-brand transition-colors"></div>
+                                Concurrency
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Column 2: Main Content (Center) -->
+        <div class="lg:col-span-6 order-1 lg:order-2">
+            <div class="mb-8">
+                <h1 class="text-4xl md:text-5xl font-black text-gray-900 dark:text-white mb-4 tracking-tight">Routing <span class="text-[#e0af68]">&amp; Config</span></h1>
+                <p class="text-gray-600 dark:text-gray-400 text-lg leading-relaxed">Kitwork uses a high-performance Radix Tree router written natively in Go. This allows static routing, parameter binding, and catch-all logic with zero overhead.</p>
+            </div>
+
+            <div class="space-y-16">
+                <section id="static-endpoints">
+                    <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-4 flex items-center gap-3">
+                        <span class="w-8 h-1 bg-[#e0af68] rounded-full"></span>
+                        Static Endpoints
+                    </h3>
+                    <p class="text-gray-600 dark:text-gray-400 mb-6">Routes are mapped via the underlying fast Go router. Define standard HTTP verbs like <code>get()</code> or <code>post()</code>.</p>
+                    <div class="bg-[#242442] rounded-2xl border border-gray-200 dark:border-gray-800 p-6 font-mono text-[14px] leading-loose text-[#a9b1d6]">
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/about"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-[#e0af68]">request, response</span>) => {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">text</span>(<span class="text-[#9ece6a]">"Kitwork is ready."</span>);<br>
+});
+                    </div>
+                </section>
+
+                <section id="dynamic-parameters">
+                    <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-4 flex items-center gap-3">
+                        <span class="w-8 h-1 bg-[#e0af68] rounded-full"></span>
+                        Dynamic Parameters
+                    </h3>
+                    <p class="text-gray-600 dark:text-gray-400 mb-6">You can extract path parameters safely using <code>:param</code> syntax inside the URL declaration.</p>
+                    <div class="bg-[#242442] rounded-2xl border border-gray-200 dark:border-gray-800 p-6 font-mono text-[14px] leading-loose text-[#a9b1d6]">
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/users/:id"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-[#e0af68]">request, response</span>) => {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// Fetch user parameter from the request object</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">const</span> <span class="text-[#c0caf5]">uid</span> = <span class="text-[#7dcfff]">request</span>.<span class="text-[#9ece6a]">params</span>(<span class="text-[#9ece6a]">"id"</span>);<br>
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">json</span>({ <span class="text-[#c0caf5]">user_id: uid</span> });<br>
+});
+                    </div>
+                </section>
+                
+                <section id="template-rendering">
+                    <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-4 flex items-center gap-3">
+                        <span class="w-8 h-1 bg-[#e0af68] rounded-full"></span>
+                        Template Rendering
+                    </h3>
+                    <p class="text-gray-600 dark:text-gray-400 mb-6">Return fully compiled HTML templates using the Go template engine.</p>
+                    <div class="bg-[#242442] rounded-2xl border border-gray-200 dark:border-gray-800 p-6 font-mono text-[14px] leading-loose text-[#a9b1d6]">
+<span class="text-[#bb9af7]">const</span> <span class="text-[#c0caf5]">home</span> = <span class="text-[#9ece6a]">render</span>(<span class="text-[#9ece6a]">"/pages/home"</span>).<span class="text-[#9ece6a]">layout</span>(<span class="text-[#9ece6a]">"/layouts/home"</span>);<br>
+<br>
+<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-[#e0af68]">request, response</span>) => {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">const</span> <span class="text-[#c0caf5]">page</span> = <span class="text-[#7dcfff]">home</span>.<span class="text-[#9ece6a]">page</span>(<span class="text-[#9ece6a]">"index.html"</span>);<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">html</span>(<span class="text-[#7dcfff]">page</span>.<span class="text-[#9ece6a]">bind</span>({ <span class="text-[#c0caf5]">title: "Dashboard"</span> }));<br>
+});
+                    </div>
+                </section>
+            </div>
+        </div>
+
+        <!-- Column 3: "On this page" Aside (Right) -->
+        <div class="lg:col-span-3 order-3">
+            <div class="sticky top-32">
+                <h3 class="font-black text-[10px] text-gray-400 uppercase tracking-[0.2em] mb-4">On this page</h3>
+                <nav>
+                    <ul class="space-y-4 border-l border-gray-200 dark:border-gray-800">
+                        <li class="pl-4 border-l-2 border-[#e0af68] -ml-[1px]">
+                            <a href="#static-endpoints" class="block text-[#e0af68] text-xs font-bold transition-colors">Static Endpoints</a>
+                        </li>
+                        <li class="pl-4">
+                            <a href="#dynamic-parameters" class="block text-gray-500 dark:text-gray-400 hover:text-brand text-xs font-medium transition-colors">Dynamic Parameters</a>
+                        </li>
+                        <li class="pl-4">
+                            <a href="#template-rendering" class="block text-gray-500 dark:text-gray-400 hover:text-brand text-xs font-medium transition-colors">Template Rendering</a>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+
+    </div>
+</div>

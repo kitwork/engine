@@ -8,10 +8,20 @@
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700;900&family=Fira+Code:wght@400;500&display=swap"
         rel="stylesheet">
 
+    <!-- Prevent FOUC -->
+    <script>
+        if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+
     <!-- Tailwind CSS -->
     <script src="/taiwindcss.js"></script>
     <script>
         tailwind.config = {
+            darkMode: 'class',
             theme: {
                 extend: {
                     colors: {
@@ -40,6 +50,12 @@
     <style>
         body {
             background-color: #fcfcfd;
+            transition: background-color 0.3s ease;
+        }
+
+        .dark body {
+            background-color: #0f172a;
+            color: #f8fafc;
         }
 
         body::before {
@@ -56,6 +72,10 @@
             pointer-events: none;
         }
 
+        .dark body::before {
+            background: radial-gradient(circle, rgba(248, 34, 68, 0.2) 0%, transparent 70%);
+        }
+
         /* Custom scrollbar */
         ::-webkit-scrollbar {
             width: 10px;
@@ -67,10 +87,20 @@
             border-left: 1px solid #f3f4f6;
         }
 
+        .dark ::-webkit-scrollbar-track {
+            background: #1e293b;
+            border-left: 1px solid #334155;
+        }
+
         ::-webkit-scrollbar-thumb {
             background: #d1d5db;
             border: 2px solid #f9fafb;
             border-radius: 10px;
+        }
+
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border: 2px solid #1e293b;
         }
 
         ::-webkit-scrollbar-thumb:hover {

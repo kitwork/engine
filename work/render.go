@@ -3,6 +3,7 @@ package work
 import (
 	"fmt"
 	"html"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,30 +17,39 @@ import (
 // RENDER SERVICE & FLUENT API
 // ----------------------------------------------------------------------------
 
-func (w *KitWork) Render(args ...value.Value) *Render {
-	r := &Render{
-		tenant: w.tenant,
-		layout: make(map[string]string),
-	}
-	if len(args) > 0 {
-		r.Template(args...)
-	}
-	return r
+func (w *KitWork) Render() *Render {
+
+	return NewRender(w.tenant)
 }
 
 func NewRender(tenant *Tenant) *Render {
 	return &Render{
 		tenant: tenant,
-		layout: make(map[string]string),
 	}
 }
 
 type Render struct {
-	tenant *Tenant
-	path   string // Thư mục gốc, ví dụ: /pages/home
-	page   string // Thư mục trang con, ví dụ: contact/profile
-	layout map[string]string
-	global value.Value // Dữ liệu dùng chung cho mọi bản render
+	tenant    *Tenant
+	directory string
+	path      string // Thư mục gốc, ví dụ: /pages/home
+	page      string // Thư mục trang con, ví dụ: contact/profile
+	layout    Layout
+	global    value.Value // Dữ liệu dùng chung cho mọi bản render
+	notfound  string
+}
+
+type Layout struct {
+	navbar string
+	footer string
+	head   string
+}
+
+func (r *Render) New(dir ...string) *Render {
+	newRender := *r
+	if len(dir) > 0 && dir[0] != "" {
+		newRender.directory = dir[0]
+	}
+	return &newRender
 }
 
 func (r *Render) Global(val value.Value) *Render {
@@ -48,9 +58,6 @@ func (r *Render) Global(val value.Value) *Render {
 }
 
 func (r *Render) Layout(val value.Value) *Render {
-	if r.layout == nil {
-		r.layout = make(map[string]string)
-	}
 
 	if val.IsString() {
 		path := r.tenant.joinPath(val.String())
@@ -62,11 +69,14 @@ func (r *Render) Layout(val value.Value) *Render {
 				}
 				name := layout.Name()
 				// Lưu cả tên có đuôi và không đuôi để dễ truy cập
-				r.layout[name] = filepath.Join(path, name)
 				if strings.HasSuffix(name, ".kitwork.html") {
-					r.layout[strings.TrimSuffix(name, ".kitwork.html")] = filepath.Join(path, name)
-				} else if ext := filepath.Ext(name); ext != "" {
-					r.layout[strings.TrimSuffix(name, ext)] = filepath.Join(path, name)
+					if strings.TrimSuffix(name, ".kitwork.html") == "navbar" {
+						r.layout.navbar = filepath.Join(path, name)
+					} else if strings.TrimSuffix(name, ".kitwork.html") == "footer" {
+						r.layout.footer = filepath.Join(path, name)
+					} else if strings.TrimSuffix(name, ".kitwork.html") == "head" {
+						r.layout.head = filepath.Join(path, name)
+					}
 				}
 			}
 		}
@@ -75,7 +85,13 @@ func (r *Render) Layout(val value.Value) *Render {
 
 	if val.IsMap() {
 		for k, v := range val.Map() {
-			r.layout[k] = v.String()
+			if k == "navbar" {
+				r.layout.navbar = v.String()
+			} else if k == "footer" {
+				r.layout.footer = v.String()
+			} else if k == "head" {
+				r.layout.head = v.String()
+			}
 		}
 	}
 	return r
@@ -103,17 +119,63 @@ func (r *Render) Template(vals ...value.Value) *Render {
 
 func (r *Render) getIndexPath() string {
 	// r.index bây giờ chỉ lưu tên file, r.path lưu thư mục
-	return r.tenant.joinPath(path.Join(r.path, "index.kitwork.html"))
+	file := r.pathJoin(r.path, r.getfile("index"))
+	fmt.Println("file " + file)
+	return file
 }
 
 func (r *Render) getPagePath() string {
 	// Kết quả: path + page_name + page.kitwork.html
-	return r.tenant.joinPath(path.Join(r.path, r.page, "page.kitwork.html"))
+	return r.pathJoin(r.path, r.page, r.getfile("page"))
+}
+
+func (r *Render) getfile(name string) string {
+
+	if filepath.Ext(name) == "" {
+		return name + ".kitwork.html"
+	}
+	return name
 }
 
 func (r *Render) getNotFoundPath() string {
 	// Kết quả: path + page_name + notfound.kitwork.html
-	return r.tenant.joinPath(path.Join(r.path, "notfound.kitwork.html"))
+	if r.notfound == "" {
+		r.notfound = "404"
+	}
+	return r.pathJoin(r.getfile(r.notfound))
+}
+
+func (r *Render) pathJoin(vals ...string) string {
+	path := path.Join(vals...)
+	return r.tenant.joinPath(r.dir(), path)
+}
+
+func (r *Render) Directory(vals ...value.Value) *Render {
+	if len(vals) > 0 {
+		r.directory = vals[0].String()
+	}
+	return r
+}
+
+func (r *Render) dir() string {
+	if r.directory == "" {
+		r.directory = "pages"
+	}
+	return r.directory
+}
+
+func (r *Render) Path(vals ...value.Value) *Render {
+	if len(vals) > 0 {
+		r.path = vals[0].String()
+	}
+	return r
+}
+
+func (r *Render) NotFound(vals ...value.Value) *Render {
+	if len(vals) > 0 {
+		r.notfound = vals[0].String()
+	}
+	return r
 }
 
 func (r *Render) Page(vals ...value.Value) *Render {
@@ -183,12 +245,14 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 			case "_page_":
 				// Nạp trang con động
 				pagePath := r.getPagePath()
-
+				log.Print("pagePath " + pagePath)
 				if raw, err := os.ReadFile(pagePath); err == nil {
+
 					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
 				} else {
 					// Fallback sang notfound
 					nfPath := r.getNotFoundPath()
+					log.Print("pagePath " + nfPath)
 					if raw, err := os.ReadFile(nfPath); err == nil {
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(nfPath), depth+1))
 					} else {
@@ -196,46 +260,47 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					}
 				}
 
-		case "_navbar_", "_footer_", "_head_":
-			// 2. Xử lý các Component cốt lõi (Short-syntax)
-			// Tự động tìm file: _navbar_.kitwork.html, _footer_.kitwork.html...
-			fname := cmd + ".kitwork.html"
-			found := false
+			case "_navbar_", "_footer_", "_head_":
+				found := false
 
-			// A. Thử tìm trong Layout Map (ưu tiên nạp từ RAM nếu có)
-			if pathVal, ok := r.layout[fname]; ok {
-				if raw, err := os.ReadFile(pathVal); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
-					found = true
+				// A. Thử tìm trong Layout Map (ưu tiên nạp từ RAM nếu có)
+				var pathVal string
+				switch cmd {
+				case "_navbar_":
+					pathVal = r.layout.navbar
+				case "_footer_":
+					pathVal = r.layout.footer
+				case "_head_":
+					pathVal = r.layout.head
 				}
-			} else if pathVal, ok := r.layout[cmd]; ok {
-				if raw, err := os.ReadFile(pathVal); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
-					found = true
+				if pathVal != "" {
+					if raw, err := os.ReadFile(pathVal); err == nil {
+						sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
+						found = true
+					}
 				}
-			}
 
-			// B. Tìm tương đối trong thư mục hiện tại
-			if !found {
-				fullPath := filepath.Join(currentDir, fname)
-				if raw, err := os.ReadFile(fullPath); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
-					found = true
+				// B. Tìm tương đối trong thư mục hiện tại
+				if !found {
+					fullPath := filepath.Join(currentDir, cmd+".kitwork.html")
+					if raw, err := os.ReadFile(fullPath); err == nil {
+						sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
+						found = true
+					}
 				}
-			}
 
-			// C. Cuối cùng thử tìm trong thư mục views global
-			if !found {
-				globalPath := r.tenant.joinPath("views", fname)
-				if raw, err := os.ReadFile(globalPath); err == nil {
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
-					found = true
+				// C. Cuối cùng thử tìm trong thư mục views global
+				if !found {
+					globalPath := r.tenant.joinPath("views", cmd+".kitwork.html")
+					if raw, err := os.ReadFile(globalPath); err == nil {
+						sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
+						found = true
+					}
 				}
-			}
 
-			if !found {
-				sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", fname))
-			}
+				if !found {
+					sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", cmd+".kitwork.html"))
+				}
 
 			default:
 				// Các tag khác như if, for, biến... giữ nguyên để giai đoạn Bind xử lý
@@ -264,22 +329,22 @@ func (r *Render) HTML(tmpl string, data any) string {
 }
 
 // File renders a file from the 'views' directory
-func (r *Render) File(name string, data any) string {
-	path := r.tenant.joinPath("views", name)
-	if filepath.Ext(path) == "" {
-		path += ".html"
-	}
+// func (r *Render) File(name string, data any) string {
+// 	path := r.tenant.joinPath("views", name)
+// 	if filepath.Ext(path) == "" {
+// 		path += ".html"
+// 	}
 
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "Render Error: file not found at " + path
-	}
+// 	content, err := os.ReadFile(path)
+// 	if err != nil {
+// 		return "Render Error: file not found at " + path
+// 	}
 
-	viewDir := filepath.Dir(path)
-	globalDir := r.tenant.joinPath("views")
+// 	viewDir := filepath.Dir(path)
+// 	globalDir := r.tenant.joinPath("views")
 
-	return engineRender(string(content), data, viewDir, globalDir)
-}
+// 	return engineRender(string(content), data, viewDir, globalDir)
+// }
 
 // ----------------------------------------------------------------------------
 // TEMPLATE ENGINE CORE
