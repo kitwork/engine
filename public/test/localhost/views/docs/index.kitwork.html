@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+{{ _head_ }}
+
+<body class="text-gray-900 bg-white font-sans selection:bg-brand/20 selection:text-brand">
+    <header>
+        {{ _navbar_ }}
+    </header>
+
+    <main class="max-w-[1400px] mx-auto p-6 md:p-12 pt-24 md:pt-32">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
+
+            <!-- Tự động nạp Sidebar (đã cấu hình trong docs layout) -->
+            {{ _sidebar_ }}
+
+            <!-- Nội dung chính của trang -->
+            {{ _page_ }}
+
+            <!-- Tự động nạp Toolbar (đã cấu hình trong docs layout) -->
+            {{ _toolbar_ }}
+
+        </div>
+    </main>
+
+    <footer>
+        {{ _footer_ }}
+    </footer>
+</body>
+
+</html>

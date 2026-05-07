@@ -1,110 +1,63 @@
-<div class="max-w-7xl mx-auto p-6 md:p-12 pt-24 md:pt-32">
-    
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
-        
-        <!-- Column 1: Navigation Sidebar (Left) -->
-        <div class="lg:col-span-3 order-2 lg:order-1">
-            <div class="sticky top-32 space-y-8">
-                <div>
-                    <h3 class="font-black text-[10px] text-gray-400 uppercase tracking-[0.2em] mb-4">Documentation</h3>
-                    <ul class="space-y-3">
-                        <li>
-                            <a href="/docs" class="flex items-center gap-3 text-gray-500 dark:text-gray-400 hover:text-brand font-medium text-sm px-3 py-2 transition-all">
-                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
-                                Docs Hub
-                            </a>
-                        </li>
-                        <li>
-                            <a href="/docs/routing" class="flex items-center gap-3 text-gray-500 dark:text-gray-400 hover:text-brand font-medium text-sm px-3 py-2 transition-all group">
-                                <div class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-700 group-hover:bg-brand transition-colors"></div>
-                                Routing Basics
-                            </a>
-                        </li>
-                        <li>
-                            <a href="/docs/database" class="flex items-center gap-3 text-gray-500 dark:text-gray-400 hover:text-brand font-medium text-sm px-3 py-2 transition-all group">
-                                <div class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-700 group-hover:bg-brand transition-colors"></div>
-                                Query Builder
-                            </a>
-                        </li>
-                        <li>
-                            <a href="/docs/async" class="flex items-center gap-3 text-brand font-bold text-sm bg-brand/5 px-3 py-2 rounded-lg border border-brand/10">
-                                <div class="w-1.5 h-1.5 rounded-full bg-brand"></div>
-                                Concurrency
-                            </a>
-                        </li>
-                    </ul>
+<div class="lg:col-span-6 order-1 lg:order-2 relative">
+    <!-- Ambient glowing light -->
+    <div class="absolute -top-24 -left-24 w-64 h-64 bg-brand/10 blur-[100px] rounded-full pointer-events-none"></div>
+
+    <!-- Hero Header -->
+    <div class="mb-24 relative z-10">
+        <div class="inline-flex items-center gap-3 bg-brand/10 text-brand font-black text-[10px] py-2 px-4 rounded-full border border-brand/20 uppercase tracking-[3px] mb-8">
+            <span class="w-2 h-2 rounded-full bg-brand outline outline-1 outline-brand outline-offset-2"></span>
+            Concurrency Layer
+        </div>
+        <h1 class="text-5xl md:text-7xl font-black text-gray-900 dark:text-white mb-6 tracking-tighter leading-[1.1]">
+            Parallel <span class="bg-gradient-to-r from-brand-light to-brand bg-clip-text text-transparent">Goroutines</span>
+        </h1>
+        <p class="text-gray-500 dark:text-gray-400 text-xl leading-relaxed max-w-2xl font-medium">
+            Unlike NodeJS which relies on a single-threaded Event Loop, Kitwork empowers you to spin up real, isolated multi-threaded processes.
+        </p>
+    </div>
+
+    <div class="space-y-32">
+        <section id="the-go-function" class="relative scroll-mt-32">
+            <div class="absolute -right-12 top-0 font-black text-[12rem] leading-none text-gray-100 dark:text-white/5 select-none -z-10">01</div>
+            
+            <div class="relative z-10">
+                <h2 class="text-4xl font-black text-gray-900 dark:text-white mb-8">The go() Function</h2>
+                <p class="text-gray-600 dark:text-gray-400 mb-10 leading-relaxed text-xl max-w-xl">
+                    Whenever you wrap an execution block inside <code>go()</code>, Kitwork safely executes it across its Sovereign VM pool.
+                </p>
+
+                <div class="bg-[#242442] rounded-3xl border-2 border-transparent hover:border-brand/60 shadow-2xl overflow-hidden relative group/code transition-all duration-500">
+                    <div class="flex justify-between items-center bg-[#1a1a32] border-b border-[#2d2d52] px-6 py-4">
+                        <div class="flex gap-2">
+                            <div class="w-3 h-3 rounded-full bg-[#ff5f56]"></div>
+                            <div class="w-3 h-3 rounded-full bg-[#ffbd2e]"></div>
+                            <div class="w-3 h-3 rounded-full bg-[#27c93f]"></div>
+                        </div>
+                        <div class="font-mono text-[10px] font-bold text-[#a9b1d6] uppercase tracking-widest">async.kitwork.js</div>
+                    </div>
+                    <div class="p-8 md:p-10 font-mono text-base leading-[2] text-[#a9b1d6]">
+                        <span class="text-[#c0caf5]">router</span>.<span class="text-[#bb9af7]">get</span>(<span class="text-[#9ece6a]">"/register"</span>).<span class="text-[#bb9af7]">handle</span>((<span class="text-[#e0af68]">req, res</span>) => {<br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// 1. Spin up Async background worker</span><br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#7aa2f7]">go</span>(() => {<br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#c0caf5]">network</span>.<span class="text-[#bb9af7]">sendEmail</span>(<span class="text-[#9ece6a]">"Welcome!"</span>);<br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#c0caf5]">log</span>.<span class="text-[#bb9af7]">Print</span>(<span class="text-[#9ece6a]">"Background task running"</span>);<br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;});<br>
+                        <br>
+                        &nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#f7768e]">return</span> <span class="text-[#e0af68]">res</span>.<span class="text-[#bb9af7]">json</span>({ success: <span class="text-[#f7768e]">true</span> });<br>
+                        });
+                    </div>
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Column 2: Main Content (Center) -->
-        <div class="lg:col-span-6 order-1 lg:order-2">
-            <div class="mb-8">
-                <h1 class="text-4xl md:text-5xl font-black text-gray-900 dark:text-white mb-4 tracking-tight">Parallel <span class="text-[#9ece6a]">Goroutines</span></h1>
-                <p class="text-gray-600 dark:text-gray-400 text-lg leading-relaxed">Unlike NodeJS which relies on a single-threaded Event Loop, Kitwork empowers you to spin up real, isolated multi-threaded processes directly from your JavaScript Code.</p>
+        <section id="why-use-goroutines" class="relative scroll-mt-32">
+            <div class="absolute -right-12 top-0 font-black text-[12rem] leading-none text-gray-100 dark:text-white/5 select-none -z-10">02</div>
+            <div class="relative z-10">
+                <h2 class="text-4xl font-black text-gray-900 dark:text-white mb-8">Why Goroutines?</h2>
+                <p class="text-gray-600 dark:text-gray-400 leading-relaxed text-xl max-w-xl italic">
+                    "Standard Javascript runtimes block the execution thread. The <code>go()</code> keyword eliminates these bottlenecks entirely. Never block your HTTP routers again."
+                </p>
             </div>
-
-            <div class="space-y-16">
-                <section id="the-go-function" class="scroll-mt-32">
-                    <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-4 flex items-center gap-3">
-                        <span class="w-8 h-1 bg-[#9ece6a] rounded-full"></span>
-                        The `go()` Function
-                    </h3>
-                    <p class="text-gray-600 dark:text-gray-400 mb-6">Whenever you wrap an execution block inside <code>go()</code>, Kitwork safely extracts that block and executes it across its Sovereign VM pool.</p>
-                    <div class="bg-[#242442] rounded-2xl border border-gray-200 dark:border-gray-800 p-6 font-mono text-[14px] leading-loose text-[#a9b1d6]">
-<span class="text-[#7dcfff]">router</span>.<span class="text-[#9ece6a]">get</span>(<span class="text-[#9ece6a]">"/register"</span>).<span class="text-[#9ece6a]">handle</span>((<span class="text-[#e0af68]">request, response</span>) => {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// 1. Save info immediately</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">const</span> <span class="text-[#c0caf5]">data</span> = <span class="text-[#7dcfff]">request</span>.<span class="text-[#9ece6a]">body</span>();<br>
-<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// 2. Spin up Async background worker</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#9ece6a]">go</span>(() => {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// This executes separately. </span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// Response will NOT wait for this.</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#7dcfff]">network</span>.<span class="text-[#9ece6a]">sendEmail</span>(<span class="text-[#c0caf5]">data.email</span>, <span class="text-[#9ece6a]">"Welcome!"</span>);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#7dcfff]">log</span>.<span class="text-[#9ece6a]">Print</span>(<span class="text-[#9ece6a]">"Email sent to: "</span> + <span class="text-[#c0caf5]">data.email</span>);<br>
-&nbsp;&nbsp;&nbsp;&nbsp;});<br>
-<br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#565f89] italic">// 3. Return response instantly (0ms latency!)</span><br>
-&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-[#bb9af7]">return</span> <span class="text-[#7dcfff]">response</span>.<span class="text-[#9ece6a]">json</span>({ <span class="text-[#c0caf5]">success: true</span> });<br>
-});
-                    </div>
-                </section>
-
-                <section id="why-use-goroutines" class="scroll-mt-32">
-                    <div class="bg-[#9ece6a]/5 dark:bg-[#9ece6a]/10 border border-[#9ece6a]/20 p-8 rounded-[2rem] relative overflow-hidden">
-                        <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-4 relative z-10">Why use Goroutines?</h3>
-                        <p class="text-gray-600 dark:text-gray-400 relative z-10 leading-relaxed">Standard Javascript runtimes block the execution thread while hashing passwords, processing images, or computing heavy loops. The <code>go()</code> keyword eliminates these bottlenecks entirely. Never block your HTTP routers again.</p>
-                    </div>
-                </section>
-            </div>
-        </div>
-
-        <!-- Column 3: "On this page" Aside (Right) -->
-        <div class="lg:col-span-3 order-3">
-            <div class="sticky top-32">
-                <h3 class="font-black text-[10px] text-gray-400 uppercase tracking-[0.2em] mb-4">On this page</h3>
-                <nav>
-                    <ul class="space-y-4 border-l border-gray-200 dark:border-gray-800">
-                        <li class="pl-4 border-l-2 border-[#9ece6a] -ml-[1px]">
-                            <a href="#the-go-function" class="block text-[#9ece6a] text-xs font-bold transition-colors">The `go()` Function</a>
-                        </li>
-                        <li class="pl-4">
-                            <a href="#why-use-goroutines" class="block text-gray-500 dark:text-gray-400 hover:text-brand text-xs font-medium transition-colors">Benefits</a>
-                        </li>
-                    </ul>
-                </nav>
-            </div>
-        </div>
-
+        </section>
     </div>
 </div>
-
-<style>
-    html {
-        scroll-behavior: smooth;
-    }
-    @keyframes fadeInUp {
-        from { opacity: 0; transform: translateY(30px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-</style>

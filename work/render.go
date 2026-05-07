@@ -39,9 +39,13 @@ type Render struct {
 }
 
 type Layout struct {
-	navbar string
-	footer string
-	head   string
+	navbar  string
+	footer  string
+	head    string
+	sidebar string
+	tabbar  string
+	subbar  string
+	toolbar string
 }
 
 func (r *Render) New(dir ...string) *Render {
@@ -69,14 +73,23 @@ func (r *Render) Layout(val value.Value) *Render {
 				}
 				name := layout.Name()
 				// Lưu cả tên có đuôi và không đuôi để dễ truy cập
-				if strings.HasSuffix(name, ".kitwork.html") {
-					if strings.TrimSuffix(name, ".kitwork.html") == "navbar" {
-						r.layout.navbar = filepath.Join(path, name)
-					} else if strings.TrimSuffix(name, ".kitwork.html") == "footer" {
-						r.layout.footer = filepath.Join(path, name)
-					} else if strings.TrimSuffix(name, ".kitwork.html") == "head" {
-						r.layout.head = filepath.Join(path, name)
-					}
+				baseName := strings.TrimSuffix(name, ".kitwork.html")
+				fullPath := filepath.Join(path, name)
+				switch baseName {
+				case "navbar":
+					r.layout.navbar = fullPath
+				case "footer":
+					r.layout.footer = fullPath
+				case "head":
+					r.layout.head = fullPath
+				case "sidebar":
+					r.layout.sidebar = fullPath
+				case "toolbar":
+					r.layout.toolbar = fullPath
+				case "tabbar":
+					r.layout.tabbar = fullPath
+				case "subbar":
+					r.layout.subbar = fullPath
 				}
 			}
 		}
@@ -85,12 +98,21 @@ func (r *Render) Layout(val value.Value) *Render {
 
 	if val.IsMap() {
 		for k, v := range val.Map() {
+			pathVal := r.tenant.joinPath("views", r.getfile(v.String()))
 			if k == "navbar" {
-				r.layout.navbar = v.String()
+				r.layout.navbar = pathVal
 			} else if k == "footer" {
-				r.layout.footer = v.String()
+				r.layout.footer = pathVal
 			} else if k == "head" {
-				r.layout.head = v.String()
+				r.layout.head = pathVal
+			} else if k == "sidebar" {
+				r.layout.sidebar = pathVal
+			} else if k == "toolbar" {
+				r.layout.toolbar = pathVal
+			} else if k == "tabbar" {
+				r.layout.tabbar = pathVal
+			} else if k == "subbar" {
+				r.layout.subbar = pathVal
 			}
 		}
 	}
@@ -165,10 +187,11 @@ func (r *Render) dir() string {
 }
 
 func (r *Render) Path(vals ...value.Value) *Render {
+	newRender := *r
 	if len(vals) > 0 {
-		r.path = vals[0].String()
+		newRender.path = vals[0].String()
 	}
-	return r
+	return &newRender
 }
 
 func (r *Render) NotFound(vals ...value.Value) *Render {
@@ -260,7 +283,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					}
 				}
 
-			case "_navbar_", "_footer_", "_head_":
+			case "_navbar_", "_footer_", "_head_", "_sidebar_", "_toolbar_", "_tabbar_", "_subbar_":
 				found := false
 
 				// A. Thử tìm trong Layout Map (ưu tiên nạp từ RAM nếu có)
@@ -272,6 +295,14 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					pathVal = r.layout.footer
 				case "_head_":
 					pathVal = r.layout.head
+				case "_sidebar_":
+					pathVal = r.layout.sidebar
+				case "_toolbar_":
+					pathVal = r.layout.toolbar
+				case "_tabbar_":
+					pathVal = r.layout.tabbar
+				case "_subbar_":
+					pathVal = r.layout.subbar
 				}
 				if pathVal != "" {
 					if raw, err := os.ReadFile(pathVal); err == nil {
