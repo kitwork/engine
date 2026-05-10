@@ -23,10 +23,10 @@ const layoutDocs = {
 
 const site = render.directory("views");
 
-const home = site.path("/").global(global).layout(layout).notfound("404");
-const docs = site.path("/docs").global(global).layout(layoutDocs).notfound("404");
+const home = site.path("/").global(global).layout(layout).notfound("notfound");
+const docs = site.path("/docs").global(global).layout(layoutDocs).notfound("notfound");
 
-const db = database.connect({
+const db = database.connection({
     type: "postgres",
     user: "postgres",
     password: "db.kitwork.io@03122025",
@@ -129,9 +129,13 @@ api.get("/gold").cache("5s")
 
 
 router.get("/docs/:site?").handle((request, response) => {
+    const siteParam = request.params("site");
+
+
+
     const binding = { request: request }
-    // Sử dụng instance 'docs' để nạp đúng views/docs/index.kitwork.html làm shell
-    const view = docs.page(request.params("site") || "page").bind(binding);
+    // Dùng "/" làm mặc định để nạp views/docs/page.kitwork.html
+    const view = docs.page(siteParam || "/").bind(binding);
     return response.html(view);
 });
 
@@ -180,9 +184,10 @@ router.get("/dashboard").handle((request, response) => {
 
 
 router.get("/*").handle((request, response) => {
-    const binding = { path: request.path() }
-    const view = home.page(request.path()).bind(binding);
+    const requestPath = request.path();
+
+    const binding = { path: requestPath }
+    const view = home.page(requestPath).bind(binding);
     return response.html(view);
 });
-
 

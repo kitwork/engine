@@ -1,5 +1,5 @@
 <nav id="main-nav"
-    class="fixed top-0 left-0 right-0 z-50 py-5 px-6 md:px-12 transition-all duration-500 border-b border-transparent">
+    class="fixed top-0 left-0 right-0 z-50 py-4 px-6 md:px-12 transition-all duration-500 border-b border-transparent">
     <div class="max-w-7xl mx-auto flex justify-between items-center">
         <!-- Brand/Logo (Left) -->
         <div class="flex items-center gap-12">
@@ -27,7 +27,7 @@
             </div>
 
             <!-- Vertical Divider -->
-            <div class="hidden lg:block w-px h-5 bg-gray-200"></div>
+            <div class="hidden lg:block w-px h-5 bg-gray-200 dark:bg-gray-800"></div>
 
             <!-- Part 2: Tools (Dark Mode, Search & GitHub) -->
             <div class="flex items-center gap-3">
@@ -73,11 +73,11 @@
     // Scroll effect
     window.addEventListener('scroll', function () {
         if (window.scrollY > 10) {
-            nav.classList.add('bg-white/80', 'dark:bg-[#1a1b26]/80', 'backdrop-blur-md', 'border-gray-200', 'dark:border-gray-800', 'py-3', 'shadow-sm');
-            nav.classList.remove('py-5', 'border-transparent');
+            nav.classList.add('bg-white/90', 'dark:bg-[#0f172a]/90', 'backdrop-blur-md', 'border-gray-200', 'dark:border-gray-800', 'py-2.5', 'shadow-sm');
+            nav.classList.remove('py-4', 'border-transparent');
         } else {
-            nav.classList.remove('bg-white/80', 'dark:bg-[#1a1b26]/80', 'backdrop-blur-md', 'border-gray-200', 'dark:border-gray-800', 'py-3', 'shadow-sm');
-            nav.classList.add('py-5', 'border-transparent');
+            nav.classList.remove('bg-white/90', 'dark:bg-[#0f172a]/90', 'backdrop-blur-md', 'border-gray-200', 'dark:border-gray-800', 'py-2.5', 'shadow-sm');
+            nav.classList.add('py-4', 'border-transparent');
         }
     });
 

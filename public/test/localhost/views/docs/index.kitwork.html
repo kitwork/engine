@@ -3,22 +3,28 @@
 
 {{ _head_ }}
 
-<body class="text-gray-900 bg-white font-sans selection:bg-brand/20 selection:text-brand">
+<body class="text-gray-900 dark:text-gray-100 bg-[#f8fafc] dark:bg-[#0f172a] font-sans selection:bg-brand/20 selection:text-brand">
     <header>
         {{ _navbar_ }}
     </header>
 
-    <main class="max-w-[1400px] mx-auto p-6 md:p-12 pt-24 md:pt-32">
+    <main class="max-w-[1400px] mx-auto p-6 md:p-12 pt-32 md:pt-44">
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
 
-            <!-- Tự động nạp Sidebar (đã cấu hình trong docs layout) -->
-            {{ _sidebar_ }}
+            <!-- Tự động nạp Sidebar -->
+            <aside class="lg:col-span-3 order-2 lg:order-1">
+                {{ _sidebar_ }}
+            </aside>
 
             <!-- Nội dung chính của trang -->
-            {{ _page_ }}
+            <section class="lg:col-span-6 order-1 lg:order-2 relative docs-content">
+                {{ _page_ }}
+            </section>
 
-            <!-- Tự động nạp Toolbar (đã cấu hình trong docs layout) -->
-            {{ _toolbar_ }}
+            <!-- Tự động nạp Toolbar -->
+            <aside class="lg:col-span-3 order-3">
+                {{ _toolbar_ }}
+            </aside>
 
         </div>
     </main>

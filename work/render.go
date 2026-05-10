@@ -3,7 +3,6 @@ package work
 import (
 	"fmt"
 	"html"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -33,6 +32,7 @@ type Render struct {
 	directory string
 	path      string // Thư mục gốc, ví dụ: /pages/home
 	page      string // Thư mục trang con, ví dụ: contact/profile
+	index     string // File shell chính, mặc định là index
 	layout    Layout
 	global    value.Value // Dữ liệu dùng chung cho mọi bản render
 	notfound  string
@@ -139,11 +139,27 @@ func (r *Render) Template(vals ...value.Value) *Render {
 	return r
 }
 
+func (r *Render) Index(vals ...value.Value) *Render {
+	newRender := *r
+	if len(vals) > 0 {
+		newRender.index = vals[0].String()
+	}
+	return &newRender
+}
+
 func (r *Render) getIndexPath() string {
-	// r.index bây giờ chỉ lưu tên file, r.path lưu thư mục
-	file := r.pathJoin(r.path, r.getfile("index"))
-	fmt.Println("file " + file)
-	return file
+	if r.index == "" {
+		r.index = "index"
+	}
+
+	// Trường hợp 1: Nếu r.index là một thư mục (Ví dụ: views/404/index.kitwork.html)
+	path1 := r.pathJoin(r.path, r.index, r.getfile("index"))
+	if _, err := os.Stat(path1); err == nil {
+		return path1
+	}
+
+	// Trường hợp 2: Nếu r.index là file trực tiếp (Ví dụ: views/404.kitwork.html)
+	return r.pathJoin(r.path, r.getfile(r.index))
 }
 
 func (r *Render) getPagePath() string {
@@ -160,11 +176,27 @@ func (r *Render) getfile(name string) string {
 }
 
 func (r *Render) getNotFoundPath() string {
-	// Kết quả: path + page_name + notfound.kitwork.html
 	if r.notfound == "" {
-		r.notfound = "404"
+		r.notfound = "notfound"
 	}
-	return r.pathJoin(r.getfile(r.notfound))
+
+	searchName := r.notfound
+	searchDir := r.path
+
+	// Nếu bắt đầu bằng "/", tìm ở thư mục gốc
+	if strings.HasPrefix(r.notfound, "/") {
+		searchName = strings.TrimPrefix(r.notfound, "/")
+		searchDir = ""
+	}
+
+	// Trường hợp 1: Nếu r.notfound là một thư mục (Ví dụ: views/404/index.kitwork.html)
+	path1 := r.pathJoin(searchDir, searchName, r.getfile("index"))
+	if _, err := os.Stat(path1); err == nil {
+		return path1
+	}
+
+	// Trường hợp 2: Nếu r.notfound là file trực tiếp (Ví dụ: views/notfound.kitwork.html)
+	return r.pathJoin(searchDir, r.getfile(searchName))
 }
 
 func (r *Render) pathJoin(vals ...string) string {
@@ -197,6 +229,8 @@ func (r *Render) Path(vals ...value.Value) *Render {
 func (r *Render) NotFound(vals ...value.Value) *Render {
 	if len(vals) > 0 {
 		r.notfound = vals[0].String()
+	} else {
+		r.notfound = "notfound"
 	}
 	return r
 }
@@ -268,19 +302,20 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 			case "_page_":
 				// Nạp trang con động
 				pagePath := r.getPagePath()
-				log.Print("pagePath " + pagePath)
+				// log.Print("pagePath " + pagePath)
 				if raw, err := os.ReadFile(pagePath); err == nil {
 
 					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
 				} else {
-					// Fallback sang notfound
+
 					nfPath := r.getNotFoundPath()
-					log.Print("pagePath " + nfPath)
 					if raw, err := os.ReadFile(nfPath); err == nil {
+
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(nfPath), depth+1))
 					} else {
 						sb.WriteString(fmt.Sprintf("<!-- 404: %v -->", pagePath))
 					}
+
 				}
 
 			case "_navbar_", "_footer_", "_head_", "_sidebar_", "_toolbar_", "_tabbar_", "_subbar_":
@@ -343,6 +378,38 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 		}
 	}
 	return sb.String()
+}
+
+func (r *Render) Has(name string) bool {
+	// Tự động thêm 2 dấu gạch dưới nếu người dùng truyền vào dạng "sidebar"
+	if !strings.HasPrefix(name, "_") {
+		name = "_" + name
+	}
+	if !strings.HasSuffix(name, "_") {
+		name = name + "_"
+	}
+
+	path := r.pathJoin(r.path, r.getfile(name))
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+	return false
+}
+
+func (r *Render) Exists(name string) bool {
+	// Trường hợp 1: Kiểm tra thư mục con chứa page.kitwork.html (Ví dụ: routing/page.kitwork.html)
+	path1 := r.pathJoin(r.path, name, r.getfile("page"))
+	if _, err := os.Stat(path1); err == nil {
+		return true
+	}
+
+	// Trường hợp 2: Kiểm tra file trực tiếp (Ví dụ: routing.kitwork.html)
+	path2 := r.pathJoin(r.path, r.getfile(name))
+	if _, err := os.Stat(path2); err == nil {
+		return true
+	}
+
+	return false
 }
 
 func (r *Render) Bind(data value.Value) value.Value {
@@ -456,7 +523,7 @@ func specializeTokens(tmpl string) []string {
 				if len(parts) > 0 {
 					cmd := parts[0]
 					switch cmd {
-					case "if", "else", "elseif", "end", "for", "let", "include", "layout":
+					case "if", "else", "elseif", "end", "for", "let":
 						clean = append(clean, t)
 						continue
 					}

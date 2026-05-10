@@ -1,28 +1,51 @@
-<div class="max-w-5xl mx-auto p-6 md:p-12">
-    <div class="mb-10">
-        <h1 class="text-4xl md:text-5xl font-black text-brand mb-3 tracking-tight">Users Directory</h1>
-        <p class="text-tokyo-text text-lg">Ultrafast data fetching from Postgres via Kitwork ORM.</p>
+<div class="max-w-7xl mx-auto p-6 md:p-12">
+    <!-- Header Section -->
+    <div class="mb-16 relative">
+        <div class="absolute -top-12 -left-12 w-64 h-64 bg-brand/10 blur-[100px] rounded-full pointer-events-none"></div>
+        
+        <div class="inline-flex items-center gap-3 bg-brand/10 text-brand font-black text-[10px] py-2 px-4 rounded-full border border-brand/20 uppercase tracking-[3px] mb-8 relative z-10">
+            <span class="w-2 h-2 rounded-full bg-brand outline outline-1 outline-brand outline-offset-2"></span>
+            Kitwork Database
+        </div>
+        
+        <h1 class="text-4xl md:text-6xl font-black text-gray-900 dark:text-white mb-6 tracking-tighter leading-tight relative z-10">
+            Users <span class="bg-gradient-to-r from-brand-light to-brand bg-clip-text text-transparent">Directory</span>
+        </h1>
+        <p class="text-gray-500 dark:text-gray-400 text-lg max-w-2xl font-medium relative z-10 leading-relaxed">
+            Directly connected to the industrial Postgres registry. Real-time data synchronization at native speed.
+        </p>
     </div>
 
-    <div class="bg-tokyo-panel/80 border border-tokyo-border rounded-2xl p-2 md:p-6 outline outline-1 outline-tokyo-border outline-offset-4 backdrop-blur-md overflow-x-auto">
-        <table class="w-full text-left border-collapse">
+    <!-- Users Table Section -->
+    <div class="relative z-10">
+        <table>
             <thead>
                 <tr>
-                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">ID</th>
-                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">Username</th>
-                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">Email Address</th>
-                    <th class="p-4 text-brand-light border-b border-tokyo-border font-bold uppercase tracking-wider text-xs">Action</th>
+                    <th>ID</th>
+                    <th>User identity</th>
+                    <th>Email address</th>
+                    <th class="text-right">Management</th>
                 </tr>
             </thead>
             <tbody>
                 {{ for user in users }}
-                <tr class="hover:bg-black/5 transition-colors border-b border-tokyo-border last:border-none">
-                    <td class="p-4 text-tokyo-muted font-mono text-sm">#{{ user.id }}</td>
-                    <td class="p-4 font-bold text-[1.1rem] text-tokyo-text">{{ user.username }}</td>
-                    <td class="p-4 text-tokyo-muted">{{ user.email }}</td>
-                    <td class="p-4">
-                        <a href="/users/{{ user.id }}" class="inline-block text-brand-light font-bold text-sm bg-brand/10 hover:bg-brand/30 hover:text-tokyo-text px-4 py-2 rounded-lg transition-all hover:scale-110 hover:outline hover:outline-1 hover:outline-brand hover:outline-offset-2">
-                            View Details &rarr;
+                <tr>
+                    <td class="font-mono text-brand font-bold">#{{ user.id }}</td>
+                    <td>
+                        <div class="flex items-center gap-4">
+                            <div class="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-black text-gray-900 dark:text-white border border-gray-200 dark:border-gray-700">
+                                {{ user.username[0] | upper }}
+                            </div>
+                            <span class="font-bold text-gray-900 dark:text-white text-base">{{ user.username }}</span>
+                        </div>
+                    </td>
+                    <td class="text-gray-500 dark:text-gray-400 font-medium">{{ user.email }}</td>
+                    <td class="text-right">
+                        <a href="/users/{{ user.id }}" class="inline-flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-brand dark:hover:bg-brand hover:text-white transition-all duration-300">
+                            Explore
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                            </svg>
                         </a>
                     </td>
                 </tr>

@@ -9,15 +9,11 @@ import (
 	_ "github.com/lib/pq"
 )
 
-func (w *KitWork) Database(vals ...value.Value) *Database {
-	db := &Database{
+func (w *KitWork) Database() *Database {
+	return &Database{
 		tenant: w.tenant,
 		config: &database.Config{},
 	}
-	if len(vals) > 0 {
-		vals[0].To(db.config)
-	}
-	return db
 }
 
 type Database struct {
@@ -26,7 +22,19 @@ type Database struct {
 	sqlDB  *sql.DB
 }
 
-func (d *Database) Connect() *Database {
+func (d *Database) Connection(vals ...value.Value) *Database {
+	if len(vals) > 0 {
+		vals[0].To(d.config)
+	}
+	return d
+}
+
+func (d *Database) Connect(vals ...value.Value) *Database {
+	// Nếu có truyền config vào, cập nhật config trước
+	if len(vals) > 0 {
+		vals[0].To(d.config)
+	}
+
 	if d.sqlDB == nil {
 		var err error
 		d.sqlDB, err = d.config.Connect()

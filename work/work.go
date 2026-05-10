@@ -47,10 +47,22 @@ type KitWork struct {
 
 func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	var matched *Router
+	var notFoundMatched *Router
 	var params map[string]string
+	var notFoundParams map[string]string
 
 	path := r.URL.Path
 	for _, rt := range t.routes {
+		if rt.Method == "NOTFOUND" {
+			if p, ok := matchRoute(path, rt.Path); ok {
+				if notFoundMatched == nil { // Chỉ lấy Notfound đầu tiên khớp
+					notFoundMatched = rt
+					notFoundParams = p
+				}
+			}
+			continue
+		}
+
 		if rt.Method == r.Method || rt.Method == "ANY" {
 			if p, ok := matchRoute(path, rt.Path); ok {
 				matched = rt
@@ -61,8 +73,13 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if matched == nil {
-		http.NotFound(w, r)
-		return
+		if notFoundMatched != nil {
+			matched = notFoundMatched
+			params = notFoundParams
+		} else {
+			http.NotFound(w, r)
+			return
+		}
 	}
 
 	// 1. Kiểm tra cache
