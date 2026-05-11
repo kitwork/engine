@@ -7,16 +7,14 @@ const global = {
     title: "Chào mừng tới kitwork",
 }
 
-const layout = render.layout({
+const layout = {
     navbar: "_navbar_",
     footer: "_footer_",
     head: "_head_",
-});
+}
 
 const layoutDocs = {
-    navbar: "_navbar_",
-    footer: "_footer_",
-    head: "_head_",
+    ...layout,
     sidebar: "/docs/_sidebar_",
     toolbar: "/docs/_toolbar_"
 }

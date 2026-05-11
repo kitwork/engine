@@ -165,8 +165,8 @@ func (c *Compiler) Compile(node Node) error {
 			if err != nil {
 				return err
 			}
-			for k := range obj.Pairs {
-				if id, ok := k.(*Identifier); ok {
+			for _, entry := range obj.Entries {
+				if id, ok := entry.Key.(*Identifier); ok {
 					c.emit(opcode.DUP)
 					symbolIndex := c.addConstant(value.NewString(id.Value))
 					c.emit(opcode.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
@@ -254,18 +254,23 @@ func (c *Compiler) Compile(node Node) error {
 
 	case *ObjectLiteral:
 		c.emit(opcode.MAKE, 0)
-		for key, val := range n.Pairs {
-			c.emit(opcode.DUP)
-			// Nếu key là Identifier, ta coi như chuỗi (JS style: { name: "..." })
-			if id, ok := key.(*Identifier); ok {
-				idx := c.addConstant(value.NewString(id.Value))
-				c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+		for _, entry := range n.Entries {
+			if entry.IsSpread {
+				c.Compile(entry.Value)
+				c.emit(opcode.MERGE)
 			} else {
-				c.Compile(key)
+				c.emit(opcode.DUP)
+				// Nếu key là Identifier, ta coi như chuỗi (JS style: { name: "..." })
+				if id, ok := entry.Key.(*Identifier); ok {
+					idx := c.addConstant(value.NewString(id.Value))
+					c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+				} else {
+					c.Compile(entry.Key)
+				}
+				c.Compile(entry.Value)
+				c.emit(opcode.SET)
+				c.emit(opcode.POP) // Loại bỏ giá trị dư từ SET (SET đẩy lại target lên stack)
 			}
-			c.Compile(val)
-			c.emit(opcode.SET)
-			c.emit(opcode.POP) // Loại bỏ giá trị dư từ SET (SET đẩy lại target lên stack)
 		}
 
 	case *ArrayLiteral:

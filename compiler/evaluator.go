@@ -137,17 +137,26 @@ func Evaluator(node Node, env *Environment) value.Value {
 		return value.New(elements)
 
 	case *ObjectLiteral:
-		// Duyệt và thực thi các cặp key-value
+		// Duyệt và thực thi các phần tử trong Object (hỗ trợ Spread)
 		obj := make(map[string]value.Value)
-		for keyNode, valNode := range n.Pairs {
-			var k string
-			// Nếu key là Identifier (ví dụ: { name: "..." }), lấy tên trực tiếp thay vì lookup biến
-			if id, ok := keyNode.(*Identifier); ok {
-				k = id.Value
+		for _, entry := range n.Entries {
+			if entry.IsSpread {
+				src := Evaluator(entry.Value, env)
+				if src.IsMap() {
+					for k, v := range src.Map() {
+						obj[k] = v
+					}
+				}
 			} else {
-				k = Evaluator(keyNode, env).Text()
+				var k string
+				// Nếu key là Identifier (ví dụ: { name: "..." }), lấy tên trực tiếp thay vì lookup biến
+				if id, ok := entry.Key.(*Identifier); ok {
+					k = id.Value
+				} else {
+					k = Evaluator(entry.Key, env).Text()
+				}
+				obj[k] = Evaluator(entry.Value, env)
 			}
-			obj[k] = Evaluator(valNode, env)
 		}
 		return value.New(obj)
 

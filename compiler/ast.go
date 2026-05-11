@@ -321,21 +321,41 @@ func (al *ArrayLiteral) String() string {
 	return out.String()
 }
 
-// ObjectLiteral: { "key": "value" }
-type ObjectLiteral struct {
-	Token token.Token
-	Pairs map[Expression]Expression
+// ObjectEntry đại diện cho một phần tử trong Object (cặp key-value hoặc spread)
+type ObjectEntry struct {
+	Key      Expression
+	Value    Expression
+	IsSpread bool
 }
+
+// ObjectLiteral: { "key": "value", ...obj }
+type ObjectLiteral struct {
+	Token   token.Token
+	Entries []ObjectEntry
+}
+
+// SpreadExpression: ...obj
+type SpreadExpression struct {
+	Token token.Token // Dấu '...'
+	Value Expression
+}
+
+func (se *SpreadExpression) expressionNode() {}
+func (se *SpreadExpression) String() string  { return "..." + se.Value.String() }
 
 func (ol *ObjectLiteral) expressionNode() {}
 func (ol *ObjectLiteral) String() string {
 	var out bytes.Buffer
-	pairs := []string{}
-	for key, val := range ol.Pairs {
-		pairs = append(pairs, key.String()+":"+val.String())
+	parts := []string{}
+	for _, entry := range ol.Entries {
+		if entry.IsSpread {
+			parts = append(parts, "..."+entry.Value.String())
+		} else {
+			parts = append(parts, entry.Key.String()+":"+entry.Value.String())
+		}
 	}
 	out.WriteString("{")
-	out.WriteString(strings.Join(pairs, ", "))
+	out.WriteString(strings.Join(parts, ", "))
 	out.WriteString("}")
 	return out.String()
 }

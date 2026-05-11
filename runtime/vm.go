@@ -344,6 +344,15 @@ func (vm *Runtime) Run() value.Value {
 			if s, ok := fn.V.(*value.Lambda); ok && vm.Spawner != nil {
 				vm.Spawner(s)
 			}
+		case opcode.MERGE:
+			src, target := vm.pop(), vm.peek()
+			if target.IsMap() && src.IsMap() {
+				targetMap := target.V.(map[string]value.Value)
+				srcMap := src.Map()
+				for k, v := range srcMap {
+					targetMap[k] = v
+				}
+			}
 		case opcode.POP:
 			vm.pop()
 
@@ -678,6 +687,15 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 				*ptr = append(*ptr, val)
 			}
 			vm.push(target)
+		case opcode.MERGE:
+			src, target := vm.pop(), vm.peek()
+			if target.IsMap() && src.IsMap() {
+				targetMap := target.V.(map[string]value.Value)
+				srcMap := src.Map()
+				for k, v := range srcMap {
+					targetMap[k] = v
+				}
+			}
 		case opcode.POP:
 			vm.pop()
 		}

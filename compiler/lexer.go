@@ -232,8 +232,21 @@ func (l *Lexer) NextToken() token.Token {
 			tok.Kind = token.Colon
 			tok.Value = value.NewString(":")
 		case '.':
-			tok.Kind = token.Dot
-			tok.Value = value.NewString(".")
+			if l.peekChar() == '.' {
+				// Check for third dot
+				if l.input[l.next+1] == '.' {
+					l.readChar()
+					l.readChar()
+					tok.Kind = token.Spread
+					tok.Value = value.NewString("...")
+				} else {
+					tok.Kind = token.Dot
+					tok.Value = value.NewString(".")
+				}
+			} else {
+				tok.Kind = token.Dot
+				tok.Value = value.NewString(".")
+			}
 		case '&':
 			if l.peekChar() == '&' {
 				l.readChar()

@@ -481,18 +481,34 @@ func (p *Parser) parseArrayLiteral() Expression {
 }
 
 func (p *Parser) parseObjectLiteral() Expression {
-	obj := &ObjectLiteral{Token: p.curToken, Pairs: make(map[Expression]Expression)}
+	obj := &ObjectLiteral{Token: p.curToken, Entries: []ObjectEntry{}}
 	for !p.peekTokenIs(token.RightBrace) {
 		p.nextToken()
-		key := p.parseExpression(LOWEST)
 
-		if p.peekTokenIs(token.Colon) {
-			p.nextToken()
+		if p.curTokenIs(token.Spread) {
 			p.nextToken()
 			val := p.parseExpression(LOWEST)
-			obj.Pairs[key] = val
+			obj.Entries = append(obj.Entries, ObjectEntry{
+				Value:    val,
+				IsSpread: true,
+			})
 		} else {
-			obj.Pairs[key] = key
+			key := p.parseExpression(LOWEST)
+			if p.peekTokenIs(token.Colon) {
+				p.nextToken()
+				p.nextToken()
+				val := p.parseExpression(LOWEST)
+				obj.Entries = append(obj.Entries, ObjectEntry{
+					Key:   key,
+					Value: val,
+				})
+			} else {
+				// Shorthand: { name } -> { name: name }
+				obj.Entries = append(obj.Entries, ObjectEntry{
+					Key:   key,
+					Value: key,
+				})
+			}
 		}
 
 		if !p.peekTokenIs(token.RightBrace) && !p.expectPeek(token.Comma) {

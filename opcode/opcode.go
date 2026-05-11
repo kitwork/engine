@@ -49,8 +49,9 @@ const (
 	// STRUCTURE
 	// =====================
 
-	MAKE // Tạo cấu trúc dữ liệu mới (Map, Array từ Pool)
-	SET  // Gán giá trị vào cấu trúc (key/index → value)
+	MAKE  // Tạo cấu trúc dữ liệu mới (Map, Array từ Pool)
+	SET   // Gán giá trị vào cấu trúc (key/index → value)
+	MERGE // Gộp các phần tử từ object nguồn vào object đích (Spread)
 
 	// =====================
 	// EXECUTION

@@ -24,6 +24,7 @@ const (
 	// --- Truy cập & Chaining ---
 	Assign   // =
 	Dot      // .
+	Spread   // ...
 	FatArrow // =>
 
 	// --- Dấu ngoặc ---
@@ -93,6 +94,8 @@ func (k Kind) String() string {
 		return "."
 	case FatArrow:
 		return "=>"
+	case Spread:
+		return "..."
 	case LeftParen:
 		return "("
 	case RightParen:
