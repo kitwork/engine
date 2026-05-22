@@ -3,9 +3,9 @@
 package id
 
 import (
-	"crypto/rand"
 	"fmt"
-	"math/big"
+	"math/rand/v2"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,9 +19,9 @@ type Generator struct {
 }
 
 var (
-	// Default Epoch set to 2025-01-01 00:00:00 UTC.
+	// Default Epoch set to 2025-12-16 08:35:00 UTC.
 	// Used for generating sortable short IDs.
-	since = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	since = time.Date(2025, 12, 16, 8, 35, 0, 0, time.UTC)
 
 	// Predefined charsets for different ID flavors.
 	digits = "0123456789"
@@ -36,6 +36,8 @@ var (
 	charset36 = []byte(digits + lower)
 	charset58 = []byte(base58)
 	charset62 = []byte(digits + lower + upper)
+
+	seq atomic.Uint32
 )
 
 // --- Fluent API Builders ---
@@ -61,7 +63,6 @@ func New(t ...time.Time) *Generator {
 }
 
 // Charset sets the charset for the generator based on length.
-// Supported lengths: 10, 26, 36, 58, 62.
 func (g *Generator) Charset(n int) *Generator {
 	switch n {
 	case 10:
@@ -80,8 +81,7 @@ func (g *Generator) Charset(n int) *Generator {
 	return g
 }
 
-// Repeat configures the generator to allow repeated characters (Standard Random).
-// If false (default), it creates a permutation (Partial Shuffle, unique characters).
+// Repeat configures the generator to allow repeated characters.
 func (g *Generator) Repeat(repeat bool) *Generator {
 	g.repeat = repeat
 	return g
@@ -93,7 +93,7 @@ func (g *Generator) Increasing(increasing bool) *Generator {
 	return g
 }
 
-// Custom sets a custom charset for the generator.
+// Custom sets a custom charset.
 func (g *Generator) Custom(chars string) *Generator {
 	if len(chars) < 2 {
 		g.err = fmt.Errorf("id: charset length must be at least 2")
@@ -105,53 +105,86 @@ func (g *Generator) Custom(chars string) *Generator {
 
 // --- Global Helpers ---
 
-// Charset returns a Generator configured with a charset of the specified length.
-// If the length is unsupported, the returned Generator will contain an error
-// which will be returned when calling Generate() or Random().
-func Charset(n int) *Generator {
-	return New().Charset(n)
-}
+func Charset(n int) *Generator       { return New().Charset(n) }
+func Custom(chars string) *Generator { return New().Custom(chars) }
 
-// Custom is a shortcut for New().Custom(chars).
-func Custom(chars string) *Generator {
-	return New().Custom(chars)
-}
+func Entity() string    { return Charset(36).Must(36) }
+func Short() string     { return Charset(62).Repeat(true).Must(6) }
+func Shortlink() string { return Charset(58).Must(8) }
 
-// Entity returns a 36-char Base36 ID (e.g. Database Keys).
-func Entity() string {
-	return Charset(36).Must(36)
-}
+// DecodeEntity parses a standard 36-character Entity ID and returns its generation time.
+func DecodeEntity(idStr string) (time.Time, error) {
+	if len(idStr) != 36 {
+		return time.Time{}, fmt.Errorf("id: invalid length for Entity ID, expected 36")
+	}
 
-// Short returns a 6-char Base62 Random ID (e.g. Short Codes).
-func Short() string {
-	return Charset(62).Repeat(true).Must(6)
-}
+	charset := charset36
+	charsetLen := len(charset)
 
-// Shortlink returns an 8-char Base58 ID (e.g. URLs).
-func Shortlink() string {
-	return Charset(58).Must(8)
+	timeLen := 0
+	capacity := uint64(1)
+	for i := 0; i < charsetLen; i++ {
+		multiplier := uint64(charsetLen - i)
+		if capacity > ^uint64(0)/multiplier {
+			break
+		}
+		capacity *= multiplier
+		timeLen++
+	}
+
+	timeChars := idStr[:timeLen]
+	avail := make([]byte, charsetLen)
+	copy(avail, charset)
+
+	idxs := make([]int, timeLen)
+	activeLen := charsetLen
+	for i := 0; i < timeLen; i++ {
+		char := timeChars[i]
+		idx := -1
+		for j := 0; j < activeLen; j++ {
+			if avail[j] == char {
+				idx = j
+				break
+			}
+		}
+		if idx == -1 {
+			return time.Time{}, fmt.Errorf("id: invalid character '%c' in ID", char)
+		}
+		idxs[i] = idx
+		for j := idx; j < activeLen-1; j++ {
+			avail[j] = avail[j+1]
+		}
+		activeLen--
+	}
+
+	currentT := uint64(0)
+	startBase := uint64(charsetLen - (timeLen - 1))
+	for i := 0; i < timeLen; i++ {
+		base := startBase + uint64((timeLen-1)-i)
+		currentT = currentT*base + uint64(idxs[i])
+	}
+
+	// Revert the 12-bit sequence mask to get the true nanosecond delta
+	nanoDelta := currentT &^ 0xfff
+	targetEpochNano := since.UnixMilli() * 1000000
+	timestampNano := targetEpochNano + int64(nanoDelta)
+
+	return time.Unix(0, timestampNano).UTC(), nil
 }
 
 // --- Execution Methods ---
 
 // Must generates an ID of the specified length or panics on error.
-// It automatically selects the strategy based on configuration:
-// 1. Increasing=true -> Time-based Sortable.
-// 2. Repeat=true     -> Random with Replacement.
-// 3. Default         -> Random Permutation (No Replacement).
 func (g *Generator) Must(length int) string {
-	res, err := g.Generate(length)
-
+	res, err := g.Sortable(length)
 	if err != nil {
 		panic(err)
 	}
 	return res
 }
 
-// Generate generates a unique, sortable (monotonically increasing) ID.
-// Ideally, the ID length should be sufficient to encode the timestamp (milli/nano).
-// It returns an error if the ID length is insufficient to encode the time.
-func (g *Generator) Generate(lengths ...int) (string, error) {
+// Sortable generates a unique, sortable (monotonically increasing) ID.
+func (g *Generator) Sortable(lengths ...int) (string, error) {
 	if g.err != nil {
 		return "", g.err
 	}
@@ -171,10 +204,10 @@ func (g *Generator) Generate(lengths ...int) (string, error) {
 		return genShortAdaptive(length, cs, g.epoch)
 	}
 
-	return generate(cs, length)
+	return generate(cs, length, g.epoch)
 }
 
-// Random creates a Random ID (No Repeats).
+// Random creates a Random ID (No Repeats by default).
 func (g *Generator) Random(lengths ...int) (string, error) {
 	if g.err != nil {
 		return "", g.err
@@ -190,13 +223,16 @@ func (g *Generator) Random(lengths ...int) (string, error) {
 		cs = charset62
 	}
 
+	if g.repeat {
+		return genRandomRepeated(length, cs), nil
+	}
 	return genPureRandom(length, cs), nil
 }
 
 // --- Internal Engine ---
 
-// genPureRandom generates a high-entropy ID by shuffling the charset and taking the first 'length' characters.
-// This implements a partial Fisher-Yates shuffle, which is optimized to stop early once we have enough characters.
+// genPureRandom generates an ID by shuffling the charset.
+// Uses math/rand/v2 for lock-free, zero-alloc speed.
 func genPureRandom(length int, charset []byte) string {
 	l := len(charset)
 	if length > l {
@@ -206,15 +242,9 @@ func genPureRandom(length int, charset []byte) string {
 	avail := make([]byte, l)
 	copy(avail, charset)
 
-	// Optimization: limit big.Int reused to avoid allocations inside loop.
-	limit := new(big.Int)
-
-	// Partial Shuffle: Only iterate 'length' times to pick the first 'length' random characters.
+	// Partial Shuffle
 	for i := 0; i < length; i++ {
-		limit.SetInt64(int64(l - i))
-		num, _ := rand.Int(rand.Reader, limit)
-		j := int(num.Int64()) + i
-
+		j := i + rand.N(l-i)
 		avail[i], avail[j] = avail[j], avail[i]
 	}
 
@@ -223,106 +253,113 @@ func genPureRandom(length int, charset []byte) string {
 
 // genRandomRepeated generates a random ID allowing repeating characters.
 func genRandomRepeated(length int, charset []byte) string {
-	l := big.NewInt(int64(len(charset)))
+	l := len(charset)
 	res := make([]byte, length)
 	for i := 0; i < length; i++ {
-		num, _ := rand.Int(rand.Reader, l)
-		res[i] = charset[num.Int64()]
+		res[i] = charset[rand.N(l)]
 	}
 	return string(res)
 }
 
-// genShortAdaptive uses a custom epoch (or default global if instanceEpoch is 0).
+// genShortAdaptive uses a custom epoch to generate sortable IDs.
 func genShortAdaptive(length int, charset []byte, instanceEpoch int64) (string, error) {
 	charsetLen := len(charset)
 	avail := make([]byte, charsetLen)
 	copy(avail, charset)
 
 	now := time.Now().UnixMilli()
-
-	// Determine which epoch to use.
 	targetEpoch := instanceEpoch
 	if targetEpoch == 0 {
 		targetEpoch = since.UnixMilli()
 	}
-
 	if now < targetEpoch {
 		now = targetEpoch
 	}
-	t := uint64(now - targetEpoch)
 
-	// Add 2 digits of jitter.
-	jitter, _ := rand.Int(rand.Reader, big.NewInt(100))
-	t = (t * 100) + uint64(jitter.Int64())
+	t := uint64(now - targetEpoch)
+	t = (t << 12) | uint64(seq.Add(1)&0xfff)
 
 	timeLen := 0
-	capacity := new(big.Int).SetUint64(1)
-	tBig := new(big.Int).SetUint64(t)
-	scratch := new(big.Int) // Optimization: reuse allocation
-
+	capacity := uint64(1)
 	for i := 0; i < charsetLen; i++ {
-		scratch.SetInt64(int64(charsetLen - i))
-		capacity.Mul(capacity, scratch)
-		timeLen++
-		if capacity.Cmp(tBig) > 0 {
+		multiplier := uint64(charsetLen - i)
+		if capacity > ^uint64(0)/multiplier { // Prevent overflow
 			break
 		}
+		capacity *= multiplier
+		timeLen++
 	}
 
 	if timeLen > length {
 		return "", fmt.Errorf("id: length %d insufficient to encode timestamp (needed %d)", length, timeLen)
 	}
-	tsChars := encodeTimePart(t, &avail, timeLen, charsetLen)
 
+	tsChars, activeLen := encodeTimePart(t, avail, timeLen, charsetLen)
 	randomLen := length - timeLen
-	shuffledAvail := shuffleRemaining(avail)
+
+	shuffledAvail := shuffleRemaining(avail[:activeLen])
 	if randomLen > len(shuffledAvail) {
 		randomLen = len(shuffledAvail)
 	}
+
 	return string(tsChars) + string(shuffledAvail[:randomLen]), nil
 }
 
 // generate uses UnixNano to create a globally unique sortable ID.
-func generate(charset []byte, totalLen int) (string, error) {
+func generate(charset []byte, totalLen int, instanceEpoch int64) (string, error) {
 	charsetLen := len(charset)
 	avail := make([]byte, charsetLen)
 	copy(avail, charset)
 
-	t := uint64(time.Now().UnixNano())
-	jitter, _ := rand.Int(rand.Reader, big.NewInt(100))
-	t = (t / 100 * 100) + uint64(jitter.Int64())
+	now := time.Now().UnixNano()
+	targetEpoch := instanceEpoch
+	if targetEpoch == 0 {
+		targetEpoch = since.UnixMilli()
+	}
+	targetEpochNano := targetEpoch * 1000000
+
+	if now < targetEpochNano {
+		now = targetEpochNano
+	}
+	t := uint64(now - targetEpochNano)
+	t = (t &^ 0xfff) | uint64(seq.Add(1)&0xfff)
 
 	timeLen := 0
-	capacity := new(big.Int).SetUint64(1)
-	tBig := new(big.Int).SetUint64(t)
-	scratch := new(big.Int) // Optimization
-
+	capacity := uint64(1)
 	for i := 0; i < charsetLen; i++ {
-		scratch.SetInt64(int64(charsetLen - i))
-		capacity.Mul(capacity, scratch)
-		timeLen++
-		if capacity.Cmp(tBig) > 0 {
+		multiplier := uint64(charsetLen - i)
+		if capacity > ^uint64(0)/multiplier {
 			break
 		}
+		capacity *= multiplier
+		timeLen++
 	}
 
 	if timeLen > totalLen {
 		return "", fmt.Errorf("id: length %d insufficient to encode timestamp (needed %d)", totalLen, timeLen)
 	}
-	tsChars := encodeTimePart(t, &avail, timeLen, charsetLen)
 
+	tsChars, activeLen := encodeTimePart(t, avail, timeLen, charsetLen)
 	randomLen := totalLen - timeLen
-	shuffledAvail := shuffleRemaining(avail)
+
+	shuffledAvail := shuffleRemaining(avail[:activeLen])
 	if randomLen > len(shuffledAvail) {
 		randomLen = len(shuffledAvail)
 	}
+
 	return string(tsChars) + string(shuffledAvail[:randomLen]), nil
 }
 
 // --- Helpers ---
 
-func encodeTimePart(t uint64, avail *[]byte, timeLen int, charsetLen int) []byte {
-	idxs := make([]int, timeLen)
+// encodeTimePart extracts time encoding and returns the used characters and the new active length of avail.
+func encodeTimePart(t uint64, avail []byte, timeLen int, charsetLen int) ([]byte, int) {
+	var resArr [256]byte
+	var idxArr [256]int
+	
+	res := resArr[:timeLen]
+	idxs := idxArr[:timeLen]
+
 	currentT := t
 	startBase := uint64(charsetLen - (timeLen - 1))
 	for i := timeLen - 1; i >= 0; i-- {
@@ -330,22 +367,23 @@ func encodeTimePart(t uint64, avail *[]byte, timeLen int, charsetLen int) []byte
 		idxs[i] = int(currentT % base)
 		currentT /= base
 	}
-	var res []byte
-	for _, idx := range idxs {
-		char := (*avail)[idx]
-		res = append(res, char)
-		*avail = append((*avail)[:idx], (*avail)[idx+1:]...)
+
+	activeLen := charsetLen
+	for i, idx := range idxs {
+		res[i] = avail[idx]
+		// In-place byte shift (Zero-allocation instead of append/slicing)
+		for j := idx; j < activeLen-1; j++ {
+			avail[j] = avail[j+1]
+		}
+		activeLen--
 	}
-	return res
+	return res, activeLen
 }
 
 func shuffleRemaining(avail []byte) []byte {
 	limit := len(avail)
-	max := new(big.Int)
 	for i := limit - 1; i > 0; i-- {
-		max.SetInt64(int64(i + 1))
-		num, _ := rand.Int(rand.Reader, max)
-		j := num.Int64()
+		j := rand.N(i + 1)
 		avail[i], avail[j] = avail[j], avail[i]
 	}
 	return avail

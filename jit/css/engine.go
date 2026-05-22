@@ -471,6 +471,261 @@ func buildProp(t string, m []string, neg bool) string {
 		return "overflow: " + v + ";"
 	case "object-fit":
 		return "object-fit: " + m[2] + ";"
+
+	// --- 11. TAILWIND SUPPORT ---
+	case "tw-spacing-axis":
+		prop := map[string]string{"m": "margin", "p": "padding", "gap": "gap"}[m[1]]
+		axis := m[2]
+		val := twUnit(m[3])
+		if prop == "gap" {
+			if axis == "x" { return "column-gap: " + val + ";" }
+			return "row-gap: " + val + ";"
+		}
+		if axis == "x" { return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val) }
+		if axis == "y" { return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", prop, val) }
+		dir := map[string]string{"t": "top", "b": "bottom", "l": "left", "r": "right"}[axis]
+		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
+	case "tw-spacing-axis-neg":
+		prop := map[string]string{"m": "margin", "p": "padding", "gap": "gap"}[m[1]]
+		axis := m[2]
+		val := "-" + twUnit(m[3])
+		if prop == "gap" { return "" }
+		if axis == "x" { return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val) }
+		if axis == "y" { return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", prop, val) }
+		dir := map[string]string{"t": "top", "b": "bottom", "l": "left", "r": "right"}[axis]
+		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
+	case "tw-spacing-all":
+		prop := map[string]string{"m": "margin", "p": "padding", "gap": "gap"}[m[1]]
+		val := twUnit(m[2])
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-spacing-all-neg":
+		prop := map[string]string{"m": "margin"}[m[1]]
+		val := "-" + twUnit(m[2])
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-sizing":
+		propMap := map[string]string{"w": "width", "h": "height", "max-w": "max-width", "min-w": "min-width", "max-h": "max-height", "min-h": "min-height"}
+		prop := propMap[m[1]]
+		val := twUnit(m[2])
+		if m[2] == "screen" && prop == "width" { val = "100vw" }
+		if m[2] == "screen" && prop == "height" { val = "100vh" }
+		if m[2] == "full" { val = "100%" }
+		// arbitrary values
+		if strings.HasPrefix(m[2], "[") && strings.HasSuffix(m[2], "]") {
+			val = m[2][1 : len(m[2])-1]
+		} else if !isNumeric(m[2]) && val == m[2] {
+			// Some specific aliases like max-w-6xl
+			aliases := map[string]string{"xs":"20rem","sm":"24rem","md":"28rem","lg":"32rem","xl":"36rem","2xl":"42rem","3xl":"48rem","4xl":"56rem","5xl":"64rem","6xl":"72rem","7xl":"80rem"}
+			if v, ok := aliases[m[2]]; ok {
+				val = v
+			}
+		}
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-color-shade":
+		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color", "ring": "box-shadow", "outline": "outline-color"}
+		prop := propMap[m[1]]
+		color := twColor(m[2], m[3])
+		alpha := m[4]
+		if color == "" { return "" }
+		
+		if color[0] == '#' {
+			if alpha != "" && isNumeric(alpha) {
+				return fmt.Sprintf("%s: %s%02x;", prop, color, mustInt(alpha)*255/100)
+			}
+			return fmt.Sprintf("%s: %s;", prop, color)
+		}
+		
+		if alpha != "" {
+			if strings.HasPrefix(alpha, "[") && strings.HasSuffix(alpha, "]") {
+				return fmt.Sprintf("%s: rgba(%s, %s);", prop, color, alpha[1:len(alpha)-1])
+			}
+			return fmt.Sprintf("%s: rgba(%s, %.2f);", prop, color, float64(mustInt(alpha))/100.0)
+		}
+		return fmt.Sprintf("%s: rgb(%s);", prop, color)
+	case "tw-color-base":
+		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color", "ring": "box-shadow", "outline": "outline-color"}
+		prop := propMap[m[1]]
+		color := twColor(m[2], "")
+		alpha := m[3]
+		
+		if color == "transparent" {
+			return fmt.Sprintf("%s: transparent;", prop)
+		}
+		
+		if color[0] == '#' {
+			if alpha != "" && isNumeric(alpha) {
+				return fmt.Sprintf("%s: %s%02x;", prop, color, mustInt(alpha)*255/100)
+			}
+			return fmt.Sprintf("%s: %s;", prop, color)
+		}
+		
+		if alpha != "" {
+			if strings.HasPrefix(alpha, "[") && strings.HasSuffix(alpha, "]") {
+				return fmt.Sprintf("%s: rgba(%s, %s);", prop, color, alpha[1:len(alpha)-1])
+			}
+			return fmt.Sprintf("%s: rgba(%s, %.2f);", prop, color, float64(mustInt(alpha))/100.0)
+		}
+		return fmt.Sprintf("%s: rgb(%s);", prop, color)
+	case "tw-color-arbitrary":
+		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color"}
+		prop := propMap[m[1]]
+		hex := m[2]
+		return fmt.Sprintf("%s: %s;", prop, hex)
+	case "tw-rounded":
+		val := m[3]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+			val = val[1 : len(val)-1]
+		} else {
+			sizes := map[string]string{"sm":"0.125rem","md":"0.375rem","lg":"0.5rem","xl":"0.75rem","2xl":"1rem","3xl":"1.5rem","full":"9999px","none":"0px","":"0.25rem"}
+			if v, ok := sizes[val]; ok { val = v }
+		}
+		
+		dir := m[2]
+		if dir == "" { return fmt.Sprintf("border-radius: %s;", val) }
+		if dir == "t" { return fmt.Sprintf("border-top-left-radius: %[1]s; border-top-right-radius: %[1]s;", val) }
+		if dir == "b" { return fmt.Sprintf("border-bottom-left-radius: %[1]s; border-bottom-right-radius: %[1]s;", val) }
+		if dir == "l" { return fmt.Sprintf("border-top-left-radius: %[1]s; border-bottom-left-radius: %[1]s;", val) }
+		if dir == "r" { return fmt.Sprintf("border-top-right-radius: %[1]s; border-bottom-right-radius: %[1]s;", val) }
+		if dir == "tl" { return fmt.Sprintf("border-top-left-radius: %s;", val) }
+		if dir == "tr" { return fmt.Sprintf("border-top-right-radius: %s;", val) }
+		if dir == "bl" { return fmt.Sprintf("border-bottom-left-radius: %s;", val) }
+		if dir == "br" { return fmt.Sprintf("border-bottom-right-radius: %s;", val) }
+	case "tw-text-size":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+			return fmt.Sprintf("font-size: %s;", val[1 : len(val)-1])
+		}
+		sizes := map[string][]string{
+			"xs": {"0.75rem","1rem"}, "sm": {"0.875rem","1.25rem"}, "base": {"1rem","1.5rem"}, "lg": {"1.125rem","1.75rem"},
+			"xl": {"1.25rem","1.75rem"}, "2xl": {"1.5rem","2rem"}, "3xl": {"1.875rem","2.25rem"}, "4xl": {"2.25rem","2.5rem"},
+			"5xl": {"3rem","1"}, "6xl": {"3.75rem","1"},
+		}
+		if s, ok := sizes[val]; ok {
+			return fmt.Sprintf("font-size: %s; line-height: %s;", s[0], s[1])
+		}
+	case "tw-blur":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+			val = val[1 : len(val)-1]
+		} else {
+			sizes := map[string]string{"sm":"4px","md":"12px","lg":"16px","xl":"24px","2xl":"40px","3xl":"64px","none":"0","":"8px"}
+			if v, ok := sizes[val]; ok { val = v }
+		}
+		return fmt.Sprintf("filter: blur(%s); -webkit-backdrop-filter: blur(%s); backdrop-filter: blur(%s);", val, val, val)
+	case "tw-opacity":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+			return fmt.Sprintf("opacity: %s;", val[1 : len(val)-1])
+		}
+		return fmt.Sprintf("opacity: %.2f;", float64(mustInt(val))/100.0)
+	case "tw-grid-cols":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+			return fmt.Sprintf("grid-template-columns: %s;", val[1 : len(val)-1])
+		}
+		if val == "none" { return "grid-template-columns: none;" }
+		return fmt.Sprintf("grid-template-columns: repeat(%s, minmax(0, 1fr));", val)
+	case "tw-col-span":
+		if m[2] == "full" { return "grid-column: 1 / -1;" }
+		return fmt.Sprintf("grid-column: span %s / span %s;", m[2], m[2])
+	case "tw-flex":
+		val := m[2]
+		if val == "row" || val == "col" || val == "row-reverse" || val == "col-reverse" {
+			if val == "col" { val = "column" }
+			return "flex-direction: " + val + ";"
+		}
+		if val == "wrap" || val == "nowrap" || val == "wrap-reverse" {
+			return "flex-wrap: " + val + ";"
+		}
+		if val == "1" { return "flex: 1 1 0%;" }
+		if val == "auto" { return "flex: 1 1 auto;" }
+		if val == "initial" { return "flex: 0 1 auto;" }
+		if val == "none" { return "flex: none;" }
+	case "tw-align":
+		propMap := map[string]string{"justify": "justify-content", "items": "align-items", "content": "align-content", "self": "align-self"}
+		prop := propMap[m[1]]
+		val := m[2]
+		if val == "start" || val == "end" { val = "flex-" + val }
+		if val == "between" || val == "around" || val == "evenly" { val = "space-" + val }
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-display":
+		val := m[1]
+		if val == "hidden" { return "display: none;" }
+		return "display: " + val + ";"
+	case "tw-position":
+		return "position: " + m[1] + ";"
+	case "tw-inset", "tw-inset-neg":
+		prop := m[1]
+		val := twUnit(m[2])
+		if m[0][0] == '-' { val = "-" + val }
+		if prop == "inset" { return fmt.Sprintf("inset: %s;", val) }
+		if prop == "inset-x" { return fmt.Sprintf("left: %[1]s; right: %[1]s;", val) }
+		if prop == "inset-y" { return fmt.Sprintf("top: %[1]s; bottom: %[1]s;", val) }
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-zindex", "tw-zindex-neg":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") { val = val[1:len(val)-1] }
+		if m[0][0] == '-' { val = "-" + val }
+		return "z-index: " + val + ";"
+	case "tw-shadow":
+		val := m[2]
+		sh := map[string]string{
+			"sm": "0 1px 2px 0 rgb(0 0 0 / 0.05)",
+			"": "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+			"md": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+			"lg": "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+			"xl": "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
+			"2xl": "0 25px 50px -12px rgb(0 0 0 / 0.25)",
+			"inner": "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
+			"none": "0 0 #0000",
+		}
+		if s, ok := sh[val]; ok { return "box-shadow: " + s + ";" }
+		return "box-shadow: " + sh[""] + ";"
+	case "tw-overflow":
+		prop := m[1]
+		val := m[2]
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-cursor":
+		return "cursor: " + m[2] + ";"
+	case "tw-transition":
+		val := m[2]
+		if val == "" { val = "color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter" }
+		if val == "colors" { val = "color, background-color, border-color, text-decoration-color, fill, stroke" }
+		if val == "none" { return "transition-property: none;" }
+		return fmt.Sprintf("transition-property: %s; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms;", val)
+	case "tw-duration":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") { val = val[1:len(val)-1] } else { val += "ms" }
+		return "transition-duration: " + val + ";"
+	case "tw-ease":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") { val = val[1:len(val)-1] }
+		e := map[string]string{"linear":"linear","in":"cubic-bezier(0.4, 0, 1, 1)","out":"cubic-bezier(0, 0, 0.2, 1)","in-out":"cubic-bezier(0.4, 0, 0.2, 1)"}
+		if v, ok := e[val]; ok { val = v }
+		return "transition-timing-function: " + val + ";"
+	case "tw-border":
+		dir := m[2]
+		val := m[3]
+		if val == "" { val = "1px" } else {
+			if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") { val = val[1:len(val)-1] } else { val += "px" }
+		}
+		if dir == "" { return fmt.Sprintf("border-width: %s;", val) }
+		if dir == "x" { return fmt.Sprintf("border-left-width: %[1]s; border-right-width: %[1]s;", val) }
+		if dir == "y" { return fmt.Sprintf("border-top-width: %[1]s; border-bottom-width: %[1]s;", val) }
+		d := map[string]string{"t":"top","b":"bottom","l":"left","r":"right"}[dir]
+		return fmt.Sprintf("border-%s-width: %s;", d, val)
+	case "tw-font-weight":
+		w := map[string]string{"thin":"100","extralight":"200","light":"300","normal":"400","medium":"500","semibold":"600","bold":"700","extrabold":"800","black":"900"}[m[2]]
+		return "font-weight: " + w + ";"
+	case "tw-text-align":
+		return "text-align: " + m[2] + ";"
+	case "tw-text-decor":
+		val := m[1]
+		if val == "italic" { return "font-style: italic;" }
+		if val == "not-italic" { return "font-style: normal;" }
+		if val == "uppercase" || val == "lowercase" || val == "capitalize" { return "text-transform: " + val + ";" }
+		if val == "normal-case" { return "text-transform: none;" }
+		if val == "underline" || val == "line-through" { return "text-decoration-line: " + val + ";" }
+		if val == "no-underline" { return "text-decoration-line: none;" }
 	}
 	return ""
 }

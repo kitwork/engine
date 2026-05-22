@@ -8,9 +8,9 @@ import (
 )
 
 type Config struct {
-	Port   int
-	Source string
-	Master []string
+	Port   int      `json:"port" yaml:"port"`
+	Source string   `json:"source" yaml:"source"`
+	Master []string `json:"master" yaml:"master"`
 }
 
 func Run(cfg *Config) {
