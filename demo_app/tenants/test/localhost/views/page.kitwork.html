@@ -1,0 +1,90 @@
+<section class="relative pt-24 pb-32 overflow-hidden">
+    <!-- Background ambient lights -->
+    <div class="absolute -top-40 left-1/4 w-[500px] h-[500px] bg-brand/10 blur-[150px] rounded-full pointer-events-none"></div>
+    <div class="absolute top-1/2 right-1/4 w-[400px] h-[400px] bg-pink-500/5 blur-[120px] rounded-full pointer-events-none"></div>
+    
+    <div class="mx-auto max-w-7xl px-6 relative z-10">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-16 items-center">
+            
+            <!-- Hero Left -->
+            <div class="lg:col-span-7 text-left">
+                <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-brand/10 border border-brand/20 text-brand-light text-xs font-black uppercase tracking-[3px] mb-8">
+                    <span class="w-1.5 h-1.5 rounded-full bg-brand outline outline-1 outline-brand outline-offset-2"></span>
+                    Sovereign Engine Sandbox
+                </div>
+                
+                <h1 class="text-5xl md:text-7xl font-black tracking-tight text-white mb-6 leading-tight">
+                    Where Logic Becomes <span class="text-gradient">Living Organisms</span>.
+                </h1>
+                
+                <p class="text-gray-400 text-lg md:text-xl leading-relaxed mb-10 max-w-xl">
+                    Run your Javascript logic inside a high-frequency, safe stack-based VM written in Go. No node_modules, no memory leaks, and bounded by physical energy costs.
+                </p>
+                
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <a href="/dashboard" class="px-8 py-4 rounded-lg bg-gradient-to-r from-brand to-brand-light text-white font-bold text-sm uppercase tracking-wider text-center transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_0_30px_rgba(139,92,246,0.3)]">
+                        Enter Dashboard
+                    </a>
+                    <a href="/about" class="px-8 py-4 rounded-lg bg-white/5 border border-white/10 text-white hover:bg-white/10 font-bold text-sm uppercase tracking-wider text-center transition-all duration-300">
+                        Philosophy Manifesto
+                    </a>
+                </div>
+            </div>
+            
+            <!-- Hero Right: Code Visualizer -->
+            <div class="lg:col-span-5 w-full">
+                <div class="glass-panel glow-effect rounded-2xl overflow-hidden shadow-2xl">
+                    <div class="flex justify-between items-center bg-black/40 border-b border-white/5 px-6 py-4">
+                        <div class="flex gap-2">
+                            <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+                            <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
+                            <span class="w-3 h-3 rounded-full bg-green-500/80"></span>
+                        </div>
+                        <div class="text-xs font-mono text-gray-500 uppercase tracking-widest">app.kitwork.js</div>
+                    </div>
+                    
+                    <div class="p-6 font-mono text-sm leading-relaxed text-gray-300 overflow-x-auto whitespace-nowrap bg-black/20">
+                        <p><span class="text-purple-400">const</span> { router, go } = kitwork();</p>
+                        <p class="text-gray-600">// Highly concurrent edge functions</p>
+                        <p>router.<span class="text-blue-400">get</span>(<span class="text-green-400">"/api/async-task"</span>)</p>
+                        <p>&nbsp;&nbsp;.<span class="text-blue-400">cache</span>(<span class="text-green-400">"30s"</span>)</p>
+                        <p>&nbsp;&nbsp;.<span class="text-blue-400">handle</span>((req, res) => {</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-blue-400">go</span>(() => {</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;log.<span class="text-yellow-400">Print</span>(<span class="text-green-400">"Parallel job running..."</span>);</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;});</p>
+                        <p>&nbsp;&nbsp;&nbsp;&nbsp;<span class="text-purple-400">return</span> res.json({ status: <span class="text-emerald-400">"active"</span> });</p>
+                        <p>&nbsp;&nbsp;});</p>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+</section>
+
+<!-- Specs Grid -->
+<section class="py-24 bg-black/20 border-y border-white/5">
+    <div class="mx-auto max-w-7xl px-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            
+            <div class="glass-panel p-8 rounded-2xl hover:bg-white/[0.02] transition-all duration-300">
+                <div class="text-gradient font-black text-5xl mb-4">14.1M</div>
+                <h3 class="text-lg font-bold text-white mb-2">Ops/sec VM Execution</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">Bare metal performance of Go-compiled instructions bypassing standard Javascript overhead.</p>
+            </div>
+            
+            <div class="glass-panel p-8 rounded-2xl hover:bg-white/[0.02] transition-all duration-300">
+                <div class="text-gradient font-black text-5xl mb-4">70ns</div>
+                <h3 class="text-lg font-bold text-white mb-2">Execution Latency</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">Nanosecond precision instruction clocks designed for high-frequency microservice backends.</p>
+            </div>
+            
+            <div class="glass-panel p-8 rounded-2xl hover:bg-white/[0.02] transition-all duration-300">
+                <div class="text-gradient font-black text-5xl mb-4">< 10ms</div>
+                <h3 class="text-lg font-bold text-white mb-2">Cold Start Time</h3>
+                <p class="text-gray-400 text-sm leading-relaxed">Instant activation cycles with near-zero Garbage Collector pressure and resource reuse.</p>
+            </div>
+            
+        </div>
+    </div>
+</section>
