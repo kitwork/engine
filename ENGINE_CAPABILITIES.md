@@ -68,11 +68,25 @@ Kitwork hỗ trợ các hàm biến đổi dữ liệu bậc cao ngay trong Core
 
 ---
 
+---
 ## 5. Triết lý Thiết kế (Developer Mindset)
 
 1.  **Fast-Path First**: Nếu có thể dùng `.assets()` hoặc `.static()`, hãy dùng chúng để bypass bộ máy Script.
 2.  **Explicit Exit**: Dùng `done()` và `fail()` thay vì lồng `if-else`.
 3.  **OS-Native Integrity**: Tận dụng File Metadata của OS là cách tốt nhất để quản lý Cache bền bỉ và hiệu quả.
+
+---
+
+## 6. Định hướng phát triển tương lai (Roadmap)
+
+### 1. Egress Network Policies (Bảo mật Sandbox)
+Bổ sung cấu hình danh sách domain được phép gọi (`egress_allowed_domains`) trong cấu hình YAML của mỗi Tenant. Tự động kiểm tra và chặn các yêu cầu HTTP từ VM gọi tới mạng nội bộ (`localhost`, `192.168.*`) để phòng chống tấn công SSRF.
+
+### 2. Durable Worker Queue & Background Jobs (Hàng đợi tác vụ nền bền bỉ)
+Thay vì thực thi Goroutine trực tiếp trên RAM qua hàm `go()`, phát triển hệ thống Queue có sự bền bỉ (Durable). Các task nền sẽ được lưu vào cơ sở dữ liệu và xử lý bởi Go-native Worker Pools hỗ trợ retry (exponential backoff) và hàng đợi lỗi (DLQ).
+
+### 3. Distributed Shared State (Bộ nhớ đệm phân tán)
+Cung cấp Driver kết nối Redis hoặc cơ chế đồng bộ Cluster State qua gRPC để chia sẻ dữ liệu bộ nhớ đệm `cache` của các Tenant khi chạy mở rộng trên nhiều máy chủ vật lý.
 
 ---
 *Tài liệu này được biên soạn cho Kitwork Engine v1.5.0+*
