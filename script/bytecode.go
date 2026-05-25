@@ -24,7 +24,7 @@ func Bytecode(paths ...string) (*compiler.Bytecode, error) {
 		return nil, fmt.Errorf("assemble error: %s", p.Errors()[0])
 	}
 
-	c := compiler.NewCompiler()
+	c := compiler.NewCompiler(content)
 	if err := c.Compile(prog); err != nil {
 		return nil, err
 	}

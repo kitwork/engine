@@ -61,9 +61,14 @@ type JoinQuery struct {
 	On    string
 }
 
+type sqlExecutor interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 type Query struct {
-	vm *runtime.Runtime
-	db *sql.DB
+	vm *runtime.VM
+	db sqlExecutor
 
 	ctx *context.Context
 
@@ -86,7 +91,7 @@ type Query struct {
 	debug bool
 }
 
-func NewQuery(vm *runtime.Runtime, db *sql.DB) *Query {
+func NewQuery(vm *runtime.VM, db sqlExecutor) *Query {
 	return &Query{vm: vm, db: db}
 }
 

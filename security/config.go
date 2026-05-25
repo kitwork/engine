@@ -26,17 +26,17 @@ func LoadConfigFromDir(dir string) (*Config, error) {
 
 	// 1. Load Database (master.yaml)
 	if data, err := os.ReadFile(dir + "/database/master.yaml"); err == nil {
-		yaml.Unmarshal(data, &cfg.Database)
+		yaml.Unmarshal([]byte(os.ExpandEnv(string(data))), &cfg.Database)
 	}
 
 	// 2. Load Server (http.yaml)
 	if data, err := os.ReadFile(dir + "/server/http.yaml"); err == nil {
-		yaml.Unmarshal(data, &cfg.Server)
+		yaml.Unmarshal([]byte(os.ExpandEnv(string(data))), &cfg.Server)
 	}
 
 	// 3. Load SMTP (mail.yaml)
 	if data, err := os.ReadFile(dir + "/smtp/mail.yaml"); err == nil {
-		yaml.Unmarshal(data, &cfg.SMTP)
+		yaml.Unmarshal([]byte(os.ExpandEnv(string(data))), &cfg.SMTP)
 	}
 
 	// Set defaults

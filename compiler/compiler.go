@@ -11,25 +11,122 @@ import (
 type Bytecode struct {
 	Instructions []byte
 	Constants    []value.Value
+	SourceMap    []int32
 }
 
 // Compiler chịu trách nhiệm chuyển đổi AST thành Bytecode
 type Compiler struct {
 	instructions []byte
 	constants    []value.Value
+	sourceMap    []int32
+	lineOffsets  []int32
+	currentPos   int32
 }
 
-func NewCompiler() *Compiler {
+func NewCompiler(source ...string) *Compiler {
+	var offsets []int32
+	if len(source) > 0 {
+		src := source[0]
+		offsets = []int32{0} // Dòng 1 bắt đầu ở byte 0
+		for i := 0; i < len(src); i++ {
+			if src[i] == '\n' {
+				offsets = append(offsets, int32(i+1))
+			}
+		}
+	}
 	return &Compiler{
 		instructions: []byte{},
 		constants:    []value.Value{},
+		sourceMap:    []int32{},
+		lineOffsets:  offsets,
 	}
+}
+
+func getNodePosition(node Node) int32 {
+	if node == nil {
+		return 0
+	}
+	switch n := node.(type) {
+	case *Program:
+		if len(n.Statements) > 0 {
+			return getNodePosition(n.Statements[0])
+		}
+	case *VarStatement:
+		return n.Token.Position
+	case *ExpressionStatement:
+		return n.Token.Position
+	case *BlockStatement:
+		return n.Token.Position
+	case *ReturnStatement:
+		return n.Token.Position
+	case *ForStatement:
+		return n.Token.Position
+	case *DeferStatement:
+		return n.Token.Position
+	case *Identifier:
+		return n.Token.Position
+	case *Literal:
+		return n.Token.Position
+	case *PrefixExpression:
+		return n.Token.Position
+	case *InfixExpression:
+		return n.Token.Position
+	case *IfExpression:
+		return n.Token.Position
+	case *CallExpression:
+		return n.Token.Position
+	case *MemberExpression:
+		return n.Token.Position
+	case *IndexExpression:
+		return n.Token.Position
+	case *AssignmentExpression:
+		return n.Token.Position
+	case *ArrayLiteral:
+		return n.Token.Position
+	case *ObjectLiteral:
+		return n.Token.Position
+	case *SpreadExpression:
+		return n.Token.Position
+	case *ParameterList:
+		return n.Token.Position
+	case *FunctionLiteral:
+		return n.Token.Position
+	case *SpawnStatement:
+		return n.Token.Position
+	case *MethodCallExpression:
+		return n.Token.Position
+	case *TemplateLiteral:
+		return n.Token.Position
+	}
+	return 0
+}
+
+func (c *Compiler) getLineNumber(pos int32) int32 {
+	if len(c.lineOffsets) == 0 {
+		return 0
+	}
+	l, r := 0, len(c.lineOffsets)-1
+	ans := 0
+	for l <= r {
+		mid := (l + r) / 2
+		if c.lineOffsets[mid] <= pos {
+			ans = mid
+			l = mid + 1
+		} else {
+			r = mid - 1
+		}
+	}
+	return int32(ans + 1)
 }
 
 // Compile bắt đầu quá trình duyệt cây và phát sinh mã
 func (c *Compiler) Compile(node Node) error {
 	if node == nil {
 		return nil
+	}
+
+	if pos := getNodePosition(node); pos > 0 {
+		c.currentPos = pos
 	}
 
 	switch n := node.(type) {
@@ -356,15 +453,20 @@ func (c *Compiler) Reset() {
 	if c.constants != nil {
 		c.constants = c.constants[:0]
 	}
+	if c.sourceMap != nil {
+		c.sourceMap = c.sourceMap[:0]
+	}
 }
 
 func (c *Compiler) ByteCodeResult() *Bytecode {
 	bc := &Bytecode{
 		Instructions: make([]byte, len(c.instructions)),
 		Constants:    make([]value.Value, len(c.constants)),
+		SourceMap:    make([]int32, len(c.sourceMap)),
 	}
 	copy(bc.Instructions, c.instructions)
 	copy(bc.Constants, c.constants)
+	copy(bc.SourceMap, c.sourceMap)
 	return bc
 }
 
@@ -372,6 +474,11 @@ func (c *Compiler) emit(op opcode.Opcode, operands ...byte) int {
 	pos := len(c.instructions)
 	c.instructions = append(c.instructions, byte(op))
 	c.instructions = append(c.instructions, operands...)
+
+	line := c.getLineNumber(c.currentPos)
+	for len(c.sourceMap) < len(c.instructions) {
+		c.sourceMap = append(c.sourceMap, line)
+	}
 	return pos
 }
 

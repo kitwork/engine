@@ -392,7 +392,7 @@ func (r *Request) SaveFile(fieldName string, destPath string) value.Value {
 	}
 	defer file.Close()
 
-	fullDest := r.router.tenant.joinPath(destPath)
+	fullDest := r.router.tenant.resolve(destPath)
 	// Create directory if not exists
 	dir := filepath.Dir(fullDest)
 	if filepath.Ext(fullDest) == "" {

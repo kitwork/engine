@@ -20,11 +20,19 @@ type Database struct {
 	tenant *Tenant
 	config *database.Config
 	sqlDB  *sql.DB
+	tx     *sql.Tx
 }
 
-func (d *Database) Connection(vals ...value.Value) *Database {
-	if len(vals) > 0 {
-		vals[0].To(d.config)
+func (d *Database) Connection() *Database {
+	if d.sqlDB == nil && database.Default != nil {
+		d.sqlDB = database.Default
+	}
+	return d
+}
+
+func (d *Database) Connected() *Database {
+	if d.sqlDB == nil && database.Default != nil {
+		d.sqlDB = database.Default
 	}
 	return d
 }
@@ -55,8 +63,12 @@ func (d *Database) Config(config *database.Config) *Database {
 }
 
 func (d *Database) NewQuery() *Query {
+	var exec sqlExecutor = d.db()
+	if d.tx != nil {
+		exec = d.tx
+	}
 	return &Query{
-		db: d.db(),
+		db: exec,
 		vm: d.tenant.vm,
 	}
 }
@@ -127,4 +139,53 @@ func (d *Database) GroupBy(cols ...string) *Query {
 
 func (d *Database) Join(args ...value.Value) *Query {
 	return d.NewQuery().Join(args...)
+}
+
+func (d *Database) Atomic(args ...value.Value) value.Value {
+	if len(args) == 0 || args[0].K != value.Func {
+		return value.Value{K: value.Nil}
+	}
+	lambda, ok := args[0].V.(*value.Lambda)
+	if !ok {
+		return value.Value{K: value.Nil}
+	}
+
+	dbConn := d.db()
+	if dbConn == nil {
+		return value.Value{K: value.Invalid, V: "database not connected"}
+	}
+	tx, err := dbConn.Begin()
+	if err != nil {
+		return value.Value{K: value.Invalid, V: err.Error()}
+	}
+
+	txDb := &Database{
+		tenant: d.tenant,
+		config: d.config,
+		sqlDB:  d.sqlDB,
+		tx:     tx,
+	}
+	txVal := value.New(txDb)
+
+	// Tự động Rollback nếu có Panic xảy ra trong khi chạy kịch bản
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+			panic(r)
+		}
+	}()
+
+	result := d.tenant.vm.ExecuteLambda(lambda, []value.Value{txVal})
+
+	if result.K == value.Invalid {
+		tx.Rollback()
+		return result
+	}
+
+	if err := tx.Commit(); err != nil {
+		tx.Rollback()
+		return value.Value{K: value.Invalid, V: err.Error()}
+	}
+
+	return result
 }

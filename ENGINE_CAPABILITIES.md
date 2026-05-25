@@ -29,9 +29,10 @@ Lưu kết quả trong bộ nhớ đệm LRU. Thích hợp cho dữ liệu nhỏ
 *   **Cú pháp**: `.cache("5s")` hoặc `.cache(60)` (giây).
 
 ### Static (Disk-based Snapshot)
-"Tĩnh hóa" kết quả của Script ra đĩa cứng dưới dạng file tĩnh. Tận dụng **Metadata (ModTime)** của OS.
-*   **Cú pháp**: `.static("1h")`.
-*   **An toàn**: `.static({ duration: "1h", check: true })` - Bật tính năng **Checksum (Sha256)** để đảm bảo tính toàn vẹn của dữ liệu trên đĩa.
+"Tĩnh hóa" kết quả của Script ra đĩa cứng dưới dạng file tĩnh đơn lẻ (Single File with Offset). Tận dụng **Metadata (ModTime/ExpireAt)** của cache để kiểm soát hạn dùng.
+*   **Cú pháp**: `.static("1h")` hoặc `.static({ duration: "1h" })`.
+*   **Kiến trúc tối ưu**: Lưu trữ metadata (status code, content-type, headers) và response body trong cùng một file duy nhất dạng nhị phân có offset, giúp giảm 50% số lượng tệp tin trên ổ đĩa, loại bỏ lãng phí bộ nhớ vật lý đĩa cứng (slack space block) và stream dữ liệu trực tiếp với RAM overhead bằng 0.
+
 
 ---
 

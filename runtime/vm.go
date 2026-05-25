@@ -3,20 +3,21 @@ package runtime
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/kitwork/engine/energy"
 	"github.com/kitwork/engine/opcode"
 	"github.com/kitwork/engine/value"
 )
 
-func (vm *Runtime) Defer(fn *value.Lambda) {
+func (vm *VM) Defer(fn *value.Lambda) {
 	if vm.FrameIdx >= 0 {
 		f := &vm.Frames[vm.FrameIdx]
 		f.Defers = append(f.Defers, fn)
 	}
 }
 
-func (vm *Runtime) Run() value.Value {
+func (vm *VM) Run() value.Value {
 	//fmt.Printf("[VM Run] Starting execution, bytecode length: %d\n", len(vm.Bytecode))
 	for vm.FrameIdx >= 0 {
 		f := &vm.Frames[vm.FrameIdx]
@@ -41,6 +42,13 @@ func (vm *Runtime) Run() value.Value {
 
 		// Tiêu thụ năng lượng
 		vm.Energy += uint64(energy.Table[op])
+		if vm.MaxEnergy > 0 && vm.Energy > vm.MaxEnergy {
+			line := vm.currentLine(f.IP - 1)
+			return value.Value{
+				K: value.Invalid,
+				V: fmt.Sprintf("Energy Limit Exceeded: Execution halted (at line %d)", line),
+			}
+		}
 
 		switch op {
 		case opcode.PUSH:
@@ -278,6 +286,12 @@ func (vm *Runtime) Run() value.Value {
 			fn := vm.pop()
 			if fn.K == value.Func {
 				if s, ok := fn.V.(*value.Lambda); ok {
+					if vm.FrameIdx+1 >= len(vm.Frames) {
+						return value.Value{
+							K: value.Invalid,
+							V: fmt.Sprintf("Stack overflow: Call stack limit exceeded (at line %d)", vm.currentLine(f.IP - 1)),
+						}
+					}
 					vm.FrameIdx++
 					nf := &vm.Frames[vm.FrameIdx]
 					nf.IP = s.Address
@@ -360,6 +374,17 @@ func (vm *Runtime) Run() value.Value {
 			fmt.Printf("Unknown OP: %d at IP %d\n", op, f.IP-1)
 			return value.Value{K: value.Invalid}
 		}
+
+		// Kiểm tra lỗi phát sinh sau khi thực thi instruction
+		if len(vm.Stack) > 0 && vm.peek().K == value.Invalid {
+			errVal := vm.pop()
+			line := vm.currentLine(f.IP - 1)
+			errMsg := errVal.Text()
+			if !strings.Contains(errMsg, "(at line") {
+				errMsg = fmt.Sprintf("%s (at line %d)", errMsg, line)
+			}
+			return value.Value{K: value.Invalid, V: errMsg}
+		}
 	}
 	if len(vm.Stack) > 0 {
 		return vm.pop()
@@ -367,9 +392,15 @@ func (vm *Runtime) Run() value.Value {
 	return value.Value{K: value.Nil}
 }
 
-func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
+func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 	if s == nil {
 		return value.Value{K: value.Nil}
+	}
+	if vm.FrameIdx+1 >= len(vm.Frames) {
+		return value.Value{
+			K: value.Invalid,
+			V: "Stack overflow: Call stack limit exceeded",
+		}
 	}
 	vm.FrameIdx++
 	f := &vm.Frames[vm.FrameIdx]
@@ -415,6 +446,13 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 		}
 
 		vm.Energy += uint64(energy.Table[op])
+		if vm.MaxEnergy > 0 && vm.Energy > vm.MaxEnergy {
+			line := vm.currentLine(f.IP - 1)
+			return value.Value{
+				K: value.Invalid,
+				V: fmt.Sprintf("Energy Limit Exceeded: Execution halted (at line %d)", line),
+			}
+		}
 
 		switch op {
 		case opcode.PUSH:
@@ -579,6 +617,12 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 			fn := vm.pop()
 			if fn.K == value.Func {
 				if s, ok := fn.V.(*value.Lambda); ok {
+					if vm.FrameIdx+1 >= len(vm.Frames) {
+						return value.Value{
+							K: value.Invalid,
+							V: fmt.Sprintf("Stack overflow: Call stack limit exceeded (at line %d)", vm.currentLine(f.IP - 1)),
+						}
+					}
 					vm.FrameIdx++
 					nf := &vm.Frames[vm.FrameIdx]
 					nf.IP = s.Address
@@ -699,9 +743,27 @@ func (vm *Runtime) ExecuteLambda(s *value.Lambda, args []value.Value) value.Valu
 		case opcode.POP:
 			vm.pop()
 		}
+
+		// Kiểm tra lỗi phát sinh sau khi thực thi instruction
+		if len(vm.Stack) > 0 && vm.peek().K == value.Invalid {
+			errVal := vm.pop()
+			line := vm.currentLine(f.IP - 1)
+			errMsg := errVal.Text()
+			if !strings.Contains(errMsg, "(at line") {
+				errMsg = fmt.Sprintf("%s (at line %d)", errMsg, line)
+			}
+			return value.Value{K: value.Invalid, V: errMsg}
+		}
 	}
 	if len(vm.Stack) > 0 {
 		return vm.pop()
 	}
 	return value.Value{K: value.Nil}
+}
+
+func (vm *VM) currentLine(ip int) int32 {
+	if ip >= 0 && ip < len(vm.SourceMap) {
+		return vm.SourceMap[ip]
+	}
+	return 0
 }

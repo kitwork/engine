@@ -1,7 +1,6 @@
 package work
 
 import (
-	"database/sql"
 	"fmt"
 	"net/http"
 	goruntime "runtime"
@@ -20,26 +19,14 @@ var vmPool = sync.Pool{
 	},
 }
 
-type Entity struct {
-	Identity string
-	Domain   string
-}
-
-func NewEntity(identity string, domain string) *Entity {
-	return &Entity{
-		Identity: identity,
-		Domain:   domain,
-	}
-}
-
 // Router struct is defined in router.go
 type Config struct {
-	source string
-
-	master *sql.DB
+	root     string
+	base     string
+	multiple bool
 }
 
-func (t *Tenant) Config(vals ...value.Value) *KitWork { return &KitWork{tenant: t} }
+func (t *Tenant) Kitwork(vals ...value.Value) *KitWork { return &KitWork{tenant: t} }
 
 type KitWork struct {
 	tenant *Tenant
@@ -47,32 +34,20 @@ type KitWork struct {
 
 func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	var matched *Router
-	var notFoundMatched *Router
 	var params map[string]string
-	var notFoundParams map[string]string
 
 	path := r.URL.Path
-	for _, rt := range t.routes {
-		if rt.Method == "NOTFOUND" {
-			if p, ok := matchRoute(path, rt.Path); ok {
-				if notFoundMatched == nil { // Chỉ lấy Notfound đầu tiên khớp
-					notFoundMatched = rt
-					notFoundParams = p
-				}
-			}
-			continue
-		}
-
-		if rt.Method == r.Method || rt.Method == "ANY" {
-			if p, ok := matchRoute(path, rt.Path); ok {
-				matched = rt
-				params = p
-				break
-			}
-		}
+	if t.routes != nil {
+		matched, params = t.routes.Match(r.Method, path)
 	}
 
 	if matched == nil {
+		var notFoundMatched *Router
+		var notFoundParams map[string]string
+		if t.routes != nil {
+			notFoundMatched, notFoundParams = t.routes.Match("NOTFOUND", path)
+		}
+
 		if notFoundMatched != nil {
 			matched = notFoundMatched
 			params = notFoundParams
@@ -97,6 +72,16 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		t.cacheLock.RUnlock()
 	}
 
+	// 1.5 Kiểm tra static cache (disk-based)
+	if matched.staticTTL > 0 {
+		ctxRouter := *matched
+		ctxRouter.request = r
+		if ctxRouter.serveStaticCache(w, r) {
+			return
+		}
+	}
+
+
 	if matched.response != nil && matched.response.IsSend() {
 		ctxRouter := *matched
 		ctxRouter.request = r
@@ -104,7 +89,7 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vm := vmPool.Get().(*runtime.Runtime)
+	vm := vmPool.Get().(*runtime.VM)
 	defer vmPool.Put(vm)
 
 	// KHỞI TẠO CONTEXT (Chính là Router copy)
@@ -116,8 +101,9 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	ctxRouter.run(vm, w, matched)
 }
 
-func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Router) {
-	vm.FastReset(r.tenant.bytecode.Instructions, r.tenant.bytecode.Constants, r.tenant.vm.Globals)
+func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
+	vm.FastReset(r.tenant.bytecode.Instructions, r.tenant.bytecode.Constants, r.tenant.vm.Globals, r.tenant.bytecode.SourceMap)
+	vm.MaxEnergy = r.tenant.MaxEnergy
 
 	reqObj := &Request{router: r}
 	ctxObj := &Context{
@@ -128,6 +114,11 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 	for _, guard := range r.guards {
 		gArgs := ctxObj.arguments(guard)
 		result := vm.ExecuteLambda(guard, gArgs)
+
+		if result.IsInvalid() {
+			r.err = fmt.Errorf("guard error: %v", result.V)
+			break
+		}
 
 		// A. Nếu Guard tự gửi phản hồi (ctx.json, ...)
 		if r.response.IsSend() {
@@ -194,8 +185,9 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 			}
 
 			result := vm.ExecuteLambda(r.handle, hArgs)
-			// Tự động nhận diện kết quả trả về của Handle
-			if !r.response.IsSend() && result.Truthy() {
+			if result.IsInvalid() {
+				r.err = fmt.Errorf("%v", result.V)
+			} else if !r.response.IsSend() && result.Truthy() {
 				if result.K == value.Map || result.K == value.Array {
 					r.response.JSON(result)
 				} else {
@@ -228,14 +220,20 @@ func (r *Router) run(vm *runtime.Runtime, w http.ResponseWriter, original *Route
 	r.responder(w)
 
 	// 4. Lưu cache nếu thành công
-	if original != nil && original.cacheTTL > 0 && r.err == nil && r.response.IsSend() {
-		cacheKey := original.Method + ":" + original.Path
-		r.tenant.cacheLock.Lock()
-		r.tenant.cache[cacheKey] = &CachedResult{
-			Response: r.response,
-			ExpireAt: time.Now().Add(original.cacheTTL),
+	if original != nil && r.err == nil && r.response.IsSend() {
+		if original.cacheTTL > 0 {
+			cacheKey := original.Method + ":" + original.Path
+			r.tenant.cacheLock.Lock()
+			r.tenant.cache[cacheKey] = &CachedResult{
+				Response: r.response,
+				ExpireAt: time.Now().Add(original.cacheTTL),
+			}
+			r.tenant.cacheLock.Unlock()
 		}
-		r.tenant.cacheLock.Unlock()
+
+		if original.staticTTL > 0 {
+			r.saveStaticCache()
+		}
 	}
 }
 

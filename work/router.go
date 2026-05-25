@@ -1,8 +1,14 @@
 package work
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,6 +43,7 @@ type Router struct {
 
 	// Cache configuration
 	cacheTTL       time.Duration
+	staticTTL      time.Duration
 	benchmarkCount int // Số lần chạy lặp để đo hiệu năng
 }
 
@@ -156,7 +163,7 @@ func (r *Router) New(method, path string) *Router {
 	newRoute.handle = nil
 	newRoute.response = &Response{}
 
-	r.tenant.routes = append(r.tenant.routes, &newRoute)
+	r.tenant.routes.Insert(method, fullPath, &newRoute)
 	return &newRoute
 }
 
@@ -183,7 +190,7 @@ func (r *Router) Group(prefix string) *Router {
 }
 
 func (r *Router) File(path string) *Router {
-	r.response.File(r.tenant.joinPath(path))
+	r.response.File(r.tenant.resolve(path))
 	return r
 }
 
@@ -195,7 +202,7 @@ func (r *Router) Response(data value.Value, options ...interface{}) *Router {
 }
 
 func (r *Router) Directory(path string) *Router {
-	r.response.Directory(r.tenant.joinPath(path))
+	r.response.Directory(r.tenant.resolve(path))
 	return r
 }
 
@@ -211,3 +218,178 @@ func (r *Router) Cache(v value.Value) *Router {
 	}
 	return r
 }
+
+func (r *Router) Static(v value.Value) *Router {
+	var durationStr string
+	if v.K == value.Map {
+		m := v.Map()
+		if d, ok := m["duration"]; ok {
+			durationStr = d.String()
+		}
+	} else {
+		durationStr = v.String()
+	}
+
+	d, err := time.ParseDuration(durationStr)
+	if err == nil {
+		r.staticTTL = d
+	}
+	return r
+}
+
+type StaticCacheMeta struct {
+	Status      int               `json:"status"`
+	ContentType string            `json:"content_type"`
+	Headers     map[string]string `json:"headers"`
+	ExpireAt    time.Time         `json:"expire_at"`
+}
+
+func (r *Router) getStaticCachePath() (string, error) {
+	req := r.request
+	if req == nil {
+		return "", fmt.Errorf("request is nil")
+	}
+
+	keySource := r.Method + ":" + req.URL.Path + "?" + req.URL.RawQuery
+	hasher := md5.New()
+	hasher.Write([]byte(keySource))
+	hashStr := hex.EncodeToString(hasher.Sum(nil))
+
+	subDir := hashStr[:2]
+	fileName := hashStr[2:]
+
+	cacheDir := r.tenant.resolve("static", subDir)
+	return filepath.Join(cacheDir, fileName+".static"), nil
+}
+
+func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool {
+	if r.staticTTL <= 0 {
+		return false
+	}
+
+	cachePath, err := r.getStaticCachePath()
+	if err != nil {
+		return false
+	}
+
+	file, err := os.Open(cachePath)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+
+	// 1. Read first 10 bytes for metadata length
+	headerBuf := make([]byte, 10)
+	_, err = io.ReadFull(file, headerBuf)
+	if err != nil {
+		return false
+	}
+	var L int
+	_, err = fmt.Sscanf(string(headerBuf), "%010d", &L)
+	if err != nil {
+		return false
+	}
+
+	// 2. Read L bytes of metadata
+	metaBuf := make([]byte, L)
+	_, err = io.ReadFull(file, metaBuf)
+	if err != nil {
+		return false
+	}
+
+	// 3. Parse metadata
+	var meta StaticCacheMeta
+	if err := json.Unmarshal(metaBuf, &meta); err != nil {
+		return false
+	}
+
+	// 4. Check expiration
+	if time.Now().After(meta.ExpireAt) {
+		file.Close()
+		os.Remove(cachePath)
+		return false
+	}
+
+	// 5. Set Headers & Status Code
+	if meta.ContentType != "" {
+		w.Header().Set("Content-Type", meta.ContentType)
+	}
+	for k, v := range meta.Headers {
+		w.Header().Set(k, v)
+	}
+	w.WriteHeader(meta.Status)
+
+	// 6. Stream Body directly to writer (Zero-Memory Copy!)
+	io.Copy(w, file)
+	return true
+}
+
+func (r *Router) saveStaticCache() {
+	if r.staticTTL <= 0 || r.err != nil || !r.response.IsSend() {
+		return
+	}
+
+	cachePath, err := r.getStaticCachePath()
+	if err != nil {
+		return
+	}
+
+	// Ensure directory exists
+	os.MkdirAll(filepath.Dir(cachePath), 0755)
+
+	// Extract Content-Type
+	contentType := ""
+	kind := r.response.Kind()
+	switch kind {
+	case "json":
+		contentType = "application/json; charset=utf-8"
+	case "html", "render":
+		contentType = "text/html; charset=utf-8"
+	case "text":
+		contentType = "text/plain; charset=utf-8"
+	case "bytes":
+		contentType = "application/octet-stream"
+	case "image":
+		contentType = "image/png"
+	}
+
+	meta := StaticCacheMeta{
+		Status:      r.response.Code(),
+		ContentType: contentType,
+		Headers:     make(map[string]string),
+		ExpireAt:    time.Now().Add(r.staticTTL),
+	}
+	if meta.Status == 0 {
+		meta.Status = 200
+	}
+
+	metaBytes, err := json.Marshal(meta)
+	if err != nil {
+		return
+	}
+	L := len(metaBytes)
+
+	// Get body bytes
+	var bodyBytes []byte
+	if kind == "render" {
+		bodyBytes, _ = r.render()
+	} else if kind == "json" {
+		bodyBytes, _ = json.Marshal(r.response.Data())
+	} else {
+		bodyBytes = r.response.toBytes()
+	}
+
+	// Write file
+	file, err := os.Create(cachePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	headerStr := fmt.Sprintf("%010d", L)
+	file.Write([]byte(headerStr))
+	file.Write(metaBytes)
+	file.Write(bodyBytes)
+}
+
+

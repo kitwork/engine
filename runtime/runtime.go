@@ -12,7 +12,7 @@ type Frame struct {
 	Defers []*value.Lambda        // Deferred functions
 }
 
-type Runtime struct {
+type VM struct {
 	Bytecode  []byte
 	Constants []value.Value
 	Stack     []value.Value
@@ -22,11 +22,13 @@ type Runtime struct {
 	Frames    []Frame                // Call Stack
 	FrameIdx  int                    // Hiện tại đang ở Frame nào
 	Energy    uint64                 // Năng lượng tiêu thụ
+	MaxEnergy uint64                 // Giới hạn năng lượng
+	SourceMap []int32                // Bản đồ dòng lệnh nguồn (IP -> Line)
 	Spawner   func(s *value.Lambda)
 }
 
-func New(code []byte, constants []value.Value) *Runtime {
-	vm := &Runtime{
+func New(code []byte, constants []value.Value) *VM {
+	vm := &VM{
 		Bytecode:  code,
 		Constants: constants,
 		Stack:     make([]value.Value, 0, 1024),
@@ -40,11 +42,12 @@ func New(code []byte, constants []value.Value) *Runtime {
 	return vm
 }
 
-func (vm *Runtime) FastReset(code []byte, constants []value.Value, globals map[string]value.Value) {
+func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string]value.Value, sourceMap []int32) {
 	vm.Bytecode = code
 	vm.Constants = constants
 	vm.Stack = vm.Stack[:0]
 	vm.Globals = globals
+	vm.SourceMap = sourceMap
 	vm.FrameIdx = 0
 	vm.Energy = 0
 
@@ -59,14 +62,14 @@ func (vm *Runtime) FastReset(code []byte, constants []value.Value, globals map[s
 	vm.Frames[0].Defers = vm.Frames[0].Defers[:0]
 }
 
-func (vm *Runtime) Stop() {
+func (vm *VM) Stop() {
 	vm.FrameIdx = -1
 }
 
 // Helper methods for Stack manipulation
-func (vm *Runtime) push(v value.Value) { vm.Stack = append(vm.Stack, v) }
+func (vm *VM) push(v value.Value) { vm.Stack = append(vm.Stack, v) }
 
-func (vm *Runtime) pop() value.Value {
+func (vm *VM) pop() value.Value {
 	if len(vm.Stack) == 0 {
 		return value.Value{K: value.Nil}
 	}
@@ -76,7 +79,7 @@ func (vm *Runtime) pop() value.Value {
 	return v
 }
 
-func (vm *Runtime) peek() value.Value {
+func (vm *VM) peek() value.Value {
 	if len(vm.Stack) == 0 {
 		return value.Value{K: value.Nil}
 	}

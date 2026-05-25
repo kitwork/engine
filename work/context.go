@@ -32,7 +32,7 @@ func (c *Context) Redirect(url string, code ...int) {
 	c.Response().Redirect(value.New(url), code...)
 }
 func (c *Context) File(path string, code ...int) {
-	c.Response().File(c.tenant().joinPath(path), code...)
+	c.Response().File(c.tenant().resolve(path), code...)
 }
 
 func (c *Context) Error(v value.Value) {

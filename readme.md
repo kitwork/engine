@@ -1,12 +1,12 @@
 # 🚀 Kitwork Engine
 > **The Industrial-Grade Logic Operating System for Sovereign Execution.**
 
-![Go](https://img.shields.io/badge/go-1.21+-black?style=flat-square&logo=go)
+![Go](https://img.shields.io/badge/go-1.25+-black?style=flat-square&logo=go)
 ![Speed](https://img.shields.io/badge/latency-70ns-black?style=flat-square)
 ![Throughput](https://img.shields.io/badge/ops-14M--s-black?style=flat-square)
 ![Status](https://img.shields.io/badge/status-production--ready-blue?style=flat-square)
 
-Kitwork is a high-performance, stack-based bytecode engine designed to replace the modern cloud stack with **Living Logic**. It prioritizes Developer Experience (DX) without compromising on hardware-level execution speeds.
+Kitwork is a ultra-high-performance, stack-based bytecode engine designed to replace the modern cloud stack with **Living Logic**. It prioritizes Developer Experience (DX) and native-level security without compromising on hardware-level execution speeds.
 
 ---
 
@@ -31,13 +31,19 @@ Initialize your world with a single destructuring call. Kitwork provides a unifi
 /* 1. Initialize & Destructure */
 const { router, log, render, http, database, go } = kitwork();
 
-/* 2. Atomic Database Logic (Magic Lambda) */
-// Zero structs, zero boilerplate. Logic-to-SQL translation in 200ns.
-const vips = database.user
-    .where(u => u.status == "active" && u.karma > 1000)
-    .sort(u => u.karma, "desc")
-    .limit(10)
-    .list();
+/* 2. ACID Database Transactions (Atomic Blocks) */
+const db = database.connection();
+db.atomic((tx) => {
+    // Both creations run atomically inside the same transaction
+    tx.table("accounts").create({ user_id: 1, balance: 1000 });
+    tx.table("accounts").create({ user_id: 2, balance: 500 });
+    
+    // Automatically rolls back if an error occurs, if the block panics,
+    // or if a statement returns an Invalid type (e.g. invalid JSON parsing)
+    if (maintenanceWindowActive) {
+        return JSON.parse("{"); // Invalid JSON parses into value.Invalid -> Triggers Rollback!
+    }
+});
 
 /* 3. Fluid Routing & Logic Hooks */
 router.get("/api/v1/orders/:id")
@@ -57,6 +63,39 @@ go(() => {
     database.logs.create({ msg: "System Sync Started", time: now() });
 });
 ```
+
+---
+
+## 🔒 Security Sandboxing & Developer Experience
+
+### 1. Execution Budgets (`MaxEnergy`)
+Spam and resource exhaustion attacks are solved at the engine level. Kitwork tracks the energy cost of every byte and instruction. 
+If a VM execution block runs into an infinite loop or consumes too much processing power, the engine halts the execution cleanly and returns an `Energy Limit Exceeded` error before any system thread gets locked up.
+
+### 2. Stack Overflow Protection
+Recursion depth is actively checked during every method and function call inside the VM. Stack depths exceeding a threshold (typically `64`) are intercepted, triggering a structured stack overflow warning instead of causing Go runtime panic or segmentation faults.
+
+### 3. Source Line Mapping
+Kitwork bridges the gap between Go bytecode execution and high-fidelity debugging. 
+- The compiler maps every instruction pointer back to its original token byte offset.
+- Lexical positions are binary-searched ($O(\log N)$) against line starts to resolve the exact source file line.
+- Stack traces cleanly report the precise Javascript file line numbers of errors and exceptions.
+
+---
+
+## 🔄 Resilient Hot-Reloading
+Deploy logic code with peace of mind. Kitwork incorporates a non-blocking hot-reload mechanism that ensures **Zero-Downtime Operations**:
+
+*   **Immutable Swapping**: New logic code is compiled in isolation inside a temporary environment. The memory cache pointer is updated atomic-style only upon successful validation.
+*   **Compile Fallback**: If an uploaded script has syntax errors or is truncated during a remote transfer, the compilation fails gracefully, and the engine continues serving the old, stable version of the code.
+*   **I/O Optimization**: Stat operations on the file watcher are throttled to a minimum interval of 1 second, preserving system file handles and minimizing system resource overhead.
+
+---
+
+## 🗄️ Database Transactions (ACID)
+Database operations inside the VM leverage Go's native SQL connection pool and transactions:
+*   **Proxy-less Execution**: Go's `*sql.DB` and `*sql.Tx` are abstracted behind an internal `sqlExecutor` interface. Query builders interact with the transaction context transparently.
+*   **Fail-Safe Cleanups**: Connection pool leaks are prevented by deferred rollback wrappers. If a JS lambda panics, execution fails, or a Go routine panics, the transaction is automatically rolled back, keeping database locks clean.
 
 ---
 
@@ -94,30 +133,6 @@ router.get("/").handle((req, res) => {
 
 ---
 
-## 🔋 The Energy Economy
-Your code pays for its own existence. **Spam is solved by physics.**
-
-Kitwork tracks the "Energy Cost" of every operation within the VM. When logic exceeds its allocated energy budget, it is throttled or halted.
-
-| Resource | Cost Weight | Philosophy |
-| :--- | :--- | :--- |
-| **CPU (Calc)** | Low | Thinking is cheap. |
-| **RAM (Alloc)** | Medium | Memory is finite space. |
-| **DB (Read)** | Medium | Knowledge retrieval. |
-| **DB (Write)** | High | Changing the world takes effort. |
-| **Network** | Very High | Communication is expensive. |
-
-> *Efficiency is not an option; it is the currency of the engine.*
-
----
-
-## 🏗 Industrial Architecture
-*   **Heart**: Stack-Based Bytecode VM with instruction-level energy monitoring.
-*   **Soul**: Dynamic Value System (`value.Value`) for seamless type-safety.
-*   **Face**: High-Speed Rendering Engine with OS-native asset serving.
-
----
-
 ## 🏁 Fast Path
 Get into the flow in under 60 seconds.
 
@@ -141,4 +156,4 @@ go run cmd/server/main.go
 > — **Huỳnh Nhân Quốc**, *Indie-Stack Developer*
 
 ---
-*© 2024-2025 Kitwork Foundation. Industrial Logic Infrastructure.*
+*© 2024-2026 Kitwork Foundation. Industrial Logic Infrastructure.*

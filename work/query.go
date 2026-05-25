@@ -27,7 +27,7 @@ type DBQuery struct {
 	groups     []string
 	havings    []string
 	returning  []string
-	executor   *runtime.Runtime
+	executor   *runtime.VM
 	connection string
 }
 
@@ -35,7 +35,7 @@ func NewDBQuery() *DBQuery {
 	return &DBQuery{method: "select"}
 }
 
-func (q *DBQuery) SetExecutor(e *runtime.Runtime) {
+func (q *DBQuery) SetExecutor(e *runtime.VM) {
 	q.executor = e
 }
 

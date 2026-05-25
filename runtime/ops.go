@@ -6,7 +6,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-func (vm *Runtime) compare(a, b value.Value, mode uint8) {
+func (vm *VM) compare(a, b value.Value, mode uint8) {
 	if a.K == value.Proxy || b.K == value.Proxy {
 		var op string
 		switch mode {
@@ -54,7 +54,7 @@ func (vm *Runtime) compare(a, b value.Value, mode uint8) {
 	vm.push(value.ToBool(res))
 }
 
-func (vm *Runtime) call(name string, args ...value.Value) {
+func (vm *VM) call(name string, args ...value.Value) {
 	if name == "log" || name == "PRINT" {
 		for _, arg := range args {
 			fmt.Print(arg.Text(), " ")

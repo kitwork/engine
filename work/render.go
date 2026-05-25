@@ -64,7 +64,7 @@ func (r *Render) Global(val value.Value) *Render {
 func (r *Render) Layout(val value.Value) *Render {
 
 	if val.IsString() {
-		path := r.tenant.joinPath(val.String())
+		path := r.tenant.resolve(val.String())
 		layouts, err := os.ReadDir(path)
 		if err == nil {
 			for _, layout := range layouts {
@@ -98,7 +98,7 @@ func (r *Render) Layout(val value.Value) *Render {
 
 	if val.IsMap() {
 		for k, v := range val.Map() {
-			pathVal := r.tenant.joinPath("views", r.getfile(v.String()))
+			pathVal := r.tenant.resolve("views", r.getfile(v.String()))
 			if k == "navbar" {
 				r.layout.navbar = pathVal
 			} else if k == "footer" {
@@ -201,7 +201,7 @@ func (r *Render) getNotFoundPath() string {
 
 func (r *Render) pathJoin(vals ...string) string {
 	path := path.Join(vals...)
-	return r.tenant.joinPath(r.dir(), path)
+	return r.tenant.resolve(r.dir(), path)
 }
 
 func (r *Render) Directory(vals ...value.Value) *Render {
@@ -357,7 +357,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 
 				// C. Cuối cùng thử tìm trong thư mục views global
 				if !found {
-					globalPath := r.tenant.joinPath("views", cmd+".kitwork.html")
+					globalPath := r.tenant.resolve("views", cmd+".kitwork.html")
 					if raw, err := os.ReadFile(globalPath); err == nil {
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
 						found = true
@@ -422,13 +422,13 @@ func (r *Render) Bind(data value.Value) value.Value {
 
 // HTML renders a raw template string with data
 func (r *Render) HTML(tmpl string, data any) string {
-	viewDir := r.tenant.joinPath("views")
+	viewDir := r.tenant.resolve("views")
 	return engineRender(tmpl, data, viewDir, viewDir)
 }
 
 // File renders a file from the 'views' directory
 // func (r *Render) File(name string, data any) string {
-// 	path := r.tenant.joinPath("views", name)
+// 	path := r.tenant.resolve("views", name)
 // 	if filepath.Ext(path) == "" {
 // 		path += ".html"
 // 	}
@@ -439,7 +439,7 @@ func (r *Render) HTML(tmpl string, data any) string {
 // 	}
 
 // 	viewDir := filepath.Dir(path)
-// 	globalDir := r.tenant.joinPath("views")
+// 	globalDir := r.tenant.resolve("views")
 
 // 	return engineRender(string(content), data, viewDir, globalDir)
 // }

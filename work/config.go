@@ -1,6 +1,8 @@
 package work
 
-import "time"
+import (
+	"time"
+)
 
 // System Defaults
 // These values act as the baseline configuration for the Engine logic.

@@ -68,7 +68,7 @@ func (r *Render) Layout(val value.Value) *Render {
 	}
 
 	if val.IsString() {
-		path := r.tenant.joinPath(val.String())
+		path := r.tenant.resolve(val.String())
 		layouts, err := os.ReadDir(path)
 		if err == nil {
 			for _, layout := range layouts {
@@ -135,17 +135,17 @@ func (r *Render) Template(vals ...value.Value) *Render {
 
 func (r *Render) getIndexPath() string {
 	// r.index bây giờ chỉ lưu tên file, r.path lưu thư mục
-	return r.tenant.joinPath(path.Join(r.path, renderfile()))
+	return r.tenant.resolve(path.Join(r.path, renderfile()))
 }
 
 func (r *Render) getPagePath() string {
 	// Kết quả: path + page_name + page.kitwork.html
-	return r.tenant.joinPath(path.Join(r.path, r.page, renderfile("page")))
+	return r.tenant.resolve(path.Join(r.path, r.page, renderfile("page")))
 }
 
 func (r *Render) getNotFoundPath() string {
 	// Kết quả: path + 404.kitwork.html
-	return r.tenant.joinPath(path.Join(r.path, renderfile("404")))
+	return r.tenant.resolve(path.Join(r.path, renderfile("404")))
 }
 
 func (r *Render) Page(vals ...value.Value) *Render {
@@ -285,7 +285,7 @@ func (r *Render) resolvePartial(cmd string, currentDir string, depth int) string
 	}
 
 	// 3. Tìm trong views global
-	globalPath := r.tenant.joinPath("views", fname)
+	globalPath := r.tenant.resolve("views", fname)
 	if raw, err := os.ReadFile(globalPath); err == nil {
 		return r.assemble(string(raw), filepath.Dir(globalPath), depth+1)
 	}
@@ -303,13 +303,13 @@ func (r *Render) Bind(data value.Value) value.Value {
 
 // HTML renders a raw template string with data
 func (r *Render) HTML(tmpl string, data any) string {
-	viewDir := r.tenant.joinPath("views")
+	viewDir := r.tenant.resolve("views")
 	return engineRender(tmpl, data, viewDir, viewDir)
 }
 
 // File renders a file from the 'views' directory
 func (r *Render) File(name string, data any) string {
-	path := r.tenant.joinPath("views", name)
+	path := r.tenant.resolve("views", name)
 	if filepath.Ext(path) == "" {
 		path += ".html"
 	}
@@ -320,7 +320,7 @@ func (r *Render) File(name string, data any) string {
 	}
 
 	viewDir := filepath.Dir(path)
-	globalDir := r.tenant.joinPath("views")
+	globalDir := r.tenant.resolve("views")
 
 	return engineRender(string(content), data, viewDir, globalDir)
 }

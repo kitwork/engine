@@ -11,7 +11,7 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 	if fn.IsCallable() {
 		// Tạo một VM riêng cho chạy background để tránh xung đột với luồng chính
 		// Lấy VM từ pool hoặc tạo mới
-		vm := vmPool.Get().(*runtime.Runtime)
+		vm := vmPool.Get().(*runtime.VM)
 
 		go func() {
 			defer func() {
@@ -22,7 +22,8 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 			}()
 
 			// Khởi tạo VM với state của tenant hiện tại (Bytecode & Globals)
-			vm.FastReset(k.tenant.bytecode.Instructions, k.tenant.bytecode.Constants, k.tenant.vm.Globals)
+			vm.FastReset(k.tenant.bytecode.Instructions, k.tenant.bytecode.Constants, k.tenant.vm.Globals, k.tenant.bytecode.SourceMap)
+			vm.MaxEnergy = k.tenant.MaxEnergy
 
 			// TỐI ƯU: Copy các biến top-level (như log, router) từ tenant vào VM background
 			// Điều này giúp các closure lồng nhau có thể truy cập được các biến môi trường
