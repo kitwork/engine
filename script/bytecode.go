@@ -13,8 +13,8 @@ import (
 var kitworkPlugin = api.Plugin{
 	Name: "kitwork-virtual",
 	Setup: func(build api.PluginBuild) {
-		// Resolve imports of "kitwork" to a virtual namespace
-		build.OnResolve(api.OnResolveOptions{Filter: `^kitwork$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
+		// Resolve imports of "kitwork" or "kitwork/*" to a virtual namespace
+		build.OnResolve(api.OnResolveOptions{Filter: `^kitwork(/.*)?$`}, func(args api.OnResolveArgs) (api.OnResolveResult, error) {
 			return api.OnResolveResult{
 				Path:      args.Path,
 				Namespace: "kitwork-ns",
@@ -23,7 +23,26 @@ var kitworkPlugin = api.Plugin{
 
 		// Load virtual content when loading from the "kitwork-ns" namespace
 		build.OnLoad(api.OnLoadOptions{Filter: `.*`, Namespace: "kitwork-ns"}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
-			contents := `export const { router, log, render, http, database, go } = kitwork();`
+			var contents string
+			switch args.Path {
+			case "kitwork":
+				contents = `export const { router, log, render, http, database, go } = kitwork();`
+			case "kitwork/router":
+				contents = `export const router = kitwork().router; export default router;`
+			case "kitwork/log":
+				contents = `export const log = kitwork().log; export default log;`
+			case "kitwork/render":
+				contents = `export const render = kitwork().render; export default render;`
+			case "kitwork/http":
+				contents = `export const http = kitwork().http; export default http;`
+			case "kitwork/database":
+				contents = `export const database = kitwork().database; export default database;`
+			case "kitwork/go":
+				contents = `export const go = kitwork().go; export default go;`
+			default:
+				return api.OnLoadResult{}, fmt.Errorf("unknown virtual module path: %s", args.Path)
+			}
+
 			return api.OnLoadResult{
 				Contents: &contents,
 				Loader:   api.LoaderJS,
@@ -39,13 +58,15 @@ func bundleJavaScript(entryPath string) (string, error) {
 	}
 
 	result := api.Build(api.BuildOptions{
-		EntryPoints: []string{absPath},
-		Bundle:      true,
-		Write:       false,
-		Target:      api.ESNext,
-		Format:      api.FormatESModule,
-		Plugins:     []api.Plugin{kitworkPlugin},
+		EntryPoints:       []string{absPath},
+		Bundle:            true,
+		Write:             false,
+		Target:            api.ESNext,
+		Format:            api.FormatESModule,
+		Plugins:           []api.Plugin{kitworkPlugin},
+		ResolveExtensions: []string{".kitwork.js", ".js", ".json"},
 	})
+
 
 	if len(result.Errors) > 0 {
 		return "", fmt.Errorf("esbuild error: %s", result.Errors[0].Text)
