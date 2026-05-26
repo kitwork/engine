@@ -88,5 +88,32 @@ Thay vì thực thi Goroutine trực tiếp trên RAM qua hàm `go()`, phát tri
 ### 3. Distributed Shared State (Bộ nhớ đệm phân tán)
 Cung cấp Driver kết nối Redis hoặc cơ chế đồng bộ Cluster State qua gRPC để chia sẻ dữ liệu bộ nhớ đệm `cache` của các Tenant khi chạy mở rộng trên nhiều máy chủ vật lý.
 
+## 7. Mô-đun hóa & Bundling (Multi-File ESM)
+
+Kitwork Engine tự động hỗ trợ tính năng chia nhỏ mã nguồn thành nhiều file JavaScript bằng cú pháp standard ES Module (`import` và `export`). Bộ biên dịch sẽ tự động bundle code bằng Esbuild ở thời điểm compile-time mà không cần cài đặt Node.js hay bất kỳ build-tool nào khác.
+
+### Cú pháp cơ bản
+*   **Khai báo và xuất module**:
+    ```javascript
+    // helper.js
+    export const getHello = () => {
+        return "Hello from helper module!";
+    };
+    ```
+*   **Import và sử dụng**:
+    ```javascript
+    // app.kitwork.js
+    import { router } from "kitwork"; // Module kitwork ảo được cung cấp sẵn
+    import { getHello } from "./helper.js";
+
+    router.get("/test").handle((response) => response.text(getHello()));
+    ```
+
+### ⚠️ Lưu ý Cực kỳ Quan trọng
+Do Bộ phân tích cú pháp (Parser) của Kitwork JS Engine được tối ưu hóa siêu nhỏ gọn và **không hỗ trợ từ khóa `function`**, bạn **bắt buộc** phải tuân thủ quy tắc sau:
+1.  Chỉ định nghĩa hàm bằng **Arrow Function** (`const myFunc = () => {}`).
+2.  Không sử dụng từ khóa `function` truyền thống (như `function myFunc() {}` hay `export function myFunc() {}`), nếu không bộ biên dịch sẽ báo lỗi cú pháp (`assemble error`).
+
 ---
 *Tài liệu này được biên soạn cho Kitwork Engine v1.5.0+*
+
