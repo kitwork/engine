@@ -259,7 +259,7 @@ func (r *Router) getStaticCachePath() (string, error) {
 	subDir := hashStr[:2]
 	fileName := hashStr[2:]
 
-	cacheDir := r.tenant.resolve("static", subDir)
+	cacheDir := r.tenant.resolve(".static", subDir)
 	return filepath.Join(cacheDir, fileName), nil
 }
 
