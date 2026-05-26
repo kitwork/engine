@@ -1,6 +1,7 @@
 package work
 
 import (
+	"compress/gzip"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -259,7 +260,7 @@ func (r *Router) getStaticCachePath() (string, error) {
 	fileName := hashStr[2:]
 
 	cacheDir := r.tenant.resolve("static", subDir)
-	return filepath.Join(cacheDir, fileName+".static"), nil
+	return filepath.Join(cacheDir, fileName), nil
 }
 
 func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool {
@@ -267,18 +268,34 @@ func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool
 		return false
 	}
 
-	cachePath, err := r.getStaticCachePath()
+	basePath, err := r.getStaticCachePath()
 	if err != nil {
 		return false
 	}
 
-	file, err := os.Open(cachePath)
-	if err != nil {
-		return false
+	// 1. Check if Gzip is supported and try to serve .static.gz first
+	gzipSupported := strings.Contains(req.Header.Get("Accept-Encoding"), "gzip")
+	var file *os.File
+	var openErr error
+	usingGzip := false
+
+	if gzipSupported {
+		file, openErr = os.Open(basePath + ".static.gz")
+		if openErr == nil {
+			usingGzip = true
+		}
+	}
+
+	// 2. Fall back to uncompressed .static if gzip was not supported or failed to open
+	if !usingGzip {
+		file, openErr = os.Open(basePath + ".static")
+		if openErr != nil {
+			return false
+		}
 	}
 	defer file.Close()
 
-	// 1. Read first 10 bytes for metadata length
+	// 3. Read first 10 bytes for metadata length
 	headerBuf := make([]byte, 10)
 	_, err = io.ReadFull(file, headerBuf)
 	if err != nil {
@@ -290,36 +307,43 @@ func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool
 		return false
 	}
 
-	// 2. Read L bytes of metadata
+	// 4. Read L bytes of metadata
 	metaBuf := make([]byte, L)
 	_, err = io.ReadFull(file, metaBuf)
 	if err != nil {
 		return false
 	}
 
-	// 3. Parse metadata
+	// 5. Parse metadata
 	var meta StaticCacheMeta
 	if err := json.Unmarshal(metaBuf, &meta); err != nil {
 		return false
 	}
 
-	// 4. Check expiration
+	// 6. Check expiration. If expired, clean up both files
 	if time.Now().After(meta.ExpireAt) {
 		file.Close()
-		os.Remove(cachePath)
+		os.Remove(basePath + ".static")
+		os.Remove(basePath + ".static.gz")
 		return false
 	}
 
-	// 5. Set Headers & Status Code
+	// 7. Set Headers & Status Code
 	if meta.ContentType != "" {
 		w.Header().Set("Content-Type", meta.ContentType)
 	}
 	for k, v := range meta.Headers {
 		w.Header().Set(k, v)
 	}
+
+	// Set Content-Encoding header if serving pre-compressed content
+	if usingGzip {
+		w.Header().Set("Content-Encoding", "gzip")
+	}
+
 	w.WriteHeader(meta.Status)
 
-	// 6. Stream Body directly to writer (Zero-Memory Copy!)
+	// 8. Stream Body directly to writer (Zero-Memory Copy!)
 	io.Copy(w, file)
 	return true
 }
@@ -329,13 +353,13 @@ func (r *Router) saveStaticCache() {
 		return
 	}
 
-	cachePath, err := r.getStaticCachePath()
+	basePath, err := r.getStaticCachePath()
 	if err != nil {
 		return
 	}
 
 	// Ensure directory exists
-	os.MkdirAll(filepath.Dir(cachePath), 0755)
+	os.MkdirAll(filepath.Dir(basePath), 0755)
 
 	// Extract Content-Type
 	contentType := ""
@@ -379,17 +403,31 @@ func (r *Router) saveStaticCache() {
 		bodyBytes = r.response.toBytes()
 	}
 
-	// Write file
-	file, err := os.Create(cachePath)
-	if err != nil {
-		return
+	// 1. Write the standard .static file (uncompressed)
+	fileRaw, err := os.Create(basePath + ".static")
+	if err == nil {
+		headerStr := fmt.Sprintf("%010d", L)
+		fileRaw.Write([]byte(headerStr))
+		fileRaw.Write(metaBytes)
+		fileRaw.Write(bodyBytes)
+		fileRaw.Close()
 	}
-	defer file.Close()
 
-	headerStr := fmt.Sprintf("%010d", L)
-	file.Write([]byte(headerStr))
-	file.Write(metaBytes)
-	file.Write(bodyBytes)
+	// 2. Write the compressed .static.gz file
+	fileGzip, err := os.Create(basePath + ".static.gz")
+	if err == nil {
+		headerStr := fmt.Sprintf("%010d", L)
+		fileGzip.Write([]byte(headerStr))
+		fileGzip.Write(metaBytes)
+		
+		// Compress body bytes using gzip writer
+		gw := gzip.NewWriter(fileGzip)
+		_, errGz := gw.Write(bodyBytes)
+		if errGz == nil {
+			gw.Close()
+		}
+		fileGzip.Close()
+	}
 }
 
 
