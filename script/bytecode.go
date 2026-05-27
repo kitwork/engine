@@ -75,7 +75,6 @@ func bundleJavaScript(entryPath string) (string, error) {
 		ResolveExtensions: []string{".kitwork.js", ".js", ".json"},
 	})
 
-
 	if len(result.Errors) > 0 {
 		return "", fmt.Errorf("esbuild error: %s", result.Errors[0].Text)
 	}
@@ -104,7 +103,7 @@ func Bytecode(paths ...string) (*compiler.Bytecode, error) {
 	// This preserves exact original line numbers for standard single-file scripts.
 	hasImports := strings.Contains(content, "import ") || strings.Contains(content, "import{") ||
 		strings.Contains(content, "export ") || strings.Contains(content, "export{")
-	
+
 	if hasImports {
 		content, err = bundleJavaScript(entryPath)
 		if err != nil {
