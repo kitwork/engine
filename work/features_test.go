@@ -264,8 +264,8 @@ func TestRouterStaticCache(t *testing.T) {
 		t.Errorf("expected execution_count 1 from cache, got: %s", rec2.Body.String())
 	}
 
-	// 3. Verify the static cache file was created under tenants/test/localhost/static/
-	staticDir := filepath.Join(tenantDir, "static")
+	// 3. Verify the static cache file was created under tenants/test/localhost/.static/
+	staticDir := filepath.Join(tenantDir, ".static")
 	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
 		t.Error("expected static cache directory to be created, but it was not found")
 	}

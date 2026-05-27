@@ -123,6 +123,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "image/png")
 		w.WriteHeader(r.response.Code())
 		w.Write(data.Bytes())
+	case "svg":
+		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+		w.WriteHeader(r.response.Code())
+		w.Write([]byte(data.String()))
 	case "json":
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(r.response.Code())
@@ -259,7 +263,7 @@ func (r *Router) getStaticCachePath() (string, error) {
 	subDir := hashStr[:2]
 	fileName := hashStr[2:]
 
-	cacheDir := r.tenant.resolve("static", subDir)
+	cacheDir := r.tenant.resolve(".static", subDir)
 	return filepath.Join(cacheDir, fileName), nil
 }
 
@@ -413,20 +417,27 @@ func (r *Router) saveStaticCache() {
 		fileRaw.Close()
 	}
 
-	// 2. Write the compressed .static.gz file
-	fileGzip, err := os.Create(basePath + ".static.gz")
-	if err == nil {
-		headerStr := fmt.Sprintf("%010d", L)
-		fileGzip.Write([]byte(headerStr))
-		fileGzip.Write(metaBytes)
-		
-		// Compress body bytes using gzip writer
-		gw := gzip.NewWriter(fileGzip)
-		_, errGz := gw.Write(bodyBytes)
-		if errGz == nil {
-			gw.Close()
+	// 2. Write the compressed .static.gz file only if content is compressible and large enough
+	// Compressible: html, json, text, render. Threshold: > 1024 bytes (1 KB)
+	shouldCompress := len(bodyBytes) > 1024 && (
+		kind == "html" || kind == "json" || kind == "render" || kind == "text" ||
+		strings.Contains(contentType, "text/") || strings.Contains(contentType, "json")	)
+
+	if shouldCompress {
+		fileGzip, err := os.Create(basePath + ".static.gz")
+		if err == nil {
+			headerStr := fmt.Sprintf("%010d", L)
+			fileGzip.Write([]byte(headerStr))
+			fileGzip.Write(metaBytes)
+			
+			// Compress body bytes using gzip writer
+			gw := gzip.NewWriter(fileGzip)
+			_, errGz := gw.Write(bodyBytes)
+			if errGz == nil {
+				gw.Close()
+			}
+			fileGzip.Close()
 		}
-		fileGzip.Close()
 	}
 }
 

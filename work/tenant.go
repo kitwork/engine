@@ -22,9 +22,9 @@ type Tenant struct {
 	config *Config
 	entity *Entity
 
-	bytecode *compiler.Bytecode
-	vm       *runtime.VM
-	routes   *Routes
+	bytecode  *compiler.Bytecode
+	vm        *runtime.VM
+	routes    *Routes
 	MaxEnergy uint64
 
 	cacheLock sync.RWMutex

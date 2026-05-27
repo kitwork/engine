@@ -1,4 +1,4 @@
-const { router, log, render, http, database, go } = kitwork();
+const { router, log, render, http, database, go, napas, qrcode } = kitwork();
 
 const global = {
     name: "kitwork",
@@ -185,6 +185,66 @@ router.get("/dashboard").handle((request, response) => {
     return response.html(view);
 });
 
+
+router.get("/test-vietqr").handle((request, response) => {
+    // 1. Tạo payload VietQR chuẩn Napas
+    const myNapas = napas
+        .bank("970415", "1234567890") // BIN VietinBank & Số tài khoản
+        .amount(150000)               // Số tiền: 150,000 VND
+        .receiver("NGUYEN VAN A")     // Tên chủ tài khoản
+        .info("Thanh toan nuoc");
+
+    // 2. Vẽ mã QR nghệ thuật Premium (PNG) bằng Smart API
+    const pngBytes = qrcode
+        .napas(myNapas)       // Truyền trực tiếp đối tượng Napas vào
+        .template("circular")
+        .logo("vietqr")
+        .cell("#005ba1")      // Cấu hình màu cell nhanh bằng chuỗi màu
+        .finder("#005ba1")    // Cấu hình tất cả finder nhanh bằng màu
+        .size(400)
+        .png();
+
+    return response.image(pngBytes);
+});
+
+router.get("/test-vietqr-svg").handle((request, response) => {
+    // 1. Tạo payload VietQR chuẩn Napas
+    const myNapas = napas
+        .bank("970415", "1234567890")
+        .amount(200000)
+        .receiver("NGUYEN VAN B")
+        .info("Thanh toan dien");
+
+    // 2. Sinh mã QR dạng SVG bằng Smart API với cấu hình Gradient phức tạp
+    const svgString = qrcode
+        .napas(myNapas)
+        .template("circular")
+        .logo("vietqr")
+        .cell({
+            gradient: { type: "linear", colors: ["#0f172a", "#38bdf8"], angle: 45 }
+        })
+        // Mắt Top-Left: Gradient Đỏ sang Hồng
+        .finder("tl", {
+            stroke: "#be123c",
+            rounded: 3.5,
+            gradient: { type: "linear", colors: ["#e11d48", "#f43f5e"], angle: 90 }
+        })
+        // Mắt Top-Right: Gradient Xanh lá sang Ngọc
+        .finder("tr", {
+            stroke: "#065f46",
+            rounded: 1.5,
+            gradient: { type: "linear", colors: ["#047857", "#10b981"], angle: 45 }
+        })
+        // Mắt Bottom-Left: Màu Tím đậm, viền Tím nhạt, vuông truyền thống
+        .finder("bl", {
+            color: "#6d28d9",
+            stroke: "#5b21b6",
+            rounded: 0
+        })
+        .svg();
+
+    return response.svg(svgString);
+});
 
 router.get("/*").handle((request, response) => {
     const requestPath = request.path();

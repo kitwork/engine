@@ -333,6 +333,20 @@ func (l *Lexer) readNumber() string {
 		l.readChar()
 	}
 
+	// Support scientific notation (e.g. 1e3, 1.5e-3, 2e+4)
+	if l.ch == 'e' || l.ch == 'E' {
+		peek := l.peekChar()
+		if character.Table[peek] == character.Digit || peek == '+' || peek == '-' {
+			l.readChar() // Consume 'e' / 'E'
+			if l.ch == '+' || l.ch == '-' {
+				l.readChar() // Consume '+' / '-'
+			}
+			for character.Table[l.ch] == character.Digit {
+				l.readChar() // Consume digits of the exponent
+			}
+		}
+	}
+
 	content := l.input[start:l.pos]
 
 	return l.b2s(content)
