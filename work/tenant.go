@@ -129,6 +129,20 @@ func (t *Tenant) Run() error {
 	})
 	t.vm.Globals["JSON"] = jsonObj
 
+	// Inject Date helper function
+	dateFunc := value.NewFunc(func(args ...value.Value) value.Value {
+		now := time.Now()
+		toISOString := value.NewFunc(func(args ...value.Value) value.Value {
+			return value.NewString(now.Format("2006-01-02T15:04:05.000Z"))
+		})
+		methods := map[string]value.Value{
+			"toISOString": toISOString,
+		}
+		return value.New(methods)
+	})
+	t.vm.Globals["Date"] = dateFunc
+
+
 	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
 	res := t.vm.Run()
 	if res.K == value.Invalid {

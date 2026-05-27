@@ -616,7 +616,7 @@ func (p *Parser) expectPeek(k token.Kind) bool {
 		p.nextToken()
 		return true
 	}
-	p.addError(fmt.Sprintf("expected %s, got %s", k, p.peekToken.Kind))
+	p.addError(fmt.Sprintf("expected %s, got %s (peek token: '%s' at position %d)", k, p.peekToken.Kind, p.peekToken.String(), p.peekToken.Position))
 	return false
 }
 

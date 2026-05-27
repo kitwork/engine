@@ -116,7 +116,28 @@ func Run(files ...string) (err error) {
 		}()
 	}
 
-	// Always launch the standard HTTP server (on cfg.Port) in the foreground to keep the process alive
-	fmt.Printf("Starting Kitwork Server on port :%d...\n", cfg.Port)
+	// Print premium startup welcome banner
+	modeStr := "Multi-Tenant"
+	switch cfg.Root {
+	case "", "./", "../", "/", ".", "..":
+		modeStr = "Standalone (Root: .)"
+	default:
+		modeStr = fmt.Sprintf("Multi-Tenant (Root: %s)", cfg.Root)
+	}
+
+	fmt.Println("\033[36m" + `
+   __  ___ __                      __   
+  / / / (_) /___ _      ______  __/ /__ 
+ / /_/ / / __/ \ \ /\ / / __ \/ __  '_/ 
+/ __  / / /_    \ V  V / /_/ / /  <    
+/_/ /_/_/\__/     \_/\_/\____/_/  |_|   ` + "\033[0m")
+	fmt.Println("\033[1;30m==================================================\033[0m")
+	fmt.Printf("\033[1;35m» Engine Mode:\033[0m       %s\n", modeStr)
+	fmt.Printf("\033[1;32m» Local Access:\033[0m      http://localhost:%d\033[0m\n", cfg.Port)
+	if cfg.Database != nil {
+		fmt.Printf("\033[1;34m» Database:\033[0m          %s (%s:%d)\n", cfg.Database.Type, cfg.Database.Host, cfg.Database.Port)
+	}
+	fmt.Println("\033[1;30m==================================================\033[0m")
+
 	return http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), handler)
 }

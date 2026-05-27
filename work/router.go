@@ -11,10 +11,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kitwork/engine/value"
 )
+
+var staticFileLocks sync.Map
+
+func getFileLock(path string) *sync.RWMutex {
+	val, _ := staticFileLocks.LoadOrStore(path, &sync.RWMutex{})
+	return val.(*sync.RWMutex)
+}
 
 func (w *KitWork) Router() *Router { return &Router{tenant: w.tenant} }
 
@@ -277,6 +285,15 @@ func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool
 		return false
 	}
 
+	mu := getFileLock(basePath)
+	mu.RLock()
+	hasReadLock := true
+	defer func() {
+		if hasReadLock {
+			mu.RUnlock()
+		}
+	}()
+
 	// 1. Check if Gzip is supported and try to serve .static.gz first
 	gzipSupported := strings.Contains(req.Header.Get("Accept-Encoding"), "gzip")
 	var file *os.File
@@ -327,8 +344,15 @@ func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool
 	// 6. Check expiration. If expired, clean up both files
 	if time.Now().After(meta.ExpireAt) {
 		file.Close()
+		
+		mu.RUnlock()
+		hasReadLock = false
+		
+		mu.Lock()
 		os.Remove(basePath + ".static")
 		os.Remove(basePath + ".static.gz")
+		mu.Unlock()
+		
 		return false
 	}
 
@@ -361,6 +385,10 @@ func (r *Router) saveStaticCache() {
 	if err != nil {
 		return
 	}
+
+	mu := getFileLock(basePath)
+	mu.Lock()
+	defer mu.Unlock()
 
 	// Ensure directory exists
 	os.MkdirAll(filepath.Dir(basePath), 0755)
