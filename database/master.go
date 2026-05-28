@@ -9,14 +9,18 @@ var Default *sql.DB
 
 func DomainSystemExists(domain string) (exists bool, err error) {
 	if System != nil {
-		query := "SELECT EXISTS(SELECT 1 FROM domains WHERE domain_name = $1)"
+		query := "SELECT EXISTS(SELECT 1 FROM domain WHERE hostname = $1)"
 		err = System.QueryRow(query, domain).Scan(&exists)
 	}
 	return
 }
 
-func IdentitySystem(domain string) (string, error) {
-	return "", nil
+func IdentitySystem(domain string) (identity string, err error) {
+	if System != nil {
+		query := "SELECT identity FROM domain WHERE hostname = $1"
+		err = System.QueryRow(query, domain).Scan(&identity)
+	}
+	return
 }
 
 func Connect(cfg *Config) (*sql.DB, error) {

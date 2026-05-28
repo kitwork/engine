@@ -35,11 +35,12 @@ type Engine struct {
 	root      string
 	maxEnergy uint64
 	hotReload bool
+	Hostname  string
 	cache     map[string]*cachedTenant
 	mu        sync.RWMutex
 }
 
-func New(root string, maxEnergy uint64, hotReload bool) *Engine {
+func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
 	if maxEnergy == 0 {
 		maxEnergy = 10000000 // Default 10M
 	}
@@ -47,6 +48,7 @@ func New(root string, maxEnergy uint64, hotReload bool) *Engine {
 		root:      root,
 		maxEnergy: maxEnergy,
 		hotReload: hotReload,
+		Hostname:  hostname,
 		cache:     make(map[string]*cachedTenant),
 	}
 	// Start background cleanup loop every 1 minute, with 10 minutes idle timeout
@@ -169,6 +171,9 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	domain := strings.Split(r.Host, ":")[0]
+	if (domain == "localhost" || domain == "127.0.0.1") && e.Hostname != "" {
+		domain = e.Hostname
+	}
 	tenant, err := e.run(domain)
 	if err != nil {
 		http.Error(w, err.Error(), 404)

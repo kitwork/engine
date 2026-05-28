@@ -22,6 +22,7 @@ type Config struct {
 	Domains   []string         `json:"domains" yaml:"domains"`
 	MaxEnergy uint64           `json:"max_energy" yaml:"max_energy"`
 	HotReload bool             `json:"hot_reload" yaml:"hot_reload"`
+	Hostname  string           `json:"hostname" yaml:"hostname"`
 }
 
 func Run(files ...string) (err error) {
@@ -98,7 +99,7 @@ func Run(files ...string) (err error) {
 	ssl.Domains = cfg.Domains
 
 	// Initialize and run the engine
-	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload)
+	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
 
 	if len(cfg.Domains) > 0 {
 		tlsConfig := ssl.AutoSSL()

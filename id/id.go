@@ -172,6 +172,30 @@ func DecodeEntity(idStr string) (time.Time, error) {
 	return time.Unix(0, timestampNano).UTC(), nil
 }
 
+// IsValid checks if the given string is a valid 36-character KitID (containing exactly the 36 distinct lowercase alphanumeric characters).
+func IsValid(idStr string) bool {
+	if len(idStr) != 36 {
+		return false
+	}
+	var mask uint64
+	for i := 0; i < 36; i++ {
+		char := idStr[i]
+		var bit int
+		if char >= '0' && char <= '9' {
+			bit = int(char - '0')
+		} else if char >= 'a' && char <= 'z' {
+			bit = int(char - 'a' + 10)
+		} else {
+			return false
+		}
+		if (mask & (1 << bit)) != 0 {
+			return false
+		}
+		mask |= (1 << bit)
+	}
+	return true
+}
+
 // --- Execution Methods ---
 
 // Must generates an ID of the specified length or panics on error.

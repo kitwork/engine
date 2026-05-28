@@ -8,7 +8,8 @@ import (
 )
 
 type Config struct {
-	Type     string `yaml:"type"` // master, postgres, mysql, sqlite
+	Alias    string `yaml:"alias"` // master, config, data_old, data
+	Type     string `yaml:"type"`  //  postgres, mysql, sqlite
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Name     string `yaml:"name"`

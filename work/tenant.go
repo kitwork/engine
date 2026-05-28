@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/script"
 	"github.com/kitwork/engine/value"
@@ -153,21 +154,23 @@ func (t *Tenant) Run() error {
 }
 
 func NewTenant(root string, domain string) *Tenant {
+	identity := "test"
+	if domain != "" {
+		if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
+			identity = dbIdentity
+		}
+	}
 
 	tenant := &Tenant{
 		config: &Config{
 			root: root,
 		},
 		entity: &Entity{
-			Identity: "test",
+			Identity: identity,
 			Domain:   domain,
 		},
 		cache:     make(map[string]*CachedResult),
 		MaxEnergy: 10000000,
-	}
-
-	if domain != "" {
-		tenant.entity.Domain = domain
 	}
 
 	switch root {

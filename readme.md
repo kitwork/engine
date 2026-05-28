@@ -171,4 +171,3 @@ Inside the VM, transaction blocks are bounded using Go's native PostgreSQL/MySQL
 
 ## ✒️ License & Support
 * Developed by **Huỳnh Nhân Quốc** under the **Kitwork Foundation**.
-* Licensed under the **MIT License**.
