@@ -379,7 +379,7 @@ func (vm *VM) Run() value.Value {
 		if len(vm.Stack) > 0 && vm.peek().K == value.Invalid {
 			errVal := vm.pop()
 			line := vm.currentLine(f.IP - 1)
-			errMsg := errVal.Text()
+			errMsg := errVal.String()
 			if !strings.Contains(errMsg, "(at line") {
 				errMsg = fmt.Sprintf("%s (at line %d)", errMsg, line)
 			}
@@ -748,7 +748,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 		if len(vm.Stack) > 0 && vm.peek().K == value.Invalid {
 			errVal := vm.pop()
 			line := vm.currentLine(f.IP - 1)
-			errMsg := errVal.Text()
+			errMsg := errVal.String()
 			if !strings.Contains(errMsg, "(at line") {
 				errMsg = fmt.Sprintf("%s (at line %d)", errMsg, line)
 			}

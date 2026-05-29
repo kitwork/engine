@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -300,15 +302,39 @@ func (l *Lexer) skipComment() {
 	l.skipWhitespace()
 }
 
+func unescapeJSString(s string, quote byte) string {
+	var sb strings.Builder
+	sb.Grow(len(s))
+	str := s
+	for len(str) > 0 {
+		c, _, tail, err := strconv.UnquoteChar(str, quote)
+		if err != nil {
+			sb.WriteByte(str[0])
+			str = str[1:]
+			continue
+		}
+		sb.WriteRune(c)
+		str = tail
+	}
+	return sb.String()
+}
+
 func (l *Lexer) readString(quote byte) string {
 	l.readChar()
 	start := l.pos
 	for l.ch != quote && l.ch != 0 {
-		l.readChar()
+		if l.ch == '\\' {
+			l.readChar()
+			if l.ch != 0 {
+				l.readChar()
+			}
+		} else {
+			l.readChar()
+		}
 	}
 	content := l.input[start:l.pos]
 	l.readChar()
-	return l.b2s(content)
+	return unescapeJSString(l.b2s(content), quote)
 }
 
 func (l *Lexer) readIdentifier() string {

@@ -170,6 +170,7 @@ func NewTenant(root string, domain string) *Tenant {
 			Domain:   domain,
 		},
 		cache:     make(map[string]*CachedResult),
+		databases: make(map[string]*sql.DB),
 		MaxEnergy: 10000000,
 	}
 

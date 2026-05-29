@@ -5,7 +5,7 @@ import (
 )
 
 var System *sql.DB
-var Default *sql.DB
+var Configs map[string]Config = make(map[string]Config)
 
 func DomainSystemExists(domain string) (exists bool, err error) {
 	if System != nil {

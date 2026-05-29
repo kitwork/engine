@@ -7,6 +7,7 @@ import (
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/value"
 	_ "github.com/lib/pq"
+	_ "modernc.org/sqlite"
 )
 
 func (w *KitWork) Database() *Database {
@@ -24,32 +25,116 @@ type Database struct {
 }
 
 func (d *Database) Connection() *Database {
-	if d.sqlDB == nil && database.Default != nil {
-		d.sqlDB = database.Default
+	if d.sqlDB == nil {
+		d.tenant.dbMu.Lock()
+		if d.tenant.databases == nil {
+			d.tenant.databases = make(map[string]*sql.DB)
+		}
+		if dbConn, exists := d.tenant.databases["default"]; exists {
+			d.sqlDB = dbConn
+		}
+		d.tenant.dbMu.Unlock()
 	}
 	return d
 }
 
 func (d *Database) Connected() *Database {
-	if d.sqlDB == nil && database.Default != nil {
-		d.sqlDB = database.Default
-	}
-	return d
+	return d.Connection()
 }
 
 func (d *Database) Connect(vals ...value.Value) *Database {
-	// Nếu có truyền config vào, cập nhật config trước
-	if len(vals) > 0 {
-		vals[0].To(d.config)
+	if d.tenant.databases == nil {
+		d.tenant.databases = make(map[string]*sql.DB)
 	}
 
-	if d.sqlDB == nil {
-		var err error
-		d.sqlDB, err = d.config.Connect()
-		if err != nil {
-			fmt.Println(err)
+	var alias string = "default"
+	var configToConnect *database.Config
+
+	if len(vals) == 1 {
+		v := vals[0]
+		if v.K == value.String {
+			// database.connect("alias") -> GET
+			alias = v.String()
+		} else if v.K == value.Map {
+			// database.connect({ alias: "alias", ... }) -> GET or SET
+			m, _ := v.Interface().(map[string]interface{})
+			if m != nil {
+				if a, ok := m["alias"].(string); ok {
+					alias = a
+				}
+				_, hasType := m["type"]
+				_, hasHost := m["host"]
+				if hasType || hasHost {
+					var dbCfg database.Config
+					v.To(&dbCfg)
+					if dbCfg.Alias == "" {
+						dbCfg.Alias = alias
+					}
+					configToConnect = &dbCfg
+				}
+			}
 		}
+	} else if len(vals) >= 2 {
+		// database.connect("alias", { ... }) -> SET
+		alias = vals[0].String()
+		var dbCfg database.Config
+		vals[1].To(&dbCfg)
+		dbCfg.Alias = alias
+		configToConnect = &dbCfg
 	}
+
+	if alias == "" {
+		alias = "default"
+	}
+
+	d.tenant.dbMu.Lock()
+	defer d.tenant.dbMu.Unlock()
+
+	// GET Operation
+	if configToConnect == nil {
+		if dbConn, exists := d.tenant.databases[alias]; exists {
+			d.sqlDB = dbConn
+		} else {
+			if dbCfg, ok := database.Configs[alias]; ok {
+				dbConn, err := dbCfg.Connect()
+				if err != nil {
+					fmt.Printf("[DB] Failed to connect to configured database '%s': %v\n", alias, err)
+				} else {
+					d.tenant.databases[alias] = dbConn
+					d.sqlDB = dbConn
+				}
+			} else if alias == "default" {
+				sqlitePath := d.tenant.resolve("kitwork.db")
+				fmt.Printf("[DB] Default connection not found. Initializing fallback SQLite at: %s\n", sqlitePath)
+				sqliteCfg := &database.Config{
+					Alias: "default",
+					Type:  "sqlite",
+					Host:  sqlitePath,
+					Name:  sqlitePath,
+				}
+				dbConn, err := sqliteCfg.Connect()
+				if err != nil {
+					fmt.Printf("[DB] Failed to connect SQLite fallback database: %v\n", err)
+				} else {
+					d.tenant.databases["default"] = dbConn
+					d.sqlDB = dbConn
+				}
+			} else {
+				fmt.Printf("Database connection with alias '%s' not found\n", alias)
+			}
+		}
+		return d
+	}
+
+	// SET Operation
+	dbConn, err := configToConnect.Connect()
+	if err != nil {
+		fmt.Printf("Failed to connect database for alias '%s': %v\n", alias, err)
+		return d
+	}
+
+	d.tenant.databases[alias] = dbConn
+	d.sqlDB = dbConn
 	return d
 }
 

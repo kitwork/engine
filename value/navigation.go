@@ -44,6 +44,9 @@ func (v Value) Len() int {
 }
 
 func (v Value) Index(i int) Value {
+	if v.K == Invalid {
+		return v
+	}
 	if !v.IsObject() {
 		return Value{K: Nil}
 	}
@@ -98,6 +101,9 @@ func (v Value) Last() Value {
 }
 
 func (v Value) One() Value {
+	if v.K == Invalid {
+		return v
+	}
 	if v.K == Array {
 		return v.First()
 	}
@@ -118,6 +124,9 @@ func (v Value) Set(key string, val Value) {
 }
 
 func (v Value) Get(key string) Value {
+	if v.K == Invalid {
+		return v
+	}
 	// JS-Compatibility: .length property
 	if key == "length" {
 		return New(v.Len())
@@ -165,6 +174,9 @@ func (v Value) Get(key string) Value {
 func (v Value) At(path ...any) Value {
 	cur := v
 	for _, p := range path {
+		if cur.K == Invalid {
+			return cur
+		}
 		switch x := p.(type) {
 		case string:
 			cur = cur.Get(x)

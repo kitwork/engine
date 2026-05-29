@@ -3,15 +3,48 @@ package work
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/kitwork/engine/value"
 )
 
+var AllowLocal bool
+var ServerPort int
+
 var sharedTransport = &http.Transport{
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control: func(network, address string, c syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if err != nil {
+				return err
+			}
+			ip := net.ParseIP(host)
+			if ip != nil {
+				if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
+					return fmt.Errorf("SSRF prevention: connection to private/local space is blocked (%s)", host)
+				}
+			}
+			return nil
+		},
+	}).DialContext,
+	MaxIdleConns:        100,
+	IdleConnTimeout:     90 * time.Second,
+	MaxIdleConnsPerHost: 100,
+}
+
+var localTransport = &http.Transport{
+	DialContext: (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext,
 	MaxIdleConns:        100,
 	IdleConnTimeout:     90 * time.Second,
 	MaxIdleConnsPerHost: 100,
@@ -19,6 +52,11 @@ var sharedTransport = &http.Transport{
 
 var sharedClient = &http.Client{
 	Transport: sharedTransport,
+	Timeout:   10 * time.Second,
+}
+
+var localClient = &http.Client{
+	Transport: localTransport,
 	Timeout:   10 * time.Second,
 }
 
@@ -84,6 +122,16 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 		}
 	}
 
+	var isLocalRequest bool
+	if strings.HasPrefix(url, "/") {
+		isLocalRequest = true
+		port := 8080
+		if ServerPort > 0 {
+			port = ServerPort
+		}
+		url = fmt.Sprintf("http://127.0.0.1:%d%s", port, url)
+	}
+
 	req, err := http.NewRequest(method, url, bodyReader)
 	if err != nil {
 		return value.New(HTTPResponse{Status: 0, Error: err.Error()})
@@ -99,12 +147,22 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := sharedClient
+	transport := sharedTransport
+	if isLocalRequest || AllowLocal {
+		transport = localTransport
+	}
+
+	var client *http.Client
 	if h.timeout > 0 {
-		// Tạo client tạm thời nhưng vẫn dùng chung Transport để giữ Keep-Alive
 		client = &http.Client{
-			Transport: sharedTransport,
+			Transport: transport,
 			Timeout:   h.timeout,
+		}
+	} else {
+		if isLocalRequest || AllowLocal {
+			client = localClient
+		} else {
+			client = sharedClient
 		}
 	}
 

@@ -1,6 +1,7 @@
 package work
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -119,7 +120,7 @@ func TestDatabaseAtomic(t *testing.T) {
 		return
 	}
 	defer dbConn.Close()
-	database.Default = dbConn
+
 
 	// 3. Setup test table
 	_, err = dbConn.Exec(`CREATE TABLE IF NOT EXISTS test_atomic_tx (
@@ -162,6 +163,7 @@ func TestDatabaseAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmpDir, "localhost")
+	tenant.databases["default"] = dbConn
 	err = tenant.Run()
 	if err != nil {
 		t.Fatalf("run success script failed: %v", err)
@@ -192,6 +194,7 @@ func TestDatabaseAtomic(t *testing.T) {
 	}
 
 	tenantFail := NewTenant(tmpDir, "localhost")
+	tenantFail.databases["default"] = dbConn
 	_ = tenantFail.Run()
 
 	// Check count again, should still be 2 (success_1 and success_2)
@@ -283,6 +286,125 @@ func TestRouterStaticCache(t *testing.T) {
 	}
 	if !strings.Contains(rec3.Body.String(), `"execution_count":2`) {
 		t.Errorf("expected execution_count 2 after cache expiration, got: %s", rec3.Body.String())
+	}
+}
+
+func TestHTTPSSRFBlocking(t *testing.T) {
+	h := &HTTP{}
+
+	// --- 1. Test standard blocking (AllowLocal = false) ---
+	AllowLocal = false
+
+	// Test private IP (loopback)
+	resLocal := h.Get("http://127.0.0.1:8080/hello")
+	respLocal, ok := resLocal.V.(HTTPResponse)
+	if !ok {
+		t.Fatalf("expected HTTPResponse structure, got %T", resLocal.V)
+	}
+	if !strings.Contains(respLocal.Error, "SSRF prevention") && !strings.Contains(respLocal.Error, "blocked") {
+		t.Errorf("expected SSRF blocked error, got: %s", respLocal.Error)
+	}
+
+	// Test hostname localhost (resolves to 127.0.0.1 or ::1)
+	resLocalhost := h.Get("http://localhost:8080/hello")
+	respLocalhost, _ := resLocalhost.V.(HTTPResponse)
+	if !strings.Contains(respLocalhost.Error, "SSRF prevention") && !strings.Contains(respLocalhost.Error, "blocked") {
+		t.Errorf("expected SSRF blocked error for localhost, got: %s", respLocalhost.Error)
+	}
+
+	// --- 2. Test standard bypass (AllowLocal = true) ---
+	AllowLocal = true
+	resLocalBypass := h.Get("http://127.0.0.1:8080/hello")
+	respLocalBypass, _ := resLocalBypass.V.(HTTPResponse)
+	// Should NOT say "SSRF prevention" or "blocked" (might fail with connection refused/etc but not SSRF)
+	if strings.Contains(respLocalBypass.Error, "SSRF prevention") {
+		t.Errorf("expected private IP request to be allowed when AllowLocal=true, got: %s", respLocalBypass.Error)
+	}
+	AllowLocal = false // restore
+
+	// --- 3. Test relative path automatic resolution & SSRF bypass ---
+	ServerPort = 9999
+	resRelative := h.Get("/hello-relative")
+	respRelative, _ := resRelative.V.(HTTPResponse)
+	// Should resolve to http://127.0.0.1:9999/hello-relative and not block with SSRF prevention
+	if strings.Contains(respRelative.Error, "SSRF prevention") {
+		t.Errorf("expected relative path to bypass SSRF filter, got: %s", respRelative.Error)
+	}
+	// Verify it resolved to the right port
+	if !strings.Contains(respRelative.Error, "127.0.0.1:9999") && !strings.Contains(respRelative.Error, "dial tcp 127.0.0.1:9999") {
+		t.Errorf("expected relative path to target 127.0.0.1:9999, got error: %s", respRelative.Error)
+	}
+	ServerPort = 0 // restore
+
+	// --- 4. Test public endpoint (should NOT trigger SSRF blocking) ---
+	resPublic := h.Get("https://github.com")
+	respPublic, _ := resPublic.V.(HTTPResponse)
+	if strings.Contains(respPublic.Error, "SSRF prevention") {
+		t.Errorf("expected public request not to be blocked by SSRF filter, got: %s", respPublic.Error)
+	}
+}
+
+func TestDatabaseFallbackAndErrorPropagation(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-fallback-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "kitwork.vn")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatalf("failed to create tenant dir: %v", err)
+	}
+
+	appJsCode := `
+import { router, database } from 'kitwork';
+const db = database.connection();
+
+router.get("/test").handle((response) => {
+	db.table("user").find("id", 1);
+	return response.text("ok");
+});
+
+router.get("/error").handle((response) => {
+	db.table("non_existent_table").find("id", 1);
+	return response.text("unexpected success");
+}).catch((err, response) => {
+	return response.text("caught: " + err);
+});
+`
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatalf("failed to write app.kitwork.js: %v", err)
+	}
+
+	tenant := NewTenant(tmpDir, "kitwork.vn")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatalf("failed to run tenant: %v", err)
+	}
+
+	route, _ := tenant.routes.Match("GET", "/test")
+	if route == nil {
+		t.Fatal("route /test not found")
+	}
+
+	rec := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/test", nil)
+	tenant.Serve(rec, req)
+
+	dbPath := filepath.Join(tenantDir, "kitwork.db")
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		t.Errorf("expected fallback SQLite database to be created at: %s", dbPath)
+	}
+
+	recErr := httptest.NewRecorder()
+	reqErr, _ := http.NewRequest("GET", "/error", nil)
+	tenant.Serve(recErr, reqErr)
+
+	body := recErr.Body.String()
+	if !strings.Contains(body, "no such table") && !strings.Contains(body, "database query error") {
+		t.Errorf("expected error to be caught by JS catch block, got body: %q", body)
 	}
 }
 

@@ -73,6 +73,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 		if r.err != nil {
 			kind = "error"
 			data = value.New(r.err.Error())
+			r.response.Return(data, kind)
 			if r.response.Code() == 0 {
 				r.response.Status(500)
 			}
@@ -82,6 +83,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 			} else {
 				kind = "html"
 			}
+			r.response.Return(data, kind)
 		}
 	}
 

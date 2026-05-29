@@ -24,6 +24,11 @@ func (v Value) String() string {
 
 func (v Value) Append(b []byte) []byte {
 	switch v.K {
+	case Invalid:
+		if s, ok := v.V.(string); ok {
+			return append(b, s...)
+		}
+		return append(b, "invalid"...)
 	case String:
 		return append(b, v.String()...)
 	case Number:

@@ -73,6 +73,7 @@ func bundleJavaScript(entryPath string) (string, error) {
 		Format:            api.FormatESModule,
 		Plugins:           []api.Plugin{kitworkPlugin},
 		ResolveExtensions: []string{".kitwork.js", ".js", ".json"},
+		Charset:           api.CharsetUTF8,
 	})
 
 	if len(result.Errors) > 0 {

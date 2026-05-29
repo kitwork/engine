@@ -463,6 +463,9 @@ func (q *Query) Exists(args ...value.Value) value.Value {
 	}
 	// We only need to know if at least one record exists
 	res := q.list(1)
+	if res.K == value.Invalid {
+		return res
+	}
 	arr := res.Array()
 	return value.New(len(arr) > 0)
 }
@@ -758,7 +761,7 @@ func (q *Query) buildConditions(conditions []Condition, argOffset int) (string, 
 
 func (q *Query) get() value.Value {
 	if q.db == nil {
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: "database not connected"}
 	}
 
 	sqlStr, args := q.getSQL()
@@ -774,7 +777,7 @@ func (q *Query) get() value.Value {
 	rows, err := q.db.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		fmt.Printf("[DB] Query Error: %v\n", err)
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("database query error: %v", err)}
 	}
 	defer rows.Close()
 
@@ -857,8 +860,11 @@ func (q *Query) Remove() value.Value {
 }
 
 func (q *Query) insert(val map[string]value.Value) value.Value {
-	if len(q.tables) == 0 || q.db == nil {
-		return value.Value{K: value.Nil}
+	if len(q.tables) == 0 {
+		return value.Value{K: value.Invalid, V: "missing table name for insert"}
+	}
+	if q.db == nil {
+		return value.Value{K: value.Invalid, V: "database not connected"}
 	}
 
 	var cols []string
@@ -896,7 +902,7 @@ func (q *Query) insert(val map[string]value.Value) value.Value {
 	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		fmt.Printf("[DB] Insert Error: %v\n", err)
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("database insert error: %v", err)}
 	}
 	defer rows.Close()
 
@@ -919,13 +925,16 @@ func (q *Query) insert(val map[string]value.Value) value.Value {
 }
 
 func (q *Query) update(val map[string]value.Value) value.Value {
-	if len(q.tables) == 0 || q.db == nil {
-		return value.Value{K: value.Nil}
+	if len(q.tables) == 0 {
+		return value.Value{K: value.Invalid, V: "missing table name for update"}
+	}
+	if q.db == nil {
+		return value.Value{K: value.Invalid, V: "database not connected"}
 	}
 
 	if len(q.conditions) == 0 {
 		fmt.Printf("[DB] Update Error: Missing WHERE clause. Bulk updates are blocked for safety.\n")
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: "missing WHERE clause for update"}
 	}
 
 	var sets []string
@@ -963,7 +972,7 @@ func (q *Query) update(val map[string]value.Value) value.Value {
 	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		fmt.Printf("[DB] Update Error: %v\n", err)
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("database update error: %v", err)}
 	}
 	defer rows.Close()
 
@@ -992,13 +1001,16 @@ func (q *Query) delete() value.Value {
 }
 
 func (q *Query) remove() value.Value {
-	if len(q.tables) == 0 || q.db == nil {
-		return value.Value{K: value.Nil}
+	if len(q.tables) == 0 {
+		return value.Value{K: value.Invalid, V: "missing table name for delete"}
+	}
+	if q.db == nil {
+		return value.Value{K: value.Invalid, V: "database not connected"}
 	}
 
 	if len(q.conditions) == 0 {
 		fmt.Printf("[DB] WARNING: Attempting hard REMOVE without WHERE on table %s. Blocked for safety.\n", q.tables[0])
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: "missing WHERE clause for delete"}
 	}
 
 	whereSQL, whereArgs := q.buildConditions(q.conditions, 1)
@@ -1016,7 +1028,7 @@ func (q *Query) remove() value.Value {
 	res, err := q.db.ExecContext(ctx, query, whereArgs...)
 	if err != nil {
 		fmt.Printf("[DB] Remove Error: %v\n", err)
-		return value.Value{K: value.Nil}
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("database delete error: %v", err)}
 	}
 	affected, _ := res.RowsAffected()
 	return value.New(affected)

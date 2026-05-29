@@ -82,6 +82,12 @@ func (c *Context) arguments(lambda *value.Lambda) []value.Value {
 			args = append(args, value.New(c.Request()))
 		case "res", "response":
 			args = append(args, value.New(c.Response()))
+		case "err", "error", "e":
+			if c.router().err != nil {
+				args = append(args, value.New(c.router().err.Error()))
+			} else {
+				args = append(args, value.Value{K: value.Nil})
+			}
 		default:
 			args = append(args, value.Value{K: value.Nil})
 		}

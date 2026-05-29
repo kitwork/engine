@@ -11,37 +11,12 @@ import (
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/ssl"
+	"github.com/kitwork/engine/work"
 	"gopkg.in/yaml.v3"
 )
 
-type Config struct {
-	Port      int              `json:"port" yaml:"port"`
-	Root      string           `json:"root" yaml:"root"`
-	Database  *database.Config `json:"database" yaml:"database"`
-	SystemDB  *database.Config `json:"systemdb" yaml:"systemdb"`
-	Domains   []string         `json:"domains" yaml:"domains"`
-	MaxEnergy uint64           `json:"max_energy" yaml:"max_energy"`
-	HotReload bool             `json:"hot_reload" yaml:"hot_reload"`
-	Hostname  string           `json:"hostname" yaml:"hostname"`
-}
-
 func Run(files ...string) (err error) {
-	// Initialize Config with default values
-	cfg := &Config{
-		Port: 8080,
-		Root: ".",
-	}
-
-	// If no files are specified, automatically search for default config files
-	// if len(files) == 0 {
-	// 	defaultFiles := []string{"config.kitwork.json", "config.kitwork.yaml", "config.kitwork.yml"}
-	// 	for _, defFile := range defaultFiles {
-	// 		if _, err := os.Stat(defFile); err == nil {
-	// 			files = append(files, defFile)
-	// 			break // Load only the first default config file found
-	// 		}
-	// 	}
-	// }
+	raw := make(map[string]interface{})
 
 	// Load and override configurations from the file list
 	for _, file := range files {
@@ -60,9 +35,9 @@ func Run(files ...string) (err error) {
 		ext := strings.ToLower(filepath.Ext(file))
 		var unmarshalErr error
 		if ext == ".json" {
-			unmarshalErr = json.Unmarshal(expandedContent, cfg)
+			unmarshalErr = json.Unmarshal(expandedContent, &raw)
 		} else if ext == ".yaml" || ext == ".yml" {
-			unmarshalErr = yaml.Unmarshal(expandedContent, cfg)
+			unmarshalErr = yaml.Unmarshal(expandedContent, &raw)
 		} else {
 			return fmt.Errorf("unsupported config file extension: %s (only .json, .yaml, .yml are supported)", file)
 		}
@@ -75,25 +50,39 @@ func Run(files ...string) (err error) {
 		break
 	}
 
-	if cfg.SystemDB != nil {
-		if database.System, err = cfg.SystemDB.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to database: %w", err)
-		}
-		defer database.System.Close()
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		return fmt.Errorf("failed to process configuration: %w", err)
+	}
 
-	} else {
+	var systemConnected bool
+	for i := range cfg.Databases {
+		dbCfg := cfg.Databases[i]
+		alias := dbCfg.Alias
+		if alias == "" {
+			alias = "default"
+		}
+		database.Configs[alias] = dbCfg
+
+		if dbCfg.Alias == "system" {
+			dbConn, err := dbCfg.Connect()
+			if err != nil {
+				return fmt.Errorf("failed to connect to system database: %w", err)
+			}
+			defer dbConn.Close()
+
+			database.System = dbConn
+			systemConnected = true
+		}
+	}
+
+	if !systemConnected {
 		fmt.Println("System Database is not provided")
 	}
 
-	if cfg.Database != nil {
-		if database.Default, err = cfg.Database.Connect(); err != nil {
-			return fmt.Errorf("failed to connect to database: %w", err)
-		}
-		defer database.Default.Close()
-
-	} else {
-		fmt.Println("Database is not provided")
-	}
+	// Pass global settings to the work package
+	work.AllowLocal = cfg.AllowLocal
+	work.ServerPort = cfg.Port
 
 	// Assign configured domains to the ssl package
 	ssl.Domains = cfg.Domains
@@ -135,8 +124,20 @@ func Run(files ...string) (err error) {
 	fmt.Println("\033[1;30m==================================================\033[0m")
 	fmt.Printf("\033[1;35m» Engine Mode:\033[0m       %s\n", modeStr)
 	fmt.Printf("\033[1;32m» Local Access:\033[0m      http://localhost:%d\033[0m\n", cfg.Port)
-	if cfg.Database != nil {
-		fmt.Printf("\033[1;34m» Database:\033[0m          %s (%s:%d)\n", cfg.Database.Type, cfg.Database.Host, cfg.Database.Port)
+	for _, db := range cfg.Databases {
+		aliasStr := db.Alias
+		if aliasStr == "" {
+			aliasStr = "default"
+		}
+		if db.Type == "sqlite" || db.Type == "sqlite3" {
+			name := db.Name
+			if name == "" {
+				name = db.Host
+			}
+			fmt.Printf("\033[1;34m» Database (%s):\033[0m    SQLite (%s)\n", aliasStr, name)
+		} else {
+			fmt.Printf("\033[1;34m» Database (%s):\033[0m    %s (%s:%d)\n", aliasStr, db.Type, db.Host, db.Port)
+		}
 	}
 	fmt.Println("\033[1;30m==================================================\033[0m")
 
