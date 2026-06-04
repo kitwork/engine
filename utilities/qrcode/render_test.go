@@ -61,9 +61,9 @@ func TestSvgRendering(t *testing.T) {
 		t.Errorf("rendered string is not a valid SVG: %s", svg)
 	}
 
-	// Verify that paths are drawn (since template is circle, represented as a merged path)
-	if !strings.Contains(svg, "<path") {
-		t.Errorf("rendered SVG should contain path tags: %s", svg)
+	// Verify that circles/rects are drawn
+	if !strings.Contains(svg, "<circle") && !strings.Contains(svg, "<rect") {
+		t.Errorf("rendered SVG should contain circle or rect tags: %s", svg)
 	}
 
 	// Verify that the custom color is present
@@ -161,13 +161,11 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 				Rounded: 3.5,
 			},
 		},
-		Center: Center{
-			Image:      "D:/project/resource/assets/images/logo/shopee.png",
-			Background: "#ffffff",
-			Stroke:     "auto", // matches extracted orange
-			Shape:      "circle",
-			Size:       0.22,
-			Padding:    0.2,
+		Logo: Logo{
+			Image:   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+			Stroke:  "auto", // matches extracted orange
+			Size:    0.22,
+			Padding: 0.2,
 		},
 		Background: Background{
 			Color:  "#ffffff",
@@ -184,7 +182,7 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 		t.Errorf("failed to render shopee: %v", err)
 	}
 
-	// Sample 2: Diamond template, Kitnext logo, linear cell gradients, custom alignment styling, stroke on logo
+	// Sample 2: Diamond template, Kitnext logo, flat colors, custom alignment styling, stroke on logo
 	kitnextOpts := &Options{
 		Data:     "https://kitnext.com",
 		Template: "diamond",
@@ -193,18 +191,14 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 		Size:     400,
 		Cells: Cells{
 			Active: Cell{
+				Color:   "#0284c7",
 				Size:    0.85,
 				Opacity: 1.0,
-				Gradient: &Gradient{
-					Type:   "linear",
-					Colors: []string{"#0f172a", "#0284c7"}, // slate to sky blue gradient
-					Angle:  45.0,
-				},
 			},
-			Alignment: Cell{
-				Color:   "#ff5f56",
-				Rounded: 1.0,
-			},
+		},
+		Alignment: Alignment{
+			Color:   "#ff5f56",
+			Rounded: 1.0,
 		},
 		Finders: Finders{
 			TopLeft: Finder{
@@ -223,13 +217,11 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 				Rounded: 1.5,
 			},
 		},
-		Center: Center{
-			Image:      "D:/project/resource/assets/images/logo/kitnext.png",
-			Background: "#f8fafc",
-			Stroke:     "#38bdf8", // light blue stroke around logo container
-			Shape:      "square",
-			Size:       0.20,
-			Padding:    0.15,
+		Logo: Logo{
+			Image:   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+			Stroke:  "#38bdf8", // light blue stroke around logo container
+			Size:    0.20,
+			Padding: 0.15,
 		},
 		Background: Background{
 			Color: "#ffffff",
@@ -243,7 +235,7 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 		t.Errorf("failed to render kitnext: %v", err)
 	}
 
-	// Sample 3: Heart template, Wedding Ring logo, pink radial cell gradient, stroke on logo
+	// Sample 3: Heart template, Wedding Ring logo, flat red/pink, stroke on logo
 	weddingOpts := &Options{
 		Data:     "https://wedding.kitwork.com",
 		Template: "heart",
@@ -252,12 +244,9 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 		Size:     400,
 		Cells: Cells{
 			Active: Cell{
+				Color:   "#f43f5e",
 				Size:    0.85,
 				Opacity: 1.0,
-				Gradient: &Gradient{
-					Type:   "radial",
-					Colors: []string{"#f43f5e", "#9f1239"}, // rose to deep red gradient
-				},
 			},
 		},
 		Finders: Finders{
@@ -277,13 +266,11 @@ func TestGenerateSampleQrcodes(t *testing.T) {
 				Rounded: 3.5,
 			},
 		},
-		Center: Center{
-			Image:      "D:/project/resource/assets/images/logo/wedding-ring.png",
-			Background: "#fff1f2",
-			Stroke:     "#fda4af",
-			Shape:      "circle",
-			Size:       0.24,
-			Padding:    0.2,
+		Logo: Logo{
+			Image:   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+			Stroke:  "#fda4af",
+			Size:    0.24,
+			Padding: 0.2,
 		},
 		Background: Background{
 			Color: "#fff1f2",

@@ -38,6 +38,8 @@ type Engine struct {
 	Hostname  string
 	cache     map[string]*cachedTenant
 	mu        sync.RWMutex
+
+	RateLimit *RateLimiter
 }
 
 func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
@@ -50,6 +52,15 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		hotReload: hotReload,
 		Hostname:  hostname,
 		cache:     make(map[string]*cachedTenant),
+		RateLimit: &RateLimiter{
+			Enabled:          true,
+			Rate:             2000,
+			IpRate:           200,
+			Period:           time.Second,
+			currentLimiters:  make(map[string]*work.RateLimiter),
+			previousLimiters: make(map[string]*work.RateLimiter),
+			lastRotation:     time.Now(),
+		},
 	}
 	// Start background cleanup loop every 1 minute, with 10 minutes idle timeout
 	go e.cleanupLoop(1*time.Minute, 10*time.Minute)
@@ -169,6 +180,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Service Unavailable", 503)
 		}
 	}()
+
+	// 1. Layer 1 Rate Limiting Check (Global & Per-IP Server Protection)
+	if !e.RateLimit.check(r, w) {
+		return
+	}
 
 	domain := strings.Split(r.Host, ":")[0]
 	if (domain == "localhost" || domain == "127.0.0.1") && e.Hostname != "" {

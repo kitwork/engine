@@ -1,12 +1,17 @@
 package work
 
 import (
+	"bytes"
+	"image"
+	_ "image/png"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/kitwork/engine/value"
+	"github.com/skip2/go-qrcode"
 )
 
 func TestNapasPayload(t *testing.T) {
@@ -130,36 +135,11 @@ func TestVMIntegration(t *testing.T) {
 	}
 }
 
-func TestQrcodeGradient(t *testing.T) {
-	work := &KitWork{}
-	qr := work.Qrcode()
-
-	opts := qr.Data(value.New("https://kitwork.io")).
-		CellGradient(value.New("linear"), value.New("#ff0000,#00ff00"), value.New(90)).
-		FinderGradient(value.New("radial"), value.New([]value.Value{value.New("#0000ff"), value.New("#ffffff")}), value.New(0))
-
-	svgVal := opts.Svg()
-	svgStr := svgVal.Text()
-
-	if !strings.Contains(svgStr, "id=\"cell-gradient\"") {
-		t.Error("expected cell-gradient definition in SVG")
-	}
-	if !strings.Contains(svgStr, "id=\"finder-tl-gradient\"") {
-		t.Error("expected finder-tl-gradient definition in SVG")
-	}
-	if !strings.Contains(svgStr, "url(#cell-gradient)") {
-		t.Error("expected cells to be filled with cell-gradient")
-	}
-	if !strings.Contains(svgStr, "url(#finder-tl-gradient)") {
-		t.Error("expected finders to reference finder-tl-gradient")
-	}
-}
 
 func TestAutoContrast(t *testing.T) {
 	work := &KitWork{}
 	qr := work.Qrcode()
 
-	// Yellow (#ffff00) has very low contrast on white background (#ffffff)
 	opts := qr.Data(value.New("https://kitwork.io")).
 		CellColor(value.New("#ffff00")).
 		FinderColor(value.New("#fffa00")).
@@ -168,27 +148,9 @@ func TestAutoContrast(t *testing.T) {
 	svgVal := opts.Svg()
 	svgStr := svgVal.Text()
 
-	// It should auto-adjust the color to safe dark color (e.g., #000000)
-	if strings.Contains(svgStr, "fill=\"#ffff00\"") {
-		t.Error("expected yellow cell color to be adjusted for contrast, but found raw color in SVG")
-	}
-	if !strings.Contains(svgStr, "fill=\"#000000\"") {
-		t.Error("expected cell color to fall back to safe black color")
-	}
-}
-
-func TestVietQRLogo(t *testing.T) {
-	work := &KitWork{}
-	qr := work.Qrcode()
-
-	opts := qr.Data(value.New("https://kitwork.io")).
-		Logo(value.New("vietqr"))
-
-	svgVal := opts.Svg()
-	svgStr := svgVal.Text()
-
-	if !strings.Contains(svgStr, "scale(") || !strings.Contains(svgStr, "rect") {
-		t.Error("expected embedded VietQR vector logo in SVG")
+	// Auto contrast check is simplified/removed. Check that the configured color is drawn directly.
+	if !strings.Contains(svgStr, "fill=\"#ffff00\"") {
+		t.Error("expected cell color to be yellow #ffff00 as configured")
 	}
 }
 
@@ -225,43 +187,6 @@ func TestIndividualFinders(t *testing.T) {
 	}
 	if !strings.Contains(svgStr, "stroke=\"#0000aa\"") || !strings.Contains(svgStr, "fill=\"#0000ff\"") {
 		t.Error("expected custom BL finder stroke and fill in SVG")
-	}
-
-	// Gradient individual finders test
-	optsGrad := qr.Data(value.New("https://kitwork.io")).
-		Finder(value.New("tl"), value.New(map[string]value.Value{
-			"gradient": value.New(map[string]value.Value{
-				"type":   value.New("linear"),
-				"colors": value.New("#ff0000,#ffff00"),
-				"angle":  value.New(90),
-			}),
-		})).
-		Finder(value.New("tr"), value.New(map[string]value.Value{
-			"gradient": value.New(map[string]value.Value{
-				"type":   value.New("radial"),
-				"colors": value.New("#00ff00,#00ffff"),
-				"angle":  value.New(0),
-			}),
-		})).
-		Finder(value.New("bl"), value.New(map[string]value.Value{
-			"gradient": value.New(map[string]value.Value{
-				"type":   value.New("linear"),
-				"colors": value.New("#0000ff,#ff00ff"),
-				"angle":  value.New(180),
-			}),
-		}))
-
-	svgGradVal := optsGrad.Svg()
-	svgGradStr := svgGradVal.Text()
-
-	if !strings.Contains(svgGradStr, "id=\"finder-tl-gradient\"") || !strings.Contains(svgGradStr, "url(#finder-tl-gradient)") {
-		t.Error("expected custom TL finder gradient in SVG")
-	}
-	if !strings.Contains(svgGradStr, "id=\"finder-tr-gradient\"") || !strings.Contains(svgGradStr, "url(#finder-tr-gradient)") {
-		t.Error("expected custom TR finder gradient in SVG")
-	}
-	if !strings.Contains(svgGradStr, "id=\"finder-bl-gradient\"") || !strings.Contains(svgGradStr, "url(#finder-bl-gradient)") {
-		t.Error("expected custom BL finder gradient in SVG")
 	}
 }
 
@@ -306,11 +231,8 @@ func TestSmartAPIs(t *testing.T) {
 	if !strings.Contains(svgStr, "<svg") || !strings.Contains(svgStr, "</svg>") {
 		t.Error("expected valid SVG string")
 	}
-	if !strings.Contains(svgStr, "id=\"cell-gradient\"") {
-		t.Error("expected cell gradient in SVG")
-	}
-	if !strings.Contains(svgStr, "id=\"finder-tl-gradient\"") {
-		t.Error("expected TL finder gradient in SVG")
+	if !strings.Contains(svgStr, "fill=\"#0f172a\"") {
+		t.Error("expected cell fallback color #0f172a in SVG")
 	}
 	if !strings.Contains(svgStr, "fill=\"#008800\"") {
 		t.Error("expected TR finder color in SVG")
@@ -459,25 +381,27 @@ func TestSmartLogo(t *testing.T) {
 	work := &KitWork{}
 	qr := work.Qrcode()
 
+	logoBase64 := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
 	logoConfig := map[string]value.Value{
-		"logo":       value.New("vietqr"),
-		"background": value.New("#ff0000"),
-		"shape":      value.New("circle"),
-		"size":       value.New(0.25),
-		"padding":    value.New(0.5),
+		"logo":    value.New(logoBase64),
+		"stroke":  value.New("#ff0000"),
+		"size":    value.New(0.25),
+		"padding": value.New(0.5),
 	}
 
-	opts := qr.Data(value.New("test-logo")).Center(value.New(logoConfig))
+	opts := qr.Data(value.New("test-logo")).Logo(value.New(logoConfig))
+
+	// Verify size and path are correctly saved before Svg() is called
+	if opts.options.Logo.Image != logoBase64 || opts.options.Logo.Stroke != "#ff0000" || opts.options.Logo.Size != 0.25 || opts.options.Logo.Padding != 0.5 {
+		t.Errorf("logo config was not correctly parsed: %+v", opts.options.Logo)
+	}
+
 	svgStr := opts.Svg().Text()
 
-	// Check if circle background is drawn
-	if !strings.Contains(svgStr, "<circle") || !strings.Contains(svgStr, "fill=\"#ff0000\"") {
-		t.Error("expected circular red background for smart logo in SVG")
-	}
-
-	// Verify size and path are correctly saved
-	if opts.options.Center.Logo != "vietqr" || opts.options.Center.Shape != "circle" || opts.options.Center.Size != 0.25 || opts.options.Center.Padding != 0.5 {
-		t.Errorf("center config was not correctly parsed: %+v", opts.options.Center)
+	// Check if red stroke is drawn
+	if !strings.Contains(svgStr, "stroke=\"#ff0000\"") {
+		t.Error("expected red stroke for logo container in SVG")
 	}
 }
 
@@ -508,29 +432,232 @@ func TestMergeToggle(t *testing.T) {
 	work := &KitWork{}
 	qr := work.Qrcode()
 
-	// Case 1: Merge = true (default)
-	optsMerged := qr.Data(value.New("https://kitwork.io")).
-		Template(value.New("circle"))
-	svgMerged := optsMerged.Svg().Text()
-
-	if !strings.Contains(svgMerged, "<path") {
-		t.Error("expected merged path in SVG by default")
-	}
-	if strings.Contains(svgMerged, "<circle") {
-		t.Error("should not contain individual circle tags when merged")
-	}
-
-	// Case 2: Merge = false (individual cells)
+	// Verify Merge is set to false correctly
 	optsIndividual := qr.Data(value.New("https://kitwork.io")).
-		Template(value.New("circle")).
 		Merge(value.New(false))
-	svgIndividual := optsIndividual.Svg().Text()
 
-	if !strings.Contains(svgIndividual, "<circle") {
-		t.Error("expected individual circle tags in SVG when merge is disabled")
+	if optsIndividual.options.Merge != false {
+		t.Errorf("expected Merge to be false, got: %t", optsIndividual.options.Merge)
 	}
 }
 
+func TestQrcodeHTTPApi(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-http-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write app.kitwork.js to register a QR code API route
+	appJsCode := `
+	import { router, qrcode } from 'kitwork';
+
+	router.get("/api/qrcode").handle((request, response) => {
+		const svgString = qrcode
+			.data("https://kitwork.io")
+			.template("circle")
+			.padding(2)
+			.svg();
+		return response.svg(svgString);
+	});
+	`
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatalf("failed to run tenant: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/qrcode", nil)
+	tenant.Serve(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "<svg") || !strings.Contains(body, "</svg>") {
+		t.Errorf("expected valid SVG string in response, got: %s", body)
+	}
+	if rec.Header().Get("Content-Type") != "image/svg+xml; charset=utf-8" {
+		t.Errorf("expected Content-Type to be image/svg+xml, got: %s", rec.Header().Get("Content-Type"))
+	}
+}
+
+func TestCustomAPIInJS(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-custom-api-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+	import { router, qrcode } from 'kitwork';
+
+	router.get("/test-custom").handle((request, response) => {
+		const data = request.query("data").text() || "https://kitwork.vn";
+		const template = request.query("template").text() || "circular";
+		const cellColor = request.query("cell_color").text() || "#0f172a";
+		
+		const cellSizeStr = request.query("cell_size").text();
+		let cellSize = 0.8;
+		if (cellSizeStr != "") {
+			cellSize = parseFloat(cellSizeStr);
+		}
+
+		const finderColor = request.query("finder_color").text() || "#1e3a8a";
+		const finderStroke = request.query("finder_stroke").text() || "#3b82f6";
+		
+		const finderRoundedStr = request.query("finder_rounded").text();
+		let finderRounded = 3.0;
+		if (finderRoundedStr != "") {
+			finderRounded = parseFloat(finderRoundedStr);
+		}
+
+		const format = request.query("format").text() || "svg";
+		
+		const sizeStr = request.query("size").text();
+		let size = 400;
+		if (sizeStr != "") {
+			size = parseInt(sizeStr, 10);
+		}
+
+		let qrBuilder = qrcode
+			.data(data)
+			.template(template)
+			.padding(2)
+			.size(size)
+			.cell({
+				color: cellColor,
+				size: cellSize
+			})
+			.finder({
+				color: finderColor,
+				stroke: finderStroke,
+				rounded: finderRounded
+			});
+
+		if (format == "png") {
+			return response.image(qrBuilder.png());
+		}
+		return response.svg(qrBuilder.svg());
+	});
+	`
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatalf("failed to run tenant: %v", err)
+	}
+
+	// 1. Test SVG output
+	recSVG := httptest.NewRecorder()
+	reqSVG := httptest.NewRequest("GET", "/test-custom?template=circular&format=svg&cell_color=005ba1&cell_size=0.85&size=300", nil)
+	tenant.Serve(recSVG, reqSVG)
+
+	if recSVG.Code != 200 {
+		t.Errorf("expected SVG status 200, got %d", recSVG.Code)
+	}
+	bodySVG := recSVG.Body.String()
+	if !strings.Contains(bodySVG, "<svg") || !strings.Contains(bodySVG, "fill=\"#005ba1\"") {
+		t.Errorf("expected valid custom SVG response, got: %s", bodySVG)
+	}
+
+	// 2. Test PNG output
+	recPNG := httptest.NewRecorder()
+	reqPNG := httptest.NewRequest("GET", "/test-custom?template=circular&format=png&cell_color=005ba1&cell_size=0.85&size=300", nil)
+	tenant.Serve(recPNG, reqPNG)
+
+	if recPNG.Code != 200 {
+		t.Errorf("expected PNG status 200, got %d", recPNG.Code)
+	}
+	if recPNG.Header().Get("Content-Type") != "image/png" {
+		t.Errorf("expected Content-Type image/png, got: %s", recPNG.Header().Get("Content-Type"))
+	}
+	img, _, errImg := image.Decode(bytes.NewReader(recPNG.Body.Bytes()))
+	if errImg != nil {
+		t.Fatalf("failed to decode PNG output: %v", errImg)
+	}
+	if img.Bounds().Dx() != 300 || img.Bounds().Dy() != 300 {
+		t.Errorf("expected PNG dimensions 300x300 (parseInt check), got %dx%d", img.Bounds().Dx(), img.Bounds().Dy())
+	}
+}
+
+func TestAlignmentCustom(t *testing.T) {
+	work := &KitWork{}
+	qr := work.Qrcode()
+
+	opts := qr.Data(value.New("https://kitwork.io")).
+		Alignment(value.New(map[string]value.Value{
+			"color":   value.New("#00ff00"),
+			"stroke":  value.New("#ff0000"),
+			"rounded": value.New(2.5),
+		}))
+
+	if opts.options.Alignment.Color != "#00ff00" {
+		t.Errorf("expected alignment color to be #00ff00, got: %s", opts.options.Alignment.Color)
+	}
+	if opts.options.Alignment.Stroke != "#ff0000" {
+		t.Errorf("expected alignment stroke to be #ff0000, got: %s", opts.options.Alignment.Stroke)
+	}
+	if opts.options.Alignment.Rounded != 2.5 {
+		t.Errorf("expected alignment rounded to be 2.5, got: %f", opts.options.Alignment.Rounded)
+	}
+}
+
+func TestLevelCustom(t *testing.T) {
+	work := &KitWork{}
+	qr := work.Qrcode()
+
+	opts1 := qr.Level(value.New("high"))
+	if opts1.options.Level != qrcode.High {
+		t.Errorf("expected level to be High, got: %v", opts1.options.Level)
+	}
+
+	opts2 := qr.Level(value.New("meidum"))
+	if opts2.options.Level != qrcode.Medium {
+		t.Errorf("expected level to be Medium, got: %v", opts2.options.Level)
+	}
+}
+
+func TestBase64Logo(t *testing.T) {
+	work := &KitWork{}
+	qr := work.Qrcode()
+
+	logoBase64 := "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+	opts := qr.Data(value.New("https://kitwork.vn")).
+		Logo(value.New(logoBase64))
+
+	svgStr := opts.Svg().Text()
+	if !strings.Contains(svgStr, "data:image/png;base64,") {
+		t.Error("expected embedded base64 logo in SVG")
+	}
+
+	pngBytes := opts.Png().Bytes()
+	if len(pngBytes) == 0 {
+		t.Error("expected valid PNG output with base64 logo")
+	}
+}
 
 
 

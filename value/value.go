@@ -15,6 +15,9 @@ type Value struct {
 	N float64
 	V any
 	K Kind
+
+	IsError  bool
+	ErrorVal any
 }
 
 func (v Value) Prototype(name string, fn Method)  { v.K.Prototype(name, fn) }

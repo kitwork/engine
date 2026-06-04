@@ -3,9 +3,19 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kitwork/engine/database"
 )
+
+type RateLimitConfig struct {
+	Enabled     bool          `json:"enabled" yaml:"enabled"`
+	Rate        int           `json:"rate" yaml:"rate"`
+	IpRate      int           `json:"ip_rate" yaml:"ip_rate"`
+	BrowserRate int           `json:"browser_rate" yaml:"browser_rate"`
+	UserRate    int           `json:"user_rate" yaml:"user_rate"`
+	Period      time.Duration `json:"period" yaml:"period"`
+}
 
 type Config struct {
 	Port       int               `json:"port" yaml:"port"`
@@ -16,6 +26,7 @@ type Config struct {
 	HotReload  bool              `json:"hot_reload" yaml:"hot_reload"`
 	Hostname   string            `json:"hostname" yaml:"hostname"`
 	AllowLocal bool              `json:"allow_local" yaml:"allow_local"`
+	RateLimit  RateLimitConfig   `json:"rate_limit" yaml:"rate_limit"`
 }
 
 func ParseConfig(raw map[string]interface{}) (*Config, error) {
@@ -23,6 +34,14 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		Port:      8080,
 		Root:      ".",
 		MaxEnergy: 10000000,
+		RateLimit: RateLimitConfig{
+			Enabled:     true,
+			Rate:        12000,
+			IpRate:      600,
+			BrowserRate: 240,
+			UserRate:    120,
+			Period:      time.Second,
+		},
 	}
 
 	if val, ok := raw["port"]; ok {
@@ -49,6 +68,33 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	if val, ok := raw["allow_local"]; ok {
 		if b, ok := val.(bool); ok {
 			cfg.AllowLocal = b
+		}
+	}
+	if val, ok := raw["rate_limit"]; ok {
+		if rateVal, err := coerceIntErr(val); err == nil {
+			cfg.RateLimit.Rate = rateVal
+			cfg.RateLimit.Enabled = true
+		} else if m, ok := val.(map[string]interface{}); ok {
+			if enabled, ok := m["enabled"].(bool); ok {
+				cfg.RateLimit.Enabled = enabled
+			}
+			if rate, ok := m["rate"]; ok {
+				cfg.RateLimit.Rate = coerceInt(rate, 2000)
+			}
+			if ipRate, ok := m["ip_rate"]; ok {
+				cfg.RateLimit.IpRate = coerceInt(ipRate, 200)
+			}
+			if browserRate, ok := m["browser_rate"]; ok {
+				cfg.RateLimit.BrowserRate = coerceInt(browserRate, 120)
+			}
+			if userRate, ok := m["user_rate"]; ok {
+				cfg.RateLimit.UserRate = coerceInt(userRate, 60)
+			}
+			if period, ok := m["period"].(string); ok {
+				if d, err := time.ParseDuration(period); err == nil {
+					cfg.RateLimit.Period = d
+				}
+			}
 		}
 	}
 
@@ -79,6 +125,18 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func coerceIntErr(val interface{}) (int, error) {
+	switch v := val.(type) {
+	case int:
+		return v, nil
+	case float64:
+		return int(v), nil
+	case int64:
+		return int(v), nil
+	}
+	return 0, fmt.Errorf("not an int")
 }
 
 func coerceInt(val interface{}, def int) int {

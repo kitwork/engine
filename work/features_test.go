@@ -361,6 +361,11 @@ func TestDatabaseFallbackAndErrorPropagation(t *testing.T) {
 import { router, database } from 'kitwork';
 const db = database.connection();
 
+// Configure global catch handler
+router.catch((err, response) => {
+	return response.text("global caught: " + err);
+});
+
 router.get("/test").handle((response) => {
 	db.table("user").find("id", 1);
 	return response.text("ok");
@@ -369,8 +374,6 @@ router.get("/test").handle((response) => {
 router.get("/error").handle((response) => {
 	db.table("non_existent_table").find("id", 1);
 	return response.text("unexpected success");
-}).catch((err, response) => {
-	return response.text("caught: " + err);
 });
 `
 	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
@@ -403,8 +406,229 @@ router.get("/error").handle((response) => {
 	tenant.Serve(recErr, reqErr)
 
 	body := recErr.Body.String()
-	if !strings.Contains(body, "no such table") && !strings.Contains(body, "database query error") {
-		t.Errorf("expected error to be caught by JS catch block, got body: %q", body)
+	if !strings.Contains(body, "global caught:") {
+		t.Errorf("expected error to be caught by global JS catch block, got body: %q", body)
+	}
+}
+
+func TestHandleErrorAndCatch(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-handle-err-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+import { router } from 'kitwork';
+
+router.get("/error-flow").handle((ctx) => {
+	ctx.res().status(418).text("response_from_handle");
+	ctx.error("my_logged_error");
+}).catch((err, response) => {
+	response.text("modified_by_catch_" + err);
+});
+
+router.get("/error-flow-return").handle((ctx) => {
+	ctx.res().status(500);
+	ctx.error("database_failure");
+}).catch((err) => {
+	return { error: err };
+});
+
+router.get("/error-flow-default-500").handle((ctx) => {
+	ctx.error("unhandled_exception");
+}).catch((err) => {
+	return { error: err };
+});
+`
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 1: Existing catch text modification
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/error-flow", nil)
+	tenant.Serve(rec, req)
+
+	t.Logf("Response code 1: %d, body: %q", rec.Code, rec.Body.String())
+	if rec.Code != 418 {
+		t.Errorf("expected status 418, got %d", rec.Code)
+	}
+	if rec.Body.String() != "modified_by_catch_my_logged_error" {
+		t.Errorf("expected body to be modified by catch handler, got %q", rec.Body.String())
+	}
+
+	// Case 2: Catch return JSON with custom status 500
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest("GET", "/error-flow-return", nil)
+	tenant.Serve(rec2, req2)
+
+	t.Logf("Response code 2: %d, body: %q", rec2.Code, rec2.Body.String())
+	if rec2.Code != 500 {
+		t.Errorf("expected status 500, got %d", rec2.Code)
+	}
+	expectedJSON := `{"error":"database_failure"}`
+	if rec2.Body.String() != expectedJSON {
+		t.Errorf("expected catch JSON return body %q, got %q", expectedJSON, rec2.Body.String())
+	}
+
+	// Case 3: Catch return JSON defaulting to status 500
+	rec3 := httptest.NewRecorder()
+	req3 := httptest.NewRequest("GET", "/error-flow-default-500", nil)
+	tenant.Serve(rec3, req3)
+
+	t.Logf("Response code 3: %d, body: %q", rec3.Code, rec3.Body.String())
+	if rec3.Code != 500 {
+		t.Errorf("expected status 500 (defaulted), got %d", rec3.Code)
+	}
+	expectedJSON3 := `{"error":"unhandled_exception"}`
+	if rec3.Body.String() != expectedJSON3 {
+		t.Errorf("expected catch JSON return body %q, got %q", expectedJSON3, rec3.Body.String())
+	}
+}
+
+func TestSafeDatabaseMethods(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-safe-db-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+import { router, database } from 'kitwork';
+const db = database.connection();
+
+router.get("/safe-test").handle((response) => {
+	// 1. SafeList on non-existent table (should fail gracefully, not VM halt)
+	const users = db.table("non_existent_table").SafeList();
+	
+	// 2. SafeFirst on non-existent table
+	const firstVal = db.table("non_existent_table").SafeFirst();
+
+	return response.json({
+		users_is_error: users.isError,
+		users_error_code: users.error.code,
+		users_error_msg: users.error.message,
+		first_is_error: firstVal.isError,
+		first_error_code: firstVal.error.code
+	});
+});
+`
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/safe-test", nil)
+	tenant.Serve(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	t.Logf("Response body: %s", body)
+	if !strings.Contains(body, `"users_is_error":true`) {
+		t.Errorf("expected users_is_error to be true, got body: %s", body)
+	}
+	if !strings.Contains(body, `"users_error_code":"DATABASE_ERROR"`) {
+		t.Errorf("expected users_error_code DATABASE_ERROR, got body: %s", body)
+	}
+	if !strings.Contains(body, `"first_is_error":true`) {
+		t.Errorf("expected first_is_error to be true, got body: %s", body)
+	}
+}
+
+func TestFileFeature(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-test-file-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write a file to read
+	err = os.WriteFile(filepath.Join(tenantDir, "hello.txt"), []byte("hello from file"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+import { router, file } from 'kitwork';
+
+router.get("/file-test").handle((response) => {
+	const content = file.read("hello.txt");
+	const base64 = file.base64("hello.txt");
+	file.write("written.txt", "hello write");
+	file.save("saved.txt", "data:text/plain;base64,aGVsbG8gc2F2ZQ==");
+	return response.json({
+		content: content,
+		base64: base64,
+		written: file.read("written.txt"),
+		saved: file.read("saved.txt")
+	});
+});
+`
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/file-test", nil)
+	tenant.Serve(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"content":"hello from file"`) {
+		t.Errorf("expected content to be read, got body: %s", body)
+	}
+	if !strings.Contains(body, `"base64":"data:application/octet-stream;base64,aGVsbG8gZnJvbSBmaWxl"`) {
+		t.Errorf("expected base64 to be encoded, got body: %s", body)
+	}
+	if !strings.Contains(body, `"written":"hello write"`) {
+		t.Errorf("expected written to be hello write, got body: %s", body)
+	}
+	if !strings.Contains(body, `"saved":"hello save"`) {
+		t.Errorf("expected saved to be hello save, got body: %s", body)
 	}
 }
 

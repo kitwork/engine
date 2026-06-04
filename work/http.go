@@ -2,6 +2,7 @@ package work
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,6 +97,28 @@ func (r HTTPResponse) JSON() value.Value {
 // Support direct .body access if it's already a string or bytes
 func (r HTTPResponse) Text() string {
 	return r.Body.String()
+}
+
+// Base64 method for javascript: fetch.base64()
+func (r HTTPResponse) Base64() string {
+	b := r.Body.Bytes()
+	b64 := base64.StdEncoding.EncodeToString(b)
+
+	var mimeType string
+	if len(b) >= 4 && bytes.HasPrefix(b, []byte("\x89PNG")) {
+		mimeType = "image/png"
+	} else if len(b) >= 3 && bytes.HasPrefix(b, []byte("\xff\xd8\xff")) {
+		mimeType = "image/jpeg"
+	} else if len(b) >= 6 && (bytes.HasPrefix(b, []byte("GIF87a")) || bytes.HasPrefix(b, []byte("GIF89a"))) {
+		mimeType = "image/gif"
+	} else if bytes.Contains(b, []byte("<svg")) {
+		mimeType = "image/svg+xml"
+	}
+
+	if mimeType != "" {
+		return fmt.Sprintf("data:%s;base64,%s", mimeType, b64)
+	}
+	return b64
 }
 
 func (h *HTTP) Get(url string) value.Value {

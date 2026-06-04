@@ -134,6 +134,17 @@ func (v Value) Get(key string) Value {
 	if key == "type" {
 		return New(v.K.String())
 	}
+	if key == "isError" && (v.K == Array || v.K == Map || v.IsError) {
+		return New(v.IsError)
+	}
+	if key == "error" && (v.K == Array || v.K == Map || v.IsError) {
+		if v.ErrorVal != nil {
+			return New(v.ErrorVal)
+		}
+		if v.K == Array || v.K == Map {
+			return Value{K: Nil}
+		}
+	}
 
 	// ƯU TIÊN 1: Tra cứu Dynamic (Struct/Func) - Cho phép gọi field của một Hàm (Object-like Function)
 	if v.K == Struct || v.K == Func {

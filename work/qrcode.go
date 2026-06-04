@@ -19,42 +19,6 @@ func (w *KitWork) Qrcode() *Qrcode {
 	q := &Qrcode{
 		tenant: w.tenant,
 	}
-	q.options.Template = "square"
-	q.options.Padding = 2
-	q.options.Level = qrcode.Medium
-	q.options.Size = 256
-	q.options.Cells.Active = qr.Cell{
-		Color:   "#000000",
-		Size:    0.85,
-		Rounded: 0,
-		Opacity: 1.0,
-	}
-	q.options.Center = qr.Center{
-		Logo:       "",
-		Background: "#ffffff",
-		Shape:      "square",
-		Size:       0.2,
-		Padding:    0.2,
-	}
-	q.options.Finders.TopLeft = qr.Finder{
-		Color:   "#000000",
-		Stroke:  "#000000",
-		Rounded: 2.0,
-	}
-	q.options.Finders.TopRight = qr.Finder{
-		Color:   "#000000",
-		Stroke:  "#000000",
-		Rounded: 2.0,
-	}
-	q.options.Finders.BottomLeft = qr.Finder{
-		Color:   "#000000",
-		Stroke:  "#000000",
-		Rounded: 2.0,
-	}
-	q.options.Background = qr.Background{
-		Color: "#ffffff",
-	}
-	q.options.Merge = true
 	return q
 }
 
@@ -100,30 +64,32 @@ func (q *Qrcode) Template(v value.Value) *Qrcode {
 }
 
 func (q *Qrcode) Logo(v value.Value) *Qrcode {
-	q.options.Center.Logo = v.Text()
+	if v.K == value.String {
+		q.options.Logo.Image = v.Text()
+	} else if v.K == value.Map {
+		m := v.Map()
+		if img, exists := m["image"]; exists {
+			q.options.Logo.Image = img.Text()
+		} else if b64, exists := m["base64"]; exists {
+			q.options.Logo.Image = b64.Text()
+		} else if l, exists := m["logo"]; exists {
+			q.options.Logo.Image = l.Text()
+		}
+		if s, exists := m["stroke"]; exists {
+			q.options.Logo.Stroke = s.Text()
+		}
+		if sz, exists := m["size"]; exists && sz.K == value.Number {
+			q.options.Logo.Size = sz.N
+		}
+		if pad, exists := m["padding"]; exists && pad.K == value.Number {
+			q.options.Logo.Padding = pad.N
+		}
+	}
 	return q
 }
 
 func (q *Qrcode) Center(v value.Value) *Qrcode {
-	if v.K == value.Map {
-		m := v.Map()
-		if l, exists := m["logo"]; exists {
-			q.options.Center.Logo = l.Text()
-		}
-		if bg, exists := m["background"]; exists {
-			q.options.Center.Background = bg.Text()
-		}
-		if s, exists := m["shape"]; exists {
-			q.options.Center.Shape = s.Text()
-		}
-		if sz, exists := m["size"]; exists && sz.K == value.Number {
-			q.options.Center.Size = sz.N
-		}
-		if pad, exists := m["padding"]; exists && pad.K == value.Number {
-			q.options.Center.Padding = pad.N
-		}
-	}
-	return q
+	return q.Logo(v)
 }
 
 func (q *Qrcode) CellColor(v value.Value) *Qrcode {
@@ -169,34 +135,6 @@ func (q *Qrcode) Merge(v value.Value) *Qrcode {
 	return q
 }
 
-func (q *Qrcode) CellGradient(typeVal value.Value, colorsVal value.Value, angleVal value.Value) *Qrcode {
-	grad := &qr.Gradient{
-		Type: typeVal.Text(),
-	}
-	if colorsVal.K == value.Array {
-		var arr []value.Value
-		if p, ok := colorsVal.V.(*[]value.Value); ok && p != nil {
-			arr = *p
-		} else if s, ok := colorsVal.V.([]value.Value); ok {
-			arr = s
-		}
-		grad.Colors = make([]string, len(arr))
-		for i, v := range arr {
-			grad.Colors[i] = v.Text()
-		}
-	} else if colorsVal.K == value.String {
-		grad.Colors = strings.Split(colorsVal.Text(), ",")
-	}
-
-	if angleVal.K == value.Number {
-		grad.Angle = angleVal.N
-	} else {
-		grad.Angle = 45.0
-	}
-	q.options.Cells.Active.Gradient = grad
-	return q
-}
-
 // --- General Finder Setters ---
 
 func (q *Qrcode) FinderColor(v value.Value) *Qrcode {
@@ -221,43 +159,6 @@ func (q *Qrcode) FinderRounded(v value.Value) *Qrcode {
 		q.options.Finders.TopRight.Rounded = v.N
 		q.options.Finders.BottomLeft.Rounded = v.N
 	}
-	return q
-}
-
-func (q *Qrcode) FinderGradient(typeVal value.Value, colorsVal value.Value, angleVal value.Value) *Qrcode {
-	gradType := typeVal.Text()
-	var gradColors []string
-	if colorsVal.K == value.Array {
-		var arr []value.Value
-		if p, ok := colorsVal.V.(*[]value.Value); ok && p != nil {
-			arr = *p
-		} else if s, ok := colorsVal.V.([]value.Value); ok {
-			arr = s
-		}
-		gradColors = make([]string, len(arr))
-		for i, v := range arr {
-			gradColors[i] = v.Text()
-		}
-	} else if colorsVal.K == value.String {
-		gradColors = strings.Split(colorsVal.Text(), ",")
-	}
-
-	var angle float64
-	if angleVal.K == value.Number {
-		angle = angleVal.N
-	} else {
-		angle = 45.0
-	}
-
-	grad := &qr.Gradient{
-		Type:   gradType,
-		Colors: gradColors,
-		Angle:  angle,
-	}
-
-	q.options.Finders.TopLeft.Gradient = grad
-	q.options.Finders.TopRight.Gradient = grad
-	q.options.Finders.BottomLeft.Gradient = grad
 	return q
 }
 
@@ -639,10 +540,7 @@ func (q *Qrcode) Cell(v value.Value) *Qrcode {
 		if grad, exists := m["gradient"]; exists {
 			if grad.K == value.Map {
 				gm := grad.Map()
-				g := &qr.Gradient{}
-				if gt, exists := gm["type"]; exists {
-					g.Type = gt.Text()
-				}
+
 				if gc, exists := gm["colors"]; exists {
 					var gradColors []string
 					if gc.K == value.Array {
@@ -659,32 +557,28 @@ func (q *Qrcode) Cell(v value.Value) *Qrcode {
 					} else if gc.K == value.String {
 						gradColors = strings.Split(gc.Text(), ",")
 					}
-					if len(gradColors) > 0 {
-						g.Colors = gradColors
-					}
+
 				}
-				if ga, exists := gm["angle"]; exists && ga.K == value.Number {
-					g.Angle = ga.N
-				} else {
-					g.Angle = 45.0
-				}
-				q.options.Cells.Active.Gradient = g
+
 			}
 		}
 	}
 	return q
 }
 
-func parseFinderConfig(configVal value.Value) (colors []string, stroke string, rounded float64, gradType string, gradAngle float64, ok bool) {
+func parseFinderConfig(configVal value.Value) (colors []string, stroke string, rounded float64, template string, ok bool) {
 	if configVal.K == value.String {
 		colors = []string{configVal.Text()}
 		stroke = configVal.Text()
-		return colors, stroke, 0, "", 0, true
+		return colors, stroke, 0, "", true
 	}
 	if configVal.K != value.Map {
-		return nil, "", 0, "", 0, false
+		return nil, "", 0, "", false
 	}
 	m := configVal.Map()
+	if t, exists := m["template"]; exists {
+		template = t.Text()
+	}
 
 	// parse color
 	if c, exists := m["color"]; exists {
@@ -714,41 +608,45 @@ func parseFinderConfig(configVal value.Value) (colors []string, stroke string, r
 		rounded = r.N
 	}
 
-	// parse gradient
-	if grad, exists := m["gradient"]; exists {
-		if grad.K == value.Map {
-			gm := grad.Map()
-			if gt, exists := gm["type"]; exists {
-				gradType = gt.Text()
-			}
-			if gc, exists := gm["colors"]; exists {
-				var gradColors []string
-				if gc.K == value.Array {
-					var arr []value.Value
-					if p, ok := gc.V.(*[]value.Value); ok && p != nil {
-						arr = *p
-					} else if s, ok := gc.V.([]value.Value); ok {
-						arr = s
-					}
-					gradColors = make([]string, len(arr))
-					for i, v := range arr {
-						gradColors[i] = v.Text()
-					}
-				} else if gc.K == value.String {
-					gradColors = strings.Split(gc.Text(), ",")
-				}
-				if len(gradColors) > 0 {
-					colors = gradColors
-				}
-			}
-			if ga, exists := gm["angle"]; exists && ga.K == value.Number {
-				gradAngle = ga.N
-			} else {
-				gradAngle = 45.0
-			}
+	return colors, stroke, rounded, template, true
+}
+
+func (q *Qrcode) Level(v value.Value) *Qrcode {
+	str := strings.ToLower(v.Text())
+	switch str {
+	case "low", "l":
+		q.options.Level = qrcode.Low
+	case "medium", "meidum", "m":
+		q.options.Level = qrcode.Medium
+	case "high", "h":
+		q.options.Level = qrcode.High
+	case "highest", "q":
+		q.options.Level = qrcode.Highest
+	}
+	return q
+}
+
+func (q *Qrcode) Alignment(v value.Value) *Qrcode {
+	if v.K == value.String {
+		color := v.Text()
+		q.options.Alignment.Color = color
+		q.options.Alignment.Stroke = color
+	} else if v.K == value.Map {
+		m := v.Map()
+		if c, exists := m["color"]; exists {
+			q.options.Alignment.Color = c.Text()
+		}
+		if s, exists := m["stroke"]; exists {
+			q.options.Alignment.Stroke = s.Text()
+		}
+		if r, exists := m["rounded"]; exists {
+			q.options.Alignment.Rounded = r.N
+		}
+		if t, exists := m["template"]; exists {
+			q.options.Alignment.Template = t.Text()
 		}
 	}
-	return colors, stroke, rounded, gradType, gradAngle, true
+	return q
 }
 
 func (q *Qrcode) Finder(args ...value.Value) *Qrcode {
@@ -773,7 +671,7 @@ func (q *Qrcode) Finder(args ...value.Value) *Qrcode {
 		config = args[1]
 	}
 
-	colors, stroke, rounded, gradType, gradAngle, ok := parseFinderConfig(config)
+	colors, stroke, rounded, templateStr, ok := parseFinderConfig(config)
 	if !ok {
 		return q
 	}
@@ -788,9 +686,10 @@ func (q *Qrcode) Finder(args ...value.Value) *Qrcode {
 			if rounded != 0 {
 				q.options.Finders.TopLeft.Rounded = rounded
 			}
-			if gradType != "" {
-				q.options.Finders.TopLeft.Gradient = &qr.Gradient{Type: gradType, Colors: colors, Angle: gradAngle}
+			if templateStr != "" {
+				q.options.Finders.TopLeft.Template = templateStr
 			}
+
 		case "tr":
 			if len(colors) > 0 {
 				q.options.Finders.TopRight.Color = colors[0]
@@ -799,9 +698,10 @@ func (q *Qrcode) Finder(args ...value.Value) *Qrcode {
 			if rounded != 0 {
 				q.options.Finders.TopRight.Rounded = rounded
 			}
-			if gradType != "" {
-				q.options.Finders.TopRight.Gradient = &qr.Gradient{Type: gradType, Colors: colors, Angle: gradAngle}
+			if templateStr != "" {
+				q.options.Finders.TopRight.Template = templateStr
 			}
+
 		case "bl":
 			if len(colors) > 0 {
 				q.options.Finders.BottomLeft.Color = colors[0]
@@ -810,9 +710,10 @@ func (q *Qrcode) Finder(args ...value.Value) *Qrcode {
 			if rounded != 0 {
 				q.options.Finders.BottomLeft.Rounded = rounded
 			}
-			if gradType != "" {
-				q.options.Finders.BottomLeft.Gradient = &qr.Gradient{Type: gradType, Colors: colors, Angle: gradAngle}
+			if templateStr != "" {
+				q.options.Finders.BottomLeft.Template = templateStr
 			}
+
 		case "all", "":
 			if len(colors) > 0 {
 				q.options.Finders.TopLeft.Color = colors[0]
@@ -823,21 +724,31 @@ func (q *Qrcode) Finder(args ...value.Value) *Qrcode {
 			q.options.Finders.TopRight.Stroke = stroke
 			q.options.Finders.BottomLeft.Stroke = stroke
 
+			if templateStr != "" {
+				q.options.Finders.TopLeft.Template = templateStr
+				q.options.Finders.TopRight.Template = templateStr
+				q.options.Finders.BottomLeft.Template = templateStr
+			}
+
 			if rounded != 0 {
 				q.options.Finders.TopLeft.Rounded = rounded
 				q.options.Finders.TopRight.Rounded = rounded
 				q.options.Finders.BottomLeft.Rounded = rounded
 			}
-			if gradType != "" {
-				g := &qr.Gradient{Type: gradType, Colors: colors, Angle: gradAngle}
-				q.options.Finders.TopLeft.Gradient = g
-				q.options.Finders.TopRight.Gradient = g
-				q.options.Finders.BottomLeft.Gradient = g
-			}
+
 		}
 	}
 
 	apply(position)
+	return q
+}
+
+func (q *Qrcode) AutoTheme() *Qrcode {
+	// AutoTheme sets some defaults for a beautiful themed QR code based on logo or default styles
+	q.options.Cells.Active.Color = "#0f172a"
+	q.options.Finders.TopLeft.Color = "#0f172a"
+	q.options.Finders.TopRight.Color = "#0f172a"
+	q.options.Finders.BottomLeft.Color = "#0f172a"
 	return q
 }
 

@@ -37,7 +37,7 @@ kitwork().Router().Get("/test").Handle(() => {
 	}
 
 	// Initialize Engine with HotReload = true
-	engine := New(tmpDir, 0, true)
+	engine := New(tmpDir, 0, true, "")
 
 	// Send request for v1
 	req1 := httptest.NewRequest("GET", "http://localhost/test", nil)
@@ -156,7 +156,7 @@ kitwork().Router().Get("/test").Handle(() => {
 	}
 
 	// Initialize Engine with HotReload = false
-	engine := New(tmpDir, 0, false)
+	engine := New(tmpDir, 0, false, "")
 
 	req1 := httptest.NewRequest("GET", "http://localhost/test", nil)
 	rr1 := httptest.NewRecorder()
@@ -191,5 +191,158 @@ kitwork().Router().Get("/test").Handle(() => {
 	// Since HotReload is false, it should STILL return v1
 	if !strings.Contains(rr2.Body.String(), "v1") {
 		t.Errorf("expected v1 (cached), got %s", rr2.Body.String())
+	}
+}
+
+func TestEngineRateLimit(t *testing.T) {
+	// Setup temporary directory
+	tmpDir, err := os.MkdirTemp("", "kitwork-engine-rl-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appCode := `
+kitwork().Router().Get("/test").Handle(() => {
+    return "ok";
+});
+`
+	appFile := filepath.Join(tenantDir, "app.kitwork.js")
+	err = os.WriteFile(appFile, []byte(appCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create Engine with a Global Limit of 5 and Per-IP Limit of 2
+	engine := New(tmpDir, 0, false, "")
+	engine.RateLimit.Enabled = true
+	engine.RateLimit.Rate = 5
+	engine.RateLimit.IpRate = 2
+	engine.RateLimit.Period = time.Second
+
+	// 2. IP 1 makes 2 requests (allowed)
+	r1 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	r1.RemoteAddr = "1.1.1.1:1234"
+
+	rr1_1 := httptest.NewRecorder()
+	engine.ServeHTTP(rr1_1, r1)
+	if rr1_1.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr1_1.Code)
+	}
+
+	rr1_2 := httptest.NewRecorder()
+	engine.ServeHTTP(rr1_2, r1)
+	if rr1_2.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr1_2.Code)
+	}
+
+	// IP 1 third request is blocked by IP limit of 2 (should be 429 and rollback global)
+	rr1_3 := httptest.NewRecorder()
+	engine.ServeHTTP(rr1_3, r1)
+	if rr1_3.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", rr1_3.Code)
+	}
+
+	// 3. IP 2 makes 2 requests (allowed because IP 2 has separate budget)
+	r2 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	r2.RemoteAddr = "2.2.2.2:1234"
+
+	rr2_1 := httptest.NewRecorder()
+	engine.ServeHTTP(rr2_1, r2)
+	if rr2_1.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr2_1.Code)
+	}
+
+	rr2_2 := httptest.NewRecorder()
+	engine.ServeHTTP(rr2_2, r2)
+	if rr2_2.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr2_2.Code)
+	}
+
+	// 4. IP 3 makes 1 request (allowed, total active system requests = 2 + 2 + 1 = 5)
+	r3 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	r3.RemoteAddr = "3.3.3.3:1234"
+
+	rr3_1 := httptest.NewRecorder()
+	engine.ServeHTTP(rr3_1, r3)
+	if rr3_1.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr3_1.Code)
+	}
+
+	// 5. IP 4 makes 1 request (blocked, exceeds global system budget of 5)
+	r4 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	r4.RemoteAddr = "4.4.4.4:1234"
+
+	rr4_1 := httptest.NewRecorder()
+	engine.ServeHTTP(rr4_1, r4)
+	if rr4_1.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 (global block), got %d", rr4_1.Code)
+	}
+}
+
+func TestEngineBrowserRateLimit(t *testing.T) {
+	// Setup temporary directory
+	tmpDir, err := os.MkdirTemp("", "kitwork-engine-rl-b-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appCode := `
+kitwork().Router().Get("/test").Handle(() => {
+    return "ok";
+});
+`
+	appFile := filepath.Join(tenantDir, "app.kitwork.js")
+	err = os.WriteFile(appFile, []byte(appCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create Engine with BrowserLimit=2
+	engine := New(tmpDir, 0, false, "")
+	engine.RateLimit.Enabled = true
+	engine.RateLimit.BrowserRate = 2
+	engine.RateLimit.Period = time.Second
+
+	// 2. Test Browser limit (IP rotations)
+	rBrowser := httptest.NewRequest("GET", "http://localhost/test", nil)
+	rBrowser.Header.Set("User-Agent", "MaliciousBrowser")
+	rBrowser.Header.Set("Accept-Language", "en")
+
+	// Request 1: Proxy IP A (Allowed)
+	rBrowser.RemoteAddr = "1.1.1.1:1234"
+	rr1 := httptest.NewRecorder()
+	engine.ServeHTTP(rr1, rBrowser)
+	if rr1.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr1.Code)
+	}
+
+	// Request 2: Proxy IP B (Allowed)
+	rBrowser.RemoteAddr = "2.2.2.2:1234"
+	rr2 := httptest.NewRecorder()
+	engine.ServeHTTP(rr2, rBrowser)
+	if rr2.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr2.Code)
+	}
+
+	// Request 3: Proxy IP C (Blocked by browser limit, despite rotating IP!)
+	rBrowser.RemoteAddr = "3.3.3.3:1234"
+	rr3 := httptest.NewRecorder()
+	engine.ServeHTTP(rr3, rBrowser)
+	if rr3.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", rr3.Code)
 	}
 }

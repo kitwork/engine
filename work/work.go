@@ -57,6 +57,11 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Rate Limiting Check
+	if !t.checkRateLimit(matched, r, w) {
+		return
+	}
+
 	// 1. Kiểm tra cache
 	if matched.cacheTTL > 0 {
 		cacheKey := matched.Method + ":" + matched.Path
@@ -80,7 +85,6 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-
 
 	if matched.response != nil && matched.response.IsSend() {
 		ctxRouter := *matched
@@ -201,7 +205,17 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 	if r.err != nil {
 		if r.catch != nil {
 			fArgs := ctxObj.arguments(r.catch)
-			vm.ExecuteLambda(r.catch, fArgs)
+			result := vm.ExecuteLambda(r.catch, fArgs)
+			if !result.IsInvalid() && !r.response.IsSend() && result.Truthy() {
+				if r.response.Code() == 0 {
+					r.response.Status(500)
+				}
+				if result.K == value.Map || result.K == value.Array {
+					r.response.JSON(result)
+				} else {
+					r.response.HTML(result)
+				}
+			}
 		}
 	} else {
 		if r.then != nil {
@@ -224,7 +238,7 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 		if original.cacheTTL > 0 {
 			cacheKey := original.Method + ":" + original.Path
 			r.tenant.cacheLock.Lock()
-			r.tenant.cache[cacheKey] = &CachedResult{
+			r.tenant.cache[cacheKey] = &Responser{
 				Response: r.response,
 				ExpireAt: time.Now().Add(original.cacheTTL),
 			}

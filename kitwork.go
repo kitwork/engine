@@ -83,12 +83,35 @@ func Run(files ...string) (err error) {
 	// Pass global settings to the work package
 	work.AllowLocal = cfg.AllowLocal
 	work.ServerPort = cfg.Port
+	work.RateLimitEnabled = cfg.RateLimit.Enabled
+	if cfg.RateLimit.Period > 0 {
+		work.RateLimitPeriod = cfg.RateLimit.Period
+	}
+	if cfg.RateLimit.Rate > 0 {
+		work.DefaultTenantRate = cfg.RateLimit.Rate
+	}
+	if cfg.RateLimit.IpRate > 0 {
+		work.DefaultTenantIpRate = cfg.RateLimit.IpRate
+	}
+	if cfg.RateLimit.BrowserRate > 0 {
+		work.DefaultTenantBrowserRate = cfg.RateLimit.BrowserRate
+	}
+	if cfg.RateLimit.UserRate > 0 {
+		work.DefaultTenantUserRate = cfg.RateLimit.UserRate
+	}
 
 	// Assign configured domains to the ssl package
 	ssl.Domains = cfg.Domains
 
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
+	handler.RateLimit.Enabled = cfg.RateLimit.Enabled
+	handler.RateLimit.Rate = cfg.RateLimit.Rate
+	handler.RateLimit.IpRate = cfg.RateLimit.IpRate
+	handler.RateLimit.BrowserRate = cfg.RateLimit.BrowserRate
+	if cfg.RateLimit.Period > 0 {
+		handler.RateLimit.Period = cfg.RateLimit.Period
+	}
 
 	if len(cfg.Domains) > 0 {
 		tlsConfig := ssl.AutoSSL()

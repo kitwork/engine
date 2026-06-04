@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,18 +30,30 @@ type Tenant struct {
 	MaxEnergy uint64
 
 	cacheLock sync.RWMutex
-	cache     map[string]*CachedResult
+	cache     map[string]*Responser
 
 	databases map[string]*sql.DB
 	dbMu      sync.Mutex
+
+	// Rate Limiting fields
+	rateLimiterMu    sync.Mutex
+	currentLimiters  map[string]*RateLimiter
+	previousLimiters map[string]*RateLimiter
+	lastRotation     time.Time
+
+	rateLimitEnabled  bool
+	rateLimitRate     int
+	rateLimitIpRate   int
+	rateLimitUserRate int
+	rateLimitPeriod   time.Duration
 }
 
-type cache struct {
+type Cache struct {
 	sync.RWMutex
-	data map[string]*CachedResult
+	data map[string]*Responser
 }
 
-type CachedResult struct {
+type Responser struct {
 	Response *Response
 	ExpireAt time.Time
 }
@@ -143,6 +156,74 @@ func (t *Tenant) Run() error {
 	})
 	t.vm.Globals["Date"] = dateFunc
 
+	// Inject parseFloat global helper
+	parseFloatFunc := value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.New(0.0)
+		}
+		s := args[0].Text()
+		f, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return value.New(0.0)
+		}
+		return value.New(f)
+	})
+	t.vm.Globals["parseFloat"] = parseFloatFunc
+
+	// Inject parseInt global helper
+	parseIntFunc := value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.New(0)
+		}
+		s := args[0].Text()
+		base := 10
+		if len(args) > 1 && args[1].K == value.Number {
+			base = int(args[1].N)
+		}
+		if base < 2 || base > 36 {
+			base = 10
+		}
+		s = strings.TrimSpace(s)
+		if len(s) == 0 {
+			return value.New(0)
+		}
+		if base == 16 && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
+			s = s[2:]
+		}
+		i, err := strconv.ParseInt(s, base, 64)
+		if err == nil {
+			return value.New(i)
+		}
+		var prefix strings.Builder
+		for idx, ch := range s {
+			if idx == 0 && (ch == '+' || ch == '-') {
+				prefix.WriteRune(ch)
+				continue
+			}
+			isValid := false
+			if ch >= '0' && ch <= '9' {
+				isValid = int(ch-'0') < base
+			} else if ch >= 'a' && ch <= 'z' {
+				isValid = int(ch-'a'+10) < base
+			} else if ch >= 'A' && ch <= 'Z' {
+				isValid = int(ch-'A'+10) < base
+			}
+			if !isValid {
+				break
+			}
+			prefix.WriteRune(ch)
+		}
+		parsedStr := prefix.String()
+		if parsedStr == "" || parsedStr == "+" || parsedStr == "-" {
+			return value.New(0)
+		}
+		i, err = strconv.ParseInt(parsedStr, base, 64)
+		if err != nil {
+			return value.New(0)
+		}
+		return value.New(i)
+	})
+	t.vm.Globals["parseInt"] = parseIntFunc
 
 	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
 	res := t.vm.Run()
@@ -169,9 +250,16 @@ func NewTenant(root string, domain string) *Tenant {
 			Identity: identity,
 			Domain:   domain,
 		},
-		cache:     make(map[string]*CachedResult),
-		databases: make(map[string]*sql.DB),
-		MaxEnergy: 10000000,
+		cache:             make(map[string]*Responser),
+		databases:         make(map[string]*sql.DB),
+		currentLimiters:   make(map[string]*RateLimiter),
+		previousLimiters:  make(map[string]*RateLimiter),
+		lastRotation:      time.Now(),
+		rateLimitEnabled:  RateLimitEnabled,
+		rateLimitRate:     DefaultTenantRate,
+		rateLimitIpRate:   DefaultTenantIpRate,
+		rateLimitUserRate: DefaultTenantUserRate,
+		rateLimitPeriod:   RateLimitPeriod,
 	}
 
 	switch root {

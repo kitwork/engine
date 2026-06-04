@@ -26,7 +26,7 @@ var kitworkPlugin = api.Plugin{
 			var contents string
 			switch args.Path {
 			case "kitwork":
-				contents = `export const { router, log, render, http, database, go, qrcode, screenshot, chromedp, napas } = kitwork();`
+				contents = `export const { router, log, render, http, database, go, qrcode, screenshot, chromedp, napas, file } = kitwork();`
 			case "kitwork/router":
 				contents = `export const router = kitwork().router; export default router;`
 			case "kitwork/log":
@@ -47,6 +47,8 @@ var kitworkPlugin = api.Plugin{
 				contents = `export const chromedp = kitwork().chromedp; export default chromedp;`
 			case "kitwork/napas":
 				contents = `export const napas = kitwork().napas; export default napas;`
+			case "kitwork/file":
+				contents = `export const file = kitwork().file; export default file;`
 			default:
 				return api.OnLoadResult{}, fmt.Errorf("unknown virtual module path: %s", args.Path)
 			}

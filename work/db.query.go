@@ -804,6 +804,50 @@ func (q *Query) get() value.Value {
 	return value.New(res)
 }
 
+func (q *Query) SafeList(args ...value.Value) value.Value {
+	if len(args) > 0 {
+		q.Where(args...)
+	}
+	res := q.get()
+	if res.K == value.Invalid {
+		arr := value.New([]value.Value{})
+		arr.IsError = true
+		arr.ErrorVal = map[string]value.Value{
+			"code":    value.New("DATABASE_ERROR"),
+			"message": value.New(res.V),
+		}
+		return arr
+	}
+	res.IsError = false
+	return res
+}
+
+func (q *Query) SafeFirst(args ...value.Value) value.Value {
+	if len(args) > 0 {
+		q.Where(args...)
+	}
+	q.limit = 1
+	res := q.get()
+	if res.K == value.Invalid {
+		obj := value.New(make(map[string]value.Value))
+		obj.IsError = true
+		obj.ErrorVal = map[string]value.Value{
+			"code":    value.New("DATABASE_ERROR"),
+			"message": value.New(res.V),
+		}
+		return obj
+	}
+	
+	arr := res.Array()
+	if len(arr) > 0 {
+		row := arr[0]
+		row.IsError = false
+		return row
+	}
+	
+	return value.Value{K: value.Nil}
+}
+
 func (q *Query) Create(args ...value.Value) value.Value {
 	if len(args) == 0 {
 		return value.Value{K: value.Nil}

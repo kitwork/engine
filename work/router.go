@@ -54,6 +54,11 @@ type Router struct {
 	cacheTTL       time.Duration
 	staticTTL      time.Duration
 	benchmarkCount int // Số lần chạy lặp để đo hiệu năng
+
+	// Rate Limit configuration
+	hasLimit    bool
+	limitRate   int
+	limitPeriod time.Duration
 }
 
 func (r *Router) Benchmark(v value.Value) *Router {
@@ -232,6 +237,173 @@ func (r *Router) Cache(v value.Value) *Router {
 		r.cacheTTL = d
 	}
 	return r
+}
+
+func (r *Router) Limit(args ...value.Value) *Router {
+	if len(args) == 0 {
+		return r
+	}
+
+	firstArg := args[0]
+
+	// Case 1: Object/Map parameter, e.g., .limit({ rate: 10, period: "1s" }) or .limit({ rate: 10, second: 1 })
+	if firstArg.IsMap() {
+		m := firstArg.Map()
+		rateVal, okRate := m["rate"]
+		periodVal, okPeriod := m["period"]
+
+		var rate int
+		var period time.Duration
+		var err error
+		var hasPeriod bool
+
+		if okRate {
+			// Parse Rate
+			if rateVal.IsNumeric() {
+				rate = int(rateVal.Float())
+			} else {
+				rate, _, err = parseLimitStr(rateVal.String() + "/1s")
+			}
+		}
+
+		if okPeriod {
+			hasPeriod = true
+			// Parse Period
+			if periodVal.K == value.Duration {
+				period = time.Duration(int64(periodVal.N))
+			} else if periodVal.IsString() {
+				period, err = time.ParseDuration(periodVal.String())
+			} else if periodVal.IsNumeric() {
+				period = time.Duration(periodVal.Float()) * time.Second
+			}
+		} else {
+			// Check for other keys like second, seconds, minute, minutes, hour, hours, day, days
+			unitKeys := []struct {
+				names []string
+				unit  time.Duration
+			}{
+				{[]string{"second", "seconds"}, time.Second},
+				{[]string{"minute", "minutes"}, time.Minute},
+				{[]string{"hour", "hours"}, time.Hour},
+				{[]string{"day", "days"}, 24 * time.Hour},
+			}
+
+			for _, uk := range unitKeys {
+				for _, name := range uk.names {
+					if unitVal, ok := m[name]; ok {
+						if unitVal.IsNumeric() {
+							period = time.Duration(unitVal.Float()) * uk.unit
+							hasPeriod = true
+							break
+						}
+					}
+				}
+				if hasPeriod {
+					break
+				}
+			}
+		}
+
+		if err == nil && rate > 0 && period > 0 && hasPeriod {
+			r.hasLimit = true
+			r.limitRate = rate
+			r.limitPeriod = period
+			return r
+		}
+	}
+
+	// Case 2: Multiple parameters, e.g., .limit(10, "1s") or .limit(10, 1) or .limit(10, time.Second)
+	if len(args) >= 2 {
+		rateArg := args[0]
+		periodArg := args[1]
+
+		var rate int
+		var period time.Duration
+		var err error
+
+		// Parse Rate
+		if rateArg.IsNumeric() {
+			rate = int(rateArg.Float())
+		} else {
+			rate, _, err = parseLimitStr(rateArg.String() + "/1s")
+		}
+
+		// Parse Period
+		if periodArg.K == value.Duration {
+			period = time.Duration(int64(periodArg.N))
+		} else if periodArg.IsString() {
+			period, err = time.ParseDuration(periodArg.String())
+		} else if periodArg.IsNumeric() {
+			period = time.Duration(periodArg.Float()) * time.Second
+		}
+
+		if err == nil && rate > 0 && period > 0 {
+			r.hasLimit = true
+			r.limitRate = rate
+			r.limitPeriod = period
+			return r
+		}
+	}
+
+	// Case 3: Single string parameter, e.g., .limit("10/s")
+	rate, period, err := parseLimitStr(firstArg.String())
+	if err == nil {
+		r.hasLimit = true
+		r.limitRate = rate
+		r.limitPeriod = period
+	} else {
+		fmt.Printf("[Router.Limit] Error parsing rate limit: %v\n", err)
+	}
+
+	return r
+}
+
+func parseLimitStr(s string) (int, time.Duration, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid format: must be <rate>/<period>")
+	}
+
+	var rate int
+	_, err := fmt.Sscanf(parts[0], "%d", &rate)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid rate: %w", err)
+	}
+
+	periodStr := strings.TrimSpace(parts[1])
+	if periodStr == "" {
+		return 0, 0, fmt.Errorf("empty period")
+	}
+
+	// If period has no number, e.g. "s", "m", prepend "1"
+	hasDigit := false
+	for _, char := range periodStr {
+		if char >= '0' && char <= '9' {
+			hasDigit = true
+			break
+		}
+	}
+	if !hasDigit {
+		periodStr = "1" + periodStr
+	}
+
+	periodStr = strings.ReplaceAll(periodStr, "seconds", "s")
+	periodStr = strings.ReplaceAll(periodStr, "second", "s")
+	periodStr = strings.ReplaceAll(periodStr, "sec", "s")
+	periodStr = strings.ReplaceAll(periodStr, "minutes", "m")
+	periodStr = strings.ReplaceAll(periodStr, "minute", "m")
+	periodStr = strings.ReplaceAll(periodStr, "min", "m")
+	periodStr = strings.ReplaceAll(periodStr, "hours", "h")
+	periodStr = strings.ReplaceAll(periodStr, "hour", "h")
+	periodStr = strings.ReplaceAll(periodStr, "hr", "h")
+
+	d, err := time.ParseDuration(periodStr)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid duration unit: %w", err)
+	}
+
+	return rate, d, nil
 }
 
 func (r *Router) Static(v value.Value) *Router {

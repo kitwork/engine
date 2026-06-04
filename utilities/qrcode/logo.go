@@ -9,55 +9,169 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"io/ioutil"
-	"path"
+	"math"
 	"sort"
 	"strings"
+
+	"github.com/fogleman/gg"
+	"github.com/nfnt/resize"
 )
 
+type Logo struct {
+	Image   string  `json:"image"`
+	Stroke  string  `json:"stroke"`
+	Size    float64 `json:"size"`
+	Padding float64 `json:"padding"`
+}
+
+func (l *Logo) Sizing(mSize int) float64 {
+	if l.Image == "" {
+		return 0
+	}
+	// Lấy kích thước ước lượng ban đầu (khoảng 25% kích thước QR)
+	size := int(math.Ceil(float64(mSize) / 4.0))
+
+	// Nếu kích thước là số chẵn, giảm đi 1 để đưa về số lẻ gần nhất
+	if size%2 == 0 {
+		size--
+	}
+
+	// Đảm bảo logo có kích thước tối thiểu là 3x3 ô để nhìn rõ
+	if size < 3 {
+		size = 3
+	}
+
+	l.Size = float64(size)
+	return l.Size
+}
+
+func (l Logo) svg(svg *Svg, mSize, padding int) {
+	image := l.Image
+	if image == "" {
+		return
+	}
+
+	logoSize := float64(l.Size)
+
+	centerStart := (mSize - int(logoSize)) / 2
+	logoX := float64(centerStart + padding)
+	logoY := float64(centerStart + padding)
+
+	strokeColor := formatColor(l.Stroke)
+	hasStroke := l.Stroke != "" && l.Stroke != "transparent" && l.Stroke != "none"
+
+	if hasStroke {
+		container := svg.NewElement("rect").
+			XY(logoX, logoY).
+			Width(logoSize).
+			Height(logoSize).
+			Fill("none")
+		container.Stroke(strokeColor).StrokeWidth(0.15)
+	}
+	pad := l.Padding
+	if pad < 0 {
+		pad = 0.0
+	}
+	imgX := logoX + pad
+	imgY := logoY + pad
+	imgSize := logoSize - 2.0*pad
+	if imgSize <= 0 {
+		imgX = logoX
+		imgY = logoY
+		imgSize = logoSize
+	}
+
+	clipID := fmt.Sprintf("center-logo-clip-%d", centerStart)
+
+	defs := svg.NewElement("defs")
+	clipPath := defs.New("clipPath").Attribute("id", clipID)
+
+	clipPath.New("rect").
+		XY(imgX, imgY).
+		Width(imgSize).
+		Height(imgSize).
+		Rounded(imgSize * 0.1)
+
+	svg.NewElement("image").
+		Attribute("href", image).
+		XY(imgX, imgY).
+		Width(imgSize).
+		Height(imgSize).
+		Attribute("clip-path", fmt.Sprintf("url(#%s)", clipID))
+
+}
+
+func (l Logo) png(ctx *gg.Context, mSize, padding int, cellSize float64) {
+	if l.Image == "" {
+		return
+	}
+
+	logoSize := float64(l.Size)
+
+	centerStart := (mSize - int(logoSize)) / 2
+	logoX := float64(centerStart+padding) * cellSize
+	logoY := float64(centerStart+padding) * cellSize
+	logoSizeVal := logoSize * cellSize
+
+	strokeColor := formatColor(l.Stroke)
+	hasStroke := l.Stroke != "" && l.Stroke != "transparent" && l.Stroke != "none"
+
+	if hasStroke {
+		ctx.DrawRoundedRectangle(logoX, logoY, logoSizeVal, logoSizeVal, 0.5*cellSize)
+		setGGColor(ctx, strokeColor, 1.0)
+		ctx.SetLineWidth(0.15 * cellSize)
+		ctx.Stroke()
+	}
+
+	logoPath := l.Image
+	pad := l.Padding
+	if pad < 0 {
+		pad = 0.0
+	}
+	imgX := logoX + pad*cellSize
+	imgY := logoY + pad*cellSize
+	imgSize := logoSizeVal - 2.0*pad*cellSize
+	if imgSize <= 0 {
+		imgX = logoX
+		imgY = logoY
+		imgSize = logoSizeVal
+	}
+
+	var imgLogo image.Image
+	parts := strings.Split(logoPath, ",")
+	base64Data := parts[len(parts)-1]
+	if decoded, err := base64.StdEncoding.DecodeString(base64Data); err == nil {
+		if img, _, err := image.Decode(bytes.NewReader(decoded)); err == nil {
+			imgLogo = img
+		}
+	}
+
+	if imgLogo != nil {
+		logoResized := resize.Resize(uint(imgSize), uint(imgSize), imgLogo, resize.Lanczos3)
+		ctx.Push()
+		ctx.DrawRoundedRectangle(imgX, imgY, imgSize, imgSize, imgSize*0.1)
+		ctx.Clip()
+		ctx.DrawImage(logoResized, int(imgX), int(imgY))
+		ctx.Pop()
+	}
+}
+
 func (o *Options) ExtractLogoColors() ([]string, error) {
-	logoPath := o.Center.Image
+	logoPath := o.Logo.Image
 	if logoPath == "" {
-		logoPath = o.Center.Logo
-	}
-	if logoPath == "" {
-		return nil, fmt.Errorf("no logo path configured")
+		return nil, fmt.Errorf("no logo image configured")
 	}
 
-	var img image.Image
+	parts := strings.Split(logoPath, ",")
+	base64Data := parts[len(parts)-1]
+	decoded, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode base64 logo: %w", err)
+	}
 
-	if strings.HasPrefix(logoPath, "data:image/") {
-		parts := strings.Split(logoPath, ",")
-		base64Data := parts[len(parts)-1]
-		decoded, err := base64.StdEncoding.DecodeString(base64Data)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode base64 logo: %w", err)
-		}
-		imgDec, _, errDec := image.Decode(bytes.NewReader(decoded))
-		if errDec != nil {
-			return nil, fmt.Errorf("failed to decode base64 image: %w", errDec)
-		}
-		img = imgDec
-	} else {
-		pngData, err := ioutil.ReadFile(logoPath)
-		if err != nil {
-			altPath := path.Join("resource", "assets", "images", "logo", logoPath+".png")
-			var errAlt error
-			pngData, errAlt = ioutil.ReadFile(altPath)
-			if errAlt != nil {
-				altPath2 := path.Join("resource", "assets", "images", "logo", logoPath)
-				var errAlt2 error
-				pngData, errAlt2 = ioutil.ReadFile(altPath2)
-				if errAlt2 != nil {
-					return nil, fmt.Errorf("failed to read logo file: %w", errAlt2)
-				}
-			}
-		}
-		imgDec, _, errDec := image.Decode(bytes.NewReader(pngData))
-		if errDec != nil {
-			return nil, fmt.Errorf("failed to decode logo image: %w", errDec)
-		}
-		img = imgDec
+	img, _, err := image.Decode(bytes.NewReader(decoded))
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode logo image: %w", err)
 	}
 
 	colorCount := make(map[string]int)
@@ -104,34 +218,4 @@ func (o *Options) ExtractLogoColors() ([]string, error) {
 	}
 
 	return result, nil
-}
-
-func getBase64Image(filePath string) string {
-	if strings.HasPrefix(filePath, "data:image/") {
-		return filePath
-	}
-
-	pngData, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		altPath := path.Join("resource", "assets", "images", "logo", filePath+".png")
-		pngData, err = ioutil.ReadFile(altPath)
-		if err != nil {
-			altPath2 := path.Join("resource", "assets", "images", "logo", filePath)
-			pngData, err = ioutil.ReadFile(altPath2)
-			if err != nil {
-				return ""
-			}
-		}
-	}
-
-	var mimeType string
-	if strings.HasSuffix(strings.ToLower(filePath), ".jpg") || strings.HasSuffix(strings.ToLower(filePath), ".jpeg") {
-		mimeType = "image/jpeg"
-	} else if strings.HasSuffix(strings.ToLower(filePath), ".gif") {
-		mimeType = "image/gif"
-	} else {
-		mimeType = "image/png"
-	}
-
-	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(pngData))
 }
