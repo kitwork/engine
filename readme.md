@@ -1,173 +1,309 @@
-# 🚀 Kitwork Engine
-> **The execution core of Kitwork — Cloud Infrastructure in a Single Binary.**
+# Kitwork Engine
+
+> **Cloud Infrastructure in a Single Binary — the execution core.**
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-black?style=flat-square&logo=go)](https://golang.org)
-[![Build Status](https://img.shields.io/badge/status-production--ready-blue?style=flat-square)](#)
-[![Performance](https://img.shields.io/badge/latency-70ns-green?style=flat-square)](#)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](#license--support)
+[![VM Latency](https://img.shields.io/badge/instruction-70ns-green?style=flat-square)](#performance)
+[![Cold Boot](https://img.shields.io/badge/cold%20boot-%3C10ms-green?style=flat-square)](#performance)
 
-Kitwork Engine is an industrial-grade, stack-based bytecode virtual machine and routing infrastructure written natively in Go. It enables SaaS providers and developers to run untrusted, dynamic JavaScript-based routing and workflow logic at native-level speeds. 
+**Kitwork Engine is a multi-tenant cloud runtime written natively in Go.** It compiles a JavaScript dialect into bytecode and executes it on a custom stack-based virtual machine — with energy metering, per-tenant sandboxing, hot reload, an integrated router, a zero-allocation database layer, and a template engine. One binary hosts unlimited domains; deploying a website means dropping a folder.
 
-By separating the hosting platform (Go) from the tenant business rules (JavaScript Bytecode), Kitwork is ideal for multi-tenant architectures, edge functions, and programmable API gateways.
-
----
-
-## ⚡ Performance Highlights
-* **Core VM Instruction Speed**: ~14.1 Million operations/sec.
-* **Logic Execution Latency**: ~70ns per VM instruction clock.
-* **Zero-Allocation Query Builder**: 230ns compilation, **20x faster** than GORM, with 0 B/op memory overhead.
-* **Zero-Downtime Hot Reloading**: Compiles and atomic-swaps script contexts in `<10ms`.
-* **Zero-Allocation Disk Caching**: Streams cached binary payload directly using OS-level file offsets and `io.Copy`.
+It is the execution core of [Kitwork](https://kitwork.vn) — a bet that an entire cloud stack (compute, runtime, delivery, scheduling) can collapse into one coherent process instead of a fleet of Redis, Kafka, and Kubernetes.
 
 ---
 
-## 📦 Go Quickstart
+## Table of Contents
 
-### 1. Install Dependency
+- [Why a custom VM?](#why-a-custom-vm)
+- [Quick Start](#quick-start)
+- [The Language](#the-language-javascript-you-know-bounded-by-design)
+- [Multi-Tenant Layout](#multi-tenant-layout)
+- [Architecture](#architecture)
+- [Security & Sandboxing](#security--sandboxing)
+- [Performance](#performance)
+- [The Cluster Vision](#the-cluster-vision)
+- [FAQ](#faq)
+- [Documentation](#documentation)
+
+---
+
+## Why a custom VM?
+
+Running untrusted tenant code is the defining problem of cloud infrastructure. The industry has three answers:
+
+| Approach | Isolation | Cold boot | Binary weight | Can the language hurt the host? |
+| :--- | :--- | :--- | :--- | :--- |
+| Containers / microVMs | OS-level | 100ms – seconds | image per tenant | Yes — anything goes inside |
+| Embedded V8 / goja | interpreter-level | ~ms | heavy (V8) or slow (reflection) | Yes — `while(true)` needs watchdogs |
+| **Kitwork VM** | **bytecode-level** | **< 10ms** | **one Go binary** | **No — unbounded constructs do not compile** |
+
+Kitwork chose to own the entire pipeline — lexer, parser, compiler, opcodes, VM — so that safety lives in the *language definition*, not in patches around it. Every instruction is energy-metered. Every workload provably terminates. A tenant cannot harm a node, which is what later allows any node to absorb any tenant.
+
+> The VM core runs at **~14.1 million ops/sec** with **near-zero GC pressure**, because safety did not have to be bolted on — it was compiled in.
+
+---
+
+## Quick Start
+
+### Embedded in your Go application
+
 ```bash
 go get github.com/kitwork/engine
 ```
-
-### 2. Standard Go Integration
-Implement Kitwork in your main entrypoint in just a few lines:
 
 ```go
 package main
 
 import (
-	"log"
+    "log"
 
-	"github.com/kitwork/engine"
+    "github.com/kitwork/engine"
 )
 
 func main() {
-	// Boot the engine server with configuration
-	log.Println("Starting Kitwork Logic Engine...")
-	if err := engine.Run("config.kitwork.yml"); err != nil {
-		log.Fatalf("Server startup failed: %v", err)
-	}
+    if err := engine.Run("config.kitwork.yml"); err != nil {
+        log.Fatalf("engine startup failed: %v", err)
+    }
 }
 ```
 
----
-
-## ⚙️ Configuration (`config.kitwork.yml`)
-The engine is configured using a YAML/JSON configuration file. Environment variables inside the file are automatically expanded at boot time.
+### Configuration — one file, environment-aware
 
 ```yaml
-# Server Port
 port: 8080
+root: "tenants"          # multi-tenant root directory
 
-# Multi-tenant root directory
-root: "tenants"
-
-# List of domains for Auto-HTTPS (ACME)
-domains:
+domains:                  # automatic HTTPS via ACME
   - kitwork.vn
 
-# VM Energy Budget (limits loop iterations and network calls per request)
-max_energy: 1000000
+max_energy: 1000000       # VM energy budget per execution
+hot_reload: true          # atomic bytecode swap on file change, <10ms
 
-# Enables hot reloading of script files on modification
-hot_reload: true
-
-# Database connection pool (PostgreSQL / MySQL supported)
 database:
-  type: "postgres"
+  type: "postgres"        # PostgreSQL / MySQL
   host: "localhost"
   port: 5432
   user: "postgres"
-  password: "${DB_PASSWORD}" # Expanded automatically from environment variables
+  password: "${DB_PASSWORD}"   # env vars expand at boot
   name: "postgres"
-  ssl: "require"
-  timeout: 5
   max_open: 50
   max_idle: 10
-  lifetime: 12 # Connection max lifetime (minutes)
 ```
+
+### Your first endpoint
+
+```javascript
+import { router, database } from "kitwork"
+
+const db = database.connection()
+
+router.get("/api/hello").handle((req, res) => {
+    return res.json({
+        status: "active",
+        time: new Date().toISOString()
+    })
+})
+
+router.get("/api/users").handle((req, res) => {
+    const users = db.table("user").list(10)
+    return res.json({ success: true, users: users })
+})
+```
+
+Save the file. Hot reload recompiles and atomically swaps the bytecode in under 10 milliseconds. No build step, no restart, no toolchain.
 
 ---
 
-## 📂 Multi-Tenant Layout
-Kitwork automatically maps incoming host requests to dedicated tenant environments based on the folder structure inside the configured `root` directory:
+## The Language: JavaScript you know, bounded by design
 
+Tenant logic is written in a JavaScript dialect. **Everything that is supported behaves exactly like standard JS** — this is an iron rule of the project:
+
+- Operators: `===`, `!==`, ternary `?:`, `%`, `+=` `-=` `*=` `/=`, `++` `--`
+- Globals: full `Math`, real `Date` (`Date.now()`, `new Date(ms | string | y,m,d)`, all getters, `toISOString`), `JSON`, `Object.keys/values/entries/assign/fromEntries`, `Number` / `String` / `Boolean` conversion, `parseInt` / `parseFloat`
+- Complete String & Array method families, **Unicode-correct**: indices count characters, not bytes — `"Phường".length === 6`, slicing never breaks Vietnamese text
+- Arrow functions, template literals, spread, destructuring, multi-parameter lambdas
+- Lexical closures at **any nesting depth** — `forEach` inside `forEach` mutating an outer array works exactly as in JS
+
+```javascript
+orders.filter(o => o.total > 500000)
+      .map(o => ({ id: o.id, vat: (o.total * 0.1).toFixed(0) }))
+      .sort((a, b) => b.vat - a.vat)
+
+"Phường Bến Nghé".indexOf("Bến")   // 7 — character index, Unicode-safe
+"5".padStart(3, "0")                // "005"
+items.reduce((acc, x) => acc + x.qty, 0)
 ```
-[root]/ (e.g. tenants/)
-  └─ [tenant_identity]/ (e.g. test/)
-       └─ [domain]/ (e.g. localhost/)
-            ├─ app.kitwork.js   <-- Script compiled into Bytecode
-            ├─ views/           <-- Sovereign HTML page fragments
-            │    └─ page.kitwork.html
-            ├─ static/          <-- Hashed disk-based `.static` cache snapshots
-            └─ assets/          <-- Direct resource assets (CSS, JS, media)
+
+### Deliberately removed — this is the product, not a gap
+
+| Removed | Why | Write instead |
+| :--- | :--- | :--- |
+| `while`, `do` | No unbounded loops on shared compute, ever | `.map()` / `.filter()` / `.find()` / `.forEach()` |
+| `try` / `catch` / `throw` | One visible error path, not invisible jumps | `.done(cb)` / `.fail(cb)` |
+| `switch` | Smaller language, fewer ways to disagree | `if / else` or object lookup |
+| `class` | Data is data; behavior is functions | object literals + arrow functions |
+
+Using a removed keyword produces a compile error that teaches:
+
+```text
+assemble error: Kitwork không hỗ trợ vòng lặp 'while' (loại bỏ có chủ đích để
+tránh vòng lặp vô tận). Hãy dùng .map() / .filter() / .find() trên mảng dữ liệu.
 ```
-When a request hits `http://localhost:8080`, the engine matches it against `tenants/test/localhost/app.kitwork.js`, compiling the VM bytecode on the fly if not cached.
+
+Full language reference: [ENGINE_CAPABILITIES.md](./ENGINE_CAPABILITIES.md)
 
 ---
 
-## 🧠 Deep-Dive Architecture & Internals
+## Multi-Tenant Layout
+
+One process serves unlimited domains, routed by hostname. **A folder is a website:**
+
+```text
+tenants/
+  └─ <tenant-identity>/
+       └─ <domain>/                    e.g. kitdata.vn/
+            ├─ app.kitwork.js          routes & logic → compiled to bytecode
+            ├─ views/                  pages, layouts, partials, {{ bindings }}
+            ├─ static/                 .static() disk-cache snapshots
+            └─ assets/                 css, js, media — served on the zero-VM fast path
+```
+
+Drop a folder in, point DNS at the node, the domain is live. Each tenant runs in its own VM sandbox with its own energy budget. Deployment is `rsync`; rollback is `git checkout`.
+
+---
+
+## Architecture
 
 ```mermaid
 graph TD
     A[Incoming HTTP Request] --> B{Radix Trie Router}
-    B -- Static Assets Match --> C[Zero-VM Fast Path: Serve directly]
-    B -- Dynamic Logic Match --> D{Static Cache Check}
-    D -- Hit (.static File) --> E[Seq Read Offset -> Stream Body]
+    B -- Static asset match --> C[Zero-VM fast path: serve from disk]
+    B -- Dynamic logic match --> D{Static cache check}
+    D -- Hit: .static file --> E[Sequential read → stream body]
     D -- Miss --> F[Acquire VM from sync.Pool]
-    F --> G[FastReset State]
-    G --> H[Execute Stack-Based VM Bytecode]
-    H --> I[Database Queries / ACID Transaction]
-    H --> J[HTTP Fetch / Ext Integration]
-    H --> K[Render Views / HTML Binding]
-    K --> L[Save Static Cache Snapshot]
-    L --> M[Send Response & Recycle VM]
+    F --> G[FastReset state]
+    G --> H[Execute stack-based bytecode]
+    H --> I[Database queries / ACID transactions]
+    H --> J[HTTP fetch / integrations]
+    H --> K[Render views / HTML binding]
+    K --> L[Save static cache snapshot]
+    L --> M[Send response & recycle VM]
 ```
 
-### 1. Compilation Pipeline (AST to Bytecode)
-The compilation pipeline is built entirely in Go without heavy external dependencies:
-* **Lexical & Syntactic Analysis**: The Lexer tokens are parsed by a recursive descent parser into an **Abstract Syntax Tree (AST)**.
-* **Bytecode Generation**: The Compiler walks the AST and emits flat linear instruction sequences (`[]byte`) alongside a Constants Pool (`[]value.Value`). Opcodes are represented by raw `uint8` instructions.
-* **Specialized Opcodes**: Instead of compiling database queries or template rendering into generic nested VM calls, the compiler emits optimized, high-level commands. This keeps bytecode short and avoids execution overhead.
+### Compilation pipeline — source to bytecode, all in Go
 
-### 2. High-Performance Radix Trie Router
-Kitwork replaces linear O(N) route matching with an optimized **Radix Trie** structure:
-* **Lookup Complexity**: Route lookup runs in $O(L)$ where $L$ is the number of path segments, making route matching completely independent of the number of registered endpoints.
-* **Wildcards and Parameters**: Node nodes support parameter matching (`:id`) and greedy wildcard matching (`*`) without regex overhead.
-* **Static Route Maps**: Paths without parameters are stored in a fast lookup map for $O(1)$ near-instant evaluation.
+1. **Lex & parse**: a hand-written recursive-descent parser builds the AST. No external parser dependencies.
+2. **Bundle**: multi-file ESM (`import` / `export`) is resolved by esbuild at compile time — no Node.js required.
+3. **Compile**: the AST is flattened into linear `uint8` opcode sequences plus a constants pool. High-level operations (DB queries, template rendering) get specialized opcodes instead of generic call chains — bytecode stays short.
+4. **Execute**: a stack-based VM with constant-time variable access, lexical scope chains, and per-opcode energy accounting.
 
-### 3. Micro-Optimizations & The Zero-Allocation Philosophy
-To handle ultra-high concurrency (target 50,000 RPS on local loopbacks), Kitwork implements strict garbage collector pressure reduction patterns:
-* **`sync.Pool` VM Recycling**: Spawning new virtual machines on every request causes immense heap allocations. Kitwork holds pre-allocated `*runtime.VM` instances in a `sync.Pool`.
-* **State FastReset**: Instead of allocating new state frames, recycled VMs are reset instantly via `.FastReset(...)`. It retains slice capacities and overrides instruction and constants pointers in-place.
-* **Sovereign Value Model (`value.Value`)**: The VM uses a custom dynamic type struct `value.Value`. It implements internal flags (`Kind`) and stores primitives directly, avoiding standard interface boxing costs (`interface{}`) and pointer tracking overhead.
+### The zero-allocation philosophy
 
-### 4. Zero-Allocation Disk Caching (`.static()`)
-The `.static()` feature uses a single offset-delimited binary format designed to feed the OS kernel efficiently:
+- **`sync.Pool` VM recycling** — pre-allocated VMs are reset in place (`FastReset`), never re-allocated per request
+- **Sovereign value model** — a custom `value.Value` struct stores primitives directly, avoiding `interface{}` boxing and pointer-chasing
+- **Radix trie routing** — O(L) in path segments, independent of endpoint count; parameter (`:id`) and wildcard (`*`) matching without regex
+- **Zero-allocation query builder** — SQL compiled in ~230ns, ~20x faster than reflection-based ORMs ([QUERY_BUILDER.md](./QUERY_BUILDER.md))
 
+### `.static()` — disk caching that feeds the kernel
+
+Responses snapshot to a single offset-delimited binary file:
+
+```text
++------------------------+-------------------------------+---------------------+
+| 10-byte length header  | JSON metadata (L bytes)       | raw body payload    |
+|                        | status, content-type, headers | HTML, JSON, images  |
++------------------------+-------------------------------+---------------------+
 ```
-+------------------------+-------------------------------+-----------------------+
-| 10-byte Length Header  |  JSON Metadata (L bytes)      |  Raw Body Payload     |
-| (Format: "%010d")      |  - HTTP Code, Content-Type    |  - HTML, Image, JSON  |
-+------------------------+-------------------------------+-----------------------+
-```
-* **Sequential Read Flow**:
-  1. Open the `.static` file (1 system call).
-  2. Read the first 10 bytes to get length `L`.
-  3. Read exactly `L` bytes in-place (`io.ReadFull`) to parse headers and status code.
-  4. At this stage, the read pointer is automatically positioned at index `10 + L`.
-  5. Call `io.Copy(w, file)` to transfer the remaining body bytes directly to the writer.
-* **No `Seek` system calls**: By reading sequentially, the kernel's read pointer advances naturally, avoiding extra system call roundtrips and optimizing file-serving performance.
 
-### 5. Sandboxing & Protection Constraints
-* **Energy Budgets**: To prevent infinite loops (`while(true) {}`) from hogging CPU cores, the VM loop evaluates the weight of every opcode execution. Once the energy threshold exceeds `max_energy`, execution is immediately aborted.
-* **Stack Depth Sentinel**: Recursion depth is monitored on function calls. Depths beyond 64 trigger a controlled virtual error rather than overflowing the Go runtime stack.
-* **Line Number Source Mapping**: During compilation, each instruction pointer is mapped to its file byte offset. If a script fails, the VM runs a binary search against the line-start offsets of the source script, printing a stack trace pointing directly to the exact file line number (e.g. `app.kitwork.js:L53`).
-
-### 6. ACID Transaction Management
-Inside the VM, transaction blocks are bounded using Go's native PostgreSQL/MySQL transactions:
-* **Callback Isolation**: The engine acquires a transaction boundary `*sql.Tx` and executes the JS lambda inside a deferred recovery block.
-* **Automatic Rollback**: If a JavaScript exception is thrown, the Go VM runs into a panic, or the code returns a `value.Invalid` type, the deferred wrapper intercepts it, executes `tx.Rollback()`, and returns the error safely, ensuring zero database connection pool leakage.
+One open, one sequential read, then `io.Copy` straight to the socket — no `Seek` syscalls, no RAM staging, metadata expiry via OS file ModTime.
 
 ---
 
-## ✒️ License & Support
-* Developed by **Huỳnh Nhân Quốc** under the **Kitwork Foundation**.
+## Security & Sandboxing
+
+| Layer | Mechanism |
+| :--- | :--- |
+| **Language** | Unbounded constructs (`while`, recursion bombs) rejected at compile time |
+| **Energy budget** | Every opcode carries a weight; execution aborts the instant `max_energy` is exceeded |
+| **Stack sentinel** | Call depth > 64 raises a controlled VM error — the Go runtime stack is never at risk |
+| **Memory guards** | String builders (`repeat`, `padStart`) hard-capped; one tenant cannot balloon node RAM |
+| **Source mapping** | Every instruction maps back to a source line — failures report `app.kitwork.js:L53`, not hex dumps |
+| **ACID boundaries** | Script transactions wrap `*sql.Tx` with deferred recovery: any VM error triggers automatic rollback, zero connection leakage |
+
+---
+
+## Performance
+
+Load-tested with `k6` against a single local node ([methodology](./BENCHMARK.md)):
+
+| Metric | Result |
+| :--- | :--- |
+| VM core throughput | ~14,100,000 ops/s |
+| Instruction latency | ~70 ns |
+| HTTP throughput | 12,726 req/s |
+| Response latency | p50 1.16 ms · avg JSON 90 µs |
+| Success rate | 100.00% (0 / 127,292 failed) |
+| Cold boot | < 10 ms |
+| GC pressure | near zero |
+
+---
+
+## The Cluster Vision
+
+A Kitwork cluster has **no special servers**. Every node runs this same engine; only responsibility differs — Gateway, Coordinator, Worker. Coordination is governed by four falsifiable invariants:
+
+1. **State outlives machines** — the database is the only memory; node RAM holds nothing precious
+2. **Correctness never rides the bus** — elections are database leases, not homemade consensus
+3. **Lose efficiency before availability** — every role can absorb the role below it
+4. **Every workload is bounded** — the language is the cluster's immune system
+
+When Workers die, Coordinators execute. When Coordinators die, Gateways execute. Performance degrades; the system continues.
+
+Full design: [CLUSTER.MD](./CLUSTER.MD)
+
+---
+
+## FAQ
+
+**What is Kitwork Engine?**
+A multi-tenant cloud runtime in a single Go binary: it compiles a bounded JavaScript dialect to bytecode and executes it on a custom stack-based VM with energy metering, integrated routing, database access, caching, and templating.
+
+**Is it Node.js-compatible?**
+No, deliberately. It is JS-*familiar*: supported syntax behaves exactly like JavaScript, but unbounded constructs (`while`, `try/catch`, `class`) are removed by design and rejected at compile time with instructive errors.
+
+**Why not embed V8 or goja?**
+Owning the compiler means safety guarantees (termination, energy budgets, memory caps) are properties of the language itself — not watchdogs around someone else's runtime. It also keeps the binary small and cold boots under 10ms.
+
+**Who is it for?**
+SaaS platforms hosting untrusted tenant logic, edge/serverless workloads needing instant cold starts, programmable API gateways, and teams who want cloud capability without operating a Kubernetes estate.
+
+**What databases are supported?**
+PostgreSQL and MySQL, through a zero-allocation fluent query builder with ACID transaction support.
+
+**What makes it suited to the Vietnamese market?**
+Built-in NAPAS 247 / VietQR-compliant QR generation (SVG, every bank BIN, EMVCo-checked) and Unicode-correct string handling where indices count characters — Vietnamese text never breaks.
+
+**Is it production-ready?**
+The engine powers live multi-tenant sites today. The clustering layer ([CLUSTER.MD](./CLUSTER.MD)) is design-complete and being implemented in phases.
+
+---
+
+## Documentation
+
+| Document | Contents |
+| :--- | :--- |
+| [ENGINE_CAPABILITIES.md](./ENGINE_CAPABILITIES.md) | Language reference: JS compatibility, removed keywords, cache / static / assets, ESM bundling |
+| [CLUSTER.MD](./CLUSTER.MD) | Distributed architecture: invariants, roles, degradation ladder, roadmap |
+| [QUERY_BUILDER.md](./QUERY_BUILDER.md) | The zero-allocation database layer |
+| [BENCHMARK.md](./BENCHMARK.md) | Load-test methodology and raw numbers |
+
+---
+
+## License & Support
+
+Developed by **Huỳnh Nhân Quốc** under the **Kitwork Foundation**. Released under the **Apache 2.0 License**.
+
+> *"While the world is busy using AI to automate everything, I choose to breathe a soul into every line of code. I expose this system to the world simply because it is beautiful, crazy, and dreamy."*
+
+Support development: [Sponsor Kitwork](https://github.com/sponsors/huynhnhanquoc)
