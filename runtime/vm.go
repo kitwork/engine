@@ -17,6 +17,33 @@ func (vm *VM) Defer(fn *value.Lambda) {
 	}
 }
 
+// lookupScopeChain tìm biến dọc theo chuỗi closure bao ngoài (lexical scoping).
+// Cho phép lambda lồng nhiều cấp đọc biến của mọi hàm bao ngoài, đúng ngữ nghĩa JS.
+func lookupScopeChain(fn *value.Lambda, name string) (value.Value, bool) {
+	for ; fn != nil; fn = fn.Parent {
+		if fn.Scope != nil {
+			if v, ok := fn.Scope[name]; ok {
+				return v, true
+			}
+		}
+	}
+	return value.Value{}, false
+}
+
+// storeScopeChain ghi đè biến ĐÃ TỒN TẠI ở scope bao ngoài gần nhất (nếu có).
+// Trả về true nếu đã ghi — false nghĩa là biến mới, lưu cục bộ tại frame hiện hành.
+func storeScopeChain(fn *value.Lambda, name string, val value.Value) bool {
+	for ; fn != nil; fn = fn.Parent {
+		if fn.Scope != nil {
+			if _, ok := fn.Scope[name]; ok {
+				fn.Scope[name] = val
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (vm *VM) Run() value.Value {
 	//fmt.Printf("[VM Run] Starting execution, bytecode length: %d\n", len(vm.Bytecode))
 	for vm.FrameIdx >= 0 {
@@ -61,6 +88,7 @@ func (vm *VM) Run() value.Value {
 					Address: sFn.Address,
 					Params:  sFn.Params,
 					Scope:   f.Vars, // Use reference to support recursion and mutability
+					Parent:  f.Fn,   // Scope chain: thấy được biến của các hàm bao ngoài
 				}
 				vm.push(value.New(closure))
 			} else {
@@ -71,24 +99,14 @@ func (vm *VM) Run() value.Value {
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
+			// Thứ tự tra cứu: biến cục bộ → chuỗi scope closure → biến
+			// top-level (vm.Vars) → Globals hệ thống.
 			if v, ok := f.Vars[name]; ok {
 				vm.push(v)
-			} else if f.Fn != nil && f.Fn.Scope != nil {
-				if v, ok := f.Fn.Scope[name]; ok {
-					vm.push(v)
-
-				} else if v, ok := vm.Vars[name]; ok {
-					vm.push(v)
-				} else if vm.Globals != nil {
-					if v, ok := vm.Globals[name]; ok {
-						vm.push(v)
-					} else {
-						vm.push(value.Value{K: value.Nil})
-					}
-				} else {
-					vm.push(value.Value{K: value.Nil})
-				}
-
+			} else if v, ok := lookupScopeChain(f.Fn, name); ok {
+				vm.push(v)
+			} else if v, ok := vm.Vars[name]; ok {
+				vm.push(v)
 			} else if v, ok := vm.Globals[name]; ok {
 				vm.push(v)
 			} else {
@@ -111,12 +129,9 @@ func (vm *VM) Run() value.Value {
 			val := vm.peek()
 
 			// Logic lưu biến thông minh:
-			// 1. Nếu là Closure scope (biến bên ngoài hàm) -> lưu vào đó
-			if f.Fn != nil && f.Fn.Scope != nil {
-				if _, ok := f.Fn.Scope[name]; ok {
-					f.Fn.Scope[name] = val
-					continue
-				}
+			// 1. Biến đã tồn tại ở scope bao ngoài (chuỗi closure) -> ghi vào đó
+			if storeScopeChain(f.Fn, name, val) {
+				continue
 			}
 
 			// 2. Nếu ở Frame gốc (main script của request) -> lưu vào vm.Vars
@@ -151,6 +166,9 @@ func (vm *VM) Run() value.Value {
 		case opcode.DIV:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Div(b))
+		case opcode.MOD:
+			b, a := vm.pop(), vm.pop()
+			vm.push(a.Mod(b))
 
 		case opcode.COMPARE:
 			mode := vm.Bytecode[f.IP]
@@ -272,6 +290,13 @@ func (vm *VM) Run() value.Value {
 				}
 			}
 
+			if !handled && target.K == value.Array {
+				if res, ok := vm.arrayCallbackMethod(target, m, ivArgs); ok {
+					vm.push(res)
+					handled = true
+				}
+			}
+
 			if !handled {
 				vm.push(target.Invoke(m, ivArgs...))
 			}
@@ -317,6 +342,9 @@ func (vm *VM) Run() value.Value {
 				} else if g, ok := fn.V.(func(...value.Value) value.Value); ok {
 					// fmt.Printf("[VM CALL] Executing Go func (%T) with %d args\n", g, len(args))
 					vm.push(g(args...))
+				} else if fo, ok := fn.V.(*value.FuncObject); ok {
+					// Constructor-style call: Date(), new Date(...)
+					vm.push(fo.Fn(args...))
 				} else if _, ok := fn.V.(reflect.Value); ok {
 					// fmt.Printf("[VM CALL] Executing reflect.Value call with %d args\n", len(args))
 					vm.push(fn.Call(fn.Text(), args...))
@@ -392,6 +420,98 @@ func (vm *VM) Run() value.Value {
 	return value.Value{K: value.Nil}
 }
 
+// arrayCallbackMethod xử lý các method Array nhận callback — forEach, some,
+// every, findIndex, reduce, sort(comparator) — chỉ VM mới thực thi được Lambda.
+// Trả về (kết quả, true) nếu method được xử lý tại đây; ngược lại (zero, false)
+// để rơi xuống prototype table (vd: sort() không comparator).
+func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.Value) (value.Value, bool) {
+	var arr []value.Value
+	if ptr, ok := target.V.(*[]value.Value); ok {
+		arr = *ptr
+	} else if a, ok := target.V.([]value.Value); ok {
+		arr = a
+	} else {
+		return value.Value{}, false
+	}
+
+	var cb *value.Lambda
+	if len(ivArgs) > 0 && ivArgs[0].K == value.Func {
+		cb, _ = ivArgs[0].V.(*value.Lambda)
+	}
+	if cb == nil {
+		return value.Value{}, false
+	}
+
+	switch m {
+	case "forEach":
+		for i, item := range arr {
+			vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+		}
+		// JS forEach trả về undefined
+		return value.Value{K: value.Nil}, true
+
+	case "some":
+		for i, item := range arr {
+			if vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))}).Truthy() {
+				return value.TRUE, true
+			}
+		}
+		return value.FALSE, true
+
+	case "every":
+		for i, item := range arr {
+			if !vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))}).Truthy() {
+				return value.FALSE, true
+			}
+		}
+		return value.TRUE, true
+
+	case "findIndex":
+		for i, item := range arr {
+			if vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))}).Truthy() {
+				return value.New(float64(i)), true
+			}
+		}
+		return value.Value{K: value.Number, N: -1}, true
+
+	case "reduce":
+		start := 0
+		var acc value.Value
+		if len(ivArgs) > 1 {
+			acc = ivArgs[1]
+		} else {
+			if len(arr) == 0 {
+				return value.Value{K: value.Invalid, V: "reduce: empty array with no initial value"}, true
+			}
+			acc = arr[0]
+			start = 1
+		}
+		for i := start; i < len(arr); i++ {
+			acc = vm.ExecuteLambda(cb, []value.Value{acc, arr[i], value.New(float64(i))})
+		}
+		return acc, true
+
+	case "sort":
+		// sort(comparator) — sắp xếp tại chỗ, trả về chính mảng (chuẩn JS)
+		sortByComparator(arr, func(a, b value.Value) bool {
+			return vm.ExecuteLambda(cb, []value.Value{a, b}).N < 0
+		})
+		return target, true
+	}
+
+	return value.Value{}, false
+}
+
+// sortByComparator — insertion sort ổn định, tránh import sort để giữ vm.go gọn.
+// Mảng tenant thường nhỏ; comparator do user cung cấp chạy qua VM.
+func sortByComparator(a []value.Value, less func(x, y value.Value) bool) {
+	for i := 1; i < len(a); i++ {
+		for j := i; j > 0 && less(a[j], a[j-1]); j-- {
+			a[j], a[j-1] = a[j-1], a[j]
+		}
+	}
+}
+
 func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 	if s == nil {
 		return value.Value{K: value.Nil}
@@ -464,6 +584,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 					Address: sFn.Address,
 					Params:  sFn.Params,
 					Scope:   f.Vars,
+					Parent:  f.Fn, // Scope chain: thấy được biến của các hàm bao ngoài
 				}
 				vm.push(value.New(closure))
 			} else {
@@ -473,30 +594,16 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
+			// Thứ tự tra cứu: biến cục bộ → chuỗi scope closure → biến
+			// top-level (vm.Vars) → Globals hệ thống.
 			if v, ok := f.Vars[name]; ok {
 				vm.push(v)
-			} else if f.Fn != nil && f.Fn.Scope != nil {
-				if v, ok := f.Fn.Scope[name]; ok {
-					vm.push(v)
-				} else if v, ok := vm.Vars[name]; ok {
-					vm.push(v)
-				} else if vm.Globals != nil {
-					if v, ok := vm.Globals[name]; ok {
-						vm.push(v)
-					} else {
-						vm.push(value.Value{K: value.Nil})
-					}
-				} else {
-					vm.push(value.Value{K: value.Nil})
-				}
+			} else if v, ok := lookupScopeChain(f.Fn, name); ok {
+				vm.push(v)
 			} else if v, ok := vm.Vars[name]; ok {
 				vm.push(v)
-			} else if vm.Globals != nil {
-				if v, ok := vm.Globals[name]; ok {
-					vm.push(v)
-				} else {
-					vm.push(value.Value{K: value.Nil})
-				}
+			} else if v, ok := vm.Globals[name]; ok {
+				vm.push(v)
 			} else {
 				vm.push(value.Value{K: value.Nil})
 			}
@@ -515,11 +622,9 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			name := vm.Constants[idx].V.(string)
 			val := vm.peek()
 
-			if f.Fn != nil && f.Fn.Scope != nil {
-				if _, ok := f.Fn.Scope[name]; ok {
-					f.Fn.Scope[name] = val
-					continue
-				}
+			// Biến đã tồn tại ở scope bao ngoài (chuỗi closure) -> ghi vào đó
+			if storeScopeChain(f.Fn, name, val) {
+				continue
 			}
 
 			f.Vars[name] = val
@@ -535,6 +640,9 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 		case opcode.DIV:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Div(b))
+		case opcode.MOD:
+			b, a := vm.pop(), vm.pop()
+			vm.push(a.Mod(b))
 		case opcode.COMPARE:
 			mode := vm.Bytecode[f.IP]
 			f.IP++
@@ -698,6 +806,13 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 						vm.push(value.Value{K: value.Nil})
 						handled = true
 					}
+				}
+			}
+
+			if !handled && target.K == value.Array {
+				if res, ok := vm.arrayCallbackMethod(target, m, ivArgs); ok {
+					vm.push(res)
+					handled = true
 				}
 			}
 

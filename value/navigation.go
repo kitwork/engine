@@ -3,6 +3,7 @@ package value
 import (
 	"reflect"
 	"strings"
+	"unicode/utf8"
 )
 
 /* =============================================================================
@@ -129,6 +130,11 @@ func (v Value) Get(key string) Value {
 	}
 	// JS-Compatibility: .length property
 	if key == "length" {
+		// Với String, đếm theo KÝ TỰ (rune) — "Phường".length == 6,
+		// khớp trực giác JS thay vì số byte UTF-8.
+		if v.K == String {
+			return New(utf8.RuneCountInString(v.V.(string)))
+		}
 		return New(v.Len())
 	}
 	if key == "type" {
@@ -143,6 +149,15 @@ func (v Value) Get(key string) Value {
 		}
 		if v.K == Array || v.K == Map {
 			return Value{K: Nil}
+		}
+	}
+
+	// ƯU TIÊN 0: Thuộc tính tĩnh của FuncObject (vd: Date.now, Date.parse)
+	if v.K == Func {
+		if fo, ok := v.V.(*FuncObject); ok {
+			if prop, found := fo.Props[key]; found {
+				return prop
+			}
 		}
 	}
 

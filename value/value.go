@@ -56,6 +56,9 @@ func (v Value) Call(name string, args ...Value) Value {
 	if goFn, ok := v.V.(func(...Value) Value); ok {
 		return goFn(args...)
 	}
+	if fo, ok := v.V.(*FuncObject); ok {
+		return fo.Fn(args...)
+	}
 
 	if fn, ok := v.V.(reflect.Value); ok {
 		fnType := fn.Type()

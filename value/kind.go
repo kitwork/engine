@@ -112,7 +112,11 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Lower, true
 		case "trim":
 			return Value.Trim, true
-		case "includes":
+		case "trimStart", "trimLeft":
+			return Value.TrimStart, true
+		case "trimEnd", "trimRight":
+			return Value.TrimEnd, true
+		case "includes", "contains":
 			return Value.Includes, true
 		case "startsWith":
 			return Value.StartsWith, true
@@ -122,6 +126,30 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Split, true
 		case "replace":
 			return Value.Replace, true
+		case "replaceAll":
+			return Value.ReplaceAll, true
+		case "slice":
+			return Value.Slice, true
+		case "substring", "substr":
+			return Value.Substring, true
+		case "indexOf":
+			return Value.IndexOf, true
+		case "lastIndexOf":
+			return Value.LastIndexOf, true
+		case "charAt":
+			return Value.CharAt, true
+		case "charCodeAt":
+			return Value.CharCodeAt, true
+		case "at":
+			return Value.StrAt, true
+		case "repeat":
+			return Value.Repeat, true
+		case "padStart":
+			return Value.PadStart, true
+		case "padEnd":
+			return Value.PadEnd, true
+		case "concat":
+			return Value.Concat, true
 		case "capitalize":
 			return Value.Capitalize, true
 			// case "safe":
@@ -155,6 +183,21 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Compact, true
 		case "unique":
 			return Value.Unique, true
+		case "slice":
+			return Value.ArraySlice, true
+		case "indexOf":
+			return Value.ArrayIndexOf, true
+		case "lastIndexOf":
+			return Value.ArrayLastIndexOf, true
+		case "includes", "contains":
+			return Value.ArrayIncludes, true
+		case "concat":
+			return Value.ArrayConcat, true
+		case "flat":
+			return Value.ArrayFlat, true
+		case "sort":
+			// sort() mặc định; sort(comparator) được VM xử lý trước (cần Lambda)
+			return Value.ArraySort, true
 		case "map", "filter", "find":
 			// Functional methods handled directly by Runtime for callback execution power
 			return func(target Value, args ...Value) Value { return Value{K: Nil} }, true

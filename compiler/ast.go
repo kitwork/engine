@@ -286,6 +286,19 @@ func (ie *IndexExpression) String() string {
 	return "(" + ie.Left.String() + "[" + ie.Index.String() + "])"
 }
 
+// TernaryExpression: cond ? consequence : alternative
+type TernaryExpression struct {
+	Token       token.Token
+	Condition   Expression
+	Consequence Expression
+	Alternative Expression
+}
+
+func (te *TernaryExpression) expressionNode() {}
+func (te *TernaryExpression) String() string {
+	return "(" + te.Condition.String() + " ? " + te.Consequence.String() + " : " + te.Alternative.String() + ")"
+}
+
 // AssignmentExpression: a = 10
 type AssignmentExpression struct {
 	Token token.Token

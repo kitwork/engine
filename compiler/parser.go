@@ -36,6 +36,14 @@ var precedences = map[token.Kind]int{
 	token.Minus:        SUM,
 	token.Star:         PRODUCT,
 	token.Slash:        PRODUCT,
+	token.Percent:      PRODUCT,
+	token.Question:     ASSIGN,
+	token.PlusAssign:   ASSIGN,
+	token.MinusAssign:  ASSIGN,
+	token.StarAssign:   ASSIGN,
+	token.SlashAssign:  ASSIGN,
+	token.PlusPlus:     CALL,
+	token.MinusMinus:   CALL,
 	token.LeftParen:    CALL,
 	token.LeftBracket:  INDEX,
 	token.Dot:          MEMBER,
@@ -83,12 +91,18 @@ func NewParser(l *Lexer) *Parser {
 	// p.registerPrefix(token.Go, p.parseSpawnStatement)
 	p.registerPrefix(token.LeftBracket, p.parseArrayLiteral)
 	p.registerPrefix(token.LeftBrace, p.parseObjectLiteral)
+	p.registerPrefix(token.Function, p.parseFunctionExpression)
+	p.registerPrefix(token.New, p.parseNewExpression)
+	p.registerPrefix(token.PlusPlus, p.parsePrefixUpdate)
+	p.registerPrefix(token.MinusMinus, p.parsePrefixUpdate)
+	p.registerPrefix(token.Reserved, p.parseReservedKeyword)
 
 	// Đăng ký Infix
 	p.registerInfix(token.Plus, p.parseInfixExpression)
 	p.registerInfix(token.Minus, p.parseInfixExpression)
 	p.registerInfix(token.Star, p.parseInfixExpression)
 	p.registerInfix(token.Slash, p.parseInfixExpression)
+	p.registerInfix(token.Percent, p.parseInfixExpression)
 	p.registerInfix(token.Equal, p.parseInfixExpression)
 	p.registerInfix(token.NotEqual, p.parseInfixExpression)
 	p.registerInfix(token.Less, p.parseInfixExpression)
@@ -102,6 +116,13 @@ func NewParser(l *Lexer) *Parser {
 	p.registerInfix(token.LogicalAnd, p.parseInfixExpression)
 	p.registerInfix(token.LogicalOr, p.parseInfixExpression)
 	p.registerInfix(token.FatArrow, p.parseArrowFunction)
+	p.registerInfix(token.Question, p.parseTernaryExpression)
+	p.registerInfix(token.PlusAssign, p.parseCompoundAssignment)
+	p.registerInfix(token.MinusAssign, p.parseCompoundAssignment)
+	p.registerInfix(token.StarAssign, p.parseCompoundAssignment)
+	p.registerInfix(token.SlashAssign, p.parseCompoundAssignment)
+	p.registerInfix(token.PlusPlus, p.parsePostfixUpdate)
+	p.registerInfix(token.MinusMinus, p.parsePostfixUpdate)
 
 	p.nextToken()
 	p.nextToken()
@@ -138,6 +159,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseVarStatement()
 	case token.Return:
 		return p.parseReturnStatement()
+	case token.Function:
+		return p.parseFunctionStatement()
 	// case token.If, token.For, token.Defer, token.Go:
 	// 	// Trong cấu trúc này, If, For, Defer và Go là Expression/Statement linh hoạt
 	// 	return p.parseExpressionStatement()
@@ -211,10 +234,11 @@ func (p *Parser) parseVarStatement() Statement {
 func (p *Parser) parseReturnStatement() Statement {
 	stmt := &ReturnStatement{Token: p.curToken}
 	p.nextToken()
+
+	if p.curTokenIs(token.Semicolon) || p.curTokenIs(token.RightBrace) || p.curTokenIs(token.EOF) {
+		return stmt
+	}
 	stmt.ReturnValue = p.parseExpression(LOWEST)
-	// if p.peekTokenIs(token.Semicolon) {
-	// 	p.nextToken()
-	// }
 	return stmt
 }
 
@@ -392,6 +416,96 @@ func (p *Parser) parsePrefixExpression() Expression {
 	p.nextToken()
 	exp.Right = p.parseExpression(PREFIX)
 	return exp
+}
+
+// parseNewExpression xử lý cú pháp `new Expr(...)` của JavaScript.
+// Kitwork không dùng prototype-based constructor — các builtin (Date, ...)
+// tự trả về object khi được gọi, nên `new` chỉ là tiền tố tương thích cú pháp
+// và biểu thức phía sau được biên dịch như một lời gọi hàm bình thường.
+func (p *Parser) parseNewExpression() Expression {
+	p.nextToken() // bỏ qua từ khóa 'new'
+	return p.parseExpression(PREFIX)
+}
+
+// parseTernaryExpression xử lý `cond ? consequence : alternative`.
+func (p *Parser) parseTernaryExpression(cond Expression) Expression {
+	exp := &TernaryExpression{Token: p.curToken, Condition: cond}
+
+	p.nextToken()
+	exp.Consequence = p.parseExpression(ASSIGN - 1)
+
+	if !p.expectPeek(token.Colon) {
+		return nil
+	}
+
+	p.nextToken()
+	// ASSIGN-1 cho phép ternary lồng nhau kết hợp phải: a ? b : c ? d : e
+	exp.Alternative = p.parseExpression(ASSIGN - 1)
+	return exp
+}
+
+// parseCompoundAssignment desugar `x += y` thành `x = x + y` (tương tự -=, *=, /=)
+// nên không cần opcode mới — tái dùng đường biên dịch Assignment + Infix sẵn có.
+func (p *Parser) parseCompoundAssignment(left Expression) Expression {
+	tok := p.curToken
+	baseOp := string(tok.Value.Text()[0]) // "+=" -> "+"
+
+	p.nextToken()
+	right := p.parseExpression(ASSIGN - 1)
+
+	return &AssignmentExpression{
+		Token: tok,
+		Name:  left,
+		Value: &InfixExpression{Token: tok, Left: left, Operator: baseOp, Right: right},
+	}
+}
+
+// updateExpression dựng `target = target ± 1` dùng chung cho ++ và --.
+func updateExpression(tok token.Token, target Expression) Expression {
+	op := "+"
+	if tok.Kind == token.MinusMinus {
+		op = "-"
+	}
+	one := &Literal{Token: token.Token{Kind: token.Number}, Value: value.New(1)}
+	return &AssignmentExpression{
+		Token: tok,
+		Name:  target,
+		Value: &InfixExpression{Token: tok, Left: target, Operator: op, Right: one},
+	}
+}
+
+// parsePostfixUpdate xử lý `i++` / `i--`.
+// Lưu ý: biểu thức trả về giá trị MỚI (khác JS trả giá trị cũ) — dùng như
+// câu lệnh độc lập thì hành vi giống hệt JS.
+func (p *Parser) parsePostfixUpdate(left Expression) Expression {
+	return updateExpression(p.curToken, left)
+}
+
+// parsePrefixUpdate xử lý `++i` / `--i`.
+func (p *Parser) parsePrefixUpdate() Expression {
+	tok := p.curToken
+	p.nextToken()
+	target := p.parseExpression(PREFIX)
+	return updateExpression(tok, target)
+}
+
+// parseReservedKeyword báo lỗi biên dịch thân thiện cho các từ khóa bị loại bỏ
+// có chủ đích khỏi ngôn ngữ — kèm hướng dẫn cách viết thay thế theo triết lý Kitwork.
+func (p *Parser) parseReservedKeyword() Expression {
+	word := p.curToken.Value.Text()
+	switch word {
+	case "while", "do":
+		p.addError(fmt.Sprintf("Kitwork không hỗ trợ vòng lặp '%s' (loại bỏ có chủ đích để tránh vòng lặp vô tận). Hãy dùng .map() / .filter() / .find() trên mảng dữ liệu.", word))
+	case "try", "catch", "finally", "throw":
+		p.addError(fmt.Sprintf("Kitwork không hỗ trợ '%s' (loại bỏ có chủ đích cho đơn giản). Hãy dùng chuỗi .done(callback) / .fail(callback) để xử lý kết quả và lỗi.", word))
+	case "switch":
+		p.addError("Kitwork không hỗ trợ 'switch'. Hãy dùng if / else hoặc tra cứu qua object map.")
+	case "class":
+		p.addError("Kitwork không hỗ trợ 'class'. Hãy dùng object literal và arrow function.")
+	default:
+		p.addError(fmt.Sprintf("Từ khóa '%s' không được hỗ trợ trong Kitwork.", word))
+	}
+	return nil
 }
 
 func (p *Parser) parseIfExpression() Expression {
@@ -655,7 +769,85 @@ func (p *Parser) curPrecedence() int {
 
 func (p *Parser) registerPrefix(k token.Kind, fn prefixParseFn) { p.prefixParseFns[k] = fn }
 func (p *Parser) registerInfix(k token.Kind, fn infixParseFn)   { p.infixParseFns[k] = fn }
-func (p *Parser) addError(msg string)                           { p.errors = append(p.errors, msg) }
+func (p *Parser) addError(msg string) {
+	p.errors = append(p.errors, fmt.Sprintf("%s (at pos %d: %q)", msg, p.curToken.Position, p.curToken.String()))
+}
 func (p *Parser) Errors() []string {
 	return p.errors
 }
+
+func (p *Parser) parseFunctionStatement() Statement {
+	tok := p.curToken
+
+	if !p.expectPeek(token.Identifier) {
+		return nil
+	}
+	name := &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
+
+	if !p.expectPeek(token.LeftParen) {
+		return nil
+	}
+
+	exps := p.parseExpressionList(token.RightParen)
+	params := make([]*Identifier, len(exps))
+	for i, e := range exps {
+		if id, ok := e.(*Identifier); ok {
+			params[i] = id
+		}
+	}
+
+	if !p.expectPeek(token.LeftBrace) {
+		return nil
+	}
+
+	body := p.parseBlockStatement()
+
+	funcLit := &FunctionLiteral{
+		Token:      tok,
+		Parameters: params,
+		Body:       body,
+	}
+
+	return &VarStatement{
+		Token: token.Token{
+			Kind:  token.Const,
+			Value: value.NewString("const"),
+		},
+		Names:        []*Identifier{name},
+		Value:        funcLit,
+		DestructMode: DestructNone,
+	}
+}
+
+func (p *Parser) parseFunctionExpression() Expression {
+	tok := p.curToken // function
+
+	if p.peekTokenIs(token.Identifier) {
+		p.nextToken() // Skip named function expression internal name
+	}
+
+	if !p.expectPeek(token.LeftParen) {
+		return nil
+	}
+
+	exps := p.parseExpressionList(token.RightParen)
+	params := make([]*Identifier, len(exps))
+	for i, e := range exps {
+		if id, ok := e.(*Identifier); ok {
+			params[i] = id
+		}
+	}
+
+	if !p.expectPeek(token.LeftBrace) {
+		return nil
+	}
+
+	body := p.parseBlockStatement()
+
+	return &FunctionLiteral{
+		Token:      tok,
+		Parameters: params,
+		Body:       body,
+	}
+}
+

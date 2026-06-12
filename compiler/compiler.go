@@ -73,6 +73,8 @@ func getNodePosition(node Node) int32 {
 		return n.Token.Position
 	case *IfExpression:
 		return n.Token.Position
+	case *TernaryExpression:
+		return n.Token.Position
 	case *CallExpression:
 		return n.Token.Position
 	case *MemberExpression:
@@ -168,9 +170,11 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(opcode.MUL)
 		case "/":
 			c.emit(opcode.DIV)
-		case "==":
+		case "%":
+			c.emit(opcode.MOD)
+		case "==", "===":
 			c.emit(opcode.COMPARE, 0)
-		case "!=":
+		case "!=", "!==":
 			c.emit(opcode.COMPARE, 1)
 		case ">":
 			c.emit(opcode.COMPARE, 2)
@@ -289,6 +293,24 @@ func (c *Compiler) Compile(node Node) error {
 				}
 			}
 		}
+
+	case *TernaryExpression:
+		err := c.Compile(n.Condition)
+		if err != nil {
+			return err
+		}
+		ternFalsePos := c.emit(opcode.FALSE, 0, 0)
+		err = c.Compile(n.Consequence)
+		if err != nil {
+			return err
+		}
+		ternJumpPos := c.emit(opcode.JUMP, 0, 0)
+		c.patchUint16(ternFalsePos+1, uint16(len(c.instructions)))
+		err = c.Compile(n.Alternative)
+		if err != nil {
+			return err
+		}
+		c.patchUint16(ternJumpPos+1, uint16(len(c.instructions)))
 
 	case *IfExpression:
 		err := c.Compile(n.Condition)

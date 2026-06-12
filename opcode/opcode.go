@@ -63,4 +63,7 @@ const (
 	RETURN // Kết thúc hàm, dọn dép stack frame
 	DEFER  // Đảm bảo dọn dẹp/hoàn trả năng lượng khi kết thúc
 	SPAWN  // Chạy lambda trong Goroutine riêng (Fire & Forget)
+
+	// Bổ sung sau (đặt cuối để giữ nguyên giá trị các opcode cũ)
+	MOD // Chia lấy dư (%)
 )

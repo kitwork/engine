@@ -65,6 +65,22 @@ const (
 	If
 	Else
 	Return
+	Function
+
+	// --- JS Compatibility (bổ sung sau, đặt cuối để không xáo trộn Kind cũ) ---
+	Percent     // %
+	New         // new (tiền tố constructor, tương thích cú pháp JS)
+	Question    // ? (ternary: cond ? a : b)
+	PlusAssign  // +=
+	MinusAssign // -=
+	StarAssign  // *=
+	SlashAssign // /=
+	PlusPlus    // ++
+	MinusMinus  // --
+
+	// Reserved: từ khóa bị loại bỏ có chủ đích khỏi ngôn ngữ (while, try, ...)
+	// Parser sẽ báo lỗi biên dịch thân thiện kèm hướng dẫn thay thế.
+	Reserved
 )
 
 // String trả về chuỗi đại diện cho Kind (Hữu ích cho Debug/Error Reporting)
@@ -156,6 +172,28 @@ func (k Kind) String() string {
 	// 	return "in"
 	case Return:
 		return "return"
+	case Function:
+		return "function"
+	case Percent:
+		return "%"
+	case New:
+		return "new"
+	case Question:
+		return "?"
+	case PlusAssign:
+		return "+="
+	case MinusAssign:
+		return "-="
+	case StarAssign:
+		return "*="
+	case SlashAssign:
+		return "/="
+	case PlusPlus:
+		return "++"
+	case MinusMinus:
+		return "--"
+	case Reserved:
+		return "RESERVED"
 	// case Go:
 	// 	return "go"
 	// case Defer:
@@ -189,7 +227,20 @@ var Keywords = map[string]Kind{
 	"else":  Else,
 	// "for":    For,
 	// "in":     In,
-	"return": Return,
+	"return":   Return,
+	"function": Function,
+	"new":      New,
+
+	// Từ khóa bị loại bỏ có chủ đích (triết lý thiết kế: không vòng lặp vô tận,
+	// không try/catch — dùng .map()/.forEach() và .done()/.fail()).
+	"while":   Reserved,
+	"do":      Reserved,
+	"try":     Reserved,
+	"catch":   Reserved,
+	"finally": Reserved,
+	"throw":   Reserved,
+	"switch":  Reserved,
+	"class":   Reserved,
 	// "go":     Go,
 	// "defer":  Defer,
 	"true":  Boolean,
@@ -214,7 +265,7 @@ func (k Kind) Precedence() int {
 		return 10
 	case LogicalNot:
 		return 9
-	case Star, Slash:
+	case Star, Slash, Percent:
 		return 8
 	case Plus, Minus:
 		return 7

@@ -115,5 +115,116 @@ Do Bộ phân tích cú pháp (Parser) của Kitwork JS Engine được tối ư
 2.  Không sử dụng từ khóa `function` truyền thống (như `function myFunc() {}` hay `export function myFunc() {}`), nếu không bộ biên dịch sẽ báo lỗi cú pháp (`assemble error`).
 
 ---
+
+## 8. Lớp tương thích JavaScript (JS Compatibility Layer)
+
+Engine cung cấp các global chuẩn JavaScript để lập trình viên JS làm việc tự nhiên, không phải học API riêng:
+
+### Toán tử & cú pháp
+*   **`%` (modulo)**: `17 % 5` → `2` — đầy đủ qua pipeline lexer → compiler → opcode `MOD`.
+*   **`new`**: được chấp nhận như tiền tố constructor chuẩn JS (`new Date()`). Kitwork không dùng prototype-based class — builtin tự trả về object — nên `new` là tương thích cú pháp.
+*   **`===` / `!==`**: strict equality chuẩn JS. So sánh của Kitwork vốn đã strict theo Kind nên `===` ≡ `==`.
+*   **Ternary `cond ? a : b`**: hỗ trợ đầy đủ, kể cả lồng nhau kết hợp phải (`a ? b : c ? d : e`). Biên dịch thành nhánh nhảy bytecode — không tốn opcode mới.
+*   **`+=` `-=` `*=` `/=`**: desugar tại parser thành `x = x + y` — tái dùng đường biên dịch sẵn có.
+*   **`++` / `--`** (prefix & postfix): desugar thành `x = x ± 1`. *Lưu ý: là biểu thức, nó trả về giá trị MỚI (khác JS trả giá trị cũ với postfix); dùng như câu lệnh độc lập (`i++;`) thì hành vi giống hệt JS.*
+
+### Triết lý: những gì bị loại bỏ CÓ CHỦ ĐÍCH
+Kitwork chọn sự đơn giản và an toàn vận hành. Các từ khóa sau bị **từ chối ngay khi biên dịch** kèm thông báo hướng dẫn thay thế:
+
+| Từ khóa | Lý do loại bỏ | Cách viết thay thế |
+| :--- | :--- | :--- |
+| `while`, `do` | Chặn vòng lặp vô tận từ gốc | `.map()` / `.filter()` / `.find()` |
+| `try`, `catch`, `finally`, `throw` | Đơn giản hóa luồng lỗi | `.done(cb)` / `.fail(cb)` |
+| `switch` | Giữ ngôn ngữ tối giản | `if / else` hoặc object map |
+| `class` | Không dùng OOP kế thừa | object literal + arrow function |
+
+Ví dụ thông báo lỗi: `assemble error: Kitwork không hỗ trợ vòng lặp 'while' (loại bỏ có chủ đích để tránh vòng lặp vô tận). Hãy dùng .map() / .filter() / .find() trên mảng dữ liệu.`
+
+### `Math`
+Hằng số: `PI`, `E`, `LN2`, `LN10`, `LOG2E`, `LOG10E`, `SQRT2`, `SQRT1_2`.
+Hàm: `abs`, `floor`, `ceil`, `round` (chuẩn JS: làm tròn .5 lên), `trunc`, `sign`, `sqrt`, `cbrt`, `pow`, `exp`, `log`, `log2`, `log10`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `atan2`, `hypot`, `min(...)`, `max(...)`, `random()`.
+
+### `Date`
+```javascript
+Date.now()                    // epoch milliseconds
+Date.parse("2026-06-12")      // epoch ms từ chuỗi ngày
+Date.UTC(2026, 5, 12)         // epoch ms theo UTC (month tính từ 0)
+
+const d = new Date();          // thời điểm hiện tại
+const x = new Date(1749720000000);      // từ epoch ms
+const y = new Date("2026-06-12");       // từ chuỗi (RFC3339, YYYY-MM-DD, ...)
+const z = new Date(2026, 5, 12, 8, 30); // year, monthIndex, day, h, m, s, ms
+
+d.getTime(); d.getFullYear(); d.getMonth(); d.getDate(); d.getDay();
+d.getHours(); d.getMinutes(); d.getSeconds(); d.getMilliseconds();
+d.getUTCFullYear(); d.getTimezoneOffset();
+d.toISOString(); d.toJSON(); d.toString(); d.toLocaleDateString();
+```
+
+Cơ chế bên dưới: `Date` là một `value.FuncObject` — hàm kèm thuộc tính tĩnh, mô phỏng "function là object" của JS. Xem `work/globals.go` và test chuẩn tại `work/jscompat_test.go`.
+
+### String methods (chuẩn JS, an toàn Unicode)
+
+Tất cả chỉ số tính theo **ký tự (rune)** — `"Phường".length === 6`, `slice/charAt` không bao giờ cắt vỡ ký tự tiếng Việt:
+
+```javascript
+"hello world".slice(6)            // "world"   (hỗ trợ chỉ số âm)
+"hello".substring(3, 1)           // "el"      (tự hoán đổi như JS)
+"Phường Bến Nghé".indexOf("Bến")  // 7         (chỉ số rune, có fromIndex)
+s.lastIndexOf(x)  s.charAt(i)  s.charCodeAt(i)  s.at(-1)
+"ab".repeat(3)                    // "ababab"  (chặn kết quả > 8MB — bảo vệ multi-tenant)
+"5".padStart(3, "0")              // "005"     · padEnd tương tự
+s.trim()  s.trimStart()  s.trimEnd()
+"a-a-a".replace("a", "b")         // "b-a-a"   (CHỈ lần đầu — đúng chuẩn JS)
+"a-a-a".replaceAll("a", "b")      // "b-b-b"
+s.split("-")  s.split()           // split() không đối số → [s] (chuẩn JS)
+s.concat(x, y)  s.includes(x)  s.startsWith(x)  s.endsWith(x)
+s.toUpperCase()  s.toLowerCase()  s.capitalize()  // capitalize là mở rộng Kitwork
+```
+
+⚠️ **Thay đổi hành vi (v1.6)**: trước đây `replace` thay *tất cả* — nay theo đúng chuẩn JS chỉ thay *lần đầu*; dùng `replaceAll` để thay tất cả.
+
+### Array methods (chuẩn JS)
+
+Cùng với `map` / `filter` / `find` sẵn có, engine hỗ trợ đầy đủ:
+
+```javascript
+// Callback methods (thực thi Lambda trong VM):
+nums.forEach(x => { sum += x; });
+nums.some(x => x > 4);        nums.every(x => x > 0);
+nums.findIndex(x => x === 4);
+nums.reduce((acc, x) => acc + x, 0);   // initial value tùy chọn
+items.sort((a, b) => b - a);           // comparator — sắp xếp tại chỗ như JS
+
+// Non-callback:
+a.slice(1, 3)      // mảng MỚI, hỗ trợ chỉ số âm
+a.indexOf(x)  a.lastIndexOf(x)  a.includes(x)   // so sánh deep-equal
+a.concat(b, 5)     // mảng MỚI, đối số mảng được trải phẳng một cấp
+[1,[2,[3]]].flat(2)
+a.join("-")  a.push(x)  a.pop()  a.shift()  a.unshift(x)
+a.reverse()  a.unique()  a.compact()  a.shuffle()  a.random()  // mở rộng Kitwork
+```
+
+⚠️ **Lệch chuẩn có chủ đích — `sort()` không comparator**: JS mặc định ép phần tử thành chuỗi (`[10, 2].sort()` → `[10, 2]` — footgun nổi tiếng). Kitwork chọn hành vi hợp trực giác: mảng toàn số xếp theo giá trị số tăng dần (`[2, 4, 10, 33]`), còn lại xếp theo chuỗi.
+
+### Lexical scoping nhiều cấp (v1.6)
+
+Closure lồng nhau ở **mọi độ sâu** đều đọc/ghi được biến của các hàm bao ngoài — đúng ngữ nghĩa scope chain của JS (trước v1.6 chỉ capture được 1 cấp):
+
+```javascript
+const search = (query) => {
+    const results = [];                  // biến của hàm bao ngoài
+    keys.forEach((key) => {
+        groups[key].forEach((item) => {  // lambda cấp 2 vẫn thấy results
+            if (item.indexOf(query) != -1) results.push(item);
+        });
+    });
+    return results;
+};
+```
+
+Cơ chế: mỗi Lambda giữ con trỏ `Parent` tới closure bao ngoài; `LOAD`/`STORE` leo chuỗi scope (cục bộ → chuỗi closure → top-level → Globals).
+
+---
 *Tài liệu này được biên soạn cho Kitwork Engine v1.5.0+*
 

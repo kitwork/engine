@@ -89,6 +89,18 @@ func NewFunc(fn func(args ...Value) Value) Value {
 	return Value{K: Func, V: fn}
 }
 
+// FuncObject là một hàm có kèm thuộc tính tĩnh (static properties),
+// mô phỏng hành vi "function là object" của JavaScript.
+// Ví dụ: Date vừa gọi được `Date()` vừa truy cập được `Date.now`.
+type FuncObject struct {
+	Fn    func(args ...Value) Value
+	Props map[string]Value
+}
+
+func NewFuncObject(fn func(args ...Value) Value, props map[string]Value) Value {
+	return Value{K: Func, V: &FuncObject{Fn: fn, Props: props}}
+}
+
 func NewNil() Value {
 	return Value{K: Nil}
 }

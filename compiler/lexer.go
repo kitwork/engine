@@ -17,6 +17,7 @@ var (
 	valMinus    = value.NewString("-")
 	valStar     = value.NewString("*")
 	valSlash    = value.NewString("/")
+	valPercent  = value.NewString("%")
 	valEqual    = value.NewString("==")
 	valAssign   = value.NewString("=")
 	valKeywords = map[token.Kind]value.Value{}
@@ -161,8 +162,16 @@ func (l *Lexer) NextToken() token.Token {
 				tok.Value = value.NewString("=>")
 			} else if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.Equal
-				tok.Value = valEqual
+				// Hỗ trợ '===' (strict equality của JS). So sánh của Kitwork
+				// vốn đã strict theo Kind nên '===' và '==' tương đương.
+				if l.peekChar() == '=' {
+					l.readChar()
+					tok.Kind = token.Equal
+					tok.Value = value.NewString("===")
+				} else {
+					tok.Kind = token.Equal
+					tok.Value = valEqual
+				}
 			} else {
 				tok.Kind = token.Assign
 				tok.Value = valAssign
@@ -170,24 +179,66 @@ func (l *Lexer) NextToken() token.Token {
 		case '!':
 			if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.NotEqual
-				tok.Value = value.NewString("!=")
+				// Hỗ trợ '!==' tương tự '==='.
+				if l.peekChar() == '=' {
+					l.readChar()
+					tok.Kind = token.NotEqual
+					tok.Value = value.NewString("!==")
+				} else {
+					tok.Kind = token.NotEqual
+					tok.Value = value.NewString("!=")
+				}
 			} else {
 				tok.Kind = token.LogicalNot
 				tok.Value = value.NewString("!")
 			}
 		case '+':
-			tok.Kind = token.Plus
-			tok.Value = valPlus
+			if l.peekChar() == '+' {
+				l.readChar()
+				tok.Kind = token.PlusPlus
+				tok.Value = value.NewString("++")
+			} else if l.peekChar() == '=' {
+				l.readChar()
+				tok.Kind = token.PlusAssign
+				tok.Value = value.NewString("+=")
+			} else {
+				tok.Kind = token.Plus
+				tok.Value = valPlus
+			}
 		case '-':
-			tok.Kind = token.Minus
-			tok.Value = valMinus
+			if l.peekChar() == '-' {
+				l.readChar()
+				tok.Kind = token.MinusMinus
+				tok.Value = value.NewString("--")
+			} else if l.peekChar() == '=' {
+				l.readChar()
+				tok.Kind = token.MinusAssign
+				tok.Value = value.NewString("-=")
+			} else {
+				tok.Kind = token.Minus
+				tok.Value = valMinus
+			}
 		case '*':
-			tok.Kind = token.Star
-			tok.Value = valStar
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok.Kind = token.StarAssign
+				tok.Value = value.NewString("*=")
+			} else {
+				tok.Kind = token.Star
+				tok.Value = valStar
+			}
 		case '/':
-			tok.Kind = token.Slash
-			tok.Value = valSlash
+			if l.peekChar() == '=' {
+				l.readChar()
+				tok.Kind = token.SlashAssign
+				tok.Value = value.NewString("/=")
+			} else {
+				tok.Kind = token.Slash
+				tok.Value = valSlash
+			}
+		case '%':
+			tok.Kind = token.Percent
+			tok.Value = valPercent
 		case '>':
 			if l.peekChar() == '=' {
 				l.readChar()
@@ -267,7 +318,8 @@ func (l *Lexer) NextToken() token.Token {
 				tok.Kind = token.NullCoalescing
 				tok.Value = value.NewString("??")
 			} else {
-				tok.Kind = token.Illegal
+				// Toán tử ternary: cond ? a : b
+				tok.Kind = token.Question
 				tok.Value = value.NewString("?")
 			}
 		}
