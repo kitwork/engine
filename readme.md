@@ -1,5 +1,5 @@
 # 🚀 Kitwork Engine
-> **High-Performance, Multi-Tenant Sovereign Logic Engine for Go.**
+> **The execution core of Kitwork — Cloud Infrastructure in a Single Binary.**
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-black?style=flat-square&logo=go)](https://golang.org)
 [![Build Status](https://img.shields.io/badge/status-production--ready-blue?style=flat-square)](#)
