@@ -95,6 +95,7 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(token.New, p.parseNewExpression)
 	p.registerPrefix(token.PlusPlus, p.parsePrefixUpdate)
 	p.registerPrefix(token.MinusMinus, p.parsePrefixUpdate)
+	p.registerPrefix(token.Void, p.parsePrefixExpression)
 	p.registerPrefix(token.Reserved, p.parseReservedKeyword)
 
 	// Đăng ký Infix

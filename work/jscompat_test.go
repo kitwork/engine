@@ -428,6 +428,37 @@ console.log("JSObj:", ks, vs, merged.c, back.a, entryCount, n1, n2, isInt, notIn
 	// Kỳ vọng: a,b 1,2 3 1 2 42.5 99 true false 3.14 123 Kit false true
 }
 
+// TestUndefinedAndVoid — `undefined` ≡ null, và `void 0` (esbuild sinh ra thay
+// cho undefined khi bundle) phải compile và trả về null.
+func TestUndefinedAndVoid(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-void-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	if err := os.MkdirAll(tenantDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptCode := `
+const u = undefined;
+const v = void 0;
+const kept = [1, null, 2, undefined, 3].filter(x => x !== null && x !== undefined);
+console.log("VoidCompat:", u === null, v === null, kept.length, kept.join(","));
+`
+	if err := os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(scriptCode), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatalf("undefined/void script failed: %v", err)
+	}
+	// Kỳ vọng: true true 3 1,2,3
+}
+
 // TestReservedKeywordsRejected đảm bảo while/try bị từ chối kèm thông báo
 // hướng dẫn — đúng triết lý thiết kế: loại bỏ vòng lặp vô tận và try/catch.
 func TestReservedKeywordsRejected(t *testing.T) {

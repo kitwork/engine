@@ -71,6 +71,7 @@ const (
 	Percent     // %
 	New         // new (tiền tố constructor, tương thích cú pháp JS)
 	Question    // ? (ternary: cond ? a : b)
+	Void        // void (đánh giá biểu thức rồi trả về null — esbuild sinh `void 0` thay cho undefined)
 	PlusAssign  // +=
 	MinusAssign // -=
 	StarAssign  // *=
@@ -180,6 +181,8 @@ func (k Kind) String() string {
 		return "new"
 	case Question:
 		return "?"
+	case Void:
+		return "void"
 	case PlusAssign:
 		return "+="
 	case MinusAssign:
@@ -243,9 +246,11 @@ var Keywords = map[string]Kind{
 	"class":   Reserved,
 	// "go":     Go,
 	// "defer":  Defer,
-	"true":  Boolean,
-	"false": Boolean,
-	"null":  Null,
+	"true":      Boolean,
+	"false":     Boolean,
+	"null":      Null,
+	"undefined": Null, // undefined ≡ null trong Kitwork (VM chỉ có một kiểu Nil)
+	"void":      Void,
 }
 
 func LookupIdentifier(ident string) Kind {

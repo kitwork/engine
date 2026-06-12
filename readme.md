@@ -4,7 +4,7 @@
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-black?style=flat-square&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](#author--license)
-[![VM Latency](https://img.shields.io/badge/instruction-70ns-green?style=flat-square)](#performance)
+[![VM Latency](https://img.shields.io/badge/instruction-27ns-green?style=flat-square)](#performance)
 [![Cold Boot](https://img.shields.io/badge/cold%20boot-%3C10ms-green?style=flat-square)](#performance)
 
 **Kitwork Engine is cloud infrastructure compiled into a single Go binary.** It runs a JavaScript dialect on a custom stack-based bytecode VM — with energy metering, per-tenant sandboxing, hot reload, an integrated router, a zero-allocation database layer, and a template engine. One process hosts unlimited domains. Deploying a website means dropping a folder.
@@ -176,16 +176,19 @@ graph TD
 
 ## Performance
 
-`k6` load test, single local node ([methodology](./BENCHMARK.md)):
+Measured June 2026 on an i7-11850H (8C/16T) — Go microbenchmarks for the VM core ([work/bench_core_test.go](./work/bench_core_test.go)), `k6` for HTTP against a live multi-tenant node ([methodology](./BENCHMARK.md)):
 
 | Metric | Result |
 | :--- | :--- |
-| VM core throughput | ~14,100,000 ops/s |
-| Instruction latency | ~70 ns |
-| HTTP throughput | 12,726 req/s |
-| Response latency | p50 1.16 ms · avg JSON 90 µs |
-| Success rate | 100.00% (0 / 127,292 failed) |
-| Cold boot | < 10 ms |
+| VM core throughput | ~36,500,000 instructions/s |
+| Instruction latency | ~27 ns |
+| HTTP throughput | 33,287 req/s · 200 concurrent VUs · real tenant route |
+| Response latency under that load | p50 3.5 ms · p95 18.8 ms |
+| Success rate | 100.00% (0 / 499,510 failed) |
+| Cold boot — full tenant (esbuild bundle + compile + routes) | 9.8 ms |
+| Cold boot — script pipeline only (lex → parse → compile → run) | 1.7 ms |
+
+Reproduce: `go test ./work/ -bench "VMCoreOps|ColdBoot" -run xxx` and `k6 run k6_test.js`.
 
 ---
 

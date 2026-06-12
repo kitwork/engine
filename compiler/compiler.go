@@ -202,6 +202,11 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(opcode.MUL)
 		case "!":
 			c.emit(opcode.NOT)
+		case "void":
+			// void expr — bỏ kết quả biểu thức, trả về null (esbuild sinh `void 0`)
+			c.emit(opcode.POP)
+			nullIndex := c.addConstant(value.NewNull())
+			c.emit(opcode.PUSH, byte(nullIndex>>8), byte(nullIndex&0xFF))
 		}
 
 	case *Literal:
