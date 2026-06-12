@@ -204,7 +204,25 @@ The Cluster Bus is the nervous system: heartbeats, scheduling hints, tenant migr
 
 Its delivery guarantee is honest: **at-most-once**. Messages may be lost, and the system must remain correct when they are — because correctness lives in the Database Cluster (Invariant 2), the Bus only makes the cluster *faster*, never *right*.
 
-Transport: the Kitwork SSE tunnel (two-way channel) — the same primitive offered to tenants, used by the platform itself. One mechanism, two audiences.
+### Transport is an adapter, not a commitment
+
+The Bus is defined by its interface and its guarantee — never by its wire protocol:
+
+```text
+bus.Publish(topic, payload)        // fire and forget
+bus.Subscribe(topic) → channel     // may miss messages; must tolerate it
+```
+
+Anything that satisfies at-most-once semantics can sit behind it:
+
+| Transport | When it is the right answer |
+| :--- | :--- |
+| **Postgres LISTEN/NOTIFY** | First implementation. Zero new infrastructure — the bus rides the Source of Truth that already exists. Fits a small cluster with sparse messages (invalidation, hints). |
+| **WebSocket mesh** | Already a dependency of the runtime. Binary frames, full duplex, no DB in the hot path. The step up when message rate outgrows the database. |
+| **gRPC streaming** | Typed contracts and built-in backpressure for a large cluster of mixed runtime versions. Adopted only when the problem exists — adding it earlier repeats the Kafka mistake this document opens with. |
+| **SSE tunnel** | Elegant — the platform using the same channel primitive it offers tenants. An option once the tenant tunnel is proven, not a prerequisite. |
+
+Swapping transport must never change a caller. If it does, the abstraction has failed.
 
 The Database Cluster is the memory.
 
@@ -253,7 +271,7 @@ Each phase is useful on its own. No phase requires the next.
 1. **Memory first** — Database Cluster HA: streaming replica, tested failover. *(Invariant 1 made real.)*
 2. **Identity** — `cluster_node` registry + heartbeat writes from every runtime.
 3. **One referee** — lease-based Coordinator election on Postgres. *(Invariant 2 made real.)*
-4. **Nervous system** — Cluster Bus over the SSE tunnel: heartbeat gossip, cache invalidation.
+4. **Nervous system** — Cluster Bus behind a transport-agnostic interface; first adapter on Postgres LISTEN/NOTIFY, upgrade path to WebSocket/gRPC when message volume demands it.
 5. **Movement** — tenant `state.get/set` API, then tenant migration.
 6. **Degradation drills** — kill nodes on purpose, in production, on a schedule. Invariant 3 is only true if it is rehearsed.
 
