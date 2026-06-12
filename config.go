@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/database"
+	"github.com/kitwork/engine/logger"
 )
 
 type RateLimitConfig struct {
@@ -27,6 +28,7 @@ type Config struct {
 	Hostname   string            `json:"hostname" yaml:"hostname"`
 	AllowLocal bool              `json:"allow_local" yaml:"allow_local"`
 	RateLimit  RateLimitConfig   `json:"rate_limit" yaml:"rate_limit"`
+	Logger     logger.Config     `json:"logger" yaml:"logger"`
 }
 
 func ParseConfig(raw map[string]interface{}) (*Config, error) {
@@ -94,6 +96,44 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 				if d, err := time.ParseDuration(period); err == nil {
 					cfg.RateLimit.Period = d
 				}
+			}
+		}
+	}
+
+	if val, ok := raw["logger"]; ok {
+		if m, ok := val.(map[string]interface{}); ok {
+			if level, ok := m["level"].(string); ok {
+				cfg.Logger.Level = level
+			}
+			if format, ok := m["format"].(string); ok {
+				cfg.Logger.Format = format
+			}
+			if logFile, ok := m["logfile"].(string); ok {
+				cfg.Logger.LogFile = logFile
+			} else if filename, ok := m["filename"].(string); ok {
+				cfg.Logger.LogFile = filename
+			}
+			if errorFile, ok := m["errorfile"].(string); ok {
+				cfg.Logger.ErrorFile = errorFile
+			} else if fileError, ok := m["fileerror"].(string); ok {
+				cfg.Logger.ErrorFile = fileError
+			} else if errorFilename, ok := m["error_filename"].(string); ok {
+				cfg.Logger.ErrorFile = errorFilename
+			}
+			if maxSize, ok := m["max_size"]; ok {
+				cfg.Logger.MaxSize = coerceInt(maxSize, 0)
+			}
+			if maxBackups, ok := m["max_backups"]; ok {
+				cfg.Logger.MaxBackups = coerceInt(maxBackups, 0)
+			}
+			if maxAge, ok := m["max_age"]; ok {
+				cfg.Logger.MaxAge = coerceInt(maxAge, 0)
+			}
+			if compress, ok := m["compress"].(bool); ok {
+				cfg.Logger.Compress = compress
+			}
+			if console, ok := m["console"].(bool); ok {
+				cfg.Logger.Console = &console
 			}
 		}
 	}

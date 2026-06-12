@@ -38,7 +38,10 @@ type Router struct {
 	Path     string
 	basePath string
 
-	guards []*value.Lambda
+	start       *value.Lambda
+	middlewares []*value.Lambda
+	guards      []*value.Lambda
+
 	handle *value.Lambda
 	then   *value.Lambda
 	catch  *value.Lambda
@@ -175,6 +178,9 @@ func (r *Router) render() ([]byte, error) {
 
 func (r *Router) New(method, path string) *Router {
 	newRoute := *r
+	newRoute.middlewares = append([]*value.Lambda(nil), r.middlewares...)
+	newRoute.guards = append([]*value.Lambda(nil), r.guards...)
+
 	fullPath := "/" + strings.Trim(r.basePath, "/") + "/" + strings.Trim(path, "/")
 	fullPath = strings.ReplaceAll(fullPath, "//", "/")
 
@@ -199,6 +205,18 @@ func (r *Router) Guard(l value.Value) *Router {
 	}
 	return r
 }
+func (r *Router) Use(l value.Value) *Router {
+	if l.K == value.Func {
+		if lambda, ok := l.V.(*value.Lambda); ok {
+			r.middlewares = append(r.middlewares, lambda)
+		}
+	}
+	return r
+}
+func (r *Router) Middleware(l value.Value) *Router {
+	return r.Use(l)
+}
+func (r *Router) Start(v value.Value) *Router   { r.start, _ = v.V.(*value.Lambda); return r }
 func (r *Router) Then(v value.Value) *Router    { r.then, _ = v.V.(*value.Lambda); return r }
 func (r *Router) Catch(v value.Value) *Router   { r.catch, _ = v.V.(*value.Lambda); return r }
 func (r *Router) Finally(v value.Value) *Router { r.final, _ = v.V.(*value.Lambda); return r }
@@ -518,15 +536,15 @@ func (r *Router) serveStaticCache(w http.ResponseWriter, req *http.Request) bool
 	// 6. Check expiration. If expired, clean up both files
 	if time.Now().After(meta.ExpireAt) {
 		file.Close()
-		
+
 		mu.RUnlock()
 		hasReadLock = false
-		
+
 		mu.Lock()
 		os.Remove(basePath + ".static")
 		os.Remove(basePath + ".static.gz")
 		mu.Unlock()
-		
+
 		return false
 	}
 
@@ -621,9 +639,8 @@ func (r *Router) saveStaticCache() {
 
 	// 2. Write the compressed .static.gz file only if content is compressible and large enough
 	// Compressible: html, json, text, render. Threshold: > 1024 bytes (1 KB)
-	shouldCompress := len(bodyBytes) > 1024 && (
-		kind == "html" || kind == "json" || kind == "render" || kind == "text" ||
-		strings.Contains(contentType, "text/") || strings.Contains(contentType, "json")	)
+	shouldCompress := len(bodyBytes) > 1024 && (kind == "html" || kind == "json" || kind == "render" || kind == "text" ||
+		strings.Contains(contentType, "text/") || strings.Contains(contentType, "json"))
 
 	if shouldCompress {
 		fileGzip, err := os.Create(basePath + ".static.gz")
@@ -631,7 +648,7 @@ func (r *Router) saveStaticCache() {
 			headerStr := fmt.Sprintf("%010d", L)
 			fileGzip.Write([]byte(headerStr))
 			fileGzip.Write(metaBytes)
-			
+
 			// Compress body bytes using gzip writer
 			gw := gzip.NewWriter(fileGzip)
 			_, errGz := gw.Write(bodyBytes)
@@ -642,5 +659,3 @@ func (r *Router) saveStaticCache() {
 		}
 	}
 }
-
-

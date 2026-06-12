@@ -62,45 +62,80 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Kiểm tra cache
-	if matched.cacheTTL > 0 {
-		cacheKey := matched.Method + ":" + matched.Path
-		t.cacheLock.RLock()
-		if cached, ok := t.cache[cacheKey]; ok && time.Now().Before(cached.ExpireAt) {
-			t.cacheLock.RUnlock()
-			ctxRouter := *matched
-			ctxRouter.request = r
-			ctxRouter.response = cached.Response
+	// KHỞI TẠO CONTEXT (Chính là Router copy cho lượt chạy này để tránh race conditions)
+	ctxRouter := *matched
+	ctxRouter.request = r
+	ctxRouter.params = params
+	ctxRouter.response = &Response{} // Response riêng cho lượt chạy này
+	if matched.response != nil && matched.response.IsSend() {
+		ctxRouter.response.kind = matched.response.kind
+		ctxRouter.response.data = matched.response.data
+		ctxRouter.response.code = matched.response.code
+		ctxRouter.response.page = matched.response.page
+	}
+
+	// 0. Chạy Start Hook đầu tiên nếu có (Trước khi kiểm tra Cache!)
+	if ctxRouter.start != nil {
+		vm := vmPool.Get().(*runtime.VM)
+		vm.FastReset(t.bytecode.Instructions, t.bytecode.Constants, t.vm.Globals, t.bytecode.SourceMap)
+		vm.MaxEnergy = t.MaxEnergy
+
+		reqObj := &Request{router: &ctxRouter}
+		ctxObj := &Context{request: reqObj}
+		gArgs := ctxObj.arguments(ctxRouter.start)
+
+		result := vm.ExecuteLambda(ctxRouter.start, gArgs)
+		vmPool.Put(vm) // Giải phóng VM sớm
+
+		if result.IsInvalid() {
+			ctxRouter.err = fmt.Errorf("start hook error: %v", result.V)
 			ctxRouter.responder(w)
 			return
 		}
-		t.cacheLock.RUnlock()
-	}
 
-	// 1.5 Kiểm tra static cache (disk-based)
-	if matched.staticTTL > 0 {
-		ctxRouter := *matched
-		ctxRouter.request = r
-		if ctxRouter.serveStaticCache(w, r) {
+		// A. Nếu Start tự gửi phản hồi (ctx.json, ...)
+		if ctxRouter.response.IsSend() {
+			ctxRouter.responder(w)
+			return
+		}
+
+		// B. Nếu Start trả về false (bị từ chối)
+		if result.IsBool() && !result.Truthy() {
+			ctxRouter.response.Status(http.StatusForbidden)
+			ctxRouter.response.Send(value.New("Request rejected by start hook"))
+			ctxRouter.responder(w)
 			return
 		}
 	}
 
-	if matched.response != nil && matched.response.IsSend() {
-		ctxRouter := *matched
-		ctxRouter.request = r
+	// 1. Kiểm tra Cold Cache (Bypass VM & Guards) - Chỉ chạy khi route KHÔNG CÓ guards bảo vệ
+	if len(ctxRouter.guards) == 0 {
+		if ctxRouter.cacheTTL > 0 {
+			cacheKey := ctxRouter.Method + ":" + ctxRouter.Path
+			t.cacheLock.RLock()
+			if cached, ok := t.cache[cacheKey]; ok && time.Now().Before(cached.ExpireAt) {
+				t.cacheLock.RUnlock()
+				ctxRouter.response = cached.Response
+				ctxRouter.responder(w)
+				return
+			}
+			t.cacheLock.RUnlock()
+		}
+
+		if ctxRouter.staticTTL > 0 {
+			if ctxRouter.serveStaticCache(w, r) {
+				return
+			}
+		}
+	}
+
+	if ctxRouter.response != nil && ctxRouter.response.IsSend() {
 		ctxRouter.responder(w)
 		return
 	}
 
 	vm := vmPool.Get().(*runtime.VM)
 	defer vmPool.Put(vm)
-
-	// KHỞI TẠO CONTEXT (Chính là Router copy)
-	ctxRouter := *matched
-	ctxRouter.request = r
-	ctxRouter.params = params
-	ctxRouter.response = &Response{} // Response riêng cho lượt chạy này
 
 	ctxRouter.run(vm, w, matched)
 }
@@ -114,40 +149,92 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 		request: reqObj,
 	}
 
-	// 1. Chạy Guards (Middleware style)
-	for _, guard := range r.guards {
-		gArgs := ctxObj.arguments(guard)
-		result := vm.ExecuteLambda(guard, gArgs)
+	// 1. Chạy Middlewares (nếu có)
+	for _, middleware := range r.middlewares {
+		mArgs := ctxObj.arguments(middleware)
+		result := vm.ExecuteLambda(middleware, mArgs)
 
 		if result.IsInvalid() {
-			r.err = fmt.Errorf("guard error: %v", result.V)
+			r.err = fmt.Errorf("middleware error: %v", result.V)
 			break
 		}
 
-		// A. Nếu Guard tự gửi phản hồi (ctx.json, ...)
+		// A. Nếu Middleware tự gửi phản hồi (ctx.json, ...)
 		if r.response.IsSend() {
 			break
 		}
 
-		// B. Nếu Guard CỐ Ý chặn bằng cách trả về FALSE
+		// B. Nếu Middleware chặn bằng cách trả về FALSE
 		if result.IsBool() && !result.Truthy() {
-			r.err = fmt.Errorf("guard rejected request")
+			r.err = fmt.Errorf("middleware rejected request")
 			break
 		}
 
-		// C. Nếu Guard Trả về DỮ LIỆU (Object/String) -> Auto Response & Break
-		if !result.IsBlank() && !result.IsBool() {
-			r.response.Send(result) // Tự động nhận diện JSON/Text
-			break
-		}
-
-		// D. Nếu có lỗi từ ctx.error()
+		// C. Nếu có lỗi từ ctx.error()
 		if r.err != nil {
 			break
 		}
 	}
 
-	// 2. Chạy Handle chính (Chỉ khi chưa có lỗi và chưa gửi response)
+	// 2. Chạy Guards (nếu có) - Chỉ khi chưa có lỗi từ Middleware
+	if r.err == nil && !r.response.IsSend() {
+		for _, guard := range r.guards {
+			gArgs := ctxObj.arguments(guard)
+			result := vm.ExecuteLambda(guard, gArgs)
+
+			if result.IsInvalid() {
+				r.err = fmt.Errorf("guard error: %v", result.V)
+				break
+			}
+
+			// A. Nếu Guard tự gửi phản hồi (ctx.json, ...)
+			if r.response.IsSend() {
+				break
+			}
+
+			// B. Nếu Guard CỐ Ý chặn bằng cách trả về FALSE
+			if result.IsBool() && !result.Truthy() {
+				r.err = fmt.Errorf("guard rejected request")
+				break
+			}
+
+			// C. Nếu Guard Trả về DỮ LIỆU (Object/String) -> Auto Response & Break
+			if !result.IsBlank() && !result.IsBool() {
+				r.response.Send(result) // Tự động nhận diện JSON/Text
+				break
+			}
+
+			// D. Nếu có lỗi từ ctx.error()
+			if r.err != nil {
+				break
+			}
+		}
+	}
+
+	// 3. Kiểm tra Hot Cache (Sau khi đã pass qua Guards thành công) - Chỉ chạy khi có Guards bảo vệ
+	if r.err == nil && !r.response.IsSend() && len(r.guards) > 0 {
+		if original != nil && original.cacheTTL > 0 {
+			cacheKey := original.Method + ":" + original.Path
+			r.tenant.cacheLock.RLock()
+			if cached, ok := r.tenant.cache[cacheKey]; ok && time.Now().Before(cached.ExpireAt) {
+				r.tenant.cacheLock.RUnlock()
+				r.response = cached.Response
+				r.runFinally(vm, ctxObj)
+				r.responder(w)
+				return
+			}
+			r.tenant.cacheLock.RUnlock()
+		}
+
+		if original != nil && original.staticTTL > 0 {
+			if r.serveStaticCache(w, r.request) {
+				r.runFinally(vm, ctxObj)
+				return
+			}
+		}
+	}
+
+	// 4. Chạy Handle chính (Chỉ khi chưa có lỗi và chưa gửi response)
 	if r.err == nil && !r.response.IsSend() {
 		if r.handle != nil {
 			hArgs := ctxObj.arguments(r.handle)
@@ -171,7 +258,7 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 				ops := float64(r.benchmarkCount) / duration.Seconds()
 
 				report := map[string]interface{}{
-					"iterations":  r.benchmarkCount,
+					"iterations1": r.benchmarkCount,
 					"duration":    duration.String(),
 					"ops_per_sec": fmt.Sprintf("%.0f", ops),
 					"avg_latency": (duration / time.Duration(r.benchmarkCount)).String(),
@@ -201,7 +288,7 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 		}
 	}
 
-	// 3. HẬU XỬ LÝ: Catch (Có lỗi) vs Then (Hoàn tất sạch sẽ)
+	// 5. HẬU XỬ LÝ: Catch (Có lỗi) vs Then (Hoàn tất sạch sẽ)
 	if r.err != nil {
 		if r.catch != nil {
 			fArgs := ctxObj.arguments(r.catch)
@@ -224,16 +311,13 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 		}
 	}
 
-	// 4. FINALLY: Luôn luôn chạy cuối cùng cho mọi request
-	if r.final != nil {
-		fArgs := ctxObj.arguments(r.final)
-		vm.ExecuteLambda(r.final, fArgs)
-	}
+	// 6. FINALLY: Luôn luôn chạy cuối cùng cho mọi request
+	r.runFinally(vm, ctxObj)
 
 	// Gửi phản hồi cuối cùng
 	r.responder(w)
 
-	// 4. Lưu cache nếu thành công
+	// 7. Lưu cache nếu thành công
 	if original != nil && r.err == nil && r.response.IsSend() {
 		if original.cacheTTL > 0 {
 			cacheKey := original.Method + ":" + original.Path
@@ -303,4 +387,11 @@ func matchRoute(path, routePath string) (map[string]string, bool) {
 	}
 
 	return params, true
+}
+
+func (r *Router) runFinally(vm *runtime.VM, ctxObj *Context) {
+	if r.final != nil {
+		fArgs := ctxObj.arguments(r.final)
+		vm.ExecuteLambda(r.final, fArgs)
+	}
 }

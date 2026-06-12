@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -74,7 +75,7 @@ func (e *Engine) cleanupLoop(interval time.Duration, idleTimeout time.Duration) 
 		now := time.Now()
 		for domain, cached := range e.cache {
 			if cached.isExpired(now, idleTimeout) {
-				fmt.Printf("[CACHE] Evicting idle tenant: %s\n", domain)
+				slog.Info("Evicting idle tenant from cache", "domain", domain)
 				delete(e.cache, domain)
 			}
 		}
@@ -110,30 +111,30 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 				if err != nil {
 					if os.IsNotExist(err) {
 						// File đã bị xóa/đổi tên -> Loại bỏ khỏi cache và trả về lỗi
-						fmt.Printf("[CACHE] Tenant directory or file removed. Evicting: %s\n", hostname)
+						slog.Warn("Tenant directory or file removed. Evicting from cache", "hostname", hostname)
 						e.mu.Lock()
 						delete(e.cache, hostname)
 						e.mu.Unlock()
 						return nil, fmt.Errorf("tenant not found: %s", hostname)
 					}
 					// Lỗi đọc đĩa khác -> Tiếp tục dùng bản cũ
-					fmt.Printf("[HOT RELOAD] os.Stat error: %v. Using cached version.\n", err)
+					slog.Error("os.Stat error during hot reload", "error", err)
 				} else {
 					// Nếu file được sửa đổi sau lần compile cuối cùng
 					if info.ModTime().After(cached.lastCompiled) {
-						fmt.Printf("[HOT RELOAD] Detecting change in %s. Recompiling...\n", appFile)
+						slog.Info("Detecting change. Recompiling...", "file", appFile)
 						newTenant := work.NewTenant(e.root, hostname)
 						newTenant.MaxEnergy = e.maxEnergy
 						if err := newTenant.Run(); err != nil {
 							// Lỗi cú pháp hoặc file dở dang -> Graceful Compile Fallback
-							fmt.Printf("[HOT RELOAD] Compile error: %v. Fallback to cached version.\n", err)
+							slog.Error("Compile error during hot reload. Fallback to cached version", "error", err)
 						} else {
 							// Thành công -> cập nhật cache
 							e.mu.Lock()
 							cached.tenant = newTenant
 							cached.lastCompiled = info.ModTime()
 							e.mu.Unlock()
-							fmt.Printf("[HOT RELOAD] Successfully reloaded tenant: %s\n", hostname)
+							slog.Info("Successfully reloaded tenant", "hostname", hostname)
 						}
 					}
 				}
@@ -176,7 +177,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			fmt.Printf("[CRITICAL] Panic: %v\n", rec)
+			slog.Error("Critical panic recovered", "panic", rec)
 			http.Error(w, "Service Unavailable", 503)
 		}
 	}()

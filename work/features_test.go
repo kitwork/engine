@@ -1,6 +1,7 @@
 package work
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -631,5 +632,314 @@ router.get("/file-test").handle((response) => {
 		t.Errorf("expected saved to be hello save, got body: %s", body)
 	}
 }
+
+func TestBrowserFeature(t *testing.T) {
+	// Spin up a mock HTTP server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`
+			<!DOCTYPE html>
+			<html>
+			<head><title>Test Page</title></head>
+			<body>
+				<h1>Welcome to Kitwork</h1>
+				<input type="text" id="username" value="" />
+				<button id="btn" onclick="document.getElementById('username').value = 'button_clicked'; document.getElementById('msg').innerText = 'Action Completed';">Click Me</button>
+				<div id="msg">Waiting</div>
+			</body>
+			</html>
+		`))
+	}))
+	defer mockServer.Close()
+
+	tmpDir, err := os.MkdirTemp("", "kitwork-browser-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+import { router, browser } from 'kitwork';
+
+router.get("/browser-test").handle((response) => {
+	const b = browser.launch({ width: 1024, height: 768 });
+	
+	// Test changing viewport dynamically
+	b.viewport({ width: 800, height: 600 });
+	
+	// Test newPage with options, and goto with wait selector option
+	b.newPage({ url: "` + mockServer.URL + `" });
+	b.goto("` + mockServer.URL + `", { wait: "#username" });
+	
+	// Initial state checks
+	const initTitle = b.evaluate("document.title");
+	const initText = b.textContent("#msg");
+	
+	// Action: Fill input & Click button
+	b.fill("#username", "hello_world");
+	const filledVal = b.value("#username");
+	
+	b.click("#btn");
+	
+	// Wait for DOM update
+	b.wait("#msg");
+	const updatedText = b.textContent("#msg");
+	const updatedVal = b.value("#username");
+	const html = b.innerHTML("body");
+	
+	// Screenshot check (should return bytes / non-empty)
+	const screenshot = b.screenshot();
+	const screenshotLen = screenshot.length;
+	
+	b.close();
+
+	return response.json({
+		init_title: initTitle,
+		init_text: initText,
+		filled_val: filledVal,
+		updated_text: updatedText,
+		updated_val: updatedVal,
+		html_contains: html.includes("Welcome to Kitwork"),
+		screenshot_len: screenshotLen,
+		error: b.err
+	});
+});
+`
+
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/browser-test", nil)
+	tenant.Serve(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	t.Logf("Browser Response body: %s", body)
+
+	// Validate results
+	if !strings.Contains(body, `"init_title":"Test Page"`) {
+		t.Errorf("expected init_title Test Page, got body: %s", body)
+	}
+	if !strings.Contains(body, `"init_text":"Waiting"`) {
+		t.Errorf("expected init_text Waiting, got body: %s", body)
+	}
+	if !strings.Contains(body, `"filled_val":"hello_world"`) {
+		t.Errorf("expected filled_val hello_world, got body: %s", body)
+	}
+	if !strings.Contains(body, `"updated_text":"Action Completed"`) {
+		t.Errorf("expected updated_text Action Completed, got body: %s", body)
+	}
+	if !strings.Contains(body, `"updated_val":"button_clicked"`) {
+		t.Errorf("expected updated_val button_clicked, got body: %s", body)
+	}
+	if !strings.Contains(body, `"html_contains":true`) {
+		t.Errorf("expected html_contains true, got body: %s", body)
+	}
+	if strings.Contains(body, `"screenshot_len":0`) {
+		t.Errorf("expected screenshot length > 0, got body: %s", body)
+	}
+}
+
+func TestJWTFeature(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-jwt-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+import { router, jwt } from 'kitwork';
+
+router.get("/jwt-test").handle((response) => {
+	const secret = "my_super_secret_key";
+	const payload = { userId: 42, role: "admin" };
+	
+	// 1. Sign
+	const token = jwt.sign(payload, secret, { expiresIn: "1s" });
+	
+	// 2. Decode
+	const decoded = jwt.decode(token);
+	
+	// 3. Verify success
+	const verifySuccess = jwt.verify(token, secret);
+	
+	// 4. Verify invalid secret
+	const verifyBadSecret = jwt.verify(token, "wrong_secret");
+	
+	return response.json({
+		token_exists: token.length > 0,
+		decoded_userId: decoded.userId,
+		decoded_role: decoded.role,
+		verify_valid: verifySuccess.valid,
+		verify_userId: verifySuccess.payload.userId,
+		verify_role: verifySuccess.payload.role,
+		bad_secret_valid: verifyBadSecret.valid,
+		bad_secret_err: verifyBadSecret.error,
+		token: token
+	});
+});
+`
+
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/jwt-test", nil)
+	tenant.Serve(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	t.Logf("JWT Response body: %s", body)
+
+	// Validate results
+	if !strings.Contains(body, `"token_exists":true`) {
+		t.Errorf("expected token_exists true, got body: %s", body)
+	}
+	if !strings.Contains(body, `"decoded_userId":42`) {
+		t.Errorf("expected decoded_userId 42, got body: %s", body)
+	}
+	if !strings.Contains(body, `"decoded_role":"admin"`) {
+		t.Errorf("expected decoded_role admin, got body: %s", body)
+	}
+	if !strings.Contains(body, `"verify_valid":true`) {
+		t.Errorf("expected verify_valid true, got body: %s", body)
+	}
+	if !strings.Contains(body, `"verify_userId":42`) {
+		t.Errorf("expected verify_userId 42, got body: %s", body)
+	}
+	if !strings.Contains(body, `"verify_role":"admin"`) {
+		t.Errorf("expected verify_role admin, got body: %s", body)
+	}
+	if !strings.Contains(body, `"bad_secret_valid":false`) {
+		t.Errorf("expected bad_secret_valid false, got body: %s", body)
+	}
+	if !strings.Contains(body, `"bad_secret_err":"invalid signature"`) {
+		t.Errorf("expected bad_secret_err invalid signature, got body: %s", body)
+	}
+
+	// Extract token to verify expiration on Go side
+	var respData struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &respData); err != nil {
+		t.Fatal(err)
+	}
+
+	// Test expiration on Go side: verify should fail after 1.5 seconds
+	jwtObj := &JWT{tenant: tenant}
+	
+	// Verify immediately (should succeed)
+	res1 := jwtObj.Verify(value.New(respData.Token), value.New("my_super_secret_key"))
+	if resMap, ok := res1.V.(JWTVerifyResult); !ok || !resMap.Valid {
+		t.Errorf("expected token to be valid immediately, got: %+v", res1.V)
+	}
+
+	// Wait for expiration
+	time.Sleep(2200 * time.Millisecond)
+
+	// Verify after expiration (should fail)
+	res2 := jwtObj.Verify(value.New(respData.Token), value.New("my_super_secret_key"))
+	if resMap, ok := res2.V.(JWTVerifyResult); !ok || resMap.Valid || resMap.Error != "token expired" {
+		t.Errorf("expected token to be expired, got: %+v", res2.V)
+	}
+}
+
+func TestFunctionKeywordFeature(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-func-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	err = os.MkdirAll(tenantDir, 0755)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appJsCode := `
+import { router } from 'kitwork';
+
+function add(a, b) {
+	return a + b;
+}
+
+router.get("/func-test").handle((response) => {
+	const mult = function(a, b) {
+		return a * b;
+	};
+	const sum = add(5, 10);
+	const prod = mult(3, 4);
+	return response.json({
+		sum: sum,
+		prod: prod
+	});
+});
+`
+
+	err = os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(appJsCode), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	err = tenant.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/func-test", nil)
+	tenant.Serve(rec, req)
+
+	if rec.Code != 200 {
+		t.Errorf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	t.Logf("Function Response body: %s", body)
+
+	// Validate results
+	if !strings.Contains(body, `"sum":15`) {
+		t.Errorf("expected sum 15, got body: %s", body)
+	}
+	if !strings.Contains(body, `"prod":12`) {
+		t.Errorf("expected prod 12, got body: %s", body)
+	}
+}
+
+
 
 

@@ -851,32 +851,44 @@ func resolveVar(rawKey string, data any, scope map[string]value.Value) string {
 
 func findSplitIndex(s string, checkFn func(int) bool, last bool) int {
 	level := 0
-	if last {
-		for i := len(s) - 1; i >= 0; i-- {
-			if s[i] == ')' {
-				level++
-			}
-			if s[i] == '(' {
-				level--
-			}
-			if level == 0 && checkFn(i) {
-				return i
-			}
+	inDoubleQuote := false
+	inSingleQuote := false
+	matchedIdx := -1
+
+	for i := 0; i < len(s); i++ {
+		// Skip escaped characters
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+			continue
 		}
-	} else {
-		for i := 0; i < len(s); i++ {
-			if s[i] == '(' {
-				level++
-			}
-			if s[i] == ')' {
-				level--
-			}
-			if level == 0 && checkFn(i) {
+
+		if s[i] == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if s[i] == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+
+		if inDoubleQuote || inSingleQuote {
+			continue // Skip everything inside string literals
+		}
+
+		if s[i] == '(' {
+			level++
+		} else if s[i] == ')' {
+			level--
+		}
+
+		if level == 0 && checkFn(i) {
+			if !last {
 				return i
 			}
+			matchedIdx = i
 		}
 	}
-	return -1
+	return matchedIdx
 }
 
 func resolveValue(path string, data any, scope map[string]value.Value) value.Value {

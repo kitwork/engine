@@ -1,4 +1,4 @@
-package ssl
+package domain
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 )
 
 // AllowedDomains holds the list of domains allowed by configuration
-var Domains []string
+var Allows []string
 
 // HostPolicy implements Let's Encrypt hostname whitelist dynamic validation
 func HostPolicy(ctx context.Context, host string) error {
@@ -26,7 +26,7 @@ func HostPolicy(ctx context.Context, host string) error {
 	cleanHost := strings.TrimPrefix(host, "www.")
 
 	// Case 1: Check via YAML config domains whitelist
-	for _, d := range Domains {
+	for _, d := range Allows {
 		if d == host || d == cleanHost {
 			return nil
 		}
@@ -48,7 +48,7 @@ func HostPolicy(ctx context.Context, host string) error {
 }
 
 // AutoSSL initializes the Let's Encrypt autocert manager and returns TLS config
-func AutoSSL() *tls.Config {
+func AutoSSL(Allows []string) *tls.Config {
 	certDir := filepath.Join(".", "certs")
 	_ = os.MkdirAll(certDir, 0700)
 

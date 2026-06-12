@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,7 +11,9 @@ import (
 
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/database"
-	"github.com/kitwork/engine/ssl"
+	"github.com/kitwork/engine/domain"
+	"github.com/kitwork/engine/host"
+	"github.com/kitwork/engine/logger"
 	"github.com/kitwork/engine/work"
 	"gopkg.in/yaml.v3"
 )
@@ -54,6 +57,11 @@ func Run(files ...string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to process configuration: %w", err)
 	}
+
+	// Initialize structured logger
+	logger.InitLogger(cfg.Logger)
+
+	slog.Info("Kitwork Engine starting...", "port", cfg.Port, "root", cfg.Root)
 
 	var systemConnected bool
 	for i := range cfg.Databases {
@@ -101,7 +109,6 @@ func Run(files ...string) (err error) {
 	}
 
 	// Assign configured domains to the ssl package
-	ssl.Domains = cfg.Domains
 
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
@@ -113,8 +120,8 @@ func Run(files ...string) (err error) {
 		handler.RateLimit.Period = cfg.RateLimit.Period
 	}
 
-	if len(cfg.Domains) > 0 {
-		tlsConfig := ssl.AutoSSL()
+	if !host.IsLocalhost() {
+		tlsConfig := domain.AutoSSL(cfg.Domains)
 
 		go func() {
 			server := &http.Server{
@@ -122,9 +129,8 @@ func Run(files ...string) (err error) {
 				Handler:   handler,
 				TLSConfig: tlsConfig,
 			}
-			fmt.Printf("Starting secure HTTPS Kitwork Server on port :443 for domains: %s...\n", strings.Join(cfg.Domains, ", "))
 			if err := server.ListenAndServeTLS("", ""); err != nil {
-				fmt.Printf("[HTTPS] Error: %v\n", err)
+				slog.Error("HTTPS Server error", "error", err)
 			}
 		}()
 	}
