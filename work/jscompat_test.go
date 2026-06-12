@@ -382,6 +382,52 @@ console.log("Closure:", all.length, hit.length, hit.join(","), depth3);
 	// Kỳ vọng: 3 1 Tai Nghe 7
 }
 
+// TestJSCompatObjectNumberGlobals kiểm tra Object/Number/String/Boolean globals
+// và Number.toFixed qua pipeline VM thật.
+func TestJSCompatObjectNumberGlobals(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-jsobj-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	tenantDir := filepath.Join(tmpDir, "test", "localhost")
+	if err := os.MkdirAll(tenantDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptCode := `
+const o = { a: 1, b: 2 };
+const ks = Object.keys(o).sort().join(",");
+const vs = Object.values(o).sort().join(",");
+const merged = Object.assign({}, o, { c: 3 });
+const back = Object.fromEntries(Object.entries(o));
+const entryCount = Object.entries(o).length;
+
+const n1 = Number("42.5");
+const n2 = Number.parseInt("99.9");
+const isInt = Number.isInteger(7);
+const notInt = Number.isInteger(7.5);
+const fx = (3.14159).toFixed(2);
+
+const s1 = String(123);
+const ch = String.fromCharCode(75, 105, 116);
+const b1 = Boolean("");
+const b2 = Boolean("x");
+
+console.log("JSObj:", ks, vs, merged.c, back.a, entryCount, n1, n2, isInt, notInt, fx, s1, ch, b1, b2);
+`
+	if err := os.WriteFile(filepath.Join(tenantDir, "app.kitwork.js"), []byte(scriptCode), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmpDir, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatalf("Object/Number globals script failed: %v", err)
+	}
+	// Kỳ vọng: a,b 1,2 3 1 2 42.5 99 true false 3.14 123 Kit false true
+}
+
 // TestReservedKeywordsRejected đảm bảo while/try bị từ chối kèm thông báo
 // hướng dẫn — đúng triết lý thiết kế: loại bỏ vòng lặp vô tận và try/catch.
 func TestReservedKeywordsRejected(t *testing.T) {

@@ -225,6 +225,24 @@ const search = (query) => {
 
 Cơ chế: mỗi Lambda giữ con trỏ `Parent` tới closure bao ngoài; `LOAD`/`STORE` leo chuỗi scope (cục bộ → chuỗi closure → top-level → Globals).
 
+### Object / Number / String / Boolean globals
+
+```javascript
+Object.keys(o)  Object.values(o)  Object.entries(o)   // ⚠️ thứ tự key KHÔNG đảm bảo (Go map) — cần ổn định hãy .sort()
+Object.assign(target, src1, src2)   // mutate target, trả về target (chuẩn JS)
+Object.fromEntries(pairs)
+
+Number("42.5")        // 42.5 · chuỗi không phải số → null (JS trả NaN, VM không có NaN)
+Number.parseInt("99.9")   Number.parseFloat(s)
+Number.isInteger(7)       Number.isFinite(x)
+Number.MAX_SAFE_INTEGER   Number.MIN_SAFE_INTEGER   Number.EPSILON
+(3.14159).toFixed(2)      // "3.14" — trả CHUỖI như JS
+
+String(123)               // "123"
+String.fromCharCode(75, 105, 116)   // "Kit"
+Boolean(x)                // truthiness chuẩn JS
+```
+
 ---
 *Tài liệu này được biên soạn cho Kitwork Engine v1.5.0+*
 

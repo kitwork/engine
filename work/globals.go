@@ -3,6 +3,8 @@ package work
 import (
 	"math"
 	"math/rand"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/kitwork/engine/value"
@@ -18,6 +20,10 @@ import (
 func injectJSCompat(globals map[string]value.Value) {
 	globals["Math"] = buildMathObject()
 	globals["Date"] = buildDateConstructor()
+	globals["Object"] = buildObjectGlobal()
+	globals["Number"] = buildNumberGlobal()
+	globals["String"] = buildStringGlobal()
+	globals["Boolean"] = buildBooleanGlobal()
 }
 
 /* =============================================================================
@@ -237,6 +243,194 @@ func newDateObject(t time.Time) value.Value {
 		"toLocaleString":     str(func() string { return t.Format("02/01/2006 15:04:05") }),
 	}
 	return value.New(obj)
+}
+
+/* =============================================================================
+   Object / Number / String / Boolean globals
+   ============================================================================= */
+
+// buildObjectGlobal cung cấp các static method quen thuộc của Object.
+// LƯU Ý: thứ tự key của keys/values/entries KHÔNG đảm bảo (Go map) —
+// khác JS giữ thứ tự chèn; cần thứ tự ổn định hãy .sort() kết quả.
+func buildObjectGlobal() value.Value {
+	ctor := func(args ...value.Value) value.Value {
+		if len(args) > 0 {
+			return args[0]
+		}
+		return value.New(map[string]value.Value{})
+	}
+
+	props := map[string]value.Value{
+		"keys": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 || args[0].K != value.Map {
+				return value.New([]value.Value{})
+			}
+			m := args[0].Map()
+			out := make([]value.Value, 0, len(m))
+			for k := range m {
+				out = append(out, value.NewString(k))
+			}
+			return value.New(out)
+		}),
+		"values": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 || args[0].K != value.Map {
+				return value.New([]value.Value{})
+			}
+			m := args[0].Map()
+			out := make([]value.Value, 0, len(m))
+			for _, v := range m {
+				out = append(out, v)
+			}
+			return value.New(out)
+		}),
+		"entries": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 || args[0].K != value.Map {
+				return value.New([]value.Value{})
+			}
+			m := args[0].Map()
+			out := make([]value.Value, 0, len(m))
+			for k, v := range m {
+				out = append(out, value.New([]value.Value{value.NewString(k), v}))
+			}
+			return value.New(out)
+		}),
+		// assign(target, ...sources) — mutate target và trả về target, chuẩn JS.
+		"assign": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 {
+				return value.New(map[string]value.Value{})
+			}
+			target := args[0]
+			if target.K != value.Map {
+				return target
+			}
+			tm := target.Map()
+			for _, src := range args[1:] {
+				if src.K == value.Map {
+					for k, v := range src.Map() {
+						tm[k] = v
+					}
+				}
+			}
+			return target
+		}),
+		"fromEntries": value.NewFunc(func(args ...value.Value) value.Value {
+			out := map[string]value.Value{}
+			if len(args) == 0 || args[0].K != value.Array {
+				return value.New(out)
+			}
+			for _, pair := range args[0].Array() {
+				if pair.K == value.Array && pair.Len() >= 2 {
+					out[pair.Index(0).Text()] = pair.Index(1)
+				}
+			}
+			return value.New(out)
+		}),
+	}
+
+	return value.NewFuncObject(ctor, props)
+}
+
+// buildNumberGlobal — Number(x) chuyển đổi kiểu + các static quen thuộc.
+func buildNumberGlobal() value.Value {
+	toNumber := func(v value.Value) value.Value {
+		switch v.K {
+		case value.Number:
+			return v
+		case value.Bool:
+			return value.Value{K: value.Number, N: v.N}
+		case value.String:
+			s := strings.TrimSpace(v.Text())
+			if s == "" {
+				return value.Value{K: value.Number, N: 0}
+			}
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				return value.New(f)
+			}
+			// JS trả NaN — VM không có NaN, trả Nil để thể hiện "không phải số"
+			return value.Value{K: value.Nil}
+		case value.Nil:
+			return value.Value{K: value.Number, N: 0}
+		}
+		return value.Value{K: value.Nil}
+	}
+
+	ctor := func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.Value{K: value.Number, N: 0}
+		}
+		return toNumber(args[0])
+	}
+
+	props := map[string]value.Value{
+		"MAX_SAFE_INTEGER": value.New(9007199254740991.0),
+		"MIN_SAFE_INTEGER": value.New(-9007199254740991.0),
+		"EPSILON":          value.New(2.220446049250313e-16),
+
+		"isInteger": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 || args[0].K != value.Number {
+				return value.FALSE
+			}
+			return value.ToBool(args[0].N == float64(int64(args[0].N)))
+		}),
+		"isFinite": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 || args[0].K != value.Number {
+				return value.FALSE
+			}
+			return value.ToBool(!math.IsInf(args[0].N, 0) && !math.IsNaN(args[0].N))
+		}),
+		"parseFloat": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 {
+				return value.Value{K: value.Nil}
+			}
+			return toNumber(args[0])
+		}),
+		"parseInt": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 {
+				return value.Value{K: value.Nil}
+			}
+			n := toNumber(args[0])
+			if n.K != value.Number {
+				return n
+			}
+			return value.Value{K: value.Number, N: float64(int64(n.N))}
+		}),
+	}
+
+	return value.NewFuncObject(ctor, props)
+}
+
+// buildStringGlobal — String(x) chuyển mọi giá trị thành chuỗi.
+func buildStringGlobal() value.Value {
+	ctor := func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.NewString("")
+		}
+		return value.NewString(args[0].Text())
+	}
+
+	props := map[string]value.Value{
+		"fromCharCode": value.NewFunc(func(args ...value.Value) value.Value {
+			runes := make([]rune, 0, len(args))
+			for _, a := range args {
+				if a.K == value.Number {
+					runes = append(runes, rune(int(a.N)))
+				}
+			}
+			return value.NewString(string(runes))
+		}),
+	}
+
+	return value.NewFuncObject(ctor, props)
+}
+
+// buildBooleanGlobal — Boolean(x) theo truthiness chuẩn JS.
+func buildBooleanGlobal() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.FALSE
+		}
+		return value.ToBool(args[0].Truthy())
+	})
 }
 
 // buildDateConstructor tạo global Date: vừa gọi được như hàm/constructor

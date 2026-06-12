@@ -104,6 +104,11 @@ func (k Kind) Method(name string) (Method, bool) {
 
 	// 2. TYPE-SPECIFIC METHODS
 	switch k {
+	case Number:
+		switch name {
+		case "toFixed":
+			return Value.ToFixed, true
+		}
 	case String:
 		switch name {
 		case "upper", "toUpperCase":

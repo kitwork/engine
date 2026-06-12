@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -543,6 +544,23 @@ func (v Value) Join(args ...Value) Value {
 		return Value{K: String, V: b.String()}
 	}
 	return Value{K: String, V: ""}
+}
+
+// --- Number Methods ---
+
+// ToFixed — chuẩn JS Number.toFixed(digits): trả CHUỖI với số chữ số thập phân cố định.
+func (v Value) ToFixed(args ...Value) Value {
+	digits := 0
+	if len(args) > 0 && args[0].K == Number {
+		digits = int(args[0].N)
+	}
+	if digits < 0 {
+		digits = 0
+	}
+	if digits > 100 {
+		digits = 100
+	}
+	return NewString(strconv.FormatFloat(v.N, 'f', digits, 64))
 }
 
 /* ---------------------------------------------------------------------------
