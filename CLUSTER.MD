@@ -1,4 +1,4 @@
-# Kitwork
+# Kitwork Cluster
 
 > One Runtime. Many Roles. One Source of Truth.
 
@@ -10,33 +10,19 @@ Kitwork begins with a question.
 
 At the beginning, everything is simple.
 
-A single application.
-
-A single database.
-
-A single server.
+A single application. A single database. A single server.
 
 Then reality arrives.
 
-We need caching.
+We need caching. We add Redis.
 
-We add Redis.
+We need queues. We add RabbitMQ.
 
-We need queues.
+We need events. We add Kafka.
 
-We add RabbitMQ.
+We need discovery. We add Consul.
 
-We need events.
-
-We add Kafka.
-
-We need discovery.
-
-We add Consul.
-
-We need orchestration.
-
-We add Kubernetes.
+We need orchestration. We add Kubernetes.
 
 Every technology solves a problem.
 
@@ -48,15 +34,11 @@ The team spends more time operating the system than improving the product.
 
 The architecture becomes a collection of technologies rather than a coherent platform.
 
-Kitwork was born from the belief that there may be another way.
+Kitwork was born from the belief that there is another way.
 
 ---
 
 # Runtime Before Framework
-
-Most frameworks think in terms of applications.
-
-Kitwork thinks in terms of Runtime.
 
 A framework answers:
 
@@ -66,208 +48,116 @@ A Runtime answers:
 
 > How should code live?
 
-Execution.
-
-Scheduling.
-
-State.
-
-Coordination.
-
-Resilience.
-
-Failure.
-
-Recovery.
+Execution. Scheduling. State. Coordination. Resilience. Failure. Recovery.
 
 These are Runtime concerns.
 
-And these concerns exist long before a web framework, API router, or template engine enters the picture.
+And they exist long before a web framework, an API router, or a template engine enters the picture.
 
 ---
 
-# One Runtime
+# One Runtime, Many Roles
 
 Kitwork intentionally avoids creating different kinds of servers.
 
-There is no special Gateway server.
+There is no special Gateway binary. No special Coordinator binary. No special Worker binary.
 
-There is no special Coordinator server.
+There is only **Kitwork Runtime** — one binary, one engine, one language.
 
-There is no special Worker server.
+The only thing that changes is responsibility:
 
-There is only:
+| Role | Responsibility | Held by |
+| :--- | :--- | :--- |
+| **Gateway** | Accept traffic, route to tenants, serve static & cached responses | Any node with a public address |
+| **Coordinator** | Schedule jobs, assign tenants to nodes, watch heartbeats | Exactly one node at a time, by lease |
+| **Worker** | Execute tenant scripts and background jobs | Every node, always |
 
-**Kitwork Runtime**
+A role defines responsibility. A Runtime defines capability.
 
-Every node runs the same engine.
+Responsibilities move. Capabilities remain.
 
-Every node understands the same language.
-
-Every node shares the same capabilities.
-
-The only thing that changes is responsibility.
-
-```text
-Gateway Runtime
-
-Gateway
-Coordinator
-Worker
-
-
-Coordinator Runtime
-
-Coordinator
-Worker
-
-
-Worker Runtime
-
-Worker
-```
-
-This distinction is fundamental.
-
-A role defines responsibility.
-
-A Runtime defines capability.
-
-Responsibilities may change.
-
-Capabilities remain.
+This is why a Kitwork cluster degrades instead of collapsing: any node can absorb any role, because every node already knows how.
 
 ---
 
-# A Runtime Never Becomes Useless
+# The Four Invariants
 
-Traditional systems often divide responsibilities into isolated components.
+Philosophy becomes architecture only when it can be falsified.
 
-A Gateway routes traffic.
+These four rules are the contract. Any design that violates one of them is wrong, no matter how convenient.
 
-A Worker executes tasks.
+### Invariant 1 — State outlives machines
 
-A Coordinator manages the cluster.
+The Database Cluster is the **only** memory of the system.
 
-Each component has a single purpose.
+Node RAM may hold only what can be regenerated: caches, compiled bytecode, warm connections.
 
-Each component becomes vulnerable to its own failure.
+If deleting a node loses data, the design is broken.
 
-Kitwork takes a different approach.
+**Corollary:** the cluster is exactly as available as its memory. A single-instance Postgres means a single point of failure — high availability of the Database Cluster (streaming replica + automatic failover) is therefore **phase one**, before any other cluster work. It is dishonest to call machines temporary while the memory lives on one machine.
 
-Every Runtime remains capable.
+### Invariant 2 — Correctness never rides the Bus
 
-Every Runtime remains useful.
+The Cluster Bus is allowed to lose messages. Therefore it may carry only things that tolerate loss:
 
-Every Runtime can adapt.
+heartbeats, cache invalidation, config hints, metrics, gossip.
 
-When Workers become unavailable:
+Anything that must be *correct* — leader election, job claims, tenant assignment — goes through the Source of Truth, using primitives that cannot split-brain:
 
-```text
-Coordinator → Execute
+```sql
+-- Coordinator election: a lease, not a vote.
+-- One row. One holder. One expiry. Postgres is the referee.
+UPDATE cluster_lease
+SET holder = :node_id, expires_at = now() + interval '10 seconds'
+WHERE name = 'coordinator'
+  AND (holder = :node_id OR expires_at < now());
 ```
 
-When Coordinators become unavailable:
+The node that wins the row is the Coordinator. The node that loses does nothing.
 
-```text
-Gateway → Execute
-```
+No consensus protocol to implement. No election bugs to debug at 3 AM.
 
-When parts of the cluster disappear:
+The day Kitwork outgrows lease-based election is a good day — it means the product won. Until then, do not build Raft.
 
-The remaining Runtime continues.
-
-Not because it was designed for perfection.
-
-But because it was designed for survival.
-
----
-
-# Failure Is Not An Exception
-
-Most architectures treat failure as an edge case.
-
-Distributed systems teach a different lesson.
-
-Machines fail.
-
-Networks fail.
-
-Storage fails.
-
-Humans fail.
-
-Failure is not exceptional.
-
-Failure is inevitable.
-
-The goal is not to eliminate failure.
-
-The goal is to continue operating despite failure.
-
-This philosophy influences every decision inside Kitwork.
-
-The question is never:
-
-> How do we prevent failure?
-
-The question is:
-
-> What happens next?
-
----
-
-# Progressive Degradation
-
-Kitwork follows a simple principle:
-
-Lose efficiency before losing availability.
+### Invariant 3 — Lose efficiency before losing availability
 
 Normal operation:
 
 ```text
-Client
-  ↓
-Gateway
-  ↓
-Coordinator
-  ↓
-Worker
+Client → Gateway → Coordinator → Worker
 ```
 
-Worker unavailable:
+Worker unavailable — the Coordinator executes:
 
 ```text
-Client
-  ↓
-Gateway
-  ↓
-Coordinator Execute
+Client → Gateway → Coordinator (execute)
 ```
 
-Coordinator unavailable:
+Coordinator unavailable — the Gateway executes:
 
 ```text
-Client
-  ↓
-Gateway Execute
+Client → Gateway (execute)
 ```
 
-Severe cluster failure:
+Severe cluster failure — serve what the memory still holds:
 
 ```text
-Client
-  ↓
-Gateway
-  ↓
-Database Cluster
+Client → Gateway → Database Cluster (static & cached responses)
 ```
 
-Performance may decrease.
+Performance may decrease. The system continues. The Runtime adapts.
 
-The system continues.
+### Invariant 4 — Every workload is bounded
 
-The Runtime adapts.
+This is where the language and the cluster become one idea.
+
+Kitwork scripts cannot contain `while`. Cannot recurse forever. Every execution is metered by energy and terminated at its limit.
+
+This is not a style preference. It is the precondition for Invariant 3:
+
+a Coordinator can safely absorb Worker traffic **only because** no workload can run unbounded. Degradation without bounded execution is just a slower way to die.
+
+The language is the cluster's immune system.
 
 ---
 
@@ -275,69 +165,46 @@ The Runtime adapts.
 
 Every distributed system requires memory.
 
-Not memory in RAM.
+Not memory in RAM. Memory in identity — what the system is, what happened, what must survive.
 
-Memory in identity.
+The Database Cluster stores:
 
-The memory of what the system is.
-
-The memory of what happened.
-
-The memory of what must survive.
-
-Kitwork calls this:
-
-**Database Cluster**
-
-It stores:
-
-* Business Data
-* Cluster State
-* Tenant State
-* Jobs
+* Business data
+* Cluster state: node registry, leases, tenant assignment
+* Jobs and their outcomes
 * Events
-* Metadata
 * Configuration
 
-The Runtime may come and go.
+The node registry is deliberately boring:
 
-The state remains.
+```sql
+CREATE TABLE cluster_node (
+    id          text PRIMARY KEY,   -- stable node identity
+    address     text NOT NULL,      -- how peers reach it
+    roles       text[] NOT NULL,    -- capabilities it advertises
+    heartbeat   timestamptz NOT NULL,
+    version     text NOT NULL,      -- runtime version, for rolling upgrades
+    started_at  timestamptz NOT NULL
+);
+```
 
-Machines are temporary.
+A node is alive if its heartbeat is fresh. A node is gone if it is not. There is no third state.
 
-State is permanent.
+Machines are temporary. State is permanent.
 
-The cluster is not defined by the servers that run it.
-
-The cluster is defined by the state it preserves.
+The cluster is not defined by the servers that run it. It is defined by the state it preserves.
 
 ---
 
 # Cluster Bus
 
-A cluster is not a collection of machines.
+A cluster is not a collection of machines. A cluster is a conversation.
 
-A cluster is a conversation.
+The Cluster Bus is the nervous system: heartbeats, scheduling hints, tenant migration signals, cache invalidation, system events.
 
-Nodes communicate.
+Its delivery guarantee is honest: **at-most-once**. Messages may be lost, and the system must remain correct when they are — because correctness lives in the Database Cluster (Invariant 2), the Bus only makes the cluster *faster*, never *right*.
 
-Nodes coordinate.
-
-Nodes adapt.
-
-Nodes evolve.
-
-This communication layer is the Cluster Bus.
-
-It carries:
-
-* Heartbeats
-* Elections
-* Scheduling
-* Tenant Migration
-* Cache Invalidation
-* Configuration Updates
-* System Events
+Transport: the Kitwork SSE tunnel (two-way channel) — the same primitive offered to tenants, used by the platform itself. One mechanism, two audiences.
 
 The Database Cluster is the memory.
 
@@ -345,55 +212,50 @@ The Cluster Bus is the nervous system.
 
 The Runtime is the organism.
 
-Together they become a living platform.
+---
+
+# Tenant State and Migration
+
+A tenant can move between nodes only if the node holds nothing the tenant cannot lose.
+
+The boundary is explicit:
+
+| Lives in node RAM (disposable) | Lives in Database Cluster (permanent) |
+| :--- | :--- |
+| Compiled bytecode | Tenant data |
+| `.cache()` entries | Jobs and schedules |
+| VM pools, connections | Counters, sessions, anything behind `state.get/set` |
+
+Scripts that keep counters in VM globals work on one node and silently break on two.
+
+The platform must offer tenants a first-class `state` API backed by the Database Cluster, so the correct way is also the easy way.
+
+Migration then becomes unremarkable: update the assignment row, invalidate via the Bus, cold-boot on the new node in milliseconds. Nothing to copy, because nothing precious was there.
 
 ---
 
-# Beyond Infrastructure
+# What Kitwork Is Not Trying To Be
 
-Kitwork is not trying to compete with Redis.
+Kitwork is not trying to compete with Redis, replace Kafka, or become another framework.
 
-Kitwork is not trying to replace Kafka.
+Those are implementation details of a different philosophy.
 
-Kitwork is not trying to become another framework.
+The objective is a platform where every component shares one worldview:
 
-Those are implementation details.
-
-The real objective is much simpler.
-
-To build a platform where every component shares the same philosophy.
-
-A platform that remains understandable after years of growth.
-
-A platform that remains operable after years of complexity.
-
-A platform that values continuity over perfection.
+understandable after years of growth, operable after years of complexity, continuity over perfection.
 
 ---
 
-# Philosophy
+# Roadmap
 
-When people talk about:
+Each phase is useful on its own. No phase requires the next.
 
-> Microservices vs Monolith
-
-We talk about Runtime.
-
-When people talk about:
-
-> Frameworks
-
-We talk about Execution.
-
-When people talk about:
-
-> Infrastructure
-
-We talk about Survival.
-
-Because software is not defined by how it starts.
-
-Software is defined by how long it can continue moving forward.
+1. **Memory first** — Database Cluster HA: streaming replica, tested failover. *(Invariant 1 made real.)*
+2. **Identity** — `cluster_node` registry + heartbeat writes from every runtime.
+3. **One referee** — lease-based Coordinator election on Postgres. *(Invariant 2 made real.)*
+4. **Nervous system** — Cluster Bus over the SSE tunnel: heartbeat gossip, cache invalidation.
+5. **Movement** — tenant `state.get/set` API, then tenant migration.
+6. **Degradation drills** — kill nodes on purpose, in production, on a schedule. Invariant 3 is only true if it is rehearsed.
 
 ---
 
@@ -403,10 +265,6 @@ A strong system is not a system that never fails.
 
 A strong system is a system that continues operating after failure occurs.
 
-Kitwork exists to explore that idea.
+Kitwork exists to build that system.
 
-One Runtime.
-
-Many Roles.
-
-One Source of Truth.
+One Runtime. Many Roles. One Source of Truth.
