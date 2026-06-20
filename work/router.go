@@ -229,19 +229,45 @@ func (r *Router) Notfound(args ...value.Value) *Router {
 	return route
 }
 
-// Context registers tenant-wide defaults available to every handler via ctx.
-// Today it stores the default render used by ctx.view(): router.context({ render }).
-// The render value wraps a *Render (value.New → {K:Struct, V:*Render}), so we pull
-// the pointer straight back out. Other keys (db, etc.) can be added here later.
+// Context registers tenant-wide defaults applied to ctx.view() rendering:
+//
+//	router.context({ render })          // an explicit Render object (value.New → {K:Struct, V:*Render})
+//	router.context({ minify: true })    // collapse whitespace + inline CSS on every rendered page
+//	router.context({ jit: true })       // inline per-page JIT CSS (vs router.jit() = cached /jitcss service)
+//
+// minify / jit are convenience flags applied to the view render — the explicit one if given,
+// otherwise a zero-config default (rooted at views/) created on the spot — so a bare
+// router.context({ minify: true }) works with no render wiring.
 func (r *Router) Context(cfg value.Value) *Router {
-	if cfg.IsMap() {
-		if rv, ok := cfg.Map()["render"]; ok {
-			if rd, ok := rv.V.(*Render); ok {
-				r.tenant.viewRender = rd
-			}
+	if !cfg.IsMap() {
+		return r
+	}
+	m := cfg.Map()
+	if rv, ok := m["render"]; ok {
+		if rd, ok := rv.V.(*Render); ok {
+			r.tenant.viewRender = rd
 		}
 	}
+	if v, ok := m["minify"]; ok {
+		r.viewRenderDefaults().minify = v.Truthy()
+	}
+	if v, ok := m["jit"]; ok {
+		r.viewRenderDefaults().jitEnabled = v.Truthy()
+	}
 	return r
+}
+
+// viewRenderDefaults returns the tenant's view render, lazily creating a zero-config one
+// (views/ root, "notfound" fallback) if none was registered — so the minify/jit shorthands
+// in Context have a render to attach to even without router.context({ render }).
+func (r *Router) viewRenderDefaults() *Render {
+	if r.tenant.viewRender == nil {
+		rd := NewRender(r.tenant)
+		rd.directory = "views"
+		rd.notfound = "notfound"
+		r.tenant.viewRender = rd
+	}
+	return r.tenant.viewRender
 }
 
 // Page registers a GET route that renders its page — the route-first declaration of

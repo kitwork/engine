@@ -1,4 +1,11 @@
+//go:build stdminify
+
 package work
+
+// Pure-stdlib OPT-OUT minifier (regexp + strings, zero external dependencies) — for a fully
+// sovereign, dependency-free build: `go build -tags stdminify ./...`. The DEFAULT build uses
+// the faster tdewolff minifier (minify_tdewolff.go); this variant trades speed/compression
+// for zero deps.
 
 import (
 	"fmt"
