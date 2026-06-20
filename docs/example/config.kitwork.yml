@@ -1,0 +1,8 @@
+# Per-tenant config (declarative). No `port` — that belongs to the engine.
+domain: ["kitwork.io", "www.kitwork.io"]
+hot_reload: true
+database:
+  type: "postgres"
+  name: "kitwork"
+cache:
+  default: "5s"

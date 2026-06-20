@@ -43,6 +43,10 @@ func (d *Database) Connected() *Database {
 }
 
 func (d *Database) Connect(vals ...value.Value) *Database {
+	if len(vals) == 0 && d.sqlDB != nil {
+		return d
+	}
+
 	if d.tenant.databases == nil {
 		d.tenant.databases = make(map[string]*sql.DB)
 	}

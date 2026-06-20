@@ -6,8 +6,6 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/kitwork/engine/character"
-	"github.com/kitwork/engine/token"
 	"github.com/kitwork/engine/value"
 )
 
@@ -20,7 +18,7 @@ var (
 	valPercent  = value.NewString("%")
 	valEqual    = value.NewString("==")
 	valAssign   = value.NewString("=")
-	valKeywords = map[token.Kind]value.Value{}
+	valKeywords = map[Kind]value.Value{}
 )
 
 var lexerPool = sync.Pool{
@@ -31,13 +29,13 @@ var lexerPool = sync.Pool{
 
 func init() {
 	// Khởi tạo sẵn Value cho các từ khóa quan trọng
-	keywords := []token.Kind{token.Const, token.Let, token.If, token.Else, token.Return}
+	keywords := []Kind{Const, Let, If, Else, Return, Import, Export}
 	for _, k := range keywords {
 		valKeywords[k] = value.NewString(k.String())
 	}
 }
 
-func Keywords(kind token.Kind, ident string) value.Value {
+func KeywordValue(kind Kind, ident string) value.Value {
 	if val, ok := valKeywords[kind]; ok {
 		return val
 	} else {
@@ -84,8 +82,8 @@ func (l *Lexer) peekChar() byte {
 	return l.input[l.next]
 }
 
-func (l *Lexer) NextToken() token.Token {
-	var tok token.Token
+func (l *Lexer) NextToken() Token {
+	var tok Token
 
 	l.skipWhitespace()
 
@@ -98,19 +96,19 @@ func (l *Lexer) NextToken() token.Token {
 	tok.Position = int32(l.pos)
 
 	// Tra bảng phân loại ký tự (O(1))
-	cType := character.Table[l.ch]
+	cType := Table[l.ch]
 
 	switch cType {
-	case character.Alpha:
-		ident := l.readIdentifier()
+	case Alpha:
+		ident := l.readIdent()
 
 		// 1. Kiểm tra nhanh xem có phải Keyword không
-		kind := token.LookupIdentifier(ident)
+		kind := LookupIdentifier(ident)
 		tok.Kind = kind
 		tok.Length = int16(len(ident))
 
 		// 2. Phân luồng xử lý cực nhanh
-		if kind == token.Identifier {
+		if kind == Ident {
 			// Chỉ intern tên biến (x, y, myVar...)
 			// Nếu Stress Test chạy đa luồng, bỏ qua intern() sẽ NHANH hơn do không bị nghẽn Lock
 			// ident = l.intern(ident)
@@ -119,46 +117,46 @@ func (l *Lexer) NextToken() token.Token {
 			// Đối với Keywords, ta dùng switch-case để gán giá trị tĩnh
 			// Giúp tránh việc gọi NewString(ident) tạo object mới trên Heap
 			switch kind {
-			case token.Boolean:
+			case Boolean:
 
 				if ident[0] == 't' {
 					tok.Value = value.TRUE
 				} else {
 					tok.Value = value.FALSE
 				}
-			case token.Null:
+			case Null:
 				tok.Value = value.NULL
 			default:
 				// Các từ khóa như const, let, if...
 				// Nếu Parser không cần text của 'if', bạn thậm chí có thể để Value rỗng
-				tok.Value = Keywords(kind, ident)
+				tok.Value = KeywordValue(kind, ident)
 			}
 		}
 		return tok
-	case character.Digit:
+	case Digit:
 		numStr := l.readNumber()
-		tok.Kind = token.Number
+		tok.Kind = Number
 		tok.Value = value.ParseNumber(numStr)
 		tok.Length = int16(len(numStr))
 		return tok
 
-	case character.Quote:
+	case Quote:
 		if l.ch == '`' {
-			tok.Kind = token.Template
+			tok.Kind = Template
 		} else {
-			tok.Kind = token.String
+			tok.Kind = String
 		}
 		str := l.readString(l.ch)
 		tok.Value = value.NewString(str)
 		tok.Length = int16(len(str))
 		return tok
 
-	case character.Operator:
+	case Operator:
 		switch l.ch {
 		case '=':
 			if l.peekChar() == '>' {
 				l.readChar()
-				tok.Kind = token.FatArrow
+				tok.Kind = FatArrow
 				tok.Value = value.NewString("=>")
 			} else if l.peekChar() == '=' {
 				l.readChar()
@@ -166,14 +164,14 @@ func (l *Lexer) NextToken() token.Token {
 				// vốn đã strict theo Kind nên '===' và '==' tương đương.
 				if l.peekChar() == '=' {
 					l.readChar()
-					tok.Kind = token.Equal
+					tok.Kind = Equal
 					tok.Value = value.NewString("===")
 				} else {
-					tok.Kind = token.Equal
+					tok.Kind = Equal
 					tok.Value = valEqual
 				}
 			} else {
-				tok.Kind = token.Assign
+				tok.Kind = Assign
 				tok.Value = valAssign
 			}
 		case '!':
@@ -182,107 +180,107 @@ func (l *Lexer) NextToken() token.Token {
 				// Hỗ trợ '!==' tương tự '==='.
 				if l.peekChar() == '=' {
 					l.readChar()
-					tok.Kind = token.NotEqual
+					tok.Kind = NotEqual
 					tok.Value = value.NewString("!==")
 				} else {
-					tok.Kind = token.NotEqual
+					tok.Kind = NotEqual
 					tok.Value = value.NewString("!=")
 				}
 			} else {
-				tok.Kind = token.LogicalNot
+				tok.Kind = LogicalNot
 				tok.Value = value.NewString("!")
 			}
 		case '+':
 			if l.peekChar() == '+' {
 				l.readChar()
-				tok.Kind = token.PlusPlus
+				tok.Kind = PlusPlus
 				tok.Value = value.NewString("++")
 			} else if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.PlusAssign
+				tok.Kind = PlusAssign
 				tok.Value = value.NewString("+=")
 			} else {
-				tok.Kind = token.Plus
+				tok.Kind = Plus
 				tok.Value = valPlus
 			}
 		case '-':
 			if l.peekChar() == '-' {
 				l.readChar()
-				tok.Kind = token.MinusMinus
+				tok.Kind = MinusMinus
 				tok.Value = value.NewString("--")
 			} else if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.MinusAssign
+				tok.Kind = MinusAssign
 				tok.Value = value.NewString("-=")
 			} else {
-				tok.Kind = token.Minus
+				tok.Kind = Minus
 				tok.Value = valMinus
 			}
 		case '*':
 			if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.StarAssign
+				tok.Kind = StarAssign
 				tok.Value = value.NewString("*=")
 			} else {
-				tok.Kind = token.Star
+				tok.Kind = Star
 				tok.Value = valStar
 			}
 		case '/':
 			if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.SlashAssign
+				tok.Kind = SlashAssign
 				tok.Value = value.NewString("/=")
 			} else {
-				tok.Kind = token.Slash
+				tok.Kind = Slash
 				tok.Value = valSlash
 			}
 		case '%':
-			tok.Kind = token.Percent
+			tok.Kind = Percent
 			tok.Value = valPercent
 		case '>':
 			if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.GreaterEqual
+				tok.Kind = GreaterEqual
 				tok.Value = value.NewString(">=")
 			} else {
-				tok.Kind = token.Greater
+				tok.Kind = Greater
 				tok.Value = value.NewString(">")
 			}
 		case '<':
 			if l.peekChar() == '=' {
 				l.readChar()
-				tok.Kind = token.LessEqual
+				tok.Kind = LessEqual
 				tok.Value = value.NewString("<=")
 			} else {
-				tok.Kind = token.Less
+				tok.Kind = Less
 				tok.Value = value.NewString("<")
 			}
 		case '(':
-			tok.Kind = token.LeftParen
+			tok.Kind = LeftParen
 			tok.Value = value.NewString("(")
 		case ')':
-			tok.Kind = token.RightParen
+			tok.Kind = RightParen
 			tok.Value = value.NewString(")")
 		case '{':
-			tok.Kind = token.LeftBrace
+			tok.Kind = LeftBrace
 			tok.Value = value.NewString("{")
 		case '}':
-			tok.Kind = token.RightBrace
+			tok.Kind = RightBrace
 			tok.Value = value.NewString("}")
 		case '[':
-			tok.Kind = token.LeftBracket
+			tok.Kind = LeftBracket
 			tok.Value = value.NewString("[")
 		case ']':
-			tok.Kind = token.RightBracket
+			tok.Kind = RightBracket
 			tok.Value = value.NewString("]")
 		case ',':
-			tok.Kind = token.Comma
+			tok.Kind = Comma
 			tok.Value = value.NewString(",")
 		case ';':
-			tok.Kind = token.Semicolon
+			tok.Kind = Semicolon
 			tok.Value = value.NewString(";")
 		case ':':
-			tok.Kind = token.Colon
+			tok.Kind = Colon
 			tok.Value = value.NewString(":")
 		case '.':
 			if l.peekChar() == '.' {
@@ -290,48 +288,48 @@ func (l *Lexer) NextToken() token.Token {
 				if l.input[l.next+1] == '.' {
 					l.readChar()
 					l.readChar()
-					tok.Kind = token.Spread
+					tok.Kind = Spread
 					tok.Value = value.NewString("...")
 				} else {
-					tok.Kind = token.Dot
+					tok.Kind = Dot
 					tok.Value = value.NewString(".")
 				}
 			} else {
-				tok.Kind = token.Dot
+				tok.Kind = Dot
 				tok.Value = value.NewString(".")
 			}
 		case '&':
 			if l.peekChar() == '&' {
 				l.readChar()
-				tok.Kind = token.LogicalAnd
+				tok.Kind = LogicalAnd
 				tok.Value = value.NewString("&&")
 			}
 		case '|':
 			if l.peekChar() == '|' {
 				l.readChar()
-				tok.Kind = token.LogicalOr
+				tok.Kind = LogicalOr
 				tok.Value = value.NewString("||")
 			}
 		case '?':
 			if l.peekChar() == '?' {
 				l.readChar()
-				tok.Kind = token.NullCoalescing
+				tok.Kind = NullCoalescing
 				tok.Value = value.NewString("??")
 			} else {
 				// Toán tử ternary: cond ? a : b
-				tok.Kind = token.Question
+				tok.Kind = Question
 				tok.Value = value.NewString("?")
 			}
 		}
 
-	case character.Space:
+	case Space:
 		if l.ch == 0 {
-			tok.Kind = token.EOF
+			tok.Kind = EOF
 			return tok
 		}
 
 	default:
-		tok.Kind = token.Illegal
+		tok.Kind = Illegal
 	}
 
 	l.readChar()
@@ -342,7 +340,7 @@ func (l *Lexer) NextToken() token.Token {
 // --- Helpers tối ưu với Table Lookup ---
 
 func (l *Lexer) skipWhitespace() {
-	for character.Table[l.ch] == character.Space && l.ch != 0 {
+	for Table[l.ch] == Space && l.ch != 0 {
 		l.readChar()
 	}
 }
@@ -389,11 +387,11 @@ func (l *Lexer) readString(quote byte) string {
 	return unescapeJSString(l.b2s(content), quote)
 }
 
-func (l *Lexer) readIdentifier() string {
+func (l *Lexer) readIdent() string {
 	start := l.pos
 	for {
-		cType := character.Table[l.ch]
-		if cType != character.Alpha && cType != character.Digit {
+		cType := Table[l.ch]
+		if cType != Alpha && cType != Digit {
 			break
 		}
 		l.readChar()
@@ -407,19 +405,19 @@ func (l *Lexer) readIdentifier() string {
 
 func (l *Lexer) readNumber() string {
 	start := l.pos
-	for character.Table[l.ch] == character.Digit || l.ch == '.' {
+	for Table[l.ch] == Digit || l.ch == '.' {
 		l.readChar()
 	}
 
 	// Support scientific notation (e.g. 1e3, 1.5e-3, 2e+4)
 	if l.ch == 'e' || l.ch == 'E' {
 		peek := l.peekChar()
-		if character.Table[peek] == character.Digit || peek == '+' || peek == '-' {
+		if Table[peek] == Digit || peek == '+' || peek == '-' {
 			l.readChar() // Consume 'e' / 'E'
 			if l.ch == '+' || l.ch == '-' {
 				l.readChar() // Consume '+' / '-'
 			}
-			for character.Table[l.ch] == character.Digit {
+			for Table[l.ch] == Digit {
 				l.readChar() // Consume digits of the exponent
 			}
 		}

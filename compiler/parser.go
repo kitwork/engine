@@ -2,8 +2,9 @@ package compiler
 
 import (
 	"fmt"
+	"strings"
 
-	"github.com/kitwork/engine/token"
+	
 	"github.com/kitwork/engine/value"
 )
 
@@ -25,32 +26,32 @@ const (
 	ARROW       // =>
 )
 
-var precedences = map[token.Kind]int{
-	token.Equal:        EQUALS,
-	token.NotEqual:     EQUALS,
-	token.Less:         LESSGREATER,
-	token.Greater:      LESSGREATER,
-	token.LessEqual:    LESSGREATER,
-	token.GreaterEqual: LESSGREATER,
-	token.Plus:         SUM,
-	token.Minus:        SUM,
-	token.Star:         PRODUCT,
-	token.Slash:        PRODUCT,
-	token.Percent:      PRODUCT,
-	token.Question:     ASSIGN,
-	token.PlusAssign:   ASSIGN,
-	token.MinusAssign:  ASSIGN,
-	token.StarAssign:   ASSIGN,
-	token.SlashAssign:  ASSIGN,
-	token.PlusPlus:     CALL,
-	token.MinusMinus:   CALL,
-	token.LeftParen:    CALL,
-	token.LeftBracket:  INDEX,
-	token.Dot:          MEMBER,
-	token.Assign:       ASSIGN,
-	token.LogicalAnd:   AND,
-	token.LogicalOr:    OR,
-	token.FatArrow:     ARROW,
+var precedences = map[Kind]int{
+	Equal:        EQUALS,
+	NotEqual:     EQUALS,
+	Less:         LESSGREATER,
+	Greater:      LESSGREATER,
+	LessEqual:    LESSGREATER,
+	GreaterEqual: LESSGREATER,
+	Plus:         SUM,
+	Minus:        SUM,
+	Star:         PRODUCT,
+	Slash:        PRODUCT,
+	Percent:      PRODUCT,
+	Question:     ASSIGN,
+	PlusAssign:   ASSIGN,
+	MinusAssign:  ASSIGN,
+	StarAssign:   ASSIGN,
+	SlashAssign:  ASSIGN,
+	PlusPlus:     CALL,
+	MinusMinus:   CALL,
+	LeftParen:    CALL,
+	LeftBracket:  INDEX,
+	Dot:          MEMBER,
+	Assign:       ASSIGN,
+	LogicalAnd:   AND,
+	LogicalOr:    OR,
+	FatArrow:     ARROW,
 }
 
 type (
@@ -62,68 +63,72 @@ type Parser struct {
 	l      *Lexer
 	errors []string
 
-	curToken  token.Token
-	peekToken token.Token
+	curToken  Token
+	peekToken Token
 
-	prefixParseFns map[token.Kind]prefixParseFn
-	infixParseFns  map[token.Kind]infixParseFn
+	prefixParseFns map[Kind]prefixParseFn
+	infixParseFns  map[Kind]infixParseFn
+
+	// Module metadata thu thập khi parse (cho bundler native ở package script).
+	exports    []string // tên export qua `export const/function` / `export { }`
+	hasDefault bool      // có `export default …` (đã hạ về const DefaultExportName)
 }
 
 func NewParser(l *Lexer) *Parser {
 	p := &Parser{l: l, errors: []string{}}
 
-	p.prefixParseFns = make(map[token.Kind]prefixParseFn)
-	p.infixParseFns = make(map[token.Kind]infixParseFn)
+	p.prefixParseFns = make(map[Kind]prefixParseFn)
+	p.infixParseFns = make(map[Kind]infixParseFn)
 
 	// Đăng ký Prefix
-	p.registerPrefix(token.Identifier, p.parseIdentifier)
-	p.registerPrefix(token.Number, p.parseLiteral)
-	p.registerPrefix(token.String, p.parseLiteral)
-	p.registerPrefix(token.Boolean, p.parseLiteral)
-	p.registerPrefix(token.Null, p.parseLiteral)
-	p.registerPrefix(token.Template, p.parseTemplateLiteral)
-	p.registerPrefix(token.LogicalNot, p.parsePrefixExpression)
-	p.registerPrefix(token.Minus, p.parsePrefixExpression)
-	p.registerPrefix(token.LeftParen, p.parseGroupedExpression)
-	p.registerPrefix(token.If, p.parseIfExpression)
-	// p.registerPrefix(token.For, p.parseForStatement)
-	// p.registerPrefix(token.Defer, p.parseDeferStatement)
-	// p.registerPrefix(token.Go, p.parseSpawnStatement)
-	p.registerPrefix(token.LeftBracket, p.parseArrayLiteral)
-	p.registerPrefix(token.LeftBrace, p.parseObjectLiteral)
-	p.registerPrefix(token.Function, p.parseFunctionExpression)
-	p.registerPrefix(token.New, p.parseNewExpression)
-	p.registerPrefix(token.PlusPlus, p.parsePrefixUpdate)
-	p.registerPrefix(token.MinusMinus, p.parsePrefixUpdate)
-	p.registerPrefix(token.Void, p.parsePrefixExpression)
-	p.registerPrefix(token.Reserved, p.parseReservedKeyword)
+	p.registerPrefix(Ident, p.parseIdentifier)
+	p.registerPrefix(Number, p.parseLiteral)
+	p.registerPrefix(String, p.parseLiteral)
+	p.registerPrefix(Boolean, p.parseLiteral)
+	p.registerPrefix(Null, p.parseLiteral)
+	p.registerPrefix(Template, p.parseTemplateLiteral)
+	p.registerPrefix(LogicalNot, p.parsePrefixExpression)
+	p.registerPrefix(Minus, p.parsePrefixExpression)
+	p.registerPrefix(LeftParen, p.parseGroupedExpression)
+	p.registerPrefix(If, p.parseIfExpression)
+	// p.registerPrefix(For, p.parseForStatement)
+	// p.registerPrefix(Defer, p.parseDeferStatement)
+	// p.registerPrefix(Go, p.parseSpawnStatement)
+	p.registerPrefix(LeftBracket, p.parseArrayLiteral)
+	p.registerPrefix(LeftBrace, p.parseObjectLiteral)
+	p.registerPrefix(Function, p.parseFunctionExpression)
+	p.registerPrefix(New, p.parseNewExpression)
+	p.registerPrefix(PlusPlus, p.parsePrefixUpdate)
+	p.registerPrefix(MinusMinus, p.parsePrefixUpdate)
+	p.registerPrefix(Void, p.parsePrefixExpression)
+	p.registerPrefix(Reserved, p.parseReservedKeyword)
 
 	// Đăng ký Infix
-	p.registerInfix(token.Plus, p.parseInfixExpression)
-	p.registerInfix(token.Minus, p.parseInfixExpression)
-	p.registerInfix(token.Star, p.parseInfixExpression)
-	p.registerInfix(token.Slash, p.parseInfixExpression)
-	p.registerInfix(token.Percent, p.parseInfixExpression)
-	p.registerInfix(token.Equal, p.parseInfixExpression)
-	p.registerInfix(token.NotEqual, p.parseInfixExpression)
-	p.registerInfix(token.Less, p.parseInfixExpression)
-	p.registerInfix(token.Greater, p.parseInfixExpression)
-	p.registerInfix(token.LessEqual, p.parseInfixExpression)
-	p.registerInfix(token.GreaterEqual, p.parseInfixExpression)
-	p.registerInfix(token.Assign, p.parseInfixExpression)
-	p.registerInfix(token.LeftParen, p.parseCallExpression)
-	p.registerInfix(token.Dot, p.parseDotExpression)
-	p.registerInfix(token.LeftBracket, p.parseIndexExpression)
-	p.registerInfix(token.LogicalAnd, p.parseInfixExpression)
-	p.registerInfix(token.LogicalOr, p.parseInfixExpression)
-	p.registerInfix(token.FatArrow, p.parseArrowFunction)
-	p.registerInfix(token.Question, p.parseTernaryExpression)
-	p.registerInfix(token.PlusAssign, p.parseCompoundAssignment)
-	p.registerInfix(token.MinusAssign, p.parseCompoundAssignment)
-	p.registerInfix(token.StarAssign, p.parseCompoundAssignment)
-	p.registerInfix(token.SlashAssign, p.parseCompoundAssignment)
-	p.registerInfix(token.PlusPlus, p.parsePostfixUpdate)
-	p.registerInfix(token.MinusMinus, p.parsePostfixUpdate)
+	p.registerInfix(Plus, p.parseInfixExpression)
+	p.registerInfix(Minus, p.parseInfixExpression)
+	p.registerInfix(Star, p.parseInfixExpression)
+	p.registerInfix(Slash, p.parseInfixExpression)
+	p.registerInfix(Percent, p.parseInfixExpression)
+	p.registerInfix(Equal, p.parseInfixExpression)
+	p.registerInfix(NotEqual, p.parseInfixExpression)
+	p.registerInfix(Less, p.parseInfixExpression)
+	p.registerInfix(Greater, p.parseInfixExpression)
+	p.registerInfix(LessEqual, p.parseInfixExpression)
+	p.registerInfix(GreaterEqual, p.parseInfixExpression)
+	p.registerInfix(Assign, p.parseInfixExpression)
+	p.registerInfix(LeftParen, p.parseCallExpression)
+	p.registerInfix(Dot, p.parseDotExpression)
+	p.registerInfix(LeftBracket, p.parseIndexExpression)
+	p.registerInfix(LogicalAnd, p.parseInfixExpression)
+	p.registerInfix(LogicalOr, p.parseInfixExpression)
+	p.registerInfix(FatArrow, p.parseArrowFunction)
+	p.registerInfix(Question, p.parseTernaryExpression)
+	p.registerInfix(PlusAssign, p.parseCompoundAssignment)
+	p.registerInfix(MinusAssign, p.parseCompoundAssignment)
+	p.registerInfix(StarAssign, p.parseCompoundAssignment)
+	p.registerInfix(SlashAssign, p.parseCompoundAssignment)
+	p.registerInfix(PlusPlus, p.parsePostfixUpdate)
+	p.registerInfix(MinusMinus, p.parsePostfixUpdate)
 
 	p.nextToken()
 	p.nextToken()
@@ -136,9 +141,9 @@ func NewParser(l *Lexer) *Parser {
 
 func (p *Parser) ParseProgram() *Program {
 	program := &Program{Statements: []Statement{}}
-	for p.curToken.Kind != token.EOF {
+	for p.curToken.Kind != EOF {
 		// 1. Bỏ qua dấu chấm phẩy thừa
-		if p.curToken.Kind == token.Semicolon {
+		if p.curToken.Kind == Semicolon {
 			p.nextToken()
 			continue
 		}
@@ -151,18 +156,24 @@ func (p *Parser) ParseProgram() *Program {
 		// 2. CHỈ GỌI nextToken Ở ĐÂY để chuẩn bị cho dòng tiếp theo
 		p.nextToken()
 	}
+	program.Exports = p.exports
+	program.HasDefault = p.hasDefault
 	return program
 }
 
 func (p *Parser) parseStatement() Statement {
 	switch p.curToken.Kind {
-	case token.Let, token.Const:
+	case Let, Const:
 		return p.parseVarStatement()
-	case token.Return:
+	case Import:
+		return p.parseImportStatement()
+	case Export:
+		return p.parseExportStatement()
+	case Return:
 		return p.parseReturnStatement()
-	case token.Function:
+	case Function:
 		return p.parseFunctionStatement()
-	// case token.If, token.For, token.Defer, token.Go:
+	// case If, For, Defer, Go:
 	// 	// Trong cấu trúc này, If, For, Defer và Go là Expression/Statement linh hoạt
 	// 	return p.parseExpressionStatement()
 	default:
@@ -175,52 +186,52 @@ func (p *Parser) parseStatement() Statement {
 func (p *Parser) parseVarStatement() Statement {
 	stmt := &VarStatement{Token: p.curToken}
 
-	if p.peekTokenIs(token.LeftBrace) {
+	if p.peekTokenIs(LeftBrace) {
 		// Destructuring Object: const { a, b } = ...
 		p.nextToken() // cur: {
 		stmt.DestructMode = DestructObject
 		stmt.Names = []*Identifier{}
-		for !p.peekTokenIs(token.RightBrace) {
+		for !p.peekTokenIs(RightBrace) {
 			p.nextToken() // cur: identifier
-			if !p.curTokenIs(token.Identifier) {
+			if !p.curTokenIs(Ident) {
 				return nil
 			}
 			stmt.Names = append(stmt.Names, &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()})
-			if p.peekTokenIs(token.Comma) {
+			if p.peekTokenIs(Comma) {
 				p.nextToken()
 			}
 		}
-		if !p.expectPeek(token.RightBrace) {
+		if !p.expectPeek(RightBrace) {
 			return nil
 		}
-	} else if p.peekTokenIs(token.LeftBracket) {
+	} else if p.peekTokenIs(LeftBracket) {
 		// Destructuring Array: const [ a, b ] = ...
 		p.nextToken() // cur: [
 		stmt.DestructMode = DestructArray
 		stmt.Names = []*Identifier{}
-		for !p.peekTokenIs(token.RightBracket) {
+		for !p.peekTokenIs(RightBracket) {
 			p.nextToken() // cur: identifier
-			if !p.curTokenIs(token.Identifier) {
+			if !p.curTokenIs(Ident) {
 				return nil
 			}
 			stmt.Names = append(stmt.Names, &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()})
-			if p.peekTokenIs(token.Comma) {
+			if p.peekTokenIs(Comma) {
 				p.nextToken()
 			}
 		}
-		if !p.expectPeek(token.RightBracket) {
+		if !p.expectPeek(RightBracket) {
 			return nil
 		}
 	} else {
 		// Standard: const a = ...
-		if !p.expectPeek(token.Identifier) {
+		if !p.expectPeek(Ident) {
 			return nil
 		}
 		stmt.Names = []*Identifier{{Token: p.curToken, Value: p.curToken.Value.Text()}}
 		stmt.DestructMode = DestructNone
 	}
 
-	if !p.expectPeek(token.Assign) {
+	if !p.expectPeek(Assign) {
 		return nil
 	}
 	// Lúc này curToken đang là '='
@@ -232,11 +243,257 @@ func (p *Parser) parseVarStatement() Statement {
 	return stmt
 }
 
+/* =============================================================================
+   MODULES — native import / export
+
+   Strategy: lower to existing AST nodes, reuse all existing machinery.
+     import { router, log } from "kitwork"   →  const { router, log } = kitwork()
+     import http from "kitwork/http"          →  const http = kitwork().http
+     export const x = ...                      →  const x = ...   (export stripped)
+     export default expr                       →  expr;           (evaluated)
+     export { a, b }                           →  (no-op)
+   Anything the native path can't express (relative modules, `as` aliases, …)
+   records a parser error so script.Bytecode() falls back to esbuild bundling.
+   ============================================================================= */
+
+func isKitworkSpecifier(s string) bool {
+	return s == "kitwork" || strings.HasPrefix(s, "kitwork/")
+}
+
+func kitworkSubpath(s string) string {
+	if strings.HasPrefix(s, "kitwork/") {
+		return s[len("kitwork/"):]
+	}
+	return ""
+}
+
+// isRelativeSpecifier báo specifier là module tương đối (file trong tenant)
+// → sẽ phát ImportStatement cho bundler native giải quyết.
+func isRelativeSpecifier(s string) bool {
+	return strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") || strings.HasPrefix(s, "/")
+}
+
+// hasAlias báo có ít nhất một binding đổi tên (`imported as local`).
+func hasAlias(specs []ImportSpec) bool {
+	for _, s := range specs {
+		if s.Local != s.Imported {
+			return true
+		}
+	}
+	return false
+}
+
+// memberConst dựng `const <local> = <obj>.<prop>`.
+func memberConst(local string, obj Expression, prop string) Statement {
+	return &VarStatement{
+		Token:        constToken(),
+		Names:        []*Identifier{{Token: Token{Kind: Ident, Value: value.NewString(local)}, Value: local}},
+		DestructMode: DestructNone,
+		Value: &MemberExpression{
+			Token:    Token{Kind: Dot},
+			Object:   obj,
+			Property: &Identifier{Token: Token{Kind: Ident, Value: value.NewString(prop)}, Value: prop},
+		},
+	}
+}
+
+// constToken builds a synthetic `const` token for lowered declarations.
+func constToken() Token {
+	return Token{Kind: Const, Value: value.NewString("const")}
+}
+
+// kitworkCall builds the expression `kitwork()`.
+func (p *Parser) kitworkCall() Expression {
+	return &CallExpression{
+		Token:     Token{Kind: LeftParen},
+		Function:  &Identifier{Token: Token{Kind: Ident, Value: value.NewString("kitwork")}, Value: "kitwork"},
+		Arguments: nil,
+	}
+}
+
+// parseFromSpecifier consumes a contextual `from "specifier"` and returns the
+// specifier string. `from` is contextual (a normal identifier), not a keyword.
+func (p *Parser) parseFromSpecifier() (string, bool) {
+	if !p.peekTokenIs(Ident) || p.peekToken.Value.Text() != "from" {
+		p.errors = append(p.errors, "import: expected 'from'")
+		return "", false
+	}
+	p.nextToken() // cur: from
+	if !p.expectPeek(String) {
+		return "", false
+	}
+	return p.curToken.Value.Text(), true
+}
+
+func (p *Parser) parseImportStatement() Statement {
+	// curToken == import
+	importTok := p.curToken
+
+	// Side-effect:  import "./mod"
+	if p.peekTokenIs(String) {
+		p.nextToken() // cur: string
+		spec := p.curToken.Value.Text()
+		if isRelativeSpecifier(spec) {
+			return &ImportStatement{Token: importTok, Source: spec, SideEffect: true}
+		}
+		p.errors = append(p.errors, fmt.Sprintf("native import: unsupported side-effect specifier %q", spec))
+		return nil
+	}
+
+	// Named:   import { a, b as c } from "..."
+	if p.peekTokenIs(LeftBrace) {
+		p.nextToken() // cur: {
+		specs := []ImportSpec{}
+		for !p.peekTokenIs(RightBrace) {
+			p.nextToken() // cur: tên import
+			if !p.curTokenIs(Ident) {
+				p.errors = append(p.errors, "import: expected identifier inside { }")
+				return nil
+			}
+			imported := p.curToken.Value.Text()
+			local := imported
+			// alias tùy chọn: `as local` (`as` là identifier theo ngữ cảnh)
+			if p.peekTokenIs(Ident) && p.peekToken.Value.Text() == "as" {
+				p.nextToken() // cur: as
+				if !p.expectPeek(Ident) {
+					return nil
+				}
+				local = p.curToken.Value.Text() // cur: local
+			}
+			specs = append(specs, ImportSpec{Imported: imported, Local: local})
+			if p.peekTokenIs(Comma) {
+				p.nextToken()
+			} else if !p.peekTokenIs(RightBrace) {
+				p.errors = append(p.errors, "import: unexpected token in named import")
+				return nil
+			}
+		}
+		if !p.expectPeek(RightBrace) {
+			return nil
+		}
+		spec, ok := p.parseFromSpecifier()
+		if !ok {
+			return nil
+		}
+		if isKitworkSpecifier(spec) {
+			if !hasAlias(specs) {
+				// → const { a, b } = kitwork()
+				names := make([]*Identifier, len(specs))
+				for i, s := range specs {
+					names[i] = &Identifier{Token: Token{Kind: Ident, Value: value.NewString(s.Local)}, Value: s.Local}
+				}
+				return &VarStatement{Token: constToken(), Names: names, DestructMode: DestructObject, Value: p.kitworkCall()}
+			}
+			// có alias → nhóm `const local = kitwork().imported`
+			stmts := make([]Statement, len(specs))
+			for i, s := range specs {
+				stmts[i] = memberConst(s.Local, p.kitworkCall(), s.Imported)
+			}
+			return &GroupStatement{Statements: stmts}
+		}
+		if isRelativeSpecifier(spec) {
+			return &ImportStatement{Token: importTok, Names: specs, Source: spec}
+		}
+		p.errors = append(p.errors, fmt.Sprintf("native import: only 'kitwork' or relative modules supported: %q", spec))
+		return nil
+	}
+
+	// Default:  import name from "..."
+	if p.peekTokenIs(Ident) {
+		p.nextToken() // cur: local name
+		name := &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
+		spec, ok := p.parseFromSpecifier()
+		if !ok {
+			return nil
+		}
+		if isKitworkSpecifier(spec) {
+			sub := kitworkSubpath(spec)
+			if sub == "" {
+				p.errors = append(p.errors, "native import: bare \"kitwork\" has no default export")
+				return nil
+			}
+			// → const name = kitwork().sub
+			return &VarStatement{
+				Token:        constToken(),
+				Names:        []*Identifier{name},
+				DestructMode: DestructNone,
+				Value: &MemberExpression{
+					Token:    Token{Kind: Dot},
+					Object:   p.kitworkCall(),
+					Property: &Identifier{Token: Token{Kind: Ident, Value: value.NewString(sub)}, Value: sub},
+				},
+			}
+		}
+		if isRelativeSpecifier(spec) {
+			return &ImportStatement{Token: importTok, Default: name, Source: spec}
+		}
+		p.errors = append(p.errors, fmt.Sprintf("native import: only 'kitwork' or relative modules supported: %q", spec))
+		return nil
+	}
+
+	p.errors = append(p.errors, "import: unsupported form")
+	return nil
+}
+
+func (p *Parser) parseExportStatement() Statement {
+	// curToken == export
+
+	// export default <expr>  →  const __kw_default = <expr>
+	// (giữ side-effect; bundler đưa __kw_default vào object export dưới khóa "default")
+	if p.peekTokenIs(Ident) && p.peekToken.Value.Text() == "default" {
+		p.nextToken() // cur: default
+		p.nextToken() // cur: start of expression
+		p.hasDefault = true
+		return &VarStatement{
+			Token:        constToken(),
+			Names:        []*Identifier{{Token: Token{Kind: Ident, Value: value.NewString(DefaultExportName)}, Value: DefaultExportName}},
+			DestructMode: DestructNone,
+			Value:        p.parseExpression(LOWEST),
+		}
+	}
+
+	// export const / export let  → ghi nhận các tên được khai báo
+	if p.peekTokenIs(Const) || p.peekTokenIs(Let) {
+		p.nextToken() // cur: const/let
+		stmt := p.parseVarStatement()
+		if vs, ok := stmt.(*VarStatement); ok {
+			for _, n := range vs.Names {
+				p.exports = append(p.exports, n.Value)
+			}
+		}
+		return stmt
+	}
+
+	// export function f(){}  → ghi nhận tên hàm
+	if p.peekTokenIs(Function) {
+		p.nextToken() // cur: function
+		if p.peekTokenIs(Ident) {
+			p.exports = append(p.exports, p.peekToken.Value.Text())
+		}
+		return p.parseFunctionStatement()
+	}
+
+	// export { a, b }  — re-export local đã khai báo: ghi nhận tên, không sinh lệnh
+	if p.peekTokenIs(LeftBrace) {
+		p.nextToken() // cur: {
+		for !p.curTokenIs(RightBrace) && !p.curTokenIs(EOF) {
+			if p.curTokenIs(Ident) {
+				p.exports = append(p.exports, p.curToken.Value.Text())
+			}
+			p.nextToken()
+		}
+		return nil
+	}
+
+	p.errors = append(p.errors, "export: unsupported form")
+	return nil
+}
+
 func (p *Parser) parseReturnStatement() Statement {
 	stmt := &ReturnStatement{Token: p.curToken}
 	p.nextToken()
 
-	if p.curTokenIs(token.Semicolon) || p.curTokenIs(token.RightBrace) || p.curTokenIs(token.EOF) {
+	if p.curTokenIs(Semicolon) || p.curTokenIs(RightBrace) || p.curTokenIs(EOF) {
 		return stmt
 	}
 	stmt.ReturnValue = p.parseExpression(LOWEST)
@@ -246,7 +503,7 @@ func (p *Parser) parseReturnStatement() Statement {
 func (p *Parser) parseExpressionStatement() Statement {
 	stmt := &ExpressionStatement{Token: p.curToken}
 	stmt.Expression = p.parseExpression(LOWEST)
-	// if p.peekTokenIs(token.Semicolon) {
+	// if p.peekTokenIs(Semicolon) {
 	// 	p.nextToken()
 	// }
 	return stmt
@@ -256,9 +513,9 @@ func (p *Parser) parseBlockStatement() *BlockStatement {
 	block := &BlockStatement{Token: p.curToken, Statements: []Statement{}}
 	p.nextToken() // Bỏ dấu {
 
-	for !p.curTokenIs(token.RightBrace) && !p.curTokenIs(token.EOF) {
+	for !p.curTokenIs(RightBrace) && !p.curTokenIs(EOF) {
 		// Bỏ qua dấu chấm phẩy thừa
-		if p.curTokenIs(token.Semicolon) {
+		if p.curTokenIs(Semicolon) {
 			p.nextToken()
 			continue
 		}
@@ -284,7 +541,7 @@ func (p *Parser) parseExpression(precedence int) Expression {
 	}
 	leftExp := prefix()
 
-	for !p.peekTokenIs(token.Semicolon) && precedence < p.peekPrecedence() {
+	for !p.peekTokenIs(Semicolon) && precedence < p.peekPrecedence() {
 		infix := p.infixParseFns[p.peekToken.Kind]
 		if infix == nil {
 			return leftExp
@@ -314,7 +571,7 @@ func (p *Parser) parseTemplateLiteral() Expression {
 			// 1. Add previous string part if exists
 			if i > start {
 				tl.Parts = append(tl.Parts, &Literal{
-					Token: token.Token{Kind: token.String},
+					Token: Token{Kind: String},
 					Value: value.NewString(fullText[start:i]),
 				})
 			}
@@ -351,7 +608,7 @@ func (p *Parser) parseTemplateLiteral() Expression {
 	// Add trailing string part
 	if start < len(fullText) {
 		tl.Parts = append(tl.Parts, &Literal{
-			Token: token.Token{Kind: token.String},
+			Token: Token{Kind: String},
 			Value: value.NewString(fullText[start:]),
 		})
 	}
@@ -361,7 +618,7 @@ func (p *Parser) parseTemplateLiteral() Expression {
 
 func (p *Parser) parseInfixExpression(left Expression) Expression {
 	// Xử lý toán tử gán riêng biệt
-	if p.curToken.Kind == token.Assign {
+	if p.curToken.Kind == Assign {
 		ae := &AssignmentExpression{Token: p.curToken, Name: left}
 		p.nextToken()
 		ae.Value = p.parseExpression(ASSIGN - 1)
@@ -391,13 +648,13 @@ func (p *Parser) parseDotExpression(left Expression) Expression {
 	}
 
 	// Kiểm tra xem có phải là gọi Method không: object.method(...)
-	if p.peekTokenIs(token.LeftParen) {
+	if p.peekTokenIs(LeftParen) {
 		p.nextToken() // Chuyển curToken sang dấu '('
 		return &MethodCallExpression{
 			Token:     tok,
 			Object:    left,
 			Method:    name,
-			Arguments: p.parseExpressionList(token.RightParen),
+			Arguments: p.parseExpressionList(RightParen),
 		}
 	}
 
@@ -435,7 +692,7 @@ func (p *Parser) parseTernaryExpression(cond Expression) Expression {
 	p.nextToken()
 	exp.Consequence = p.parseExpression(ASSIGN - 1)
 
-	if !p.expectPeek(token.Colon) {
+	if !p.expectPeek(Colon) {
 		return nil
 	}
 
@@ -462,12 +719,12 @@ func (p *Parser) parseCompoundAssignment(left Expression) Expression {
 }
 
 // updateExpression dựng `target = target ± 1` dùng chung cho ++ và --.
-func updateExpression(tok token.Token, target Expression) Expression {
+func updateExpression(tok Token, target Expression) Expression {
 	op := "+"
-	if tok.Kind == token.MinusMinus {
+	if tok.Kind == MinusMinus {
 		op = "-"
 	}
-	one := &Literal{Token: token.Token{Kind: token.Number}, Value: value.New(1)}
+	one := &Literal{Token: Token{Kind: Number}, Value: value.New(1)}
 	return &AssignmentExpression{
 		Token: tok,
 		Name:  target,
@@ -511,16 +768,16 @@ func (p *Parser) parseReservedKeyword() Expression {
 
 func (p *Parser) parseIfExpression() Expression {
 	exp := &IfExpression{Token: p.curToken}
-	if !p.expectPeek(token.LeftParen) {
+	if !p.expectPeek(LeftParen) {
 		return nil
 	}
 	p.nextToken()
 	exp.Condition = p.parseExpression(LOWEST)
-	if !p.expectPeek(token.RightParen) {
+	if !p.expectPeek(RightParen) {
 		return nil
 	}
 
-	if p.peekTokenIs(token.LeftBrace) {
+	if p.peekTokenIs(LeftBrace) {
 		p.nextToken()
 		exp.Consequence = p.parseBlockStatement()
 	} else {
@@ -529,9 +786,9 @@ func (p *Parser) parseIfExpression() Expression {
 		exp.Consequence = &BlockStatement{Statements: []Statement{stmt}}
 	}
 
-	if p.peekTokenIs(token.Else) {
+	if p.peekTokenIs(Else) {
 		p.nextToken()
-		if p.peekTokenIs(token.LeftBrace) {
+		if p.peekTokenIs(LeftBrace) {
 			p.nextToken()
 			exp.Alternative = p.parseBlockStatement()
 		} else {
@@ -546,27 +803,27 @@ func (p *Parser) parseIfExpression() Expression {
 func (p *Parser) parseForStatement() Expression {
 	exp := &ForStatement{Token: p.curToken}
 
-	if !p.expectPeek(token.LeftParen) {
+	if !p.expectPeek(LeftParen) {
 		return nil
 	}
 
-	if !p.expectPeek(token.Identifier) {
+	if !p.expectPeek(Ident) {
 		return nil
 	}
 	exp.Item = &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
 
-	// if !p.expectPeek(token.In) {
+	// if !p.expectPeek(In) {
 	// 	return nil
 	// }
 
 	p.nextToken()
 	exp.Iterable = p.parseExpression(LOWEST)
 
-	if !p.expectPeek(token.RightParen) {
+	if !p.expectPeek(RightParen) {
 		return nil
 	}
 
-	if !p.expectPeek(token.LeftBrace) {
+	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
 	exp.Body = p.parseBlockStatement()
@@ -591,16 +848,16 @@ func (p *Parser) parseSpawnStatement() Expression {
 func (p *Parser) parseArrayLiteral() Expression {
 	return &ArrayLiteral{
 		Token:    p.curToken,
-		Elements: p.parseExpressionList(token.RightBracket),
+		Elements: p.parseExpressionList(RightBracket),
 	}
 }
 
 func (p *Parser) parseObjectLiteral() Expression {
 	obj := &ObjectLiteral{Token: p.curToken, Entries: []ObjectEntry{}}
-	for !p.peekTokenIs(token.RightBrace) {
+	for !p.peekTokenIs(RightBrace) {
 		p.nextToken()
 
-		if p.curTokenIs(token.Spread) {
+		if p.curTokenIs(Spread) {
 			p.nextToken()
 			val := p.parseExpression(LOWEST)
 			obj.Entries = append(obj.Entries, ObjectEntry{
@@ -609,7 +866,7 @@ func (p *Parser) parseObjectLiteral() Expression {
 			})
 		} else {
 			key := p.parseExpression(LOWEST)
-			if p.peekTokenIs(token.Colon) {
+			if p.peekTokenIs(Colon) {
 				p.nextToken()
 				p.nextToken()
 				val := p.parseExpression(LOWEST)
@@ -626,11 +883,11 @@ func (p *Parser) parseObjectLiteral() Expression {
 			}
 		}
 
-		if !p.peekTokenIs(token.RightBrace) && !p.expectPeek(token.Comma) {
+		if !p.peekTokenIs(RightBrace) && !p.expectPeek(Comma) {
 			return nil
 		}
 	}
-	if !p.expectPeek(token.RightBrace) {
+	if !p.expectPeek(RightBrace) {
 		return nil
 	}
 	return obj
@@ -638,7 +895,7 @@ func (p *Parser) parseObjectLiteral() Expression {
 
 func (p *Parser) parseCallExpression(left Expression) Expression {
 	exp := &CallExpression{Token: p.curToken, Function: left}
-	exp.Arguments = p.parseExpressionList(token.RightParen)
+	exp.Arguments = p.parseExpressionList(RightParen)
 	return exp
 }
 
@@ -646,7 +903,7 @@ func (p *Parser) parseIndexExpression(left Expression) Expression {
 	exp := &IndexExpression{Token: p.curToken, Left: left}
 	p.nextToken()
 	exp.Index = p.parseExpression(LOWEST)
-	if !p.expectPeek(token.RightBracket) {
+	if !p.expectPeek(RightBracket) {
 		return nil
 	}
 	return exp
@@ -654,15 +911,15 @@ func (p *Parser) parseIndexExpression(left Expression) Expression {
 
 func (p *Parser) parseGroupedExpression() Expression {
 	// Nếu là () => ...
-	if p.peekTokenIs(token.RightParen) {
+	if p.peekTokenIs(RightParen) {
 		p.nextToken() // Sang dấu )
 		return &ParameterList{Token: p.curToken, Parameters: []*Identifier{}}
 	}
 
-	exps := p.parseExpressionList(token.RightParen)
+	exps := p.parseExpressionList(RightParen)
 
 	// Nếu tiếp sau là =>, biến list này thành ParameterList
-	if p.peekTokenIs(token.FatArrow) {
+	if p.peekTokenIs(FatArrow) {
 		params := make([]*Identifier, len(exps))
 		for i, e := range exps {
 			if id, ok := e.(*Identifier); ok {
@@ -690,7 +947,7 @@ func (p *Parser) parseArrowFunction(left Expression) Expression {
 	}
 
 	// Xử lý block { } hoặc single expression
-	if p.curTokenIs(token.LeftBrace) {
+	if p.curTokenIs(LeftBrace) {
 		return &FunctionLiteral{
 			Token:      tok,
 			Parameters: params,
@@ -723,10 +980,10 @@ func (p *Parser) nextToken() {
 	p.peekToken = p.l.NextToken()
 }
 
-func (p *Parser) curTokenIs(k token.Kind) bool  { return p.curToken.Kind == k }
-func (p *Parser) peekTokenIs(k token.Kind) bool { return p.peekToken.Kind == k }
+func (p *Parser) curTokenIs(k Kind) bool  { return p.curToken.Kind == k }
+func (p *Parser) peekTokenIs(k Kind) bool { return p.peekToken.Kind == k }
 
-func (p *Parser) expectPeek(k token.Kind) bool {
+func (p *Parser) expectPeek(k Kind) bool {
 	if p.peekTokenIs(k) {
 		p.nextToken()
 		return true
@@ -735,7 +992,7 @@ func (p *Parser) expectPeek(k token.Kind) bool {
 	return false
 }
 
-func (p *Parser) parseExpressionList(end token.Kind) []Expression {
+func (p *Parser) parseExpressionList(end Kind) []Expression {
 	list := []Expression{}
 	if p.peekTokenIs(end) {
 		p.nextToken()
@@ -743,7 +1000,7 @@ func (p *Parser) parseExpressionList(end token.Kind) []Expression {
 	}
 	p.nextToken()
 	list = append(list, p.parseExpression(LOWEST))
-	for p.peekTokenIs(token.Comma) {
+	for p.peekTokenIs(Comma) {
 		p.nextToken()
 		p.nextToken()
 		list = append(list, p.parseExpression(LOWEST))
@@ -768,8 +1025,8 @@ func (p *Parser) curPrecedence() int {
 	return LOWEST
 }
 
-func (p *Parser) registerPrefix(k token.Kind, fn prefixParseFn) { p.prefixParseFns[k] = fn }
-func (p *Parser) registerInfix(k token.Kind, fn infixParseFn)   { p.infixParseFns[k] = fn }
+func (p *Parser) registerPrefix(k Kind, fn prefixParseFn) { p.prefixParseFns[k] = fn }
+func (p *Parser) registerInfix(k Kind, fn infixParseFn)   { p.infixParseFns[k] = fn }
 func (p *Parser) addError(msg string) {
 	p.errors = append(p.errors, fmt.Sprintf("%s (at pos %d: %q)", msg, p.curToken.Position, p.curToken.String()))
 }
@@ -780,16 +1037,16 @@ func (p *Parser) Errors() []string {
 func (p *Parser) parseFunctionStatement() Statement {
 	tok := p.curToken
 
-	if !p.expectPeek(token.Identifier) {
+	if !p.expectPeek(Ident) {
 		return nil
 	}
 	name := &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
 
-	if !p.expectPeek(token.LeftParen) {
+	if !p.expectPeek(LeftParen) {
 		return nil
 	}
 
-	exps := p.parseExpressionList(token.RightParen)
+	exps := p.parseExpressionList(RightParen)
 	params := make([]*Identifier, len(exps))
 	for i, e := range exps {
 		if id, ok := e.(*Identifier); ok {
@@ -797,7 +1054,7 @@ func (p *Parser) parseFunctionStatement() Statement {
 		}
 	}
 
-	if !p.expectPeek(token.LeftBrace) {
+	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
 
@@ -810,8 +1067,8 @@ func (p *Parser) parseFunctionStatement() Statement {
 	}
 
 	return &VarStatement{
-		Token: token.Token{
-			Kind:  token.Const,
+		Token: Token{
+			Kind:  Const,
 			Value: value.NewString("const"),
 		},
 		Names:        []*Identifier{name},
@@ -823,15 +1080,15 @@ func (p *Parser) parseFunctionStatement() Statement {
 func (p *Parser) parseFunctionExpression() Expression {
 	tok := p.curToken // function
 
-	if p.peekTokenIs(token.Identifier) {
+	if p.peekTokenIs(Ident) {
 		p.nextToken() // Skip named function expression internal name
 	}
 
-	if !p.expectPeek(token.LeftParen) {
+	if !p.expectPeek(LeftParen) {
 		return nil
 	}
 
-	exps := p.parseExpressionList(token.RightParen)
+	exps := p.parseExpressionList(RightParen)
 	params := make([]*Identifier, len(exps))
 	for i, e := range exps {
 		if id, ok := e.(*Identifier); ok {
@@ -839,7 +1096,7 @@ func (p *Parser) parseFunctionExpression() Expression {
 		}
 	}
 
-	if !p.expectPeek(token.LeftBrace) {
+	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
 

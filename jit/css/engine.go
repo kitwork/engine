@@ -37,31 +37,51 @@ func ResolveCore(full string) (cssProp, selector, mediaQuery string) {
 				continue
 			}
 
-			// Escape class name for Selector
-			esc := strings.NewReplacer(":", "\\:", ".", "\\.", "/", "\\/", "%", "\\%").Replace(full)
+			// Escape class name for the CSS selector. Arbitrary values bring [ ] # ( ) ,
+			// and decimals — all must be backslash-escaped or the selector is invalid
+			// (e.g. .w-[17px] parses as .w- + [17px] attribute → rule dropped).
+			esc := strings.NewReplacer(
+				":", "\\:", ".", "\\.", "/", "\\/", "%", "\\%",
+				"[", "\\[", "]", "\\]", "#", "\\#",
+				"(", "\\(", ")", "\\)", ",", "\\,",
+			).Replace(full)
 			sel := "." + esc
 			if full[0] == '-' {
 				sel = ".\\-" + strings.TrimPrefix(esc, "-")
 			}
 
-			// Separate media queries from pseudo-classes
-			var pseudo string
-
-			for _, v := range variants {
-				if mq, ok := MediaQueries[v]; ok {
-					mediaQuery = mq // Last media query wins closest context
-				} else if st, ok := States[v]; ok {
-					pseudo = st
-				}
+			// space-*/divide-* target the gaps BETWEEN children, not the element itself.
+			if reg.Type == "tw-space" || reg.Type == "tw-divide" || reg.Type == "tw-divide-color" {
+				sel += " > :not([hidden]) ~ :not([hidden])"
 			}
 
-			// Apply State to Selector
-			if pseudo != "" {
-				if strings.Contains(pseudo, "&") {
-					sel = strings.ReplaceAll(pseudo, "&", sel)
-				} else {
-					sel += ":" + pseudo
+			// Apply variants. dark: scopes the selector under .dark; a media query wraps
+			// it; states become pseudo-classes (multiple may stack); group-hover etc. use
+			// an "&" pattern. Stacking like dark:md:hover:bg-x is supported.
+			var darkMode bool
+			var ampPattern string
+			for _, v := range variants {
+				if v == "dark" {
+					darkMode = true
+					continue
 				}
+				if mq, ok := MediaQueries[v]; ok {
+					mediaQuery = mq // last (innermost) media query wins
+					continue
+				}
+				if st, ok := States[v]; ok {
+					if strings.Contains(st, "&") {
+						ampPattern = st
+					} else {
+						sel += ":" + st
+					}
+				}
+			}
+			if ampPattern != "" {
+				sel = strings.ReplaceAll(ampPattern, "&", sel)
+			}
+			if darkMode {
+				sel = ".dark " + sel
 			}
 
 			return css, sel, mediaQuery
@@ -473,35 +493,99 @@ func buildProp(t string, m []string, neg bool) string {
 		return "object-fit: " + m[2] + ";"
 
 	// --- 11. TAILWIND SUPPORT ---
-	case "tw-spacing-axis":
-		prop := map[string]string{"m": "margin", "p": "padding", "gap": "gap"}[m[1]]
-		axis := m[2]
-		val := twUnit(m[3])
-		if prop == "gap" {
-			if axis == "x" { return "column-gap: " + val + ";" }
-			return "row-gap: " + val + ";"
-		}
-		if axis == "x" { return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val) }
-		if axis == "y" { return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", prop, val) }
-		dir := map[string]string{"t": "top", "b": "bottom", "l": "left", "r": "right"}[axis]
-		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
-	case "tw-spacing-axis-neg":
-		prop := map[string]string{"m": "margin", "p": "padding", "gap": "gap"}[m[1]]
-		axis := m[2]
-		val := "-" + twUnit(m[3])
-		if prop == "gap" { return "" }
-		if axis == "x" { return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val) }
-		if axis == "y" { return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", prop, val) }
-		dir := map[string]string{"t": "top", "b": "bottom", "l": "left", "r": "right"}[axis]
-		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
-	case "tw-spacing-all":
-		prop := map[string]string{"m": "margin", "p": "padding", "gap": "gap"}[m[1]]
+	case "tw-side": // mt/mr/mb/ml/pt/pr/pb/pl
+		prop := map[byte]string{'m': "margin", 'p': "padding"}[m[1][0]]
+		dir := map[byte]string{'t': "top", 'r': "right", 'b': "bottom", 'l': "left"}[m[1][1]]
 		val := twUnit(m[2])
+		if neg {
+			val = "-" + val
+		}
+		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
+	case "tw-axis": // mx/my/px/py
+		prop := map[byte]string{'m': "margin", 'p': "padding"}[m[1][0]]
+		val := twUnit(m[2])
+		if neg {
+			val = "-" + val
+		}
+		if m[1][1] == 'x' {
+			return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val)
+		}
+		return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", prop, val)
+	case "tw-allside": // m/p
+		prop := map[string]string{"m": "margin", "p": "padding"}[m[1]]
+		val := twUnit(m[2])
+		if neg {
+			val = "-" + val
+		}
 		return fmt.Sprintf("%s: %s;", prop, val)
-	case "tw-spacing-all-neg":
-		prop := map[string]string{"m": "margin"}[m[1]]
-		val := "-" + twUnit(m[2])
-		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-gap":
+		return "gap: " + twUnit(m[2]) + ";"
+	case "tw-gap-axis":
+		if m[2] == "x" {
+			return "column-gap: " + twUnit(m[3]) + ";"
+		}
+		return "row-gap: " + twUnit(m[3]) + ";"
+	case "tw-leading":
+		v := m[2]
+		if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+			return "line-height: " + v[1:len(v)-1] + ";"
+		}
+		named := map[string]string{"none": "1", "tight": "1.25", "snug": "1.375", "normal": "1.5", "relaxed": "1.625", "loose": "2"}
+		if x, ok := named[v]; ok {
+			return "line-height: " + x + ";"
+		}
+		return "line-height: " + twUnit(v) + ";"
+	case "tw-tracking":
+		named := map[string]string{"tighter": "-0.05em", "tight": "-0.025em", "normal": "0em", "wide": "0.025em", "wider": "0.05em", "widest": "0.1em"}
+		v := m[2]
+		if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+			return "letter-spacing: " + v[1:len(v)-1] + ";"
+		}
+		return "letter-spacing: " + named[v] + ";"
+	case "tw-font-family":
+		fams := map[string]string{
+			"sans":  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+			"serif": "ui-serif, Georgia, Cambria, serif",
+			"mono":  "ui-monospace, SFMono-Regular, Menlo, monospace",
+		}
+		return "font-family: " + fams[m[2]] + ";"
+	case "tw-shrink-grow":
+		v := "1"
+		if m[2] == "0" {
+			v = "0"
+		}
+		if m[1] == "shrink" {
+			return "flex-shrink: " + v + ";"
+		}
+		return "flex-grow: " + v + ";"
+	case "tw-marker":
+		switch m[1] {
+		case "antialiased":
+			return "-webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;"
+		case "isolate":
+			return "isolation: isolate;"
+		case "sr-only":
+			return "position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border-width: 0;"
+		}
+		return "" // transform/group/peer: variant hooks, no CSS of their own
+	case "tw-backdrop-blur":
+		v := m[2]
+		if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+			v = v[1 : len(v)-1]
+		} else {
+			sizes := map[string]string{"sm": "4px", "md": "12px", "lg": "16px", "xl": "24px", "2xl": "40px", "3xl": "64px", "none": "0", "": "8px"}
+			v = sizes[v]
+		}
+		return fmt.Sprintf("-webkit-backdrop-filter: blur(%s); backdrop-filter: blur(%s);", v, v)
+	case "tw-translate":
+		val := twUnit(m[3])
+		if neg {
+			val = "-" + val
+		}
+		if m[2] == "x" {
+			return "transform: translateX(" + val + ");"
+		}
+		return "transform: translateY(" + val + ");"
 	case "tw-sizing":
 		propMap := map[string]string{"w": "width", "h": "height", "max-w": "max-width", "min-w": "min-width", "max-h": "max-height", "min-h": "min-height"}
 		prop := propMap[m[1]]
@@ -511,7 +595,7 @@ func buildProp(t string, m []string, neg bool) string {
 		if m[2] == "full" { val = "100%" }
 		// arbitrary values
 		if strings.HasPrefix(m[2], "[") && strings.HasSuffix(m[2], "]") {
-			val = m[2][1 : len(m[2])-1]
+			val = unarb(m[2])
 		} else if !isNumeric(m[2]) && val == m[2] {
 			// Some specific aliases like max-w-6xl
 			aliases := map[string]string{"xs":"20rem","sm":"24rem","md":"28rem","lg":"32rem","xl":"36rem","2xl":"42rem","3xl":"48rem","4xl":"56rem","5xl":"64rem","6xl":"72rem","7xl":"80rem"}
@@ -546,11 +630,14 @@ func buildProp(t string, m []string, neg bool) string {
 		prop := propMap[m[1]]
 		color := twColor(m[2], "")
 		alpha := m[3]
-		
+
+		if color == "" {
+			return "" // unknown color name → let other patterns try
+		}
 		if color == "transparent" {
 			return fmt.Sprintf("%s: transparent;", prop)
 		}
-		
+
 		if color[0] == '#' {
 			if alpha != "" && isNumeric(alpha) {
 				return fmt.Sprintf("%s: %s%02x;", prop, color, mustInt(alpha)*255/100)
@@ -569,11 +656,75 @@ func buildProp(t string, m []string, neg bool) string {
 		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color"}
 		prop := propMap[m[1]]
 		hex := m[2]
+		if len(m) > 3 && m[3] != "" { // bg-[#fff]/80 → 8-digit hex with alpha
+			return fmt.Sprintf("%s: %s%02x;", prop, hex, mustInt(m[3])*255/100)
+		}
 		return fmt.Sprintf("%s: %s;", prop, hex)
+	case "tw-gradient-dir":
+		dirs := map[string]string{"t": "to top", "b": "to bottom", "l": "to left", "r": "to right",
+			"tl": "to top left", "tr": "to top right", "bl": "to bottom left", "br": "to bottom right"}
+		return fmt.Sprintf("background-image: linear-gradient(%s, var(--tw-gradient-stops));", dirs[m[1]])
+	case "tw-gradient-stop": // from/via/to-<family>-<shade>
+		col := twColor(m[2], m[3])
+		return gradientStop(m[1], rgbWrap(col))
+	case "tw-gradient-stop-base": // from/via/to-<named color>
+		col := twColor(m[2], "")
+		if col == "" {
+			return ""
+		}
+		return gradientStop(m[1], rgbWrap(col))
+	case "tw-gradient-stop-arb": // from/via/to-[#hex]
+		return gradientStop(m[1], m[2])
+	case "tw-bg-clip":
+		v := m[1]
+		if v == "text" {
+			return "-webkit-background-clip: text; background-clip: text;"
+		}
+		return "background-clip: " + v + "-box;"
+	case "tw-space": // space-x/space-y → margin on subsequent children (selector suffix in ResolveCore)
+		val := twUnit(m[2])
+		if neg {
+			val = "-" + val
+		}
+		if m[1] == "x" {
+			return "margin-left: " + val + ";"
+		}
+		return "margin-top: " + val + ";"
+	case "tw-divide": // divide-x/divide-y → border between children
+		if m[1] == "x" {
+			return "border-left-width: 1px;"
+		}
+		return "border-top-width: 1px;"
+	case "tw-divide-color":
+		col := twColor(m[1], m[2])
+		if col == "" {
+			return ""
+		}
+		return "border-color: " + rgbWrap(col) + ";"
+	case "tw-outline":
+		return "outline-style: solid;"
+	case "tw-outline-width":
+		return "outline-width: " + m[1] + "px;"
+	case "tw-outline-offset":
+		return "outline-offset: " + m[1] + "px;"
+	case "tw-scroll":
+		prop := map[byte]string{'m': "scroll-margin", 'p': "scroll-padding"}[m[1][0]]
+		val := twUnit(m[2])
+		if len(m[1]) == 1 { // scroll-m / scroll-p
+			return prop + ": " + val + ";"
+		}
+		switch m[1][1] {
+		case 'x':
+			return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val)
+		case 'y':
+			return fmt.Sprintf("%[1]s-top: %[2]s; %[1]s-bottom: %[2]s;", prop, val)
+		}
+		dir := map[byte]string{'t': "top", 'r': "right", 'b': "bottom", 'l': "left"}[m[1][1]]
+		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
 	case "tw-rounded":
 		val := m[3]
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-			val = val[1 : len(val)-1]
+			val = unarb(val)
 		} else {
 			sizes := map[string]string{"sm":"0.125rem","md":"0.375rem","lg":"0.5rem","xl":"0.75rem","2xl":"1rem","3xl":"1.5rem","full":"9999px","none":"0px","":"0.25rem"}
 			if v, ok := sizes[val]; ok { val = v }
@@ -592,7 +743,7 @@ func buildProp(t string, m []string, neg bool) string {
 	case "tw-text-size":
 		val := m[2]
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-			return fmt.Sprintf("font-size: %s;", val[1 : len(val)-1])
+			return fmt.Sprintf("font-size: %s;", unarb(val))
 		}
 		sizes := map[string][]string{
 			"xs": {"0.75rem","1rem"}, "sm": {"0.875rem","1.25rem"}, "base": {"1rem","1.5rem"}, "lg": {"1.125rem","1.75rem"},
@@ -605,7 +756,7 @@ func buildProp(t string, m []string, neg bool) string {
 	case "tw-blur":
 		val := m[2]
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-			val = val[1 : len(val)-1]
+			val = unarb(val)
 		} else {
 			sizes := map[string]string{"sm":"4px","md":"12px","lg":"16px","xl":"24px","2xl":"40px","3xl":"64px","none":"0","":"8px"}
 			if v, ok := sizes[val]; ok { val = v }
@@ -614,13 +765,13 @@ func buildProp(t string, m []string, neg bool) string {
 	case "tw-opacity":
 		val := m[2]
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-			return fmt.Sprintf("opacity: %s;", val[1 : len(val)-1])
+			return fmt.Sprintf("opacity: %s;", unarb(val))
 		}
 		return fmt.Sprintf("opacity: %.2f;", float64(mustInt(val))/100.0)
 	case "tw-grid-cols":
 		val := m[2]
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
-			return fmt.Sprintf("grid-template-columns: %s;", val[1 : len(val)-1])
+			return fmt.Sprintf("grid-template-columns: %s;", unarb(val))
 		}
 		if val == "none" { return "grid-template-columns: none;" }
 		return fmt.Sprintf("grid-template-columns: repeat(%s, minmax(0, 1fr));", val)
@@ -726,6 +877,126 @@ func buildProp(t string, m []string, neg bool) string {
 		if val == "normal-case" { return "text-transform: none;" }
 		if val == "underline" || val == "line-through" { return "text-decoration-line: " + val + ";" }
 		if val == "no-underline" { return "text-decoration-line: none;" }
+	case "tw-rotate":
+		v := m[2]
+		if strings.HasPrefix(v, "[") {
+			v = unarb(v)
+		} else {
+			v = v + "deg"
+		}
+		if neg {
+			v = "-" + v
+		}
+		return "transform: rotate(" + v + ");"
+	case "tw-scale":
+		return "transform: scale(" + scaleVal(m[2], neg) + ");"
+	case "tw-scale-axis":
+		ax := "X"
+		if m[2] == "y" {
+			ax = "Y"
+		}
+		return "transform: scale" + ax + "(" + scaleVal(m[3], neg) + ");"
+	case "tw-skew":
+		v := m[3]
+		if strings.HasPrefix(v, "[") {
+			v = unarb(v)
+		} else {
+			v = v + "deg"
+		}
+		if neg {
+			v = "-" + v
+		}
+		ax := "X"
+		if m[2] == "y" {
+			ax = "Y"
+		}
+		return "transform: skew" + ax + "(" + v + ");"
+	case "tw-origin":
+		return "transform-origin: " + strings.ReplaceAll(m[1], "-", " ") + ";"
+	case "tw-aspect":
+		ratios := map[string]string{"video": "16 / 9", "square": "1 / 1", "auto": "auto"}
+		return "aspect-ratio: " + ratios[m[1]] + ";"
+	case "tw-aspect-arb":
+		return "aspect-ratio: " + strings.ReplaceAll(m[1], "_", " ") + ";"
+	case "tw-object":
+		return "object-fit: " + m[1] + ";"
+	case "tw-truncate":
+		return "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+	case "tw-whitespace":
+		return "white-space: " + m[1] + ";"
+	case "tw-line-clamp":
+		if m[1] == "none" {
+			return "-webkit-line-clamp: none;"
+		}
+		return fmt.Sprintf("display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: %s; overflow: hidden;", m[1])
+	case "tw-break":
+		switch m[1] {
+		case "words":
+			return "overflow-wrap: break-word;"
+		case "all":
+			return "word-break: break-all;"
+		case "keep":
+			return "word-break: keep-all;"
+		}
+		return "word-break: normal; overflow-wrap: normal;"
+	case "tw-grid-line":
+		base := "grid-column-"
+		if m[1] == "row" {
+			base = "grid-row-"
+		}
+		return base + m[2] + ": " + m[3] + ";"
+	case "tw-row-span":
+		if m[1] == "full" {
+			return "grid-row: 1 / -1;"
+		}
+		return fmt.Sprintf("grid-row: span %s / span %s;", m[1], m[1])
+	case "tw-grid-rows":
+		v := m[2]
+		if strings.HasPrefix(v, "[") {
+			return "grid-template-rows: " + unarb(v) + ";"
+		}
+		if v == "none" {
+			return "grid-template-rows: none;"
+		}
+		return fmt.Sprintf("grid-template-rows: repeat(%s, minmax(0, 1fr));", v)
+	case "tw-shadow-arb":
+		return "box-shadow: " + strings.ReplaceAll(m[1], "_", " ") + ";"
+	case "tw-order":
+		v := m[1]
+		switch v {
+		case "first":
+			v = "-9999"
+		case "last":
+			v = "9999"
+		case "none":
+			v = "0"
+		}
+		if neg {
+			v = "-" + v
+		}
+		return "order: " + v + ";"
+	case "tw-pointer-events":
+		return "pointer-events: " + m[1] + ";"
+	case "tw-select":
+		return "-webkit-user-select: " + m[1] + "; user-select: " + m[1] + ";"
+	case "tw-animate":
+		if m[1] == "none" {
+			return "animation: none;"
+		}
+		anims := map[string]string{
+			"spin":   "spin 1s linear infinite",
+			"ping":   "ping 1s cubic-bezier(0,0,0.2,1) infinite",
+			"pulse":  "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
+			"bounce": "bounce 1s infinite",
+		}
+		return "animation: " + anims[m[1]] + ";"
 	}
 	return ""
 }
+
+// AnimKeyframes are the @keyframes for animate-* utilities, injected once by the render
+// when any animation is used (Tailwind ships these via its base layer).
+const AnimKeyframes = "@keyframes spin{to{transform:rotate(360deg)}}" +
+	"@keyframes ping{75%,100%{transform:scale(2);opacity:0}}" +
+	"@keyframes pulse{50%{opacity:.5}}" +
+	"@keyframes bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}"

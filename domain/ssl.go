@@ -61,7 +61,8 @@ func AutoSSL(Allows []string) *tls.Config {
 	// Spin up ACME challenge response handler on port 80 in background
 	go func() {
 		fmt.Println("Starting ACME challenge handler on port :80...")
-		if err := http.ListenAndServe(":80", m.HTTPHandler(nil)); err != nil {
+		// Non-ACME http traffic → forced to https (+ canonical/domain redirects).
+		if err := http.ListenAndServe(":80", m.HTTPHandler(RedirectFallback())); err != nil {
 			fmt.Printf("[ACME-HTTP] Error: %v\n", err)
 		}
 	}()

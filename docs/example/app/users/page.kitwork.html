@@ -1,0 +1,19 @@
+<!-- Tier ① view — TEMPLATE ONLY. No inline <script>, no logic.
+     {{ }} = templating; data-* = hooks for Kit JS (client.kitwork.js). -->
+<section class="kw-section py-20">
+  <div class="max-w-3xl mx-auto px-6">
+    <h1 class="kw-heading font-black text-3xl mb-6">Users</h1>
+
+    <input data-kit-filter placeholder="Filter by name…"
+           class="newsletter-input w-full px-4 py-2.5 rounded-lg border mb-4">
+
+    <ul data-kit="users-list" class="space-y-2">
+      {{ users | each:
+        <li data-kit-row class="kw-card p-4 flex items-center justify-between">
+          <a href="/users/{{ .id }}" class="kw-heading font-bold">{{ .name }}</a>
+          <span class="kw-muted text-sm">{{ .email }}</span>
+        </li>
+      }}
+    </ul>
+  </div>
+</section>

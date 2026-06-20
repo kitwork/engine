@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/value"
 )
 
@@ -36,6 +37,13 @@ type Render struct {
 	layout    Layout
 	global    value.Value // Dữ liệu dùng chung cho mọi bản render
 	notfound  string
+	// notfoundMode: render the notfound page for {{_page_}} (not the path's own page).
+	// Set by ctx.view on a router.notfound("*") route so an unregistered path always
+	// shows the not-found page — never a page that merely happens to exist on disk.
+	notfoundMode bool
+
+	jitEnabled bool // .jit(): inject server-side Tailwind/utility CSS for the page's classes
+	minify     bool // .minify(): minify the final HTML output (+ inline CSS)
 }
 
 type Layout struct {
@@ -59,6 +67,34 @@ func (r *Render) New(dir ...string) *Render {
 func (r *Render) Global(val value.Value) *Render {
 	r.global = val
 	return r
+}
+
+// Jit enables the server-side Tailwind/utility JIT for this render: a <style> with the
+// minimal CSS for the page's classes is injected before </head>. Opt-in — `render.jit()`
+// (or `render.jit(false)` to disable). Replaces the client-side Tailwind CDN.
+func (r *Render) Jit(vals ...value.Value) *Render {
+	r.jitEnabled = len(vals) == 0 || vals[0].Truthy()
+	return r
+}
+
+// Minify enables minification of the final HTML output (collapse whitespace, drop
+// comments, minify inline CSS). Opt-in — `render.minify()` / `render.minify(false)`.
+func (r *Render) Minify(vals ...value.Value) *Render {
+	r.minify = len(vals) == 0 || vals[0].Truthy()
+	return r
+}
+
+// CSS returns the tenant's site-wide JIT CSS as a STRING — the same minified, mtime-cached
+// stylesheet router.jit() serves at /jitcss. Use it to serve the CSS from YOUR OWN handler
+// with full control over path, caching and headers:
+//
+//	router.get("/styles.css").static("1h").handle((req, res) => res.css(render.css()))
+//	router.get("/styles.css").cache("1h").handle((req, res) => res.css(render.css()))
+//
+// Pair with res.css(...) / ctx.css(...) so the response goes out as text/css.
+func (r *Render) CSS() value.Value {
+	css, _ := tenantJITCSS(r.tenant)
+	return value.New(css)
 }
 
 func (r *Render) Layout(val value.Value) *Render {
@@ -98,7 +134,7 @@ func (r *Render) Layout(val value.Value) *Render {
 
 	if val.IsMap() {
 		for k, v := range val.Map() {
-			pathVal := r.tenant.resolve("views", r.getfile(v.String()))
+			pathVal := r.tenant.resolve(r.dir(), r.getfile(v.String()))
 			if k == "navbar" {
 				r.layout.navbar = pathVal
 			} else if k == "footer" {
@@ -148,18 +184,31 @@ func (r *Render) Index(vals ...value.Value) *Render {
 }
 
 func (r *Render) getIndexPath() string {
-	if r.index == "" {
-		r.index = "index"
+	// Explicit index override: keep the old direct-file / directory behavior.
+	if r.index != "" {
+		path1 := r.pathJoin(r.path, r.index, r.getfile("index"))
+		if _, err := os.Stat(path1); err == nil {
+			return path1
+		}
+		return r.pathJoin(r.path, r.getfile(r.index))
 	}
 
-	// Trường hợp 1: Nếu r.index là một thư mục (Ví dụ: views/404/index.kitwork.html)
-	path1 := r.pathJoin(r.path, r.index, r.getfile("index"))
-	if _, err := os.Stat(path1); err == nil {
-		return path1
+	// NESTED SHELL: walk UP from the page's folder to the nearest index.kitwork.html.
+	// e.g. page /docs/routing → app/docs/routing/index → app/docs/index (found) →
+	// app/index. A section gets its own shell just by having its own index file.
+	// (A few os.Stat — cheap; the template read+parse below dominates cost anyway.)
+	folder := path.Join("/", r.path, r.page)
+	for {
+		candidate := r.pathJoin(folder, r.getfile("index"))
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+		if folder == "/" || folder == "." || folder == "" {
+			break
+		}
+		folder = path.Dir(folder)
 	}
-
-	// Trường hợp 2: Nếu r.index là file trực tiếp (Ví dụ: views/404.kitwork.html)
-	return r.pathJoin(r.path, r.getfile(r.index))
+	return r.pathJoin("", r.getfile("index")) // root <dir>/index.kitwork.html
 }
 
 func (r *Render) getPagePath() string {
@@ -213,7 +262,7 @@ func (r *Render) Directory(vals ...value.Value) *Render {
 
 func (r *Render) dir() string {
 	if r.directory == "" {
-		r.directory = "pages"
+		r.directory = "views"
 	}
 	return r.directory
 }
@@ -276,7 +325,53 @@ func (r *Render) tmpl(data any) string {
 	// Parse và Eval một lần duy nhất cho toàn bộ cây mẫu
 	tokens := specializeTokens(fullTemplate)
 	prog := parse(tokens)
-	return eval(prog, data, scope)
+	out := eval(prog, data, scope)
+
+	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
+	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
+	// cache theo tập class nên gần như miễn phí sau lần đầu.
+	if r.jitEnabled {
+		if css := jitcss.GenerateJITCached(out); css != "" {
+			if strings.Contains(css, "animation:") {
+				css = jitcss.AnimKeyframes + "\n" + css // keyframes for animate-* utilities
+			}
+			style := "<style data-kitwork-jit>\n" + css + "</style>"
+			if i := strings.LastIndex(out, "</head>"); i >= 0 {
+				out = out[:i] + style + out[i:]
+			} else {
+				out = style + out
+			}
+		}
+	}
+
+	// 3b. JIT service mode (router.jit()): link the shared, cached stylesheet once — no
+	// <head> edit needed. Two guards keep the <link> honest: (a) only inject when a LIVE jit
+	// route still serves jitRoute, so a router.get(jitRoute) that shadowed it never leaves
+	// pages pointing at a non-CSS response; (b) skip when the page already carries a
+	// stylesheet link to jitRoute — idempotent for hand-placed links, without the false
+	// match an unrelated <a href="…"> would cause.
+	if r.tenant != nil && r.tenant.jitInject && r.tenant.jitRoute != "" && r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", r.tenant.jitRoute); rt != nil && rt.isJIT {
+			route := r.tenant.jitRoute
+			already := strings.Contains(out, `rel="stylesheet" href="`+route+`"`) ||
+				strings.Contains(out, `rel='stylesheet' href='`+route+`'`)
+			if !already {
+				link := `<link rel="stylesheet" href="` + route + `">`
+				if i := strings.LastIndex(out, "</head>"); i >= 0 {
+					out = out[:i] + link + out[i:]
+				} else {
+					out = link + out
+				}
+			}
+		}
+	}
+
+	// 4. Minify (opt-in via .minify()): gọn HTML + CSS nội tuyến (giữ nguyên
+	// pre/textarea/script).
+	if r.minify {
+		out = minifyOutput(out)
+	}
+	return out
 }
 
 // assemble thực hiện quét template và nạp các thành phần thô một cách đệ quy
@@ -300,9 +395,12 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 			cmd := parts[0]
 			switch cmd {
 			case "_page_":
-				// Nạp trang con động
+				// Nạp trang con động. notfoundMode → nạp thẳng trang not-found
+				// (không phải trang của path), để path chưa đăng ký luôn ra 404 page.
 				pagePath := r.getPagePath()
-				// log.Print("pagePath " + pagePath)
+				if r.notfoundMode {
+					pagePath = r.getNotFoundPath()
+				}
 				if raw, err := os.ReadFile(pagePath); err == nil {
 
 					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
@@ -346,12 +444,25 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					}
 				}
 
-				// B. Tìm tương đối trong thư mục hiện tại
+				// B. Walk UP from the current dir to the render root, so a nested-section
+				// shell (e.g. app/docs/index) finds shared partials that live higher up
+				// (app/_navbar_) — the same walk-up that resolves the shell itself. This
+				// is what makes a render work with NO layout map (zero-config).
 				if !found {
-					fullPath := filepath.Join(currentDir, cmd+".kitwork.html")
-					if raw, err := os.ReadFile(fullPath); err == nil {
-						sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
-						found = true
+					root := filepath.Clean(r.tenant.resolve(r.dir()))
+					dir := filepath.Clean(currentDir)
+					for {
+						fullPath := filepath.Join(dir, cmd+".kitwork.html")
+						if raw, err := os.ReadFile(fullPath); err == nil {
+							sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
+							found = true
+							break
+						}
+						parent := filepath.Dir(dir)
+						if dir == root || parent == dir {
+							break
+						}
+						dir = parent
 					}
 				}
 

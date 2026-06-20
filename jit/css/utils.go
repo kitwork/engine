@@ -27,10 +27,58 @@ func transformUnit(s string) string {
 func isNumeric(s string) bool { _, err := strconv.Atoi(s); return err == nil }
 func mustInt(s string) int    { i, _ := strconv.Atoi(s); return i }
 
+// rgbWrap turns a twColor result into a usable CSS color: "r, g, b" → "rgb(r, g, b)";
+// hex / transparent / currentColor pass through; empty stays empty.
+func rgbWrap(col string) string {
+	if col == "" || col == "transparent" || col == "currentColor" {
+		return col
+	}
+	if strings.HasPrefix(col, "#") {
+		return col
+	}
+	return "rgb(" + col + ")"
+}
+
+// gradientStop emits the Tailwind gradient CSS-var declarations for from/via/to.
+func gradientStop(pos, color string) string {
+	switch pos {
+	case "from":
+		return fmt.Sprintf("--tw-gradient-from: %s; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent);", color)
+	case "via":
+		return fmt.Sprintf("--tw-gradient-stops: var(--tw-gradient-from), %s, var(--tw-gradient-to, transparent);", color)
+	case "to":
+		return fmt.Sprintf("--tw-gradient-to: %s;", color)
+	}
+	return ""
+}
+
+// unarb unwraps a Tailwind arbitrary value: "[1fr_2fr]" -> "1fr 2fr" (underscores become
+// spaces, per Tailwind). Non-arbitrary input is returned unchanged.
+func unarb(s string) string {
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		return strings.ReplaceAll(s[1:len(s)-1], "_", " ")
+	}
+	return s
+}
+
+// scaleVal turns a Tailwind scale number (105) into a CSS scale factor (1.05); arbitrary
+// values pass through. Honors the negative-prefix flag.
+func scaleVal(s string, neg bool) string {
+	if strings.HasPrefix(s, "[") {
+		return unarb(s)
+	}
+	f, _ := strconv.ParseFloat(s, 64)
+	v := fmt.Sprintf("%g", f/100)
+	if neg {
+		v = "-" + v
+	}
+	return v
+}
+
 // twUnit converts Tailwind syntax to CSS values (e.g. 4 -> 1rem, [120px] -> 120px)
 func twUnit(s string) string {
 	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		return s[1 : len(s)-1]
+		return unarb(s)
 	}
 	if s == "px" {
 		return "1px"
@@ -44,43 +92,75 @@ func twUnit(s string) string {
 	if s == "auto" || s == "none" || s == "min-content" || s == "max-content" || s == "fit-content" {
 		return s
 	}
-	if isNumeric(s) {
-		val, _ := strconv.ParseFloat(s, 64)
-		if val == 0 {
+	if s == "fit" {
+		return "fit-content"
+	}
+	if s == "min" {
+		return "min-content"
+	}
+	if s == "max" {
+		return "max-content"
+	}
+	// Fractions: 1/2 → 50%, 2/3 → 66.6667%
+	if strings.Contains(s, "/") {
+		parts := strings.SplitN(s, "/", 2)
+		if n, e1 := strconv.ParseFloat(parts[0], 64); e1 == nil {
+			if d, e2 := strconv.ParseFloat(parts[1], 64); e2 == nil && d != 0 {
+				return fmt.Sprintf("%g%%", n/d*100)
+			}
+		}
+	}
+	// Numeric (incl. decimals like 0.5, 1.5): 1 tw unit = 0.25rem.
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		if f == 0 {
 			return "0px"
 		}
-		// 1 tw unit = 0.25rem
-		return fmt.Sprintf("%grem", val*0.25)
+		return fmt.Sprintf("%grem", f*0.25)
 	}
 	return s
 }
 
-// twColor resolves Tailwind colors including arbitrary hex values
+// twColor resolves a Tailwind color to an "R, G, B" string (or hex for arbitrary /
+// transparent passthrough). Lookup order: arbitrary [..] → base keywords → the
+// Tailwind v3 palette (family-shade, see twpalette.go) → the custom Colors map.
 func twColor(colorName, shade string) string {
 	if strings.HasPrefix(colorName, "[") && strings.HasSuffix(colorName, "]") {
 		return colorName[1 : len(colorName)-1] // e.g. [#fcfcfd]
 	}
-	
-	key := colorName
+
+	// Base keywords (no shade).
+	switch colorName {
+	case "white":
+		return "255, 255, 255"
+	case "black":
+		return "0, 0, 0"
+	case "transparent":
+		return "transparent"
+	case "current":
+		return "currentColor"
+	}
+
+	// Tailwind palette: family + shade (e.g. slate-800, gray-400, emerald-500).
 	if shade != "" {
-		if colorName == "gray" && shade == "900" { key = "dark" }
-		if colorName == "gray" && shade == "800" { key = "dark-lighter" }
-		if colorName == "gray" && shade == "100" { key = "light" }
-		if colorName == "gray" && shade == "200" { key = "light-darker" }
-		// Fallback for demo
-		if rgb, ok := Colors[key]; ok {
-			return rgb.String()
+		if fam, ok := TwPalette[colorName]; ok {
+			if rgb, ok := fam[shade]; ok {
+				return rgb
+			}
 		}
 	}
-	
-	if rgb, ok := Colors[key]; ok {
+
+	// Custom design-system colors (brand, kitwork, primary, …) — shade ignored.
+	if rgb, ok := Colors[colorName]; ok {
 		return rgb.String()
 	}
-	
-	// Default fallbacks for common colors to avoid breaking compilation
-	if colorName == "white" { return "255, 255, 255" }
-	if colorName == "black" { return "0, 0, 0" }
-	if colorName == "transparent" { return "transparent" }
-	
+
+	// Tailwind family without an explicit shade → default to the 500 shade (Tailwind's
+	// behavior for `bg-blue` etc., though v3 usually requires a shade).
+	if fam, ok := TwPalette[colorName]; ok {
+		if rgb, ok := fam["500"]; ok {
+			return rgb
+		}
+	}
+
 	return ""
 }

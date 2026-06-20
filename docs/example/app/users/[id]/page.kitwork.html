@@ -1,0 +1,11 @@
+<!-- /users/:id view — template only. -->
+<section class="kw-section py-20">
+  <div class="max-w-2xl mx-auto px-6">
+    <a href="/users" class="kw-muted text-sm">← Users</a>
+    <h1 class="kw-heading font-black text-3xl mt-2 mb-4">{{ user.name }}</h1>
+    <div class="kw-card p-6 space-y-2 text-sm">
+      <p><span class="kw-muted">Email</span> · {{ user.email }}</p>
+      <p><span class="kw-muted">Active</span> · {{ user.is_active }}</p>
+    </div>
+  </div>
+</section>

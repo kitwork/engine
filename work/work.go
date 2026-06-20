@@ -28,6 +28,16 @@ type Config struct {
 
 func (t *Tenant) Kitwork(vals ...value.Value) *KitWork { return &KitWork{tenant: t} }
 
+// KitWork is the per-tenant capability surface returned by kitwork() in the VM.
+// Every capability is a METHOD on *KitWork, so they must all live in package work
+// (Go requires methods in the type's package) — that's why this package is large.
+// Capability → file map:
+//
+//	router.go    Router()        log.go       Log()         db.go        Database()
+//	http.go      HTTP()          jwt.go       JWT()         render.go    Render()
+//	qrcode.go    Qrcode()        napas.go     Napas()       file.go      File()
+//	browser.go   Browser()       chromedp.go  Chromedp()/Screenshot()   go.go  Go()
+//	env.go       Env()           (per-tenant, path-isolated env)
 type KitWork struct {
 	tenant *Tenant
 }
@@ -55,6 +65,13 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+	}
+
+	// JIT stylesheet route (router.jit()): serve the tenant's site-wide, cached JIT CSS in
+	// Go — no VM, no lifecycle. A declared feature, so it lives in the routes table.
+	if matched.isJIT {
+		serveJITCSS(t, w, r)
+		return
 	}
 
 	// Rate Limiting Check
@@ -131,6 +148,33 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 
 	if ctxRouter.response != nil && ctxRouter.response.IsSend() {
 		ctxRouter.responder(w)
+		return
+	}
+
+	// ZERO-VM FAST PATH: a pure static view route (.view()) renders in Go with no
+	// VM at all — no JS bytecode, no pool checkout. Routes needing the VM
+	// (middlewares, guards, then/catch/finally) fall through to the lifecycle below.
+	if ctxRouter.isView && len(ctxRouter.middlewares) == 0 && len(ctxRouter.guards) == 0 &&
+		ctxRouter.then == nil && ctxRouter.catch == nil && ctxRouter.final == nil {
+		reqObj := &Request{router: &ctxRouter}
+		ctxObj := &Context{request: reqObj}
+		ctxObj.View(ctxRouter.viewArgs...)
+		ctxRouter.responder(w)
+
+		if ctxRouter.err == nil && ctxRouter.response.IsSend() {
+			if matched.cacheTTL > 0 {
+				cacheKey := matched.Method + ":" + matched.Path
+				t.cacheLock.Lock()
+				t.cache[cacheKey] = &Responser{
+					Response: ctxRouter.response,
+					ExpireAt: time.Now().Add(matched.cacheTTL),
+				}
+				t.cacheLock.Unlock()
+			}
+			if matched.staticTTL > 0 {
+				ctxRouter.saveStaticCache()
+			}
+		}
 		return
 	}
 
@@ -285,6 +329,9 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 					r.response.HTML(result)
 				}
 			}
+		} else if r.isView {
+			// View route: render the page directly (no JS lambda to execute).
+			ctxObj.View(r.viewArgs...)
 		}
 	}
 

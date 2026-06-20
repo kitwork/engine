@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/kitwork/engine/energy"
-	"github.com/kitwork/engine/opcode"
+	
+	
 	"github.com/kitwork/engine/value"
 )
 
@@ -48,6 +48,11 @@ func (vm *VM) Run() value.Value {
 	//fmt.Printf("[VM Run] Starting execution, bytecode length: %d\n", len(vm.Bytecode))
 	for vm.FrameIdx >= 0 {
 		f := &vm.Frames[vm.FrameIdx]
+		// if f.IP < len(vm.Bytecode) {
+		// 	op := vm.Bytecode[f.IP]
+		// 	fmt.Printf("[VM TRACE] IP: %-3d | Op: %-3d | FrameIdx: %d | Stack: %+v\n", f.IP, op, vm.FrameIdx, vm.Stack)
+		// }
+
 		if f.IP >= len(vm.Bytecode) {
 			if vm.FrameIdx == 0 {
 				break
@@ -56,19 +61,19 @@ func (vm *VM) Run() value.Value {
 			continue
 		}
 
-		op := opcode.Opcode(vm.Bytecode[f.IP])
+		op := Opcode(vm.Bytecode[f.IP])
 		f.IP++
 
 		// Safety check for operations that read operands
 		switch op {
-		case opcode.PUSH, opcode.LOAD, opcode.STORE, opcode.JUMP, opcode.TRUE, opcode.FALSE, opcode.ITER:
+		case PUSH, LOAD, STORE, JUMP, TRUE, FALSE, ITER:
 			if f.IP+1 >= len(vm.Bytecode) {
 				return value.Value{K: value.Invalid, V: "Bytecode truncated: expected operands"}
 			}
 		}
 
 		// Tiêu thụ năng lượng
-		vm.Energy += uint64(energy.Table[op])
+		vm.Energy += uint64(Table[op])
 		if vm.MaxEnergy > 0 && vm.Energy > vm.MaxEnergy {
 			line := vm.currentLine(f.IP - 1)
 			return value.Value{
@@ -78,7 +83,7 @@ func (vm *VM) Run() value.Value {
 		}
 
 		switch op {
-		case opcode.PUSH:
+		case PUSH:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			val := vm.Constants[idx]
@@ -90,12 +95,13 @@ func (vm *VM) Run() value.Value {
 					Scope:   f.Vars, // Use reference to support recursion and mutability
 					Parent:  f.Fn,   // Scope chain: thấy được biến của các hàm bao ngoài
 				}
+				f.captured = true // map này đã escape vào closure → đừng tái dùng/xoá
 				vm.push(value.New(closure))
 			} else {
 				vm.push(val)
 			}
 
-		case opcode.LOAD:
+		case LOAD:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
@@ -113,7 +119,7 @@ func (vm *VM) Run() value.Value {
 				vm.push(value.Value{K: value.Nil})
 			}
 
-		case opcode.BUILTIN:
+		case BUILTIN:
 			idx := vm.Bytecode[f.IP]
 			f.IP++
 			if int(idx) < len(vm.Builtins) {
@@ -122,7 +128,7 @@ func (vm *VM) Run() value.Value {
 				vm.push(value.Value{K: value.Nil})
 			}
 
-		case opcode.STORE:
+		case STORE:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
@@ -142,7 +148,7 @@ func (vm *VM) Run() value.Value {
 				f.Vars[name] = val
 			}
 
-		case opcode.GET:
+		case GET:
 			keyVal := vm.pop()
 			target := vm.pop()
 			if keyVal.K == value.Number {
@@ -151,64 +157,64 @@ func (vm *VM) Run() value.Value {
 				vm.push(target.Get(keyVal.Text()))
 			}
 
-		case opcode.DUP:
+		case DUP:
 			vm.push(vm.peek())
 
-		case opcode.ADD:
+		case ADD:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Add(b))
-		case opcode.SUB:
+		case SUB:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Sub(b))
-		case opcode.MUL:
+		case MUL:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Mul(b))
-		case opcode.DIV:
+		case DIV:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Div(b))
-		case opcode.MOD:
+		case MOD:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Mod(b))
 
-		case opcode.COMPARE:
+		case COMPARE:
 			mode := vm.Bytecode[f.IP]
 			f.IP++
 			b, a := vm.pop(), vm.pop()
 			vm.compare(a, b, mode)
 
-		case opcode.JUMP:
+		case JUMP:
 			f.IP = int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
-		case opcode.TRUE:
+		case TRUE:
 			addr := int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
 			f.IP += 2
 			if vm.pop().Truthy() {
 				f.IP = addr
 			}
-		case opcode.FALSE:
+		case FALSE:
 			addr := int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
 			f.IP += 2
 			if !vm.pop().Truthy() {
 				f.IP = addr
 			}
-		case opcode.AND:
+		case AND:
 			b, a := vm.pop(), vm.pop()
 			if !a.Truthy() {
 				vm.push(a)
 			} else {
 				vm.push(b)
 			}
-		case opcode.OR:
+		case OR:
 			b, a := vm.pop(), vm.pop()
 			if a.Truthy() {
 				vm.push(a)
 			} else {
 				vm.push(b)
 			}
-		case opcode.NOT:
+		case NOT:
 			a := vm.pop()
 			vm.push(value.ToBool(!a.Truthy()))
 
-		case opcode.ITER:
+		case ITER:
 			addr := int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
 			f.IP += 2
 			idxVal := vm.pop()
@@ -223,7 +229,7 @@ func (vm *VM) Run() value.Value {
 				f.IP = addr
 			}
 
-		case opcode.MAKE:
+		case MAKE:
 			t := vm.Bytecode[f.IP]
 			f.IP++
 			if t == 0 {
@@ -232,7 +238,7 @@ func (vm *VM) Run() value.Value {
 				vm.push(value.New(&[]value.Value{}))
 			}
 
-		case opcode.SET:
+		case SET:
 			val, key, target := vm.pop(), vm.pop(), vm.pop()
 			if target.IsMap() {
 				target.V.(map[string]value.Value)[key.Text()] = val
@@ -242,7 +248,7 @@ func (vm *VM) Run() value.Value {
 			}
 			vm.push(target)
 
-		case opcode.INVOKE:
+		case INVOKE:
 			n := int(vm.Bytecode[f.IP])
 			f.IP++
 			m := vm.pop().Text()
@@ -297,11 +303,22 @@ func (vm *VM) Run() value.Value {
 				}
 			}
 
+			if !handled && target.K == value.Map {
+				// obj.method() where the member is a SCRIPT lambda (obj = { f: () => … })
+				// must be executed by the VM — value.Invoke/Call cannot run a *value.Lambda.
+				if member := target.Get(m); member.K == value.Func {
+					if lambda, ok := member.V.(*value.Lambda); ok {
+						vm.push(vm.ExecuteLambda(lambda, ivArgs))
+						handled = true
+					}
+				}
+			}
+
 			if !handled {
 				vm.push(target.Invoke(m, ivArgs...))
 			}
 
-		case opcode.CALL:
+		case CALL:
 			n := int(vm.Bytecode[f.IP])
 			f.IP++
 			args := make([]value.Value, n)
@@ -322,8 +339,10 @@ func (vm *VM) Run() value.Value {
 					nf.IP = s.Address
 					nf.Fn = s
 
-					// OPTIMIZATION: Recycle Map (Zero-Alloc Strategy)
-					if nf.Vars == nil {
+					// OPTIMIZATION: Recycle Map (Zero-Alloc Strategy). NHƯNG nếu map lần
+					// dùng trước đã bị closure giữ (captured), phải cấp map MỚI — không
+					// được xoá map mà closure còn tham chiếu.
+					if nf.Vars == nil || nf.captured {
 						nf.Vars = make(map[string]value.Value)
 					} else {
 						// Optimized map clear (compiler optimization ensures no re-alloc)
@@ -331,6 +350,7 @@ func (vm *VM) Run() value.Value {
 							delete(nf.Vars, k)
 						}
 					}
+					nf.captured = false
 
 					for i, name := range s.Params {
 						if i < len(args) {
@@ -361,7 +381,7 @@ func (vm *VM) Run() value.Value {
 				vm.call(fn.Text(), args...)
 			}
 
-		case opcode.RETURN:
+		case RETURN:
 			res := vm.pop()
 			for i := len(f.Defers) - 1; i >= 0; i-- {
 				vm.ExecuteLambda(f.Defers[i], nil)
@@ -374,19 +394,19 @@ func (vm *VM) Run() value.Value {
 			vm.FrameIdx--
 			vm.push(res)
 
-		case opcode.HALT:
+		case HALT:
 			return vm.pop()
-		case opcode.DEFER:
+		case DEFER:
 			fn := vm.pop()
 			if s, ok := fn.V.(*value.Lambda); ok {
 				f.Defers = append(f.Defers, s)
 			}
-		case opcode.SPAWN:
+		case SPAWN:
 			fn := vm.pop()
 			if s, ok := fn.V.(*value.Lambda); ok && vm.Spawner != nil {
 				vm.Spawner(s)
 			}
-		case opcode.MERGE:
+		case MERGE:
 			src, target := vm.pop(), vm.peek()
 			if target.IsMap() && src.IsMap() {
 				targetMap := target.V.(map[string]value.Value)
@@ -395,7 +415,7 @@ func (vm *VM) Run() value.Value {
 					targetMap[k] = v
 				}
 			}
-		case opcode.POP:
+		case POP:
 			vm.pop()
 
 		default:
@@ -526,20 +546,34 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 	f := &vm.Frames[vm.FrameIdx]
 	f.IP = s.Address
 	f.Fn = s
+	f.StackBase = len(vm.Stack)
 
-	// OPTIMIZATION: Recycle Map
-	if f.Vars == nil {
+	// OPTIMIZATION: Recycle Map — fresh map nếu lần trước bị closure capture.
+	if f.Vars == nil || f.captured {
 		f.Vars = make(map[string]value.Value)
 	} else {
 		for k := range f.Vars {
 			delete(f.Vars, k)
 		}
 	}
+	f.captured = false
 	for i, name := range s.Params {
 		if i < len(args) {
 			f.Vars[name] = args[i]
 		}
 	}
+
+	// Isolate this lambda's value-stack usage from the caller's. ExecuteLambda runs on
+	// the SHARED vm.Stack; without this, a block-body lambda that leaves the stack
+	// balanced (e.g. a forEach callback with no explicit return) would make a
+	// fall-through `pop` steal the caller's PENDING value (e.g. the `300` in
+	// `f() * 100 + g()`). Capture the base depth and never return below it.
+	base := len(vm.Stack)
+	defer func() {
+		if len(vm.Stack) > base {
+			vm.Stack = vm.Stack[:base] // drop any leftovers the lambda didn't consume
+		}
+	}()
 
 	startFrame := vm.FrameIdx
 	for vm.FrameIdx >= startFrame {
@@ -547,25 +581,28 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 
 		if f.IP >= len(vm.Bytecode) {
 			if vm.FrameIdx == startFrame {
-				return vm.pop()
+				if len(vm.Stack) > base {
+					return vm.Stack[len(vm.Stack)-1]
+				}
+				return value.Value{K: value.Nil}
 			}
 			vm.FrameIdx--
 			continue
 		}
 
-		op := opcode.Opcode(vm.Bytecode[f.IP])
+		op := Opcode(vm.Bytecode[f.IP])
 		// fmt.Printf("[VM] IP: %d, OP: %d\n", f.IP, op)
 		f.IP++
 
 		// Safety check for operations that read operands
 		switch op {
-		case opcode.PUSH, opcode.LOAD, opcode.STORE, opcode.JUMP, opcode.TRUE, opcode.FALSE, opcode.ITER:
+		case PUSH, LOAD, STORE, JUMP, TRUE, FALSE, ITER:
 			if f.IP+1 >= len(vm.Bytecode) {
 				return value.Value{K: value.Invalid, V: "Lambda Bytecode truncated"}
 			}
 		}
 
-		vm.Energy += uint64(energy.Table[op])
+		vm.Energy += uint64(Table[op])
 		if vm.MaxEnergy > 0 && vm.Energy > vm.MaxEnergy {
 			line := vm.currentLine(f.IP - 1)
 			return value.Value{
@@ -575,7 +612,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 		}
 
 		switch op {
-		case opcode.PUSH:
+		case PUSH:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			val := vm.Constants[idx]
@@ -586,11 +623,12 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 					Scope:   f.Vars,
 					Parent:  f.Fn, // Scope chain: thấy được biến của các hàm bao ngoài
 				}
+				f.captured = true // map này đã escape vào closure → đừng tái dùng/xoá
 				vm.push(value.New(closure))
 			} else {
 				vm.push(val)
 			}
-		case opcode.LOAD:
+		case LOAD:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
@@ -607,7 +645,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			} else {
 				vm.push(value.Value{K: value.Nil})
 			}
-		case opcode.BUILTIN:
+		case BUILTIN:
 			idx := vm.Bytecode[f.IP]
 			f.IP++
 			if int(idx) < len(vm.Builtins) {
@@ -616,7 +654,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 				vm.push(value.Value{K: value.Nil})
 			}
 
-		case opcode.STORE:
+		case STORE:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
 			f.IP += 2
 			name := vm.Constants[idx].V.(string)
@@ -628,58 +666,58 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			}
 
 			f.Vars[name] = val
-		case opcode.ADD:
+		case ADD:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Add(b))
-		case opcode.SUB:
+		case SUB:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Sub(b))
-		case opcode.MUL:
+		case MUL:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Mul(b))
-		case opcode.DIV:
+		case DIV:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Div(b))
-		case opcode.MOD:
+		case MOD:
 			b, a := vm.pop(), vm.pop()
 			vm.push(a.Mod(b))
-		case opcode.COMPARE:
+		case COMPARE:
 			mode := vm.Bytecode[f.IP]
 			f.IP++
 			b, a := vm.pop(), vm.pop()
 			vm.compare(a, b, mode)
-		case opcode.JUMP:
+		case JUMP:
 			f.IP = int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
-		case opcode.TRUE:
+		case TRUE:
 			addr := int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
 			f.IP += 2
 			if vm.pop().Truthy() {
 				f.IP = addr
 			}
-		case opcode.FALSE:
+		case FALSE:
 			addr := int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
 			f.IP += 2
 			if !vm.pop().Truthy() {
 				f.IP = addr
 			}
-		case opcode.AND:
+		case AND:
 			b, a := vm.pop(), vm.pop()
 			if !a.Truthy() {
 				vm.push(a)
 			} else {
 				vm.push(b)
 			}
-		case opcode.OR:
+		case OR:
 			b, a := vm.pop(), vm.pop()
 			if a.Truthy() {
 				vm.push(a)
 			} else {
 				vm.push(b)
 			}
-		case opcode.NOT:
+		case NOT:
 			a := vm.pop()
 			vm.push(value.ToBool(!a.Truthy()))
-		case opcode.ITER:
+		case ITER:
 			addr := int(uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1]))
 			f.IP += 2
 			idxVal := vm.pop()
@@ -692,29 +730,33 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 				vm.pop()
 				f.IP = addr
 			}
-		case opcode.DEFER:
+		case DEFER:
 			fn := vm.pop()
 			if s, ok := fn.V.(*value.Lambda); ok {
 				f.Defers = append(f.Defers, s)
 			}
-		case opcode.SPAWN:
+		case SPAWN:
 			fn := vm.pop()
 			if s, ok := fn.V.(*value.Lambda); ok && vm.Spawner != nil {
 				vm.Spawner(s)
 			}
-		case opcode.RETURN:
+		case RETURN:
 			res := vm.pop()
 			for i := len(f.Defers) - 1; i >= 0; i-- {
 				vm.ExecuteLambda(f.Defers[i], nil)
 			}
 			f.Defers = f.Defers[:0]
 
+			if len(vm.Stack) > f.StackBase {
+				vm.Stack = vm.Stack[:f.StackBase]
+			}
+
 			vm.FrameIdx--
 			if vm.FrameIdx < startFrame {
 				return res
 			}
 			vm.push(res)
-		case opcode.CALL:
+		case CALL:
 			// fmt.Printf("VM: OpCall Triggered at IP %d\n", f.IP-1)
 			n := int(vm.Bytecode[f.IP])
 			f.IP++
@@ -735,6 +777,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 					nf := &vm.Frames[vm.FrameIdx]
 					nf.IP = s.Address
 					nf.Fn = s
+					nf.StackBase = len(vm.Stack)
 					nf.Vars = make(map[string]value.Value) // Fresh map
 					for i, name := range s.Params {
 						if i < len(fnArgs) {
@@ -761,7 +804,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			} else {
 				vm.call(fn.Text(), fnArgs...)
 			}
-		case opcode.INVOKE:
+		case INVOKE:
 			n := int(vm.Bytecode[f.IP])
 			f.IP++
 			m := vm.pop().Text()
@@ -816,10 +859,21 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 				}
 			}
 
+			if !handled && target.K == value.Map {
+				// obj.method() where the member is a SCRIPT lambda (obj = { f: () => … })
+				// must be executed by the VM — value.Invoke/Call cannot run a *value.Lambda.
+				if member := target.Get(m); member.K == value.Func {
+					if lambda, ok := member.V.(*value.Lambda); ok {
+						vm.push(vm.ExecuteLambda(lambda, ivArgs))
+						handled = true
+					}
+				}
+			}
+
 			if !handled {
 				vm.push(target.Invoke(m, ivArgs...))
 			}
-		case opcode.GET:
+		case GET:
 			keyVal := vm.pop()
 			target := vm.pop()
 			if keyVal.K == value.Number {
@@ -827,9 +881,9 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			} else {
 				vm.push(target.Get(keyVal.Text()))
 			}
-		case opcode.DUP:
+		case DUP:
 			vm.push(vm.peek())
-		case opcode.MAKE:
+		case MAKE:
 			t := vm.Bytecode[f.IP]
 			f.IP++
 			if t == 0 {
@@ -837,7 +891,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			} else {
 				vm.push(value.New(&[]value.Value{}))
 			}
-		case opcode.SET:
+		case SET:
 			val, key, target := vm.pop(), vm.pop(), vm.pop()
 			if target.IsMap() {
 				target.V.(map[string]value.Value)[key.Text()] = val
@@ -846,7 +900,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 				*ptr = append(*ptr, val)
 			}
 			vm.push(target)
-		case opcode.MERGE:
+		case MERGE:
 			src, target := vm.pop(), vm.peek()
 			if target.IsMap() && src.IsMap() {
 				targetMap := target.V.(map[string]value.Value)
@@ -855,7 +909,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 					targetMap[k] = v
 				}
 			}
-		case opcode.POP:
+		case POP:
 			vm.pop()
 		}
 
@@ -870,8 +924,8 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			return value.Value{K: value.Invalid, V: errMsg}
 		}
 	}
-	if len(vm.Stack) > 0 {
-		return vm.pop()
+	if len(vm.Stack) > base {
+		return vm.Stack[len(vm.Stack)-1]
 	}
 	return value.Value{K: value.Nil}
 }

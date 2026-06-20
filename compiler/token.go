@@ -1,0 +1,304 @@
+package compiler
+
+import (
+	"fmt"
+
+	"github.com/kitwork/engine/value"
+)
+
+type Kind uint16
+
+const (
+	Illegal Kind = iota
+	EOF
+	Comment
+
+	// --- Dữ liệu (Literals) ---
+	Ident // work, db, cleanup
+	Number     // 123, 0.5
+	String     // "02:00", 'logs'
+	Template   // `Hello ${name}`
+	Boolean    // true, false
+	Null
+
+	// --- Truy cập & Chaining ---
+	Assign   // =
+	Dot      // .
+	Spread   // ...
+	FatArrow // =>
+
+	// --- Dấu ngoặc ---
+	LeftParen    // (
+	RightParen   // )
+	LeftBrace    // {
+	RightBrace   // }
+	LeftBracket  // [
+	RightBracket // ]
+
+	// --- Ngắt câu & Phân tách ---
+	Comma     // ,
+	Semicolon // ;
+	Colon     // :
+
+	// --- Logic & So sánh ---
+	LogicalAnd     // &&
+	LogicalOr      // ||
+	NullCoalescing // ??
+	LogicalNot     // !
+	Equal          // ==
+	NotEqual       // !=
+
+	Greater      // >
+	GreaterEqual //>=
+	Less         // <
+	LessEqual    //<=
+
+	// --- Số học ---
+	Plus  // +
+	Minus // -
+	Star  // *
+	Slash // /
+
+	// --- Từ khóa ---
+	Const
+	Let
+	If
+	Else
+	Return
+	Function
+
+	// --- JS Compatibility (bổ sung sau, đặt cuối để không xáo trộn Kind cũ) ---
+	Percent     // %
+	New         // new (tiền tố constructor, tương thích cú pháp JS)
+	Question    // ? (ternary: cond ? a : b)
+	Void        // void (đánh giá biểu thức rồi trả về null — esbuild sinh `void 0` thay cho undefined)
+	PlusAssign  // +=
+	MinusAssign // -=
+	StarAssign  // *=
+	SlashAssign // /=
+	PlusPlus    // ++
+	MinusMinus  // --
+
+	// --- Modules (native import/export) ---
+	Import // import { x } from "..."
+	Export // export const / export default / export { ... }
+
+	// Reserved: từ khóa bị loại bỏ có chủ đích khỏi ngôn ngữ (while, try, ...)
+	// Parser sẽ báo lỗi biên dịch thân thiện kèm hướng dẫn thay thế.
+	Reserved
+)
+
+// String trả về chuỗi đại diện cho Kind (Hữu ích cho Debug/Error Reporting)
+func (k Kind) String() string {
+	switch k {
+	case Illegal:
+		return "ILLEGAL"
+	case EOF:
+		return "EOF"
+	case Comment:
+		return "COMMENT"
+	case Ident:
+		return "IDENTIFIER"
+	case Number:
+		return "NUMBER"
+	case String:
+		return "STRING"
+	case Template:
+		return "TEMPLATE"
+	case Boolean:
+		return "BOOLEAN"
+	case Null:
+		return "NULL"
+	case Assign:
+		return "="
+	case Dot:
+		return "."
+	case FatArrow:
+		return "=>"
+	case Spread:
+		return "..."
+	case LeftParen:
+		return "("
+	case RightParen:
+		return ")"
+	case LeftBrace:
+		return "{"
+	case RightBrace:
+		return "}"
+	case LeftBracket:
+		return "["
+	case RightBracket:
+		return "]"
+	case Comma:
+		return ","
+	case Semicolon:
+		return ";"
+	case Colon:
+		return ":"
+	case LogicalAnd:
+		return "&&"
+	case LogicalOr:
+		return "||"
+	case NullCoalescing:
+		return "??"
+	case LogicalNot:
+		return "!"
+	case Equal:
+		return "=="
+	case NotEqual:
+		return "!="
+	case Greater:
+		return ">"
+	case GreaterEqual:
+		return ">="
+	case Less:
+		return "<"
+	case LessEqual:
+		return "<="
+	case Plus:
+		return "+"
+	case Minus:
+		return "-"
+	case Star:
+		return "*"
+	case Slash:
+		return "/"
+	case Const:
+		return "const"
+	case Let:
+		return "let"
+	case If:
+		return "if"
+	case Else:
+		return "else"
+	// case For:
+	// 	return "for"
+	// case In:
+	// 	return "in"
+	case Return:
+		return "return"
+	case Function:
+		return "function"
+	case Percent:
+		return "%"
+	case New:
+		return "new"
+	case Question:
+		return "?"
+	case Void:
+		return "void"
+	case PlusAssign:
+		return "+="
+	case MinusAssign:
+		return "-="
+	case StarAssign:
+		return "*="
+	case SlashAssign:
+		return "/="
+	case PlusPlus:
+		return "++"
+	case MinusMinus:
+		return "--"
+	case Import:
+		return "import"
+	case Export:
+		return "export"
+	case Reserved:
+		return "RESERVED"
+	// case Go:
+	// 	return "go"
+	// case Defer:
+	// 	return "defer"
+	default:
+		return fmt.Sprintf("KIND(%d)", k)
+	}
+}
+
+type Token struct {
+	Value    value.Value
+	Position int32
+	Length   int16
+	Kind     Kind
+}
+
+// String trả về nội dung text của Token (giúp hiển thị khi in AST)
+func (t Token) String() string {
+	// Nếu token có giá trị (Number, String, Ident), trả về text của giá trị đó
+	if !t.Value.IsNil() {
+		return t.Value.Text()
+	}
+	// Nếu không, trả về ký hiệu của Kind (vd: "+", "const")
+	return t.Kind.String()
+}
+
+var Keywords = map[string]Kind{
+	"const": Const,
+	"let":   Let,
+	"if":    If,
+	"else":  Else,
+	// "for":    For,
+	// "in":     In,
+	"return":   Return,
+	"function": Function,
+	"new":      New,
+	"import":   Import,
+	"export":   Export,
+
+	// Từ khóa bị loại bỏ có chủ đích (triết lý thiết kế: không vòng lặp vô tận,
+	// không try/catch — dùng .map()/.forEach() và .done()/.fail()).
+	"while":   Reserved,
+	"do":      Reserved,
+	"try":     Reserved,
+	"catch":   Reserved,
+	"finally": Reserved,
+	"throw":   Reserved,
+	"switch":  Reserved,
+	"class":   Reserved,
+	// "go":     Go,
+	// "defer":  Defer,
+	"true":      Boolean,
+	"false":     Boolean,
+	"null":      Null,
+	"undefined": Null, // undefined ≡ null trong Kitwork (VM chỉ có một kiểu Nil)
+	"void":      Void,
+}
+
+func LookupIdentifier(ident string) Kind {
+	if k, ok := Keywords[ident]; ok {
+		return k
+	}
+	return Ident
+}
+
+func (k Kind) Precedence() int {
+	switch k {
+	case Dot:
+		return 12
+	case LeftBracket:
+		return 11
+	case LeftParen:
+		return 10
+	case LogicalNot:
+		return 9
+	case Star, Slash, Percent:
+		return 8
+	case Plus, Minus:
+		return 7
+	case Greater, Less, Equal, NotEqual, GreaterEqual, LessEqual:
+		return 6
+	case LogicalAnd:
+		return 5
+	case LogicalOr:
+		return 4
+	case NullCoalescing:
+		return 4
+	case Assign:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func (k Kind) IsOperator() bool {
+	return k.Precedence() > 0
+}

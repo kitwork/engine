@@ -10,6 +10,11 @@ type Frame struct {
 	Vars   map[string]value.Value // Local scope
 	Fn     *value.Lambda          // Hàm đang được thực thi
 	Defers []*value.Lambda        // Deferred functions
+	// captured = true khi Vars của frame này đã bị một closure giữ tham chiếu
+	// (Scope: f.Vars). Lúc đó slot KHÔNG được tái dùng/xoá map cũ — phải cấp map
+	// mới — nếu không closure sẽ mất biến sau khi frame return (bug closure).
+	captured bool
+	StackBase int                    // Stack depth when the function call started
 }
 
 type VM struct {
@@ -38,7 +43,7 @@ func New(code []byte, constants []value.Value) *VM {
 	}
 	// Khởi tạo Frame gốc (Main entry)
 	vm.FrameIdx = 0
-	vm.Frames[0] = Frame{IP: 0, Vars: vm.Vars} // TRANG BỊ VŨ KHÍ: Frame 0 chính là vm.Vars
+	vm.Frames[0] = Frame{IP: 0, Vars: vm.Vars, StackBase: 0} // TRANG BỊ VŨ KHÍ: Frame 0 chính là vm.Vars
 	return vm
 }
 
@@ -60,6 +65,7 @@ func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string
 	vm.Frames[0].IP = 0
 	vm.Frames[0].Vars = vm.Vars
 	vm.Frames[0].Defers = vm.Frames[0].Defers[:0]
+	vm.Frames[0].StackBase = 0
 }
 
 func (vm *VM) Stop() {
@@ -70,17 +76,24 @@ func (vm *VM) Stop() {
 func (vm *VM) push(v value.Value) { vm.Stack = append(vm.Stack, v) }
 
 func (vm *VM) pop() value.Value {
-	if len(vm.Stack) == 0 {
+	var base int
+	if vm.FrameIdx >= 0 && vm.FrameIdx < len(vm.Frames) {
+		base = vm.Frames[vm.FrameIdx].StackBase
+	}
+	if len(vm.Stack) <= base {
 		return value.Value{K: value.Nil}
 	}
 	v := vm.Stack[len(vm.Stack)-1]
 	vm.Stack = vm.Stack[:len(vm.Stack)-1]
-	// fmt.Printf("VM Pop: %v\n", v) // Debug hook enabled
 	return v
 }
 
 func (vm *VM) peek() value.Value {
-	if len(vm.Stack) == 0 {
+	var base int
+	if vm.FrameIdx >= 0 && vm.FrameIdx < len(vm.Frames) {
+		base = vm.Frames[vm.FrameIdx].StackBase
+	}
+	if len(vm.Stack) <= base {
 		return value.Value{K: value.Nil}
 	}
 	return vm.Stack[len(vm.Stack)-1]

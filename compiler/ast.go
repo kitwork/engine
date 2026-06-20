@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"strings"
 
-	"github.com/kitwork/engine/token"
+	
 	"github.com/kitwork/engine/value"
 )
 
@@ -32,6 +32,78 @@ type Expression interface {
 // Program là nút gốc chứa toàn bộ script
 type Program struct {
 	Statements []Statement
+	Exports    []string // tên export qua `export const/function` hoặc `export { }`
+	HasDefault bool      // true nếu có `export default …` (đã hạ về const DefaultExportName)
+}
+
+// DefaultExportName là biến tổng hợp mà `export default <expr>` được hạ xuống.
+const DefaultExportName = "__kw_default"
+
+// ImportSpec là một binding có tên trong import: `imported as local`
+// (Local == Imported khi không có alias).
+type ImportSpec struct {
+	Imported string // tên trong export của module
+	Local    string // tên biến cục bộ
+}
+
+// ImportStatement đại diện cho một import MODULE TƯƠNG ĐỐI chưa giải quyết
+// (vd `import { x } from "./helper.kitwork.js"`). Import từ "kitwork" KHÔNG dùng
+// node này — chúng được hạ thẳng về VarStatement trong parser. Bundler ở package
+// script sẽ giải quyết các node này (IIFE-wrap) trước khi compile.
+type ImportStatement struct {
+	Token      Token
+	Names      []ImportSpec // import có tên: import { a, b as c } from "..."
+	Default    *Identifier  // import mặc định: import x from "..." (nil nếu không có)
+	Source     string       // specifier (đường dẫn tương đối)
+	SideEffect bool         // import "..."  (không binding)
+}
+
+func (is *ImportStatement) statementNode() {}
+func (is *ImportStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("import ")
+	if is.SideEffect {
+		out.WriteString("\"" + is.Source + "\";")
+		return out.String()
+	}
+	if is.Default != nil {
+		out.WriteString(is.Default.Value)
+		if len(is.Names) > 0 {
+			out.WriteString(", ")
+		}
+	}
+	if len(is.Names) > 0 {
+		out.WriteString("{ ")
+		for i, n := range is.Names {
+			if n.Local != n.Imported {
+				out.WriteString(n.Imported + " as " + n.Local)
+			} else {
+				out.WriteString(n.Imported)
+			}
+			if i < len(is.Names)-1 {
+				out.WriteString(", ")
+			}
+		}
+		out.WriteString(" }")
+	}
+	out.WriteString(" from \"" + is.Source + "\";")
+	return out.String()
+}
+
+// GroupStatement là một nhóm câu lệnh được compile TẠI CHỖ (không tạo scope mới,
+// không RETURN) — dùng để một lệnh nguồn (vd import có alias) hạ xuống nhiều
+// VarStatement.
+type GroupStatement struct {
+	Statements []Statement
+}
+
+func (gs *GroupStatement) statementNode() {}
+func (gs *GroupStatement) String() string {
+	var out bytes.Buffer
+	for _, s := range gs.Statements {
+		out.WriteString(s.String())
+	}
+	return out.String()
 }
 
 func (p *Program) String() string {
@@ -52,7 +124,7 @@ const (
 
 // VarStatement: const a = 10; let b = 20;
 type VarStatement struct {
-	Token        token.Token // const, let
+	Token        Token // const, let
 	Names        []*Identifier
 	Value        Expression
 	DestructMode DestructMode
@@ -95,7 +167,7 @@ func (vs *VarStatement) String() string {
 
 // ExpressionStatement: Dùng cho các lệnh đứng độc lập (vd: call();)
 type ExpressionStatement struct {
-	Token      token.Token
+	Token      Token
 	Expression Expression
 }
 
@@ -109,7 +181,7 @@ func (es *ExpressionStatement) String() string {
 
 // BlockStatement: Code nằm trong dấu { }
 type BlockStatement struct {
-	Token      token.Token // Dấu '{'
+	Token      Token // Dấu '{'
 	Statements []Statement
 }
 
@@ -124,7 +196,7 @@ func (bs *BlockStatement) String() string {
 
 // ReturnStatement: return 10;
 type ReturnStatement struct {
-	Token       token.Token
+	Token       Token
 	ReturnValue Expression
 }
 
@@ -141,7 +213,7 @@ func (rs *ReturnStatement) String() string {
 
 // ForStatement: for (item in list) { }
 type ForStatement struct {
-	Token    token.Token // Dấu 'for'
+	Token    Token // Dấu 'for'
 	Item     *Identifier
 	Iterable Expression
 	Body     *BlockStatement
@@ -162,7 +234,7 @@ func (fs *ForStatement) String() string {
 
 // DeferStatement: defer () => { }
 type DeferStatement struct {
-	Token token.Token // Dấu 'defer'
+	Token Token // Dấu 'defer'
 	Fn    Expression
 }
 
@@ -178,7 +250,7 @@ func (ds *DeferStatement) String() string {
 
 // Identifier: Tên biến (db, user, task)
 type Identifier struct {
-	Token token.Token
+	Token Token
 	Value string
 }
 
@@ -187,7 +259,7 @@ func (i *Identifier) String() string  { return i.Value }
 
 // Literal: Giá trị thô (10, "hello", true, null)
 type Literal struct {
-	Token token.Token
+	Token Token
 	Value value.Value // Thùng 24-byte
 }
 
@@ -196,7 +268,7 @@ func (l *Literal) String() string  { return l.Value.Text() }
 
 // PrefixExpression: !true, -5
 type PrefixExpression struct {
-	Token    token.Token
+	Token    Token
 	Operator string
 	Right    Expression
 }
@@ -208,7 +280,7 @@ func (pe *PrefixExpression) String() string {
 
 // InfixExpression: a + b, x > y, a == b
 type InfixExpression struct {
-	Token    token.Token
+	Token    Token
 	Left     Expression
 	Operator string
 	Right    Expression
@@ -221,7 +293,7 @@ func (ie *InfixExpression) String() string {
 
 // IfExpression: if (cond) { con } else { alt }
 type IfExpression struct {
-	Token       token.Token
+	Token       Token
 	Condition   Expression
 	Consequence *BlockStatement
 	Alternative *BlockStatement
@@ -243,7 +315,7 @@ func (ie *IfExpression) String() string {
 
 // CallExpression: f(a, b)
 type CallExpression struct {
-	Token     token.Token // Dấu '('
+	Token     Token // Dấu '('
 	Function  Expression  // Tên hàm hoặc object.method
 	Arguments []Expression
 }
@@ -264,7 +336,7 @@ func (ce *CallExpression) String() string {
 
 // MemberExpression: object.property
 type MemberExpression struct {
-	Token    token.Token // Dấu '.'
+	Token    Token // Dấu '.'
 	Object   Expression
 	Property *Identifier
 }
@@ -276,7 +348,7 @@ func (me *MemberExpression) String() string {
 
 // IndexExpression: array[index]
 type IndexExpression struct {
-	Token token.Token // Dấu '['
+	Token Token // Dấu '['
 	Left  Expression
 	Index Expression
 }
@@ -288,7 +360,7 @@ func (ie *IndexExpression) String() string {
 
 // TernaryExpression: cond ? consequence : alternative
 type TernaryExpression struct {
-	Token       token.Token
+	Token       Token
 	Condition   Expression
 	Consequence Expression
 	Alternative Expression
@@ -301,7 +373,7 @@ func (te *TernaryExpression) String() string {
 
 // AssignmentExpression: a = 10
 type AssignmentExpression struct {
-	Token token.Token
+	Token Token
 	Name  Expression // Thường là Identifier hoặc IndexExpression
 	Value Expression
 }
@@ -317,7 +389,7 @@ func (ae *AssignmentExpression) String() string {
 
 // ArrayLiteral: [1, 2, 3]
 type ArrayLiteral struct {
-	Token    token.Token
+	Token    Token
 	Elements []Expression
 }
 
@@ -343,13 +415,13 @@ type ObjectEntry struct {
 
 // ObjectLiteral: { "key": "value", ...obj }
 type ObjectLiteral struct {
-	Token   token.Token
+	Token   Token
 	Entries []ObjectEntry
 }
 
 // SpreadExpression: ...obj
 type SpreadExpression struct {
-	Token token.Token // Dấu '...'
+	Token Token // Dấu '...'
 	Value Expression
 }
 
@@ -375,7 +447,7 @@ func (ol *ObjectLiteral) String() string {
 
 // ParameterList: Dùng tạm để chứa danh sách tham số trước khi định nghĩa Lambda
 type ParameterList struct {
-	Token      token.Token
+	Token      Token
 	Parameters []*Identifier
 }
 
@@ -390,7 +462,7 @@ func (pl *ParameterList) String() string {
 
 // FunctionLiteral: (x, y) => { }
 type FunctionLiteral struct {
-	Token      token.Token
+	Token      Token
 	Parameters []*Identifier
 	Body       *BlockStatement
 	Address    int // Compiled bytecode address
@@ -412,7 +484,7 @@ func (fl *FunctionLiteral) String() string {
 
 // SpawnStatement: go () => { }
 type SpawnStatement struct {
-	Token token.Token // Dấu 'go'
+	Token Token // Dấu 'go'
 	Fn    Expression
 }
 
@@ -424,7 +496,7 @@ func (ss *SpawnStatement) String() string {
 
 // MethodCallExpression: object.method(args...)
 type MethodCallExpression struct {
-	Token     token.Token  // Dấu '.'
+	Token     Token  // Dấu '.'
 	Object    Expression   // Đối tượng (ví dụ: "hello")
 	Method    *Identifier  // Tên phương thức (ví dụ: upper)
 	Arguments []Expression // Các tham số truyền vào
@@ -448,7 +520,7 @@ func (mce *MethodCallExpression) String() string {
 
 // TemplateLiteral: `Hello ${user.name}`
 type TemplateLiteral struct {
-	Token token.Token
+	Token Token
 	Parts []Expression // Alternating Literal (strings) and Expressions
 }
 
@@ -457,7 +529,7 @@ func (tl *TemplateLiteral) String() string {
 	var out bytes.Buffer
 	out.WriteString("`")
 	for _, p := range tl.Parts {
-		if lit, ok := p.(*Literal); ok && lit.Token.Kind == token.String {
+		if lit, ok := p.(*Literal); ok && lit.Token.Kind == String {
 			out.WriteString(lit.Value.Text())
 		} else {
 			out.WriteString("${")

@@ -1,12 +1,10 @@
 package engine
 
 import (
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kitwork/engine/core"
@@ -15,43 +13,37 @@ import (
 	"github.com/kitwork/engine/host"
 	"github.com/kitwork/engine/logger"
 	"github.com/kitwork/engine/work"
-	"gopkg.in/yaml.v3"
 )
 
-func Run(files ...string) (err error) {
-	raw := make(map[string]interface{})
+func Run(configFile ...string) (err error) {
+	// Lưu ý: KHÔNG nạp .env vào môi trường tiến trình toàn cục (sẽ làm mọi tenant
+	// chung env, rò secret). env là SCOPED: host đọc root .env trong evalConfigJS;
+	// mỗi tenant đọc .env riêng của nó (work.Tenant.Run → kitwork().env).
 
-	// Load and override configurations from the file list
-	for _, file := range files {
-		bytes, err := os.ReadFile(file)
-		if err != nil {
-			if os.IsNotExist(err) {
-				// Skip if file does not exist to support fallback chain
-				continue
-			}
-			return fmt.Errorf("unable to read config file %s: %w", file, err)
-		}
-
-		// Expand environment variables
-		expandedContent := []byte(os.ExpandEnv(string(bytes)))
-
-		ext := strings.ToLower(filepath.Ext(file))
-		var unmarshalErr error
-		if ext == ".json" {
-			unmarshalErr = json.Unmarshal(expandedContent, &raw)
-		} else if ext == ".yaml" || ext == ".yml" {
-			unmarshalErr = yaml.Unmarshal(expandedContent, &raw)
-		} else {
-			return fmt.Errorf("unsupported config file extension: %s (only .json, .yaml, .yml are supported)", file)
-		}
-
-		if unmarshalErr != nil {
-			return fmt.Errorf("failed to parse config file %s: %w", file, unmarshalErr)
-		}
-
-		fmt.Printf("Loaded configuration from %s\n", file)
-		break
+	// Bootstrap DUY NHẤT là một file .kitwork.js chạy được (mặc định
+	// server.kitwork.js). YAML/JSON KHÔNG còn nạp trực tiếp ở đây — muốn dùng chúng
+	// thì trỏ tới từ trong server.kitwork.js: server.run("config.kitwork.yaml").
+	file := "server.kitwork.js"
+	if len(configFile) > 0 && configFile[0] != "" {
+		file = configFile[0]
 	}
+
+	if !strings.HasSuffix(strings.ToLower(file), ".js") {
+		return fmt.Errorf("engine.Run chỉ nhận bootstrap .kitwork.js, nhận %q — "+
+			"muốn dùng YAML/JSON thì trỏ từ server.kitwork.js: server.run(\"config.kitwork.yaml\")", file)
+	}
+
+	if _, statErr := os.Stat(file); statErr != nil {
+		return fmt.Errorf("không tìm thấy bootstrap config %s: %w", file, statErr)
+	}
+
+	// Chạy bootstrap trong VM setup tối giản, bắt object/đường-dẫn từ server.run(...).
+	// Engine tự sở hữu stack → config cũng là chính ngôn ngữ Kitwork, không parser ngoài.
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		return fmt.Errorf("failed to evaluate config %s: %w", file, err)
+	}
+	fmt.Printf("Loaded configuration from %s (server.run)\n", file)
 
 	cfg, err := ParseConfig(raw)
 	if err != nil {
@@ -108,7 +100,9 @@ func Run(files ...string) (err error) {
 		work.DefaultTenantUserRate = cfg.RateLimit.UserRate
 	}
 
-	// Assign configured domains to the ssl package
+	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
+	domain.Allows = cfg.Domains
+	domain.Configure(cfg.Canonical, cfg.Redirects)
 
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
@@ -120,7 +114,17 @@ func Run(files ...string) (err error) {
 		handler.RateLimit.Period = cfg.RateLimit.Period
 	}
 
-	if !host.IsLocalhost() {
+	// Pre-warm: compile sẵn các tenant để request ĐẦU TIÊN không bị cold compile.
+	// Chạy nền để không chặn khởi động; run() idempotent nên an toàn với request đến
+	// sớm. Standalone (1 tenant) bỏ qua — compile lazy ở request đầu là đủ rẻ.
+	switch cfg.Root {
+	case "", "./", "../", "/", ".", "..":
+		// standalone: không prewarm
+	default:
+		go handler.Prewarm()
+	}
+
+	if !host.IsLocalhost() && !cfg.AllowLocal {
 		tlsConfig := domain.AutoSSL(cfg.Domains)
 
 		go func() {
@@ -135,40 +139,57 @@ func Run(files ...string) (err error) {
 		}()
 	}
 
-	// Print premium startup welcome banner
-	modeStr := "Multi-Tenant"
-	switch cfg.Root {
-	case "", "./", "../", "/", ".", "..":
-		modeStr = "Standalone (Root: .)"
-	default:
-		modeStr = fmt.Sprintf("Multi-Tenant (Root: %s)", cfg.Root)
+	printBanner(cfg, host.IsLocalhost())
+
+	return http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), handler)
+}
+
+// printBanner renders the Kitwork startup banner: a brand-red "KITWORK" wordmark
+// plus honest runtime facts (mode, listen address, TLS, databases). No fake metrics.
+func printBanner(cfg *Config, isLocalhost bool) {
+	const (
+		red   = "\033[38;2;248;34;68m" // brand red #f82244
+		dim   = "\033[2m"
+		reset = "\033[0m"
+	)
+	label := func(name string) string {
+		return fmt.Sprintf("  %s▸%s %s%-7s%s ", red, reset, dim, name, reset)
 	}
 
-	fmt.Println("\033[36m" + `
-   __  ___ __                      __   
-  / / / (_) /___ _      ______  __/ /__ 
- / /_/ / / __/ \ \ /\ / / __ \/ __  '_/ 
-/ __  / / /_    \ V  V / /_/ / /  <    
-/_/ /_/_/\__/     \_/\_/\____/_/  |_|   ` + "\033[0m")
-	fmt.Println("\033[1;30m==================================================\033[0m")
-	fmt.Printf("\033[1;35m» Engine Mode:\033[0m       %s\n", modeStr)
-	fmt.Printf("\033[1;32m» Local Access:\033[0m      http://localhost:%d\033[0m\n", cfg.Port)
+	mode, root := "Multi-Tenant", cfg.Root
+	switch cfg.Root {
+	case "", "./", "../", "/", ".", "..":
+		mode, root = "Standalone", "."
+	}
+
+	fmt.Println("\n" + red + `█   █ █████ █████ █   █  ███  ████  █   █
+█  █    █     █   █   █ █   █ █   █ █  █
+███     █     █   █ █ █ █   █ ████  ███
+█  █    █     █   ██ ██ █   █ █  █  █  █
+█   █ █████   █   █   █  ███  █   █ █   █` + reset)
+	fmt.Println(dim + "  sovereign logic engine\n" + reset)
+
+	fmt.Printf("%s%s  %sroot:%s %s\n", label("mode"), mode, dim, reset, root)
+	fmt.Printf("%shttp://localhost:%d\n", label("listen"), cfg.Port)
+	if cfg.AllowLocal || isLocalhost {
+		fmt.Printf("%s%sdisabled (local dev)%s\n", label("tls"), dim, reset)
+	} else {
+		fmt.Printf("%sAutoSSL · :443\n", label("tls"))
+	}
 	for _, db := range cfg.Databases {
-		aliasStr := db.Alias
-		if aliasStr == "" {
-			aliasStr = "default"
+		alias := db.Alias
+		if alias == "" {
+			alias = "default"
 		}
 		if db.Type == "sqlite" || db.Type == "sqlite3" {
 			name := db.Name
 			if name == "" {
 				name = db.Host
 			}
-			fmt.Printf("\033[1;34m» Database (%s):\033[0m    SQLite (%s)\n", aliasStr, name)
+			fmt.Printf("%ssqlite · %s %s(%s)%s\n", label("db"), name, dim, alias, reset)
 		} else {
-			fmt.Printf("\033[1;34m» Database (%s):\033[0m    %s (%s:%d)\n", aliasStr, db.Type, db.Host, db.Port)
+			fmt.Printf("%s%s · %s:%d %s(%s)%s\n", label("db"), db.Type, db.Host, db.Port, dim, alias, reset)
 		}
 	}
-	fmt.Println("\033[1;30m==================================================\033[0m")
-
-	return http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), handler)
+	fmt.Println()
 }

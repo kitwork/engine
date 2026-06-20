@@ -27,6 +27,7 @@ func (c *Context) Res() *Response { return c.Response() }
 func (c *Context) JSON(v value.Value, code ...int) { c.Response().JSON(v, code...) }
 func (c *Context) HTML(v value.Value, code ...int) { c.Response().HTML(v, code...) }
 func (c *Context) Text(v value.Value, code ...int) { c.Response().Text(v, code...) }
+func (c *Context) CSS(v value.Value, code ...int)  { c.Response().CSS(v, code...) }
 func (c *Context) Status(code int) *Response       { return c.Response().Status(code) }
 func (c *Context) Redirect(url string, code ...int) {
 	c.Response().Redirect(value.New(url), code...)

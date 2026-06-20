@@ -46,11 +46,12 @@ type Chromedp struct {
 func (c *Chromedp) Page(urlVal value.Value) *ChromeOptions {
 	initGlobalChrome()
 	return &ChromeOptions{
-		tenant: c.tenant,
-		url:    urlVal.Text(),
-		width:  1280,
-		height: 720,
-		delay:  1 * time.Second,
+		tenant:  c.tenant,
+		url:     urlVal.Text(),
+		width:   1280,
+		height:  720,
+		delay:   1 * time.Second,
+		timeout: 15 * time.Second,
 	}
 }
 
@@ -59,12 +60,13 @@ func (c *Chromedp) Navigate(urlVal value.Value) *ChromeOptions {
 }
 
 type ChromeOptions struct {
-	tenant *Tenant
-	url    string
-	width  int
-	height int
-	delay  time.Duration
-	err    error
+	tenant  *Tenant
+	url     string
+	width   int
+	height  int
+	delay   time.Duration
+	timeout time.Duration
+	err     error
 }
 
 func (co *ChromeOptions) Viewport(widthVal value.Value, heightVal value.Value) *ChromeOptions {
@@ -87,5 +89,15 @@ func (co *ChromeOptions) Wait(delayVal value.Value) *ChromeOptions {
 	if delayVal.K == value.Number {
 		co.delay = time.Duration(delayVal.N) * time.Millisecond
 	}
+	return co
+}
+
+// Timeout caps the whole capture. A bare number is seconds (.timeout(8)); a string is a Go
+// duration (.timeout("8s")). Keeps one slow page from blocking the shared Chrome for long.
+func (co *ChromeOptions) Timeout(v value.Value) *ChromeOptions {
+	if co.err != nil {
+		return co
+	}
+	co.timeout = parseScreenshotTimeout(v, co.timeout)
 	return co
 }

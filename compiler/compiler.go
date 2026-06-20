@@ -2,8 +2,9 @@ package compiler
 
 import (
 	"encoding/binary"
+	"fmt"
 
-	"github.com/kitwork/engine/opcode"
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -141,15 +142,36 @@ func (c *Compiler) Compile(node Node) error {
 			// Nếu là ExpressionStatement và KHÔNG PHẢI cuối cùng, ta POP
 			if _, ok := s.(*ExpressionStatement); ok {
 				if i < len(n.Statements)-1 {
-					c.emit(opcode.POP)
+					c.emit(runtime.POP)
 				}
 			}
 		}
 		// Luôn kết thúc Program bằng RETURN để đảm bảo thực thi defer
-		c.emit(opcode.RETURN)
+		c.emit(runtime.RETURN)
+
+	case *ImportStatement:
+		// Bundler ở package script phải giải quyết hết ImportStatement (IIFE-wrap)
+		// TRƯỚC khi compile. Còn sót tới đây = import chưa được resolve.
+		return fmt.Errorf("compiler: unresolved relative import %q (native bundler did not run)", n.Source)
+
+	case *GroupStatement:
+		for _, s := range n.Statements {
+			if err := c.Compile(s); err != nil {
+				return err
+			}
+		}
 
 	case *ExpressionStatement:
-		return c.Compile(n.Expression)
+		if err := c.Compile(n.Expression); err != nil {
+			return err
+		}
+		switch n.Expression.(type) {
+		case *IfExpression:
+			// Skip POP for control flow expressions (if statements)
+		default:
+			c.emit(runtime.POP)
+		}
+		return nil
 
 	case *InfixExpression:
 		err := c.Compile(n.Left)
@@ -163,31 +185,31 @@ func (c *Compiler) Compile(node Node) error {
 
 		switch n.Operator {
 		case "+":
-			c.emit(opcode.ADD)
+			c.emit(runtime.ADD)
 		case "-":
-			c.emit(opcode.SUB)
+			c.emit(runtime.SUB)
 		case "*":
-			c.emit(opcode.MUL)
+			c.emit(runtime.MUL)
 		case "/":
-			c.emit(opcode.DIV)
+			c.emit(runtime.DIV)
 		case "%":
-			c.emit(opcode.MOD)
+			c.emit(runtime.MOD)
 		case "==", "===":
-			c.emit(opcode.COMPARE, 0)
+			c.emit(runtime.COMPARE, 0)
 		case "!=", "!==":
-			c.emit(opcode.COMPARE, 1)
+			c.emit(runtime.COMPARE, 1)
 		case ">":
-			c.emit(opcode.COMPARE, 2)
+			c.emit(runtime.COMPARE, 2)
 		case "<":
-			c.emit(opcode.COMPARE, 3)
+			c.emit(runtime.COMPARE, 3)
 		case ">=":
-			c.emit(opcode.COMPARE, 4)
+			c.emit(runtime.COMPARE, 4)
 		case "<=":
-			c.emit(opcode.COMPARE, 5)
+			c.emit(runtime.COMPARE, 5)
 		case "&&":
-			c.emit(opcode.AND)
+			c.emit(runtime.AND)
 		case "||":
-			c.emit(opcode.OR)
+			c.emit(runtime.OR)
 		}
 
 	case *PrefixExpression:
@@ -198,28 +220,28 @@ func (c *Compiler) Compile(node Node) error {
 		switch n.Operator {
 		case "-":
 			constIndex := c.addConstant(value.New(-1))
-			c.emit(opcode.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
-			c.emit(opcode.MUL)
+			c.emit(runtime.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
+			c.emit(runtime.MUL)
 		case "!":
-			c.emit(opcode.NOT)
+			c.emit(runtime.NOT)
 		case "void":
 			// void expr — bỏ kết quả biểu thức, trả về null (esbuild sinh `void 0`)
-			c.emit(opcode.POP)
+			c.emit(runtime.POP)
 			nullIndex := c.addConstant(value.NewNull())
-			c.emit(opcode.PUSH, byte(nullIndex>>8), byte(nullIndex&0xFF))
+			c.emit(runtime.PUSH, byte(nullIndex>>8), byte(nullIndex&0xFF))
 		}
 
 	case *Literal:
 		constIndex := c.addConstant(n.Value)
-		c.emit(opcode.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
+		c.emit(runtime.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
 
 	case *Identifier:
 		if n.Value == "kitwork" {
-			c.emit(opcode.BUILTIN, 0)
+			c.emit(runtime.BUILTIN, 0)
 			return nil
 		}
 		symbolIndex := c.addConstant(value.NewString(n.Value))
-		c.emit(opcode.LOAD, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+		c.emit(runtime.LOAD, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 
 	case *VarStatement:
 		err := c.Compile(n.Value)
@@ -229,28 +251,28 @@ func (c *Compiler) Compile(node Node) error {
 
 		if n.DestructMode == DestructObject {
 			for _, id := range n.Names {
-				c.emit(opcode.DUP)
+				c.emit(runtime.DUP)
 				symbolIndex := c.addConstant(value.NewString(id.Value))
-				c.emit(opcode.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-				c.emit(opcode.GET)
-				c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-				c.emit(opcode.POP)
+				c.emit(runtime.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+				c.emit(runtime.GET)
+				c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+				c.emit(runtime.POP)
 			}
 		} else if n.DestructMode == DestructArray {
 			for i, id := range n.Names {
-				c.emit(opcode.DUP)
+				c.emit(runtime.DUP)
 				idxIndex := c.addConstant(value.New(i))
-				c.emit(opcode.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
-				c.emit(opcode.GET)
+				c.emit(runtime.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
+				c.emit(runtime.GET)
 				symbolIndex := c.addConstant(value.NewString(id.Value))
-				c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-				c.emit(opcode.POP)
+				c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+				c.emit(runtime.POP)
 			}
 		} else {
 			symbolIndex := c.addConstant(value.NewString(n.Names[0].Value))
-			c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		}
-		c.emit(opcode.POP)
+		c.emit(runtime.POP)
 
 	case *AssignmentExpression:
 		if id, ok := n.Name.(*Identifier); ok {
@@ -259,13 +281,13 @@ func (c *Compiler) Compile(node Node) error {
 				return err
 			}
 			symbolIndex := c.addConstant(value.NewString(id.Value))
-			c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		} else if mem, ok := n.Name.(*MemberExpression); ok {
 			c.Compile(mem.Object)
 			propIndex := c.addConstant(value.NewString(mem.Property.Value))
-			c.emit(opcode.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
+			c.emit(runtime.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
 			c.Compile(n.Value)
-			c.emit(opcode.SET)
+			c.emit(runtime.SET)
 		} else if obj, ok := n.Name.(*ObjectLiteral); ok {
 			err := c.Compile(n.Value)
 			if err != nil {
@@ -273,12 +295,12 @@ func (c *Compiler) Compile(node Node) error {
 			}
 			for _, entry := range obj.Entries {
 				if id, ok := entry.Key.(*Identifier); ok {
-					c.emit(opcode.DUP)
+					c.emit(runtime.DUP)
 					symbolIndex := c.addConstant(value.NewString(id.Value))
-					c.emit(opcode.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-					c.emit(opcode.GET)
-					c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-					c.emit(opcode.POP)
+					c.emit(runtime.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+					c.emit(runtime.GET)
+					c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+					c.emit(runtime.POP)
 				}
 			}
 		} else if arr, ok := n.Name.(*ArrayLiteral); ok {
@@ -288,13 +310,13 @@ func (c *Compiler) Compile(node Node) error {
 			}
 			for i, el := range arr.Elements {
 				if id, ok := el.(*Identifier); ok {
-					c.emit(opcode.DUP)
+					c.emit(runtime.DUP)
 					idxIndex := c.addConstant(value.New(i))
-					c.emit(opcode.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
-					c.emit(opcode.GET)
+					c.emit(runtime.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
+					c.emit(runtime.GET)
 					symbolIndex := c.addConstant(value.NewString(id.Value))
-					c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-					c.emit(opcode.POP)
+					c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+					c.emit(runtime.POP)
 				}
 			}
 		}
@@ -304,12 +326,12 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
-		ternFalsePos := c.emit(opcode.FALSE, 0, 0)
+		ternFalsePos := c.emit(runtime.FALSE, 0, 0)
 		err = c.Compile(n.Consequence)
 		if err != nil {
 			return err
 		}
-		ternJumpPos := c.emit(opcode.JUMP, 0, 0)
+		ternJumpPos := c.emit(runtime.JUMP, 0, 0)
 		c.patchUint16(ternFalsePos+1, uint16(len(c.instructions)))
 		err = c.Compile(n.Alternative)
 		if err != nil {
@@ -322,14 +344,14 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
-		falsePos := c.emit(opcode.FALSE, 0, 0)
+		falsePos := c.emit(runtime.FALSE, 0, 0)
 		err = c.Compile(n.Consequence)
 		if err != nil {
 			return err
 		}
 
 		if n.Alternative != nil {
-			jumpPos := c.emit(opcode.JUMP, 0, 0)
+			jumpPos := c.emit(runtime.JUMP, 0, 0)
 			c.patchUint16(falsePos+1, uint16(len(c.instructions)))
 			err = c.Compile(n.Alternative)
 			if err != nil {
@@ -343,17 +365,17 @@ func (c *Compiler) Compile(node Node) error {
 	case *ForStatement:
 		c.Compile(n.Iterable)
 		constZero := c.addConstant(value.New(0))
-		c.emit(opcode.PUSH, byte(constZero>>8), byte(constZero&0xFF))
+		c.emit(runtime.PUSH, byte(constZero>>8), byte(constZero&0xFF))
 		loopStart := len(c.instructions)
-		exitJump := c.emit(opcode.ITER, 0, 0)
+		exitJump := c.emit(runtime.ITER, 0, 0)
 		symbolIndex := c.addConstant(value.NewString(n.Item.Value))
-		c.emit(opcode.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-		c.emit(opcode.POP)
+		c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+		c.emit(runtime.POP)
 		c.Compile(n.Body)
-		c.emit(opcode.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
+		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
 		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
-		c.emit(opcode.POP)
-		c.emit(opcode.POP)
+		c.emit(runtime.POP)
+		c.emit(runtime.POP)
 
 	case *BlockStatement:
 		for _, s := range n.Statements {
@@ -365,54 +387,54 @@ func (c *Compiler) Compile(node Node) error {
 			c.Compile(n.ReturnValue)
 		} else {
 			constNull := c.addConstant(value.Value{K: value.Nil})
-			c.emit(opcode.PUSH, byte(constNull>>8), byte(constNull&0xFF))
+			c.emit(runtime.PUSH, byte(constNull>>8), byte(constNull&0xFF))
 		}
-		c.emit(opcode.RETURN)
+		c.emit(runtime.RETURN)
 
 	case *CallExpression:
 		c.Compile(n.Function)
 		for _, arg := range n.Arguments {
 			c.Compile(arg)
 		}
-		c.emit(opcode.CALL, byte(len(n.Arguments)))
+		c.emit(runtime.CALL, byte(len(n.Arguments)))
 
 	case *ObjectLiteral:
-		c.emit(opcode.MAKE, 0)
+		c.emit(runtime.MAKE, 0)
 		for _, entry := range n.Entries {
 			if entry.IsSpread {
 				c.Compile(entry.Value)
-				c.emit(opcode.MERGE)
+				c.emit(runtime.MERGE)
 			} else {
-				c.emit(opcode.DUP)
+				c.emit(runtime.DUP)
 				// Nếu key là Identifier, ta coi như chuỗi (JS style: { name: "..." })
 				if id, ok := entry.Key.(*Identifier); ok {
 					idx := c.addConstant(value.NewString(id.Value))
-					c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+					c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
 				} else {
 					c.Compile(entry.Key)
 				}
 				c.Compile(entry.Value)
-				c.emit(opcode.SET)
-				c.emit(opcode.POP) // Loại bỏ giá trị dư từ SET (SET đẩy lại target lên stack)
+				c.emit(runtime.SET)
+				c.emit(runtime.POP) // Loại bỏ giá trị dư từ SET (SET đẩy lại target lên stack)
 			}
 		}
 
 	case *ArrayLiteral:
-		c.emit(opcode.MAKE, 1) // 1 for Array
+		c.emit(runtime.MAKE, 1) // 1 for Array
 		for i, el := range n.Elements {
-			c.emit(opcode.DUP)
+			c.emit(runtime.DUP)
 			// Push the index as the key for SET
 			idx := c.addConstant(value.New(float64(i)))
-			c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+			c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
 			c.Compile(el)
-			c.emit(opcode.SET)
-			c.emit(opcode.POP) // SET pushes target back, but we duped it already
+			c.emit(runtime.SET)
+			c.emit(runtime.POP) // SET pushes target back, but we duped it already
 		}
 
 	case *IndexExpression:
 		c.Compile(n.Left)
 		c.Compile(n.Index)
-		c.emit(opcode.GET)
+		c.emit(runtime.GET)
 
 	case *MethodCallExpression:
 		c.Compile(n.Object)
@@ -420,20 +442,20 @@ func (c *Compiler) Compile(node Node) error {
 			c.Compile(arg)
 		}
 		methIndex := c.addConstant(value.NewString(n.Method.Value))
-		c.emit(opcode.PUSH, byte(methIndex>>8), byte(methIndex&0xFF))
-		c.emit(opcode.INVOKE, byte(len(n.Arguments)))
+		c.emit(runtime.PUSH, byte(methIndex>>8), byte(methIndex&0xFF))
+		c.emit(runtime.INVOKE, byte(len(n.Arguments)))
 
 	case *MemberExpression:
 		c.Compile(n.Object)
 		propIndex := c.addConstant(value.NewString(n.Property.Value))
-		c.emit(opcode.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
-		c.emit(opcode.GET)
+		c.emit(runtime.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
+		c.emit(runtime.GET)
 
 	case *FunctionLiteral:
-		jumpOver := c.emit(opcode.JUMP, 0, 0)
+		jumpOver := c.emit(runtime.JUMP, 0, 0)
 		startIP := len(c.instructions)
 		c.Compile(n.Body)
-		c.emit(opcode.RETURN)
+		c.emit(runtime.RETURN)
 		endIP := len(c.instructions)
 		c.patchUint16(jumpOver+1, uint16(endIP))
 
@@ -447,12 +469,12 @@ func (c *Compiler) Compile(node Node) error {
 			Params:  params,
 		}
 		idx := c.addConstant(value.New(fnData))
-		c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+		c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
 
 	case *TemplateLiteral:
 		if len(n.Parts) == 0 {
 			idx := c.addConstant(value.NewString(""))
-			c.emit(opcode.PUSH, byte(idx>>8), byte(idx&0xFF))
+			c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
 			return nil
 		}
 		// Compile first part
@@ -466,7 +488,7 @@ func (c *Compiler) Compile(node Node) error {
 			if err != nil {
 				return err
 			}
-			c.emit(opcode.ADD)
+			c.emit(runtime.ADD)
 		}
 	}
 
@@ -497,7 +519,7 @@ func (c *Compiler) ByteCodeResult() *Bytecode {
 	return bc
 }
 
-func (c *Compiler) emit(op opcode.Opcode, operands ...byte) int {
+func (c *Compiler) emit(op runtime.Opcode, operands ...byte) int {
 	pos := len(c.instructions)
 	c.instructions = append(c.instructions, byte(op))
 	c.instructions = append(c.instructions, operands...)

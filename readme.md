@@ -3,7 +3,7 @@
 > **The cloud became an estate to operate. Kitwork is a disagreement.**
 
 [![Go Version](https://img.shields.io/badge/go-1.25+-black?style=flat-square&logo=go)](https://golang.org)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](#author--license)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](#author--license)
 [![VM Latency](https://img.shields.io/badge/instruction-27ns-green?style=flat-square)](#performance)
 [![Cold Boot](https://img.shields.io/badge/cold%20boot-%3C10ms-green?style=flat-square)](#performance)
 
@@ -55,29 +55,41 @@ import (
 )
 
 func main() {
-    if err := engine.Run("config.kitwork.yml"); err != nil {
+    // Starts the engine using server.kitwork.js as the bootstrap config
+    if err := engine.Run("server.kitwork.js"); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-```yaml
-# config.kitwork.yml
-port: 8080
-root: "tenants"            # multi-tenant root
-domains: [kitwork.vn]      # automatic HTTPS via ACME
-max_energy: 1000000        # VM energy budget per execution
-hot_reload: true
-database:
-  type: "postgres"         # PostgreSQL / MySQL
-  host: "localhost"
-  user: "postgres"
-  password: "${DB_PASSWORD}"
-  name: "postgres"
-```
+**`server.kitwork.js`** — the bootstrap config (run once on startup):
 
 ```javascript
-// app.kitwork.js
+import { server, env } from "kitwork"
+
+server.run({
+  port: env.PORT || 8080,
+  root: env.ROOT || "tenants",            // multi-tenant root folder
+  hostname: "kitwork.io",
+  hot_reload: true,
+  databases: [
+    {
+      alias: "system",
+      type: "postgres",
+      host: env.DB_HOST || "localhost",
+      port: env.DB_PORT || 5432,
+      user: env.DB_USER || "postgres",
+      password: env.DB_PASSWORD || "your_password",
+      name: env.DB_NAME || "postgres",
+      sslmode: "disable"
+    }
+  ]
+})
+```
+
+**`tenants/029w8decto4uabhpsmfjlxgknzqy7356riv1/kitwork.io/app.kitwork.js`** — your tenant application:
+
+```javascript
 import { router, database } from "kitwork"
 
 const db = database.connection()
@@ -88,7 +100,7 @@ router.get("/api/users").handle((req, res) => {
 })
 ```
 
-Save the file — the engine recompiles and atomically swaps bytecode in under 10ms. No build step. No restart. No toolchain.
+Save the tenant file — the engine recompiles and atomically swaps the bytecode in under 10ms. No build step. No restart. No toolchain.
 
 ---
 
@@ -172,6 +184,13 @@ graph TD
 | Source mapping | Failures report `app.kitwork.js:L53`, not hex dumps |
 | ACID boundaries | Any VM error → automatic rollback, zero connection leakage |
 
+### Environment Variable Scoping & Isolation
+
+> [!WARNING]
+> Do **NOT** load sensitive global host credentials into the host OS environment variables. The global process environment is accessible only to the host setup VM (`server.kitwork.js`).
+>
+> To prevent credential leakage in multi-tenant environments, every tenant's VM is strictly isolated: a tenant can only read environment variables loaded from its local `.env` file located inside its tenant directory (e.g. `tenants/<identity>/<domain>/.env`).
+
 ---
 
 ## Performance
@@ -241,4 +260,10 @@ The engine powers live multi-tenant sites today, including built-in NAPAS 247 / 
 
 Kitwork is written the way one writes an essay — every line argued over, nothing kept that cannot be defended. It is public not because it is finished, but because it is honest: small enough to understand, strange enough to matter, and built to keep running after everything around it fails.
 
-**Huỳnh Nhân Quốc** · Kitwork Foundation · Apache 2.0 · [Sponsor](https://github.com/sponsors/huynhnhanquoc)
+### Dual-Licensing Model
+
+Kitwork Engine is open-source software licensed under the **GNU Affero General Public License (AGPL-3.0)**.
+
+If you wish to use the Kitwork Engine in closed-source proprietary environments or embed it into a commercial product without being bound by the copyleft requirements of the AGPL-3.0, a **Commercial License** is available. For licensing terms and corporate inquiries, contact: [hello@kitwork.vn](mailto:hello@kitwork.vn).
+
+**Huỳnh Nhân Quốc** · Kitwork Foundation · AGPL-3.0 & Commercial · [Sponsor](https://github.com/sponsors/huynhnhanquoc)

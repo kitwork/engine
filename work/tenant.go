@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,12 +14,14 @@ import (
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/runtime"
-	"github.com/kitwork/engine/script"
 	"github.com/kitwork/engine/value"
 )
 
 const kitwork = "kitwork"
 const extension = "." + kitwork
+
+// AppFileName is the entry filename every tenant must have (app.kitwork.js).
+const AppFileName = "app" + extension + ".js"
 
 type Tenant struct {
 	config *Config
@@ -28,6 +31,16 @@ type Tenant struct {
 	vm        *runtime.VM
 	routes    *Routes
 	MaxEnergy uint64
+
+	env value.Value // env scoped của tenant này (đọc từ <path>/.env), lộ qua kitwork().env
+
+	viewRender *Render // render mặc định cho ctx.view (đăng ký qua router.context({render}))
+
+	// JIT CSS service mode (đăng ký qua router.jit()): phục vụ 1 stylesheet site-wide,
+	// cached, tại jitRoute; jitInject = tự chèn <link> vào mỗi trang render. Set 1 lần
+	// lúc boot khi app.kitwork.js chạy router.jit() — read-only khi phục vụ request.
+	jitRoute  string
+	jitInject bool
 
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
@@ -59,9 +72,23 @@ type Responser struct {
 }
 
 func (t *Tenant) resolve(paths ...string) string {
-
 	if t.config.base == "" {
-		t.config.base = filepath.Join(t.config.root, t.entity.Identity, t.entity.Domain)
+		switch t.config.root {
+		case "", "./", "../", "/", ".", "..":
+			t.config.base = "."
+		default:
+			if t.entity.Identity != "" {
+				t.config.base = filepath.Join(t.config.root, t.entity.Identity, t.entity.Domain)
+			} else {
+				flatPath := filepath.Join(t.config.root, t.entity.Domain)
+				testPath := filepath.Join(t.config.root, "test", t.entity.Domain)
+				if _, err := os.Stat(filepath.Join(testPath, AppFileName)); err == nil {
+					t.config.base = testPath
+				} else {
+					t.config.base = flatPath
+				}
+			}
+		}
 	}
 	if len(paths) == 0 {
 		return t.config.base
@@ -78,7 +105,7 @@ func (t *Tenant) AppFile(filenames ...string) string {
 }
 
 func (t *Tenant) Run() error {
-	bytecode, err := script.Bytecode(t.AppFile())
+	bytecode, err := compiler.CompileFile(t.AppFile())
 	if err != nil {
 		return err
 	}
@@ -88,6 +115,10 @@ func (t *Tenant) Run() error {
 	t.vm.MaxEnergy = t.MaxEnergy
 	t.vm.SourceMap = bytecode.SourceMap
 	t.routes = NewRoutes()
+
+	// env scoped THEO PATH của tenant: chỉ đọc <root>/<identity>/<domain>/.env →
+	// tenant không bao giờ thấy env của host hay tenant khác. Lộ qua kitwork().env.
+	t.env = NewEnv(ParseDotEnv(t.resolve(".env")))
 
 	// TỐI ƯU: Đăng ký kitwork vào Builtin Index 0, trả về Struct KitWork
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
@@ -225,12 +256,10 @@ func (t *Tenant) Run() error {
 }
 
 func NewTenant(root string, domain string) *Tenant {
-	identity := "test"
+	var identity string
 	if domain != "" {
 		if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
 			identity = dbIdentity
-		} else {
-			fmt.Println("Error identity system :", domain, " error : ", err)
 		}
 	}
 
@@ -252,12 +281,6 @@ func NewTenant(root string, domain string) *Tenant {
 		rateLimitIpRate:   DefaultTenantIpRate,
 		rateLimitUserRate: DefaultTenantUserRate,
 		rateLimitPeriod:   RateLimitPeriod,
-	}
-
-	switch root {
-	case "", "./", "../", "/", ".", "..":
-		tenant.config.base = "."
-		break
 	}
 
 	return tenant

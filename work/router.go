@@ -47,6 +47,15 @@ type Router struct {
 	catch  *value.Lambda
 	final  *value.Lambda
 
+	// View route: render a page directly (no JS handler, no VM). Set by .view().
+	isView     bool
+	isNotfound bool // a view route that responds 404 (set by .notfound())
+	viewArgs   []value.Value
+
+	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
+	// Set by .jit(); the path defaults to /jitcss.
+	isJIT bool
+
 	response *Response
 	request  *http.Request
 
@@ -145,6 +154,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
 		w.WriteHeader(r.response.Code())
 		w.Write([]byte(data.String()))
+	case "css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.WriteHeader(r.response.Code())
+		w.Write(r.response.toBytes())
 	case "json":
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(r.response.Code())
@@ -195,6 +208,127 @@ func (r *Router) New(method, path string) *Router {
 
 func (r *Router) Get(path string) *Router  { return r.New("GET", path) }
 func (r *Router) Post(path string) *Router { return r.New("POST", path) }
+
+// Notfound registers the 404 fallback. The engine routes to a NOTFOUND-method
+// route when nothing else matches (see Tenant.Serve) — no "/*-must-be-last" trap.
+//
+//	router.notfound("*")         // render the REQUESTED path's page (section-aware
+//	                             // shell, falling through to notfound.kitwork.html) @ 404
+//	router.notfound("/oops")     // always render /oops @ 404
+//	router.notfound((ctx) => …)  // full control: a handler (status it yourself)
+//
+// The string forms are view routes (no handler, no VM, like .view()) that respond 404.
+func (r *Router) Notfound(args ...value.Value) *Router {
+	route := r.New("NOTFOUND", "/*")
+	if len(args) == 1 && args[0].K == value.Func {
+		return route.Handle(args[0]) // handler form: caller owns the response
+	}
+	route.isView = true
+	route.isNotfound = true
+	route.viewArgs = args
+	return route
+}
+
+// Context registers tenant-wide defaults available to every handler via ctx.
+// Today it stores the default render used by ctx.view(): router.context({ render }).
+// The render value wraps a *Render (value.New → {K:Struct, V:*Render}), so we pull
+// the pointer straight back out. Other keys (db, etc.) can be added here later.
+func (r *Router) Context(cfg value.Value) *Router {
+	if cfg.IsMap() {
+		if rv, ok := cfg.Map()["render"]; ok {
+			if rd, ok := rv.V.(*Render); ok {
+				r.tenant.viewRender = rd
+			}
+		}
+	}
+	return r
+}
+
+// Page registers a GET route that renders its page — the route-first declaration of
+// a static page. The first arg is ALWAYS the ROUTE path; an optional second arg is the
+// page file when route ≠ page. Render runs with no handler and no VM.
+//
+//	router.page("/about")       // GET /about → app/about/page.kitwork.html
+//	router.page("/", "/home")   // route ≠ page → 2nd arg is the page
+//	router.page("/docs/:site?") // dynamic; page derived from the route
+//
+// It is exactly router.get(path).view(pageFile?). For per-request data use
+// router.get(path).handle((ctx) => ctx.view(data)).
+func (r *Router) Page(args ...value.Value) *Router {
+	if len(args) == 0 || !args[0].IsString() {
+		return r // route path required
+	}
+	route := r.New("GET", args[0].String())
+	route.isView = true
+	route.viewArgs = args[1:]
+	return route
+}
+
+// View ends a BUILT route by rendering a page — no JS handler, no VM:
+//
+//	router.get("/about").view()     // → app/about/page.kitwork.html
+//	router.get("/").view("/home")   // route ≠ page → arg is the page
+//
+// Args match ctx.view(): a string is the page, a map is binding. To declare a page
+// route in one call use router.page(path); for per-request data use
+// .handle((ctx) => ctx.view(data)).
+func (r *Router) View(args ...value.Value) *Router {
+	r.isView = true
+	r.viewArgs = args
+	return r
+}
+
+// Jit declares the site-wide JIT CSS feature: a single, browser-cached stylesheet built
+// from the utility classes used across the tenant's templates, served at /jitcss (or a
+// custom path), and auto-linked into every rendered page. Declare it once at boot:
+//
+//	router.jit()                              // serve at /jitcss + auto-link in <head>
+//	router.jit("/styles.css")                 // custom path
+//	router.jit({ path: "/css", inject: false }) // serve only; place the <link> yourself
+//
+// This is SERVICE mode — one shared, cached request for the whole site. Contrast with
+// render.jit(), which INLINES a per-page <style>. The route serves CSS in Go (no VM).
+func (r *Router) Jit(args ...value.Value) *Router {
+	path := JITStylesheetPath
+	inject := true
+	if len(args) > 0 {
+		a := args[0]
+		if a.IsString() {
+			if p := a.String(); p != "" {
+				path = p
+			}
+		} else if a.IsMap() {
+			m := a.Map()
+			if p, ok := m["path"]; ok && p.String() != "" {
+				path = p.String()
+			}
+			if v, ok := m["inject"]; ok {
+				inject = v.Truthy()
+			}
+		}
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	// Surface an obvious clash instead of failing silently: the routes table is last-write-
+	// wins, so if another GET route already owns this path one of them will be shadowed.
+	if r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", path); rt != nil && !rt.isJIT {
+			fmt.Printf("[router.jit] GET %s is already registered by another route — it will be shadowed\n", path)
+		}
+	}
+
+	route := r.New("GET", path)
+	route.isJIT = true
+
+	// Auto-link uses the route's CANONICAL path (New normalizes basePath + slashes), so the
+	// injected <link href> can never diverge from the route that actually serves the CSS —
+	// e.g. router.group("/assets").jit("/css") serves AND links /assets/css. Set once at boot.
+	r.tenant.jitRoute = route.Path
+	r.tenant.jitInject = inject
+	return route
+}
 
 func (r *Router) Handle(l value.Value) *Router { r.handle, _ = l.V.(*value.Lambda); return r }
 func (r *Router) Guard(l value.Value) *Router {
@@ -595,6 +729,8 @@ func (r *Router) saveStaticCache() {
 		contentType = "text/html; charset=utf-8"
 	case "text":
 		contentType = "text/plain; charset=utf-8"
+	case "css":
+		contentType = "text/css; charset=utf-8"
 	case "bytes":
 		contentType = "application/octet-stream"
 	case "image":

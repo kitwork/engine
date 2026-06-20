@@ -23,6 +23,8 @@ type Config struct {
 	Root       string            `json:"root" yaml:"root"`
 	Databases  []database.Config `json:"database" yaml:"database"`
 	Domains    []string          `json:"domains" yaml:"domains"`
+	Canonical  string            `json:"canonical" yaml:"canonical"`   // "apex" | "www" | "" (off)
+	Redirects  map[string]string `json:"redirects" yaml:"redirects"`   // host → target host or full URL
 	MaxEnergy  uint64            `json:"max_energy" yaml:"max_energy"`
 	HotReload  bool              `json:"hot_reload" yaml:"hot_reload"`
 	Hostname   string            `json:"hostname" yaml:"hostname"`
@@ -147,6 +149,23 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	}
 	if rawDomains != nil {
 		cfg.Domains = coerceStringSlice(rawDomains)
+	}
+
+	// Domain redirects: canonical (apex/www) + a host→target map.
+	if val, ok := raw["canonical"]; ok {
+		if s, ok := val.(string); ok {
+			cfg.Canonical = s
+		}
+	}
+	if val, ok := raw["redirects"]; ok {
+		if m, ok := val.(map[string]interface{}); ok {
+			cfg.Redirects = make(map[string]string, len(m))
+			for k, v := range m {
+				if s, ok := v.(string); ok {
+					cfg.Redirects[k] = s
+				}
+			}
+		}
 	}
 
 	// Dynamic database/databases mapping

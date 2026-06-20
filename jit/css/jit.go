@@ -2,10 +2,144 @@ package css
 
 import (
 	"fmt"
+	"hash/fnv"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+var classAttrRe = regexp.MustCompile(`class="([^"]+)"`)
+
+// jitCache maps a class-set signature → generated CSS. The class SET of a page is stable
+// across requests (dynamic data doesn't change it), so this skips re-resolution.
+var jitCache sync.Map
+
+// GenerateJITCached scans HTML for the Tailwind/utility classes actually used and returns
+// the minimal CSS for them, deduped and cached by the (sorted, unique) class set. This is
+// the server-side JIT entry point — only what the page uses is emitted.
+func GenerateJITCached(html string) string {
+	seen := make(map[string]bool)
+	var classes []string
+	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
+		for _, c := range strings.Fields(m[1]) {
+			if !seen[c] {
+				seen[c] = true
+				classes = append(classes, c)
+			}
+		}
+	}
+	if len(classes) == 0 {
+		return ""
+	}
+	sort.Strings(classes)
+
+	h := fnv.New64a()
+	for _, c := range classes {
+		_, _ = h.Write([]byte(c))
+		_, _ = h.Write([]byte{' '})
+	}
+	sig := h.Sum64()
+	if v, ok := jitCache.Load(sig); ok {
+		return v.(string)
+	}
+
+	out := buildJITCSS(classes)
+	jitCache.Store(sig, out)
+	return out
+}
+
+func buildJITCSS(classes []string) string {
+	groups := make(map[string][]string)
+	for _, c := range classes {
+		css, sel, mediaQ := ResolveCore(c)
+		if css == "" {
+			continue
+		}
+		rule := fmt.Sprintf("%s { %s }\n", sel, css)
+		groups[mediaQ] = append(groups[mediaQ], rule)
+	}
+
+	var b strings.Builder
+	// 1. Base styles (no media query)
+	if baseRules, ok := groups[""]; ok {
+		for _, r := range baseRules {
+			b.WriteString(r)
+		}
+	}
+
+	// Ordered list of known media queries for correct CSS cascading
+	orderedMQs := []string{
+		"@media (max-width: 1535.98px)",
+		"@media (max-width: 1279.98px)",
+		"@media (max-width: 1023.98px)",
+		"@media (max-width: 767.98px)",
+		"@media (max-width: 639.98px)",
+		"@media (min-width: 640px)",
+		"@media (min-width: 768px)",
+		"@media (min-width: 1024px)",
+		"@media (min-width: 1280px)",
+		"@media (min-width: 1536px)",
+	}
+
+	seenMQ := make(map[string]bool)
+	for _, mq := range orderedMQs {
+		if rules, ok := groups[mq]; ok {
+			b.WriteString(mq + " {\n")
+			for _, r := range rules {
+				b.WriteString("\t" + r)
+			}
+			b.WriteString("}\n")
+			seenMQ[mq] = true
+		}
+	}
+
+	// Custom/remaining media queries (if any)
+	var remainingMQs []string
+	for mq := range groups {
+		if mq != "" && !seenMQ[mq] {
+			remainingMQs = append(remainingMQs, mq)
+		}
+	}
+	sort.Strings(remainingMQs)
+	for _, mq := range remainingMQs {
+		b.WriteString(mq + " {\n")
+		for _, r := range groups[mq] {
+			b.WriteString("\t" + r)
+		}
+		b.WriteString("}\n")
+	}
+
+	return b.String()
+}
+
+// GenerateSiteCSS scans many HTML sources (a whole tenant's templates) for utility classes
+// and returns ONE combined stylesheet — the site-wide JIT served at a single path like
+// /jitcss, so the browser caches it once for every page instead of inlining per render.
+func GenerateSiteCSS(htmls ...string) string {
+	seen := make(map[string]bool)
+	var classes []string
+	for _, h := range htmls {
+		for _, m := range classAttrRe.FindAllStringSubmatch(h, -1) {
+			for _, c := range strings.Fields(m[1]) {
+				if !seen[c] {
+					seen[c] = true
+					classes = append(classes, c)
+				}
+			}
+		}
+	}
+	if len(classes) == 0 {
+		return ""
+	}
+	sort.Strings(classes)
+	css := buildJITCSS(classes)
+	if strings.Contains(css, "animation:") {
+		css = AnimKeyframes + "\n" + css
+	}
+	return css
+}
 
 // ============================================================================
 // KITWORK INDUSTRIAL SYSTEM (v15.2) - JIT ENGINE MAIN COMPONENT
@@ -229,18 +363,20 @@ func GenerateFramework() string {
 }
 
 func GenerateJIT(html string) string {
-	var b strings.Builder
 	seen := make(map[string]bool)
+	var classes []string
 	re := regexp.MustCompile(`class="([^"]+)"`)
 	for _, m := range re.FindAllStringSubmatch(html, -1) {
 		for _, class := range strings.Fields(m[1]) {
 			if !seen[class] {
-				if css := resolve(class); css != "" {
-					b.WriteString(css)
-					seen[class] = true
-				}
+				seen[class] = true
+				classes = append(classes, class)
 			}
 		}
 	}
-	return b.String()
+	if len(classes) == 0 {
+		return ""
+	}
+	sort.Strings(classes)
+	return buildJITCSS(classes)
 }

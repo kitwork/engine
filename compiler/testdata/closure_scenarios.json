@@ -1,0 +1,315 @@
+{
+  "summary": "Adversarially design closure edge-case scenarios to stress-test a core VM closure-capture fix",
+  "agentCount": 6,
+  "logs": [
+    "collected 38 closure scenarios across 6 risk areas"
+  ],
+  "result": {
+    "scenarios": [
+      {
+        "name": "five_level_chain_read_after_churn",
+        "js": "const a1 = (a) => {\n  const b1 = (b) => {\n    const c1 = (c) => {\n      const d1 = (d) => {\n        const e1 = () => a + b + c + d;\n        return e1;\n      };\n      return d1(8);\n    };\n    return c1(4);\n  };\n  return b1(2);\n};\nconst leaf = a1(1);\nconst churn = (n) => {\n  if (n <= 0) { return 0; }\n  const junk1 = n * 3;\n  const junk2 = junk1 + 7;\n  return junk2 + churn(n - 1);\n};\nchurn(40);\nconst result = leaf();",
+        "expectKind": "number",
+        "expectNum": 15,
+        "rationale": "Captured var lives 5 frames up (a,b,c,d) after every intermediate frame returned AND 40 recursive churn calls reuse those exact slots; tests the full Parent chain, not just the immediate captured frame.",
+        "area": "nested-chain"
+      },
+      {
+        "name": "deep_mutation_seen_by_sibling_after_churn",
+        "js": "const outer = () => {\n  let acc = 0;\n  const adder = (n) => {\n    const bump = () => { acc = acc + n; return acc; };\n    return bump;\n  };\n  const reader = () => acc;\n  return { add: adder, read: reader };\n};\nconst api = outer();\nconst churn = (n) => {\n  if (n <= 0) { return 1; }\n  const t = n + n;\n  return t + churn(n - 1);\n};\nconst plus5 = api.add(5);\nchurn(25);\nplus5();\nchurn(25);\nplus5();\nchurn(25);\nconst result = api.read();",
+        "expectKind": "number",
+        "expectNum": 10,
+        "rationale": "Mutation via storeScopeChain writes into a grandparent captured map shared by two distinct closures (bump and reader); churn between every mutation must not wipe acc, and the sibling reader must observe the SAME map by reference.",
+        "area": "nested-chain"
+      },
+      {
+        "name": "early_closure_survives_self_recursion",
+        "js": "const build = (n) => {\n  const tag = n * 100;\n  const peek = () => tag;\n  if (n <= 0) { return peek; }\n  const deeper = build(n - 1);\n  const combine = () => peek() + deeper();\n  return combine;\n};\nconst f = build(3);\nconst noise = (k) => {\n  if (k <= 0) { return 0; }\n  const z = k - 1;\n  return z + noise(z);\n};\nnoise(30);\nconst result = f();",
+        "expectKind": "number",
+        "expectNum": 600,
+        "rationale": "build recurses into its OWN slot repeatedly; each level's 'peek' closure captures that level's distinct frame. If recursion reuse wipes an earlier level's captured map, combine() at level 3 (300) + level2(200)+level1(100)+level0(0)=600 breaks.",
+        "area": "nested-chain"
+      },
+      {
+        "name": "map_callback_closures_capture_distinct_frames",
+        "js": "const makeAdders = () => {\n  const base = 1000;\n  const nums = [1, 2, 3, 4];\n  const fns = nums.map((v) => {\n    const local = v * 10;\n    return () => base + local;\n  });\n  return fns;\n};\nconst adders = makeAdders();\nconst churn = (n) => {\n  if (n <= 0) { return 0; }\n  const a = n;\n  const b = a + 1;\n  return b + churn(n - 1);\n};\nchurn(35);\nconst sum = adders[0]() + adders[1]() + adders[2]() + adders[3]();\nconst result = sum;",
+        "expectKind": "number",
+        "expectNum": 4100,
+        "rationale": "Four closures are created in successive .map callback invocations that reuse the same callback frame slot; each must keep its own 'local' AND share the grandparent 'base' map. churn afterward reuses the makeAdders frame slot too. 4*1000 + (10+20+30+40)=4100.",
+        "area": "nested-chain"
+      },
+      {
+        "name": "mutual_capture_outer_outer_invoked_last",
+        "js": "const top = () => {\n  let counter = 7;\n  const mid = () => {\n    const factor = 3;\n    const leaf = () => counter * factor;\n    const mutate = () => { counter = counter + 1; return counter; };\n    return { leaf: leaf, mutate: mutate };\n  };\n  return mid();\n};\nconst pair = top();\nconst churn = (n) => {\n  if (n <= 0) { return 0; }\n  const q = n * 2;\n  return q + churn(n - 1);\n};\nchurn(20);\npair.mutate();\nchurn(20);\npair.mutate();\nchurn(20);\nconst result = pair.leaf();",
+        "expectKind": "number",
+        "expectNum": 27,
+        "rationale": "leaf reaches up TWO levels for counter (top) and ONE for factor (mid); mutate writes counter two levels up via storeScopeChain. After two mutations interleaved with churn, counter=9, factor=3 -> leaf=27. Tests reference semantics across a 2-level Parent link with intervening slot churn.",
+        "area": "nested-chain"
+      },
+      {
+        "name": "grandparent_alive_when_only_child_captured",
+        "js": "const gp = () => {\n  const g = 5;\n  const parent = () => {\n    const p = 11;\n    const child = () => {\n      const c = () => g + p;\n      return c;\n    };\n    return child();\n  };\n  return parent();\n};\nconst f = gp();\nconst noise = (k) => {\n  if (k <= 0) { return 0; }\n  const tmp1 = k + k;\n  const tmp2 = tmp1 * 2;\n  return tmp2 + noise(k - 1);\n};\nnoise(45);\nconst result = f();",
+        "expectKind": "number",
+        "expectNum": 16,
+        "rationale": "The deepest closure c captures p (parent frame) and g (grandparent gp frame), but only c's immediate frame is marked captured at creation; both gp and parent frames already returned. If the Parent link to gp's map is not kept alive independently, g (5) is lost and 16 breaks. 45 noise calls churn all intervening slots.",
+        "area": "nested-chain"
+      },
+      {
+        "name": "factory_capture_then_deep_self_recursion",
+        "js": "const makeAdder = (base) => (x) => base + x;\nconst add100 = makeAdder(100);\nconst sumTo = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  return n + sumTo(n - 1);\n};\nconst deep = sumTo(40);\nconst v = add100(5);\nconst result = v + deep;",
+        "expectKind": "number",
+        "expectNum": 925,
+        "rationale": "Creates a captured closure (add100 over base=100), THEN runs 40 levels of self-recursion that cycle frame slots; if the recursion reuses add100's slot without honoring captured, base is wiped and v becomes nil+5 instead of 105 (105 + sumTo(40)=820 = 925).",
+        "area": "recursion"
+      },
+      {
+        "name": "recursion_collects_per_level_closures",
+        "js": "const build = (n) => {\n  const local = n * 10;\n  const here = () => local;\n  if (n <= 0) {\n    return [here];\n  }\n  const rest = build(n - 1);\n  return rest.concat([here]);\n};\nconst fns = build(5);\nlet total = 0;\nfns.forEach((fn) => {\n  total = total + fn();\n});\nconst result = total;",
+        "expectKind": "number",
+        "expectNum": 150,
+        "rationale": "Every recursion level creates a closure over its OWN local; all 6 captured maps must survive simultaneously while the same frame slots are pushed/popped. If a deeper level's reuse wipes a shallower captured sibling, the collected closures read wrong locals (expect 50+40+30+20+10+0=150).",
+        "area": "recursion"
+      },
+      {
+        "name": "mutual_recursion_around_live_mutating_closure",
+        "js": "const makeCounter = (start) => {\n  let count = start;\n  return () => {\n    count = count + 1;\n    return count;\n  };\n};\nconst tick = makeCounter(0);\nconst isEven = (n) => {\n  if (n === 0) {\n    return true;\n  }\n  return isOdd(n - 1);\n};\nconst isOdd = (n) => {\n  if (n === 0) {\n    return false;\n  }\n  return isEven(n - 1);\n};\nconst parity = isEven(12);\nconst a = tick();\nconst b = tick();\nlet flag = 0;\nif (parity) {\n  flag = 100;\n} else {\n  flag = 0;\n}\nconst result = flag + a + b;",
+        "expectKind": "number",
+        "expectNum": 103,
+        "rationale": "tick captures makeCounter's frame holding mutable count; then mutual even/odd recursion (12 alternating frames) churns slots; afterward tick() must mutate the SAME surviving map via storeScopeChain (1 then 2). Wipe -> nil+1; lost reference -> count resets each call (parity true=100, +1 +2 = 103).",
+        "area": "recursion"
+      },
+      {
+        "name": "factorial_recursion_between_capture_and_use",
+        "js": "const makeMul = (factor) => (x) => factor * x;\nconst triple = makeMul(3);\nconst fact = (n) => {\n  if (n <= 1) {\n    return 1;\n  }\n  return n * fact(n - 1);\n};\nconst f6 = fact(6);\nconst t = triple(f6);\nconst result = t;",
+        "expectKind": "number",
+        "expectNum": 2160,
+        "rationale": "triple captures factor=3; classic factorial self-recursion (6 deep) runs entirely AFTER the capture but BEFORE triple is invoked, maximizing the window for a reused slot to clobber factor. fact(6)=720, *3 = 2160; a wiped factor would give nil*720.",
+        "area": "recursion"
+      },
+      {
+        "name": "self_referential_recursion_via_captured_binding",
+        "js": "const makeSummer = (limit) => {\n  const go = (acc, i) => {\n    if (i > limit) {\n      return acc;\n    }\n    return go(acc + i, i + 1);\n  };\n  return go(0, 1);\n};\nconst makeConst = (k) => () => k;\nconst getK = makeConst(7);\nconst s = makeSummer(50);\nconst result = s + getK();",
+        "expectKind": "number",
+        "expectNum": 1282,
+        "rationale": "go recurses by referencing ITSELF through makeSummer's captured frame (scope-chain self-reference, not a top-level var) across 50 deep frames; getK was captured just before. Both makeSummer's per-call frame and getK's frame must keep distinct captured maps (sum 1..50=1275, +7 = 1282).",
+        "area": "recursion"
+      },
+      {
+        "name": "interleaved_factories_split_by_recursion",
+        "js": "const make = (tag) => () => tag;\nconst f1 = make(1);\nconst countdown = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  return countdown(n - 1);\n};\nconst z1 = countdown(20);\nconst f2 = make(2);\nconst z2 = countdown(20);\nconst f3 = make(4);\nconst z3 = countdown(20);\nconst result = f1() * 100 + f2() * 10 + f3() + z1 + z2 + z3;",
+        "expectKind": "number",
+        "expectNum": 124,
+        "rationale": "Three factory closures (tags 1,2,4) are created with 20-deep recursion runs interleaved BETWEEN each creation, so each capture survives multiple later frame-reuse storms. Any single wiped tag changes the encoded digit (100+20+4 = 124).",
+        "area": "recursion"
+      },
+      {
+        "name": "recursive_factory_returns_closure_per_call",
+        "js": "const makeChain = (n) => {\n  const tagFn = () => n;\n  if (n <= 0) {\n    return tagFn();\n  }\n  const inner = makeChain(n - 1);\n  return tagFn() + inner;\n};\nconst sum = makeChain(8);\nconst makeFlag = (v) => () => v;\nconst flag = makeFlag(1000);\nconst again = makeChain(4);\nconst result = sum + again + flag();",
+        "expectKind": "number",
+        "expectNum": 1046,
+        "rationale": "makeChain both self-recurses AND captures n at each level via tagFn (marking every recursive frame captured); a captured frame must still be safely reused as a NORMAL recursion frame on the next deep call. Then makeFlag is captured and makeChain(4) runs again, re-churning slots (8..0=36, 4..0=10, +1000=1046... expect 36+10+1000=1046).",
+        "area": "recursion"
+      },
+      {
+        "name": "counter_mutated_by_sibling_closure",
+        "js": "const makeCounter = () => {\n  let count = 0;\n  const inc = () => {\n    count = count + 1;\n    return count;\n  };\n  const get = () => count;\n  return ({ inc: inc, get: get });\n};\n\nconst c = makeCounter();\nconst a = c.inc();\nconst b = c.inc();\nconst d = c.inc();\nconst seen = c.get();\nconst result = (a * 1000) + (b * 100) + (d * 10) + seen;\n",
+        "expectKind": "number",
+        "expectNum": 1233,
+        "rationale": "inc() reassigns the captured `let count` from inside a closure while a SIBLING closure get() must observe the same live map — proves both closures share one captured frame map (not snapshots) across repeated mutation.",
+        "area": "mutation"
+      },
+      {
+        "name": "mutate_after_intervening_frame_reuse",
+        "js": "const makeCounter = () => {\n  let n = 10;\n  const bump = () => {\n    n = n + 5;\n    return n;\n  };\n  return bump;\n};\n\nconst noise = (x) => {\n  let a = x + 1;\n  let b = a + 1;\n  let c = b + 1;\n  return a + b + c;\n};\n\nconst bump = makeCounter();\nconst junk1 = noise(1);\nconst junk2 = noise(2);\nconst junk3 = noise(3);\nconst first = bump();\nconst junk4 = noise(4);\nconst junk5 = noise(5);\nconst second = bump();\nconst result = (first * 100) + second + (junk1 - junk1) + (junk5 - junk5);\n",
+        "expectKind": "number",
+        "expectNum": 1520,
+        "rationale": "noise() runs between closure creation and each mutation, recycling the pooled frame slot that held the captured `let n`; if the captured flag fails to preserve the map, the reassignment lands on a wiped/fresh map and bump() returns wrong values (first should be 15, second 20).",
+        "area": "mutation"
+      },
+      {
+        "name": "two_independent_counters_no_crosstalk",
+        "js": "const makeCounter = (start) => {\n  let count = start;\n  const inc = () => {\n    count = count + 1;\n    return count;\n  };\n  return inc;\n};\n\nconst c1 = makeCounter(100);\nconst c2 = makeCounter(200);\nconst r1 = c1();\nconst r2 = c2();\nconst r3 = c1();\nconst r4 = c2();\nconst r5 = c1();\nconst result = (r1 + r3 + r5) + (r2 + r4) * 10000;\n",
+        "expectKind": "number",
+        "expectNum": 4030306,
+        "rationale": "Two counters created back-to-back reuse the same pooled frame slot in sequence; each must capture its OWN map. Interleaved mutation (c1,c2,c1,c2,c1) would corrupt if the second creation wiped the first's captured map or if reassignment leaked across maps.",
+        "area": "mutation"
+      },
+      {
+        "name": "accumulator_mutated_inside_foreach_callback",
+        "js": "const makeAcc = () => {\n  let total = 0;\n  const add = (items) => {\n    items.forEach((x) => {\n      total = total + x;\n    });\n    return total;\n  };\n  const peek = () => total;\n  return ({ add: add, peek: peek });\n};\n\nconst acc = makeAcc();\nconst r1 = acc.add([1, 2, 3]);\nconst r2 = acc.add([10, 20]);\nconst seen = acc.peek();\nconst result = (r1 * 1000) + (r2 * 10) + seen;\n",
+        "expectKind": "number",
+        "expectNum": 6396,
+        "rationale": "The forEach callback is a NESTED closure whose `total = total + x` must reach through TWO scope-chain links (callback -> add frame -> makeAcc captured map) via storeScopeChain. Callback frames are pushed/reused per element; the enclosing captured map must survive so peek() (a sibling) sees 6.",
+        "area": "mutation"
+      },
+      {
+        "name": "reassign_captured_let_with_new_closure",
+        "js": "const build = () => {\n  let op = (x) => x + 1;\n  const setDouble = () => {\n    op = (x) => x * 2;\n  };\n  const run = (x) => op(x);\n  return ({ setDouble: setDouble, run: run });\n};\n\nconst m = build();\nconst before = m.run(10);\nm.setDouble();\nconst after = m.run(10);\nconst result = (before * 100) + after;\n",
+        "expectKind": "number",
+        "expectNum": 1120,
+        "rationale": "A captured `let op` (holding a closure) is REASSIGNED to a brand-new closure from inside setDouble(); run() must observe the NEW function by reference, not a snapshot of the original — stresses that storeScopeChain writes the latest value into the shared captured map that run() reads.",
+        "area": "mutation"
+      },
+      {
+        "name": "deep_chain_mutation_with_reuse_pressure",
+        "js": "const outer = () => {\n  let base = 1;\n  const mid = () => {\n    let mult = 1;\n    const inner = () => {\n      base = base + 1;\n      mult = mult + 10;\n      return base + mult;\n    };\n    return inner;\n  };\n  const innerFn = mid();\n  const readBase = () => base;\n  return ({ innerFn: innerFn, readBase: readBase });\n};\n\nconst spin = (k) => {\n  let s = 0;\n  const step = (i) => {\n    s = s + i;\n  };\n  [1, 2, 3].forEach(step);\n  return s + k;\n};\n\nconst o = outer();\nconst noise1 = spin(1);\nconst x1 = o.innerFn();\nconst noise2 = spin(2);\nconst x2 = o.innerFn();\nconst finalBase = o.readBase();\nconst result = (x1 * 10000) + (x2 * 100) + finalBase + (noise1 - noise1) + (noise2 - noise2);\n",
+        "expectKind": "number",
+        "expectNum": 132403,
+        "rationale": "Multi-level chain: inner mutates `mult` (mid's captured map) AND `base` (outer's captured map) — two separate enclosing frames each marked captured at their own creation. Between calls, spin() (itself using a forEach callback closure) churns pooled frame slots. A missed captured flag on EITHER enclosing frame would wipe its map; readBase (a sibling of innerFn over outer) cross-checks base reached 3. Expect x1=13, x2=24, finalBase=3.",
+        "area": "mutation"
+      },
+      {
+        "name": "fanout_distinct_captures_then_slot_churn",
+        "js": "const makeAdders = () => {\n  const a = 10;\n  const b = 20;\n  const c = 30;\n  const arr = [];\n  arr.push(() => a);\n  arr.push(() => b);\n  arr.push(() => c);\n  return arr;\n};\nconst noise = (x) => {\n  const p = x + 1;\n  const q = x + 2;\n  const r = x + 3;\n  return p + q + r;\n};\nconst fns = makeAdders();\nconst churn = [1, 2, 3, 4, 5].map((n) => noise(n));\nlet total = 0;\ntotal = total + fns[0]();\ntotal = total + fns[1]();\ntotal = total + fns[2]();\nconst result = total + churn[0];\n",
+        "expectKind": "number",
+        "expectNum": 69,
+        "rationale": "One frame fans out 3 closures over distinct names sharing the single f.Vars map; after the factory returns, many noise() calls via .map reuse that depth-1 slot, then all 3 closures are invoked and must still see 10/20/30 (60), plus churn[0]=noise(1)=2+3+4=9, giving 69.",
+        "area": "fan-out"
+      },
+      {
+        "name": "fanout_two_batches_interleaved_same_slot",
+        "js": "const makeBatch = (base) => {\n  const x = base;\n  const arr = [];\n  arr.push(() => x + 1);\n  arr.push(() => x + 2);\n  arr.push(() => x + 3);\n  return arr;\n};\nconst noise = (n) => {\n  const t = n * 7;\n  return t - n;\n};\nconst batch1 = makeBatch(100);\nconst c1 = [9, 8, 7].map((n) => noise(n));\nconst batch2 = makeBatch(200);\nconst c2 = [6, 5, 4].map((n) => noise(n));\nlet s = 0;\ns = s + batch1[0]() + batch1[1]() + batch1[2]();\ns = s + batch2[0]() + batch2[1]() + batch2[2]();\nconst result = s;\n",
+        "expectKind": "number",
+        "expectNum": 912,
+        "rationale": "makeBatch reuses the SAME depth-1 slot twice: first call captures map M1 (x=100, captured=true), noise churn must NOT wipe M1, then the second call must get a FRESH map M2 (x=200) without clobbering M1. batch1=101+102+103=306, batch2=201+202+203=606, total=912.",
+        "area": "fan-out"
+      },
+      {
+        "name": "fanout_closures_invoked_via_map_callback",
+        "js": "const makeFns = (k) => {\n  const a = k;\n  const b = k * 2;\n  const arr = [];\n  arr.push(() => a);\n  arr.push(() => b);\n  return arr;\n};\nconst f1 = makeFns(3);\nconst f2 = makeFns(5);\nconst all = [];\nall.push(f1[0]);\nall.push(f1[1]);\nall.push(f2[0]);\nall.push(f2[1]);\nconst vals = all.map((fn) => fn());\nconst result = vals[0] + vals[1] + vals[2] + vals[3];\n",
+        "expectKind": "number",
+        "expectNum": 24,
+        "rationale": "The fanned-out closures are invoked from inside a .map callback (itself running under ExecuteLambda, which pushes frames), so the invocation itself churns slots while two factory batches must keep distinct captures: f1 a=3,b=6 and f2 a=5,b=10 => 3+6+5+10=24.",
+        "area": "fan-out"
+      },
+      {
+        "name": "fanout_multilevel_scope_chain",
+        "js": "const outer = (o) => {\n  const inner = (i) => {\n    const arr = [];\n    arr.push(() => o + i);\n    arr.push(() => o * i);\n    return arr;\n  };\n  return inner(o + 1);\n};\nconst noise = (n) => {\n  const a = n + 1;\n  const b = n + 2;\n  return a + b;\n};\nconst fns = outer(10);\nconst churn = [1, 2, 3, 4].map((n) => noise(n));\nconst sum = fns[0]() + fns[1]();\nconst result = sum + churn[3];\n",
+        "expectKind": "number",
+        "expectNum": 142,
+        "rationale": "Fanned-out leaf closures read o from the OUTER frame (Parent chain) and i from the INNER frame; BOTH enclosing frames must be flagged captured. After outer/inner return, noise churn reuses both depth-1 and depth-2 slots. o=10,i=11: fns[0]=21, fns[1]=110, sum=131; churn[3]=noise(4)=11; 131+11=142.",
+        "area": "fan-out"
+      },
+      {
+        "name": "fanout_mutated_shared_counter_reference",
+        "js": "const makeCounter = () => {\n  let n = 0;\n  const inc = () => {\n    n = n + 1;\n    return n;\n  };\n  const get = () => n;\n  const arr = [];\n  arr.push(inc);\n  arr.push(get);\n  return arr;\n};\nconst noise = (x) => {\n  const y = x * 3;\n  return y;\n};\nconst c = makeCounter();\nconst churn = [1, 2, 3].map((m) => noise(m));\nconst incFn = c[0];\nconst getFn = c[1];\nincFn();\nincFn();\nincFn();\nconst result = getFn() + churn[2];\n",
+        "expectKind": "number",
+        "expectNum": 12,
+        "rationale": "Two fanned-out closures (inc and get) SHARE the same captured n by reference; after the factory returns and noise churns the slot, three inc() mutations must persist in the surviving captured map and be visible to get(). get()=3, churn[2]=noise(3)=9, 3+9=12.",
+        "area": "fan-out"
+      },
+      {
+        "name": "fanout_array_of_distinct_via_helper_then_burn",
+        "js": "const make = (v) => (() => v);\nconst fns = [11, 22, 33, 44].map((v) => make(v));\nconst noise = (n) => {\n  const a = n + 100;\n  const b = n + 200;\n  return a + b;\n};\nconst burn = [1, 2, 3, 4, 5, 6].map((n) => noise(n));\nconst out = fns.map((fn) => fn());\nconst result = out[0] + out[1] + out[2] + out[3];\n",
+        "expectKind": "number",
+        "expectNum": 110,
+        "rationale": "Each make(v) is a one-frame fan-out producing a closure over its own v, all created by reusing the SAME depth-1 frame slot across four .map iterations; then heavy noise churn reuses that exact slot repeatedly, after which all four closures must still return 11/22/33/44 => 110, proving captured=true forces a fresh map on every reuse instead of wiping the prior capture.",
+        "area": "fan-out"
+      },
+      {
+        "name": "closures_built_in_map_called_after",
+        "js": "const fns = [10, 20, 30].map(n => () => n);\nconst a = fns[0];\nconst b = fns[1];\nconst c = fns[2];\nconst result = a() + b() + c();\n",
+        "expectKind": "number",
+        "expectNum": 60,
+        "rationale": "The canonical loop-variable capture: each .map iteration reuses the SAME callback frame slot; iteration i+1 must see captured=true and allocate a fresh map, or all three closures collapse onto the last n (would give 90) or see a wiped nil (would give 0/NaN).",
+        "area": "iteration"
+      },
+      {
+        "name": "map_closures_survive_later_unrelated_call",
+        "js": "const fns = [1, 2, 3, 4].map(n => () => n);\nconst churn = (k) => {\n  if (k <= 0) { return 0; }\n  const junk = k * 100;\n  return junk + churn(k - 1);\n};\nchurn(8);\nconst result = fns[0]() + fns[1]() + fns[2]() + fns[3]();\n",
+        "expectKind": "number",
+        "expectNum": 10,
+        "rationale": "After building closures inside .map, a deep recursive churn() aggressively reuses the pooled frame slots (including the one the map callback used). If the map-callback frames were not each freshly allocated on capture, churn's locals overwrite the captured n's and the sum breaks (expect 10).",
+        "area": "iteration"
+      },
+      {
+        "name": "foreach_mutates_captured_accumulator",
+        "js": "let total = 0;\nlet count = 0;\n[5, 7, 9].forEach(n => {\n  total = total + n;\n  count = count + 1;\n});\nconst result = total * 100 + count;\n",
+        "expectKind": "number",
+        "expectNum": 2103,
+        "rationale": "Reference semantics under iteration: each forEach callback runs in a reused frame and must write total/count THROUGH the scope chain (storeScopeChain) to the SAME top-level map every iteration. If a fresh map were wrongly allocated mid-iteration, the accumulator would reset (expect total=21, count=3 -> 2103).",
+        "area": "iteration"
+      },
+      {
+        "name": "nested_map_two_level_capture",
+        "js": "const outer = [1, 2];\nconst inner = [10, 20];\nconst grid = outer.map(a => inner.map(b => () => a + b));\nconst f00 = grid[0][0];\nconst f01 = grid[0][1];\nconst f10 = grid[1][0];\nconst f11 = grid[1][1];\nconst result = f00() + f01() + f10() + f11();\n",
+        "expectKind": "number",
+        "expectNum": 66,
+        "rationale": "Two reused frame levels at once: the inner-map callback frame is reused across inner iterations AND across each outer iteration, while the leaf closure reads its own b (inner frame) plus a via Parent.Scope (outer-map callback frame). Both levels must stay captured independently or pairs cross-contaminate (correct: 11+21+12+22 = 66).",
+        "area": "iteration"
+      },
+      {
+        "name": "filter_then_invoke_factory_closures",
+        "js": "const makeAdders = (base) => [1, 2, 3, 4].map(n => () => base + n);\nconst adders = makeAdders(100);\nconst kept = adders.filter((f, i) => i !== 1);\nconst result = kept[0]() + kept[1]() + kept[2]();\n",
+        "expectKind": "number",
+        "expectNum": 308,
+        "rationale": "Each .map closure has a TWO-link chain: its own n (reused map-callback frame) plus base from the enclosing makeAdders frame (Parent.Scope). The closures are then sieved by .filter (more callback-frame reuse) before being called. Surviving indices 0,2,3 give 101+103+104 = 311; a missed capture link would drop base or alias n.",
+        "area": "iteration"
+      },
+      {
+        "name": "map_closure_outer_param_with_intervening_call",
+        "js": "const build = (offset) => [3, 6].map(n => () => offset + n);\nconst fns = build(50);\nconst noise = (x) => {\n  const a = x + 1;\n  const b = a + 1;\n  return a + b;\n};\nnoise(999);\nnoise(7);\nconst result = fns[0]() + fns[1]();\n",
+        "expectKind": "number",
+        "expectNum": 109,
+        "rationale": "Stress the Parent.Scope link specifically: closures capture n (map-callback frame) and offset (build's frame). After the map completes, build returns and unrelated noise() calls churn the same frame slots. If build's frame map were recycled (its captured flag not respected because the capture happened in a NESTED map-callback frame, not build's own frame), offset would vanish; correct sum 53+56 = 109.",
+        "area": "iteration"
+      },
+      {
+        "name": "interleaved_counter_factory_churn",
+        "js": "const makeCounter = (start) => {\n  let count = start;\n  const inc = () => {\n    count = count + 1;\n    return count;\n  };\n  return inc;\n};\n\nconst c0 = makeCounter(0);\nconst c1 = makeCounter(10);\nconst c2 = makeCounter(20);\nconst c3 = makeCounter(30);\nconst c4 = makeCounter(40);\n\nconst burn = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  const a = n + 1;\n  const b = a + 1;\n  return b + burn(n - 1);\n};\nlet junk = 0;\njunk = burn(60);\njunk = burn(55);\njunk = burn(50);\n\nlet total = 0;\ntotal = total + c2();\ntotal = total + c2();\ntotal = total + c4();\ntotal = total + c0();\ntotal = total + c0();\ntotal = total + c0();\ntotal = total + c3();\ntotal = total + c1();\ntotal = total + c1();\nconst final0 = c0();\nconst final1 = c1();\nconst final2 = c2();\nconst final3 = c3();\nconst final4 = c4();\nconst result = final0 + final1 + final2 + final3 + final4;\n",
+        "expectKind": "number",
+        "expectNum": 114,
+        "rationale": "Five mutating counter closures are created, then a deep recursive burn() churns the exact frame slots they captured, then they are mutated in interleaved (non-creation) order; if any captured 'count' map was wiped or aliased, the final per-counter sums (3+12+22+31+41) break.",
+        "area": "churn-order"
+      },
+      {
+        "name": "triple_nested_chain_out_of_order",
+        "js": "const level1 = (a) => {\n  const level2 = (b) => {\n    const level3 = (c) => {\n      const leaf = () => a + b + c;\n      return leaf;\n    };\n    return level3;\n  };\n  return level2;\n};\n\nconst leafA = level1(100)(20)(3);\nconst leafB = level1(400)(50)(6);\nconst leafC = level1(700)(80)(9);\n\nconst deep = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  const x = n * 2;\n  const y = x + 1;\n  return deep(n - 1) + y - x;\n};\nlet drain = 0;\ndrain = deep(40);\ndrain = deep(38);\ndrain = deep(36);\n\nconst result = leafC() + leafA() + leafB();\n",
+        "expectKind": "number",
+        "expectNum": 1368,
+        "rationale": "A closure-capturing-closure-capturing-closure: each leaf reads grandparent a, parent b, own c via the Parent scope chain. The intermediate level1/level2 frames are reused by deep() churn before the leaves run, so any missed 'captured' marking on a NON-defining enclosing frame wipes a or b; correct sums are 123, 456, 789.",
+        "area": "churn-order"
+      },
+      {
+        "name": "closures_invoke_each_other_reverse",
+        "js": "const buildAdders = (base) => {\n  const addBase = (x) => x + base;\n  return addBase;\n};\n\nconst add1 = buildAdders(1);\nconst add100 = buildAdders(100);\nconst add10000 = buildAdders(10000);\n\nconst compose = (f, g) => {\n  const h = (v) => f(g(v));\n  return h;\n};\n\nconst stack1 = compose(add10000, compose(add100, add1));\nconst stack2 = compose(add1, compose(add10000, add100));\n\nconst spin = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  const t1 = n + n;\n  const t2 = t1 + n;\n  return spin(n - 1) + t2 - t1 - n;\n};\nlet noise = 0;\nnoise = spin(50);\nnoise = spin(45);\nnoise = spin(48);\n\nconst r2 = stack2(7);\nconst r1 = stack1(0);\nconst result = r1 + r2;\n",
+        "expectKind": "number",
+        "expectNum": 20209,
+        "rationale": "Composed closures hold other closures (compose's h captures f and g, which are themselves base-capturing closures); heavy spin() churn runs between build and invocation, and the two stacks are invoked in reverse order. stack1(0)=10101, stack2(7)=10117; any wiped 'base' or wiped f/g reference corrupts the total.",
+        "area": "churn-order"
+      },
+      {
+        "name": "captured_array_mutation_after_churn",
+        "js": "const makeBag = () => {\n  const items = [];\n  const push = (v) => {\n    items.push(v);\n    return items.length;\n  };\n  const sum = () => {\n    let s = 0;\n    items.forEach((it) => {\n      s = s + it;\n    });\n    return s;\n  };\n  return { push: push, sum: sum };\n};\n\nconst bagX = makeBag();\nconst bagY = makeBag();\nconst bagZ = makeBag();\n\nbagX.push(1);\nbagY.push(10);\nbagZ.push(100);\n\nconst recurse = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  const local = [n, n + 1, n + 2];\n  let acc = 0;\n  local.forEach((e) => {\n    acc = acc + e;\n  });\n  return recurse(n - 1);\n};\nlet thrash = 0;\nthrash = recurse(40);\nthrash = recurse(35);\n\nbagZ.push(200);\nbagX.push(2);\nbagY.push(20);\nbagX.push(4);\n\nconst result = bagX.sum() + bagY.sum() + bagZ.sum();\n",
+        "expectKind": "number",
+        "expectNum": 337,
+        "rationale": "Each bag's push/sum closures share a captured 'items' array (reference semantics); recurse() churns frames AND drives forEach callbacks through ExecuteLambda (the inline-CALL path that never sets captured), then bags are mutated/read interleaved. bagX=1+2+4=7, bagY=10+20=30, bagZ=100+200=300, plus cross via forEach sum; correct total is 637.",
+        "area": "churn-order"
+      },
+      {
+        "name": "factory_array_then_map_churn",
+        "js": "const makeGetter = (n) => {\n  const get = () => n * n;\n  return get;\n};\n\nconst getters = [1, 2, 3, 4, 5].map((n) => makeGetter(n));\n\nconst churn = (k) => {\n  if (k <= 0) {\n    return 0;\n  }\n  const tmp = makeGetter(k);\n  const v = tmp();\n  return churn(k - 1);\n};\nlet sink = 0;\nsink = churn(50);\nsink = churn(47);\n\nlet total = 0;\ntotal = total + getters[3]();\ntotal = total + getters[0]();\ntotal = total + getters[4]();\ntotal = total + getters[2]();\ntotal = total + getters[1]();\nconst result = total;\n",
+        "expectKind": "number",
+        "expectNum": 55,
+        "rationale": "Closures are created INSIDE a .map callback (ExecuteLambda path), so each makeGetter frame is captured while running under ExecuteLambda rather than Run(); churn() then creates+discards more getters reusing those slots, and the stored getters are invoked out of index order. Each must still see its own n: 16+1+25+9+4 = 55.",
+        "area": "churn-order"
+      },
+      {
+        "name": "shadowed_names_interleaved_churn",
+        "js": "const make = (x) => {\n  const f = () => {\n    const x2 = x + 1000;\n    return x2;\n  };\n  return f;\n};\n\nconst a = make(1);\nconst b = make(2);\nconst c = make(3);\nconst d = make(4);\n\nconst loop = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  const x = n;\n  const inner = () => {\n    const x = 7;\n    return x;\n  };\n  const got = inner();\n  return loop(n - 1) + got - 7;\n};\nlet waste = 0;\nwaste = loop(60);\nwaste = loop(58);\nwaste = loop(56);\n\nconst result = d() + b() + a() + c();\n",
+        "expectKind": "number",
+        "expectNum": 4010,
+        "rationale": "All closures capture a variable literally named 'x', and loop()'s churn frames ALSO bind a local 'x' (plus a shadowing inner 'x'); if a stale reused map isn't fully replaced/cleared, a captured x could read a leftover churn 'x'. Out-of-order invocation must still yield 1004+1002+1001+1003 = 4010.",
+        "area": "churn-order"
+      },
+      {
+        "name": "deep_chain_partial_capture_reverse",
+        "js": "const a1 = (p) => {\n  const a2 = (q) => {\n    const a3 = (r) => {\n      const a4 = (s) => {\n        const leaf = () => p + q + r + s;\n        return leaf;\n      };\n      return a4;\n    };\n    return a3;\n  };\n  return a2;\n};\n\nconst L = a1(1)(2)(3)(4);\nconst M = a1(10)(20)(30)(40);\nconst N = a1(100)(200)(300)(400);\n\nconst grind = (n) => {\n  if (n <= 0) {\n    return 0;\n  }\n  const w1 = n + 1;\n  const w2 = w1 + 1;\n  const w3 = w2 + 1;\n  const w4 = w3 + 1;\n  return grind(n - 1) + w4 - w3 - w2 + w1 - 2;\n};\nlet g = 0;\ng = grind(45);\ng = grind(42);\ng = grind(48);\n\nconst result = N() + L() + M();\n",
+        "expectKind": "number",
+        "expectNum": 1110,
+        "rationale": "Four-level scope chain (leaf reads p,q,r,s across four distinct enclosing frames). grind() pushes four-deep recursion to maximize reuse of every chain level's slot before the leaves run in reverse order; missing the captured mark on ANY of the four enclosing frames wipes one term. L=10, M=100, N=1000, total 1110.",
+        "area": "churn-order"
+      }
+    ]
+  }
+}

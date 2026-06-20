@@ -88,6 +88,12 @@ func (r *Response) SVG(data value.Value, code ...int) {
 	r.Return(data, "svg", code...)
 }
 
+// CSS responds with Content-Type: text/css — pair with render.css() to serve a stylesheet
+// from a handler: res.css(render.css()). Works with .cache()/.static() like any response.
+func (r *Response) CSS(data value.Value, code ...int) {
+	r.Return(data, "css", code...)
+}
+
 func (r *Response) Bytes(data []byte, code ...int) {
 	r.Return(value.New(data), "bytes", code...)
 }
