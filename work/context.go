@@ -83,6 +83,8 @@ func (c *Context) arguments(lambda *value.Lambda) []value.Value {
 			args = append(args, value.New(c.Request()))
 		case "res", "response":
 			args = append(args, value.New(c.Response()))
+		case "sse":
+			args = append(args, value.New(&SseHelper{tenant: c.tenant(), context: c}))
 		case "err", "error", "e":
 			if c.router().err != nil {
 				args = append(args, value.New(c.router().err.Error()))

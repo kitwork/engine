@@ -49,16 +49,17 @@ type Tenant struct {
 	dbMu      sync.Mutex
 
 	// Rate Limiting fields
-	rateLimiterMu    sync.Mutex
-	currentLimiters  map[string]*RateLimiter
-	previousLimiters map[string]*RateLimiter
-	lastRotation     time.Time
+	limiters     *LimiterStore // this tenant's own rate-limit buckets (tenant-scoped rules)
+	hostLimiters *LimiterStore // shared host store for scope:"server" rules; injected by core
 
 	rateLimitEnabled  bool
 	rateLimitRate     int
 	rateLimitIpRate   int
 	rateLimitUserRate int
 	rateLimitPeriod   time.Duration
+
+	sseMu     sync.Mutex
+	sseBroker *SSEBroker
 }
 
 type Cache struct {
@@ -273,9 +274,7 @@ func NewTenant(root string, domain string) *Tenant {
 		},
 		cache:             make(map[string]*Responser),
 		databases:         make(map[string]*sql.DB),
-		currentLimiters:   make(map[string]*RateLimiter),
-		previousLimiters:  make(map[string]*RateLimiter),
-		lastRotation:      time.Now(),
+		limiters:          NewLimiterStore(RateLimitPeriod),
 		rateLimitEnabled:  RateLimitEnabled,
 		rateLimitRate:     DefaultTenantRate,
 		rateLimitIpRate:   DefaultTenantIpRate,
@@ -285,3 +284,33 @@ func NewTenant(root string, domain string) *Tenant {
 
 	return tenant
 }
+
+// SSEBroker returns the tenant-scoped event broker, initializing it on-demand
+func (t *Tenant) SSEBroker() *SSEBroker {
+	t.sseMu.Lock()
+	defer t.sseMu.Unlock()
+	if t.sseBroker == nil {
+		t.sseBroker = NewSSEBroker()
+	}
+	return t.sseBroker
+}
+
+// Close releases all tenant-level resources including open database connections and active SSE brokers
+func (t *Tenant) Close() {
+	t.sseMu.Lock()
+	if t.sseBroker != nil {
+		t.sseBroker.Stop()
+	}
+	t.sseMu.Unlock()
+
+	t.dbMu.Lock()
+	defer t.dbMu.Unlock()
+	for alias, db := range t.databases {
+		db.Close()
+		delete(t.databases, alias)
+	}
+}
+
+// SetHostLimiters injects the shared host limiter store so this tenant's scope:"server" route
+// rules count against the server-wide buckets (across all tenants). Called by core at boot.
+func (t *Tenant) SetHostLimiters(s *LimiterStore) { t.hostLimiters = s }

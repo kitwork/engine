@@ -82,6 +82,7 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	// KHỞI TẠO CONTEXT (Chính là Router copy cho lượt chạy này để tránh race conditions)
 	ctxRouter := *matched
 	ctxRouter.request = r
+	ctxRouter.responseWriter = w
 	ctxRouter.params = params
 	ctxRouter.response = &Response{} // Response riêng cho lượt chạy này
 	if matched.response != nil && matched.response.IsSend() {
@@ -179,12 +180,17 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vm := vmPool.Get().(*runtime.VM)
-	defer vmPool.Put(vm)
+	ctxRouter.run(vm, matched)
+	vmPool.Put(vm)
 
-	ctxRouter.run(vm, w, matched)
+	if ctxRouter.response != nil && ctxRouter.response.Kind() == "sse" {
+		ctxRouter.streamSSE(w)
+	} else {
+		ctxRouter.responder(w)
+	}
 }
 
-func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
+func (r *Router) run(vm *runtime.VM, original *Router) {
 	vm.FastReset(r.tenant.bytecode.Instructions, r.tenant.bytecode.Constants, r.tenant.vm.Globals, r.tenant.bytecode.SourceMap)
 	vm.MaxEnergy = r.tenant.MaxEnergy
 
@@ -264,14 +270,14 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 				r.tenant.cacheLock.RUnlock()
 				r.response = cached.Response
 				r.runFinally(vm, ctxObj)
-				r.responder(w)
+				r.responder(r.responseWriter)
 				return
 			}
 			r.tenant.cacheLock.RUnlock()
 		}
 
 		if original != nil && original.staticTTL > 0 {
-			if r.serveStaticCache(w, r.request) {
+			if r.serveStaticCache(r.responseWriter, r.request) {
 				r.runFinally(vm, ctxObj)
 				return
 			}
@@ -315,7 +321,6 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 
 				// Ghi đè Response bằng báo cáo JSON
 				r.response.JSON(value.New(report))
-				r.responder(w)
 				return
 			}
 
@@ -360,9 +365,6 @@ func (r *Router) run(vm *runtime.VM, w http.ResponseWriter, original *Router) {
 
 	// 6. FINALLY: Luôn luôn chạy cuối cùng cho mọi request
 	r.runFinally(vm, ctxObj)
-
-	// Gửi phản hồi cuối cùng
-	r.responder(w)
 
 	// 7. Lưu cache nếu thành công
 	if original != nil && r.err == nil && r.response.IsSend() {

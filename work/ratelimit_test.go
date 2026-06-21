@@ -78,18 +78,13 @@ func TestTenantCheckRateLimit(t *testing.T) {
 	tenant := &Tenant{
 		rateLimitEnabled: true,
 		rateLimitPeriod:  time.Second,
-		currentLimiters:  make(map[string]*RateLimiter),
-		previousLimiters: make(map[string]*RateLimiter),
-		lastRotation:     time.Now(),
 	}
 
 	// Route limit: 3 requests
 	matchedRoute := &Router{
-		hasLimit:    true,
-		limitRate:   3,
-		limitPeriod: time.Second,
-		Method:      "GET",
-		Path:        "/test",
+		limitRules: []rateRule{{Type: "ip", Rate: 3, Period: time.Second}},
+		Method:     "GET",
+		Path:       "/test",
 	}
 
 	r1 := httptest.NewRequest("GET", "http://localhost/test", nil)
@@ -114,62 +109,36 @@ func TestTenantCheckRateLimit(t *testing.T) {
 		t.Errorf("expected status 429, got %d", wBlocked.Code)
 	}
 
-	// Test Route-level API Limit configuration in JavaScript
+	// Test Route-level API Limit configuration in JavaScript. Each .Limit() REPLACES the rules;
+	// the legacy/single-map forms each produce exactly one "ip" rule.
 	router := &Router{tenant: tenant}
-	
-	// Test String Case
+	one := func(label string, wantRate int, wantPeriod time.Duration) {
+		if len(router.limitRules) != 1 || router.limitRules[0].Type != "ip" ||
+			router.limitRules[0].Rate != wantRate || router.limitRules[0].Period != wantPeriod {
+			t.Errorf("%s: got %+v, want one ip rule %d/%v", label, router.limitRules, wantRate, wantPeriod)
+		}
+	}
+
 	router.Limit(value.New("5/s"))
-	if !router.hasLimit || router.limitRate != 5 || router.limitPeriod != time.Second {
-		t.Errorf("expected string limit to be set, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	one("string", 5, time.Second)
 
-	// Test Map Case
-	mVal := value.New(map[string]any{
-		"rate":   15,
-		"period": "2s",
-	})
-	router.Limit(mVal)
-	if !router.hasLimit || router.limitRate != 15 || router.limitPeriod != 2*time.Second {
-		t.Errorf("expected map limit to be set, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	router.Limit(value.New(map[string]any{"rate": 15, "period": "2s"}))
+	one("map period", 15, 2*time.Second)
 
-	// Test Map Case with unit key: second
-	mValSec := value.New(map[string]any{
-		"rate":   10,
-		"second": 1,
-	})
-	router.Limit(mValSec)
-	if !router.hasLimit || router.limitRate != 10 || router.limitPeriod != time.Second {
-		t.Errorf("expected map limit with second key to be set, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	router.Limit(value.New(map[string]any{"rate": 10, "second": 1}))
+	one("map second", 10, time.Second)
 
-	// Test Map Case with unit key: minute
-	mValMin := value.New(map[string]any{
-		"rate":   100,
-		"minute": 1,
-	})
-	router.Limit(mValMin)
-	if !router.hasLimit || router.limitRate != 100 || router.limitPeriod != time.Minute {
-		t.Errorf("expected map limit with minute key to be set, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	router.Limit(value.New(map[string]any{"rate": 100, "minute": 1}))
+	one("map minute", 100, time.Minute)
 
-	// Test Multiple params Case (rate number, duration string)
 	router.Limit(value.New(25), value.New("5s"))
-	if !router.hasLimit || router.limitRate != 25 || router.limitPeriod != 5*time.Second {
-		t.Errorf("expected multiple params (number, string) to work, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	one("multi string", 25, 5*time.Second)
 
-	// Test Multiple params Case (rate number, duration number of seconds)
 	router.Limit(value.New(30), value.New(2))
-	if !router.hasLimit || router.limitRate != 30 || router.limitPeriod != 2*time.Second {
-		t.Errorf("expected multiple params (number, number) to work, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	one("multi number", 30, 2*time.Second)
 
-	// Test Multiple params Case (rate number, time.Duration type)
 	router.Limit(value.New(40), value.New(time.Minute))
-	if !router.hasLimit || router.limitRate != 40 || router.limitPeriod != time.Minute {
-		t.Errorf("expected multiple params (number, Duration) to work, got rate %d, period %v", router.limitRate, router.limitPeriod)
-	}
+	one("multi duration", 40, time.Minute)
 }
 
 func TestTenantLevelRateLimit(t *testing.T) {
@@ -179,15 +148,10 @@ func TestTenantLevelRateLimit(t *testing.T) {
 		rateLimitRate:    3,
 		rateLimitIpRate:  2,
 		rateLimitPeriod:  time.Second,
-		currentLimiters:  make(map[string]*RateLimiter),
-		previousLimiters: make(map[string]*RateLimiter),
-		lastRotation:     time.Now(),
 	}
 
 	// No route-specific limits configured
-	matchedRoute := &Router{
-		hasLimit: false,
-	}
+	matchedRoute := &Router{}
 
 	// Client IP 1
 	r1 := httptest.NewRequest("GET", "http://localhost/test", nil)
@@ -235,17 +199,12 @@ func TestTenantRateLimitMapRotation(t *testing.T) {
 	tenant := &Tenant{
 		rateLimitEnabled: true,
 		rateLimitPeriod:  time.Millisecond,
-		currentLimiters:  make(map[string]*RateLimiter),
-		previousLimiters: make(map[string]*RateLimiter),
-		lastRotation:     time.Now(),
 	}
 
 	matchedRoute := &Router{
-		hasLimit:    true,
-		limitRate:   1,
-		limitPeriod: time.Second,
-		Method:      "GET",
-		Path:        "/test",
+		limitRules: []rateRule{{Type: "ip", Rate: 1, Period: time.Second}},
+		Method:     "GET",
+		Path:       "/test",
 	}
 
 	r := httptest.NewRequest("GET", "http://localhost/test", nil)
@@ -262,7 +221,7 @@ func TestTenantRateLimitMapRotation(t *testing.T) {
 	}
 
 	// Force map rotation by setting lastRotation to 2 seconds ago
-	tenant.lastRotation = time.Now().Add(-2 * time.Second)
+	tenant.limiters.lastRotation = time.Now().Add(-2 * time.Second)
 
 	// Request 3: Still blocked, but state carries over from previous map
 	if tenant.checkRateLimit(matchedRoute, r, httptest.NewRecorder()) {
@@ -283,14 +242,9 @@ func TestTenantUserRateLimit(t *testing.T) {
 		rateLimitEnabled:  true,
 		rateLimitUserRate: 2,
 		rateLimitPeriod:   time.Second,
-		currentLimiters:   make(map[string]*RateLimiter),
-		previousLimiters:  make(map[string]*RateLimiter),
-		lastRotation:      time.Now(),
 	}
 
-	matchedRoute := &Router{
-		hasLimit: false,
-	}
+	matchedRoute := &Router{}
 
 	// Request from User A
 	r1 := httptest.NewRequest("GET", "http://localhost/test", nil)
@@ -330,14 +284,9 @@ func TestTenantUserRateLimitDynamic(t *testing.T) {
 		rateLimitEnabled:  true,
 		rateLimitUserRate: 2,
 		rateLimitPeriod:   time.Second,
-		currentLimiters:   make(map[string]*RateLimiter),
-		previousLimiters:  make(map[string]*RateLimiter),
-		lastRotation:      time.Now(),
 	}
 
-	matchedRoute := &Router{
-		hasLimit: false,
-	}
+	matchedRoute := &Router{}
 
 	// 1. Create a mock JWT with a custom limit of 4
 	claimJSON := `{"user_rate": 4}`
@@ -362,5 +311,155 @@ func TestTenantUserRateLimitDynamic(t *testing.T) {
 	}
 	if wBlocked.Code != http.StatusTooManyRequests {
 		t.Errorf("expected 429, got %d", wBlocked.Code)
+	}
+}
+
+// New typed/array API: .limit([{ type, rate, period }, ...]).
+func TestRouteLimitArrayParse(t *testing.T) {
+	router := &Router{}
+	router.Limit(value.New([]any{
+		map[string]any{"type": "ip", "rate": 100, "second": 1},
+		map[string]any{"type": "user", "rate": 10, "minute": 1},
+		map[string]any{"type": "browser", "rate": 30, "period": "1s"},
+	}))
+
+	if len(router.limitRules) != 3 {
+		t.Fatalf("expected 3 rules, got %d (%+v)", len(router.limitRules), router.limitRules)
+	}
+	want := []rateRule{
+		{Type: "ip", Rate: 100, Period: time.Second, Scope: "tenant"},
+		{Type: "user", Rate: 10, Period: time.Minute, Scope: "tenant"},
+		{Type: "browser", Rate: 30, Period: time.Second, Scope: "tenant"},
+	}
+	for i, w := range want {
+		if router.limitRules[i] != w {
+			t.Errorf("rule %d: got %+v, want %+v", i, router.limitRules[i], w)
+		}
+	}
+
+	// A single typed map → one rule of that type.
+	router.Limit(value.New(map[string]any{"type": "user", "rate": 5, "second": 1}))
+	if len(router.limitRules) != 1 || router.limitRules[0].Type != "user" || router.limitRules[0].Rate != 5 {
+		t.Errorf("single typed map: got %+v", router.limitRules)
+	}
+}
+
+// Multi-window: two IP rules with different periods are BOTH enforced — the tighter one bites.
+func TestRouteLimitMultiWindow(t *testing.T) {
+	tenant := &Tenant{
+		rateLimitEnabled: true,
+		rateLimitPeriod:  time.Second,
+	}
+	matched := &Router{
+		limitRules: []rateRule{
+			{Type: "ip", Rate: 2, Period: time.Second},    // burst: 2/s
+			{Type: "ip", Rate: 100, Period: time.Minute},  // sustained: 100/min
+		},
+		Method: "GET",
+		Path:   "/api",
+	}
+	r := httptest.NewRequest("GET", "http://localhost/api", nil)
+	r.RemoteAddr = "9.9.9.9:1234"
+
+	// First 2 allowed (within 2/s), 3rd blocked by the per-second rule even though /min is fine.
+	if !tenant.checkRateLimit(matched, r, httptest.NewRecorder()) {
+		t.Errorf("req 1 should pass")
+	}
+	if !tenant.checkRateLimit(matched, r, httptest.NewRecorder()) {
+		t.Errorf("req 2 should pass")
+	}
+	w := httptest.NewRecorder()
+	if tenant.checkRateLimit(matched, r, w) {
+		t.Errorf("req 3 should be blocked by the 2/s window")
+	}
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", w.Code)
+	}
+
+	// After the second refills, requests flow again (the /min rule was NOT wrongly consumed on
+	// the blocked request — it was rolled back).
+	time.Sleep(1100 * time.Millisecond)
+	if !tenant.checkRateLimit(matched, r, httptest.NewRecorder()) {
+		t.Errorf("req after refill should pass")
+	}
+}
+
+// A "user" rule limits per account and is SKIPPED for anonymous requests.
+func TestRouteLimitTypeUser(t *testing.T) {
+	tenant := &Tenant{
+		rateLimitEnabled: true,
+		rateLimitPeriod:  time.Second,
+	}
+	matched := &Router{
+		limitRules: []rateRule{{Type: "user", Rate: 1, Period: time.Second}},
+		Method:     "GET",
+		Path:       "/api",
+	}
+
+	// Authenticated user: 1/s → 2nd blocked.
+	ru := httptest.NewRequest("GET", "http://localhost/api", nil)
+	ru.RemoteAddr = "1.1.1.1:1"
+	ru.Header.Set("Authorization", "Bearer userA")
+	if !tenant.checkRateLimit(matched, ru, httptest.NewRecorder()) {
+		t.Errorf("user req 1 should pass")
+	}
+	if tenant.checkRateLimit(matched, ru, httptest.NewRecorder()) {
+		t.Errorf("user req 2 should be blocked by the user rule")
+	}
+
+	// Anonymous (no auth/session): the user rule does not apply → never blocked by it.
+	ra := httptest.NewRequest("GET", "http://localhost/api", nil)
+	ra.RemoteAddr = "2.2.2.2:1"
+	for i := 0; i < 5; i++ {
+		if !tenant.checkRateLimit(matched, ra, httptest.NewRecorder()) {
+			t.Errorf("anonymous req %d should pass (user rule skipped)", i+1)
+		}
+	}
+}
+
+// scope:"server" puts the bucket in the SHARED host store, so the SAME route limit counts
+// across DIFFERENT tenants (vs the default "tenant" scope, which is per-tenant).
+func TestRouteLimitServerScope(t *testing.T) {
+	host := NewLimiterStore(time.Second)
+	mk := func() *Tenant {
+		return &Tenant{rateLimitEnabled: true, rateLimitPeriod: time.Second, hostLimiters: host}
+	}
+	tenantA, tenantB := mk(), mk()
+
+	// scope:"server" is parsed off the JS rule.
+	rt := &Router{}
+	rt.Limit(value.New([]any{map[string]any{"type": "ip", "rate": 2, "second": 1, "scope": "server"}}))
+	if len(rt.limitRules) != 1 || rt.limitRules[0].Scope != "server" {
+		t.Fatalf("scope not parsed: %+v", rt.limitRules)
+	}
+	rt.Method, rt.Path = "GET", "/x"
+
+	r := httptest.NewRequest("GET", "http://localhost/x", nil)
+	r.RemoteAddr = "5.5.5.5:1"
+
+	// Same IP + same route, but TWO different tenants → one shared server bucket (2/s total).
+	if !tenantA.checkRateLimit(rt, r, httptest.NewRecorder()) {
+		t.Errorf("tenant A req 1 should pass")
+	}
+	if !tenantB.checkRateLimit(rt, r, httptest.NewRecorder()) {
+		t.Errorf("tenant B req 1 should pass (2nd overall)")
+	}
+	w := httptest.NewRecorder()
+	if tenantA.checkRateLimit(rt, r, w) {
+		t.Errorf("3rd request across tenants should be blocked by the SHARED server bucket")
+	}
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429, got %d", w.Code)
+	}
+
+	// Contrast: a tenant-scoped rule is NOT shared — each tenant gets its own bucket.
+	rtT := &Router{Method: "GET", Path: "/y", limitRules: []rateRule{{Type: "ip", Rate: 1, Period: time.Second, Scope: "tenant"}}}
+	r2 := httptest.NewRequest("GET", "http://localhost/y", nil)
+	r2.RemoteAddr = "6.6.6.6:1"
+	if !tenantA.checkRateLimit(rtT, r2, httptest.NewRecorder()) {
+		t.Errorf("tenant A /y req 1 should pass")
+	}
+	if !tenantB.checkRateLimit(rtT, r2, httptest.NewRecorder()) {
+		t.Errorf("tenant B /y req 1 should pass — separate tenant bucket, not shared")
 	}
 }

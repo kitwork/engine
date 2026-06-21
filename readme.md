@@ -264,6 +264,6 @@ Kitwork is written the way one writes an essay — every line argued over, nothi
 
 Kitwork Engine is open-source software licensed under the **GNU Affero General Public License (AGPL-3.0)**.
 
-If you wish to use the Kitwork Engine in closed-source proprietary environments or embed it into a commercial product without being bound by the copyleft requirements of the AGPL-3.0, a **Commercial License** is available. For licensing terms and corporate inquiries, contact: [hello@kitwork.vn](mailto:hello@kitwork.vn).
+If you wish to use the Kitwork Engine in closed-source proprietary environments or embed it into a commercial product without being bound by the copyleft requirements of the AGPL-3.0, a **Commercial License** is available. For licensing terms and corporate inquiries, contact: [support@kitwork.org](mailto:support@kitwork.org).
 
 **Huỳnh Nhân Quốc** · Kitwork Foundation · AGPL-3.0 & Commercial · [Sponsor](https://github.com/sponsors/huynhnhanquoc)

@@ -58,6 +58,7 @@ type Router struct {
 
 	response *Response
 	request  *http.Request
+	responseWriter http.ResponseWriter
 
 	params map[string]string
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
@@ -67,10 +68,19 @@ type Router struct {
 	staticTTL      time.Duration
 	benchmarkCount int // Số lần chạy lặp để đo hiệu năng
 
-	// Rate Limit configuration
-	hasLimit    bool
-	limitRate   int
-	limitPeriod time.Duration
+	// Rate Limit configuration — a list of rules ({type, rate, period}). Multiple rules, even
+	// the same type with different periods (e.g. 100/s + 1000/min per IP), all apply.
+	limitRules []rateRule
+}
+
+// rateRule is one rate-limit rule. Type is the key dimension ("ip" | "user" | "browser" |
+// "global" aggregate); Scope is the blast radius ("tenant" (default) | "server" = a bucket
+// shared across ALL tenants, in the host limiter store).
+type rateRule struct {
+	Type   string
+	Rate   int
+	Period time.Duration
+	Scope  string
 }
 
 func (r *Router) Benchmark(v value.Value) *Router {
@@ -118,6 +128,12 @@ func (r *Router) responder(w http.ResponseWriter) {
 
 	// 3. Xử lý phản hồi dựa trên kind
 	switch kind {
+	case "sse":
+		// The VM was already returned to the pool before this responder runs (Tenant.Serve), so
+		// the long-lived stream below holds NO VM — only this goroutine. See SSE_ARCHITECTURE.md.
+		r.streamSSE(w)
+		return
+
 	case "render":
 		result, err := r.render()
 		if err != nil {
@@ -176,6 +192,82 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.Write(r.response.toBytes())
 	default:
 		http.NotFound(w, request)
+	}
+}
+
+// streamSSE runs the Go-native side of an SSE connection. The engine calls it from Tenant.Serve
+// AFTER the request's VM has been returned to the pool, so NO VM is held for the (potentially
+// hours-long) connection — only this lightweight HTTP goroutine. It writes the stream headers,
+// registers the client, replays missed events (Last-Event-ID), then fans broker messages +
+// heartbeats out to the wire until the client disconnects.
+func (r *Router) streamSSE(w http.ResponseWriter) {
+	client, ok := r.response.Data().V.(*SSEClient)
+	if !ok {
+		http.Error(w, "invalid sse client", http.StatusInternalServerError)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	// Active-connection cap (DoS protection) — each open stream costs a goroutine + broker slot.
+	broker := r.tenant.SSEBroker()
+	maxConn := client.maxConnections
+	if maxConn <= 0 {
+		maxConn = 1000
+	}
+	if broker.ClientCount() >= maxConn {
+		http.Error(w, "too many concurrent connections", http.StatusTooManyRequests)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	broker.Register(client)
+
+	// Send clientSessionId init event
+	initPayload, err := formatSSEPayload("", "init", map[string]string{"clientSessionId": client.id})
+	if err == nil {
+		w.Write(initPayload)
+	}
+
+	// Last-Event-ID recovery (header on auto-reconnect, or ?lastEventId= for manual control).
+	lastEventID := r.request.Header.Get("Last-Event-ID")
+	if lastEventID == "" {
+		lastEventID = r.request.URL.Query().Get("lastEventId")
+	}
+	if lastEventID != "" {
+		broker.Replay(client, lastEventID)
+	}
+
+	ticker := time.NewTicker(15 * time.Second)
+	defer func() {
+		ticker.Stop()
+		broker.Unregister(client)
+	}()
+
+	notify := r.request.Context().Done()
+	flusher.Flush()
+
+	for {
+		select {
+		case <-notify:
+			return // client closed the tab / network dropped
+		case msg, open := <-client.sendChan:
+			if !open {
+				return // broker stopped (tenant evicted)
+			}
+			w.Write(msg)
+			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		}
 	}
 }
 
@@ -417,123 +509,163 @@ func (r *Router) Cache(v value.Value) *Router {
 	return r
 }
 
+// Limit sets route-level rate limiting. It accepts one rule, or an ARRAY of rules — and
+// multiple rules (even the same type with different periods) all apply, e.g. 100/s + 1000/min
+// per IP for burst + sustained protection:
+//
+//	router.limit("10/s")                                 // 10/s per IP (legacy shorthand)
+//	router.limit({ rate: 10, period: "1s" })             // type defaults to "ip"
+//	router.limit({ type: "user", rate: 10, second: 1 })  // per authenticated account
+//	router.limit([
+//	    { type: "ip",      rate: 100,  period: time.Second },
+//	    { type: "ip",      rate: 1000, period: time.Minute },
+//	    { type: "browser", rate: 30,   second: 1 },
+//	])
+//
+// type is the bucket scope: "ip" (default) | "user" | "browser". A "user"/"browser" rule is
+// skipped for a request lacking that identity (pair it with an "ip" rule to cover anonymous).
+// Each call REPLACES the route's rules. period accepts a duration (time.Second), a string
+// ("1s"), a bare number (seconds), or a unit key (second/minute/hour/day).
 func (r *Router) Limit(args ...value.Value) *Router {
 	if len(args) == 0 {
 		return r
 	}
+	first := args[0]
 
-	firstArg := args[0]
-
-	// Case 1: Object/Map parameter, e.g., .limit({ rate: 10, period: "1s" }) or .limit({ rate: 10, second: 1 })
-	if firstArg.IsMap() {
-		m := firstArg.Map()
-		rateVal, okRate := m["rate"]
-		periodVal, okPeriod := m["period"]
-
-		var rate int
-		var period time.Duration
-		var err error
-		var hasPeriod bool
-
-		if okRate {
-			// Parse Rate
-			if rateVal.IsNumeric() {
-				rate = int(rateVal.Float())
-			} else {
-				rate, _, err = parseLimitStr(rateVal.String() + "/1s")
+	// Array form → multiple rules, all enforced.
+	if first.IsArray() {
+		var rules []rateRule
+		for _, el := range first.Array() {
+			if rule, ok := parseRateRule(el); ok {
+				rules = append(rules, rule)
 			}
 		}
-
-		if okPeriod {
-			hasPeriod = true
-			// Parse Period
-			if periodVal.K == value.Duration {
-				period = time.Duration(int64(periodVal.N))
-			} else if periodVal.IsString() {
-				period, err = time.ParseDuration(periodVal.String())
-			} else if periodVal.IsNumeric() {
-				period = time.Duration(periodVal.Float()) * time.Second
-			}
-		} else {
-			// Check for other keys like second, seconds, minute, minutes, hour, hours, day, days
-			unitKeys := []struct {
-				names []string
-				unit  time.Duration
-			}{
-				{[]string{"second", "seconds"}, time.Second},
-				{[]string{"minute", "minutes"}, time.Minute},
-				{[]string{"hour", "hours"}, time.Hour},
-				{[]string{"day", "days"}, 24 * time.Hour},
-			}
-
-			for _, uk := range unitKeys {
-				for _, name := range uk.names {
-					if unitVal, ok := m[name]; ok {
-						if unitVal.IsNumeric() {
-							period = time.Duration(unitVal.Float()) * uk.unit
-							hasPeriod = true
-							break
-						}
-					}
-				}
-				if hasPeriod {
-					break
-				}
-			}
+		if len(rules) > 0 {
+			r.limitRules = rules
 		}
+		return r
+	}
 
-		if err == nil && rate > 0 && period > 0 && hasPeriod {
-			r.hasLimit = true
-			r.limitRate = rate
-			r.limitPeriod = period
-			return r
+	// Single map form → one rule (type defaults to "ip").
+	if first.IsMap() {
+		if rule, ok := parseRateRule(first); ok {
+			r.limitRules = []rateRule{rule}
+		}
+		return r
+	}
+
+	// Legacy scalar forms (.limit("10/s") / .limit(10, "1s")) → one tenant-scoped "ip" rule.
+	if rate, period, ok := parseLegacyLimit(args...); ok {
+		r.limitRules = []rateRule{{Type: "ip", Rate: rate, Period: period, Scope: "tenant"}}
+	} else {
+		fmt.Printf("[Router.Limit] could not parse rate limit\n")
+	}
+	return r
+}
+
+// parseRateRule reads one { type?, rate, period } map into a rateRule. type defaults to "ip".
+func parseRateRule(v value.Value) (rateRule, bool) {
+	if !v.IsMap() {
+		return rateRule{}, false
+	}
+	m := v.Map()
+
+	typ := "ip"
+	if tv, ok := m["type"]; ok {
+		switch strings.ToLower(tv.String()) {
+		case "user":
+			typ = "user"
+		case "browser":
+			typ = "browser"
+		case "global", "all":
+			typ = "global"
 		}
 	}
 
-	// Case 2: Multiple parameters, e.g., .limit(10, "1s") or .limit(10, 1) or .limit(10, time.Second)
+	scope := "tenant"
+	if sv, ok := m["scope"]; ok {
+		switch strings.ToLower(sv.String()) {
+		case "server", "global", "system", "host":
+			scope = "server"
+		}
+	}
+
+	var rate int
+	if rv, ok := m["rate"]; ok {
+		if rv.IsNumeric() {
+			rate = int(rv.Float())
+		} else {
+			rate, _, _ = parseLimitStr(rv.String() + "/1s")
+		}
+	}
+
+	period := parsePeriodMap(m)
+	if rate <= 0 || period <= 0 {
+		return rateRule{}, false
+	}
+	return rateRule{Type: typ, Rate: rate, Period: period, Scope: scope}, true
+}
+
+// parsePeriodMap pulls a duration from a rule map: period | Period (lenient), else a unit key.
+func parsePeriodMap(m map[string]value.Value) time.Duration {
+	for _, key := range []string{"period", "Period"} {
+		if pv, ok := m[key]; ok {
+			if pv.K == value.Duration {
+				return time.Duration(int64(pv.N))
+			} else if pv.IsString() {
+				if d, err := time.ParseDuration(pv.String()); err == nil {
+					return d
+				}
+			} else if pv.IsNumeric() {
+				return time.Duration(pv.Float()) * time.Second
+			}
+		}
+	}
+	units := []struct {
+		names []string
+		unit  time.Duration
+	}{
+		{[]string{"second", "seconds"}, time.Second},
+		{[]string{"minute", "minutes"}, time.Minute},
+		{[]string{"hour", "hours"}, time.Hour},
+		{[]string{"day", "days"}, 24 * time.Hour},
+	}
+	for _, u := range units {
+		for _, name := range u.names {
+			if uv, ok := m[name]; ok && uv.IsNumeric() {
+				return time.Duration(uv.Float()) * u.unit
+			}
+		}
+	}
+	return 0
+}
+
+// parseLegacyLimit handles the scalar forms: .limit("10/s"), .limit(10, "1s"|2|time.Second).
+func parseLegacyLimit(args ...value.Value) (int, time.Duration, bool) {
 	if len(args) >= 2 {
-		rateArg := args[0]
-		periodArg := args[1]
-
+		rateArg, periodArg := args[0], args[1]
 		var rate int
-		var period time.Duration
-		var err error
-
-		// Parse Rate
 		if rateArg.IsNumeric() {
 			rate = int(rateArg.Float())
 		} else {
-			rate, _, err = parseLimitStr(rateArg.String() + "/1s")
+			rate, _, _ = parseLimitStr(rateArg.String() + "/1s")
 		}
-
-		// Parse Period
+		var period time.Duration
 		if periodArg.K == value.Duration {
 			period = time.Duration(int64(periodArg.N))
 		} else if periodArg.IsString() {
-			period, err = time.ParseDuration(periodArg.String())
+			period, _ = time.ParseDuration(periodArg.String())
 		} else if periodArg.IsNumeric() {
 			period = time.Duration(periodArg.Float()) * time.Second
 		}
-
-		if err == nil && rate > 0 && period > 0 {
-			r.hasLimit = true
-			r.limitRate = rate
-			r.limitPeriod = period
-			return r
+		if rate > 0 && period > 0 {
+			return rate, period, true
 		}
 	}
-
-	// Case 3: Single string parameter, e.g., .limit("10/s")
-	rate, period, err := parseLimitStr(firstArg.String())
-	if err == nil {
-		r.hasLimit = true
-		r.limitRate = rate
-		r.limitPeriod = period
-	} else {
-		fmt.Printf("[Router.Limit] Error parsing rate limit: %v\n", err)
+	if rate, period, err := parseLimitStr(args[0].String()); err == nil {
+		return rate, period, true
 	}
-
-	return r
+	return 0, 0, false
 }
 
 func parseLimitStr(s string) (int, time.Duration, error) {

@@ -58,13 +58,11 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		cache:       make(map[string]*cachedTenant),
 		idleTimeout: 10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
 		RateLimit: &RateLimiter{
-			Enabled:          true,
-			Rate:             2000,
-			IpRate:           200,
-			Period:           time.Second,
-			currentLimiters:  make(map[string]*work.RateLimiter),
-			previousLimiters: make(map[string]*work.RateLimiter),
-			lastRotation:     time.Now(),
+			Enabled: true,
+			Rate:    2000,
+			IpRate:  200,
+			Period:  time.Second,
+			store:   work.NewLimiterStore(time.Second),
 		},
 	}
 	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
@@ -90,6 +88,7 @@ func (e *Engine) cleanupLoop(interval time.Duration) {
 			for domain, cached := range e.cache {
 				if cached.isExpired(now, timeout) {
 					slog.Info("Evicting idle tenant from cache", "domain", domain)
+					cached.tenant.Close()
 					delete(e.cache, domain)
 				}
 			}
@@ -140,6 +139,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 						slog.Info("Detecting change. Recompiling...", "file", appFile)
 						newTenant := work.NewTenant(e.root, hostname)
 						newTenant.MaxEnergy = e.maxEnergy
+						newTenant.SetHostLimiters(e.RateLimit.Store())
 						if err := newTenant.Run(); err != nil {
 							// Lỗi cú pháp hoặc file dở dang -> Graceful Compile Fallback
 							slog.Error("Compile error during hot reload. Fallback to cached version", "error", err)
@@ -170,6 +170,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 
 	tenant := work.NewTenant(e.root, hostname)
 	tenant.MaxEnergy = e.maxEnergy
+	tenant.SetHostLimiters(e.RateLimit.Store())
 	if err := tenant.Run(); err != nil {
 		return nil, err
 	}

@@ -24,6 +24,7 @@ func injectJSCompat(globals map[string]value.Value) {
 	globals["Number"] = buildNumberGlobal()
 	globals["String"] = buildStringGlobal()
 	globals["Boolean"] = buildBooleanGlobal()
+	globals["Array"] = buildArrayGlobal()
 }
 
 /* =============================================================================
@@ -456,6 +457,31 @@ func buildDateConstructor() value.Value {
 		}),
 		"UTC": value.NewFunc(func(args ...value.Value) value.Value {
 			return value.New(float64(timeFromParts(args, time.UTC).UnixMilli()))
+		}),
+	}
+
+	return value.NewFuncObject(ctor, props)
+}
+
+func buildArrayGlobal() value.Value {
+	ctor := func(args ...value.Value) value.Value {
+		if len(args) == 1 && args[0].K == value.Number {
+			n := int(args[0].N)
+			out := make([]value.Value, n)
+			for i := 0; i < n; i++ {
+				out[i] = value.Value{K: value.Nil}
+			}
+			return value.New(out)
+		}
+		return value.New(args)
+	}
+
+	props := map[string]value.Value{
+		"isArray": value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) == 0 {
+				return value.FALSE
+			}
+			return value.ToBool(args[0].K == value.Array)
 		}),
 	}
 

@@ -184,150 +184,145 @@ func (t *Tenant) checkRateLimit(matched *Router, r *http.Request, w http.Respons
 	if isPrivateOrLocalIP(ip) {
 		return true
 	}
-	now := time.Now()
-
-	t.rateLimiterMu.Lock()
-	if t.currentLimiters == nil {
-		t.currentLimiters = make(map[string]*RateLimiter)
-	}
-	if t.previousLimiters == nil {
-		t.previousLimiters = make(map[string]*RateLimiter)
+	if t.limiters == nil {
+		t.limiters = NewLimiterStore(t.rateLimitPeriod)
 	}
 
-	// 0. Perform Map Rotation if rotation threshold is exceeded (10 * rateLimitPeriod)
-	rotationThreshold := 10 * t.rateLimitPeriod
-	if now.Sub(t.lastRotation) > rotationThreshold {
-		t.previousLimiters = t.currentLimiters
-		t.currentLimiters = make(map[string]*RateLimiter)
-		t.lastRotation = now
-	}
-
-	// Helper to get or create a rate limiter with double buffering (Map Rotation)
-	getLimiter := func(key string, rate int, period time.Duration) *RateLimiter {
-		// First search in current active map
-		lim, exists := t.currentLimiters[key]
-		if exists {
-			return lim
-		}
-
-		// Second search in previous map
-		lim, exists = t.previousLimiters[key]
-		if exists {
-			lim.mu.Lock()
-			refillAge := now.Sub(lim.lastRefill)
-			lim.mu.Unlock()
-
-			// Carry over if it was active within the rotation window
-			if refillAge < rotationThreshold {
-				t.currentLimiters[key] = lim
-				return lim
-			}
-		}
-
-		// Otherwise, create a new limiter
-		lim = NewRateLimiter(rate, period)
-		t.currentLimiters[key] = lim
-		return lim
-	}
-
-	// 1. Get Tenant Global Limiter
-	var tenantGlobalLim *RateLimiter
-	if t.rateLimitRate > 0 {
-		tenantGlobalLim = getLimiter("tenant:global", t.rateLimitRate, t.rateLimitPeriod)
-	}
-
-	// 2. Get Tenant IP Limiter
-	var tenantIpLim *RateLimiter
-	if t.rateLimitIpRate > 0 {
-		tenantIpLim = getLimiter("tenant:ip:"+ip, t.rateLimitIpRate, t.rateLimitPeriod)
-	}
-
-	// 3. Get Tenant User Limiter
-	var tenantUserLim *RateLimiter
 	userAcc, customUserRate := GetClientUserAccount(r)
 	userRateToUse := t.rateLimitUserRate
 	if customUserRate > 0 {
 		userRateToUse = customUserRate
 	}
+
+	// Build the full list of buckets to consume (order = rollback order). Tenant-wide limits
+	// are always tenant-scoped; each route rule picks its store by scope ("tenant" → this
+	// tenant's store, "server" → the shared host store, so the bucket counts across ALL tenants).
+	var checks []LimitCheck
+	if t.rateLimitRate > 0 {
+		checks = append(checks, LimitCheck{t.limiters, "tenant:global", t.rateLimitRate, t.rateLimitPeriod})
+	}
+	if t.rateLimitIpRate > 0 {
+		checks = append(checks, LimitCheck{t.limiters, "tenant:ip:" + ip, t.rateLimitIpRate, t.rateLimitPeriod})
+	}
 	if userRateToUse > 0 && userAcc != "" {
-		tenantUserLim = getLimiter("tenant:user:"+userAcc, userRateToUse, t.rateLimitPeriod)
+		checks = append(checks, LimitCheck{t.limiters, "tenant:user:" + userAcc, userRateToUse, t.rateLimitPeriod})
 	}
 
-	// 4. Get Route Limiter
-	var routeLim *RateLimiter
-	if matched != nil && matched.hasLimit {
-		routeKey := "route:" + ip + ":" + matched.Method + ":" + matched.Path
-		routeLim = getLimiter(routeKey, matched.limitRate, matched.limitPeriod)
-	}
-	t.rateLimiterMu.Unlock()
-
-	// 4. Check Tenant Global Limit
-	if tenantGlobalLim != nil {
-		if !tenantGlobalLim.Allow(t.rateLimitRate, t.rateLimitPeriod) {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", t.rateLimitPeriod.Seconds()))
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error": "Too Many Requests", "message": "Tenant traffic limit exceeded."}`))
-			return false
+	if matched != nil {
+		for _, rule := range matched.limitRules {
+			store := t.limiters
+			if rule.Scope == "server" && t.hostLimiters != nil {
+				store = t.hostLimiters
+			}
+			var scopeKey string
+			switch rule.Type {
+			case "user":
+				if userAcc == "" {
+					continue // anonymous request — a "user" rule does not apply
+				}
+				scopeKey = "user:" + userAcc
+			case "browser":
+				scopeKey = "browser:" + GetClientBrowserFingerprint(r)
+			case "global":
+				scopeKey = "global"
+			default: // "ip"
+				scopeKey = "ip:" + ip
+			}
+			// rate/period in the key keep multiple rules (same type, different window) distinct.
+			key := fmt.Sprintf("route:%s:%s:%s:%d/%s", scopeKey, matched.Method, matched.Path, rule.Rate, rule.Period)
+			checks = append(checks, LimitCheck{store, key, rule.Rate, rule.Period})
 		}
 	}
 
-	// 5. Check Tenant IP Limit
-	if tenantIpLim != nil {
-		if !tenantIpLim.Allow(t.rateLimitIpRate, t.rateLimitPeriod) {
-			if tenantGlobalLim != nil {
-				tenantGlobalLim.Rollback(t.rateLimitRate)
+	return EnforceChecks(checks, w)
+}
+
+// LimiterStore is a rotating map of token-bucket limiters, safe for concurrent use. The host
+// uses one store (server-wide buckets); each tenant uses its own. A rule's scope just decides
+// which store it lands in — that is the whole tenant-vs-server distinction.
+type LimiterStore struct {
+	mu           sync.Mutex
+	current      map[string]*RateLimiter
+	previous     map[string]*RateLimiter
+	lastRotation time.Time
+	rotateBase   time.Duration // stale buckets are swept every 10 * rotateBase
+}
+
+// NewLimiterStore returns an empty store. rotateBase only tunes how often stale buckets are
+// garbage-collected (every 10 * rotateBase); it does not affect any limit's accuracy. Min 1s.
+func NewLimiterStore(rotateBase time.Duration) *LimiterStore {
+	if rotateBase <= 0 {
+		rotateBase = time.Second
+	}
+	return &LimiterStore{
+		current:      make(map[string]*RateLimiter),
+		previous:     make(map[string]*RateLimiter),
+		lastRotation: time.Now(),
+		rotateBase:   rotateBase,
+	}
+}
+
+// limiter returns the bucket for key (creating it if absent), carrying a still-active bucket
+// over from the previous map across a rotation. Takes its own lock.
+func (s *LimiterStore) limiter(key string, rate int, period time.Duration, now time.Time) *RateLimiter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	threshold := 10 * s.rotateBase
+	if now.Sub(s.lastRotation) > threshold {
+		s.previous = s.current
+		s.current = make(map[string]*RateLimiter)
+		s.lastRotation = now
+	}
+	if lim, ok := s.current[key]; ok {
+		return lim
+	}
+	if lim, ok := s.previous[key]; ok {
+		if now.Sub(lim.LastRefill()) < threshold {
+			s.current[key] = lim
+			return lim
+		}
+	}
+	lim := NewRateLimiter(rate, period)
+	s.current[key] = lim
+	return lim
+}
+
+// LimitCheck is one bucket to consume: which Store, the bucket Key, and its Rate/Period.
+type LimitCheck struct {
+	Store  *LimiterStore
+	Key    string
+	Rate   int
+	Period time.Duration
+}
+
+// EnforceChecks consumes one token from each check IN ORDER. If any is exhausted it rolls back
+// the tokens already taken from earlier checks (so a downstream limit never burns upstream
+// budget) and writes a 429. Returns true only if every check passes. Shared by host + tenant.
+func EnforceChecks(checks []LimitCheck, w http.ResponseWriter) bool {
+	if len(checks) == 0 {
+		return true
+	}
+	now := time.Now()
+	lims := make([]*RateLimiter, len(checks))
+	for i, c := range checks {
+		lims[i] = c.Store.limiter(c.Key, c.Rate, c.Period, now)
+	}
+	for i, c := range checks {
+		if !lims[i].Allow(c.Rate, c.Period) {
+			for j := 0; j < i; j++ {
+				lims[j].Rollback(checks[j].Rate)
 			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", t.rateLimitPeriod.Seconds()))
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error": "Too Many Requests", "message": "Tenant rate limit exceeded for this IP."}`))
+			write429(w, c.Period)
 			return false
 		}
 	}
-
-	// 6. Check Tenant User Limit
-	if tenantUserLim != nil {
-		if !tenantUserLim.Allow(userRateToUse, t.rateLimitPeriod) {
-			if tenantIpLim != nil {
-				tenantIpLim.Rollback(t.rateLimitIpRate)
-			}
-			if tenantGlobalLim != nil {
-				tenantGlobalLim.Rollback(t.rateLimitRate)
-			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", t.rateLimitPeriod.Seconds()))
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error": "Too Many Requests", "message": "Tenant rate limit exceeded for this account."}`))
-			return false
-		}
-	}
-
-	// 7. Check Route-Specific Limit
-	if routeLim != nil {
-		if !routeLim.Allow(matched.limitRate, matched.limitPeriod) {
-			if tenantUserLim != nil {
-				tenantUserLim.Rollback(userRateToUse)
-			}
-			if tenantIpLim != nil {
-				tenantIpLim.Rollback(t.rateLimitIpRate)
-			}
-			if tenantGlobalLim != nil {
-				tenantGlobalLim.Rollback(t.rateLimitRate)
-			}
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", matched.limitPeriod.Seconds()))
-			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"error": "Too Many Requests", "message": "Endpoint rate limit exceeded."}`))
-			return false
-		}
-	}
-
 	return true
 }
 
-func (t *Tenant) CleanOldLimiters() {
-	t.rateLimiterMu.Lock()
-	defer t.rateLimiterMu.Unlock()
-	t.previousLimiters = make(map[string]*RateLimiter)
+func write429(w http.ResponseWriter, period time.Duration) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Retry-After", fmt.Sprintf("%.0f", period.Seconds()))
+	w.WriteHeader(http.StatusTooManyRequests)
+	w.Write([]byte(`{"error": "Too Many Requests", "message": "Rate limit exceeded. Please try again later."}`))
 }
