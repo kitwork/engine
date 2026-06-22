@@ -283,3 +283,52 @@ func TestSSEBrokerSendTo(t *testing.T) {
 
 	broker.Unregister(client)
 }
+
+// TestSSEBrokerRegistry proves the shared-by-identity guarantee: the same key always returns the
+// SAME broker (so a hot-reload recompile keeps publishing to the broker the client connected to),
+// while different keys get isolated brokers (tenant isolation). This is the root-cause fix for SSE
+// messages landing on a fresh, empty broker after a recompile.
+func TestSSEBrokerRegistry(t *testing.T) {
+	const keyA = "id-a/site-a.vn"
+	const keyB = "id-b/site-b.io"
+
+	b1 := sseBrokerFor(keyA)
+	b2 := sseBrokerFor(keyA) // simulates a recompiled *Tenant asking again
+	if b1 != b2 {
+		t.Fatal("same identity key returned different brokers — recompile would lose live clients")
+	}
+
+	other := sseBrokerFor(keyB)
+	if other == b1 {
+		t.Fatal("different identity keys share a broker — tenant isolation broken")
+	}
+
+	// A message published to keyA must reach a client registered on the broker obtained via the
+	// SAME key from a *different* lookup (the recompile scenario), and must NOT cross to keyB.
+	client := &SSEClient{id: "sess-x", sendChan: make(chan []byte, 5), channels: []string{"general"}}
+	b1.Register(client)
+	time.Sleep(10 * time.Millisecond)
+
+	sseBrokerFor(keyA).Publish("general", "1", []byte("hello"))
+	select {
+	case <-client.sendChan:
+		// success: recompiled instance's publish reached the original client
+	case <-time.After(100 * time.Millisecond):
+		t.Error("publish via re-looked-up broker did not reach the registered client")
+	}
+
+	sseBrokerFor(keyB).Publish("general", "2", []byte("leak"))
+	select {
+	case m := <-client.sendChan:
+		t.Errorf("message leaked across identities: %s", m)
+	case <-time.After(50 * time.Millisecond):
+		// success: isolated
+	}
+
+	b1.Unregister(client)
+	// Brokers live in a package-level registry; stop them so the goroutines don't linger.
+	b1.Stop()
+	other.Stop()
+	sseBrokerRegistry.Delete(keyA)
+	sseBrokerRegistry.Delete(keyB)
+}

@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -57,9 +59,6 @@ type Tenant struct {
 	rateLimitIpRate   int
 	rateLimitUserRate int
 	rateLimitPeriod   time.Duration
-
-	sseMu     sync.Mutex
-	sseBroker *SSEBroker
 }
 
 type Cache struct {
@@ -81,12 +80,20 @@ func (t *Tenant) resolve(paths ...string) string {
 			if t.entity.Identity != "" {
 				t.config.base = filepath.Join(t.config.root, t.entity.Identity, t.entity.Domain)
 			} else {
+				// No identity (single-tenant). Resolve in priority order: the sites/ convention
+				// (root/sites/<domain>), the test layout (root/test/<domain>), then a flat
+				// root/<domain>. Default to flat when none has an app file yet (preserves the
+				// pre-existing behaviour for brand-new tenants).
 				flatPath := filepath.Join(t.config.root, t.entity.Domain)
-				testPath := filepath.Join(t.config.root, "test", t.entity.Domain)
-				if _, err := os.Stat(filepath.Join(testPath, AppFileName)); err == nil {
-					t.config.base = testPath
-				} else {
-					t.config.base = flatPath
+				t.config.base = flatPath
+				for _, cand := range []string{
+					filepath.Join(t.config.root, SitesDirName, t.entity.Domain),
+					filepath.Join(t.config.root, "test", t.entity.Domain),
+				} {
+					if _, err := os.Stat(filepath.Join(cand, AppFileName)); err == nil {
+						t.config.base = cand
+						break
+					}
 				}
 			}
 		}
@@ -95,6 +102,44 @@ func (t *Tenant) resolve(paths ...string) string {
 		return t.config.base
 	}
 	return filepath.Join(append([]string{t.config.base}, paths...)...)
+}
+
+// serveViewStatic auto-serves a plain .txt file that lives in the tenant's views/ folder with NO
+// explicit route. Dropping `views/robots.txt` makes GET /robots.txt serve it as text/plain — "add
+// a .txt to views and it just opens". This is a Zero-VM disk read (http.ServeFile handles
+// Content-Type, Last-Modified, ETag and Range); an explicit route always wins because Serve only
+// reaches here when nothing matched. Scoped to .txt so .kitwork.* sources are never exposed, and
+// guarded against path traversal. Returns true if it served the request.
+func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if !strings.HasSuffix(strings.ToLower(r.URL.Path), ".txt") {
+		return false
+	}
+
+	// Clean the request path and refuse anything that still looks like traversal.
+	clean := path.Clean("/" + strings.TrimPrefix(r.URL.Path, "/"))
+	if strings.Contains(clean, "..") {
+		return false
+	}
+
+	viewsDir := t.resolve("views")
+	full := filepath.Join(viewsDir, filepath.FromSlash(clean))
+
+	// Defense in depth: the resolved path must stay inside views/.
+	rel, err := filepath.Rel(viewsDir, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		return false
+	}
+
+	http.ServeFile(w, r, full)
+	return true
 }
 
 func (t *Tenant) AppFile(filenames ...string) string {
@@ -285,24 +330,28 @@ func NewTenant(root string, domain string) *Tenant {
 	return tenant
 }
 
-// SSEBroker returns the tenant-scoped event broker, initializing it on-demand
+// SSEBroker returns the event broker for this tenant identity. The broker is shared across every
+// *Tenant instance of the same identity (via sseBrokerRegistry), so live SSE connections survive
+// hot-reload recompiles — a publish from a freshly-recompiled instance still reaches clients that
+// connected through the previous instance. See engine/backbone.md (Phase 1, Invariant C).
 func (t *Tenant) SSEBroker() *SSEBroker {
-	t.sseMu.Lock()
-	defer t.sseMu.Unlock()
-	if t.sseBroker == nil {
-		t.sseBroker = NewSSEBroker()
-	}
-	return t.sseBroker
+	return sseBrokerFor(t.brokerKey())
 }
 
-// Close releases all tenant-level resources including open database connections and active SSE brokers
-func (t *Tenant) Close() {
-	t.sseMu.Lock()
-	if t.sseBroker != nil {
-		t.sseBroker.Stop()
+// brokerKey identifies a tenant for the shared broker registry. (Identity, Domain) is always
+// unique per tenant: single-tenant (flat) layouts have an empty Identity but a distinct Domain;
+// multi-tenant layouts carry both.
+func (t *Tenant) brokerKey() string {
+	if t.entity != nil && (t.entity.Identity != "" || t.entity.Domain != "") {
+		return t.entity.Identity + "/" + t.entity.Domain
 	}
-	t.sseMu.Unlock()
+	return "default"
+}
 
+// Close releases per-instance tenant resources (database connections). The SSE broker is NOT
+// stopped here: it is shared across instances of this identity via sseBrokerRegistry and must
+// outlive any single instance (e.g. an evicted/recompiled one) so open streams keep flowing.
+func (t *Tenant) Close() {
 	t.dbMu.Lock()
 	defer t.dbMu.Unlock()
 	for alias, db := range t.databases {

@@ -94,6 +94,36 @@ To route direct 1-to-1 client messages (`sse.send` or `SendTo`), the cluster mai
 ### Invariant D: Multiplexed Tiny RPC over QUIC Streams
 We reject gRPC due to its heavy runtime footprint and complex protobuf requirements. Instead, Kitwork nodes communicate via custom multiplexed QUIC streams using a minimal RPC layer encoding payloads in JSON or MsgPack.
 
+### Invariant E: Tenant-Scoped Channels & Authorization (Cluster Isolation)
+The local Bus is per-tenant, but across the cluster every channel **must be namespaced by tenant identity** so one node can never leak a tenant's events to another. Channel keys are `<tenant_id>/<channel>`, and the Bus enforces an ACL: a VM may only `Publish`/`Subscribe` under its own tenant identity. Without this invariant, the cluster silently breaks the tenant isolation the single-node engine guarantees.
+
+### Unified Addressing Schema
+Every endpoint resolves through one URI, so the Bus can choose the route (in-process / S2S / S2C / P2P) from the address alone:
+
+```
+kw://<node>/<tenant>/<kind>/<id>      kind ∈ { channel, client, capsule, node }
+```
+
+The Control Plane's location registry (Invariant C) maps `client`/`capsule` ids to their current host node.
+
+---
+
+## 3.5. Failure Modes, Delivery Semantics & Observability
+
+### Control-Plane Degradation (no split-brain)
+If the Control Plane store (Postgres lease/registry) becomes unavailable, the cluster enters a **degraded mode**, not a hard failure: established QUIC connections and their streams keep flowing (the data plane is independent), and only *new* discovery, routing decisions, and address resolution stall. Nodes never invent conflicting routing state on their own.
+
+### Delivery Guarantees (per traffic class)
+*   **Pub/Sub events (SSE-class)**: *at-most-once* — non-blocking drop when a slow consumer's buffer fills (a realtime stream favors freshness over completeness); `Last-Event-ID` replay covers gaps.
+*   **Tiny RPC (S2S)**: *at-least-once* with an explicit ack + idempotency key; the caller retries on a dropped stream. An RPC is never silently dropped.
+*   **Backpressure**: a saturated downstream applies QUIC flow control upstream rather than buffering without bound — memory stays bounded under fan-out.
+
+### Cluster-Wide Rate Limiting
+The engine's existing rate-limit `scope` axis (`tenant` | `server`) gains a third value `cluster`: limiter state for cluster-scoped rules is shared over the Bus, so a single IP/user is capped across **all** nodes, not only the node it happened to hit.
+
+### Backbone Observability
+The transport is self-instrumented: active connection count, open stream count, direct-vs-relay ratio, per-peer RTT, and dropped-event counters — surfaced to the Application-layer monitoring UI.
+
 ---
 
 ## 4. Practical Implementation Reality Checks
@@ -107,10 +137,25 @@ We reject gRPC due to its heavy runtime footprint and complex protobuf requireme
 
 ---
 
+## 4.5. Current Code Foundation (what already exists)
+
+The single-node engine already contains working prototypes of the backbone's local layer — these are not throwaway; they become the first `Bus` driver.
+
+| Already in code | Role in the QUIC backbone |
+|---|---|
+| **SSE broker** (`work/sse.go`): per-tenant pub/sub channels, `SendTo` (1-to-1), `Last-Event-ID` replay, dynamic subscribe/unsubscribe | Prototype of the **Local Bus driver** — refactored to implement `Bus` in Phase 1 |
+| **Shared-registry fix** for the cross-request broker | The local form of Invariant C (Address Resolution): active client mappings live in a shared per-tenant registry |
+| **Rate-limit `scope: tenant\|server`** (`LimiterStore` / `EnforceChecks`) | Ready to accept the third `scope: cluster` value once the Bus shares limiter state |
+| **Per-tenant identity** | The seed of the Control Plane: tenant isolation today → node/peer identity (Ed25519) tomorrow |
+
+> SSE today is the **stepping stone**: shipping it proves the channel / pub-sub model that the QUIC data plane will later carry — the broker abstraction is reused verbatim.
+
+---
+
 ## 5. Development Roadmap
 
 ```
-[Phase 0: Abstraction & ID] ──> [Phase 1: Local Bus Integration] ──> [Phase 2: S2S QUIC Mesh] ──> [Phase 3: S2C WebTransport] ──> [Phase 4: C2C P2P & Relay]
+[Phase 0: Abstraction & ID] ──> [Phase 1: Local Bus] ──> [Phase 1.5: PG NOTIFY] ──> [Phase 2: S2S QUIC Mesh] ──> [Phase 3: S2C WebTransport] ──> [Phase 4: C2C P2P & Relay]
 ```
 
 ### Phase 0: Foundations (Abstraction & Identity)
@@ -121,6 +166,9 @@ We reject gRPC due to its heavy runtime footprint and complex protobuf requireme
 ### Phase 1: Local Engine Integration
 *   Refactor the current local SSE Broker to implement the `Bus` interface as a driver.
 *   Resolve cross-request context restrictions by moving active client mappings to a shared tenant registry.
+
+### Phase 1.5: Multi-Node via Postgres LISTEN/NOTIFY (Intermediate)
+A cheap stepping stone between the single-node in-memory broker and the full QUIC mesh: multiple processes (or a small cluster sharing one database) fan messages out through Postgres `LISTEN/NOTIFY`, behind the same `Bus` interface. This makes multi-node pub/sub work **before** QUIC lands and validates the Bus abstraction under real cross-process delivery.
 
 ### Phase 2: Server-to-Server QUIC Mesh
 *   Integrate `quic-go`.
@@ -134,4 +182,4 @@ We reject gRPC due to its heavy runtime footprint and complex protobuf requireme
 
 ### Phase 4: Peer-to-Peer & Relay (Tailscale Model)
 *   Implement UDP Hole Punching protocols for native agents.
-*   Write an End-to-End Encrypted (E2EE) relay router module (DERP equivalent) in the Go engine to serve as a fallback when direct P2P connections fail.
+*   Write an End-to-End Encrypted (E2EE) relay router module (DERP equivalent) in the Go engine to serve as a fallback when direct P2P connections fail. The relay is **blind**: it forwards encrypted bytes between peers and never holds the keys to decrypt them — sovereignty is preserved even when traffic transits a shared relay.

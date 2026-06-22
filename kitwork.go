@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kitwork/engine/core"
@@ -102,6 +103,19 @@ func Run(configFile ...string) (err error) {
 
 	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
 	domain.Allows = cfg.Domains
+	// Single-tenant sites/ convention: every folder under <root>/sites/ is a domain AutoSSL should
+	// serve, with no identity and no DB. Enable the live HostPolicy folder check, and seed the
+	// whitelist from the sites present at boot (the live check also covers ones added later).
+	switch cfg.Root {
+	case "", "./", "../", "/", ".", "..":
+		// standalone: no sites/ root
+	default:
+		domain.SitesDir = filepath.Join(cfg.Root, work.SitesDirName)
+		if sites := work.DiscoverSites(cfg.Root); len(sites) > 0 {
+			domain.Allows = append(domain.Allows, sites...)
+			slog.Info("Single-tenant sites discovered", "count", len(sites), "dir", domain.SitesDir)
+		}
+	}
 	domain.Configure(cfg.Canonical, cfg.Redirects)
 
 	// Initialize and run the engine

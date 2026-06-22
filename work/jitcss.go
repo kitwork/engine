@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	jitcss "github.com/kitwork/engine/jit/css"
+	"github.com/kitwork/engine/modules/minifier"
 )
 
 // JITStylesheetPath is the DEFAULT route the site-wide JIT CSS is served at when a tenant
@@ -50,7 +51,7 @@ func tenantJITCSS(t *Tenant) (css, etag string) {
 			return e.css, sig
 		}
 	}
-	out := minifyCSS(jitcss.GenerateSiteCSS(readTemplates(root)...))
+	out := minifier.CSS(jitcss.GenerateSiteCSS(readTemplates(root)...))
 	jitStyleCache.Store(root, &jitEntry{css: out, sig: sig})
 	return out, sig
 }

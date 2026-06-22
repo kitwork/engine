@@ -16,6 +16,20 @@ import (
 // AllowedDomains holds the list of domains allowed by configuration
 var Allows []string
 
+// SitesDir, when set (e.g. "tenants/sites"), enables the single-tenant convention: a host is
+// allowed for AutoSSL if <SitesDir>/<host>/ exists on disk. Dropping a domain folder is enough to
+// get a certificate — no YAML whitelist entry and no DB registration. Empty = disabled.
+var SitesDir string
+
+// siteFolderExists reports whether <SitesDir>/<host> is an existing directory.
+func siteFolderExists(host string) bool {
+	if SitesDir == "" {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(SitesDir, host))
+	return err == nil && fi.IsDir()
+}
+
 // HostPolicy implements Let's Encrypt hostname whitelist dynamic validation
 func HostPolicy(ctx context.Context, host string) error {
 	// Allow local connection
@@ -30,6 +44,12 @@ func HostPolicy(ctx context.Context, host string) error {
 		if d == host || d == cleanHost {
 			return nil
 		}
+	}
+
+	// Case 1.5: single-tenant sites/ folder present on disk (drop-a-folder → cert, no config/DB).
+	// Evaluated live, so a site added while running is served without a restart.
+	if siteFolderExists(host) || siteFolderExists(cleanHost) {
+		return nil
 	}
 
 	// Case 2: Check via Database registration

@@ -2,12 +2,12 @@
 
 > **The cloud became an estate to operate. Kitwork is a disagreement.**
 
-[![Go Version](https://img.shields.io/badge/go-1.25+-black?style=flat-square&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-1.26+-black?style=flat-square&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](#author--license)
-[![VM Latency](https://img.shields.io/badge/instruction-27ns-green?style=flat-square)](#performance)
+[![VM Latency](https://img.shields.io/badge/instruction-~27ns-green?style=flat-square)](#performance)
 [![Cold Boot](https://img.shields.io/badge/cold%20boot-%3C10ms-green?style=flat-square)](#performance)
 
-**Kitwork Engine is cloud infrastructure compiled into a single Go binary.** It runs a JavaScript dialect on a custom stack-based bytecode VM — with energy metering, per-tenant sandboxing, hot reload, an integrated router, a zero-allocation database layer, and a template engine. One process hosts unlimited domains. Deploying a website means dropping a folder.
+**Kitwork Engine is cloud infrastructure compiled into a single Go binary.** It runs a JavaScript dialect on a custom stack-based bytecode VM — with energy metering, per-tenant sandboxing, hot reload, an integrated router, a fluent query-builder over SQL, a template engine, automatic TLS, built-in rate limiting, and SSE streaming. One process hosts unlimited domains. Deploying a website means dropping a folder.
 
 Every system starts simple — then caching brings Redis, queues bring RabbitMQ, orchestration brings Kubernetes, and the team ends up operating machinery instead of shipping product. Kitwork collapses that estate back into **one runtime with one philosophy**: from the language, which cannot loop forever, to the cluster, which degrades instead of dying.
 
@@ -92,7 +92,7 @@ server.run({
 ```javascript
 import { router, database } from "kitwork"
 
-const db = database.connection()
+const db = database.connect("system")
 
 router.get("/api/users").handle((req, res) => {
     const users = db.table("user").list(10)
@@ -134,22 +134,46 @@ tránh vòng lặp vô tận). Hãy dùng .map() / .filter() / .find() trên m�
 
 It is the same trade Starlark, CEL, and eBPF made: on shared infrastructure, **provable termination is worth more than expressive power**. Kitwork makes the trade in a syntax millions already know.
 
+**Imports are native.** `import { router } from "kitwork"` and relative multi-file ESM are lowered inside the engine — no Node.js, no esbuild, no bundler step.
+
 Full reference: [ENGINE_CAPABILITIES.md](./ENGINE_CAPABILITIES.md)
+
+---
+
+## Batteries included
+
+The platform is the binary. Nothing below is an add-on service — it is all in the same process:
+
+| Built in | What it does |
+| :--- | :--- |
+| **Router** | Fluent trie router with route groups, lifecycle (`handle`/`then`/`catch`/`finally`), guards & middleware |
+| **Database** | Query builder over SQL — parameterized, with a mandatory `WHERE` on update/delete; ACID transactions with automatic rollback on any VM error |
+| **Templates** | `views/` pages + layouts + partials with `{{ }}` bindings, rendered on the zero-VM fast path |
+| **Caching** | `.cache()` RAM-LRU per route + `.static()` disk snapshots streamed straight to the socket |
+| **AutoSSL** | Let's Encrypt certificates — and a single-tenant `sites/<domain>` mode where **dropping a folder issues the cert**, no config and no DB |
+| **Rate limiting** | Typed rules (`ip` / `user` / `browser` / `global`), multi-window, scoped per-tenant or server-wide |
+| **Realtime (SSE)** | Server-Sent Events on a Zero-VM path — the broker survives hot reload, with `Last-Event-ID` replay and 1-to-1 send |
+| **Static files** | Assets served straight from disk; a `.txt` dropped into `views/` opens automatically — no route needed |
+| **Isolation** | Per-tenant `.env`, path-isolated — no tenant can read the host's or another tenant's secrets |
+| **Payments (VN)** | Built-in NAPAS 247 / VietQR payment-QR generation |
+| **Outbound** | `fetch`-style HTTP with SSRF protection; `go()` for bounded background work |
 
 ---
 
 ## A Folder Is a Website
 
-One process serves unlimited domains, routed by hostname:
+One process serves unlimited domains, routed by hostname. Two layouts:
 
 ```text
-tenants/<identity>/<domain>/
+tenants/<identity>/<domain>/      multi-tenant (identity from the system DB)
   ├─ app.kitwork.js      routes & logic → compiled to bytecode
-  ├─ views/              pages, layouts, partials, {{ bindings }}
+  ├─ views/              pages, layouts, partials, {{ bindings }}, auto-served .txt
   └─ assets/             served on the zero-VM fast path
+
+tenants/sites/<domain>/           single-tenant — no identity, no DB
 ```
 
-Drop a folder in, point DNS at the node, the domain is live — each tenant in its own sandbox with its own energy budget. Deployment is `rsync`; rollback is `git checkout`.
+Drop a folder in, point DNS at the node, the domain is live — each tenant in its own sandbox with its own energy budget. For a `sites/<domain>` folder the Let's Encrypt certificate is issued the moment the folder exists, with zero configuration. Deployment is `rsync`; rollback is `git checkout`.
 
 ---
 
@@ -157,8 +181,8 @@ Drop a folder in, point DNS at the node, the domain is live — each tenant in i
 
 ```mermaid
 graph TD
-    A[HTTP Request] --> B{Radix Trie Router}
-    B -- static asset --> C[Zero-VM fast path]
+    A[HTTP Request] --> B{Trie Router}
+    B -- static asset / .txt --> C[Zero-VM fast path]
     B -- dynamic --> D{Static cache?}
     D -- hit --> E[Stream .static file]
     D -- miss --> F[VM from sync.Pool] --> G[Execute bytecode]
@@ -166,10 +190,10 @@ graph TD
     H --> I[Snapshot cache → respond → recycle VM]
 ```
 
-- **Pipeline**: hand-written recursive-descent parser → esbuild bundles multi-file ESM (no Node.js) → AST flattens to `uint8` opcodes + constants pool → stack-based VM with lexical scope chains and per-opcode energy accounting
-- **Zero-allocation discipline**: VMs recycled via `sync.Pool` and reset in place; a custom `value.Value` model avoids `interface{}` boxing; radix-trie routing is O(path segments) with no regex
+- **Pipeline**: hand-written recursive-descent parser → native import bundler (multi-file ESM lowered in-engine, no Node.js) → AST flattens to `uint8` opcodes + constants pool → stack-based VM with lexical scope chains and per-opcode energy accounting
+- **Zero-allocation discipline**: VMs recycled via `sync.Pool` and reset in place; a custom `value.Value` model avoids `interface{}` boxing; trie routing is O(path segments) with no regex
 - **`.cache()` / `.static()`**: thread-safe RAM cache per route, and disk snapshots streamed to the socket with sequential reads — no `Seek`, no RAM staging
-- **Query builder**: SQL compiled in ~230ns, ~20x faster than reflection ORMs, ACID transactions with automatic rollback ([QUERY_BUILDER.md](./QUERY_BUILDER.md))
+- **Query builder**: parameterized SQL compiled in-engine (no reflection-ORM round-trips at request time), with ACID transactions and automatic rollback ([QUERY_BUILDER.md](./QUERY_BUILDER.md))
 
 ---
 
@@ -183,6 +207,9 @@ graph TD
 | Memory guards | String builders hard-capped; no tenant can balloon node RAM |
 | Source mapping | Failures report `app.kitwork.js:L53`, not hex dumps |
 | ACID boundaries | Any VM error → automatic rollback, zero connection leakage |
+| SQL safety | Parameterized queries; update/delete without a `WHERE` is refused |
+| Outbound | SSRF guard blocks requests to internal/loopback ranges |
+| Rate limiting | Per-IP / user / browser / global, at the server and tenant layers |
 
 ### Environment Variable Scoping & Isolation
 
@@ -204,7 +231,7 @@ Measured June 2026 on an i7-11850H (8C/16T) — Go microbenchmarks for the VM co
 | HTTP throughput | 33,287 req/s · 200 concurrent VUs · real tenant route |
 | Response latency under that load | p50 3.5 ms · p95 18.8 ms |
 | Success rate | 100.00% (0 / 499,510 failed) |
-| Cold boot — full tenant (esbuild bundle + compile + routes) | 9.8 ms |
+| Cold boot — full tenant (native bundle + compile + routes) | 9.8 ms |
 | Cold boot — script pipeline only (lex → parse → compile → run) | 1.7 ms |
 
 Reproduce: `go test ./work/ -bench "VMCoreOps|ColdBoot" -run xxx` and `k6 run k6_test.js`.
@@ -220,17 +247,17 @@ No special servers — every node runs this same engine; only responsibility dif
 - **Lose efficiency before availability** — when Workers die, Coordinators execute; when Coordinators die, Gateways execute
 - **Every workload is bounded** — the language is the cluster's immune system
 
-Performance degrades. The system continues. Full design: [CLUSTER.MD](./CLUSTER.MD)
+Performance degrades. The system continues. The clustering layer is **design-complete and being implemented in phases** — full design: [CLUSTER.MD](./CLUSTER.MD), transport backbone: [backbone.md](./backbone.md).
 
 ---
 
 ## FAQ
 
 **What is Kitwork Engine?**
-A multi-tenant cloud runtime in a single Go binary: a bounded JavaScript dialect compiled to bytecode, executed on a custom VM with energy metering, routing, database access, caching, and templating built in.
+A multi-tenant cloud runtime in a single Go binary: a bounded JavaScript dialect compiled to bytecode, executed on a custom VM with energy metering, routing, database access, caching, templating, AutoSSL, rate limiting, and SSE streaming built in.
 
 **Is it Node.js-compatible?**
-No — deliberately. Supported syntax behaves exactly like JavaScript; unbounded constructs (`while`, `try/catch`, `class`) are removed by design and rejected at compile time with instructive errors.
+No — deliberately. Supported syntax behaves exactly like JavaScript; unbounded constructs (`while`, `try/catch`, `class`) are removed by design and rejected at compile time with instructive errors. Imports are native — there is no Node.js or bundler in the pipeline.
 
 **Why not embed V8 or goja?**
 Owning the compiler makes safety a property of the language itself — not a watchdog around someone else's runtime — and keeps cold boots under 10ms in a small binary.
@@ -249,7 +276,8 @@ The engine powers live multi-tenant sites today, including built-in NAPAS 247 / 
 | :--- | :--- |
 | [ENGINE_CAPABILITIES.md](./ENGINE_CAPABILITIES.md) | Language reference: JS compatibility, removed keywords, cache / static / assets |
 | [CLUSTER.MD](./CLUSTER.MD) | Distributed architecture: invariants, roles, degradation, roadmap |
-| [QUERY_BUILDER.md](./QUERY_BUILDER.md) | The zero-allocation database layer |
+| [backbone.md](./backbone.md) | QUIC-centric transport backbone: planes, invariants, phased roadmap |
+| [QUERY_BUILDER.md](./QUERY_BUILDER.md) | The query-builder database layer |
 | [BENCHMARK.md](./BENCHMARK.md) | Load-test methodology and raw numbers |
 
 ---

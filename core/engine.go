@@ -221,6 +221,12 @@ func (e *Engine) discoverTenants() []string {
 		if !entry.IsDir() {
 			continue
 		}
+		// 0. Single-tenant convention: root/sites/<domain>/app.kitwork.js (no identity layer).
+		// Handled explicitly so it is not mistaken for an identity folder.
+		if entry.Name() == work.SitesDirName {
+			domains = append(domains, work.DiscoverSites(e.root)...)
+			continue
+		}
 		// 1. Kiểm tra cấu trúc phẳng: root/<domain>/app.kitwork.js
 		if _, err := os.Stat(filepath.Join(e.root, entry.Name(), work.AppFileName)); err == nil {
 			domains = append(domains, entry.Name())
@@ -274,9 +280,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, target, http.StatusMovedPermanently)
 		return
 	}
-	if to := dom.DBRedirectTarget(domain); to != "" && to != domain {
-		http.Redirect(w, r, dom.RedirectURL(scheme, to, r.URL.Path, r.URL.RawQuery), http.StatusMovedPermanently)
-		return
+	if !work.AllowLocal {
+		if to := dom.DBRedirectTarget(domain); to != "" && to != domain {
+			http.Redirect(w, r, dom.RedirectURL(scheme, to, r.URL.Path, r.URL.RawQuery), http.StatusMovedPermanently)
+			return
+		}
 	}
 
 	tenant, err := e.run(domain)

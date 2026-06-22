@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/modules/minifier"
 	"github.com/kitwork/engine/value"
 )
 
@@ -56,8 +57,8 @@ type Router struct {
 	// Set by .jit(); the path defaults to /jitcss.
 	isJIT bool
 
-	response *Response
-	request  *http.Request
+	response       *Response
+	request        *http.Request
 	responseWriter http.ResponseWriter
 
 	params map[string]string
@@ -341,10 +342,16 @@ func (r *Router) Context(cfg value.Value) *Router {
 		}
 	}
 	if v, ok := m["minify"]; ok {
-		r.viewRenderDefaults().minify = v.Truthy()
+		rd := r.viewRenderDefaults()
+		rd.minifySet = true // explicit → overrides the environment default
+		if v.Truthy() {
+			rd.minify = minifier.AllTypes
+		} else {
+			rd.minify = nil
+		}
 	}
 	if v, ok := m["jit"]; ok {
-		r.viewRenderDefaults().jitEnabled = v.Truthy()
+		r.viewRenderDefaults().jitCSS = v.Truthy()
 	}
 	return r
 }

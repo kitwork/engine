@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	jitcss "github.com/kitwork/engine/jit/css"
+	"github.com/kitwork/engine/modules/minifier"
 	"github.com/kitwork/engine/value"
 )
 
@@ -42,8 +43,9 @@ type Render struct {
 	// shows the not-found page — never a page that merely happens to exist on disk.
 	notfoundMode bool
 
-	jitEnabled bool // .jit(): inject server-side Tailwind/utility CSS for the page's classes
-	minify     bool // .minify(): minify the final HTML output (+ inline CSS)
+	jitCSS    bool     // .jit(): inject server-side Tailwind/utility CSS for the page's classes
+	minify    []string // .minify(): content types to minify on the final HTML output
+	minifySet bool     // whether minify was set explicitly (else default by environment)
 }
 
 type Layout struct {
@@ -73,15 +75,45 @@ func (r *Render) Global(val value.Value) *Render {
 // minimal CSS for the page's classes is injected before </head>. Opt-in — `render.jit()`
 // (or `render.jit(false)` to disable). Replaces the client-side Tailwind CDN.
 func (r *Render) Jit(vals ...value.Value) *Render {
-	r.jitEnabled = len(vals) == 0 || vals[0].Truthy()
+	r.jitCSS = len(vals) == 0 || vals[0].Truthy()
 	return r
 }
 
-// Minify enables minification of the final HTML output (collapse whitespace, drop
-// comments, minify inline CSS). Opt-in — `render.minify()` / `render.minify(false)`.
+// Minify configures minification of the final HTML output (collapse whitespace, drop comments,
+// minify inline CSS/JS/JSON/SVG). Calling it marks the choice EXPLICIT, overriding the
+// environment default (see shouldMinify):
+//
+//	render.minify()              // on, all types
+//	render.minify(false)         // off
+//	render.minify("css", "js")   // on, explicit subset by type name
 func (r *Render) Minify(vals ...value.Value) *Render {
-	r.minify = len(vals) == 0 || vals[0].Truthy()
+	r.minifySet = true
+	switch {
+	case len(vals) == 0:
+		r.minify = minifier.AllTypes
+	case vals[0].IsBool():
+		if vals[0].Truthy() {
+			r.minify = minifier.AllTypes
+		} else {
+			r.minify = nil
+		}
+	default:
+		r.minify = nil
+		for _, v := range vals {
+			r.minify = append(r.minify, v.String())
+		}
+	}
 	return r
+}
+
+// shouldMinify decides whether to minify this render. If .minify() / context({minify}) set it
+// explicitly, honor that. Otherwise default BY ENVIRONMENT: OFF on local dev (AllowLocal) for
+// readable output, ON for a real server for compact output.
+func (r *Render) shouldMinify() bool {
+	if r.minifySet {
+		return len(r.minify) > 0
+	}
+	return !AllowLocal
 }
 
 // CSS returns the tenant's site-wide JIT CSS as a STRING — the same minified, mtime-cached
@@ -225,27 +257,43 @@ func (r *Render) getfile(name string) string {
 }
 
 func (r *Render) getNotFoundPath() string {
-	if r.notfound == "" {
-		r.notfound = "notfound"
+	name := r.notfound
+	if name == "" {
+		name = "notfound"
 	}
 
-	searchName := r.notfound
-	searchDir := r.path
-
-	// Nếu bắt đầu bằng "/", tìm ở thư mục gốc
-	if strings.HasPrefix(r.notfound, "/") {
-		searchName = strings.TrimPrefix(r.notfound, "/")
-		searchDir = ""
+	// Explicit absolute path (e.g. .notfound("/errors/404")): resolve from the render root only,
+	// no walk-up — the caller pinned it deliberately.
+	if strings.HasPrefix(name, "/") {
+		name = strings.TrimPrefix(name, "/")
+		if p := r.pathJoin("", name, r.getfile("index")); fileExists(p) {
+			return p // directory form: <name>/index.kitwork.html
+		}
+		return r.pathJoin("", r.getfile(name)) // direct file: <name>.kitwork.html
 	}
 
-	// Trường hợp 1: Nếu r.notfound là một thư mục (Ví dụ: views/404/index.kitwork.html)
-	path1 := r.pathJoin(searchDir, searchName, r.getfile("index"))
-	if _, err := os.Stat(path1); err == nil {
-		return path1
+	// Otherwise: walk UP from the page's folder to the NEAREST notfound — the same nested
+	// resolution the shell (index) uses. So /docs/routing falls back to docs/notfound, then the
+	// root notfound. No declaration needed; .notfound("name") only changes the filename to look for.
+	folder := path.Join("/", r.path, r.page)
+	for {
+		if p := r.pathJoin(folder, r.getfile(name)); fileExists(p) {
+			return p // direct file: <folder>/notfound.kitwork.html
+		}
+		if p := r.pathJoin(folder, name, r.getfile("index")); fileExists(p) {
+			return p // directory form: <folder>/notfound/index.kitwork.html
+		}
+		if folder == "/" || folder == "." || folder == "" {
+			break
+		}
+		folder = path.Dir(folder)
 	}
+	return r.pathJoin("", r.getfile(name)) // root fallback: <root>/notfound.kitwork.html
+}
 
-	// Trường hợp 2: Nếu r.notfound là file trực tiếp (Ví dụ: views/notfound.kitwork.html)
-	return r.pathJoin(searchDir, r.getfile(searchName))
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
 }
 
 func (r *Render) pathJoin(vals ...string) string {
@@ -330,7 +378,7 @@ func (r *Render) tmpl(data any) string {
 	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
 	// cache theo tập class nên gần như miễn phí sau lần đầu.
-	if r.jitEnabled {
+	if r.jitCSS {
 		if css := jitcss.GenerateJITCached(out); css != "" {
 			if strings.Contains(css, "animation:") {
 				css = jitcss.AnimKeyframes + "\n" + css // keyframes for animate-* utilities
@@ -366,10 +414,10 @@ func (r *Render) tmpl(data any) string {
 		}
 	}
 
-	// 4. Minify (opt-in via .minify()): gọn HTML + CSS nội tuyến (giữ nguyên
-	// pre/textarea/script).
-	if r.minify {
-		out = minifyOutput(out)
+	// 4. Minify (opt-in via .minify()): gọn HTML + CSS/JS nội tuyến (giữ nguyên
+	// pre/textarea/script). HTML minify tự lan vào <style>/<script> bên trong.
+	if r.shouldMinify() {
+		out = minifier.HTML(out)
 	}
 	return out
 }
@@ -393,6 +441,14 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 			}
 
 			cmd := parts[0]
+			// Layout-slot token: `@navbar` (preferred) or legacy `_navbar_`. Normalize `@x` → `_x_`
+			// so both forms hit the slot handling below; anything else falls through to the Bind
+			// stage. `base` is the bare slot name ("navbar"), used to find the partial file — which
+			// may be the clean `navbar.kitwork.html` OR the legacy `_navbar_.kitwork.html`.
+			if len(cmd) > 1 && cmd[0] == '@' {
+				cmd = "_" + cmd[1:] + "_"
+			}
+			base := strings.Trim(cmd, "_")
 			switch cmd {
 			case "_page_":
 				// Nạp trang con động. notfoundMode → nạp thẳng trang not-found
@@ -452,10 +508,15 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					root := filepath.Clean(r.tenant.resolve(r.dir()))
 					dir := filepath.Clean(currentDir)
 					for {
-						fullPath := filepath.Join(dir, cmd+".kitwork.html")
-						if raw, err := os.ReadFile(fullPath); err == nil {
-							sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
-							found = true
+						for _, fname := range slotFiles(base) {
+							fullPath := filepath.Join(dir, fname)
+							if raw, err := os.ReadFile(fullPath); err == nil {
+								sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
+								found = true
+								break
+							}
+						}
+						if found {
 							break
 						}
 						parent := filepath.Dir(dir)
@@ -468,15 +529,18 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 
 				// C. Cuối cùng thử tìm trong thư mục views global
 				if !found {
-					globalPath := r.tenant.resolve("views", cmd+".kitwork.html")
-					if raw, err := os.ReadFile(globalPath); err == nil {
-						sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
-						found = true
+					for _, fname := range slotFiles(base) {
+						globalPath := r.tenant.resolve("views", fname)
+						if raw, err := os.ReadFile(globalPath); err == nil {
+							sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
+							found = true
+							break
+						}
 					}
 				}
 
 				if !found {
-					sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", cmd+".kitwork.html"))
+					sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", base+".kitwork.html"))
 				}
 
 			default:
@@ -491,18 +555,20 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 	return sb.String()
 }
 
-func (r *Render) Has(name string) bool {
-	// Tự động thêm 2 dấu gạch dưới nếu người dùng truyền vào dạng "sidebar"
-	if !strings.HasPrefix(name, "_") {
-		name = "_" + name
-	}
-	if !strings.HasSuffix(name, "_") {
-		name = name + "_"
-	}
+// slotFiles returns the partial-file candidates for a layout slot, newest convention first:
+// "navbar.kitwork.html" (clean — matches the @navbar token) then the legacy
+// "_navbar_.kitwork.html". The first that exists on disk wins.
+func slotFiles(base string) []string {
+	return []string{base + ".kitwork.html", "_" + base + "_.kitwork.html"}
+}
 
-	path := r.pathJoin(r.path, r.getfile(name))
-	if _, err := os.Stat(path); err == nil {
-		return true
+func (r *Render) Has(name string) bool {
+	base := strings.Trim(name, "_") // accept "sidebar", "_sidebar_" or "@sidebar"-style input
+	base = strings.TrimPrefix(base, "@")
+	for _, fname := range slotFiles(base) {
+		if _, err := os.Stat(r.pathJoin(r.path, fname)); err == nil {
+			return true
+		}
 	}
 	return false
 }

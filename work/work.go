@@ -51,6 +51,16 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		matched, params = t.routes.Match(r.Method, path)
 	}
 
+	// Zero-VM: a real .txt file dropped into views/ is auto-served as a static file with no route.
+	// It wins over a wildcard catch-all (e.g. router.get("/*")) and the custom 404 so the file
+	// actually opens — but a SPECIFIC explicit route (matched, non-wildcard) still takes priority.
+	// serveViewStatic is a cheap no-op (suffix check) for non-.txt paths, so this stays hot-path safe.
+	if matched == nil || strings.HasSuffix(matched.Path, "*") {
+		if t.serveViewStatic(w, r) {
+			return
+		}
+	}
+
 	if matched == nil {
 		var notFoundMatched *Router
 		var notFoundParams map[string]string

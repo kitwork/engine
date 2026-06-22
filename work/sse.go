@@ -81,6 +81,24 @@ func NewSSEBroker() *SSEBroker {
 	return b
 }
 
+// sseBrokerRegistry shares ONE broker per tenant identity, so a broker (and its live client
+// connections) survives tenant recompiles: hot-reload swaps the *Tenant instance, but the open
+// SSE connections must keep talking to the SAME broker — otherwise a publish lands on a fresh,
+// empty broker. Local form of the backbone's shared bus (see engine/backbone.md, Phase 1).
+var sseBrokerRegistry sync.Map // identity/domain key -> *SSEBroker
+
+func sseBrokerFor(key string) *SSEBroker {
+	if b, ok := sseBrokerRegistry.Load(key); ok {
+		return b.(*SSEBroker)
+	}
+	b := NewSSEBroker()
+	if actual, loaded := sseBrokerRegistry.LoadOrStore(key, b); loaded {
+		b.Stop() // lost the create race — discard ours, use the winner's
+		return actual.(*SSEBroker)
+	}
+	return b
+}
+
 func (b *SSEBroker) run() {
 	for {
 		select {
