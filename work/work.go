@@ -84,6 +84,12 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// JIT icon stylesheet route (router.icons()): same idea, the site-wide icon masks.
+	if matched.isIcons {
+		serveIconCSS(t, w, r)
+		return
+	}
+
 	// Rate Limiting Check
 	if !t.checkRateLimit(matched, r, w) {
 		return

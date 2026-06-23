@@ -44,6 +44,12 @@ type Tenant struct {
 	jitRoute  string
 	jitInject bool
 
+	// JIT icon service mode (đăng ký qua router.icons()): phục vụ 1 stylesheet icon site-wide,
+	// cached, tại iconRoute; iconInject = tự chèn <link>. Khi set, mỗi trang render KHÔNG inline
+	// <style data-kitwork-jit="icons"> nữa mà dùng stylesheet chung này.
+	iconRoute  string
+	iconInject bool
+
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
 

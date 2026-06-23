@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	jitcss "github.com/kitwork/engine/jit/css"
+	icons "github.com/kitwork/engine/jit/icons"
 	"github.com/kitwork/engine/modules/minifier"
 	"github.com/kitwork/engine/value"
 )
@@ -383,13 +384,43 @@ func (r *Render) tmpl(data any) string {
 			if strings.Contains(css, "animation:") {
 				css = jitcss.AnimKeyframes + "\n" + css // keyframes for animate-* utilities
 			}
-			style := "<style data-kitwork-jit>\n" + css + "</style>"
+			style := "<style data-kitwork-jit=\"css\">\n" + css + "</style>"
 			if i := strings.LastIndex(out, "</head>"); i >= 0 {
 				out = out[:i] + style + out[i:]
 			} else {
 				out = style + out
 			}
 		}
+	}
+
+	// 3c. JIT icons. DEFAULT (inline): scan for `<i class="icon-x">` and inject a per-page
+	// <style data-kitwork-jit="icons"> with CSS-mask rules for ONLY the icons used (jit/icons) — a
+	// cheap no-op when none are present. SERVICE mode: if the tenant declared router.icons(), a
+	// shared cached stylesheet is served at iconRoute instead, so we skip the inline pass and
+	// auto-link that stylesheet (same guards as router.jit(): a LIVE isIcons route, idempotent if a
+	// link is already present). Sovereign + minimal either way: no Font Awesome, no CDN, no payload.
+	iconService := false
+	if r.tenant != nil && r.tenant.iconRoute != "" && r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", r.tenant.iconRoute); rt != nil && rt.isIcons {
+			iconService = true
+		}
+	}
+	if iconService {
+		if r.tenant.iconInject {
+			route := r.tenant.iconRoute
+			already := strings.Contains(out, `rel="stylesheet" href="`+route+`"`) ||
+				strings.Contains(out, `rel='stylesheet' href='`+route+`'`)
+			if !already {
+				link := `<link rel="stylesheet" href="` + route + `">`
+				if i := strings.LastIndex(out, "</head>"); i >= 0 {
+					out = out[:i] + link + out[i:]
+				} else {
+					out = link + out
+				}
+			}
+		}
+	} else {
+		out = icons.Render(out)
 	}
 
 	// 3b. JIT service mode (router.jit()): link the shared, cached stylesheet once — no

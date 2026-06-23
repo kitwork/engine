@@ -56,6 +56,9 @@ type Router struct {
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.
 	isJIT bool
+	// JIT icon stylesheet route: serve the tenant's site-wide icon CSS (masks, no JS handler,
+	// no VM). Set by .icons(); the path defaults to /jiticons.
+	isIcons bool
 
 	response       *Response
 	request        *http.Request
@@ -452,6 +455,57 @@ func (r *Router) Jit(args ...value.Value) *Router {
 	// e.g. router.group("/assets").jit("/css") serves AND links /assets/css. Set once at boot.
 	r.tenant.jitRoute = route.Path
 	r.tenant.jitInject = inject
+	return route
+}
+
+// Icons declares the site-wide JIT ICON feature: a single, browser-cached stylesheet of CSS-mask
+// rules for the icon-<name> classes used across the tenant's templates, served at /jiticons (or a
+// custom path), and auto-linked into every rendered page. Declare it once at boot:
+//
+//	router.icons()                                // serve at /jiticons + auto-link in <head>
+//	router.icons("/icons.css")                    // custom path
+//	router.icons({ path: "/icons", inject: false }) // serve only; place the <link> yourself
+//
+// This is SERVICE mode — one shared, cached request for the whole site, the same-site form of the
+// jiticons.kitwork.io CDN. Contrast with the DEFAULT, where each rendered page inlines its own
+// <style data-kitwork-jit="icons">. Declaring this switches icons from inline to service mode.
+func (r *Router) Icons(args ...value.Value) *Router {
+	path := IconStylesheetPath
+	inject := true
+	if len(args) > 0 {
+		a := args[0]
+		if a.IsString() {
+			if p := a.String(); p != "" {
+				path = p
+			}
+		} else if a.IsMap() {
+			m := a.Map()
+			if p, ok := m["path"]; ok && p.String() != "" {
+				path = p.String()
+			}
+			if v, ok := m["inject"]; ok {
+				inject = v.Truthy()
+			}
+		}
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	// Surface an obvious clash instead of failing silently (routes table is last-write-wins).
+	if r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", path); rt != nil && !rt.isIcons {
+			fmt.Printf("[router.icons] GET %s is already registered by another route — it will be shadowed\n", path)
+		}
+	}
+
+	route := r.New("GET", path)
+	route.isIcons = true
+
+	// Auto-link uses the route's CANONICAL path (see router.jit), so the injected <link href> can
+	// never diverge from the route that serves the CSS. Set once at boot.
+	r.tenant.iconRoute = route.Path
+	r.tenant.iconInject = inject
 	return route
 }
 
