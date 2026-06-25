@@ -1,0 +1,50 @@
+/* more — progressive "load more" with NO fragment endpoint and NO server-side template-in-JS.
+ * Fetches the NEXT PAGE (a normal, server-rendered, paginated page), finds the SAME list container
+ * in it, skips items already present (deduped by their data-key), and appends the rest. The trigger
+ * then advances to that page's own "next" link and retires itself on the last page. With JS off it
+ * degrades to real pagination (the trigger is a normal <a href>).
+ *
+ *   <div id="list"> … <article data-key="123">…</article> … </div>
+ *   <a href="/posts?page=2" data-kitwork-action="more" data-kitwork-target="#list">Load more</a>
+ */
+window.kitwork.components.action("more", function (el, e) {
+  if (e && e.preventDefault) e.preventDefault();
+  var store = window.kitwork.components.state(el);
+  if (store.isLoading) return;
+  var href = el.getAttribute("data-kitwork-href") || el.getAttribute("href");
+  var selector = el.getAttribute("data-kitwork-target");
+  var dest = selector ? document.querySelector(selector) : null;
+  if (!href || !dest) return;
+  store.isLoading = true;
+  el.classList.add("is-loading");
+
+  fetch(href, { credentials: "same-origin" })
+    .then(function (r) { return r.text(); })
+    .then(function (html) {
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      var source = doc.querySelector(selector);
+      if (source) {
+        // Keys already in the live container → skip duplicates.
+        var seen = {};
+        dest.querySelectorAll("[data-key]").forEach(function (n) { seen[n.getAttribute("data-key")] = true; });
+        source.querySelectorAll("[data-key]").forEach(function (n) {
+          var key = n.getAttribute("data-key");
+          if (seen[key]) return;
+          seen[key] = true;
+          dest.appendChild(document.importNode(n, true));
+        });
+      }
+      // Advance the trigger to the fetched page's own "next" link; retire it on the last page.
+      var next = doc.querySelector('[data-kitwork-action="more"]');
+      var nextHref = next && (next.getAttribute("data-kitwork-href") || next.getAttribute("href"));
+      store.isLoading = false;
+      el.classList.remove("is-loading");
+      if (nextHref) {
+        el.setAttribute(el.hasAttribute("data-kitwork-href") ? "data-kitwork-href" : "href", nextHref);
+      } else {
+        el.remove();
+      }
+      document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: href, target: dest } }));
+    })
+    .catch(function () { store.isLoading = false; el.classList.remove("is-loading"); });
+});

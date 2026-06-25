@@ -59,6 +59,12 @@ type Router struct {
 	// JIT icon stylesheet route: serve the tenant's site-wide icon CSS (masks, no JS handler,
 	// no VM). Set by .icons(); the path defaults to /jiticons.
 	isIcons bool
+	// jitjs runtime route: serve the tenant's site-wide JS runtime (verbs, no JS handler, no VM).
+	// Set by .jitjs(); the path defaults to /jitjs.
+	isJitjs bool
+	// JIT logo stylesheet route: serve the tenant's site-wide brand-logo CSS (Simple Icons masks,
+	// no JS handler, no VM). Set by .logo(); the path defaults to /jitlogo.
+	isLogo bool
 
 	response       *Response
 	request        *http.Request
@@ -506,6 +512,95 @@ func (r *Router) Icons(args ...value.Value) *Router {
 	// never diverge from the route that serves the CSS. Set once at boot.
 	r.tenant.iconRoute = route.Path
 	r.tenant.iconInject = inject
+	return route
+}
+
+// Jitjs declares the site-wide jitjs runtime as a SERVICE: a single, browser-cached script holding
+// the core dispatcher + the union of data-kitwork-action verbs used across the tenant's templates,
+// served at /jitjs (or a custom path) and auto-injected into every rendered page. Declare once:
+//
+//	router.jitjs()                                  // serve at /jitjs + auto <script> in <head>
+//	router.jitjs("/runtime.js")                     // custom path
+//	router.jitjs({ path: "/r.js", inject: false })  // serve only; place the <script> yourself
+//
+// Contrast with the DEFAULT, where each page inlines its own <script data-kitwork-jit="js"> with
+// only its verbs. Declaring this switches jitjs from inline to one shared cached file.
+func (r *Router) Jitjs(args ...value.Value) *Router {
+	path := JitjsPath
+	inject := true
+	if len(args) > 0 {
+		a := args[0]
+		if a.IsString() {
+			if p := a.String(); p != "" {
+				path = p
+			}
+		} else if a.IsMap() {
+			m := a.Map()
+			if p, ok := m["path"]; ok && p.String() != "" {
+				path = p.String()
+			}
+			if v, ok := m["inject"]; ok {
+				inject = v.Truthy()
+			}
+		}
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	// Surface an obvious clash instead of failing silently (routes table is last-write-wins).
+	if r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", path); rt != nil && !rt.isJitjs {
+			fmt.Printf("[router.jitjs] GET %s is already registered by another route — it will be shadowed\n", path)
+		}
+	}
+
+	route := r.New("GET", path)
+	route.isJitjs = true
+
+	// Auto-inject uses the route's CANONICAL path (see router.jit), so the injected <script src> can
+	// never diverge from the route that serves the runtime. Set once at boot.
+	r.tenant.jitjsRoute = route.Path
+	r.tenant.jitjsInject = inject
+	return route
+}
+
+// Logo declares the site-wide JIT brand-logo stylesheet (Simple Icons CSS-masks for the logo-<name>
+// classes used across the tenant), served at /jitlogo (or a custom path) and auto-linked. Mirrors
+// router.icons(); contrast the DEFAULT, where each page inlines its own <style data-kitwork-jit="logo">.
+func (r *Router) Logo(args ...value.Value) *Router {
+	path := LogoStylesheetPath
+	inject := true
+	if len(args) > 0 {
+		a := args[0]
+		if a.IsString() {
+			if p := a.String(); p != "" {
+				path = p
+			}
+		} else if a.IsMap() {
+			m := a.Map()
+			if p, ok := m["path"]; ok && p.String() != "" {
+				path = p.String()
+			}
+			if v, ok := m["inject"]; ok {
+				inject = v.Truthy()
+			}
+		}
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	if r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", path); rt != nil && !rt.isLogo {
+			fmt.Printf("[router.logo] GET %s is already registered by another route — it will be shadowed\n", path)
+		}
+	}
+
+	route := r.New("GET", path)
+	route.isLogo = true
+	r.tenant.logoRoute = route.Path
+	r.tenant.logoInject = inject
 	return route
 }
 

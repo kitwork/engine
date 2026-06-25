@@ -15,7 +15,7 @@ import (
 
 // AllowedDomains holds the list of domains allowed by configuration
 var Allows []string
-var SkipLabels []string
+var SkipLabel []string
 
 // SitesDir, when set (e.g. "tenants/sites"), enables the single-tenant convention: a host is
 // allowed for AutoSSL if <SitesDir>/<host>/ exists on disk. Dropping a domain folder is enough to

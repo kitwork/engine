@@ -9,8 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	components "github.com/kitwork/engine/jit/components"
 	jitcss "github.com/kitwork/engine/jit/css"
 	icons "github.com/kitwork/engine/jit/icons"
+	jitjs "github.com/kitwork/engine/jit/js"
+	logo "github.com/kitwork/engine/jit/logo"
 	"github.com/kitwork/engine/modules/minifier"
 	"github.com/kitwork/engine/value"
 )
@@ -393,6 +396,10 @@ func (r *Render) tmpl(data any) string {
 		}
 	}
 
+	// 3d. JIT components: inject <style data-kitwork-jit="components"> with CSS for ONLY the UI
+	// component families (.button/.btn, .card, …) the page uses (jit/components). No-op otherwise.
+	out = components.Render(out)
+
 	// 3c. JIT icons. DEFAULT (inline): scan for `<i class="icon-x">` and inject a per-page
 	// <style data-kitwork-jit="icons"> with CSS-mask rules for ONLY the icons used (jit/icons) — a
 	// cheap no-op when none are present. SERVICE mode: if the tenant declared router.icons(), a
@@ -421,6 +428,59 @@ func (r *Render) tmpl(data any) string {
 		}
 	} else {
 		out = icons.Render(out)
+	}
+
+	// 3f. JIT logos: brand logos (Simple Icons) via <i class="logo-x"> — same inline/service model
+	// as icons (jit/logo). router.logo() switches to the shared cached /jitlogo stylesheet.
+	logoService := false
+	if r.tenant != nil && r.tenant.logoRoute != "" && r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", r.tenant.logoRoute); rt != nil && rt.isLogo {
+			logoService = true
+		}
+	}
+	if logoService {
+		if r.tenant.logoInject {
+			route := r.tenant.logoRoute
+			already := strings.Contains(out, `rel="stylesheet" href="`+route+`"`) ||
+				strings.Contains(out, `rel='stylesheet' href='`+route+`'`)
+			if !already {
+				link := `<link rel="stylesheet" href="` + route + `">`
+				if i := strings.LastIndex(out, "</head>"); i >= 0 {
+					out = out[:i] + link + out[i:]
+				} else {
+					out = link + out
+				}
+			}
+		}
+	} else {
+		out = logo.Render(out)
+	}
+
+	// 3e. jitjs. DEFAULT (inline): inject a per-page <script data-kitwork-jit="js"> with the core
+	// dispatcher + ONLY the data-kitwork-action verbs the page uses (jit/js); Drive re-runs it on
+	// swap (mergeHead). SERVICE: if the tenant declared router.jitjs(), one shared cached runtime is
+	// served at jitjsRoute, so we skip inlining and auto-inject <script src> (same guards as
+	// router.icons()). A cheap no-op when no verbs are used.
+	jitjsService := false
+	if r.tenant != nil && r.tenant.jitjsRoute != "" && r.tenant.routes != nil {
+		if rt, _ := r.tenant.routes.Match("GET", r.tenant.jitjsRoute); rt != nil && rt.isJitjs {
+			jitjsService = true
+		}
+	}
+	if jitjsService {
+		if r.tenant.jitjsInject {
+			route := r.tenant.jitjsRoute
+			if !strings.Contains(out, `src="`+route+`"`) {
+				tag := `<script src="` + route + `" defer></script>`
+				if i := strings.LastIndex(out, "</head>"); i >= 0 {
+					out = out[:i] + tag + out[i:]
+				} else {
+					out = tag + out
+				}
+			}
+		}
+	} else {
+		out = jitjs.Render(out)
 	}
 
 	// 3b. JIT service mode (router.jit()): link the shared, cached stylesheet once — no

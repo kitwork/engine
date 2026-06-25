@@ -1,0 +1,2 @@
+Drop Simple Icons (CC0) here: clone simple-icons and copy icons/*.svg into this folder, then
+rebuild. `//go:embed all:simple` keeps this dir embeddable before any .svg is added.

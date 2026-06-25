@@ -154,6 +154,12 @@ func twColor(colorName, shade string) string {
 		return rgb.String()
 	}
 
+	// Brand-logo colours: brand-<slug> (text-brand-github, bg-brand-stripe, …) resolve to the
+	// official hex registered by jit/logo. Returns a #hex; the callers handle the '#' path.
+	if hex, ok := brandHex(colorName); ok {
+		return hex
+	}
+
 	// Tailwind family without an explicit shade → default to the 500 shade (Tailwind's
 	// behavior for `bg-blue` etc., though v3 usually requires a shade).
 	if fam, ok := TwPalette[colorName]; ok {

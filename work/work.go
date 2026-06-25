@@ -90,6 +90,18 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// jitjs runtime route (router.jitjs()): serve the tenant's site-wide, cached JS runtime.
+	if matched.isJitjs {
+		serveJitjsJS(t, w, r)
+		return
+	}
+
+	// JIT logo stylesheet route (router.logo()): site-wide brand-logo masks.
+	if matched.isLogo {
+		serveLogoCSS(t, w, r)
+		return
+	}
+
 	// Rate Limiting Check
 	if !t.checkRateLimit(matched, r, w) {
 		return

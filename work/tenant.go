@@ -50,6 +50,16 @@ type Tenant struct {
 	iconRoute  string
 	iconInject bool
 
+	// jitjs service mode (đăng ký qua router.jitjs()): phục vụ 1 runtime <script> site-wide, cached,
+	// tại jitjsRoute; jitjsInject = tự chèn <script src>. Khi set, mỗi trang KHÔNG inline
+	// <script data-kitwork-jit="js"> nữa mà dùng file chung này.
+	jitjsRoute  string
+	jitjsInject bool
+
+	// JIT logo service mode (router.logo()): site-wide brand-logo stylesheet at logoRoute, cached.
+	logoRoute  string
+	logoInject bool
+
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
 
