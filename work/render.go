@@ -11,6 +11,7 @@ import (
 
 	components "github.com/kitwork/engine/jit/components"
 	jitcss "github.com/kitwork/engine/jit/css"
+	fonts "github.com/kitwork/engine/jit/fonts"
 	icons "github.com/kitwork/engine/jit/icons"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
@@ -482,6 +483,12 @@ func (r *Render) tmpl(data any) string {
 	} else {
 		out = jitjs.Render(out)
 	}
+
+	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses
+	// (a `font-family: <Name>` value or a `font-<slug>` class) → inject preload links + ONE
+	// <style data-kitwork-jit="fonts"> with @font-face (subset woff2 served from /jitfonts) for ONLY
+	// those families. No Google at runtime, no third-party CDN; a cheap no-op when none are used.
+	out = fonts.Render(out)
 
 	// 3b. JIT service mode (router.jit()): link the shared, cached stylesheet once — no
 	// <head> edit needed. Two guards keep the <link> honest: (a) only inject when a LIVE jit

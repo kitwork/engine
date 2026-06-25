@@ -47,6 +47,13 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	var params map[string]string
 
 	path := r.URL.Path
+
+	// jitfonts: vendored woff2 are served straight off the embedded FS at /jitfonts/ — a built-in,
+	// always-on route (the injected @font-face src points here), checked before tenant routing.
+	if serveFontIf(w, r) {
+		return
+	}
+
 	if t.routes != nil {
 		matched, params = t.routes.Match(r.Method, path)
 	}

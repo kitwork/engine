@@ -1,0 +1,16 @@
+Vendored web fonts — licensing
+================================
+
+The woff2 files under families/ are vendored from Google Fonts and redistributed under their
+respective open-source licenses (self-hosting is explicitly permitted):
+
+- Outfit        — SIL Open Font License 1.1 — © The Outfit Project Authors
+                  https://fonts.google.com/specimen/Outfit
+- Fira Code     — SIL Open Font License 1.1 — © The Fira Code Project Authors
+                  https://fonts.google.com/specimen/Fira+Code
+
+SIL Open Font License 1.1: https://openfontlicense.org/
+
+The files are the standard Google Fonts subsets (latin / latin-ext), unchanged. Regenerate or add
+families with vendor.py. Font/brand names are trademarks of their owners — used here only to name
+the typeface, not to imply endorsement.
