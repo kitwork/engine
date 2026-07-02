@@ -123,7 +123,7 @@ func twUnit(s string) string {
 // twColor resolves a Tailwind color to an "R, G, B" string (or hex for arbitrary /
 // transparent passthrough). Lookup order: arbitrary [..] → base keywords → the
 // Tailwind v3 palette (family-shade, see twpalette.go) → the custom Colors map.
-func twColor(colorName, shade string) string {
+func twColor(colorName, shade string, cfg *Config) string {
 	if strings.HasPrefix(colorName, "[") && strings.HasSuffix(colorName, "]") {
 		return colorName[1 : len(colorName)-1] // e.g. [#fcfcfd]
 	}
@@ -150,7 +150,11 @@ func twColor(colorName, shade string) string {
 	}
 
 	// Custom design-system colors (brand, kitwork, primary, …) — shade ignored.
-	if rgb, ok := Colors[colorName]; ok {
+	colors := Colors
+	if cfg != nil {
+		colors = cfg.Colors
+	}
+	if rgb, ok := colors[colorName]; ok {
 		return rgb.String()
 	}
 

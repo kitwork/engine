@@ -203,4 +203,47 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 	})
 }
 
+func (r HTTPResponse) Ok() bool {
+	return r.Status >= 200 && r.Status < 300
+}
+
 func (w *KitWork) HTTP() *HTTP { return &HTTP{} }
+
+// globalFetch implements the browser-compatible global fetch(url, options) function.
+func globalFetch(args ...value.Value) value.Value {
+	if len(args) == 0 {
+		return value.New(HTTPResponse{Status: 0, Error: "fetch: url is required"})
+	}
+	urlStr := args[0].Text()
+
+	h := &HTTP{}
+	method := "GET"
+	var body value.Value
+
+	if len(args) > 1 && args[1].IsMap() {
+		opts := args[1].Map()
+		if m, ok := opts["method"]; ok {
+			method = strings.ToUpper(m.String())
+		}
+		if b, ok := opts["body"]; ok {
+			body = b
+		}
+		if t, ok := opts["timeout"]; ok {
+			if t.IsNumeric() {
+				h.timeout = time.Duration(t.N) * time.Millisecond
+			} else {
+				if d, err := ParseDuration(t.String()); err == nil {
+					h.timeout = d
+				}
+			}
+		}
+		if hdrs, ok := opts["headers"]; ok && hdrs.IsMap() {
+			h.headers = make(map[string]string)
+			for k, v := range hdrs.Map() {
+				h.headers[k] = v.String()
+			}
+		}
+	}
+
+	return h.do(method, urlStr, body)
+}

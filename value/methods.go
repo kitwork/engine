@@ -733,3 +733,86 @@ func (v Value) Merge(args ...Value) Value {
 	}
 	return v
 }
+
+func (v Value) Chunk(args ...Value) Value {
+	if len(args) == 0 {
+		return v
+	}
+	size := int(args[0].N)
+	if size <= 0 {
+		return Value{K: Array, V: &[]Value{}}
+	}
+
+	var arr []Value
+	if ptr, ok := v.V.(*[]Value); ok {
+		arr = *ptr
+	} else if a, ok := v.V.([]Value); ok {
+		arr = a
+	} else {
+		return Value{K: Nil}
+	}
+
+	var chunks []Value
+	for i := 0; i < len(arr); i += size {
+		end := i + size
+		if end > len(arr) {
+			end = len(arr)
+		}
+		chunk := make([]Value, end-i)
+		copy(chunk, arr[i:end])
+		chunks = append(chunks, Value{K: Array, V: &chunk})
+	}
+	return Value{K: Array, V: &chunks}
+}
+
+func (v Value) Pick(args ...Value) Value {
+	if v.K != Map || len(args) == 0 {
+		return Value{K: Map, V: make(map[string]Value)}
+	}
+
+	keysMap := make(map[string]bool)
+	for _, arg := range args {
+		if arg.K == Array {
+			for _, item := range arg.Array() {
+				keysMap[item.Text()] = true
+			}
+		} else {
+			keysMap[arg.Text()] = true
+		}
+	}
+
+	m := v.Map()
+	res := make(map[string]Value)
+	for k, val := range m {
+		if keysMap[k] {
+			res[k] = val
+		}
+	}
+	return New(res)
+}
+
+func (v Value) Omit(args ...Value) Value {
+	if v.K != Map {
+		return Value{K: Map, V: make(map[string]Value)}
+	}
+
+	keysMap := make(map[string]bool)
+	for _, arg := range args {
+		if arg.K == Array {
+			for _, item := range arg.Array() {
+				keysMap[item.Text()] = true
+			}
+		} else {
+			keysMap[arg.Text()] = true
+		}
+	}
+
+	m := v.Map()
+	res := make(map[string]Value)
+	for k, val := range m {
+		if !keysMap[k] {
+			res[k] = val
+		}
+	}
+	return New(res)
+}

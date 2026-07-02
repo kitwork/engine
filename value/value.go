@@ -121,3 +121,11 @@ func transformArg(val Value, targetType reflect.Type) reflect.Value {
 	}
 	return reflect.Zero(targetType)
 }
+
+// TenantCache enables runtime/VM to query the in-memory cache directly without import cycles.
+type TenantCache interface {
+	GetCache(key string) (Value, bool)
+	SetCache(key string, val Value, ttl Value)
+	DeleteCache(key string)
+	ClearCache()
+}

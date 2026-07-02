@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/modules/minifier"
 	"github.com/kitwork/engine/value"
 )
@@ -81,6 +83,8 @@ type Router struct {
 	// Rate Limit configuration — a list of rules ({type, rate, period}). Multiple rules, even
 	// the same type with different periods (e.g. 100/s + 1000/min per IP), all apply.
 	limitRules []rateRule
+
+	cors *CorsOptions
 }
 
 // rateRule is one rate-limit rule. Type is the key dimension ("ip" | "user" | "browser" |
@@ -127,6 +131,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 	// 2. Mặc định Status 200 nếu chưa có
 	if r.response.Code() == 0 {
 		r.response.Status(200)
+	}
+
+	if r.cors != nil {
+		writeCorsHeaders(r.cors, w, request)
 	}
 
 	// // 2.5 Bơm Headers (nếu có)
@@ -462,6 +470,143 @@ func (r *Router) Jit(args ...value.Value) *Router {
 	r.tenant.jitRoute = route.Path
 	r.tenant.jitInject = inject
 	return route
+}
+
+// Jitcss registers a custom config object for JIT CSS theme compilation (colors, shadow, animations).
+// Called at boot in app.kitwork.js:
+//
+//	router.jitcss({
+//		theme: {
+//			extend: {
+//				colors: { brand: '#ff6d00' }
+//			}
+//		}
+//	})
+func (r *Router) Jitcss(cfg value.Value) *Router {
+	if !cfg.IsMap() {
+		return r
+	}
+
+	config := &jitcss.Config{
+		Colors:       make(map[string]jitcss.Color),
+		Order:        append([]string(nil), jitcss.DefaultConfig.Order...),
+		MediaQueries: make(map[string]string),
+		States:       make(map[string]string),
+		ShadowLevels: make(map[string]string),
+		Scale:        append([]int(nil), jitcss.DefaultConfig.Scale...),
+		AlphaScales:  append([]int(nil), jitcss.DefaultConfig.AlphaScales...),
+		Opacities:    append([]int(nil), jitcss.DefaultConfig.Opacities...),
+		ZIndices:     append([]int(nil), jitcss.DefaultConfig.ZIndices...),
+		Animations:   make(map[string]string),
+		Keyframes:    make(map[string]string),
+	}
+
+	for k, v := range jitcss.DefaultConfig.Colors {
+		config.Colors[k] = v
+	}
+	for k, v := range jitcss.DefaultConfig.MediaQueries {
+		config.MediaQueries[k] = v
+	}
+	for k, v := range jitcss.DefaultConfig.States {
+		config.States[k] = v
+	}
+	for k, v := range jitcss.DefaultConfig.ShadowLevels {
+		config.ShadowLevels[k] = v
+	}
+
+	m := cfg.Map()
+
+	// Parse theme & theme.extend
+	if themeVal, ok := m["theme"]; ok && themeVal.IsMap() {
+		themeMap := themeVal.Map()
+		parseTheme(config, themeMap)
+
+		if extendVal, ok := themeMap["extend"]; ok && extendVal.IsMap() {
+			parseTheme(config, extendVal.Map())
+		}
+	}
+
+	r.tenant.jitcssConfig = config
+	return r
+}
+
+func parseTheme(config *jitcss.Config, m map[string]value.Value) {
+	// Parse colors
+	if colorsVal, ok := m["colors"]; ok && colorsVal.IsMap() {
+		for colorName, colorVal := range colorsVal.Map() {
+			if colorVal.IsString() {
+				config.Colors[colorName] = jitcss.Hex(colorVal.String())
+				if !contains(config.Order, colorName) {
+					config.Order = append(config.Order, colorName)
+				}
+			} else if colorVal.IsMap() {
+				for shadeName, shadeVal := range colorVal.Map() {
+					if shadeVal.IsString() {
+						var flatName string
+						if shadeName == "DEFAULT" {
+							flatName = colorName
+						} else {
+							flatName = colorName + "-" + shadeName
+						}
+						config.Colors[flatName] = jitcss.Hex(shadeVal.String())
+						if !contains(config.Order, flatName) {
+							config.Order = append(config.Order, flatName)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Parse boxShadow
+	if shadowVal, ok := m["boxShadow"]; ok && shadowVal.IsMap() {
+		for shadowName, shadowVal := range shadowVal.Map() {
+			if shadowVal.IsString() {
+				config.ShadowLevels[shadowName] = shadowVal.String()
+			}
+		}
+	}
+
+	// Parse animation
+	if animVal, ok := m["animation"]; ok && animVal.IsMap() {
+		for animName, animVal := range animVal.Map() {
+			if animVal.IsString() {
+				config.Animations[animName] = animVal.String()
+			}
+		}
+	}
+
+	// Parse keyframes
+	if kfVal, ok := m["keyframes"]; ok && kfVal.IsMap() {
+		for kfName, kfVal := range kfVal.Map() {
+			if kfVal.IsMap() {
+				config.Keyframes[kfName] = buildKeyframeCSS(kfVal.Map())
+			}
+		}
+	}
+}
+
+func contains(arr []string, val string) bool {
+	for _, v := range arr {
+		if v == val {
+			return true
+		}
+	}
+	return false
+}
+
+func buildKeyframeCSS(stagesMap map[string]value.Value) string {
+	var sb strings.Builder
+	for stage, props := range stagesMap {
+		if props.IsMap() {
+			sb.WriteString("\t" + stage + " {\n")
+			for prop, val := range props.Map() {
+				sb.WriteString(fmt.Sprintf("\t\t%s: %s;\n", prop, val.String()))
+			}
+			sb.WriteString("\t}\n")
+		}
+	}
+	return sb.String()
 }
 
 // Icons declares the site-wide JIT ICON feature: a single, browser-cached stylesheet of CSS-mask
@@ -890,6 +1035,10 @@ func (r *Router) Static(v value.Value) *Router {
 	return r
 }
 
+func (r *Router) Persist(v value.Value) *Router {
+	return r.Static(v)
+}
+
 type StaticCacheMeta struct {
 	Status      int               `json:"status"`
 	ContentType string            `json:"content_type"`
@@ -1108,4 +1257,108 @@ func (r *Router) saveStaticCache() {
 			fileGzip.Close()
 		}
 	}
+}
+
+// CORS Middleware Implementation
+
+type CorsOptions struct {
+	AllowedOrigins   []string
+	AllowedMethods   []string
+	AllowedHeaders   []string
+	AllowCredentials bool
+	MaxAge           int
+}
+
+func (r *Router) Cors(args ...value.Value) *Router {
+	opts := &CorsOptions{
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "X-Requested-With"},
+		AllowCredentials: true,
+		MaxAge:           86400,
+	}
+
+	if len(args) > 0 && args[0].IsMap() {
+		m := args[0].Map()
+		if origin, ok := m["origin"]; ok {
+			if origin.K == value.Array {
+				opts.AllowedOrigins = nil
+				for _, item := range origin.Array() {
+					opts.AllowedOrigins = append(opts.AllowedOrigins, item.Text())
+				}
+			} else {
+				opts.AllowedOrigins = []string{origin.Text()}
+			}
+		}
+		if methods, ok := m["methods"]; ok {
+			if methods.K == value.Array {
+				opts.AllowedMethods = nil
+				for _, item := range methods.Array() {
+					opts.AllowedMethods = append(opts.AllowedMethods, item.Text())
+				}
+			} else {
+				opts.AllowedMethods = []string{methods.Text()}
+			}
+		}
+		if headers, ok := m["headers"]; ok {
+			if headers.K == value.Array {
+				opts.AllowedHeaders = nil
+				for _, item := range headers.Array() {
+					opts.AllowedHeaders = append(opts.AllowedHeaders, item.Text())
+				}
+			} else {
+				opts.AllowedHeaders = []string{headers.Text()}
+			}
+		}
+		if creds, ok := m["credentials"]; ok {
+			opts.AllowCredentials = creds.Truthy()
+		}
+		if maxAge, ok := m["maxAge"]; ok && maxAge.IsNumeric() {
+			opts.MaxAge = int(maxAge.N)
+		}
+	}
+
+	r.cors = opts
+	return r
+}
+
+func writeCorsHeaders(opts *CorsOptions, w http.ResponseWriter, r *http.Request) {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return
+	}
+
+	allowedOrigin := ""
+	for _, o := range opts.AllowedOrigins {
+		if o == "*" {
+			allowedOrigin = "*"
+			break
+		}
+		if o == origin {
+			allowedOrigin = origin
+			break
+		}
+	}
+
+	if allowedOrigin != "" {
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigin)
+		if opts.AllowCredentials && allowedOrigin != "*" {
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+	}
+
+	if len(opts.AllowedHeaders) > 0 {
+		w.Header().Set("Access-Control-Allow-Headers", strings.Join(opts.AllowedHeaders, ", "))
+	}
+	if len(opts.AllowedMethods) > 0 {
+		w.Header().Set("Access-Control-Allow-Methods", strings.Join(opts.AllowedMethods, ", "))
+	}
+	if opts.MaxAge > 0 {
+		w.Header().Set("Access-Control-Max-Age", strconv.Itoa(opts.MaxAge))
+	}
+}
+
+func serveCorsPreflight(opts *CorsOptions, w http.ResponseWriter, r *http.Request) {
+	writeCorsHeaders(opts, w, r)
+	w.WriteHeader(http.StatusNoContent)
 }

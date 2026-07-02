@@ -28,6 +28,10 @@ type Config struct {
 
 func (t *Tenant) Kitwork(vals ...value.Value) *KitWork { return &KitWork{tenant: t} }
 
+func (w *KitWork) Cache() *GeneralCache {
+	return &GeneralCache{tenant: w.tenant}
+}
+
 // KitWork is the per-tenant capability surface returned by kitwork() in the VM.
 // Every capability is a METHOD on *KitWork, so they must all live in package work
 // (Go requires methods in the type's package) — that's why this package is large.
@@ -48,9 +52,27 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 
 	path := r.URL.Path
 
+	// Native CORS OPTIONS Preflight check (Zero-VM bypass)
+	if r.Method == "OPTIONS" && t.routes != nil {
+		methodsToTry := []string{"GET", "POST", "PUT", "DELETE", "PATCH"}
+		for _, m := range methodsToTry {
+			if rt, _ := t.routes.Match(m, path); rt != nil && rt.cors != nil {
+				serveCorsPreflight(rt.cors, w, r)
+				return
+			}
+		}
+	}
+
 	// jitfonts: vendored woff2 are served straight off the embedded FS at /jitfonts/ — a built-in,
 	// always-on route (the injected @font-face src points here), checked before tenant routing.
 	if serveFontIf(w, r) {
+		return
+	}
+
+	// hydrate runtime: the client interpreter for the frontend bytecode VM (jit/hydrate) is a
+	// built-in, always-on asset — the <script src> that render injects points here, identical bytes
+	// for every tenant. Checked before tenant routing; a cheap no-op for other paths.
+	if serveHydrateIf(w, r) {
 		return
 	}
 

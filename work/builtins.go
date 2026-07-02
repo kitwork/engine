@@ -1,6 +1,8 @@
 package work
 
 import (
+	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"strconv"
@@ -10,21 +12,66 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// injectJSCompat bổ sung các global chuẩn JavaScript (Math, Date) cho VM,
-// giúp script của tenant chạy giống hệt môi trường JS quen thuộc:
+// builtins is the table of every TENANT-AGNOSTIC global a script sees — the JS-standard surface:
 //
-//	Math.floor(7 / 2)        // 3
-//	Date.now()               // epoch milliseconds
-//	const d = new Date();    // `new` được parser chấp nhận như tiền tố JS
-//	d.getFullYear()          // 2026
+//	Math.floor(7 / 2)        // 3                Number("42") / Number(true)
+//	Date.now(); new Date()   // epoch / instance String(42); Boolean(0); Array(3)
+//	JSON.stringify / .parse  console.log(…)      Object.keys / .assign / .entries
+//	parseInt("0x1f", 16)     // 31               BigInt("123")
+//	return fail("…")         // value-error      return new Error("…")  (alias)
+//
+// It maps a name → a BUILDER (not a value) so each tenant gets a FRESH copy: one tenant mutating a
+// global object (e.g. Math.x = …) can never leak into another — sovereign isolation. The per-tenant
+// Kitwork API (kitwork(), router, db, env) is layered on AFTER this in tenant setup. Add a global by
+// adding one line here + its build…() below.
+var TestNotifyHook func(string, ...value.Value)
+
+var builtins = map[string]func() value.Value{
+	"Math":       buildMathObject,
+	"Date":       buildDateConstructor,
+	"JSON":       buildJSONObject,
+	"console":    buildConsole,
+	"Object":     buildObjectGlobal,
+	"Number":     buildNumberGlobal,
+	"BigInt":     buildBigIntGlobal,
+	"String":     buildStringGlobal,
+	"Boolean":    buildBooleanGlobal,
+	"Array":      buildArrayGlobal,
+	"parseInt":   buildParseInt,
+	"parseFloat": buildParseFloat,
+	"fail":       buildErrorGlobal, // ≈ Go errors.New — a value-error; Kitwork has no throw.
+	"Error":      buildErrorGlobal, // familiar alias for fail(); same value.
+	"testNotify": func() value.Value {
+		return value.NewFunc(func(args ...value.Value) value.Value {
+			if len(args) > 0 && TestNotifyHook != nil {
+				TestNotifyHook(args[0].Text(), args[1:]...)
+			}
+			return value.Value{K: value.Nil}
+		})
+	},
+}
+
+// injectJSCompat installs a fresh copy of every global builtin into a tenant's globals.
 func injectJSCompat(globals map[string]value.Value) {
-	globals["Math"] = buildMathObject()
-	globals["Date"] = buildDateConstructor()
-	globals["Object"] = buildObjectGlobal()
-	globals["Number"] = buildNumberGlobal()
-	globals["String"] = buildStringGlobal()
-	globals["Boolean"] = buildBooleanGlobal()
-	globals["Array"] = buildArrayGlobal()
+	for name, build := range builtins {
+		globals[name] = build()
+	}
+}
+
+// buildConsole — console.log(...): print the space-joined args with a [console.log] prefix.
+func buildConsole() value.Value {
+	log := value.NewFunc(func(args ...value.Value) value.Value {
+		var sb strings.Builder
+		for i, arg := range args {
+			if i > 0 {
+				sb.WriteString(" ")
+			}
+			sb.WriteString(arg.Text())
+		}
+		fmt.Println("[console.log]", sb.String())
+		return value.Value{K: value.Nil}
+	})
+	return value.New(map[string]value.Value{"log": log})
 }
 
 /* =============================================================================
@@ -486,4 +533,151 @@ func buildArrayGlobal() value.Value {
 	}
 
 	return value.NewFuncObject(ctor, props)
+}
+
+// buildBigIntGlobal — BigInt(x) coerces to an INTEGER. NOTE: Kitwork numbers are float64, so this is
+// NOT arbitrary precision: integers beyond 2^53 lose exactness (a dedicated bigint kind is future
+// work). A non-integer number or an unparseable string yields an error value (JS throws; Kitwork
+// RETURNS the error — catch it with .result()/.safe()).
+func buildBigIntGlobal() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.Value{K: value.Number, N: 0}
+		}
+		v := args[0]
+		switch v.K {
+		case value.Number:
+			if v.N != math.Trunc(v.N) {
+				return value.Value{K: value.Invalid, V: "BigInt: not an integer"}
+			}
+			return value.Value{K: value.Number, N: v.N}
+		case value.Bool:
+			return value.Value{K: value.Number, N: v.N}
+		case value.String:
+			s := strings.TrimSuffix(strings.TrimSpace(v.Text()), "n") // accept "123n"
+			if s == "" {
+				return value.Value{K: value.Number, N: 0}
+			}
+			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+				return value.New(i)
+			}
+			return value.Value{K: value.Invalid, V: "BigInt: cannot convert \"" + v.Text() + "\""}
+		}
+		return value.Value{K: value.Invalid, V: "BigInt: cannot convert value"}
+	})
+}
+
+// buildJSONObject — JSON.stringify / JSON.parse. A parse/marshal failure yields an error VALUE
+// (K==Invalid), consistent with the rest of the engine.
+func buildJSONObject() value.Value {
+	stringify := value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.Value{K: value.Nil}
+		}
+		bytes, err := json.Marshal(args[0])
+		if err != nil {
+			return value.Value{K: value.Invalid, V: err.Error()}
+		}
+		return value.NewString(string(bytes))
+	})
+	parse := value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.Value{K: value.Nil}
+		}
+		var val value.Value
+		if err := json.Unmarshal([]byte(args[0].Text()), &val); err != nil {
+			return value.Value{K: value.Invalid, V: err.Error()}
+		}
+		return val
+	})
+	return value.New(map[string]value.Value{
+		"stringify": stringify,
+		"parse":     parse,
+	})
+}
+
+// buildParseFloat — parseFloat(x): leading numeric prefix → float, else 0.
+func buildParseFloat() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.New(0.0)
+		}
+		f, err := strconv.ParseFloat(strings.TrimSpace(args[0].Text()), 64)
+		if err != nil {
+			return value.New(0.0)
+		}
+		return value.New(f)
+	})
+}
+
+// buildParseInt — parseInt(x, base): JS-style, supports 0x prefix at base 16 and a leading
+// valid-digit prefix; unparseable → 0.
+func buildParseInt() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		if len(args) == 0 {
+			return value.New(0)
+		}
+		s := args[0].Text()
+		base := 10
+		if len(args) > 1 && args[1].K == value.Number {
+			base = int(args[1].N)
+		}
+		if base < 2 || base > 36 {
+			base = 10
+		}
+		s = strings.TrimSpace(s)
+		if len(s) == 0 {
+			return value.New(0)
+		}
+		if base == 16 && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
+			s = s[2:]
+		}
+		i, err := strconv.ParseInt(s, base, 64)
+		if err == nil {
+			return value.New(i)
+		}
+		var prefix strings.Builder
+		for idx, ch := range s {
+			if idx == 0 && (ch == '+' || ch == '-') {
+				prefix.WriteRune(ch)
+				continue
+			}
+			isValid := false
+			if ch >= '0' && ch <= '9' {
+				isValid = int(ch-'0') < base
+			} else if ch >= 'a' && ch <= 'z' {
+				isValid = int(ch-'a'+10) < base
+			} else if ch >= 'A' && ch <= 'Z' {
+				isValid = int(ch-'A'+10) < base
+			}
+			if !isValid {
+				break
+			}
+			prefix.WriteRune(ch)
+		}
+		parsedStr := prefix.String()
+		if parsedStr == "" || parsedStr == "+" || parsedStr == "-" {
+			return value.New(0)
+		}
+		i, err = strconv.ParseInt(parsedStr, base, 64)
+		if err != nil {
+			return value.New(0)
+		}
+		return value.New(i)
+	})
+}
+
+// buildErrorGlobal returns Kitwork's error constructor, shared by fail() and Error()/new Error():
+// it RETURNS an error VALUE (K==Invalid carrying the message) — the same shape a failed db query
+// produces — so it composes with .result()/.safe()/`or` and bubbles to a route .catch. No throw.
+func buildErrorGlobal() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		msg := "error"
+		if len(args) > 0 {
+			if s := args[0].Text(); s != "" {
+				msg = s
+			}
+		}
+		return value.Value{K: value.Invalid, V: msg}
+	})
 }

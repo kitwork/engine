@@ -22,13 +22,13 @@ func TestBrandColorUtilities(t *testing.T) {
 		"border-brand-acme": "border-color: #181717;",
 	}
 	for cls, want := range cases {
-		if css, _, _ := ResolveCore(cls); css != want {
+		if css, _, _ := ResolveCore(cls, nil); css != want {
 			t.Errorf("%s → %q, want %q", cls, css, want)
 		}
 	}
 
 	// Variants ride along: the property still resolves and the selector carries the pseudo.
-	css, sel, _ := ResolveCore("hover:text-brand-acme")
+	css, sel, _ := ResolveCore("hover:text-brand-acme", nil)
 	if css != "color: #181717;" {
 		t.Errorf("hover brand colour lost: %q", css)
 	}
@@ -37,7 +37,7 @@ func TestBrandColorUtilities(t *testing.T) {
 	}
 
 	// Unknown brand slug does not resolve (class is dropped, like any unknown colour).
-	if css, _, _ := ResolveCore("text-brand-nope"); css != "" {
+	if css, _, _ := ResolveCore("text-brand-nope", nil); css != "" {
 		t.Errorf("unknown brand should not resolve, got %q", css)
 	}
 }
@@ -45,7 +45,7 @@ func TestBrandColorUtilities(t *testing.T) {
 // Without a registered palette, brand-* must not resolve (and must not panic).
 func TestBrandColorUnwired(t *testing.T) {
 	RegisterBrandPalette(nil)
-	if css, _, _ := ResolveCore("text-brand-acme"); css != "" {
+	if css, _, _ := ResolveCore("text-brand-acme", nil); css != "" {
 		t.Errorf("unwired brand-* should not resolve, got %q", css)
 	}
 }

@@ -99,6 +99,12 @@ func (k Kind) Method(name string) (Method, bool) {
 		return Value.ToJson, true
 	case "len", "length":
 		return Value.Length, true
+	case "result":
+		// Reshape an inline-error value (Safe* result) into [data, error] for destructuring.
+		return Value.Result, true
+	case "safe":
+		// Reshape the same into an object { value } carrying .error / .isError.
+		return Value.Safe, true
 
 	}
 
@@ -188,6 +194,11 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Compact, true
 		case "unique":
 			return Value.Unique, true
+		case "chunk":
+			return Value.Chunk, true
+		case "group", "groupBy", "sortBy":
+			// Handled directly by VM arrayCallbackMethod for callback execution
+			return func(target Value, args ...Value) Value { return Value{K: Nil} }, true
 		case "slice":
 			return Value.ArraySlice, true
 		case "indexOf":
@@ -217,6 +228,10 @@ func (k Kind) Method(name string) (Method, bool) {
 			return Value.Has, true
 		case "merge":
 			return Value.Merge, true
+		case "pick":
+			return Value.Pick, true
+		case "omit":
+			return Value.Omit, true
 		}
 	}
 

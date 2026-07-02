@@ -32,6 +32,8 @@ type Config struct {
 	AlphaScales  []int
 	Opacities    []int // 0-100 scale
 	ZIndices     []int // 0, 10, 20...
+	Animations   map[string]string
+	Keyframes    map[string]string
 }
 
 var DefaultConfig = Config{

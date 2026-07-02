@@ -51,7 +51,7 @@ func tenantJITCSS(t *Tenant) (css, etag string) {
 			return e.css, sig
 		}
 	}
-	out := minifier.CSS(jitcss.GenerateSiteCSS(readTemplates(root)...))
+	out := minifier.CSS(jitcss.GenerateSiteCSS(t.jitcssConfig, readTemplates(root)...))
 	jitStyleCache.Store(root, &jitEntry{css: out, sig: sig})
 	return out, sig
 }

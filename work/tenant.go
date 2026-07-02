@@ -15,12 +15,19 @@ import (
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
+	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
 const kitwork = "kitwork"
 const extension = "." + kitwork
+
+const (
+	ScopeTenant = 0
+	ScopeServer = 1
+	ScopeMax    = 2
+)
 
 // AppFileName is the entry filename every tenant must have (app.kitwork.js).
 const AppFileName = "app" + extension + ".js"
@@ -37,6 +44,7 @@ type Tenant struct {
 	env value.Value // env scoped của tenant này (đọc từ <path>/.env), lộ qua kitwork().env
 
 	viewRender *Render // render mặc định cho ctx.view (đăng ký qua router.context({render}))
+	jitcssConfig *jitcss.Config
 
 	// JIT CSS service mode (đăng ký qua router.jit()): phục vụ 1 stylesheet site-wide,
 	// cached, tại jitRoute; jitInject = tự chèn <link> vào mỗi trang render. Set 1 lần
@@ -67,14 +75,16 @@ type Tenant struct {
 	dbMu      sync.Mutex
 
 	// Rate Limiting fields
-	limiters     *LimiterStore // this tenant's own rate-limit buckets (tenant-scoped rules)
-	hostLimiters *LimiterStore // shared host store for scope:"server" rules; injected by core
+	limiters     []*LimiterStore // index 0 = ScopeTenant, index 1 = ScopeServer
 
-	rateLimitEnabled  bool
-	rateLimitRate     int
-	rateLimitIpRate   int
-	rateLimitUserRate int
-	rateLimitPeriod   time.Duration
+	crons        []*CronJob
+	cronMu       sync.Mutex
+	cronCancels  []chan struct{}
+
+	lruCache     map[string]*CacheItem
+	lruCacheLock sync.RWMutex
+
+	rateLimitRules    []rateRule
 }
 
 type Cache struct {
@@ -308,11 +318,17 @@ func (t *Tenant) Run() error {
 	})
 	t.vm.Globals["parseInt"] = parseIntFunc
 
+	// Inject fetch global helper
+	fetchFunc := value.NewFunc(globalFetch)
+	t.vm.Globals["fetch"] = fetchFunc
+
 	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
 	res := t.vm.Run()
 	if res.K == value.Invalid {
 		return fmt.Errorf("runtime error: %v", res.V)
 	}
+
+	t.StartCronJobs()
 
 	return nil
 }
@@ -335,12 +351,23 @@ func NewTenant(root string, domain string) *Tenant {
 		},
 		cache:             make(map[string]*Responser),
 		databases:         make(map[string]*sql.DB),
-		limiters:          NewLimiterStore(RateLimitPeriod),
-		rateLimitEnabled:  RateLimitEnabled,
-		rateLimitRate:     DefaultTenantRate,
-		rateLimitIpRate:   DefaultTenantIpRate,
-		rateLimitUserRate: DefaultTenantUserRate,
-		rateLimitPeriod:   RateLimitPeriod,
+		limiters:          make([]*LimiterStore, ScopeMax),
+		lruCache:          make(map[string]*CacheItem),
+	}
+
+	tenant.limiters[ScopeTenant] = NewLimiterStore(RateLimitPeriod)
+
+	if DefaultTenantRate > 0 {
+		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "global", Rate: DefaultTenantRate, Period: RateLimitPeriod})
+	}
+	if DefaultTenantIpRate > 0 {
+		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "ip", Rate: DefaultTenantIpRate, Period: RateLimitPeriod})
+	}
+	if DefaultTenantBrowserRate > 0 {
+		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "browser", Rate: DefaultTenantBrowserRate, Period: RateLimitPeriod})
+	}
+	if DefaultTenantUserRate > 0 {
+		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "user", Rate: DefaultTenantUserRate, Period: RateLimitPeriod})
 	}
 
 	return tenant
@@ -374,8 +401,16 @@ func (t *Tenant) Close() {
 		db.Close()
 		delete(t.databases, alias)
 	}
+	t.StopCronJobs()
 }
 
 // SetHostLimiters injects the shared host limiter store so this tenant's scope:"server" route
 // rules count against the server-wide buckets (across all tenants). Called by core at boot.
-func (t *Tenant) SetHostLimiters(s *LimiterStore) { t.hostLimiters = s }
+func (t *Tenant) SetHostLimiters(s *LimiterStore) {
+	if len(t.limiters) < ScopeMax {
+		newLimiters := make([]*LimiterStore, ScopeMax)
+		copy(newLimiters, t.limiters)
+		t.limiters = newLimiters
+	}
+	t.limiters[ScopeServer] = s
+}

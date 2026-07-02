@@ -13,10 +13,10 @@ func TestBrandColorWiredIntoCSS(t *testing.T) {
 	if hex, ok := BrandHex("github"); !ok || hex != "#181717" {
 		t.Fatalf("BrandHex(github) = %q,%v want #181717,true", hex, ok)
 	}
-	if got, _, _ := css.ResolveCore("text-brand-github"); got != "color: #181717;" {
+	if got, _, _ := css.ResolveCore("text-brand-github", nil); got != "color: #181717;" {
 		t.Errorf("text-brand-github → %q via the real palette, want color: #181717;", got)
 	}
-	if got, _, _ := css.ResolveCore("bg-brand-github"); got != "background-color: #181717;" {
+	if got, _, _ := css.ResolveCore("bg-brand-github", nil); got != "background-color: #181717;" {
 		t.Errorf("bg-brand-github → %q, want background-color: #181717;", got)
 	}
 }

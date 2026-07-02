@@ -176,7 +176,7 @@ func isPrivateOrLocalIP(ipStr string) bool {
 }
 
 func (t *Tenant) checkRateLimit(matched *Router, r *http.Request, w http.ResponseWriter) bool {
-	if !t.rateLimitEnabled {
+	if !RateLimitEnabled {
 		return true
 	}
 
@@ -184,35 +184,55 @@ func (t *Tenant) checkRateLimit(matched *Router, r *http.Request, w http.Respons
 	if isPrivateOrLocalIP(ip) {
 		return true
 	}
-	if t.limiters == nil {
-		t.limiters = NewLimiterStore(t.rateLimitPeriod)
+
+	if len(t.limiters) == 0 {
+		t.limiters = make([]*LimiterStore, ScopeMax)
+		t.limiters[ScopeTenant] = NewLimiterStore(RateLimitPeriod)
 	}
 
 	userAcc, customUserRate := GetClientUserAccount(r)
-	userRateToUse := t.rateLimitUserRate
-	if customUserRate > 0 {
-		userRateToUse = customUserRate
-	}
-
-	// Build the full list of buckets to consume (order = rollback order). Tenant-wide limits
-	// are always tenant-scoped; each route rule picks its store by scope ("tenant" → this
-	// tenant's store, "server" → the shared host store, so the bucket counts across ALL tenants).
 	var checks []LimitCheck
-	if t.rateLimitRate > 0 {
-		checks = append(checks, LimitCheck{t.limiters, "tenant:global", t.rateLimitRate, t.rateLimitPeriod})
-	}
-	if t.rateLimitIpRate > 0 {
-		checks = append(checks, LimitCheck{t.limiters, "tenant:ip:" + ip, t.rateLimitIpRate, t.rateLimitPeriod})
-	}
-	if userRateToUse > 0 && userAcc != "" {
-		checks = append(checks, LimitCheck{t.limiters, "tenant:user:" + userAcc, userRateToUse, t.rateLimitPeriod})
+
+	// 1. Process tenant default/global rate limit rules
+	for _, rule := range t.rateLimitRules {
+		store := t.limiters[ScopeTenant]
+		if store == nil {
+			continue
+		}
+		rateToUse := rule.Rate
+		if rule.Type == "user" && customUserRate > 0 {
+			rateToUse = customUserRate
+		}
+
+		var scopeKey string
+		switch rule.Type {
+		case "user":
+			if userAcc == "" {
+				continue
+			}
+			scopeKey = "user:" + userAcc
+		case "browser":
+			scopeKey = "browser:" + GetClientBrowserFingerprint(r)
+		case "global":
+			scopeKey = "global"
+		default: // "ip"
+			scopeKey = "ip:" + ip
+		}
+		
+		key := fmt.Sprintf("tenant:%s:%d/%s", scopeKey, rateToUse, rule.Period)
+		checks = append(checks, LimitCheck{store, key, rateToUse, rule.Period})
 	}
 
+	// 2. Process route-specific rules
 	if matched != nil {
 		for _, rule := range matched.limitRules {
-			store := t.limiters
-			if rule.Scope == "server" && t.hostLimiters != nil {
-				store = t.hostLimiters
+			scopeIdx := ScopeTenant
+			if rule.Scope == "server" {
+				scopeIdx = ScopeServer
+			}
+			store := t.limiters[scopeIdx]
+			if store == nil {
+				continue
 			}
 			var scopeKey string
 			switch rule.Type {

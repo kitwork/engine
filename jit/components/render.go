@@ -89,26 +89,28 @@ const buttonCSS = `.button,.btn{display:inline-flex;align-items:center;justify-c
 	`.button-small,.btn-sm{padding:.25rem .75rem;font-size:.75rem}` +
 	`.button-large,.btn-lg{padding:.75rem 1.5rem;font-size:1rem}` +
 	`.button-brand,.btn-brand{background:#f82244;color:#fff}` +
-	`.button-brand:hover,.btn-brand:hover{box-shadow:0 4px 16px rgba(248,34,68,.35)}` +
+	`.button-brand:hover,.btn-brand:hover{background:#e01d3c}` + // flat: darken, no drop shadow
 	`.button-outline,.btn-outline{background:transparent;border-color:currentColor}` +
 	`.button-ghost,.btn-ghost{background:transparent}` +
 	`.button-ghost:hover,.btn-ghost:hover{background:rgba(127,127,127,.1)}`
 
-// cardCSS — `.card` container + header/body/footer + media/title/text/meta pieces + `.card-hover`.
-// Theme-aware via --kitwork-* custom properties (with light fallbacks for tenants that don't set them).
+// cardCSS — FLAT by design: a `.card` is JUST a surface (background + radius), with NO border and NO
+// shadow. Separation comes from the surface colour + whitespace, not lines/elevation (Stripe/Supabase
+// style). Header/footer are spacing-only (no divider line). `.card-hover` is an opt-in, still flat —
+// a subtle surface lift on hover, never a drop shadow. Theme-aware via --kitwork-* custom properties.
 const cardCSS = `.card{display:flex;flex-direction:column;background:var(--kitwork-surface,#fff);` +
-	`border:1px solid var(--kitwork-border,rgba(0,0,0,.08));border-radius:.75rem;overflow:hidden}` +
-	`.card-header{padding:1.25rem 1.5rem;border-bottom:1px solid var(--kitwork-border,rgba(0,0,0,.06))}` +
+	`border-radius:.75rem;overflow:hidden}` +
+	`.card-header{padding:1.25rem 1.5rem 0}` +
 	`.card-body{padding:1.25rem 1.4rem 1.4rem;flex:1}` +
-	`.card-footer{padding:1rem 1.5rem;border-top:1px solid var(--kitwork-border,rgba(0,0,0,.06))}` +
-	`.card-media{display:block;aspect-ratio:16/9;overflow:hidden;background:rgba(127,127,127,.08)}` +
+	`.card-footer{padding:0 1.5rem 1.25rem}` +
+	`.card-media{display:block;aspect-ratio:16/9;overflow:hidden;background:rgba(127,127,127,.06)}` +
 	`.card-media img{width:100%;height:100%;object-fit:cover}` +
-	`.card-title{display:block;font-weight:800;font-size:1.05rem;line-height:1.35;color:var(--kitwork-text-hi,#0f172a)}` +
+	`.card-title{display:block;font-weight:700;font-size:1.05rem;line-height:1.35;color:var(--kitwork-text-hi,#0f172a)}` +
 	`.card-text{margin-top:.4rem;font-size:.85rem;line-height:1.55;color:var(--kitwork-text-lo,#64748b);` +
 	`overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}` +
 	`.card-meta{display:block;margin-top:.6rem;font-size:.72rem;color:var(--kitwork-text-muted,#94a3b8)}` +
-	`.card-hover{transition:transform .2s ease,box-shadow .2s ease}` +
-	`.card-hover:hover{transform:translateY(-3px);box-shadow:0 16px 40px -16px rgba(0,0,0,.25)}`
+	`.card-hover{transition:background .15s ease}` +
+	`.card-hover:hover{background:var(--kitwork-surface-hi,rgba(127,127,127,.05))}`
 
 // proseCSS — readable long-form typography for raw/CMS HTML (articles, docs, blog). `.prose` for the
 // container; the `.prose-frame` modifier crops in-article images to a uniform 16:9.
@@ -124,7 +126,7 @@ const proseCSS = `.prose{font-size:1.1rem;line-height:1.78;color:var(--kitwork-t
 	`.prose figure{margin:1.9rem 0}` +
 	`.prose figcaption{font-size:.8rem;text-align:center;color:var(--kitwork-text-muted,#94a3b8);margin-top:.5rem}` +
 	`.prose pre{overflow-x:auto;padding:1.1rem 1.3rem;border-radius:.7rem;background:#0d1117;color:#e6edf3;` +
-	`border:1px solid rgba(255,255,255,.08);font-size:.86rem;line-height:1.65;margin:1.9rem 0}` +
+	`font-size:.86rem;line-height:1.65;margin:1.9rem 0}` + // FLAT: no border on code block
 	`.prose pre code{background:none;padding:0;color:inherit;font-size:inherit}` +
 	`.prose code{font-family:'Fira Code',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;` +
 	`background:rgba(127,127,127,.16);padding:.15em .4em;border-radius:.3em}` +
@@ -134,37 +136,42 @@ const proseCSS = `.prose{font-size:1.1rem;line-height:1.78;color:var(--kitwork-t
 // + `.badge-dot` (a leading status dot in currentColor).
 const badgeCSS = `.badge{display:inline-flex;align-items:center;gap:.35rem;padding:.15rem .55rem;` +
 	`border-radius:9999px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;` +
-	`line-height:1.4;white-space:nowrap;border:1px solid transparent}` +
+	`line-height:1.4;white-space:nowrap}` + // FLAT: tinted fill only, no border
 	`.badge-dot{width:.4rem;height:.4rem;border-radius:9999px;background:currentColor}` +
-	`.badge-brand{background:rgba(248,34,68,.12);color:#f82244;border-color:rgba(248,34,68,.25)}` +
-	`.badge-success{background:rgba(16,185,129,.12);color:#059669;border-color:rgba(16,185,129,.25)}` +
-	`.badge-warning{background:rgba(245,158,11,.14);color:#b45309;border-color:rgba(245,158,11,.3)}` +
-	`.badge-danger{background:rgba(239,68,68,.12);color:#dc2626;border-color:rgba(239,68,68,.25)}` +
-	`.badge-neutral{background:rgba(127,127,127,.14);color:var(--kitwork-text-lo,#64748b);border-color:rgba(127,127,127,.2)}`
+	`.badge-brand{background:rgba(248,34,68,.12);color:#f82244}` +
+	`.badge-success{background:rgba(16,185,129,.12);color:#059669}` +
+	`.badge-warning{background:rgba(245,158,11,.14);color:#b45309}` +
+	`.badge-danger{background:rgba(239,68,68,.12);color:#dc2626}` +
+	`.badge-neutral{background:rgba(127,127,127,.14);color:var(--kitwork-text-lo,#64748b)}`
 
 // alertCSS — callout boxes. `.alert` + info/success/warning/danger.
 const alertCSS = `.alert{display:flex;gap:.75rem;padding:.9rem 1.1rem;border-radius:.6rem;` +
-	`border:1px solid transparent;font-size:.9rem;line-height:1.55}` +
-	`.alert-info{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.25);color:#1d4ed8}` +
-	`.alert-success{background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.25);color:#047857}` +
-	`.alert-warning{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);color:#b45309}` +
-	`.alert-danger{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.25);color:#b91c1c}`
+	`font-size:.9rem;line-height:1.55}` + // FLAT: tinted fill only, no border
+	`.alert-info{background:rgba(59,130,246,.08);color:#1d4ed8}` +
+	`.alert-success{background:rgba(16,185,129,.08);color:#047857}` +
+	`.alert-warning{background:rgba(245,158,11,.1);color:#b45309}` +
+	`.alert-danger{background:rgba(239,68,68,.08);color:#b91c1c}`
 
 // inputCSS — form fields. `.input` / `.textarea` / `.select` + `.input-small` / `.input-large`.
+// inputCSS — FLAT filled fields: a subtle surface fill at rest with NO visible border (1px
+// transparent keeps layout stable); focus reveals a single brand-coloured hairline + a clean surface,
+// no glow/ring. Minimal lines, clear affordance.
 const inputCSS = `.input,.textarea,.select{width:100%;padding:.6rem .85rem;border-radius:.5rem;` +
-	`border:1px solid var(--kitwork-border,rgba(0,0,0,.12));background:var(--kitwork-surface,#fff);` +
+	`border:1px solid transparent;background:var(--kitwork-input,rgba(127,127,127,.06));` +
 	`color:var(--kitwork-text-hi,#0f172a);font-family:inherit;font-size:.9rem;line-height:1.4;` +
-	`transition:border-color .15s ease,box-shadow .15s ease}` +
+	`transition:border-color .15s ease,background .15s ease}` +
 	`.input:focus,.textarea:focus,.select:focus{outline:none;border-color:var(--kitwork-brand,#f82244);` +
-	`box-shadow:0 0 0 3px rgba(248,34,68,.12)}` +
+	`background:var(--kitwork-surface,#fff)}` +
 	`.input::placeholder,.textarea::placeholder{color:var(--kitwork-text-muted,#94a3b8)}` +
 	`.input-small{padding:.4rem .65rem;font-size:.8rem}.input-large{padding:.8rem 1.1rem;font-size:1rem}`
 
 // tableCSS — data tables. `.table` + `.table-zebra` modifier; row hover. (A page using Tailwind's
 // `table-auto` only triggers an unused rule — harmless.)
+// tableCSS — FLAT: only hairline row separators (a table needs row structure); no outer/vertical
+// borders, no zebra by default. Separators kept faint.
 const tableCSS = `.table{width:100%;border-collapse:collapse;font-size:.9rem;text-align:left}` +
-	`.table th,.table td{padding:.7rem 1rem;border-bottom:1px solid var(--kitwork-border,rgba(0,0,0,.08))}` +
-	`.table th{font-weight:700;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;` +
+	`.table th,.table td{padding:.7rem 1rem;border-bottom:1px solid var(--kitwork-border,rgba(0,0,0,.05))}` +
+	`.table th{font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;` +
 	`color:var(--kitwork-text-muted,#94a3b8)}` +
-	`.table tbody tr:hover{background:rgba(127,127,127,.05)}` +
-	`.table-zebra tbody tr:nth-child(even){background:rgba(127,127,127,.04)}`
+	`.table tbody tr:hover{background:rgba(127,127,127,.04)}` +
+	`.table-zebra tbody tr:nth-child(even){background:rgba(127,127,127,.03)}`

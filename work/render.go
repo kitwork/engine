@@ -12,6 +12,7 @@ import (
 	components "github.com/kitwork/engine/jit/components"
 	jitcss "github.com/kitwork/engine/jit/css"
 	fonts "github.com/kitwork/engine/jit/fonts"
+	hydrate "github.com/kitwork/engine/jit/hydrate"
 	icons "github.com/kitwork/engine/jit/icons"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
@@ -54,6 +55,7 @@ type Render struct {
 }
 
 type Layout struct {
+	header  string
 	navbar  string
 	footer  string
 	head    string
@@ -323,7 +325,11 @@ func (r *Render) dir() string {
 func (r *Render) Path(vals ...value.Value) *Render {
 	newRender := *r
 	if len(vals) > 0 {
-		newRender.path = vals[0].String()
+		var parts []string
+		for _, val := range vals {
+			parts = append(parts, val.String())
+		}
+		newRender.path = path.Join(parts...)
 	}
 	return &newRender
 }
@@ -384,9 +390,16 @@ func (r *Render) tmpl(data any) string {
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
 	// cache theo tập class nên gần như miễn phí sau lần đầu.
 	if r.jitCSS {
-		if css := jitcss.GenerateJITCached(out); css != "" {
+		if css := jitcss.GenerateJITCached(out, r.tenant.jitcssConfig); css != "" {
 			if strings.Contains(css, "animation:") {
-				css = jitcss.AnimKeyframes + "\n" + css // keyframes for animate-* utilities
+				var keyframesStr strings.Builder
+				keyframesStr.WriteString(jitcss.AnimKeyframes)
+				if cfg := r.tenant.jitcssConfig; cfg != nil && cfg.Keyframes != nil {
+					for name, rule := range cfg.Keyframes {
+						keyframesStr.WriteString(fmt.Sprintf("\n@keyframes %s {\n%s\n}", name, rule))
+					}
+				}
+				css = keyframesStr.String() + "\n" + css
 			}
 			style := "<style data-kitwork-jit=\"css\">\n" + css + "</style>"
 			if i := strings.LastIndex(out, "</head>"); i >= 0 {
@@ -484,6 +497,13 @@ func (r *Render) tmpl(data any) string {
 		out = jitjs.Render(out)
 	}
 
+	// 3h. hydrate (frontend bytecode VM): on a page that opts in via the data-kitwork-hydrate root
+	// marker, compile authored data-text/show/click="<expr>" into data-*-ir='<IR>' and inject
+	// <script src="/jithydrate"> — only-used. The IR is walked by the shared interpreter served at
+	// hydrate.RuntimePath (serveHydrateIf). A cheap no-op on pages without the marker, so static
+	// pages and the client-parser demos are never rewritten.
+	out = hydrate.Render(out)
+
 	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses
 	// (a `font-family: <Name>` value or a `font-<slug>` class) → inject preload links + ONE
 	// <style data-kitwork-jit="fonts"> with @font-face (subset woff2 served from /jitfonts) for ONLY
@@ -570,12 +590,14 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 
 				}
 
-			case "_navbar_", "_footer_", "_head_", "_sidebar_", "_toolbar_", "_tabbar_", "_subbar_":
+			case "_header_", "_navbar_", "_footer_", "_head_", "_sidebar_", "_toolbar_", "_tabbar_", "_subbar_":
 				found := false
 
 				// A. Thử tìm trong Layout Map (ưu tiên nạp từ RAM nếu có)
 				var pathVal string
 				switch cmd {
+				case "_header_":
+					pathVal = r.layout.header
 				case "_navbar_":
 					pathVal = r.layout.navbar
 				case "_footer_":

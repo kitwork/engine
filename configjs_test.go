@@ -173,3 +173,83 @@ func TestEvalConfigJS_NoRun(t *testing.T) {
 		t.Fatal("expected error when server.run is never called")
 	}
 }
+
+// Validation errors should be returned to JS and abort host boot.
+func TestEvalConfigJS_ValidationFailure(t *testing.T) {
+	file := writeServerJS(t, `
+import { server, env } from "kitwork";
+const err = server.port(-5).run();
+if (err) {
+	// JS captured the error successfully!
+}
+`)
+	_, err := evalConfigJS(file)
+	if err == nil {
+		t.Fatal("expected boot to fail on configuration validation error")
+	}
+	if !strings.Contains(err.Error(), "invalid port number") {
+		t.Errorf("expected validation error message, got: %v", err)
+	}
+}
+
+// Fluent builder pattern configuration must parse and run correctly.
+func TestEvalConfigJS_BuilderPattern(t *testing.T) {
+	file := writeServerJS(t, `
+import { server, env } from "kitwork";
+server.port(8080)
+      .root("tenants")
+      .database({ alias: "main", type: "sqlite", name: "data.db" })
+      .run();
+`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatalf("evalConfigJS: %v", err)
+	}
+	if raw["port"] != float64(8080) {
+		t.Errorf("port = %v, want 8080", raw["port"])
+	}
+	if raw["root"] != "tenants" {
+		t.Errorf("root = %v, want tenants", raw["root"])
+	}
+	dbs, ok := raw["databases"].([]interface{})
+	if !ok || len(dbs) != 1 {
+		t.Fatalf("databases = %v, want 1 db", raw["databases"])
+	}
+	db0 := dbs[0].(map[string]interface{})
+	if db0["alias"] != "main" || db0["type"] != "sqlite" || db0["name"] != "data.db" {
+		t.Errorf("db0 = %v", db0)
+	}
+}
+
+// Fluent builder must support string-to-numeric coercion and shorthand run arguments.
+func TestEvalConfigJS_MultiStyle(t *testing.T) {
+	// Style 1: String port coercion in .port()
+	file1 := writeServerJS(t, `import { server } from "kitwork"; server.port("9090").run();`)
+	raw1, err := evalConfigJS(file1)
+	if err != nil {
+		t.Fatalf("style 1 failed: %v", err)
+	}
+	if raw1["port"] != float64(9090) {
+		t.Errorf("style 1 port = %v, want 9090", raw1["port"])
+	}
+
+	// Style 2: Shorthand numeric port in .run(8888)
+	file2 := writeServerJS(t, `import { server } from "kitwork"; server.run(8888);`)
+	raw2, err := evalConfigJS(file2)
+	if err != nil {
+		t.Fatalf("style 2 failed: %v", err)
+	}
+	if raw2["port"] != float64(8888) {
+		t.Errorf("style 2 port = %v, want 8888", raw2["port"])
+	}
+
+	// Style 3: Shorthand string port in .run("7777")
+	file3 := writeServerJS(t, `import { server } from "kitwork"; server.run("7777");`)
+	raw3, err := evalConfigJS(file3)
+	if err != nil {
+		t.Fatalf("style 3 failed: %v", err)
+	}
+	if raw3["port"] != float64(7777) {
+		t.Errorf("style 3 port = %v, want 7777", raw3["port"])
+	}
+}

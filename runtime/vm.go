@@ -3,10 +3,9 @@ package runtime
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
-	
-	
 	"github.com/kitwork/engine/value"
 )
 
@@ -259,8 +258,27 @@ func (vm *VM) Run() value.Value {
 			target := vm.pop()
 
 			handled := false
+			// Special Handling for cache.get(key, callback, ttl)
+			if cacheObj, ok := target.V.(value.TenantCache); ok && m == "get" && len(ivArgs) > 0 {
+				key := ivArgs[0].Text()
+				if val, found := cacheObj.GetCache(key); found {
+					vm.push(val)
+					handled = true
+				} else if len(ivArgs) > 1 && ivArgs[1].K == value.Func {
+					callback := ivArgs[1].V.(*value.Lambda)
+					val := vm.ExecuteLambda(callback, nil)
+					var ttl value.Value
+					if len(ivArgs) > 2 {
+						ttl = ivArgs[2]
+					}
+					cacheObj.SetCache(key, val, ttl)
+					vm.push(val)
+					handled = true
+				}
+			}
+
 			// Special Handling for Functional Methods (Map, Filter, Find)
-			if target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
+			if !handled && target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
 				callback := ivArgs[0].V.(*value.Lambda)
 				arr := *target.V.(*[]value.Value)
 
@@ -516,6 +534,60 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 		sortByComparator(arr, func(a, b value.Value) bool {
 			return vm.ExecuteLambda(cb, []value.Value{a, b}).N < 0
 		})
+		return target, true
+
+	case "group", "groupBy":
+		groups := make(map[string]value.Value)
+		for i, item := range arr {
+			keyVal := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			keyStr := keyVal.Text()
+
+			var groupArr []value.Value
+			if existing, ok := groups[keyStr]; ok {
+				groupArr = *existing.V.(*[]value.Value)
+			}
+			groupArr = append(groupArr, item)
+			groups[keyStr] = value.Value{K: value.Array, V: &groupArr}
+		}
+		return value.New(groups), true
+
+	case "sortBy":
+		type pair struct {
+			item value.Value
+			key  value.Value
+		}
+		pairs := make([]pair, len(arr))
+		for i, item := range arr {
+			key := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			pairs[i] = pair{item: item, key: key}
+		}
+		sort.SliceStable(pairs, func(i, j int) bool {
+			ki := pairs[i].key
+			kj := pairs[j].key
+			if ki.IsNumeric() && kj.IsNumeric() {
+				return ki.N < kj.N
+			}
+			return ki.Text() < kj.Text()
+		})
+		for i, p := range pairs {
+			arr[i] = p.item
+		}
+		return target, true
+
+	case "unique":
+		seen := make(map[any]bool)
+		resArr := []value.Value{}
+		for i, item := range arr {
+			keyVal := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			key := keyVal.Interface()
+			if !seen[key] {
+				seen[key] = true
+				resArr = append(resArr, item)
+			}
+		}
+		if ptr, ok := target.V.(*[]value.Value); ok {
+			*ptr = resArr
+		}
 		return target, true
 	}
 
@@ -813,10 +885,28 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 				ivArgs[i] = vm.pop()
 			}
 			target := vm.pop()
-
 			handled := false
+			// Special Handling for cache.get(key, callback, ttl)
+			if cacheObj, ok := target.V.(value.TenantCache); ok && m == "get" && len(ivArgs) > 0 {
+				key := ivArgs[0].Text()
+				if val, found := cacheObj.GetCache(key); found {
+					vm.push(val)
+					handled = true
+				} else if len(ivArgs) > 1 && ivArgs[1].K == value.Func {
+					callback := ivArgs[1].V.(*value.Lambda)
+					val := vm.ExecuteLambda(callback, nil)
+					var ttl value.Value
+					if len(ivArgs) > 2 {
+						ttl = ivArgs[2]
+					}
+					cacheObj.SetCache(key, val, ttl)
+					vm.push(val)
+					handled = true
+				}
+			}
+
 			// Special Handling for Functional Methods (Map, Filter, Find)
-			if target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
+			if !handled && target.K == value.Array && len(ivArgs) > 0 && ivArgs[0].K == value.Func {
 				callback := ivArgs[0].V.(*value.Lambda)
 				arr := *target.V.(*[]value.Value)
 

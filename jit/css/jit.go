@@ -19,7 +19,7 @@ var jitCache sync.Map
 // GenerateJITCached scans HTML for the Tailwind/utility classes actually used and returns
 // the minimal CSS for them, deduped and cached by the (sorted, unique) class set. This is
 // the server-side JIT entry point — only what the page uses is emitted.
-func GenerateJITCached(html string) string {
+func GenerateJITCached(html string, cfg *Config) string {
 	seen := make(map[string]bool)
 	var classes []string
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
@@ -40,20 +40,24 @@ func GenerateJITCached(html string) string {
 		_, _ = h.Write([]byte(c))
 		_, _ = h.Write([]byte{' '})
 	}
+	if cfg != nil {
+		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Colors)))
+		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Animations)))
+	}
 	sig := h.Sum64()
 	if v, ok := jitCache.Load(sig); ok {
 		return v.(string)
 	}
 
-	out := buildJITCSS(classes)
+	out := buildJITCSS(classes, cfg)
 	jitCache.Store(sig, out)
 	return out
 }
 
-func buildJITCSS(classes []string) string {
+func buildJITCSS(classes []string, cfg *Config) string {
 	groups := make(map[string][]string)
 	for _, c := range classes {
-		css, sel, mediaQ := ResolveCore(c)
+		css, sel, mediaQ := ResolveCore(c, cfg)
 		if css == "" {
 			continue
 		}
@@ -117,7 +121,7 @@ func buildJITCSS(classes []string) string {
 // GenerateSiteCSS scans many HTML sources (a whole tenant's templates) for utility classes
 // and returns ONE combined stylesheet — the site-wide JIT served at a single path like
 // /jitcss, so the browser caches it once for every page instead of inlining per render.
-func GenerateSiteCSS(htmls ...string) string {
+func GenerateSiteCSS(cfg *Config, htmls ...string) string {
 	seen := make(map[string]bool)
 	var classes []string
 	for _, h := range htmls {
@@ -134,9 +138,16 @@ func GenerateSiteCSS(htmls ...string) string {
 		return ""
 	}
 	sort.Strings(classes)
-	css := buildJITCSS(classes)
+	css := buildJITCSS(classes, cfg)
 	if strings.Contains(css, "animation:") {
-		css = AnimKeyframes + "\n" + css
+		var keyframesStr strings.Builder
+		keyframesStr.WriteString(AnimKeyframes)
+		if cfg != nil && cfg.Keyframes != nil {
+			for name, rule := range cfg.Keyframes {
+				keyframesStr.WriteString(fmt.Sprintf("\n@keyframes %s {\n%s\n}", name, rule))
+			}
+		}
+		css = keyframesStr.String() + "\n" + css
 	}
 	return css
 }
@@ -173,7 +184,7 @@ func GenerateFramework() string {
 
 	// Internal Gen Function using ResolveCore
 	gen := func(c string) {
-		css, sel, mq := ResolveCore(c)
+		css, sel, mq := ResolveCore(c, nil)
 		if css != "" {
 			if buf, ok := buffers[mq]; ok {
 				buf.WriteString(fmt.Sprintf("%s { %s }\n", sel, css))
@@ -362,7 +373,7 @@ func GenerateFramework() string {
 	return b.String()
 }
 
-func GenerateJIT(html string) string {
+func GenerateJIT(html string, cfg *Config) string {
 	seen := make(map[string]bool)
 	var classes []string
 	re := regexp.MustCompile(`class="([^"]+)"`)
@@ -378,5 +389,5 @@ func GenerateJIT(html string) string {
 		return ""
 	}
 	sort.Strings(classes)
-	return buildJITCSS(classes)
+	return buildJITCSS(classes, cfg)
 }

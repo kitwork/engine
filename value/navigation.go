@@ -126,6 +126,22 @@ func (v Value) Set(key string, val Value) {
 
 func (v Value) Get(key string) Value {
 	if v.K == Invalid {
+		// An errored value (a failed db query, fail("…") / new Error("…")) is K==Invalid carrying its
+		// message in .V. Expose a small, deliberate surface so it reads like an error object AND can
+		// be caught — while every OTHER access stays Invalid so a bare value keeps bubbling:
+		//   .result()/.safe() rescue it into a capturable shape; .message is the text; .isError true.
+		switch key {
+		case "result", "safe":
+			if fn, ok := v.K.Method(key); ok {
+				return Value{K: Func, V: fn}
+			}
+		case "message":
+			if s, ok := v.V.(string); ok {
+				return New(s)
+			}
+		case "isError":
+			return New(true)
+		}
 		return v
 	}
 	// JS-Compatibility: .length property

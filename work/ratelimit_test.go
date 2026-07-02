@@ -75,10 +75,7 @@ func TestRateLimiterAllow(t *testing.T) {
 }
 
 func TestTenantCheckRateLimit(t *testing.T) {
-	tenant := &Tenant{
-		rateLimitEnabled: true,
-		rateLimitPeriod:  time.Second,
-	}
+	tenant := &Tenant{}
 
 	// Route limit: 3 requests
 	matchedRoute := &Router{
@@ -144,10 +141,10 @@ func TestTenantCheckRateLimit(t *testing.T) {
 func TestTenantLevelRateLimit(t *testing.T) {
 	// Initialize tenant with a tenant-wide global limit of 3 and per-IP limit of 2
 	tenant := &Tenant{
-		rateLimitEnabled: true,
-		rateLimitRate:    3,
-		rateLimitIpRate:  2,
-		rateLimitPeriod:  time.Second,
+		rateLimitRules: []rateRule{
+			{Type: "global", Rate: 3, Period: time.Second},
+			{Type: "ip", Rate: 2, Period: time.Second},
+		},
 	}
 
 	// No route-specific limits configured
@@ -196,10 +193,7 @@ func TestTenantLevelRateLimit(t *testing.T) {
 }
 
 func TestTenantRateLimitMapRotation(t *testing.T) {
-	tenant := &Tenant{
-		rateLimitEnabled: true,
-		rateLimitPeriod:  time.Millisecond,
-	}
+	tenant := &Tenant{}
 
 	matchedRoute := &Router{
 		limitRules: []rateRule{{Type: "ip", Rate: 1, Period: time.Second}},
@@ -221,7 +215,7 @@ func TestTenantRateLimitMapRotation(t *testing.T) {
 	}
 
 	// Force map rotation by setting lastRotation to 2 seconds ago
-	tenant.limiters.lastRotation = time.Now().Add(-2 * time.Second)
+	tenant.limiters[ScopeTenant].lastRotation = time.Now().Add(-2 * time.Second)
 
 	// Request 3: Still blocked, but state carries over from previous map
 	if tenant.checkRateLimit(matchedRoute, r, httptest.NewRecorder()) {
@@ -239,9 +233,9 @@ func TestTenantRateLimitMapRotation(t *testing.T) {
 
 func TestTenantUserRateLimit(t *testing.T) {
 	tenant := &Tenant{
-		rateLimitEnabled:  true,
-		rateLimitUserRate: 2,
-		rateLimitPeriod:   time.Second,
+		rateLimitRules: []rateRule{
+			{Type: "user", Rate: 2, Period: time.Second},
+		},
 	}
 
 	matchedRoute := &Router{}
@@ -281,9 +275,9 @@ func TestTenantUserRateLimit(t *testing.T) {
 
 func TestTenantUserRateLimitDynamic(t *testing.T) {
 	tenant := &Tenant{
-		rateLimitEnabled:  true,
-		rateLimitUserRate: 2,
-		rateLimitPeriod:   time.Second,
+		rateLimitRules: []rateRule{
+			{Type: "user", Rate: 2, Period: time.Second},
+		},
 	}
 
 	matchedRoute := &Router{}
@@ -346,10 +340,7 @@ func TestRouteLimitArrayParse(t *testing.T) {
 
 // Multi-window: two IP rules with different periods are BOTH enforced — the tighter one bites.
 func TestRouteLimitMultiWindow(t *testing.T) {
-	tenant := &Tenant{
-		rateLimitEnabled: true,
-		rateLimitPeriod:  time.Second,
-	}
+	tenant := &Tenant{}
 	matched := &Router{
 		limitRules: []rateRule{
 			{Type: "ip", Rate: 2, Period: time.Second},    // burst: 2/s
@@ -386,10 +377,7 @@ func TestRouteLimitMultiWindow(t *testing.T) {
 
 // A "user" rule limits per account and is SKIPPED for anonymous requests.
 func TestRouteLimitTypeUser(t *testing.T) {
-	tenant := &Tenant{
-		rateLimitEnabled: true,
-		rateLimitPeriod:  time.Second,
-	}
+	tenant := &Tenant{}
 	matched := &Router{
 		limitRules: []rateRule{{Type: "user", Rate: 1, Period: time.Second}},
 		Method:     "GET",
@@ -422,7 +410,12 @@ func TestRouteLimitTypeUser(t *testing.T) {
 func TestRouteLimitServerScope(t *testing.T) {
 	host := NewLimiterStore(time.Second)
 	mk := func() *Tenant {
-		return &Tenant{rateLimitEnabled: true, rateLimitPeriod: time.Second, hostLimiters: host}
+		ten := &Tenant{
+			limiters: make([]*LimiterStore, ScopeMax),
+		}
+		ten.limiters[ScopeTenant] = NewLimiterStore(time.Second)
+		ten.limiters[ScopeServer] = host
+		return ten
 	}
 	tenantA, tenantB := mk(), mk()
 

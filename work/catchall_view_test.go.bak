@@ -1,0 +1,65 @@
+package work
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func writePage(t *testing.T, viewsDir, rel string) {
+	t.Helper()
+	dir := filepath.Join(viewsDir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "page.kitwork.html"), []byte("<p>x</p>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// router.page("/*") catch-all: resolveFilePage maps a request URL → a page folder (literal nested +
+// a [param] folder capturing its value); a path with no page file falls through to 404.
+func TestCatchAllFileRouting(t *testing.T) {
+	tenant, viewsDir := newTestTenant(t)
+	writePage(t, viewsDir, "about")
+	writePage(t, viewsDir, "docs/routing")
+	writePage(t, viewsDir, "blog/[slug]")
+
+	render := &Render{tenant: tenant, directory: "views", path: "/"}
+	ctx := func() *Context {
+		return &Context{request: &Request{router: &Router{tenant: tenant, params: map[string]string{}}}}
+	}
+
+	// Literal — top-level and nested.
+	if got := ctx().resolveFilePage(render, "/about"); got != "/about" {
+		t.Errorf("/about → %q, want /about", got)
+	}
+	if got := ctx().resolveFilePage(render, "/docs/routing"); got != "/docs/routing" {
+		t.Errorf("/docs/routing → %q, want /docs/routing", got)
+	}
+
+	// Dynamic [slug] folder + captured param.
+	c := ctx()
+	if got := c.resolveFilePage(render, "/blog/my-post"); got != "/blog/[slug]" {
+		t.Errorf("/blog/my-post → %q, want /blog/[slug]", got)
+	}
+	if c.request.router.params["slug"] != "my-post" {
+		t.Errorf("captured slug = %q, want my-post", c.request.router.params["slug"])
+	}
+
+	// Unknown stays literal → no page file → 404.
+	if got := ctx().resolveFilePage(render, "/nope"); got != "/nope" {
+		t.Errorf("/nope → %q, want /nope", got)
+	}
+
+	cc := ctx()
+	if !cc.pageExists(render, pageSegments("/about")) {
+		t.Error("/about must have a page file (200)")
+	}
+	if !cc.pageExists(render, pageSegments("/blog/[slug]")) {
+		t.Error("/blog/[slug] must have a page file (200)")
+	}
+	if cc.pageExists(render, pageSegments("/nope")) {
+		t.Error("/nope must NOT have a page file (→ 404)")
+	}
+}
