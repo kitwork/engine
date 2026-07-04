@@ -95,4 +95,4 @@ Technology, when built with heart, should serve human happiness and simplicity. 
 - **GitHub**: [@huynhnhanquoc](https://github.com/huynhnhanquoc)
 - **Substack**: [huynhnhanquoc.substack.com](https://huynhnhanquoc.substack.com)
 - **Personal Blog**: [huynhnhanquoc.com](https://huynhnhanquoc.com)
-- **Open Source Projects**: [Kit Module](https://kitmodule.vn)
+- **Open Source Projects**: [Kitwork](https://kitwork.io)
