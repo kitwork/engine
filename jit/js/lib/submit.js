@@ -25,12 +25,20 @@ window.kitwork.components.action("submit", function (form, e) {
 
   store.isLoading = true;
   form.classList.add("is-loading");
+  form.setAttribute("data-state", "loading");
+  var subButtons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
+  subButtons.forEach(function (btn) { btn.disabled = true; });
 
-  fetch(action, options)
+  var fetchFn = window.kitwork.fetchWithRetry || function (u, o) { return fetch(u, o); };
+
+  fetchFn(action, options)
     .then(function (r) { return r.text(); })
     .then(function (html) {
       store.isLoading = false;
       form.classList.remove("is-loading");
+      form.setAttribute("data-state", "ready");
+      subButtons.forEach(function (btn) { btn.disabled = false; });
+
       if (!target) return;
       if (swap === "append") target.insertAdjacentHTML("beforeend", html);
       else if (swap === "prepend") target.insertAdjacentHTML("afterbegin", html);
@@ -38,5 +46,10 @@ window.kitwork.components.action("submit", function (form, e) {
       else target.innerHTML = html;
       document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: action, target: target } }));
     })
-    .catch(function () { store.isLoading = false; form.classList.remove("is-loading"); });
+    .catch(function () {
+      store.isLoading = false;
+      form.classList.remove("is-loading");
+      form.setAttribute("data-state", "error");
+      subButtons.forEach(function (btn) { btn.disabled = false; });
+    });
 });

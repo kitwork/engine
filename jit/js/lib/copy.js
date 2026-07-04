@@ -1,5 +1,7 @@
-/* copy — copy data-kitwork-copy (or the target's text) to the clipboard. Flags `.is-copied` for
- * 2s so the author renders the "Copied!" state purely in CSS. */
+/* copy verb — copy data-kitwork-copy (or the target's text) to the clipboard.
+ * Flags `.is-copied` for 2s so the author renders the "Copied!" state purely in CSS.
+ * Supports: <button data-kitwork-action="copy" data-kitwork-copy="npm i kitwork">Copy</button>
+ */
 window.kitwork.components.action("copy", function (el) {
   var text = el.getAttribute("data-kitwork-copy");
   if (text == null) {

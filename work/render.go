@@ -498,11 +498,12 @@ func (r *Render) tmpl(data any) string {
 	}
 
 	// 3h. hydrate (frontend bytecode VM): on a page that opts in via the data-kitwork-hydrate root
-	// marker, compile authored data-text/show/click="<expr>" into data-*-ir='<IR>' and inject
-	// <script src="/jithydrate"> — only-used. The IR is walked by the shared interpreter served at
-	// hydrate.RuntimePath (serveHydrateIf). A cheap no-op on pages without the marker, so static
-	// pages and the client-parser demos are never rewritten.
+	// marker, verify every authored expression (compile-time linting) and inject the kernel runtime
+	// reference — only-used. The wire ships the SOURCE; the client parses it (no eval). Then PreRender
+	// runs the SAME Go walker over data-kit-text/show to bake initial values into the HTML: no flash,
+	// correct with JS off, indexable. Both are marker-gated no-ops on ordinary pages.
 	out = hydrate.Render(out)
+	out = hydrate.PreRender(out)
 
 	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses
 	// (a `font-family: <Name>` value or a `font-<slug>` class) → inject preload links + ONE

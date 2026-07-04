@@ -76,6 +76,20 @@ func TestRenderMalformedKeptAndStillInjects(t *testing.T) {
 	}
 }
 
+// When the jit/js pass already inlined its verb bundle (whose core IS this same kernel), the
+// hydrate pass must not add a second reference.
+func TestRenderSkipsWhenKernelInlined(t *testing.T) {
+	in := `<head><script data-kitwork-jit="js">/*kernel+verbs*/</script></head><body>` + marker +
+		`<b data-kit-text="n">0</b></section></body>`
+	out := Render(in)
+	if strings.Contains(out, injectTag) {
+		t.Error("kernel already inlined by jit/js — no /jithydrate reference should be added")
+	}
+	if out != in {
+		t.Errorf("page should be unchanged\n got: %s", out)
+	}
+}
+
 // live and model are not expressions — they must trigger runtime injection but never be
 // compile-verified, and they ride the wire unchanged like everything else.
 func TestRenderLiveAndModelInject(t *testing.T) {
@@ -103,7 +117,29 @@ func TestRenderInjectsBeforeBodyWhenNoHead(t *testing.T) {
 // precompiled mode) — and never eval.
 func TestRuntimeEmbedded(t *testing.T) {
 	rt := Runtime()
-	for _, want := range []string{"window.hydrate", "PREC", "function lex", "-ir", "EventSource", "MutationObserver"} {
+	for _, want := range []string{
+		"window.hydrate", "PREC", "function lex", "-ir", "EventSource", "MutationObserver",
+		// the unified kernel surfaces: boot guard, behavior registry, verb compat, delegated action
+		"kitwork.runtime", "kitwork.behavior", "kitwork.components", "data-kitwork-action",
+		// the absorbed drive: navigation fetch header, morph primitive, head reconcile, history,
+		// the two-way lock against the legacy standalone file, and the swap lifecycle events
+		"X-Kitwork-Hydrate", "kitwork.morph", "mergeHead", "popstate", "kitwork.hydrate",
+		"kitwork:before-swap", "kitwork:load",
+		// scopes: the boundary attribute, the resolver, and the page-scope opcode
+		"data-kitwork-scope", "scopeFor", `"=$"`,
+		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
+		`"{}"`, `"[]"`, `"=>"`, `"call"`, "__kitLambda", "tryArrowParams", "boundaryScope", "kitwork.run",
+		// registered components: register fn, activation attr, blueprint registry, method this-bind
+		"kitwork.component", "data-kitwork-component", "seedComponent", "fn.apply(s, fargs)",
+		// remember: persisted $ keys — register fn, declaration attr, storage key, load/persist
+		"kitwork.remember", "data-kit-remember", "kitwork:$", "persistRemembered", "loadRemembered",
+		// api: async JSON source — sync fn, activation attr, fetch + state→CSS lifecycle
+		"kitwork.syncApi", "data-kit-api", `el.setAttribute("data-state", "loading")`,
+		// live per-scope + component init() lifecycle hook
+		"liveTarget", "function runInit", "st.scope.init",
+		// sandbox: the blocklist that seals the Function-constructor / prototype-pollution escape
+		"function blockedKey", "constructor",
+	} {
 		if !strings.Contains(rt, want) {
 			t.Errorf("runtime.js missing %q", want)
 		}

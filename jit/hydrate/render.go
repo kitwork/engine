@@ -26,6 +26,8 @@ const RuntimePath = "/jithydrate"
 const (
 	rootMarker      = "data-kitwork-hydrate"
 	rootMarkerShort = "data-kit-hydrate"
+	appMarker       = "data-kitwork-app"
+	appMarkerShort  = "data-kit-app"
 )
 
 // directiveRe matches an authored EXPRESSION directive in either alias:
@@ -34,8 +36,9 @@ const (
 var directiveRe = regexp.MustCompile(`data-(?:kitwork|kit)-(text|show|click|validate)="([^"]*)"`)
 
 // presenceRe decides runtime INJECTION: it also covers the non-expression attributes — model is a
-// plain scope key, live is an SSE URL — which need the runtime but must never be compile-verified.
-var presenceRe = regexp.MustCompile(`data-(?:kitwork|kit)-(?:text|show|click|validate|model|live)="`)
+// plain scope key, live an SSE URL, scope/component a boundary — which need the runtime but must
+// never be compile-verified.
+var presenceRe = regexp.MustCompile(`data-(?:kitwork|kit)-(?:text|show|click|validate|model|live|scope|component|remember|api)="`)
 
 const injectTag = `<script data-kitwork-jit="hydrate" src="` + RuntimePath + `" defer></script>`
 
@@ -52,7 +55,8 @@ const injectTag = `<script data-kitwork-jit="hydrate" src="` + RuntimePath + `" 
 // mode: the client runtime also reads data-kitwork-*-ir when present — Render just no longer
 // emits it. A page WITHOUT the marker (or with no directive) is returned byte-for-byte unchanged.
 func Render(html string) string {
-	if !strings.Contains(html, rootMarker) && !strings.Contains(html, rootMarkerShort) {
+	if !strings.Contains(html, rootMarker) && !strings.Contains(html, rootMarkerShort) &&
+		!strings.Contains(html, appMarker) && !strings.Contains(html, appMarkerShort) {
 		return html
 	}
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
@@ -61,6 +65,14 @@ func Render(html string) string {
 		}
 	}
 	if !presenceRe.MatchString(html) {
+		return html
+	}
+	// The jit/js pass (which runs earlier in the pipeline) inlines the SAME kernel as the core of
+	// its verb bundle — when that block is already on the page, a second reference would be pure
+	// duplication (the kernel is boot-guarded anyway, this just saves the bytes). Match the full
+	// open tag: the kernel SOURCE mentions the bare marker (mergeHead), so a substring would
+	// false-positive on any page that inlines the kernel for other reasons.
+	if strings.Contains(html, `<script data-kitwork-jit="js">`) {
 		return html
 	}
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {

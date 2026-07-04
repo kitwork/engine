@@ -18,9 +18,14 @@ window.kitwork.components.action("get", function (el, e) {
   if (store.fetchController) store.fetchController.abort();
   var controller = ("AbortController" in window) ? new AbortController() : null;
   store.fetchController = controller;
-  target.classList.add("is-loading");
 
-  fetch(href, {
+  target.classList.add("is-loading");
+  el.setAttribute("data-state", "loading");
+  if (el.tagName === "BUTTON" || el.tagName === "INPUT") el.disabled = true;
+
+  var fetchFn = window.kitwork.fetchWithRetry || function (u, o) { return fetch(u, o); };
+
+  fetchFn(href, {
     headers: { "X-Kitwork-Fragment": "1" },
     credentials: "same-origin",
     signal: controller && controller.signal
@@ -29,6 +34,9 @@ window.kitwork.components.action("get", function (el, e) {
     .then(function (html) {
       store.fetchController = null;
       target.classList.remove("is-loading");
+      el.setAttribute("data-state", "ready");
+      if (el.tagName === "BUTTON" || el.tagName === "INPUT") el.disabled = false;
+
       var landed = target;
       if (swap === "append") target.insertAdjacentHTML("beforeend", html);
       else if (swap === "prepend") target.insertAdjacentHTML("afterbegin", html);
@@ -43,5 +51,7 @@ window.kitwork.components.action("get", function (el, e) {
       if (err && err.name === "AbortError") return;
       store.fetchController = null;
       target.classList.remove("is-loading");
+      el.setAttribute("data-state", "error");
+      if (el.tagName === "BUTTON" || el.tagName === "INPUT") el.disabled = false;
     });
 });

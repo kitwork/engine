@@ -46,6 +46,97 @@ func TestEvalBasics(t *testing.T) {
 	}
 }
 
+// $ addresses the page scope. On the server the scope IS the page scope (flat), so $.n and n read
+// the same map — the verdicts stay identical to a client whose page scope holds the same data.
+func TestEvalPageScopeDollar(t *testing.T) {
+	scope := map[string]any{"total": 1.0, "n": 2.0}
+	if got := compileEval(t, "$.total", scope); got != 1.0 {
+		t.Errorf("$.total = %#v, want 1", got)
+	}
+	if got := compileEval(t, "$.total = $.total + n", scope); got != 3.0 {
+		t.Errorf("$.total assign = %#v, want 3", got)
+	}
+	if scope["total"] != 3.0 {
+		t.Errorf("scope not updated: %#v", scope["total"])
+	}
+	// a missing page-scope key reads as undefined/nil — any comparison against it is false,
+	// the same verdict the client walker reaches (2 > undefined → false).
+	if got := compileEval(t, "n > $.limit", scope); got != false {
+		t.Errorf("n > $.limit = %#v, want false (limit missing)", got)
+	}
+}
+
+// Blueprint values: a lambda is code-as-data walked by the same budgeted walker — no eval, no loops.
+func TestEvalBlueprint(t *testing.T) {
+	// object + array literals evaluate their values
+	if v := compileEval(t, "{ a: 1 + 1, b: 'x' }", map[string]any{}); v.(map[string]any)["a"] != 2.0 {
+		t.Errorf("object literal: %#v", v)
+	}
+	if v := compileEval(t, "[qty, 2]", map[string]any{"qty": 3.0}); v.([]any)[0] != 3.0 {
+		t.Errorf("array literal: %#v", v)
+	}
+	// a bare-called lambda mutates the surrounding scope lexically
+	scope := map[string]any{"n": 0.0}
+	if v := compileEval(t, "inc = () => n = n + 1; inc(); inc(); n", scope); v != 2.0 {
+		t.Errorf("lambda call: %#v", v)
+	}
+	if scope["n"] != 2.0 {
+		t.Errorf("lambda did not write through: %#v", scope["n"])
+	}
+	// params overlay locally and never leak; non-param writes flow out
+	s2 := map[string]any{"total": 1.0}
+	if v := compileEval(t, "f = (x) => total = total + x; f(5); total", s2); v != 6.0 {
+		t.Errorf("param lambda: %#v", v)
+	}
+	if _, leaked := s2["x"]; leaked {
+		t.Error("param x must not leak into the caller scope")
+	}
+	// calling a non-lambda yields nil (parity with the client returning undefined)
+	if v := compileEval(t, "notafn()", map[string]any{"notafn": 5.0}); v != nil {
+		t.Errorf("calling a non-lambda should be nil, got %#v", v)
+	}
+}
+
+// Lambdas cannot loop, so the only runaway is recursion — the op budget stops it (never a crash).
+func TestEvalLambdaRecursionBudget(t *testing.T) {
+	node, err := Compile("f = () => f(); f()")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Eval(node, map[string]any{}); err == nil {
+		t.Error("expected budget error on infinite recursion")
+	}
+}
+
+// Sandbox: the walker must never reach the Function constructor (i.e. eval) or prototype pollution,
+// so constructor/__proto__/prototype resolve to nil in reads, calls and writes. This is what makes
+// "no eval" true by construction — essential before any client-sent expression (capsule) runs.
+func TestEvalSandboxBlocksConstructor(t *testing.T) {
+	cases := []string{
+		"''.constructor",                          // → String, must be nil
+		"''.constructor.constructor",              // → Function, must be nil
+		"''.constructor.constructor('x')",         // building Function('x'), must be nil
+		"x.__proto__",                             // prototype access
+		"x.prototype",                             // prototype access
+	}
+	for _, expr := range cases {
+		v := compileEval(t, expr, map[string]any{"x": map[string]any{}})
+		if v != nil {
+			t.Errorf("sandbox breach: %q returned %#v, want nil", expr, v)
+		}
+	}
+	// a write to a blocked target is a no-op (no prototype pollution)
+	scope := map[string]any{}
+	compileEval(t, "__proto__ = 1", scope)
+	if _, leaked := scope["__proto__"]; leaked {
+		t.Error("write to __proto__ must be blocked")
+	}
+	// the legitimate method set still works (regression guard)
+	if compileEval(t, "'a@b'.includes('@')", map[string]any{}) != true {
+		t.Error("legit method call broke")
+	}
+}
+
 func TestEvalAssignment(t *testing.T) {
 	scope := map[string]any{"n": 1.0}
 	if got := compileEval(t, "n = n + 1", scope); got != 2.0 {

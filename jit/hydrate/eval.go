@@ -14,6 +14,13 @@ const evalBudget = 10000
 
 var errBudget = errors.New("hydrate: evaluation budget exceeded")
 
+// Lambda is a compiled function VALUE — a named IR tree with parameter names. It is pure data
+// (serializable, inspectable); calling it means walking Body with the same budgeted walker.
+type Lambda struct {
+	Params []string
+	Body   any
+}
+
 // Eval walks a compiled IR node against scope — the Go twin of the ~30-line client walker in
 // runtime.js. One IR, two ends: the client walks it for instant feedback (e.g. validate as you
 // type), the server walks the SAME data for truth (validate on submit, first-paint, go tests).
@@ -38,6 +45,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		return arr[1], nil
 	case "$":
 		name, _ := arr[1].(string)
+		if name == "$" {
+			return scope, nil // `$` = the page scope itself; on the server the scope IS the root
+		}
 		v, ok := scope[name]
 		if !ok {
 			return float64(0), nil // mirror the client Proxy: a missing key reads as 0
@@ -49,8 +59,13 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 			return float64(n), nil
 		}
 		return v, nil
-	case "=":
+	case "=", "=$":
+		// On the server the scope is flat (one map), so the lexical write and the page-scope
+		// write land in the same place; the client walker distinguishes them across scopes.
 		name, _ := arr[1].(string)
+		if blockedKey(name) {
+			return nil, nil
+		}
 		v, err := eval(arr[2], scope, budget)
 		if err != nil {
 			return nil, err
@@ -72,6 +87,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 			return nil, err
 		}
 		name, _ := arr[2].(string)
+		if blockedKey(name) {
+			return nil, nil
+		}
 		return member(o, name), nil
 	case "()":
 		o, err := eval(arr[1], scope, budget)
@@ -79,6 +97,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 			return nil, err
 		}
 		name, _ := arr[2].(string)
+		if blockedKey(name) {
+			return nil, nil
+		}
 		rawArgs, _ := arr[3].([]any)
 		args := make([]any, len(rawArgs))
 		for i, ra := range rawArgs {
@@ -89,6 +110,99 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 			args[i] = v
 		}
 		return call(o, name, args), nil
+	case "{}":
+		pairs, _ := arr[1].([]any)
+		m := make(map[string]any, len(pairs))
+		for _, pr := range pairs {
+			pa, ok := pr.([]any)
+			if !ok || len(pa) != 2 {
+				continue
+			}
+			k, _ := pa[0].(string)
+			v, err := eval(pa[1], scope, budget)
+			if err != nil {
+				return nil, err
+			}
+			m[k] = v
+		}
+		return m, nil
+	case "[]":
+		items, _ := arr[1].([]any)
+		out := make([]any, 0, len(items))
+		for _, it := range items {
+			v, err := eval(it, scope, budget)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	case "=>":
+		// A lambda VALUE: pure data (params + body IR). Nothing executes until it is called.
+		rawParams, _ := arr[1].([]any)
+		params := make([]string, 0, len(rawParams))
+		for _, rp := range rawParams {
+			if s, ok := rp.(string); ok {
+				params = append(params, s)
+			}
+		}
+		return &Lambda{Params: params, Body: arr[2]}, nil
+	case ";":
+		var v any
+		for _, e := range arr[1:] {
+			var err error
+			v, err = eval(e, scope, budget)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return v, nil
+	case "call":
+		callee, err := eval(arr[1], scope, budget)
+		if err != nil {
+			return nil, err
+		}
+		rawArgs, _ := arr[2].([]any)
+		args := make([]any, len(rawArgs))
+		for i, ra := range rawArgs {
+			v, err := eval(ra, scope, budget)
+			if err != nil {
+				return nil, err
+			}
+			args[i] = v
+		}
+		lam, ok := callee.(*Lambda)
+		if !ok {
+			return nil, nil // mirror the client: calling a non-lambda yields undefined
+		}
+		if len(lam.Params) == 0 {
+			return eval(lam.Body, scope, budget)
+		}
+		// Params overlay the calling scope; writes to NON-param keys flow back out (lexical),
+		// param bindings themselves stay local to the call.
+		merged := make(map[string]any, len(scope)+len(lam.Params))
+		for k, v := range scope {
+			merged[k] = v
+		}
+		isParam := make(map[string]bool, len(lam.Params))
+		for i, pn := range lam.Params {
+			isParam[pn] = true
+			if i < len(args) {
+				merged[pn] = args[i]
+			} else {
+				merged[pn] = nil
+			}
+		}
+		out, err := eval(lam.Body, merged, budget)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range merged {
+			if !isParam[k] {
+				scope[k] = v
+			}
+		}
+		return out, nil
 	case "u!":
 		v, err := eval(arr[1], scope, budget)
 		if err != nil {
@@ -159,6 +273,14 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 // Truthy reports whether an Eval result counts as true — exported so a host can turn a rule's
 // result into a verdict with the exact same semantics the walkers use internally.
 func Truthy(v any) bool { return truthy(v) }
+
+// blockedKey mirrors the client walker: constructor/__proto__/prototype are the only member names
+// that can reach code execution or prototype pollution, so member access, method calls and writes
+// to them all resolve to nil. (The Go walker cannot reach a function constructor anyway, but the
+// guard keeps the two ends byte-for-byte in agreement.)
+func blockedKey(name string) bool {
+	return name == "constructor" || name == "__proto__" || name == "prototype"
+}
 
 // truthy follows JS: false, 0, NaN, "", null/undefined are falsy; everything else truthy.
 func truthy(v any) bool {

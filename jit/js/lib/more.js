@@ -16,9 +16,17 @@ window.kitwork.components.action("more", function (el, e) {
   var dest = selector ? document.querySelector(selector) : null;
   if (!href || !dest) return;
   store.isLoading = true;
-  el.classList.add("is-loading");
 
-  fetch(href, { credentials: "same-origin" })
+  el.classList.add("is-loading");
+  el.setAttribute("data-state", "loading");
+  if (el.tagName === "BUTTON" || el.tagName === "INPUT" || el.tagName === "A") {
+    el.style.pointerEvents = "none";
+    if (el.tagName !== "A") el.disabled = true;
+  }
+
+  var fetchFn = window.kitwork.fetchWithRetry || function (u, o) { return fetch(u, o); };
+
+  fetchFn(href, { credentials: "same-origin" })
     .then(function (r) { return r.text(); })
     .then(function (html) {
       var doc = new DOMParser().parseFromString(html, "text/html");
@@ -26,11 +34,18 @@ window.kitwork.components.action("more", function (el, e) {
       if (source) {
         // Keys already in the live container → skip duplicates.
         var seen = {};
-        dest.querySelectorAll("[data-key]").forEach(function (n) { seen[n.getAttribute("data-key")] = true; });
-        source.querySelectorAll("[data-key]").forEach(function (n) {
-          var key = n.getAttribute("data-key");
-          if (seen[key]) return;
-          seen[key] = true;
+        var keySelector = "[data-kitwork-key],[data-kit-key],[data-key]";
+        function getKey(n) {
+          return n.getAttribute("data-kitwork-key") || n.getAttribute("data-kit-key") || n.getAttribute("data-key");
+        }
+        dest.querySelectorAll(keySelector).forEach(function (n) {
+          var k = getKey(n);
+          if (k) seen[k] = true;
+        });
+        source.querySelectorAll(keySelector).forEach(function (n) {
+          var k = getKey(n);
+          if (!k || seen[k]) return;
+          seen[k] = true;
           dest.appendChild(document.importNode(n, true));
         });
       }
@@ -39,6 +54,12 @@ window.kitwork.components.action("more", function (el, e) {
       var nextHref = next && (next.getAttribute("data-kitwork-href") || next.getAttribute("href"));
       store.isLoading = false;
       el.classList.remove("is-loading");
+      el.setAttribute("data-state", "ready");
+      if (el.tagName === "BUTTON" || el.tagName === "INPUT" || el.tagName === "A") {
+        el.style.pointerEvents = "";
+        if (el.tagName !== "A") el.disabled = false;
+      }
+
       if (nextHref) {
         el.setAttribute(el.hasAttribute("data-kitwork-href") ? "data-kitwork-href" : "href", nextHref);
       } else {
@@ -46,5 +67,13 @@ window.kitwork.components.action("more", function (el, e) {
       }
       document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: href, target: dest } }));
     })
-    .catch(function () { store.isLoading = false; el.classList.remove("is-loading"); });
+    .catch(function () {
+      store.isLoading = false;
+      el.classList.remove("is-loading");
+      el.setAttribute("data-state", "error");
+      if (el.tagName === "BUTTON" || el.tagName === "INPUT" || el.tagName === "A") {
+        el.style.pointerEvents = "";
+        if (el.tagName !== "A") el.disabled = false;
+      }
+    });
 });

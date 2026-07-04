@@ -6,13 +6,27 @@
 // IR shapes (each is a JSON array):
 //
 //	["#", literal]            literal (number | string | bool | null)
-//	["$", "name"]            variable read from scope
+//	["$", "name"]            variable read from scope ("$" itself = the PAGE scope object)
 //	[op, left, right]        binary: + - * / % > < >= <= == != && ||
 //	["u!", e] / ["u-", e]    unary not / negate
 //	["?", c, a, b]           ternary c ? a : b
-//	["=", "name", value]     assignment to a scope variable
+//	["=", "name", value]     assignment to a scope variable (lexical: owner scope, else nearest)
+//	["=$", "name", value]    assignment to the PAGE scope: $.name = value — the same $ the
+//	                         server template language uses for its root data
 //	[".", obj, "name"]       member access obj.name
 //	["()", obj, "name", []]  method call obj.name(args...)
+//	["{}", [[k, v], …]]      object literal { count: 5, open: false } — a BLUEPRINT, parsed not
+//	                         eval'd (objects allow a trailing comma, matching the server language)
+//	["[]", [e, …]]           array literal [1, 2, 3] (arrays REJECT a trailing comma, ditto)
+//	[";", e1, e2, …]         sequence: count = 5; open = true — evaluates left to right,
+//	                         yields the last value
+//	["=>", [params], body]   lambda: () => count = count + 1 — a NAMED IR TREE, i.e. code-as-data.
+//	                         The body is this same grammar; parens are required around params.
+//	["call", callee, [args]] bare call: inc() — callee must evaluate to a lambda value
+//
+// The line the grammar never crosses is ARBITRARY CODE: a lambda here is not JavaScript — it is a
+// compiled IR tree walked by the same budgeted walker as everything else. Nothing is ever handed
+// to eval/new Function, there are no loops, and the op budget stops runaway recursion.
 package hydrate
 
 import (
@@ -68,13 +82,13 @@ func lex(s string) []tok {
 			i = j
 		default:
 			if i+1 < n {
-				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" {
+				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" {
 					out = append(out, tok{"op", two})
 					i += 2
 					continue
 				}
 			}
-			if strings.IndexByte("+-*/%<>!?:().,=", c) >= 0 {
+			if strings.IndexByte("+-*/%<>!?:().,={}[];", c) >= 0 {
 				out = append(out, tok{"op", string(c)})
 			}
 			i++
@@ -113,8 +127,36 @@ func (p *parser) eat(v string) error {
 	return nil
 }
 
-// The grammar (precedence low→high): assign → ternary → binary → unary → postfix → primary.
-// Each stage returns the IR directly, so parse and codegen are one pass.
+// The grammar (precedence low→high): sequence → assign → ternary → binary → unary → postfix →
+// primary. Each stage returns the IR directly, so parse and codegen are one pass.
+
+// sequence parses `expr; expr; …` (a trailing ; is fine). A single expression compiles exactly as
+// before — the [";"] wrapper only appears when there really is a sequence.
+func (p *parser) sequence() (any, error) {
+	first, err := p.assign()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().v != ";" {
+		return first, nil
+	}
+	exprs := []any{";", first}
+	for p.peek().v == ";" {
+		p.next()
+		if p.peek().t == "eof" {
+			break
+		}
+		e, err := p.assign()
+		if err != nil {
+			return nil, err
+		}
+		exprs = append(exprs, e)
+	}
+	if len(exprs) == 2 {
+		return first, nil
+	}
+	return exprs, nil
+}
 
 func (p *parser) assign() (any, error) {
 	left, err := p.ternary()
@@ -127,11 +169,22 @@ func (p *parser) assign() (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		arr, ok := left.([]any)
-		if !ok || len(arr) != 2 || arr[0] != "$" {
-			return nil, errors.New("hydrate: invalid assignment target")
+		if arr, ok := left.([]any); ok {
+			if len(arr) == 2 && arr[0] == "$" {
+				if arr[1] == "$" {
+					return nil, errors.New("hydrate: cannot assign to $ itself")
+				}
+				return []any{"=", arr[1], val}, nil
+			}
+			// $.name = value — the explicit page-scope address. The ONLY member target that is
+			// assignable; general obj.prop assignment stays out of the grammar.
+			if len(arr) == 3 && arr[0] == "." {
+				if inner, ok := arr[1].([]any); ok && len(inner) == 2 && inner[0] == "$" && inner[1] == "$" {
+					return []any{"=$", arr[2], val}, nil
+				}
+			}
 		}
-		return []any{"=", arr[1], val}, nil
+		return nil, errors.New("hydrate: invalid assignment target")
 	}
 	return left, nil
 }
@@ -195,39 +248,62 @@ func (p *parser) unary() (any, error) {
 	return p.postfix()
 }
 
+// callArgs parses `(a, b, …)` — the opening paren already consumed by the caller.
+func (p *parser) callArgs() ([]any, error) {
+	args := []any{}
+	if p.peek().v != ")" {
+		a, err := p.assign()
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, a)
+		for p.peek().v == "," {
+			p.next()
+			a, err := p.assign()
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, a)
+		}
+	}
+	if err := p.eat(")"); err != nil {
+		return nil, err
+	}
+	return args, nil
+}
+
 func (p *parser) postfix() (any, error) {
 	e, err := p.primary()
 	if err != nil {
 		return nil, err
 	}
-	for p.peek().v == "." {
-		p.next()
-		name := p.next().v
-		if p.peek().v == "(" {
+	for {
+		if p.peek().v == "." {
 			p.next()
-			args := []any{}
-			if p.peek().v != ")" {
-				a, err := p.assign()
+			name := p.next().v
+			if p.peek().v == "(" {
+				p.next()
+				args, err := p.callArgs()
 				if err != nil {
 					return nil, err
 				}
-				args = append(args, a)
-				for p.peek().v == "," {
-					p.next()
-					a, err := p.assign()
-					if err != nil {
-						return nil, err
-					}
-					args = append(args, a)
-				}
+				e = []any{"()", e, name, args}
+			} else {
+				e = []any{".", e, name}
 			}
-			if err := p.eat(")"); err != nil {
+			continue
+		}
+		// bare call: inc(), add(1, 2) — the callee is whatever expression came before.
+		if p.peek().v == "(" {
+			p.next()
+			args, err := p.callArgs()
+			if err != nil {
 				return nil, err
 			}
-			e = []any{"()", e, name, args}
-		} else {
-			e = []any{".", e, name}
+			e = []any{"call", e, args}
+			continue
 		}
+		break
 	}
 	return e, nil
 }
@@ -258,6 +334,14 @@ func (p *parser) primary() (any, error) {
 		return []any{"$", t.v}, nil
 	case "op":
 		if t.v == "(" {
+			// Arrow lookahead first: `() => body` / `(x, y) => body`. Parens are required.
+			if params, ok := p.tryArrowParams(); ok {
+				body, err := p.assign()
+				if err != nil {
+					return nil, err
+				}
+				return []any{"=>", params, body}, nil
+			}
 			p.next()
 			e, err := p.assign()
 			if err != nil {
@@ -268,14 +352,102 @@ func (p *parser) primary() (any, error) {
 			}
 			return e, nil
 		}
+		if t.v == "{" {
+			p.next()
+			pairs := []any{}
+			for p.peek().v != "}" {
+				kt := p.next()
+				if kt.t != "id" && kt.t != "str" {
+					return nil, errors.New("hydrate: bad object key '" + kt.v + "'")
+				}
+				if err := p.eat(":"); err != nil {
+					return nil, err
+				}
+				v, err := p.assign()
+				if err != nil {
+					return nil, err
+				}
+				pairs = append(pairs, []any{kt.v, v})
+				if p.peek().v == "," {
+					p.next() // objects allow a trailing comma (server-language convention)
+					continue
+				}
+				break
+			}
+			if err := p.eat("}"); err != nil {
+				return nil, err
+			}
+			return []any{"{}", pairs}, nil
+		}
+		if t.v == "[" {
+			p.next()
+			items := []any{}
+			if p.peek().v != "]" {
+				for {
+					v, err := p.assign()
+					if err != nil {
+						return nil, err
+					}
+					items = append(items, v)
+					if p.peek().v == "," {
+						p.next()
+						if p.peek().v == "]" {
+							return nil, errors.New("hydrate: arrays reject a trailing comma")
+						}
+						continue
+					}
+					break
+				}
+			}
+			if err := p.eat("]"); err != nil {
+				return nil, err
+			}
+			return []any{"[]", items}, nil
+		}
 	}
 	return nil, errors.New("hydrate: unexpected token '" + t.v + "'")
+}
+
+// tryArrowParams speculatively parses `(ident, …) =>` from the current position. On success the
+// tokens are consumed and the parameter names are returned; on any mismatch the position is
+// restored and the caller falls through to a parenthesized expression.
+func (p *parser) tryArrowParams() ([]any, bool) {
+	save := p.pos
+	p.next() // consume (
+	params := []any{}
+	if p.peek().v == ")" {
+		p.next()
+	} else {
+		for {
+			if p.peek().t != "id" {
+				p.pos = save
+				return nil, false
+			}
+			params = append(params, p.next().v)
+			if p.peek().v == "," {
+				p.next()
+				continue
+			}
+			break
+		}
+		if p.peek().v != ")" {
+			p.pos = save
+			return nil, false
+		}
+		p.next()
+	}
+	if p.peek().v != "=>" {
+		p.pos = save
+		return nil, false
+	}
+	p.next()
+	return params, true
 }
 
 // Compile parses a hydrate expression and returns its IR tree (marshalable to a compact JSON array).
 func Compile(expr string) (any, error) {
 	p := &parser{toks: lex(expr)}
-	node, err := p.assign()
+	node, err := p.sequence()
 	if err != nil {
 		return nil, err
 	}
