@@ -221,10 +221,6 @@ kitwork().Router().Get("/test").Handle(() => {
 
 	// 1. Create Engine with a Global Limit of 5 and Per-IP Limit of 2
 	engine := New(tmpDir, 0, false, "")
-	engine.RateLimit.Enabled = true
-	engine.RateLimit.Rate = 5
-	engine.RateLimit.IpRate = 2
-	engine.RateLimit.Period = time.Second
 
 	// 2. IP 1 makes 2 requests (allowed)
 	r1 := httptest.NewRequest("GET", "http://localhost/test", nil)
@@ -313,9 +309,6 @@ kitwork().Router().Get("/test").Handle(() => {
 
 	// 1. Create Engine with BrowserLimit=2
 	engine := New(tmpDir, 0, false, "")
-	engine.RateLimit.Enabled = true
-	engine.RateLimit.BrowserRate = 2
-	engine.RateLimit.Period = time.Second
 
 	// 2. Test Browser limit (IP rotations)
 	rBrowser := httptest.NewRequest("GET", "http://localhost/test", nil)

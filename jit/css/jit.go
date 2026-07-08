@@ -66,6 +66,13 @@ func buildJITCSS(classes []string, cfg *Config) string {
 	}
 
 	var b strings.Builder
+	b.WriteString("*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor; }\n")
+	b.WriteString("html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }\n")
+	b.WriteString("body { margin: 0; line-height: inherit; }\n")
+	b.WriteString("a { color: inherit; text-decoration: inherit; }\n")
+	b.WriteString("button, input, optgroup, select, textarea { font: inherit; color: inherit; margin: 0; padding: 0; }\n")
+	b.WriteString("img, svg, video, canvas, audio, iframe, embed, object { display: block; vertical-align: middle; }\n")
+
 	// 1. Base styles (no media query)
 	if baseRules, ok := groups[""]; ok {
 		for _, r := range baseRules {

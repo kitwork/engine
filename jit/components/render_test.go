@@ -51,6 +51,18 @@ func TestRenderCardFamily(t *testing.T) {
 	}
 }
 
+func TestRenderProseFamilyIncludesDarkRules(t *testing.T) {
+	out := Render(`<head></head><body><article class="prose prose-frame"><p>x</p></article></body>`)
+	for _, want := range []string{".prose{", ".dark .prose{", ".prose-frame img{"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prose family missing %q: %s", want, out)
+		}
+	}
+	if strings.Contains(out, ".card{") {
+		t.Errorf("card family should NOT ship (unused): %s", out)
+	}
+}
+
 func TestRenderNoOpWithoutComponents(t *testing.T) {
 	in := `<head></head><body><p class="text-sm">no components</p></body>`
 	if out := Render(in); out != in {

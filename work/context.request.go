@@ -46,6 +46,10 @@ func (r *Request) Query(key string) value.Value {
 	return value.New(u.Query().Get(key))
 }
 
+func (r *Request) Screenshot() value.Value {
+	return value.NewString(r.Path().String() + "screenshot.png")
+}
+
 func (r *Request) Params(key string) value.Value {
 	if v, ok := r.router.params[key]; ok {
 		return value.New(v)

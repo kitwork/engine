@@ -49,3 +49,33 @@ func TestBrandColorUnwired(t *testing.T) {
 		t.Errorf("unwired brand-* should not resolve, got %q", css)
 	}
 }
+
+func TestJITPreflightAndBoxSizingUtilities(t *testing.T) {
+	out := GenerateJITCached(`<a class="box-border border border-t w-[240px] min-h-dvh px-6 flex-shrink-0 dark:text-zinc-100"></a>`, nil)
+
+	for _, want := range []string{
+		"*, ::before, ::after { box-sizing: border-box;",
+		"body { margin: 0; line-height: inherit; }",
+		"a { color: inherit; text-decoration: inherit; }",
+		".box-border { box-sizing: border-box; }",
+		".border { border-width: 1px; border-style: solid; }",
+		".border-t { border-top-width: 1px; border-top-style: solid; }",
+		".flex-shrink-0 { flex-shrink: 0; }",
+		".min-h-dvh { min-height: 100dvh; }",
+		".w-\\[240px\\] { width: 240px; }",
+		".px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }",
+		".dark .dark\\:text-zinc-100 { color: rgb(244, 244, 245); }",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("generated CSS missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestArbitraryPropertyUtility(t *testing.T) {
+	out := GenerateJITCached(`<h1 class="[font-variation-settings:'opsz'_72]"></h1>`, nil)
+
+	if !strings.Contains(out, "font-variation-settings: 'opsz' 72;") {
+		t.Fatalf("generated CSS missing arbitrary property in:\n%s", out)
+	}
+}

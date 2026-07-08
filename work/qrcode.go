@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kitwork/engine/utilities/napas"
-	qr "github.com/kitwork/engine/utilities/qrcode"
+	"github.com/kitwork/engine/helpers/napas"
+	qr "github.com/kitwork/engine/helpers/qrcode"
 	"github.com/kitwork/engine/value"
 	"github.com/skip2/go-qrcode"
 )

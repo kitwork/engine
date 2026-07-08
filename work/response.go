@@ -118,6 +118,10 @@ func (r *Response) HelloWorld() {
 	r.String("Hello World")
 }
 
+func (r *Response) View(data value.Value, code ...int) {
+	r.Return(data, "render", code...)
+}
+
 func (r *Response) NotFound() {
 	r.Error(value.New("404 Not Found"), 404)
 }

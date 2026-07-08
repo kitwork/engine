@@ -84,22 +84,6 @@ func Run(configFile ...string) (err error) {
 	// Pass global settings to the work package
 	work.AllowLocal = cfg.AllowLocal
 	work.ServerPort = cfg.Port
-	work.RateLimitEnabled = cfg.RateLimit.Enabled
-	if cfg.RateLimit.Period > 0 {
-		work.RateLimitPeriod = cfg.RateLimit.Period
-	}
-	if cfg.RateLimit.Rate > 0 {
-		work.DefaultTenantRate = cfg.RateLimit.Rate
-	}
-	if cfg.RateLimit.IpRate > 0 {
-		work.DefaultTenantIpRate = cfg.RateLimit.IpRate
-	}
-	if cfg.RateLimit.BrowserRate > 0 {
-		work.DefaultTenantBrowserRate = cfg.RateLimit.BrowserRate
-	}
-	if cfg.RateLimit.UserRate > 0 {
-		work.DefaultTenantUserRate = cfg.RateLimit.UserRate
-	}
 
 	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
 	domain.Allows = cfg.Domains
@@ -120,23 +104,10 @@ func Run(configFile ...string) (err error) {
 
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
-	handler.RateLimit.Enabled = cfg.RateLimit.Enabled
-	handler.RateLimit.Rate = cfg.RateLimit.Rate
-	handler.RateLimit.IpRate = cfg.RateLimit.IpRate
-	handler.RateLimit.BrowserRate = cfg.RateLimit.BrowserRate
-	if cfg.RateLimit.Period > 0 {
-		handler.RateLimit.Period = cfg.RateLimit.Period
-	}
 
-	// Pre-warm: compile sẵn các tenant để request ĐẦU TIÊN không bị cold compile.
-	// Chạy nền để không chặn khởi động; run() idempotent nên an toàn với request đến
-	// sớm. Standalone (1 tenant) bỏ qua — compile lazy ở request đầu là đủ rẻ.
-	switch cfg.Root {
-	case "", "./", "../", "/", ".", "..":
-		// standalone: không prewarm
-	default:
-		go handler.Prewarm()
-	}
+	// FILESYSTEM-ROUTED is lazy BY DESIGN: nothing is scanned or compiled at startup — the engine is
+	// idle until the first request, and each folder's router.kitwork.js compiles on first hit. So
+	// there is NO prewarm; the old eager route-registration is gone with the flat model.
 
 	if !host.IsLocalhost() && !cfg.AllowLocal {
 		tlsConfig := domain.AutoSSL(cfg.Domains)

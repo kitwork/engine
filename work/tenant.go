@@ -2,19 +2,20 @@ package work
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
+	"github.com/kitwork/engine/helpers/cache"
+	"github.com/kitwork/engine/helpers/persist"
+	"github.com/kitwork/engine/helpers/ratelimit"
 	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -38,35 +39,20 @@ type Tenant struct {
 
 	bytecode  *compiler.Bytecode
 	vm        *runtime.VM
-	routes    *Routes
 	MaxEnergy uint64
+
+	// tree, when non-nil, marks this tenant as FILESYSTEM-ROUTED: requests are resolved by
+	// walking the folder tree (each folder = a runtime node) instead of the flat routes table.
+	// Activated by a `filesystem.kitwork` marker at the tenant root. See tree*.go.
+	tree *RouteTree
 
 	env value.Value // env scoped của tenant này (đọc từ <path>/.env), lộ qua kitwork().env
 
-	viewRender *Render // render mặc định cho ctx.view (đăng ký qua router.context({render}))
-	jitcssConfig *jitcss.Config
+	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
 
-	// JIT CSS service mode (đăng ký qua router.jit()): phục vụ 1 stylesheet site-wide,
-	// cached, tại jitRoute; jitInject = tự chèn <link> vào mỗi trang render. Set 1 lần
-	// lúc boot khi app.kitwork.js chạy router.jit() — read-only khi phục vụ request.
-	jitRoute  string
-	jitInject bool
-
-	// JIT icon service mode (đăng ký qua router.icons()): phục vụ 1 stylesheet icon site-wide,
-	// cached, tại iconRoute; iconInject = tự chèn <link>. Khi set, mỗi trang render KHÔNG inline
-	// <style data-kitwork-jit="icons"> nữa mà dùng stylesheet chung này.
-	iconRoute  string
-	iconInject bool
-
-	// jitjs service mode (đăng ký qua router.jitjs()): phục vụ 1 runtime <script> site-wide, cached,
-	// tại jitjsRoute; jitjsInject = tự chèn <script src>. Khi set, mỗi trang KHÔNG inline
-	// <script data-kitwork-jit="js"> nữa mà dùng file chung này.
-	jitjsRoute  string
-	jitjsInject bool
-
-	// JIT logo service mode (router.logo()): site-wide brand-logo stylesheet at logoRoute, cached.
-	logoRoute  string
-	logoInject bool
+	respCache    *cache.Store       // .cache(): RAM response cache
+	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)
+	limiter      *ratelimit.Limiter // .limit(): rate limiter
 
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
@@ -75,16 +61,19 @@ type Tenant struct {
 	dbMu      sync.Mutex
 
 	// Rate Limiting fields
-	limiters     []*LimiterStore // index 0 = ScopeTenant, index 1 = ScopeServer
+	limiters []*LimiterStore // index 0 = ScopeTenant, index 1 = ScopeServer
 
-	crons        []*CronJob
-	cronMu       sync.Mutex
-	cronCancels  []chan struct{}
+	crons       []*CronJob
+	cronMu      sync.Mutex
+	cronCancels []chan struct{}
 
 	lruCache     map[string]*CacheItem
 	lruCacheLock sync.RWMutex
 
-	rateLimitRules    []rateRule
+	rateLimitRules []rateRule
+
+	// Global App level configs
+	meta value.Value
 }
 
 type Cache struct {
@@ -116,7 +105,9 @@ func (t *Tenant) resolve(paths ...string) string {
 					filepath.Join(t.config.root, SitesDirName, t.entity.Domain),
 					filepath.Join(t.config.root, "test", t.entity.Domain),
 				} {
-					if _, err := os.Stat(filepath.Join(cand, AppFileName)); err == nil {
+					_, errApp := os.Stat(filepath.Join(cand, AppFileName))
+					_, errRouter := os.Stat(filepath.Join(cand, "router"+extension+".js"))
+					if errApp == nil || errRouter == nil {
 						t.config.base = cand
 						break
 					}
@@ -169,166 +160,49 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (t *Tenant) AppFile(filenames ...string) string {
-	file := "app" + extension + ".js"
 	if len(filenames) > 0 {
-		file = filenames[0]
+		return t.resolve(filenames[0])
 	}
-	return t.resolve(file)
+	routerFile := t.resolve("router" + extension + ".js")
+	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
+		return routerFile
+	}
+	return t.resolve("app" + extension + ".js")
 }
 
 func (t *Tenant) Run() error {
-	bytecode, err := compiler.CompileFile(t.AppFile())
-	if err != nil {
-		return err
-	}
-
-	t.bytecode = bytecode
-	t.vm = runtime.New(bytecode.Instructions, bytecode.Constants)
+	// FILESYSTEM-ROUTED, always. There is no flat app.kitwork.js entry and no route table — the
+	// folder tree IS the router. We only set up the shared VM + globals + env here; the tree
+	// compiles each folder's router.kitwork.js LAZILY on the first request that reaches it.
+	t.bytecode = &compiler.Bytecode{}
+	t.vm = runtime.New(t.bytecode.Instructions, t.bytecode.Constants)
 	t.vm.MaxEnergy = t.MaxEnergy
-	t.vm.SourceMap = bytecode.SourceMap
-	t.routes = NewRoutes()
+	t.vm.SourceMap = t.bytecode.SourceMap
 
 	// env scoped THEO PATH của tenant: chỉ đọc <root>/<identity>/<domain>/.env →
 	// tenant không bao giờ thấy env của host hay tenant khác. Lộ qua kitwork().env.
 	t.env = NewEnv(ParseDotEnv(t.resolve(".env")))
 
-	// TỐI ƯU: Đăng ký kitwork vào Builtin Index 0, trả về Struct KitWork
+	// Đăng ký kitwork vào Builtin Index 0 + Globals, trả về Struct KitWork.
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
 		return value.New(t.Kitwork(args...))
 	})
 	t.vm.Builtins = []value.Value{kitworkFunc}
-
-	// Giữ lại trong Globals
+	t.vm.Globals = make(map[string]value.Value)
 	t.vm.Globals[kitwork] = kitworkFunc
 
-	// Inject console global helper
-	consoleLog := value.NewFunc(func(args ...value.Value) value.Value {
-		var sb strings.Builder
-		for i, arg := range args {
-			if i > 0 {
-				sb.WriteString(" ")
-			}
-			sb.WriteString(arg.Text())
-		}
-		fmt.Println("[console.log]", sb.String())
-		return value.Value{K: value.Nil}
-	})
-	consoleObj := value.New(map[string]value.Value{
-		"log": consoleLog,
-	})
-	t.vm.Globals["console"] = consoleObj
-
-	// Inject JSON global helper
-	jsonStringify := value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) == 0 {
-			return value.Value{K: value.Nil}
-		}
-		bytes, err := json.Marshal(args[0])
-		if err != nil {
-			return value.Value{K: value.Invalid, V: err.Error()}
-		}
-		return value.NewString(string(bytes))
-	})
-	jsonParse := value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) == 0 {
-			return value.Value{K: value.Nil}
-		}
-		var val value.Value
-		err := json.Unmarshal([]byte(args[0].Text()), &val)
-		if err != nil {
-			return value.Value{K: value.Invalid, V: err.Error()}
-		}
-		return val
-	})
-	jsonObj := value.New(map[string]value.Value{
-		"stringify": jsonStringify,
-		"parse":     jsonParse,
-	})
-	t.vm.Globals["JSON"] = jsonObj
-
-	// Inject JS-compatible globals: Math, Date (Date.now, new Date(), ...)
+	// Inject JS-compatible globals: Math, Date, JSON, console, fetch, parseInt, parseFloat...
 	injectJSCompat(t.vm.Globals)
 
-	// Inject parseFloat global helper
-	parseFloatFunc := value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) == 0 {
-			return value.New(0.0)
-		}
-		s := args[0].Text()
-		f, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return value.New(0.0)
-		}
-		return value.New(f)
-	})
-	t.vm.Globals["parseFloat"] = parseFloatFunc
+	// Response caching + rate limiting stores (used by .cache()/.persist()/.limit()).
+	t.respCache = cache.NewStore(1000)
+	t.persistStore = persist.New(t.resolve(".persist"))
+	t.limiter = ratelimit.New()
 
-	// Inject parseInt global helper
-	parseIntFunc := value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) == 0 {
-			return value.New(0)
-		}
-		s := args[0].Text()
-		base := 10
-		if len(args) > 1 && args[1].K == value.Number {
-			base = int(args[1].N)
-		}
-		if base < 2 || base > 36 {
-			base = 10
-		}
-		s = strings.TrimSpace(s)
-		if len(s) == 0 {
-			return value.New(0)
-		}
-		if base == 16 && (strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X")) {
-			s = s[2:]
-		}
-		i, err := strconv.ParseInt(s, base, 64)
-		if err == nil {
-			return value.New(i)
-		}
-		var prefix strings.Builder
-		for idx, ch := range s {
-			if idx == 0 && (ch == '+' || ch == '-') {
-				prefix.WriteRune(ch)
-				continue
-			}
-			isValid := false
-			if ch >= '0' && ch <= '9' {
-				isValid = int(ch-'0') < base
-			} else if ch >= 'a' && ch <= 'z' {
-				isValid = int(ch-'a'+10) < base
-			} else if ch >= 'A' && ch <= 'Z' {
-				isValid = int(ch-'A'+10) < base
-			}
-			if !isValid {
-				break
-			}
-			prefix.WriteRune(ch)
-		}
-		parsedStr := prefix.String()
-		if parsedStr == "" || parsedStr == "+" || parsedStr == "-" {
-			return value.New(0)
-		}
-		i, err = strconv.ParseInt(parsedStr, base, 64)
-		if err != nil {
-			return value.New(0)
-		}
-		return value.New(i)
-	})
-	t.vm.Globals["parseInt"] = parseIntFunc
+	// Build the (lazy) resolution tree — folders compile on first hit.
+	t.tree = NewRouteTree(t)
 
-	// Inject fetch global helper
-	fetchFunc := value.NewFunc(globalFetch)
-	t.vm.Globals["fetch"] = fetchFunc
-
-	// QUAN TRỌNG: Phải chạy VM để thực thi code trong app.js
-	res := t.vm.Run()
-	if res.K == value.Invalid {
-		return fmt.Errorf("runtime error: %v", res.V)
-	}
-
-	t.StartCronJobs()
+	// t.StartCronJobs()
 
 	return nil
 }
@@ -349,25 +223,9 @@ func NewTenant(root string, domain string) *Tenant {
 			Identity: identity,
 			Domain:   domain,
 		},
-		cache:             make(map[string]*Responser),
-		databases:         make(map[string]*sql.DB),
-		limiters:          make([]*LimiterStore, ScopeMax),
-		lruCache:          make(map[string]*CacheItem),
-	}
-
-	tenant.limiters[ScopeTenant] = NewLimiterStore(RateLimitPeriod)
-
-	if DefaultTenantRate > 0 {
-		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "global", Rate: DefaultTenantRate, Period: RateLimitPeriod})
-	}
-	if DefaultTenantIpRate > 0 {
-		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "ip", Rate: DefaultTenantIpRate, Period: RateLimitPeriod})
-	}
-	if DefaultTenantBrowserRate > 0 {
-		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "browser", Rate: DefaultTenantBrowserRate, Period: RateLimitPeriod})
-	}
-	if DefaultTenantUserRate > 0 {
-		tenant.rateLimitRules = append(tenant.rateLimitRules, rateRule{Type: "user", Rate: DefaultTenantUserRate, Period: RateLimitPeriod})
+		cache:     make(map[string]*Responser),
+		databases: make(map[string]*sql.DB),
+		lruCache:  make(map[string]*CacheItem),
 	}
 
 	return tenant
@@ -413,4 +271,26 @@ func (t *Tenant) SetHostLimiters(s *LimiterStore) {
 		t.limiters = newLimiters
 	}
 	t.limiters[ScopeServer] = s
+}
+
+// CompileDynamicRoute compiles a router script (e.g. router.kitwork.js) and executes it
+// in a freshly-reset VM using the tenant's base globals and builtins, registering routes dynamically.
+func (t *Tenant) CompileDynamicRoute(filePath string) error {
+	bytecode, err := compiler.CompileFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	vm := vmPool.Get().(*runtime.VM)
+	defer vmPool.Put(vm)
+
+	vm.Builtins = t.vm.Builtins
+	vm.FastReset(bytecode.Instructions, bytecode.Constants, t.vm.Globals, bytecode.SourceMap)
+	vm.MaxEnergy = t.MaxEnergy
+
+	res := vm.Run()
+	if res.K == value.Invalid {
+		return fmt.Errorf("dynamic runtime error: %v", res.V)
+	}
+	return nil
 }

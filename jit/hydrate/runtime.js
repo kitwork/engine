@@ -20,8 +20,17 @@
   // and never silently phones home, and the "no dependencies" promise holds until you pick a CDN.
   kitwork.cdnComponents = kitwork.cdnComponents || "";
 
+  var bridge = window.kitworkBridge || null;
+  kitwork.bridge = bridge;
+  kitwork.platform = bridge && bridge.platform ? bridge.platform : "web";
+  kitwork.isNative = !!bridge;
+
   if (kitwork.runtime) return;
   kitwork.runtime = "v.1.0.0";
+
+  kitwork.toggleTheme = function () {
+    kitwork.theme = kitwork.theme === "light" ? "dark" : "light";
+  };
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
   var PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
@@ -200,8 +209,8 @@
   // the precondition for running client-sent expressions (capsules) safely.
   function blockedKey(k) {
     return k === "constructor" || k === "__proto__" || k === "prototype" ||
-           k === "ownerDocument" || k === "defaultView" || k === "contentWindow" ||
-           k === "window" || k === "parent" || k === "top" || k === "self" || k === "globalThis";
+      k === "ownerDocument" || k === "defaultView" || k === "contentWindow" ||
+      k === "window" || k === "parent" || k === "top" || k === "self" || k === "globalThis";
   }
   function run(x, s) {
     var op = x[0];
@@ -285,13 +294,15 @@
   function modelValue(el) { return el.type === "number" ? (parseFloat(el.value) || 0) : (el.value || ""); }
 
   var raw = {};
+
   var scope = new Proxy(raw, {
-    get: function (t, k) { if (k === "$") return t; return k in t ? t[k] : 0; },
+    get: function (t, k) {
+      if (k === "$") return t;
+      if (k === "$app") return kitwork;
+      return k in t ? t[k] : 0;
+    },
     set: function (t, k, v) {
-      if (t[k] !== v) {
-        t[k] = v;
-        if (remembered[k]) rememberedDirty = true;
-      }
+      t[k] = v;
       return true;
     }
   });
@@ -518,6 +529,7 @@
       get: function (t, k) {
         if (k === "$el") return el;
         if (k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
+        if (k === "$app") return kitwork;
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
@@ -532,6 +544,7 @@
     st.scopeProxy = new Proxy(boundaryScope(b), {
       get: function (t, k) {
         if (k === "$") return raw;
+        if (k === "$app") return kitwork;
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
         return 0;
@@ -540,17 +553,11 @@
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) {
           if (k in objs[i]) {
-            if (objs[i][k] !== v) {
-              objs[i][k] = v;
-              if (remembered[k]) rememberedDirty = true;
-            }
+            objs[i][k] = v;
             return true;
           }
         }
-        if (objs[0][k] !== v) {
-          objs[0][k] = v;
-          if (remembered[k]) rememberedDirty = true;
-        }
+        objs[0][k] = v;
         return true;
       }
     });
@@ -605,7 +612,6 @@
     // validate → state→CSS: the element carries data-state="valid|invalid"; styling is CSS's job.
     document.querySelectorAll(selector("validate")).forEach(function (el) { var x = directive(el, "validate"); if (!x) return; el.setAttribute("data-state", run(x, scopeFor(el)) ? "valid" : "invalid"); });
     document.querySelectorAll(MODEL).forEach(function (el) { var k = modelKey(el), s = scopeFor(el); if (String(s[k]) !== el.value) el.value = s[k]; });
-    persistRemembered();
   }
 
   // ---- remember: persist chosen page-scope ($) keys across reloads ----
@@ -614,32 +620,83 @@
   // $ keys mirror to localStorage and sync across tabs; everything else in $ stays ephemeral.
   // Client-only (localStorage) — the SERVER sees the DECLARATION but not the value.
   var REMEMBER = "[data-kitwork-remember],[data-kit-remember]";
-  var STOREKEY = "kitwork:$";
   var remembered = {};
-  var rememberedDirty = false;
-  var lastPersisted = "";
+  var memCache = {};
+  function getStorageItem(k) {
+    try { return localStorage.getItem(k); } catch (e) { return memCache[k] !== undefined ? memCache[k] : null; }
+  }
+  function setStorageItem(k, v) {
+    try { localStorage.setItem(k, v); } catch (e) { memCache[k] = v; }
+  }
   function parseKeys(v) {
     return (v || "").trim().replace(/^\[/, "").replace(/\]$/, "").split(/[\s,]+/).filter(Boolean);
   }
-  function readStore() { try { return JSON.parse(localStorage.getItem(STOREKEY) || "{}"); } catch (e) { return {}; } }
+  function registerRememberedKey(k) {
+    if (remembered[k]) return;
+    remembered[k] = true;
+    var localVal = getStorageItem(k);
+    var defaultVal = raw[k];
+    Object.defineProperty(raw, k, {
+      get: function () {
+        var val = getStorageItem(k);
+        if (val === null) return undefined;
+        try { return JSON.parse(val); } catch (e) { return val; }
+      },
+      set: function (v) {
+        var s = typeof v === "object" ? JSON.stringify(v) : String(v);
+        if (getStorageItem(k) !== s) {
+          setStorageItem(k, s);
+          scheduleRender();
+        }
+      },
+      configurable: true,
+      enumerable: true
+    });
+    if (localVal === null && defaultVal !== undefined) {
+      raw[k] = defaultVal;
+    }
+  }
+
+  Object.defineProperty(kitwork, "theme", {
+    get() {
+      let theme = localStorage.getItem("theme");
+
+      if (!theme) {
+        theme = document.documentElement.classList.contains("dark")
+          ? "dark"
+          : "light";
+      }
+
+      return theme;
+    },
+
+    set(v) {
+      const dark = v === "dark";
+
+      document.documentElement.classList.toggle("dark", dark);
+
+      try {
+        localStorage.setItem("theme", dark ? "dark" : "light");
+      } catch (e) { }
+    },
+
+    configurable: true,
+    enumerable: true
+  });
+
+  function setTheme() {
+    var dark = document.documentElement.classList.toggle("dark");
+    try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch (e) { }
+
+    // Sync the theme component scope if it exists on page
+    var comp = window.kitwork.scope.theme;
+    if (comp) comp.dark = dark;
+  }
+
   function loadRemembered() {
     document.querySelectorAll(REMEMBER).forEach(function (el) {
-      parseKeys(el.getAttribute("data-kitwork-remember") || el.getAttribute("data-kit-remember")).forEach(function (k) { remembered[k] = true; });
+      parseKeys(el.getAttribute("data-kitwork-remember") || el.getAttribute("data-kit-remember")).forEach(registerRememberedKey);
     });
-    var saved = readStore();
-    for (var k in remembered) { if (Object.prototype.hasOwnProperty.call(saved, k)) raw[k] = saved[k]; }
-  }
-  function persistRemembered() {
-    if (!rememberedDirty) return;
-    var keys = Object.keys(remembered);
-    if (!keys.length) { rememberedDirty = false; return; }
-    var obj = {};
-    for (var i = 0; i < keys.length; i++) { if (keys[i] in raw) obj[keys[i]] = raw[keys[i]]; }
-    var s = JSON.stringify(obj);
-    rememberedDirty = false;
-    if (s === lastPersisted) return;   // dirty check — never churn localStorage on unrelated renders
-    lastPersisted = s;
-    try { localStorage.setItem(STOREKEY, s); } catch (e) { }
   }
 
   // ---- behaviors (verbs): ONE registry; jit/js modules register into it ----
@@ -676,9 +733,7 @@
   kitwork.component = function (name, def) { blueprints[name] = def; scheduleRender(); return kitwork; };
   // Programmatic form of data-kit-remember: mark $ keys as persisted across reloads.
   kitwork.remember = function () {
-    for (var i = 0; i < arguments.length; i++) remembered[arguments[i]] = true;
-    var saved = readStore();
-    for (var k in remembered) { if (Object.prototype.hasOwnProperty.call(saved, k)) raw[k] = saved[k]; }
+    for (var i = 0; i < arguments.length; i++) registerRememberedKey(arguments[i]);
     scheduleRender();
     return kitwork;
   };
@@ -914,7 +969,7 @@
     if (!appEl) return;
     kitwork.hydrate = true;
 
-    // appMode & appVersion are parsed globally by initAppConfig at boot
+    // mode & version are parsed globally by initAppConfig at boot
 
     var inflight = null;                  // AbortController for the current visit
     var watchdog = null;                  // fetch-timeout watchdog timer
@@ -968,10 +1023,10 @@
       if (e && (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return false;
       if (a.target === "_blank" || a.hasAttribute("download") || a.getAttribute("rel") === "external") return false;
       if (a.getAttribute("data-kitwork-app") === "false" || a.getAttribute("data-kit-app") === "false" ||
-          a.getAttribute("data-kitwork-hydrate") === "false" || a.getAttribute("data-kit-hydrate") === "false") return false;
+        a.getAttribute("data-kitwork-hydrate") === "false" || a.getAttribute("data-kit-hydrate") === "false") return false;
       if (a.closest && (
-          a.closest("[data-kitwork-app='false'],[data-kit-app='false']") ||
-          a.closest("[data-kitwork-hydrate='false'],[data-kit-hydrate='false']")
+        a.closest("[data-kitwork-app='false'],[data-kit-app='false']") ||
+        a.closest("[data-kitwork-hydrate='false'],[data-kit-hydrate='false']")
       )) return false;
       if (a.getAttribute("data-kitwork-action") || a.getAttribute("data-kit-action")) return false; // verbs own their triggers
       if (a.getAttribute("data-kitwork-click") || a.getAttribute("data-kit-click") || a.getAttribute("data-kitwork-click-ir")) return false; // expression links don't navigate
@@ -1050,7 +1105,7 @@
             }
           }
         }
-        if (newVersion !== kitwork.appVersion) {
+        if (newVersion !== kitwork.version) {
           location.assign(url);
           return;
         }
@@ -1158,7 +1213,7 @@
       var f = e.target;
       if (!f || f.tagName !== "FORM" || (f.method || "get").toLowerCase() !== "get") return;
       if (f.getAttribute("data-kitwork-app") === "false" || f.getAttribute("data-kit-app") === "false" ||
-          f.getAttribute("data-kitwork-hydrate") === "false" || f.getAttribute("data-kit-hydrate") === "false") return;
+        f.getAttribute("data-kitwork-hydrate") === "false" || f.getAttribute("data-kit-hydrate") === "false") return;
       if (f.getAttribute("data-kitwork-action") || f.getAttribute("data-kit-action")) return;
       var u; try { u = new URL(f.action || location.href, location.href); } catch (x) { return; }
       if (!sameOrigin(u.href)) return;
@@ -1250,8 +1305,8 @@
           }
         }
       }
-      kitwork.appMode = mode;
-      kitwork.appVersion = version;
+      kitwork.mode = mode;
+      kitwork.version = version;
       kitwork.useIndexed = appEl.getAttribute("data-kitwork-indexed") === "true" || appEl.getAttribute("data-kit-indexed") === "true";
     }
   }
@@ -1259,11 +1314,9 @@
   function boot() { initAppConfig(); loadRemembered(); seedModels(); render(); syncLive(); syncApi(); bindVisible(); initDrive(); }
   // Another tab changed a remembered value → adopt it and re-render (live cross-tab sync).
   window.addEventListener("storage", function (e) {
-    if (e.key !== STOREKEY) return;
-    var saved = readStore();
-    for (var k in remembered) { if (Object.prototype.hasOwnProperty.call(saved, k)) raw[k] = saved[k]; }
-    lastPersisted = e.newValue || "";
-    render();
+    if (remembered[e.key]) {
+      scheduleRender();
+    }
   });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();

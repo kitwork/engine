@@ -42,8 +42,6 @@ type Engine struct {
 	cache       map[string]*cachedTenant
 	idleTimeout time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
 	mu          sync.RWMutex
-
-	RateLimit *RateLimiter
 }
 
 func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
@@ -57,13 +55,7 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		Hostname:    hostname,
 		cache:       make(map[string]*cachedTenant),
 		idleTimeout: 10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
-		RateLimit: &RateLimiter{
-			Enabled: true,
-			Rate:    2000,
-			IpRate:  200,
-			Period:  time.Second,
-			store:   work.NewLimiterStore(time.Second),
-		},
+
 	}
 	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
 	go e.cleanupLoop(1 * time.Minute)
@@ -139,7 +131,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 						slog.Info("Detecting change. Recompiling...", "file", appFile)
 						newTenant := work.NewTenant(e.root, hostname)
 						newTenant.MaxEnergy = e.maxEnergy
-						newTenant.SetHostLimiters(e.RateLimit.Store())
+
 						if err := newTenant.Run(); err != nil {
 							// Lỗi cú pháp hoặc file dở dang -> Graceful Compile Fallback
 							slog.Error("Compile error during hot reload. Fallback to cached version", "error", err)
@@ -170,7 +162,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 
 	tenant := work.NewTenant(e.root, hostname)
 	tenant.MaxEnergy = e.maxEnergy
-	tenant.SetHostLimiters(e.RateLimit.Store())
+
 	if err := tenant.Run(); err != nil {
 		return nil, err
 	}
@@ -258,11 +250,6 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 1. Layer 1 Rate Limiting Check (Global & Per-IP Server Protection)
-	if !e.RateLimit.check(r, w) {
-		return
-	}
-
 	domain := strings.Split(r.Host, ":")[0]
 	if (domain == "localhost" || domain == "127.0.0.1") && e.Hostname != "" {
 		domain = e.Hostname
@@ -288,10 +275,21 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenant, err := e.run(domain)
+
 	if err != nil {
 		http.Error(w, err.Error(), 404)
 		return
 	}
+
+	// tenant := work.NewTenant(e.root, domain)
+
+	// tenant.MaxEnergy = e.maxEnergy
+
+	// if err := tenant.Run(); err != nil {
+
+	// 	// Lỗi cú pháp hoặc file dở dang -> Graceful Compile Fallback
+	// 	slog.Error("Compile error during hot reload. Fallback to cached version", "error", err)
+	// }
 
 	// Bàn giao toàn bộ quyền xử lý cho Tenant
 	tenant.Serve(w, r)

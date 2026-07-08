@@ -51,6 +51,7 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 				":", "\\:", ".", "\\.", "/", "\\/", "%", "\\%",
 				"[", "\\[", "]", "\\]", "#", "\\#",
 				"(", "\\(", ")", "\\)", ",", "\\,",
+				"'", "\\'", "\"", "\\\"",
 			).Replace(full)
 			sel := "." + esc
 			if full[0] == '-' {
@@ -88,7 +89,11 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 				sel = strings.ReplaceAll(ampPattern, "&", sel)
 			}
 			if darkMode {
-				sel = ".dark " + sel
+				dark := ".dark"
+				if cfg != nil && cfg.DarkSelector != "" {
+					dark = cfg.DarkSelector
+				}
+				sel = dark + " " + sel
 			}
 
 			return css, sel, mediaQuery
@@ -571,6 +576,23 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			"mono":  "ui-monospace, SFMono-Regular, Menlo, monospace",
 		}
 		return "font-family: " + fams[m[2]] + ";"
+	case "tw-arbitrary-prop":
+		body := strings.ReplaceAll(m[1], "_", " ")
+		parts := strings.SplitN(body, ":", 2)
+		if len(parts) != 2 {
+			return ""
+		}
+		prop := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if prop == "" || val == "" || strings.ContainsAny(val, "{};") {
+			return ""
+		}
+		for _, r := range prop {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '-') {
+				return ""
+			}
+		}
+		return prop + ": " + val + ";"
 	case "tw-shrink-grow":
 		v := "1"
 		if m[2] == "0" {
@@ -586,6 +608,10 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return "-webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;"
 		case "isolate":
 			return "isolation: isolate;"
+		case "box-border":
+			return "box-sizing: border-box;"
+		case "box-content":
+			return "box-sizing: content-box;"
 		case "sr-only":
 			return "position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border-width: 0;"
 		}
@@ -620,6 +646,12 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		if m[2] == "full" {
 			val = "100%"
+		}
+		switch m[2] {
+		case "dvh", "svh", "lvh":
+			val = "100" + m[2]
+		case "dvw", "svw", "lvw":
+			val = "100" + m[2]
 		}
 		// arbitrary values
 		if strings.HasPrefix(m[2], "[") && strings.HasSuffix(m[2], "]") {
@@ -966,16 +998,16 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			}
 		}
 		if dir == "" {
-			return fmt.Sprintf("border-width: %s;", val)
+			return fmt.Sprintf("border-width: %s; border-style: solid;", val)
 		}
 		if dir == "x" {
-			return fmt.Sprintf("border-left-width: %[1]s; border-right-width: %[1]s;", val)
+			return fmt.Sprintf("border-left-width: %[1]s; border-right-width: %[1]s; border-left-style: solid; border-right-style: solid;", val)
 		}
 		if dir == "y" {
-			return fmt.Sprintf("border-top-width: %[1]s; border-bottom-width: %[1]s;", val)
+			return fmt.Sprintf("border-top-width: %[1]s; border-bottom-width: %[1]s; border-top-style: solid; border-bottom-style: solid;", val)
 		}
 		d := map[string]string{"t": "top", "b": "bottom", "l": "left", "r": "right"}[dir]
-		return fmt.Sprintf("border-%s-width: %s;", d, val)
+		return fmt.Sprintf("border-%[1]s-width: %[2]s; border-%[1]s-style: solid;", d, val)
 	case "tw-font-weight":
 		w := map[string]string{"thin": "100", "extralight": "200", "light": "300", "normal": "400", "medium": "500", "semibold": "600", "bold": "700", "extrabold": "800", "black": "900"}[m[2]]
 		return "font-weight: " + w + ";"

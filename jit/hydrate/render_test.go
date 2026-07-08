@@ -132,7 +132,8 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
 		"kitwork.component", "data-kitwork-component", "seedComponent", "fn.apply(s, fargs)",
 		// remember: persisted $ keys — register fn, declaration attr, storage key, load/persist
-		"kitwork.remember", "data-kit-remember", "kitwork:$", "persistRemembered", "loadRemembered",
+		"kitwork.remember", "data-kit-remember", "registerRememberedKey", "loadRemembered",
+		"kitwork.platform", "kitwork.bridge", "kitwork.isNative",
 		// api: async JSON source — sync fn, activation attr, fetch + state→CSS lifecycle
 		"kitwork.syncApi", "data-kit-api", `el.setAttribute("data-state", "loading")`,
 		// live per-scope + component init() lifecycle hook

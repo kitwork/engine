@@ -34,6 +34,9 @@ type Config struct {
 	ZIndices     []int // 0, 10, 20...
 	Animations   map[string]string
 	Keyframes    map[string]string
+	// DarkSelector is the PARENT selector the dark: variant scopes under. Empty = ".dark". Set it
+	// to e.g. `[data-theme="dark"]` via router.jitcss({ darkMode: ['class', '[data-theme="dark"]'] }).
+	DarkSelector string
 }
 
 var DefaultConfig = Config{

@@ -114,17 +114,26 @@ const cardCSS = `.card{display:flex;flex-direction:column;background:var(--kitwo
 
 // proseCSS — readable long-form typography for raw/CMS HTML (articles, docs, blog). `.prose` for the
 // container; the `.prose-frame` modifier crops in-article images to a uniform 16:9.
-const proseCSS = `.prose{font-size:1.1rem;line-height:1.78;color:var(--kitwork-text,#334155)}` +
-	`.prose h2{font-weight:800;font-size:1.7rem;line-height:1.25;margin:2.75rem 0 1rem;color:var(--kitwork-text-hi,#0f172a)}` +
-	`.prose h3{font-weight:700;font-size:1.35rem;margin:2.25rem 0 .75rem;color:var(--kitwork-text-hi,#0f172a)}` +
+const proseCSS = `.prose{font-size:1rem;line-height:1.85;color:var(--kitwork-text,#52525b)}` +
+	`.dark .prose{color:var(--kitwork-text,#a1a1aa)}` +
+	`.prose h1{font-weight:900;font-size:2rem;line-height:1.15;margin:0 0 1.4rem;color:var(--kitwork-text-hi,#18181b)}` +
+	`.prose h2{font-weight:800;font-size:1.55rem;line-height:1.25;margin:2.75rem 0 1rem;color:var(--kitwork-text-hi,#18181b)}` +
+	`.prose h3{font-weight:700;font-size:1.25rem;margin:2.25rem 0 .75rem;color:var(--kitwork-text-hi,#18181b)}` +
+	`.prose h4{font-weight:700;font-size:1.05rem;margin:1.8rem 0 .65rem;color:var(--kitwork-text-hi,#18181b)}` +
+	`.dark .prose h1,.dark .prose h2,.dark .prose h3,.dark .prose h4{color:var(--kitwork-text-hi,#f4f4f5)}` +
 	`.prose p{margin:1.2rem 0}` +
 	`.prose a{color:var(--kitwork-brand,#f82244);text-decoration:underline;text-underline-offset:2px}` +
+	`.prose strong{font-weight:700;color:var(--kitwork-text-hi,#18181b)}` +
+	`.dark .prose strong{color:var(--kitwork-text-hi,#f4f4f5)}` +
 	`.prose blockquote{margin:1.9rem 0;padding:.5rem 0 .5rem 1.5rem;border-left:3px solid var(--kitwork-brand,#f82244);font-style:italic;color:var(--kitwork-text-lo,#64748b)}` +
+	`.dark .prose blockquote{color:var(--kitwork-text-lo,#a1a1aa)}` +
 	`.prose ul,.prose ol{margin:1.2rem 0;padding-left:1.5rem;list-style:revert}` +
 	`.prose li{margin:.45rem 0}` +
 	`.prose img{max-width:100%;height:auto;border-radius:.75rem;margin:1.9rem 0}` +
 	`.prose figure{margin:1.9rem 0}` +
 	`.prose figcaption{font-size:.8rem;text-align:center;color:var(--kitwork-text-muted,#94a3b8);margin-top:.5rem}` +
+	`.prose hr{border:0;border-top:1px solid var(--kitwork-border,rgba(0,0,0,.1));margin:2rem 0}` +
+	`.dark .prose hr{border-top-color:var(--kitwork-border,rgba(255,255,255,.1))}` +
 	`.prose pre{overflow-x:auto;padding:1.1rem 1.3rem;border-radius:.7rem;background:#0d1117;color:#e6edf3;` +
 	`font-size:.86rem;line-height:1.65;margin:1.9rem 0}` + // FLAT: no border on code block
 	`.prose pre code{background:none;padding:0;color:inherit;font-size:inherit}` +
