@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/logger"
@@ -19,7 +20,24 @@ type Config struct {
 	HotReload  bool              `json:"hot_reload" yaml:"hot_reload"`
 	Hostname   string            `json:"hostname" yaml:"hostname"`
 	AllowLocal bool              `json:"allow_local" yaml:"allow_local"`
+	TrustProxy bool              `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
 	Logger     logger.Config     `json:"logger" yaml:"logger"`
+	RateLimit  *RateLimitConfig  `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
+}
+
+// RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request
+// passes, before tenant resolution. Each dimension 0 = off. From server.kitwork.js:
+//
+//	.rateLimit({ rate: 1200, ip: 120, browser: 240, user: 360, period: "1s" })
+//
+// or the YAML `rate_limit:` block with the same keys. period accepts a Go duration string
+// ("1s", "500ms", "1m") or a number of seconds; default 1s.
+type RateLimitConfig struct {
+	Rate    int           `json:"rate" yaml:"rate"`       // aggregate across ALL tenants per period
+	IP      int           `json:"ip" yaml:"ip"`           // per client IP
+	Browser int           `json:"browser" yaml:"browser"` // per browser fingerprint
+	User    int           `json:"user" yaml:"user"`       // per authenticated user account
+	Period  time.Duration `json:"-" yaml:"-"`
 }
 
 func ParseConfig(raw map[string]interface{}) (*Config, error) {
@@ -53,6 +71,11 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	if val, ok := raw["allow_local"]; ok {
 		if b, ok := val.(bool); ok {
 			cfg.AllowLocal = b
+		}
+	}
+	if val, ok := raw["trust_proxy"]; ok {
+		if b, ok := val.(bool); ok {
+			cfg.TrustProxy = b
 		}
 	}
 
@@ -119,6 +142,32 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 					cfg.Redirects[k] = s
 				}
 			}
+		}
+	}
+
+	// Host-level rate limits: { rate, ip, browser, user, period }.
+	if val, ok := raw["rate_limit"]; ok {
+		if m, ok := val.(map[string]interface{}); ok {
+			rl := &RateLimitConfig{
+				Rate:    coerceInt(m["rate"], 0),
+				IP:      coerceInt(m["ip"], 0),
+				Browser: coerceInt(m["browser"], 0),
+				User:    coerceInt(m["user"], 0),
+				Period:  time.Second,
+			}
+			if p, ok := m["period"]; ok {
+				switch v := p.(type) {
+				case string:
+					if d, err := time.ParseDuration(v); err == nil && d > 0 {
+						rl.Period = d
+					}
+				default:
+					if secs := coerceInt(v, 0); secs > 0 {
+						rl.Period = time.Duration(secs) * time.Second
+					}
+				}
+			}
+			cfg.RateLimit = rl
 		}
 	}
 

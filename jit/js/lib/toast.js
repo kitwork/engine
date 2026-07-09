@@ -19,6 +19,7 @@ window.kitwork.components.action("toast", function (el) {
   if (!host) {
     host = document.createElement("div");
     host.id = "kitwork-toasts";
+    host.setAttribute("data-kitwork-ui", "toasts"); // kernel overlay: morph/Drive swaps keep it
     host.setAttribute("role", "status");
     host.setAttribute("aria-live", "polite");
     host.style.cssText = "position:fixed;bottom:1rem;right:1rem;z-index:2147483647;" +

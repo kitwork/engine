@@ -36,15 +36,18 @@ func PreRender(htmlStr string) string {
 	return out
 }
 
+// PreRender evaluates authored SOURCE only, so all three regexes match the data-kit-* prefix
+// exclusively — data-kitwork-text/show on the wire is engine-emitted IR (JSON), not an expression,
+// and must not be Eval'd as source. model has no IR form but follows the same authored canon.
 var (
-	// a data-kit(work)-model input — captures the scope key; value/type are read from the tag body.
-	modelTagRe = regexp.MustCompile(`<[a-zA-Z][^>]*\bdata-(?:kitwork|kit)-model="([^"]*)"[^>]*>`)
+	// a data-kit-model input — captures the scope key; value/type are read from the tag body.
+	modelTagRe  = regexp.MustCompile(`<[a-zA-Z][^>]*\bdata-kit-model="([^"]*)"[^>]*>`)
 	attrValueRe = regexp.MustCompile(`\bvalue="([^"]*)"`)
 	attrTypeRe  = regexp.MustCompile(`\btype="([^"]*)"`)
 	// leaf text binding: (open tag)(plain-text content)(closing "</"). Content has no nested tag.
-	textLeafRe = regexp.MustCompile(`(<[a-zA-Z][^>]*\bdata-(?:kitwork|kit)-text="([^"]*)"[^>]*>)([^<]*)(</)`)
-	// an element carrying data-kit(work)-show — the whole opening tag, plus its expression.
-	showTagRe = regexp.MustCompile(`<[a-zA-Z][^>]*\bdata-(?:kitwork|kit)-show="([^"]*)"[^>]*>`)
+	textLeafRe = regexp.MustCompile(`(<[a-zA-Z][^>]*\bdata-kit-text="([^"]*)"[^>]*>)([^<]*)(</)`)
+	// an element carrying data-kit-show — the whole opening tag, plus its expression.
+	showTagRe = regexp.MustCompile(`<[a-zA-Z][^>]*\bdata-kit-show="([^"]*)"[^>]*>`)
 )
 
 // modelScope seeds the initial scope from the value= of each model input, matching the client's

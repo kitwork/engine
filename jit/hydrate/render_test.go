@@ -12,7 +12,7 @@ const marker = `<section data-kitwork-hydrate="v1.0.0">`
 func TestRenderKeepsSourceAndInjects(t *testing.T) {
 	in := `<head><title>x</title></head><body>` + marker +
 		`<b data-kit-text="n * qty">0</b>` +
-		`<button data-kitwork-click="n = n + 1">+</button>` +
+		`<button data-kit-click="n = n + 1">+</button>` +
 		`<span data-kit-show="n > 3">ok</span>` +
 		`<form data-kit-validate="password.length >= 6"></form>` +
 		`<input data-kit-model="name">` +
@@ -22,7 +22,7 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 	// authored source attributes are the wire format — kept byte-for-byte
 	for _, keep := range []string{
 		`data-kit-text="n * qty"`,
-		`data-kitwork-click="n = n + 1"`,
+		`data-kit-click="n = n + 1"`,
 		`data-kit-show="n > 3"`,
 		`data-kit-validate="password.length >= 6"`,
 		`data-kit-model="name"`,
@@ -30,10 +30,6 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 		if !strings.Contains(out, keep) {
 			t.Errorf("authored attribute must ride unchanged: %s\nout: %s", keep, out)
 		}
-	}
-	// no IR is emitted by default (IR = internal/optional mode)
-	if strings.Contains(out, "-ir='") {
-		t.Errorf("default wire must not carry IR attributes\nout: %s", out)
 	}
 	// runtime injected once, inside <head>, pointing at the runtime route
 	if n := strings.Count(out, injectTag); n != 1 {
@@ -83,7 +79,7 @@ func TestRenderSkipsWhenKernelInlined(t *testing.T) {
 		`<b data-kit-text="n">0</b></section></body>`
 	out := Render(in)
 	if strings.Contains(out, injectTag) {
-		t.Error("kernel already inlined by jit/js — no /jithydrate reference should be added")
+		t.Error("kernel already inlined by jit/js — no /kit.js reference should be added")
 	}
 	if out != in {
 		t.Errorf("page should be unchanged\n got: %s", out)
@@ -105,6 +101,27 @@ func TestRenderLiveAndModelInject(t *testing.T) {
 	}
 }
 
+// STRICT PREFIX = ORIGIN: data-kit-* is the only authored source form; data-kitwork-* on a
+// directive is engine-emitted IR — never compile-verified as source, but it still needs the
+// runtime injected (the walker runs it).
+func TestRenderStrictPrefixOrigin(t *testing.T) {
+	// The verify regex must not treat the long prefix as source…
+	if directiveRe.MatchString(`data-kitwork-click="n = n + 1"`) {
+		t.Error("data-kitwork-click must NOT be matched as authored source")
+	}
+	if !directiveRe.MatchString(`data-kit-click="n = n + 1"`) {
+		t.Error("data-kit-click must be matched as authored source")
+	}
+	// …and a page carrying ONLY a precompiled IR directive still gets the runtime.
+	in := `<head></head><body>` + marker +
+		`<button data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'>+</button>` +
+		`</section></body>`
+	out := Render(in)
+	if strings.Count(out, injectTag) != 1 {
+		t.Error("an IR-only page still needs the runtime injected")
+	}
+}
+
 func TestRenderInjectsBeforeBodyWhenNoHead(t *testing.T) {
 	in := `<body>` + marker + `<b data-kit-text="n">0</b></section></body>`
 	out := Render(in)
@@ -113,18 +130,23 @@ func TestRenderInjectsBeforeBodyWhenNoHead(t *testing.T) {
 	}
 }
 
-// The runtime must ship BOTH halves: the tiny parser (source mode) and the IR walker (optional
-// precompiled mode) — and never eval.
+// The runtime must ship BOTH halves: the tiny parser (data-kit-* source) and the IR walker
+// (data-kitwork-* precompiled JSON — prefix IS the encoding, no -ir suffix) — and never eval.
 func TestRuntimeEmbedded(t *testing.T) {
 	rt := Runtime()
+	if strings.Contains(rt, "-ir") {
+		t.Error("the -ir suffix form is retired — the long prefix alone marks engine-emitted IR")
+	}
 	for _, want := range []string{
-		"window.hydrate", "PREC", "function lex", "-ir", "EventSource", "MutationObserver",
+		"window.hydrate", "PREC", "function lex", "EventSource", "MutationObserver",
 		// the unified kernel surfaces: boot guard, behavior registry, verb compat, delegated action
 		"kitwork.runtime", "kitwork.behavior", "kitwork.components", "data-kitwork-action",
 		// the absorbed drive: navigation fetch header, morph primitive, head reconcile, history,
 		// the two-way lock against the legacy standalone file, and the swap lifecycle events
 		"X-Kitwork-Hydrate", "kitwork.morph", "mergeHead", "popstate", "kitwork.hydrate",
 		"kitwork:before-swap", "kitwork:load",
+		// kernel overlays (progress bar, announcer) survive morph via the data-kitwork-ui marker
+		"data-kitwork-ui", "kernelUI",
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
 		"data-kitwork-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes

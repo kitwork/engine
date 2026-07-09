@@ -146,15 +146,9 @@ func GenerateSiteCSS(cfg *Config, htmls ...string) string {
 	}
 	sort.Strings(classes)
 	css := buildJITCSS(classes, cfg)
-	if strings.Contains(css, "animation:") {
-		var keyframesStr strings.Builder
-		keyframesStr.WriteString(AnimKeyframes)
-		if cfg != nil && cfg.Keyframes != nil {
-			for name, rule := range cfg.Keyframes {
-				keyframesStr.WriteString(fmt.Sprintf("\n@keyframes %s {\n%s\n}", name, rule))
-			}
-		}
-		css = keyframesStr.String() + "\n" + css
+	// Emit @keyframes + :root vars + reduced-motion for ONLY the animations used site-wide.
+	if kf := UsedKeyframes(css, cfg); kf != "" {
+		css = kf + "\n" + css
 	}
 	return css
 }

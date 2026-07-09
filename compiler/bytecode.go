@@ -48,16 +48,21 @@ func CompileFile(paths ...string) (*Bytecode, error) {
 	if err != nil {
 		return nil, err
 	}
+	files := []string{entryPath}
 	if hasRelativeImports(prog) {
-		prog, err = nativeBundle(entryPath, prog)
+		var moduleFiles []string
+		prog, moduleFiles, err = nativeBundle(entryPath, prog)
 		if err != nil {
 			return nil, err
 		}
+		files = append(files, moduleFiles...)
 	}
 
 	c := NewCompiler(content)
 	if err := c.Compile(prog); err != nil {
 		return nil, err
 	}
-	return c.ByteCodeResult(), nil
+	bc := c.ByteCodeResult()
+	bc.Files = files
+	return bc, nil
 }

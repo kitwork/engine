@@ -51,9 +51,12 @@ router.get("/hello").handle((res) => { return res.text(greet("world")); });`,
 		t.Fatal("expected entry to carry relative ImportStatement nodes")
 	}
 
-	combined, err := nativeBundle(entry, prog)
+	combined, moduleFiles, err := nativeBundle(entry, prog)
 	if err != nil {
 		t.Fatalf("nativeBundle error: %v", err)
+	}
+	if len(moduleFiles) == 0 {
+		t.Fatal("nativeBundle should report the bundled module files (hot reload watches them)")
 	}
 
 	// No unresolved imports should remain.
@@ -130,9 +133,12 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 		t.Fatalf("parse failed: %v", perr)
 	}
 
-	combined, err := nativeBundle(entry, prog)
+	combined, moduleFiles, err := nativeBundle(entry, prog)
 	if err != nil {
 		t.Fatalf("nativeBundle error: %v", err)
+	}
+	if len(moduleFiles) == 0 {
+		t.Fatal("nativeBundle should report the bundled module files (hot reload watches them)")
 	}
 
 	out := combined.String()
@@ -155,7 +161,7 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 	})
 	contentFail, _ := os.ReadFile(entryFail)
 	progFail, _ := parseProgram(string(contentFail))
-	_, errFail := nativeBundle(entryFail, progFail)
+	_, _, errFail := nativeBundle(entryFail, progFail)
 	if errFail == nil {
 		t.Error("expected directory import with bindings to fail, but it succeeded")
 	} else if !strings.Contains(errFail.Error(), "must be a side-effect import") {

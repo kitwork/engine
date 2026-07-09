@@ -231,15 +231,10 @@ func (r *Render) tmpl(data any) string {
 	// cache theo tập class nên gần như miễn phí sau lần đầu.
 	if r.jitCSS {
 		if css := jitcss.GenerateJITCached(out, r.jitConfig); css != "" {
-			if strings.Contains(css, "animation:") {
-				var keyframesStr strings.Builder
-				keyframesStr.WriteString(jitcss.AnimKeyframes)
-				if cfg := r.jitConfig; cfg != nil && cfg.Keyframes != nil {
-					for name, rule := range cfg.Keyframes {
-						keyframesStr.WriteString(fmt.Sprintf("\n@keyframes %s {\n%s\n}", name, rule))
-					}
-				}
-				css = keyframesStr.String() + "\n" + css
+			// Prepend @keyframes + :root vars + reduced-motion for ONLY the animations the page
+			// actually uses (jit animate emit-only-used). No-op when nothing animates.
+			if kf := jitcss.UsedKeyframes(css, r.jitConfig); kf != "" {
+				css = kf + "\n" + css
 			}
 			style := "<style data-kitwork-jit=\"css\">\n" + css + "</style>"
 			if i := strings.LastIndex(out, "</head>"); i >= 0 {

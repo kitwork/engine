@@ -13,6 +13,9 @@ type Bytecode struct {
 	Instructions []byte
 	Constants    []value.Value
 	SourceMap    []int32
+	// Files lists every source file compiled in: the entry plus all natively-bundled imports.
+	// Hot reload stats these to catch edits — including edits to an imported ./_core module.
+	Files []string
 }
 
 // Compiler chịu trách nhiệm chuyển đổi AST thành Bytecode

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
@@ -108,6 +109,23 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Folder-level rate limits (router.ratelimit), outside-in: ONE bucket per client per rule for
+	// the folder's whole subtree — a root rule is a site-wide ceiling. Enforced before any guard
+	// or handler work.
+	for _, node := range match.Chain {
+		if node.folder == nil {
+			continue
+		}
+		for _, lim := range node.folder.limits {
+			if !t.limiter.Allow(limitKey(lim, "folder:"+node.relPath(), r), lim.Rate, lim.Per) {
+				w.Header().Set("Retry-After", fmt.Sprintf("%.0f", lim.Per.Seconds()))
+				reqRouter.response.Text(value.New("Too Many Requests"), 429)
+				finalize()
+				return
+			}
+		}
+	}
+
 	vm := vmPool.Get().(*runtime.VM)
 	defer vmPool.Put(vm)
 	vm.Builtins = t.vm.Builtins
@@ -142,9 +160,10 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rate limit (.limit) — before any work. Key by dimension + client + path.
+	// Method-level rate limits (.limit/.ratelimit) — before any handler work, keyed per URL path.
 	for _, lim := range method.limits {
-		if !t.limiter.Allow(lim.Dim+"|"+r.RemoteAddr+"|"+r.URL.Path, lim.Rate, lim.Per) {
+		if !t.limiter.Allow(limitKey(lim, "path:"+r.URL.Path, r), lim.Rate, lim.Per) {
+			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", lim.Per.Seconds()))
 			reqRouter.response.Text(value.New("Too Many Requests"), 429)
 			finalize()
 			return
@@ -218,6 +237,31 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	finalize()
 }
 
+// limitClient resolves the client half of a .limit() bucket key for a rule dimension.
+func limitClient(dim string, r *http.Request) string {
+	switch dim {
+	case "user":
+		if account, _ := GetClientUserAccount(r); account != "" {
+			return account
+		}
+		return GetClientIP(r) // anonymous: fall back to the IP so the rule still bites
+	case "browser":
+		return GetClientBrowserFingerprint(r)
+	case "global":
+		return "" // one shared bucket — no client component
+	default: // "ip"
+		return GetClientIP(r)
+	}
+}
+
+// limitKey builds a rule's full bucket key: dimension + client + scope (folder subtree or URL
+// path) + the rule's own rate/window. Including rate+per keeps STACKED rules on the same
+// dimension (burst 30/1s + sustained 600/1m) in separate buckets — sharing one would let the
+// first-created window swallow both rules.
+func limitKey(lim methodLimit, scope string, r *http.Request) string {
+	return lim.Dim + "|" + limitClient(lim.Dim, r) + "|" + scope + "|" + strconv.Itoa(lim.Rate) + "/" + lim.Per.String()
+}
+
 // execTree loads the folder's bytecode into the VM (its lambdas index THAT bytecode), then runs
 // one lambda with the usual (ctx/request/response) argument binding.
 func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda, ctxObj *Context) value.Value {
@@ -275,8 +319,9 @@ func (t *Tenant) folderHasPage(n *RouteNode) bool {
 }
 
 // serveTreeStatic streams a real on-disk file under the tenant (assets, images, …) with no VM.
-// It refuses path traversal, dotfiles and any *.kitwork.* source so templates/routers are never
-// exposed. Returns true if it served the request.
+// It refuses path traversal, dot segments (protects .env, .persist/) and any *.kitwork.* source so
+// templates/routers are never exposed. When the root router declared .assets(), only those
+// prefixes are served (allowlist); /favicon.ico honors .favicon(). Returns true if it served.
 func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -288,14 +333,42 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 	if strings.Contains(strings.ToLower(clean), extension+".") { // never expose *.kitwork.* sources
 		return false
 	}
+	for _, seg := range strings.Split(clean, "/") { // any dot SEGMENT: .env, .persist/…, .git/…
+		if strings.HasPrefix(seg, ".") {
+			return false
+		}
+	}
+
+	// The root router declares .favicon()/.assets() — make sure it has compiled (lazy, once) so
+	// those declarations exist even when the very first request is a static one.
+	if t.tree != nil && t.tree.root != nil {
+		t.tree.root.ensureFolder(t)
+	}
+
+	// /favicon.ico: browsers request it unprompted; .favicon() names the file that answers.
+	if clean == "/favicon.ico" && t.faviconFile != "" {
+		http.ServeFile(w, r, t.faviconFile)
+		return true
+	}
+
+	// Allowlist mode: once .assets() declared anything, only those roots are public.
+	if len(t.assetPrefixes) > 0 {
+		allowed := false
+		for _, p := range t.assetPrefixes {
+			if strings.HasPrefix(clean, "/"+p+"/") || clean == "/"+p {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return false
+		}
+	}
 
 	base := t.resolve()
 	full := filepath.Join(base, filepath.FromSlash(clean))
 	rel, err := filepath.Rel(base, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return false
-	}
-	if strings.HasPrefix(filepath.Base(full), ".") { // dotfile
 		return false
 	}
 	info, err := os.Stat(full)

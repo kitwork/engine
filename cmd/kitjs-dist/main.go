@@ -1,7 +1,7 @@
 // kitjs-dist emits the publishable dist files for @kitwork/kitjs — the open-source, CDN-served
 // build of the kernel (engine/jit/hydrate/runtime.js). The engine is the SINGLE source of truth:
 // this command is the only sanctioned way to produce dist/, so the npm package can never drift
-// from what the engine serves at /jithydrate.
+// from what the engine serves at /kit.js.
 //
 //	go run ./cmd/kitjs-dist <version> <outdir>
 //	go run ./cmd/kitjs-dist 1.0.0 ../packages/kitjs/dist

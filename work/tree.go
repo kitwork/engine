@@ -105,6 +105,13 @@ type RouteNode struct {
 	folder      *FolderRouter // compiled router.kitwork.js (behaviour) — see tree_folder.go
 	folderMu    sync.Mutex    // guards the one-time folder compile
 	folderReady atomic.Bool
+
+	// Per-folder hot reload (active when tenant.HotReload): the recorded source snapshot the
+	// throttled hotCheck compares against. srcFiles/srcMod/dirMod are guarded by folderMu.
+	hotCheckAt atomic.Int64 // unix nanos of the last check — 1s throttle via CAS
+	srcFiles   []string     // router.kitwork.js + every natively-bundled import
+	srcMod     int64        // newest modtime across srcFiles at compile (0 = no router)
+	dirMod     int64        // the folder's own modtime — changes on child create/remove
 }
 
 // diskPath derives the on-disk location by walking up to the root anchor.

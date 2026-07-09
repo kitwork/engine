@@ -74,6 +74,19 @@ func TestRenderNoOpWithoutVerbs(t *testing.T) {
 	}
 }
 
+func TestRenderInjectsShortFormAction(t *testing.T) {
+	// data-kit-action is the CANONICAL authored form. A page using ONLY the short form must still
+	// get the runtime injected (regression: the guard once checked only data-kitwork-action=).
+	html := `<html><head></head><body><button data-kit-action="copy"></button></body></html>`
+	out := Render(html)
+	if out == html {
+		t.Fatal("short-form data-kit-action page got no runtime injected")
+	}
+	if !strings.Contains(out, `action("copy"`) {
+		t.Errorf("copy verb not injected for data-kit-action, got: %s", out)
+	}
+}
+
 func TestRenderInjectsComponents(t *testing.T) {
 	// 1. Only component should be injected if only component is declared
 	htmlComp := `<html><head></head><body><div data-kit-component="copy"></div></body></html>`

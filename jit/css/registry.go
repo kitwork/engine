@@ -97,6 +97,8 @@ var Registry = []Pattern{
 	{`^-?order-(\d+|first|last|none)$`, "tw-order"},
 	{`^pointer-events-(none|auto)$`, "tw-pointer-events"},
 	{`^select-(none|text|all|auto)$`, "tw-select"},
+	{`^animate-\[(.+?)\]$`, "tw-animate-arb"},
+	{`^animate-on-hover$`, "tw-animate-onhover"},
 	{`^animate-([a-zA-Z0-9_-]+)$`, "tw-animate"},
 	{`^container$`, "container"},
 }

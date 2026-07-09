@@ -22,7 +22,7 @@ import (
 //
 // Bất kỳ trường hợp nào không xử lý được (cycle, không tìm thấy file, …) đều trả lỗi
 // để caller (Bytecode) rớt về esbuild — nên đây là đường đi AN TOÀN, additive.
-func nativeBundle(entryPath string, entryProg *Program) (*Program, error) {
+func nativeBundle(entryPath string, entryProg *Program) (*Program, []string, error) {
 	abs, err := filepath.Abs(entryPath)
 	if err != nil {
 		abs = entryPath
@@ -33,12 +33,20 @@ func nativeBundle(entryPath string, entryProg *Program) (*Program, error) {
 	}
 	body, err := b.rewriteStatements(entryProg.Statements, filepath.Dir(abs))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	combined := &Program{}
 	combined.Statements = append(combined.Statements, b.defs...) // IIFE const của module (thứ tự phụ thuộc)
 	combined.Statements = append(combined.Statements, body...)   // thân entry (chạy ở top-level)
-	return combined, nil
+
+	// Every bundled module file, sorted for determinism — surfaced on Bytecode.Files so hot
+	// reload can watch imports, not just the entry.
+	files := make([]string, 0, len(b.modules))
+	for absPath := range b.modules {
+		files = append(files, absPath)
+	}
+	sort.Strings(files)
+	return combined, files, nil
 }
 
 type bundler struct {

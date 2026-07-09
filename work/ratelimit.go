@@ -71,13 +71,22 @@ func (lim *RateLimiter) LastRefill() time.Time {
 	return lim.lastRefill
 }
 
+// TrustProxyHeaders controls whether GetClientIP believes X-Forwarded-For / X-Real-IP. Kitwork is
+// normally the EDGE server (it owns :443 itself via AutoSSL), so those headers come straight from
+// the client and are trivially spoofable — trusting them would let an attacker rotate fake IPs
+// past every per-IP rate limit. Default FALSE (RemoteAddr only); set true ONLY when deployed
+// behind a reverse proxy you control (config `trust_proxy: true` / `.trustProxy(true)`).
+var TrustProxyHeaders bool
+
 func GetClientIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		parts := strings.Split(ip, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
+	if TrustProxyHeaders {
+		if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+			parts := strings.Split(ip, ",")
+			return strings.TrimSpace(parts[0])
+		}
+		if ip := r.Header.Get("X-Real-IP"); ip != "" {
+			return ip
+		}
 	}
 	ip := r.RemoteAddr
 	if idx := strings.LastIndex(ip, ":"); idx != -1 {

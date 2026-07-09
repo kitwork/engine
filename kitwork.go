@@ -105,6 +105,22 @@ func Run(configFile ...string) (err error) {
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
 
+	// Client-IP source: as the edge server Kitwork ignores X-Forwarded-For by default (spoofable);
+	// trust_proxy: true opts in when running behind your own reverse proxy.
+	work.TrustProxyHeaders = cfg.TrustProxy
+
+	// Host-level rate limits (first gate in ServeHTTP, before tenant resolution). Configured via
+	// server.kitwork.js .rateLimit({...}) or the YAML rate_limit: block; absent = off.
+	if cfg.RateLimit != nil {
+		handler.SetRateLimit(&core.RateLimiter{
+			Rate:        cfg.RateLimit.Rate,
+			IPRate:      cfg.RateLimit.IP,
+			BrowserRate: cfg.RateLimit.Browser,
+			UserRate:    cfg.RateLimit.User,
+			Period:      cfg.RateLimit.Period,
+		})
+	}
+
 	// FILESYSTEM-ROUTED is lazy BY DESIGN: nothing is scanned or compiled at startup — the engine is
 	// idle until the first request, and each folder's router.kitwork.js compiles on first hit. So
 	// there is NO prewarm; the old eager route-registration is gone with the flat model.

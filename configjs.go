@@ -113,6 +113,13 @@ func (b *ServerBuilder) RateLimit(v value.Value) *ServerBuilder {
 	return b
 }
 
+// TrustProxy: believe X-Forwarded-For/X-Real-IP for the client IP. Enable ONLY when Kitwork runs
+// behind a reverse proxy you control — as the edge server those headers are client-spoofable.
+func (b *ServerBuilder) TrustProxy(v value.Value) *ServerBuilder {
+	b.config["trust_proxy"] = v
+	return b
+}
+
 func (b *ServerBuilder) Databases(v value.Value) *ServerBuilder {
 	b.config["databases"] = v
 	return b

@@ -17,7 +17,7 @@ import (
 type cachedTenant struct {
 	tenant       *work.Tenant
 	lastAccess   time.Time
-	lastCompiled time.Time // Thời điểm compile file app.kitwork.js gần nhất
+	lastCompiled time.Time // ModTime root router (router.kitwork.js) ở lần compile gần nhất
 	lastChecked  time.Time // Thời điểm thực hiện check ModTime gần nhất (để throttle)
 	mu           sync.Mutex
 }
@@ -41,6 +41,7 @@ type Engine struct {
 	Hostname    string
 	cache       map[string]*cachedTenant
 	idleTimeout time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
+	rateLimiter *RateLimiter  // host-level limits (nil = off); set qua SetRateLimit trước khi serve
 	mu          sync.RWMutex
 }
 
@@ -60,6 +61,12 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
 	go e.cleanupLoop(1 * time.Minute)
 	return e
+}
+
+// SetRateLimit bật rate limit tầng host (global/IP/browser/user — xem RateLimiter). Gọi MỘT lần
+// lúc boot, trước khi phục vụ request; nil = tắt.
+func (e *Engine) SetRateLimit(rl *RateLimiter) {
+	e.rateLimiter = rl
 }
 
 // SetIdleTimeout chỉnh thời gian một tenant idle được giữ trong RAM cache.
@@ -109,10 +116,10 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 			cached.mu.Unlock()
 
 			if shouldCheck {
-				// Lấy đường dẫn file app.kitwork.js của tenant
+				// Lấy đường dẫn root router (marker) của tenant
 				tempTenant := work.NewTenant(e.root, hostname)
-				appFile := tempTenant.AppFile()
-				info, err := os.Stat(appFile)
+				routerFile := tempTenant.RouterFile()
+				info, err := os.Stat(routerFile)
 
 				if err != nil {
 					if os.IsNotExist(err) {
@@ -128,9 +135,10 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 				} else {
 					// Nếu file được sửa đổi sau lần compile cuối cùng
 					if info.ModTime().After(cached.lastCompiled) {
-						slog.Info("Detecting change. Recompiling...", "file", appFile)
+						slog.Info("Detecting change. Recompiling...", "file", routerFile)
 						newTenant := work.NewTenant(e.root, hostname)
 						newTenant.MaxEnergy = e.maxEnergy
+						newTenant.HotReload = e.hotReload
 
 						if err := newTenant.Run(); err != nil {
 							// Lỗi cú pháp hoặc file dở dang -> Graceful Compile Fallback
@@ -162,6 +170,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 
 	tenant := work.NewTenant(e.root, hostname)
 	tenant.MaxEnergy = e.maxEnergy
+	tenant.HotReload = e.hotReload
 
 	if err := tenant.Run(); err != nil {
 		return nil, err
@@ -169,7 +178,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 
 	// Lấy ModTime để lưu làm lastCompiled
 	lastCompiled := time.Now()
-	if info, err := os.Stat(tenant.AppFile()); err == nil {
+	if info, err := os.Stat(tenant.RouterFile()); err == nil {
 		lastCompiled = info.ModTime()
 	}
 
@@ -201,7 +210,8 @@ func (e *Engine) Prewarm() (warmed int, failed int) {
 }
 
 // discoverTenants liệt kê domain tenant bằng cách duyệt root/<domain>/ hoặc root/<identity>/<domain>/
-// và lấy thư mục nào chứa file app của tenant.
+// và lấy thư mục nào chứa marker của tenant — root router (router.kitwork.js). Không còn gì
+// liên quan tới app.kitwork.js: cây filesystem là mô hình duy nhất.
 func (e *Engine) discoverTenants() []string {
 	var domains []string
 	entries, err := os.ReadDir(e.root)
@@ -213,18 +223,18 @@ func (e *Engine) discoverTenants() []string {
 		if !entry.IsDir() {
 			continue
 		}
-		// 0. Single-tenant convention: root/sites/<domain>/app.kitwork.js (no identity layer).
+		// 0. Single-tenant convention: root/sites/<domain>/router.kitwork.js (no identity layer).
 		// Handled explicitly so it is not mistaken for an identity folder.
 		if entry.Name() == work.SitesDirName {
 			domains = append(domains, work.DiscoverSites(e.root)...)
 			continue
 		}
-		// 1. Kiểm tra cấu trúc phẳng: root/<domain>/app.kitwork.js
-		if _, err := os.Stat(filepath.Join(e.root, entry.Name(), work.AppFileName)); err == nil {
+		// 1. Kiểm tra cấu trúc phẳng: root/<domain>/router.kitwork.js
+		if _, err := os.Stat(filepath.Join(e.root, entry.Name(), work.RouterFileName)); err == nil {
 			domains = append(domains, entry.Name())
 			continue
 		}
-		// 2. Kiểm tra cấu trúc lồng: root/<identity>/<domain>/app.kitwork.js
+		// 2. Kiểm tra cấu trúc lồng: root/<identity>/<domain>/router.kitwork.js
 		idPath := filepath.Join(e.root, entry.Name())
 		subEntries, err := os.ReadDir(idPath)
 		if err != nil {
@@ -234,7 +244,7 @@ func (e *Engine) discoverTenants() []string {
 			if !sub.IsDir() {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(idPath, sub.Name(), work.AppFileName)); err == nil {
+			if _, err := os.Stat(filepath.Join(idPath, sub.Name(), work.RouterFileName)); err == nil {
 				domains = append(domains, sub.Name())
 			}
 		}
@@ -249,6 +259,12 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Service Unavailable", 503)
 		}
 	}()
+
+	// 1. Host-level rate limit — the FIRST gate, before any tenant work, so a flood is refused at
+	// the cheapest possible point. check() writes the 429 itself on rejection.
+	if rl := e.rateLimiter; rl != nil && !rl.check(w, r) {
+		return
+	}
 
 	domain := strings.Split(r.Host, ":")[0]
 	if (domain == "localhost" || domain == "127.0.0.1") && e.Hostname != "" {

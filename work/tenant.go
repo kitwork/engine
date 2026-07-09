@@ -30,8 +30,11 @@ const (
 	ScopeMax    = 2
 )
 
-// AppFileName is the entry filename every tenant must have (app.kitwork.js).
-const AppFileName = "app" + extension + ".js"
+// RouterFileName is the tenant marker: the root router of the filesystem-routed tree
+// (router.kitwork.js). A folder holding one IS a tenant — discovery, hot reload and the layout
+// conventions all key off it. (The old flat app.kitwork.js entry is gone with the tree-only
+// cutover and plays no part anywhere.)
+const RouterFileName = "router" + extension + ".js"
 
 type Tenant struct {
 	config *Config
@@ -40,6 +43,10 @@ type Tenant struct {
 	bytecode  *compiler.Bytecode
 	vm        *runtime.VM
 	MaxEnergy uint64
+	// HotReload enables the per-folder hot check: an edited router.kitwork.js (or an imported
+	// module) recompiles just its folder; created/removed folders re-enter the tree. Set by the
+	// engine from config; off = every compile is exactly once (production).
+	HotReload bool
 
 	// tree, when non-nil, marks this tenant as FILESYSTEM-ROUTED: requests are resolved by
 	// walking the folder tree (each folder = a runtime node) instead of the flat routes table.
@@ -50,9 +57,13 @@ type Tenant struct {
 
 	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
 
+	// Declared by the root router during ensureFolder (same publish pattern as jitcssConfig):
+	faviconFile   string   // .favicon(): file served at /favicon.ico ("" = none declared)
+	assetPrefixes []string // .assets(): allowlisted static roots (empty = serve any safe file)
+
 	respCache    *cache.Store       // .cache(): RAM response cache
 	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)
-	limiter      *ratelimit.Limiter // .limit(): rate limiter
+	limiter      *ratelimit.Limiter // .limit()/.ratelimit(): rate limiter
 
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
@@ -97,7 +108,7 @@ func (t *Tenant) resolve(paths ...string) string {
 			} else {
 				// No identity (single-tenant). Resolve in priority order: the sites/ convention
 				// (root/sites/<domain>), the test layout (root/test/<domain>), then a flat
-				// root/<domain>. Default to flat when none has an app file yet (preserves the
+				// root/<domain>. Default to flat when none has a root router yet (preserves the
 				// pre-existing behaviour for brand-new tenants).
 				flatPath := filepath.Join(t.config.root, t.entity.Domain)
 				t.config.base = flatPath
@@ -105,9 +116,7 @@ func (t *Tenant) resolve(paths ...string) string {
 					filepath.Join(t.config.root, SitesDirName, t.entity.Domain),
 					filepath.Join(t.config.root, "test", t.entity.Domain),
 				} {
-					_, errApp := os.Stat(filepath.Join(cand, AppFileName))
-					_, errRouter := os.Stat(filepath.Join(cand, "router"+extension+".js"))
-					if errApp == nil || errRouter == nil {
+					if _, err := os.Stat(filepath.Join(cand, RouterFileName)); err == nil {
 						t.config.base = cand
 						break
 					}
@@ -159,15 +168,13 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-func (t *Tenant) AppFile(filenames ...string) string {
+// RouterFile returns the path of the tenant's root router (the tenant marker) — what hot reload
+// watches for changes/removal. With an argument it resolves that filename inside the tenant instead.
+func (t *Tenant) RouterFile(filenames ...string) string {
 	if len(filenames) > 0 {
 		return t.resolve(filenames[0])
 	}
-	routerFile := t.resolve("router" + extension + ".js")
-	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
-		return routerFile
-	}
-	return t.resolve("app" + extension + ".js")
+	return t.resolve(RouterFileName)
 }
 
 func (t *Tenant) Run() error {
@@ -213,6 +220,12 @@ func NewTenant(root string, domain string) *Tenant {
 		if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
 			identity = dbIdentity
 		}
+		// THE FILESYSTEM IS THE SOURCE OF TRUTH for tenant layout — the system DB (when connected)
+		// is just a faster index of it. Without this fallback, a missing DB row (or Postgres being
+		// down) silently resolved the tenant to a flat tenants/<domain> that doesn't exist.
+		if identity == "" {
+			identity = findIdentity(root, domain)
+		}
 	}
 
 	tenant := &Tenant{
@@ -229,6 +242,27 @@ func NewTenant(root string, domain string) *Tenant {
 	}
 
 	return tenant
+}
+
+// findIdentity locates the identity folder holding <root>/<identity>/<domain>/ by walking the
+// tenants root. Top-level convention folders (sites/, test/) are layouts of their own, not
+// identities, and are skipped. os.ReadDir returns sorted entries, so a domain that somehow exists
+// under two identities resolves deterministically (first alphabetically). Returns "" when the
+// domain lives flat under root (or not at all) — resolve() then falls through as before.
+func findIdentity(root, domain string) string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == SitesDirName || entry.Name() == "test" {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(root, entry.Name(), domain)); err == nil && info.IsDir() {
+			return entry.Name()
+		}
+	}
+	return ""
 }
 
 // SSEBroker returns the event broker for this tenant identity. The broker is shared across every

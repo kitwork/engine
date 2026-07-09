@@ -11,7 +11,9 @@ package work
 
 import (
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kitwork/engine/compiler"
@@ -162,6 +164,57 @@ func (m *FolderMethod) Limit(args ...value.Value) *FolderMethod {
 	return m
 }
 
+// ratelimitRules parses the .ratelimit() config shape into rules. One map per call; each DIMENSION
+// key (ip/browser/user/global) carries its own rate, sharing the map's period — and calls STACK, so
+// layered windows read naturally:
+//
+//	router.ratelimit({ ip: 30, period: "1s" })   // burst ceiling
+//	      .ratelimit({ ip: 600, period: "1m" })  // sustained ceiling
+//	      .ratelimit({ global: 5000, period: "1m" })
+//
+// The legacy { rate, per, type } shape is accepted too. Rules missing a positive rate or period
+// are dropped (never a silent zero-limit).
+func ratelimitRules(args ...value.Value) []methodLimit {
+	var rules []methodLimit
+	for _, a := range args {
+		if !a.IsMap() {
+			continue
+		}
+		mp := a.Map()
+		per := time.Second
+		if p, ok := mp["period"]; ok {
+			per = parseTTL(p)
+		} else if p, ok := mp["per"]; ok {
+			per = parseTTL(p)
+		}
+		if per <= 0 {
+			continue
+		}
+		for _, dim := range []string{"ip", "browser", "user", "global"} {
+			if rv, ok := mp[dim]; ok && int(rv.N) > 0 {
+				rules = append(rules, methodLimit{Dim: dim, Rate: int(rv.N), Per: per})
+			}
+		}
+		if rv, ok := mp["rate"]; ok && int(rv.N) > 0 { // legacy shape
+			dim := "ip"
+			if d, ok := mp["type"]; ok && d.Text() != "" {
+				dim = d.Text()
+			}
+			rules = append(rules, methodLimit{Dim: dim, Rate: int(rv.N), Per: per})
+		}
+	}
+	return rules
+}
+
+// Ratelimit adds rate-limit rules to THIS method (same stacking shape as the router-level form).
+func (m *FolderMethod) Ratelimit(args ...value.Value) *FolderMethod {
+	m.limits = append(m.limits, ratelimitRules(args...)...)
+	return m
+}
+
+// RateLimit is the camelCase alias (.rateLimit).
+func (m *FolderMethod) RateLimit(args ...value.Value) *FolderMethod { return m.Ratelimit(args...) }
+
 // ── the folder's router (runtime behaviour for this node) ───────────────────
 
 type FolderRouter struct {
@@ -174,6 +227,7 @@ type FolderRouter struct {
 	notFound *value.Lambda
 	errorH   *value.Lambda
 	meta     map[string]value.Value // declared via router.meta()/.favicon(); inherited down the chain
+	limits   []methodLimit          // router.ratelimit() rules — this folder AND every descendant
 }
 
 func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
@@ -215,16 +269,68 @@ func (f *FolderRouter) Meta(v value.Value) *FolderRouter {
 	return f
 }
 
-// Favicon is sugar for meta({ favicon }). Assets is accepted for parity with the flat API but is a
-// no-op in tree mode: real files on disk are auto-served (see serveTreeStatic). Both return the
-// FolderRouter so a root chain like router.favicon(..).assets(..).meta(..) stays intact.
+// Ratelimit adds rate-limit rules for this folder AND every descendant (enforced on the resolve
+// chain, outside-in — declare site-wide ceilings once at the root). Calls stack; see ratelimitRules
+// for the shape. One bucket per client per rule for the whole subtree.
+func (f *FolderRouter) Ratelimit(args ...value.Value) *FolderRouter {
+	f.limits = append(f.limits, ratelimitRules(args...)...)
+	return f
+}
+
+// RateLimit is the camelCase alias (.rateLimit).
+func (f *FolderRouter) RateLimit(args ...value.Value) *FolderRouter { return f.Ratelimit(args...) }
+
+// Favicon declares the favicon: sugar for meta({ favicon }) — templates read $.meta.favicon — AND
+// registers the file (resolved inside this folder) to be served at /favicon.ico, which browsers
+// request unprompted.
 func (f *FolderRouter) Favicon(args ...value.Value) *FolderRouter {
-	if len(args) > 0 {
-		f.meta["favicon"] = args[0]
+	if len(args) == 0 {
+		return f
+	}
+	f.meta["favicon"] = args[0]
+	rel := strings.TrimPrefix(strings.TrimPrefix(args[0].Text(), "./"), "/")
+	if rel == "" {
+		return f
+	}
+	full := filepath.Join(f.node.diskPath(), filepath.FromSlash(path.Clean(rel)))
+	base := f.tenant.resolve()
+	if r, err := filepath.Rel(base, full); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		f.tenant.faviconFile = full
 	}
 	return f
 }
-func (f *FolderRouter) Assets(args ...value.Value) *FolderRouter { return f }
+
+// Assets DECLARES the public static roots — an allowlist. Without any declaration every safe disk
+// file under the tenant is auto-served (zero-config, see serveTreeStatic); once a folder declares
+// .assets("./assets/*"), ONLY the declared prefixes are served and everything else routes through
+// the tree. Multiple patterns/calls accumulate; the pattern is relative to this folder.
+func (f *FolderRouter) Assets(args ...value.Value) *FolderRouter {
+	for _, a := range args {
+		p := strings.TrimPrefix(a.Text(), "./")
+		p = strings.TrimSuffix(strings.TrimSuffix(p, "/*"), "/")
+		p = strings.Trim(path.Clean("/"+p), "/")
+		if p == "" || p == "." {
+			continue
+		}
+		prefix := path.Join(f.node.relPath(), p)
+		if !containsString(f.tenant.assetPrefixes, prefix) { // idempotent under hot-reload recompile
+			f.tenant.assetPrefixes = append(f.tenant.assetPrefixes, prefix)
+		}
+	}
+	return f
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// Language is sugar for meta({ language }) — $.meta.language in the view, for <html lang="…">.
+func (f *FolderRouter) Language(v value.Value) *FolderRouter { f.meta["language"] = v; return f }
 
 // Meta shorthands at the node-declaration level — same set as the ViewBuilder, so a static page
 // can set its own title in one line (router.title("...")) without a handler, and it still
@@ -254,6 +360,9 @@ func (tw *TreeKitWork) Router() *FolderRouter { return tw.node.folder }
 // empty FolderRouter so its page.kitwork.html can render.
 func (n *RouteNode) ensureFolder(t *Tenant) *FolderRouter {
 	if n.folderReady.Load() {
+		if t.HotReload {
+			n.hotCheck(t)
+		}
 		return n.folder
 	}
 	n.folderMu.Lock()
@@ -262,19 +371,71 @@ func (n *RouteNode) ensureFolder(t *Tenant) *FolderRouter {
 		return n.folder
 	}
 
+	n.compileFolder(t)
+	n.folderReady.Store(true)
+	return n.folder
+}
+
+// compileFolder (re)builds this node's FolderRouter from disk and records the source snapshot the
+// hot-reload check compares against. Caller holds folderMu.
+func (n *RouteNode) compileFolder(t *Tenant) {
 	fr := &FolderRouter{tenant: t, node: n, methods: map[string]*FolderMethod{}, meta: map[string]value.Value{}}
 	n.folder = fr // publish before running so TreeKitWork.Router() can reach it
 
 	routerFile := filepath.Join(n.diskPath(), "router"+extension+".js")
+	n.srcFiles = []string{routerFile} // watched even when absent — a router APPEARING is a change
+	n.srcMod = 0
 	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
+		n.srcMod = info.ModTime().UnixNano()
 		if bc, err := compiler.CompileFile(routerFile); err == nil {
 			fr.bytecode = bc
+			if len(bc.Files) > 0 {
+				n.srcFiles = bc.Files // entry + every natively-bundled import (./_core/…)
+				n.srcMod = maxModTime(bc.Files)
+			}
 			runFolderRouter(t, n, bc)
 		}
 	}
+	if info, err := os.Stat(n.diskPath()); err == nil {
+		n.dirMod = info.ModTime().UnixNano()
+	}
+}
 
-	n.folderReady.Store(true)
-	return fr
+// hotCheck is the per-folder hot reload: at most once per second (per node), stat the folder's
+// source files and its directory. An edited router — or an edited MODULE it imports — recompiles
+// just this folder in place; a created/removed child folder invalidates the children cache so the
+// next resolve rediscovers the structure. Views (*.kitwork.html) need none of this: the render
+// reads them from disk every request.
+func (n *RouteNode) hotCheck(t *Tenant) {
+	now := time.Now().UnixNano()
+	last := n.hotCheckAt.Load()
+	if now-last < int64(time.Second) || !n.hotCheckAt.CompareAndSwap(last, now) {
+		return
+	}
+
+	n.folderMu.Lock()
+	defer n.folderMu.Unlock()
+	if maxModTime(n.srcFiles) != n.srcMod {
+		n.compileFolder(t)
+	}
+	if info, err := os.Stat(n.diskPath()); err == nil && info.ModTime().UnixNano() != n.dirMod {
+		n.dirMod = info.ModTime().UnixNano()
+		n.built.Store(false) // children rescan on the next resolve (new/removed folders)
+	}
+}
+
+// maxModTime returns the newest modtime (unix nanos) across files; missing files count as 0, so
+// a deletion changes the max and is detected like an edit.
+func maxModTime(files []string) int64 {
+	var max int64
+	for _, f := range files {
+		if info, err := os.Stat(f); err == nil {
+			if m := info.ModTime().UnixNano(); m > max {
+				max = m
+			}
+		}
+	}
+	return max
 }
 
 // runFolderRouter executes a folder's compiled router in an ISOLATED VM whose kitwork() is the

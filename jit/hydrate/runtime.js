@@ -1,11 +1,12 @@
-// kitwork kernel — THE one client runtime. Served at /jithydrate, and prepended by jit/js as the
+// kitwork kernel — THE one client runtime. Served at /kit.js, and prepended by jit/js as the
 // core of every verb bundle, so expressions, verbs, model, validate and live all ride ONE root
 // (window.kitwork), ONE registry, ONE set of delegated listeners, ONE observer.
 //
 // Boot-guarded: safe under double inclusion and under Kitwork Drive re-running head scripts.
-// Authors write data-kit-*/data-kitwork-* SOURCE attributes; this kernel carries a tiny parser for
-// that source (same grammar the Go side compiles for ctx.validate) plus the IR walker. It also
-// reads data-kitwork-*-ir when present (optional precompiled mode). No eval, no new Function, ever.
+// PREFIX = ORIGIN (strict, for expression directives): authors write data-kit-* SOURCE — this
+// kernel carries a tiny parser for it (same grammar the Go side compiles for ctx.validate) plus the
+// IR walker; data-kitwork-* on a directive is ENGINE-emitted precompiled IR (JSON). No eval, no
+// new Function, ever.
 //
 // Leak-free by architecture: nodes carry no listeners and no closures (everything is delegated),
 // per-element state hides behind a Symbol and dies with the node, SSE streams are deduped by URL
@@ -28,6 +29,10 @@
   if (kitwork.runtime) return;
   kitwork.runtime = "v.1.0.0";
 
+  // The one theme action — markup calls it as $app.toggleTheme() (data-kit-click). It flips the
+  // `theme` property defined below, whose setter is the SINGLE place that toggles the .dark class
+  // and persists localStorage["theme"]. So the pre-paint (jit/theme) and every caller read/write
+  // one source of truth and can never drift.
   kitwork.toggleTheme = function () {
     kitwork.theme = kitwork.theme === "light" ? "dark" : "light";
   };
@@ -271,22 +276,26 @@
     }
   }
 
-  // ---- directives: source attr (default) or precompiled -ir attr (optional mode) ----
+  // ---- directives: the PREFIX carries the encoding (strict origin convention) ----
+  // data-kit-<name>     = AUTHOR-written source → parsed by the tiny parser here.
+  // data-kitwork-<name> = ENGINE-emitted, precompiled IR (JSON) → JSON.parse, no parsing.
+  // (The old long-prefix source alias and the suffixed IR attribute are gone: two names,
+  // two meanings, told apart by prefix alone.)
   var cache = {};
   function directive(el, name) {
-    var raw = el.getAttribute("data-kitwork-" + name + "-ir");
+    var raw = el.getAttribute("data-kitwork-" + name);
     if (raw) {
       if (!(raw in cache)) { try { cache[raw] = JSON.parse(raw); } catch (e) { cache[raw] = null; } }
       return cache[raw];
     }
-    raw = el.getAttribute("data-kitwork-" + name) || el.getAttribute("data-kit-" + name);
+    raw = el.getAttribute("data-kit-" + name);
     if (!raw) return null;
     var key = "$" + raw;
     if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
     return cache[key];
   }
   function selector(name) {
-    return "[data-kitwork-" + name + "],[data-kit-" + name + "],[data-kitwork-" + name + "-ir]";
+    return "[data-kitwork-" + name + "],[data-kit-" + name + "]";
   }
 
   var MODEL = "[data-kitwork-model],[data-kit-model]";
@@ -684,15 +693,6 @@
     enumerable: true
   });
 
-  function setTheme() {
-    var dark = document.documentElement.classList.toggle("dark");
-    try { localStorage.setItem("theme", dark ? "dark" : "light"); } catch (e) { }
-
-    // Sync the theme component scope if it exists on page
-    var comp = window.kitwork.scope.theme;
-    if (comp) comp.dark = dark;
-  }
-
   function loadRemembered() {
     document.querySelectorAll(REMEMBER).forEach(function (el) {
       parseKeys(el.getAttribute("data-kitwork-remember") || el.getAttribute("data-kit-remember")).forEach(registerRememberedKey);
@@ -900,7 +900,12 @@
       } else if (fromNode.tagName === "SELECT") {
         if (fromNode.value !== toNode.value) fromNode.value = toNode.value;
       }
-      var fromChildren = Array.prototype.slice.call(fromNode.childNodes);
+      // Kernel-owned overlay nodes (progress bar, announcer, toasts — marked data-kitwork-ui) are
+      // CLIENT truth: the fetched HTML never contains them, so they are invisible to matching and
+      // exempt from removal. Without this, an app rooted at <html> loses the progress bar on the
+      // first swap (the bar died with the morph, so it "sometimes shows, sometimes doesn't").
+      function kernelUI(n) { return n.nodeType === 1 && n.hasAttribute("data-kitwork-ui"); }
+      var fromChildren = Array.prototype.slice.call(fromNode.childNodes).filter(function (n) { return !kernelUI(n); });
       var toChildren = Array.prototype.slice.call(toNode.childNodes);
 
       function getKey(n) {
@@ -949,8 +954,10 @@
         activeIndex++;
       }
 
-      while (fromNode.childNodes.length > activeIndex) {
-        fromNode.childNodes[activeIndex].remove();
+      // Tail cleanup: drop leftovers the new page doesn't have — but never a kernel overlay.
+      for (var r = fromNode.childNodes.length - 1; r >= activeIndex; r--) {
+        var leftover = fromNode.childNodes[r];
+        if (!kernelUI(leftover)) leftover.remove();
       }
     }
   }
@@ -979,25 +986,38 @@
     var inSite = false, trapped = false;  // entry-page back-to-top trap state
     document.querySelectorAll("script[src]").forEach(function (s) { loadedSrc.add(s.src); });
 
-    // Self-contained top progress bar — no markup needed in the shell.
+    // Self-contained top progress bar — no markup needed in the shell. data-kitwork-ui marks it as
+    // a kernel overlay so morph leaves it alone; the isConnected re-append is belt-and-braces for
+    // any other code that clears <body>.
     var bar = document.createElement("div");
+    bar.setAttribute("data-kitwork-ui", "progress");
     bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;background:#f82244;" +
       "z-index:2147483647;opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s";
     document.body.appendChild(bar);
-    var rafId = 0;
+    var rafId = 0, barTimer = 0, barShown = false;
     function progress(on) {
       cancelAnimationFrame(rafId);
+      clearTimeout(barTimer);
       if (on) {
-        bar.style.opacity = "1"; bar.style.width = "0";
-        rafId = requestAnimationFrame(function () { bar.style.transition = "width 8s cubic-bezier(.1,.7,.1,1)"; bar.style.width = "90%"; });
-      } else {
+        // Show only when the navigation is actually slow (>120ms) — prefetched/fast pages swap
+        // before this fires and never flash the bar, so its behaviour reads as consistent.
+        barTimer = setTimeout(function () {
+          if (!bar.isConnected) document.body.appendChild(bar);
+          barShown = true;
+          bar.style.transition = "width .2s ease,opacity .3s";
+          bar.style.opacity = "1"; bar.style.width = "0";
+          rafId = requestAnimationFrame(function () { bar.style.transition = "width 8s cubic-bezier(.1,.7,.1,1)"; bar.style.width = "90%"; });
+        }, 120);
+      } else if (barShown) {
+        barShown = false;
         bar.style.transition = "width .2s ease,opacity .4s"; bar.style.width = "100%";
         setTimeout(function () { bar.style.opacity = "0"; bar.style.width = "0"; }, 220);
       }
     }
 
-    // Visually-hidden live region so screen readers hear page changes.
+    // Visually-hidden live region so screen readers hear page changes. Kernel overlay like the bar.
     var announcer = document.createElement("div");
+    announcer.setAttribute("data-kitwork-ui", "announcer");
     announcer.setAttribute("aria-live", "polite");
     announcer.setAttribute("aria-atomic", "true");
     announcer.style.cssText = "position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;" +
@@ -1029,7 +1049,7 @@
         a.closest("[data-kitwork-hydrate='false'],[data-kit-hydrate='false']")
       )) return false;
       if (a.getAttribute("data-kitwork-action") || a.getAttribute("data-kit-action")) return false; // verbs own their triggers
-      if (a.getAttribute("data-kitwork-click") || a.getAttribute("data-kit-click") || a.getAttribute("data-kitwork-click-ir")) return false; // expression links don't navigate
+      if (a.getAttribute("data-kit-click") || a.getAttribute("data-kitwork-click")) return false; // expression links (source or IR) don't navigate
       if (!sameOrigin(a.href)) return false;
       var u = new URL(a.href);
       if (u.pathname === location.pathname && u.search === location.search && u.hash) return false; // in-page #anchor
@@ -1147,6 +1167,7 @@
 
       var t = region(document);
       if (t) { t.setAttribute("tabindex", "-1"); try { t.focus({ preventScroll: true }); } catch (e) { } }
+      if (!announcer.isConnected) document.body.appendChild(announcer);
       announcer.textContent = "";
       setTimeout(function () { announcer.textContent = document.title; }, 50);
       document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: url } }));

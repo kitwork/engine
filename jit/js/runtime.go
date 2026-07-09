@@ -1,5 +1,7 @@
 // Package js is Kitwork's JIT JavaScript runtime — "jitjs", a sibling of jit/css and jit/icons.
-// The author writes `data-kitwork-action="<verb>"`; Render scans the page and injects ONE
+// The author writes `data-kit-action="<verb>"` (canonical; `data-kitwork-action` is a deprecated
+// alias — see the prefix convention: data-kit-* = author-written, data-kitwork-* = engine-emitted).
+// Render scans the page and injects ONE
 // `<script data-kitwork-jit="js">` holding the core delegated dispatcher plus ONLY the verb modules
 // the page actually uses. No framework, no full-library payload — the jitcss model applied to JS.
 // Verbs are delegated (one listener on document), so the runtime is inherently safe under Kitwork
@@ -7,14 +9,14 @@
 //
 // Each verb is one file in ./lib (copy.js, toggle.js, dismiss.js, tab.js, theme.js, dialog.js, …).
 // Drop a `lib/<name>.js` that calls `window.kitwork.components.action("<name>", fn)` and it is
-// emitted only on pages that use `data-kitwork-action="<name>"`. Heavy widgets use the platform,
+// emitted only on pages that use `data-kit-action="<name>"`. Heavy widgets use the platform,
 // not JS: dropdown → popover, accordion → <details>, modal → <dialog> (the dialog verb only
 // opens/closes it).
 //
 // THE CORE IS THE UNIFIED KERNEL (engine/jit/hydrate/runtime.js): one window.kitwork root, one
 // behavior registry, one set of delegated listeners shared with expressions/model/validate/live.
 // Verb modules register into it through the kitwork.components compat surface; the kernel is
-// boot-guarded, so double inclusion (inline bundle + /jithydrate) is harmless.
+// boot-guarded, so double inclusion (inline bundle + /kit.js) is harmless.
 package js
 
 import (
@@ -49,7 +51,8 @@ var (
 	// componentVersionRe validates a component version suffix.
 	componentVersionRe = regexp.MustCompile(`^v[0-9]+(\.[0-9]+)*$`)
 
-	// actionAttrRe extracts the verb from every data-kitwork-action="…" attribute.
+	// actionAttrRe extracts the verb from every data-kit-action="…" (or deprecated
+	// data-kitwork-action) attribute.
 	actionAttrRe = regexp.MustCompile(`data-kit(?:work)?-action="([a-z][a-z0-9-]*)"`)
 	// componentAttrRe extracts the component name and optional version suffix.
 	componentAttrRe = regexp.MustCompile(`data-kit(?:work)?-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?"`)
@@ -268,11 +271,13 @@ func SiteRuntimeJS(htmls ...string) string {
 }
 
 // Render injects the per-page runtime as ONE `<script data-kitwork-jit="js">` before </head>.
-// A cheap no-op when the page uses no verbs/components.
+// A cheap no-op when the page uses no verbs/components. Both prefixes are checked: the canonical
+// authored form is data-kit-*, and a page that uses ONLY the short form must still get the runtime.
 func Render(html string) string {
-	if !strings.Contains(html, "data-kitwork-action=") &&
-		!strings.Contains(html, "data-kitwork-component=") &&
-		!strings.Contains(html, "data-kit-component=") {
+	if !strings.Contains(html, "data-kit-action=") &&
+		!strings.Contains(html, "data-kitwork-action=") &&
+		!strings.Contains(html, "data-kit-component=") &&
+		!strings.Contains(html, "data-kitwork-component=") {
 		return html
 	}
 	js := RuntimeJS(scanVerbs(html))

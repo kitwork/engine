@@ -10,40 +10,44 @@ import (
 	"time"
 )
 
+// writeTreeTenant lays a minimal FILESYSTEM-ROUTED tenant on disk (root/test/localhost) whose root
+// router answers GET / with the given body. Returns the router file path (the tenant marker hot
+// reload watches). The flat app.kitwork.js model is gone — every engine test drives the tree.
+func writeTreeTenant(t *testing.T, tmpDir, body string) string {
+	t.Helper()
+	dir := filepath.Join(tmpDir, "test", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	routerFile := filepath.Join(dir, "router.kitwork.js")
+	writeRouterBody(t, routerFile, body)
+	return routerFile
+}
+
+func writeRouterBody(t *testing.T, routerFile, body string) {
+	t.Helper()
+	code := "import { router } from \"kitwork\";\n" +
+		"router.get().handle((ctx) => ctx.text(\"" + body + "\"));\n"
+	if err := os.WriteFile(routerFile, []byte(code), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEngineHotReloadAndFallback(t *testing.T) {
-	// Setup temporary directory
 	tmpDir, err := os.MkdirTemp("", "kitwork-engine-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tenantDir := filepath.Join(tmpDir, "test", "localhost")
-	err = os.MkdirAll(tenantDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 1. Write v1 of app.kitwork.js
-	v1Code := `
-kitwork().Router().Get("/test").Handle(() => {
-    return "v1";
-});
-`
-	appFile := filepath.Join(tenantDir, "app.kitwork.js")
-	err = os.WriteFile(appFile, []byte(v1Code), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
+	routerFile := writeTreeTenant(t, tmpDir, "v1")
 
 	// Initialize Engine with HotReload = true
 	engine := New(tmpDir, 0, true, "")
 
-	// Send request for v1
-	req1 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	req1 := httptest.NewRequest("GET", "http://localhost/", nil)
 	rr1 := httptest.NewRecorder()
 	engine.ServeHTTP(rr1, req1)
-
 	if rr1.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d. Body: %s", rr1.Code, rr1.Body.String())
 	}
@@ -51,30 +55,18 @@ kitwork().Router().Get("/test").Handle(() => {
 		t.Errorf("expected body to contain v1, got %s", rr1.Body.String())
 	}
 
-	// 2. Write v2 of app.kitwork.js and set ModTime to be 5 seconds in the future to trigger reload check
-	v2Code := `
-kitwork().Router().Get("/test").Handle(() => {
-    return "v2";
-});
-`
-	err = os.WriteFile(appFile, []byte(v2Code), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// 2. Rewrite the root router (the watched marker) as v2, ModTime in the future so the 1s
+	// hot-reload throttle sees a change.
+	writeRouterBody(t, routerFile, "v2")
 	futureTime := time.Now().Add(5 * time.Second)
-	err = os.Chtimes(appFile, futureTime, futureTime)
-	if err != nil {
+	if err := os.Chtimes(routerFile, futureTime, futureTime); err != nil {
 		t.Fatal(err)
 	}
-
-	// Wait slightly for the throttle limit (1 second) to pass
 	time.Sleep(1100 * time.Millisecond)
 
-	// Send request for v2 (triggers reload check)
-	req2 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	req2 := httptest.NewRequest("GET", "http://localhost/", nil)
 	rr2 := httptest.NewRecorder()
 	engine.ServeHTTP(rr2, req2)
-
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d. Body: %s", rr2.Code, rr2.Body.String())
 	}
@@ -82,50 +74,34 @@ kitwork().Router().Get("/test").Handle(() => {
 		t.Errorf("expected body to contain v2, got %s", rr2.Body.String())
 	}
 
-	// 3. Write invalid code (syntax error) and verify compile fallback
-	invalidCode := `
-kitwork().Router().Get("/test", () => {
-    return "v3"
-` // Missing closing brace/paren
-	err = os.WriteFile(appFile, []byte(invalidCode), 0644)
-	if err != nil {
+	// 3. Broken syntax: under the tree model folder routers compile LAZILY per request, so there is
+	// no reload-time "fallback to the old version" (that was a flat-era semantic) — a folder whose
+	// router fails to compile is an EMPTY folder: fail-visible 404, never a crash.
+	if err := os.WriteFile(routerFile, []byte("import { router } from \"kitwork\";\nrouter.get().handle((ctx => {\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	futureTime2 := futureTime.Add(5 * time.Second)
-	err = os.Chtimes(appFile, futureTime2, futureTime2)
-	if err != nil {
+	if err := os.Chtimes(routerFile, futureTime2, futureTime2); err != nil {
 		t.Fatal(err)
 	}
-
 	time.Sleep(1100 * time.Millisecond)
 
-	// Send request after writing invalid code
-	req3 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	req3 := httptest.NewRequest("GET", "http://localhost/", nil)
 	rr3 := httptest.NewRecorder()
 	engine.ServeHTTP(rr3, req3)
-
-	// System should NOT crash and should fallback to v2!
-	if rr3.Code != http.StatusOK {
-		t.Fatalf("expected status 200 (fallback to v2), got %d. Body: %s", rr3.Code, rr3.Body.String())
-	}
-	if !strings.Contains(rr3.Body.String(), "v2") {
-		t.Errorf("expected body to fall back and contain v2, got %s", rr3.Body.String())
+	if rr3.Code != http.StatusNotFound {
+		t.Errorf("broken router should serve fail-visible 404 (empty folder), got %d. Body: %s", rr3.Code, rr3.Body.String())
 	}
 
-	// 4. Test directory deletion
-	err = os.Remove(appFile)
-	if err != nil {
+	// 4. Deleting the root router (the tenant marker) evicts the tenant from the cache → 404.
+	if err := os.Remove(routerFile); err != nil {
 		t.Fatal(err)
 	}
-
 	time.Sleep(1100 * time.Millisecond)
 
-	// Send request after deleting file
-	req4 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	req4 := httptest.NewRequest("GET", "http://localhost/", nil)
 	rr4 := httptest.NewRecorder()
 	engine.ServeHTTP(rr4, req4)
-
-	// Should return 404 since tenant was evicted from cache
 	if rr4.Code != http.StatusNotFound {
 		t.Errorf("expected status 404 after deletion, got %d", rr4.Code)
 	}
@@ -138,204 +114,154 @@ func TestEngineHotReloadDisabled(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tenantDir := filepath.Join(tmpDir, "test", "localhost")
-	err = os.MkdirAll(tenantDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	v1Code := `
-kitwork().Router().Get("/test").Handle(() => {
-    return "v1";
-});
-`
-	appFile := filepath.Join(tenantDir, "app.kitwork.js")
-	err = os.WriteFile(appFile, []byte(v1Code), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
+	routerFile := writeTreeTenant(t, tmpDir, "v1")
 
 	// Initialize Engine with HotReload = false
 	engine := New(tmpDir, 0, false, "")
 
-	req1 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	req1 := httptest.NewRequest("GET", "http://localhost/", nil)
 	rr1 := httptest.NewRecorder()
 	engine.ServeHTTP(rr1, req1)
-
 	if !strings.Contains(rr1.Body.String(), "v1") {
 		t.Fatalf("expected v1, got %s", rr1.Body.String())
 	}
 
-	// Write v2 of app.kitwork.js
-	v2Code := `
-kitwork().Router().Get("/test").Handle(() => {
-    return "v2";
-});
-`
-	err = os.WriteFile(appFile, []byte(v2Code), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Rewrite as v2 — with hot reload off, the cached tenant (and its compiled folder) must keep
+	// serving v1.
+	writeRouterBody(t, routerFile, "v2")
 	futureTime := time.Now().Add(5 * time.Second)
-	err = os.Chtimes(appFile, futureTime, futureTime)
-	if err != nil {
+	if err := os.Chtimes(routerFile, futureTime, futureTime); err != nil {
 		t.Fatal(err)
 	}
-
 	time.Sleep(1100 * time.Millisecond)
 
-	req2 := httptest.NewRequest("GET", "http://localhost/test", nil)
+	req2 := httptest.NewRequest("GET", "http://localhost/", nil)
 	rr2 := httptest.NewRecorder()
 	engine.ServeHTTP(rr2, req2)
-
-	// Since HotReload is false, it should STILL return v1
 	if !strings.Contains(rr2.Body.String(), "v1") {
 		t.Errorf("expected v1 (cached), got %s", rr2.Body.String())
 	}
 }
 
 func TestEngineRateLimit(t *testing.T) {
-	// Setup temporary directory
 	tmpDir, err := os.MkdirTemp("", "kitwork-engine-rl-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tenantDir := filepath.Join(tmpDir, "test", "localhost")
-	err = os.MkdirAll(tenantDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
+	writeTreeTenant(t, tmpDir, "ok")
 
-	appCode := `
-kitwork().Router().Get("/test").Handle(() => {
-    return "ok";
-});
-`
-	appFile := filepath.Join(tenantDir, "app.kitwork.js")
-	err = os.WriteFile(appFile, []byte(appCode), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 1. Create Engine with a Global Limit of 5 and Per-IP Limit of 2
+	// Global budget of 5 per window, per-IP budget of 2. Window = 1 minute so nothing refills
+	// mid-test. Public test IPs — loopback/private would bypass the limiter.
 	engine := New(tmpDir, 0, false, "")
+	engine.SetRateLimit(&RateLimiter{Rate: 5, IPRate: 2, Period: time.Minute})
 
-	// 2. IP 1 makes 2 requests (allowed)
-	r1 := httptest.NewRequest("GET", "http://localhost/test", nil)
-	r1.RemoteAddr = "1.1.1.1:1234"
-
-	rr1_1 := httptest.NewRecorder()
-	engine.ServeHTTP(rr1_1, r1)
-	if rr1_1.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr1_1.Code)
+	send := func(ip string) int {
+		r := httptest.NewRequest("GET", "http://localhost/", nil)
+		r.RemoteAddr = ip + ":1234"
+		rr := httptest.NewRecorder()
+		engine.ServeHTTP(rr, r)
+		return rr.Code
 	}
 
-	rr1_2 := httptest.NewRecorder()
-	engine.ServeHTTP(rr1_2, r1)
-	if rr1_2.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr1_2.Code)
+	// IP 1: two allowed, third blocked by the per-IP budget — and the global token it took must
+	// be ROLLED BACK (a blocked request never burns global budget).
+	if c := send("1.1.1.1"); c != http.StatusOK {
+		t.Errorf("ip1 #1: expected 200, got %d", c)
+	}
+	if c := send("1.1.1.1"); c != http.StatusOK {
+		t.Errorf("ip1 #2: expected 200, got %d", c)
+	}
+	if c := send("1.1.1.1"); c != http.StatusTooManyRequests {
+		t.Errorf("ip1 #3: expected 429 (per-IP), got %d", c)
 	}
 
-	// IP 1 third request is blocked by IP limit of 2 (should be 429 and rollback global)
-	rr1_3 := httptest.NewRecorder()
-	engine.ServeHTTP(rr1_3, r1)
-	if rr1_3.Code != http.StatusTooManyRequests {
-		t.Errorf("expected 429, got %d", rr1_3.Code)
+	// IP 2 has its own budget: two more allowed (global now 4/5).
+	if c := send("2.2.2.2"); c != http.StatusOK {
+		t.Errorf("ip2 #1: expected 200, got %d", c)
+	}
+	if c := send("2.2.2.2"); c != http.StatusOK {
+		t.Errorf("ip2 #2: expected 200, got %d", c)
 	}
 
-	// 3. IP 2 makes 2 requests (allowed because IP 2 has separate budget)
-	r2 := httptest.NewRequest("GET", "http://localhost/test", nil)
-	r2.RemoteAddr = "2.2.2.2:1234"
-
-	rr2_1 := httptest.NewRecorder()
-	engine.ServeHTTP(rr2_1, r2)
-	if rr2_1.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr2_1.Code)
+	// IP 3 takes the 5th and last global token — proof the rollback above worked.
+	if c := send("3.3.3.3"); c != http.StatusOK {
+		t.Errorf("ip3 #1: expected 200, got %d", c)
 	}
 
-	rr2_2 := httptest.NewRecorder()
-	engine.ServeHTTP(rr2_2, r2)
-	if rr2_2.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr2_2.Code)
-	}
-
-	// 4. IP 3 makes 1 request (allowed, total active system requests = 2 + 2 + 1 = 5)
-	r3 := httptest.NewRequest("GET", "http://localhost/test", nil)
-	r3.RemoteAddr = "3.3.3.3:1234"
-
-	rr3_1 := httptest.NewRecorder()
-	engine.ServeHTTP(rr3_1, r3)
-	if rr3_1.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr3_1.Code)
-	}
-
-	// 5. IP 4 makes 1 request (blocked, exceeds global system budget of 5)
-	r4 := httptest.NewRequest("GET", "http://localhost/test", nil)
-	r4.RemoteAddr = "4.4.4.4:1234"
-
-	rr4_1 := httptest.NewRecorder()
-	engine.ServeHTTP(rr4_1, r4)
-	if rr4_1.Code != http.StatusTooManyRequests {
-		t.Errorf("expected 429 (global block), got %d", rr4_1.Code)
+	// IP 4 is refused by the exhausted GLOBAL bucket despite a fresh per-IP budget.
+	if c := send("4.4.4.4"); c != http.StatusTooManyRequests {
+		t.Errorf("ip4 #1: expected 429 (global), got %d", c)
 	}
 }
 
 func TestEngineBrowserRateLimit(t *testing.T) {
-	// Setup temporary directory
 	tmpDir, err := os.MkdirTemp("", "kitwork-engine-rl-b-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	tenantDir := filepath.Join(tmpDir, "test", "localhost")
-	err = os.MkdirAll(tenantDir, 0755)
-	if err != nil {
-		t.Fatal(err)
-	}
+	writeTreeTenant(t, tmpDir, "ok")
 
-	appCode := `
-kitwork().Router().Get("/test").Handle(() => {
-    return "ok";
-});
-`
-	appFile := filepath.Join(tenantDir, "app.kitwork.js")
-	err = os.WriteFile(appFile, []byte(appCode), 0644)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 1. Create Engine with BrowserLimit=2
+	// Browser fingerprint budget of 2 — catches one client rotating proxy IPs.
 	engine := New(tmpDir, 0, false, "")
+	engine.SetRateLimit(&RateLimiter{BrowserRate: 2, Period: time.Minute})
 
-	// 2. Test Browser limit (IP rotations)
-	rBrowser := httptest.NewRequest("GET", "http://localhost/test", nil)
-	rBrowser.Header.Set("User-Agent", "MaliciousBrowser")
-	rBrowser.Header.Set("Accept-Language", "en")
-
-	// Request 1: Proxy IP A (Allowed)
-	rBrowser.RemoteAddr = "1.1.1.1:1234"
-	rr1 := httptest.NewRecorder()
-	engine.ServeHTTP(rr1, rBrowser)
-	if rr1.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr1.Code)
+	send := func(ip string) int {
+		r := httptest.NewRequest("GET", "http://localhost/", nil)
+		r.RemoteAddr = ip + ":1234"
+		r.Header.Set("User-Agent", "MaliciousBrowser")
+		r.Header.Set("Accept-Language", "en")
+		rr := httptest.NewRecorder()
+		engine.ServeHTTP(rr, r)
+		return rr.Code
 	}
 
-	// Request 2: Proxy IP B (Allowed)
-	rBrowser.RemoteAddr = "2.2.2.2:1234"
-	rr2 := httptest.NewRecorder()
-	engine.ServeHTTP(rr2, rBrowser)
-	if rr2.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rr2.Code)
+	if c := send("1.1.1.1"); c != http.StatusOK {
+		t.Errorf("proxy A: expected 200, got %d", c)
+	}
+	if c := send("2.2.2.2"); c != http.StatusOK {
+		t.Errorf("proxy B: expected 200, got %d", c)
+	}
+	// Third request: new IP, SAME browser fingerprint → blocked.
+	if c := send("3.3.3.3"); c != http.StatusTooManyRequests {
+		t.Errorf("proxy C: expected 429 (browser fingerprint), got %d", c)
+	}
+}
+
+func TestEngineRateLimitIgnoresSpoofedForwardedFor(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "kitwork-engine-rl-xff-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	writeTreeTenant(t, tmpDir, "ok")
+
+	engine := New(tmpDir, 0, false, "")
+	engine.SetRateLimit(&RateLimiter{IPRate: 2, Period: time.Minute})
+
+	// Same real connection, rotating FAKE X-Forwarded-For each time. Kitwork is the edge server:
+	// the header is client-supplied and must be IGNORED (work.TrustProxyHeaders default false) —
+	// otherwise the per-IP budget resets on every spoofed value.
+	send := func(fakeIP string) int {
+		r := httptest.NewRequest("GET", "http://localhost/", nil)
+		r.RemoteAddr = "9.9.9.9:1234"
+		r.Header.Set("X-Forwarded-For", fakeIP)
+		rr := httptest.NewRecorder()
+		engine.ServeHTTP(rr, r)
+		return rr.Code
 	}
 
-	// Request 3: Proxy IP C (Blocked by browser limit, despite rotating IP!)
-	rBrowser.RemoteAddr = "3.3.3.3:1234"
-	rr3 := httptest.NewRecorder()
-	engine.ServeHTTP(rr3, rBrowser)
-	if rr3.Code != http.StatusTooManyRequests {
-		t.Errorf("expected 429, got %d", rr3.Code)
+	if c := send("1.2.3.4"); c != http.StatusOK {
+		t.Errorf("#1: expected 200, got %d", c)
+	}
+	if c := send("5.6.7.8"); c != http.StatusOK {
+		t.Errorf("#2: expected 200, got %d", c)
+	}
+	if c := send("10.11.12.13"); c != http.StatusTooManyRequests {
+		t.Errorf("#3: spoofed X-Forwarded-For must NOT bypass the per-IP limit, got %d", c)
 	}
 }

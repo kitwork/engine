@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Prewarm must discover every root/<identity>/<domain>/app.kitwork.js, compile
-// it, and leave it in the cache — while ignoring folders without an app file.
+// Prewarm must discover every root/<identity>/<domain>/router.kitwork.js (the tenant marker) and
+// warm it into the cache — while ignoring folders without a root router.
 func TestPrewarmAndDiscover(t *testing.T) {
 	tmpDir := t.TempDir()
 	for _, dom := range []string{"localhost", "alpha.local"} {
@@ -16,11 +16,11 @@ func TestPrewarmAndDiscover(t *testing.T) {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "app.kitwork.js"), []byte(`const x = 1;`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(`const x = 1;`), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// A folder with no app file must be ignored by discovery.
+	// A folder with no root router must be ignored by discovery.
 	if err := os.MkdirAll(filepath.Join(tmpDir, "test", "notenant"), 0o755); err != nil {
 		t.Fatal(err)
 	}

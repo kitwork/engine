@@ -10,6 +10,11 @@ import (
 )
 
 func TestServeHydrateIf(t *testing.T) {
+	// Force production mode: the kernel must ship minified.
+	saved := AllowLocal
+	AllowLocal = false
+	defer func() { AllowLocal = saved }()
+
 	// A non-matching path is a no-op: returns false, writes nothing.
 	r := httptest.NewRequest("GET", "/something-else", nil)
 	w := httptest.NewRecorder()
@@ -33,6 +38,13 @@ func TestServeHydrateIf(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "window.hydrate") {
 		t.Error("body should be the embedded interpreter")
+	}
+	// Production serves the MINIFIED kernel: comments stripped, far smaller than the source.
+	if w.Body.Len() >= len(hydrate.Runtime()) {
+		t.Errorf("production body should be minified: %d bytes vs %d source", w.Body.Len(), len(hydrate.Runtime()))
+	}
+	if strings.Contains(w.Body.String(), "// kitwork kernel") {
+		t.Error("comments should be stripped from the production kernel")
 	}
 
 	// A conditional request with the current ETag revalidates to 304 with no body.

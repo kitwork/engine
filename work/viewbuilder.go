@@ -66,6 +66,7 @@ func (vb *ViewBuilder) Description(v value.Value) *ViewBuilder { vb.meta["descri
 func (vb *ViewBuilder) Image(v value.Value) *ViewBuilder       { vb.meta["image"] = v; return vb }
 func (vb *ViewBuilder) Url(v value.Value) *ViewBuilder         { vb.meta["url"] = v; return vb }
 func (vb *ViewBuilder) Type(v value.Value) *ViewBuilder        { vb.meta["type"] = v; return vb }
+func (vb *ViewBuilder) Language(v value.Value) *ViewBuilder    { vb.meta["language"] = v; return vb }
 
 // flush renders the accumulated view exactly once. The tree lifecycle calls it at the end.
 func (vb *ViewBuilder) flush() {

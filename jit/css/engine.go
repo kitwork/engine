@@ -62,6 +62,11 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 			if reg.Type == "tw-space" || reg.Type == "tw-divide" || reg.Type == "tw-divide-color" {
 				sel += " > :not([hidden]) ~ :not([hidden])"
 			}
+			// animate-on-hover pauses DESCENDANTS' animations (the :hover-runs counterpart rule is
+			// appended by UsedKeyframes).
+			if reg.Type == "tw-animate-onhover" {
+				sel += " *"
+			}
 
 			// Apply variants. dark: scopes the selector under .dark; a media query wraps
 			// it; states become pseudo-classes (multiple may stack); group-hover etc. use
@@ -190,15 +195,6 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return "background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;"
 		}
 		return "text-shadow: 0 0 30px rgba(248, 34, 68, 0.4);"
-	case "animate":
-		if m[2] == "pulse" {
-			return "animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }"
-		}
-		if m[2] == "spin" {
-			return "animation: spin 1s linear infinite; @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }"
-		}
-		return "animation: " + m[2] + " 1s infinite;"
-
 	// --- BOX MODEL ---
 	case "spacing-axis":
 		p, axis, val := m[1], m[2], transformUnit(m[3])
@@ -1136,35 +1132,24 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-select":
 		return "-webkit-user-select: " + m[1] + "; user-select: " + m[1] + ";"
 	case "tw-animate":
-		if m[1] == "none" {
+		name := m[1]
+		if name == "none" {
 			return "animation: none;"
 		}
-		animRule := ""
+		// User extend wins (theme.extend.animation), then the vendored animate catalog.
 		if cfg != nil && cfg.Animations != nil {
-			if r, ok := cfg.Animations[m[1]]; ok {
-				animRule = r
+			if r, ok := cfg.Animations[name]; ok {
+				return "animation: " + r + ";"
 			}
 		}
-		if animRule == "" {
-			anims := map[string]string{
-				"spin":   "spin 1s linear infinite",
-				"ping":   "ping 1s cubic-bezier(0,0,0.2,1) infinite",
-				"pulse":  "pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
-				"bounce": "bounce 1s infinite",
-			}
-			animRule = anims[m[1]]
-		}
-		if animRule != "" {
-			return "animation: " + animRule + ";"
-		}
-		return ""
+		return resolveAnimate(name)
+	case "tw-animate-arb":
+		// Arbitrary animation: animate-[wiggle_1s_ease-in-out_infinite]. Underscores → spaces
+		// (Tailwind convention). The keyframe is emitted by UsedKeyframes if the name is in the
+		// catalog or theme.extend.keyframes.
+		return "animation: " + strings.ReplaceAll(m[1], "_", " ") + ";"
+	case "tw-animate-onhover":
+		return "animation-play-state: paused;"
 	}
 	return ""
 }
-
-// AnimKeyframes are the @keyframes for animate-* utilities, injected once by the render
-// when any animation is used (Tailwind ships these via its base layer).
-const AnimKeyframes = "@keyframes spin{to{transform:rotate(360deg)}}" +
-	"@keyframes ping{75%,100%{transform:scale(2);opacity:0}}" +
-	"@keyframes pulse{50%{opacity:.5}}" +
-	"@keyframes bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}"

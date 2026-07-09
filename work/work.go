@@ -46,7 +46,7 @@ type KitWork struct {
 // always-on assets (the client hydrate runtime and the vendored fonts — identical bytes for every
 // tenant), the request walks the folder tree (see tree_serve.go). There is no flat route table.
 func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
-	// /jithydrate — the client interpreter the render injects into every hydrated page.
+	// /kit.js — the client runtime the render injects into every hydrated page.
 	if serveHydrateIf(w, r) {
 		return
 	}
