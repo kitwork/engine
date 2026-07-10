@@ -46,6 +46,16 @@ func Render(html string) string {
 	return html
 }
 
+// Force injects the pre-paint UNCONDITIONALLY — router.jittheme(true): the site declares "I theme"
+// once at the root instead of relying on the usage scan (e.g. the toggle lives on a page the scan
+// can't see, or theming is applied by external scripts). A marker still pins the position.
+func Force(html string) string {
+	if strings.Contains(html, `-jit="theme"`) {
+		return markerRe.ReplaceAllString(html, prepaint)
+	}
+	return injectHeadTop(html, prepaint)
+}
+
 // usesTheme reports whether the page references the theme system. Cheap substring checks:
 // `toggleTheme` catches $app.toggleTheme(); `$app.theme` catches reads/binds; the action/component
 // forms catch the legacy jitjs verb + component (data-kit- and data-kitwork- both end this way).

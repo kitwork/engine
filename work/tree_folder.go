@@ -165,15 +165,18 @@ func (m *FolderMethod) Limit(args ...value.Value) *FolderMethod {
 }
 
 // ratelimitRules parses the .ratelimit() config shape into rules. One map per call; each DIMENSION
-// key (ip/browser/user/global) carries its own rate, sharing the map's period — and calls STACK, so
+// key (ip/browser/user/global) carries its own rate, sharing the map's window — and calls STACK, so
 // layered windows read naturally:
 //
-//	router.ratelimit({ ip: 30, period: "1s" })   // burst ceiling
-//	      .ratelimit({ ip: 600, period: "1m" })  // sustained ceiling
-//	      .ratelimit({ global: 5000, period: "1m" })
+//	router.ratelimit({ ip: 30, second: 1 })      // 30 per second (unit key = the window)
+//	      .ratelimit({ ip: 600, minute: 1 })     // 600 per minute
+//	      .ratelimit({ ip: 100, minute: 5 })     // 100 per 5 minutes
+//	      .ratelimit({ global: 5000, period: "1m" }) // explicit period works too (and wins)
 //
-// The legacy { rate, per, type } shape is accepted too. Rules missing a positive rate or period
-// are dropped (never a silent zero-limit).
+// The window: `period`/`per` (a duration string) when given, else a UNIT key
+// (second/minute/hour/day, singular or plural, value = how many), else 1s. The legacy
+// { rate, per, type } shape is accepted too. Rules missing a positive rate or window are dropped
+// (never a silent zero-limit).
 func ratelimitRules(args ...value.Value) []methodLimit {
 	var rules []methodLimit
 	for _, a := range args {
@@ -181,14 +184,17 @@ func ratelimitRules(args ...value.Value) []methodLimit {
 			continue
 		}
 		mp := a.Map()
-		per := time.Second
+		per := time.Duration(0)
 		if p, ok := mp["period"]; ok {
 			per = parseTTL(p)
 		} else if p, ok := mp["per"]; ok {
 			per = parseTTL(p)
 		}
 		if per <= 0 {
-			continue
+			per = unitWindow(mp)
+		}
+		if per <= 0 {
+			per = time.Second
 		}
 		for _, dim := range []string{"ip", "browser", "user", "global"} {
 			if rv, ok := mp[dim]; ok && int(rv.N) > 0 {
@@ -204,6 +210,26 @@ func ratelimitRules(args ...value.Value) []methodLimit {
 		}
 	}
 	return rules
+}
+
+// unitWindow reads the window from a time-UNIT key: { second: 1 } = 1s, { minute: 5 } = 5m.
+// Full words only (no-abbreviation), singular or plural. Returns 0 when no unit key is present.
+func unitWindow(mp map[string]value.Value) time.Duration {
+	units := []struct {
+		key string
+		d   time.Duration
+	}{
+		{"second", time.Second}, {"seconds", time.Second},
+		{"minute", time.Minute}, {"minutes", time.Minute},
+		{"hour", time.Hour}, {"hours", time.Hour},
+		{"day", 24 * time.Hour}, {"days", 24 * time.Hour},
+	}
+	for _, u := range units {
+		if v, ok := mp[u.key]; ok && int(v.N) > 0 {
+			return time.Duration(int(v.N)) * u.d
+		}
+	}
+	return 0
 }
 
 // Ratelimit adds rate-limit rules to THIS method (same stacking shape as the router-level form).
@@ -331,6 +357,21 @@ func containsString(list []string, s string) bool {
 
 // Language is sugar for meta({ language }) — $.meta.language in the view, for <html lang="…">.
 func (f *FolderRouter) Language(v value.Value) *FolderRouter { f.meta["language"] = v; return f }
+
+// Jittheme pins the theme pre-paint for the whole site: router.jittheme(true) ALWAYS injects the
+// anti-flash script (no usage scan needed — e.g. the toggle lives where the scan can't see);
+// router.jittheme(false) disables it entirely. Without the call, the auto-scan decides per page.
+func (f *FolderRouter) Jittheme(args ...value.Value) *FolderRouter {
+	mode := "force" // bare router.jittheme() reads as "turn it on"
+	if len(args) > 0 && args[0].K == value.Bool && args[0].N == 0 {
+		mode = "off"
+	}
+	f.tenant.themeMode = mode
+	return f
+}
+
+// JitTheme is the camelCase alias (.jitTheme).
+func (f *FolderRouter) JitTheme(args ...value.Value) *FolderRouter { return f.Jittheme(args...) }
 
 // Meta shorthands at the node-declaration level — same set as the ViewBuilder, so a static page
 // can set its own title in one line (router.title("...")) without a handler, and it still

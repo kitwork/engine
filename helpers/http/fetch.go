@@ -50,13 +50,20 @@ func parseDuration(s string) (time.Duration, error) {
 	return 0, fmt.Errorf("unknown duration unit: %s", unit)
 }
 
+// Fetch is the tenant-agnostic builtin form — no cache tiers wired. Hosts that can scope stores
+// per tenant bind FetchWith instead.
 func Fetch(args ...value.Value) value.Value {
+	return FetchWith(&HTTP{}, args...)
+}
+
+// FetchWith runs fetch(url[, options]) on a prepared client (NewClient), so { cache, persist }
+// options land in the injected per-tenant tiers — the options-map spelling of the builder chain.
+func FetchWith(h *HTTP, args ...value.Value) value.Value {
 	if len(args) == 0 {
 		return value.New(Response{Status: 0, Error: "fetch: url is required"})
 	}
 	urlStr := args[0].Text()
 
-	h := &HTTP{}
 	method := "GET"
 	var body value.Value
 
@@ -82,6 +89,12 @@ func Fetch(args ...value.Value) value.Value {
 			for k, v := range hdrs.Map() {
 				h.headers[k] = v.String()
 			}
+		}
+		if c, ok := opts["cache"]; ok {
+			h.Cache(c)
+		}
+		if p, ok := opts["persist"]; ok {
+			h.Persist(p)
 		}
 	}
 

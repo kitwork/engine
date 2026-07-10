@@ -15,6 +15,14 @@ import (
 type HTTP struct {
 	timeout time.Duration
 	headers map[string]string
+
+	// Outbound caching (see store.go): tiers injected per tenant; flags set by .cache()/.persist().
+	cacheStore   ResponseStore
+	persistStore ResponseStore
+	cacheOn      bool
+	persistOn    bool
+	cacheTTL     time.Duration
+	persistTTL   time.Duration
 }
 
 func (h *HTTP) Timeout(ms int) *HTTP {
@@ -39,6 +47,28 @@ func (h *HTTP) Post(url string, body value.Value) value.Value {
 }
 
 func (h *HTTP) do(method, url string, body value.Value) value.Value {
+	// Read-through caching: GET only. Check RAM first, then disk; on a live failure fall back to
+	// an expired disk copy (stale-on-error) so a third-party outage never breaks the page.
+	wantCache := h.cacheOn && h.cacheStore != nil
+	wantPersist := h.persistOn && h.persistStore != nil
+	key := ""
+	if method == "GET" && (wantCache || wantPersist) {
+		key = requestKey(url, h.headers)
+		if wantCache {
+			if snap, ok := h.cacheStore.Load(key); ok {
+				return storedResponse(snap, false)
+			}
+		}
+		if wantPersist {
+			if snap, ok := h.persistStore.Load(key); ok {
+				if wantCache { // promote a disk hit into RAM for the next reader
+					h.cacheStore.Save(key, snap, h.cacheTTL)
+				}
+				return storedResponse(snap, false)
+			}
+		}
+	}
+
 	timeout := h.timeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
@@ -108,14 +138,39 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if snap, ok := staleFallback(key, wantPersist, h.persistStore); ok {
+			return storedResponse(snap, true)
+		}
 		return value.New(Response{Status: 0, Error: err.Error()})
 	}
 	defer resp.Body.Close()
 
 	resBody, _ := io.ReadAll(resp.Body)
 
+	if key != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		snap := Snapshot{Status: resp.StatusCode, Body: resBody}
+		if wantCache {
+			h.cacheStore.Save(key, snap, h.cacheTTL)
+		}
+		if wantPersist {
+			h.persistStore.Save(key, snap, h.persistTTL)
+		}
+	} else if resp.StatusCode >= 500 {
+		if snap, ok := staleFallback(key, wantPersist, h.persistStore); ok {
+			return storedResponse(snap, true)
+		}
+	}
+
 	return value.New(Response{
 		Status: resp.StatusCode,
 		Body:   value.New(resBody),
 	})
+}
+
+// staleFallback returns an expired-but-present disk copy when the live request failed.
+func staleFallback(key string, wantPersist bool, store ResponseStore) (Snapshot, bool) {
+	if key == "" || !wantPersist {
+		return Snapshot{}, false
+	}
+	return store.LoadStale(key)
 }

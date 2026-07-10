@@ -36,6 +36,7 @@ func (w *KitWork) Cache() *GeneralCache {
 //	router.go    Router()        log.go       Log()         db.go        Database()
 //	http.go      HTTP()          jwt.go       JWT()         render.go    Render()
 //	qrcode.go    Qrcode()        napas.go     Napas()       file.go      File()
+//	collection.go Collection()   (directory-backed Markdown content)
 //	browser.go   Browser()       chromedp.go  Chromedp()/Screenshot()   go.go  Go()
 //	env.go       Env()           (per-tenant, path-isolated env)
 type KitWork struct {

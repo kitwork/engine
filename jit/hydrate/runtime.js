@@ -21,7 +21,13 @@
   // and never silently phones home, and the "no dependencies" promise holds until you pick a CDN.
   kitwork.cdnComponents = kitwork.cdnComponents || "";
 
-  var bridge = window.kitworkBridge || null;
+  // NATIVE BRIDGE CONTRACT: a native shell (WebView2/WKWebView) pre-seeds
+  // `window.kitwork = { bridge: {...} }` in a document-start script — the merge on line 15 keeps
+  // it, so the bridge lives at kitwork.bridge and there is NO second global. On the plain web,
+  // bridge is simply absent. Capabilities are METHODS on $app (kitwork): $app.camera(...),
+  // $app.biometric(...), $app.clipboard(...) — one surface on every platform; when kitwork.bridge
+  // exists a method delegates to it, otherwise it uses the web fallback.
+  var bridge = kitwork.bridge || null;
   kitwork.bridge = bridge;
   kitwork.platform = bridge && bridge.platform ? bridge.platform : "web";
   kitwork.isNative = !!bridge;
@@ -29,12 +35,85 @@
   if (kitwork.runtime) return;
   kitwork.runtime = "v.1.0.0";
 
-  // The one theme action — markup calls it as $app.toggleTheme() (data-kit-click). It flips the
-  // `theme` property defined below, whose setter is the SINGLE place that toggles the .dark class
-  // and persists localStorage["theme"]. So the pre-paint (jit/theme) and every caller read/write
-  // one source of truth and can never drift.
+  // ---- $app capabilities (Native Bridge RFC v2) ----
+  // Capabilities are METHODS on $app — one surface on every platform, no new attributes. Each
+  // method prefers kitwork.bridge (a native shell) and falls back to the web platform. They are
+  // invoked from markup through the ONE grammar: data-kit-click="$app.toggleTheme()" /
+  // "$app.clipboard(bill_id)" — a click IS the user gesture the platform APIs require.
+
+  // The one theme action — flips the `theme` property defined below, whose setter is the SINGLE
+  // place that toggles the .dark class and persists localStorage["theme"]. So the pre-paint
+  // (jit/theme) and every caller read/write one source of truth and can never drift.
   kitwork.toggleTheme = function () {
     kitwork.theme = kitwork.theme === "light" ? "dark" : "light";
+  };
+
+  // clipboard(value): copy a value. Native shell → bridge.call("clipboard.write"); modern web →
+  // the async Clipboard API; old WebViews / non-secure contexts → the textarea/execCommand
+  // fallback. Fire-and-forget: markup needs no result to proceed.
+  kitwork.clipboard = function (text) {
+    text = text == null ? "" : String(text);
+    if (bridge && bridge.call) {
+      bridge.call("clipboard.write", { text: text });
+      return true;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text);
+      return true;
+    }
+    var area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand("copy"); } catch (e) { }
+    area.remove();
+    return true;
+  };
+
+  // window(action): control the NATIVE window — "minimize" | "maximize" | "close" | "drag". Only
+  // meaningful in a native shell (a desktop app's custom title bar calls these); on the plain web a
+  // page can't move the browser window, so it is a no-op. Returns a Promise from the bridge.
+  kitwork.window = function (action) {
+    if (bridge && bridge.call) {
+      return bridge.call("window." + action, {});
+    }
+    return false;
+  };
+
+  // camera(key): capture a photo and write its URI into scope[key] — the FIRST capability that
+  // RETURNS a value (RFC async contract): the call returns immediately, and when the photo is
+  // ready kitwork.set(key, uri) fires a reactive re-render, so <img data-kit-bind="{src:key}"> and
+  // data-kit-show="key" update on their own. On failure/cancel it writes key+"_error" and leaves
+  // key untouched. Native shell → bridge.call("camera.capture"); web/desktop-WebView → a hidden
+  // <input type=file accept=image/* capture> (the browser opens the OS camera on mobile, a file
+  // picker on desktop) read as a data URL.
+  kitwork.camera = function (key) {
+    if (bridge && bridge.call) {
+      bridge.call("camera.capture", {}).then(function (uri) {
+        if (uri) kitwork.set(key, uri);
+      }).catch(function (e) { kitwork.set(key + "_error", String((e && e.message) || e)); });
+      return true;
+    }
+    var input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.setAttribute("capture", "environment"); // hint the rear camera on mobile web
+    input.style.display = "none";
+    input.addEventListener("change", function () {
+      var file = input.files && input.files[0];
+      input.remove();
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () { kitwork.set(key, reader.result); };
+      reader.onerror = function () { kitwork.set(key + "_error", "read failed"); };
+      reader.readAsDataURL(file);
+    });
+    document.body.appendChild(input);
+    input.click();
+    return true;
   };
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
@@ -618,6 +697,21 @@
     rebuildActiveComponents();
     document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; });
     document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; el.hidden = !run(x, scopeFor(el)); });
+    // bind → attributes: the expression is an OBJECT (reusing the closed grammar), each key an attr.
+    // { src: avatar, alt: name, disabled: n > 3 }. false/null removes the attr; true sets it empty;
+    // else the value. So <img data-kit-bind="{ src: avatar }"> tracks a scope key with no new syntax.
+    document.querySelectorAll(selector("bind")).forEach(function (el) {
+      var x = directive(el, "bind"); if (!x) return;
+      var obj = run(x, scopeFor(el));
+      if (!obj || typeof obj !== "object") return;
+      for (var k in obj) {
+        if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
+        var v = obj[k];
+        if (v === false || v == null) el.removeAttribute(k);
+        else if (v === true) el.setAttribute(k, "");
+        else if (String(el.getAttribute(k)) !== String(v)) el.setAttribute(k, v);
+      }
+    });
     // validate → state→CSS: the element carries data-state="valid|invalid"; styling is CSS's job.
     document.querySelectorAll(selector("validate")).forEach(function (el) { var x = directive(el, "validate"); if (!x) return; el.setAttribute("data-state", run(x, scopeFor(el)) ? "valid" : "invalid"); });
     document.querySelectorAll(MODEL).forEach(function (el) { var k = modelKey(el), s = scopeFor(el); if (String(s[k]) !== el.value) el.value = s[k]; });

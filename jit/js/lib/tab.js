@@ -12,7 +12,7 @@ window.kitwork.components.action("tab", function (el) {
   if (!panel) return;
   var list = el.closest('[role="tablist"]') || el.parentElement;
   if (list) {
-    list.querySelectorAll('[data-kitwork-action="tab"]').forEach(function (t) {
+    list.querySelectorAll('[data-kit-action="tab"],[data-kitwork-action="tab"]').forEach(function (t) {
       t.setAttribute("aria-selected", t === el ? "true" : "false");
     });
   }

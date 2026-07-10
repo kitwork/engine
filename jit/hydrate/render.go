@@ -46,14 +46,14 @@ const (
 // directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
 // prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
 // Expressions use single-quoted string literals, so the value never contains a double quote.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|click|validate)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|click|validate|bind)="([^"]*)"`)
 
 // presenceRe decides runtime INJECTION: authored data-kit-* forms (including the non-expression
 // attributes — model is a plain scope key, live an SSE URL, scope/component a boundary — which need
 // the runtime but must never be compile-verified), plus engine-emitted IR directives
 // (data-kitwork-text|show|click|validate), which equally need the walker.
 // (IR JSON contains double quotes, so an emitted IR attribute is single-quoted — accept both.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|click|validate|model|live|scope|component|remember|api)="|data-kitwork-(?:text|show|click|validate)=['"]`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|click|validate|bind|model|live|scope|component|remember|api)="|data-kitwork-(?:text|show|click|validate|bind)=['"]`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The

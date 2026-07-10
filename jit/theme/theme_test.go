@@ -55,3 +55,20 @@ func TestRenderNoop(t *testing.T) {
 		t.Error("should be a no-op without marker or theme usage")
 	}
 }
+
+func TestForce(t *testing.T) {
+	// No marker, no theme usage — Force still injects at the top of <head>.
+	in := `<html><head><link rel="stylesheet" href="a.css"></head><body><p>plain</p></body></html>`
+	out := Force(in)
+	if !strings.Contains(out, `getItem("theme")`) {
+		t.Fatal("Force must inject without any usage")
+	}
+	if strings.Index(out, `getItem("theme")`) > strings.Index(out, "a.css") {
+		t.Error("forced pre-paint must land before the first stylesheet")
+	}
+	// A marker still pins the position.
+	pinned := Force(`<head><title>x</title><script data-kitwork-jit="theme"></script></head>`)
+	if strings.Contains(pinned, `-jit="theme"`) || !strings.Contains(pinned, `getItem("theme")`) {
+		t.Error("marker should be replaced in place under Force")
+	}
+}

@@ -3,7 +3,7 @@
  * Supports: <button data-kitwork-action="copy" data-kitwork-copy="npm i kitwork">Copy</button>
  */
 window.kitwork.components.action("copy", function (el) {
-  var text = el.getAttribute("data-kitwork-copy");
+  var text = (el.getAttribute("data-kit-copy") || el.getAttribute("data-kitwork-copy"));
   if (text == null) {
     var t = window.kitwork.components.target(el);
     text = t ? (t.innerText || t.textContent || "") : "";

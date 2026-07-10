@@ -2,12 +2,12 @@
  * Supports: <button data-kitwork-action="toast" data-kitwork-toast="Success">
  */
 window.kitwork.components.action("toast", function (el) {
-  var text = el.getAttribute("data-kitwork-toast") || el.getAttribute("data-kit-toast");
+  var text = el.getAttribute("data-kit-toast") || el.getAttribute("data-kitwork-toast");
   if (text == null) {
     var t = window.kitwork.components.target(el);
     text = t ? (t.innerText || t.textContent || "") : "";
   }
-  var ms = parseInt(el.getAttribute("data-kitwork-toast-ms") || el.getAttribute("data-kit-toast-ms"), 10) || 3000;
+  var ms = parseInt(el.getAttribute("data-kit-toast-ms") || el.getAttribute("data-kitwork-toast-ms"), 10) || 3000;
   
   // Use the global kitwork.toast utility if available, else fall back to inline creation
   if (typeof window.kitwork.toast === "function") {

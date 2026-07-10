@@ -156,6 +156,11 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// remember: persisted $ keys — register fn, declaration attr, storage key, load/persist
 		"kitwork.remember", "data-kit-remember", "registerRememberedKey", "loadRemembered",
 		"kitwork.platform", "kitwork.bridge", "kitwork.isNative",
+		// $app capabilities (Native Bridge RFC v2): bridge-first with web fallback
+		"kitwork.clipboard", `bridge.call("clipboard.write"`, "navigator.clipboard",
+		"kitwork.camera", `bridge.call("camera.capture"`, "readAsDataURL",
+		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
+		`selector("bind")`,
 		// api: async JSON source — sync fn, activation attr, fetch + state→CSS lifecycle
 		"kitwork.syncApi", "data-kit-api", `el.setAttribute("data-state", "loading")`,
 		// live per-scope + component init() lifecycle hook

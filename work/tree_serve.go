@@ -310,6 +310,7 @@ func (t *Tenant) treeRender(n *RouteNode) *render.Render {
 		Notfound:      "notfound",
 		JitCSS:        true, // zero-config: inline the minimal JIT CSS for the classes each page uses
 		DefaultMinify: !AllowLocal,
+		ThemeMode:     t.themeMode, // router.jittheme(): "" auto-scan / "force" / "off"
 	})
 }
 

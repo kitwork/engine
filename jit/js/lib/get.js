@@ -9,10 +9,10 @@
  * `.is-loading` to the target while in flight and cancels a prior request to the same target. */
 window.kitwork.components.action("get", function (el, e) {
   if (e && e.preventDefault) e.preventDefault();
-  var href = el.getAttribute("data-kitwork-href") || el.getAttribute("href");
+  var href = (el.getAttribute("data-kit-href") || el.getAttribute("data-kitwork-href")) || el.getAttribute("href");
   var target = window.kitwork.components.target(el);
   if (!href || !target) return;
-  var swap = el.getAttribute("data-kitwork-swap") || "replace";
+  var swap = (el.getAttribute("data-kit-swap") || el.getAttribute("data-kitwork-swap")) || "replace";
 
   var store = window.kitwork.components.state(target);
   if (store.fetchController) store.fetchController.abort();
@@ -40,9 +40,9 @@ window.kitwork.components.action("get", function (el, e) {
       var landed = target;
       if (swap === "append") target.insertAdjacentHTML("beforeend", html);
       else if (swap === "prepend") target.insertAdjacentHTML("afterbegin", html);
-      else if (swap === "outer") { target.outerHTML = html; landed = document.querySelector(el.getAttribute("data-kitwork-target")) || document.body; }
+      else if (swap === "outer") { target.outerHTML = html; landed = document.querySelector((el.getAttribute("data-kit-target") || el.getAttribute("data-kitwork-target"))) || document.body; }
       else target.innerHTML = html;
-      if (el.getAttribute("data-kitwork-push") === "true") {
+      if ((el.getAttribute("data-kit-push") || el.getAttribute("data-kitwork-push")) === "true") {
         try { history.pushState({}, "", href); } catch (e2) {}
       }
       document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: href, target: landed } }));

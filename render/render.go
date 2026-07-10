@@ -37,6 +37,7 @@ type Config struct {
 	Minify        []string       // explicit minify content types
 	MinifySet     bool           // whether Minify was set explicitly
 	DefaultMinify bool           // minify when not set explicitly (caller passes !AllowLocal)
+	ThemeMode     string         // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
 }
 
 func New(c Config) *Render {
@@ -44,7 +45,7 @@ func New(c Config) *Render {
 		base: c.Base, jitConfig: c.JitConfig, directory: c.Directory, path: c.Path,
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
-		defaultMinify: c.DefaultMinify,
+		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode,
 	}
 }
 
@@ -63,6 +64,7 @@ type Render struct {
 	minify        []string // content types to minify on the final HTML output
 	minifySet     bool     // whether minify was set explicitly (else default by environment)
 	defaultMinify bool     // minify default when not explicit (injected — replaces AllowLocal)
+	themeMode     string   // theme pre-paint mode (see Config.ThemeMode)
 }
 
 type Layout struct {
@@ -284,7 +286,13 @@ func (r *Render) tmpl(data any) string {
 
 	// 3i. JIT theme: swap <script data-kitwork-jit="theme"> for a synchronous pre-paint that applies
 	// the saved/OS theme before first paint (no flash). Pairs with the jitjs theme toggle verb.
-	out = theme.Render(out)
+	switch r.themeMode {
+	case "off": // router.jittheme(false) — no pre-paint even when the scan would find usage
+	case "force":
+		out = theme.Force(out) // router.jittheme(true) — always inject, scan or no scan
+	default:
+		out = theme.Render(out)
+	}
 
 	// 4. Minify (opt-in via .minify()): gọn HTML + CSS/JS nội tuyến (giữ nguyên
 	// pre/textarea/script). HTML minify tự lan vào <style>/<script> bên trong.

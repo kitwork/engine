@@ -14,6 +14,8 @@ import (
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/helpers/cache"
+	collectionhelper "github.com/kitwork/engine/helpers/collection"
+	httphelper "github.com/kitwork/engine/helpers/http"
 	"github.com/kitwork/engine/helpers/persist"
 	"github.com/kitwork/engine/helpers/ratelimit"
 	jitcss "github.com/kitwork/engine/jit/css"
@@ -60,10 +62,15 @@ type Tenant struct {
 	// Declared by the root router during ensureFolder (same publish pattern as jitcssConfig):
 	faviconFile   string   // .favicon(): file served at /favicon.ico ("" = none declared)
 	assetPrefixes []string // .assets(): allowlisted static roots (empty = serve any safe file)
+	themeMode     string   // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
 
 	respCache    *cache.Store       // .cache(): RAM response cache
 	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)
 	limiter      *ratelimit.Limiter // .limit()/.ratelimit(): rate limiter
+
+	collectionMu    sync.Mutex
+	collectionStore *collectionhelper.Store
+	collectionErr   error
 
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
@@ -205,6 +212,12 @@ func (t *Tenant) Run() error {
 	t.respCache = cache.NewStore(1000)
 	t.persistStore = persist.New(t.resolve(".persist"))
 	t.limiter = ratelimit.New()
+
+	// Override the tenant-agnostic fetch builtin with one wired to THIS tenant's cache tiers, so
+	// fetch(url, { cache: "5m", persist: "1d" }) stores per-tenant (same tiers as kitwork().http).
+	t.vm.Globals["fetch"] = value.NewFunc(func(args ...value.Value) value.Value {
+		return httphelper.FetchWith(httphelper.NewClient(t.fetchRAM(), t.fetchDisk()), args...)
+	})
 
 	// Build the (lazy) resolution tree — folders compile on first hit.
 	t.tree = NewRouteTree(t)

@@ -13,6 +13,8 @@ type Response struct {
 	Status int
 	Body   value.Value
 	Error  string
+	Cached bool // served from the .cache()/.persist() tiers, not the network
+	Stale  bool // served from an EXPIRED persisted copy because the live request failed
 }
 
 func (r Response) Ok() bool {

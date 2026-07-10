@@ -45,12 +45,29 @@ func (s *Store) Get(key string) (Record, bool) {
 	return r, true
 }
 
+// GetStale returns the record even when EXPIRED (without deleting it) — the fail-open read: a
+// caller whose live source just failed can serve the last known copy. ok is false only when the
+// key is absent or unreadable; stale reports whether the record is past its expiry.
+func (s *Store) GetStale(key string) (r Record, stale bool, ok bool) {
+	f, err := os.Open(s.path(key))
+	if err != nil {
+		return Record{}, false, false
+	}
+	defer f.Close()
+	if gob.NewDecoder(f).Decode(&r) != nil {
+		return Record{}, false, false
+	}
+	stale = !r.ExpireAt.IsZero() && time.Now().After(r.ExpireAt)
+	return r, stale, true
+}
+
 // Set writes r under key with the given TTL (0 = no expiry). The write is atomic (temp + rename).
+// Keys may carry a subdirectory ("fetch/<hash>") — the parent is created as needed.
 func (s *Store) Set(key string, r Record, ttl time.Duration) error {
 	if ttl > 0 {
 		r.ExpireAt = time.Now().Add(ttl)
 	}
-	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(s.path(key)), 0o755); err != nil {
 		return err
 	}
 	tmp := s.path(key) + ".tmp"

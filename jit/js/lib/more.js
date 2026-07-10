@@ -11,8 +11,8 @@ window.kitwork.components.action("more", function (el, e) {
   if (e && e.preventDefault) e.preventDefault();
   var store = window.kitwork.components.state(el);
   if (store.isLoading) return;
-  var href = el.getAttribute("data-kitwork-href") || el.getAttribute("href");
-  var selector = el.getAttribute("data-kitwork-target");
+  var href = (el.getAttribute("data-kit-href") || el.getAttribute("data-kitwork-href")) || el.getAttribute("href");
+  var selector = (el.getAttribute("data-kit-target") || el.getAttribute("data-kitwork-target"));
   var dest = selector ? document.querySelector(selector) : null;
   if (!href || !dest) return;
   store.isLoading = true;
@@ -36,7 +36,7 @@ window.kitwork.components.action("more", function (el, e) {
         var seen = {};
         var keySelector = "[data-kitwork-key],[data-kit-key],[data-key]";
         function getKey(n) {
-          return n.getAttribute("data-kitwork-key") || n.getAttribute("data-kit-key") || n.getAttribute("data-key");
+          return (n.getAttribute("data-kit-key") || n.getAttribute("data-kitwork-key")) || n.getAttribute("data-kit-key") || n.getAttribute("data-key");
         }
         dest.querySelectorAll(keySelector).forEach(function (n) {
           var k = getKey(n);
@@ -50,8 +50,8 @@ window.kitwork.components.action("more", function (el, e) {
         });
       }
       // Advance the trigger to the fetched page's own "next" link; retire it on the last page.
-      var next = doc.querySelector('[data-kitwork-action="more"]');
-      var nextHref = next && (next.getAttribute("data-kitwork-href") || next.getAttribute("href"));
+      var next = doc.querySelector('[data-kit-action="more"],[data-kitwork-action="more"]');
+      var nextHref = next && ((next.getAttribute("data-kit-href") || next.getAttribute("data-kitwork-href")) || next.getAttribute("href"));
       store.isLoading = false;
       el.classList.remove("is-loading");
       el.setAttribute("data-state", "ready");

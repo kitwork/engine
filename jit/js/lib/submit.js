@@ -11,7 +11,7 @@ window.kitwork.components.action("submit", function (form, e) {
   var store = window.kitwork.components.state(form);
   if (store.isLoading) return;
   var target = window.kitwork.components.target(form);
-  var swap = form.getAttribute("data-kitwork-swap") || "replace";
+  var swap = (form.getAttribute("data-kit-swap") || form.getAttribute("data-kitwork-swap")) || "replace";
   var method = (form.getAttribute("method") || "get").toUpperCase();
   var action = form.getAttribute("action") || location.href;
   var formData = new FormData(form);

@@ -66,3 +66,20 @@ func TestCompileErrors(t *testing.T) {
 		}
 	}
 }
+
+// $app capability calls (Native Bridge RFC v2) are ordinary member calls in the ONE grammar — the
+// server compiler must verify them like any expression (data-kit-click="$app.clipboard(bill_id)").
+func TestCompileAppCapabilities(t *testing.T) {
+	for _, src := range []string{
+		"$app.toggleTheme()",
+		"$app.clipboard('npm i kitwork')",
+		"$app.clipboard(bill_id)",
+		"$app.camera('user_avatar')",
+		"$app.biometric('login_success')",
+		"{ src: avatar, alt: name, disabled: n > 3 }",
+	} {
+		if _, err := Compile(src); err != nil {
+			t.Errorf("capability expression must compile: %s → %v", src, err)
+		}
+	}
+}

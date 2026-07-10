@@ -5,8 +5,8 @@
  *   <dialog id="confirm">… <button data-kitwork-action="dialog" data-kitwork-command="close">Cancel</button></dialog>
  */
 window.kitwork.components.action("dialog", function (el) {
-  var command = el.getAttribute("data-kitwork-command") || "open";
-  var dialog = el.getAttribute("data-kitwork-target")
+  var command = (el.getAttribute("data-kit-command") || el.getAttribute("data-kitwork-command")) || "open";
+  var dialog = (el.getAttribute("data-kit-target") || el.getAttribute("data-kitwork-target"))
     ? window.kitwork.components.target(el)
     : el.closest("dialog");
   if (!dialog || typeof dialog.showModal !== "function") return;
