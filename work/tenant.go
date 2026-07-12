@@ -60,9 +60,9 @@ type Tenant struct {
 	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
 
 	// Declared by the root router during ensureFolder (same publish pattern as jitcssConfig):
-	faviconFile   string   // .favicon(): file served at /favicon.ico ("" = none declared)
-	assetPrefixes []string // .assets(): allowlisted static roots (empty = serve any safe file)
-	themeMode     string   // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
+	faviconFile string        // .favicon(): file served at /favicon.ico ("" = none declared)
+	assetMounts []assetMount  // .assets(): allowlisted static roots, each URL prefix → disk dir (empty = serve any safe file)
+	themeMode   string        // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
 
 	respCache    *cache.Store       // .cache(): RAM response cache
 	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)

@@ -46,14 +46,16 @@ func appendLambdas(dst []*value.Lambda, args ...value.Value) []*value.Lambda {
 // ── a single HTTP method on a folder ────────────────────────────────────────
 
 type FolderMethod struct {
-	method   string
-	handle   *value.Lambda
-	guards   []*value.Lambda // the before-chain: runs in order; each may block / respond / prepare
-	success  *value.Lambda   // runs after a clean handler (canonical name for the old `then`)
-	errorH   *value.Lambda   // runs when the method errored (canonical name for the old `catch`)
-	final    *value.Lambda
-	isView   bool
-	viewArgs []value.Value
+	method     string
+	handle     *value.Lambda
+	guards     []*value.Lambda // the before-chain: runs in order; each may block / respond / prepare
+	success    *value.Lambda   // runs after a clean handler (canonical name for the old `then`)
+	errorH     *value.Lambda   // runs when the method errored (canonical name for the old `catch`)
+	final      *value.Lambda
+	isView     bool
+	viewArgs   []value.Value
+	outputKind string
+	outputData value.Value
 
 	// Response caching + rate limiting (see cache/persist/ratelimit helper packages). The expiry
 	// resolvers accept a rolling duration OR a wall-clock boundary ("nextday 03:00", "weekly", …),
@@ -250,6 +252,7 @@ type FolderRouter struct {
 
 	guards   []*value.Lambda // folder before-chain — applied to this folder AND every descendant
 	methods  map[string]*FolderMethod
+	outputs  map[string]*FolderMethod // semantic generated endpoints such as /rss.xml and /sitemap.xml
 	notFound *value.Lambda
 	errorH   *value.Lambda
 	meta     map[string]value.Value // declared via router.meta()/.favicon(); inherited down the chain
@@ -270,6 +273,38 @@ func (f *FolderRouter) Post(args ...value.Value) *FolderMethod   { return f.decl
 func (f *FolderRouter) Put(args ...value.Value) *FolderMethod    { return f.declare("PUT", args...) }
 func (f *FolderRouter) Patch(args ...value.Value) *FolderMethod  { return f.declare("PATCH", args...) }
 func (f *FolderRouter) Delete(args ...value.Value) *FolderMethod { return f.declare("DELETE", args...) }
+
+func (f *FolderRouter) output(kind, defaultPath string, args ...value.Value) *FolderMethod {
+	m := &FolderMethod{method: "GET", outputKind: kind, outputData: value.New(map[string]value.Value{})}
+	outputPath := defaultPath
+	if len(args) > 0 {
+		if args[0].K == value.Func {
+			m.handle = lambdaOf(args[0])
+		} else {
+			m.outputData = args[0]
+			if args[0].IsMap() {
+				if configured, ok := args[0].Map()["path"]; ok && configured.Text() != "" {
+					outputPath = configured.Text()
+				}
+			}
+		}
+	}
+	outputPath = "/" + strings.TrimPrefix(path.Clean("/"+outputPath), "/")
+	f.outputs[outputPath] = m
+	return m
+}
+
+// RSS declares a generated RSS 2.0 feed at /rss.xml. It accepts either a provider callback or a
+// channel map whose items field may itself be a callback. The returned method supports cache,
+// persist, limit, and guards just like router.get().
+func (f *FolderRouter) RSS(args ...value.Value) *FolderMethod {
+	return f.output("rss", "/rss.xml", args...)
+}
+
+// Sitemap declares a generated sitemap at /sitemap.xml from a provider callback or page map.
+func (f *FolderRouter) Sitemap(args ...value.Value) *FolderMethod {
+	return f.output("sitemap", "/sitemap.xml", args...)
+}
 
 // Guard registers folder-level before-hooks (auth/prepare) that run IN ORDER for this folder and
 // every descendant — the outside-in cascade. Accepts a fn, a variadic list, or an array.
@@ -326,33 +361,57 @@ func (f *FolderRouter) Favicon(args ...value.Value) *FolderRouter {
 	return f
 }
 
+// assetMount maps a PUBLIC url prefix to a DISK dir prefix (both relative to the tenant root). For a
+// plain .assets("assets/*") the two are identical (1:1); the alias form points a clean public URL at
+// a different — often private, underscore-prefixed — folder.
+type assetMount struct {
+	url  string // public URL prefix, no surrounding slashes, e.g. "assets"
+	disk string // disk dir prefix relative to the tenant root, e.g. "_assets"
+}
+
 // Assets DECLARES the public static roots — an allowlist. Without any declaration every safe disk
 // file under the tenant is auto-served (zero-config, see serveTreeStatic); once a folder declares
-// .assets("./assets/*"), ONLY the declared prefixes are served and everything else routes through
-// the tree. Multiple patterns/calls accumulate; the pattern is relative to this folder.
+// .assets(...), ONLY the declared prefixes are public and everything else routes through the tree.
+// Two forms (relative to this folder, accumulating + idempotent under hot-reload):
+//
+//	.assets("assets/*")             // serve disk "assets/" at URL /assets/*   (1:1)
+//	.assets("/assets/*", "_assets") // serve disk "_assets/" at URL /assets/*   (alias a private dir)
+//
+// The alias exposes a folder the router never routes (an underscore-prefixed "_assets/") at a clean
+// public URL — without leaking the underscore or making the folder routable.
 func (f *FolderRouter) Assets(args ...value.Value) *FolderRouter {
-	for _, a := range args {
-		p := strings.TrimPrefix(a.Text(), "./")
-		p = strings.TrimSuffix(strings.TrimSuffix(p, "/*"), "/")
-		p = strings.Trim(path.Clean("/"+p), "/")
-		if p == "" || p == "." {
-			continue
+	add := func(url, disk string) {
+		url, disk = cleanAssetPrefix(url), cleanAssetPrefix(disk)
+		if url == "" || disk == "" {
+			return
 		}
-		prefix := path.Join(f.node.relPath(), p)
-		if !containsString(f.tenant.assetPrefixes, prefix) { // idempotent under hot-reload recompile
-			f.tenant.assetPrefixes = append(f.tenant.assetPrefixes, prefix)
+		m := assetMount{url: path.Join(f.node.relPath(), url), disk: path.Join(f.node.relPath(), disk)}
+		for _, e := range f.tenant.assetMounts {
+			if e == m {
+				return // idempotent under hot-reload recompile
+			}
 		}
+		f.tenant.assetMounts = append(f.tenant.assetMounts, m)
+	}
+	if len(args) == 2 { // alias form: (publicURLGlob, diskDir)
+		add(args[0].Text(), args[1].Text())
+		return f
+	}
+	for _, a := range args { // 1:1 form(s): each arg is both the URL and the disk prefix
+		add(a.Text(), a.Text())
 	}
 	return f
 }
 
-func containsString(list []string, s string) bool {
-	for _, v := range list {
-		if v == s {
-			return true
-		}
+// cleanAssetPrefix normalises "./assets/*", "/assets", "assets/" → "assets" (no slashes, no glob).
+func cleanAssetPrefix(s string) string {
+	s = strings.TrimPrefix(s, "./")
+	s = strings.TrimSuffix(strings.TrimSuffix(s, "/*"), "/")
+	s = strings.Trim(path.Clean("/"+s), "/")
+	if s == "." {
+		return ""
 	}
-	return false
+	return s
 }
 
 // Language is sugar for meta({ language }) — $.meta.language in the view, for <html lang="…">.
@@ -420,7 +479,10 @@ func (n *RouteNode) ensureFolder(t *Tenant) *FolderRouter {
 // compileFolder (re)builds this node's FolderRouter from disk and records the source snapshot the
 // hot-reload check compares against. Caller holds folderMu.
 func (n *RouteNode) compileFolder(t *Tenant) {
-	fr := &FolderRouter{tenant: t, node: n, methods: map[string]*FolderMethod{}, meta: map[string]value.Value{}}
+	fr := &FolderRouter{
+		tenant: t, node: n,
+		methods: map[string]*FolderMethod{}, outputs: map[string]*FolderMethod{}, meta: map[string]value.Value{},
+	}
 	n.folder = fr // publish before running so TreeKitWork.Router() can reach it
 
 	routerFile := filepath.Join(n.diskPath(), "router"+extension+".js")

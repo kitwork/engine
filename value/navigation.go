@@ -153,9 +153,6 @@ func (v Value) Get(key string) Value {
 		}
 		return New(v.Len())
 	}
-	if key == "type" {
-		return New(v.K.String())
-	}
 	if key == "isError" && (v.K == Array || v.K == Map || v.IsError) {
 		return New(v.IsError)
 	}
@@ -183,6 +180,12 @@ func (v Value) Get(key string) Value {
 		if res.K != Nil {
 			return res
 		}
+	}
+
+	// Plain values expose `.type` as a kind name. Struct methods take precedence so APIs such as
+	// ctx.type(...), router.type(...), and browser.type(...) remain callable.
+	if key == "type" {
+		return New(v.K.String())
 	}
 
 	// ƯU TIÊN 2: Tra cứu Prototype Table (Fix lỗi upper, type, len)

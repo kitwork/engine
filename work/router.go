@@ -138,6 +138,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 	if r.cors != nil {
 		writeCorsHeaders(r.cors, w, request)
 	}
+	r.response.writeCookies(w)
 
 	// // 2.5 Bơm Headers (nếu có)
 	// if r.response.headers != nil {
@@ -182,6 +183,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
 		w.WriteHeader(r.response.Code())
 		w.Write([]byte(data.String()))
+	case "typed":
+		w.Header().Set("Content-Type", r.response.ContentType())
+		w.WriteHeader(r.response.Code())
+		w.Write(r.response.toBytes())
 	case "css":
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		w.WriteHeader(r.response.Code())
@@ -342,4 +347,3 @@ func writeCorsHeaders(opts *CorsOptions, w http.ResponseWriter, r *http.Request)
 		w.Header().Set("Access-Control-Max-Age", strconv.Itoa(int(opts.MaxAge)))
 	}
 }
-

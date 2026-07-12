@@ -45,6 +45,8 @@ func responseBytes(resp *Response) (body []byte, ct string, status int, ok bool)
 		return []byte(resp.Data().String()), "text/css; charset=utf-8", status, true
 	case "svg":
 		return []byte(resp.Data().String()), "image/svg+xml; charset=utf-8", status, true
+	case "typed":
+		return []byte(resp.Data().String()), resp.ContentType(), status, true
 	case "json":
 		b, err := json.Marshal(resp.Data())
 		if err != nil {

@@ -72,6 +72,11 @@ func buildJITCSS(classes []string, cfg *Config) string {
 	b.WriteString("a { color: inherit; text-decoration: inherit; }\n")
 	b.WriteString("button, input, optgroup, select, textarea { font: inherit; color: inherit; margin: 0; padding: 0; }\n")
 	b.WriteString("img, svg, video, canvas, audio, iframe, embed, object { display: block; vertical-align: middle; }\n")
+	// The `hidden` attribute must always win — otherwise any element with an explicit display (e.g. an
+	// icon's display:inline-block, or flex/grid utilities) overrides the UA `[hidden]{display:none}`
+	// and stays visible. data-kit-show toggles `el.hidden`, so without this it silently fails on such
+	// elements (both branches of a show/hide pair render at once).
+	b.WriteString("[hidden] { display: none !important; }\n")
 
 	// 1. Base styles (no media query)
 	if baseRules, ok := groups[""]; ok {

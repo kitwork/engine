@@ -60,6 +60,17 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	// during ensureFolder) is captured into treeRender.JitConfig.
 	reqRouter.treeRender = t.treeRender(match.Node)
 
+	// Semantic outputs are virtual root endpoints. A real filesystem node always wins; otherwise
+	// router.rss()/router.sitemap() can answer their declared path without a synthetic folder.
+	var generatedMethod *FolderMethod
+	if !match.Found && r.Method == http.MethodGet && t.tree.root.folder != nil {
+		generatedMethod = t.tree.root.folder.outputs[path.Clean("/"+r.URL.Path)]
+		if generatedMethod != nil {
+			match.Found = true
+			match.Node = t.tree.root
+		}
+	}
+
 	// savMethod (set once a cacheable method resolves) makes finalize persist the response.
 	var savMethod *FolderMethod
 	savKey := cacheKey(r)
@@ -146,7 +157,10 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	leaf := match.Node.folder
-	method := leaf.methods[r.Method]
+	method := generatedMethod
+	if method == nil {
+		method = leaf.methods[r.Method]
+	}
 
 	// No explicit method for this verb: a GET on a folder that has a page renders it; anything
 	// else is a not-found (method not allowed bubbles to the same 404 view for now).
@@ -190,6 +204,10 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	// Handler.
 	if reqRouter.err == nil && !reqRouter.response.IsSend() {
 		switch {
+		case method.outputKind != "":
+			if err := t.executeGeneratedOutput(vm, leaf.bytecode, method, ctxObj); err != nil {
+				reqRouter.err = err
+			}
 		case method.handle != nil:
 			res := t.execTree(vm, leaf.bytecode, method.handle, ctxObj)
 			if res.K == value.Invalid {
@@ -352,22 +370,27 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 
-	// Allowlist mode: once .assets() declared anything, only those roots are public.
-	if len(t.assetPrefixes) > 0 {
-		allowed := false
-		for _, p := range t.assetPrefixes {
-			if strings.HasPrefix(clean, "/"+p+"/") || clean == "/"+p {
-				allowed = true
+	// Allowlist + alias mapping: once .assets() declared anything, only those URL prefixes are public,
+	// and each maps to its (possibly different, e.g. private "_assets/") disk dir. Zero-config (no
+	// mounts) leaves diskClean == clean so any safe file under the tenant auto-serves.
+	diskClean := clean
+	if len(t.assetMounts) > 0 {
+		matched := false
+		for _, m := range t.assetMounts {
+			up := "/" + m.url
+			if clean == up || strings.HasPrefix(clean, up+"/") {
+				diskClean = "/" + m.disk + strings.TrimPrefix(clean, up)
+				matched = true
 				break
 			}
 		}
-		if !allowed {
+		if !matched {
 			return false
 		}
 	}
 
 	base := t.resolve()
-	full := filepath.Join(base, filepath.FromSlash(clean))
+	full := filepath.Join(base, filepath.FromSlash(diskClean))
 	rel, err := filepath.Rel(base, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false

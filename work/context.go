@@ -29,6 +29,7 @@ func (c *Context) HTML(v value.Value, code ...int) { c.Response().HTML(v, code..
 func (c *Context) Text(v value.Value, code ...int) { c.Response().Text(v, code...) }
 func (c *Context) CSS(v value.Value, code ...int)  { c.Response().CSS(v, code...) }
 func (c *Context) Status(code int) *Response       { return c.Response().Status(code) }
+func (c *Context) Type(mediaType string) *Response { return c.Response().Type(mediaType) }
 func (c *Context) Redirect(url string, code ...int) {
 	c.Response().Redirect(value.New(url), code...)
 }
@@ -55,8 +56,35 @@ func (c *Context) UserAgent() value.Value      { return c.request.UserAgent() }
 func (c *Context) IsAJAX() value.Value         { return c.request.IsAJAX() }
 func (c *Context) IsJSON() value.Value         { return c.request.IsJSON() }
 
-func (c *Context) Cookie(name string) value.Value          { return c.request.Cookie(name) }
-func (c *Context) Cookies() value.Value                    { return c.request.Cookies() }
+// Cookie is the context-level cookie shorthand:
+//
+//	ctx.cookie("name")                 read
+//	ctx.cookie("name", value)          set with defaults
+//	ctx.cookie("name", value, options) set with options
+//	ctx.cookie("name", null, options)  delete
+//
+// Request.Cookie remains read-only. SetCookie and DeleteCookie stay as explicit aliases.
+func (c *Context) Cookie(name string, args ...value.Value) value.Value {
+	if len(args) == 0 {
+		return c.request.Cookie(name)
+	}
+	data := args[0]
+	options := args[1:]
+	if data.K == value.Nil {
+		c.Response().DeleteCookie(name, options...)
+		return value.NewNil()
+	}
+	c.Response().SetCookie(name, data, options...)
+	return data
+}
+
+func (c *Context) Cookies() value.Value { return c.request.Cookies() }
+func (c *Context) SetCookie(name string, data value.Value, options ...value.Value) *Response {
+	return c.Response().SetCookie(name, data, options...)
+}
+func (c *Context) DeleteCookie(name string, options ...value.Value) *Response {
+	return c.Response().DeleteCookie(name, options...)
+}
 func (c *Context) Hostname() value.Value                   { return c.request.Hostname() }
 func (c *Context) Secure() value.Value                     { return c.request.Secure() }
 func (c *Context) OriginalURL() value.Value                { return c.request.OriginalURL() }

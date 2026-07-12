@@ -68,14 +68,15 @@ type Render struct {
 }
 
 type Layout struct {
-	header  string
-	navbar  string
-	footer  string
-	head    string
-	sidebar string
-	tabbar  string
-	subbar  string
-	toolbar string
+	header   string
+	navbar   string
+	footer   string
+	head     string
+	sidebar  string
+	tabbar   string
+	subbar   string
+	toolbar  string
+	titlebar string
 }
 
 func (r *Render) New(dir ...string) *Render {
@@ -352,7 +353,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 
 				}
 
-			case "_header_", "_navbar_", "_footer_", "_head_", "_sidebar_", "_toolbar_", "_tabbar_", "_subbar_":
+			case "_header_", "_navbar_", "_footer_", "_head_", "_sidebar_", "_toolbar_", "_tabbar_", "_subbar_", "_titlebar_":
 				found := false
 
 				// A. Thử tìm trong Layout Map (ưu tiên nạp từ RAM nếu có)
@@ -374,6 +375,8 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					pathVal = r.layout.tabbar
 				case "_subbar_":
 					pathVal = r.layout.subbar
+				case "_titlebar_":
+					pathVal = r.layout.titlebar
 				}
 				if pathVal != "" {
 					if raw, err := os.ReadFile(pathVal); err == nil {

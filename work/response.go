@@ -1,6 +1,10 @@
 package work
 
 import (
+	"net/http"
+	"strings"
+	"time"
+
 	"github.com/kitwork/engine/value"
 )
 
@@ -10,11 +14,13 @@ type page struct {
 }
 
 type Response struct {
-	data value.Value
-	kind string
-	code int
+	data        value.Value
+	kind        string
+	code        int
+	contentType string
 
-	page *page
+	page    *page
+	cookies []*http.Cookie
 }
 
 func (r *Response) IsSend() bool {
@@ -39,7 +45,11 @@ func (r *Response) Send(data value.Value, options ...interface{}) {
 	r.data = data
 	if len(options) == 0 {
 		if !data.IsBlank() {
-			r.kind = "" // Clear kind to let responder guess from data
+			if r.contentType != "" {
+				r.kind = "typed"
+			} else {
+				r.kind = "" // Clear kind to let responder guess from data
+			}
 		}
 		return
 	}
@@ -131,6 +141,89 @@ func (r *Response) Status(code int) *Response {
 	return r
 }
 
+// Type selects the media type used by Send. XML, CSV, calendar, and vendor formats all share
+// this path instead of growing one response method per representation.
+func (r *Response) Type(mediaType string) *Response {
+	mediaType = strings.TrimSpace(mediaType)
+	if mediaType != "" && strings.Contains(mediaType, "/") && !strings.ContainsAny(mediaType, "\r\n") {
+		r.contentType = mediaType
+	}
+	return r
+}
+
+// SetCookie queues an HTTP cookie for the response. Cookies are HttpOnly and SameSite=Lax by
+// default; callers may override path, domain, secure, httpOnly, sameSite, and maxAge.
+func (r *Response) SetCookie(name string, data value.Value, options ...value.Value) *Response {
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    data.String(),
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	}
+	applyCookieOptions(cookie, options...)
+	r.cookies = append(r.cookies, cookie)
+	return r
+}
+
+// DeleteCookie expires a cookie immediately while preserving path/domain matching options.
+func (r *Response) DeleteCookie(name string, options ...value.Value) *Response {
+	cookie := &http.Cookie{
+		Name:     name,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0).UTC(),
+	}
+	applyCookieOptions(cookie, options...)
+	cookie.Value = ""
+	cookie.MaxAge = -1
+	cookie.Expires = time.Unix(1, 0).UTC()
+	r.cookies = append(r.cookies, cookie)
+	return r
+}
+
+func applyCookieOptions(cookie *http.Cookie, options ...value.Value) {
+	if len(options) == 0 || options[0].K != value.Map {
+		return
+	}
+	opts := options[0].Map()
+	if v, ok := opts["path"]; ok && v.String() != "" {
+		cookie.Path = v.String()
+	}
+	if v, ok := opts["domain"]; ok {
+		cookie.Domain = v.String()
+	}
+	if v, ok := opts["secure"]; ok {
+		cookie.Secure = v.Truthy()
+	}
+	if v, ok := opts["httpOnly"]; ok {
+		cookie.HttpOnly = v.Truthy()
+	}
+	if v, ok := opts["maxAge"]; ok && v.IsNumber() {
+		cookie.MaxAge = int(v.N)
+	}
+	if v, ok := opts["sameSite"]; ok {
+		switch strings.ToLower(v.String()) {
+		case "strict":
+			cookie.SameSite = http.SameSiteStrictMode
+		case "none":
+			cookie.SameSite = http.SameSiteNoneMode
+		case "default":
+			cookie.SameSite = http.SameSiteDefaultMode
+		default:
+			cookie.SameSite = http.SameSiteLaxMode
+		}
+	}
+}
+
+func (r *Response) writeCookies(w http.ResponseWriter) {
+	for _, cookie := range r.cookies {
+		http.SetCookie(w, cookie)
+	}
+}
+
 func (r *Response) Template(index string) *Response {
 	if r.page == nil {
 		r.page = &page{}
@@ -178,5 +271,6 @@ func (r *Response) toBytes() []byte {
 	return []byte(r.data.String())
 }
 
-func (r *Response) Kind() string      { return r.kind }
-func (r *Response) Data() value.Value { return r.data }
+func (r *Response) Kind() string        { return r.kind }
+func (r *Response) Data() value.Value   { return r.data }
+func (r *Response) ContentType() string { return r.contentType }

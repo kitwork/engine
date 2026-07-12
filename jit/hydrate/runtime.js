@@ -76,12 +76,28 @@
   // window(action): control the NATIVE window — "minimize" | "maximize" | "close" | "drag". Only
   // meaningful in a native shell (a desktop app's custom title bar calls these); on the plain web a
   // page can't move the browser window, so it is a no-op. Returns a Promise from the bridge.
+  // NOTE: this is called INTERNALLY (the data-kit-drag handler) — it is NOT reachable from markup,
+  // because the expression sandbox blocks the member key "window" (see blockedKey: `.window` could
+  // escape to the global). Markup uses the named aliases below instead.
   kitwork.window = function (action) {
     if (bridge && bridge.call) {
       return bridge.call("window." + action, {});
     }
     return false;
   };
+  // Markup-facing window controls. "window" is a sandbox-blocked member key, so a custom title bar
+  // can't call $app.window(...) from data-kit-click — these named capabilities are the public surface:
+  // data-kit-click="$app.minimize()" / "$app.maximize()" / "$app.closeWindow()". Each is a native
+  // no-op on the web (bridge absent).
+  kitwork.minimize = function () { return kitwork.window("minimize"); };
+  kitwork.maximize = function () { return kitwork.window("maximize"); };
+  kitwork.closeWindow = function () { return kitwork.window("close"); };
+
+  // Navigation for custom title bars / toolbars (history isn't in the expression scope, so markup
+  // calls these): $app.back() / $app.forward() / $app.reload(). Work on web and native alike.
+  kitwork.back = function () { history.back(); };
+  kitwork.forward = function () { history.forward(); };
+  kitwork.reload = function () { location.reload(); };
 
   // camera(key): capture a photo and write its URI into scope[key] — the FIRST capability that
   // RETURNS a value (RFC async contract): the call returns immediately, and when the photo is
@@ -387,6 +403,7 @@
     get: function (t, k) {
       if (k === "$") return t;
       if (k === "$app") return kitwork;
+      if (k in aliases) return aliases[k]; // $sidebar / $theme … → the named instance's scope
       return k in t ? t[k] : 0;
     },
     set: function (t, k, v) {
@@ -541,11 +558,15 @@
 
   function boundaryScope(b) {
     var st = state(b);
-    var cname = b.getAttribute("data-kitwork-component") || b.getAttribute("data-kit-component");
-    if (cname) {
+    var craw = b.getAttribute("data-kitwork-component") || b.getAttribute("data-kit-component");
+    if (craw) {
+      var tag = parseComponentTag(craw);
+      var cname = tag.name;
+      var alias = tag.alias || b.getAttribute("data-alias") || "";
       // Component registration (kitwork.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       if (!st.scope) st.scope = {};
+      if (alias) aliases[alias] = st.scope; // global handle → this instance's scope
       if (!st.seeded) {
         if (blueprints[cname]) {
           seedComponent(st.scope, blueprints[cname]);
@@ -618,6 +639,7 @@
         if (k === "$el") return el;
         if (k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
         if (k === "$app") return kitwork;
+        if (k in aliases) return aliases[k]; // $sidebar / $theme … → the named instance's scope
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
@@ -633,6 +655,7 @@
       get: function (t, k) {
         if (k === "$") return raw;
         if (k === "$app") return kitwork;
+        if (k in aliases) return aliases[k]; // $sidebar / $theme … → the named instance's scope
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
         return 0;
@@ -665,12 +688,30 @@
     });
   }
 
+  // Named component handles: data-kit-component="sidebar=$sidebar" registers `$sidebar` → that
+  // instance's scope, so ANY expression reaches it ($sidebar.cycle()), even from outside its DOM
+  // subtree (the scattered-controls case). No alias = purely lexical (bare cycle() = nearest scope).
+  var aliases = {};
+  // $theme is a boot-registered GLOBAL handle: theme is a global capability, not a DOM-scoped instance,
+  // so it needs no per-page boundary — data-kit-click="$theme.toggle()" works everywhere. It delegates
+  // to the one theme source of truth (kitwork.theme setter). Coherent with $sidebar etc. (all in aliases);
+  // NOT stored on kitwork.theme, which is the theme STRING ("light"/"dark").
+  aliases["$theme"] = { toggle: function () { kitwork.toggleTheme(); } };
+  // parseComponentTag splits `name@version=$alias` (all but name optional) → { name, version, alias }.
+  function parseComponentTag(raw) {
+    var name = raw, version = "", alias = "", i;
+    if ((i = name.indexOf("=")) >= 0) { alias = name.slice(i + 1).trim(); name = name.slice(0, i); }
+    if ((i = name.indexOf("@")) >= 0) { version = name.slice(i + 1).trim(); name = name.slice(0, i); }
+    return { name: name.trim(), version: version, alias: alias };
+  }
+
   var activeComponents = {};
   function rebuildActiveComponents() {
     var next = {};
     document.querySelectorAll("[data-kitwork-component],[data-kit-component]").forEach(function (el) {
-      var cname = el.getAttribute("data-kitwork-component") || el.getAttribute("data-kit-component");
-      if (!cname) return;
+      var craw = el.getAttribute("data-kitwork-component") || el.getAttribute("data-kit-component");
+      if (!craw) return;
+      var cname = parseComponentTag(craw).name;
       var st = state(el);
       if (st.seeded) {
         var inst = scopeFor(el);
@@ -854,6 +895,19 @@
     if (ex) { var x = directive(ex, "click"); if (x) { run(x, elementScope(ex)); render(); } }
     var act = e.target.closest && e.target.closest(ACTION);
     if (act) fire(act, e);
+  });
+  // data-kit-drag: a native window drag region (a custom title bar). Primary-button press hands the
+  // drag to the OS via $app.window('drag'); double-click maximizes — standard title-bar behaviour.
+  // A no-op on the web (bridge absent). Buttons inside can opt out with data-kit-no-drag.
+  var DRAG = "[data-kitwork-drag],[data-kit-drag]";
+  document.addEventListener("mousedown", function (e) {
+    if (e.button !== 0) return;
+    if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
+    if (e.target.closest && e.target.closest(DRAG)) kitwork.window("drag");
+  });
+  document.addEventListener("dblclick", function (e) {
+    if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
+    if (e.target.closest && e.target.closest(DRAG)) kitwork.window("maximize");
   });
   document.addEventListener("input", function (e) {
     var el = e.target.closest && e.target.closest(MODEL);

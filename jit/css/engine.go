@@ -51,7 +51,7 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 				":", "\\:", ".", "\\.", "/", "\\/", "%", "\\%",
 				"[", "\\[", "]", "\\]", "#", "\\#",
 				"(", "\\(", ")", "\\)", ",", "\\,",
-				"'", "\\'", "\"", "\\\"",
+				"'", "\\'", "\"", "\\\"", "=", "\\=",
 			).Replace(full)
 			sel := "." + esc
 			if full[0] == '-' {
@@ -82,6 +82,20 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 					mediaQuery = mq // last (innermost) media query wins
 					continue
 				}
+				// data-[state=x] / data-[open] / group-data-[state=x]: element or .group ancestor attr.
+				if strings.HasPrefix(v, "data-[") || strings.HasPrefix(v, "group-data-[") {
+					inner := v[strings.IndexByte(v, '[')+1 : len(v)-1]
+					attr := "data-" + inner
+					if i := strings.IndexByte(inner, '='); i >= 0 {
+						attr = "data-" + inner[:i] + `="` + inner[i+1:] + `"`
+					}
+					if strings.HasPrefix(v, "group-") {
+						ampPattern = ".group[" + attr + "] &"
+					} else {
+						sel += "[" + attr + "]"
+					}
+					continue
+				}
 				if st, ok := sts[v]; ok {
 					if strings.Contains(st, "&") {
 						ampPattern = st
@@ -106,6 +120,10 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 	}
 	return "", "", ""
 }
+
+// dataVariantRe matches an arbitrary data-attribute variant prefix: `data-[state=x]:`,
+// `data-[open]:`, or the `group-` form. The bracket body is turned into a `[data-…]` selector.
+var dataVariantRe = regexp.MustCompile(`^(?:group-)?data-\[[^\]]*\]:`)
 
 // Support stacked variants: desktop:hover:bg-red
 func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
@@ -142,6 +160,17 @@ func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
 					found = true
 					break
 				}
+			}
+		}
+
+		// Arbitrary data-attribute variant: data-[state=collapsed]: / data-[open]: (element itself)
+		// and group-data-[state=…]: (a .group ancestor). State-driven styling with pure utilities
+		// (the shadcn pattern) instead of a hand-written <style> block.
+		if !found {
+			if m := dataVariantRe.FindString(core); m != "" {
+				variants = append(variants, strings.TrimSuffix(m, ":"))
+				core = core[len(m):]
+				found = true
 			}
 		}
 

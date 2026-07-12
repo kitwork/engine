@@ -98,6 +98,64 @@ func (r *Request) Header(key string) value.Value {
 	return value.New(req.Header.Get(key))
 }
 
+// The native-runtime signals. A native shell (desktop/mobile) sends X-Kitwork-Native: <platform>
+// on every in-memory request; a plain web browser never does. Templates read these to render
+// platform-specific chrome ONCE on the server ({{ if $.request.desktop }}…{{ end }}) — so the DOM
+// never even reaches web clients (no flash, unlike a client-side data-kit-show). All are 0-arg, so
+// they appear as fields: $.request.native / .platform / .desktop / .mobile.
+
+// nativePlatform returns "windows"|"macos"|"ios"|"android" from the shell header, or "".
+func (r *Request) nativePlatform() string {
+	req := r.request()
+	if req == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(req.Header.Get("X-Kitwork-Native")))
+}
+
+// Native reports whether the request comes from ANY native shell (a bridge is present).
+func (r *Request) Native() value.Value { return value.New(r.nativePlatform() != "") }
+
+// Platform is the OS the request runs on: "windows"|"macos"|"ios"|"android", or "web".
+func (r *Request) Platform() value.Value {
+	if p := r.nativePlatform(); p != "" {
+		return value.New(p)
+	}
+	return value.New("web")
+}
+
+// Desktop is true for the desktop apps (window chrome makes sense: title bar, min/max/close).
+func (r *Request) Desktop() value.Value {
+	p := r.nativePlatform()
+	return value.New(p == "windows" || p == "macos")
+}
+
+// Mobile is true for the phone apps (no window chrome; use safe-area / an app bar instead).
+func (r *Request) Mobile() value.Value {
+	p := r.nativePlatform()
+	return value.New(p == "ios" || p == "android")
+}
+
+// Chrome reports which window chrome the shell is drawing, so a tenant renders its HTML title bar
+// ONLY when asked and never doubles up with an OS one:
+//   - "native": the shell draws a real OS title bar / toolbar → the page renders NO title bar.
+//   - "html":   the shell is frameless → the page owns the title bar ({{ if $.request.chrome == 'html' }}).
+//   - "web":    a plain browser.
+// The desktop shell sends X-Kitwork-Chrome per its --chrome mode; a native shell that omits it
+// defaults to html (the frameless + HTML-title-bar path).
+func (r *Request) Chrome() value.Value {
+	req := r.request()
+	if req != nil {
+		if c := strings.ToLower(strings.TrimSpace(req.Header.Get("X-Kitwork-Chrome"))); c != "" {
+			return value.New(c)
+		}
+	}
+	if r.nativePlatform() != "" {
+		return value.New("html")
+	}
+	return value.New("web")
+}
+
 func (r *Request) Headers() value.Value {
 	req := r.request()
 	if req == nil {
