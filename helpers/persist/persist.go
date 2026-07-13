@@ -16,6 +16,7 @@ type Record struct {
 	Body        []byte
 	ContentType string
 	Status      int
+	Headers     map[string]string
 	ExpireAt    time.Time
 }
 

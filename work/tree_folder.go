@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +57,7 @@ type FolderMethod struct {
 	viewArgs   []value.Value
 	outputKind string
 	outputData value.Value
+	outputPath string
 
 	// Response caching + rate limiting (see cache/persist/ratelimit helper packages). The expiry
 	// resolvers accept a rolling duration OR a wall-clock boundary ("nextday 03:00", "weekly", …),
@@ -290,8 +292,31 @@ func (f *FolderRouter) output(kind, defaultPath string, args ...value.Value) *Fo
 		}
 	}
 	outputPath = "/" + strings.TrimPrefix(path.Clean("/"+outputPath), "/")
+	m.outputPath = outputPath
 	f.outputs[outputPath] = m
 	return m
+}
+
+func (f *FolderRouter) generatedOutput(requestPath string) *FolderMethod {
+	requestPath = path.Clean("/" + requestPath)
+	if method := f.outputs[requestPath]; method != nil {
+		return method
+	}
+	for _, method := range f.outputs {
+		if method.outputKind != "sitemap" {
+			continue
+		}
+		extension := path.Ext(method.outputPath)
+		base := strings.TrimSuffix(method.outputPath, extension)
+		if !strings.HasPrefix(requestPath, base+"-") || !strings.HasSuffix(requestPath, extension) {
+			continue
+		}
+		pageText := strings.TrimSuffix(strings.TrimPrefix(requestPath, base+"-"), extension)
+		if page, err := strconv.Atoi(pageText); err == nil && page > 0 {
+			return method
+		}
+	}
+	return nil
 }
 
 // RSS declares a generated RSS 2.0 feed at /rss.xml. It accepts either a provider callback or a

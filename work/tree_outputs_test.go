@@ -22,6 +22,7 @@ func TestTreeSemanticOutputsAndTypedResponse(t *testing.T) {
 	}
 	router := `import { router } from "kitwork";
 router.rss({
+    path: "/feed.xml",
     title: "Test & Feed",
     description: "Structured output",
     link: "https://example.test",
@@ -32,6 +33,7 @@ router.rss({
         published: "2026-07-12"
     }]
 }).cache("1h");
+router.rss({ path: "/broken.xml", title: "Broken", items: [] });
 router.sitemap(() => [
     { loc: "/", lastmod: "2026-07-12" },
     { loc: "/concepts/runtime", lastmod: "2026-07-11" },
@@ -50,14 +52,20 @@ router.get((ctx) => ctx.type("text/csv; charset=utf-8").send("name,value\nkitwor
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
-	get := func(path string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)
+	request := func(method, path string, headers map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, "http://localhost"+path, nil)
+		for name, data := range headers {
+			req.Header.Set(name, data)
+		}
 		rec := httptest.NewRecorder()
 		tenant.Serve(rec, req)
 		return rec
 	}
+	get := func(path string) *httptest.ResponseRecorder {
+		return request(http.MethodGet, path, nil)
+	}
 
-	rss := get("/rss.xml")
+	rss := get("/feed.xml")
 	if rss.Code != 200 || !strings.HasPrefix(rss.Header().Get("Content-Type"), "application/rss+xml") {
 		t.Fatalf("rss response: status=%d type=%q body=%q", rss.Code, rss.Header().Get("Content-Type"), rss.Body.String())
 	}
@@ -66,8 +74,25 @@ router.get((ctx) => ctx.type("text/csv; charset=utf-8").send("name,value\nkitwor
 			t.Fatalf("rss body missing %q: %s", want, rss.Body.String())
 		}
 	}
-	if hit := get("/rss.xml"); hit.Header().Get("X-Kitwork-Cache") != "hit" {
+	etag := rss.Header().Get("ETag")
+	lastModified := rss.Header().Get("Last-Modified")
+	if etag == "" || lastModified == "" {
+		t.Fatalf("rss validators missing: etag=%q last-modified=%q", etag, lastModified)
+	}
+	if hit := get("/feed.xml"); hit.Header().Get("X-Kitwork-Cache") != "hit" {
 		t.Fatalf("second rss request should use method cache, headers=%v", hit.Header())
+	}
+	conditional := request(http.MethodGet, "/feed.xml", map[string]string{"If-None-Match": etag})
+	if conditional.Code != http.StatusNotModified || conditional.Body.Len() != 0 {
+		t.Fatalf("conditional rss: status=%d body=%q", conditional.Code, conditional.Body.String())
+	}
+	head := request(http.MethodHead, "/feed.xml", nil)
+	if head.Code != http.StatusOK || head.Body.Len() != 0 || head.Header().Get("ETag") != etag {
+		t.Fatalf("rss HEAD: status=%d etag=%q body=%q", head.Code, head.Header().Get("ETag"), head.Body.String())
+	}
+	broken := get("/broken.xml")
+	if broken.Code != http.StatusInternalServerError || !strings.Contains(broken.Body.String(), "requires title, description, and link") {
+		t.Fatalf("invalid rss should fail clearly: status=%d body=%q", broken.Code, broken.Body.String())
 	}
 
 	sitemap := get("/sitemap.xml")

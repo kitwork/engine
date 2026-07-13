@@ -182,8 +182,16 @@ func (v Value) Get(key string) Value {
 		}
 	}
 
-	// Plain values expose `.type` as a kind name. Struct methods take precedence so APIs such as
-	// ctx.type(...), router.type(...), and browser.type(...) remain callable.
+	// An object's own `type` field is data, not the generic kind helper. This is especially
+	// important for metadata objects (`$.meta.type`).
+	if key == "type" && v.K == Map {
+		if item, ok := v.Map()[key]; ok {
+			return item
+		}
+	}
+
+	// Plain values expose `.type` as a kind name. Struct methods and map fields take precedence so
+	// APIs such as ctx.type(...) and data objects with a `type` field remain usable.
 	if key == "type" {
 		return New(v.K.String())
 	}

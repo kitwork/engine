@@ -1,8 +1,7 @@
 package work
 
-// Response-cache glue: this is the HTTP-aware layer that wires the pure cache/persist/ratelimit
-// packages into the tree lifecycle. The packages store opaque bytes by key; here we extract the
-// key from the request, serialize the finalized Response, and replay it on a hit.
+// Response-cache glue for tree routes. Cache packages store opaque HTTP records; this layer
+// extracts and replays body, content type, status, and validator headers without entering the VM.
 
 import (
 	"crypto/sha256"
@@ -15,92 +14,111 @@ import (
 	"github.com/kitwork/engine/helpers/persist"
 )
 
-// cacheKey identifies a cached response by method + path + query.
 func cacheKey(r *http.Request) string {
-	if r.URL.RawQuery != "" {
-		return r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery
+	method := r.Method
+	if method == http.MethodHead {
+		method = http.MethodGet
 	}
-	return r.Method + " " + r.URL.Path
+	if r.URL.RawQuery != "" {
+		return method + " " + r.URL.Path + "?" + r.URL.RawQuery
+	}
+	return method + " " + r.URL.Path
 }
 
-// hashKey turns a key into a filesystem-safe name for the disk (.persist) store.
 func hashKey(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
 
-// responseBytes serializes a finalized Response to (body, content-type, status) for caching. Only
-// value-bearing responses cache; streams / redirects / files return ok=false.
-func responseBytes(resp *Response) (body []byte, ct string, status int, ok bool) {
+func responseBytes(resp *Response) (body []byte, contentType string, status int, headers map[string]string, ok bool) {
 	status = resp.Code()
 	if status == 0 {
-		status = 200
+		status = http.StatusOK
 	}
+	headers = resp.Headers()
 	switch resp.Kind() {
 	case "html", "":
-		return []byte(resp.Data().String()), "text/html; charset=utf-8", status, true
+		return []byte(resp.Data().String()), "text/html; charset=utf-8", status, headers, true
 	case "text":
-		return []byte(resp.Data().String()), "text/plain; charset=utf-8", status, true
+		return []byte(resp.Data().String()), "text/plain; charset=utf-8", status, headers, true
 	case "css":
-		return []byte(resp.Data().String()), "text/css; charset=utf-8", status, true
+		return []byte(resp.Data().String()), "text/css; charset=utf-8", status, headers, true
 	case "svg":
-		return []byte(resp.Data().String()), "image/svg+xml; charset=utf-8", status, true
+		return []byte(resp.Data().String()), "image/svg+xml; charset=utf-8", status, headers, true
 	case "typed":
-		return []byte(resp.Data().String()), resp.ContentType(), status, true
+		return []byte(resp.Data().String()), resp.ContentType(), status, headers, true
 	case "json":
-		b, err := json.Marshal(resp.Data())
+		data, err := json.Marshal(resp.Data())
 		if err != nil {
-			return nil, "", 0, false
+			return nil, "", 0, nil, false
 		}
-		return b, "application/json; charset=utf-8", status, true
+		return data, "application/json; charset=utf-8", status, headers, true
 	case "image":
-		return resp.Data().Bytes(), "image/png", status, true
+		return resp.Data().Bytes(), "image/png", status, headers, true
 	case "bytes":
-		return resp.Data().Bytes(), "application/octet-stream", status, true
+		return resp.Data().Bytes(), "application/octet-stream", status, headers, true
 	default:
-		return nil, "", 0, false // sse / redirect / file / directory / error — never cached
+		return nil, "", 0, nil, false
 	}
 }
 
-// serveCached writes a cache/persist hit straight to the wire — no VM, no render.
-func serveCached(w http.ResponseWriter, body []byte, ct string, status int) {
+func serveCached(
+	w http.ResponseWriter,
+	request *http.Request,
+	body []byte,
+	contentType string,
+	status int,
+	headers map[string]string,
+) {
 	if status == 0 {
-		status = 200
+		status = http.StatusOK
 	}
-	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Type", contentType)
+	for name, data := range headers {
+		w.Header().Set(name, data)
+	}
 	w.Header().Set("X-Kitwork-Cache", "hit")
+	if requestNotModified(request, w.Header()) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 	w.WriteHeader(status)
-	w.Write(body)
+	if request.Method != http.MethodHead {
+		_, _ = w.Write(body)
+	}
 }
 
-// cachedResponse returns a hit for the method's cache/persist config, if any.
-func (t *Tenant) cachedResponse(method *FolderMethod, key string) (body []byte, ct string, status int, ok bool) {
+func (t *Tenant) cachedResponse(
+	method *FolderMethod,
+	key string,
+) (body []byte, contentType string, status int, headers map[string]string, ok bool) {
 	if method.cacheExpiry != nil {
-		if e, hit := t.respCache.Get(key); hit {
-			return e.Body, e.ContentType, e.Status, true
+		if entry, hit := t.respCache.Get(key); hit {
+			return entry.Body, entry.ContentType, entry.Status, entry.Headers, true
 		}
 	}
 	if method.persistExpiry != nil {
-		if rec, hit := t.persistStore.Get(hashKey(key)); hit {
-			return rec.Body, rec.ContentType, rec.Status, true
+		if record, hit := t.persistStore.Get(hashKey(key)); hit {
+			return record.Body, record.ContentType, record.Status, record.Headers, true
 		}
 	}
-	return nil, "", 0, false
+	return nil, "", 0, nil, false
 }
 
-// saveResponse stores a finalized 2xx response in RAM (.cache) and/or on disk (.persist). The
-// expiry resolvers are evaluated NOW, so a boundary spec ("nextday 03:00") pins the expiry to the
-// next wall-clock boundary rather than a rolling window.
-func (t *Tenant) saveResponse(method *FolderMethod, key string, resp *Response) {
-	body, ct, status, ok := responseBytes(resp)
+func (t *Tenant) saveResponse(method *FolderMethod, key string, response *Response) {
+	body, contentType, status, headers, ok := responseBytes(response)
 	if !ok || status < 200 || status >= 300 {
 		return
 	}
 	now := time.Now()
 	if method.cacheExpiry != nil {
-		t.respCache.Set(key, cache.Entry{Body: body, ContentType: ct, Status: status}, method.cacheExpiry(now))
+		t.respCache.Set(key, cache.Entry{
+			Body: body, ContentType: contentType, Status: status, Headers: headers,
+		}, method.cacheExpiry(now))
 	}
 	if method.persistExpiry != nil {
-		_ = t.persistStore.Set(hashKey(key), persist.Record{Body: body, ContentType: ct, Status: status}, method.persistExpiry(now))
+		_ = t.persistStore.Set(hashKey(key), persist.Record{
+			Body: body, ContentType: contentType, Status: status, Headers: headers,
+		}, method.persistExpiry(now))
 	}
 }

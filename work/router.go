@@ -139,6 +139,11 @@ func (r *Router) responder(w http.ResponseWriter) {
 		writeCorsHeaders(r.cors, w, request)
 	}
 	r.response.writeCookies(w)
+	r.response.writeHeaders(w)
+	if requestNotModified(request, w.Header()) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
 
 	// // 2.5 Bơm Headers (nếu có)
 	// if r.response.headers != nil {
@@ -186,7 +191,9 @@ func (r *Router) responder(w http.ResponseWriter) {
 	case "typed":
 		w.Header().Set("Content-Type", r.response.ContentType())
 		w.WriteHeader(r.response.Code())
-		w.Write(r.response.toBytes())
+		if request.Method != http.MethodHead {
+			w.Write(r.response.toBytes())
+		}
 	case "css":
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		w.WriteHeader(r.response.Code())

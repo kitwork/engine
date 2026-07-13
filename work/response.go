@@ -18,6 +18,7 @@ type Response struct {
 	kind        string
 	code        int
 	contentType string
+	headers     map[string]string
 
 	page    *page
 	cookies []*http.Cookie
@@ -151,6 +152,28 @@ func (r *Response) Type(mediaType string) *Response {
 	return r
 }
 
+// Header sets a response header. Request headers remain available through ctx.header(name).
+func (r *Response) Header(name, data string) *Response {
+	name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+	data = strings.TrimSpace(data)
+	if name == "" || strings.ContainsAny(name+data, "\r\n") {
+		return r
+	}
+	if r.headers == nil {
+		r.headers = make(map[string]string)
+	}
+	r.headers[name] = data
+	return r
+}
+
+func (r *Response) Headers() map[string]string {
+	out := make(map[string]string, len(r.headers))
+	for name, data := range r.headers {
+		out[name] = data
+	}
+	return out
+}
+
 // SetCookie queues an HTTP cookie for the response. Cookies are HttpOnly and SameSite=Lax by
 // default; callers may override path, domain, secure, httpOnly, sameSite, and maxAge.
 func (r *Response) SetCookie(name string, data value.Value, options ...value.Value) *Response {
@@ -222,6 +245,36 @@ func (r *Response) writeCookies(w http.ResponseWriter) {
 	for _, cookie := range r.cookies {
 		http.SetCookie(w, cookie)
 	}
+}
+
+func (r *Response) writeHeaders(w http.ResponseWriter) {
+	for name, data := range r.headers {
+		w.Header().Set(name, data)
+	}
+}
+
+func requestNotModified(request *http.Request, headers http.Header) bool {
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		return false
+	}
+	if etag := headers.Get("ETag"); etag != "" {
+		if candidate := request.Header.Get("If-None-Match"); candidate != "" {
+			for _, item := range strings.Split(candidate, ",") {
+				if strings.TrimSpace(item) == etag || strings.TrimSpace(item) == "*" {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	lastModified := headers.Get("Last-Modified")
+	if lastModified == "" {
+		return false
+	}
+	since := request.Header.Get("If-Modified-Since")
+	modified, modifiedErr := http.ParseTime(lastModified)
+	requested, requestErr := http.ParseTime(since)
+	return modifiedErr == nil && requestErr == nil && !modified.After(requested.Add(time.Second))
 }
 
 func (r *Response) Template(index string) *Response {

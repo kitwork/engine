@@ -63,8 +63,8 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	// Semantic outputs are virtual root endpoints. A real filesystem node always wins; otherwise
 	// router.rss()/router.sitemap() can answer their declared path without a synthetic folder.
 	var generatedMethod *FolderMethod
-	if !match.Found && r.Method == http.MethodGet && t.tree.root.folder != nil {
-		generatedMethod = t.tree.root.folder.outputs[path.Clean("/"+r.URL.Path)]
+	if !match.Found && (r.Method == http.MethodGet || r.Method == http.MethodHead) && t.tree.root.folder != nil {
+		generatedMethod = t.tree.root.folder.generatedOutput(path.Clean("/" + r.URL.Path))
 		if generatedMethod != nil {
 			match.Found = true
 			match.Node = t.tree.root
@@ -185,8 +185,8 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Response cache (.cache RAM / .persist disk) — serve a hit with no VM, no render.
-	if body, ct, status, ok := t.cachedResponse(method, savKey); ok {
-		serveCached(w, body, ct, status)
+	if body, ct, status, headers, ok := t.cachedResponse(method, savKey); ok {
+		serveCached(w, r, body, ct, status, headers)
 		return
 	}
 	if method.cacheExpiry != nil || method.persistExpiry != nil {
@@ -207,6 +207,7 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 		case method.outputKind != "":
 			if err := t.executeGeneratedOutput(vm, leaf.bytecode, method, ctxObj); err != nil {
 				reqRouter.err = err
+				reqRouter.response.Text(value.New(err.Error()), http.StatusInternalServerError)
 			}
 		case method.handle != nil:
 			res := t.execTree(vm, leaf.bytecode, method.handle, ctxObj)

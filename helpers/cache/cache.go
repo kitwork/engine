@@ -14,6 +14,7 @@ type Entry struct {
 	Body        []byte
 	ContentType string
 	Status      int
+	Headers     map[string]string
 	expireAt    time.Time
 }
 

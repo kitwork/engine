@@ -2,6 +2,7 @@ package work
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/helpers/publishing"
@@ -60,9 +61,27 @@ func (t *Tenant) executeGeneratedOutput(
 
 	switch method.outputKind {
 	case "rss":
-		ctx.Type(publishing.RSSMediaType).Send(value.New(publishing.RSS(data, base, ctx.Path().String())))
+		document, err := publishing.RSS(data, base, ctx.Path().String())
+		if err != nil {
+			return err
+		}
+		response := ctx.Type(publishing.RSSMediaType)
+		response.Header("ETag", publishing.ETag(document))
+		if modified := publishing.LastModified(data); !modified.IsZero() {
+			response.Header("Last-Modified", modified.Format(http.TimeFormat))
+		}
+		response.Send(value.New(document))
 	case "sitemap":
-		ctx.Type(publishing.SitemapMediaType).Send(value.New(publishing.Sitemap(data, base)))
+		document, err := publishing.Sitemap(data, base, method.outputPath, ctx.Path().String())
+		if err != nil {
+			return err
+		}
+		response := ctx.Type(publishing.SitemapMediaType)
+		response.Header("ETag", publishing.ETag(document))
+		if modified := publishing.LastModified(data); !modified.IsZero() {
+			response.Header("Last-Modified", modified.Format(http.TimeFormat))
+		}
+		response.Send(value.New(document))
 	default:
 		return fmt.Errorf("unknown generated output %q", method.outputKind)
 	}
