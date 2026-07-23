@@ -47,6 +47,7 @@ func TestSplitFrontMatterAndRenderMarkdown(t *testing.T) {
 		"Intro with **strong**, *emphasis*, `code`, and [docs](https://example.com).\n\n" +
 		"## The Simple Idea\n\n" +
 		"- first\n- second\n\n" +
+		"> first quote paragraph\n>\n> second quote paragraph\n\n" +
 		"```go\nfmt.Println(\"<safe>\")\n```\n")
 
 	meta, body, err := splitFrontMatter(source)
@@ -73,8 +74,9 @@ func TestSplitFrontMatterAndRenderMarkdown(t *testing.T) {
 		"<strong>strong</strong>",
 		"<em>emphasis</em>",
 		"<code>code</code>",
-		`<a href="https://example.com">docs</a>`,
+		`<a href="https://example.com" target="_blank" rel="noopener noreferrer">docs</a>`,
 		`<h2 id="the-simple-idea">The Simple Idea</h2>`,
+		"<blockquote>\n<p>first quote paragraph</p>\n<p>second quote paragraph</p>\n</blockquote>",
 		`<code class="language-go">fmt.Println(&#34;&lt;safe&gt;&#34;)`,
 	} {
 		if !strings.Contains(rendered, want) {

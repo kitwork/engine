@@ -2,6 +2,7 @@ package work
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	collectionhelper "github.com/kitwork/engine/helpers/collection"
@@ -11,13 +12,16 @@ import (
 
 // CollectionManager is the tenant-scoped entry point exposed as collection in Kitwork JS.
 type CollectionManager struct {
-	store *collectionhelper.Store
-	err   error
+	store  *collectionhelper.Store
+	tenant *Tenant
+	err    error
 }
 
-// CollectionHandle is one opened directory-backed collection.
+// CollectionHandle is one opened directory-backed collection. tenant is carried for the features that
+// need tenant plumbing beyond the file store (the FTS search index lives in the tenant's .data/).
 type CollectionHandle struct {
 	collection *collectionhelper.Collection
+	tenant     *Tenant
 }
 
 // Collection returns a manager backed by one shared per-tenant Store, so parsed documents survive
@@ -29,7 +33,7 @@ func (w *KitWork) Collection() *CollectionManager {
 	if t.collectionStore == nil {
 		t.collectionStore, t.collectionErr = collectionhelper.NewStore(t.resolve(), collectionDiskStore{t: t})
 	}
-	return &CollectionManager{store: t.collectionStore, err: t.collectionErr}
+	return &CollectionManager{store: t.collectionStore, tenant: t, err: t.collectionErr}
 }
 
 func (m *CollectionManager) Open(args ...value.Value) value.Value {
@@ -39,11 +43,21 @@ func (m *CollectionManager) Open(args ...value.Value) value.Value {
 	if len(args) == 0 || args[0].String() == "" {
 		return value.Value{K: value.Invalid, V: "collection: folder is required"}
 	}
-	opened, err := m.store.Open(args[0].String())
+	name := args[0].String()
+	// The blessed home: a BARE name ("posts") means _collection/<name> — the folder named after the
+	// feature that reads it, exactly as _cron is the scheduler's folder. Any explicit path (contains a
+	// separator, e.g. legacy "_data/concepts") and bare names without a _collection/ match still open
+	// literally, so existing tenants keep working unchanged.
+	if !strings.ContainsAny(name, `/\`) {
+		if opened, err := m.store.Open("_collection/" + name); err == nil {
+			return value.New(&CollectionHandle{collection: opened, tenant: m.tenant})
+		}
+	}
+	opened, err := m.store.Open(name)
 	if err != nil {
 		return collectionInvalid(err)
 	}
-	return value.New(&CollectionHandle{collection: opened})
+	return value.New(&CollectionHandle{collection: opened, tenant: m.tenant})
 }
 
 // Cache keeps the automatic signature-aware RAM tier enabled. The optional duration controls idle

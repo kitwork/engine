@@ -24,6 +24,9 @@ type markdownRenderer struct {
 	skippedH bool
 }
 
+// Bump this when rendered HTML semantics change so persisted documents rebuild.
+const markdownRendererVersion = "3"
+
 func renderMarkdown(body []byte, title string) (string, []Heading) {
 	r := &markdownRenderer{ids: make(map[string]int), title: strings.TrimSpace(title)}
 	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
@@ -67,9 +70,26 @@ func renderMarkdown(body []byte, title string) (string, []Heading) {
 		if len(quote) == 0 {
 			return
 		}
-		r.html.WriteString("<blockquote><p>")
-		r.html.WriteString(renderInline(strings.Join(quote, " ")))
-		r.html.WriteString("</p></blockquote>\n")
+		r.html.WriteString("<blockquote>\n")
+		var paragraph []string
+		flushQuoteParagraph := func() {
+			if len(paragraph) == 0 {
+				return
+			}
+			r.html.WriteString("<p>")
+			r.html.WriteString(renderInline(strings.Join(paragraph, " ")))
+			r.html.WriteString("</p>\n")
+			paragraph = nil
+		}
+		for _, line := range quote {
+			if line == "" {
+				flushQuoteParagraph()
+				continue
+			}
+			paragraph = append(paragraph, line)
+		}
+		flushQuoteParagraph()
+		r.html.WriteString("</blockquote>\n")
 		quote = nil
 	}
 	flushCode := func() {
@@ -149,6 +169,14 @@ func renderMarkdown(body []byte, title string) (string, []Heading) {
 			}
 			listTag = "ol"
 			listItems = append(listItems, item)
+			continue
+		}
+		if trimmed == ">" {
+			flushParagraph()
+			flushList()
+			if len(quote) > 0 && quote[len(quote)-1] != "" {
+				quote = append(quote, "")
+			}
 			continue
 		}
 		if strings.HasPrefix(trimmed, "> ") {
@@ -239,7 +267,11 @@ func renderInline(input string) string {
 		if !safeHref(href) {
 			href = "#"
 		}
-		return `<a href="` + href + `">` + sub[1] + "</a>"
+		attributes := ""
+		if strings.HasPrefix(href, "https://") || strings.HasPrefix(href, "http://") {
+			attributes = ` target="_blank" rel="noopener noreferrer"`
+		}
+		return `<a href="` + href + `"` + attributes + `>` + sub[1] + "</a>"
 	})
 	escaped = strongRE.ReplaceAllString(escaped, "<strong>$1</strong>")
 	escaped = emphasisRE.ReplaceAllString(escaped, "<em>$1</em>")

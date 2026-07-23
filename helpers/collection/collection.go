@@ -68,7 +68,11 @@ func (c *Collection) Index() ([]IndexEntry, error) {
 		for _, file := range files {
 			meta, err := readFrontMatter(file.path)
 			if err != nil {
-				return nil, fmt.Errorf("collection: index %s: %w", file.Name, err)
+				// One broken frontmatter must not take down the WHOLE index (one typo'd `:` would 500
+				// every listing page — and an agent writing files in bulk makes this a certainty).
+				// Skip the file, keep it visible in the server log; fixing it re-indexes via signature.
+				fmt.Printf("[Collection] %s/%s skipped: %v\n", c.path, file.Name, err)
+				continue
 			}
 			index = append(index, IndexEntry{File: file, Meta: meta})
 		}
@@ -96,24 +100,25 @@ func (c *Collection) Read(slug string) (*Document, error) {
 		return nil, err
 	}
 	key := file.path
+	signature := file.signature + "|markdown:" + markdownRendererVersion
 	if c.cacheEnabled {
-		if document, ok := c.store.getDocument(key, file.signature, c.cacheTTL); ok {
+		if document, ok := c.store.getDocument(key, signature, c.cacheTTL); ok {
 			return document, nil
 		}
 	}
 	persistKey := snapshotKey("document", c.path+"/"+file.Slug)
 	if c.persistEnabled && c.store.disk != nil {
 		if body, ok := c.store.disk.Load(persistKey); ok {
-			if document, valid := decodeDocumentSnapshot(body, file.signature); valid {
+			if document, valid := decodeDocumentSnapshot(body, signature); valid {
 				if c.cacheEnabled {
-					c.store.setDocument(key, file.signature, document)
+					c.store.setDocument(key, signature, document)
 				}
 				return document, nil
 			}
 		}
 	}
 
-	value, err := c.store.run("document|"+key+"|"+file.signature, func() (any, error) {
+	value, err := c.store.run("document|"+key+"|"+signature, func() (any, error) {
 		source, err := os.ReadFile(file.path)
 		if err != nil {
 			return nil, err
@@ -132,10 +137,10 @@ func (c *Collection) Read(slug string) (*Document, error) {
 			TOC:  toc,
 		}
 		if c.cacheEnabled {
-			c.store.setDocument(key, file.signature, document)
+			c.store.setDocument(key, signature, document)
 		}
 		if c.persistEnabled && c.store.disk != nil {
-			snapshot := documentSnapshot{Signature: file.signature, Document: document}
+			snapshot := documentSnapshot{Signature: signature, Document: document}
 			if encoded, err := json.Marshal(snapshot); err == nil {
 				_ = c.store.disk.Save(persistKey, encoded, c.persistTTL)
 			}

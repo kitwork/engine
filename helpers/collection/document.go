@@ -11,6 +11,10 @@ type File struct {
 	path      string
 }
 
+// Signature exposes the freshness key (size + mtime in NANOseconds) for derived indexes — Modified
+// alone is second-granular, too coarse to notice a same-second same-size edit.
+func (f File) Signature() string { return f.signature }
+
 // Heading is one entry in a rendered Markdown table of contents.
 type Heading struct {
 	ID    string `json:"id"`
