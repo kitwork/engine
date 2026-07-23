@@ -45,11 +45,15 @@ func (m *memStore) Save(key string, s Snapshot, ttl time.Duration) {
 
 func respOf(t *testing.T, v value.Value) Response {
 	t.Helper()
-	r, ok := v.Interface().(Response)
-	if !ok {
-		t.Fatalf("not a Response: %#v", v)
+	// .get()/.post() are now lazy — they hand back a *Request that fires on demand.
+	if req, ok := v.V.(*Request); ok {
+		return req.Fire()
 	}
-	return r
+	if r, ok := v.Interface().(Response); ok {
+		return r
+	}
+	t.Fatalf("not a Response or *Request: %#v", v)
+	return Response{}
 }
 
 func TestCacheReadThrough(t *testing.T) {
@@ -157,7 +161,8 @@ func TestFetchWithOptions(t *testing.T) {
 
 	ram := newMemStore()
 	opts := value.New(map[string]value.Value{"cache": value.New("5m")})
-	FetchWith(NewClient(ram, nil), value.New(server.URL), opts)
+	// fetch is lazy now — fire the first call (respOf) so it populates the cache tier.
+	respOf(t, FetchWith(NewClient(ram, nil), value.New(server.URL), opts))
 	r2 := respOf(t, FetchWith(NewClient(ram, nil), value.New(server.URL), opts))
 	if hits != 1 || !r2.Cached {
 		t.Errorf("fetch {cache} option: hits=%d cached=%v, want 1/true", hits, r2.Cached)

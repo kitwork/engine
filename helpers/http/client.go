@@ -23,6 +23,7 @@ type HTTP struct {
 	persistOn    bool
 	cacheTTL     time.Duration
 	persistTTL   time.Duration
+	retry        int // .retry(n): re-attempt transient failures on idempotent reads (see request.go)
 }
 
 func (h *HTTP) Timeout(ms int) *HTTP {
@@ -38,12 +39,34 @@ func (h *HTTP) Header(key, val string) *HTTP {
 	return h
 }
 
+// Retry sets how many extra attempts a transient failure (network error / 5xx) gets on a GET/HEAD.
+func (h *HTTP) Retry(n int) *HTTP {
+	h.retry = n
+	return h
+}
+
+// clone copies the configured template so a fired Request never mutates the shared builder.
+func (h *HTTP) clone() *HTTP {
+	c := *h
+	if h.headers != nil {
+		c.headers = make(map[string]string, len(h.headers))
+		for k, v := range h.headers {
+			c.headers[k] = v
+		}
+	}
+	return &c
+}
+
+// Get / Post are now LAZY: they return a *Request (see request.go) that fires exactly once when its
+// result is first read (.status/.json()/.body/…) or .send() is called. This is what lets the chain be
+// written flat in any order — http.get(url).retry(3).cache("5m").  do() stays the eager engine used by
+// fetch() and by Request.ensure().
 func (h *HTTP) Get(url string) value.Value {
-	return h.do("GET", url, value.New(nil))
+	return newRequest(h.clone(), "GET", url, value.New(nil))
 }
 
 func (h *HTTP) Post(url string, body value.Value) value.Value {
-	return h.do("POST", url, body)
+	return newRequest(h.clone(), "POST", url, body)
 }
 
 func (h *HTTP) do(method, url string, body value.Value) value.Value {
@@ -146,9 +169,15 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 	defer resp.Body.Close()
 
 	resBody, _ := io.ReadAll(resp.Body)
+	// Keep the upstream's media type: a cached/proxied copy must replay under the ORIGINAL type.
+	// Fall back to sniffing the bytes when the server sent none (stdlib, no dependency).
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" && len(resBody) > 0 {
+		contentType = stdhttp.DetectContentType(resBody)
+	}
 
 	if key != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		snap := Snapshot{Status: resp.StatusCode, Body: resBody}
+		snap := Snapshot{Status: resp.StatusCode, Body: resBody, ContentType: contentType}
 		if wantCache {
 			h.cacheStore.Save(key, snap, h.cacheTTL)
 		}
@@ -162,8 +191,9 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 	}
 
 	return value.New(Response{
-		Status: resp.StatusCode,
-		Body:   value.New(resBody),
+		Status:      resp.StatusCode,
+		Body:        value.New(resBody),
+		ContentType: contentType,
 	})
 }
 

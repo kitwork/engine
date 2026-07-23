@@ -25,10 +25,13 @@ import (
 // The stores are INJECTED by the host per tenant (NewClient); this package stays pure. With no
 // store injected, .cache()/.persist() are quiet no-ops.
 
-// Snapshot is the storable form of a response: just status + raw body bytes.
+// Snapshot is the storable form of a response: status + raw body bytes + the upstream's media type.
+// ContentType is carried so a cached copy replays byte-identically — router.proxy() streams the
+// stored bytes back under the ORIGINAL type (an image must not come back as octet-stream).
 type Snapshot struct {
-	Status int
-	Body   []byte
+	Status      int
+	Body        []byte
+	ContentType string
 }
 
 // ResponseStore is one storage tier. Load returns a FRESH snapshot only; LoadStale may return an
@@ -95,5 +98,8 @@ func requestKey(url string, headers map[string]string) string {
 
 // storedResponse rebuilds a Response from a snapshot, flagged with its provenance.
 func storedResponse(s Snapshot, stale bool) value.Value {
-	return value.New(Response{Status: s.Status, Body: value.New(s.Body), Cached: true, Stale: stale})
+	return value.New(Response{
+		Status: s.Status, Body: value.New(s.Body), ContentType: s.ContentType,
+		Cached: true, Stale: stale,
+	})
 }

@@ -30,29 +30,33 @@ type fetchRAMStore struct{ t *Tenant }
 
 func (s fetchRAMStore) Load(key string) (http.Snapshot, bool) {
 	if e, ok := s.t.respCache.Get("fetch|" + key); ok {
-		return http.Snapshot{Status: e.Status, Body: e.Body}, true
+		return http.Snapshot{Status: e.Status, Body: e.Body, ContentType: e.ContentType}, true
 	}
 	return http.Snapshot{}, false
 }
 func (s fetchRAMStore) LoadStale(string) (http.Snapshot, bool) { return http.Snapshot{}, false }
 func (s fetchRAMStore) Save(key string, snap http.Snapshot, ttl time.Duration) {
-	s.t.respCache.Set("fetch|"+key, cache.Entry{Body: snap.Body, Status: snap.Status}, ttl)
+	s.t.respCache.Set("fetch|"+key, cache.Entry{
+		Body: snap.Body, Status: snap.Status, ContentType: snap.ContentType,
+	}, ttl)
 }
 
 type fetchDiskStore struct{ t *Tenant }
 
 func (s fetchDiskStore) Load(key string) (http.Snapshot, bool) {
 	if r, ok := s.t.persistStore.Get("fetch/" + key); ok {
-		return http.Snapshot{Status: r.Status, Body: r.Body}, true
+		return http.Snapshot{Status: r.Status, Body: r.Body, ContentType: r.ContentType}, true
 	}
 	return http.Snapshot{}, false
 }
 func (s fetchDiskStore) LoadStale(key string) (http.Snapshot, bool) {
 	if r, _, ok := s.t.persistStore.GetStale("fetch/" + key); ok {
-		return http.Snapshot{Status: r.Status, Body: r.Body}, true
+		return http.Snapshot{Status: r.Status, Body: r.Body, ContentType: r.ContentType}, true
 	}
 	return http.Snapshot{}, false
 }
 func (s fetchDiskStore) Save(key string, snap http.Snapshot, ttl time.Duration) {
-	_ = s.t.persistStore.Set("fetch/"+key, persist.Record{Body: snap.Body, Status: snap.Status}, ttl)
+	_ = s.t.persistStore.Set("fetch/"+key, persist.Record{
+		Body: snap.Body, Status: snap.Status, ContentType: snap.ContentType,
+	}, ttl)
 }
