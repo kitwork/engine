@@ -80,7 +80,7 @@ func (c *Collection) Index() ([]IndexEntry, error) {
 			c.store.setIndex(key, signature, index)
 		}
 		if c.persistEnabled && c.store.disk != nil {
-			body, err := json.Marshal(indexSnapshot{Signature: signature, Index: index})
+			body, err := encodeIndexSnapshot(signature, index)
 			if err == nil {
 				_ = c.store.disk.Save(persistKey, body, c.persistTTL)
 			}

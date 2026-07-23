@@ -131,7 +131,9 @@ func (h *CollectionHandle) syncFTS(db *sql.DB, index []collectionhelper.IndexEnt
 		slug := entry.File.Slug
 		live[slug] = true
 		sig := entry.File.Signature() // size + mtime-nanos: catches even a same-second, same-size edit
-		if known[slug] == sig {
+		// An EMPTY signature means the entry came from a snapshot that lost it — never treat that as
+		// "unchanged" (it would compare equal to the missing-row zero value and skip indexing forever).
+		if sig != "" && known[slug] == sig {
 			continue
 		}
 		doc, err := h.collection.Read(slug)

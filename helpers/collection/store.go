@@ -218,6 +218,11 @@ type documentSnapshot struct {
 type indexSnapshot struct {
 	Signature string       `json:"signature"`
 	Index     []IndexEntry `json:"index"`
+	// File.signature is unexported (it must not leak into JS payloads), so a JSON round-trip through
+	// the persist tier would silently DROP it — and every derived index (FTS search sync) that compares
+	// per-file signatures would then see "" == "" and treat all documents as unchanged, indexing
+	// nothing. Carry the signatures alongside and re-attach on decode.
+	FileSignatures []string `json:"fileSignatures"`
 }
 
 func decodeDocumentSnapshot(body []byte, signature string) (*Document, bool) {
@@ -233,5 +238,20 @@ func decodeIndexSnapshot(body []byte, signature string) ([]IndexEntry, bool) {
 	if json.Unmarshal(body, &snapshot) != nil || snapshot.Signature != signature {
 		return nil, false
 	}
+	// Re-attach the unexported per-file signatures (older snapshots without them stay signature-less
+	// and derived indexes treat those entries as always-changed — correct, just less cached).
+	if len(snapshot.FileSignatures) == len(snapshot.Index) {
+		for i := range snapshot.Index {
+			snapshot.Index[i].File.signature = snapshot.FileSignatures[i]
+		}
+	}
 	return snapshot.Index, true
+}
+
+func encodeIndexSnapshot(signature string, index []IndexEntry) ([]byte, error) {
+	sigs := make([]string, len(index))
+	for i := range index {
+		sigs[i] = index[i].File.signature
+	}
+	return json.Marshal(indexSnapshot{Signature: signature, Index: index, FileSignatures: sigs})
 }
