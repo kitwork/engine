@@ -71,6 +71,7 @@ type Tenant struct {
 	collectionMu    sync.Mutex
 	collectionStore *collectionhelper.Store
 	collectionErr   error
+	collectionFTS   map[string]string // collection path → dir signature at last FTS sync (RAM, per process)
 
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
@@ -84,6 +85,10 @@ type Tenant struct {
 	crons       []*CronJob
 	cronMu      sync.Mutex
 	cronCancels []chan struct{}
+	cronDB      *sql.DB             // underlying durable store handle (.data/scheduler.db, or shared PG)
+	cronStore   cronStore           // dialect-abstracted coordination store (sqlite Phase 2 / pg Phase 3)
+	cronByName  map[string]*CronJob // cron name → job, so a claimed DB slot finds its code to run
+	cronNode    string              // lease owner override (multi-node demo); "" → process cronNodeID
 
 	lruCache     map[string]*CacheItem
 	lruCacheLock sync.RWMutex
@@ -135,6 +140,17 @@ func (t *Tenant) resolve(paths ...string) string {
 		return t.config.base
 	}
 	return filepath.Join(append([]string{t.config.base}, paths...)...)
+}
+
+// resolveApp resolves a path at the IDENTITY (app) level — apps/<identity>/… — which every domain of
+// the app shares. This is where app-wide infrastructure lives: `_cron` (one schedule set per app),
+// `.data` (the app's scheduler DB), `_core` (shared services). Single-tenant (flat/sites) layouts have
+// no identity layer, so it falls back to the domain level.
+func (t *Tenant) resolveApp(paths ...string) string {
+	if t.entity != nil && t.entity.Identity != "" && t.config.root != "" {
+		return filepath.Join(append([]string{t.config.root, t.entity.Identity}, paths...)...)
+	}
+	return t.resolve(paths...)
 }
 
 // serveViewStatic auto-serves a plain .txt file that lives in the tenant's views/ folder with NO
@@ -222,9 +238,55 @@ func (t *Tenant) Run() error {
 	// Build the (lazy) resolution tree — folders compile on first hit.
 	t.tree = NewRouteTree(t)
 
-	// t.StartCronJobs()
+	// Scheduler: the APP-TENANT (no domain, base = apps/<identity>) owns the identity's _cron scheduler
+	// and boots it eagerly here. Domain-tenants serve HTTP ONLY — they must not each start a scheduler,
+	// or one identity's _cron would run N dispatchers (one per domain). See NewAppTenant + StartAppSchedulers.
+	if t.entity.Domain == "" {
+		t.LoadCronFiles()
+	}
 
 	return nil
+}
+
+// NewAppTenant builds the APP-level runtime for one identity: a tenant with NO domain, whose base is
+// apps/<identity>. It does not serve HTTP — it exists to run the app's _cron scheduler (from
+// apps/<identity>/_cron) eagerly at server boot, independent of which domain gets traffic. Exactly one
+// per identity per process, so an identity's crons run through a single dispatcher.
+func NewAppTenant(root, identity string) *Tenant {
+	return &Tenant{
+		config:    &Config{root: root},
+		entity:    &Entity{Identity: identity, Domain: ""},
+		cache:     make(map[string]*Responser),
+		databases: make(map[string]*sql.DB),
+		lruCache:  make(map[string]*CacheItem),
+	}
+}
+
+// DiscoverAppIdentities lists identity folders under root that hold a non-empty _cron/ — i.e. apps that
+// have scheduled work. Convention folders (sites/, test/) are layouts, not identities, and are skipped.
+func DiscoverAppIdentities(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == SitesDirName || e.Name() == "test" {
+			continue
+		}
+		cronDir := filepath.Join(root, e.Name(), "_cron")
+		files, err := os.ReadDir(cronDir)
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			if !f.IsDir() && strings.HasSuffix(f.Name(), ".kitwork.js") {
+				ids = append(ids, e.Name())
+				break
+			}
+		}
+	}
+	return ids
 }
 
 func NewTenant(root string, domain string) *Tenant {

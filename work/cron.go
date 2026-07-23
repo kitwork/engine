@@ -1,23 +1,46 @@
 package work
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
-// CronJob represents a scheduled task registered by a tenant
+// CronJob is a registered scheduled task. The callback's Address offsets point into Bytecode — each
+// _cron/*.kitwork.js compiles to its OWN bytecode (like a folder router), so runInJobVM FastResets
+// THAT bytecode (not the tenant's main bytecode) before invoking the lambda.
+//
+// EVERY file-cron is durable: its definition is stored in the `crons` table and it is dispatched through
+// the database (idempotent slots, history, cross-node coordination). There is no in-process-only tier
+// and no .persist() flag — a cron in a file is, by nature, stored and survives a restart.
 type CronJob struct {
+	Name       string
 	Expression string
 	Callback   *value.Lambda
+	Bytecode   *compiler.Bytecode
+
+	RetentionDays int
+	MaxAttempts   int    // default 1 — scheduler does NOT auto-retry a thrown handler unless .retries(n)
+	Timezone      string // default "UTC"
+	OverlapPolicy string // skip | queue | allow — default skip
+	ContentHash   string // sha256 of the source file; lets sync skip no-op writes
+	OnSuccess     *value.Lambda
+	OnError       *value.Lambda
 }
 
-// Cron is the entry namespace for scheduled tasks in the VM
+// Cron is the tenant's scheduler namespace: `import { cron } from "kitwork"`. It mirrors the router
+// convention — a noun subsystem you call methods on (cron.schedule(...), cron.daily(...)), reached
+// via kitwork().cron (the 0-arg method is auto-called as a getter, like kitwork().router).
 type Cron struct {
 	tenant *Tenant
 }
@@ -26,126 +49,309 @@ func (w *KitWork) Cron() *Cron {
 	return &Cron{tenant: w.tenant}
 }
 
-// CronBuilder is a fluent builder for scheduled task setups
-type CronBuilder struct {
-	cron       *Cron
-	expression string
-}
-
+// Cadence entry points start a builder. A cron's identity is its FILE — one file, one cron, named by
+// the filename (filesystem-is-runtime, exactly like a route's path is its identity). So there is no
+// cron.schedule("name"): `cron.daily("08:00").handle(fn)` inside _cron/daily-report.kitwork.js IS the
+// "daily-report" cron (the stem is applied in runCronFile). Group related jobs as separate files that
+// share logic via _core, not many crons in one file.
 func (c *Cron) Every(args ...value.Value) *CronBuilder {
-	if len(args) == 0 {
-		return &CronBuilder{cron: c, expression: ""}
-	}
-	expr := smartParse(args[0].Text())
-	cb := &CronBuilder{cron: c, expression: expr}
-	if len(args) > 1 && args[1].IsCallable() {
-		cb.Handle(args[1])
-	}
-	return cb
+	return (&CronBuilder{tenant: c.tenant}).Every(args...)
 }
-
-func (c *Cron) Schedule(args ...value.Value) *CronBuilder {
-	if len(args) == 0 {
-		return &CronBuilder{cron: c, expression: ""}
-	}
-	expr := smartParse(args[0].Text())
-	cb := &CronBuilder{cron: c, expression: expr}
-	if len(args) > 1 && args[1].IsCallable() {
-		cb.Handle(args[1])
-	}
-	return cb
-}
-
 func (c *Cron) Daily(args ...value.Value) *CronBuilder {
-	if len(args) == 0 {
-		return &CronBuilder{cron: c, expression: "@daily"}
-	}
-	expr := timeToCron(args[0].Text())
-	cb := &CronBuilder{cron: c, expression: expr}
-	if len(args) > 1 && args[1].IsCallable() {
-		cb.Handle(args[1])
+	return (&CronBuilder{tenant: c.tenant}).Daily(args...)
+}
+func (c *Cron) Hourly(args ...value.Value) *CronBuilder {
+	return (&CronBuilder{tenant: c.tenant}).Hourly(args...)
+}
+func (c *Cron) Weekly(args ...value.Value) *CronBuilder {
+	return (&CronBuilder{tenant: c.tenant}).Weekly(args...)
+}
+func (c *Cron) Monthly(args ...value.Value) *CronBuilder {
+	return (&CronBuilder{tenant: c.tenant}).Monthly(args...)
+}
+func (c *Cron) Cron(args ...value.Value) *CronBuilder {
+	return (&CronBuilder{tenant: c.tenant}).Cron(args...)
+}
+
+// CronBuilder is the fluent schedule builder. Scheduling methods set the expression; .handle()
+// registers. Config modifiers (.persist/.retries/.timezone/.overlap/.success/.error) may be chained
+// EITHER side of .handle(): before, they stage onto the builder and .handle() copies them into the new
+// job; after, they mutate the already-registered job (cb.job) in place — so an option chained after
+// .handle() (as .retention("30d") or .success(fn) often is) still takes effect.
+type CronBuilder struct {
+	tenant     *Tenant
+	expression string
+	job        *CronJob // set once .handle() registers; post-handle modifiers mutate this
+
+	// staged config, copied into the job at .handle() time (for the pre-handle order)
+	retentionDays int
+	maxAttempts   int
+	timezone      string
+	overlap       string
+	onSuccess     *value.Lambda
+	onError       *value.Lambda
+}
+
+// maybeHandle registers the callback when it is passed inline, e.g. .daily("08:00", fn).
+func (cb *CronBuilder) maybeHandle(args []value.Value) *CronBuilder {
+	for _, a := range args {
+		if a.IsCallable() {
+			cb.Handle(a)
+			break
+		}
 	}
 	return cb
 }
 
-func (c *Cron) Hourly(args ...value.Value) *CronBuilder {
+func (cb *CronBuilder) Every(args ...value.Value) *CronBuilder {
+	if len(args) > 0 && !args[0].IsCallable() {
+		cb.expression = smartParse(args[0].Text())
+	}
+	return cb.maybeHandle(args)
+}
+
+// Cron sets a raw cron expression verbatim (escape hatch): .cron("*/5 * * * *").
+func (cb *CronBuilder) Cron(args ...value.Value) *CronBuilder {
+	if len(args) > 0 && !args[0].IsCallable() {
+		cb.expression = smartParse(args[0].Text())
+	}
+	return cb.maybeHandle(args)
+}
+
+func (cb *CronBuilder) Daily(args ...value.Value) *CronBuilder {
+	cb.expression = "@daily"
+	if len(args) > 0 && !args[0].IsCallable() {
+		cb.expression = timeToCron(args[0].Text())
+	}
+	return cb.maybeHandle(args)
+}
+
+func (cb *CronBuilder) Hourly(args ...value.Value) *CronBuilder {
 	min := "0"
 	if len(args) > 0 && !args[0].IsCallable() {
 		min = args[0].Text()
 	}
-	expr := fmt.Sprintf("0 %s * * * *", strings.TrimRight(strings.ToLower(min), "m"))
-	cb := &CronBuilder{cron: c, expression: expr}
-	for _, arg := range args {
-		if arg.IsCallable() {
-			cb.Handle(arg)
-			break
+	cb.expression = fmt.Sprintf("0 %s * * * *", strings.TrimRight(strings.ToLower(min), "m"))
+	return cb.maybeHandle(args)
+}
+
+func (cb *CronBuilder) Weekly(args ...value.Value) *CronBuilder {
+	cb.expression = "@weekly"
+	if len(args) > 0 && !args[0].IsCallable() {
+		cb.expression = smartParse(args[0].Text())
+	}
+	return cb.maybeHandle(args)
+}
+
+func (cb *CronBuilder) Monthly(args ...value.Value) *CronBuilder {
+	cb.expression = "@monthly"
+	if len(args) > 0 && !args[0].IsCallable() {
+		cb.expression = monthlyParse(args[0].Text())
+	}
+	return cb.maybeHandle(args)
+}
+
+// Retention sets how long this cron's run history is kept in the `crons` store, e.g. .retention("90d")
+// (default 30 days). Durability itself is NOT optional — every file-cron is stored + survives restart;
+// this only bounds how much past history is retained. (.persist() is a fetch-only modifier and does not
+// exist on cron.)
+func (cb *CronBuilder) Retention(args ...value.Value) *CronBuilder {
+	if len(args) > 0 && !args[0].IsCallable() {
+		if d, err := ParseDuration(args[0].Text()); err == nil {
+			cb.retentionDays = int(d.Hours() / 24)
 		}
+	}
+	if cb.retentionDays < 1 {
+		cb.retentionDays = 1
+	}
+	if cb.job != nil {
+		cb.job.RetentionDays = cb.retentionDays
 	}
 	return cb
 }
 
-func (c *Cron) Weekly(args ...value.Value) *CronBuilder {
-	expr := "@weekly"
+// Retries opts a job into scheduler-level retry (default max_attempts is 1 — see scheduler.md; a thrown
+// handler re-runs ALL side effects, so this is only for handlers the author made idempotent).
+func (cb *CronBuilder) Retries(args ...value.Value) *CronBuilder {
+	cb.maxAttempts = 1
 	if len(args) > 0 && !args[0].IsCallable() {
-		expr = smartParse(args[0].Text())
-	}
-	cb := &CronBuilder{cron: c, expression: expr}
-	for _, arg := range args {
-		if arg.IsCallable() {
-			cb.Handle(arg)
-			break
+		if n, err := strconv.Atoi(strings.TrimSpace(args[0].Text())); err == nil && n >= 1 {
+			cb.maxAttempts = n
 		}
+	}
+	if cb.job != nil {
+		cb.job.MaxAttempts = cb.maxAttempts
 	}
 	return cb
 }
 
-func (c *Cron) Monthly(args ...value.Value) *CronBuilder {
-	expr := "@monthly"
+func (cb *CronBuilder) Timezone(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
-		expr = monthlyParse(args[0].Text())
+		cb.timezone = args[0].Text()
 	}
-	cb := &CronBuilder{cron: c, expression: expr}
-	for _, arg := range args {
-		if arg.IsCallable() {
-			cb.Handle(arg)
-			break
-		}
+	if cb.job != nil {
+		cb.job.Timezone = cb.timezone
 	}
 	return cb
 }
+
+func (cb *CronBuilder) Overlap(args ...value.Value) *CronBuilder {
+	if len(args) > 0 && !args[0].IsCallable() {
+		cb.overlap = strings.ToLower(strings.TrimSpace(args[0].Text()))
+	}
+	if cb.job != nil {
+		cb.job.OverlapPolicy = cb.overlap
+	}
+	return cb
+}
+
+func (cb *CronBuilder) Success(args ...value.Value) *CronBuilder {
+	if len(args) > 0 {
+		cb.onSuccess = lambdaOf(args[0])
+	}
+	if cb.job != nil {
+		cb.job.OnSuccess = cb.onSuccess
+	}
+	return cb
+}
+
+func (cb *CronBuilder) Error(args ...value.Value) *CronBuilder {
+	if len(args) > 0 {
+		cb.onError = lambdaOf(args[0])
+	}
+	if cb.job != nil {
+		cb.job.OnError = cb.onError
+	}
+	return cb
+}
+
+// Misfire — accepted + chainable; the misfire policy is a Phase-2-plus refinement (catch-up on missed
+// slots) not yet wired, so this stays a no-op passthrough for now.
+func (cb *CronBuilder) Misfire(args ...value.Value) *CronBuilder { return cb }
 
 func (cb *CronBuilder) Handle(callback value.Value) *CronBuilder {
 	if callback.IsCallable() && cb.expression != "" {
 		lambda, _ := callback.V.(*value.Lambda)
-		cb.cron.tenant.RegisterCron(cb.expression, lambda)
+		cb.job = cb.tenant.RegisterCron(cb.expression, lambda)
+		// Copy any config staged BEFORE .handle() into the freshly-registered job.
+		cb.job.RetentionDays = cb.retentionDays
+		cb.job.MaxAttempts = cb.maxAttempts
+		cb.job.Timezone = cb.timezone
+		cb.job.OverlapPolicy = cb.overlap
+		cb.job.OnSuccess = cb.onSuccess
+		cb.job.OnError = cb.onError
 	}
 	return cb
 }
 
-// RegisterCron appends a cron job configuration to the tenant's registry.
-func (t *Tenant) RegisterCron(expression string, callback *value.Lambda) {
+// RegisterCron appends a cron job to the tenant's registry and returns it so the caller can finish
+// filling it in. The NAME is not set here — it comes from the filename, applied by runCronFile once the
+// whole file has been evaluated (one file = one cron).
+func (t *Tenant) RegisterCron(expression string, callback *value.Lambda) *CronJob {
 	t.cronMu.Lock()
 	defer t.cronMu.Unlock()
-	t.crons = append(t.crons, &CronJob{
+	job := &CronJob{
 		Expression: expression,
 		Callback:   callback,
-	})
+	}
+	t.crons = append(t.crons, job)
+	return job
 }
 
-// StartCronJobs spawns goroutines to run all registered background cron tasks.
+// LoadCronFiles eagerly evaluates every _cron/*.kitwork.js at boot so scheduled jobs REGISTER before
+// any request arrives — folder routers compile lazily on first hit, which is too late for a scheduler
+// that must tick on its own. Each file compiles to its OWN bytecode; the jobs it registers keep a
+// pointer to that bytecode so their callback addresses resolve when they fire.
+//
+// `_cron` lives at the IDENTITY (app) level — apps/<identity>/_cron — not per domain: a cron is app
+// infrastructure shared by all of the app's domains, keyed by identity (see appID). Every domain of the
+// app loads the same set and they coordinate through the one store.
+func (t *Tenant) LoadCronFiles() {
+	dir := t.resolveApp("_cron")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return // no _cron/ folder — nothing to schedule
+	}
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".kitwork.js") {
+			continue
+		}
+		file := filepath.Join(dir, e.Name())
+		bc, err := compiler.CompileFile(file)
+		if err != nil {
+			fmt.Printf("[Cron] compile %s: %v\n", e.Name(), err)
+			continue
+		}
+		// content_hash of the source lets sync skip no-op writes to scheduler.db (see syncPersisted).
+		hash := ""
+		if raw, rerr := os.ReadFile(file); rerr == nil {
+			sum := sha256.Sum256(raw)
+			hash = hex.EncodeToString(sum[:])
+		}
+		// The filename (minus .kitwork.js) is the DEFAULT job identity — filesystem-is-runtime, same as
+		// routes take their identity from their path. Jobs that called cron.schedule("name") keep their
+		// explicit name; the rest inherit this stem.
+		stem := strings.TrimSuffix(e.Name(), ".kitwork.js")
+		t.runCronFile(bc, stem, hash)
+	}
+
+	t.StartCronJobs()
+}
+
+// runCronFile executes a compiled _cron file in an isolated VM whose kitwork() is the plain tenant
+// binding (so `import { cron } from "kitwork"` registers here), then finalizes the job the file
+// registered: attaches bc (so the callback's bytecode FastResets at fire time) and NAMES it after the
+// file (the stem). ONE FILE = ONE CRON, named by the filename — if a file registers more than one, only
+// the first is kept (the rest would collide on the same filename identity) and a warning is logged.
+// Globals are COPIED so a cron file's top-level declarations never leak into the shared tenant VM.
+func (t *Tenant) runCronFile(bc *compiler.Bytecode, stem, contentHash string) {
+	t.cronMu.Lock()
+	before := len(t.crons)
+	t.cronMu.Unlock()
+
+	globals := make(map[string]value.Value, len(t.vm.Globals))
+	for k, v := range t.vm.Globals {
+		globals[k] = v
+	}
+
+	vm := runtime.New(bc.Instructions, bc.Constants)
+	vm.Builtins = t.vm.Builtins
+	vm.Globals = globals
+	vm.SourceMap = bc.SourceMap
+	vm.MaxEnergy = t.MaxEnergy
+	vm.Run()
+
+	t.cronMu.Lock()
+	registered := t.crons[before:]
+	if len(registered) > 1 {
+		fmt.Printf("[Cron] %s.kitwork.js registered %d crons; one file = one cron — keeping only %q\n",
+			stem, len(registered), stem)
+		t.crons = t.crons[:before+1] // drop the extras; they'd collide on the filename identity
+		registered = t.crons[before:]
+	}
+	for i := range registered {
+		registered[i].Bytecode = bc
+		registered[i].ContentHash = contentHash
+		registered[i].Name = stem // the file IS the cron's identity
+	}
+	t.cronMu.Unlock()
+}
+
+// StartCronJobs launches this tenant's scheduler. EVERY registered file-cron is durable — its definition
+// is synced into the `crons` table and it is dispatched through the database (idempotent slots, history,
+// cross-node coordination). One dispatcher goroutine serves them all; see cron_persist.go.
 func (t *Tenant) StartCronJobs() {
 	t.cronMu.Lock()
 	defer t.cronMu.Unlock()
 
-	// Stop any existing jobs first to be safe
-	t.stopCronJobsNoLock()
+	t.stopCronJobsNoLock() // stop any existing jobs first to be safe
 
-	for _, job := range t.crons {
-		cancelChan := make(chan struct{})
-		t.cronCancels = append(t.cronCancels, cancelChan)
-
-		// Run job in background goroutine
-		go t.runCronJob(job, cancelChan)
+	if len(t.crons) == 0 {
+		return
+	}
+	if err := t.startPersistedScheduler(); err != nil {
+		fmt.Printf("[Cron] scheduler disabled: %v\n", err)
 	}
 }
 
@@ -161,99 +367,6 @@ func (t *Tenant) stopCronJobsNoLock() {
 		close(ch)
 	}
 	t.cronCancels = nil
-}
-
-func (t *Tenant) runCronJob(job *CronJob, cancel chan struct{}) {
-	var duration time.Duration
-	var err error
-
-	expr := job.Expression
-	isInterval := false
-	if strings.HasPrefix(expr, "@every ") {
-		isInterval = true
-		durationStr := strings.TrimPrefix(expr, "@every ")
-		duration, err = ParseDuration(durationStr)
-		if err != nil {
-			fmt.Printf("[Cron Error] Invalid duration: %s\n", durationStr)
-			return
-		}
-	} else if strings.HasPrefix(expr, "@hourly") {
-		isInterval = true
-		duration = time.Hour
-	} else if strings.HasPrefix(expr, "@daily") {
-		isInterval = true
-		duration = 24 * time.Hour
-	} else if strings.HasPrefix(expr, "@weekly") {
-		isInterval = true
-		duration = 7 * 24 * time.Hour
-	} else if strings.HasPrefix(expr, "@monthly") {
-		isInterval = true
-		duration = 30 * 24 * time.Hour
-	}
-
-	if isInterval {
-		ticker := time.NewTicker(duration)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-cancel:
-				return
-			case <-ticker.C:
-				t.executeCronCallback(job.Callback)
-			}
-		}
-	} else {
-		// standard cron expression matcher (ticks every second, runs once per matching minute)
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-
-		lastRunMinute := -1
-
-		for {
-			select {
-			case <-cancel:
-				return
-			case <-ticker.C:
-				now := time.Now()
-				if matchCronExpression(expr, now) {
-					currentMinute := now.Minute()
-					if lastRunMinute != currentMinute {
-						lastRunMinute = currentMinute
-						t.executeCronCallback(job.Callback)
-					}
-				}
-			}
-		}
-	}
-}
-
-func (t *Tenant) executeCronCallback(lambda *value.Lambda) {
-	vmInterface := vmPool.Get()
-	if vmInterface == nil {
-		return
-	}
-	vm, ok := vmInterface.(*runtime.VM)
-	if !ok {
-		return
-	}
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Printf("[Cron Job] Panic: %v\n", r)
-			}
-			vmPool.Put(vm)
-		}()
-
-		vm.FastReset(t.bytecode.Instructions, t.bytecode.Constants, t.vm.Globals, t.bytecode.SourceMap)
-		vm.MaxEnergy = t.MaxEnergy
-
-		for key, val := range t.vm.Vars {
-			vm.Vars[key] = val
-		}
-
-		vm.ExecuteLambda(lambda, nil)
-	}()
 }
 
 // Helpers for cron expression parsing

@@ -40,8 +40,9 @@ type Engine struct {
 	hotReload   bool
 	Hostname    string
 	cache       map[string]*cachedTenant
-	idleTimeout time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
-	rateLimiter *RateLimiter  // host-level limits (nil = off); set qua SetRateLimit trước khi serve
+	appTenants  map[string]*work.Tenant // identity → app runtime that owns that identity's _cron scheduler
+	idleTimeout time.Duration           // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
+	rateLimiter *RateLimiter            // host-level limits (nil = off); set qua SetRateLimit trước khi serve
 	mu          sync.RWMutex
 }
 
@@ -55,12 +56,45 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		hotReload:   hotReload,
 		Hostname:    hostname,
 		cache:       make(map[string]*cachedTenant),
+		appTenants:  make(map[string]*work.Tenant),
 		idleTimeout: 10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
 
 	}
 	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
 	go e.cleanupLoop(1 * time.Minute)
 	return e
+}
+
+// StartAppSchedulers boots one app runtime per identity that has a non-empty _cron/, EAGERLY at startup.
+// Each app-tenant loads apps/<identity>/_cron and starts a single scheduler for the app — so crons run
+// without waiting for a domain to be hit (routing is lazy) and without one dispatcher per domain. This
+// is the deliberate exception to "no prewarm": a scheduler cannot wait for a request. Call once after
+// the system DB is wired (so the shared-Postgres backend is chosen). Idempotent per identity.
+func (e *Engine) StartAppSchedulers() (started int) {
+	for _, identity := range work.DiscoverAppIdentities(e.root) {
+		e.mu.RLock()
+		_, exists := e.appTenants[identity]
+		e.mu.RUnlock()
+		if exists {
+			continue
+		}
+
+		app := work.NewAppTenant(e.root, identity)
+		app.MaxEnergy = e.maxEnergy
+		app.HotReload = e.hotReload
+		if err := app.Run(); err != nil {
+			slog.Warn("App scheduler failed to start", "identity", identity, "error", err)
+			continue
+		}
+		e.mu.Lock()
+		e.appTenants[identity] = app
+		e.mu.Unlock()
+		started++
+	}
+	if started > 0 {
+		slog.Info("App schedulers started", "count", started)
+	}
+	return started
 }
 
 // SetRateLimit bật rate limit tầng host (global/IP/browser/user — xem RateLimiter). Gọi MỘT lần

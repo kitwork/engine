@@ -21,34 +21,80 @@ func Run(configFile ...string) (err error) {
 	// chung env, rò secret). env là SCOPED: host đọc root .env trong evalConfigJS;
 	// mỗi tenant đọc .env riêng của nó (work.Tenant.Run → kitwork().env).
 
-	// Bootstrap DUY NHẤT là một file .kitwork.js chạy được (mặc định
-	// server.kitwork.js). YAML/JSON KHÔNG còn nạp trực tiếp ở đây — muốn dùng chúng
-	// thì trỏ tới từ trong server.kitwork.js: server.run("config.kitwork.yaml").
-	file := "server.kitwork.js"
+	// Manifest DUY NHẤT là một file .kitwork.js chạy được: app.kitwork.js (mặc định mới),
+	// hoặc server.kitwork.js (tên cũ, vẫn đọc). YAML/JSON KHÔNG nạp trực tiếp ở đây — muốn
+	// dùng chúng thì trỏ từ manifest: server.run("config.kitwork.yaml").
+	file := ""
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
+	} else {
+		for _, candidate := range []string{"app.kitwork.js", "server.kitwork.js"} {
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				file = candidate
+				break
+			}
+		}
+		if file == "" {
+			return fmt.Errorf("không tìm thấy manifest: cần app.kitwork.js (hoặc server.kitwork.js)")
+		}
 	}
 
 	if !strings.HasSuffix(strings.ToLower(file), ".js") {
-		return fmt.Errorf("engine.Run chỉ nhận bootstrap .kitwork.js, nhận %q — "+
-			"muốn dùng YAML/JSON thì trỏ từ server.kitwork.js: server.run(\"config.kitwork.yaml\")", file)
+		return fmt.Errorf("engine.Run chỉ nhận manifest .kitwork.js, nhận %q — "+
+			"muốn dùng YAML/JSON thì trỏ từ manifest: server.run(\"config.kitwork.yaml\")", file)
 	}
 
 	if _, statErr := os.Stat(file); statErr != nil {
-		return fmt.Errorf("không tìm thấy bootstrap config %s: %w", file, statErr)
+		return fmt.Errorf("không tìm thấy manifest %s: %w", file, statErr)
 	}
 
-	// Chạy bootstrap trong VM setup tối giản, bắt object/đường-dẫn từ server.run(...).
+	// Chạy manifest trong VM setup tối giản để BẮT các khai báo (surfaces + config chung).
 	// Engine tự sở hữu stack → config cũng là chính ngôn ngữ Kitwork, không parser ngoài.
-	raw, err := evalConfigJS(file)
+	builder, err := evalServerBuilder(file)
 	if err != nil {
 		return fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
-	fmt.Printf("Loaded configuration from %s (server.run)\n", file)
+	if builder.err != "" {
+		return fmt.Errorf("failed to evaluate config %s: config validation error: %s", file, builder.err)
+	}
+
+	// DISPATCH THEO MANIFEST: khai báo là DỮ LIỆU, lệnh mới quyết định chạy gì. Không có web
+	// surface thì cloud host không có gì để phục vụ — nếu app khai desktop/mobile thì đó là
+	// hợp lệ (chạy shell tương ứng), không phải lỗi.
+	if !builder.hasWeb {
+		if _, hasDesktop := builder.config["desktop"]; hasDesktop {
+			fmt.Printf("%s khai báo app.desktop() nhưng không có web surface — không có gì để phục vụ.\n"+
+				"→ Chạy `kitwork-desktop` cho app desktop, hoặc thêm `app.web({ port: env.PORT || 8080 })` để phục vụ HTTP.\n", file)
+			return nil
+		}
+		if _, hasMobile := builder.config["mobile"]; hasMobile {
+			fmt.Printf("%s chỉ khai báo app.mobile() — cloud host không có gì để phục vụ.\n", file)
+			return nil
+		}
+		return fmt.Errorf("failed to evaluate config %s: %w", file, noWebSurfaceErr(builder, file))
+	}
+
+	raw, err := builderToMap(builder, file)
+	if err != nil {
+		return fmt.Errorf("failed to evaluate config %s: %w", file, err)
+	}
+	fmt.Printf("Loaded configuration from %s (app.web)\n", file)
 
 	cfg, err := ParseConfig(raw)
 	if err != nil {
 		return fmt.Errorf("failed to process configuration: %w", err)
+	}
+
+	// apps/ is the modern root name (an app = a folder); deployments created before the rename still
+	// have tenants/. When the configured apps/ is missing but the legacy folder exists, follow it —
+	// an old server keeps booting untouched, no config edit required.
+	if cfg.Root == "apps" {
+		if _, err := os.Stat(cfg.Root); os.IsNotExist(err) {
+			if _, err := os.Stat("tenants"); err == nil {
+				fmt.Println("Root apps/ not found — using legacy tenants/ folder")
+				cfg.Root = "tenants"
+			}
+		}
 	}
 
 	// Initialize structured logger
@@ -84,6 +130,13 @@ func Run(configFile ...string) (err error) {
 	// Pass global settings to the work package
 	work.AllowLocal = cfg.AllowLocal
 	work.ServerPort = cfg.Port
+
+	// Scheduler backend is chosen automatically: a connected system Postgres → the SHARED cluster store
+	// (crons + cron_runs tables, SKIP LOCKED claim, lease/heartbeat, cross-node reclaim); no system DB →
+	// per-tenant SQLite. No flag — the presence of database.System is the switch (see startPersistedScheduler).
+	if database.System != nil {
+		slog.Info("Scheduler: shared Postgres backend (system DB connected)")
+	}
 
 	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
 	domain.Allows = cfg.Domains
@@ -123,7 +176,11 @@ func Run(configFile ...string) (err error) {
 
 	// FILESYSTEM-ROUTED is lazy BY DESIGN: nothing is scanned or compiled at startup — the engine is
 	// idle until the first request, and each folder's router.kitwork.js compiles on first hit. So
-	// there is NO prewarm; the old eager route-registration is gone with the flat model.
+	// there is NO route prewarm; the old eager route-registration is gone with the flat model.
+	//
+	// The ONE deliberate exception is the scheduler: a cron cannot wait for a request. So every app
+	// (identity) with a _cron/ boots an app runtime NOW that starts its scheduler eagerly.
+	handler.StartAppSchedulers()
 
 	if !host.IsLocalhost() && !cfg.AllowLocal {
 		tlsConfig := domain.AutoSSL(cfg.Domains)
