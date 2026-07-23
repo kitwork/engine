@@ -13,7 +13,9 @@ window.kitwork.components.action("tab", function (el) {
   var list = el.closest('[role="tablist"]') || el.parentElement;
   if (list) {
     list.querySelectorAll('[data-kit-action="tab"],[data-kitwork-action="tab"]').forEach(function (t) {
-      t.setAttribute("aria-selected", t === el ? "true" : "false");
+      var active = t === el;
+      t.setAttribute("aria-selected", active ? "true" : "false");
+      t.setAttribute("data-state", active ? "active" : "inactive");
     });
   }
   var group = panel.parentElement;

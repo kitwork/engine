@@ -30,6 +30,12 @@ func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
 	if !strings.Contains(js, `action("copy"`) {
 		t.Errorf("copy module missing: %s", js)
 	}
+	if !strings.Contains(js, `execCommand("copy")`) {
+		t.Errorf("copy fallback missing: %s", js)
+	}
+	if !strings.Contains(js, `range.selectNodeContents(target)`) {
+		t.Errorf("copy text-selection fallback missing: %s", js)
+	}
 	if strings.Contains(js, `action("toggle"`) {
 		t.Errorf("toggle should NOT be included (unused): %s", js)
 	}
@@ -54,6 +60,9 @@ func TestRenderInjectsOnlyUsed(t *testing.T) {
 	}
 	if !strings.Contains(out, `action("tab"`) || !strings.Contains(out, `action("dialog"`) {
 		t.Errorf("both used verbs expected: %s", out)
+	}
+	if !strings.Contains(out, `setAttribute("data-state"`) {
+		t.Errorf("tab state hook for utility variants missing: %s", out)
 	}
 	if strings.Contains(out, `action("copy"`) {
 		t.Errorf("copy is unused and must not ship: %s", out)

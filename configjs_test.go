@@ -253,3 +253,115 @@ func TestEvalConfigJS_MultiStyle(t *testing.T) {
 		t.Errorf("style 3 port = %v, want 7777", raw3["port"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Manifest STYLES. A Kitwork manifest is a blueprint: the author picks the shape.
+// Both must build the SAME config, and mixing them must compose — these tests pin
+// that contract so neither style can quietly regress.
+// ---------------------------------------------------------------------------
+
+// Style A: flat chain — app.port().hostname().allowLocal()
+func TestManifestStyle_FlatChain(t *testing.T) {
+	file := writeServerJS(t, `import { app, env } from "kitwork";
+app.port(3100).hostname("flat.example").allowLocal(true).rateLimit({ rate: 50, period: "1s" });`)
+
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatalf("flat chain should be a valid manifest: %v", err)
+	}
+	if raw["port"] != float64(3100) {
+		t.Errorf("port = %v, want 3100", raw["port"])
+	}
+	if raw["hostname"] != "flat.example" {
+		t.Errorf("hostname = %v, want flat.example", raw["hostname"])
+	}
+	if raw["allow_local"] != true {
+		t.Errorf("allow_local = %v, want true", raw["allow_local"])
+	}
+	if raw["rate_limit"] == nil {
+		t.Error("rate_limit missing")
+	}
+}
+
+// Style B: grouped surface — app.web({ ... }). Must flatten to the SAME keys as style A.
+func TestManifestStyle_GroupedWeb(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.web({ port: 3100, hostname: "flat.example", allowLocal: true, rateLimit: { rate: 50, period: "1s" } });`)
+
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatalf("grouped web should be a valid manifest: %v", err)
+	}
+	if raw["port"] != float64(3100) {
+		t.Errorf("port = %v, want 3100", raw["port"])
+	}
+	if raw["hostname"] != "flat.example" {
+		t.Errorf("hostname = %v, want flat.example (app.web must flatten to the same key)", raw["hostname"])
+	}
+	if raw["allow_local"] != true {
+		t.Errorf("allow_local = %v, want true (allowLocal → allow_local)", raw["allow_local"])
+	}
+	if raw["rate_limit"] == nil {
+		t.Error("rate_limit missing (rateLimit → rate_limit)")
+	}
+}
+
+// app.web(8080) shorthand declares the surface with just a port.
+func TestManifestStyle_WebShorthandPort(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork"; app.web(8080);`))
+	if err != nil {
+		t.Fatalf("app.web(8080) should be valid: %v", err)
+	}
+	if raw["port"] != float64(8080) {
+		t.Errorf("port = %v, want 8080", raw["port"])
+	}
+}
+
+// Desktop in BOTH styles: flat sugar (app.chrome/app.window) and grouped (app.desktop({...})),
+// mixed in one chain and in either order — they must merge into one desktop block.
+func TestManifestStyle_DesktopFlatAndGroupedCompose(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.port(3000).chrome("native").desktop({ window: { width: 800, maximized: true } });`)
+
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatalf("mixed desktop styles should be valid: %v", err)
+	}
+	d, ok := raw["desktop"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("desktop block missing: %#v", raw["desktop"])
+	}
+	if d["chrome"] != "native" {
+		t.Errorf("chrome = %v, want native (flat app.chrome must survive a later app.desktop)", d["chrome"])
+	}
+	w, ok := d["window"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("window missing: %#v", d["window"])
+	}
+	if w["width"] != float64(800) || w["maximized"] != true {
+		t.Errorf("window = %#v, want width 800 + maximized", w)
+	}
+}
+
+// The legacy `server` object stays an alias of `app` — old manifests must not break.
+func TestManifestStyle_ServerAliasStillWorks(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { server } from "kitwork"; server.run(4321);`))
+	if err != nil {
+		t.Fatalf("legacy server.run must still work: %v", err)
+	}
+	if raw["port"] != float64(4321) {
+		t.Errorf("port = %v, want 4321", raw["port"])
+	}
+}
+
+// A desktop-only manifest is VALID data (the shell reads it) but has no web surface for the cloud
+// host — the error must say that, not "you forgot to call run()".
+func TestManifestStyle_DesktopOnlyHasNoWebSurface(t *testing.T) {
+	_, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork"; app.title("X").desktop({ chrome: "native" });`))
+	if err == nil {
+		t.Fatal("desktop-only manifest must not satisfy the cloud host")
+	}
+	if !strings.Contains(err.Error(), "no web surface") {
+		t.Errorf("error should explain the missing WEB surface, got: %v", err)
+	}
+}
