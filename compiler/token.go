@@ -78,6 +78,7 @@ const (
 	SlashAssign // /=
 	PlusPlus    // ++
 	MinusMinus  // --
+	For         // for — a BOUNDED counting loop (for (let i=0;i<n;i++)) or for…of iteration
 
 	// --- Modules (native import/export) ---
 	Import // import { x } from "..."
@@ -171,6 +172,8 @@ func (k Kind) String() string {
 		return "if"
 	case Else:
 		return "else"
+	case For:
+		return "for"
 	// case For:
 	// 	return "for"
 	// case In:
@@ -236,8 +239,7 @@ var Keywords = map[string]Kind{
 	"let":   Let,
 	"if":    If,
 	"else":  Else,
-	// "for":    For,
-	// "in":     In,
+	"for":   For,
 	"return":   Return,
 	"function": Function,
 	"new":      New,

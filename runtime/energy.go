@@ -59,4 +59,6 @@ var Table = [256]Cost{
 	RETURN: 5,   // Thu hồi Frame và dọn dẹp Stack
 	DEFER:  10,  // Bảo hiểm hệ thống: Đảm bảo thực thi dọn dẹp
 	SPAWN:  200, // Đắt: Tạo Goroutine và Context mới
+	POPFIN:     1, // Như POP; phần finalize (nếu có) tính phí qua chính request/handler
+	POPFINSOFT: 1, // Như POP; finalize soft (chỉ request có handler)
 }

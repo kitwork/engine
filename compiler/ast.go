@@ -211,12 +211,47 @@ func (rs *ReturnStatement) String() string {
 	return out.String()
 }
 
-// ForStatement: for (item in list) { }
+// ForStatement: for (item of list) { } — iterates a bounded collection (compiled to the ITER opcode).
 type ForStatement struct {
 	Token    Token // Dấu 'for'
 	Item     *Identifier
 	Iterable Expression
 	Body     *BlockStatement
+}
+
+// ForRangeStatement: a BOUNDED counting loop — for (let i = 0; i < n; i++) { … }.
+// The parser accepts ONLY this exact shape (a declared counter, a condition comparing that counter,
+// and an update that mutates that counter), so an unbounded / while-style loop (for(;;), for(;c;))
+// cannot be written — the "no infinite loop" guarantee holds by construction. MaxEnergy is the
+// backstop for the one pathological case syntax can't catch (a bound that grows inside the body).
+type ForRangeStatement struct {
+	Token   Token      // 'for'
+	Counter string     // the loop variable name (i)
+	Init    Statement  // let i = <expr>
+	Cond    Expression // i < n
+	Update  Expression // i = i + 1  (desugared from i++ / i += k)
+	Body    *BlockStatement
+}
+
+func (fs *ForRangeStatement) statementNode()  {}
+func (fs *ForRangeStatement) expressionNode() {}
+func (fs *ForRangeStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("for (")
+	if fs.Init != nil {
+		out.WriteString(fs.Init.String())
+	}
+	out.WriteString("; ")
+	if fs.Cond != nil {
+		out.WriteString(fs.Cond.String())
+	}
+	out.WriteString("; ")
+	if fs.Update != nil {
+		out.WriteString(fs.Update.String())
+	}
+	out.WriteString(") ")
+	out.WriteString(fs.Body.String())
+	return out.String()
 }
 
 func (fs *ForStatement) statementNode()  {}

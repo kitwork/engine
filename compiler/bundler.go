@@ -162,33 +162,55 @@ func (b *bundler) ensureModule(spec, fromDir string) (string, error) {
 // resolveModulePath quy specifier tương đối về đường dẫn file tuyệt đối, thử các
 // đuôi quen thuộc của tenant.
 func resolveModulePath(spec, fromDir string) (string, error) {
-	var base string
-	if filepath.IsAbs(spec) {
-		base = spec
-	} else {
+	// App-shared specifier (`_core/…`): walk UP from the importing file's dir, matching the FIRST `_core`
+	// found — the domain's own copy (apps/<id>/<domain>/_core) overrides, else the app-wide one at the
+	// identity level (apps/<id>/_core). Relative/abs specifiers keep their exact single-location resolve.
+	if !filepath.IsAbs(spec) && strings.HasPrefix(spec, "_") {
+		dir := fromDir
+		for {
+			if resolved, ok := statModule(filepath.Join(dir, spec)); ok {
+				return resolved, nil
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break // reached the filesystem root without a match
+			}
+			dir = parent
+		}
+		return "", fmt.Errorf("native bundle: app-shared module %q không tìm thấy khi đi ngược từ %s", spec, fromDir)
+	}
+
+	base := spec
+	if !filepath.IsAbs(spec) {
 		base = filepath.Join(fromDir, spec)
 	}
+	if resolved, ok := statModule(base); ok {
+		return resolved, nil
+	}
+	return "", fmt.Errorf("native bundle: không resolve được %q từ %s", spec, fromDir)
+}
+
+// statModule tries a module base path plus the usual extension/index candidates, returning the first
+// real file (a bare directory only matches itself, for side-effect dir imports).
+func statModule(base string) (string, bool) {
 	candidates := []string{base}
 	if filepath.Ext(base) == "" {
 		candidates = append(candidates,
-			base+".kitwork.js",
-			base+".js",
-			filepath.Join(base, "index.kitwork.js"),
-			filepath.Join(base, "index.js"),
-		)
+			base+".kitwork.js", base+".js",
+			filepath.Join(base, "index.kitwork.js"), filepath.Join(base, "index.js"))
 	}
 	for _, c := range candidates {
 		if fi, err := os.Stat(c); err == nil {
 			if fi.IsDir() {
 				if c == base {
-					return filepath.Clean(c), nil
+					return filepath.Clean(c), true
 				}
 				continue
 			}
-			return filepath.Clean(c), nil
+			return filepath.Clean(c), true
 		}
 	}
-	return "", fmt.Errorf("native bundle: không resolve được %q từ %s", spec, fromDir)
+	return "", false
 }
 
 /* ---- builder AST tổng hợp (lower về node sẵn có, không opcode mới) ---- */

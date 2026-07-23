@@ -173,9 +173,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseReturnStatement()
 	case Function:
 		return p.parseFunctionStatement()
-	// case If, For, Defer, Go:
-	// 	// Trong cấu trúc này, If, For, Defer và Go là Expression/Statement linh hoạt
-	// 	return p.parseExpressionStatement()
+	case For:
+		return p.parseForStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -273,6 +272,15 @@ func isRelativeSpecifier(s string) bool {
 	return strings.HasPrefix(s, "./") || strings.HasPrefix(s, "../") || strings.HasPrefix(s, "/")
 }
 
+// isAppSpecifier báo specifier là module APP-SHARED: bắt đầu bằng `_` (vd `_core/github.kitwork.js`).
+// Bundler resolve bằng cách ĐI NGƯỢC LÊN từ file import — bắt gặp `_core` ở cấp domain trước, rồi cấp
+// identity (apps/<identity>/_core). Nhờ vậy các domain của một app DÙNG CHUNG `_core` mà không cần
+// đường dẫn tương đối `../../_core`, và domain vẫn override được bằng `_core` riêng. Không đụng import
+// tương đối cũ (`../_core` vẫn chạy y nguyên).
+func isAppSpecifier(s string) bool {
+	return strings.HasPrefix(s, "_")
+}
+
 // hasAlias báo có ít nhất một binding đổi tên (`imported as local`).
 func hasAlias(specs []ImportSpec) bool {
 	for _, s := range specs {
@@ -333,7 +341,7 @@ func (p *Parser) parseImportStatement() Statement {
 	if p.peekTokenIs(String) {
 		p.nextToken() // cur: string
 		spec := p.curToken.Value.Text()
-		if isRelativeSpecifier(spec) {
+		if isRelativeSpecifier(spec) || isAppSpecifier(spec) {
 			return &ImportStatement{Token: importTok, Source: spec, SideEffect: true}
 		}
 		p.errors = append(p.errors, fmt.Sprintf("native import: unsupported side-effect specifier %q", spec))
@@ -391,10 +399,10 @@ func (p *Parser) parseImportStatement() Statement {
 			}
 			return &GroupStatement{Statements: stmts}
 		}
-		if isRelativeSpecifier(spec) {
+		if isRelativeSpecifier(spec) || isAppSpecifier(spec) {
 			return &ImportStatement{Token: importTok, Names: specs, Source: spec}
 		}
-		p.errors = append(p.errors, fmt.Sprintf("native import: only 'kitwork' or relative modules supported: %q", spec))
+		p.errors = append(p.errors, fmt.Sprintf("native import: only 'kitwork', relative, or app-shared (_core/…) modules supported: %q", spec))
 		return nil
 	}
 
@@ -753,7 +761,7 @@ func (p *Parser) parseReservedKeyword() Expression {
 	word := p.curToken.Value.Text()
 	switch word {
 	case "while", "do":
-		p.addError(fmt.Sprintf("Kitwork không hỗ trợ vòng lặp '%s' (loại bỏ có chủ đích để tránh vòng lặp vô tận). Hãy dùng .map() / .filter() / .find() trên mảng dữ liệu.", word))
+		p.addError(fmt.Sprintf("Kitwork không hỗ trợ vòng điều kiện tuỳ ý '%s' (có thể lặp vô tận). Hãy dùng vòng ĐẾM 'for (let i = 0; i < n; i++)', duyệt 'for (const x of arr)', hoặc .map()/.filter()/.find() trên mảng.", word))
 	case "try", "catch", "finally", "throw":
 		p.addError(fmt.Sprintf("Kitwork không hỗ trợ '%s' (loại bỏ có chủ đích cho đơn giản). Hãy dùng chuỗi .done(callback) / .fail(callback) để xử lý kết quả và lỗi.", word))
 	case "switch":
@@ -800,35 +808,132 @@ func (p *Parser) parseIfExpression() Expression {
 	return exp
 }
 
-func (p *Parser) parseForStatement() Expression {
-	exp := &ForStatement{Token: p.curToken}
-
+// parseForStatement accepts EXACTLY two shapes, and rejects everything else with a friendly error:
+//
+//	for (let i = 0; i < n; i++) { … }   // a BOUNDED counting loop  → ForRangeStatement
+//	for (const x of arr) { … }          // iterate a collection      → ForStatement (ITER)
+//
+// It deliberately refuses for(;;) / for(; cond ;) — an arbitrary condition loop is `while` in
+// disguise, and Kitwork's guarantee is "no infinite loop by construction". The counter must be
+// declared (let/const), the condition must compare THAT counter, and the update must mutate it.
+func (p *Parser) parseForStatement() Statement {
+	forTok := p.curToken
 	if !p.expectPeek(LeftParen) {
 		return nil
 	}
 
+	// Reject the empty / condition-only forms up front.
+	if p.peekTokenIs(Semicolon) || p.peekTokenIs(RightParen) {
+		p.addError("Kitwork chỉ hỗ trợ vòng ĐẾM: for (let i = 0; i < n; i++). Dạng for(;;) / for(; điều_kiện ;) không được phép — đó là 'while' trá hình (dùng vòng đếm, hoặc .map()/.filter()).")
+		return nil
+	}
+
+	// The counter MUST be declared with let/const.
+	if !p.peekTokenIs(Let) && !p.peekTokenIs(Const) {
+		p.addError("Biến đếm của for phải khai báo bằng 'let'/'const': for (let i = 0; i < n; i++) hoặc for (const x of arr).")
+		return nil
+	}
+	declTok := p.peekToken
+	p.nextToken() // cur: let/const
 	if !p.expectPeek(Ident) {
 		return nil
 	}
-	exp.Item = &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
+	counter := &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
 
-	// if !p.expectPeek(In) {
-	// 	return nil
-	// }
+	// Disambiguate on the token after the counter name: '=' → counting loop, 'of' → iteration.
+	switch {
+	case p.peekTokenIs(Assign):
+		return p.parseCountedFor(forTok, declTok, counter)
+	case p.peekTokenIs(Ident) && p.peekToken.Value.Text() == "of":
+		return p.parseForOf(forTok, counter)
+	default:
+		p.addError(fmt.Sprintf("Cú pháp for không hợp lệ sau '%s'. Dùng vòng đếm 'for (let %s = 0; %s < n; %s++)' hoặc duyệt 'for (const %s of arr)'.",
+			counter.Value, counter.Value, counter.Value, counter.Value, counter.Value))
+		return nil
+	}
+}
 
+// parseCountedFor parses `for (<decl> i = <init> ; <cond> ; <update>)` and validates that <cond>
+// compares the counter and <update> mutates it — so the loop is bounded by construction.
+func (p *Parser) parseCountedFor(forTok, declTok Token, counter *Identifier) Statement {
+	stmt := &ForRangeStatement{Token: forTok, Counter: counter.Value}
+
+	// Init:  let i = <expr>
+	p.nextToken() // cur: '='
+	p.nextToken() // cur: init expression
+	init := p.parseExpression(LOWEST)
+	stmt.Init = &VarStatement{Token: declTok, Names: []*Identifier{counter}, Value: init, DestructMode: DestructNone}
+	if !p.expectPeek(Semicolon) {
+		return nil
+	}
+
+	// Cond:  i < n  (must compare the counter)
 	p.nextToken()
-	exp.Iterable = p.parseExpression(LOWEST)
+	stmt.Cond = p.parseExpression(LOWEST)
+	if !condRefsCounter(stmt.Cond, counter.Value) {
+		p.addError(fmt.Sprintf("Điều kiện for phải so sánh biến đếm '%s' (ví dụ '%s < n', '%s >= 0'). Điều kiện tuỳ ý là 'while' trá hình và không được phép.", counter.Value, counter.Value, counter.Value))
+		return nil
+	}
+	if !p.expectPeek(Semicolon) {
+		return nil
+	}
+
+	// Update:  i++ / i-- / i += k / i -= k  (must mutate the counter)
+	p.nextToken()
+	stmt.Update = p.parseExpression(LOWEST)
+	if !updateMutatesCounter(stmt.Update, counter.Value) {
+		p.addError(fmt.Sprintf("Bước nhảy for phải cập nhật biến đếm '%s' (%s++, %s--, %s += n).", counter.Value, counter.Value, counter.Value, counter.Value))
+		return nil
+	}
 
 	if !p.expectPeek(RightParen) {
 		return nil
 	}
-
 	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
-	exp.Body = p.parseBlockStatement()
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
 
-	return exp
+// parseForOf parses `for (<decl> x of <iterable>)` — bounded iteration over a collection.
+func (p *Parser) parseForOf(forTok Token, item *Identifier) Statement {
+	stmt := &ForStatement{Token: forTok, Item: item}
+	p.nextToken() // cur: 'of'
+	p.nextToken() // cur: iterable expression
+	stmt.Iterable = p.parseExpression(LOWEST)
+	if !p.expectPeek(RightParen) {
+		return nil
+	}
+	if !p.expectPeek(LeftBrace) {
+		return nil
+	}
+	stmt.Body = p.parseBlockStatement()
+	return stmt
+}
+
+// condRefsCounter reports whether a for-condition is a comparison against the loop counter.
+func condRefsCounter(e Expression, name string) bool {
+	inf, ok := e.(*InfixExpression)
+	if !ok {
+		return false
+	}
+	switch inf.Operator {
+	case "<", "<=", ">", ">=", "!=":
+		return isIdent(inf.Left, name) || isIdent(inf.Right, name)
+	}
+	return false
+}
+
+// updateMutatesCounter reports whether a for-update assigns/updates the loop counter (i++/i+=k/…).
+func updateMutatesCounter(e Expression, name string) bool {
+	as, ok := e.(*AssignmentExpression)
+	return ok && isIdent(as.Name, name)
+}
+
+func isIdent(e Expression, name string) bool {
+	id, ok := e.(*Identifier)
+	return ok && id.Value == name
 }
 
 func (p *Parser) parseDeferStatement() Expression {

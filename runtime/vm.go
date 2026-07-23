@@ -16,6 +16,22 @@ func (vm *VM) Defer(fn *value.Lambda) {
 	}
 }
 
+// finalizeStatement is the POPFIN behaviour: a bare expression statement whose value is a
+// value.StatementFinalizer (a lazy http request) fires here — at the END of the statement — and runs
+// its .then()/.catch() handler on THIS vm (re-entrant, exactly like an array-map callback). This is
+// what lets the http chain be written flat in any order: nothing fires until the statement ends. For
+// every other value POPFIN is just POP.
+func (vm *VM) finalizeStatement(v value.Value, soft bool) {
+	if v.K != value.Struct {
+		return
+	}
+	if f, ok := v.V.(value.StatementFinalizer); ok {
+		if h, arg, run := f.FinalizeStatement(soft); run && h != nil {
+			vm.ExecuteLambda(h, []value.Value{arg})
+		}
+	}
+}
+
 // lookupScopeChain tìm biến dọc theo chuỗi closure bao ngoài (lexical scoping).
 // Cho phép lambda lồng nhiều cấp đọc biến của mọi hàm bao ngoài, đúng ngữ nghĩa JS.
 func lookupScopeChain(fn *value.Lambda, name string) (value.Value, bool) {
@@ -401,6 +417,9 @@ func (vm *VM) Run() value.Value {
 
 		case RETURN:
 			res := vm.pop()
+			// A returned http request WITH a .then()/.catch() handler (e.g. an arrow-body
+			// `ctx => http.get(url).then(A)`) fires + runs its handler here instead of leaking unfired.
+			vm.finalizeStatement(res, true)
 			for i := len(f.Defers) - 1; i >= 0; i-- {
 				vm.ExecuteLambda(f.Defers[i], nil)
 			}
@@ -435,6 +454,12 @@ func (vm *VM) Run() value.Value {
 			}
 		case POP:
 			vm.pop()
+
+		case POPFIN:
+			vm.finalizeStatement(vm.pop(), false)
+
+		case POPFINSOFT:
+			vm.finalizeStatement(vm.pop(), true)
 
 		default:
 			fmt.Printf("Unknown OP: %d at IP %d\n", op, f.IP-1)
@@ -814,6 +839,9 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			}
 		case RETURN:
 			res := vm.pop()
+			// A returned http request WITH a .then()/.catch() handler (e.g. an arrow-body
+			// `ctx => http.get(url).then(A)`) fires + runs its handler here instead of leaking unfired.
+			vm.finalizeStatement(res, true)
 			for i := len(f.Defers) - 1; i >= 0; i-- {
 				vm.ExecuteLambda(f.Defers[i], nil)
 			}
@@ -1001,6 +1029,10 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			}
 		case POP:
 			vm.pop()
+		case POPFIN:
+			vm.finalizeStatement(vm.pop(), false)
+		case POPFINSOFT:
+			vm.finalizeStatement(vm.pop(), true)
 		}
 
 		// Kiểm tra lỗi phát sinh sau khi thực thi instruction

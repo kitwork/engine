@@ -65,6 +65,8 @@ func getNodePosition(node Node) int32 {
 		return n.Token.Position
 	case *ForStatement:
 		return n.Token.Position
+	case *ForRangeStatement:
+		return n.Token.Position
 	case *DeferStatement:
 		return n.Token.Position
 	case *Identifier:
@@ -172,7 +174,10 @@ func (c *Compiler) Compile(node Node) error {
 		case *IfExpression:
 			// Skip POP for control flow expressions (if statements)
 		default:
-			c.emit(runtime.POP)
+			// POPFIN (a safe superset of POP): pops the discarded value AND, if it is a
+			// value.StatementFinalizer (a lazy http request), fires it once + runs .then()/.catch().
+			// For every other value it is identical to POP.
+			c.emit(runtime.POPFIN)
 		}
 		return nil
 
@@ -275,7 +280,9 @@ func (c *Compiler) Compile(node Node) error {
 			symbolIndex := c.addConstant(value.NewString(n.Names[0].Value))
 			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		}
-		c.emit(runtime.POP)
+		// POPFINSOFT (soft finalize): if the assigned value is an http request WITH a .then()/.catch()
+		// handler, fire it + run the handler here; a plain lazy request stays lazy. Otherwise = POP.
+		c.emit(runtime.POPFINSOFT)
 
 	case *AssignmentExpression:
 		if id, ok := n.Name.(*Identifier); ok {
@@ -379,6 +386,30 @@ func (c *Compiler) Compile(node Node) error {
 		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
 		c.emit(runtime.POP)
 		c.emit(runtime.POP)
+
+	case *ForRangeStatement:
+		// Counting loop, compiled to a plain condition-jump — bounded by construction because the
+		// parser guarantees the shape (declared counter, compares the counter, mutates the counter).
+		//   init: let i = 0        (VarStatement leaves a clean stack — it POPs its own value)
+		if err := c.Compile(n.Init); err != nil {
+			return err
+		}
+		loopStart := len(c.instructions)
+		//   cond: i < n            (pushes a bool that FALSE consumes; jump past the loop when false)
+		if err := c.Compile(n.Cond); err != nil {
+			return err
+		}
+		exitJump := c.emit(runtime.FALSE, 0, 0)
+		if err := c.Compile(n.Body); err != nil {
+			return err
+		}
+		//   update: i = i + 1      (AssignmentExpression leaves its value on the stack → POP it)
+		if err := c.Compile(n.Update); err != nil {
+			return err
+		}
+		c.emit(runtime.POP)
+		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
+		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
 
 	case *BlockStatement:
 		for _, s := range n.Statements {
