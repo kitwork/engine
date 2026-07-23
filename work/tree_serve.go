@@ -204,6 +204,14 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	// Handler.
 	if reqRouter.err == nil && !reqRouter.response.IsSend() {
 		switch {
+		case method.isProxy:
+			// Reverse proxy (router.proxy): a .cache()/.persist() hit already replayed above with no
+			// VM — reaching here means a miss, so fetch the upstream now. A failure is the UPSTREAM's
+			// fault, not ours: 502.
+			if err := t.serveProxy(vm, leaf.bytecode, method, ctxObj); err != nil {
+				reqRouter.err = err
+				reqRouter.response.Text(value.New(err.Error()), http.StatusBadGateway)
+			}
 		case method.outputKind != "":
 			if err := t.executeGeneratedOutput(vm, leaf.bytecode, method, ctxObj); err != nil {
 				reqRouter.err = err

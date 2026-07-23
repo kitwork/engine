@@ -59,6 +59,11 @@ type FolderMethod struct {
 	outputData value.Value
 	outputPath string
 
+	// .proxy(): answer from an upstream instead of a page. proxyTarget is a fixed URL or a handler
+	// computing one per request. See serveProxy in tree_proxy.go.
+	isProxy     bool
+	proxyTarget value.Value
+
 	// Response caching + rate limiting (see cache/persist/ratelimit helper packages). The expiry
 	// resolvers accept a rolling duration OR a wall-clock boundary ("nextday 03:00", "weekly", …),
 	// evaluated at save time; nil = that tier is off.
@@ -272,6 +277,27 @@ func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
 
 func (f *FolderRouter) Get(args ...value.Value) *FolderMethod    { return f.declare("GET", args...) }
 func (f *FolderRouter) Post(args ...value.Value) *FolderMethod   { return f.declare("POST", args...) }
+
+// Proxy answers this folder from an UPSTREAM url instead of a page — a reverse proxy mounted at the
+// folder. The target is a fixed URL, or a handler that computes one per request (params/path):
+//
+//	router.proxy("https://cdn.example.com/logo.png").persist("30d")
+//	router.proxy((ctx) => "https://cdn.example.com/" + ctx.params("id") + ".png").persist("30d")
+//
+// Compose with .persist()/.cache(): a hit replays the stored bytes with NO VM and NO refetch — the
+// "cached mount" (declare once, first hit fetches, the rest serve from disk). The upstream's
+// Content-Type is preserved, so images come back as images.
+//
+// SSRF: the TENANT owns the target (it computes it) — the engine still blocks private/loopback space
+// at the transport as a backstop. Never build the target straight from untrusted input.
+func (f *FolderRouter) Proxy(args ...value.Value) *FolderMethod {
+	m := f.declare("GET") // declare WITHOUT args so a handler-target never becomes the page handler
+	m.isProxy = true
+	if len(args) > 0 {
+		m.proxyTarget = args[0]
+	}
+	return m
+}
 func (f *FolderRouter) Put(args ...value.Value) *FolderMethod    { return f.declare("PUT", args...) }
 func (f *FolderRouter) Patch(args ...value.Value) *FolderMethod  { return f.declare("PATCH", args...) }
 func (f *FolderRouter) Delete(args ...value.Value) *FolderMethod { return f.declare("DELETE", args...) }
