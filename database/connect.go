@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -30,7 +31,13 @@ func (d *Config) Connect() (*sql.DB, error) {
 		return nil, err
 	}
 
-	db, err := sql.Open(d.Type, dsn)
+	// The registered driver name is "sqlite" (modernc.org/sqlite) — accept the common "sqlite3"
+	// spelling in configs without requiring a second driver.
+	driver := strings.ToLower(d.Type)
+	if driver == "sqlite3" {
+		driver = "sqlite"
+	}
+	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -38,6 +45,13 @@ func (d *Config) Connect() (*sql.DB, error) {
 	db.SetMaxOpenConns(d.MaxOpen)
 	db.SetMaxIdleConns(d.MaxIdle)
 	db.SetConnMaxLifetime(time.Duration(d.Lifetime) * time.Minute)
+
+	// A :memory: SQLite database exists PER CONNECTION — with a pool, every new conn would be a
+	// fresh empty database. Pin the pool to one connection so it behaves like one database.
+	if driver == "sqlite" && strings.Contains(dsn, ":memory:") {
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	}
 
 	if err := db.Ping(); err != nil {
 		db.Close()
@@ -89,7 +103,9 @@ func (d *Config) BuildDSN() (string, error) {
 			d.User, d.Password, d.Host, d.Port, d.Name, timezone), nil
 
 	case "sqlite", "sqlite3":
-		// SQLite DSN is simply the file path (stored in Host or Name)
+		// SQLite DSN is the file path (stored in Name or Host), wrapped in a file: URI so pragmas
+		// ride along. WAL + busy_timeout are what make two concurrent writers QUEUE instead of
+		// erroring "database is locked" — the number-one SQLite footgun without them.
 		path := d.Name
 		if path == "" {
 			path = d.Host
@@ -97,7 +113,12 @@ func (d *Config) BuildDSN() (string, error) {
 		if path == "" {
 			path = "kitwork.db"
 		}
-		return path, nil
+		if strings.Contains(path, ":memory:") {
+			// In-memory: WAL is meaningless; the pool is pinned to 1 conn in Connect().
+			return "file::memory:?_pragma=foreign_keys(1)", nil
+		}
+		return "file:" + filepath.ToSlash(path) +
+			"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", nil
 
 	default:
 		return "", fmt.Errorf("unsupported database type: %s", d.Type)

@@ -3,6 +3,9 @@ package work
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/value"
@@ -22,6 +25,11 @@ type Database struct {
 	config *database.Config
 	sqlDB  *sql.DB
 	tx     *sql.Tx
+
+	// preset, when set, pins this Database to a specific connection config (the sqlite entry uses it:
+	// each file gets Alias "sqlite:<rel>"). Connect() then resolves via the preset — lazily, cached in
+	// tenant.databases — instead of the alias-"default" flow. Nil for the ordinary db entry.
+	preset *database.Config
 }
 
 func (d *Database) Connection() *Database {
@@ -44,6 +52,35 @@ func (d *Database) Connected() *Database {
 
 func (d *Database) Connect(vals ...value.Value) *Database {
 	if len(vals) == 0 && d.sqlDB != nil {
+		return d
+	}
+
+	// Preset path (the sqlite entry): connect via the pinned config, cached per alias in
+	// tenant.databases. This keeps open()/Sqlite() zero-I/O — the file is only touched here,
+	// on the first actual query.
+	if len(vals) == 0 && d.preset != nil {
+		d.tenant.dbMu.Lock()
+		defer d.tenant.dbMu.Unlock()
+		if d.tenant.databases == nil {
+			d.tenant.databases = make(map[string]*sql.DB)
+		}
+		if conn, ok := d.tenant.databases[d.preset.Alias]; ok {
+			d.sqlDB = conn
+			return d
+		}
+		// SQLite creates the FILE on open but not its directory (.data/…) — make it first.
+		if t := strings.ToLower(d.preset.Type); t == "sqlite" || t == "sqlite3" {
+			if dir := filepath.Dir(d.preset.Name); dir != "." && dir != "" {
+				_ = os.MkdirAll(dir, 0o755)
+			}
+		}
+		conn, err := d.preset.Connect()
+		if err != nil {
+			fmt.Printf("[DB] Failed to connect %s: %v\n", d.preset.Alias, err)
+			return d
+		}
+		d.tenant.databases[d.preset.Alias] = conn
+		d.sqlDB = conn
 		return d
 	}
 
