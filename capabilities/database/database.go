@@ -21,6 +21,9 @@ func NewDatabaseAdapter(scope capabilities.Scope) *DatabaseAdapter {
 }
 
 func (d *DatabaseAdapter) DB() *sql.DB {
+	if d.scope == nil {
+		return nil
+	}
 	return d.scope.DB(d.name)
 }
 
@@ -37,8 +40,12 @@ func (d *DatabaseAdapter) Table(args ...value.Value) value.Value {
 	return value.New(q)
 }
 
-func init() {
-	capabilities.DefaultRegistry.Register("database", func(scope capabilities.Scope) value.Value {
+func Register(registry *capabilities.Registry) {
+	registry.Register("database", func(scope capabilities.Scope) value.Value {
 		return value.New(NewDatabaseAdapter(scope))
 	})
+}
+
+func init() {
+	Register(capabilities.DefaultRegistry)
 }

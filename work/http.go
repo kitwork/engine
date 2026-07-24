@@ -18,6 +18,7 @@ func (w *KitWork) HTTP() *HTTP {
 	if w == nil || w.tenant == nil {
 		return httputil.NewClient(nil, nil)
 	}
+	_ = w.Capability("http")
 	return httputil.NewClient(w.tenant.fetchRAM(), w.tenant.fetchDisk())
 }
 

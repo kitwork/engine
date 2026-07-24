@@ -124,8 +124,12 @@ func (cb *CronBuilder) Handle(args ...value.Value) *CronBuilder {
 	return cb
 }
 
-func init() {
-	capabilities.DefaultRegistry.Register("cron", func(scope capabilities.Scope) value.Value {
+func Register(registry *capabilities.Registry) {
+	registry.Register("cron", func(scope capabilities.Scope) value.Value {
 		return value.New(NewCronAdapter(scope))
 	})
+}
+
+func init() {
+	Register(capabilities.DefaultRegistry)
 }
