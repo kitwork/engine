@@ -2,14 +2,24 @@ package work
 
 import (
 	"fmt"
+
 	"github.com/kitwork/engine/value"
 )
 
 func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
-	if fn.IsCallable() {
-		// Tạo một VM riêng cho chạy background để tránh xung đột với luồng chính
-		// Lấy VM từ pool hoặc tạo mới
+	if fn.IsCallable() && k != nil && k.tenant != nil {
 		vm := enginePool.Acquire()
+
+		tenant := k.tenant
+		bc := tenant.bytecode
+		var builtins []value.Value
+		var globals map[string]value.Value
+		var vars map[string]value.Value
+		if tenant.vm != nil {
+			builtins = tenant.vm.Builtins
+			globals = tenant.vm.Globals
+			vars = tenant.vm.Vars
+		}
 
 		go func() {
 			defer func() {
@@ -19,21 +29,19 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 				enginePool.Release(vm)
 			}()
 
-			// Khởi tạo VM với state của tenant hiện tại (Bytecode & Globals)
-			vm.FastReset(k.tenant.bytecode.Instructions, k.tenant.bytecode.Constants, k.tenant.vm.Globals, k.tenant.bytecode.SourceMap)
-			vm.MaxEnergy = k.tenant.MaxEnergy
+			vm.Builtins = builtins
+			if bc != nil {
+				vm.FastReset(bc.Instructions, bc.Constants, globals, bc.SourceMap)
+			}
+			vm.MaxEnergy = tenant.MaxEnergy
 
-			// TỐI ƯU: Copy các biến top-level (như log, router) từ tenant vào VM background
-			// Điều này giúp các closure lồng nhau có thể truy cập được các biến môi trường
-			for key, val := range k.tenant.vm.Vars {
+			for key, val := range vars {
 				vm.Vars[key] = val
 			}
 
 			if lambda, ok := fn.V.(*value.Lambda); ok {
-				// Thực thi lambda JS
 				vm.ExecuteLambda(lambda, args)
 			} else {
-				// Thực thi Go Function hoặc Method
 				fn.Call("go", args...)
 			}
 		}()

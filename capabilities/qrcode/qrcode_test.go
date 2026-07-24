@@ -1,35 +1,33 @@
-package qrcode_test
+package qrcode
 
 import (
-	"database/sql"
+	"strings"
 	"testing"
 
-	"github.com/kitwork/engine/capabilities"
-	qrcap "github.com/kitwork/engine/capabilities/qrcode"
 	"github.com/kitwork/engine/value"
 )
 
-type mockScope struct{}
+func TestQRCodeContractRealAppChain(t *testing.T) {
+	adapter := NewQRCodeAdapter(nil)
 
-func (m *mockScope) AppID() string                      { return "app_test" }
-func (m *mockScope) Domain() string                     { return "test.com" }
-func (m *mockScope) ResolvePath(paths ...string) string { return "/test" }
-func (m *mockScope) DB(name string) *sql.DB             { return nil }
+	payment := value.New(map[string]any{
+		"bank":    "970422",
+		"account": "123456789",
+		"amount":  50000,
+		"memo":    "ung ho website",
+	})
 
-func TestQRCodeCapability(t *testing.T) {
-	scope := &mockScope{}
-	val, ok := capabilities.DefaultRegistry.Get("qrcode", scope)
-	if !ok {
-		t.Fatal("QRCode capability not registered")
-	}
+	res := adapter.Napas(payment).
+		Template(value.NewString("circular")).
+		Logo(value.NewString("vietqr")).
+		Svg()
 
-	adapter, ok := val.V.(*qrcap.QRCodeAdapter)
-	if !ok {
-		t.Fatalf("Expected *qrcap.QRCodeAdapter, got %T", val.V)
-	}
-
-	res := adapter.Generate(value.NewString("https://kitwork.io"), value.New(200))
 	if res.K == value.Invalid {
-		t.Fatalf("QRCode generate failed: %v", res.V)
+		t.Fatalf("QRCode contract chain failed: %v", res.V)
+	}
+
+	svgText := res.Text()
+	if !strings.Contains(svgText, "<svg") {
+		t.Fatalf("Expected SVG string output, got: %s", svgText)
 	}
 }

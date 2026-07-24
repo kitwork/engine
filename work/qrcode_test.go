@@ -1,20 +1,37 @@
 package work
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kitwork/engine/value"
 )
 
-func TestQRCodeIntegration(t *testing.T) {
+func TestQRCodeIntegrationRealAppContract(t *testing.T) {
 	kw := &KitWork{tenant: &Tenant{}}
-	qr := kw.Qrcode()
-	if qr == nil {
-		t.Fatal("Expected QRCode adapter, got nil")
+	qr1 := kw.Qrcode()
+	qr2 := kw.Qrcode()
+
+	if qr1 == qr2 {
+		t.Fatal("Expected fresh QRCode adapter instances for request isolation")
 	}
 
-	res := qr.Generate(value.NewString("https://kitwork.io"), value.New(256))
-	if res.K == value.Invalid {
-		t.Fatalf("QRCode generate failed: %v", res.V)
+	payment := value.New(map[string]any{
+		"bank":    "970422",
+		"account": "000012345",
+		"amount":  100000,
+		"memo":    "test donate",
+	})
+
+	svgRes := qr1.Napas(payment).
+		Template(value.NewString("circular")).
+		Logo(value.NewString("vietqr")).
+		Svg()
+
+	if svgRes.K == value.Invalid {
+		t.Fatalf("QRCode Napas chain failed: %v", svgRes.V)
+	}
+	if !strings.Contains(svgRes.Text(), "<svg") {
+		t.Fatalf("Expected valid SVG output, got: %s", svgRes.Text())
 	}
 }
