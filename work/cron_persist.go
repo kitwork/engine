@@ -300,31 +300,12 @@ func (t *Tenant) cronContext(execID int64, attempt, maxAttempts int, final bool,
 // bytecode (the lambda's Address offsets index into it) and given the tenant's Builtins/Globals/Vars.
 // Returns gas consumed and any run error (an Invalid result — thrown value or energy-limit halt).
 func (t *Tenant) runInJobVM(job *CronJob, lambda *value.Lambda, args []value.Value) (gas uint64, runErr error) {
-	bc := job.Bytecode
-	if bc == nil {
+	if job.Bytecode == nil {
 		return 0, fmt.Errorf("cron %q has no bytecode", job.Name)
 	}
-	vm := enginePool.Acquire()
-	defer func() {
-		if r := recover(); r != nil {
-			runErr = fmt.Errorf("panic: %v", r)
-		}
-		enginePool.Release(vm)
-	}()
-
-	vm.Builtins = t.vm.Builtins
-	vm.FastReset(bc.Instructions, bc.Constants, t.vm.Globals, bc.SourceMap)
-	vm.MaxEnergy = t.MaxEnergy
-	for k, v := range t.vm.Vars {
-		vm.Vars[k] = v
-	}
-
-	res := vm.ExecuteLambda(lambda, args)
-	gas = vm.Energy
-	if res.K == value.Invalid {
-		runErr = fmt.Errorf("%v", res.V)
-	}
-	return gas, runErr
+	// The generic compute seam (capabilities.Runtime, see compute.go) IS this runner — cron dogfoods
+	// it, so every cron test also exercises the seam a migrated cron capability would use.
+	return t.Execute(job.Bytecode, lambda, args)
 }
 
 // cronSuccessRetention is how long a SUCCESSFUL run's row is kept in cron_runs. Successes are transient
