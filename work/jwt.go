@@ -3,7 +3,7 @@ package work
 import (
 	"time"
 
-	jwthelper "github.com/kitwork/engine/helpers/jwt"
+	jwthelper "github.com/kitwork/engine/utilities/jwt"
 	"github.com/kitwork/engine/value"
 )
 

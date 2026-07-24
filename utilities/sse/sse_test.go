@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitwork/engine/helpers/sse"
+	"github.com/kitwork/engine/utilities/sse"
 )
 
 func TestSSEBrokerPubSub(t *testing.T) {

@@ -3,9 +3,9 @@ package work
 import (
 	"time"
 
-	"github.com/kitwork/engine/helpers/cache"
-	"github.com/kitwork/engine/helpers/http"
-	"github.com/kitwork/engine/helpers/persist"
+	"github.com/kitwork/engine/utilities/cache"
+	"github.com/kitwork/engine/utilities/http"
+	"github.com/kitwork/engine/utilities/persist"
 )
 
 var AllowLocal bool

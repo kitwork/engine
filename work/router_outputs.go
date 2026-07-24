@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/kitwork/engine/compiler"
-	"github.com/kitwork/engine/helpers/publishing"
+	"github.com/kitwork/engine/utilities/publishing"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )

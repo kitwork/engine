@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kitwork/engine/compiler"
-	pg "github.com/kitwork/engine/helpers/playground"
+	pg "github.com/kitwork/engine/utilities/playground"
 	"github.com/kitwork/engine/value"
 )
 

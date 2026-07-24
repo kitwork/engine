@@ -1,7 +1,7 @@
 package work
 
 import (
-	insightshelper "github.com/kitwork/engine/helpers/insights"
+	insightshelper "github.com/kitwork/engine/utilities/insights"
 	"github.com/kitwork/engine/value"
 )
 

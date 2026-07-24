@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	collectionhelper "github.com/kitwork/engine/helpers/collection"
+	collectionhelper "github.com/kitwork/engine/utilities/collection"
 	"github.com/kitwork/engine/value"
 )
 

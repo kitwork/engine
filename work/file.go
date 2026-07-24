@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	filehelper "github.com/kitwork/engine/helpers/file"
+	filehelper "github.com/kitwork/engine/utilities/file"
 	"github.com/kitwork/engine/value"
 )
 

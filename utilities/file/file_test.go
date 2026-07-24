@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	filehelper "github.com/kitwork/engine/helpers/file"
+	filehelper "github.com/kitwork/engine/utilities/file"
 )
 
 func TestResolvePathSecurity(t *testing.T) {

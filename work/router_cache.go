@@ -10,8 +10,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kitwork/engine/helpers/cache"
-	"github.com/kitwork/engine/helpers/persist"
+	"github.com/kitwork/engine/utilities/cache"
+	"github.com/kitwork/engine/utilities/persist"
 )
 
 func cacheKey(r *http.Request) string {

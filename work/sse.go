@@ -3,7 +3,7 @@ package work
 import (
 	"fmt"
 
-	ssehelper "github.com/kitwork/engine/helpers/sse"
+	ssehelper "github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/value"
 )
 

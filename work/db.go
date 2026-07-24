@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/database"
-	query "github.com/kitwork/engine/helpers/query"
+	query "github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"

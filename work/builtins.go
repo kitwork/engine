@@ -2,7 +2,7 @@ package work
 
 import (
 	"github.com/kitwork/engine/builtins"
-	"github.com/kitwork/engine/helpers/http"
+	"github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/value"
 )
 

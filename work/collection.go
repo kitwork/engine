@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	collectionhelper "github.com/kitwork/engine/helpers/collection"
-	"github.com/kitwork/engine/helpers/persist"
+	collectionhelper "github.com/kitwork/engine/utilities/collection"
+	"github.com/kitwork/engine/utilities/persist"
 	"github.com/kitwork/engine/value"
 )
 

@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	hydrate "github.com/kitwork/engine/jit/hydrate"
-	"github.com/kitwork/engine/modules/minifier"
+	"github.com/kitwork/engine/utilities/minifier"
 )
 
 // serveHydrateIf serves the hydrate client interpreter — the "frontend bytecode VM" runtime that

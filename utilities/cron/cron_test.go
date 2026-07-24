@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitwork/engine/helpers/cron"
+	"github.com/kitwork/engine/utilities/cron"
 	_ "modernc.org/sqlite"
 )
 

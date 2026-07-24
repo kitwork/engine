@@ -17,7 +17,7 @@ import (
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
 	theme "github.com/kitwork/engine/jit/theme"
-	"github.com/kitwork/engine/modules/minifier"
+	"github.com/kitwork/engine/utilities/minifier"
 	"github.com/kitwork/engine/value"
 )
 

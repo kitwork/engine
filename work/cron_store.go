@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"time"
 
-	cronhelper "github.com/kitwork/engine/helpers/cron"
+	cronhelper "github.com/kitwork/engine/utilities/cron"
 )
 
 type cronStore interface {

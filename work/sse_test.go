@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	ssehelper "github.com/kitwork/engine/helpers/sse"
+	ssehelper "github.com/kitwork/engine/utilities/sse"
 )
 
 func TestSSEPayloadFormatting(t *testing.T) {

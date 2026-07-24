@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	envhelper "github.com/kitwork/engine/helpers/env"
+	envhelper "github.com/kitwork/engine/utilities/env"
 )
 
 func TestParseDotEnv(t *testing.T) {

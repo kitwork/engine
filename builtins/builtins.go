@@ -1,7 +1,7 @@
 package builtins
 
 import (
-	"github.com/kitwork/engine/helpers/http"
+	"github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/value"
 )
 

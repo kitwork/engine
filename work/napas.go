@@ -3,7 +3,7 @@ package work
 import (
 	"strconv"
 
-	"github.com/kitwork/engine/helpers/napas"
+	"github.com/kitwork/engine/utilities/napas"
 	"github.com/kitwork/engine/value"
 )
 

@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 
 	hydrate "github.com/kitwork/engine/jit/hydrate"
-	"github.com/kitwork/engine/modules/minifier"
+	"github.com/kitwork/engine/utilities/minifier"
 )
 
 func main() {

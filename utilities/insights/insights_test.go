@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/kitwork/engine/helpers/insights"
+	"github.com/kitwork/engine/utilities/insights"
 	_ "modernc.org/sqlite"
 )
 

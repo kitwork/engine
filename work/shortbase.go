@@ -1,7 +1,7 @@
 package work
 
 import (
-	shortbase "github.com/kitwork/engine/helpers/shortbase"
+	shortbase "github.com/kitwork/engine/utilities/shortbase"
 	"github.com/kitwork/engine/value"
 )
 

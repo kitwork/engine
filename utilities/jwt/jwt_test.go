@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitwork/engine/helpers/jwt"
+	"github.com/kitwork/engine/utilities/jwt"
 )
 
 func TestJWTSignAndVerify(t *testing.T) {
