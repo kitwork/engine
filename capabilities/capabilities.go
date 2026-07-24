@@ -1,0 +1,52 @@
+// Package capabilities defines the neutral contract and registry for Kitwork JS capability adapters.
+package capabilities
+
+import (
+	"sync"
+
+	"github.com/kitwork/engine/value"
+)
+
+// Scope provides neutral, isolated access to a tenant's environment without coupling to work.Tenant.
+type Scope interface {
+	AppID() string
+	Domain() string
+	ResolvePath(paths ...string) string
+}
+
+// Factory constructs a capability object (value.Value) bound to a given Scope.
+type Factory func(scope Scope) value.Value
+
+// Registry manages registered capabilities and constructs capability instances for a Scope.
+type Registry struct {
+	mu        sync.RWMutex
+	factories map[string]Factory
+}
+
+// NewRegistry creates a new capability Registry.
+func NewRegistry() *Registry {
+	return &Registry{
+		factories: make(map[string]Factory),
+	}
+}
+
+// DefaultRegistry is the global default capability registry for the engine.
+var DefaultRegistry = NewRegistry()
+
+// Register adds a capability factory under a name (e.g. "collection", "jwt", "qrcode").
+func (r *Registry) Register(name string, factory Factory) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.factories[name] = factory
+}
+
+// Get instantiates a capability object bound to the given Scope.
+func (r *Registry) Get(name string, scope Scope) (value.Value, bool) {
+	r.mu.RLock()
+	factory, ok := r.factories[name]
+	r.mu.RUnlock()
+	if !ok {
+		return value.Value{K: value.Nil}, false
+	}
+	return factory(scope), true
+}
