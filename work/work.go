@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/kitwork/engine/capabilities"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
@@ -41,6 +42,13 @@ func (w *KitWork) Cache() *GeneralCache {
 //	env.go       Env()           (per-tenant, path-isolated env)
 type KitWork struct {
 	tenant *Tenant
+}
+
+func (w *KitWork) Capability(name string) value.Value {
+	if val, ok := capabilities.DefaultRegistry.Get(name, w.tenant); ok {
+		return val
+	}
+	return value.Value{K: value.Nil}
 }
 
 // Serve handles every request for this tenant. Kitwork is FILESYSTEM-ROUTED: after the built-in,

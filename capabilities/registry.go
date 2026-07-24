@@ -1,4 +1,3 @@
-// Package capabilities defines the neutral contract and registry for Kitwork JS capability adapters.
 package capabilities
 
 import (
@@ -7,14 +6,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// Scope provides neutral, isolated access to a tenant's environment without coupling to work.Tenant.
-type Scope interface {
-	AppID() string
-	Domain() string
-	ResolvePath(paths ...string) string
-}
-
-// Factory constructs a capability object (value.Value) bound to a given Scope.
+// Factory constructs a capability JS object (value.Value) bound to a given Scope.
 type Factory func(scope Scope) value.Value
 
 // Registry manages registered capabilities and constructs capability instances for a Scope.

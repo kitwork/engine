@@ -142,6 +142,12 @@ func (t *Tenant) resolve(paths ...string) string {
 	return filepath.Join(append([]string{t.config.base}, paths...)...)
 }
 
+// capabilities.Scope interface implementation:
+func (t *Tenant) AppID() string                     { return t.appID() }
+func (t *Tenant) Domain() string                    { return t.entity.Domain }
+func (t *Tenant) ResolvePath(paths ...string) string { return t.resolve(paths...) }
+func (t *Tenant) DB(name string) *sql.DB            { return sqliteFor(t, name).db() }
+
 // resolveApp resolves a path at the IDENTITY (app) level — apps/<identity>/… — which every domain of
 // the app shares. This is where app-wide infrastructure lives: `_cron` (one schedule set per app),
 // `.data` (the app's scheduler DB), `_core` (shared services). Single-tenant (flat/sites) layouts have
