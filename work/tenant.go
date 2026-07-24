@@ -36,35 +36,53 @@ const (
 
 // RouterFileName is the tenant marker: the root router of the filesystem-routed tree
 // (router.kitwork.js). A folder holding one IS a tenant — discovery, hot reload and the layout
-// conventions all key off it. (The old flat app.kitwork.js entry is gone with the tree-only
-// cutover and plays no part anywhere.)
+// conventions all key off it.
 const RouterFileName = "router" + extension + ".js"
 
+// AppScope encapsulates app-level state shared across all domains/sites of an application identity:
+// Identity config, DB connections, Capabilities Cache, Background Tasks, and Cron Scheduler.
+type AppScope struct {
+	config            *Config
+	entity            *Entity
+	databases         map[string]*sql.DB
+	dbMu              sync.Mutex
+	crons             []*CronJob
+	cronMu            sync.Mutex
+	cronCancels       []chan struct{}
+	cronDB            *sql.DB             // underlying durable store handle (.data/scheduler.db, or shared PG)
+	cronStore         cronStore           // dialect-abstracted coordination store
+	cronByName        map[string]*CronJob // cron name → job, so a claimed DB slot finds its code to run
+	cronNode          string              // lease owner override
+	capabilitiesCache *capabilities.InstanceCache
+
+	backgroundMu      sync.Mutex
+	backgroundCtx     context.Context
+	backgroundCancel  context.CancelFunc
+	backgroundWG      sync.WaitGroup
+	backgroundClosing bool
+}
+
+// SiteScope encapsulates domain/site-level web presentation state:
+// Dynamic RouteTree, JIT CSS config, asset mounts, favicon, and theme mode.
+type SiteScope struct {
+	tree         *RouteTree
+	jitcssConfig *jitcss.Config
+	faviconFile  string       // .favicon(): file served at /favicon.ico ("" = none declared)
+	assetMounts  []assetMount // .assets(): allowlisted static roots, each URL prefix → disk dir
+	themeMode    string       // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
+}
+
+// Tenant represents an active tenant, composing AppScope and SiteScope with runtime VM state.
 type Tenant struct {
-	config *Config
-	entity *Entity
+	AppScope
+	SiteScope
 
 	bytecode  *compiler.Bytecode
 	vm        *runtime.VM
 	MaxEnergy uint64
-	// HotReload enables the per-folder hot check: an edited router.kitwork.js (or an imported
-	// module) recompiles just its folder; created/removed folders re-enter the tree. Set by the
-	// engine from config; off = every compile is exactly once (production).
 	HotReload bool
 
-	// tree, when non-nil, marks this tenant as FILESYSTEM-ROUTED: requests are resolved by
-	// walking the folder tree (each folder = a runtime node) instead of the flat routes table.
-	// Activated by a `filesystem.kitwork` marker at the tenant root. See tree*.go.
-	tree *RouteTree
-
 	env value.Value // env scoped của tenant này (đọc từ <path>/.env), lộ qua kitwork().env
-
-	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
-
-	// Declared by the root router during ensureFolder (same publish pattern as jitcssConfig):
-	faviconFile string       // .favicon(): file served at /favicon.ico ("" = none declared)
-	assetMounts []assetMount // .assets(): allowlisted static roots, each URL prefix → disk dir (empty = serve any safe file)
-	themeMode   string       // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
 
 	respCache    *cache.Store       // .cache(): RAM response cache
 	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)
@@ -73,39 +91,19 @@ type Tenant struct {
 	collectionMu    sync.Mutex
 	collectionStore *collectionhelper.Store
 	collectionErr   error
-	collectionFTS   map[string]string // collection path → dir signature at last FTS sync (RAM, per process)
+	collectionFTS   map[string]string // collection path → dir signature at last FTS sync
 
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
 
-	databases map[string]*sql.DB
-	dbMu      sync.Mutex
-
-	// Rate Limiting fields
 	limiters []*LimiterStore // index 0 = ScopeTenant, index 1 = ScopeServer
-
-	crons       []*CronJob
-	cronMu      sync.Mutex
-	cronCancels []chan struct{}
-	cronDB      *sql.DB             // underlying durable store handle (.data/scheduler.db, or shared PG)
-	cronStore   cronStore           // dialect-abstracted coordination store (sqlite Phase 2 / pg Phase 3)
-	cronByName  map[string]*CronJob // cron name → job, so a claimed DB slot finds its code to run
-	cronNode    string              // lease owner override (multi-node demo); "" → process cronNodeID
 
 	lruCache     map[string]*CacheItem
 	lruCacheLock sync.RWMutex
 
 	rateLimitRules []rateRule
 
-	// Global App level configs
-	meta              value.Value
-	capabilitiesCache *capabilities.InstanceCache
-
-	backgroundMu      sync.Mutex
-	backgroundCtx     context.Context
-	backgroundCancel  context.CancelFunc
-	backgroundWG      sync.WaitGroup
-	backgroundClosing bool
+	meta value.Value
 }
 
 func (t *Tenant) CapabilitiesCache() *capabilities.InstanceCache {
@@ -139,10 +137,6 @@ func (t *Tenant) resolve(paths ...string) string {
 			if t.entity.Identity != "" {
 				t.config.base = filepath.Join(t.config.root, t.entity.Identity, t.entity.Domain)
 			} else {
-				// No identity (single-tenant). Resolve in priority order: the sites/ convention
-				// (root/sites/<domain>), the test layout (root/test/<domain>), then a flat
-				// root/<domain>. Default to flat when none has a root router yet (preserves the
-				// pre-existing behaviour for brand-new tenants).
 				flatPath := filepath.Join(t.config.root, t.entity.Domain)
 				t.config.base = flatPath
 				for _, cand := range []string{
@@ -168,11 +162,10 @@ func (t *Tenant) AppID() string                      { return t.appID() }
 func (t *Tenant) Domain() string                     { return t.entity.Domain }
 func (t *Tenant) ResolvePath(paths ...string) string { return t.resolve(paths...) }
 func (t *Tenant) DB(name string) *sql.DB             { return sqliteFor(t, name).db() }
+func (t *Tenant) RAMStore() httphelper.ResponseStore { return t.fetchRAM() }
 
 // resolveApp resolves a path at the IDENTITY (app) level — apps/<identity>/… — which every domain of
-// the app shares. This is where app-wide infrastructure lives: `_cron` (one schedule set per app),
-// `.data` (the app's scheduler DB), `_core` (shared services). Single-tenant (flat/sites) layouts have
-// no identity layer, so it falls back to the domain level.
+// the app shares.
 func (t *Tenant) resolveApp(paths ...string) string {
 	if t.entity != nil && t.entity.Identity != "" && t.config.root != "" {
 		return filepath.Join(append([]string{t.config.root, t.entity.Identity}, paths...)...)
@@ -180,12 +173,6 @@ func (t *Tenant) resolveApp(paths ...string) string {
 	return t.resolve(paths...)
 }
 
-// serveViewStatic auto-serves a plain .txt file that lives in the tenant's views/ folder with NO
-// explicit route. Dropping `views/robots.txt` makes GET /robots.txt serve it as text/plain — "add
-// a .txt to views and it just opens". This is a Zero-VM disk read (http.ServeFile handles
-// Content-Type, Last-Modified, ETag and Range); an explicit route always wins because Serve only
-// reaches here when nothing matched. Scoped to .txt so .kitwork.* sources are never exposed, and
-// guarded against path traversal. Returns true if it served the request.
 func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -194,7 +181,6 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	// Clean the request path and refuse anything that still looks like traversal.
 	clean := path.Clean("/" + strings.TrimPrefix(r.URL.Path, "/"))
 	if strings.Contains(clean, "..") {
 		return false
@@ -203,7 +189,6 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	viewsDir := t.resolve("views")
 	full := filepath.Join(viewsDir, filepath.FromSlash(clean))
 
-	// Defense in depth: the resolved path must stay inside views/.
 	rel, err := filepath.Rel(viewsDir, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
@@ -218,8 +203,6 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// RouterFile returns the path of the tenant's root router (the tenant marker) — what hot reload
-// watches for changes/removal. With an argument it resolves that filename inside the tenant instead.
 func (t *Tenant) RouterFile(filenames ...string) string {
 	if len(filenames) > 0 {
 		return t.resolve(filenames[0])
@@ -228,19 +211,13 @@ func (t *Tenant) RouterFile(filenames ...string) string {
 }
 
 func (t *Tenant) Run() error {
-	// FILESYSTEM-ROUTED, always. There is no flat app.kitwork.js entry and no route table — the
-	// folder tree IS the router. We only set up the shared VM + globals + env here; the tree
-	// compiles each folder's router.kitwork.js LAZILY on the first request that reaches it.
 	t.bytecode = &compiler.Bytecode{}
 	t.vm = runtime.New(t.bytecode.Instructions, t.bytecode.Constants)
 	t.vm.MaxEnergy = t.MaxEnergy
 	t.vm.SourceMap = t.bytecode.SourceMap
 
-	// env scoped THEO PATH của tenant: chỉ đọc <root>/<identity>/<domain>/.env →
-	// tenant không bao giờ thấy env của host hay tenant khác. Lộ qua kitwork().env.
 	t.env = NewEnv(ParseDotEnv(t.resolve(".env")))
 
-	// Đăng ký kitwork vào Builtin Index 0 + Globals, trả về Struct KitWork.
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
 		return value.New(t.Kitwork(args...))
 	})
@@ -248,26 +225,18 @@ func (t *Tenant) Run() error {
 	t.vm.Globals = make(map[string]value.Value)
 	t.vm.Globals[kitwork] = kitworkFunc
 
-	// Inject JS-compatible globals: Math, Date, JSON, console, fetch, parseInt, parseFloat...
 	injectJSCompat(t.vm.Globals)
 
-	// Response caching + rate limiting stores (used by .cache()/.persist()/.limit()).
 	t.respCache = cache.NewStore(1000)
 	t.persistStore = persist.New(t.resolve(".persist"))
 	t.limiter = ratelimit.New()
 
-	// Override the tenant-agnostic fetch builtin with one wired to THIS tenant's cache tiers, so
-	// fetch(url, { cache: "5m", persist: "1d" }) stores per-tenant (same tiers as kitwork().http).
 	t.vm.Globals["fetch"] = value.NewFunc(func(args ...value.Value) value.Value {
 		return httphelper.FetchWith(httphelper.NewClient(t.fetchRAM(), t.fetchDisk()), args...)
 	})
 
-	// Build the (lazy) resolution tree — folders compile on first hit.
 	t.tree = NewRouteTree(t)
 
-	// Scheduler: the APP-TENANT (no domain, base = apps/<identity>) owns the identity's _cron scheduler
-	// and boots it eagerly here. Domain-tenants serve HTTP ONLY — they must not each start a scheduler,
-	// or one identity's _cron would run N dispatchers (one per domain). See NewAppTenant + StartAppSchedulers.
 	if t.entity.Domain == "" {
 		t.LoadCronFiles()
 	}
@@ -275,22 +244,19 @@ func (t *Tenant) Run() error {
 	return nil
 }
 
-// NewAppTenant builds the APP-level runtime for one identity: a tenant with NO domain, whose base is
-// apps/<identity>. It does not serve HTTP — it exists to run the app's _cron scheduler (from
-// apps/<identity>/_cron) eagerly at server boot, independent of which domain gets traffic. Exactly one
-// per identity per process, so an identity's crons run through a single dispatcher.
 func NewAppTenant(root, identity string) *Tenant {
 	return &Tenant{
-		config:    &Config{root: root},
-		entity:    &Entity{Identity: identity, Domain: ""},
+		AppScope: AppScope{
+			config:    &Config{root: root},
+			entity:    &Entity{Identity: identity, Domain: ""},
+			databases: make(map[string]*sql.DB),
+		},
+		SiteScope: SiteScope{},
 		cache:     make(map[string]*Responser),
-		databases: make(map[string]*sql.DB),
 		lruCache:  make(map[string]*CacheItem),
 	}
 }
 
-// DiscoverAppIdentities lists identity folders under root that hold a non-empty _cron/ — i.e. apps that
-// have scheduled work. Convention folders (sites/, test/) are layouts, not identities, and are skipped.
 func DiscoverAppIdentities(root string) []string {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -322,35 +288,25 @@ func NewTenant(root string, domain string) *Tenant {
 		if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
 			identity = dbIdentity
 		}
-		// THE FILESYSTEM IS THE SOURCE OF TRUTH for tenant layout — the system DB (when connected)
-		// is just a faster index of it. Without this fallback, a missing DB row (or Postgres being
-		// down) silently resolved the tenant to a flat tenants/<domain> that doesn't exist.
 		if identity == "" {
 			identity = findIdentity(root, domain)
 		}
 	}
 
 	tenant := &Tenant{
-		config: &Config{
-			root: root,
+		AppScope: AppScope{
+			config:    &Config{root: root},
+			entity:    &Entity{Identity: identity, Domain: domain},
+			databases: make(map[string]*sql.DB),
 		},
-		entity: &Entity{
-			Identity: identity,
-			Domain:   domain,
-		},
+		SiteScope: SiteScope{},
 		cache:     make(map[string]*Responser),
-		databases: make(map[string]*sql.DB),
 		lruCache:  make(map[string]*CacheItem),
 	}
 
 	return tenant
 }
 
-// findIdentity locates the identity folder holding <root>/<identity>/<domain>/ by walking the
-// tenants root. Top-level convention folders (sites/, test/) are layouts of their own, not
-// identities, and are skipped. os.ReadDir returns sorted entries, so a domain that somehow exists
-// under two identities resolves deterministically (first alphabetically). Returns "" when the
-// domain lives flat under root (or not at all) — resolve() then falls through as before.
 func findIdentity(root, domain string) string {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -367,17 +323,10 @@ func findIdentity(root, domain string) string {
 	return ""
 }
 
-// SSEBroker returns the event broker for this tenant identity. The broker is shared across every
-// *Tenant instance of the same identity (via sseBrokerRegistry), so live SSE connections survive
-// hot-reload recompiles — a publish from a freshly-recompiled instance still reaches clients that
-// connected through the previous instance. See engine/backbone.md (Phase 1, Invariant C).
 func (t *Tenant) SSEBroker() *SSEBroker {
 	return sseBrokerFor(t.brokerKey())
 }
 
-// brokerKey identifies a tenant for the shared broker registry. (Identity, Domain) is always
-// unique per tenant: single-tenant (flat) layouts have an empty Identity but a distinct Domain;
-// multi-tenant layouts carry both.
 func (t *Tenant) brokerKey() string {
 	if t.entity != nil && (t.entity.Identity != "" || t.entity.Domain != "") {
 		return t.entity.Identity + "/" + t.entity.Domain
@@ -385,9 +334,6 @@ func (t *Tenant) brokerKey() string {
 	return "default"
 }
 
-// Close releases per-instance tenant resources (database connections). The SSE broker is NOT
-// stopped here: it is shared across instances of this identity via sseBrokerRegistry and must
-// outlive any single instance (e.g. an evicted/recompiled one) so open streams keep flowing.
 func (t *Tenant) Close() {
 	t.stopBackgroundTasks()
 	t.StopCronJobs()
@@ -404,8 +350,6 @@ func (t *Tenant) Close() {
 	}
 }
 
-// SetHostLimiters injects the shared host limiter store so this tenant's scope:"server" route
-// rules count against the server-wide buckets (across all tenants). Called by core at boot.
 func (t *Tenant) SetHostLimiters(s *LimiterStore) {
 	if len(t.limiters) < ScopeMax {
 		newLimiters := make([]*LimiterStore, ScopeMax)
@@ -415,8 +359,6 @@ func (t *Tenant) SetHostLimiters(s *LimiterStore) {
 	t.limiters[ScopeServer] = s
 }
 
-// CompileDynamicRoute compiles a router script (e.g. router.kitwork.js) and executes it
-// in a freshly-reset VM using the tenant's base globals and builtins, registering routes dynamically.
 func (t *Tenant) CompileDynamicRoute(filePath string) error {
 	bytecode, err := compiler.CompileFile(filePath)
 	if err != nil {
