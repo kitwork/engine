@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -99,6 +100,12 @@ type Tenant struct {
 	// Global App level configs
 	meta              value.Value
 	capabilitiesCache *capabilities.InstanceCache
+
+	backgroundMu      sync.Mutex
+	backgroundCtx     context.Context
+	backgroundCancel  context.CancelFunc
+	backgroundWG      sync.WaitGroup
+	backgroundClosing bool
 }
 
 func (t *Tenant) CapabilitiesCache() *capabilities.InstanceCache {
@@ -382,13 +389,19 @@ func (t *Tenant) brokerKey() string {
 // stopped here: it is shared across instances of this identity via sseBrokerRegistry and must
 // outlive any single instance (e.g. an evicted/recompiled one) so open streams keep flowing.
 func (t *Tenant) Close() {
+	t.stopBackgroundTasks()
+	t.StopCronJobs()
+
+	if t.capabilitiesCache != nil {
+		t.capabilitiesCache.Close()
+	}
+
 	t.dbMu.Lock()
 	defer t.dbMu.Unlock()
 	for alias, db := range t.databases {
 		db.Close()
 		delete(t.databases, alias)
 	}
-	t.StopCronJobs()
 }
 
 // SetHostLimiters injects the shared host limiter store so this tenant's scope:"server" route

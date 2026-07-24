@@ -27,6 +27,7 @@ func (p *Pool) Acquire() *runtime.VM {
 
 func (p *Pool) Release(vm *runtime.VM) {
 	if vm != nil {
+		vm.ResetForPool()
 		p.pool.Put(vm)
 	}
 }

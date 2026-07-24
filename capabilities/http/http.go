@@ -97,7 +97,7 @@ func (h *HTTPAdapter) Fetch(args ...value.Value) value.Value {
 }
 
 func Register(registry *capabilities.Registry) {
-	registry.Register("http", func(scope capabilities.Scope) value.Value {
+	registry.RegisterWithLifetime("http", capabilities.LifetimeTransient, func(scope capabilities.Scope) value.Value {
 		return value.New(NewHTTPAdapter(scope))
 	})
 }

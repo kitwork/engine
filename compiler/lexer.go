@@ -285,7 +285,7 @@ func (l *Lexer) NextToken() Token {
 		case '.':
 			if l.peekChar() == '.' {
 				// Check for third dot
-				if l.input[l.next+1] == '.' {
+				if l.next+1 < len(l.input) && l.input[l.next+1] == '.' {
 					l.readChar()
 					l.readChar()
 					tok.Kind = Spread

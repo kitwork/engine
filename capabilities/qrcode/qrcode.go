@@ -502,8 +502,73 @@ func parseFinderConfig(configVal value.Value) (colors []string, stroke string, r
 	return colors, stroke, rounded, template, true
 }
 
+func (q *QRCodeAdapter) Center(v value.Value) *QRCodeAdapter { return q.Logo(v) }
+
+func (q *QRCodeAdapter) Padding(v value.Value) *QRCodeAdapter {
+	if v.K == value.Number {
+		q.options.Padding = int(v.N)
+	}
+	return q
+}
+
+func (q *QRCodeAdapter) Merge(v value.Value) *QRCodeAdapter {
+	if v.K == value.Bool {
+		q.options.Merge = v.Truthy()
+	}
+	return q
+}
+
+func (q *QRCodeAdapter) CellColor(v value.Value) *QRCodeAdapter {
+	q.options.Cells.Active.Color = v.Text()
+	return q
+}
+
+func (q *QRCodeAdapter) CellSize(v value.Value) *QRCodeAdapter {
+	if v.K == value.Number {
+		q.options.Cells.Active.Size = v.N
+	}
+	return q
+}
+
+func (q *QRCodeAdapter) BorderColor(v value.Value) *QRCodeAdapter {
+	q.options.Background.Stroke = v.Text()
+	return q
+}
+
+func (q *QRCodeAdapter) BorderSize(v value.Value) *QRCodeAdapter {
+	if v.K == value.Number {
+		q.options.Background.Border = v.N
+	}
+	return q
+}
+
+func (q *QRCodeAdapter) FinderColor(v value.Value) *QRCodeAdapter {
+	color := v.Text()
+	q.options.Finders.TopLeft.Color = color
+	q.options.Finders.TopRight.Color = color
+	q.options.Finders.BottomLeft.Color = color
+	return q
+}
+
+func (q *QRCodeAdapter) FinderStroke(v value.Value) *QRCodeAdapter {
+	stroke := v.Text()
+	q.options.Finders.TopLeft.Stroke = stroke
+	q.options.Finders.TopRight.Stroke = stroke
+	q.options.Finders.BottomLeft.Stroke = stroke
+	return q
+}
+
+func (q *QRCodeAdapter) FinderRounded(v value.Value) *QRCodeAdapter {
+	if v.K == value.Number {
+		q.options.Finders.TopLeft.Rounded = v.N
+		q.options.Finders.TopRight.Rounded = v.N
+		q.options.Finders.BottomLeft.Rounded = v.N
+	}
+	return q
+}
+
 func Register(registry *capabilities.Registry) {
-	registry.Register("qrcode", func(scope capabilities.Scope) value.Value {
+	registry.RegisterWithLifetime("qrcode", capabilities.LifetimeTransient, func(scope capabilities.Scope) value.Value {
 		return value.New(NewQRCodeAdapter(scope))
 	})
 }

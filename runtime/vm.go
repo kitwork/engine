@@ -105,10 +105,13 @@ func (vm *VM) Run() value.Value {
 			if sFn, ok := val.V.(*value.Lambda); ok {
 				// fmt.Printf("[VM PUSH] ScriptFunction from constants[%d] with Address: %d\n", idx, sFn.Address)
 				closure := &value.Lambda{
-					Address: sFn.Address,
-					Params:  sFn.Params,
-					Scope:   f.Vars, // Use reference to support recursion and mutability
-					Parent:  f.Fn,   // Scope chain: thấy được biến của các hàm bao ngoài
+					Address:   sFn.Address,
+					Params:    sFn.Params,
+					Scope:     f.Vars, // Use reference to support recursion and mutability
+					Parent:    f.Fn,   // Scope chain: thấy được biến của các hàm bao ngoài
+					Code:      vm.Bytecode,
+					Constants: vm.Constants,
+					SourceMap: vm.SourceMap,
 				}
 				f.captured = true // map này đã escape vào closure → đừng tái dùng/xoá
 				vm.push(value.New(closure))
@@ -715,10 +718,13 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			val := vm.Constants[idx]
 			if sFn, ok := val.V.(*value.Lambda); ok {
 				closure := &value.Lambda{
-					Address: sFn.Address,
-					Params:  sFn.Params,
-					Scope:   f.Vars,
-					Parent:  f.Fn, // Scope chain: thấy được biến của các hàm bao ngoài
+					Address:   sFn.Address,
+					Params:    sFn.Params,
+					Scope:     f.Vars,
+					Parent:    f.Fn, // Scope chain: thấy được biến của các hàm bao ngoài
+					Code:      vm.Bytecode,
+					Constants: vm.Constants,
+					SourceMap: vm.SourceMap,
 				}
 				f.captured = true // map này đã escape vào closure → đừng tái dùng/xoá
 				vm.push(value.New(closure))

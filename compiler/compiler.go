@@ -46,6 +46,18 @@ func NewCompiler(source ...string) *Compiler {
 	}
 }
 
+func CompileSource(src string) (*Bytecode, error) {
+	prog, err := parseProgram(src)
+	if err != nil {
+		return nil, err
+	}
+	comp := NewCompiler(src)
+	if err := comp.Compile(prog); err != nil {
+		return nil, err
+	}
+	return comp.ByteCodeResult(), nil
+}
+
 func getNodePosition(node Node) int32 {
 	if node == nil {
 		return 0

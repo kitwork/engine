@@ -50,22 +50,54 @@ func New(code []byte, constants []value.Value) *VM {
 func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string]value.Value, sourceMap []int32) {
 	vm.Bytecode = code
 	vm.Constants = constants
+	clear(vm.Stack)
 	vm.Stack = vm.Stack[:0]
 	vm.Globals = globals
 	vm.SourceMap = sourceMap
 	vm.FrameIdx = 0
 	vm.Energy = 0
 
-	// RECYCLE MAP: Trình dọn dẹp Map cực nhanh không tốn RAM
-	for k := range vm.Vars {
-		delete(vm.Vars, k)
+	root := &vm.Frames[0]
+	if root.captured {
+		// A top-level closure still owns the old map. Detach the VM instead of
+		// clearing data that escaped with that closure.
+		vm.Vars = make(map[string]value.Value)
+		root.captured = false
+	} else {
+		clear(vm.Vars)
 	}
 
 	// Đồng bộ lại Frame gốc
-	vm.Frames[0].IP = 0
-	vm.Frames[0].Vars = vm.Vars
-	vm.Frames[0].Defers = vm.Frames[0].Defers[:0]
-	vm.Frames[0].StackBase = 0
+	root.IP = 0
+	root.Vars = vm.Vars
+	root.Fn = nil
+	clear(root.Defers)
+	root.Defers = root.Defers[:0]
+	root.StackBase = 0
+}
+
+// ResetForPool drops tenant-owned references before a VM becomes visible to
+// another app. Captured frame maps are detached, never cleared.
+func (vm *VM) ResetForPool() {
+	vm.FastReset(nil, nil, nil, nil)
+	vm.Builtins = nil
+	vm.MaxEnergy = 0
+	vm.Spawner = nil
+
+	for i := 1; i < len(vm.Frames); i++ {
+		f := &vm.Frames[i]
+		f.IP = 0
+		f.Fn = nil
+		clear(f.Defers)
+		f.Defers = f.Defers[:0]
+		f.StackBase = 0
+		if f.captured {
+			f.Vars = nil
+		} else {
+			clear(f.Vars)
+		}
+		f.captured = false
+	}
 }
 
 func (vm *VM) Stop() {

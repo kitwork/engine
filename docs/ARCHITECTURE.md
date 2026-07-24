@@ -1,8 +1,10 @@
-# Kitwork — Application Architecture (RFC, draft)
+# Kitwork - Application Architecture (Historical RFC)
 
-> The three-tier model for applications running on the Kitwork runtime.
-> Status: **draft for review.** Nothing here is implemented yet — it captures the
-> intended convention so we can react to it before changing the engine.
+> This document preserves the original three-tier application proposal.
+> The routing sections are historical and are not the current file convention.
+> Production now uses a filesystem route tree with `router.kitwork.js` and
+> `page.kitwork.html` in each route folder. Treat the capsule sections as an RFC
+> and use `docs/STABILITY.md` as the contract for current engine work.
 
 ---
 
