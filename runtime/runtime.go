@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"context"
+
 	"github.com/kitwork/engine/value"
 )
 
@@ -18,6 +20,7 @@ type Frame struct {
 }
 
 type VM struct {
+	Context   context.Context // Request execution context (for cancellation)
 	Bytecode  []byte
 	Constants []value.Value
 	Stack     []value.Value
@@ -48,6 +51,7 @@ func New(code []byte, constants []value.Value) *VM {
 }
 
 func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string]value.Value, sourceMap []int32) {
+	vm.Context = nil
 	vm.Bytecode = code
 	vm.Constants = constants
 	clear(vm.Stack)

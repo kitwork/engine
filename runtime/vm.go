@@ -97,6 +97,15 @@ func (vm *VM) Run() value.Value {
 			}
 		}
 
+		if vm.Context != nil && (vm.Energy&63 == 0) {
+			if err := vm.Context.Err(); err != nil {
+				return value.Value{
+					K: value.Invalid,
+					V: fmt.Sprintf("Execution Cancelled: %v", err),
+				}
+			}
+		}
+
 		switch op {
 		case PUSH:
 			idx := uint16(vm.Bytecode[f.IP])<<8 | uint16(vm.Bytecode[f.IP+1])
