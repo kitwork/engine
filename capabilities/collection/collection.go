@@ -90,12 +90,18 @@ func (m *Manager) Open(args ...value.Value) value.Value {
 		return value.Value{K: value.Invalid, V: "collection: folder is required"}
 	}
 	name := args[0].String()
+	targetPath := name
 	if !strings.ContainsAny(name, `/\`) {
-		if opened, err := m.store.Open("_collection/" + name); err == nil {
-			return value.New(&Handle{manager: m, collection: opened, scope: m.scope})
+		targetPath = "_collection/" + name
+	}
+
+	if m.scope != nil {
+		if _, err := capabilities.CleanPath(m.scope.ResolvePath(), targetPath); err != nil {
+			return collectionInvalid(err)
 		}
 	}
-	opened, err := m.store.Open(name)
+
+	opened, err := m.store.Open(targetPath)
 	if err != nil {
 		return collectionInvalid(err)
 	}

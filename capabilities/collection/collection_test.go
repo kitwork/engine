@@ -54,4 +54,10 @@ func TestCollectionCapability(t *testing.T) {
 	if resPosts.K == value.Invalid {
 		t.Errorf("Open('posts') failed: %v", resPosts.V)
 	}
+
+	// Path traversal attempt should return value.Invalid (permission denied)
+	resEscape := mgr.Open(value.NewString("../../secret"))
+	if resEscape.K != value.Invalid {
+		t.Errorf("Expected path traversal attempt to return Invalid, got %v", resEscape.K)
+	}
 }
