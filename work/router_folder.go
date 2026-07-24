@@ -10,6 +10,7 @@ package work
 // (env, db, http, render…) is promoted from the embedded *KitWork unchanged.
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -541,7 +542,13 @@ func (n *RouteNode) compileFolder(t *Tenant) {
 	n.srcMod = 0
 	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
 		n.srcMod = info.ModTime().UnixNano()
-		if bc, err := compiler.CompileFile(routerFile); err == nil {
+		bc, err := compiler.CompileFile(routerFile)
+		if err != nil {
+			// A router that won't compile registers NO methods, so the folder silently degrades to
+			// page-only rendering (chain meta, no handler binding). Surface it — a swallowed syntax
+			// error here is a mystifying "my handler just doesn't run" with nothing in the logs.
+			fmt.Printf("[Router] %s: %v\n", strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator)), err)
+		} else {
 			fr.bytecode = bc
 			if len(bc.Files) > 0 {
 				n.srcFiles = bc.Files // entry + every natively-bundled import (./_core/…)

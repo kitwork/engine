@@ -73,6 +73,19 @@ func (c *Cron) Cron(args ...value.Value) *CronBuilder {
 	return (&CronBuilder{tenant: c.tenant}).Cron(args...)
 }
 
+// List returns the durable summary of every cron in this app (identity) — name, schedule, source,
+// status, last run + counts — read straight from the `crons` table. It is the read side of the
+// scheduler: a dashboard can make the (otherwise invisible) background jobs visible without any handle
+// on the dispatcher. Works from ANY of the app's domains, because they all share one partition (appID);
+// an app that has never run a cron yields an empty list, not an error.
+func (c *Cron) List(args ...value.Value) value.Value {
+	store := c.tenant.openCronStore()
+	if store == nil {
+		return collectionValue([]map[string]any{})
+	}
+	return collectionValue(store.listCrons(c.tenant.appID()))
+}
+
 // CronBuilder is the fluent schedule builder. Scheduling methods set the expression; .handle()
 // registers. Config modifiers (.persist/.retries/.timezone/.overlap/.success/.error) may be chained
 // EITHER side of .handle(): before, they stage onto the builder and .handle() copies them into the new

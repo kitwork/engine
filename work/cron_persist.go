@@ -56,6 +56,25 @@ func (t *Tenant) nodeID() string {
 	return cronNodeID
 }
 
+// openCronStore returns a store for READING the scheduler tables from a tenant that does not itself run
+// the dispatcher. The scheduler runs on the app-tenant (identity level); a DOMAIN-tenant serving a page
+// (e.g. a dashboard) has no t.cronStore, so it opens its own view onto the same backend — shared Postgres
+// when a system DB is connected, else the app's identity-level SQLite. Same partition key (appID) either
+// way, so it sees exactly the rows the scheduler wrote.
+func (t *Tenant) openCronStore() cronStore {
+	if t.cronStore != nil {
+		return t.cronStore
+	}
+	if database.System != nil {
+		return newPgStore(database.System, t.nodeID())
+	}
+	db := appSqliteFor(t, "scheduler.db").db()
+	if db == nil {
+		return nil
+	}
+	return newSqliteStore(db, t.nodeID())
+}
+
 // startPersistedScheduler picks the store backend (shared Postgres if SchedulerShared + database.System,
 // else per-tenant SQLite), migrates it, syncs the persisted jobs, reclaims orphaned slots, and launches
 // the dispatcher + heartbeat goroutines. Called from StartCronJobs when the tenant has any cron. Runs
@@ -69,14 +88,14 @@ func (t *Tenant) startPersistedScheduler() error {
 	var store cronStore
 	if database.System != nil {
 		t.cronDB = database.System
-		store = &pgStore{db: database.System, node: t.nodeID()}
+		store = newPgStore(database.System, t.nodeID())
 	} else {
 		db := appSqliteFor(t, "scheduler.db").db() // apps/<identity>/.data/scheduler.db — one per app
 		if db == nil {
 			return fmt.Errorf("scheduler.db connection unavailable")
 		}
 		t.cronDB = db
-		store = &sqliteStore{db: db, node: t.nodeID()}
+		store = newSqliteStore(db, t.nodeID())
 	}
 	t.cronStore = store
 

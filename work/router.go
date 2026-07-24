@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/helpers/sse"
 	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/value"
 )
@@ -238,7 +239,7 @@ func (r *Router) streamSSE(w http.ResponseWriter) {
 
 	// Active-connection cap (DoS protection) — each open stream costs a goroutine + broker slot.
 	broker := r.tenant.SSEBroker()
-	maxConn := client.maxConnections
+	maxConn := client.MaxConnections
 	if maxConn <= 0 {
 		maxConn = 1000
 	}
@@ -255,7 +256,7 @@ func (r *Router) streamSSE(w http.ResponseWriter) {
 	broker.Register(client)
 
 	// Send clientSessionId init event
-	initPayload, err := formatSSEPayload("", "init", map[string]string{"clientSessionId": client.id})
+	initPayload, err := sse.FormatSSEPayload("", "init", map[string]string{"clientSessionId": client.ID})
 	if err == nil {
 		w.Write(initPayload)
 	}
@@ -282,7 +283,7 @@ func (r *Router) streamSSE(w http.ResponseWriter) {
 		select {
 		case <-notify:
 			return // client closed the tab / network dropped
-		case msg, open := <-client.sendChan:
+		case msg, open := <-client.SendChan:
 			if !open {
 				return // broker stopped (tenant evicted)
 			}
