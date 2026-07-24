@@ -3,7 +3,6 @@ package compiler
 import (
 	"testing"
 
-	
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )

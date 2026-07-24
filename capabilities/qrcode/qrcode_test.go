@@ -11,10 +11,10 @@ import (
 
 type mockScope struct{}
 
-func (m *mockScope) AppID() string                     { return "app_test" }
-func (m *mockScope) Domain() string                    { return "test.com" }
+func (m *mockScope) AppID() string                      { return "app_test" }
+func (m *mockScope) Domain() string                     { return "test.com" }
 func (m *mockScope) ResolvePath(paths ...string) string { return "/test" }
-func (m *mockScope) DB(name string) *sql.DB            { return nil }
+func (m *mockScope) DB(name string) *sql.DB             { return nil }
 
 func TestQRCodeCapability(t *testing.T) {
 	scope := &mockScope{}

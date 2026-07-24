@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/render"
+	"github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/value"
 )
 

@@ -14,10 +14,10 @@ type mockScope struct {
 	db *sql.DB
 }
 
-func (m *mockScope) AppID() string                     { return "app_test" }
-func (m *mockScope) Domain() string                    { return "test.com" }
+func (m *mockScope) AppID() string                      { return "app_test" }
+func (m *mockScope) Domain() string                     { return "test.com" }
 func (m *mockScope) ResolvePath(paths ...string) string { return "/test" }
-func (m *mockScope) DB(name string) *sql.DB            { return m.db }
+func (m *mockScope) DB(name string) *sql.DB             { return m.db }
 
 func TestDatabaseCapability(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")

@@ -25,9 +25,9 @@ func TestValidateFormBody(t *testing.T) {
 		want bool
 	}{
 		{"password=secret1&confirm=secret1&email=a%40b.vn", true},
-		{"password=abc&confirm=abc&email=a%40b.vn", false},          // too short
-		{"password=secret1&confirm=khac&email=a%40b.vn", false},     // mismatch
-		{"password=secret1&confirm=secret1&email=khong-co", false},  // no @
+		{"password=abc&confirm=abc&email=a%40b.vn", false},         // too short
+		{"password=secret1&confirm=khac&email=a%40b.vn", false},    // mismatch
+		{"password=secret1&confirm=secret1&email=khong-co", false}, // no @
 		{"", false}, // empty submission — fail closed
 	}
 	for _, c := range cases {

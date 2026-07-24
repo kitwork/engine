@@ -837,14 +837,14 @@ func (q *Query) SafeFirst(args ...value.Value) value.Value {
 		}
 		return obj
 	}
-	
+
 	arr := res.Array()
 	if len(arr) > 0 {
 		row := arr[0]
 		row.IsError = false
 		return row
 	}
-	
+
 	return value.Value{K: value.Nil}
 }
 

@@ -47,8 +47,8 @@ func newSqliteStore(db *sql.DB, nodeID string) *sqliteStore {
 	return &sqliteStore{inner: cronhelper.NewSqliteStore(db, nodeID)}
 }
 
-func (s *sqliteStore) label() string         { return s.inner.Label() }
-func (s *sqliteStore) initSchema() error     { return s.inner.InitSchema() }
+func (s *sqliteStore) label() string     { return s.inner.Label() }
+func (s *sqliteStore) initSchema() error { return s.inner.InitSchema() }
 func (s *sqliteStore) sync(identity string, jobs []*CronJob) error {
 	return s.inner.Sync(identity, cronJobsToRecords(jobs))
 }
@@ -102,8 +102,8 @@ func newPgStore(db *sql.DB, nodeID string) *pgStore {
 	return &pgStore{inner: cronhelper.NewPgStore(db, nodeID)}
 }
 
-func (s *pgStore) label() string         { return s.inner.Label() }
-func (s *pgStore) initSchema() error     { return s.inner.InitSchema() }
+func (s *pgStore) label() string     { return s.inner.Label() }
+func (s *pgStore) initSchema() error { return s.inner.InitSchema() }
 func (s *pgStore) sync(identity string, jobs []*CronJob) error {
 	return s.inner.Sync(identity, cronJobsToRecords(jobs))
 }

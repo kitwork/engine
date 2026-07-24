@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"strings"
 
-	
 	"github.com/kitwork/engine/value"
 )
 
@@ -33,7 +32,7 @@ type Expression interface {
 type Program struct {
 	Statements []Statement
 	Exports    []string // tên export qua `export const/function` hoặc `export { }`
-	HasDefault bool      // true nếu có `export default …` (đã hạ về const DefaultExportName)
+	HasDefault bool     // true nếu có `export default …` (đã hạ về const DefaultExportName)
 }
 
 // DefaultExportName là biến tổng hợp mà `export default <expr>` được hạ xuống.
@@ -350,8 +349,8 @@ func (ie *IfExpression) String() string {
 
 // CallExpression: f(a, b)
 type CallExpression struct {
-	Token     Token // Dấu '('
-	Function  Expression  // Tên hàm hoặc object.method
+	Token     Token      // Dấu '('
+	Function  Expression // Tên hàm hoặc object.method
 	Arguments []Expression
 }
 
@@ -531,7 +530,7 @@ func (ss *SpawnStatement) String() string {
 
 // MethodCallExpression: object.method(args...)
 type MethodCallExpression struct {
-	Token     Token  // Dấu '.'
+	Token     Token        // Dấu '.'
 	Object    Expression   // Đối tượng (ví dụ: "hello")
 	Method    *Identifier  // Tên phương thức (ví dụ: upper)
 	Arguments []Expression // Các tham số truyền vào

@@ -14,10 +14,10 @@ type mockScope struct {
 	root   string
 }
 
-func (m *mockScope) AppID() string                     { return m.appID }
-func (m *mockScope) Domain() string                    { return m.domain }
+func (m *mockScope) AppID() string                      { return m.appID }
+func (m *mockScope) Domain() string                     { return m.domain }
 func (m *mockScope) ResolvePath(paths ...string) string { return m.root }
-func (m *mockScope) DB(name string) *sql.DB            { return nil }
+func (m *mockScope) DB(name string) *sql.DB             { return nil }
 
 func TestCapabilityRegistry(t *testing.T) {
 	reg := capabilities.NewRegistry()

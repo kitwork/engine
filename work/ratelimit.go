@@ -227,7 +227,7 @@ func (t *Tenant) checkRateLimit(matched *Router, r *http.Request, w http.Respons
 		default: // "ip"
 			scopeKey = "ip:" + ip
 		}
-		
+
 		key := fmt.Sprintf("tenant:%s:%d/%s", scopeKey, rateToUse, rule.Period)
 		checks = append(checks, LimitCheck{store, key, rateToUse, rule.Period})
 	}

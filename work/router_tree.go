@@ -98,7 +98,7 @@ type RouteNode struct {
 	parent  *RouteNode
 	base    string // ONLY the root sets this — the tenant's disk anchor
 
-	childMu  sync.Mutex                 // guards the one-time children build
+	childMu  sync.Mutex                   // guards the one-time children build
 	children atomic.Pointer[[]*RouteNode] // copy-on-write → readers never lock
 	built    atomic.Bool
 

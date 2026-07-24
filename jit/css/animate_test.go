@@ -175,17 +175,17 @@ func TestAnimatePipeline(t *testing.T) {
 	full := UsedKeyframes(css, cfg) + css
 
 	wants := []string{
-		"animation:animate--spin 1s linear infinite",   // loop
-		"animation-direction:reverse",                  // modifier composes
-		"animation-name:animate--up",                   // entrance
-		"animation-delay:0.16s",                        // stagger up-2
-		"animation: wiggle 1s infinite",                // arbitrary
-		"@keyframes animate--spin{",                    // only-used keyframe (loop)
-		"@keyframes animate--up{",                       // only-used keyframe (entrance)
-		"@keyframes wiggle{",                            // extend keyframe
-		".animate-on-hover * { animation-play-state: paused; }", // paused descendants
+		"animation:animate--spin 1s linear infinite",              // loop
+		"animation-direction:reverse",                             // modifier composes
+		"animation-name:animate--up",                              // entrance
+		"animation-delay:0.16s",                                   // stagger up-2
+		"animation: wiggle 1s infinite",                           // arbitrary
+		"@keyframes animate--spin{",                               // only-used keyframe (loop)
+		"@keyframes animate--up{",                                 // only-used keyframe (entrance)
+		"@keyframes wiggle{",                                      // extend keyframe
+		".animate-on-hover * { animation-play-state: paused; }",   // paused descendants
 		".animate-on-hover:hover *{animation-play-state:running}", // hover-runs counterpart
-		"prefers-reduced-motion",                       // a11y guard
+		"prefers-reduced-motion",                                  // a11y guard
 	}
 	for _, w := range wants {
 		if !strings.Contains(full, w) {

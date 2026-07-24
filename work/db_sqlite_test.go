@@ -83,17 +83,17 @@ func TestTreeSqliteEntry(t *testing.T) {
 // sqliteRel must flatten every escape attempt into .data/ — traversal, absolute paths, drive letters.
 func TestSqliteRelSafety(t *testing.T) {
 	cases := map[string]string{
-		"app.db":              "app.db",
-		"analytics.db":        "analytics.db",
-		"archive/2026.db":     "archive/2026.db",
-		"../secrets.db":       "secrets.db",
-		"../../etc/passwd":    "passwd",
-		"/absolute.db":        "absolute.db",
-		"C:/windows/evil.db":  "evil.db",
-		"a/../../escape.db":   "escape.db",
-		"..":                  "app.db", // pure traversal has no name — falls back to the default
-		"../..":               "app.db",
-		"":                    "app.db",
+		"app.db":             "app.db",
+		"analytics.db":       "analytics.db",
+		"archive/2026.db":    "archive/2026.db",
+		"../secrets.db":      "secrets.db",
+		"../../etc/passwd":   "passwd",
+		"/absolute.db":       "absolute.db",
+		"C:/windows/evil.db": "evil.db",
+		"a/../../escape.db":  "escape.db",
+		"..":                 "app.db", // pure traversal has no name — falls back to the default
+		"../..":              "app.db",
+		"":                   "app.db",
 	}
 	for in, want := range cases {
 		if got := sqliteRel(in); got != want {

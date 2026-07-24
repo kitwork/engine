@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	
 )
 
 // writeTenant lays out module files in a temp dir and returns the entry path.
@@ -118,10 +116,10 @@ func TestBytecodeNativeForModularTenant(t *testing.T) {
 
 func TestNativeBundleDirectoryImport(t *testing.T) {
 	entry := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import "./routes/";`,
+		"app.kitwork.js":      `import "./routes/";`,
 		"routes/a.kitwork.js": `import { log } from "kitwork"; log.print("route a loaded");`,
 		"routes/b.kitwork.js": `import { log } from "kitwork"; log.print("route b loaded");`,
-		"routes/c.js": `import { log } from "kitwork"; log.print("route c should not load");`,
+		"routes/c.js":         `import { log } from "kitwork"; log.print("route c should not load");`,
 	})
 
 	content, err := os.ReadFile(entry)
@@ -156,7 +154,7 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 
 	// Verify that named imports from directory fail compilation
 	entryFail := writeTenant(t, map[string]string{
-		"app.kitwork.js": `import { something } from "./routes/";`,
+		"app.kitwork.js":      `import { something } from "./routes/";`,
 		"routes/a.kitwork.js": `export const something = 123;`,
 	})
 	contentFail, _ := os.ReadFile(entryFail)
@@ -168,4 +166,3 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 		t.Errorf("expected side-effect error, got: %v", errFail)
 	}
 }
-

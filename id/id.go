@@ -380,7 +380,7 @@ func generate(charset []byte, totalLen int, instanceEpoch int64) (string, error)
 func encodeTimePart(t uint64, avail []byte, timeLen int, charsetLen int) ([]byte, int) {
 	var resArr [256]byte
 	var idxArr [256]int
-	
+
 	res := resArr[:timeLen]
 	idxs := idxArr[:timeLen]
 

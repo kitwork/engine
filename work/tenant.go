@@ -11,15 +11,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/capabilities"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
+	jitcss "github.com/kitwork/engine/jit/css"
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/utilities/cache"
 	collectionhelper "github.com/kitwork/engine/utilities/collection"
 	httphelper "github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/utilities/persist"
 	"github.com/kitwork/engine/utilities/ratelimit"
-	jitcss "github.com/kitwork/engine/jit/css"
-	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -60,9 +61,9 @@ type Tenant struct {
 	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
 
 	// Declared by the root router during ensureFolder (same publish pattern as jitcssConfig):
-	faviconFile string        // .favicon(): file served at /favicon.ico ("" = none declared)
-	assetMounts []assetMount  // .assets(): allowlisted static roots, each URL prefix → disk dir (empty = serve any safe file)
-	themeMode   string        // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
+	faviconFile string       // .favicon(): file served at /favicon.ico ("" = none declared)
+	assetMounts []assetMount // .assets(): allowlisted static roots, each URL prefix → disk dir (empty = serve any safe file)
+	themeMode   string       // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
 
 	respCache    *cache.Store       // .cache(): RAM response cache
 	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)
@@ -96,7 +97,20 @@ type Tenant struct {
 	rateLimitRules []rateRule
 
 	// Global App level configs
-	meta value.Value
+	meta              value.Value
+	capabilitiesCache *capabilities.InstanceCache
+}
+
+func (t *Tenant) CapabilitiesCache() *capabilities.InstanceCache {
+	if t == nil {
+		return nil
+	}
+	t.dbMu.Lock()
+	defer t.dbMu.Unlock()
+	if t.capabilitiesCache == nil {
+		t.capabilitiesCache = capabilities.NewInstanceCache()
+	}
+	return t.capabilitiesCache
 }
 
 type Cache struct {
@@ -143,10 +157,10 @@ func (t *Tenant) resolve(paths ...string) string {
 }
 
 // capabilities.Scope interface implementation:
-func (t *Tenant) AppID() string                     { return t.appID() }
-func (t *Tenant) Domain() string                    { return t.entity.Domain }
+func (t *Tenant) AppID() string                      { return t.appID() }
+func (t *Tenant) Domain() string                     { return t.entity.Domain }
 func (t *Tenant) ResolvePath(paths ...string) string { return t.resolve(paths...) }
-func (t *Tenant) DB(name string) *sql.DB            { return sqliteFor(t, name).db() }
+func (t *Tenant) DB(name string) *sql.DB             { return sqliteFor(t, name).db() }
 
 // resolveApp resolves a path at the IDENTITY (app) level — apps/<identity>/… — which every domain of
 // the app shares. This is where app-wide infrastructure lives: `_cron` (one schedule set per app),

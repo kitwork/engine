@@ -13,8 +13,8 @@ type Frame struct {
 	// captured = true khi Vars của frame này đã bị một closure giữ tham chiếu
 	// (Scope: f.Vars). Lúc đó slot KHÔNG được tái dùng/xoá map cũ — phải cấp map
 	// mới — nếu không closure sẽ mất biến sau khi frame return (bug closure).
-	captured bool
-	StackBase int                    // Stack depth when the function call started
+	captured  bool
+	StackBase int // Stack depth when the function call started
 }
 
 type VM struct {

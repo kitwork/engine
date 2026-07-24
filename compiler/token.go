@@ -14,11 +14,11 @@ const (
 	Comment
 
 	// --- Dữ liệu (Literals) ---
-	Ident // work, db, cleanup
-	Number     // 123, 0.5
-	String     // "02:00", 'logs'
-	Template   // `Hello ${name}`
-	Boolean    // true, false
+	Ident    // work, db, cleanup
+	Number   // 123, 0.5
+	String   // "02:00", 'logs'
+	Template // `Hello ${name}`
+	Boolean  // true, false
 	Null
 
 	// --- Truy cập & Chaining ---
@@ -235,11 +235,11 @@ func (t Token) String() string {
 }
 
 var Keywords = map[string]Kind{
-	"const": Const,
-	"let":   Let,
-	"if":    If,
-	"else":  Else,
-	"for":   For,
+	"const":    Const,
+	"let":      Let,
+	"if":       If,
+	"else":     Else,
+	"for":      For,
 	"return":   Return,
 	"function": Function,
 	"new":      New,

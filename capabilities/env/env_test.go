@@ -15,15 +15,15 @@ type mockScope struct {
 	root string
 }
 
-func (m *mockScope) AppID() string                     { return "app_test" }
-func (m *mockScope) Domain() string                    { return "test.com" }
+func (m *mockScope) AppID() string  { return "app_test" }
+func (m *mockScope) Domain() string { return "test.com" }
 func (m *mockScope) ResolvePath(paths ...string) string {
 	if len(paths) == 0 {
 		return m.root
 	}
 	return filepath.Join(append([]string{m.root}, paths...)...)
 }
-func (m *mockScope) DB(name string) *sql.DB            { return nil }
+func (m *mockScope) DB(name string) *sql.DB { return nil }
 
 func TestEnvCapability(t *testing.T) {
 	dir := t.TempDir()

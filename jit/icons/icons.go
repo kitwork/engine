@@ -156,7 +156,7 @@ func dataURI(inner string) string {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="` +
 		strokeWidth + `" stroke-linecap="round" stroke-linejoin="round">` + inner + `</svg>`
 	svg = strings.ReplaceAll(svg, "currentColor", "#000")
-	svg = strings.ReplaceAll(svg, `"`, `'`)    // single quotes so the data-URI fits in url("…")
+	svg = strings.ReplaceAll(svg, `"`, `'`)      // single quotes so the data-URI fits in url("…")
 	svg = strings.Join(strings.Fields(svg), " ") // collapse whitespace/newlines
 	return `url("data:image/svg+xml,` + uriEncode.Replace(svg) + `")`
 }

@@ -113,11 +113,11 @@ func TestEvalLambdaRecursionBudget(t *testing.T) {
 // "no eval" true by construction — essential before any client-sent expression (capsule) runs.
 func TestEvalSandboxBlocksConstructor(t *testing.T) {
 	cases := []string{
-		"''.constructor",                          // → String, must be nil
-		"''.constructor.constructor",              // → Function, must be nil
-		"''.constructor.constructor('x')",         // building Function('x'), must be nil
-		"x.__proto__",                             // prototype access
-		"x.prototype",                             // prototype access
+		"''.constructor",                  // → String, must be nil
+		"''.constructor.constructor",      // → Function, must be nil
+		"''.constructor.constructor('x')", // building Function('x'), must be nil
+		"x.__proto__",                     // prototype access
+		"x.prototype",                     // prototype access
 	}
 	for _, expr := range cases {
 		v := compileEval(t, expr, map[string]any{"x": map[string]any{}})
@@ -160,8 +160,8 @@ func TestEvalIsomorphicValidate(t *testing.T) {
 		want                     bool
 	}{
 		{"secret1", "secret1", "a@b.vn", true},
-		{"abc", "abc", "a@b.vn", false},          // too short
-		{"secret1", "secret2", "a@b.vn", false},  // mismatch
+		{"abc", "abc", "a@b.vn", false},           // too short
+		{"secret1", "secret2", "a@b.vn", false},   // mismatch
 		{"secret1", "secret1", "khong-co", false}, // no @
 		{"", "", "", false},                       // untouched form
 	}

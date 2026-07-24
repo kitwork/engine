@@ -45,7 +45,20 @@ type KitWork struct {
 }
 
 func (w *KitWork) Capability(name string) value.Value {
-	if val, ok := capabilities.DefaultRegistry.Get(name, w.tenant); ok {
+	if w == nil || w.tenant == nil {
+		if val, ok := capabilities.DefaultRegistry.Get(name, nil); ok {
+			return val
+		}
+		return value.Value{K: value.Nil}
+	}
+	cache := w.tenant.CapabilitiesCache()
+	if cache == nil {
+		if val, ok := capabilities.DefaultRegistry.Get(name, w.tenant); ok {
+			return val
+		}
+		return value.Value{K: value.Nil}
+	}
+	if val, ok := cache.GetOrCompute(name, capabilities.DefaultRegistry, w.tenant); ok {
 		return val
 	}
 	return value.Value{K: value.Nil}

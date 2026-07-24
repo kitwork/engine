@@ -1,7 +1,5 @@
 package runtime
 
-
-
 // Cost đại diện cho đơn vị năng lượng tiêu thụ thực tế trên hạ tầng.
 type Cost uint64
 
@@ -53,12 +51,12 @@ var Table = [256]Cost{
 	// =====================
 	// EXECUTION
 	// =====================
-	CALL:   150, // Phí hạ tầng: Context Switch sang Go Host
-	INVOKE: 150, // Gọi phương thức (Dynamic Dispatch)
-	LAMBDA: 60,  // Khởi tạo ngữ cảnh hàm con
-	RETURN: 5,   // Thu hồi Frame và dọn dẹp Stack
-	DEFER:  10,  // Bảo hiểm hệ thống: Đảm bảo thực thi dọn dẹp
-	SPAWN:  200, // Đắt: Tạo Goroutine và Context mới
-	POPFIN:     1, // Như POP; phần finalize (nếu có) tính phí qua chính request/handler
-	POPFINSOFT: 1, // Như POP; finalize soft (chỉ request có handler)
+	CALL:       150, // Phí hạ tầng: Context Switch sang Go Host
+	INVOKE:     150, // Gọi phương thức (Dynamic Dispatch)
+	LAMBDA:     60,  // Khởi tạo ngữ cảnh hàm con
+	RETURN:     5,   // Thu hồi Frame và dọn dẹp Stack
+	DEFER:      10,  // Bảo hiểm hệ thống: Đảm bảo thực thi dọn dẹp
+	SPAWN:      200, // Đắt: Tạo Goroutine và Context mới
+	POPFIN:     1,   // Như POP; phần finalize (nếu có) tính phí qua chính request/handler
+	POPFINSOFT: 1,   // Như POP; finalize soft (chỉ request có handler)
 }

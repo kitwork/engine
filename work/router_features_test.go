@@ -70,7 +70,7 @@ func TestTreeRootRouterDeclarations(t *testing.T) {
 	if rec := get("/"); rec.Code != 429 { // burst full → 429 (sustained untouched at 2)
 		t.Fatalf("third request should hit the burst window, got %d", rec.Code)
 	}
-	time.Sleep(150 * time.Millisecond) // burst window resets; sustained window persists
+	time.Sleep(150 * time.Millisecond)    // burst window resets; sustained window persists
 	if rec := get("/"); rec.Code != 200 { // burst 1, sustained 3 — the last sustained token
 		t.Fatalf("burst window should have reset, got %d", rec.Code)
 	}

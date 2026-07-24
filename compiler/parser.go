@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	
 	"github.com/kitwork/engine/value"
 )
 
@@ -71,7 +70,7 @@ type Parser struct {
 
 	// Module metadata thu thập khi parse (cho bundler native ở package script).
 	exports    []string // tên export qua `export const/function` / `export { }`
-	hasDefault bool      // có `export default …` (đã hạ về const DefaultExportName)
+	hasDefault bool     // có `export default …` (đã hạ về const DefaultExportName)
 }
 
 func NewParser(l *Lexer) *Parser {
@@ -1213,4 +1212,3 @@ func (p *Parser) parseFunctionExpression() Expression {
 		Body:       body,
 	}
 }
-

@@ -34,7 +34,7 @@ func newRequest(h *HTTP, method, url string, body value.Value) value.Value {
 
 // ---- modifiers: return *Request so they chain in any order, BEFORE or AFTER .get() ----
 
-func (r *Request) Retry(n int) *Request             { r.h.retry = n; return r }
+func (r *Request) Retry(n int) *Request              { r.h.retry = n; return r }
 func (r *Request) Timeout(ms int) *Request           { r.h.Timeout(ms); return r }
 func (r *Request) Header(k, v string) *Request       { r.h.Header(k, v); return r }
 func (r *Request) Cache(a ...value.Value) *Request   { r.h.Cache(a...); return r }

@@ -199,4 +199,3 @@ func isServer() bool {
 	}
 	return false
 }
-

@@ -6,7 +6,6 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-
 func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 	if fn.IsCallable() {
 		// Tạo một VM riêng cho chạy background để tránh xung đột với luồng chính
@@ -42,4 +41,3 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 	}
 	return k
 }
-

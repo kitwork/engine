@@ -141,6 +141,7 @@ func (r *Request) Mobile() value.Value {
 //   - "native": the shell draws a real OS title bar / toolbar → the page renders NO title bar.
 //   - "html":   the shell is frameless → the page owns the title bar ({{ if $.request.chrome == 'html' }}).
 //   - "web":    a plain browser.
+//
 // The desktop shell sends X-Kitwork-Chrome per its --chrome mode; a native shell that omits it
 // defaults to html (the frameless + HTML-title-bar path).
 func (r *Request) Chrome() value.Value {

@@ -42,3 +42,37 @@ func (r *Registry) Get(name string, scope Scope) (value.Value, bool) {
 	}
 	return factory(scope), true
 }
+
+// InstanceCache caches capability instances per Scope (e.g. per tenant) across requests.
+type InstanceCache struct {
+	mu        sync.RWMutex
+	instances map[string]value.Value
+}
+
+func NewInstanceCache() *InstanceCache {
+	return &InstanceCache{
+		instances: make(map[string]value.Value),
+	}
+}
+
+func (c *InstanceCache) GetOrCompute(name string, registry *Registry, scope Scope) (value.Value, bool) {
+	c.mu.RLock()
+	inst, ok := c.instances[name]
+	c.mu.RUnlock()
+	if ok {
+		return inst, true
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if inst, ok := c.instances[name]; ok {
+		return inst, true
+	}
+
+	computed, exists := registry.Get(name, scope)
+	if !exists {
+		return value.Value{K: value.Nil}, false
+	}
+	c.instances[name] = computed
+	return computed, true
+}

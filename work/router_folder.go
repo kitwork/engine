@@ -276,8 +276,8 @@ func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
 	return m
 }
 
-func (f *FolderRouter) Get(args ...value.Value) *FolderMethod    { return f.declare("GET", args...) }
-func (f *FolderRouter) Post(args ...value.Value) *FolderMethod   { return f.declare("POST", args...) }
+func (f *FolderRouter) Get(args ...value.Value) *FolderMethod  { return f.declare("GET", args...) }
+func (f *FolderRouter) Post(args ...value.Value) *FolderMethod { return f.declare("POST", args...) }
 
 // Proxy answers this folder from an UPSTREAM url instead of a page — a reverse proxy mounted at the
 // folder. The target is a fixed URL, or a handler that computes one per request (params/path):

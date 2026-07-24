@@ -365,7 +365,7 @@ func (vm *VM) Run() value.Value {
 					if vm.FrameIdx+1 >= len(vm.Frames) {
 						return value.Value{
 							K: value.Invalid,
-							V: fmt.Sprintf("Stack overflow: Call stack limit exceeded (at line %d)", vm.currentLine(f.IP - 1)),
+							V: fmt.Sprintf("Stack overflow: Call stack limit exceeded (at line %d)", vm.currentLine(f.IP-1)),
 						}
 					}
 					vm.FrameIdx++
@@ -870,7 +870,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 					if vm.FrameIdx+1 >= len(vm.Frames) {
 						return value.Value{
 							K: value.Invalid,
-							V: fmt.Sprintf("Stack overflow: Call stack limit exceeded (at line %d)", vm.currentLine(f.IP - 1)),
+							V: fmt.Sprintf("Stack overflow: Call stack limit exceeded (at line %d)", vm.currentLine(f.IP-1)),
 						}
 					}
 					vm.FrameIdx++
