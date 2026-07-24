@@ -2,19 +2,13 @@ package work
 
 import (
 	"net/http"
-	"sync"
 
+	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
-	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
-var vmPool = sync.Pool{
-	New: func() interface{} {
-		// Tạo một VM trắng, sẽ được cấu hình lại bằng FastReset
-		return runtime.New(nil, nil)
-	},
-}
+var enginePool = app.NewPool()
 
 // Router struct is defined in router.go
 type Config struct {

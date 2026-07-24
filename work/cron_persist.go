@@ -7,7 +7,6 @@ import (
 
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/id"
-	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -305,19 +304,12 @@ func (t *Tenant) runInJobVM(job *CronJob, lambda *value.Lambda, args []value.Val
 	if bc == nil {
 		return 0, fmt.Errorf("cron %q has no bytecode", job.Name)
 	}
-	vmi := vmPool.Get()
-	vm, ok := vmi.(*runtime.VM)
-	if !ok {
-		if vmi != nil {
-			vmPool.Put(vmi)
-		}
-		return 0, fmt.Errorf("vm pool unavailable")
-	}
+	vm := enginePool.Acquire()
 	defer func() {
 		if r := recover(); r != nil {
 			runErr = fmt.Errorf("panic: %v", r)
 		}
-		vmPool.Put(vm)
+		enginePool.Release(vm)
 	}()
 
 	vm.Builtins = t.vm.Builtins

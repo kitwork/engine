@@ -137,8 +137,8 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	vm := vmPool.Get().(*runtime.VM)
-	defer vmPool.Put(vm)
+	vm := enginePool.Acquire()
+	defer enginePool.Release(vm)
 	vm.Builtins = t.vm.Builtins
 	vm.MaxEnergy = t.MaxEnergy
 

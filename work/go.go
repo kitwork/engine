@@ -2,7 +2,6 @@ package work
 
 import (
 	"fmt"
-	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -10,14 +9,14 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 	if fn.IsCallable() {
 		// Tạo một VM riêng cho chạy background để tránh xung đột với luồng chính
 		// Lấy VM từ pool hoặc tạo mới
-		vm := vmPool.Get().(*runtime.VM)
+		vm := enginePool.Acquire()
 
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					fmt.Printf("[Background Task] Panic: %v\n", r)
 				}
-				vmPool.Put(vm)
+				enginePool.Release(vm)
 			}()
 
 			// Khởi tạo VM với state của tenant hiện tại (Bytecode & Globals)

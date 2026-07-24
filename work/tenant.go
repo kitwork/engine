@@ -410,8 +410,8 @@ func (t *Tenant) CompileDynamicRoute(filePath string) error {
 		return err
 	}
 
-	vm := vmPool.Get().(*runtime.VM)
-	defer vmPool.Put(vm)
+	vm := enginePool.Acquire()
+	defer enginePool.Release(vm)
 
 	vm.Builtins = t.vm.Builtins
 	vm.FastReset(bytecode.Instructions, bytecode.Constants, t.vm.Globals, bytecode.SourceMap)
