@@ -55,22 +55,22 @@ func (w *KitWork) Cron() *Cron {
 // "daily-report" cron (the stem is applied in runCronFile). Group related jobs as separate files that
 // share logic via _core, not many crons in one file.
 func (c *Cron) Every(args ...value.Value) *CronBuilder {
-	return (&CronBuilder{tenant: c.tenant}).Every(args...)
+	return newCronBuilder(c.tenant).Every(args...)
 }
 func (c *Cron) Daily(args ...value.Value) *CronBuilder {
-	return (&CronBuilder{tenant: c.tenant}).Daily(args...)
+	return newCronBuilder(c.tenant).Daily(args...)
 }
 func (c *Cron) Hourly(args ...value.Value) *CronBuilder {
-	return (&CronBuilder{tenant: c.tenant}).Hourly(args...)
+	return newCronBuilder(c.tenant).Hourly(args...)
 }
 func (c *Cron) Weekly(args ...value.Value) *CronBuilder {
-	return (&CronBuilder{tenant: c.tenant}).Weekly(args...)
+	return newCronBuilder(c.tenant).Weekly(args...)
 }
 func (c *Cron) Monthly(args ...value.Value) *CronBuilder {
-	return (&CronBuilder{tenant: c.tenant}).Monthly(args...)
+	return newCronBuilder(c.tenant).Monthly(args...)
 }
 func (c *Cron) Cron(args ...value.Value) *CronBuilder {
-	return (&CronBuilder{tenant: c.tenant}).Cron(args...)
+	return newCronBuilder(c.tenant).Cron(args...)
 }
 
 // List returns the durable summary of every cron in this app (identity) — name, schedule, source,
@@ -86,23 +86,19 @@ func (c *Cron) List(args ...value.Value) value.Value {
 	return collectionValue(store.listCrons(c.tenant.appID()))
 }
 
-// CronBuilder is the fluent schedule builder. Scheduling methods set the expression; .handle()
-// registers. Config modifiers (.persist/.retries/.timezone/.overlap/.success/.error) may be chained
-// EITHER side of .handle(): before, they stage onto the builder and .handle() copies them into the new
-// job; after, they mutate the already-registered job (cb.job) in place — so an option chained after
-// .handle() (as .retention("30d") or .success(fn) often is) still takes effect.
+// CronBuilder is the fluent schedule builder. It holds ONE CronJob from the start; scheduling methods
+// set its expression and config modifiers mutate it in place — chained either side of .handle(), which
+// only attaches the callback and registers the job. No staged duplicate fields, no copy: the builder's
+// job IS the job (before .handle() it just isn't in the registry yet).
 type CronBuilder struct {
 	tenant     *Tenant
-	expression string
-	job        *CronJob // set once .handle() registers; post-handle modifiers mutate this
+	job        *CronJob // built up front; every modifier mutates it in place; Handle() registers it once
+	registered bool
+}
 
-	// staged config, copied into the job at .handle() time (for the pre-handle order)
-	retentionDays int
-	maxAttempts   int
-	timezone      string
-	overlap       string
-	onSuccess     *value.Lambda
-	onError       *value.Lambda
+// newCronBuilder starts a builder with a fresh, unregistered job.
+func newCronBuilder(t *Tenant) *CronBuilder {
+	return &CronBuilder{tenant: t, job: &CronJob{}}
 }
 
 // maybeHandle registers the callback when it is passed inline, e.g. .daily("08:00", fn).
@@ -118,7 +114,7 @@ func (cb *CronBuilder) maybeHandle(args []value.Value) *CronBuilder {
 
 func (cb *CronBuilder) Every(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.expression = smartParse(args[0].Text())
+		cb.job.Expression = smartParse(args[0].Text())
 	}
 	return cb.maybeHandle(args)
 }
@@ -126,15 +122,15 @@ func (cb *CronBuilder) Every(args ...value.Value) *CronBuilder {
 // Cron sets a raw cron expression verbatim (escape hatch): .cron("*/5 * * * *").
 func (cb *CronBuilder) Cron(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.expression = smartParse(args[0].Text())
+		cb.job.Expression = smartParse(args[0].Text())
 	}
 	return cb.maybeHandle(args)
 }
 
 func (cb *CronBuilder) Daily(args ...value.Value) *CronBuilder {
-	cb.expression = "@daily"
+	cb.job.Expression = "@daily"
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.expression = timeToCron(args[0].Text())
+		cb.job.Expression = timeToCron(args[0].Text())
 	}
 	return cb.maybeHandle(args)
 }
@@ -144,22 +140,22 @@ func (cb *CronBuilder) Hourly(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
 		min = args[0].Text()
 	}
-	cb.expression = fmt.Sprintf("0 %s * * * *", strings.TrimRight(strings.ToLower(min), "m"))
+	cb.job.Expression = fmt.Sprintf("0 %s * * * *", strings.TrimRight(strings.ToLower(min), "m"))
 	return cb.maybeHandle(args)
 }
 
 func (cb *CronBuilder) Weekly(args ...value.Value) *CronBuilder {
-	cb.expression = "@weekly"
+	cb.job.Expression = "@weekly"
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.expression = smartParse(args[0].Text())
+		cb.job.Expression = smartParse(args[0].Text())
 	}
 	return cb.maybeHandle(args)
 }
 
 func (cb *CronBuilder) Monthly(args ...value.Value) *CronBuilder {
-	cb.expression = "@monthly"
+	cb.job.Expression = "@monthly"
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.expression = monthlyParse(args[0].Text())
+		cb.job.Expression = monthlyParse(args[0].Text())
 	}
 	return cb.maybeHandle(args)
 }
@@ -171,14 +167,11 @@ func (cb *CronBuilder) Monthly(args ...value.Value) *CronBuilder {
 func (cb *CronBuilder) Retention(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
 		if d, err := ParseDuration(args[0].Text()); err == nil {
-			cb.retentionDays = int(d.Hours() / 24)
+			cb.job.RetentionDays = int(d.Hours() / 24)
 		}
 	}
-	if cb.retentionDays < 1 {
-		cb.retentionDays = 1
-	}
-	if cb.job != nil {
-		cb.job.RetentionDays = cb.retentionDays
+	if cb.job.RetentionDays < 1 {
+		cb.job.RetentionDays = 1
 	}
 	return cb
 }
@@ -186,54 +179,39 @@ func (cb *CronBuilder) Retention(args ...value.Value) *CronBuilder {
 // Retries opts a job into scheduler-level retry (default max_attempts is 1 — see scheduler.md; a thrown
 // handler re-runs ALL side effects, so this is only for handlers the author made idempotent).
 func (cb *CronBuilder) Retries(args ...value.Value) *CronBuilder {
-	cb.maxAttempts = 1
+	cb.job.MaxAttempts = 1
 	if len(args) > 0 && !args[0].IsCallable() {
 		if n, err := strconv.Atoi(strings.TrimSpace(args[0].Text())); err == nil && n >= 1 {
-			cb.maxAttempts = n
+			cb.job.MaxAttempts = n
 		}
-	}
-	if cb.job != nil {
-		cb.job.MaxAttempts = cb.maxAttempts
 	}
 	return cb
 }
 
 func (cb *CronBuilder) Timezone(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.timezone = args[0].Text()
-	}
-	if cb.job != nil {
-		cb.job.Timezone = cb.timezone
+		cb.job.Timezone = args[0].Text()
 	}
 	return cb
 }
 
 func (cb *CronBuilder) Overlap(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
-		cb.overlap = strings.ToLower(strings.TrimSpace(args[0].Text()))
-	}
-	if cb.job != nil {
-		cb.job.OverlapPolicy = cb.overlap
+		cb.job.OverlapPolicy = strings.ToLower(strings.TrimSpace(args[0].Text()))
 	}
 	return cb
 }
 
 func (cb *CronBuilder) Success(args ...value.Value) *CronBuilder {
 	if len(args) > 0 {
-		cb.onSuccess = lambdaOf(args[0])
-	}
-	if cb.job != nil {
-		cb.job.OnSuccess = cb.onSuccess
+		cb.job.OnSuccess = lambdaOf(args[0])
 	}
 	return cb
 }
 
 func (cb *CronBuilder) Error(args ...value.Value) *CronBuilder {
 	if len(args) > 0 {
-		cb.onError = lambdaOf(args[0])
-	}
-	if cb.job != nil {
-		cb.job.OnError = cb.onError
+		cb.job.OnError = lambdaOf(args[0])
 	}
 	return cb
 }
@@ -243,32 +221,20 @@ func (cb *CronBuilder) Error(args ...value.Value) *CronBuilder {
 func (cb *CronBuilder) Misfire(args ...value.Value) *CronBuilder { return cb }
 
 func (cb *CronBuilder) Handle(callback value.Value) *CronBuilder {
-	if callback.IsCallable() && cb.expression != "" {
-		lambda, _ := callback.V.(*value.Lambda)
-		cb.job = cb.tenant.RegisterCron(cb.expression, lambda)
-		// Copy any config staged BEFORE .handle() into the freshly-registered job.
-		cb.job.RetentionDays = cb.retentionDays
-		cb.job.MaxAttempts = cb.maxAttempts
-		cb.job.Timezone = cb.timezone
-		cb.job.OverlapPolicy = cb.overlap
-		cb.job.OnSuccess = cb.onSuccess
-		cb.job.OnError = cb.onError
+	if !cb.registered && callback.IsCallable() && cb.job.Expression != "" {
+		cb.job.Callback, _ = callback.V.(*value.Lambda)
+		cb.tenant.registerCron(cb.job)
+		cb.registered = true
 	}
 	return cb
 }
 
-// RegisterCron appends a cron job to the tenant's registry and returns it so the caller can finish
-// filling it in. The NAME is not set here — it comes from the filename, applied by runCronFile once the
-// whole file has been evaluated (one file = one cron).
-func (t *Tenant) RegisterCron(expression string, callback *value.Lambda) *CronJob {
+// registerCron appends a builder's job to the tenant's registry. The NAME is not set here — it comes
+// from the filename, applied by runCronFile once the whole file has been evaluated (one file = one cron).
+func (t *Tenant) registerCron(job *CronJob) {
 	t.cronMu.Lock()
 	defer t.cronMu.Unlock()
-	job := &CronJob{
-		Expression: expression,
-		Callback:   callback,
-	}
 	t.crons = append(t.crons, job)
-	return job
 }
 
 // LoadCronFiles eagerly evaluates every _cron/*.kitwork.js at boot so scheduled jobs REGISTER before
