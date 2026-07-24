@@ -50,8 +50,11 @@ func New(code []byte, constants []value.Value) *VM {
 	return vm
 }
 
+// FastReset loads a new program into this VM. It runs MID-REQUEST — a folder router FastResets the
+// VM onto each folder's bytecode before running its lambdas (work.execTree) — so it must NOT clear
+// Context: that would drop the request's cancellation signal the moment the handler is loaded.
+// Clearing Context is pool hygiene and belongs to ResetForPool (STABILITY.md §1).
 func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string]value.Value, sourceMap []int32) {
-	vm.Context = nil
 	vm.Bytecode = code
 	vm.Constants = constants
 	clear(vm.Stack)
@@ -84,6 +87,7 @@ func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string
 // another app. Captured frame maps are detached, never cleared.
 func (vm *VM) ResetForPool() {
 	vm.FastReset(nil, nil, nil, nil)
+	vm.Context = nil // a pooled VM must never inherit the previous owner's request context
 	vm.Builtins = nil
 	vm.MaxEnergy = 0
 	vm.Spawner = nil

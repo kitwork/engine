@@ -61,6 +61,7 @@ func storeScopeChain(fn *value.Lambda, name string, val value.Value) bool {
 
 func (vm *VM) Run() value.Value {
 	//fmt.Printf("[VM Run] Starting execution, bytecode length: %d\n", len(vm.Bytecode))
+	steps := uint64(0)
 	for vm.FrameIdx >= 0 {
 		f := &vm.Frames[vm.FrameIdx]
 		// if f.IP < len(vm.Bytecode) {
@@ -97,7 +98,11 @@ func (vm *VM) Run() value.Value {
 			}
 		}
 
-		if vm.Context != nil && (vm.Energy&63 == 0) {
+		// Cancellation probe, every 64 OPCODES. Counted with a dedicated step counter rather than
+		// with Energy: energy advances by a per-opcode cost (Table[op]), so a hot loop whose body
+		// costs a multiple of 64 can stride past `Energy&63 == 0` forever and never be cancelled.
+		steps++
+		if vm.Context != nil && steps&63 == 0 {
 			if err := vm.Context.Err(); err != nil {
 				return value.Value{
 					K: value.Invalid,
@@ -685,6 +690,7 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 	}()
 
 	startFrame := vm.FrameIdx
+	steps := uint64(0)
 	for vm.FrameIdx >= startFrame {
 		f = &vm.Frames[vm.FrameIdx]
 
@@ -717,6 +723,19 @@ func (vm *VM) ExecuteLambda(s *value.Lambda, args []value.Value) value.Value {
 			return value.Value{
 				K: value.Invalid,
 				V: fmt.Sprintf("Energy Limit Exceeded: Execution halted (at line %d)", line),
+			}
+		}
+
+		// Same cancellation probe as Run(). REQUIRED here, not just there: route handlers are
+		// lambdas invoked through this loop (work/router_serve.go serveTree -> ExecuteLambda), so
+		// without this a cancelled request keeps burning gas until the energy ceiling.
+		steps++
+		if vm.Context != nil && steps&63 == 0 {
+			if err := vm.Context.Err(); err != nil {
+				return value.Value{
+					K: value.Invalid,
+					V: fmt.Sprintf("Execution Cancelled: %v", err),
+				}
 			}
 		}
 
