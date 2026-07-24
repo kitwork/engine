@@ -4,38 +4,42 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/utilities/cache"
-	"github.com/kitwork/engine/utilities/http"
+	httputil "github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/utilities/persist"
 )
 
 var AllowLocal bool
 var ServerPort int
 
-type HTTP = http.HTTP
-type HTTPResponse = http.Response
+type HTTP = httputil.HTTP
+type HTTPResponse = httputil.Response
 
-// HTTP hands JS a client wired to THIS tenant's cache tiers, so
-// http.cache("5m").persist("1d").get(url) lands in the tenant's own RAM store and
-// <tenant>/.persist/fetch/ — never another tenant's.
 func (w *KitWork) HTTP() *HTTP {
-	return http.NewClient(w.tenant.fetchRAM(), w.tenant.fetchDisk())
+	if w == nil || w.tenant == nil {
+		return httputil.NewClient(nil, nil)
+	}
+	return httputil.NewClient(w.tenant.fetchRAM(), w.tenant.fetchDisk())
 }
 
-// fetchRAM / fetchDisk adapt the tenant's stores to the pure http.ResponseStore interface.
-// Keys are namespaced so outbound fetches never collide with route .cache()/.persist() entries.
-func (t *Tenant) fetchRAM() http.ResponseStore  { return fetchRAMStore{t} }
-func (t *Tenant) fetchDisk() http.ResponseStore { return fetchDiskStore{t} }
+func (t *Tenant) fetchRAM() httputil.ResponseStore  { return fetchRAMStore{t} }
+func (t *Tenant) fetchDisk() httputil.ResponseStore { return fetchDiskStore{t} }
 
 type fetchRAMStore struct{ t *Tenant }
 
-func (s fetchRAMStore) Load(key string) (http.Snapshot, bool) {
-	if e, ok := s.t.respCache.Get("fetch|" + key); ok {
-		return http.Snapshot{Status: e.Status, Body: e.Body, ContentType: e.ContentType}, true
+func (s fetchRAMStore) Load(key string) (httputil.Snapshot, bool) {
+	if s.t == nil || s.t.respCache == nil {
+		return httputil.Snapshot{}, false
 	}
-	return http.Snapshot{}, false
+	if e, ok := s.t.respCache.Get("fetch|" + key); ok {
+		return httputil.Snapshot{Status: e.Status, Body: e.Body, ContentType: e.ContentType}, true
+	}
+	return httputil.Snapshot{}, false
 }
-func (s fetchRAMStore) LoadStale(string) (http.Snapshot, bool) { return http.Snapshot{}, false }
-func (s fetchRAMStore) Save(key string, snap http.Snapshot, ttl time.Duration) {
+func (s fetchRAMStore) LoadStale(string) (httputil.Snapshot, bool) { return httputil.Snapshot{}, false }
+func (s fetchRAMStore) Save(key string, snap httputil.Snapshot, ttl time.Duration) {
+	if s.t == nil || s.t.respCache == nil {
+		return
+	}
 	s.t.respCache.Set("fetch|"+key, cache.Entry{
 		Body: snap.Body, Status: snap.Status, ContentType: snap.ContentType,
 	}, ttl)
@@ -43,19 +47,28 @@ func (s fetchRAMStore) Save(key string, snap http.Snapshot, ttl time.Duration) {
 
 type fetchDiskStore struct{ t *Tenant }
 
-func (s fetchDiskStore) Load(key string) (http.Snapshot, bool) {
+func (s fetchDiskStore) Load(key string) (httputil.Snapshot, bool) {
+	if s.t == nil || s.t.persistStore == nil {
+		return httputil.Snapshot{}, false
+	}
 	if r, ok := s.t.persistStore.Get("fetch/" + key); ok {
-		return http.Snapshot{Status: r.Status, Body: r.Body, ContentType: r.ContentType}, true
+		return httputil.Snapshot{Status: r.Status, Body: r.Body, ContentType: r.ContentType}, true
 	}
-	return http.Snapshot{}, false
+	return httputil.Snapshot{}, false
 }
-func (s fetchDiskStore) LoadStale(key string) (http.Snapshot, bool) {
+func (s fetchDiskStore) LoadStale(key string) (httputil.Snapshot, bool) {
+	if s.t == nil || s.t.persistStore == nil {
+		return httputil.Snapshot{}, false
+	}
 	if r, _, ok := s.t.persistStore.GetStale("fetch/" + key); ok {
-		return http.Snapshot{Status: r.Status, Body: r.Body, ContentType: r.ContentType}, true
+		return httputil.Snapshot{Status: r.Status, Body: r.Body, ContentType: r.ContentType}, true
 	}
-	return http.Snapshot{}, false
+	return httputil.Snapshot{}, false
 }
-func (s fetchDiskStore) Save(key string, snap http.Snapshot, ttl time.Duration) {
+func (s fetchDiskStore) Save(key string, snap httputil.Snapshot, ttl time.Duration) {
+	if s.t == nil || s.t.persistStore == nil {
+		return
+	}
 	_ = s.t.persistStore.Set("fetch/"+key, persist.Record{
 		Body: snap.Body, Status: snap.Status, ContentType: snap.ContentType,
 	}, ttl)

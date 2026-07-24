@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	dbcap "github.com/kitwork/engine/capabilities/database"
 	"github.com/kitwork/engine/database"
 	query "github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
@@ -15,6 +16,10 @@ import (
 )
 
 func (w *KitWork) Database() *Database {
+	val := w.Capability("database")
+	if adapter, ok := val.V.(*dbcap.DatabaseAdapter); ok {
+		_ = adapter
+	}
 	return &Database{
 		tenant: w.tenant,
 		config: &database.Config{},
@@ -27,9 +32,6 @@ type Database struct {
 	sqlDB  *sql.DB
 	tx     *sql.Tx
 
-	// preset, when set, pins this Database to a specific connection config (the sqlite entry uses it:
-	// each file gets Alias "sqlite:<rel>"). Connect() then resolves via the preset — lazily, cached in
-	// tenant.databases — instead of the alias-"default" flow. Nil for the ordinary db entry.
 	preset *database.Config
 }
 
@@ -56,9 +58,6 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 		return d
 	}
 
-	// Preset path (the sqlite entry): connect via the pinned config, cached per alias in
-	// tenant.databases. This keeps open()/Sqlite() zero-I/O — the file is only touched here,
-	// on the first actual query.
 	if len(vals) == 0 && d.preset != nil {
 		d.tenant.dbMu.Lock()
 		defer d.tenant.dbMu.Unlock()
@@ -69,7 +68,6 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 			d.sqlDB = conn
 			return d
 		}
-		// SQLite creates the FILE on open but not its directory (.data/…) — make it first.
 		if t := strings.ToLower(d.preset.Type); t == "sqlite" || t == "sqlite3" {
 			if dir := filepath.Dir(d.preset.Name); dir != "." && dir != "" {
 				_ = os.MkdirAll(dir, 0o755)
@@ -95,10 +93,8 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 	if len(vals) == 1 {
 		v := vals[0]
 		if v.K == value.String {
-			// database.connect("alias") -> GET
 			alias = v.String()
 		} else if v.K == value.Map {
-			// database.connect({ alias: "alias", ... }) -> GET or SET
 			m, _ := v.Interface().(map[string]interface{})
 			if m != nil {
 				if a, ok := m["alias"].(string); ok {
@@ -117,7 +113,6 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 			}
 		}
 	} else if len(vals) >= 2 {
-		// database.connect("alias", { ... }) -> SET
 		alias = vals[0].String()
 		var dbCfg database.Config
 		vals[1].To(&dbCfg)
@@ -132,7 +127,6 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 	d.tenant.dbMu.Lock()
 	defer d.tenant.dbMu.Unlock()
 
-	// GET Operation
 	if configToConnect == nil {
 		if dbConn, exists := d.tenant.databases[alias]; exists {
 			d.sqlDB = dbConn
@@ -168,7 +162,6 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 		return d
 	}
 
-	// SET Operation
 	dbConn, err := configToConnect.Connect()
 	if err != nil {
 		fmt.Printf("Failed to connect database for alias '%s': %v\n", alias, err)
@@ -291,7 +284,6 @@ func (d *Database) Atomic(args ...value.Value) value.Value {
 	}
 	txVal := value.New(txDb)
 
-	// Tự động Rollback nếu có Panic xảy ra trong khi chạy kịch bản
 	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
