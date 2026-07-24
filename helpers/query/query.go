@@ -1,4 +1,4 @@
-package work
+package query
 
 import (
 	"context"
@@ -61,14 +61,14 @@ type JoinQuery struct {
 	On    string
 }
 
-type sqlExecutor interface {
+type Executor interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
 type Query struct {
 	vm *runtime.VM
-	db sqlExecutor
+	db Executor
 
 	ctx *context.Context
 
@@ -91,7 +91,7 @@ type Query struct {
 	debug bool
 }
 
-func NewQuery(vm *runtime.VM, db sqlExecutor) *Query {
+func NewQuery(vm *runtime.VM, db Executor) *Query {
 	return &Query{vm: vm, db: db}
 }
 
@@ -1108,3 +1108,15 @@ func (q *Query) Like(args ...value.Value) *Query {
 	}
 	return q
 }
+
+// New builds a query bound to an executor (a *sql.DB or *sql.Tx) and the tenant VM (magic-where
+// predicates run in the VM). The work-side Database binding calls this; the fluent chain takes over.
+func New(exec Executor, vm *runtime.VM) *Query {
+	return &Query{db: exec, vm: vm}
+}
+
+// Query row-limit defaults (moved from work/config.go — they only govern the query builder).
+const (
+	DefaultDBLimit    = 60  // soft limit when .take() is not specified
+	DefaultDBMaxLimit = 120 // hard safety cap when .limited() is not specified
+)

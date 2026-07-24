@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/database"
+	query "github.com/kitwork/engine/helpers/query"
 	"github.com/kitwork/engine/value"
 	_ "github.com/lib/pq"
 	_ "modernc.org/sqlite"
@@ -188,30 +189,27 @@ func (d *Database) Config(config *database.Config) *Database {
 	return d
 }
 
-func (d *Database) NewQuery() *Query {
-	var exec sqlExecutor = d.db()
+func (d *Database) NewQuery() *query.Query {
+	var exec query.Executor = d.db()
 	if d.tx != nil {
 		exec = d.tx
 	}
-	return &Query{
-		db: exec,
-		vm: d.tenant.vm,
-	}
+	return query.New(exec, d.tenant.vm)
 }
 
-func (d *Database) Table(table string) *Query {
+func (d *Database) Table(table string) *query.Query {
 	return d.NewQuery().Table(table)
 }
 
-func (d *Database) Select(fields ...string) *Query {
+func (d *Database) Select(fields ...string) *query.Query {
 	return d.NewQuery().Select(fields...)
 }
 
-func (d *Database) Where(args ...value.Value) *Query {
+func (d *Database) Where(args ...value.Value) *query.Query {
 	return d.NewQuery().Where(args...)
 }
 
-func (d *Database) Limit(limit int) *Query {
+func (d *Database) Limit(limit int) *query.Query {
 	return d.NewQuery().Limit(limit)
 }
 
@@ -255,15 +253,15 @@ func (d *Database) Remove() value.Value {
 	return d.NewQuery().Remove()
 }
 
-func (d *Database) OrderBy(col string, dir ...string) *Query {
+func (d *Database) OrderBy(col string, dir ...string) *query.Query {
 	return d.NewQuery().OrderBy(col, dir...)
 }
 
-func (d *Database) GroupBy(cols ...string) *Query {
+func (d *Database) GroupBy(cols ...string) *query.Query {
 	return d.NewQuery().GroupBy(cols...)
 }
 
-func (d *Database) Join(args ...value.Value) *Query {
+func (d *Database) Join(args ...value.Value) *query.Query {
 	return d.NewQuery().Join(args...)
 }
 
