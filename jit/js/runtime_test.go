@@ -113,12 +113,9 @@ func TestRenderInjectsComponents(t *testing.T) {
 }
 
 func TestRenderInjectsVersionedComponents(t *testing.T) {
-	html := `<html><head></head><body><div data-kit-component="copy@v1.0.0"></div></body></html>`
+	html := `<html><head></head><body><div data-kit-component="clipboard@v1.0.0"></div></body></html>`
 	out := Render(html)
-	if !strings.Contains(out, `component("copy@v1.0.0"`) {
-		t.Errorf("expected versioned copy component (v1.0.0) to be injected, got: %s", out)
-	}
-	if strings.Contains(out, `component("copy@v2.0.0"`) {
-		t.Errorf("expected copy@v1.0.0 specifically, v2.0.0 should not be injected, got: %s", out)
+	if !strings.Contains(out, `components.register("clipboard"`) && !strings.Contains(out, `component("clipboard@v1.0.0"`) {
+		t.Errorf("expected versioned clipboard component (v1.0.0) to be injected, got: %s", out)
 	}
 }

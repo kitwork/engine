@@ -129,6 +129,9 @@ func readComponent(nameWithVersion string) string {
 	s := ""
 	parts := strings.SplitN(nameWithVersion, "@", 2)
 	name := parts[0]
+	if name == "copy" && findLatestComponentVersion("copy") == "" {
+		name = "clipboard"
+	}
 
 	var versionFile string
 	if len(parts) == 2 {
