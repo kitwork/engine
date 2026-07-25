@@ -39,8 +39,14 @@ const (
 // conventions all key off it.
 const RouterFileName = "router" + extension + ".js"
 
-// AppScope encapsulates app-level state shared across all domains/sites of an application identity:
-// Identity config, DB connections, Capabilities Cache, Background Tasks, and Cron Scheduler.
+// AppScope groups the state whose SCOPE is the app (identity) rather than the single web request:
+// identity config, DB connections, the capability cache, background tasks and the cron scheduler.
+//
+// "App-level" describes what the state MEANS, not that one instance is shared: AppScope is embedded
+// by value, so every Tenant owns its own. Kitwork builds one Tenant per DOMAIN, and genuine
+// per-app singletons are reached another way — the cron dispatcher runs on a separate identity-level
+// tenant (NewAppTenant, one per app, see StartAppSchedulers) and the SSE broker lives in a registry
+// keyed by identity. Do not add state here on the assumption that domains of one app will share it.
 type AppScope struct {
 	config            *Config
 	entity            *Entity
@@ -50,9 +56,9 @@ type AppScope struct {
 	cronMu            sync.Mutex
 	cronCancels       []chan struct{}
 	cronDB            *sql.DB             // underlying durable store handle (.data/scheduler.db, or shared PG)
-	cronStore         cronStore           // dialect-abstracted coordination store
+	cronStore         cronStore           // dialect-abstracted coordination store (sqlite Phase 2 / pg Phase 3)
 	cronByName        map[string]*CronJob // cron name → job, so a claimed DB slot finds its code to run
-	cronNode          string              // lease owner override
+	cronNode          string              // lease owner override (multi-node demo); "" → process cronNodeID
 	capabilitiesCache *capabilities.InstanceCache
 
 	backgroundMu      sync.Mutex
@@ -62,14 +68,20 @@ type AppScope struct {
 	backgroundClosing bool
 }
 
-// SiteScope encapsulates domain/site-level web presentation state:
-// Dynamic RouteTree, JIT CSS config, asset mounts, favicon, and theme mode.
+// SiteScope groups domain/site-level web presentation state: the route tree, JIT CSS config, asset
+// mounts, favicon and theme mode. Everything here is declared by the site's own root router, so it
+// belongs to ONE domain even when several domains share an app.
 type SiteScope struct {
-	tree         *RouteTree
-	jitcssConfig *jitcss.Config
-	faviconFile  string       // .favicon(): file served at /favicon.ico ("" = none declared)
-	assetMounts  []assetMount // .assets(): allowlisted static roots, each URL prefix → disk dir
-	themeMode    string       // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
+	// tree, when non-nil, marks this tenant as FILESYSTEM-ROUTED: requests are resolved by
+	// walking the folder tree (each folder = a runtime node) instead of the flat routes table.
+	// Activated by a `filesystem.kitwork` marker at the tenant root. See router_*.go.
+	tree *RouteTree
+
+	// Declared by the root router during ensureFolder (jitcssConfig sets the publish pattern):
+	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
+	faviconFile  string         // .favicon(): file served at /favicon.ico ("" = none declared)
+	assetMounts  []assetMount   // .assets(): allowlisted static roots, each URL prefix → disk dir (empty = serve any safe file)
+	themeMode    string         // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
 }
 
 // Tenant represents an active tenant, composing AppScope and SiteScope with runtime VM state.
@@ -80,6 +92,10 @@ type Tenant struct {
 	bytecode  *compiler.Bytecode
 	vm        *runtime.VM
 	MaxEnergy uint64
+
+	// HotReload enables the per-folder hot check: an edited router.kitwork.js (or an imported
+	// module) recompiles just its folder; created/removed folders re-enter the tree. Set by the
+	// engine from config; off = every compile is exactly once (production).
 	HotReload bool
 
 	env value.Value // env scoped của tenant này (đọc từ <path>/.env), lộ qua kitwork().env
@@ -137,6 +153,10 @@ func (t *Tenant) resolve(paths ...string) string {
 			if t.entity.Identity != "" {
 				t.config.base = filepath.Join(t.config.root, t.entity.Identity, t.entity.Domain)
 			} else {
+				// No identity (single-tenant). Resolve in priority order: the sites/ convention
+				// (root/sites/<domain>), the test layout (root/test/<domain>), then a flat
+				// root/<domain>. Default to flat when none has a root router yet (preserves the
+				// pre-existing behaviour for brand-new tenants).
 				flatPath := filepath.Join(t.config.root, t.entity.Domain)
 				t.config.base = flatPath
 				for _, cand := range []string{
@@ -165,7 +185,9 @@ func (t *Tenant) DB(name string) *sql.DB             { return sqliteFor(t, name)
 func (t *Tenant) RAMStore() httphelper.ResponseStore { return t.fetchRAM() }
 
 // resolveApp resolves a path at the IDENTITY (app) level — apps/<identity>/… — which every domain of
-// the app shares.
+// the app shares. This is where app-wide infrastructure lives: `_cron` (one schedule set per app),
+// `.data` (the app's scheduler DB), `_core` (shared services). Single-tenant (flat/sites) layouts have
+// no identity layer, so it falls back to the domain level.
 func (t *Tenant) resolveApp(paths ...string) string {
 	if t.entity != nil && t.entity.Identity != "" && t.config.root != "" {
 		return filepath.Join(append([]string{t.config.root, t.entity.Identity}, paths...)...)
@@ -173,6 +195,12 @@ func (t *Tenant) resolveApp(paths ...string) string {
 	return t.resolve(paths...)
 }
 
+// serveViewStatic auto-serves a plain .txt file that lives in the tenant's views/ folder with NO
+// explicit route. Dropping `views/robots.txt` makes GET /robots.txt serve it as text/plain — "add
+// a .txt to views and it just opens". This is a Zero-VM disk read (http.ServeFile handles
+// Content-Type, Last-Modified, ETag and Range); an explicit route always wins because Serve only
+// reaches here when nothing matched. Scoped to .txt so .kitwork.* sources are never exposed, and
+// guarded against path traversal. Returns true if it served the request.
 func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -181,6 +209,7 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
+	// Clean the request path and refuse anything that still looks like traversal.
 	clean := path.Clean("/" + strings.TrimPrefix(r.URL.Path, "/"))
 	if strings.Contains(clean, "..") {
 		return false
@@ -189,6 +218,7 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	viewsDir := t.resolve("views")
 	full := filepath.Join(viewsDir, filepath.FromSlash(clean))
 
+	// Defense in depth: the resolved path must stay inside views/.
 	rel, err := filepath.Rel(viewsDir, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
@@ -203,6 +233,8 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// RouterFile returns the path of the tenant's root router (the tenant marker) — what hot reload
+// watches for changes/removal. With an argument it resolves that filename inside the tenant instead.
 func (t *Tenant) RouterFile(filenames ...string) string {
 	if len(filenames) > 0 {
 		return t.resolve(filenames[0])
@@ -211,6 +243,9 @@ func (t *Tenant) RouterFile(filenames ...string) string {
 }
 
 func (t *Tenant) Run() error {
+	// FILESYSTEM-ROUTED, always. There is no flat app.kitwork.js entry and no route table — the
+	// folder tree IS the router. We only set up the shared VM + globals + env here; the tree
+	// compiles each folder's router.kitwork.js LAZILY on the first request that reaches it.
 	t.bytecode = &compiler.Bytecode{}
 	t.vm = runtime.New(t.bytecode.Instructions, t.bytecode.Constants)
 	t.vm.MaxEnergy = t.MaxEnergy
