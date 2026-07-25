@@ -55,18 +55,27 @@ func TestStaticClassStillWorksBesideDynamic(t *testing.T) {
 	}
 }
 
-// CONTROL for the anchoring: the expression's syntax must never be treated as class names. Without
-// this the suite would still pass on a scanner that splits data-kit-class on whitespace — it would
-// happen to pick up the literals too, along with junk, and nobody would notice until a rule name
-// collided.
+// The expression's SYNTAX must never be mistaken for class names.
+//
+// This asserts on the collected class SET, not on the generated CSS, and the difference matters.
+// Junk tokens never reach the stylesheet either way — an unresolvable name produces no rule, so
+// buildJITCSS drops it silently — which means a CSS-level assertion here would pass even with the
+// scanner's anchoring removed, and prove nothing. (Measured: it did.) The set is where the damage
+// is visible: it keys the JIT cache, so garbage tokens split one entry into many, and a token that
+// ever DOES resolve becomes a rule nobody asked for.
 func TestExpressionSyntaxIsNotTreatedAsClassNames(t *testing.T) {
-	html := `<div data-kit-class="{ 'p-4': big }">x</div>`
-	css := GenerateJITCached(html, nil)
+	seen := map[string]bool{}
+	var classes []string
+	collectClasses(`<div data-kit-class="{ 'p-4': big }" class="m-2">x</div>`, seen, &classes)
 
-	for _, junk := range []string{`.{`, `.}`, `.big`, `.'p-4':`, `.big }`} {
-		if strings.Contains(css, junk) {
-			t.Fatalf("expression token %q leaked into the stylesheet\n--- css ---\n%s", junk, css)
+	want := map[string]bool{"m-2": true, "p-4": true}
+	for _, c := range classes {
+		if !want[c] {
+			t.Fatalf("expression token %q was collected as a class name; got %v", c, classes)
 		}
+	}
+	if len(classes) != len(want) {
+		t.Fatalf("expected exactly %v, got %v", want, classes)
 	}
 }
 
