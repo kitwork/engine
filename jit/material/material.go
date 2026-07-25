@@ -1,4 +1,4 @@
-package components
+package material
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"github.com/kitwork/engine/jit/css"
 )
 
-// GenerateLibrary returns a map of filename -> CSS content for all components.
+// GenerateLibrary returns a map of filename -> CSS content for all materials.
 func GenerateLibrary() map[string]string {
 	return map[string]string{
 		"tokens.css":    GenerateTokens(),
@@ -32,7 +32,7 @@ func GenerateLibrary() map[string]string {
 // --- DESIGN TOKENS ---
 func GenerateTokens() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: TOKENS */\n")
+	b.WriteString("/* Kitwork Material: TOKENS */\n")
 	b.WriteString(`:root {
 	--bg-surface: #121212;
 	--text-main: #e0e0e0;
@@ -61,7 +61,7 @@ func GenerateTokens() string {
 // --- PROSE (Markdown Container) ---
 func GenerateProse() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: PROSE (Markdown) */\n")
+	b.WriteString("/* Kitwork Material: PROSE (Markdown) */\n")
 	b.WriteString(`.prose {
 	color: var(--text-main, #e0e0e0);
 	max-width: 65ch;
@@ -118,7 +118,7 @@ func GenerateProse() string {
 // --- BUTTONS (No Abbreviations Canonical: .button) ---
 func GenerateButtons() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: BUTTONS */\n")
+	b.WriteString("/* Kitwork Material: BUTTONS */\n")
 
 	b.WriteString(`.button, .btn { 
 	display: inline-flex; align-items: center; justify-content: center; 
@@ -152,7 +152,7 @@ func GenerateButtons() string {
 // --- INPUTS ---
 func GenerateInputs() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: INPUTS */\n")
+	b.WriteString("/* Kitwork Material: INPUTS */\n")
 
 	b.WriteString(`.input, .select, .textarea {
 	width: 100%; padding: 10px 16px; 
@@ -176,7 +176,7 @@ func GenerateInputs() string {
 // --- CARDS ---
 func GenerateCards() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: CARDS */\n")
+	b.WriteString("/* Kitwork Material: CARDS */\n")
 
 	b.WriteString(`.card { background-color: var(--bg-surface, #121212); border: 1px solid var(--glass-border, rgba(255,255,255,0.05)); border-radius: var(--radius-lg, 8px); overflow: hidden; display: flex; flex-direction: column; }
 .card-header { padding: 20px 24px; border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.05)); }
@@ -196,7 +196,7 @@ func GenerateCards() string {
 // --- BADGES ---
 func GenerateBadges() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: BADGES */\n")
+	b.WriteString("/* Kitwork Material: BADGES */\n")
 
 	b.WriteString(`.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full, 9999px); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.5; white-space: nowrap; }
 .badge-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; background-color: currentColor; }
@@ -214,7 +214,7 @@ func GenerateBadges() string {
 // --- ALERTS ---
 func GenerateAlerts() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: ALERTS */\n")
+	b.WriteString("/* Kitwork Material: ALERTS */\n")
 
 	b.WriteString(`.alert { padding: 16px; border-radius: var(--radius-md, 6px); border: 1px solid transparent; width: 100%; margin-bottom: 16px; font-size: 14px; }
 `)
@@ -229,7 +229,7 @@ func GenerateAlerts() string {
 // --- TABLES ---
 func GenerateTables() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: TABLES */\n")
+	b.WriteString("/* Kitwork Material: TABLES */\n")
 	b.WriteString(`.table-container { overflow-x: auto; width: 100%; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
 .table th, .table td { padding: 12px 16px; border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.05)); }
@@ -242,7 +242,7 @@ func GenerateTables() string {
 // --- STEPS ---
 func GenerateSteps() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: STEPS */\n")
+	b.WriteString("/* Kitwork Material: STEPS */\n")
 	b.WriteString(".steps { display: flex; align-items: center; width: 100%; }\n")
 	b.WriteString(".step-item { display: flex; flex-direction: column; align-items: center; flex: 1; position: relative; }\n")
 	b.WriteString(".step-item:not(:last-child)::after { content: ''; position: absolute; top: 16px; left: 50%; width: 100%; height: 2px; background-color: rgba(255,255,255,0.1); z-index: 0; }\n")
@@ -263,7 +263,7 @@ func GenerateSteps() string {
 // --- AVATARS ---
 func GenerateAvatars() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: AVATARS */\n")
+	b.WriteString("/* Kitwork Material: AVATARS */\n")
 	b.WriteString(`.avatar { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background-color: var(--glass-bg, rgba(255,255,255,0.1)); overflow: hidden; object-fit: cover; font-weight: 600; font-size: 14px; }
 .avatar-small, .avatar-sm { width: 28px; height: 28px; font-size: 11px; }
 .avatar-large, .avatar-lg { width: 56px; height: 56px; font-size: 18px; }
@@ -277,7 +277,7 @@ func GenerateAvatars() string {
 // --- DIALOGS / MODALS ---
 func GenerateDialogs() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: DIALOGS */\n")
+	b.WriteString("/* Kitwork Material: DIALOGS */\n")
 	b.WriteString(`.dialog-backdrop { position: fixed; inset: 0; background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px); z-index: 999; display: flex; align-items: center; justify-content: center; }
 .dialog { background-color: var(--bg-surface, #121212); border: 1px solid var(--glass-border, rgba(255,255,255,0.1)); border-radius: var(--radius-lg, 8px); width: 100%; max-width: 500px; padding: 24px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
 .dialog-header { font-size: 18px; font-weight: 700; margin-bottom: 12px; color: var(--text-heading, #ffffff); }
@@ -290,7 +290,7 @@ func GenerateDialogs() string {
 // --- SKELETONS ---
 func GenerateSkeletons() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: SKELETONS */\n")
+	b.WriteString("/* Kitwork Material: SKELETONS */\n")
 	b.WriteString(`.skeleton { background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%); background-size: 200% 100%; animation: skeleton-wave 1.5s infinite ease-in-out; border-radius: var(--radius-md, 6px); }
 .skeleton-text { height: 16px; width: 100%; margin-bottom: 8px; }
 .skeleton-avatar { width: 40px; height: 40px; border-radius: 50%; }
@@ -302,7 +302,7 @@ func GenerateSkeletons() string {
 // --- TOOLTIPS ---
 func GenerateTooltips() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: TOOLTIPS */\n")
+	b.WriteString("/* Kitwork Material: TOOLTIPS */\n")
 	b.WriteString(`.tooltip { position: relative; display: inline-block; }
 .tooltip::after { content: attr(data-tooltip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding: 4px 8px; background-color: #000; color: #fff; font-size: 11px; border-radius: 4px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; margin-bottom: 6px; z-index: 1000; }
 .tooltip:hover::after { opacity: 1; }
@@ -313,7 +313,7 @@ func GenerateTooltips() string {
 // --- STATS / METRICS ---
 func GenerateStats() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: STATS */\n")
+	b.WriteString("/* Kitwork Material: STATS */\n")
 	b.WriteString(`.stat { display: flex; flex-direction: column; padding: 20px; background-color: var(--bg-surface, #121212); border: 1px solid var(--glass-border, rgba(255,255,255,0.05)); border-radius: var(--radius-lg, 8px); }
 .stat-title { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; }
 .stat-value { font-size: 28px; font-weight: 700; color: var(--text-heading, #ffffff); margin: 4px 0; }
@@ -325,7 +325,7 @@ func GenerateStats() string {
 // --- NAVBAR ---
 func GenerateNavbar() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: NAVBAR */\n")
+	b.WriteString("/* Kitwork Material: NAVBAR */\n")
 	b.WriteString(`.navbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background-color: var(--bg-surface, #121212); border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.05)); width: 100%; }
 .navbar-brand { font-size: 18px; font-weight: 700; color: var(--text-heading, #ffffff); text-decoration: none; }
 .navbar-nav { display: flex; align-items: center; gap: 16px; list-style: none; margin: 0; padding: 0; }
@@ -338,7 +338,7 @@ func GenerateNavbar() string {
 // --- TIMELINE ---
 func GenerateTimeline() string {
 	var b strings.Builder
-	b.WriteString("/* Kitwork Industrial Components: TIMELINE */\n")
+	b.WriteString("/* Kitwork Material: TIMELINE */\n")
 	b.WriteString(`.timeline { position: relative; padding-left: 24px; border-left: 2px solid var(--glass-border, rgba(255,255,255,0.1)); list-style: none; margin: 0; }
 .timeline-item { position: relative; margin-bottom: 20px; }
 .timeline-item::before { content: ''; position: absolute; left: -31px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background-color: var(--color-brand-rgb, #f82244); border: 2px solid var(--bg-surface, #121212); }

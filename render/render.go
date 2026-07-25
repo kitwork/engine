@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"strings"
 
-	components "github.com/kitwork/engine/jit/components"
 	jitcss "github.com/kitwork/engine/jit/css"
 	fonts "github.com/kitwork/engine/jit/fonts"
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 	icons "github.com/kitwork/engine/jit/icons"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
+	material "github.com/kitwork/engine/jit/material"
 	theme "github.com/kitwork/engine/jit/theme"
 	"github.com/kitwork/engine/utilities/minifier"
 	"github.com/kitwork/engine/value"
@@ -248,9 +248,9 @@ func (r *Render) tmpl(data any) string {
 		}
 	}
 
-	// 3d. JIT components: inject <style data-kitwork-jit="components"> with CSS for ONLY the UI
-	// component families (.button/.btn, .card, …) the page uses (jit/components). No-op otherwise.
-	out = components.Render(out)
+	// 3d. JIT material: inject <style data-kitwork-jit="material"> with CSS for ONLY the UI
+	// material families (.button/.btn, .card, …) the page uses (jit/material). No-op otherwise.
+	out = material.Render(out)
 
 	// 3c. JIT icons. DEFAULT (inline): scan for `<i class="icon-x">` and inject a per-page
 	// <style data-kitwork-jit="icons"> with CSS-mask rules for ONLY the icons used (jit/icons) — a
