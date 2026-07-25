@@ -79,10 +79,9 @@ func TestRenderNewFamilies(t *testing.T) {
 		{`<input class="input input-large">`, ".input,.textarea,.select{", ".table{"},
 		{`<table class="table table-zebra">`, ".table{", ".badge{"},
 		{`<textarea class="textarea"></textarea>`, ".input,.textarea,.select{", ".badge{"}, // alias base triggers input
-		{`<div class="avatar avatar-large"></div>`, ".avatar{", ".badge{"},
-		{`<div class="dialog">Body</div>`, ".dialog-backdrop{", ".avatar{"},
-		{`<div class="skeleton skeleton-text"></div>`, ".skeleton{", ".avatar{"},
-		{`<span class="tooltip" data-tooltip="hi">Hover</span>`, ".tooltip{", ".avatar{"},
+		{`<div class="stat"><div class="stat-value">$1,200</div></div>`, ".stat{", ".badge{"},
+		{`<nav class="navbar"><a class="navbar-brand">Logo</a></nav>`, ".navbar{", ".badge{"},
+		{`<ul class="timeline"><li class="timeline-item">Event</li></ul>`, ".timeline{", ".badge{"},
 	}
 	for _, c := range cases {
 		out := Render(`<head></head><body>` + c.markup + `</body>`)

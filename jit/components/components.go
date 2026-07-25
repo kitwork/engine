@@ -23,6 +23,9 @@ func GenerateLibrary() map[string]string {
 		"dialogs.css":   GenerateDialogs(),
 		"skeletons.css": GenerateSkeletons(),
 		"tooltips.css":  GenerateTooltips(),
+		"stats.css":     GenerateStats(),
+		"navbar.css":    GenerateNavbar(),
+		"timeline.css":  GenerateTimeline(),
 	}
 }
 
@@ -117,7 +120,6 @@ func GenerateButtons() string {
 	var b strings.Builder
 	b.WriteString("/* Kitwork Industrial Components: BUTTONS */\n")
 
-	// Base
 	b.WriteString(`.button, .btn { 
 	display: inline-flex; align-items: center; justify-content: center; 
 	border: 1px solid transparent; border-radius: var(--radius-sm, 4px); 
@@ -129,25 +131,17 @@ func GenerateButtons() string {
 .button:disabled, .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 `)
 
-	// Sizes
 	b.WriteString(`.button-small, .btn-sm { padding: 4px 12px; font-size: 12px; height: 28px; }
 .button-medium, .btn-md { padding: 8px 16px; font-size: 14px; height: 36px; }
 .button-large, .btn-lg { padding: 12px 24px; font-size: 16px; height: 48px; }
 `)
 
-	// Variants
 	for name, color := range css.Colors {
 		rgb := fmt.Sprintf("%d, %d, %d", color.R, color.G, color.B)
-
-		// Solid
 		b.WriteString(fmt.Sprintf(".button-%s, .btn-%s { background-color: rgb(%s); color: %s; }\n", name, name, rgb, contrast(color)))
 		b.WriteString(fmt.Sprintf(".button-%s:hover, .btn-%s:hover { box-shadow: 0 0 20px rgba(%s, 0.4); }\n", name, name, rgb))
-
-		// Outline
 		b.WriteString(fmt.Sprintf(".button-outline-%s, .btn-outline-%s { background-color: transparent; border-color: rgba(%s, 0.5); color: rgb(%s); }\n", name, name, rgb, rgb))
 		b.WriteString(fmt.Sprintf(".button-outline-%s:hover, .btn-outline-%s:hover { border-color: rgb(%s); background-color: rgba(%s, 0.05); }\n", name, name, rgb, rgb))
-
-		// Ghost
 		b.WriteString(fmt.Sprintf(".button-ghost-%s, .btn-ghost-%s { background-color: transparent; color: rgb(%s); }\n", name, name, rgb))
 		b.WriteString(fmt.Sprintf(".button-ghost-%s:hover, .btn-ghost-%s:hover { background-color: rgba(%s, 0.1); }\n", name, name, rgb))
 	}
@@ -312,6 +306,44 @@ func GenerateTooltips() string {
 	b.WriteString(`.tooltip { position: relative; display: inline-block; }
 .tooltip::after { content: attr(data-tooltip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); padding: 4px 8px; background-color: #000; color: #fff; font-size: 11px; border-radius: 4px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; margin-bottom: 6px; z-index: 1000; }
 .tooltip:hover::after { opacity: 1; }
+`)
+	return b.String()
+}
+
+// --- STATS / METRICS ---
+func GenerateStats() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Components: STATS */\n")
+	b.WriteString(`.stat { display: flex; flex-direction: column; padding: 20px; background-color: var(--bg-surface, #121212); border: 1px solid var(--glass-border, rgba(255,255,255,0.05)); border-radius: var(--radius-lg, 8px); }
+.stat-title { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-value { font-size: 28px; font-weight: 700; color: var(--text-heading, #ffffff); margin: 4px 0; }
+.stat-desc { font-size: 12px; color: rgba(255,255,255,0.4); }
+`)
+	return b.String()
+}
+
+// --- NAVBAR ---
+func GenerateNavbar() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Components: NAVBAR */\n")
+	b.WriteString(`.navbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; background-color: var(--bg-surface, #121212); border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.05)); width: 100%; }
+.navbar-brand { font-size: 18px; font-weight: 700; color: var(--text-heading, #ffffff); text-decoration: none; }
+.navbar-nav { display: flex; align-items: center; gap: 16px; list-style: none; margin: 0; padding: 0; }
+.navbar-item { color: var(--text-main, #e0e0e0); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s ease; }
+.navbar-item:hover { color: var(--text-heading, #ffffff); }
+`)
+	return b.String()
+}
+
+// --- TIMELINE ---
+func GenerateTimeline() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Components: TIMELINE */\n")
+	b.WriteString(`.timeline { position: relative; padding-left: 24px; border-left: 2px solid var(--glass-border, rgba(255,255,255,0.1)); list-style: none; margin: 0; }
+.timeline-item { position: relative; margin-bottom: 20px; }
+.timeline-item::before { content: ''; position: absolute; left: -31px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background-color: var(--color-brand-rgb, #f82244); border: 2px solid var(--bg-surface, #121212); }
+.timeline-time { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
+.timeline-content { font-size: 14px; color: var(--text-main, #e0e0e0); }
 `)
 	return b.String()
 }

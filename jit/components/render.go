@@ -36,6 +36,9 @@ var families = []family{
 	{[]string{"dialog", "modal"}, dialogCSS},
 	{[]string{"skeleton"}, skeletonCSS},
 	{[]string{"tooltip"}, tooltipCSS},
+	{[]string{"stat"}, statCSS},
+	{[]string{"navbar"}, navbarCSS},
+	{[]string{"timeline"}, timelineCSS},
 }
 
 var componentClassRe = regexp.MustCompile(`class="([^"]*)"`)
@@ -220,3 +223,25 @@ const tooltipCSS = `.tooltip{position:relative;display:inline-block}` +
 	`padding:.25rem .5rem;background:#000;color:#fff;font-size:.7rem;border-radius:.25rem;white-space:nowrap;` +
 	`opacity:0;pointer-events:none;transition:opacity .2s ease;margin-bottom:.35rem;z-index:1000}` +
 	`.tooltip:hover::after{opacity:1}`
+
+// statCSS — metrics and dashboard stats. `.stat` + `.stat-title` / `.stat-value` / `.stat-desc`.
+const statCSS = `.stat{display:flex;flex-direction:column;padding:1.25rem;background:var(--kitwork-surface,#fff);` +
+	`border-radius:.75rem;border:1px solid var(--kitwork-border,rgba(0,0,0,.05))}` +
+	`.stat-title{font-size:.8rem;font-weight:500;color:var(--kitwork-text-lo,#64748b);text-transform:uppercase;letter-spacing:.05em}` +
+	`.stat-value{font-size:1.75rem;font-weight:700;color:var(--kitwork-text-hi,#0f172a);margin:.25rem 0}` +
+	`.stat-desc{font-size:.75rem;color:var(--kitwork-text-muted,#94a3b8)}`
+
+// navbarCSS — top site navigation header. `.navbar` + `.navbar-brand` / `.navbar-nav` / `.navbar-item`.
+const navbarCSS = `.navbar{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1.5rem;` +
+	`background:var(--kitwork-surface,#fff);border-bottom:1px solid var(--kitwork-border,rgba(0,0,0,.05));width:100%}` +
+	`.navbar-brand{font-size:1.125rem;font-weight:700;color:var(--kitwork-text-hi,#0f172a);text-decoration:none}` +
+	`.navbar-nav{display:flex;align-items:center;gap:1rem;list-style:none;margin:0;padding:0}` +
+	`.navbar-item{color:var(--kitwork-text-lo,#64748b);text-decoration:none;font-size:.875rem;font-weight:500;transition:color .15s ease}` +
+	`.navbar-item:hover{color:var(--kitwork-text-hi,#0f172a)}`
+
+// timelineCSS — history / activity timelines. `.timeline` + `.timeline-item`.
+const timelineCSS = `.timeline{position:relative;padding-left:1.5rem;border-left:2px solid var(--kitwork-border,rgba(0,0,0,.08));list-style:none;margin:0}` +
+	`.timeline-item{position:relative;margin-bottom:1.25rem}` +
+	`.timeline-item::before{content:'';position:absolute;left:-1.95rem;top:.25rem;width:.75rem;height:.75rem;border-radius:9999px;background:var(--kitwork-brand,#f82244);border:2px solid var(--kitwork-surface,#fff)}` +
+	`.timeline-time{font-size:.75rem;color:var(--kitwork-text-muted,#94a3b8);margin-bottom:.25rem}` +
+	`.timeline-content{font-size:.875rem;color:var(--kitwork-text,#52525b)}`
