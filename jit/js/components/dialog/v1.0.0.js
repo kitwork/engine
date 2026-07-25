@@ -1,23 +1,16 @@
-/* dialog component @v1.0.0 — an open/close overlay driven by state (the component sibling of the
- * `dialog` VERB, which drives a native <dialog>). Use the verb when the native element is enough;
- * use this component when you want the state named, reachable and styled with utilities.
- * Supports:
- *   - <div data-kit-component="dialog">
- *       <button data-kit-click="show()">Open</button>
- *       <div data-kit-show="open" class="fixed inset-0 …">
- *         <div data-kit-click="hide()" class="absolute inset-0 bg-black/40"></div>
- *         <div class="relative …">…<button data-kit-click="hide()">Close</button></div>
- *       </div>
- *     </div>
- *   - <div data-kit-component="dialog@v1.0.0">      — pin the version
- *   - <div data-kit-component="dialog=$confirm">    — global handle: $confirm.show() from anywhere
+/* dialog component @v1.0.0 — open/close dialog or modal.
+ * Usage: <button data-kit-component="dialog" data-kit-target="#my-dialog">Open Dialog</button>
  */
-var dialogDef = {
-  open: false,
-  show: function () { this.open = true; },
-  hide: function () { this.open = false; },
-  toggle: function () { this.open = !this.open; }
-};
-
-window.kitwork.component("dialog", dialogDef);
-window.kitwork.component("dialog@v1.0.0", dialogDef);
+window.kitwork.components.action("dialog", function (el) {
+  var t = window.kitwork.components.target(el);
+  if (!t) return;
+  if (t.tagName === "DIALOG") {
+    if (t.open) {
+      if (t.close) t.close(); else t.removeAttribute("open");
+    } else {
+      if (t.showModal) t.showModal(); else if (t.show) t.show(); else t.setAttribute("open", "");
+    }
+  } else {
+    t.classList.toggle("hidden");
+  }
+});

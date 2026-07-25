@@ -30,7 +30,7 @@ import (
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
-//go:embed lib components
+//go:embed components
 var jsFS embed.FS
 
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.
@@ -114,18 +114,9 @@ func findLatestComponentVersion(name string) string {
 	return latest
 }
 
-// readAction returns the (trimmed) contents of lib/<name>.js, or "" if absent. Cached.
+// readAction returns the component content mapped from legacy action name. Cached.
 func readAction(name string) string {
-	key := "action:" + name
-	if v, ok := moduleCache.Load(key); ok {
-		return v.(string)
-	}
-	s := ""
-	if b, err := jsFS.ReadFile("lib/" + name + ".js"); err == nil {
-		s = strings.TrimSpace(string(b))
-	}
-	moduleCache.Store(key, s)
-	return s
+	return readComponent(name)
 }
 
 // readComponent returns the (trimmed) contents of components/<name>/<version>.js, or "" if absent. Cached.

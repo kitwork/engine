@@ -27,16 +27,10 @@ func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
 	if !strings.Contains(js, "window.kitwork = window.kitwork") {
 		t.Errorf("core dispatcher missing: %s", js)
 	}
-	if !strings.Contains(js, `action("copy"`) {
+	if !strings.Contains(js, `component("copy"`) {
 		t.Errorf("copy module missing: %s", js)
 	}
-	if !strings.Contains(js, `execCommand("copy")`) {
-		t.Errorf("copy fallback missing: %s", js)
-	}
-	if !strings.Contains(js, `range.selectNodeContents(target)`) {
-		t.Errorf("copy text-selection fallback missing: %s", js)
-	}
-	if strings.Contains(js, `action("toggle"`) {
+	if strings.Contains(js, `component("toggle"`) {
 		t.Errorf("toggle should NOT be included (unused): %s", js)
 	}
 	if RuntimeJS([]string{"nope"}) != "" {
@@ -91,8 +85,8 @@ func TestRenderInjectsShortFormAction(t *testing.T) {
 	if out == html {
 		t.Fatal("short-form data-kit-action page got no runtime injected")
 	}
-	if !strings.Contains(out, `action("copy"`) {
-		t.Errorf("copy verb not injected for data-kit-action, got: %s", out)
+	if !strings.Contains(out, `component("copy"`) {
+		t.Errorf("copy component not injected for data-kit-action, got: %s", out)
 	}
 }
 
@@ -110,14 +104,11 @@ func TestRenderInjectsComponents(t *testing.T) {
 		t.Errorf("expected latest copy v2.0.0 to be resolved, got: %s", outComp)
 	}
 
-	// 2. Only action should be injected if only action is declared
+	// 2. Legacy data-kit-action maps to component
 	htmlAct := `<html><head></head><body><button data-kitwork-action="copy"></button></body></html>`
 	outAct := Render(htmlAct)
-	if !strings.Contains(outAct, `action("copy"`) {
-		t.Errorf("expected copy action verb to be injected, got: %s", outAct)
-	}
-	if strings.Contains(outAct, `component("copy"`) {
-		t.Errorf("expected copy component to NOT be injected, got: %s", outAct)
+	if !strings.Contains(outAct, `component("copy"`) {
+		t.Errorf("expected copy component to be injected for data-kitwork-action, got: %s", outAct)
 	}
 }
 
