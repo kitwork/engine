@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	dbcap "github.com/kitwork/engine/capabilities/database"
 	"github.com/kitwork/engine/database"
 	query "github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
@@ -15,11 +14,24 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Database is NOT served by the capability registry, unlike collection/jwt/shortbase/qrcode.
+// capabilities/database exists and registers itself, but it is a narrower re-implementation and
+// delegating to it would silently regress two things:
+//
+//   - Connections. The adapter resolves an alias through Scope.DB(), which for a tenant means
+//     sqliteFor() — a SQLite file under .data/. It never consults database.Configs, so every
+//     configured Postgres/MySQL connection would quietly become an empty local SQLite file.
+//   - Lambda predicates. The adapter builds queries with query.New(exec, nil). Every "magic"
+//     branch in the query builder is gated on `q.vm != nil`, so the lambda is never compiled to
+//     SQL. It does not error either: measured, `table("users").where(u => u.active)` builds
+//     `SELECT * FROM "users" WHERE "" IS NULL LIMIT 60` — an EMPTY column identifier — which the
+//     driver either rejects or evaluates to nothing. Kitwork's signature query form would break.
+//
+// A previous version called w.Capability("database") and discarded the result, which read like
+// wiring that was nearly finished. It was not: it was a no-op in front of the real implementation
+// below. Removed so the code states the truth. Reviving the delegation means teaching the adapter
+// about database.Configs and giving it the tenant VM first.
 func (w *KitWork) Database() *Database {
-	val := w.Capability("database")
-	if adapter, ok := val.V.(*dbcap.DatabaseAdapter); ok {
-		_ = adapter
-	}
 	return &Database{
 		tenant: w.tenant,
 		config: &database.Config{},

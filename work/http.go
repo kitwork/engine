@@ -14,11 +14,17 @@ var ServerPort int
 type HTTP = httputil.HTTP
 type HTTPResponse = httputil.Response
 
+// HTTP is NOT served by the capability registry either, for the same kind of reason as Database.
+// capabilities/http builds its client as httputil.NewClient(nil, diskStore) — the RAM store is
+// nil — so delegating would leave .cache() with nowhere to keep a response and turn every cached
+// fetch into a live request, silently. The client below is given BOTH stores.
+//
+// The discarded w.Capability("http") call that used to sit here was a no-op dressed as
+// integration; removed. Reviving it means giving the adapter a RAM store first.
 func (w *KitWork) HTTP() *HTTP {
 	if w == nil || w.tenant == nil {
 		return httputil.NewClient(nil, nil)
 	}
-	_ = w.Capability("http")
 	return httputil.NewClient(w.tenant.fetchRAM(), w.tenant.fetchDisk())
 }
 
