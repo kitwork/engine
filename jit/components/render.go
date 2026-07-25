@@ -32,6 +32,10 @@ var families = []family{
 	{[]string{"alert"}, alertCSS},
 	{[]string{"input", "textarea", "select"}, inputCSS},
 	{[]string{"table"}, tableCSS},
+	{[]string{"avatar"}, avatarCSS},
+	{[]string{"dialog", "modal"}, dialogCSS},
+	{[]string{"skeleton"}, skeletonCSS},
+	{[]string{"tooltip"}, tooltipCSS},
 }
 
 var componentClassRe = regexp.MustCompile(`class="([^"]*)"`)
@@ -184,3 +188,35 @@ const tableCSS = `.table{width:100%;border-collapse:collapse;font-size:.9rem;tex
 	`color:var(--kitwork-text-muted,#94a3b8)}` +
 	`.table tbody tr:hover{background:rgba(127,127,127,.04)}` +
 	`.table-zebra tbody tr:nth-child(even){background:rgba(127,127,127,.03)}`
+
+// avatarCSS — user profile pictures. `.avatar` + `.avatar-small` / `.avatar-large` / `.avatar-group`.
+const avatarCSS = `.avatar{display:inline-flex;align-items:center;justify-content:center;width:2.5rem;height:2.5rem;` +
+	`border-radius:9999px;background:rgba(127,127,127,.1);overflow:hidden;object-fit:cover;font-weight:600;font-size:.875rem}` +
+	`.avatar-small,.avatar-sm{width:1.75rem;height:1.75rem;font-size:.7rem}` +
+	`.avatar-large,.avatar-lg{width:3.5rem;height:3.5rem;font-size:1.1rem}` +
+	`.avatar-group{display:inline-flex}` +
+	`.avatar-group .avatar{border:2px solid var(--kitwork-surface,#fff);margin-left:-.6rem}` +
+	`.avatar-group .avatar:first-child{margin-left:0}`
+
+// dialogCSS — modals and popups. `.dialog` + `.dialog-backdrop`.
+const dialogCSS = `.dialog-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);` +
+	`z-index:999;display:flex;align-items:center;justify-content:center}` +
+	`.dialog{background:var(--kitwork-surface,#fff);border-radius:.75rem;width:100%;max-width:32rem;padding:1.5rem;` +
+	`box-shadow:0 20px 25px -5px rgba(0,0,0,.25)}` +
+	`.dialog-header{font-size:1.125rem;font-weight:700;margin-bottom:.75rem}` +
+	`.dialog-body{font-size:.875rem;line-height:1.5;margin-bottom:1.25rem}` +
+	`.dialog-footer{display:flex;justify-content:flex-end;gap:.75rem}`
+
+// skeletonCSS — loading state placeholder animations.
+const skeletonCSS = `.skeleton{background:linear-gradient(90deg,rgba(127,127,127,.05) 25%,rgba(127,127,127,.12) 50%,rgba(127,127,127,.05) 75%);` +
+	`background-size:200% 100%;animation:skeleton-wave 1.5s infinite ease-in-out;border-radius:.375rem}` +
+	`.skeleton-text{height:1rem;width:100%;margin-bottom:.5rem}` +
+	`.skeleton-avatar{width:2.5rem;height:2.5rem;border-radius:9999px}` +
+	`@keyframes skeleton-wave{0%{background-position:200% 0}100%{background-position:-200% 0}}`
+
+// tooltipCSS — hover tooltips. `.tooltip[data-tooltip="..."]`.
+const tooltipCSS = `.tooltip{position:relative;display:inline-block}` +
+	`.tooltip::after{content:attr(data-tooltip);position:absolute;bottom:100%;left:50%;transform:translateX(-50%);` +
+	`padding:.25rem .5rem;background:#000;color:#fff;font-size:.7rem;border-radius:.25rem;white-space:nowrap;` +
+	`opacity:0;pointer-events:none;transition:opacity .2s ease;margin-bottom:.35rem;z-index:1000}` +
+	`.tooltip:hover::after{opacity:1}`

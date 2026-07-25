@@ -73,11 +73,16 @@ func TestRenderNoOpWithoutComponents(t *testing.T) {
 func TestRenderNewFamilies(t *testing.T) {
 	// Each new family emits only when used, and only itself.
 	cases := []struct{ markup, want, notWant string }{
+		{`<button class="button button-brand">Save</button>`, ".button,.btn{", ".card{"},
 		{`<span class="badge badge-success">New</span>`, ".badge{", ".alert{"},
 		{`<div class="alert alert-warning">!</div>`, ".alert{", ".badge{"},
 		{`<input class="input input-large">`, ".input,.textarea,.select{", ".table{"},
 		{`<table class="table table-zebra">`, ".table{", ".badge{"},
 		{`<textarea class="textarea"></textarea>`, ".input,.textarea,.select{", ".badge{"}, // alias base triggers input
+		{`<div class="avatar avatar-large"></div>`, ".avatar{", ".badge{"},
+		{`<div class="dialog">Body</div>`, ".dialog-backdrop{", ".avatar{"},
+		{`<div class="skeleton skeleton-text"></div>`, ".skeleton{", ".avatar{"},
+		{`<span class="tooltip" data-tooltip="hi">Hover</span>`, ".tooltip{", ".avatar{"},
 	}
 	for _, c := range cases {
 		out := Render(`<head></head><body>` + c.markup + `</body>`)
