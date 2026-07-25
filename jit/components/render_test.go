@@ -89,3 +89,10 @@ func TestRenderNewFamilies(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderProseFamily(t *testing.T) {
+	out := Render(`<head></head><body><article class="prose"><h1>Title</h1><p>Body</p></article></body>`)
+	if !strings.Contains(out, ".prose{") {
+		t.Errorf("prose family expected: %s", out)
+	}
+}

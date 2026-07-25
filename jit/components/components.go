@@ -10,6 +10,7 @@ import (
 // GenerateLibrary returns a map of filename -> CSS content for all components.
 func GenerateLibrary() map[string]string {
 	return map[string]string{
+		"tokens.css":  GenerateTokens(),
 		"buttons.css": GenerateButtons(),
 		"inputs.css":  GenerateInputs(),
 		"cards.css":   GenerateCards(),
@@ -17,7 +18,94 @@ func GenerateLibrary() map[string]string {
 		"steps.css":   GenerateSteps(),
 		"tables.css":  GenerateTables(),
 		"alerts.css":  GenerateAlerts(),
+		"prose.css":   GenerateProse(),
 	}
+}
+
+// --- DESIGN TOKENS ---
+func GenerateTokens() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Components: TOKENS */\n")
+	b.WriteString(`:root {
+	--bg-surface: #121212;
+	--text-main: #e0e0e0;
+	--text-heading: #ffffff;
+	--radius-sm: 4px;
+	--radius-md: 6px;
+	--radius-lg: 8px;
+	--radius-full: 9999px;
+	--font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	--glass-bg: rgba(255, 255, 255, 0.03);
+	--glass-border: rgba(255, 255, 255, 0.08);
+}
+@media (prefers-color-scheme: light) {
+	:root {
+		--bg-surface: #ffffff;
+		--text-main: #1f2937;
+		--text-heading: #111827;
+		--glass-bg: rgba(0, 0, 0, 0.03);
+		--glass-border: rgba(0, 0, 0, 0.08);
+	}
+}
+`)
+	return b.String()
+}
+
+// --- PROSE (Markdown Container) ---
+func GenerateProse() string {
+	var b strings.Builder
+	b.WriteString("/* Kitwork Industrial Components: PROSE (Markdown) */\n")
+	b.WriteString(`.prose {
+	color: var(--text-main, #e0e0e0);
+	max-width: 65ch;
+	line-height: 1.7;
+	font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+}
+.prose h1, .prose h2, .prose h3, .prose h4 {
+	color: var(--text-heading, #ffffff);
+	font-weight: 700;
+	margin-top: 1.5em;
+	margin-bottom: 0.5em;
+	line-height: 1.3;
+}
+.prose h1 { font-size: 2em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 0.3em; }
+.prose h2 { font-size: 1.5em; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.2em; }
+.prose h3 { font-size: 1.25em; }
+.prose p { margin-top: 0.8em; margin-bottom: 0.8em; }
+.prose code {
+	background-color: rgba(255,255,255,0.08);
+	padding: 0.2em 0.4em;
+	border-radius: 4px;
+	font-size: 0.9em;
+	font-family: monospace;
+}
+.prose pre {
+	background-color: #0d0d0d;
+	border: 1px solid rgba(255,255,255,0.1);
+	border-radius: 6px;
+	padding: 1em;
+	overflow-x: auto;
+	margin: 1.2em 0;
+}
+.prose pre code {
+	background-color: transparent;
+	padding: 0;
+}
+.prose blockquote {
+	border-left: 4px solid rgba(var(--color-brand-rgb, 59, 130, 246), 0.8);
+	padding-left: 1em;
+	margin: 1em 0;
+	color: rgba(255,255,255,0.7);
+	font-style: italic;
+}
+.prose ul, .prose ol { padding-left: 1.5em; margin: 0.8em 0; }
+.prose li { margin-bottom: 0.4em; }
+.prose img { max-width: 100%; height: auto; border-radius: 6px; }
+.prose table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+.prose th, .prose td { padding: 8px 12px; border: 1px solid rgba(255,255,255,0.1); }
+.prose th { background-color: rgba(255,255,255,0.05); }
+`)
+	return b.String()
 }
 
 // --- BUTTONS ---
@@ -28,8 +116,8 @@ func GenerateButtons() string {
 	// Base
 	b.WriteString(`.btn { 
 	display: inline-flex; align-items: center; justify-content: center; 
-	border: 1px solid transparent; border-radius: 4px; 
-	font-weight: 600; font-family: 'Outfit', sans-serif; cursor: pointer; 
+	border: 1px solid transparent; border-radius: var(--radius-sm, 4px); 
+	font-weight: 600; font-family: var(--font-sans, sans-serif); cursor: pointer; 
 	transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); 
 	outline: none; text-decoration: none; user-select: none;
 }
@@ -71,13 +159,13 @@ func GenerateInputs() string {
 	// Base Input
 	b.WriteString(`.input, .select, .textarea {
 	width: 100%; padding: 10px 16px; 
-	background-color: rgba(255,255,255,0.03); 
-	border: 1px solid rgba(255,255,255,0.1); 
-	border-radius: 4px; 
-	color: #fff; font-family: 'Outfit', sans-serif; font-size: 14px;
+	background-color: var(--glass-bg, rgba(255,255,255,0.03)); 
+	border: 1px solid var(--glass-border, rgba(255,255,255,0.1)); 
+	border-radius: var(--radius-sm, 4px); 
+	color: var(--text-main, #fff); font-family: var(--font-sans, sans-serif); font-size: 14px;
 	transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.input:focus, .select:focus, .textarea:focus { outline: none; border-color: rgba(var(--color-brand-rgb), 0.5); box-shadow: 0 0 0 2px rgba(var(--color-brand-rgb), 0.1); }
+.input:focus, .select:focus, .textarea:focus { outline: none; border-color: rgba(var(--color-brand-rgb, 59,130,246), 0.5); box-shadow: 0 0 0 2px rgba(var(--color-brand-rgb, 59,130,246), 0.1); }
 ::placeholder { color: rgba(255,255,255,0.3); }
 `)
 
@@ -95,10 +183,10 @@ func GenerateCards() string {
 	b.WriteString("/* Kitwork Industrial Components: CARDS */\n")
 
 	// Base
-	b.WriteString(`.card { background-color: #121212; border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
-.card-header { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+	b.WriteString(`.card { background-color: var(--bg-surface, #121212); border: 1px solid var(--glass-border, rgba(255,255,255,0.05)); border-radius: var(--radius-lg, 8px); overflow: hidden; display: flex; flex-direction: column; }
+.card-header { padding: 20px 24px; border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.05)); }
 .card-body { padding: 24px; flex: 1; }
-.card-footer { padding: 16px 24px; background-color: rgba(0,0,0,0.2); border-top: 1px solid rgba(255,255,255,0.05); }
+.card-footer { padding: 16px 24px; background-color: rgba(0,0,0,0.2); border-top: 1px solid var(--glass-border, rgba(255,255,255,0.05)); }
 `)
 
 	// Variants
@@ -116,7 +204,7 @@ func GenerateBadges() string {
 	var b strings.Builder
 	b.WriteString("/* Kitwork Industrial Components: BADGES */\n")
 
-	b.WriteString(`.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.5; white-space: nowrap; }
+	b.WriteString(`.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full, 9999px); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.5; white-space: nowrap; }
 .badge-dot { width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; background-color: currentColor; }
 `)
 
@@ -136,7 +224,7 @@ func GenerateAlerts() string {
 	var b strings.Builder
 	b.WriteString("/* Kitwork Industrial Components: ALERTS */\n")
 
-	b.WriteString(`.alert { padding: 16px; border-radius: 6px; border: 1px solid transparent; width: 100%; margin-bottom: 16px; font-size: 14px; }
+	b.WriteString(`.alert { padding: 16px; border-radius: var(--radius-md, 6px); border: 1px solid transparent; width: 100%; margin-bottom: 16px; font-size: 14px; }
 `)
 
 	for name, color := range css.Colors {
@@ -152,7 +240,7 @@ func GenerateTables() string {
 	b.WriteString("/* Kitwork Industrial Components: TABLES */\n")
 	b.WriteString(`.table-container { overflow-x: auto; width: 100%; }
 .table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
-.table th, .table td { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.table th, .table td { padding: 12px 16px; border-bottom: 1px solid var(--glass-border, rgba(255,255,255,0.05)); }
 .table th { font-weight: 600; text-transform: uppercase; font-size: 11px; color: rgba(255,255,255,0.5); letter-spacing: 1px; }
 .table tbody tr:hover { background-color: rgba(255,255,255,0.02); }
 `)
@@ -161,9 +249,6 @@ func GenerateTables() string {
 
 // --- STEPS (Refined) ---
 func GenerateSteps() string {
-	// Re-using the previous logic but made principled if needed.
-	// For now, hardcoded is fine as Steps don't usually map 1:1 to all colors unless requested.
-	// But we'll add color variants support!
 	var b strings.Builder
 	b.WriteString("/* Kitwork Industrial Components: STEPS */\n")
 	b.WriteString(".steps { display: flex; align-items: center; width: 100%; }\n")
@@ -172,7 +257,6 @@ func GenerateSteps() string {
 	b.WriteString(".step-marker { width: 32px; height: 32px; border-radius: 50%; background-color: #121212; border: 2px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; z-index: 1; font-weight: bold; font-size: 12px; color: rgba(255,255,255,0.5); transition: all 0.3s ease; }\n")
 	b.WriteString(".step-label { margin-top: 12px; font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; }\n")
 
-	// Create "Active" variant for Brand by default, but loop for keys
 	for name, color := range css.Colors {
 		if name == "brand" || name == "success" || name == "primary" {
 			rgb := fmt.Sprintf("%d, %d, %d", color.R, color.G, color.B)
@@ -186,7 +270,6 @@ func GenerateSteps() string {
 
 // Helper: Simple contrast checker to decide text color (black or white)
 func contrast(bg css.Color) string {
-	// Calculate luminance
 	lum := (0.299*float64(bg.R) + 0.587*float64(bg.G) + 0.114*float64(bg.B)) / 255.0
 	if lum > 0.6 {
 		return "#000000"
