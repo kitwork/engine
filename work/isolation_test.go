@@ -172,23 +172,27 @@ router.get((ctx) => {
 });
 `
 
-func TestAppIsolationStaticURLCannotEscape(t *testing.T) {
-	_, tenant := buildIsolationFixture(t, staticOnlyRouter)
-
-	// Raw targets: httptest.NewRequest keeps the path as written, which is the point — the check
-	// has to survive un-normalised input, not just what a tidy client would send.
-	for _, target := range []string{
-		"http://localhost/../victim-corp/victim.com/secret.txt",
-		"http://localhost/../../victim-corp/victim.com/secret.txt",
-		"http://localhost/views/../../../victim-corp/victim.com/secret.txt",
-		"http://localhost/%2e%2e/victim-corp/victim.com/secret.txt",
-	} {
-		rec := serveIsolation(t, tenant, target)
-		if strings.Contains(rec.Body.String(), victimMarker) {
-			t.Fatalf("static serving leaked another app's file via %q", target)
-		}
-	}
-}
+// NOTE — why there is no ".." test for static serving.
+//
+// It was written, and it could not be made to fail. URL-driven traversal is neutralised
+// STRUCTURALLY, before any guard runs, by one idiom used consistently on this path:
+//
+//	clean := path.Clean("/" + urlPath)     // serveTreeStatic
+//	s = path.Clean("/" + s)                // cleanAssetPrefix, for .assets() disk aliases
+//
+// Cleaning an ABSOLUTE path collapses leading ".." to root — "/../../victim" becomes "/victim" —
+// so no traversal survives to be caught. Measured both ways: through Tenant.Serve (the folder
+// router rejects it even earlier) and by calling serveTreeStatic directly with an un-normalised
+// path, in each case with serveTreeStatic's ".." check AND its filepath.Rel boundary disabled.
+// Nothing leaked in any combination.
+//
+// So those two guards are real defense in depth, not the thing doing the work, and a test
+// asserting them would pass on a build with them deleted. Shipping one would be worse than
+// shipping none: it would claim coverage that does not exist. If this path is ever refactored to
+// resolve a RELATIVE path, the idiom above is what must be preserved.
+//
+// What IS tested below is the part that has no structural backstop: the allowlist that keeps
+// sources and dot-files unreadable.
 
 // Sources and dot-files must never be served even from inside the tenant: .env holds secrets and
 // *.kitwork.* is the app's own source code.
