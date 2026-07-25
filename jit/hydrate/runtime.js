@@ -35,33 +35,108 @@
   if (kitwork.runtime) return;
   kitwork.runtime = "v.1.0.0";
 
-  // ---- $app capabilities (idea.md unified spec) ----
+  // ---- 1. RUNTIME, APP, PLATFORM & PERMISSIONS ----
   kitwork.toggleTheme = function () {
     kitwork.theme = kitwork.theme === "light" ? "dark" : "light";
   };
 
-  // Dynamic Module Delegate based on idea.md spec
-  function createModule(moduleName) {
-    return typeof Proxy !== "undefined" ? new Proxy(function () {}, {
-      get: function (_, actionName) {
-        return function (params) {
-          if (bridge && bridge.call) return bridge.call(moduleName + "." + actionName, params || {});
-          var fb = webFallbacks[moduleName] && webFallbacks[moduleName][actionName];
-          return fb ? Promise.resolve(fb(params)) : Promise.reject(new Error("Unsupported " + moduleName + "." + actionName));
-        };
-      },
-      apply: function (_, thisArg, args) {
-        // Direct call fallback (e.g. kitwork.clipboard(text) or kitwork.camera(key))
-        if (moduleName === "clipboard") return kitwork.clipboardWrite(args[0]);
-        if (moduleName === "camera") return kitwork.cameraCapture(args[0]);
-        if (moduleName === "window") return kitwork.windowControl(args[0]);
-        return false;
-      }
-    }) : {};
-  }
+  kitwork.runtimeInfo = function () { return bridgeCall("runtime.info"); };
+  kitwork.supports = function (cap) { return bridgeCall("runtime.supports", { capability: cap }); };
 
-  // Legacy direct helpers
-  kitwork.clipboardWrite = kitwork.clipboard = function (text) {
+  kitwork.app = {
+    info: function () { return bridgeCall("app.info"); },
+    exit: function () { return bridgeCall("app.exit"); },
+    restart: function () { return bridgeCall("app.restart"); }
+  };
+
+  kitwork.platform = {
+    info: function () { return bridgeCall("platform.info"); },
+    is: function (name) {
+      var ua = (navigator.userAgent || "").toLowerCase();
+      if (name === "web") return !bridge;
+      if (name === "mobile") return /android|iphone|ipad|ipod/i.test(ua);
+      if (name === "desktop") return !/android|iphone|ipad|ipod/i.test(ua);
+      if (name === "android") return /android/i.test(ua);
+      if (name === "ios") return /iphone|ipad|ipod/i.test(ua);
+      if (name === "windows") return /windows/i.test(ua);
+      if (name === "macos") return /macintosh|mac os x/i.test(ua);
+      if (name === "linux") return /linux/i.test(ua);
+      return false;
+    }
+  };
+
+  kitwork.permissions = {
+    check: function (p) { return bridgeCall("permissions.check", { permission: p }); },
+    request: function (p) { return bridgeCall("permissions.request", { permissions: Array.isArray(p) ? p : [p] }); }
+  };
+
+  // ---- 2. STORAGE, CACHE & DATABASE ----
+  kitwork.storage = {
+    get: function (k, opts) {
+      if (bridge && bridge.call) return bridge.call("storage.get", Object.assign({ key: k }, opts));
+      try {
+        var val = localStorage.getItem(k);
+        return Promise.resolve(val !== null ? JSON.parse(val) : (opts && opts.default !== undefined ? opts.default : null));
+      } catch (e) {
+        return Promise.resolve(opts && opts.default !== undefined ? opts.default : null);
+      }
+    },
+    set: function (k, v) {
+      if (bridge && bridge.call) return bridge.call("storage.set", { key: k, value: v });
+      try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+      return Promise.resolve(true);
+    },
+    remove: function (k) {
+      if (bridge && bridge.call) return bridge.call("storage.remove", { key: k });
+      try { localStorage.removeItem(k); } catch (e) {}
+      return Promise.resolve(true);
+    },
+    clear: function () {
+      if (bridge && bridge.call) return bridge.call("storage.clear", {});
+      try { localStorage.clear(); } catch (e) {}
+      return Promise.resolve(true);
+    }
+  };
+
+  kitwork.secureStorage = {
+    get: function (k, opts) { return bridgeCall("secureStorage.get", Object.assign({ key: k }, opts)); },
+    set: function (k, v) { return bridgeCall("secureStorage.set", { key: k, value: v }); },
+    remove: function (k) { return bridgeCall("secureStorage.remove", { key: k }); }
+  };
+
+  kitwork.cache = {
+    get: function (k) { return bridgeCall("cache.get", { key: k }); },
+    set: function (k, v, opts) { return bridgeCall("cache.set", Object.assign({ key: k, value: v }, opts)); }
+  };
+
+  kitwork.database = {
+    open: function (name) { return bridgeCall("database.open", { name: name }); }
+  };
+
+  // ---- 3. FILES, DIALOG, CLIPBOARD & SHARE ----
+  kitwork.files = {
+    read: function (p) { return bridgeCall("files.read", { path: p }); },
+    write: function (p, c) { return bridgeCall("files.write", { path: p, content: c }); },
+    exists: function (p) { return bridgeCall("files.exists", { path: p }); }
+  };
+
+  kitwork.dialog = {
+    alert: function (p) {
+      if (bridge && bridge.call) return bridge.call("dialog.alert", p || {});
+      alert((p && p.message) || p || "");
+      return Promise.resolve(true);
+    },
+    confirm: function (p) {
+      if (bridge && bridge.call) return bridge.call("dialog.confirm", p || {});
+      return Promise.resolve(confirm((p && p.message) || p || ""));
+    },
+    prompt: function (p) {
+      if (bridge && bridge.call) return bridge.call("dialog.prompt", p || {});
+      return Promise.resolve(prompt((p && p.title) || "", (p && p.placeholder) || ""));
+    }
+  };
+
+  kitwork.clipboard = function (text) {
     text = text == null ? "" : String(text);
     if (bridge && bridge.call) {
       bridge.call("clipboard.write", { text: text });
@@ -82,22 +157,20 @@
     area.remove();
     return true;
   };
-
-  kitwork.windowControl = kitwork.window = function (action) {
-    if (bridge && bridge.call) {
-      return bridge.call("window." + action, {});
-    }
-    return false;
+  kitwork.clipboard.writeText = function (text) { return kitwork.clipboard(text); };
+  kitwork.clipboard.readText = function () {
+    return navigator.clipboard ? navigator.clipboard.readText() : Promise.reject(new Error("Unsupported"));
   };
 
-  kitwork.minimize = function () { return kitwork.window("minimize"); };
-  kitwork.maximize = function () { return kitwork.window("maximize"); };
-  kitwork.closeWindow = function () { return kitwork.window("close"); };
-  kitwork.back = function () { history.back(); };
-  kitwork.forward = function () { history.forward(); };
-  kitwork.reload = function () { location.reload(); };
+  kitwork.share = {
+    open: function (p) {
+      if (navigator.share) return navigator.share(p);
+      return bridgeCall("share.open", p);
+    }
+  };
 
-  kitwork.cameraCapture = kitwork.camera = function (key) {
+  // ---- 4. CAMERA, MEDIA, AUDIO & SCREEN ----
+  kitwork.camera = function (key) {
     if (bridge && bridge.call) {
       bridge.call("camera.capture", {}).then(function (uri) {
         if (uri) kitwork.set(key, uri);
@@ -122,23 +195,28 @@
     input.click();
     return true;
   };
+  kitwork.camera.capture = function (opts) { return bridgeCall("camera.capture", opts); };
 
-  var webFallbacks = {
-    clipboard: {
-      writeText: function (p) { kitwork.clipboard(p.text); return true; },
-      readText: function () { return navigator.clipboard ? navigator.clipboard.readText() : Promise.reject(); }
-    },
-    dialog: {
-      alert: function (p) { alert(p.message || ""); return true; },
-      confirm: function (p) { return confirm(p.message || ""); },
-      prompt: function (p) { return prompt(p.title || "", p.placeholder || ""); }
-    }
+  // ---- 5. WINDOW, SYSTEM & SHELL ----
+  kitwork.window = function (action) {
+    if (bridge && bridge.call) return bridge.call("window." + action, {});
+    return false;
+  };
+  kitwork.minimize = function () { return kitwork.window("minimize"); };
+  kitwork.maximize = function () { return kitwork.window("maximize"); };
+  kitwork.closeWindow = function () { return kitwork.window("close"); };
+  kitwork.back = function () { history.back(); };
+  kitwork.forward = function () { history.forward(); };
+  kitwork.reload = function () { location.reload(); };
+
+  kitwork.shell = {
+    open: function (url) { return bridgeCall("shell.open", { url: url }); }
   };
 
-  // Expose module namespaces from idea.md
-  ["storage", "secureStorage", "cache", "database", "files", "dialog", "share", "location", "device", "network", "notification", "shell", "http", "ai", "auth", "session", "logs"].forEach(function (m) {
-    kitwork[m] = kitwork[m] || createModule(m);
-  });
+  function bridgeCall(action, params) {
+    if (bridge && bridge.call) return bridge.call(action, params || {});
+    return Promise.reject(new Error("Bridge absent"));
+  }
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
   var PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
