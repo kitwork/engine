@@ -1,13 +1,24 @@
-/* get component @v1.0.0 — fetch content and place in target element.
- * Usage: <button data-kit-component="get" data-kit-url="/api/data" data-kit-target="#result">Fetch</button>
+/* get component @v1.0.0 — fetch content.
+ * Usage: <div data-kit-component="get">
  */
-window.kitwork.components.action("get", function (el) {
-  var url = el.getAttribute("data-kit-url") || el.getAttribute("data-kitwork-url");
-  if (!url) return;
-  var target = window.kitwork.components.target(el);
-  if (!target) return;
-  fetch(url, { headers: { "X-Kitwork-Hydrate": "1" } })
-    .then(function (r) { return r.text(); })
-    .then(function (html) { target.innerHTML = html; })
-    .catch(function () {});
-});
+var getDef = {
+  loading: false,
+  data: null,
+  fetch: function (url, targetId) {
+    var self = this;
+    self.loading = true;
+    fetch(url, { headers: { "X-Kitwork-Hydrate": "1" } })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        self.loading = false;
+        self.data = html;
+        if (targetId) {
+          var el = document.querySelector(targetId);
+          if (el) el.innerHTML = html;
+        }
+      }).catch(function () { self.loading = false; });
+  }
+};
+
+window.kitwork.component("get", getDef);
+window.kitwork.component("get@v1.0.0", getDef);

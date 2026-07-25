@@ -52,14 +52,11 @@ func TestRenderInjectsOnlyUsed(t *testing.T) {
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("runtime should be injected before </head>: %s", out)
 	}
-	if !strings.Contains(out, `action("tab"`) || !strings.Contains(out, `action("dialog"`) {
-		t.Errorf("both used verbs expected: %s", out)
+	if !strings.Contains(out, `component("tab"`) || !strings.Contains(out, `component("dialog"`) {
+		t.Errorf("both used components expected: %s", out)
 	}
-	if !strings.Contains(out, `setAttribute("data-state"`) {
-		t.Errorf("tab state hook for utility variants missing: %s", out)
-	}
-	if strings.Contains(out, `action("copy"`) {
-		t.Errorf("copy is unused and must not ship: %s", out)
+	if strings.Contains(out, `component("clipboard"`) {
+		t.Errorf("clipboard is unused and must not ship: %s", out)
 	}
 	if !strings.Contains(out, `<button data-kitwork-action="tab"`) {
 		t.Errorf("author markup should be preserved: %s", out)

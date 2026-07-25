@@ -1,36 +1,21 @@
-/* clipboard component @v1.0.0 — copy text to clipboard with feedback state.
- * Usage: <button data-kit-component="clipboard" data-kit-clipboard="npm i kitwork">Copy</button>
+/* clipboard component @v1.0.0 — copy text to clipboard with 1s feedback.
+ * Supports:
+ *   - <div data-kit-component="clipboard">
+ *   - <div data-kit-component="clipboard@v1.0.0">
  */
-window.kitwork.components.register("clipboard", function (el) {
-  var target = null;
-  var text = (el.getAttribute("data-kit-clipboard") || el.getAttribute("data-kit-copy") || el.getAttribute("data-kitwork-copy"));
-  if (text == null) {
-    target = window.kitwork.components.target(el);
-    text = target ? (target.innerText || target.textContent || "") : "";
+var clipboardDef = {
+  copied: false,
+  copy: function (text) {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+    var self = this;
+    navigator.clipboard.writeText(text).then(function () {
+      self.copied = true;
+      setTimeout(function () { self.copied = false; }, 1000);
+    }).catch(function () {});
   }
-  var copied = function () {
-    el.classList.add("is-copied");
-    var store = window.kitwork.components.state(el);
-    clearTimeout(store.copyResetTimer);
-    store.copyResetTimer = setTimeout(function () { el.classList.remove("is-copied"); }, 2000);
-  };
+};
 
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(copied).catch(function () {});
-  } else {
-    var area = document.createElement("textarea");
-    area.value = text;
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.appendChild(area);
-    area.select();
-    try { document.execCommand("copy"); copied(); } catch (e) {}
-    document.body.removeChild(area);
-  }
-});
-
-// Alias for backward compatibility
-window.kitwork.components.register("copy", function (el) {
-  var fn = window.kitwork.components.get ? window.kitwork.components.get("clipboard") : null;
-  if (fn) fn(el);
-});
+window.kitwork.component("clipboard", clipboardDef);
+window.kitwork.component("clipboard@v1.0.0", clipboardDef);
+window.kitwork.component("copy", clipboardDef);
+window.kitwork.component("copy@v1.0.0", clipboardDef);

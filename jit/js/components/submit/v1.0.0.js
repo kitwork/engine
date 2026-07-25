@@ -1,12 +1,20 @@
 /* submit component @v1.0.0 — submit form via fetch.
- * Usage: <form data-kit-component="submit" action="/api/save">...</form>
+ * Usage: <div data-kit-component="submit">
  */
-window.kitwork.components.action("submit", function (el) {
-  var form = el.tagName === "FORM" ? el : el.closest("form");
-  if (!form) return;
-  var action = form.action || location.href;
-  var method = (form.method || "POST").toUpperCase();
-  var body = new FormData(form);
-  fetch(action, { method: method, body: body, headers: { "X-Kitwork-Hydrate": "1" } })
-    .catch(function () {});
-});
+var submitDef = {
+  submitting: false,
+  send: function (formEl) {
+    var self = this;
+    if (!formEl) return;
+    self.submitting = true;
+    var action = formEl.action || location.href;
+    var method = (formEl.method || "POST").toUpperCase();
+    var body = new FormData(formEl);
+    fetch(action, { method: method, body: body, headers: { "X-Kitwork-Hydrate": "1" } })
+      .then(function () { self.submitting = false; })
+      .catch(function () { self.submitting = false; });
+  }
+};
+
+window.kitwork.component("submit", submitDef);
+window.kitwork.component("submit@v1.0.0", submitDef);

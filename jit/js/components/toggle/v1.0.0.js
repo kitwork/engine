@@ -1,9 +1,12 @@
-/* toggle component @v1.0.0 — toggle class on target element.
- * Usage: <button data-kit-component="toggle" data-kit-target="#sidebar" data-kit-class="hidden">Toggle</button>
+/* toggle component @v1.0.0 — toggle state/class.
+ * Usage: <div data-kit-component="toggle">
  */
-window.kitwork.components.register("toggle", function (el) {
-  var t = window.kitwork.components.target(el);
-  if (!t) return;
-  var cls = el.getAttribute("data-kit-class") || el.getAttribute("data-kitwork-class") || "active";
-  t.classList.toggle(cls);
-});
+var toggleDef = {
+  open: false,
+  toggle: function () {
+    this.open = !this.open;
+  }
+};
+
+window.kitwork.component("toggle", toggleDef);
+window.kitwork.component("toggle@v1.0.0", toggleDef);

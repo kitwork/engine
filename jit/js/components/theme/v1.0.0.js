@@ -1,8 +1,13 @@
-/* theme component @v1.0.0 — toggle light/dark theme.
- * Usage: <button data-kit-component="theme">Toggle Theme</button>
+/* theme component @v1.0.0 — toggle theme.
+ * Usage: <div data-kit-component="theme">
  */
-window.kitwork.components.register("theme", function () {
-  if (window.kitwork && window.kitwork.toggleTheme) {
-    window.kitwork.toggleTheme();
+var themeDef = {
+  toggle: function () {
+    if (window.kitwork && window.kitwork.toggleTheme) {
+      window.kitwork.toggleTheme();
+    }
   }
-});
+};
+
+window.kitwork.component("theme", themeDef);
+window.kitwork.component("theme@v1.0.0", themeDef);
