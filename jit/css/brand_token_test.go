@@ -53,21 +53,15 @@ func TestBrandTokenFollowsSiteConfig(t *testing.T) {
 	}
 }
 
-// The brand gradient used to hardcode both of its stops, so it stayed Kitwork red on a site that
-// had rebranded everything else — the kind of mismatch nobody notices until it ships.
-func TestBrandGradientFollowsSiteConfig(t *testing.T) {
-	cfg := DefaultConfig
-	cfg.Colors = map[string]Color{}
-	for k, v := range DefaultConfig.Colors {
-		cfg.Colors[k] = v
-	}
-	cfg.Colors["brand"] = Hex("#00aaff")
-
-	css := GenerateJITCached(`<div class="bg-brand-gradient">x</div>`, &cfg)
-	if strings.Contains(css, "#f82244") || strings.Contains(css, "#d61b3c") {
-		t.Fatalf("gradient still carries the default brand\n%s", css)
-	}
-}
+// NOTE — there is no test for the brand GRADIENT, and no way to write one.
+//
+// buildProp has a "special-bg" case handling bg grid/haze/gradient, but NOTHING in Registry maps to
+// that type, so no class name reaches it: bg-brand-gradient, bg-gradient-brand and the rest all
+// resolve to "". The code is unreachable. A test would pass on any implementation — including one
+// with the branch deleted — because the CSS it checks is never generated either way.
+//
+// The branch was left as-is (its stops now derive from the configured brand like everything else,
+// so it is correct if it is ever wired up), but whether to wire it or delete it is a product call.
 
 func firstLines(s string, n int) string {
 	parts := strings.SplitN(s, "\n", n+1)
