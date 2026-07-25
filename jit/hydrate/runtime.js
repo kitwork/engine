@@ -21,18 +21,72 @@
   // and never silently phones home, and the "no dependencies" promise holds until you pick a CDN.
   kitwork.cdnComponents = kitwork.cdnComponents || "";
 
+  // --- KITWORK ERROR CLASS (idea.md / runtime1.js) ---
+  function KitworkError(message, code, moduleName, actionName, details) {
+    var err = new Error(message || "Kitwork execution error");
+    err.name = "KitworkError";
+    err.code = code || "INTERNAL_ERROR";
+    err.module = moduleName || "system";
+    err.action = actionName || "unknown";
+    err.details = details || {};
+    return err;
+  }
+  kitwork.KitworkError = KitworkError;
+
+  // --- KITWORK BRIDGE CLASS (idea.md / runtime1.js) ---
+  var KitworkBridge = (function () {
+    function KitworkBridge() {
+      this.pending = new Map();
+      this.listeners = new Map();
+      this.sequence = 0;
+      this.nativeHandle = typeof window !== "undefined" && window.chrome && window.chrome.webview ? window.chrome.webview : (typeof window !== "undefined" && window.webkit && window.webkit.messageHandlers ? window.webkit.messageHandlers.kitwork : null);
+    }
+    KitworkBridge.prototype.invoke = function (m, a, p) {
+      var self = this;
+      return new Promise(function (res, rej) {
+        var id = "req_" + (++self.sequence) + "_" + Date.now();
+        self.pending.set(id, { resolve: res, reject: rej, module: m, action: a });
+        var payload = { id: id, module: m, action: a, params: p || {} };
+        if (self.nativeHandle && self.nativeHandle.postMessage) {
+          self.nativeHandle.postMessage(payload);
+        } else if (typeof window !== "undefined" && window.kitworkNativeBridge && window.kitworkNativeBridge.postMessage) {
+          window.kitworkNativeBridge.postMessage(JSON.stringify(payload));
+        } else {
+          var fb = webFallbacks[m] && webFallbacks[m][a];
+          if (fb) try { Promise.resolve(fb(p)).then(res).catch(rej); } catch (e) { rej(e); }
+          else rej(KitworkError("Capability " + m + "." + a + " unsupported on web", "UNSUPPORTED", m, a));
+        }
+      });
+    };
+    KitworkBridge.prototype.call = function (action, params) {
+      var parts = action.split(".");
+      return this.invoke(parts[0], parts[1] || "default", params);
+    };
+    KitworkBridge.prototype.on = function (eventKey, handler) {
+      if (!this.listeners.has(eventKey)) this.listeners.set(eventKey, []);
+      this.listeners.get(eventKey).push(handler);
+      var self = this;
+      return function () {
+        var list = self.listeners.get(eventKey) || [];
+        var idx = list.indexOf(handler);
+        if (idx >= 0) list.splice(idx, 1);
+      };
+    };
+    return KitworkBridge;
+  })();
+
   // NATIVE BRIDGE CONTRACT: a native shell (WebView2/WKWebView) pre-seeds
   // `window.kitwork = { bridge: {...} }` in a document-start script — the merge on line 15 keeps
   // it, so the bridge lives at kitwork.bridge and there is NO second global. On the plain web,
   // bridge is simply absent. Capabilities are METHODS on $app (kitwork): $app.camera(...),
   // $app.biometric(...), $app.clipboard(...) — one surface on every platform; when kitwork.bridge
   // exists a method delegates to it, otherwise it uses the web fallback.
-  var bridge = kitwork.bridge || null;
+  var bridge = kitwork.bridge || new KitworkBridge();
   kitwork.bridge = bridge;
   kitwork.platform = bridge && bridge.platform ? bridge.platform : "web";
   kitwork.isNative = !!bridge;
 
-  if (kitwork.runtime) return;
+  if (kitwork.runtime && typeof kitwork.runtime === "object") return;
   kitwork.runtime = "v.1.0.0";
 
   // ---- 1. RUNTIME, APP, PLATFORM & PERMISSIONS ----
@@ -47,22 +101,6 @@
     info: function () { return bridgeCall("app.info"); },
     exit: function () { return bridgeCall("app.exit"); },
     restart: function () { return bridgeCall("app.restart"); }
-  };
-
-  kitwork.platform = {
-    info: function () { return bridgeCall("platform.info"); },
-    is: function (name) {
-      var ua = (navigator.userAgent || "").toLowerCase();
-      if (name === "web") return !bridge;
-      if (name === "mobile") return /android|iphone|ipad|ipod/i.test(ua);
-      if (name === "desktop") return !/android|iphone|ipad|ipod/i.test(ua);
-      if (name === "android") return /android/i.test(ua);
-      if (name === "ios") return /iphone|ipad|ipod/i.test(ua);
-      if (name === "windows") return /windows/i.test(ua);
-      if (name === "macos") return /macintosh|mac os x/i.test(ua);
-      if (name === "linux") return /linux/i.test(ua);
-      return false;
-    }
   };
 
   kitwork.permissions = {
@@ -133,6 +171,32 @@
     prompt: function (p) {
       if (bridge && bridge.call) return bridge.call("dialog.prompt", p || {});
       return Promise.resolve(prompt((p && p.title) || "", (p && p.placeholder) || ""));
+    }
+  };
+
+  kitwork.share = {
+    open: function (p) {
+      if (typeof navigator !== "undefined" && navigator.share) return navigator.share(p);
+      return bridgeCall("share.open", p);
+    }
+  };
+
+  // ---- 4. MEDIA, AUDIO, SCREEN, LOCATION, DEVICE & NETWORK ----
+  kitwork.media = { resize: function (p, opts) { return bridgeCall("media.resize", Object.assign({ path: p }, opts)); } };
+  kitwork.audio = { record: function (opts) { return bridgeCall("audio.record", opts); }, play: function (src) { return bridgeCall("audio.play", { src: src }); } };
+  kitwork.screen = { capture: function () { return bridgeCall("screen.capture"); }, keepAwake: function () { return bridgeCall("screen.keepAwake"); } };
+  kitwork.location = { current: function () { return bridgeCall("location.current"); } };
+  kitwork.device = { info: function () { return bridgeCall("device.info"); }, vibrate: function (p) { return bridgeCall("device.vibrate", { pattern: p }); } };
+
+  // ---- 5. AI, AUTH, SESSION, LOGS & EVENTS ----
+  kitwork.ai = { chat: function (opts) { return bridgeCall("ai.chat", opts); }, transcribe: function (p) { return bridgeCall("ai.transcribe", { path: p }); } };
+  kitwork.auth = { login: function (c) { return bridgeCall("auth.login", c); }, logout: function () { return bridgeCall("auth.logout"); } };
+  kitwork.session = { get: function (k) { return bridgeCall("session.get", { key: k }); }, set: function (k, v) { return bridgeCall("session.set", { key: k, value: v }); }, clear: function () { return bridgeCall("session.clear"); } };
+  kitwork.logs = { info: function (m) { return bridgeCall("logs.info", { message: m }); }, error: function (m, e) { return bridgeCall("logs.error", { message: m, error: String(e) }); } };
+
+  var webFallbacks = {
+    storage: {
+      get: function (p) { var v = localStorage.getItem(p.key); return v !== null ? JSON.parse(v) : (p.default !== undefined ? p.default : null); }
     }
   };
 
