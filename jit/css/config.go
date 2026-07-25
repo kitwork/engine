@@ -13,6 +13,23 @@ const ExplicitUnit = "px"
 type Color struct{ R, G, B int }
 
 func (c Color) String() string { return fmt.Sprintf("%d, %d, %d", c.R, c.G, c.B) }
+
+// HexString renders the colour as #rrggbb — the form a CSS property takes directly. String() gives
+// the "r, g, b" triplet instead, which is what alpha compositing needs: rgba(var(--x), .12).
+func (c Color) HexString() string { return fmt.Sprintf("#%02x%02x%02x", c.R, c.G, c.B) }
+
+// BrandColor resolves the site's brand colour: router.jitcss({ colors: { brand: "#0af" } }) when
+// the tenant sets one, otherwise Kitwork's own. Every brand-coloured surface in the engine — the
+// navigation progress bar, .button-brand, .badge-brand, prose links, focus rings — resolves
+// through the token this feeds, so a site changes its accent in ONE place.
+func BrandColor(cfg *Config) Color {
+	if cfg != nil {
+		if c, ok := cfg.Colors["brand"]; ok {
+			return c
+		}
+	}
+	return DefaultConfig.Colors["brand"]
+}
 func Hex(h string) Color {
 	h = strings.TrimPrefix(h, "#")
 	if len(h) == 3 {

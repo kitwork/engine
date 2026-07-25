@@ -106,6 +106,12 @@ func buildJITCSS(classes []string, cfg *Config) string {
 	}
 
 	var b strings.Builder
+	// The brand token, emitted ONCE and actually defined. Everything brand-coloured reads it —
+	// including the kernel's navigation progress bar, which sets an inline style and so needs a
+	// value it can resolve without a stylesheet rule of its own. Two forms because both are needed:
+	// the hex for a plain colour, the "r, g, b" triplet for alpha, as in rgba(var(--…-rgb), .12).
+	brand := BrandColor(cfg)
+	b.WriteString(":root { --kitwork-brand: " + brand.HexString() + "; --kitwork-brand-rgb: " + brand.String() + "; }\n")
 	b.WriteString("*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor; }\n")
 	b.WriteString("html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }\n")
 	b.WriteString("body { margin: 0; line-height: inherit; }\n")

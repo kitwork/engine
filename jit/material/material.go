@@ -341,7 +341,7 @@ func GenerateTimeline() string {
 	b.WriteString("/* Kitwork Material: TIMELINE */\n")
 	b.WriteString(`.timeline { position: relative; padding-left: 24px; border-left: 2px solid var(--glass-border, rgba(255,255,255,0.1)); list-style: none; margin: 0; }
 .timeline-item { position: relative; margin-bottom: 20px; }
-.timeline-item::before { content: ''; position: absolute; left: -31px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background-color: var(--color-brand-rgb, #f82244); border: 2px solid var(--bg-surface, #121212); }
+.timeline-item::before { content: ''; position: absolute; left: -31px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background-color: var(--kitwork-brand, #f82244); border: 2px solid var(--bg-surface, #121212); }
 .timeline-time { font-size: 12px; color: rgba(255,255,255,0.4); margin-bottom: 4px; }
 .timeline-content { font-size: 14px; color: var(--text-main, #e0e0e0); }
 `)

@@ -1176,7 +1176,7 @@
     // any other code that clears <body>.
     var bar = document.createElement("div");
     bar.setAttribute("data-kitwork-ui", "progress");
-    bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;background:#f82244;" +
+    bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;background:var(--kitwork-brand,#f82244);" +
       "z-index:2147483647;opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s";
     document.body.appendChild(bar);
     var rafId = 0, barTimer = 0, barShown = false;

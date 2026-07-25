@@ -103,7 +103,7 @@ const buttonCSS = `.button,.btn{display:inline-flex;align-items:center;justify-c
 	`.button:disabled,.btn:disabled{opacity:.5;cursor:not-allowed;pointer-events:none}` +
 	`.button-small,.btn-sm{padding:.25rem .75rem;font-size:.75rem}` +
 	`.button-large,.btn-lg{padding:.75rem 1.5rem;font-size:1rem}` +
-	`.button-brand,.btn-brand{background:#f82244;color:#fff}` +
+	`.button-brand,.btn-brand{background:var(--kitwork-brand,#f82244);color:#fff}` +
 	`.button-brand:hover,.btn-brand:hover{background:#e01d3c}` +
 	`.button-outline,.btn-outline{background:transparent;border-color:currentColor}` +
 	`.button-ghost,.btn-ghost{background:transparent}` +
@@ -154,7 +154,7 @@ const proseCSS = `.prose{font-size:1rem;line-height:1.85;color:var(--kitwork-tex
 // badgeCSS — status pills and tags.
 const badgeCSS = `.badge{display:inline-flex;align-items:center;padding:.15rem .55rem;border-radius:9999px;` +
 	`font-size:.72rem;font-weight:600;line-height:1;white-space:nowrap}` +
-	`.badge-brand{background:rgba(248,34,68,.12);color:#f82244}` +
+	`.badge-brand{background:rgba(var(--kitwork-brand-rgb,248,34,68),.12);color:var(--kitwork-brand,#f82244)}` +
 	`.badge-success{background:rgba(16,185,129,.12);color:#059669}` +
 	`.badge-warning{background:rgba(245,158,11,.14);color:#b45309}` +
 	`.badge-danger{background:rgba(239,68,68,.12);color:#dc2626}` +

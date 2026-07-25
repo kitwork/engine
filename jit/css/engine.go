@@ -208,7 +208,12 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return fmt.Sprintf("background: radial-gradient(circle at 50%% 20%%, rgba(%s, 0.12), transparent 70%%);", rgb)
 		}
 		if m[2] == "gradient" && color == "brand" {
-			return "background: linear-gradient(135deg, #f82244 0%, #d61b3c 100%);"
+			// Both stops derive from the configured brand colour, so .jitcss({ colors: { brand } })
+			// moves the gradient with everything else. The far stop is the same hue darkened ~15%,
+			// which is what the original hand-picked pair was.
+			b := BrandColor(cfg)
+			dark := Color{R: b.R * 85 / 100, G: b.G * 85 / 100, B: b.B * 85 / 100}
+			return fmt.Sprintf("background: linear-gradient(135deg, %s 0%%, %s 100%%);", b.HexString(), dark.HexString())
 		}
 	case "blur":
 		v := map[string]string{"small": "4px", "medium": "16px", "large": "40px", "none": "0"}
