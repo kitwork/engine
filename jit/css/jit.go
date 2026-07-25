@@ -8,9 +8,56 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
-var classAttrRe = regexp.MustCompile(`class="([^"]+)"`)
+// classAttrRe matches the STATIC class attribute. The leading whitespace is load-bearing: without
+// it the pattern also matches the tail of any attribute ENDING in class — data-kit-class="{ open:
+// x }" would be read as a class list and shredded into tokens like "{", "open:", "x". ( does not
+// help: "-" is a non-word character, so it already sits on a word boundary.) HTML separates
+// attributes with whitespace, so requiring it splits the two cleanly.
+var classAttrRe = regexp.MustCompile(`(?:^|\s)class="([^"]+)"`)
+
+// dynamicClassRe matches the AUTHORED dynamic class directive. Its value is an expression, not a
+// class list, so it is handed to the compiler rather than split on spaces — see collectClasses.
+var dynamicClassRe = regexp.MustCompile(`data-kit-class="([^"]*)"`)
+
+// collectClasses appends every class name a page uses to classes, skipping ones already in seen.
+//
+// TWO sources, deliberately handled differently. A static class="a b" is a list, so it is split on
+// whitespace. A dynamic data-kit-class="open ? 'on' : 'off'" is an EXPRESSION, so it is compiled
+// and its string literals are read off the resulting tree — EVERY branch, not whichever one the
+// page happens to take at runtime. Splitting that attribute on spaces would yield "?" and "'on'"
+// and emit nothing usable.
+//
+// Every entry point shares this so the scans cannot drift: a class that styles a page inline must
+// also reach the site-wide stylesheet, or the same markup renders differently depending on which
+// path produced the CSS.
+func collectClasses(html string, seen map[string]bool, classes *[]string) {
+	add := func(c string) {
+		if c != "" && !seen[c] {
+			seen[c] = true
+			*classes = append(*classes, c)
+		}
+	}
+	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
+		for _, c := range strings.Fields(m[1]) {
+			add(c)
+		}
+	}
+	for _, m := range dynamicClassRe.FindAllStringSubmatch(html, -1) {
+		names, err := hydrate.ClassLiterals(m[1])
+		if err != nil {
+			// A malformed expression is already reported by the hydrate render pass, which names the
+			// attribute it came from. Reporting it again here would be noise.
+			continue
+		}
+		for _, c := range names {
+			add(c)
+		}
+	}
+}
 
 // jitCache maps a class-set signature → generated CSS. The class SET of a page is stable
 // across requests (dynamic data doesn't change it), so this skips re-resolution.
@@ -22,14 +69,7 @@ var jitCache sync.Map
 func GenerateJITCached(html string, cfg *Config) string {
 	seen := make(map[string]bool)
 	var classes []string
-	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
-		for _, c := range strings.Fields(m[1]) {
-			if !seen[c] {
-				seen[c] = true
-				classes = append(classes, c)
-			}
-		}
-	}
+	collectClasses(html, seen, &classes)
 	if len(classes) == 0 {
 		return ""
 	}
@@ -137,14 +177,7 @@ func GenerateSiteCSS(cfg *Config, htmls ...string) string {
 	seen := make(map[string]bool)
 	var classes []string
 	for _, h := range htmls {
-		for _, m := range classAttrRe.FindAllStringSubmatch(h, -1) {
-			for _, c := range strings.Fields(m[1]) {
-				if !seen[c] {
-					seen[c] = true
-					classes = append(classes, c)
-				}
-			}
-		}
+		collectClasses(h, seen, &classes)
 	}
 	if len(classes) == 0 {
 		return ""
@@ -382,15 +415,7 @@ func GenerateFramework() string {
 func GenerateJIT(html string, cfg *Config) string {
 	seen := make(map[string]bool)
 	var classes []string
-	re := regexp.MustCompile(`class="([^"]+)"`)
-	for _, m := range re.FindAllStringSubmatch(html, -1) {
-		for _, class := range strings.Fields(m[1]) {
-			if !seen[class] {
-				seen[class] = true
-				classes = append(classes, class)
-			}
-		}
-	}
+	collectClasses(html, seen, &classes)
 	if len(classes) == 0 {
 		return ""
 	}

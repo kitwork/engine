@@ -46,14 +46,14 @@ const (
 // directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
 // prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
 // Expressions use single-quoted string literals, so the value never contains a double quote.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|click|validate|bind)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|click|validate|bind|class)="([^"]*)"`)
 
 // presenceRe decides runtime INJECTION: authored data-kit-* forms (including the non-expression
 // attributes — model is a plain scope key, live an SSE URL, scope/component a boundary — which need
 // the runtime but must never be compile-verified), plus engine-emitted IR directives
 // (data-kitwork-text|show|click|validate), which equally need the walker.
 // (IR JSON contains double quotes, so an emitted IR attribute is single-quoted — accept both.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|click|validate|bind|model|live|scope|component|remember|api)="|data-kitwork-(?:text|show|click|validate|bind)=['"]`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|click|validate|bind|class|model|live|scope|component|remember|api)="|data-kitwork-(?:text|show|click|validate|bind|class)=['"]`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
@@ -82,6 +82,17 @@ func Render(html string) string {
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
 		if _, err := Compile(m[2]); err != nil {
 			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
+			continue
+		}
+		// data-kit-class carries an extra obligation the other directives do not: the CSS JIT emits
+		// only classes it can SEE, and it reads them off this expression's literals. A name built by
+		// concatenation is invisible to it, so the class would resolve at runtime to a rule that was
+		// never generated — styling that silently disappears for some values and works for others,
+		// which is far harder to diagnose than an error. Say so at render, next to the markup.
+		if m[1] == "class" && HasConstructedClass(m[2]) {
+			fmt.Printf("[hydrate] class names must be written out in full — the CSS JIT cannot emit a "+
+				"name built with '+', so this rule is never generated. Use a conditional between "+
+				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s\n", m[0])
 		}
 	}
 	if !presenceRe.MatchString(html) {

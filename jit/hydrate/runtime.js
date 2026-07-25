@@ -734,6 +734,27 @@
     }
   }
 
+  // classNames flattens a class expression's VALUE into a list of names. String → split on spaces;
+  // array → each item, recursively; object → the keys whose value is truthy. false/null/"" drop out,
+  // so `active ? 'ring' : ''` adds nothing on the false branch.
+  function classNames(v, out) {
+    if (v == null || v === false || v === true) return out;
+    if (typeof v === "string") {
+      var parts = v.split(/\s+/);
+      for (var i = 0; i < parts.length; i++) if (parts[i]) out.push(parts[i]);
+      return out;
+    }
+    if (Array.isArray(v)) {
+      for (var j = 0; j < v.length; j++) classNames(v[j], out);
+      return out;
+    }
+    if (typeof v === "object") {
+      for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k) && v[k]) classNames(k, out);
+      return out;
+    }
+    return out;
+  }
+
   function render() {
     rebuildActiveComponents();
     document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; });
@@ -752,6 +773,22 @@
         else if (v === true) el.setAttribute(k, "");
         else if (String(el.getAttribute(k)) !== String(v)) el.setAttribute(k, v);
       }
+    });
+    // class → toggle classes from an expression. Every shape the grammar allows is accepted, so
+    // nobody has to remember a special syntax: a string ('card ring'), an object whose truthy keys
+    // win ({ 'is-open': open }), a ternary between names, an array mixing all three, nested freely.
+    // The names must be written out in full — the CSS JIT reads them off this same expression to
+    // decide what to emit, and cannot see a name built with '+'.
+    document.querySelectorAll(selector("class")).forEach(function (el) {
+      var x = directive(el, "class"); if (!x) return;
+      var want = classNames(run(x, scopeFor(el)), []);
+      // Remove only what THIS directive added last pass, never the static class attribute: an
+      // element is normally `class="card" data-kit-class="{ ring: focused }"` and blowing away
+      // "card" on the first toggle would strip the page's own styling.
+      var prev = el.__kitClass || [];
+      for (var i = 0; i < prev.length; i++) if (want.indexOf(prev[i]) < 0) el.classList.remove(prev[i]);
+      for (var j = 0; j < want.length; j++) el.classList.add(want[j]);
+      el.__kitClass = want;
     });
     // validate → state→CSS: the element carries data-state="valid|invalid"; styling is CSS's job.
     document.querySelectorAll(selector("validate")).forEach(function (el) { var x = directive(el, "validate"); if (!x) return; el.setAttribute("data-state", run(x, scopeFor(el)) ? "valid" : "invalid"); });
