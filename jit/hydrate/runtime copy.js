@@ -35,33 +35,23 @@
   if (kitwork.runtime) return;
   kitwork.runtime = "v.1.0.0";
 
-  // ---- $app capabilities (idea.md unified spec) ----
+  // ---- $app capabilities (Native Bridge RFC v2) ----
+  // Capabilities are METHODS on $app — one surface on every platform, no new attributes. Each
+  // method prefers kitwork.bridge (a native shell) and falls back to the web platform. They are
+  // invoked from markup through the ONE grammar: data-kit-click="$app.toggleTheme()" /
+  // "$app.clipboard(bill_id)" — a click IS the user gesture the platform APIs require.
+
+  // The one theme action — flips the `theme` property defined below, whose setter is the SINGLE
+  // place that toggles the .dark class and persists localStorage["theme"]. So the pre-paint
+  // (jit/theme) and every caller read/write one source of truth and can never drift.
   kitwork.toggleTheme = function () {
     kitwork.theme = kitwork.theme === "light" ? "dark" : "light";
   };
 
-  // Dynamic Module Delegate based on idea.md spec
-  function createModule(moduleName) {
-    return typeof Proxy !== "undefined" ? new Proxy(function () {}, {
-      get: function (_, actionName) {
-        return function (params) {
-          if (bridge && bridge.call) return bridge.call(moduleName + "." + actionName, params || {});
-          var fb = webFallbacks[moduleName] && webFallbacks[moduleName][actionName];
-          return fb ? Promise.resolve(fb(params)) : Promise.reject(new Error("Unsupported " + moduleName + "." + actionName));
-        };
-      },
-      apply: function (_, thisArg, args) {
-        // Direct call fallback (e.g. kitwork.clipboard(text) or kitwork.camera(key))
-        if (moduleName === "clipboard") return kitwork.clipboardWrite(args[0]);
-        if (moduleName === "camera") return kitwork.cameraCapture(args[0]);
-        if (moduleName === "window") return kitwork.windowControl(args[0]);
-        return false;
-      }
-    }) : {};
-  }
-
-  // Legacy direct helpers
-  kitwork.clipboardWrite = kitwork.clipboard = function (text) {
+  // clipboard(value): copy a value. Native shell → bridge.call("clipboard.write"); modern web →
+  // the async Clipboard API; old WebViews / non-secure contexts → the textarea/execCommand
+  // fallback. Fire-and-forget: markup needs no result to proceed.
+  kitwork.clipboard = function (text) {
     text = text == null ? "" : String(text);
     if (bridge && bridge.call) {
       bridge.call("clipboard.write", { text: text });
@@ -83,21 +73,40 @@
     return true;
   };
 
-  kitwork.windowControl = kitwork.window = function (action) {
+  // window(action): control the NATIVE window — "minimize" | "maximize" | "close" | "drag". Only
+  // meaningful in a native shell (a desktop app's custom title bar calls these); on the plain web a
+  // page can't move the browser window, so it is a no-op. Returns a Promise from the bridge.
+  // NOTE: this is called INTERNALLY (the data-kit-drag handler) — it is NOT reachable from markup,
+  // because the expression sandbox blocks the member key "window" (see blockedKey: `.window` could
+  // escape to the global). Markup uses the named aliases below instead.
+  kitwork.window = function (action) {
     if (bridge && bridge.call) {
       return bridge.call("window." + action, {});
     }
     return false;
   };
-
+  // Markup-facing window controls. "window" is a sandbox-blocked member key, so a custom title bar
+  // can't call $app.window(...) from data-kit-click — these named capabilities are the public surface:
+  // data-kit-click="$app.minimize()" / "$app.maximize()" / "$app.closeWindow()". Each is a native
+  // no-op on the web (bridge absent).
   kitwork.minimize = function () { return kitwork.window("minimize"); };
   kitwork.maximize = function () { return kitwork.window("maximize"); };
   kitwork.closeWindow = function () { return kitwork.window("close"); };
+
+  // Navigation for custom title bars / toolbars (history isn't in the expression scope, so markup
+  // calls these): $app.back() / $app.forward() / $app.reload(). Work on web and native alike.
   kitwork.back = function () { history.back(); };
   kitwork.forward = function () { history.forward(); };
   kitwork.reload = function () { location.reload(); };
 
-  kitwork.cameraCapture = kitwork.camera = function (key) {
+  // camera(key): capture a photo and write its URI into scope[key] — the FIRST capability that
+  // RETURNS a value (RFC async contract): the call returns immediately, and when the photo is
+  // ready kitwork.set(key, uri) fires a reactive re-render, so <img data-kit-bind="{src:key}"> and
+  // data-kit-show="key" update on their own. On failure/cancel it writes key+"_error" and leaves
+  // key untouched. Native shell → bridge.call("camera.capture"); web/desktop-WebView → a hidden
+  // <input type=file accept=image/* capture> (the browser opens the OS camera on mobile, a file
+  // picker on desktop) read as a data URL.
+  kitwork.camera = function (key) {
     if (bridge && bridge.call) {
       bridge.call("camera.capture", {}).then(function (uri) {
         if (uri) kitwork.set(key, uri);
@@ -107,7 +116,7 @@
     var input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
-    input.setAttribute("capture", "environment");
+    input.setAttribute("capture", "environment"); // hint the rear camera on mobile web
     input.style.display = "none";
     input.addEventListener("change", function () {
       var file = input.files && input.files[0];
@@ -122,23 +131,6 @@
     input.click();
     return true;
   };
-
-  var webFallbacks = {
-    clipboard: {
-      writeText: function (p) { kitwork.clipboard(p.text); return true; },
-      readText: function () { return navigator.clipboard ? navigator.clipboard.readText() : Promise.reject(); }
-    },
-    dialog: {
-      alert: function (p) { alert(p.message || ""); return true; },
-      confirm: function (p) { return confirm(p.message || ""); },
-      prompt: function (p) { return prompt(p.title || "", p.placeholder || ""); }
-    }
-  };
-
-  // Expose module namespaces from idea.md
-  ["storage", "secureStorage", "cache", "database", "files", "dialog", "share", "location", "device", "network", "notification", "shell", "http", "ai", "auth", "session", "logs"].forEach(function (m) {
-    kitwork[m] = kitwork[m] || createModule(m);
-  });
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
   var PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
