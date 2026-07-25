@@ -146,7 +146,9 @@ import { router, jwt } from "kitwork";
 router.get((ctx) => {
     const token = jwt.sign({ user: "admin" }, "secret123");
     const verified = jwt.verify(token, "secret123");
-    return ctx.json({ user: verified.payload.user });
+    const forged = jwt.verify(token, "wrong-secret");
+    const tampered = jwt.verify(token + "x", "secret123");
+    return ctx.json({ user: verified.payload.user, forged: forged, tampered: tampered });
 });
 `
 	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
@@ -167,6 +169,14 @@ router.get((ctx) => {
 	}
 	if !strings.Contains(rec.Body.String(), "admin") {
 		t.Fatalf("expected 'admin' in response body, got: %s", rec.Body.String())
+	}
+	// A sign->verify round-trip alone is satisfied by a verify that checks nothing. What has to
+	// hold is the negative: a wrong secret and a tampered token must both be refused.
+	if !strings.Contains(rec.Body.String(), `"forged":null`) {
+		t.Fatalf("jwt.verify accepted a token signed with a different secret: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"tampered":null`) {
+		t.Fatalf("jwt.verify accepted a tampered token: %s", rec.Body.String())
 	}
 }
 
@@ -201,6 +211,11 @@ router.get((ctx) => {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
+	}
+	// Round-tripping proves nothing on its own — an encode that returns its input would pass too.
+	// The code has to be an actual encoding, i.e. not the digits it came from.
+	if strings.Contains(rec.Body.String(), `"code":"123456"`) {
+		t.Fatalf("shortbase.encode returned its input unchanged: %s", rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"id":"123456"`) {
 		t.Fatalf("expected id '123456' in response body, got: %s", rec.Body.String())
