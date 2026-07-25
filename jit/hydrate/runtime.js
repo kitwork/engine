@@ -1179,12 +1179,16 @@
     // Colour resolution, most specific first:
     //   data-kit-progress="#0af" on the app root — this bar only
     //   --kitwork-progress                       — same, from CSS
-    //   --kitwork-brand                          — follows the site's accent (the usual case)
-    //   #f82244                                  — Kitwork red, if nothing is configured
-    // The bar is often a DIFFERENT colour from the brand (a neutral accent on a red site reads as
-    // chrome rather than content), which is why it gets its own control instead of only inheriting.
+    //   #1a73e8                                  — the browser-blue default
+    //
+    // The default is deliberately NOT the site's brand. A loading bar is chrome, not content: blue
+    // is what a browser's own progress reads as, so an unconfigured site gets something that looks
+    // like part of the browser rather than a stripe of its accent colour. --kitwork-brand is left
+    // out of the chain on purpose — it is always emitted now, so including it would mean the blue
+    // default could never appear. A site that DOES want the bar to track its accent says so in one
+    // line: --kitwork-progress: var(--kitwork-brand).
     bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;" +
-      "background:var(--kitwork-progress,var(--kitwork-brand,#f82244));" +
+      "background:var(--kitwork-progress,#1a73e8);" +
       "z-index:2147483647;opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s";
     document.body.appendChild(bar);
     var rafId = 0, barTimer = 0, barShown = false;
