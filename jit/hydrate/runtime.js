@@ -1176,7 +1176,15 @@
     // any other code that clears <body>.
     var bar = document.createElement("div");
     bar.setAttribute("data-kitwork-ui", "progress");
-    bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;background:var(--kitwork-brand,#f82244);" +
+    // Colour resolution, most specific first:
+    //   data-kit-progress="#0af" on the app root — this bar only
+    //   --kitwork-progress                       — same, from CSS
+    //   --kitwork-brand                          — follows the site's accent (the usual case)
+    //   #f82244                                  — Kitwork red, if nothing is configured
+    // The bar is often a DIFFERENT colour from the brand (a neutral accent on a red site reads as
+    // chrome rather than content), which is why it gets its own control instead of only inheriting.
+    bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;" +
+      "background:var(--kitwork-progress,var(--kitwork-brand,#f82244));" +
       "z-index:2147483647;opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s";
     document.body.appendChild(bar);
     var rafId = 0, barTimer = 0, barShown = false;
@@ -1494,6 +1502,11 @@
   function initAppConfig() {
     var appEl = document.querySelector("[data-kitwork-app],[data-kit-app],[data-kitwork-hydrate],[data-kit-hydrate]");
     if (appEl) {
+      // data-kit-progress="#0af" — the navigation bar's colour, declared in markup where a reader
+      // can see it. It is published as a CSS variable rather than written onto the bar, so the same
+      // value also works when set in a stylesheet, and so a site can scope it per section.
+      var progressColor = appEl.getAttribute("data-kitwork-progress") || appEl.getAttribute("data-kit-progress") || "";
+      if (progressColor) document.documentElement.style.setProperty("--kitwork-progress", progressColor);
       var appVal = appEl.getAttribute("data-kitwork-app") || appEl.getAttribute("data-kit-app") || "";
       var mode = "runtime";
       var version = "latest";
