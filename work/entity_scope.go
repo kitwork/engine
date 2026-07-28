@@ -44,20 +44,45 @@ type Entities struct {
 	q *query.Query
 }
 
-// Entity opens this app's slice of the shared database. The table is named FIRST so the identity
-// predicate is attached before any author-supplied condition, leaving no code path that builds a
-// query without one.
-func (w *KitWork) Entity() *EntityScope {
-	return &EntityScope{tenant: w.tenant}
+// Entity opens this app's slice of the shared database. It hangs off `database` rather than
+// standing alone so an author reaches it through the vocabulary they already use, and so the two
+// scopes sit side by side where the difference is visible:
+//
+//	database.entity().table("posts").list()   // this app's rows — always allowed
+//	database.system().table("posts").list()   // every app's rows — needs permission
+//
+// TWO CALLS, not one call that changes meaning. A single entry point whose result depended on
+// ambient permission would make the same line safe or unsafe depending on who ran it, and that is
+// unreadable: the author cannot tell from the code which rows they are about to touch. Here the
+// code states its intent and permission only decides whether system() is ALLOWED.
+func (d *Database) Entity() *EntityScope {
+	return &EntityScope{tenant: d.tenant}
 }
 
-type EntityScope struct{ tenant *Tenant }
+// System is the unscoped counterpart: every app's rows, for an operator dashboard rather than a
+// site. It is deliberately INERT — capability permissions do not exist yet (nothing in the engine
+// grants or checks one), and shipping an open door that a later permission system was supposed to
+// close is how a hole becomes permanent. The name is reserved and the shape is settled; the method
+// refuses until there is something real to check.
+func (d *Database) System() *EntityScope {
+	return &EntityScope{tenant: d.tenant, denied: fmt.Errorf(
+		"database.system(): unscoped access needs a capability permission, and permissions are not " +
+			"implemented yet — use database.entity() for this app's own rows")}
+}
+
+type EntityScope struct {
+	tenant *Tenant
+	denied error
+}
 
 // Table binds a table. Errors are carried rather than thrown so that a mistake surfaces at the point the query runs, with the rest of the chain intact — the same shape as the other builders.
 func (e *EntityScope) Table(table string) *Entities {
 	d := &Entities{tenant: e.tenant, table: table}
 
 	switch {
+	case e.denied != nil:
+		d.err = e.denied
+		return d
 	case e.tenant == nil:
 		d.err = fmt.Errorf("entity: no tenant in scope")
 		return d

@@ -49,7 +49,7 @@ func tenantFor(identity string) *Tenant {
 }
 
 func tableAs(identity, table string) *Entities {
-	return (&EntityScope{tenant: tenantFor(identity)}).Table(table)
+	return (&Database{tenant: tenantFor(identity)}).Entity().Table(table)
 }
 
 func TestEntityReadsOnlyItsOwnRows(t *testing.T) {
@@ -172,5 +172,25 @@ func TestEntityExposesNoRawEscape(t *testing.T) {
 	}
 	if _, bad := d.(interface{ Table(string) *Entities }); bad {
 		t.Error("Entities exposes Table(): re-targeting would drop the predicate bound at open()")
+	}
+}
+
+// system() reserves the unscoped entry point without opening it. A method that quietly returned
+// every app's rows while the permission system it was supposed to wait for did not exist yet is
+// exactly how a temporary hole becomes a permanent one.
+func TestSystemIsRefusedUntilPermissionsExist(t *testing.T) {
+	withSharedDB(t)
+
+	res := (&Database{tenant: tenantFor("acme")}).System().Table("posts").List()
+	if res.K != value.Invalid {
+		t.Fatalf("database.system() returned rows before permissions exist: %v", res.V)
+	}
+	if !strings.Contains(res.String(), "permission") {
+		t.Errorf("the refusal should name what is missing, got: %s", res.String())
+	}
+	// CONTROL: the scoped door is open, so the refusal above is about system() specifically and
+	// not about the whole API being broken.
+	if got := (&Database{tenant: tenantFor("acme")}).Entity().Table("posts").List(); got.K == value.Invalid {
+		t.Fatalf("database.entity() should still work: %v", got.V)
 	}
 }
