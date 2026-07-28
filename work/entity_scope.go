@@ -17,13 +17,13 @@ import (
 // `while`, rather than trying to detect runaway loops afterwards.
 //
 // So this type never hands out the underlying *query.Query. Holding one means holding .Raw(), and a
-// single raw string would undo every condition below it. Every method here returns *Data, and the
+// single raw string would undo every condition below it. Every method here returns *Entities, and
 // identity predicate is attached at open() before an author can touch anything:
 //
-//	import { data } from "kitwork";
-//	data.open("posts").where("status", "published").list()   → … WHERE identity = <this app> AND …
-//	data.open("posts").create({ title: "x" })                → identity is set by the engine
-//	data.open("posts").where("id", 3).delete()               → cannot reach another app's row
+//	import { entity } from "kitwork";
+//	entity.table("posts").where("status", "published").list()   → … WHERE identity = <this app> AND …
+//	entity.table("posts").create({ title: "x" })                → identity is set by the engine
+//	entity.table("posts").where("id", 3).delete()               → cannot reach another app's row
 //
 // The identity comes from the tenant, never from an argument. There is no API to name a different
 // one, so a site cannot ask for another site's rows even by mistake.
@@ -33,8 +33,9 @@ import (
 // would turn a missing identity into a data leak, and the failure would look like a feature.
 const identityColumn = "identity"
 
-// Data is the JS-facing handle: one table, permanently bound to one identity.
-type Data struct {
+// Entities is the JS-facing handle: one table of the shared database, permanently bound to this
+// app's identity.
+type Entities struct {
 	tenant   *Tenant
 	table    string
 	identity string
@@ -43,50 +44,49 @@ type Data struct {
 	q *query.Query
 }
 
-// Data opens the shared database. The table is named at open() so the identity predicate can be
-// attached before any author-supplied condition, and so no code path exists that builds a query
-// without one.
-func (w *KitWork) Data() *DataOpener {
-	return &DataOpener{tenant: w.tenant}
+// Entity opens this app's slice of the shared database. The table is named FIRST so the identity
+// predicate is attached before any author-supplied condition, leaving no code path that builds a
+// query without one.
+func (w *KitWork) Entity() *EntityScope {
+	return &EntityScope{tenant: w.tenant}
 }
 
-type DataOpener struct{ tenant *Tenant }
+type EntityScope struct{ tenant *Tenant }
 
-// Open binds a table. Errors are carried rather than thrown so that a mistake surfaces at the point
-// the query runs, with the rest of the chain intact — the same shape as the other builders.
-func (o *DataOpener) Open(table string) *Data {
-	d := &Data{tenant: o.tenant, table: table}
+// Table binds a table. Errors are carried rather than thrown so that a mistake surfaces at the point the query runs, with the rest of the chain intact — the same shape as the other builders.
+func (e *EntityScope) Table(table string) *Entities {
+	d := &Entities{tenant: e.tenant, table: table}
 
 	switch {
-	case o.tenant == nil:
-		d.err = fmt.Errorf("data: no tenant in scope")
+	case e.tenant == nil:
+		d.err = fmt.Errorf("entity: no tenant in scope")
 		return d
 	case table == "":
-		d.err = fmt.Errorf("data: table name is required")
+		d.err = fmt.Errorf("entity: table name is required")
 		return d
 	case database.System == nil:
-		d.err = fmt.Errorf("data: no shared database is connected (system)")
+		d.err = fmt.Errorf("entity: no shared database is connected (system)")
 		return d
 	}
 
-	d.identity = o.tenant.appID()
+	d.identity = e.tenant.appID()
 	if d.identity == "" {
 		// Refusing here is the whole point: an app with no identity has no slice of a shared table,
 		// and answering with everyone's rows would be a leak wearing the shape of a result.
-		d.err = fmt.Errorf("data: this app has no identity, so a shared query cannot be scoped — " +
+		d.err = fmt.Errorf("entity: this app has no identity, so a shared query cannot be scoped — " +
 			"use sqlite for site-local data, or run under apps/<identity>/<domain>")
 		return d
 	}
 
-	d.q = query.New(database.System, o.tenant.vm).
+	d.q = query.New(database.System, e.tenant.vm).
 		Table(table).
 		Where(value.New(identityColumn), value.New(d.identity))
 	return d
 }
 
-// ---- narrowing: every method returns *Data, never the query underneath ----
+// ---- narrowing: every method returns *Entities, never the query underneath ----
 
-func (d *Data) Where(args ...value.Value) *Data {
+func (d *Entities) Where(args ...value.Value) *Entities {
 	if d.q != nil {
 		// Author conditions are ANDed onto the identity predicate that is already there, so no
 		// combination of them can widen the result past this app.
@@ -95,35 +95,35 @@ func (d *Data) Where(args ...value.Value) *Data {
 	return d
 }
 
-func (d *Data) OrderBy(column string, direction ...string) *Data {
+func (d *Entities) OrderBy(column string, direction ...string) *Entities {
 	if d.q != nil {
 		d.q = d.q.OrderBy(column, direction...)
 	}
 	return d
 }
 
-func (d *Data) GroupBy(columns ...string) *Data {
+func (d *Entities) GroupBy(columns ...string) *Entities {
 	if d.q != nil {
 		d.q = d.q.GroupBy(columns...)
 	}
 	return d
 }
 
-func (d *Data) Select(fields ...string) *Data {
+func (d *Entities) Select(fields ...string) *Entities {
 	if d.q != nil {
 		d.q = d.q.Select(fields...)
 	}
 	return d
 }
 
-func (d *Data) Limit(n int) *Data {
+func (d *Entities) Limit(n int) *Entities {
 	if d.q != nil {
 		d.q = d.q.Limit(n)
 	}
 	return d
 }
 
-func (d *Data) Skip(n int) *Data {
+func (d *Entities) Skip(n int) *Entities {
 	if d.q != nil {
 		d.q = d.q.Skip(n)
 	}
@@ -132,25 +132,25 @@ func (d *Data) Skip(n int) *Data {
 
 // ---- terminals ----
 
-func (d *Data) List(args ...value.Value) value.Value {
+func (d *Entities) List(args ...value.Value) value.Value {
 	return d.run(func() value.Value { return d.q.List(args...) })
 }
-func (d *Data) Find(args ...value.Value) value.Value {
+func (d *Entities) Find(args ...value.Value) value.Value {
 	return d.run(func() value.Value { return d.q.Find(args...) })
 }
-func (d *Data) First(args ...value.Value) value.Value {
+func (d *Entities) First(args ...value.Value) value.Value {
 	return d.run(func() value.Value { return d.q.First(args...) })
 }
-func (d *Data) Count(args ...value.Value) value.Value {
+func (d *Entities) Count(args ...value.Value) value.Value {
 	return d.run(func() value.Value { return d.q.Count(args...) })
 }
-func (d *Data) Exists(args ...value.Value) value.Value {
+func (d *Entities) Exists(args ...value.Value) value.Value {
 	return d.run(func() value.Value { return d.q.Exists(args...) })
 }
 
 // Create stamps the identity itself. Any identity in the payload is REPLACED, not merged: letting
 // an author choose it would make the column a suggestion instead of a boundary.
-func (d *Data) Create(args ...value.Value) value.Value {
+func (d *Entities) Create(args ...value.Value) value.Value {
 	return d.run(func() value.Value {
 		return d.q.Create(d.stamped(args)...)
 	})
@@ -158,17 +158,17 @@ func (d *Data) Create(args ...value.Value) value.Value {
 
 // Update and Delete inherit the identity predicate attached at open(), so a row belonging to
 // another app is not merely hidden from reads — it cannot be written or removed either.
-func (d *Data) Update(args ...value.Value) value.Value {
+func (d *Entities) Update(args ...value.Value) value.Value {
 	return d.run(func() value.Value {
 		return d.q.Update(d.stamped(args)...)
 	})
 }
 
-func (d *Data) Delete() value.Value { return d.run(func() value.Value { return d.q.Delete() }) }
-func (d *Data) Remove() value.Value { return d.run(func() value.Value { return d.q.Remove() }) }
+func (d *Entities) Delete() value.Value { return d.run(func() value.Value { return d.q.Delete() }) }
+func (d *Entities) Remove() value.Value { return d.run(func() value.Value { return d.q.Remove() }) }
 
 // stamped forces the identity onto a written payload.
-func (d *Data) stamped(args []value.Value) []value.Value {
+func (d *Entities) stamped(args []value.Value) []value.Value {
 	if len(args) == 0 || !args[0].IsMap() {
 		return args
 	}
@@ -192,12 +192,12 @@ func (d *Data) stamped(args []value.Value) []value.Value {
 	return out
 }
 
-func (d *Data) run(fn func() value.Value) value.Value {
+func (d *Entities) run(fn func() value.Value) value.Value {
 	if d.err != nil {
 		return value.Value{K: value.Invalid, V: d.err.Error()}
 	}
 	if d.q == nil {
-		return value.Value{K: value.Invalid, V: "data: query was not initialised"}
+		return value.Value{K: value.Invalid, V: "entity: query was not initialised"}
 	}
 	return fn()
 }

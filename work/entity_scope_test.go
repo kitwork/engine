@@ -48,14 +48,14 @@ func tenantFor(identity string) *Tenant {
 	}}
 }
 
-func openAs(identity, table string) *Data {
-	return (&DataOpener{tenant: tenantFor(identity)}).Open(table)
+func tableAs(identity, table string) *Entities {
+	return (&EntityScope{tenant: tenantFor(identity)}).Table(table)
 }
 
-func TestDataReadsOnlyItsOwnRows(t *testing.T) {
+func TestEntityReadsOnlyItsOwnRows(t *testing.T) {
 	withSharedDB(t)
 
-	got := openAs("acme", "posts").List().String()
+	got := tableAs("acme", "posts").List().String()
 	if strings.Contains(got, "VICTIM-SECRET") {
 		t.Fatalf("another app's row was returned:\n%s", got)
 	}
@@ -67,10 +67,10 @@ func TestDataReadsOnlyItsOwnRows(t *testing.T) {
 
 // Naming the other app's identity explicitly must narrow, never widen: the engine's predicate is
 // already there and the author's condition is ANDed onto it.
-func TestDataCannotWidenByAskingForAnotherIdentity(t *testing.T) {
+func TestEntityCannotWidenByAskingForAnotherIdentity(t *testing.T) {
 	withSharedDB(t)
 
-	got := openAs("acme", "posts").
+	got := tableAs("acme", "posts").
 		Where(value.New("identity"), value.New("victim")).
 		List().String()
 
@@ -81,10 +81,10 @@ func TestDataCannotWidenByAskingForAnotherIdentity(t *testing.T) {
 
 // A write is the dangerous direction: a row that is merely hidden from reads but writable is not
 // isolated at all.
-func TestDataCannotUpdateAnotherIdentitysRow(t *testing.T) {
+func TestEntityCannotUpdateAnotherIdentitysRow(t *testing.T) {
 	db := withSharedDB(t)
 
-	openAs("acme", "posts").
+	tableAs("acme", "posts").
 		Where(value.New("title"), value.New("victim post")).
 		Update(value.New(map[string]interface{}{"secret": "OVERWRITTEN"}))
 
@@ -97,10 +97,10 @@ func TestDataCannotUpdateAnotherIdentitysRow(t *testing.T) {
 	}
 }
 
-func TestDataCannotDeleteAnotherIdentitysRow(t *testing.T) {
+func TestEntityCannotDeleteAnotherIdentitysRow(t *testing.T) {
 	db := withSharedDB(t)
 
-	openAs("acme", "posts").
+	tableAs("acme", "posts").
 		Where(value.New("title"), value.New("victim post")).
 		Delete()
 
@@ -115,10 +115,10 @@ func TestDataCannotDeleteAnotherIdentitysRow(t *testing.T) {
 
 // Writing someone else's identity onto a new row would let an app plant data inside another app's
 // slice — invisible to it, but returned to the victim as its own.
-func TestDataCreateForcesItsOwnIdentity(t *testing.T) {
+func TestEntityCreateForcesItsOwnIdentity(t *testing.T) {
 	db := withSharedDB(t)
 
-	openAs("acme", "posts").Create(value.New(map[string]interface{}{
+	tableAs("acme", "posts").Create(value.New(map[string]interface{}{
 		"title":    "planted",
 		"identity": "victim", // the attempt
 	}))
@@ -134,10 +134,10 @@ func TestDataCreateForcesItsOwnIdentity(t *testing.T) {
 
 // The choice made deliberately: no identity means refuse, not "return everything". A silent
 // full-table read would be a leak that looks like a working query.
-func TestDataRefusesWhenTheAppHasNoIdentity(t *testing.T) {
+func TestEntityRefusesWhenTheAppHasNoIdentity(t *testing.T) {
 	withSharedDB(t)
 
-	res := openAs("", "posts").List()
+	res := tableAs("", "posts").List()
 	if res.K != value.Invalid {
 		t.Fatalf("an app with no identity got a result instead of an error: %v", res.V)
 	}
@@ -146,12 +146,12 @@ func TestDataRefusesWhenTheAppHasNoIdentity(t *testing.T) {
 	}
 }
 
-func TestDataRefusesWithoutASharedDatabase(t *testing.T) {
+func TestEntityRefusesWithoutASharedDatabase(t *testing.T) {
 	prev := database.System
 	database.System = nil
 	t.Cleanup(func() { database.System = prev })
 
-	if res := openAs("acme", "posts").List(); res.K != value.Invalid {
+	if res := tableAs("acme", "posts").List(); res.K != value.Invalid {
 		t.Fatal("expected an error when no shared database is connected")
 	}
 }
@@ -159,18 +159,18 @@ func TestDataRefusesWithoutASharedDatabase(t *testing.T) {
 // The escape hatch that makes builder-level scoping worthless elsewhere: .Raw() and .Exec() run a
 // string, so any condition attached above them is irrelevant. This asserts the scoped type does not
 // expose one — the guarantee is structural, not a rule someone has to remember.
-func TestDataExposesNoRawEscape(t *testing.T) {
-	var d any = &Data{}
+func TestEntityExposesNoRawEscape(t *testing.T) {
+	var d any = &Entities{}
 
 	if _, bad := d.(interface{ Raw() value.Value }); bad {
-		t.Error("Data exposes Raw(): a raw string bypasses the identity predicate")
+		t.Error("Entities exposes Raw(): a raw string bypasses the identity predicate")
 	}
 	if _, bad := d.(interface {
 		Exec(string, ...value.Value) value.Value
 	}); bad {
-		t.Error("Data exposes Exec(): arbitrary SQL bypasses the identity predicate")
+		t.Error("Entities exposes Exec(): arbitrary SQL bypasses the identity predicate")
 	}
-	if _, bad := d.(interface{ Table(string) *Data }); bad {
-		t.Error("Data exposes Table(): re-targeting would drop the predicate bound at open()")
+	if _, bad := d.(interface{ Table(string) *Entities }); bad {
+		t.Error("Entities exposes Table(): re-targeting would drop the predicate bound at open()")
 	}
 }
