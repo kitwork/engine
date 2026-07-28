@@ -71,7 +71,6 @@ type compressWriter struct {
 	decided     bool
 	gz          *gzip.Writer
 	buf         []byte
-	streaming   bool // a handler that flushed: never buffer it again
 }
 
 func (c *compressWriter) WriteHeader(status int) {
@@ -107,12 +106,12 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Flush marks the response as streaming. SSE and any progressive response reach here, and from
-// this point the body must go out uncompressed and immediately — a compressor would hold events
-// until its window filled, which is indistinguishable from the stream having stalled.
+// Flush means the handler wants bytes on the wire NOW: SSE and any progressive response reach
+// here. Committing with bigEnough=false is what makes that safe — it settles on the identity
+// encoding, so nothing is ever held back waiting for a compression window to fill, which would be
+// indistinguishable from the stream having stalled.
 func (c *compressWriter) Flush() {
 	if !c.decided {
-		c.streaming = true
 		_ = c.decide(false)
 	}
 	if c.gz != nil {
@@ -123,15 +122,16 @@ func (c *compressWriter) Flush() {
 	}
 }
 
-// decide commits to compressing or not, sends the header, and drains whatever was buffered.
-// bigEnough is false when the handler finished (or flushed) before reaching minSize.
+// decide commits to compressing or not, sends the header, and drains whatever was buffered. It runs
+// exactly once. bigEnough is false when the handler finished or FLUSHED before reaching minSize —
+// both mean "send what we have as-is", which is why a flushing handler is never compressed.
 func (c *compressWriter) decide(bigEnough bool) error {
 	if c.decided {
 		return nil
 	}
 	c.decided = true
 
-	if bigEnough && !c.streaming && shouldCompress(c.ResponseWriter.Header()) {
+	if bigEnough && shouldCompress(c.ResponseWriter.Header()) {
 		h := c.ResponseWriter.Header()
 		h.Set("Content-Encoding", "gzip")
 		// The declared length belongs to the identity encoding; keeping it would describe the
