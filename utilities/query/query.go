@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -66,8 +65,12 @@ type Executor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+type LambdaExecutor interface {
+	ExecuteLambda(fn *value.Lambda, args []value.Value) value.Value
+}
+
 type Query struct {
-	vm *runtime.VM
+	vm LambdaExecutor
 	db Executor
 
 	ctx *context.Context
@@ -91,7 +94,7 @@ type Query struct {
 	debug bool
 }
 
-func NewQuery(vm *runtime.VM, db Executor) *Query {
+func NewQuery(vm LambdaExecutor, db Executor) *Query {
 	return &Query{vm: vm, db: db}
 }
 
@@ -138,7 +141,17 @@ func (q *Query) Where(args ...value.Value) *Query {
 			var tables []string
 			for i, p := range sFn.Params {
 				tables = append(tables, p)
-				proxies[i] = value.Value{K: value.Proxy, V: &SQLProxy{TableName: p}}
+				tableName := p
+				switch {
+				case len(q.tables) == 1:
+					// A fluent .table("items").where(row => row.id == 1) already
+					// identifies the table. The lambda parameter is a local name,
+					// not a SQL alias, so emitting row.id would be invalid SQL.
+					tableName = ""
+				case i < len(q.tables):
+					tableName = q.tables[i]
+				}
+				proxies[i] = value.Value{K: value.Proxy, V: &SQLProxy{TableName: tableName}}
 			}
 
 			// Auto-table inference cho TẤT CẢ các tham số nếu bảng bị bỏ trống
@@ -1111,7 +1124,7 @@ func (q *Query) Like(args ...value.Value) *Query {
 
 // New builds a query bound to an executor (a *sql.DB or *sql.Tx) and the tenant VM (magic-where
 // predicates run in the VM). The work-side Database binding calls this; the fluent chain takes over.
-func New(exec Executor, vm *runtime.VM) *Query {
+func New(exec Executor, vm LambdaExecutor) *Query {
 	return &Query{db: exec, vm: vm}
 }
 

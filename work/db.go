@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/database"
+	requestscope "github.com/kitwork/engine/request"
 	query "github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
 	_ "github.com/lib/pq"
@@ -33,30 +34,27 @@ import (
 // about database.Configs and giving it the tenant VM first.
 func (w *KitWork) Database() *Database {
 	return &Database{
-		tenant: w.tenant,
-		config: &database.Config{},
+		tenant:       w.tenant,
+		requestScope: w.requestScope,
+		config:       &database.Config{},
 	}
 }
 
 type Database struct {
-	tenant *Tenant
-	config *database.Config
-	sqlDB  *sql.DB
-	tx     *sql.Tx
+	tenant       *Tenant
+	requestScope *requestscope.Scope
+	config       *database.Config
+	sqlDB        *sql.DB
+	tx           *sql.Tx
 
 	preset *database.Config
 }
 
 func (d *Database) Connection() *Database {
 	if d.sqlDB == nil {
-		d.tenant.dbMu.Lock()
-		if d.tenant.databases == nil {
-			d.tenant.databases = make(map[string]*sql.DB)
+		if config, ok := database.Configs["default"]; ok {
+			d.sqlDB = d.tenant.lookupDatabase(&config)
 		}
-		if dbConn, exists := d.tenant.databases["default"]; exists {
-			d.sqlDB = dbConn
-		}
-		d.tenant.dbMu.Unlock()
 	}
 	return d
 }
@@ -71,12 +69,7 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 	}
 
 	if len(vals) == 0 && d.preset != nil {
-		d.tenant.dbMu.Lock()
-		defer d.tenant.dbMu.Unlock()
-		if d.tenant.databases == nil {
-			d.tenant.databases = make(map[string]*sql.DB)
-		}
-		if conn, ok := d.tenant.databases[d.preset.Alias]; ok {
+		if conn := d.tenant.lookupDatabase(d.preset); conn != nil {
 			d.sqlDB = conn
 			return d
 		}
@@ -85,18 +78,13 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 				_ = os.MkdirAll(dir, 0o755)
 			}
 		}
-		conn, err := d.preset.Connect()
+		conn, err := d.tenant.openDatabase(d.preset)
 		if err != nil {
 			fmt.Printf("[DB] Failed to connect %s: %v\n", d.preset.Alias, err)
 			return d
 		}
-		d.tenant.databases[d.preset.Alias] = conn
 		d.sqlDB = conn
 		return d
-	}
-
-	if d.tenant.databases == nil {
-		d.tenant.databases = make(map[string]*sql.DB)
 	}
 
 	var alias string = "default"
@@ -136,51 +124,45 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 		alias = "default"
 	}
 
-	d.tenant.dbMu.Lock()
-	defer d.tenant.dbMu.Unlock()
-
 	if configToConnect == nil {
-		if dbConn, exists := d.tenant.databases[alias]; exists {
-			d.sqlDB = dbConn
-		} else {
-			if dbCfg, ok := database.Configs[alias]; ok {
-				dbConn, err := dbCfg.Connect()
+		if dbCfg, ok := database.Configs[alias]; ok {
+			if dbConn := d.tenant.lookupDatabase(&dbCfg); dbConn != nil {
+				d.sqlDB = dbConn
+			} else {
+				dbConn, err := d.tenant.openDatabase(&dbCfg)
 				if err != nil {
 					fmt.Printf("[DB] Failed to connect to configured database '%s': %v\n", alias, err)
 				} else {
-					d.tenant.databases[alias] = dbConn
 					d.sqlDB = dbConn
 				}
-			} else if alias == "default" {
-				sqlitePath := d.tenant.resolve("kitwork.db")
-				fmt.Printf("[DB] Default connection not found. Initializing fallback SQLite at: %s\n", sqlitePath)
-				sqliteCfg := &database.Config{
-					Alias: "default",
-					Type:  "sqlite",
-					Host:  sqlitePath,
-					Name:  sqlitePath,
-				}
-				dbConn, err := sqliteCfg.Connect()
-				if err != nil {
-					fmt.Printf("[DB] Failed to connect SQLite fallback database: %v\n", err)
-				} else {
-					d.tenant.databases["default"] = dbConn
-					d.sqlDB = dbConn
-				}
-			} else {
-				fmt.Printf("Database connection with alias '%s' not found\n", alias)
 			}
+		} else if alias == "default" {
+			sqlitePath := d.tenant.resolve("kitwork.db")
+			fmt.Printf("[DB] Default connection not found. Initializing fallback SQLite at: %s\n", sqlitePath)
+			sqliteCfg := &database.Config{
+				Alias: "default",
+				Type:  "sqlite",
+				Host:  sqlitePath,
+				Name:  sqlitePath,
+			}
+			dbConn, err := d.tenant.openDatabase(sqliteCfg)
+			if err != nil {
+				fmt.Printf("[DB] Failed to connect SQLite fallback database: %v\n", err)
+			} else {
+				d.sqlDB = dbConn
+			}
+		} else {
+			fmt.Printf("Database connection with alias '%s' not found\n", alias)
 		}
 		return d
 	}
 
-	dbConn, err := configToConnect.Connect()
+	dbConn, err := d.tenant.openDatabase(configToConnect)
 	if err != nil {
 		fmt.Printf("Failed to connect database for alias '%s': %v\n", alias, err)
 		return d
 	}
 
-	d.tenant.databases[alias] = dbConn
 	d.sqlDB = dbConn
 	return d
 }
@@ -199,7 +181,7 @@ func (d *Database) NewQuery() *query.Query {
 	if d.tx != nil {
 		exec = d.tx
 	}
-	return query.New(exec, d.tenant.vm)
+	return query.New(exec, tenantLambdaExecutor{tenant: d.tenant, requestScope: d.requestScope})
 }
 
 func (d *Database) Table(table string) *query.Query {
@@ -289,10 +271,11 @@ func (d *Database) Atomic(args ...value.Value) value.Value {
 	}
 
 	txDb := &Database{
-		tenant: d.tenant,
-		config: d.config,
-		sqlDB:  d.sqlDB,
-		tx:     tx,
+		tenant:       d.tenant,
+		requestScope: d.requestScope,
+		config:       d.config,
+		sqlDB:        d.sqlDB,
+		tx:           tx,
 	}
 	txVal := value.New(txDb)
 
@@ -303,7 +286,7 @@ func (d *Database) Atomic(args ...value.Value) value.Value {
 		}
 	}()
 
-	result := d.tenant.vm.ExecuteLambda(lambda, []value.Value{txVal})
+	result := (tenantLambdaExecutor{tenant: d.tenant, requestScope: d.requestScope}).ExecuteLambda(lambda, []value.Value{txVal})
 
 	if result.K == value.Invalid {
 		tx.Rollback()

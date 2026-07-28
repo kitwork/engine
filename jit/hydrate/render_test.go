@@ -72,13 +72,12 @@ func TestRenderMalformedKeptAndStillInjects(t *testing.T) {
 	}
 }
 
-// When the jit/js pass already inlined its verb bundle (whose core IS this same kernel), the
-// hydrate pass must not add a second reference.
-func TestRenderSkipsWhenKernelInlined(t *testing.T) {
-	in := `<head><script data-kitwork-jit="js">/*kernel+verbs*/</script></head><body>` + marker +
+// A combined jit/js asset already carries the kernel, so Hydrate must not add a bare reference.
+func TestRenderSkipsWhenRuntimeAssetExists(t *testing.T) {
+	in := `<head><script data-kitwork-jit="runtime" src="/kit.js?components=dialog" defer></script></head><body>` + marker +
 		`<b data-kit-text="n">0</b></section></body>`
 	out := Render(in)
-	if strings.Contains(out, injectTag) {
+	if strings.Count(out, `src="/kit.js`) != 1 {
 		t.Error("kernel already inlined by jit/js — no /kit.js reference should be added")
 	}
 	if out != in {
@@ -141,7 +140,7 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"window.hydrate", "PREC", "function lex", "EventSource", "MutationObserver",
 		// the unified kernel surfaces: boot guard, behavior registry, verb compat, delegated action
 		"kitwork.runtime", "kitwork.behavior", "kitwork.components", "data-kitwork-action",
-		// the absorbed drive: navigation fetch header, morph primitive, head reconcile, history,
+		// the composed Drive module: navigation fetch header, morph primitive, head reconcile, history,
 		// the two-way lock against the legacy standalone file, and the swap lifecycle events
 		"X-Kitwork-Hydrate", "kitwork.morph", "mergeHead", "popstate", "kitwork.hydrate",
 		"kitwork:before-swap", "kitwork:load",
@@ -156,9 +155,10 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// remember: persisted $ keys — register fn, declaration attr, storage key, load/persist
 		"kitwork.remember", "data-kit-remember", "registerRememberedKey", "loadRemembered",
 		"kitwork.platform", "kitwork.bridge", "kitwork.isNative",
+		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kitwork.destroy", "removeEventListener",
 		// $app capabilities (Native Bridge RFC v2): bridge-first with web fallback
-		"kitwork.clipboard", `bridge.call("clipboard.write"`, "navigator.clipboard",
-		"kitwork.camera", `bridge.call("camera.capture"`, "readAsDataURL",
+		"kitwork.clipboard", `native.call("clipboard.write"`, "navigator.clipboard",
+		"kitwork.camera", `native.call("camera.capture"`, "readAsDataURL",
 		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
 		`selector("bind")`,
 		// api: async JSON source — sync fn, activation attr, fetch + state→CSS lifecycle
@@ -169,12 +169,39 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"function blockedKey", "constructor",
 	} {
 		if !strings.Contains(rt, want) {
-			t.Errorf("runtime.js missing %q", want)
+			t.Errorf("composed runtime missing %q", want)
 		}
 	}
 	for _, forbid := range []string{"eval(", "new Function("} {
 		if strings.Contains(rt, forbid) {
-			t.Errorf("runtime.js must never use %q", forbid)
+			t.Errorf("composed runtime must never use %q", forbid)
 		}
+	}
+}
+
+func TestRuntimeCompositionOrder(t *testing.T) {
+	runtime := Runtime()
+	markers := []string{
+		"Kitwork native bridge adapter",
+		"Kitwork hydrate kernel",
+		"Native-only capabilities",
+		"Storage capability",
+		"Browser-backed capabilities",
+		"Optional remote component loader",
+		"DOM morph module",
+		"Compatibility surface",
+		"Optional Kitwork Drive module",
+		"Final composition step",
+	}
+	last := -1
+	for _, marker := range markers {
+		index := strings.Index(runtime, marker)
+		if index < 0 {
+			t.Fatalf("runtime module marker missing: %q", marker)
+		}
+		if index <= last {
+			t.Fatalf("runtime module out of order: %q", marker)
+		}
+		last = index
 	}
 }

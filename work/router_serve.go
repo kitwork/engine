@@ -19,19 +19,27 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
-	"github.com/kitwork/engine/render"
+	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
-func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
+func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
+	w := requestScope.Writer()
+	r := requestScope.Request()
+	tree := t.routeTree()
+	if tree == nil {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
 	// Static assets win first: a real file on disk under the tenant (e.g. /assets/logo.png) is
 	// streamed straight from disk (Zero-VM), never routed. Source files are never exposed.
 	if t.serveTreeStatic(w, r) {
 		return
 	}
 
-	match := t.tree.Resolve(r.URL.Path)
+	match := tree.Resolve(r.URL.Path)
 
 	reqRouter := &Router{
 		tenant:         t,
@@ -44,11 +52,10 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 	}
 	ctxObj := &Context{request: &Request{router: reqRouter}}
 
-	// Compile every folder on the chain once (lazy, cached) and collect inherited meta:
+	// Read inherited metadata from the immutable generation graph:
 	// router.meta() merged root→leaf is the base every page's $.meta starts from.
 	chainMeta := map[string]value.Value{}
 	for _, node := range match.Chain {
-		node.ensureFolder(t)
 		if node.folder != nil {
 			for k, v := range node.folder.meta {
 				chainMeta[k] = v
@@ -56,18 +63,17 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	reqRouter.chainMeta = chainMeta
-	// Build the render AFTER the chain compiled, so the root's router.jitcss() config (installed
-	// during ensureFolder) is captured into treeRender.JitConfig.
+	// Presentation declarations were frozen with the graph before activation.
 	reqRouter.treeRender = t.treeRender(match.Node)
 
 	// Semantic outputs are virtual root endpoints. A real filesystem node always wins; otherwise
 	// router.rss()/router.sitemap() can answer their declared path without a synthetic folder.
 	var generatedMethod *FolderMethod
-	if !match.Found && (r.Method == http.MethodGet || r.Method == http.MethodHead) && t.tree.root.folder != nil {
-		generatedMethod = t.tree.root.folder.generatedOutput(path.Clean("/" + r.URL.Path))
+	if !match.Found && (r.Method == http.MethodGet || r.Method == http.MethodHead) && tree.root.folder != nil {
+		generatedMethod = tree.root.folder.generatedOutput(path.Clean("/" + r.URL.Path))
 		if generatedMethod != nil {
 			match.Found = true
-			match.Node = t.tree.root
+			match.Node = tree.root
 		}
 	}
 
@@ -100,6 +106,9 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 			t.saveResponse(savMethod, savKey, reqRouter.response)
 		}
 		if reqRouter.response.Kind() == "sse" {
+			// Streaming can remain open for hours. The SSE response retains only
+			// Go-native broker state, so the request VM can return to the pool now.
+			requestScope.ReleaseVM()
 			reqRouter.streamSSE(w)
 		} else {
 			reqRouter.responder(w)
@@ -137,13 +146,12 @@ func (t *Tenant) serveTree(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	vm := enginePool.Acquire()
-	vm.Context = r.Context()
-	defer func() {
-		vm.Context = nil
-		enginePool.Release(vm)
-	}()
-	vm.Builtins = t.vm.Builtins
+	vm, err := requestScope.LeaseVM(enginePool.Acquire, enginePool.Release)
+	if err != nil {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins, requestScope)
 	vm.MaxEnergy = t.MaxEnergy
 
 	// Folder before-chain, outside-in: each folder's guards run in order (guard subsumes middleware).
@@ -299,7 +307,7 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 	if l == nil || bc == nil {
 		return value.Value{K: value.Nil}
 	}
-	vm.FastReset(bc.Instructions, bc.Constants, t.vm.Globals, bc.SourceMap)
+	vm.FastReset(bc.Instructions, bc.Constants, vm.Globals, bc.SourceMap)
 	return vm.ExecuteLambda(l, ctxObj.arguments(l))
 }
 
@@ -332,22 +340,15 @@ func (t *Tenant) runStage(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 // treeRender points the render engine at a folder: page = <folder>/page.kitwork.html, while the
 // nearest index.kitwork.html and each slot resolve by walking UP from the folder to the root —
 // exactly the inside-out view resolution the docs describe, reusing the existing render engine.
-func (t *Tenant) treeRender(n *RouteNode) *render.Render {
-	return render.New(render.Config{
-		Base:          t.resolve(),
-		JitConfig:     t.jitcssConfig,
-		Directory:     ".", // anchor at the tenant base
-		Path:          n.relPath(),
-		Notfound:      "notfound",
-		JitCSS:        true, // zero-config: inline the minimal JIT CSS for the classes each page uses
-		DefaultMinify: !AllowLocal,
-		ThemeMode:     t.themeMode, // router.jittheme(): "" auto-scan / "force" / "off"
-	})
+func (t *Tenant) treeRender(n *RouteNode) *plannedRenderer {
+	if n == nil || t.renderPlan() == nil {
+		return nil
+	}
+	return t.renderPlan().renderer(n.relPath())
 }
 
 func (t *Tenant) folderHasPage(n *RouteNode) bool {
-	info, err := os.Stat(filepath.Join(n.diskPath(), "page"+extension+".html"))
-	return err == nil && !info.IsDir()
+	return n != nil && t.renderPlan() != nil && t.renderPlan().hasPage(n.relPath())
 }
 
 // serveTreeStatic streams a real on-disk file under the tenant (assets, images, …) with no VM.
@@ -371,15 +372,12 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 		}
 	}
 
-	// The root router declares .favicon()/.assets() — make sure it has compiled (lazy, once) so
-	// those declarations exist even when the very first request is a static one.
-	if t.tree != nil && t.tree.root != nil {
-		t.tree.root.ensureFolder(t)
-	}
+	// Presentation declarations were collected before generation activation.
+	presentation := t.presentation().View()
 
 	// /favicon.ico: browsers request it unprompted; .favicon() names the file that answers.
-	if clean == "/favicon.ico" && t.faviconFile != "" {
-		http.ServeFile(w, r, t.faviconFile)
+	if clean == "/favicon.ico" && presentation.FaviconFile != "" {
+		http.ServeFile(w, r, presentation.FaviconFile)
 		return true
 	}
 
@@ -387,12 +385,12 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 	// and each maps to its (possibly different, e.g. private "_assets/") disk dir. Zero-config (no
 	// mounts) leaves diskClean == clean so any safe file under the tenant auto-serves.
 	diskClean := clean
-	if len(t.assetMounts) > 0 {
+	if len(presentation.AssetMounts) > 0 {
 		matched := false
-		for _, m := range t.assetMounts {
-			up := "/" + m.url
+		for _, m := range presentation.AssetMounts {
+			up := "/" + m.URL
 			if clean == up || strings.HasPrefix(clean, up+"/") {
-				diskClean = "/" + m.disk + strings.TrimPrefix(clean, up)
+				diskClean = "/" + m.Disk + strings.TrimPrefix(clean, up)
 				matched = true
 				break
 			}
@@ -404,8 +402,7 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 
 	base := t.resolve()
 	full := filepath.Join(base, filepath.FromSlash(diskClean))
-	rel, err := filepath.Rel(base, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if !t.insideSiteRoot(full) {
 		return false
 	}
 	info, err := os.Stat(full)

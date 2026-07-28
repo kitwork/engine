@@ -1,7 +1,7 @@
 // Package hydrate is the server half of the "frontend bytecode VM": it compiles a small,
 // deliberately-constrained expression subset (the same one authors write in data-* attributes)
-// into a compact IR — a nested JSON array the tiny client interpreter walks. The client ships NO
-// lexer/parser; the parser lives here, on the server, so pages ship bytecode + a ~30-line runner.
+// into a compact IR — a nested JSON array the tiny client interpreter walks. The client also keeps
+// a matching parser for author-written data-kit-* source; engine-emitted data-kitwork-* ships IR.
 //
 // IR shapes (each is a JSON array):
 //
@@ -50,7 +50,7 @@ func isDigit(c byte) bool  { return c >= '0' && c <= '9' }
 
 // lex turns the source into tokens. It is byte-oriented for the ASCII structure; string-literal
 // contents are sliced from the source so UTF-8 (e.g. Vietnamese, emoji) is preserved verbatim.
-func lex(s string) []tok {
+func lex(s string) ([]tok, error) {
 	var out []tok
 	i, n := 0, len(s)
 	for i < n {
@@ -60,8 +60,18 @@ func lex(s string) []tok {
 			i++
 		case isDigit(c) || (c == '.' && i+1 < n && isDigit(s[i+1])):
 			j := i
-			for j < n && (isDigit(s[j]) || s[j] == '.') {
-				j++
+			dot := false
+			for j < n {
+				if isDigit(s[j]) {
+					j++
+					continue
+				}
+				if s[j] == '.' && !dot {
+					dot = true
+					j++
+					continue
+				}
+				break
 			}
 			out = append(out, tok{"num", s[i:j]})
 			i = j
@@ -70,6 +80,9 @@ func lex(s string) []tok {
 			j := i + 1
 			for j < n && s[j] != q {
 				j++
+			}
+			if j >= n {
+				return nil, errors.New("hydrate: unterminated string")
 			}
 			out = append(out, tok{"str", s[i+1 : j]})
 			i = j + 1
@@ -90,11 +103,13 @@ func lex(s string) []tok {
 			}
 			if strings.IndexByte("+-*/%<>!?:().,={}[];", c) >= 0 {
 				out = append(out, tok{"op", string(c)})
+				i++
+				continue
 			}
-			i++
+			return nil, errors.New("hydrate: unexpected character '" + string(c) + "'")
 		}
 	}
-	return append(out, tok{"eof", ""})
+	return append(out, tok{"eof", ""}), nil
 }
 
 var precedence = map[string]int{
@@ -446,7 +461,11 @@ func (p *parser) tryArrowParams() ([]any, bool) {
 
 // Compile parses a hydrate expression and returns its IR tree (marshalable to a compact JSON array).
 func Compile(expr string) (any, error) {
-	p := &parser{toks: lex(expr)}
+	toks, err := lex(expr)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{toks: toks}
 	node, err := p.sequence()
 	if err != nil {
 		return nil, err

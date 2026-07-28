@@ -6,8 +6,8 @@ package work
 // every folder is a runtime node, the folder location IS the URL, and each folder's
 // router.kitwork.js declares only runtime BEHAVIOUR (guards, middleware, methods). See
 // ROUTER_API_SPEC.md / REQUEST_EXECUTION_FLOW.MD. This file is the resolver: it walks the
-// folder tree one segment at a time, lazily discovering + caching children on first hit, so
-// the cache IS the tree and its size is bounded by the number of folders, not by traffic.
+// folder tree one segment at a time. A generation discovers the complete tree
+// before publication, so request-time resolution only reads immutable nodes.
 
 import (
 	"os"
@@ -106,12 +106,9 @@ type RouteNode struct {
 	folderMu    sync.Mutex    // guards the one-time folder compile
 	folderReady atomic.Bool
 
-	// Per-folder hot reload (active when tenant.HotReload): the recorded source snapshot the
-	// throttled hotCheck compares against. srcFiles/srcMod/dirMod are guarded by folderMu.
-	hotCheckAt atomic.Int64 // unix nanos of the last check — 1s throttle via CAS
-	srcFiles   []string     // router.kitwork.js + every natively-bundled import
-	srcMod     int64        // newest modtime across srcFiles at compile (0 = no router)
-	dirMod     int64        // the folder's own modtime — changes on child create/remove
+	// Source files are copied into the generation manifest after compilation.
+	folderErr error
+	srcFiles  []string // router.kitwork.js + every natively-bundled import
 }
 
 // diskPath derives the on-disk location by walking up to the root anchor.
@@ -175,7 +172,6 @@ func (n *RouteNode) ensureChildren() {
 
 // child resolves ONE path segment against this node — exact-then-dynamic, in one scan.
 func (n *RouteNode) child(seg string, params map[string]string) *RouteNode {
-	n.ensureChildren()
 	kids := n.children.Load()
 	if kids == nil {
 		return nil
@@ -207,6 +203,101 @@ func NewRouteTree(t *Tenant) *RouteTree {
 	}
 }
 
+// Close releases the graph after its owning generation has drained.
+func (rt *RouteTree) Close() {
+	if rt == nil {
+		return
+	}
+	rt.root = nil
+	rt.tenant = nil
+}
+
+func (rt *RouteTree) routeNodes() []*RouteNode {
+	if rt == nil || rt.root == nil {
+		return nil
+	}
+	nodes := make([]*RouteNode, 0)
+	var walk func(*RouteNode)
+	walk = func(node *RouteNode) {
+		if node == nil || !node.folderReady.Load() {
+			return
+		}
+		nodes = append(nodes, node)
+		children := node.children.Load()
+		if children == nil {
+			return
+		}
+		for _, child := range *children {
+			walk(child)
+		}
+	}
+	walk(rt.root)
+	return nodes
+}
+
+// Prepare discovers and compiles the complete route tree before its generation
+// is activated. Declarations from every folder therefore contribute to one
+// coherent presentation snapshot without request-time mutation.
+func (rt *RouteTree) Prepare() error {
+	if rt == nil || rt.root == nil {
+		return nil
+	}
+	var prepare func(*RouteNode) error
+	prepare = func(node *RouteNode) error {
+		node.ensureFolder(rt.tenant)
+		if err := node.compileError(); err != nil {
+			return err
+		}
+		sources := rt.tenant.SiteGeneration().Sources()
+		for _, filename := range node.sourceFiles() {
+			info, err := os.Stat(filename)
+			if err == nil && info.IsDir() {
+				err = sources.WatchModuleDirectory(filename)
+			} else {
+				err = sources.WatchFile(filename)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		node.ensureChildren()
+		if err := sources.WatchDirectory(node.diskPath()); err != nil {
+			return err
+		}
+		children := node.children.Load()
+		if children == nil {
+			return nil
+		}
+		for _, child := range *children {
+			if rt.isAssetDirectory(child) {
+				continue
+			}
+			if err := prepare(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := prepare(rt.root); err != nil {
+		return err
+	}
+	rt.tenant = nil
+	return nil
+}
+
+func (rt *RouteTree) isAssetDirectory(node *RouteNode) bool {
+	if node == nil {
+		return false
+	}
+	rel := node.relPath()
+	for _, mount := range rt.tenant.presentation().AssetMounts() {
+		if rel == mount.Disk || strings.HasPrefix(rel, mount.Disk+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // RouteMatch is the outcome of resolving a URL path against the tree.
 type RouteMatch struct {
 	Node   *RouteNode        // the deepest node reached (leaf if Found, else last matched)
@@ -216,6 +307,9 @@ type RouteMatch struct {
 }
 
 func (rt *RouteTree) Resolve(urlPath string) *RouteMatch {
+	if rt == nil || rt.root == nil {
+		return &RouteMatch{Params: map[string]string{}, Found: false}
+	}
 	m := &RouteMatch{Node: rt.root, Chain: []*RouteNode{rt.root}, Params: map[string]string{}, Found: true}
 	for _, seg := range splitPath(urlPath) {
 		c := m.Node.child(seg, m.Params)

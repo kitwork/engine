@@ -108,6 +108,22 @@ func TestEvalLambdaRecursionBudget(t *testing.T) {
 	}
 }
 
+func TestEvalLogicalOperatorsShortCircuit(t *testing.T) {
+	scope := map[string]any{"n": 0.0}
+	if got := compileEval(t, "inc = () => n = n + 1; false && inc(); n", scope); got != 0.0 {
+		t.Fatalf("false && rhs evaluated: got %#v", got)
+	}
+	if got := compileEval(t, "true || inc(); n", scope); got != 0.0 {
+		t.Fatalf("true || rhs evaluated: got %#v", got)
+	}
+	if got := compileEval(t, "true && 'right'", map[string]any{}); got != "right" {
+		t.Errorf("&& must return the selected operand, got %#v", got)
+	}
+	if got := compileEval(t, "false || 'right'", map[string]any{}); got != "right" {
+		t.Errorf("|| must return the selected operand, got %#v", got)
+	}
+}
+
 // Sandbox: the walker must never reach the Function constructor (i.e. eval) or prototype pollution,
 // so constructor/__proto__/prototype resolve to nil in reads, calls and writes. This is what makes
 // "no eval" true by construction — essential before any client-sent expression (capsule) runs.
@@ -118,6 +134,9 @@ func TestEvalSandboxBlocksConstructor(t *testing.T) {
 		"''.constructor.constructor('x')", // building Function('x'), must be nil
 		"x.__proto__",                     // prototype access
 		"x.prototype",                     // prototype access
+		"x.ownerDocument",                 // browser host escape
+		"x.defaultView",                   // browser host escape
+		"x.globalThis",                    // browser global escape
 	}
 	for _, expr := range cases {
 		v := compileEval(t, expr, map[string]any{"x": map[string]any{}})

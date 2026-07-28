@@ -2,9 +2,8 @@ package capabilities
 
 import (
 	"database/sql"
-	"fmt"
-	"path/filepath"
-	"strings"
+
+	"github.com/kitwork/engine/utilities/safepath"
 )
 
 // Identity represents the app and domain identifier of a tenant.
@@ -36,16 +35,5 @@ func CleanPath(base string, paths ...string) (string, error) {
 	if base == "" {
 		base = "."
 	}
-	baseAbs, err := filepath.Abs(base)
-	if err != nil {
-		return "", fmt.Errorf("invalid base path: %w", err)
-	}
-
-	target := filepath.Join(append([]string{baseAbs}, paths...)...)
-	rel, err := filepath.Rel(baseAbs, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("permission denied: path %q escapes boundary %q", target, baseAbs)
-	}
-
-	return target, nil
+	return safepath.Resolve(base, paths...)
 }

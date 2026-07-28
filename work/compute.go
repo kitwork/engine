@@ -5,6 +5,8 @@ import (
 
 	"github.com/kitwork/engine/capabilities"
 	"github.com/kitwork/engine/compiler"
+	requestscope "github.com/kitwork/engine/request"
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -12,6 +14,53 @@ import (
 // implemented in tenant.go). A capability that must run user JS off the request path asserts
 // scope.(capabilities.Runtime) to reach Run.
 var _ capabilities.Runtime = (*Tenant)(nil)
+
+type tenantLambdaExecutor struct {
+	tenant       *Tenant
+	requestScope *requestscope.Scope
+}
+
+func (e tenantLambdaExecutor) ExecuteLambda(fn *value.Lambda, args []value.Value) (result value.Value) {
+	if e.tenant == nil || fn == nil {
+		return value.Value{K: value.Invalid, V: "run: nil tenant or lambda"}
+	}
+
+	code := fn.Code
+	constants := fn.Constants
+	sourceMap := fn.SourceMap
+	if code == nil && e.tenant.bytecode != nil {
+		code = e.tenant.bytecode.Instructions
+		constants = e.tenant.bytecode.Constants
+		sourceMap = e.tenant.bytecode.SourceMap
+	}
+	if code == nil {
+		return value.Value{K: value.Invalid, V: "run: lambda has no bytecode"}
+	}
+
+	vm := (*runtime.VM)(nil)
+	releaseVM := func() {}
+	if e.requestScope != nil {
+		var err error
+		vm, releaseVM, err = e.requestScope.AcquireExecutionVM(enginePool.Acquire, enginePool.Release)
+		if err != nil {
+			return value.Value{K: value.Invalid, V: err.Error()}
+		}
+	} else {
+		vm = enginePool.Acquire()
+		releaseVM = func() { enginePool.Release(vm) }
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = value.Value{K: value.Invalid, V: fmt.Sprintf("panic: %v", recovered)}
+		}
+		releaseVM()
+	}()
+
+	e.tenant.prepareExecutionVM(vm, e.tenant.vm.Globals, e.tenant.vm.Builtins, e.requestScope)
+	vm.FastReset(code, constants, vm.Globals, sourceMap)
+	vm.MaxEnergy = e.tenant.MaxEnergy
+	return vm.ExecuteLambda(fn, args)
+}
 
 // Execute implements capabilities.Runtime: run a lambda against its bytecode in a pooled VM, bound to
 // this tenant's Globals/Builtins/Vars and capped by MaxEnergy. This is the SAME runner the cron
@@ -30,8 +79,8 @@ func (t *Tenant) Execute(bc *compiler.Bytecode, fn *value.Lambda, args []value.V
 		enginePool.Release(vm)
 	}()
 
-	vm.Builtins = t.vm.Builtins
-	vm.FastReset(bc.Instructions, bc.Constants, t.vm.Globals, bc.SourceMap)
+	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
+	vm.FastReset(bc.Instructions, bc.Constants, vm.Globals, bc.SourceMap)
 	vm.MaxEnergy = t.MaxEnergy
 	for k, v := range t.vm.Vars {
 		vm.Vars[k] = v

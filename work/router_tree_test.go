@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -55,8 +56,12 @@ func TestTreeTenantServesFilesystemRoutes(t *testing.T) {
 	if err := tenant.Run(); err != nil {
 		t.Fatalf("tree tenant failed to run: %v", err)
 	}
-	if tenant.tree == nil {
+	if tenant.routeTree() == nil {
 		t.Fatal("tenant.tree is nil — filesystem.kitwork marker did not activate tree mode")
+	}
+
+	if tenant.SiteGeneration().RouteGraph() != tenant.routeTree() {
+		t.Fatal("tenant adapter does not read the generation-owned route graph")
 	}
 
 	get := func(path string) *httptest.ResponseRecorder {
@@ -90,5 +95,29 @@ func TestTreeTenantServesFilesystemRoutes(t *testing.T) {
 				t.Fatalf("%s: body %q does not contain %q", c.path, rec.Body.String(), c.wantSub)
 			}
 		})
+	}
+
+	// Resolution is read-only after publication: concurrent requests must not
+	// rediscover or republish the prepared child list.
+	tree := tenant.routeTree()
+	rootChildren := tree.root.children.Load()
+	var wg sync.WaitGroup
+	statuses := make(chan int, 32)
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			statuses <- get("/users/quoc").Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	for status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("concurrent route resolution returned %d", status)
+		}
+	}
+	if tree.root.children.Load() != rootChildren {
+		t.Fatal("request-time resolution republished the generation route graph")
 	}
 }

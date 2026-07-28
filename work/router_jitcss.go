@@ -1,9 +1,8 @@
 package work
 
 // router.jitcss(config): a folder router (usually the root) tunes the site-wide JIT-CSS engine —
-// custom brand colors (theme.extend.colors), keyframes, shadows, and the dark: selector. It writes
-// tenant.jitcssConfig, which the render engine feeds to GenerateJITCached for every page. Declare
-// once at the root; it applies to the whole tenant.
+// custom brand colors (theme.extend.colors), keyframes, shadows, and the dark: selector. The
+// pending generation collects this declaration and freezes it at activation.
 
 import (
 	"fmt"
@@ -21,7 +20,7 @@ import (
 //	})
 func (f *FolderRouter) Jitcss(cfg value.Value) *FolderRouter {
 	if config := buildJitcssConfig(cfg); config != nil {
-		f.tenant.jitcssConfig = config
+		f.tenant.presentation().SetJITConfig(config)
 	}
 	return f
 }

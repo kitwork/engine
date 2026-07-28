@@ -97,13 +97,14 @@ func TestCronLoadAndFire(t *testing.T) {
 	}
 
 	// Registry must hold both jobs, each with its own bytecode + resolved identity.
-	tenant.cronMu.Lock()
-	defer tenant.cronMu.Unlock()
-	if len(tenant.crons) != 2 {
-		t.Fatalf("want 2 registered crons, got %d", len(tenant.crons))
+	scheduler := tenant.scheduler()
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if len(scheduler.jobs) != 2 {
+		t.Fatalf("want 2 registered crons, got %d", len(scheduler.jobs))
 	}
 	names := map[string]*CronJob{}
-	for _, j := range tenant.crons {
+	for _, j := range scheduler.jobs {
 		names[j.Name] = j
 		if j.Bytecode == nil {
 			t.Errorf("cron %q has no bytecode attached — executeCronCallback would FastReset the wrong code", j.Name)

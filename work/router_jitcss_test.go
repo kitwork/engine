@@ -50,9 +50,9 @@ func TestJitcssConfigApplied(t *testing.T) {
 	tn.Serve(rec, req)
 	body := rec.Body.String()
 
-	// The root router.jitcss() runs during the first request's lazy compile.
-	if tn.jitcssConfig == nil {
-		t.Fatal("router.jitcss() did not install tenant.jitcssConfig")
+	// The root router.jitcss() runs while the generation is prepared.
+	if tn.SiteGeneration().Presentation().Snapshot().JITConfig == nil {
+		t.Fatal("router.jitcss() did not install the generation JIT config")
 	}
 
 	// The custom brand color #e8173a (not the default #f82244) must drive .bg-brand.

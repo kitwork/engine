@@ -33,7 +33,7 @@ func TestCronListReadAPI(t *testing.T) {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		var n int
-		tenant.cronDB.QueryRow(`SELECT run_count FROM crons WHERE name='pulse'`).Scan(&n)
+		tenant.scheduler().db.QueryRow(`SELECT run_count FROM crons WHERE name='pulse'`).Scan(&n)
 		if n >= 1 {
 			break
 		}

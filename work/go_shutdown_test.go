@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -44,7 +45,13 @@ var makeTask = (block, finish) => {
 		t.Fatal("makeTask was not defined")
 	}
 
-	tenant := &Tenant{bytecode: &compiler.Bytecode{}, vm: vm, MaxEnergy: 1_000_000}
+	tenant := &Tenant{
+		appRuntime: app.NewRuntime("background-test"),
+		ownsApp:    true,
+		bytecode:   &compiler.Bytecode{},
+		vm:         vm,
+		MaxEnergy:  1_000_000,
+	}
 	build := func(block, finish value.Value) value.Value {
 		return vm.ExecuteLambda(makeTask.V.(*value.Lambda), []value.Value{block, finish})
 	}

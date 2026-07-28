@@ -232,9 +232,15 @@ func (cb *CronBuilder) Handle(callback value.Value) *CronBuilder {
 // registerCron appends a builder's job to the tenant's registry. The NAME is not set here — it comes
 // from the filename, applied by runCronFile once the whole file has been evaluated (one file = one cron).
 func (t *Tenant) registerCron(job *CronJob) {
-	t.cronMu.Lock()
-	defer t.cronMu.Unlock()
-	t.crons = append(t.crons, job)
+	scheduler, err := t.ensureScheduler()
+	if err != nil {
+		return
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if !scheduler.closed {
+		scheduler.jobs = append(scheduler.jobs, job)
+	}
 }
 
 // LoadCronFiles eagerly evaluates every _cron/*.kitwork.js at boot so scheduled jobs REGISTER before
@@ -246,6 +252,11 @@ func (t *Tenant) registerCron(job *CronJob) {
 // infrastructure shared by all of the app's domains, keyed by identity (see appID). Every domain of the
 // app loads the same set and they coordinate through the one store.
 func (t *Tenant) LoadCronFiles() {
+	scheduler, schedulerErr := t.ensureScheduler()
+	if schedulerErr != nil {
+		fmt.Printf("[Cron] scheduler unavailable: %v\n", schedulerErr)
+		return
+	}
 	dir := t.resolveApp("_cron")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -272,7 +283,7 @@ func (t *Tenant) LoadCronFiles() {
 		// routes take their identity from their path. Jobs that called cron.schedule("name") keep their
 		// explicit name; the rest inherit this stem.
 		stem := strings.TrimSuffix(e.Name(), ".kitwork.js")
-		t.runCronFile(bc, stem, hash)
+		t.runCronFile(scheduler, bc, stem, hash)
 	}
 
 	t.StartCronJobs()
@@ -284,10 +295,10 @@ func (t *Tenant) LoadCronFiles() {
 // file (the stem). ONE FILE = ONE CRON, named by the filename — if a file registers more than one, only
 // the first is kept (the rest would collide on the same filename identity) and a warning is logged.
 // Globals are COPIED so a cron file's top-level declarations never leak into the shared tenant VM.
-func (t *Tenant) runCronFile(bc *compiler.Bytecode, stem, contentHash string) {
-	t.cronMu.Lock()
-	before := len(t.crons)
-	t.cronMu.Unlock()
+func (t *Tenant) runCronFile(scheduler *cronRuntime, bc *compiler.Bytecode, stem, contentHash string) {
+	scheduler.mu.Lock()
+	before := len(scheduler.jobs)
+	scheduler.mu.Unlock()
 
 	globals := make(map[string]value.Value, len(t.vm.Globals))
 	for k, v := range t.vm.Globals {
@@ -301,51 +312,59 @@ func (t *Tenant) runCronFile(bc *compiler.Bytecode, stem, contentHash string) {
 	vm.MaxEnergy = t.MaxEnergy
 	vm.Run()
 
-	t.cronMu.Lock()
-	registered := t.crons[before:]
+	scheduler.mu.Lock()
+	registered := scheduler.jobs[before:]
 	if len(registered) > 1 {
 		fmt.Printf("[Cron] %s.kitwork.js registered %d crons; one file = one cron — keeping only %q\n",
 			stem, len(registered), stem)
-		t.crons = t.crons[:before+1] // drop the extras; they'd collide on the filename identity
-		registered = t.crons[before:]
+		scheduler.jobs = scheduler.jobs[:before+1]
+		registered = scheduler.jobs[before:]
 	}
 	for i := range registered {
 		registered[i].Bytecode = bc
 		registered[i].ContentHash = contentHash
 		registered[i].Name = stem // the file IS the cron's identity
 	}
-	t.cronMu.Unlock()
+	scheduler.mu.Unlock()
 }
 
 // StartCronJobs launches this tenant's scheduler. EVERY registered file-cron is durable — its definition
 // is synced into the `crons` table and it is dispatched through the database (idempotent slots, history,
 // cross-node coordination). One dispatcher goroutine serves them all; see cron_persist.go.
 func (t *Tenant) StartCronJobs() {
-	t.cronMu.Lock()
-	defer t.cronMu.Unlock()
-
-	t.stopCronJobsNoLock() // stop any existing jobs first to be safe
-
-	if len(t.crons) == 0 {
+	scheduler := t.scheduler()
+	if scheduler == nil {
 		return
 	}
-	if err := t.startPersistedScheduler(); err != nil {
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+
+	stopCronJobsNoLock(scheduler)
+
+	if len(scheduler.jobs) == 0 || scheduler.closed {
+		return
+	}
+	if err := t.startPersistedScheduler(scheduler); err != nil {
 		fmt.Printf("[Cron] scheduler disabled: %v\n", err)
 	}
 }
 
 // StopCronJobs halts all background cron tasks.
 func (t *Tenant) StopCronJobs() {
-	t.cronMu.Lock()
-	defer t.cronMu.Unlock()
-	t.stopCronJobsNoLock()
+	scheduler := t.scheduler()
+	if scheduler == nil {
+		return
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	stopCronJobsNoLock(scheduler)
 }
 
-func (t *Tenant) stopCronJobsNoLock() {
-	for _, ch := range t.cronCancels {
+func stopCronJobsNoLock(scheduler *cronRuntime) {
+	for _, ch := range scheduler.cancels {
 		close(ch)
 	}
-	t.cronCancels = nil
+	scheduler.cancels = nil
 }
 
 // Helpers for cron expression parsing

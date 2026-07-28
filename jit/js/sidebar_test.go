@@ -13,12 +13,12 @@ func TestSidebarIsShippedWhenUsed(t *testing.T) {
 	html := `<body data-kit-component="sidebar=$sidebar"><button data-kit-click="cycle()">x</button></body>`
 	out := Render(html)
 
-	if !strings.Contains(out, `component("sidebar"`) {
+	if !strings.Contains(out, `components=component%3Asidebar`) {
 		t.Fatalf("sidebar was not injected for markup that uses it:\n%s", out)
 	}
 	// The versioned alias must ship with it, or data-kit-component="sidebar@v1.0.0" silently
 	// resolves to nothing.
-	if !strings.Contains(out, `component("sidebar@v1.0.0"`) {
+	if !strings.Contains(ModulesJS([]string{"sidebar"}), `component("sidebar@v1.0.0"`) {
 		t.Error("versioned registration missing")
 	}
 }
@@ -29,10 +29,10 @@ func TestSidebarIsAbsentWhenUnused(t *testing.T) {
 	html := `<div data-kit-component="dropdown"><button data-kit-click="toggle()">x</button></div>`
 	out := Render(html)
 
-	if strings.Contains(out, `component("sidebar"`) {
+	if strings.Contains(out, `components=component%3Asidebar`) {
 		t.Fatal("sidebar shipped to a page that never mentions it")
 	}
-	if !strings.Contains(out, `component("dropdown"`) {
+	if !strings.Contains(out, `components=component%3Adropdown`) {
 		t.Fatal("the component that IS used should still ship")
 	}
 }

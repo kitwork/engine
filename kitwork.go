@@ -1,12 +1,17 @@
 package engine
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/database"
@@ -157,6 +162,7 @@ func Run(configFile ...string) (err error) {
 
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
+	defer handler.Close()
 
 	// Client-IP source: as the edge server Kitwork ignores X-Forwarded-For by default (spoofable);
 	// trust_proxy: true opts in when running behind your own reverse proxy.
@@ -181,25 +187,133 @@ func Run(configFile ...string) (err error) {
 	// The ONE deliberate exception is the scheduler: a cron cannot wait for a request. So every app
 	// (identity) with a _cron/ boots an app runtime NOW that starts its scheduler eagerly.
 	handler.StartAppSchedulers()
+	for _, site := range work.DiscoverLegacySites(cfg.Root) {
+		slog.Warn("Legacy site entry is ignored; migrate to router.kitwork.js", "site", site)
+	}
 
+	var servers []*http.Server
+	serverErrors := make(chan error, 2)
 	if !host.IsLocalhost() && !cfg.AllowLocal {
 		tlsConfig := domain.AutoSSL(cfg.Domains)
 
+		httpsServer := &http.Server{
+			Addr:      ":443",
+			Handler:   handler,
+			TLSConfig: tlsConfig,
+		}
+		servers = append(servers, httpsServer)
 		go func() {
-			server := &http.Server{
-				Addr:      ":443",
-				Handler:   handler,
-				TLSConfig: tlsConfig,
-			}
-			if err := server.ListenAndServeTLS("", ""); err != nil {
-				slog.Error("HTTPS Server error", "error", err)
-			}
+			serverErrors <- httpsServer.ListenAndServeTLS("", "")
 		}()
 	}
 
 	printBanner(cfg, host.IsLocalhost())
 
-	return http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), handler)
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
+		Handler: handler,
+	}
+	servers = append(servers, httpServer)
+	go func() {
+		serverErrors <- httpServer.ListenAndServe()
+	}()
+
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	var runErr error
+	select {
+	case <-signalCtx.Done():
+		slog.Info("Shutdown signal received")
+	case runErr = <-serverErrors:
+		if !errors.Is(runErr, http.ErrServerClosed) {
+			slog.Error("HTTP server stopped", "error", runErr)
+		}
+	}
+
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelShutdown()
+	for _, server := range servers {
+		if err := server.Shutdown(shutdownCtx); err != nil && runErr == nil {
+			runErr = err
+		}
+	}
+
+	if errors.Is(runErr, http.ErrServerClosed) {
+		return nil
+	}
+	return runErr
+}
+
+// Check validates the executable manifest and prepares every discovered site
+// without opening a listener, publishing a generation, or starting cron.
+func Check(configFile ...string) (core.CheckReport, error) {
+	file := ""
+	if len(configFile) > 0 && configFile[0] != "" {
+		file = configFile[0]
+	} else {
+		for _, candidate := range []string{"app.kitwork.js", "server.kitwork.js"} {
+			if _, err := os.Stat(candidate); err == nil {
+				file = candidate
+				break
+			}
+		}
+	}
+	if file == "" {
+		return core.CheckReport{}, fmt.Errorf(
+			"không tìm thấy manifest: cần app.kitwork.js (hoặc server.kitwork.js)",
+		)
+	}
+	if !strings.HasSuffix(strings.ToLower(file), ".js") {
+		return core.CheckReport{}, fmt.Errorf(
+			"engine.Check chỉ nhận manifest .kitwork.js, nhận %q",
+			file,
+		)
+	}
+
+	builder, err := evalServerBuilder(file)
+	if err != nil {
+		return core.CheckReport{}, fmt.Errorf("failed to evaluate config %s: %w", file, err)
+	}
+	if builder.err != "" {
+		return core.CheckReport{}, fmt.Errorf(
+			"failed to evaluate config %s: config validation error: %s",
+			file,
+			builder.err,
+		)
+	}
+	if !builder.hasWeb {
+		return core.CheckReport{}, fmt.Errorf(
+			"failed to evaluate config %s: %w",
+			file,
+			noWebSurfaceErr(builder, file),
+		)
+	}
+	raw, err := builderToMap(builder, file)
+	if err != nil {
+		return core.CheckReport{}, fmt.Errorf("failed to evaluate config %s: %w", file, err)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		return core.CheckReport{}, fmt.Errorf("failed to process configuration: %w", err)
+	}
+	if cfg.Root == "apps" {
+		if _, statErr := os.Stat(cfg.Root); os.IsNotExist(statErr) {
+			if _, legacyErr := os.Stat("tenants"); legacyErr == nil {
+				cfg.Root = "tenants"
+			}
+		}
+	}
+	for i := range cfg.Databases {
+		dbConfig := cfg.Databases[i]
+		alias := dbConfig.Alias
+		if alias == "" {
+			alias = "default"
+		}
+		database.Configs[alias] = dbConfig
+	}
+	work.AllowLocal = cfg.AllowLocal
+	return core.Check(cfg.Root, cfg.MaxEnergy), nil
 }
 
 // printBanner renders the Kitwork startup banner: a brand-red "KITWORK" wordmark

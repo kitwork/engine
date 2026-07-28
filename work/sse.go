@@ -22,6 +22,10 @@ func sseBrokerFor(key string) *SSEBroker {
 	return ssehelper.SSEBrokerFor(key)
 }
 
+func releaseSSEBroker(key string) {
+	ssehelper.ReleaseSSEBroker(key)
+}
+
 // ConnectOptions specifies initial client connection settings.
 type ConnectOptions struct {
 	Channel        string   `json:"channel"`

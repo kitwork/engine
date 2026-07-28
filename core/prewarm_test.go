@@ -26,6 +26,7 @@ func TestPrewarmAndDiscover(t *testing.T) {
 	}
 
 	engine := New(tmpDir, 0, false, "")
+	t.Cleanup(engine.Close)
 
 	domains := engine.discoverTenants()
 	if len(domains) != 2 {
@@ -49,6 +50,7 @@ func TestPrewarmAndDiscover(t *testing.T) {
 // SetIdleTimeout(0) must disable eviction so cached tenants stay warm forever.
 func TestSetIdleTimeoutNeverEvict(t *testing.T) {
 	engine := New(t.TempDir(), 0, false, "")
+	t.Cleanup(engine.Close)
 
 	engine.SetIdleTimeout(0)
 	engine.mu.RLock()

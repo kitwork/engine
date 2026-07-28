@@ -106,6 +106,27 @@ func TestContextFileRejectsCrossAppTraversal(t *testing.T) {
 	}
 }
 
+func TestStaticAndContextFileRejectCrossAppSymlink(t *testing.T) {
+	root, tenant := buildBoundaryFixture(t, boundaryFileRouter)
+	link := filepath.Join(root, "acme", "localhost", "external")
+	target := filepath.Join(root, "victim-corp", "victim.com")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	staticReq := httptest.NewRequest(http.MethodGet, "http://localhost/external/secret.txt", nil)
+	staticRec := httptest.NewRecorder()
+	tenant.Serve(staticRec, staticReq)
+	if strings.Contains(staticRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
+		t.Fatal("zero-VM static serving followed a symlink outside the site")
+	}
+
+	contextRec := getBoundary(t, tenant, "external/secret.txt")
+	if strings.Contains(contextRec.Body.String(), "TOP-SECRET-CROSS-TENANT") {
+		t.Fatal("ctx.file followed a symlink outside the app")
+	}
+}
+
 const boundaryUploadRouter = `
 import { router } from "kitwork";
 
@@ -157,5 +178,22 @@ func TestSaveFileRejectsEscapingDestination(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "victim-corp", "victim.com", "planted.txt")); err == nil {
 		t.Fatal("upload was written into another app's directory")
+	}
+}
+
+func TestSaveFileRejectsSymlinkedDestination(t *testing.T) {
+	root, tenant := buildBoundaryFixture(t, boundaryUploadRouter)
+	link := filepath.Join(root, "acme", "localhost", "external")
+	target := filepath.Join(root, "victim-corp", "victim.com")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	rec := postUpload(t, tenant, "external/planted.txt", "planted.txt")
+	if strings.Contains(rec.Body.String(), "true") {
+		t.Fatalf("symlinked upload reported success: %q", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(target, "planted.txt")); err == nil {
+		t.Fatal("upload followed a symlink into another app")
 	}
 }

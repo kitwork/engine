@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// Per-folder hot reload: editing a SUBFOLDER's router (or a module it imports) recompiles just
-// that folder; creating a folder re-enters the tree — no restart, no touching the root router.
-func TestTreeFolderHotReload(t *testing.T) {
+// A prepared Tenant is one generation and never mutates in place. Production
+// hot reload is owned by core.Engine, which replaces the whole generation.
+func TestTreeGenerationDoesNotReloadInPlace(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-tree-hot-*")
 	if err != nil {
 		t.Fatal(err)
@@ -62,26 +62,26 @@ func TestTreeFolderHotReload(t *testing.T) {
 		t.Fatalf("baseline: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// 1. Edit the SUBFOLDER router — only this folder recompiles.
+	// Editing a subfolder router does not mutate this generation.
 	write("api/router.kitwork.js",
 		`import { router } from "kitwork";`+"\n"+
 			`import { answer } from "../_core/service.kitwork.js";`+"\n"+
 			`router.get().handle((ctx) => ctx.text("api-v2 " + answer()));`)
 	touchFuture(apiRouter, 5)
 	time.Sleep(1100 * time.Millisecond) // past the per-node 1s throttle
-	if rec := get("/api"); !strings.Contains(rec.Body.String(), "api-v2 service-v1") {
-		t.Fatalf("subfolder router edit not hot-reloaded: %d %s", rec.Code, rec.Body.String())
+	if rec := get("/api"); !strings.Contains(rec.Body.String(), "api-v1 service-v1") {
+		t.Fatalf("subfolder edit mutated the active generation: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// 2. Edit the IMPORTED module — the importing folder recompiles (Bytecode.Files is watched).
+	// Editing an imported module also leaves this generation untouched.
 	servicePath := write("_core/service.kitwork.js", `export const answer = () => ("service-v2");`)
 	touchFuture(servicePath, 10)
 	time.Sleep(1100 * time.Millisecond)
-	if rec := get("/api"); !strings.Contains(rec.Body.String(), "api-v2 service-v2") {
-		t.Fatalf("imported module edit not hot-reloaded: %d %s", rec.Code, rec.Body.String())
+	if rec := get("/api"); !strings.Contains(rec.Body.String(), "api-v1 service-v1") {
+		t.Fatalf("import edit mutated the active generation: %d %s", rec.Code, rec.Body.String())
 	}
 
-	// 3. CREATE a new folder — the parent's dir modtime changes, children rescan, route appears.
+	// A new folder belongs to the next generation, not this route graph.
 	if rec := get("/fresh"); rec.Code != 404 {
 		t.Fatalf("fresh route should not exist yet, got %d", rec.Code)
 	}
@@ -89,12 +89,12 @@ func TestTreeFolderHotReload(t *testing.T) {
 		`import { router } from "kitwork";`+"\n"+
 			`router.get().handle((ctx) => ctx.text("fresh-alive"));`)
 	time.Sleep(1100 * time.Millisecond)
-	if rec := get("/fresh"); !strings.Contains(rec.Body.String(), "fresh-alive") {
-		t.Fatalf("new folder not discovered: %d %s", rec.Code, rec.Body.String())
+	if rec := get("/fresh"); rec.Code != 404 {
+		t.Fatalf("new folder entered the active generation: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
-// Control: with HotReload off (production), a compiled folder never re-stats or recompiles.
+// A generation remains immutable when HotReload is left at its default too.
 func TestTreeFolderHotReloadDisabled(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-tree-hot-off-*")
 	if err != nil {

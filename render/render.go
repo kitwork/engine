@@ -38,6 +38,7 @@ type Config struct {
 	MinifySet     bool           // whether Minify was set explicitly
 	DefaultMinify bool           // minify when not set explicitly (caller passes !AllowLocal)
 	ThemeMode     string         // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
+	Source        Source         // immutable template source; nil reads the live filesystem
 }
 
 func New(c Config) *Render {
@@ -46,6 +47,7 @@ func New(c Config) *Render {
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
 		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode,
+		source: c.Source,
 	}
 }
 
@@ -65,6 +67,9 @@ type Render struct {
 	minifySet     bool     // whether minify was set explicitly (else default by environment)
 	defaultMinify bool     // minify default when not explicit (injected — replaces AllowLocal)
 	themeMode     string   // theme pre-paint mode (see Config.ThemeMode)
+	source        Source   // immutable generation snapshot; nil = live filesystem
+	program       *node
+	prepareError  string
 }
 
 type Layout struct {
@@ -93,6 +98,20 @@ func (r *Render) resolve(paths ...string) string {
 	return filepath.Join(append([]string{r.base}, paths...)...)
 }
 
+func (r *Render) readFile(filename string) ([]byte, error) {
+	if r.source != nil {
+		return r.source.ReadFile(filename)
+	}
+	return os.ReadFile(filename)
+}
+
+func (r *Render) fileExists(filename string) bool {
+	if r.source != nil {
+		return r.source.Exists(filename)
+	}
+	return fileExists(filename)
+}
+
 func (r *Render) shouldMinify() bool {
 	if r.minifySet {
 		return len(r.minify) > 0
@@ -104,7 +123,7 @@ func (r *Render) getIndexPath() string {
 	// Explicit index override: keep the old direct-file / directory behavior.
 	if r.index != "" {
 		path1 := r.pathJoin(r.path, r.index, r.getfile("index"))
-		if _, err := os.Stat(path1); err == nil {
+		if r.fileExists(path1) {
 			return path1
 		}
 		return r.pathJoin(r.path, r.getfile(r.index))
@@ -117,7 +136,7 @@ func (r *Render) getIndexPath() string {
 	folder := path.Join("/", r.path, r.page)
 	for {
 		candidate := r.pathJoin(folder, r.getfile("index"))
-		if _, err := os.Stat(candidate); err == nil {
+		if r.fileExists(candidate) {
 			return candidate
 		}
 		if folder == "/" || folder == "." || folder == "" {
@@ -151,7 +170,7 @@ func (r *Render) getNotFoundPath() string {
 	// no walk-up — the caller pinned it deliberately.
 	if strings.HasPrefix(name, "/") {
 		name = strings.TrimPrefix(name, "/")
-		if p := r.pathJoin("", name, r.getfile("index")); fileExists(p) {
+		if p := r.pathJoin("", name, r.getfile("index")); r.fileExists(p) {
 			return p // directory form: <name>/index.kitwork.html
 		}
 		return r.pathJoin("", r.getfile(name)) // direct file: <name>.kitwork.html
@@ -162,10 +181,10 @@ func (r *Render) getNotFoundPath() string {
 	// root notfound. No declaration needed; .notfound("name") only changes the filename to look for.
 	folder := path.Join("/", r.path, r.page)
 	for {
-		if p := r.pathJoin(folder, r.getfile(name)); fileExists(p) {
+		if p := r.pathJoin(folder, r.getfile(name)); r.fileExists(p) {
 			return p // direct file: <folder>/notfound.kitwork.html
 		}
-		if p := r.pathJoin(folder, name, r.getfile("index")); fileExists(p) {
+		if p := r.pathJoin(folder, name, r.getfile("index")); r.fileExists(p) {
 			return p // directory form: <folder>/notfound/index.kitwork.html
 		}
 		if folder == "/" || folder == "." || folder == "" {
@@ -196,17 +215,22 @@ func (r *Render) dir() string {
 func (r *Render) tmpl(data any) string {
 	// 1. GIAI ĐOẠN ASSEMBLY: Ráp nối các file mẫu thành một template lớn duy nhất
 	// Bắt đầu từ file Shell (index.html)
-	indexPath := r.getIndexPath()
-	shellRaw, err := os.ReadFile(indexPath)
-	if err != nil {
-		return fmt.Sprintf("[Error reading index: %v]", indexPath)
+	program := r.program
+	prepareError := r.prepareError
+	if program == nil && prepareError == "" {
+		program, prepareError = r.compileTemplate()
+	}
+	if prepareError != "" {
+		return prepareError
 	}
 
 	// Đệ quy nạp các thành phần lồng nhau (layouts, includes, page)
-	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
 
 	// 2. GIAI ĐOẠN BIND: Render dữ liệu vào các biến
 	scope := make(map[string]value.Value)
+	if r.source != nil {
+		scope["__template_source"] = value.New(r.source)
+	}
 
 	// A. Nạp dữ liệu Global (Nếu có)
 	if !r.global.IsBlank() && r.global.IsMap() {
@@ -225,9 +249,7 @@ func (r *Render) tmpl(data any) string {
 	}
 
 	// Parse và Eval một lần duy nhất cho toàn bộ cây mẫu
-	tokens := specializeTokens(fullTemplate)
-	prog := parse(tokens)
-	out := eval(prog, data, scope)
+	out := eval(program, data, scope)
 
 	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
@@ -304,6 +326,41 @@ func (r *Render) tmpl(data any) string {
 }
 
 // assemble thực hiện quét template và nạp các thành phần thô một cách đệ quy
+func (r *Render) compileTemplate() (program *node, prepareError string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			program = nil
+			prepareError = fmt.Sprintf("template parse error: %v", recovered)
+		}
+	}()
+	indexPath := r.getIndexPath()
+	shellRaw, err := r.readFile(indexPath)
+	if err != nil {
+		return nil, fmt.Sprintf("[Error reading index: %v]", indexPath)
+	}
+	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
+	return parse(specializeTokens(fullTemplate)), ""
+}
+
+// Prepare assembles and parses this render path once. The returned Render is
+// immutable and safe for concurrent Bind calls.
+func (r *Render) Prepare() *Render {
+	if r == nil {
+		return nil
+	}
+	prepared := *r
+	prepared.program, prepared.prepareError = prepared.compileTemplate()
+	return &prepared
+}
+
+// PreparationError reports assembly or parse failure captured by Prepare.
+func (r *Render) PreparationError() error {
+	if r == nil || r.prepareError == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", r.prepareError)
+}
+
 func (r *Render) assemble(content string, currentDir string, depth int) string {
 	if depth > 10 { // Giới hạn đệ quy để tránh treo hệ thống
 		return "<!-- Error: Template recursion too deep -->"
@@ -338,13 +395,13 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 				if r.notfoundMode {
 					pagePath = r.getNotFoundPath()
 				}
-				if raw, err := os.ReadFile(pagePath); err == nil {
+				if raw, err := r.readFile(pagePath); err == nil {
 
 					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
 				} else {
 
 					nfPath := r.getNotFoundPath()
-					if raw, err := os.ReadFile(nfPath); err == nil {
+					if raw, err := r.readFile(nfPath); err == nil {
 
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(nfPath), depth+1))
 					} else {
@@ -379,7 +436,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					pathVal = r.layout.titlebar
 				}
 				if pathVal != "" {
-					if raw, err := os.ReadFile(pathVal); err == nil {
+					if raw, err := r.readFile(pathVal); err == nil {
 						sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
 						found = true
 					}
@@ -395,7 +452,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					for {
 						for _, fname := range slotFiles(base) {
 							fullPath := filepath.Join(dir, fname)
-							if raw, err := os.ReadFile(fullPath); err == nil {
+							if raw, err := r.readFile(fullPath); err == nil {
 								sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
 								found = true
 								break
@@ -416,7 +473,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 				if !found {
 					for _, fname := range slotFiles(base) {
 						globalPath := r.resolve("views", fname)
-						if raw, err := os.ReadFile(globalPath); err == nil {
+						if raw, err := r.readFile(globalPath); err == nil {
 							sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
 							found = true
 							break
@@ -427,6 +484,27 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 				if !found {
 					sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", base+".kitwork.html"))
 				}
+
+			case "include", "layout":
+				if len(parts) < 2 {
+					sb.WriteString(t)
+					continue
+				}
+				name := strings.Trim(parts[1], `"'`)
+				if !strings.HasSuffix(name, ".html") {
+					name += ".html"
+				}
+				includePath := filepath.Join(currentDir, filepath.FromSlash(name))
+				raw, err := r.readFile(includePath)
+				if err != nil {
+					includePath = r.resolve("views", filepath.FromSlash(name))
+					raw, err = r.readFile(includePath)
+				}
+				if err != nil {
+					sb.WriteString(fmt.Sprintf("[Error: %v]", err))
+					continue
+				}
+				sb.WriteString(r.assemble(string(raw), filepath.Dir(includePath), depth+1))
 
 			default:
 				// Các tag khác như if, for, biến... giữ nguyên để giai đoạn Bind xử lý
@@ -451,7 +529,7 @@ func (r *Render) Has(name string) bool {
 	base := strings.Trim(name, "_") // accept "sidebar", "_sidebar_" or "@sidebar"-style input
 	base = strings.TrimPrefix(base, "@")
 	for _, fname := range slotFiles(base) {
-		if _, err := os.Stat(r.pathJoin(r.path, fname)); err == nil {
+		if r.fileExists(r.pathJoin(r.path, fname)) {
 			return true
 		}
 	}
@@ -461,13 +539,13 @@ func (r *Render) Has(name string) bool {
 func (r *Render) Exists(name string) bool {
 	// Trường hợp 1: Kiểm tra thư mục con chứa page.kitwork.html (Ví dụ: routing/page.kitwork.html)
 	path1 := r.pathJoin(r.path, name, r.getfile("page"))
-	if _, err := os.Stat(path1); err == nil {
+	if r.fileExists(path1) {
 		return true
 	}
 
 	// Trường hợp 2: Kiểm tra file trực tiếp (Ví dụ: routing.kitwork.html)
 	path2 := r.pathJoin(r.path, r.getfile(name))
-	if _, err := os.Stat(path2); err == nil {
+	if r.fileExists(path2) {
 		return true
 	}
 
@@ -483,8 +561,14 @@ func (r *Render) Bind(data value.Value) value.Value {
 // render's own page). Used by the tree view lifecycle.
 func (r *Render) BindPage(page string, notfoundMode bool, data value.Value) value.Value {
 	rc := *r
-	if page != "" {
+	if page != "" && page != rc.page {
 		rc.page = page
+		rc.program = nil
+		rc.prepareError = ""
+	}
+	if notfoundMode != rc.notfoundMode {
+		rc.program = nil
+		rc.prepareError = ""
 	}
 	rc.notfoundMode = notfoundMode
 	return rc.Bind(data)
@@ -497,7 +581,7 @@ func (r *Render) BindPage(page string, notfoundMode bool, data value.Value) valu
 // HTML renders a raw template string with data
 func (r *Render) HTML(tmpl string, data any) string {
 	viewDir := r.resolve("views")
-	return engineRender(tmpl, data, viewDir, viewDir)
+	return engineRenderWithSource(tmpl, data, viewDir, viewDir, r.source)
 }
 
 // File renders a file from the 'views' directory
@@ -523,6 +607,10 @@ func (r *Render) HTML(tmpl string, data any) string {
 // ----------------------------------------------------------------------------
 
 func engineRender(tmpl string, data any, viewDir string, globalDir string) string {
+	return engineRenderWithSource(tmpl, data, viewDir, globalDir, nil)
+}
+
+func engineRenderWithSource(tmpl string, data any, viewDir string, globalDir string, source Source) string {
 	tokens := specializeTokens(tmpl)
 	node := parse(tokens)
 
@@ -531,6 +619,9 @@ func engineRender(tmpl string, data any, viewDir string, globalDir string) strin
 	initialScope["$"] = valData
 	initialScope["__view_dir"] = value.New(viewDir)
 	initialScope["__global_view_dir"] = value.New(globalDir)
+	if source != nil {
+		initialScope["__template_source"] = value.New(source)
+	}
 
 	if valData.IsMap() {
 		for k, v := range valData.Map() {
@@ -539,6 +630,15 @@ func engineRender(tmpl string, data any, viewDir string, globalDir string) strin
 	}
 
 	return eval(node, data, initialScope)
+}
+
+func readScopedTemplate(scope map[string]value.Value, filename string) ([]byte, error) {
+	if sourceValue, ok := scope["__template_source"]; ok {
+		if source, valid := sourceValue.V.(Source); valid && source != nil {
+			return source.ReadFile(filename)
+		}
+	}
+	return os.ReadFile(filename)
 }
 
 type nodeType int
@@ -846,7 +946,7 @@ func eval(n *node, data any, scope map[string]value.Value) (out string) {
 		// Thử tìm trong __layouts map trước (ưu tiên Fluent Layouts)
 		if lMapVal, ok := scope["__layouts"]; ok && lMapVal.IsMap() {
 			if pathVal, ok := lMapVal.Map()[fname]; ok {
-				content, err := os.ReadFile(pathVal.String())
+				content, err := readScopedTemplate(scope, pathVal.String())
 				if err == nil {
 					tokens := specializeTokens(string(content))
 					prog := parse(tokens)
@@ -858,7 +958,7 @@ func eval(n *node, data any, scope map[string]value.Value) (out string) {
 			// Thử tìm theo tên không đuôi
 			nameOnly := strings.TrimSuffix(fname, ".html")
 			if pathVal, ok := lMapVal.Map()[nameOnly]; ok {
-				content, err := os.ReadFile(pathVal.String())
+				content, err := readScopedTemplate(scope, pathVal.String())
 				if err == nil {
 					tokens := specializeTokens(string(content))
 					prog := parse(tokens)
@@ -870,12 +970,12 @@ func eval(n *node, data any, scope map[string]value.Value) (out string) {
 		}
 
 		fullPath := filepath.Join(viewDir, fname)
-		content, err := os.ReadFile(fullPath)
+		content, err := readScopedTemplate(scope, fullPath)
 		if err != nil {
 			if globalVal, ok := scope["__global_view_dir"]; ok {
 				fallbackDir := globalVal.String()
 				fullPath = filepath.Join(fallbackDir, fname)
-				content, err = os.ReadFile(fullPath)
+				content, err = readScopedTemplate(scope, fullPath)
 			}
 			if err != nil {
 				return fmt.Sprintf("[Error: %v]", err)

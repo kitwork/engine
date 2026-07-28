@@ -17,6 +17,9 @@ func (m *mockScope) ResolvePath(paths ...string) string { return "/test" }
 func (m *mockScope) DB(name string) *sql.DB             { return nil }
 
 func TestShortbaseCapability(t *testing.T) {
+	if got := capabilities.DefaultRegistry.GetLifetime("shortbase"); got != capabilities.LifetimeApp {
+		t.Fatalf("shortbase lifetime = %v, want LifetimeApp", got)
+	}
 	scope := &mockScope{}
 	val, ok := capabilities.DefaultRegistry.Get("shortbase", scope)
 	if !ok {

@@ -4,30 +4,14 @@ package file
 import (
 	"encoding/base64"
 	"fmt"
-	"path/filepath"
 	"strings"
+
+	"github.com/kitwork/engine/utilities/safepath"
 )
 
 // ResolvePath checks that targetRelPath stays within baseDir boundary.
 func ResolvePath(baseDir, targetRelPath string) (string, error) {
-	absBase, err := filepath.Abs(baseDir)
-	if err != nil {
-		return "", err
-	}
-	targetPath := filepath.Join(absBase, targetRelPath)
-	absTarget, err := filepath.Abs(targetPath)
-	if err != nil {
-		return "", err
-	}
-
-	rel, err := filepath.Rel(absBase, absTarget)
-	if err != nil {
-		return "", err
-	}
-	if strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("security boundary violation: access denied")
-	}
-	return absTarget, nil
+	return safepath.Resolve(baseDir, targetRelPath)
 }
 
 // DetectMIME detects the MIME content type from a file extension.

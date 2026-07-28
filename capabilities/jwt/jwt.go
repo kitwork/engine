@@ -8,12 +8,10 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-type JWTAdapter struct {
-	scope capabilities.Scope
-}
+type JWTAdapter struct{}
 
-func NewJWTAdapter(scope capabilities.Scope) *JWTAdapter {
-	return &JWTAdapter{scope: scope}
+func NewJWTAdapter(capabilities.Scope) *JWTAdapter {
+	return &JWTAdapter{}
 }
 
 func (j *JWTAdapter) Sign(payloadVal value.Value, secretVal value.Value, opts ...value.Value) value.Value {
@@ -71,7 +69,7 @@ func (j *JWTAdapter) Decode(tokenVal value.Value) value.Value {
 }
 
 func init() {
-	capabilities.DefaultRegistry.Register("jwt", func(scope capabilities.Scope) value.Value {
+	capabilities.DefaultRegistry.RegisterWithLifetime("jwt", capabilities.LifetimeApp, func(scope capabilities.Scope) value.Value {
 		return value.New(NewJWTAdapter(scope))
 	})
 }

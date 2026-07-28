@@ -61,8 +61,15 @@ func coerceEnv(v string) value.Value {
 }
 
 func (w *KitWork) Env() value.Value {
-	if w.tenant != nil && w.tenant.env.K == value.Proxy {
-		return w.tenant.env
+	if w.tenant != nil {
+		if generation := w.tenant.SiteGeneration(); generation != nil {
+			if environment := generation.Environment(); environment.K == value.Proxy {
+				return environment
+			}
+		}
+		if w.tenant.env.K == value.Proxy {
+			return w.tenant.env
+		}
 	}
 	return NewEnv(nil)
 }

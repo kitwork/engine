@@ -26,6 +26,9 @@ func (m *mockScope) ResolvePath(paths ...string) string {
 func (m *mockScope) DB(name string) *sql.DB { return nil }
 
 func TestEnvCapability(t *testing.T) {
+	if got := capabilities.DefaultRegistry.GetLifetime("env"); got != capabilities.LifetimeSite {
+		t.Fatalf("env lifetime = %v, want LifetimeSite", got)
+	}
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("PORT=8080\nDEBUG=true\n"), 0644)
 

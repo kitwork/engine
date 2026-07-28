@@ -20,9 +20,10 @@ type Entry struct {
 
 // Store is a concurrent, size-capped map of key → Entry with lazy expiry.
 type Store struct {
-	mu  sync.RWMutex
-	m   map[string]Entry
-	max int
+	mu     sync.RWMutex
+	m      map[string]Entry
+	max    int
+	closed bool
 }
 
 // NewStore returns a store holding at most max entries (default 1000).
@@ -36,6 +37,10 @@ func NewStore(max int) *Store {
 // Get returns the entry for key if present and unexpired.
 func (s *Store) Get(key string) (Entry, bool) {
 	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return Entry{}, false
+	}
 	e, ok := s.m[key]
 	s.mu.RUnlock()
 	if !ok {
@@ -57,6 +62,9 @@ func (s *Store) Set(key string, e Entry, ttl time.Duration) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
 	if _, exists := s.m[key]; !exists && len(s.m) >= s.max {
 		for k := range s.m { // simple FIFO-ish eviction — cheap, bounds memory
 			delete(s.m, k)
@@ -64,4 +72,17 @@ func (s *Store) Set(key string, e Entry, ttl time.Duration) {
 		}
 	}
 	s.m[key] = e
+}
+
+// Close releases all entries and makes the store terminal.
+func (s *Store) Close() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if !s.closed {
+		s.closed = true
+		s.m = nil
+	}
+	s.mu.Unlock()
 }

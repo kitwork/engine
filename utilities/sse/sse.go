@@ -68,6 +68,7 @@ type SSEBroker struct {
 	unsubscribe chan unsubscribeRequest
 	sendTo      chan sendToRequest
 	stopChan    chan struct{}
+	stopOnce    sync.Once
 	mu          sync.RWMutex
 }
 
@@ -103,6 +104,14 @@ func SSEBrokerFor(key string) *SSEBroker {
 		return actual.(*SSEBroker)
 	}
 	return b
+}
+
+// ReleaseSSEBroker removes and stops the broker owned by a tenant lifecycle.
+// A later tenant generation with the same key gets a fresh broker.
+func ReleaseSSEBroker(key string) {
+	if broker, ok := sseBrokerRegistry.LoadAndDelete(key); ok {
+		broker.(*SSEBroker).Stop()
+	}
 }
 
 func (b *SSEBroker) run() {
@@ -227,67 +236,60 @@ func (b *SSEBroker) run() {
 
 // Register registers a client connection to the broker.
 func (b *SSEBroker) Register(c *SSEClient) {
-	b.mu.RLock()
-	active := b.clients != nil
-	b.mu.RUnlock()
-	if active {
-		b.register <- c
+	select {
+	case b.register <- c:
+	case <-b.stopChan:
 	}
 }
 
 // Unregister removes a client connection from the broker.
 func (b *SSEBroker) Unregister(c *SSEClient) {
-	b.mu.RLock()
-	active := b.clients != nil
-	b.mu.RUnlock()
-	if active {
-		b.unregister <- c
+	select {
+	case b.unregister <- c:
+	case <-b.stopChan:
 	}
 }
 
 // Subscribe adds channels dynamically to an active connection.
 func (b *SSEBroker) Subscribe(clientID string, channels []string) {
-	b.mu.RLock()
-	active := b.clients != nil
-	b.mu.RUnlock()
-	if active {
-		b.subscribe <- subscribeRequest{clientID: clientID, channels: channels}
+	select {
+	case b.subscribe <- subscribeRequest{clientID: clientID, channels: channels}:
+	case <-b.stopChan:
 	}
 }
 
 // Unsubscribe removes channels dynamically from an active connection.
 func (b *SSEBroker) Unsubscribe(clientID string, channels []string) {
-	b.mu.RLock()
-	active := b.clients != nil
-	b.mu.RUnlock()
-	if active {
-		b.unsubscribe <- unsubscribeRequest{clientID: clientID, channels: channels}
+	select {
+	case b.unsubscribe <- unsubscribeRequest{clientID: clientID, channels: channels}:
+	case <-b.stopChan:
 	}
 }
 
 // SendTo delivers raw event bytes to a single connection by session ID.
 func (b *SSEBroker) SendTo(clientID string, message []byte) {
-	b.mu.RLock()
-	active := b.clients != nil
-	b.mu.RUnlock()
-	if active {
-		b.sendTo <- sendToRequest{clientID: clientID, message: message}
+	select {
+	case b.sendTo <- sendToRequest{clientID: clientID, message: message}:
+	case <-b.stopChan:
 	}
 }
 
 // Publish broadcasts raw event bytes to all subscribers of a channel.
 func (b *SSEBroker) Publish(channel string, id string, message []byte) {
-	b.mu.RLock()
-	active := b.clients != nil
-	b.mu.RUnlock()
-	if active {
-		b.publish <- publishRequest{channel: channel, id: id, message: message}
+	select {
+	case b.publish <- publishRequest{channel: channel, id: id, message: message}:
+	case <-b.stopChan:
 	}
 }
 
 // Stop stops the broker and cleans up all clients.
 func (b *SSEBroker) Stop() {
-	close(b.stopChan)
+	if b == nil {
+		return
+	}
+	b.stopOnce.Do(func() {
+		close(b.stopChan)
+	})
 }
 
 // ClientCount returns the number of active clients on the broker.

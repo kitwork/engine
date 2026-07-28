@@ -21,8 +21,8 @@ type Lambda struct {
 	Body   any
 }
 
-// Eval walks a compiled IR node against scope — the Go twin of the ~30-line client walker in
-// runtime.js. One IR, two ends: the client walks it for instant feedback (e.g. validate as you
+// Eval walks a compiled IR node against scope — the Go twin of the composed client walker.
+// One IR, two ends: the client walks it for instant feedback (e.g. validate as you
 // type), the server walks the SAME data for truth (validate on submit, first-paint, go tests).
 // Scope values follow JSON conventions: float64 numbers, string, bool, nil, []any, map[string]any.
 func Eval(x any, scope map[string]any) (any, error) {
@@ -217,27 +217,28 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		return -num(v), nil
 	}
 
-	// Binary operators. Like the client walker, BOTH operands are evaluated (no short-circuit),
-	// and &&/|| return an operand — JS value semantics.
+	// Logical operators short-circuit and return an operand, matching JavaScript and the client.
 	l, err := eval(arr[1], scope, budget)
 	if err != nil {
 		return nil, err
+	}
+	if op == "&&" {
+		if !truthy(l) {
+			return l, nil
+		}
+		return eval(arr[2], scope, budget)
+	}
+	if op == "||" {
+		if truthy(l) {
+			return l, nil
+		}
+		return eval(arr[2], scope, budget)
 	}
 	r, err := eval(arr[2], scope, budget)
 	if err != nil {
 		return nil, err
 	}
 	switch op {
-	case "&&":
-		if truthy(l) {
-			return r, nil
-		}
-		return l, nil
-	case "||":
-		if truthy(l) {
-			return l, nil
-		}
-		return r, nil
 	case "+":
 		if ls, ok := l.(string); ok {
 			return ls + toStr(r), nil
@@ -274,12 +275,17 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 // result into a verdict with the exact same semantics the walkers use internally.
 func Truthy(v any) bool { return truthy(v) }
 
-// blockedKey mirrors the client walker: constructor/__proto__/prototype are the only member names
-// that can reach code execution or prototype pollution, so member access, method calls and writes
-// to them all resolve to nil. (The Go walker cannot reach a function constructor anyway, but the
-// guard keeps the two ends byte-for-byte in agreement.)
+// blockedKey mirrors the client walker. The DOM-global names matter only in the browser, but using
+// one denylist keeps server verdicts and client feedback consistent.
 func blockedKey(name string) bool {
-	return name == "constructor" || name == "__proto__" || name == "prototype"
+	switch name {
+	case "constructor", "__proto__", "prototype",
+		"ownerDocument", "defaultView", "contentWindow",
+		"window", "parent", "top", "self", "globalThis":
+		return true
+	default:
+		return false
+	}
 }
 
 // truthy follows JS: false, 0, NaN, "", null/undefined are falsy; everything else truthy.

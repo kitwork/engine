@@ -1,7 +1,7 @@
 package work
 
 // Per-folder router: the collector that a folder's router.kitwork.js writes into, plus the
-// tree-mode kitwork() binding and the lazy one-time compile of that script.
+// tree-mode kitwork() binding and the generation preparation of that script.
 //
 // In a tree tenant, `const { router } = kitwork()` inside a folder's router.kitwork.js must
 // yield a collector bound to THAT folder — not the flat, path-registering Router. We get that
@@ -20,6 +20,7 @@ import (
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/value"
 )
 
@@ -408,7 +409,7 @@ func (f *FolderRouter) Favicon(args ...value.Value) *FolderRouter {
 	full := filepath.Join(f.node.diskPath(), filepath.FromSlash(path.Clean(rel)))
 	base := f.tenant.resolve()
 	if r, err := filepath.Rel(base, full); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-		f.tenant.faviconFile = full
+		f.tenant.presentation().SetFaviconFile(full)
 	}
 	return f
 }
@@ -416,11 +417,6 @@ func (f *FolderRouter) Favicon(args ...value.Value) *FolderRouter {
 // assetMount maps a PUBLIC url prefix to a DISK dir prefix (both relative to the tenant root). For a
 // plain .assets("assets/*") the two are identical (1:1); the alias form points a clean public URL at
 // a different — often private, underscore-prefixed — folder.
-type assetMount struct {
-	url  string // public URL prefix, no surrounding slashes, e.g. "assets"
-	disk string // disk dir prefix relative to the tenant root, e.g. "_assets"
-}
-
 // Assets DECLARES the public static roots — an allowlist. Without any declaration every safe disk
 // file under the tenant is auto-served (zero-config, see serveTreeStatic); once a folder declares
 // .assets(...), ONLY the declared prefixes are public and everything else routes through the tree.
@@ -437,13 +433,10 @@ func (f *FolderRouter) Assets(args ...value.Value) *FolderRouter {
 		if url == "" || disk == "" {
 			return
 		}
-		m := assetMount{url: path.Join(f.node.relPath(), url), disk: path.Join(f.node.relPath(), disk)}
-		for _, e := range f.tenant.assetMounts {
-			if e == m {
-				return // idempotent under hot-reload recompile
-			}
-		}
-		f.tenant.assetMounts = append(f.tenant.assetMounts, m)
+		f.tenant.presentation().AddAssetMount(site.AssetMount{
+			URL:  path.Join(f.node.relPath(), url),
+			Disk: path.Join(f.node.relPath(), disk),
+		})
 	}
 	if len(args) == 2 { // alias form: (publicURLGlob, diskDir)
 		add(args[0].Text(), args[1].Text())
@@ -477,7 +470,7 @@ func (f *FolderRouter) Jittheme(args ...value.Value) *FolderRouter {
 	if len(args) > 0 && args[0].K == value.Bool && args[0].N == 0 {
 		mode = "off"
 	}
-	f.tenant.themeMode = mode
+	f.tenant.presentation().SetThemeMode(mode)
 	return f
 }
 
@@ -505,16 +498,13 @@ type TreeKitWork struct {
 
 func (tw *TreeKitWork) Router() *FolderRouter { return tw.node.folder }
 
-// ── lazy one-time folder compile ────────────────────────────────────────────
+// ── generation folder compile ──────────────────────────────────────────────
 
 // ensureFolder compiles + runs this node's router.kitwork.js exactly once, collecting its
 // guards/middleware/methods into node.folder. A folder with no router.kitwork.js still gets an
 // empty FolderRouter so its page.kitwork.html can render.
 func (n *RouteNode) ensureFolder(t *Tenant) *FolderRouter {
 	if n.folderReady.Load() {
-		if t.HotReload {
-			n.hotCheck(t)
-		}
 		return n.folder
 	}
 	n.folderMu.Lock()
@@ -523,14 +513,28 @@ func (n *RouteNode) ensureFolder(t *Tenant) *FolderRouter {
 		return n.folder
 	}
 
-	n.compileFolder(t)
+	n.folderErr = n.compileFolder(t)
 	n.folderReady.Store(true)
 	return n.folder
 }
 
-// compileFolder (re)builds this node's FolderRouter from disk and records the source snapshot the
-// hot-reload check compares against. Caller holds folderMu.
-func (n *RouteNode) compileFolder(t *Tenant) {
+func (n *RouteNode) compileError() error {
+	n.folderMu.Lock()
+	err := n.folderErr
+	n.folderMu.Unlock()
+	return err
+}
+
+func (n *RouteNode) sourceFiles() []string {
+	n.folderMu.Lock()
+	files := append([]string(nil), n.srcFiles...)
+	n.folderMu.Unlock()
+	return files
+}
+
+// compileFolder builds this generation's FolderRouter and records every
+// executable source file used by its native import graph.
+func (n *RouteNode) compileFolder(t *Tenant) error {
 	fr := &FolderRouter{
 		tenant: t, node: n,
 		methods: map[string]*FolderMethod{}, outputs: map[string]*FolderMethod{}, meta: map[string]value.Value{},
@@ -539,73 +543,32 @@ func (n *RouteNode) compileFolder(t *Tenant) {
 
 	routerFile := filepath.Join(n.diskPath(), "router"+extension+".js")
 	n.srcFiles = []string{routerFile} // watched even when absent — a router APPEARING is a change
-	n.srcMod = 0
 	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
-		n.srcMod = info.ModTime().UnixNano()
 		bc, err := compiler.CompileFile(routerFile)
 		if err != nil {
-			// A router that won't compile registers NO methods, so the folder silently degrades to
-			// page-only rendering (chain meta, no handler binding). Surface it — a swallowed syntax
-			// error here is a mystifying "my handler just doesn't run" with nothing in the logs.
-			fmt.Printf("[Router] %s: %v\n", strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator)), err)
-		} else {
-			fr.bytecode = bc
-			if len(bc.Files) > 0 {
-				n.srcFiles = bc.Files // entry + every natively-bundled import (./_core/…)
-				n.srcMod = maxModTime(bc.Files)
-			}
-			runFolderRouter(t, n, bc)
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			return fmt.Errorf("compile router %s: %w", relative, err)
+		}
+		fr.bytecode = bc
+		if len(bc.Files) > 0 {
+			n.srcFiles = append([]string(nil), bc.Files...)
+		}
+		if err := runFolderRouter(t, n, bc); err != nil {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			return fmt.Errorf("initialize router %s: %w", relative, err)
 		}
 	}
-	if info, err := os.Stat(n.diskPath()); err == nil {
-		n.dirMod = info.ModTime().UnixNano()
-	}
-}
-
-// hotCheck is the per-folder hot reload: at most once per second (per node), stat the folder's
-// source files and its directory. An edited router — or an edited MODULE it imports — recompiles
-// just this folder in place; a created/removed child folder invalidates the children cache so the
-// next resolve rediscovers the structure. Views (*.kitwork.html) need none of this: the render
-// reads them from disk every request.
-func (n *RouteNode) hotCheck(t *Tenant) {
-	now := time.Now().UnixNano()
-	last := n.hotCheckAt.Load()
-	if now-last < int64(time.Second) || !n.hotCheckAt.CompareAndSwap(last, now) {
-		return
-	}
-
-	n.folderMu.Lock()
-	defer n.folderMu.Unlock()
-	if maxModTime(n.srcFiles) != n.srcMod {
-		n.compileFolder(t)
-	}
-	if info, err := os.Stat(n.diskPath()); err == nil && info.ModTime().UnixNano() != n.dirMod {
-		n.dirMod = info.ModTime().UnixNano()
-		n.built.Store(false) // children rescan on the next resolve (new/removed folders)
-	}
-}
-
-// maxModTime returns the newest modtime (unix nanos) across files; missing files count as 0, so
-// a deletion changes the max and is detected like an edit.
-func maxModTime(files []string) int64 {
-	var max int64
-	for _, f := range files {
-		if info, err := os.Stat(f); err == nil {
-			if m := info.ModTime().UnixNano(); m > max {
-				max = m
-			}
-		}
-	}
-	return max
+	return nil
 }
 
 // runFolderRouter executes a folder's compiled router in an ISOLATED VM whose kitwork() is the
 // tree binding. Isolated (not the request pool) so the tree kitwork never leaks into a pooled
 // VM that a later flat-mode request might reuse. The handler lambdas it registers carry Address
 // offsets into bc — the same bc is FastReset back in at request time (see tree_serve.go).
-func runFolderRouter(t *Tenant, n *RouteNode, bc *compiler.Bytecode) {
+func runFolderRouter(t *Tenant, n *RouteNode, bc *compiler.Bytecode) error {
+	var vm *runtime.VM
 	treeKitwork := value.NewFunc(func(args ...value.Value) value.Value {
-		return value.New(&TreeKitWork{KitWork: t.Kitwork(args...), node: n})
+		return value.New(&TreeKitWork{KitWork: &KitWork{tenant: t, vm: vm}, node: n})
 	})
 
 	globals := make(map[string]value.Value, len(t.vm.Globals)+1)
@@ -614,10 +577,13 @@ func runFolderRouter(t *Tenant, n *RouteNode, bc *compiler.Bytecode) {
 	}
 	globals[kitwork] = treeKitwork
 
-	vm := runtime.New(bc.Instructions, bc.Constants)
+	vm = runtime.New(bc.Instructions, bc.Constants)
 	vm.Builtins = []value.Value{treeKitwork}
 	vm.Globals = globals
 	vm.SourceMap = bc.SourceMap
 	vm.MaxEnergy = t.MaxEnergy
-	vm.Run()
+	if result := vm.Run(); result.K == value.Invalid {
+		return fmt.Errorf("%s", result.Text())
+	}
+	return nil
 }

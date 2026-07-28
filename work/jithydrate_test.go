@@ -36,15 +36,25 @@ func TestServeHydrateIf(t *testing.T) {
 	if etag == "" {
 		t.Error("want an ETag header")
 	}
-	if !strings.Contains(w.Body.String(), "window.hydrate") {
-		t.Error("body should be the embedded interpreter")
+	if !strings.Contains(w.Body.String(), "kitwork:ready") {
+		t.Error("body should contain the composed runtime boot marker")
 	}
-	// Production serves the MINIFIED kernel: comments stripped, far smaller than the source.
+	// Production serves the minified composition: comments stripped, far smaller than the source.
 	if w.Body.Len() >= len(hydrate.Runtime()) {
 		t.Errorf("production body should be minified: %d bytes vs %d source", w.Body.Len(), len(hydrate.Runtime()))
 	}
-	if strings.Contains(w.Body.String(), "// kitwork kernel") {
-		t.Error("comments should be stripped from the production kernel")
+	if strings.Contains(w.Body.String(), "// Kitwork hydrate kernel") {
+		t.Error("comments should be stripped from the production runtime")
+	}
+
+	r = httptest.NewRequest("GET", hydrate.RuntimePath+"?components=dialog", nil)
+	w = httptest.NewRecorder()
+	serveHydrateIf(w, r)
+	if !strings.Contains(w.Body.String(), `components.action("dialog"`) {
+		t.Error("requested dialog action should be appended to the runtime")
+	}
+	if strings.Contains(w.Body.String(), `component("clipboard"`) {
+		t.Error("unused clipboard component should not ship")
 	}
 
 	// A conditional request with the current ETag revalidates to 304 with no body.

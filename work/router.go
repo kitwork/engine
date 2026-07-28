@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/value"
 )
@@ -85,7 +84,7 @@ type Router struct {
 
 	// treeRender, when set, is the render a filesystem-routed (tree) request uses for ctx.view():
 	// it is pointed at the resolved folder so page/index/slots resolve by that folder's chain.
-	treeRender *render.Render
+	treeRender *plannedRenderer
 
 	// viewBuilder is the DEFERRED view result for a filesystem-routed request (see viewbuilder.go).
 	// Handlers accumulate binding + meta on it; the tree lifecycle renders it once at the end.

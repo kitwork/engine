@@ -60,7 +60,8 @@ func TestCompileErrors(t *testing.T) {
 	// a.b = 1 stays out of the grammar ($.name is the ONLY assignable member); $ itself is read-only;
 	// arrays reject a trailing comma; malformed objects/arrows are rejected.
 	for _, e := range []string{"n +", "1 2", ")", "* 3", "n = ", "a.b = 1", "$ = 5",
-		"[1, 2,]", "{ count 5 }", "(x, 1) => x", "{ 5: 1 }"} {
+		"[1, 2,]", "{ count 5 }", "(x, 1) => x", "{ 5: 1 }",
+		"n@", "1.2.3", "'unterminated"} {
 		if _, err := CompileJSON(e); err == nil {
 			t.Errorf("expected error for %q, got none", e)
 		}

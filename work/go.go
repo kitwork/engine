@@ -66,8 +66,9 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 			default:
 			}
 
-			vm.Builtins = builtins
-			vm.FastReset(code, constants, globals, sourceMap)
+			vm.Context = ctx
+			tenant.prepareExecutionVM(vm, globals, builtins)
+			vm.FastReset(code, constants, vm.Globals, sourceMap)
 			vm.MaxEnergy = tenant.MaxEnergy
 
 			for key, val := range vars {
@@ -85,29 +86,16 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 }
 
 func (t *Tenant) startBackgroundTask() (context.Context, func(), bool) {
-	t.backgroundMu.Lock()
-	defer t.backgroundMu.Unlock()
-
-	if t.backgroundClosing {
+	if t == nil || t.appRuntime == nil || t.appRuntime.Tasks() == nil {
 		return nil, nil, false
 	}
-	if t.backgroundCtx == nil {
-		t.backgroundCtx, t.backgroundCancel = context.WithCancel(context.Background())
-	}
-	t.backgroundWG.Add(1)
-	return t.backgroundCtx, t.backgroundWG.Done, true
+	return t.appRuntime.Tasks().Start()
 }
 
 func (t *Tenant) stopBackgroundTasks() {
-	t.backgroundMu.Lock()
-	t.backgroundClosing = true
-	cancel := t.backgroundCancel
-	t.backgroundMu.Unlock()
-
-	if cancel != nil {
-		cancel()
+	if t != nil && t.ownsApp && t.appRuntime != nil {
+		t.appRuntime.Tasks().Close()
 	}
-	t.backgroundWG.Wait()
 }
 
 func snapshotLambda(src *value.Lambda) *value.Lambda {

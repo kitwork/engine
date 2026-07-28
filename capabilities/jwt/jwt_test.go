@@ -17,6 +17,9 @@ func (m *mockScope) ResolvePath(paths ...string) string { return "/test" }
 func (m *mockScope) DB(name string) *sql.DB             { return nil }
 
 func TestJWTCapability(t *testing.T) {
+	if got := capabilities.DefaultRegistry.GetLifetime("jwt"); got != capabilities.LifetimeApp {
+		t.Fatalf("jwt lifetime = %v, want LifetimeApp", got)
+	}
 	scope := &mockScope{}
 	val, ok := capabilities.DefaultRegistry.Get("jwt", scope)
 	if !ok {

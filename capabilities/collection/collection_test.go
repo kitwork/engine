@@ -28,6 +28,9 @@ func (m *mockScope) ResolvePath(paths ...string) string {
 func (m *mockScope) DB(name string) *sql.DB { return nil }
 
 func TestCollectionCapability(t *testing.T) {
+	if got := capabilities.DefaultRegistry.GetLifetime("collection"); got != capabilities.LifetimeSite {
+		t.Fatalf("collection lifetime = %v, want LifetimeSite", got)
+	}
 	dir := t.TempDir()
 	postsDir := filepath.Join(dir, "_collection", "posts")
 	os.MkdirAll(postsDir, 0755)

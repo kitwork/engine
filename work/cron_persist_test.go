@@ -45,7 +45,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 	}
 	defer tenant.Close()
 
-	if tenant.cronDB == nil {
+	if tenant.scheduler().db == nil {
 		t.Fatal("persisted scheduler did not start (cronDB nil) — .persist() not detected?")
 	}
 
@@ -53,7 +53,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 	var completed int
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		_ = tenant.cronDB.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&completed)
+		_ = tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&completed)
 		if completed >= 2 {
 			break
 		}
@@ -69,7 +69,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 	// schedules row synced from the file
 	var name, origin, expr, srcPath string
 	var retention int
-	err = tenant.cronDB.QueryRow(
+	err = tenant.scheduler().db.QueryRow(
 		`SELECT name, origin, schedule, source, retention FROM crons`).
 		Scan(&name, &origin, &expr, &srcPath, &retention)
 	if err != nil {
@@ -84,9 +84,9 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 
 	// History captured: output has the logged line, gas recorded, all completed.
 	var total, distinctSlots, withOutput, withGas int
-	tenant.cronDB.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT scheduled_for) FROM cron_runs`).Scan(&total, &distinctSlots)
-	tenant.cronDB.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE output LIKE 'tick %'`).Scan(&withOutput)
-	tenant.cronDB.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE gas_used > 0`).Scan(&withGas)
+	tenant.scheduler().db.QueryRow(`SELECT COUNT(*), COUNT(DISTINCT scheduled_for) FROM cron_runs`).Scan(&total, &distinctSlots)
+	tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE output LIKE 'tick %'`).Scan(&withOutput)
+	tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE gas_used > 0`).Scan(&withGas)
 
 	if total != distinctSlots {
 		t.Errorf("IDEMPOTENCY broken: %d executions across %d distinct slots — a slot fired twice", total, distinctSlots)
@@ -105,7 +105,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 	}
 	defer tenant2.Close()
 	var scheduleCount int
-	tenant2.cronDB.QueryRow(`SELECT COUNT(*) FROM crons`).Scan(&scheduleCount)
+	tenant2.scheduler().db.QueryRow(`SELECT COUNT(*) FROM crons`).Scan(&scheduleCount)
 	if scheduleCount != 1 {
 		t.Errorf("restart duplicated schedules: got %d rows, want 1", scheduleCount)
 	}
@@ -163,14 +163,14 @@ func TestCronPersistRetryAndError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tenant.Close()
-	if tenant.cronDB == nil {
+	if tenant.scheduler().db == nil {
 		t.Fatal("persisted scheduler did not start")
 	}
 
 	var failed int
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		_ = tenant.cronDB.QueryRow(
+		_ = tenant.scheduler().db.QueryRow(
 			`SELECT COUNT(*) FROM cron_runs WHERE status='failed' AND attempt=2`).Scan(&failed)
 		if failed >= 1 && atomic.LoadInt32(&errHits) >= 1 {
 			break
@@ -189,7 +189,7 @@ func TestCronPersistRetryAndError(t *testing.T) {
 
 	// The error message from the energy-limit halt must be recorded.
 	var msg string
-	tenant.cronDB.QueryRow(
+	tenant.scheduler().db.QueryRow(
 		`SELECT error_message FROM cron_runs WHERE status='failed' LIMIT 1`).Scan(&msg)
 	if msg == "" {
 		t.Errorf("failed execution has no error_message recorded")

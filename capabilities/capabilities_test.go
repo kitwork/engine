@@ -54,6 +54,70 @@ func TestInstanceCacheHonorsCapabilityLifetime(t *testing.T) {
 	}
 }
 
+func TestRegistryResolveUsesOwnerCaches(t *testing.T) {
+	reg := capabilities.NewRegistry()
+	appCache := capabilities.NewInstanceCache()
+	firstSiteCache := capabilities.NewInstanceCache()
+	secondSiteCache := capabilities.NewInstanceCache()
+	firstScope := &mockScope{appID: "app_123", domain: "first.example"}
+	secondScope := &mockScope{appID: "app_123", domain: "second.example"}
+
+	reg.RegisterWithLifetime("app", capabilities.LifetimeApp, func(capabilities.Scope) value.Value {
+		return value.New(&struct{ ID string }{ID: "app"})
+	})
+	reg.Register("site", func(capabilities.Scope) value.Value {
+		return value.New(&struct{ ID string }{ID: "site"})
+	})
+	reg.RegisterWithLifetime("request", capabilities.LifetimeRequest, func(capabilities.Scope) value.Value {
+		return value.New(&struct{ ID string }{ID: "request"})
+	})
+
+	firstApp, _ := reg.Resolve("app", firstScope, appCache, firstSiteCache)
+	secondApp, _ := reg.Resolve("app", secondScope, appCache, secondSiteCache)
+	if firstApp.V != secondApp.V {
+		t.Fatal("one app cache produced different app-scoped instances")
+	}
+	otherApp, _ := reg.Resolve(
+		"app",
+		&mockScope{appID: "app_456", domain: "third.example"},
+		capabilities.NewInstanceCache(),
+		capabilities.NewInstanceCache(),
+	)
+	if firstApp.V == otherApp.V {
+		t.Fatal("different app caches shared an app-scoped instance")
+	}
+
+	firstSite, _ := reg.Resolve("site", firstScope, appCache, firstSiteCache)
+	firstSiteAgain, _ := reg.Resolve("site", firstScope, appCache, firstSiteCache)
+	secondSite, _ := reg.Resolve("site", secondScope, appCache, secondSiteCache)
+	if firstSite.V != firstSiteAgain.V {
+		t.Fatal("one site cache produced different site-scoped instances")
+	}
+	if firstSite.V == secondSite.V {
+		t.Fatal("different site caches shared a site-scoped instance")
+	}
+	if got := reg.GetLifetime("site"); got != capabilities.LifetimeSite {
+		t.Fatalf("Register default lifetime = %v, want LifetimeSite", got)
+	}
+
+	firstRequestCache := capabilities.NewInstanceCache()
+	firstRequest, _ := reg.Resolve("request", firstScope, appCache, firstSiteCache, firstRequestCache)
+	firstRequestAgain, _ := reg.Resolve("request", firstScope, appCache, firstSiteCache, firstRequestCache)
+	secondRequest, _ := reg.Resolve(
+		"request",
+		secondScope,
+		appCache,
+		secondSiteCache,
+		capabilities.NewInstanceCache(),
+	)
+	if firstRequest.V != firstRequestAgain.V {
+		t.Fatal("one request cache produced different request-scoped instances")
+	}
+	if firstRequest.V == secondRequest.V {
+		t.Fatal("different request caches shared a request-scoped instance")
+	}
+}
+
 func (m *mockScope) AppID() string                      { return m.appID }
 func (m *mockScope) Domain() string                     { return m.domain }
 func (m *mockScope) ResolvePath(paths ...string) string { return m.root }

@@ -49,8 +49,8 @@ func (t *Tenant) appID() string {
 
 // nodeID is this tenant instance's lease owner (defaults to the process node id).
 func (t *Tenant) nodeID() string {
-	if t.cronNode != "" {
-		return t.cronNode
+	if scheduler := t.scheduler(); scheduler != nil && scheduler.node != "" {
+		return scheduler.node
 	}
 	return cronNodeID
 }
@@ -61,8 +61,8 @@ func (t *Tenant) nodeID() string {
 // when a system DB is connected, else the app's identity-level SQLite. Same partition key (appID) either
 // way, so it sees exactly the rows the scheduler wrote.
 func (t *Tenant) openCronStore() cronStore {
-	if t.cronStore != nil {
-		return t.cronStore
+	if scheduler := t.scheduler(); scheduler != nil && scheduler.store != nil {
+		return scheduler.store
 	}
 	if database.System != nil {
 		return newPgStore(database.System, t.nodeID())
@@ -78,7 +78,7 @@ func (t *Tenant) openCronStore() cronStore {
 // else per-tenant SQLite), migrates it, syncs the persisted jobs, reclaims orphaned slots, and launches
 // the dispatcher + heartbeat goroutines. Called from StartCronJobs when the tenant has any cron. Runs
 // under t.cronMu (held by the caller), so it must not re-lock it.
-func (t *Tenant) startPersistedScheduler() error {
+func (t *Tenant) startPersistedScheduler(scheduler *cronRuntime) error {
 	appID := t.appID()
 
 	// Default to the shared Postgres store whenever a system DB is connected — cron state belongs in one
@@ -86,17 +86,17 @@ func (t *Tenant) startPersistedScheduler() error {
 	// dev / single binary). No flag: the presence of database.System is the switch.
 	var store cronStore
 	if database.System != nil {
-		t.cronDB = database.System
+		scheduler.db = database.System
 		store = newPgStore(database.System, t.nodeID())
 	} else {
 		db := appSqliteFor(t, "scheduler.db").db() // apps/<identity>/.data/scheduler.db — one per app
 		if db == nil {
 			return fmt.Errorf("scheduler.db connection unavailable")
 		}
-		t.cronDB = db
+		scheduler.db = db
 		store = newSqliteStore(db, t.nodeID())
 	}
-	t.cronStore = store
+	scheduler.store = store
 
 	if err := store.initSchema(); err != nil {
 		return err
@@ -104,12 +104,12 @@ func (t *Tenant) startPersistedScheduler() error {
 
 	// Snapshot every cron + build the name→code map the worker uses to find a claimed slot's handler.
 	// Within an app (identity) a cron's name is its file, unique — so name is the key.
-	persisted := make([]*CronJob, 0, len(t.crons))
-	t.cronByName = make(map[string]*CronJob)
-	for _, job := range t.crons {
+	persisted := make([]*CronJob, 0, len(scheduler.jobs))
+	scheduler.byName = make(map[string]*CronJob)
+	for _, job := range scheduler.jobs {
 		normalizeCronDefaults(job)
 		persisted = append(persisted, job)
-		t.cronByName[job.Name] = job
+		scheduler.byName[job.Name] = job
 	}
 	if len(persisted) == 0 {
 		return nil
@@ -121,14 +121,22 @@ func (t *Tenant) startPersistedScheduler() error {
 	store.reclaim(appID, true) // boot: SQLite wipes all this app's 'running'; PG frees only expired leases
 
 	cancel := make(chan struct{})
-	t.cronCancels = append(t.cronCancels, cancel)
-	go t.persistDispatcher(cancel, appID, persisted)
+	scheduler.cancels = append(scheduler.cancels, cancel)
+	scheduler.wg.Add(1)
+	go func() {
+		defer scheduler.wg.Done()
+		t.persistDispatcher(scheduler, cancel, appID, persisted)
+	}()
 
 	// Heartbeat in a host goroutine (never the VM): keep this node's leases alive while long jobs run.
 	// No-op for SQLite (single node); the lifeline that stops premature reclaim on Postgres.
 	hb := make(chan struct{})
-	t.cronCancels = append(t.cronCancels, hb)
-	go t.persistHeartbeat(hb)
+	scheduler.cancels = append(scheduler.cancels, hb)
+	scheduler.wg.Add(1)
+	go func() {
+		defer scheduler.wg.Done()
+		t.persistHeartbeat(scheduler, hb)
+	}()
 
 	fmt.Printf("[Cron] persisted scheduler up (%s, node=%s) — %d job(s) for %q\n",
 		store.label(), t.nodeID(), len(persisted), appID)
@@ -151,7 +159,7 @@ func normalizeCronDefaults(job *CronJob) {
 	}
 }
 
-func (t *Tenant) persistDispatcher(cancel chan struct{}, appID string, persisted []*CronJob) {
+func (t *Tenant) persistDispatcher(scheduler *cronRuntime, cancel chan struct{}, appID string, persisted []*CronJob) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	tick := 0
@@ -162,12 +170,12 @@ func (t *Tenant) persistDispatcher(cancel chan struct{}, appID string, persisted
 			return
 		case <-ticker.C:
 			now := time.Now().UTC()
-			t.dispatchDue(now, appID, persisted, lastSlot)
-			t.claimAndRun(appID)
-			t.cronStore.reclaim(appID, false) // PG: free expired leases (a crashed node's work). SQLite: no-op.
+			t.dispatchDue(scheduler, now, appID, persisted, lastSlot)
+			t.claimAndRun(scheduler, appID)
+			scheduler.store.reclaim(appID, false)
 			tick++
 			if tick%60 == 0 { // ~once a minute
-				t.retentionSweep(persisted)
+				t.retentionSweep(scheduler, persisted)
 			}
 		}
 	}
@@ -175,7 +183,7 @@ func (t *Tenant) persistDispatcher(cancel chan struct{}, appID string, persisted
 
 // persistHeartbeat pushes this node's leases forward every ttl/3 while it lives, so the shared store can
 // tell a live-but-busy node from a dead one. Host goroutine — the VM is blocked during a slow job.
-func (t *Tenant) persistHeartbeat(cancel chan struct{}) {
+func (t *Tenant) persistHeartbeat(scheduler *cronRuntime, cancel chan struct{}) {
 	interval := cronLeaseTTL / 3
 	if interval < 250*time.Millisecond {
 		interval = 250 * time.Millisecond
@@ -187,7 +195,7 @@ func (t *Tenant) persistHeartbeat(cancel chan struct{}) {
 		case <-cancel:
 			return
 		case <-ticker.C:
-			t.cronStore.heartbeat(t.nodeID(), cronLeaseTTL)
+			scheduler.store.heartbeat(t.nodeID(), cronLeaseTTL)
 		}
 	}
 }
@@ -196,7 +204,7 @@ func (t *Tenant) persistHeartbeat(cancel chan struct{}) {
 // ~N ticks that land in one window down to a single INSERT (so rowids stay tidy and writes don't churn);
 // the UNIQUE(identity, name, scheduled_for) constraint remains the real idempotency backstop, so a
 // restart (which starts with an empty lastSlot) still cannot duplicate a slot already recorded.
-func (t *Tenant) dispatchDue(now time.Time, appID string, persisted []*CronJob, lastSlot map[string]time.Time) {
+func (t *Tenant) dispatchDue(scheduler *cronRuntime, now time.Time, appID string, persisted []*CronJob, lastSlot map[string]time.Time) {
 	for _, job := range persisted {
 		slot, due := jobSlot(job, now)
 		if !due {
@@ -206,10 +214,10 @@ func (t *Tenant) dispatchDue(now time.Time, appID string, persisted []*CronJob, 
 			continue // already handled this window on an earlier tick
 		}
 		// Overlap 'skip': don't open a new slot while a previous run for this job is still active.
-		if job.OverlapPolicy == "skip" && t.cronStore.hasActive(appID, job.Name) {
+		if job.OverlapPolicy == "skip" && scheduler.store.hasActive(appID, job.Name) {
 			continue
 		}
-		if err := t.cronStore.insertSlot(appID, job.Name, slot, job.MaxAttempts); err != nil {
+		if err := scheduler.store.insertSlot(appID, job.Name, slot, job.MaxAttempts); err != nil {
 			fmt.Printf("[Cron] dispatch %s: %v\n", job.Name, err)
 			continue // leave lastSlot unset so the next tick retries this window
 		}
@@ -227,21 +235,26 @@ type claimedRow struct {
 	maxAttempts  int
 }
 
-func (t *Tenant) claimAndRun(appID string) {
-	for _, r := range t.cronStore.claim(appID, t.nodeID(), cronLeaseTTL, 20) {
-		job := t.cronByName[r.name]
+func (t *Tenant) claimAndRun(scheduler *cronRuntime, appID string) {
+	for _, r := range scheduler.store.claim(appID, t.nodeID(), cronLeaseTTL, 20) {
+		job := scheduler.byName[r.name]
 		if job == nil {
 			// Code for this cron is not loaded on this node — close the slot so it does not loop.
-			t.cronStore.fail(r.id, r.attempt+1, false, time.Time{}, "no registered handler for "+r.name, "", 0)
+			scheduler.store.fail(r.id, r.attempt+1, false, time.Time{}, "no registered handler for "+r.name, "", 0)
 			continue
 		}
-		go t.runClaimed(r, job)
+		if scheduler.startRun() {
+			go func() {
+				defer scheduler.wg.Done()
+				t.runClaimed(scheduler, r, job)
+			}()
+		}
 	}
 }
 
 // runClaimed executes one slot's handler and records the outcome. attempt counts PRIOR failures, so the
 // current try is attempt+1 and this is the final try when attempt+1 >= max_attempts.
-func (t *Tenant) runClaimed(r claimedRow, job *CronJob) {
+func (t *Tenant) runClaimed(scheduler *cronRuntime, r claimedRow, job *CronJob) {
 	var out strings.Builder
 	tryNum := r.attempt + 1
 	final := tryNum >= r.maxAttempts
@@ -251,8 +264,8 @@ func (t *Tenant) runClaimed(r claimedRow, job *CronJob) {
 
 	appID := t.appID()
 	if runErr == nil {
-		t.cronStore.complete(r.id, out.String(), int64(gas))
-		t.cronStore.recordSummary(appID, r.name, "completed") // roll into the crons summary
+		scheduler.store.complete(r.id, out.String(), int64(gas))
+		scheduler.store.recordSummary(appID, r.name, "completed")
 		if job.OnSuccess != nil {
 			_, _ = t.runInJobVM(job, job.OnSuccess, []value.Value{ctx})
 		}
@@ -263,10 +276,10 @@ func (t *Tenant) runClaimed(r claimedRow, job *CronJob) {
 	// available_at = now + 2^attempt × 10s. Reclaim is separate: it re-runs a slot that never finished.
 	newAttempt := r.attempt + 1
 	retry := newAttempt < r.maxAttempts
-	t.cronStore.fail(r.id, newAttempt, retry, time.Now().Add(cronBackoff(newAttempt)),
+	scheduler.store.fail(r.id, newAttempt, retry, time.Now().Add(cronBackoff(newAttempt)),
 		runErr.Error(), out.String(), int64(gas))
 	if !retry {
-		t.cronStore.recordSummary(appID, r.name, "failed") // terminal failure — summarise once
+		scheduler.store.recordSummary(appID, r.name, "failed")
 	}
 	if job.OnError != nil {
 		errObj := value.New(map[string]value.Value{"message": value.New(runErr.Error())})
@@ -316,7 +329,7 @@ var cronSuccessRetention = 1 * time.Hour
 
 // retentionSweep prunes cron_runs — successes fast (cronSuccessRetention), failures for their .retention()
 // window. The per-cron summary on `crons` is what persists; the run log stays small.
-func (t *Tenant) retentionSweep(persisted []*CronJob) {
+func (t *Tenant) retentionSweep(scheduler *cronRuntime, persisted []*CronJob) {
 	appID := t.appID()
 	now := time.Now()
 	completedBefore := now.Add(-cronSuccessRetention)
@@ -325,7 +338,7 @@ func (t *Tenant) retentionSweep(persisted []*CronJob) {
 		if days < 1 {
 			days = 30
 		}
-		t.cronStore.retention(appID, job.Name, completedBefore, now.AddDate(0, 0, -days))
+		scheduler.store.retention(appID, job.Name, completedBefore, now.AddDate(0, 0, -days))
 	}
 }
 

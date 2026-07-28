@@ -7,41 +7,39 @@ import (
 )
 
 type ShortbaseAdapter struct {
-	scope capabilities.Scope
 	codec *sb.Codec
 }
 
-func NewShortbaseAdapter(scope capabilities.Scope) *ShortbaseAdapter {
+func NewShortbaseAdapter(capabilities.Scope) *ShortbaseAdapter {
 	return &ShortbaseAdapter{
-		scope: scope,
 		codec: sb.Default(),
 	}
 }
 
 func (s *ShortbaseAdapter) From(args ...value.Value) *ShortbaseAdapter {
 	if len(args) > 0 {
-		return &ShortbaseAdapter{scope: s.scope, codec: s.codec.From(args[0].Text())}
+		return &ShortbaseAdapter{codec: s.codec.From(args[0].Text())}
 	}
 	return s
 }
 
 func (s *ShortbaseAdapter) To(args ...value.Value) *ShortbaseAdapter {
 	if len(args) > 0 {
-		return &ShortbaseAdapter{scope: s.scope, codec: s.codec.To(args[0].Text())}
+		return &ShortbaseAdapter{codec: s.codec.To(args[0].Text())}
 	}
 	return s
 }
 
 func (s *ShortbaseAdapter) Prefix(args ...value.Value) *ShortbaseAdapter {
 	if len(args) > 0 {
-		return &ShortbaseAdapter{scope: s.scope, codec: s.codec.Prefix(args[0].Text())}
+		return &ShortbaseAdapter{codec: s.codec.Prefix(args[0].Text())}
 	}
 	return s
 }
 
 func (s *ShortbaseAdapter) Suffix(args ...value.Value) *ShortbaseAdapter {
 	if len(args) > 0 {
-		return &ShortbaseAdapter{scope: s.scope, codec: s.codec.Suffix(args[0].Text())}
+		return &ShortbaseAdapter{codec: s.codec.Suffix(args[0].Text())}
 	}
 	return s
 }
@@ -67,7 +65,7 @@ func (s *ShortbaseAdapter) Decode(args ...value.Value) value.Value {
 }
 
 func init() {
-	capabilities.DefaultRegistry.Register("shortbase", func(scope capabilities.Scope) value.Value {
+	capabilities.DefaultRegistry.RegisterWithLifetime("shortbase", capabilities.LifetimeApp, func(scope capabilities.Scope) value.Value {
 		return value.New(NewShortbaseAdapter(scope))
 	})
 }

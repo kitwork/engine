@@ -7,14 +7,54 @@ import (
 	"strings"
 )
 
-//go:embed runtime.js
-var runtimeJS string
+//go:embed bridge.js
+var bridgeJS string
 
-// Runtime returns the client runtime source (tiny parser + IR walker, no eval). It is the same for
-// every page and every tenant, so a host serves it once at a stable, cacheable URL (RuntimePath).
+//go:embed kernel.js
+var kernelJS string
+
+//go:embed morph.js
+var morphJS string
+
+//go:embed modules/native.js
+var nativeJS string
+
+//go:embed modules/storage.js
+var storageJS string
+
+//go:embed modules/web.js
+var webJS string
+
+//go:embed modules/component-loader.js
+var componentLoaderJS string
+
+//go:embed compat.js
+var compatJS string
+
+//go:embed drive.js
+var driveJS string
+
+//go:embed boot.js
+var bootJS string
+
+// Runtime returns the ordered client composition: bridge, kernel, modules, Morph, compatibility,
+// Drive, then boot. It is identical for every tenant and served at one cacheable RuntimePath.
 // Because the engine serves BOTH this runtime and the Go compiler from one codebase, the two ends
 // version together — grammar sync is by construction, not by discipline.
-func Runtime() string { return runtimeJS }
+func Runtime() string {
+	return strings.Join([]string{
+		bridgeJS,
+		kernelJS,
+		nativeJS,
+		storageJS,
+		webJS,
+		componentLoaderJS,
+		morphJS,
+		compatJS,
+		driveJS,
+		bootJS,
+	}, "\n")
+}
 
 // RuntimePath is the built-in, always-on route the runtime is served at, and what Render points
 // pages at. It is NOT a per-page JIT artifact (unlike /jitcss, /jiticons, /jitfonts, which are
@@ -98,12 +138,9 @@ func Render(html string) string {
 	if !presenceRe.MatchString(html) {
 		return html
 	}
-	// The jit/js pass (which runs earlier in the pipeline) inlines the SAME kernel as the core of
-	// its verb bundle — when that block is already on the page, a second reference would be pure
-	// duplication (the kernel is boot-guarded anyway, this just saves the bytes). Match the full
-	// open tag: the kernel SOURCE mentions the bare marker (mergeHead), so a substring would
-	// false-positive on any page that inlines the kernel for other reasons.
-	if strings.Contains(html, `<script data-kitwork-jit="js">`) {
+	// The jit/js pass runs earlier and points its only-used action/component set at this same
+	// runtime route. When that combined asset is present, a second bare reference is duplication.
+	if strings.Contains(html, `<script data-kitwork-jit="runtime" src="`+RuntimePath) {
 		return html
 	}
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {

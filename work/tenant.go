@@ -1,7 +1,6 @@
 package work
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -12,11 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
-	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/utilities/cache"
 	collectionhelper "github.com/kitwork/engine/utilities/collection"
 	httphelper "github.com/kitwork/engine/utilities/http"
@@ -39,70 +39,51 @@ const (
 // conventions all key off it.
 const RouterFileName = "router" + extension + ".js"
 
-// AppScope groups the state whose SCOPE is the app (identity) rather than the single web request:
-// identity config, DB connections, the capability cache, background tasks and the cron scheduler.
-//
-// "App-level" describes what the state MEANS, not that one instance is shared: AppScope is embedded
-// by value, so every Tenant owns its own. Kitwork builds one Tenant per DOMAIN, and genuine
-// per-app singletons are reached another way — the cron dispatcher runs on a separate identity-level
-// tenant (NewAppTenant, one per app, see StartAppSchedulers) and the SSE broker lives in a registry
-// keyed by identity. Do not add state here on the assumption that domains of one app will share it.
+// AppScope retains only compatibility metadata used by Tenant adapters.
+// Identity-wide resources live on app.Runtime.
 type AppScope struct {
-	config            *Config
-	entity            *Entity
-	databases         map[string]*sql.DB
-	dbMu              sync.Mutex
-	crons             []*CronJob
-	cronMu            sync.Mutex
-	cronCancels       []chan struct{}
-	cronDB            *sql.DB             // underlying durable store handle (.data/scheduler.db, or shared PG)
-	cronStore         cronStore           // dialect-abstracted coordination store (sqlite Phase 2 / pg Phase 3)
-	cronByName        map[string]*CronJob // cron name → job, so a claimed DB slot finds its code to run
-	cronNode          string              // lease owner override (multi-node demo); "" → process cronNodeID
-	capabilitiesCache *capabilities.InstanceCache
-
-	backgroundMu      sync.Mutex
-	backgroundCtx     context.Context
-	backgroundCancel  context.CancelFunc
-	backgroundWG      sync.WaitGroup
-	backgroundClosing bool
+	config *Config
+	entity *Entity
 }
 
-// SiteScope groups domain/site-level web presentation state: the route tree, JIT CSS config, asset
-// mounts, favicon and theme mode. Everything here is declared by the site's own root router, so it
-// belongs to ONE domain even when several domains share an app.
-type SiteScope struct {
-	// tree, when non-nil, marks this tenant as FILESYSTEM-ROUTED: requests are resolved by
-	// walking the folder tree (each folder = a runtime node) instead of the flat routes table.
-	// Activated by a `filesystem.kitwork` marker at the tenant root. See router_*.go.
-	tree *RouteTree
-
-	// Declared by the root router during ensureFolder (jitcssConfig sets the publish pattern):
-	jitcssConfig *jitcss.Config // JIT-CSS config passed to the render engine
-	faviconFile  string         // .favicon(): file served at /favicon.ico ("" = none declared)
-	assetMounts  []assetMount   // .assets(): allowlisted static roots, each URL prefix → disk dir (empty = serve any safe file)
-	themeMode    string         // .jittheme(): "" = auto-scan, "force" = always inject, "off" = never
-}
+// SiteScope remains as a source-compatible embedding point while concrete
+// site state moves to site.Runtime and site.Generation.
+type SiteScope struct{}
 
 // Tenant represents an active tenant, composing AppScope and SiteScope with runtime VM state.
 type Tenant struct {
 	AppScope
 	SiteScope
 
+	appRuntime  *app.Runtime
+	siteRuntime *site.Runtime
+	generation  *site.Generation
+	ownsApp     bool
+
 	bytecode  *compiler.Bytecode
 	vm        *runtime.VM
 	MaxEnergy uint64
 
-	// HotReload enables the per-folder hot check: an edited router.kitwork.js (or an imported
-	// module) recompiles just its folder; created/removed folders re-enter the tree. Set by the
-	// engine from config; off = every compile is exactly once (production).
+	requestMu      sync.Mutex
+	requestWG      sync.WaitGroup
+	requestClosing bool
+	closeOnce      sync.Once
+
+	// App-only compatibility tenants have no site generation.
+	capabilitiesMu    sync.Mutex
+	capabilitiesCache *capabilities.InstanceCache
+
+	// HotReload is retained for compatibility. Reload ownership now belongs to
+	// core.Engine, which replaces the complete generation instead of mutating
+	// this Tenant in place.
 	HotReload bool
 
-	env value.Value // env scoped của tenant này (đọc từ <path>/.env), lộ qua kitwork().env
-
-	respCache    *cache.Store       // .cache(): RAM response cache
-	persistStore *persist.Store     // .persist(): disk response cache (<tenant>/.persist)
-	limiter      *ratelimit.Limiter // .limit()/.ratelimit(): rate limiter
+	// Compatibility aliases. A web tenant borrows these from its generation
+	// and site runtime; an app-only tenant still owns local fallbacks.
+	env          value.Value
+	respCache    *cache.Store
+	persistStore *persist.Store
+	limiter      *ratelimit.Limiter
 
 	collectionMu    sync.Mutex
 	collectionStore *collectionhelper.Store
@@ -122,16 +103,117 @@ type Tenant struct {
 	meta value.Value
 }
 
+// CapabilitiesCache owns LifetimeSite instances for this tenant generation.
 func (t *Tenant) CapabilitiesCache() *capabilities.InstanceCache {
 	if t == nil {
 		return nil
 	}
-	t.dbMu.Lock()
-	defer t.dbMu.Unlock()
+	if t.generation != nil {
+		return t.generation.CapabilitiesCache()
+	}
+	t.capabilitiesMu.Lock()
+	defer t.capabilitiesMu.Unlock()
 	if t.capabilitiesCache == nil {
 		t.capabilitiesCache = capabilities.NewInstanceCache()
 	}
 	return t.capabilitiesCache
+}
+
+// AppCapabilitiesCache delegates LifetimeApp ownership to the shared app runtime.
+func (t *Tenant) AppCapabilitiesCache() *capabilities.InstanceCache {
+	if t == nil {
+		return nil
+	}
+	if t.appRuntime != nil {
+		return t.appRuntime.CapabilitiesCache()
+	}
+	return t.CapabilitiesCache()
+}
+
+func (t *Tenant) AppRuntime() *app.Runtime {
+	if t == nil {
+		return nil
+	}
+	return t.appRuntime
+}
+
+func (t *Tenant) SiteRuntime() *site.Runtime {
+	if t == nil {
+		return nil
+	}
+	return t.siteRuntime
+}
+
+func (t *Tenant) SiteGeneration() *site.Generation {
+	if t == nil {
+		return nil
+	}
+	return t.generation
+}
+
+// SourcesChanged compares the active generation's executable source manifest
+// with disk. Templates are deliberately excluded because render reads them
+// directly for each request.
+func (t *Tenant) SourcesChanged() (bool, error) {
+	if t == nil || t.generation == nil {
+		return false, nil
+	}
+	return t.generation.Sources().Changed()
+}
+
+func (t *Tenant) presentation() *site.Presentation {
+	if t == nil || t.generation == nil {
+		return nil
+	}
+	return t.generation.Presentation()
+}
+
+func (t *Tenant) routeTree() *RouteTree {
+	if t == nil || t.generation == nil {
+		return nil
+	}
+	tree, _ := t.generation.RouteGraph().(*RouteTree)
+	return tree
+}
+
+func (t *Tenant) renderPlan() *RenderPlan {
+	if t == nil || t.generation == nil {
+		return nil
+	}
+	plan, _ := t.generation.RenderPlan().(*RenderPlan)
+	return plan
+}
+
+// ActivateGeneration publishes this tenant's prepared site revision. It does
+// not retire the previous generation; the previous Tenant owns that drain.
+func (t *Tenant) ActivateGeneration() error {
+	if t == nil || t.siteRuntime == nil || t.generation == nil {
+		return nil
+	}
+	_, err := t.siteRuntime.ActivateGeneration(t.generation)
+	return err
+}
+
+func (t *Tenant) generationLease() (*site.Lease, error) {
+	if t == nil || t.generation == nil {
+		return nil, nil
+	}
+	current := t.siteRuntime.CurrentGeneration()
+	if current == nil {
+		if err := t.ActivateGeneration(); err != nil {
+			return nil, err
+		}
+	} else if current != t.generation {
+		return nil, fmt.Errorf(
+			"site generation %d is no longer current",
+			t.generation.Version(),
+		)
+	}
+	lease, ok := t.generation.Acquire()
+	if !ok {
+		return nil, fmt.Errorf("site generation %d is retired", t.generation.Version())
+	}
+	return lease, nil
 }
 
 type Cache struct {
@@ -218,9 +300,9 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 	viewsDir := t.resolve("views")
 	full := filepath.Join(viewsDir, filepath.FromSlash(clean))
 
-	// Defense in depth: the resolved path must stay inside views/.
-	rel, err := filepath.Rel(viewsDir, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	// Defense in depth: canonical resolution must remain in this site. This
+	// rejects symlinks that point into a sibling site or outside the app.
+	if !t.insideSiteRoot(full) {
 		return false
 	}
 
@@ -244,17 +326,29 @@ func (t *Tenant) RouterFile(filenames ...string) string {
 
 func (t *Tenant) Run() error {
 	// FILESYSTEM-ROUTED, always. There is no flat app.kitwork.js entry and no route table — the
-	// folder tree IS the router. We only set up the shared VM + globals + env here; the tree
-	// compiles each folder's router.kitwork.js LAZILY on the first request that reaches it.
+	// folder tree IS the router. Build the finite route declaration tree before activation so
+	// requests never publish a partially prepared generation.
 	t.bytecode = &compiler.Bytecode{}
 	t.vm = runtime.New(t.bytecode.Instructions, t.bytecode.Constants)
 	t.vm.MaxEnergy = t.MaxEnergy
 	t.vm.SourceMap = t.bytecode.SourceMap
 
-	t.env = NewEnv(ParseDotEnv(t.resolve(".env")))
+	envFile := t.resolve(".env")
+	environment := NewEnv(ParseDotEnv(envFile))
+	if t.generation != nil {
+		if err := t.generation.SetEnvironment(environment); err != nil {
+			return err
+		}
+		if err := t.generation.Sources().WatchFile(envFile); err != nil {
+			return err
+		}
+		t.env = t.generation.Environment()
+	} else {
+		t.env = environment
+	}
 
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
-		return value.New(t.Kitwork(args...))
+		return value.New(&KitWork{tenant: t, vm: t.vm})
 	})
 	t.vm.Builtins = []value.Value{kitworkFunc}
 	t.vm.Globals = make(map[string]value.Value)
@@ -262,15 +356,41 @@ func (t *Tenant) Run() error {
 
 	injectJSCompat(t.vm.Globals)
 
-	t.respCache = cache.NewStore(1000)
-	t.persistStore = persist.New(t.resolve(".persist"))
-	t.limiter = ratelimit.New()
+	if t.generation != nil && t.siteRuntime != nil {
+		if err := t.siteRuntime.ConfigureResources(t.resolve()); err != nil {
+			return err
+		}
+		t.respCache = t.generation.ResponseCache()
+		t.persistStore = t.siteRuntime.PersistStore()
+		t.limiter = t.siteRuntime.Limiter()
+	} else {
+		t.respCache = cache.NewStore(1000)
+		t.persistStore = persist.New(t.resolve(".persist"))
+		t.limiter = ratelimit.New()
+	}
 
 	t.vm.Globals["fetch"] = value.NewFunc(func(args ...value.Value) value.Value {
 		return httphelper.FetchWith(httphelper.NewClient(t.fetchRAM(), t.fetchDisk()), args...)
 	})
 
-	t.tree = NewRouteTree(t)
+	if t.entity.Domain != "" {
+		tree := NewRouteTree(t)
+		if err := tree.Prepare(); err != nil {
+			return err
+		}
+		if err := t.generation.SetRouteGraph(tree); err != nil {
+			tree.Close()
+			return err
+		}
+		plan, err := newRenderPlan(t, tree)
+		if err != nil {
+			return err
+		}
+		if err := t.generation.SetRenderPlan(plan); err != nil {
+			plan.Close()
+			return err
+		}
+	}
 
 	if t.entity.Domain == "" {
 		t.LoadCronFiles()
@@ -280,15 +400,22 @@ func (t *Tenant) Run() error {
 }
 
 func NewAppTenant(root, identity string) *Tenant {
+	appRuntime := app.NewRuntime(identity)
+	tenant := NewAppTenantWithRuntime(root, identity, appRuntime)
+	tenant.ownsApp = true
+	return tenant
+}
+
+func NewAppTenantWithRuntime(root, identity string, appRuntime *app.Runtime) *Tenant {
 	return &Tenant{
 		AppScope: AppScope{
-			config:    &Config{root: root},
-			entity:    &Entity{Identity: identity, Domain: ""},
-			databases: make(map[string]*sql.DB),
+			config: &Config{root: root},
+			entity: &Entity{Identity: identity, Domain: ""},
 		},
-		SiteScope: SiteScope{},
-		cache:     make(map[string]*Responser),
-		lruCache:  make(map[string]*CacheItem),
+		SiteScope:  SiteScope{},
+		appRuntime: appRuntime,
+		cache:      make(map[string]*Responser),
+		lruCache:   make(map[string]*CacheItem),
 	}
 }
 
@@ -317,29 +444,94 @@ func DiscoverAppIdentities(root string) []string {
 	return ids
 }
 
+// DiscoverLegacySites reports domain folders that still have the removed flat
+// app.kitwork.js entry but no filesystem router marker. The host never executes
+// these files; surfacing them at boot prevents a silent migration failure.
+func DiscoverLegacySites(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+
+	var legacy []string
+	check := func(dir, label string) {
+		if _, err := os.Stat(filepath.Join(dir, RouterFileName)); err == nil {
+			return
+		}
+		if info, err := os.Stat(filepath.Join(dir, "app.kitwork.js")); err == nil && !info.IsDir() {
+			legacy = append(legacy, label)
+		}
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		first := filepath.Join(root, entry.Name())
+		check(first, entry.Name())
+
+		children, readErr := os.ReadDir(first)
+		if readErr != nil {
+			continue
+		}
+		for _, child := range children {
+			if child.IsDir() {
+				check(filepath.Join(first, child.Name()), child.Name())
+			}
+		}
+	}
+	return legacy
+}
+
 func NewTenant(root string, domain string) *Tenant {
-	var identity string
-	if domain != "" {
-		if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
-			identity = dbIdentity
-		}
-		if identity == "" {
-			identity = findIdentity(root, domain)
-		}
-	}
-
-	tenant := &Tenant{
-		AppScope: AppScope{
-			config:    &Config{root: root},
-			entity:    &Entity{Identity: identity, Domain: domain},
-			databases: make(map[string]*sql.DB),
-		},
-		SiteScope: SiteScope{},
-		cache:     make(map[string]*Responser),
-		lruCache:  make(map[string]*CacheItem),
-	}
-
+	identity := ResolveIdentity(root, domain)
+	appRuntime := app.NewRuntime(identity)
+	siteRuntime, _ := appRuntime.Site(root, domain)
+	generation, _ := siteRuntime.PrepareGeneration()
+	tenant := NewTenantWithRuntime(root, domain, appRuntime, siteRuntime, generation)
+	tenant.ownsApp = true
 	return tenant
+}
+
+func NewTenantWithRuntime(
+	root,
+	domain string,
+	appRuntime *app.Runtime,
+	siteRuntime *site.Runtime,
+	generations ...*site.Generation,
+) *Tenant {
+	identity := ""
+	if appRuntime != nil {
+		identity = appRuntime.ID()
+	}
+	var generation *site.Generation
+	if len(generations) > 0 {
+		generation = generations[0]
+	} else if siteRuntime != nil {
+		generation, _ = siteRuntime.PrepareGeneration()
+	}
+	return &Tenant{
+		AppScope: AppScope{
+			config: &Config{root: root},
+			entity: &Entity{Identity: identity, Domain: domain},
+		},
+		SiteScope:   SiteScope{},
+		appRuntime:  appRuntime,
+		siteRuntime: siteRuntime,
+		generation:  generation,
+		cache:       make(map[string]*Responser),
+		lruCache:    make(map[string]*CacheItem),
+	}
+}
+
+func ResolveIdentity(root, domain string) string {
+	if domain == "" {
+		return ""
+	}
+	if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
+		return dbIdentity
+	}
+	return findIdentity(root, domain)
 }
 
 func findIdentity(root, domain string) string {
@@ -359,30 +551,66 @@ func findIdentity(root, domain string) string {
 }
 
 func (t *Tenant) SSEBroker() *SSEBroker {
+	if t != nil && t.siteRuntime != nil {
+		return t.siteRuntime.SSEBroker()
+	}
 	return sseBrokerFor(t.brokerKey())
 }
 
 func (t *Tenant) brokerKey() string {
-	if t.entity != nil && (t.entity.Identity != "" || t.entity.Domain != "") {
+	if t != nil && t.entity != nil && (t.entity.Identity != "" || t.entity.Domain != "") {
 		return t.entity.Identity + "/" + t.entity.Domain
 	}
 	return "default"
 }
 
 func (t *Tenant) Close() {
-	t.stopBackgroundTasks()
-	t.StopCronJobs()
-
-	if t.capabilitiesCache != nil {
-		t.capabilitiesCache.Close()
+	if t == nil {
+		return
 	}
+	t.closeOnce.Do(func() {
+		t.requestMu.Lock()
+		t.requestClosing = true
+		t.requestMu.Unlock()
+		ownsCurrentSite := t.generation == nil ||
+			t.siteRuntime == nil ||
+			t.siteRuntime.CurrentGeneration() == t.generation
+		if ownsCurrentSite && t.siteRuntime != nil {
+			t.siteRuntime.StopStreams()
+		} else if ownsCurrentSite {
+			releaseSSEBroker(t.brokerKey())
+		}
+		t.requestWG.Wait()
+		if t.generation != nil {
+			t.generation.Retire()
+		} else if t.respCache != nil {
+			t.respCache.Close()
+		}
 
-	t.dbMu.Lock()
-	defer t.dbMu.Unlock()
-	for alias, db := range t.databases {
-		db.Close()
-		delete(t.databases, alias)
+		t.capabilitiesMu.Lock()
+		if t.capabilitiesCache != nil {
+			t.capabilitiesCache.Close()
+		}
+		t.capabilitiesMu.Unlock()
+
+		if t.ownsApp && t.appRuntime != nil {
+			t.appRuntime.Close()
+		}
+	})
+}
+
+func (t *Tenant) beginRequest() bool {
+	t.requestMu.Lock()
+	defer t.requestMu.Unlock()
+	if t.requestClosing {
+		return false
 	}
+	t.requestWG.Add(1)
+	return true
+}
+
+func (t *Tenant) endRequest() {
+	t.requestWG.Done()
 }
 
 func (t *Tenant) SetHostLimiters(s *LimiterStore) {
@@ -403,8 +631,8 @@ func (t *Tenant) CompileDynamicRoute(filePath string) error {
 	vm := enginePool.Acquire()
 	defer enginePool.Release(vm)
 
-	vm.Builtins = t.vm.Builtins
-	vm.FastReset(bytecode.Instructions, bytecode.Constants, t.vm.Globals, bytecode.SourceMap)
+	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
+	vm.FastReset(bytecode.Instructions, bytecode.Constants, vm.Globals, bytecode.SourceMap)
 	vm.MaxEnergy = t.MaxEnergy
 
 	res := vm.Run()

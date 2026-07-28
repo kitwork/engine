@@ -3,28 +3,24 @@ package work
 import (
 	"hash/fnv"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	hydrate "github.com/kitwork/engine/jit/hydrate"
+	jitjs "github.com/kitwork/engine/jit/js"
 	"github.com/kitwork/engine/utilities/minifier"
 )
 
-// serveHydrateIf serves the hydrate client interpreter — the "frontend bytecode VM" runtime that
-// walks the IR compiled by jit/hydrate — at hydrate.RuntimePath. Like jitfonts, it is a built-in,
-// always-on route checked before tenant routing: the <script src> that render injects points here,
-// and the bytes are identical for every tenant (embedded at build), so one browser-cached file
-// serves the whole host. A cheap no-op (returns false) for any other path.
-//
-// The kernel ships MINIFIED in production — the embedded source is comment-heavy by design (it is
-// the reference implementation), roughly halving on minify. Local dev (ALLOW_LOCAL) serves the
-// readable source instead, mirroring how HTML minify is keyed off !AllowLocal, so view-source
-// debugging stays pleasant. Each variant is minified/hashed once and cached for the process.
+// serveHydrateIf serves the shared client runtime at /kit.js. A components query composes only the
+// JIT modules used by the page into the same external, cacheable response.
 func serveHydrateIf(w http.ResponseWriter, r *http.Request) bool {
 	if r.URL.Path != hydrate.RuntimePath {
 		return false
 	}
-	body, etag := hydrateAsset()
+	keys := runtimeComponentKeys(r.URL.Query().Get("components"))
+	body, etag := hydrateAsset(keys)
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	if r.Header.Get("If-None-Match") == etag {
@@ -36,33 +32,50 @@ func serveHydrateIf(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// The two serve variants, each computed once. The URL is fixed but the bytes change per build (and
-// per variant), so the ETag is a content hash and we pair a short max-age with revalidation rather
-// than an immutable cache that would pin a stale runtime. Distinct ETags mean a dev↔prod switch
-// revalidates cleanly.
-var (
-	hydrateMinOnce sync.Once
-	hydrateMin     []byte
-	hydrateMinTag  string
-	hydrateRawOnce sync.Once
-	hydrateRaw     []byte
-	hydrateRawTag  string
-)
+type runtimeAsset struct {
+	body []byte
+	etag string
+}
 
-func hydrateAsset() ([]byte, string) {
-	if AllowLocal {
-		hydrateRawOnce.Do(func() {
-			hydrateRaw = []byte(hydrate.Runtime())
-			hydrateRawTag = contentTag(hydrateRaw)
-		})
-		return hydrateRaw, hydrateRawTag
+var runtimeAssetCache sync.Map
+
+func runtimeComponentKeys(raw string) []string {
+	if len(raw) > 1024 {
+		return nil
 	}
-	hydrateMinOnce.Do(func() {
-		// minifier.JS returns the input unchanged on a parse error — worst case we serve readable.
-		hydrateMin = []byte(minifier.JS(hydrate.Runtime()))
-		hydrateMinTag = contentTag(hydrateMin)
-	})
-	return hydrateMin, hydrateMinTag
+	parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ' ' })
+	if len(parts) > 32 {
+		parts = parts[:32]
+	}
+	keys := jitjs.ModuleKeys(parts)
+	sort.Strings(keys)
+	return keys
+}
+
+func hydrateAsset(keys []string) ([]byte, string) {
+	mode := "min:"
+	if AllowLocal {
+		mode = "raw:"
+	}
+	key := mode + strings.Join(keys, ",")
+	if cached, ok := runtimeAssetCache.Load(key); ok {
+		asset := cached.(runtimeAsset)
+		return asset.body, asset.etag
+	}
+
+	source := hydrate.Runtime()
+	if modules := jitjs.ModulesJS(keys); modules != "" {
+		source += "\n" + modules
+	}
+	if !AllowLocal {
+		// The minifier returns the readable input unchanged on a parse error.
+		source = minifier.JS(source)
+	}
+	asset := runtimeAsset{body: []byte(source)}
+	asset.etag = contentTag(asset.body)
+	actual, _ := runtimeAssetCache.LoadOrStore(key, asset)
+	stored := actual.(runtimeAsset)
+	return stored.body, stored.etag
 }
 
 func contentTag(b []byte) string {

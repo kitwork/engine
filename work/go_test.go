@@ -5,13 +5,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/value"
 )
 
 func TestBackgroundGoConcurrentIsolation(t *testing.T) {
 	tenant := &Tenant{
-		MaxEnergy: 1000000,
+		appRuntime: app.NewRuntime("background-test"),
+		ownsApp:    true,
+		MaxEnergy:  1000000,
 	}
+	defer tenant.Close()
 	kw := &KitWork{tenant: tenant}
 
 	var wg sync.WaitGroup

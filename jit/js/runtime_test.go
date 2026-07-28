@@ -27,7 +27,7 @@ func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
 	if !strings.Contains(js, "window.kitwork = window.kitwork") {
 		t.Errorf("core dispatcher missing: %s", js)
 	}
-	if !strings.Contains(js, `component("copy"`) {
+	if !strings.Contains(js, `components.action("copy"`) {
 		t.Errorf("copy module missing: %s", js)
 	}
 	if strings.Contains(js, `component("toggle"`) {
@@ -45,17 +45,17 @@ func TestRenderInjectsOnlyUsed(t *testing.T) {
 	out := Render(html)
 
 	// count the OPEN TAG precisely — the kernel source itself mentions the marker (mergeHead).
-	if strings.Count(out, `<script data-kitwork-jit="js">`) != 1 {
+	if strings.Count(out, `<script data-kitwork-jit="runtime"`) != 1 {
 		t.Errorf("expected exactly one runtime script: %s", out)
 	}
-	si := strings.Index(out, `<script data-kitwork-jit="js">`)
+	si := strings.Index(out, `<script data-kitwork-jit="runtime"`)
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("runtime should be injected before </head>: %s", out)
 	}
-	if !strings.Contains(out, `component("tab"`) || !strings.Contains(out, `component("dialog"`) {
+	if !strings.Contains(out, `components=action%3Adialog%2Caction%3Atab`) {
 		t.Errorf("both used components expected: %s", out)
 	}
-	if strings.Contains(out, `component("clipboard"`) {
+	if strings.Contains(out, `clipboard`) {
 		t.Errorf("clipboard is unused and must not ship: %s", out)
 	}
 	if !strings.Contains(out, `<button data-kitwork-action="tab"`) {
@@ -82,7 +82,7 @@ func TestRenderInjectsShortFormAction(t *testing.T) {
 	if out == html {
 		t.Fatal("short-form data-kit-action page got no runtime injected")
 	}
-	if !strings.Contains(out, `component("copy"`) {
+	if !strings.Contains(out, `components=action%3Acopy`) {
 		t.Errorf("copy component not injected for data-kit-action, got: %s", out)
 	}
 }
@@ -91,20 +91,20 @@ func TestRenderInjectsComponents(t *testing.T) {
 	// 1. Only component should be injected if only component is declared
 	htmlComp := `<html><head></head><body><div data-kit-component="copy"></div></body></html>`
 	outComp := Render(htmlComp)
-	if !strings.Contains(outComp, `component("copy"`) {
+	if !strings.Contains(outComp, `components=component%3Acopy`) {
 		t.Errorf("expected component copy module to be injected, got: %s", outComp)
 	}
 	if strings.Contains(outComp, `action("copy"`) {
 		t.Errorf("expected copy action verb to NOT be injected, got: %s", outComp)
 	}
-	if !strings.Contains(outComp, `component("copy@v2.0.0"`) {
+	if !strings.Contains(ModulesJS([]string{"component:copy"}), `component("copy@v2.0.0"`) {
 		t.Errorf("expected latest copy v2.0.0 to be resolved, got: %s", outComp)
 	}
 
 	// 2. Legacy data-kit-action maps to component
 	htmlAct := `<html><head></head><body><button data-kitwork-action="copy"></button></body></html>`
 	outAct := Render(htmlAct)
-	if !strings.Contains(outAct, `component("copy"`) {
+	if !strings.Contains(outAct, `components=action%3Acopy`) {
 		t.Errorf("expected copy component to be injected for data-kitwork-action, got: %s", outAct)
 	}
 }
@@ -112,7 +112,7 @@ func TestRenderInjectsComponents(t *testing.T) {
 func TestRenderInjectsVersionedComponents(t *testing.T) {
 	html := `<html><head></head><body><div data-kit-component="clipboard@v1.0.0"></div></body></html>`
 	out := Render(html)
-	if !strings.Contains(out, `components.register("clipboard"`) && !strings.Contains(out, `component("clipboard@v1.0.0"`) {
+	if !strings.Contains(out, `components=component%3Aclipboard%40v1.0.0`) {
 		t.Errorf("expected versioned clipboard component (v1.0.0) to be injected, got: %s", out)
 	}
 }

@@ -13,14 +13,14 @@
 // not JS: dropdown → popover, accordion → <details>, modal → <dialog> (the dialog verb only
 // opens/closes it).
 //
-// THE CORE IS THE UNIFIED KERNEL (engine/jit/hydrate/runtime.js): one window.kitwork root, one
-// behavior registry, one set of delegated listeners shared with expressions/model/validate/live.
-// Verb modules register into it through the kitwork.components compat surface; the kernel is
-// boot-guarded, so double inclusion (inline bundle + /kit.js) is harmless.
+// THE CORE IS hydrate.Runtime(): ordered modules behind one window.kitwork root, one behavior
+// registry and one delegated event system shared with expressions/model/validate/live.
+// Render requests that core plus a typed, only-used action/component set from one cacheable URL.
 package js
 
 import (
 	"embed"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -30,7 +30,7 @@ import (
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
-//go:embed components
+//go:embed components lib
 var jsFS embed.FS
 
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.
@@ -41,7 +41,7 @@ const coreName = "core"
 
 // runtimeMarker tags the injected <script> within the shared data-kitwork-jit namespace (value
 // "js"), so Kitwork Drive's mergeHead re-runs it on navigation alongside the css/icons blocks.
-const runtimeMarker = `data-kitwork-jit="js"`
+const runtimeMarker = `data-kitwork-jit="runtime"`
 
 var (
 	// verbRe validates a verb slug; anchored, so a name can never escape the embedded lib dir.
@@ -114,9 +114,21 @@ func findLatestComponentVersion(name string) string {
 	return latest
 }
 
-// readAction returns the component content mapped from legacy action name. Cached.
+// readAction returns the stateless behavior module from lib/<name>.js. Cached separately from
+// stateful component blueprints, because action:dialog and component:dialog are different APIs.
 func readAction(name string) string {
-	return readComponent(name)
+	key := "action:" + name
+	if v, ok := moduleCache.Load(key); ok {
+		return v.(string)
+	}
+	s := ""
+	if verbRe.MatchString(name) {
+		if b, err := jsFS.ReadFile("lib/" + name + ".js"); err == nil {
+			s = strings.TrimSpace(string(b))
+		}
+	}
+	moduleCache.Store(key, s)
+	return s
 }
 
 // readComponent returns the (trimmed) contents of components/<name>/<version>.js, or "" if absent. Cached.
@@ -209,14 +221,24 @@ func scanVerbs(html string) []string {
 	return out
 }
 
-// RuntimeJS concatenates the unified kernel + each named module (deduped, sorted). "" if none.
-func RuntimeJS(names []string) string {
+func moduleKeys(names []string) []string {
 	seen := make(map[string]bool)
 	var keys []string
 	for _, n := range names {
 		var key string
 		if strings.Contains(n, ":") {
-			key = n
+			parts := strings.SplitN(n, ":", 2)
+			switch parts[0] {
+			case "action":
+				if verbRe.MatchString(parts[1]) && HasAction(parts[1]) {
+					key = n
+				}
+			case "component":
+				name := strings.SplitN(parts[1], "@", 2)[0]
+				if componentNameRe.MatchString(name) && HasComponent(parts[1]) {
+					key = n
+				}
+			}
 		} else {
 			if HasAction(n) {
 				key = "action:" + n
@@ -232,16 +254,32 @@ func RuntimeJS(names []string) string {
 	}
 
 	if len(keys) == 0 {
-		return ""
+		return nil
 	}
 
 	sort.Strings(keys)
+	return keys
+}
+
+// ModuleKeys returns canonical action:<name>/component:<name> keys for the runtime route.
+// Unknown names are omitted, so arbitrary query strings cannot create arbitrary asset variants.
+func ModuleKeys(names []string) []string { return moduleKeys(names) }
+
+// ModulesJS concatenates only the requested component modules. The shared kernel is served by
+// /kit.js; keeping this function separate lets the HTTP asset compose and cache each used set.
+func ModulesJS(names []string) string {
+	keys := moduleKeys(names)
+	if len(keys) == 0 {
+		return ""
+	}
+
 	var b strings.Builder
-	b.WriteString(strings.TrimSpace(hydrate.Runtime()))
 	for _, k := range keys {
 		parts := strings.SplitN(k, ":", 2)
 		typ, name := parts[0], parts[1]
-		b.WriteByte('\n')
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
 		if typ == "action" {
 			b.WriteString(readAction(name))
 		} else if typ == "component" {
@@ -249,6 +287,16 @@ func RuntimeJS(names []string) string {
 		}
 	}
 	return b.String()
+}
+
+// RuntimeJS concatenates the unified kernel + each named module (deduped, sorted). It remains the
+// source builder for package distribution and tests; rendered pages use the cacheable HTTP asset.
+func RuntimeJS(names []string) string {
+	modules := ModulesJS(names)
+	if modules == "" {
+		return ""
+	}
+	return strings.TrimSpace(hydrate.Runtime()) + "\n" + modules
 }
 
 // SiteRuntimeJS is the whole-tenant form: the union of verbs used across many templates (for a
@@ -277,11 +325,12 @@ func Render(html string) string {
 		!strings.Contains(html, "data-kitwork-component=") {
 		return html
 	}
-	js := RuntimeJS(scanVerbs(html))
-	if js == "" {
+	keys := ModuleKeys(scanVerbs(html))
+	if len(keys) == 0 {
 		return html
 	}
-	tag := "<script " + runtimeMarker + ">" + js + "</script>"
+	src := hydrate.RuntimePath + "?components=" + url.QueryEscape(strings.Join(keys, ","))
+	tag := `<script ` + runtimeMarker + ` src="` + src + `" defer></script>`
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {
 		return html[:i] + tag + html[i:]
 	}

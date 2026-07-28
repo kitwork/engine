@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -59,7 +60,13 @@ var makeBackground = (block, callback) => {
 
 	// Filesystem route handlers do not execute from tenant.bytecode. The
 	// detached closure must carry the folder program that owns its address.
-	tenant := &Tenant{bytecode: &compiler.Bytecode{}, vm: vm, MaxEnergy: 1_000_000}
+	tenant := &Tenant{
+		appRuntime: app.NewRuntime("background-test"),
+		ownsApp:    true,
+		bytecode:   &compiler.Bytecode{},
+		vm:         vm,
+		MaxEnergy:  1_000_000,
+	}
 	(&KitWork{tenant: tenant}).Go(background)
 
 	select {

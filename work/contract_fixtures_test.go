@@ -67,8 +67,11 @@ import { router, sqlite } from "kitwork";
 router.get((ctx) => {
     sqlite.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)");
     sqlite.table("items").create({ name: "laptop", price: 1200 });
-    const item = sqlite.table("items").where("name", "laptop").first();
-    return ctx.json({ name: item.name });
+    sqlite.atomic((tx) => {
+        tx.table("items").create({ name: "camera", price: 900 });
+    });
+    const item = sqlite.table("items").where(row => row.name == "camera").first();
+    return ctx.json({ name: item.name, price: item.price });
 });
 `
 	if err := os.WriteFile(filepath.Join(appDir, "router.kitwork.js"), []byte(routerScript), 0644); err != nil {
@@ -87,8 +90,8 @@ router.get((ctx) => {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d. Body: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "laptop") {
-		t.Fatalf("expected 'laptop' in response body, got: %s", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `"name":"camera"`) || !strings.Contains(rec.Body.String(), `"price":900`) {
+		t.Fatalf("database lambda/transaction did not execute on the request VM: %s", rec.Body.String())
 	}
 }
 

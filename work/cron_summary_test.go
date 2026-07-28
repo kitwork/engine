@@ -33,7 +33,7 @@ func TestCronSummaryAndRetentionSplit(t *testing.T) {
 	var completed int
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
-		tenant.cronDB.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&completed)
+		tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&completed)
 		if completed >= 3 {
 			break
 		}
@@ -45,7 +45,7 @@ func TestCronSummaryAndRetentionSplit(t *testing.T) {
 	// summary on crons accumulated
 	var runCount, failCount int
 	var lastStatus, lastRun string
-	err = tenant.cronDB.QueryRow(`SELECT run_count, fail_count, last_status, last_run FROM crons WHERE name='beat'`).
+	err = tenant.scheduler().db.QueryRow(`SELECT run_count, fail_count, last_status, last_run FROM crons WHERE name='beat'`).
 		Scan(&runCount, &failCount, &lastStatus, &lastRun)
 	if err != nil {
 		t.Fatalf("crons summary query: %v", err)
@@ -64,14 +64,14 @@ func TestCronSummaryAndRetentionSplit(t *testing.T) {
 	}
 
 	var runsBefore int
-	tenant.cronDB.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&runsBefore)
+	tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&runsBefore)
 
 	// Prune successes (completedBefore in the future → delete them all); the summary must NOT change.
-	tenant.cronStore.retention("acme", "beat", time.Now().Add(time.Hour), time.Now().Add(-24*time.Hour))
+	tenant.scheduler().store.retention("acme", "beat", time.Now().Add(time.Hour), time.Now().Add(-24*time.Hour))
 
 	var runsAfter, runCountAfter int
-	tenant.cronDB.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&runsAfter)
-	tenant.cronDB.QueryRow(`SELECT run_count FROM crons WHERE name='beat'`).Scan(&runCountAfter)
+	tenant.scheduler().db.QueryRow(`SELECT COUNT(*) FROM cron_runs WHERE status='completed'`).Scan(&runsAfter)
+	tenant.scheduler().db.QueryRow(`SELECT run_count FROM crons WHERE name='beat'`).Scan(&runCountAfter)
 
 	if runsBefore == 0 {
 		t.Fatal("no completed cron_runs to prune")

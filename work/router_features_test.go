@@ -47,6 +47,19 @@ func TestTreeRootRouterDeclarations(t *testing.T) {
 	if err := tenant.Run(); err != nil {
 		t.Fatalf("tenant failed to run: %v", err)
 	}
+	tree := tenant.routeTree()
+	if tree == nil {
+		t.Fatal("site generation has no prepared route graph")
+	}
+	for _, child := range *tree.root.children.Load() {
+		if child.seg == "assets" && child.folderReady.Load() {
+			t.Fatal("generation preparation descended into a declared asset tree")
+		}
+	}
+	write("assets/style.css", "body{color:red}")
+	if changed, err := tenant.SourcesChanged(); err != nil || changed {
+		t.Fatalf("asset content should not invalidate executable sources: changed=%v err=%v", changed, err)
+	}
 
 	get := func(path string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)

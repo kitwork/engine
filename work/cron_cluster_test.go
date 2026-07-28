@@ -63,9 +63,11 @@ func TestCronClusterPostgres(t *testing.T) {
 
 	// ── two nodes, same app, same DB ──────────────────────────────────────────────────────────────
 	nodeA := NewAppTenant(tmp, "kwtest")
-	nodeA.cronNode = "node-A"
+	schedulerA, _ := nodeA.ensureScheduler()
+	schedulerA.node = "node-A"
 	nodeB := NewAppTenant(tmp, "kwtest")
-	nodeB.cronNode = "node-B"
+	schedulerB, _ := nodeB.ensureScheduler()
+	schedulerB.node = "node-B"
 	if err := nodeA.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +129,8 @@ func TestCronClusterPostgres(t *testing.T) {
 
 	// A fresh live node boots: its dispatcher must reclaim the expired lease and finish the orphaned slot.
 	nodeC := NewAppTenant(tmp, "kwtest")
-	nodeC.cronNode = "node-C"
+	schedulerC, _ := nodeC.ensureScheduler()
+	schedulerC.node = "node-C"
 	if err := nodeC.Run(); err != nil {
 		t.Fatal(err)
 	}

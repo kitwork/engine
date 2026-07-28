@@ -13,6 +13,9 @@ const (
 	LifetimeRequest
 	LifetimeApp
 	LifetimeSingleton
+	// LifetimeSite is appended to preserve the numeric values of the original
+	// public constants. New code should prefer named constants, never integers.
+	LifetimeSite
 )
 
 // Closer represents a capability that holds resources needing cleanup on app unload.
@@ -24,8 +27,13 @@ type Closer interface {
 type Factory func(scope Scope) value.Value
 
 type entry struct {
-	factory  Factory
-	lifetime Lifetime
+	factory     Factory
+	lifetime    Lifetime
+	permissions []string
+}
+
+type PermissionChecker interface {
+	HasPermission(permission string) bool
 }
 
 // Registry manages registered capabilities and constructs capability instances for a Scope.
@@ -47,18 +55,31 @@ func NewRegistry() *Registry {
 // DefaultRegistry is the global default capability registry for the engine.
 var DefaultRegistry = NewRegistry()
 
-// Register adds a capability factory under a name (e.g. "collection", "jwt", "qrcode").
+// Register adds a site-scoped capability factory under a name. This preserves
+// the historical behavior where one Tenant (one domain) owned the cache.
 func (r *Registry) Register(name string, factory Factory) {
-	r.RegisterWithLifetime(name, LifetimeApp, factory)
+	r.RegisterWithLifetime(name, LifetimeSite, factory)
 }
 
 // RegisterWithLifetime adds a capability factory with explicit lifetime scope.
 func (r *Registry) RegisterWithLifetime(name string, lifetime Lifetime, factory Factory) {
+	r.RegisterWithPermissions(name, lifetime, nil, factory)
+}
+
+// RegisterWithPermissions declares capability grants required at resolution.
+// Existing capabilities remain unrestricted when permissions is empty.
+func (r *Registry) RegisterWithPermissions(
+	name string,
+	lifetime Lifetime,
+	permissions []string,
+	factory Factory,
+) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.factories[name] = entry{
-		factory:  factory,
-		lifetime: lifetime,
+		factory:     factory,
+		lifetime:    lifetime,
+		permissions: append([]string(nil), permissions...),
 	}
 }
 
@@ -80,7 +101,7 @@ func (r *Registry) GetLifetime(name string) Lifetime {
 	if ent, ok := r.factories[name]; ok {
 		return ent.lifetime
 	}
-	return LifetimeApp
+	return LifetimeSite
 }
 
 func (r *Registry) getSingleton(name string, scope Scope) (value.Value, bool) {
@@ -98,8 +119,8 @@ func (r *Registry) getSingleton(name string, scope Scope) (value.Value, bool) {
 	return inst, true
 }
 
-// Close releases process-scoped capability instances. App-scoped instances are
-// owned by their InstanceCache and are closed when that app unloads.
+// Close releases process-scoped capability instances. App- and site-scoped
+// instances are closed by their runtime owners.
 func (r *Registry) Close() {
 	r.singletonMu.Lock()
 	instances := r.singletons
@@ -109,10 +130,11 @@ func (r *Registry) Close() {
 	closeInstances(instances)
 }
 
-// InstanceCache caches capability instances per Scope (e.g. per tenant) across requests.
+// InstanceCache caches capability instances for one runtime owner.
 type InstanceCache struct {
 	mu        sync.RWMutex
 	instances map[string]value.Value
+	closed    bool
 }
 
 func NewInstanceCache() *InstanceCache {
@@ -124,14 +146,25 @@ func NewInstanceCache() *InstanceCache {
 func (c *InstanceCache) GetOrCompute(name string, registry *Registry, scope Scope) (value.Value, bool) {
 	switch registry.GetLifetime(name) {
 	case LifetimeTransient, LifetimeRequest:
-		// A request cache does not exist yet, so request-scoped capabilities
-		// deliberately degrade to transient instead of leaking across requests.
+		// This compatibility method has only one owner cache. Request-scoped
+		// capabilities therefore remain transient; production uses Resolve with
+		// an explicit request cache.
 		return registry.Get(name, scope)
 	case LifetimeSingleton:
 		return registry.getSingleton(name, scope)
 	}
+	return c.getOrCompute(name, registry, scope)
+}
 
+func (c *InstanceCache) getOrCompute(name string, registry *Registry, scope Scope) (value.Value, bool) {
+	if c == nil {
+		return registry.Get(name, scope)
+	}
 	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return value.Value{K: value.Nil}, false
+	}
 	inst, ok := c.instances[name]
 	c.mu.RUnlock()
 	if ok {
@@ -141,6 +174,9 @@ func (c *InstanceCache) GetOrCompute(name string, registry *Registry, scope Scop
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.closed {
+		return value.Value{K: value.Nil}, false
+	}
 	if inst, ok := c.instances[name]; ok {
 		return inst, true
 	}
@@ -152,10 +188,91 @@ func (c *InstanceCache) GetOrCompute(name string, registry *Registry, scope Scop
 	return computed, true
 }
 
+// Resolve selects the cache belonging to the capability's declared owner. The
+// optional request cache keeps the original call shape compatible for
+// off-request execution, where LifetimeRequest deliberately stays transient.
+func (r *Registry) Resolve(
+	name string,
+	scope Scope,
+	appCache *InstanceCache,
+	siteCache *InstanceCache,
+	requestCaches ...*InstanceCache,
+) (value.Value, bool) {
+	return r.ResolveAuthorized(
+		name,
+		scope,
+		scope,
+		appCache,
+		siteCache,
+		requestCaches...,
+	)
+}
+
+// ResolveAuthorized separates the scope used to construct a cached capability
+// from the request scope used to enforce access. This prevents an app-scoped
+// factory from accidentally retaining request state.
+func (r *Registry) ResolveAuthorized(
+	name string,
+	factoryScope Scope,
+	accessScope Scope,
+	appCache *InstanceCache,
+	siteCache *InstanceCache,
+	requestCaches ...*InstanceCache,
+) (value.Value, bool) {
+	if !r.allowed(name, accessScope) {
+		return value.Value{K: value.Nil}, false
+	}
+	switch r.GetLifetime(name) {
+	case LifetimeTransient:
+		return r.Get(name, factoryScope)
+	case LifetimeRequest:
+		var requestCache *InstanceCache
+		if len(requestCaches) > 0 {
+			requestCache = requestCaches[0]
+		}
+		return requestCache.getOrCompute(name, r, factoryScope)
+	case LifetimeSingleton:
+		return r.getSingleton(name, factoryScope)
+	case LifetimeApp:
+		return appCache.getOrCompute(name, r, factoryScope)
+	case LifetimeSite:
+		return siteCache.getOrCompute(name, r, factoryScope)
+	default:
+		return r.Get(name, factoryScope)
+	}
+}
+
+func (r *Registry) allowed(name string, scope Scope) bool {
+	r.mu.RLock()
+	ent, ok := r.factories[name]
+	r.mu.RUnlock()
+	if !ok || len(ent.permissions) == 0 {
+		return ok
+	}
+	checker, ok := scope.(PermissionChecker)
+	if !ok {
+		return false
+	}
+	for _, permission := range ent.permissions {
+		if !checker.HasPermission(permission) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *InstanceCache) Close() {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
 	instances := c.instances
-	c.instances = make(map[string]value.Value)
+	c.instances = nil
 	c.mu.Unlock()
 
 	closeInstances(instances)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/database"
+	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/value"
 )
 
@@ -31,20 +32,25 @@ type SQLite struct {
 // Sqlite is what `import { sqlite } from "kitwork"` resolves to (0-arg getter, auto-called): the
 // tenant's default database at .data/app.db.
 func (w *KitWork) Sqlite() *SQLite {
-	return sqliteFor(w.tenant, "app.db")
+	return sqliteForRequest(w.tenant, "app.db", w.requestScope)
 }
 
 // Open names another database file inside the tenant's .data/ folder — a blueprint, zero I/O.
 // Subfolders are fine ("archive/2026.db"); traversal is not (see sqliteRel).
 func (s *SQLite) Open(path string) *SQLite {
-	return sqliteFor(s.tenant, path)
+	return sqliteForRequest(s.tenant, path, s.requestScope)
 }
 
 // Memory returns the tenant's in-memory database (:memory:, one shared connection) — for tests and
 // scratch work. It vanishes with the process.
 func (s *SQLite) Memory() *SQLite {
 	preset := &database.Config{Alias: "sqlite::memory:", Type: "sqlite", Name: ":memory:"}
-	return &SQLite{Database: &Database{tenant: s.tenant, config: &database.Config{}, preset: preset}}
+	return &SQLite{Database: &Database{
+		tenant:       s.tenant,
+		requestScope: s.requestScope,
+		config:       &database.Config{},
+		preset:       preset,
+	}}
 }
 
 // Exec runs raw SQL — the escape hatch for DDL (CREATE TABLE / CREATE INDEX / migrations), which a
@@ -71,13 +77,22 @@ func (s *SQLite) Exec(sqlText string, args ...value.Value) value.Value {
 // sqliteFor builds the blueprint for one tenant database file: resolve the path under .data/,
 // pin the connection config (alias "sqlite:<rel>" keys the cache in tenant.databases).
 func sqliteFor(t *Tenant, rel string) *SQLite {
+	return sqliteForRequest(t, rel, nil)
+}
+
+func sqliteForRequest(t *Tenant, rel string, requestScope *requestscope.Scope) *SQLite {
 	rel = sqliteRel(rel)
 	preset := &database.Config{
 		Alias: "sqlite:" + rel,
 		Type:  "sqlite",
 		Name:  t.resolve(".data", filepath.FromSlash(rel)),
 	}
-	return &SQLite{Database: &Database{tenant: t, config: &database.Config{}, preset: preset}}
+	return &SQLite{Database: &Database{
+		tenant:       t,
+		requestScope: requestScope,
+		config:       &database.Config{},
+		preset:       preset,
+	}}
 }
 
 // appSqliteFor is like sqliteFor but resolves under the IDENTITY-level .data/ (apps/<identity>/.data),

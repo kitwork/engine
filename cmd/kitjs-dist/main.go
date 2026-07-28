@@ -1,5 +1,5 @@
 // kitjs-dist emits the publishable dist files for @kitwork/kitjs — the open-source, CDN-served
-// build of the kernel (engine/jit/hydrate/runtime.js). The engine is the SINGLE source of truth:
+// build returned by hydrate.Runtime(). The engine's ordered modules are the single source of truth:
 // this command is the only sanctioned way to produce dist/, so the npm package can never drift
 // from what the engine serves at /kit.js.
 //
@@ -24,7 +24,7 @@ func main() {
 	version, outdir := os.Args[1], os.Args[2]
 
 	banner := "/*! @kitwork/kitjs v" + version + " | MIT | https://kitwork.io | " +
-		"generated from engine/jit/hydrate/runtime.js — do not edit */\n"
+		"generated from engine/jit/hydrate Runtime() — do not edit */\n"
 
 	src := hydrate.Runtime()
 	min := minifier.JS(src)
