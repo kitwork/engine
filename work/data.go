@@ -178,11 +178,12 @@ func (d *Data) stamped(args []value.Value) []value.Value {
 	}
 	clone := make(map[string]interface{}, len(row)+1)
 	for k, v := range row {
-		if k == identityColumn {
-			continue // whatever the author put here is discarded
-		}
 		clone[k] = v
 	}
+	// Written LAST, so it overwrites rather than merges: an identity in the payload is copied above
+	// and then replaced here. Skipping it during the copy as well would look like a second guard,
+	// but this line is the only one doing the work — verified by removing it and watching the
+	// "cannot plant a row under another identity" test fail.
 	clone[identityColumn] = d.identity
 
 	out := make([]value.Value, len(args))
