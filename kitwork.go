@@ -18,6 +18,7 @@ import (
 	"github.com/kitwork/engine/domain"
 	"github.com/kitwork/engine/host"
 	"github.com/kitwork/engine/logger"
+	"github.com/kitwork/engine/utilities/compress"
 	"github.com/kitwork/engine/work"
 )
 
@@ -191,6 +192,11 @@ func Run(configFile ...string) (err error) {
 		slog.Warn("Legacy site entry is ignored; migrate to router.kitwork.js", "site", site)
 	}
 
+	// Transport compression wraps the whole handler once. A Kitwork page is markup-heavy — a real
+	// site measured 174 KB uncompressed — and while the render costs microseconds, shipping those
+	// bytes costs hundreds of milliseconds. The middleware leaves live streams, already-compressed
+	// formats and tiny bodies alone; see utilities/compress.
+	srvHandler := compress.Middleware(handler)
 	var servers []*http.Server
 	serverErrors := make(chan error, 2)
 	if !host.IsLocalhost() && !cfg.AllowLocal {
@@ -198,7 +204,7 @@ func Run(configFile ...string) (err error) {
 
 		httpsServer := &http.Server{
 			Addr:      ":443",
-			Handler:   handler,
+			Handler:   srvHandler,
 			TLSConfig: tlsConfig,
 		}
 		servers = append(servers, httpsServer)
@@ -211,7 +217,7 @@ func Run(configFile ...string) (err error) {
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: handler,
+		Handler: srvHandler,
 	}
 	servers = append(servers, httpServer)
 	go func() {
