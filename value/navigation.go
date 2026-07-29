@@ -129,9 +129,9 @@ func (v Value) Get(key string) Value {
 		// An errored value (a failed db query, fail("…") / new Error("…")) is K==Invalid carrying its
 		// message in .V. Expose a small, deliberate surface so it reads like an error object AND can
 		// be caught — while every OTHER access stays Invalid so a bare value keeps bubbling:
-		//   .result()/.safe() rescue it into a capturable shape; .message is the text; .isError true.
+		//   .safe() rescues it into a capturable shape; .message is the text; .isError true.
 		switch key {
-		case "result", "safe":
+		case "safe":
 			if fn, ok := v.K.Method(key); ok {
 				return Value{K: Func, V: fn}
 			}

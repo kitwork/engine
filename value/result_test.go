@@ -2,7 +2,14 @@ package value
 
 import "testing"
 
-// an error-carrying value, like SafeFirst returns on a DB failure (the data half + an attached error)
+// safe() is the ONLY inline-error shape. It replaced a pair — an object and a two-element array —
+// that were similar enough the dispatch table's own comments ended up describing each other, which
+// is the clearest evidence two spellings of one idea cost more than they gave.
+//
+// Each case below is a different way a failure can arrive, because the point of having one shape is
+// that a handler never has to know which way it did.
+
+// an error-carrying value: the data half plus an attached error
 func erroredRecord() Value {
 	v := New(map[string]Value{"id": New(7)})
 	v.IsError = true
@@ -10,82 +17,73 @@ func erroredRecord() Value {
 	return v
 }
 
-// .result() → OBJECT { value } carrying .error / .isError (à la Rust's Result).
-func TestResultObjectShape(t *testing.T) {
-	r := erroredRecord().Result()
+func TestSafeSplitsAnAttachedError(t *testing.T) {
+	r := erroredRecord().Safe()
+
 	if r.Get("value").Get("id").Int() != 7 {
 		t.Error(".value must hold the data")
 	}
 	if !r.Get("isError").Truthy() {
 		t.Error(".isError must be true (carried on the wrapper)")
 	}
+	// .error is an ACCESSOR, not a map field: a plain "error" key would be shadowed by it.
 	if got := r.Get("error").Get("message").String(); got != "boom" {
-		t.Errorf(".error.message = %q, want boom (accessor, not a shadowed field)", got)
+		t.Errorf(".error.message = %q, want boom", got)
+	}
+	// The data must come back clean, or the caller re-discovers the failure it just handled.
+	if r.Get("value").IsError {
+		t.Error(".value still carries the error flag")
 	}
 }
 
-func TestResultObjectSuccess(t *testing.T) {
-	r := New(map[string]Value{"id": New(7)}).Result()
+func TestSafeOnSuccess(t *testing.T) {
+	r := New(map[string]Value{"id": New(7)}).Safe()
+
+	// Readable and null rather than missing: `if (check.error)` must be safe to write before
+	// knowing whether anything failed.
 	if r.Get("error").K != Nil {
 		t.Errorf(".error must be null on success, got kind %v", r.Get("error").K)
 	}
 	if r.Get("value").Get("id").Int() != 7 {
 		t.Error(".value must hold the record on success")
 	}
-}
-
-// .safe() → ARRAY [data, error] for destructuring.
-func TestSafeArrayShape(t *testing.T) {
-	arr := erroredRecord().Safe().Array()
-	if len(arr) != 2 {
-		t.Fatalf(".safe() must be [data, error], got len %d", len(arr))
-	}
-	if arr[0].IsError {
-		t.Error("data half must have its error flag cleared")
-	}
-	if got := arr[1].Get("message").String(); got != "boom" {
-		t.Errorf("error half .message = %q, want boom", got)
+	if r.IsError {
+		t.Error("a plain value must not be reported as an error")
 	}
 }
 
-func TestSafeArraySuccess(t *testing.T) {
-	arr := New(map[string]Value{"id": New(7)}).Safe().Array()
-	if arr[1].K != Nil {
-		t.Errorf("error half must be null on success, got kind %v", arr[1].K)
-	}
-	if arr[0].Get("id").Int() != 7 {
-		t.Error("data half must be the record itself")
-	}
-}
+// A hard failure — a broken query, fail("…"). This language has no try/catch, so without safe()
+// the Invalid value keeps propagating and the request ends in an error page instead of a decision
+// the author made.
+func TestSafeRescuesAHardFailure(t *testing.T) {
+	r := Value{K: Invalid, V: "database query error: boom"}.Safe()
 
-// A hard failure (Invalid, e.g. first() on a DB error) must be rescued by .result()/.safe() into a
-// capturable shape — so no safeFirst() is needed.
-func TestResultRescuesInvalid(t *testing.T) {
-	r := Value{K: Invalid, V: "database query error: boom"}.Result()
 	if r.Get("value").K != Nil {
-		t.Error(".value must be null on a hard failure")
+		t.Error(".value must be null on a hard failure — there is no data")
 	}
 	if got := r.Get("error").Get("message").String(); got != "database query error: boom" {
 		t.Errorf(".error.message = %q, want the Invalid .V", got)
 	}
 }
 
-func TestSafeRescuesInvalid(t *testing.T) {
-	arr := Value{K: Invalid, V: "boom"}.Safe().Array()
-	if arr[0].K != Nil {
-		t.Error("data half must be null on a hard failure")
+// CONTROL: safe() must change the SHAPE, not pass the value through. Without this every assertion
+// above would also hold on an implementation that returns its input unchanged.
+func TestSafeAlwaysWraps(t *testing.T) {
+	r := New("hello").Safe()
+
+	if r.K != Map {
+		t.Fatalf("safe() must return an object, got kind %v", r.K)
 	}
-	if got := arr[1].Get("message").String(); got != "boom" {
-		t.Errorf("error half .message = %q, want boom", got)
+	if r.Get("value").String() != "hello" {
+		t.Fatalf(".value = %q, want hello", r.Get("value").String())
 	}
 }
 
-// Only result/safe pierce an Invalid; any other access stays Invalid (keeps bubbling).
-func TestInvalidExposesOnlyResultSafe(t *testing.T) {
+// safe() is the one door through an Invalid value; every other access stays Invalid so a bare
+// failure keeps bubbling instead of silently reading as empty.
+func TestInvalidExposesOnlySafe(t *testing.T) {
 	bad := Value{K: Invalid, V: "boom"}
-	if bad.Get("result").K != Func {
-		t.Error(".result must dispatch even on Invalid")
-	}
+
 	if bad.Get("safe").K != Func {
 		t.Error(".safe must dispatch even on Invalid")
 	}
@@ -94,10 +92,10 @@ func TestInvalidExposesOnlyResultSafe(t *testing.T) {
 	}
 }
 
-// An error value (fail/new Error → Invalid) reads like an error object: .message + .isError, while
-// anything else still stays Invalid (keeps bubbling).
+// An error value still reads like an error object without being reshaped.
 func TestInvalidExposesMessageAndIsError(t *testing.T) {
 	e := Value{K: Invalid, V: "Email trống"}
+
 	if got := e.Get("message").String(); got != "Email trống" {
 		t.Errorf(".message = %q, want 'Email trống'", got)
 	}
@@ -109,13 +107,15 @@ func TestInvalidExposesMessageAndIsError(t *testing.T) {
 	}
 }
 
-func TestResultSafeRegistered(t *testing.T) {
-	for _, n := range []string{"result", "safe"} {
-		if _, ok := Map.Method(n); !ok {
-			t.Errorf("%q not registered as a method", n)
+func TestSafeRegisteredAndResultGone(t *testing.T) {
+	for _, k := range []Kind{Map, Array} {
+		if _, ok := k.Method("safe"); !ok {
+			t.Errorf("safe not registered for %v", k)
 		}
-		if _, ok := Array.Method(n); !ok {
-			t.Errorf("%q not registered for Array", n)
+		// Asserting the absence keeps a later "restore the old helper" from quietly bringing back
+		// two shapes for one idea.
+		if _, ok := k.Method("result"); ok {
+			t.Errorf("result is back on %v — there must be exactly one inline-error shape", k)
 		}
 	}
 }

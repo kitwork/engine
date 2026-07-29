@@ -99,11 +99,8 @@ func (k Kind) Method(name string) (Method, bool) {
 		return Value.ToJson, true
 	case "len", "length":
 		return Value.Length, true
-	case "result":
-		// Reshape an inline-error value (Safe* result) into [data, error] for destructuring.
-		return Value.Result, true
 	case "safe":
-		// Reshape the same into an object { value } carrying .error / .isError.
+		// Reshape an inline-error value into an object { value } carrying .error / .isError.
 		return Value.Safe, true
 
 	}
