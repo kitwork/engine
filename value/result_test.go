@@ -66,16 +66,26 @@ func TestSafeRescuesAHardFailure(t *testing.T) {
 	}
 }
 
-// CONTROL: safe() must change the SHAPE, not pass the value through. Without this every assertion
-// above would also hold on an implementation that returns its input unchanged.
+// CONTROL: safe() must WRAP, not pass the value through. Without this every assertion above would
+// also hold on an implementation that returns its input unchanged.
+//
+// Asserted through the accessors rather than by checking the concrete kind: the wrapper is a struct
+// today and was a map before, and a test that pins the representation fails on a refactor that
+// changes nothing an author can see.
 func TestSafeAlwaysWraps(t *testing.T) {
 	r := New("hello").Safe()
 
-	if r.K != Map {
-		t.Fatalf("safe() must return an object, got kind %v", r.K)
-	}
 	if r.Get("value").String() != "hello" {
 		t.Fatalf(".value = %q, want hello", r.Get("value").String())
+	}
+	if r.String() == "hello" {
+		t.Fatal("safe() returned the bare value instead of wrapping it")
+	}
+	// The wrapper answers all four questions, whichever way it is built.
+	for _, key := range []string{"value", "error", "ok", "isError"} {
+		if r.Get(key).K == Invalid {
+			t.Errorf(".%s is not readable on the wrapper", key)
+		}
 	}
 }
 

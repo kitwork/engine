@@ -11,35 +11,56 @@ package value
 // other. Two spellings of one idea is a tax on every reader, and the array form additionally
 // depended on destructuring, which this language only accepts after `const`.
 
-// Safe reshapes a value into an OBJECT whose `.value` is the data and whose `.error` / `.isError`
-// report the failure through the standard accessors (null when there is none). It works whether the
-// call succeeded or failed, so no separate "safe" variant of each method is needed:
+// SafeResult is what safe() hands back: the data, plus whether it arrived.
 //
-//	const check = database.entity().table("users").first({ email }).safe()
+//	const check = database.entity().table("users").where("email", e).first().safe()
 //	if (!check.ok) return ctx.status(503).json({ message: check.error.message })
 //	return ctx.json(check.value)
 //
-// `ok` is carried even though `error` already answers the same question, because a JS author
-// reaches for it by reflex — fetch() responses have had .ok for a decade. Without it the habit
-// writes `if (!check.ok)`, reads undefined, and takes the failure branch on EVERY call including
-// the successful ones. A missing property is falsy, so that bug is silent and looks like the
-// database is down.
+// A STRUCT rather than a map, and that choice is what makes `.ok` read correctly without parens.
+// Property access on a Go value reaches these methods through reflection, and a method taking no
+// arguments is INVOKED rather than returned (the getter pattern in navigation.go) — so `check.ok`
+// is a real boolean. A method registered on the Kind table instead would hand back a function
+// value, and a function is truthy, so `if (!check.ok)` would be false forever and a genuine
+// failure would be skipped in silence.
 //
-// It is a plain key on the wrapper, not a registered accessor, so unlike `error` it costs nobody
-// the word "ok" as a column name.
+// The other half of the choice: these methods belong to THIS type. Kind methods are global, so
+// naming one "ok" would shadow a column called ok in everyone's data — the way `error` already
+// shadows one called error on every map in the system.
+type SafeResult struct {
+	value Value
+	err   map[string]Value // {code, message}, or nil on success
+}
+
+// Ok reports that the call succeeded. Named for what a JS author reaches for by reflex: fetch()
+// responses have carried .ok for a decade.
+func (s *SafeResult) Ok() bool { return s.err == nil }
+
+// IsError is Ok's opposite, kept because the same name means the same thing on a bare error value.
+func (s *SafeResult) IsError() bool { return s.err != nil }
+
+// Value is the data — null on a hard failure, since there is none.
+func (s *SafeResult) Value() Value { return s.value }
+
+// Error returns {code, message}, or null when nothing failed. It returns a Value rather than a
+// string on purpose: a method named Error returning a string would make this type satisfy Go's
+// error interface, and it is a result, not an error.
+func (s *SafeResult) Error() Value {
+	if s.err == nil {
+		return Value{K: Nil}
+	}
+	return New(s.err)
+}
+
+// Safe reshapes a value — successful, carrying an attached error, or an outright failure — into one
+// SafeResult, so a handler never has to know which of the three it was.
 func (v Value) Safe(_ ...Value) Value {
 	clean, rawErr, _ := splitInlineError(v)
-	obj := New(map[string]Value{
-		"value": clean,
-		"ok":    New(rawErr == nil),
-	})
-	// Carry the error on the WRAPPER so the .error / .isError accessors surface it — a plain "error"
-	// map field would be shadowed by the accessor (see navigation.go).
-	if rawErr != nil {
-		obj.IsError = true
-		obj.ErrorVal = rawErr
+	out := &SafeResult{value: clean}
+	if m, ok := rawErr.(map[string]Value); ok {
+		out.err = m
 	}
-	return obj
+	return New(out)
 }
 
 // splitInlineError peels any error off v. Returns the clean data; the raw error (a map[string]Value
