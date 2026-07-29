@@ -217,12 +217,46 @@ func (d *Entities) stamped(args []value.Value) []value.Value {
 	return out
 }
 
+// run executes a terminal and reports any failure as an ATTACHED error rather than a hard one.
+//
+// The distinction decides whether a handler can respond at all. A hard failure is K==Invalid, and
+// the VM stops the program the moment one lands on the stack — before .safe() on the same
+// expression is ever reached — so the request becomes a 500 instead of a decision the author made.
+// An attached error is an ordinary value carrying IsError/ErrorVal: it flows through the call like
+// any other, so .safe() can split it and the handler keeps control:
+//
+//	const check = database.entity().table("users").where("email", e).first().safe()
+//	if (!check.ok) return ctx.status(503).json({ message: check.error })
+//	return ctx.json(check.value)
+//
+// This is what the old SafeList/SafeFirst pair was really for — not reshaping, which safe() does,
+// but AVOIDING the hard failure in the first place. Doing it here rather than in a parallel set of
+// "safe" methods means every query is answerable, with no second spelling of each terminal to
+// remember.
+//
+// Ignoring the failure still surfaces it: the value is empty and carries .isError, so a handler
+// that forgets to check gets nothing rather than something wrong.
 func (d *Entities) run(fn func() value.Value) value.Value {
 	if d.err != nil {
-		return value.Value{K: value.Invalid, V: d.err.Error()}
+		return attachedError(d.err.Error())
 	}
 	if d.q == nil {
-		return value.Value{K: value.Invalid, V: "entity: query was not initialised"}
+		return attachedError("entity: query was not initialised")
 	}
-	return fn()
+	res := fn()
+	if res.K == value.Invalid {
+		return attachedError(res.String())
+	}
+	return res
+}
+
+// attachedError builds an empty result that reports a failure without halting the program.
+func attachedError(message string) value.Value {
+	out := value.New([]value.Value{})
+	out.IsError = true
+	out.ErrorVal = map[string]value.Value{
+		"code":    value.New("DATABASE_ERROR"),
+		"message": value.New(message),
+	}
+	return out
 }

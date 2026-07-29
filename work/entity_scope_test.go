@@ -138,11 +138,13 @@ func TestEntityRefusesWhenTheAppHasNoIdentity(t *testing.T) {
 	withSharedDB(t)
 
 	res := tableAs("", "posts").List()
-	if res.K != value.Invalid {
-		t.Fatalf("an app with no identity got a result instead of an error: %v", res.V)
+	// Reported as an ATTACHED error, not a hard one: a hard failure stops the VM before .safe() on
+	// the same expression can run, which would leave the handler no way to respond.
+	if !res.IsError {
+		t.Fatalf("an app with no identity got a clean result instead of an error: %v", res.V)
 	}
-	if !strings.Contains(res.String(), "identity") {
-		t.Errorf("the error should say what is missing, got: %s", res.String())
+	if msg := res.Safe().Get("error").String(); !strings.Contains(msg, "identity") {
+		t.Errorf("the error should say what is missing, got: %s", msg)
 	}
 }
 
@@ -151,7 +153,7 @@ func TestEntityRefusesWithoutASharedDatabase(t *testing.T) {
 	database.System = nil
 	t.Cleanup(func() { database.System = prev })
 
-	if res := tableAs("acme", "posts").List(); res.K != value.Invalid {
+	if res := tableAs("acme", "posts").List(); !res.IsError {
 		t.Fatal("expected an error when no shared database is connected")
 	}
 }
@@ -182,15 +184,60 @@ func TestSystemIsRefusedUntilPermissionsExist(t *testing.T) {
 	withSharedDB(t)
 
 	res := (&Database{tenant: tenantFor("acme")}).System().Table("posts").List()
-	if res.K != value.Invalid {
+	if !res.IsError {
 		t.Fatalf("database.system() returned rows before permissions exist: %v", res.V)
 	}
-	if !strings.Contains(res.String(), "permission") {
-		t.Errorf("the refusal should name what is missing, got: %s", res.String())
+	if msg := res.Safe().Get("error").String(); !strings.Contains(msg, "permission") {
+		t.Errorf("the refusal should name what is missing, got: %s", msg)
 	}
 	// CONTROL: the scoped door is open, so the refusal above is about system() specifically and
 	// not about the whole API being broken.
-	if got := (&Database{tenant: tenantFor("acme")}).Entity().Table("posts").List(); got.K == value.Invalid {
+	if got := (&Database{tenant: tenantFor("acme")}).Entity().Table("posts").List(); got.IsError {
 		t.Fatalf("database.entity() should still work: %v", got.V)
+	}
+}
+
+// The handler this was built for, both ways round. A query that fails must leave the author in
+// control — status, shape and wording all theirs — rather than becoming a 500 the engine chose.
+func TestEntityFailureIsAnswerableByTheHandler(t *testing.T) {
+	// A failure reaches run() as K==Invalid from the query builder. Returned as-is it would be a
+	// HARD failure, and the VM stops the program the moment one lands on the stack — before .safe()
+	// on the same expression is reached. Attaching the error instead keeps the value ordinary, so
+	// it survives the call and .safe() can split it.
+	withSharedDB(t)
+	res := tableAs("acme", "no_such_table").List()
+
+	if res.K == value.Invalid {
+		t.Fatal("a failed query returned a hard error; .safe() on the same expression cannot run")
+	}
+	if !res.IsError {
+		t.Fatal("the failure was swallowed — a handler that forgets to check would read it as data")
+	}
+
+	// safe() then reports it, and .error is the MESSAGE so it drops straight into a response
+	// instead of nesting {code, message} inside the caller's own message field.
+	check := res.Safe()
+	if check.Get("ok").Truthy() {
+		t.Error("ok must be false when the query failed")
+	}
+	if msg := check.Get("error").String(); msg == "" || strings.Contains(msg, "map[") {
+		t.Errorf(".error must be the message text, got %q", msg)
+	}
+	if code := check.Get("code").String(); code != "DATABASE_ERROR" {
+		t.Errorf(".code must stay reachable for handlers that branch on it, got %q", code)
+	}
+}
+
+// CONTROL: success must not be dressed up as a failure. Without this the assertions above would
+// hold on an implementation that marks everything as an error.
+func TestEntitySuccessIsNotMarkedAsError(t *testing.T) {
+	withSharedDB(t)
+	res := tableAs("acme", "posts").List()
+
+	if res.IsError {
+		t.Fatal("a working query was reported as an error")
+	}
+	if !res.Safe().Get("ok").Truthy() {
+		t.Fatal("ok must be true on success")
 	}
 }

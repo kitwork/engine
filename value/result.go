@@ -42,14 +42,37 @@ func (s *SafeResult) IsError() bool { return s.err != nil }
 // Value is the data — null on a hard failure, since there is none.
 func (s *SafeResult) Value() Value { return s.value }
 
-// Error returns {code, message}, or null when nothing failed. It returns a Value rather than a
-// string on purpose: a method named Error returning a string would make this type satisfy Go's
-// error interface, and it is a result, not an error.
+// Error is the MESSAGE, or null when nothing failed — not a {code, message} object, so it drops
+// straight into a response without a second hop:
+//
+//	if (!check.ok) return ctx.status(503).json({ message: check.error })
+//
+// Nesting the object there produced {"message":{"code":…,"message":…}}, which reads as a bug in the
+// handler rather than a description of the failure. The code is still reachable as .code for the
+// callers that branch on it, which are far fewer than the ones that just want to say what happened.
+//
+// It returns a Value rather than a string deliberately: a method named Error returning a string
+// would make this type satisfy Go's error interface, and it is a result, not an error.
 func (s *SafeResult) Error() Value {
 	if s.err == nil {
 		return Value{K: Nil}
 	}
+	if msg, ok := s.err["message"]; ok {
+		return msg
+	}
 	return New(s.err)
+}
+
+// Code is the machine-readable half, for a handler that branches on the kind of failure rather
+// than reporting it.
+func (s *SafeResult) Code() Value {
+	if s.err == nil {
+		return Value{K: Nil}
+	}
+	if code, ok := s.err["code"]; ok {
+		return code
+	}
+	return Value{K: Nil}
 }
 
 // Safe reshapes a value — successful, carrying an attached error, or an outright failure — into one

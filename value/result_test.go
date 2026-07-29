@@ -27,8 +27,8 @@ func TestSafeSplitsAnAttachedError(t *testing.T) {
 		t.Error(".isError must be true (carried on the wrapper)")
 	}
 	// .error is an ACCESSOR, not a map field: a plain "error" key would be shadowed by it.
-	if got := r.Get("error").Get("message").String(); got != "boom" {
-		t.Errorf(".error.message = %q, want boom", got)
+	if got := r.Get("error").String(); got != "boom" {
+		t.Errorf(".error = %q, want boom", got)
 	}
 	// The data must come back clean, or the caller re-discovers the failure it just handled.
 	if r.Get("value").IsError {
@@ -61,8 +61,8 @@ func TestSafeRescuesAHardFailure(t *testing.T) {
 	if r.Get("value").K != Nil {
 		t.Error(".value must be null on a hard failure — there is no data")
 	}
-	if got := r.Get("error").Get("message").String(); got != "database query error: boom" {
-		t.Errorf(".error.message = %q, want the Invalid .V", got)
+	if got := r.Get("error").String(); got != "database query error: boom" {
+		t.Errorf(".error = %q, want the Invalid .V", got)
 	}
 }
 
