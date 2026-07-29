@@ -16,11 +16,23 @@ package value
 // call succeeded or failed, so no separate "safe" variant of each method is needed:
 //
 //	const check = database.entity().table("users").first({ email }).safe()
-//	if (check.error) return ctx.status(503).json({ message: check.error.message })
+//	if (!check.ok) return ctx.status(503).json({ message: check.error.message })
 //	return ctx.json(check.value)
+//
+// `ok` is carried even though `error` already answers the same question, because a JS author
+// reaches for it by reflex — fetch() responses have had .ok for a decade. Without it the habit
+// writes `if (!check.ok)`, reads undefined, and takes the failure branch on EVERY call including
+// the successful ones. A missing property is falsy, so that bug is silent and looks like the
+// database is down.
+//
+// It is a plain key on the wrapper, not a registered accessor, so unlike `error` it costs nobody
+// the word "ok" as a column name.
 func (v Value) Safe(_ ...Value) Value {
 	clean, rawErr, _ := splitInlineError(v)
-	obj := New(map[string]Value{"value": clean})
+	obj := New(map[string]Value{
+		"value": clean,
+		"ok":    New(rawErr == nil),
+	})
 	// Carry the error on the WRAPPER so the .error / .isError accessors surface it — a plain "error"
 	// map field would be shadowed by the accessor (see navigation.go).
 	if rawErr != nil {

@@ -119,3 +119,53 @@ func TestSafeRegisteredAndResultGone(t *testing.T) {
 		}
 	}
 }
+
+// .ok exists because a JS author writes it by reflex — fetch() responses have carried .ok for a
+// decade. Without it the habit reads undefined, which is falsy, so `if (!check.ok)` takes the
+// failure branch on EVERY call including the successful ones: a silent bug that looks like the
+// database being down.
+func TestSafeCarriesOk(t *testing.T) {
+	good := New(map[string]Value{"id": New(7)}).Safe()
+	if !good.Get("ok").Truthy() {
+		t.Error("ok must be true on success")
+	}
+
+	bad := Value{K: Invalid, V: "boom"}.Safe()
+	if bad.Get("ok").Truthy() {
+		t.Error("ok must be false on a failure")
+	}
+
+	// The guard the field exists for has to work in both directions.
+	if !good.Get("ok").Truthy() || bad.Get("ok").Truthy() {
+		t.Fatal("if (!check.ok) must distinguish success from failure")
+	}
+}
+
+// ok mirrors error rather than drifting from it: two fields answering one question must never
+// disagree, or a handler checking one behaves differently from a handler checking the other.
+func TestSafeOkAgreesWithError(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   Value
+	}{
+		{"success", New("data")},
+		{"hard failure", Value{K: Invalid, V: "boom"}},
+		{"attached error", erroredRecord()},
+	} {
+		out := c.in.Safe()
+		hasError := out.Get("error").K != Nil
+		isOk := out.Get("ok").Truthy()
+		if hasError == isOk {
+			t.Errorf("%s: ok=%v but error present=%v — they must be opposites", c.name, isOk, hasError)
+		}
+	}
+}
+
+// ok is a plain key on the wrapper, NOT a registered accessor, so it must not shadow a column
+// named "ok" the way `error` shadows one named "error".
+func TestOkDoesNotBecomeAReservedWord(t *testing.T) {
+	row := New(map[string]Value{"ok": New("DU-LIEU-CUA-TOI")})
+	if got := row.Get("ok").String(); got != "DU-LIEU-CUA-TOI" {
+		t.Fatalf("a data field named ok was shadowed: got %q", got)
+	}
+}
