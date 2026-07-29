@@ -30,7 +30,7 @@ type CronJob struct {
 	Bytecode   *compiler.Bytecode
 
 	RetentionDays int
-	MaxAttempts   int    // default 1 — scheduler does NOT auto-retry a thrown handler unless .retries(n)
+	MaxAttempts   int    // total attempt budget, default 1 — no auto-retry unless .retry(n)
 	Timezone      string // default "UTC"
 	OverlapPolicy string // skip | queue | allow — default skip
 	ContentHash   string // sha256 of the source file; lets sync skip no-op writes
@@ -160,11 +160,14 @@ func (cb *CronBuilder) Monthly(args ...value.Value) *CronBuilder {
 	return cb.maybeHandle(args)
 }
 
-// Retention sets how long this cron's run history is kept in the `crons` store, e.g. .retention("90d")
-// (default 30 days). Durability itself is NOT optional — every file-cron is stored + survives restart;
-// this only bounds how much past history is retained. (.persist() is a fetch-only modifier and does not
-// exist on cron.)
-func (cb *CronBuilder) Retention(args ...value.Value) *CronBuilder {
+// Keep sets how long this cron's run history is kept, e.g. .keep("90d") (default 30 days).
+// Durability itself is NOT optional — every file-cron is stored and survives restart; this only
+// bounds how much past history is retained. (.persist() is a fetch-only modifier and does not exist
+// on cron.)
+//
+// The store, the column and the sweep still say "retention", which is the policy this sets. `keep`
+// is the word an author writes, because it reads as an instruction next to a duration.
+func (cb *CronBuilder) Keep(args ...value.Value) *CronBuilder {
 	if len(args) > 0 && !args[0].IsCallable() {
 		if d, err := ParseDuration(args[0].Text()); err == nil {
 			cb.job.RetentionDays = int(d.Hours() / 24)
@@ -176,9 +179,10 @@ func (cb *CronBuilder) Retention(args ...value.Value) *CronBuilder {
 	return cb
 }
 
-// Retries opts a job into scheduler-level retry (default max_attempts is 1 — see scheduler.md; a thrown
-// handler re-runs ALL side effects, so this is only for handlers the author made idempotent).
-func (cb *CronBuilder) Retries(args ...value.Value) *CronBuilder {
+// Retry sets the ATTEMPT BUDGET: how many times a slot is run in total before it is marked failed —
+// `.retry(3)` means three runs, not one run plus three more. Default 1 (see scheduler.md): a thrown
+// handler re-runs ALL side effects, so this is only for handlers the author made idempotent.
+func (cb *CronBuilder) Retry(args ...value.Value) *CronBuilder {
 	cb.job.MaxAttempts = 1
 	if len(args) > 0 && !args[0].IsCallable() {
 		if n, err := strconv.Atoi(strings.TrimSpace(args[0].Text())); err == nil && n >= 1 {
@@ -305,10 +309,9 @@ func (t *Tenant) runCronFile(scheduler *cronRuntime, bc *compiler.Bytecode, stem
 		globals[k] = v
 	}
 
-	vm := runtime.New(bc.Instructions, bc.Constants)
+	vm := runtime.New(bc.Program)
 	vm.Builtins = t.vm.Builtins
 	vm.Globals = globals
-	vm.SourceMap = bc.SourceMap
 	vm.MaxEnergy = t.MaxEnergy
 	vm.Run()
 

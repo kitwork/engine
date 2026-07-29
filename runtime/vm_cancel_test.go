@@ -18,7 +18,7 @@ func TestVMCancellation(t *testing.T) {
 	code := []byte{
 		byte(JUMP), 0, 0,
 	}
-	vm := New(code, []value.Value{})
+	vm := New(mustProgram(t, code, nil))
 	vm.MaxEnergy = 1_000_000_000 // Very large energy ceiling
 
 	ctx, cancel := context.WithCancel(context.Background())

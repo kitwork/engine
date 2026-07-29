@@ -9,7 +9,11 @@ import (
 // parseProgram lexes + parses source into an AST, returning the first parser
 // error (if any).
 func parseProgram(content string) (*Program, error) {
-	l := NewLexer(content)
+	return parseProgramSource(content, "")
+}
+
+func parseProgramSource(content, source string) (*Program, error) {
+	l := NewLexerSource(content, source)
 	p := NewParser(l)
 	prog := p.ParseProgram()
 	if len(p.Errors()) > 0 {
@@ -34,35 +38,45 @@ func CompileFile(paths ...string) (*Bytecode, error) {
 	}
 
 	entryPath := filepath.Join(paths...)
+	entryAbs, err := filepath.Abs(entryPath)
+	if err != nil {
+		entryAbs = entryPath
+	}
 
-	data, err := os.ReadFile(entryPath)
+	data, err := os.ReadFile(entryAbs)
 	if err != nil {
 		return nil, err
 	}
 	content := string(data)
-	if err != nil {
-		return nil, err
-	}
+	sourceName := filepath.ToSlash(filepath.Base(entryAbs))
 
-	prog, err := parseProgram(content)
+	prog, err := parseProgramSource(content, sourceName)
 	if err != nil {
 		return nil, err
 	}
-	files := []string{entryPath}
+	files := []string{entryAbs}
+	sources := map[string]string{sourceName: content}
 	if hasRelativeImports(prog) {
 		var moduleFiles []string
-		prog, moduleFiles, err = nativeBundle(entryPath, prog)
+		var moduleSources map[string]string
+		prog, moduleFiles, moduleSources, err = nativeBundleWithSources(entryAbs, prog)
 		if err != nil {
 			return nil, err
 		}
 		files = append(files, moduleFiles...)
+		for name, source := range moduleSources {
+			sources[name] = source
+		}
 	}
 
-	c := NewCompiler(content)
+	c := newCompilerWithSources(sources)
 	if err := c.Compile(prog); err != nil {
 		return nil, err
 	}
-	bc := c.ByteCodeResult()
+	bc, err := c.ByteCodeResult()
+	if err != nil {
+		return nil, err
+	}
 	bc.Files = files
 	return bc, nil
 }

@@ -27,7 +27,7 @@ import (
 // author made — and safe() only covers success plus errors ATTACHED to a returned value.
 //
 // Closing it means choosing an error model, which is a language decision rather than a patch:
-//   - defer the halt to statement finalisation (POPFIN), so an Invalid can flow into an INVOKE;
+//   - defer the halt to the COMMIT boundary, so an Invalid can flow into an INVOKE;
 //     changes when errors surface and which line they report;
 //   - or compile `X.safe()` to a protected-evaluation opcode, so the guarantee is syntactic — the
 //     approach the language already takes with `while` and unbounded loops.

@@ -137,7 +137,7 @@ func TestNativeImportCompiles(t *testing.T) {
 	if err := c.Compile(prog); err != nil {
 		t.Fatalf("compile error: %v", err)
 	}
-	if c.ByteCodeResult() == nil {
-		t.Fatalf("nil bytecode")
+	if _, err := c.ByteCodeResult(); err != nil {
+		t.Fatalf("program: %v", err)
 	}
 }

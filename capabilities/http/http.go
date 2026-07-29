@@ -61,13 +61,23 @@ func NewHTTPAdapter(scope capabilities.Scope) *HTTPAdapter {
 }
 
 func (h *HTTPAdapter) Cache(args ...value.Value) *HTTPAdapter {
-	h.client.Cache(args...)
-	return h
+	return &HTTPAdapter{scope: h.scope, client: h.client.Cache(args...)}
 }
 
 func (h *HTTPAdapter) Persist(args ...value.Value) *HTTPAdapter {
-	h.client.Persist(args...)
-	return h
+	return &HTTPAdapter{scope: h.scope, client: h.client.Persist(args...)}
+}
+
+func (h *HTTPAdapter) Retry(n int) *HTTPAdapter {
+	return &HTTPAdapter{scope: h.scope, client: h.client.Retry(n)}
+}
+
+func (h *HTTPAdapter) Timeout(ms int) *HTTPAdapter {
+	return &HTTPAdapter{scope: h.scope, client: h.client.Timeout(ms)}
+}
+
+func (h *HTTPAdapter) Header(key, val string) *HTTPAdapter {
+	return &HTTPAdapter{scope: h.scope, client: h.client.Header(key, val)}
 }
 
 func (h *HTTPAdapter) Get(args ...value.Value) value.Value {

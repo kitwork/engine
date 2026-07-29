@@ -42,13 +42,21 @@ func (p *Playground) Compile(codeVal value.Value) value.Value {
 			"gas":       value.New(float64(0)),
 		})
 	}
-	bc := c.ByteCodeResult()
+	bc, err := c.ByteCodeResult()
+	if err != nil {
+		return value.New(map[string]value.Value{
+			"error":     value.NewString(fmt.Sprintf("Verify error: %s", err)),
+			"bytecode":  value.NewString(""),
+			"constants": value.NewString(""),
+			"gas":       value.New(float64(0)),
+		})
+	}
 
 	bytecodeOps := pg.FormatBytecode(bc)
 	constsList := pg.FormatConstants(bc)
 
 	// 3. Test Run for Gas estimation
-	vm := runtime.New(bc.Instructions, bc.Constants)
+	vm := runtime.New(bc.Program)
 	vm.MaxEnergy = 50000 // reasonable limit for small snippet testing
 
 	// Inject standard globals

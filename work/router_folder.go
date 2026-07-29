@@ -577,10 +577,9 @@ func runFolderRouter(t *Tenant, n *RouteNode, bc *compiler.Bytecode) error {
 	}
 	globals[kitwork] = treeKitwork
 
-	vm = runtime.New(bc.Instructions, bc.Constants)
+	vm = runtime.New(bc.Program)
 	vm.Builtins = []value.Value{treeKitwork}
 	vm.Globals = globals
-	vm.SourceMap = bc.SourceMap
 	vm.MaxEnergy = t.MaxEnergy
 	if result := vm.Run(); result.K == value.Invalid {
 		return fmt.Errorf("%s", result.Text())

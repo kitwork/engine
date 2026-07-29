@@ -18,9 +18,11 @@ func runResult(t *testing.T, src string) value.Value {
 	if err := c.Compile(prog); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	bc := c.ByteCodeResult()
-	vm := runtime.New(bc.Instructions, bc.Constants)
-	vm.SourceMap = bc.SourceMap
+	bc, err := c.ByteCodeResult()
+	if err != nil {
+		t.Fatalf("program: %v", err)
+	}
+	vm := runtime.New(bc.Program)
 	vm.MaxEnergy = 100_000_000
 	res := vm.Run()
 	if res.K == value.Invalid {

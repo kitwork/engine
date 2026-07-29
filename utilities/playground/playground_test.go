@@ -4,14 +4,22 @@ import (
 	"testing"
 
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/runtime"
 	pg "github.com/kitwork/engine/utilities/playground"
 	"github.com/kitwork/engine/value"
 )
 
 func TestFormatBytecodeAndConstants(t *testing.T) {
+	program, err := runtime.NewProgram(
+		[]byte{byte(runtime.PUSH), 0, 0, byte(runtime.HALT)},
+		[]value.Value{value.New(42)},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	bc := &compiler.Bytecode{
-		Instructions: []byte{0x00, 0x00, 0x00, 0x13},
-		Constants:    []value.Value{value.New(42)},
+		Program: program,
 	}
 
 	ops := pg.FormatBytecode(bc)

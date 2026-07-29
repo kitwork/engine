@@ -90,7 +90,9 @@ Cung cấp Driver kết nối Redis hoặc cơ chế đồng bộ Cluster State 
 
 ## 7. Mô-đun hóa & Bundling (Multi-File ESM)
 
-Kitwork Engine tự động hỗ trợ tính năng chia nhỏ mã nguồn thành nhiều file JavaScript bằng cú pháp standard ES Module (`import` và `export`). Bộ biên dịch sẽ tự động bundle code bằng Esbuild ở thời điểm compile-time mà không cần cài đặt Node.js hay bất kỳ build-tool nào khác.
+Kitwork Engine tự động hỗ trợ tính năng chia nhỏ mã nguồn thành nhiều file JavaScript bằng cú pháp standard ES Module (`import` và `export`). Bộ biên dịch **tự bundle NGAY TRONG ENGINE** ở thời điểm compile-time — không Node.js, không `node_modules`, không build-tool nào cả.
+
+> ⚠️ **Đã thay đổi:** trước đây bước này chạy qua esbuild. Esbuild ĐÃ ĐƯỢC GỠ BỎ; việc phân giải và gộp module giờ là code Go thuần trong `compiler/bundler.go`. Cả `"kitwork"` (và alias) lẫn import tương đối đều đi qua đường này.
 
 ### Cú pháp cơ bản
 *   **Khai báo và xuất module**:

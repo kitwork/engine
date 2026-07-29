@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 
 	"github.com/kitwork/engine/capabilities"
-	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
@@ -152,7 +151,7 @@ func (s *Scope) DB(name string) *sql.DB {
 // assert capabilities.Runtime. The parent remains the owner of this detached
 // execution; request-bound handlers use the leased VM instead.
 func (s *Scope) Execute(
-	bc *compiler.Bytecode,
+	program *runtime.Program,
 	fn *value.Lambda,
 	args []value.Value,
 ) (uint64, error) {
@@ -163,7 +162,7 @@ func (s *Scope) Execute(
 	if !ok {
 		return 0, fmt.Errorf("request scope parent does not provide execution")
 	}
-	return executor.Execute(bc, fn, args)
+	return executor.Execute(program, fn, args)
 }
 
 // LeaseVM acquires the request's one VM lease. Repeated calls return the same

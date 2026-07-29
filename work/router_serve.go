@@ -307,7 +307,7 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 	if l == nil || bc == nil {
 		return value.Value{K: value.Nil}
 	}
-	vm.FastReset(bc.Instructions, bc.Constants, vm.Globals, bc.SourceMap)
+	vm.FastReset(bc.Program, vm.Globals)
 	return vm.ExecuteLambda(l, ctxObj.arguments(l))
 }
 

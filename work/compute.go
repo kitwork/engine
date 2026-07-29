@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/kitwork/engine/capabilities"
-	"github.com/kitwork/engine/compiler"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -25,15 +24,11 @@ func (e tenantLambdaExecutor) ExecuteLambda(fn *value.Lambda, args []value.Value
 		return value.Value{K: value.Invalid, V: "run: nil tenant or lambda"}
 	}
 
-	code := fn.Code
-	constants := fn.Constants
-	sourceMap := fn.SourceMap
-	if code == nil && e.tenant.bytecode != nil {
-		code = e.tenant.bytecode.Instructions
-		constants = e.tenant.bytecode.Constants
-		sourceMap = e.tenant.bytecode.SourceMap
+	program, _ := runtime.ProgramFromRef(fn.Program)
+	if program == nil && e.tenant.bytecode != nil {
+		program = e.tenant.bytecode.Program
 	}
-	if code == nil {
+	if program == nil {
 		return value.Value{K: value.Invalid, V: "run: lambda has no bytecode"}
 	}
 
@@ -57,7 +52,7 @@ func (e tenantLambdaExecutor) ExecuteLambda(fn *value.Lambda, args []value.Value
 	}()
 
 	e.tenant.prepareExecutionVM(vm, e.tenant.vm.Globals, e.tenant.vm.Builtins, e.requestScope)
-	vm.FastReset(code, constants, vm.Globals, sourceMap)
+	vm.FastReset(program, vm.Globals)
 	vm.MaxEnergy = e.tenant.MaxEnergy
 	return vm.ExecuteLambda(fn, args)
 }
@@ -67,9 +62,15 @@ func (e tenantLambdaExecutor) ExecuteLambda(fn *value.Lambda, args []value.Value
 // scheduler uses (runInJobVM now delegates here) — exposed generically so any capability can run
 // handlers off the request path through its Scope. (Tenant.Run() is the tenant boot method; this is
 // named Execute to avoid that.)
-func (t *Tenant) Execute(bc *compiler.Bytecode, fn *value.Lambda, args []value.Value) (gas uint64, runErr error) {
-	if bc == nil || fn == nil {
-		return 0, fmt.Errorf("run: nil bytecode or lambda")
+func (t *Tenant) Execute(program *runtime.Program, fn *value.Lambda, args []value.Value) (gas uint64, runErr error) {
+	if fn == nil {
+		return 0, fmt.Errorf("run: nil lambda")
+	}
+	if program == nil {
+		program, _ = runtime.ProgramFromRef(fn.Program)
+	}
+	if program == nil {
+		return 0, fmt.Errorf("run: lambda has no program")
 	}
 	vm := enginePool.Acquire()
 	defer func() {
@@ -80,7 +81,7 @@ func (t *Tenant) Execute(bc *compiler.Bytecode, fn *value.Lambda, args []value.V
 	}()
 
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
-	vm.FastReset(bc.Instructions, bc.Constants, vm.Globals, bc.SourceMap)
+	vm.FastReset(program, vm.Globals)
 	vm.MaxEnergy = t.MaxEnergy
 	for k, v := range t.vm.Vars {
 		vm.Vars[k] = v

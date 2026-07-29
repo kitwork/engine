@@ -2,17 +2,17 @@ package compiler
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
-// Bytecode đại diện cho kết quả sau khi biên dịch
+// Bytecode couples an immutable executable Program with its source-file manifest.
 type Bytecode struct {
-	Instructions []byte
-	Constants    []value.Value
-	SourceMap    []int32
+	*runtime.Program
 	// Files lists every source file compiled in: the entry plus all natively-bundled imports.
 	// Hot reload stats these to catch edits — including edits to an imported ./_core module.
 	Files []string
@@ -20,11 +20,12 @@ type Bytecode struct {
 
 // Compiler chịu trách nhiệm chuyển đổi AST thành Bytecode
 type Compiler struct {
-	instructions []byte
-	constants    []value.Value
-	sourceMap    []int32
-	lineOffsets  []int32
-	currentPos   int32
+	instructions  []byte
+	constants     []value.Value
+	debugEntries  []runtime.DebugEntry
+	sources       map[string][]int32
+	currentSource string
+	currentPos    int32
 }
 
 func NewCompiler(source ...string) *Compiler {
@@ -38,24 +39,48 @@ func NewCompiler(source ...string) *Compiler {
 			}
 		}
 	}
+	sources := make(map[string][]int32)
+	if offsets != nil {
+		sources[""] = offsets
+	}
 	return &Compiler{
 		instructions: []byte{},
 		constants:    []value.Value{},
-		sourceMap:    []int32{},
-		lineOffsets:  offsets,
+		debugEntries: []runtime.DebugEntry{},
+		sources:      sources,
 	}
 }
 
+func newCompilerWithSources(sources map[string]string) *Compiler {
+	compiler := &Compiler{
+		instructions: []byte{},
+		constants:    []value.Value{},
+		debugEntries: []runtime.DebugEntry{},
+		sources:      make(map[string][]int32, len(sources)),
+	}
+	for name, source := range sources {
+		offsets := []int32{0}
+		for index := 0; index < len(source); index++ {
+			if source[index] == '\n' {
+				offsets = append(offsets, int32(index+1))
+			}
+		}
+		compiler.sources[name] = offsets
+	}
+	return compiler
+}
+
 func CompileSource(src string) (*Bytecode, error) {
-	prog, err := parseProgram(src)
+	const sourceName = "<source>"
+	prog, err := parseProgramSource(src, sourceName)
 	if err != nil {
 		return nil, err
 	}
-	comp := NewCompiler(src)
+	comp := newCompilerWithSources(map[string]string{sourceName: src})
 	if err := comp.Compile(prog); err != nil {
 		return nil, err
 	}
-	return comp.ByteCodeResult(), nil
+	return comp.ByteCodeResult()
 }
 
 func getNodePosition(node Node) int32 {
@@ -121,22 +146,102 @@ func getNodePosition(node Node) int32 {
 	return 0
 }
 
-func (c *Compiler) getLineNumber(pos int32) int32 {
-	if len(c.lineOffsets) == 0 {
-		return 0
+func getNodeSource(node Node) string {
+	if node == nil {
+		return ""
 	}
-	l, r := 0, len(c.lineOffsets)-1
-	ans := 0
-	for l <= r {
-		mid := (l + r) / 2
-		if c.lineOffsets[mid] <= pos {
-			ans = mid
-			l = mid + 1
-		} else {
-			r = mid - 1
+	switch n := node.(type) {
+	case *Program:
+		if len(n.Statements) > 0 {
+			return getNodeSource(n.Statements[0])
 		}
+	case *GroupStatement:
+		if len(n.Statements) > 0 {
+			return getNodeSource(n.Statements[0])
+		}
+	case *VarStatement:
+		return n.Token.Source
+	case *ExpressionStatement:
+		return n.Token.Source
+	case *BlockStatement:
+		return n.Token.Source
+	case *ReturnStatement:
+		return n.Token.Source
+	case *ForStatement:
+		return n.Token.Source
+	case *ForRangeStatement:
+		return n.Token.Source
+	case *DeferStatement:
+		return n.Token.Source
+	case *Identifier:
+		return n.Token.Source
+	case *Literal:
+		return n.Token.Source
+	case *PrefixExpression:
+		return n.Token.Source
+	case *InfixExpression:
+		return n.Token.Source
+	case *IfExpression:
+		return n.Token.Source
+	case *TernaryExpression:
+		return n.Token.Source
+	case *CallExpression:
+		return n.Token.Source
+	case *MemberExpression:
+		return n.Token.Source
+	case *IndexExpression:
+		return n.Token.Source
+	case *AssignmentExpression:
+		return n.Token.Source
+	case *ArrayLiteral:
+		return n.Token.Source
+	case *ObjectLiteral:
+		return n.Token.Source
+	case *SpreadExpression:
+		return n.Token.Source
+	case *ParameterList:
+		return n.Token.Source
+	case *FunctionLiteral:
+		return n.Token.Source
+	case *SpawnStatement:
+		return n.Token.Source
+	case *MethodCallExpression:
+		return n.Token.Source
+	case *TemplateLiteral:
+		return n.Token.Source
 	}
-	return int32(ans + 1)
+	return ""
+}
+
+func nameFunction(expression Expression, name string) {
+	if function, ok := expression.(*FunctionLiteral); ok && function.DebugName == "" {
+		function.DebugName = name
+	}
+}
+
+func (c *Compiler) getLineNumber(pos int32) int32 {
+	return c.getSourceLocation(c.currentSource, pos).Line
+}
+
+func (c *Compiler) getSourceLocation(source string, pos int32) runtime.SourceLocation {
+	offsets := c.sources[source]
+	if len(offsets) == 0 {
+		return runtime.SourceLocation{}
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	lineIndex := sort.Search(len(offsets), func(index int) bool {
+		return offsets[index] > pos
+	}) - 1
+	if lineIndex < 0 {
+		lineIndex = 0
+	}
+	return runtime.SourceLocation{
+		File:   source,
+		Line:   int32(lineIndex + 1),
+		Column: pos - offsets[lineIndex] + 1,
+	}
 }
 
 // Compile bắt đầu quá trình duyệt cây và phát sinh mã
@@ -145,22 +250,18 @@ func (c *Compiler) Compile(node Node) error {
 		return nil
 	}
 
-	if pos := getNodePosition(node); pos > 0 {
-		c.currentPos = pos
+	source := getNodeSource(node)
+	if _, knownSource := c.sources[source]; knownSource {
+		c.currentSource = source
+		c.currentPos = getNodePosition(node)
 	}
 
 	switch n := node.(type) {
 	case *Program:
-		for i, s := range n.Statements {
+		for _, s := range n.Statements {
 			err := c.Compile(s)
 			if err != nil {
 				return err
-			}
-			// Nếu là ExpressionStatement và KHÔNG PHẢI cuối cùng, ta POP
-			if _, ok := s.(*ExpressionStatement); ok {
-				if i < len(n.Statements)-1 {
-					c.emit(runtime.POP)
-				}
 			}
 		}
 		// Luôn kết thúc Program bằng RETURN để đảm bảo thực thi defer
@@ -186,10 +287,10 @@ func (c *Compiler) Compile(node Node) error {
 		case *IfExpression:
 			// Skip POP for control flow expressions (if statements)
 		default:
-			// POPFIN (a safe superset of POP): pops the discarded value AND, if it is a
-			// value.StatementFinalizer (a lazy http request), fires it once + runs .then()/.catch().
-			// For every other value it is identical to POP.
-			c.emit(runtime.POPFIN)
+			// Finish configuring a deferred effect before discarding the expression result.
+			// COMMIT is a no-op for ordinary values and deliberately does not pop the stack.
+			c.emit(runtime.COMMIT)
+			c.emit(runtime.POP)
 		}
 		return nil
 
@@ -264,6 +365,9 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(runtime.LOAD, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 
 	case *VarStatement:
+		if n.DestructMode == DestructNone && len(n.Names) > 0 {
+			nameFunction(n.Value, n.Names[0].Value)
+		}
 		err := c.Compile(n.Value)
 		if err != nil {
 			return err
@@ -292,12 +396,13 @@ func (c *Compiler) Compile(node Node) error {
 			symbolIndex := c.addConstant(value.NewString(n.Names[0].Value))
 			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		}
-		// POPFINSOFT (soft finalize): if the assigned value is an http request WITH a .then()/.catch()
-		// handler, fire it + run the handler here; a plain lazy request stays lazy. Otherwise = POP.
-		c.emit(runtime.POPFINSOFT)
+		// STORE keeps the value on the stack. Commit the configured expression, then clean up.
+		c.emit(runtime.COMMIT)
+		c.emit(runtime.POP)
 
 	case *AssignmentExpression:
 		if id, ok := n.Name.(*Identifier); ok {
+			nameFunction(n.Value, id.Value)
 			err := c.Compile(n.Value)
 			if err != nil {
 				return err
@@ -305,10 +410,23 @@ func (c *Compiler) Compile(node Node) error {
 			symbolIndex := c.addConstant(value.NewString(id.Value))
 			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		} else if mem, ok := n.Name.(*MemberExpression); ok {
+			nameFunction(n.Value, mem.String())
 			c.Compile(mem.Object)
 			propIndex := c.addConstant(value.NewString(mem.Property.Value))
 			c.emit(runtime.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
 			c.Compile(n.Value)
+			c.emit(runtime.SET)
+		} else if index, ok := n.Name.(*IndexExpression); ok {
+			nameFunction(n.Value, index.String())
+			if err := c.Compile(index.Left); err != nil {
+				return err
+			}
+			if err := c.Compile(index.Index); err != nil {
+				return err
+			}
+			if err := c.Compile(n.Value); err != nil {
+				return err
+			}
 			c.emit(runtime.SET)
 		} else if obj, ok := n.Name.(*ObjectLiteral); ok {
 			err := c.Compile(n.Value)
@@ -396,8 +514,6 @@ func (c *Compiler) Compile(node Node) error {
 		c.Compile(n.Body)
 		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
 		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
-		c.emit(runtime.POP)
-		c.emit(runtime.POP)
 
 	case *ForRangeStatement:
 		// Counting loop, compiled to a plain condition-jump — bounded by construction because the
@@ -435,6 +551,7 @@ func (c *Compiler) Compile(node Node) error {
 			constNull := c.addConstant(value.Value{K: value.Nil})
 			c.emit(runtime.PUSH, byte(constNull>>8), byte(constNull&0xFF))
 		}
+		c.emit(runtime.COMMIT)
 		c.emit(runtime.RETURN)
 
 	case *CallExpression:
@@ -454,9 +571,11 @@ func (c *Compiler) Compile(node Node) error {
 				c.emit(runtime.DUP)
 				// Nếu key là Identifier, ta coi như chuỗi (JS style: { name: "..." })
 				if id, ok := entry.Key.(*Identifier); ok {
+					nameFunction(entry.Value, id.Value)
 					idx := c.addConstant(value.NewString(id.Value))
 					c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
 				} else {
+					nameFunction(entry.Value, entry.Key.String())
 					c.Compile(entry.Key)
 				}
 				c.Compile(entry.Value)
@@ -510,9 +629,18 @@ func (c *Compiler) Compile(node Node) error {
 			params[i] = p.Value
 		}
 		n.Address = startIP // Propagate address back to AST node
+		name := n.DebugName
+		if name == "" {
+			name = "<anonymous>"
+		}
+		location := c.getSourceLocation(n.Token.Source, n.Token.Position)
 		fnData := &value.Lambda{
-			Address: startIP,
-			Params:  params,
+			Address:      startIP,
+			Name:         name,
+			SourceFile:   location.File,
+			SourceLine:   location.Line,
+			SourceColumn: location.Column,
+			Params:       params,
 		}
 		idx := c.addConstant(value.New(fnData))
 		c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
@@ -548,21 +676,30 @@ func (c *Compiler) Reset() {
 	if c.constants != nil {
 		c.constants = c.constants[:0]
 	}
-	if c.sourceMap != nil {
-		c.sourceMap = c.sourceMap[:0]
+	if c.debugEntries != nil {
+		c.debugEntries = c.debugEntries[:0]
 	}
 }
 
-func (c *Compiler) ByteCodeResult() *Bytecode {
-	bc := &Bytecode{
-		Instructions: make([]byte, len(c.instructions)),
-		Constants:    make([]value.Value, len(c.constants)),
-		SourceMap:    make([]int32, len(c.sourceMap)),
+func (c *Compiler) ByteCodeResult() (*Bytecode, error) {
+	program, err := runtime.NewProgramWithDebug(c.instructions, c.constants, c.debugEntries)
+	if err != nil {
+		var verifyErr *runtime.VerifyError
+		if errors.As(err, &verifyErr) &&
+			verifyErr.IP >= 0 &&
+			verifyErr.IP < len(c.instructions) {
+			location := c.debugLocationAt(verifyErr.IP)
+			return nil, fmt.Errorf(
+				"compiler produced invalid bytecode at %s:%d:%d: %w",
+				location.File,
+				location.Line,
+				location.Column,
+				err,
+			)
+		}
+		return nil, fmt.Errorf("compiler produced invalid bytecode: %w", err)
 	}
-	copy(bc.Instructions, c.instructions)
-	copy(bc.Constants, c.constants)
-	copy(bc.SourceMap, c.sourceMap)
-	return bc
+	return &Bytecode{Program: program}, nil
 }
 
 func (c *Compiler) emit(op runtime.Opcode, operands ...byte) int {
@@ -570,11 +707,25 @@ func (c *Compiler) emit(op runtime.Opcode, operands ...byte) int {
 	c.instructions = append(c.instructions, byte(op))
 	c.instructions = append(c.instructions, operands...)
 
-	line := c.getLineNumber(c.currentPos)
-	for len(c.sourceMap) < len(c.instructions) {
-		c.sourceMap = append(c.sourceMap, line)
+	location := c.getSourceLocation(c.currentSource, c.currentPos)
+	if location.Line > 0 &&
+		(len(c.debugEntries) == 0 ||
+			c.debugEntries[len(c.debugEntries)-1].SourceLocation != location) {
+		c.debugEntries = append(c.debugEntries, runtime.DebugEntry{
+			IP:             pos,
+			SourceLocation: location,
+		})
 	}
 	return pos
+}
+
+func (c *Compiler) debugLocationAt(ip int) runtime.SourceLocation {
+	for index := len(c.debugEntries) - 1; index >= 0; index-- {
+		if c.debugEntries[index].IP <= ip {
+			return c.debugEntries[index].SourceLocation
+		}
+	}
+	return runtime.SourceLocation{}
 }
 
 func (c *Compiler) patchUint16(pos int, val uint16) {

@@ -97,7 +97,7 @@ func TestPooledVMDropsPreviousOwnerState(t *testing.T) {
 	dirty := pool.Acquire()
 	dirty.Builtins = builtinSlice(3)
 	dirty.Spawner = func(*value.Lambda) {}
-	dirty.FastReset(bc.Instructions, bc.Constants, map[string]value.Value{"appName": value.New("tenant-a")}, bc.SourceMap)
+	dirty.FastReset(bc.Program, map[string]value.Value{"appName": value.New("tenant-a")})
 	dirty.MaxEnergy = 500_000
 	if res := dirty.Run(); res.K == value.Invalid {
 		t.Fatalf("run fixture: %v", res.V)
@@ -113,19 +113,13 @@ func TestPooledVMDropsPreviousOwnerState(t *testing.T) {
 		vm := pool.Acquire()
 		acquired = append(acquired, vm)
 
-		if vm.Bytecode != nil {
-			t.Errorf("acquire %d: bytecode retained from previous owner", i)
-		}
-		if vm.Constants != nil {
-			t.Errorf("acquire %d: constants retained from previous owner", i)
+		if vm.Program() != nil {
+			t.Errorf("acquire %d: program retained from previous owner", i)
 		}
 		// A freshly-constructed VM carries an empty (non-nil) Globals map, so the invariant is
 		// "no entries survive", not "the map is nil".
 		if len(vm.Globals) != 0 {
 			t.Errorf("acquire %d: globals retained from previous owner (%d keys)", i, len(vm.Globals))
-		}
-		if vm.SourceMap != nil {
-			t.Errorf("acquire %d: source map retained from previous owner", i)
 		}
 		if vm.Builtins != nil {
 			t.Errorf("acquire %d: builtins retained from previous owner", i)
@@ -170,8 +164,8 @@ func TestPooledVMIsolationAcrossAppsConcurrent(t *testing.T) {
 
 				vm := pool.Acquire()
 				vm.Builtins = builtinSlice(f.builtins)
-				vm.FastReset(bc.Instructions, bc.Constants,
-					map[string]value.Value{"appName": value.New(f.name)}, bc.SourceMap)
+				vm.FastReset(bc.Program,
+					map[string]value.Value{"appName": value.New(f.name)})
 				vm.MaxEnergy = f.maxEnergy
 
 				res := vm.Run()

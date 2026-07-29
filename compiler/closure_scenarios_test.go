@@ -41,9 +41,11 @@ func tryRun(src string) (res value.Value, err error) {
 	if cerr := c.Compile(prog); cerr != nil {
 		return value.Value{}, fmt.Errorf("compile: %w", cerr)
 	}
-	bc := c.ByteCodeResult()
-	vm := runtime.New(bc.Instructions, bc.Constants)
-	vm.SourceMap = bc.SourceMap
+	bc, berr := c.ByteCodeResult()
+	if berr != nil {
+		return value.Value{}, fmt.Errorf("program: %w", berr)
+	}
+	vm := runtime.New(bc.Program)
 	vm.MaxEnergy = 100_000_000
 	out := vm.Run()
 	if out.K == value.Invalid {

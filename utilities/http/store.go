@@ -10,10 +10,10 @@ import (
 )
 
 // Outbound response caching — the same .cache()/.persist() the router speaks, applied to
-// fetch()/http.get(). The chain is BUILDER-position (before the verb) because the verb executes
-// eagerly:
+// fetch()/http.get(). A deferred request accepts these options on either side of the verb:
 //
 //	http.cache("5m").get(url)                  // RAM, read-through
+//	http.get(url).cache("5m")                  // equivalent request-position form
 //	http.persist("1d").get(url)                // disk — survives restarts
 //	http.cache("10m").persist("1d").get(url)   // both tiers
 //	fetch(url, { cache: "5m", persist: "1d" }) // the fetch spelling of the same thing
@@ -50,16 +50,18 @@ func NewClient(cacheStore, persistStore ResponseStore) *HTTP {
 // Cache opts this request chain into the RAM tier: http.cache("5m").get(url).
 // No argument (or true) = no expiry; a number = seconds; a string = duration ("5m", "1h", "1d").
 func (h *HTTP) Cache(args ...value.Value) *HTTP {
-	h.cacheOn = true
-	h.cacheTTL = ttlOf(args...)
-	return h
+	next := h.clone()
+	next.cacheOn = true
+	next.cacheTTL = ttlOf(args...)
+	return next
 }
 
 // Persist opts this request chain into the DISK tier (survives restarts): http.persist("1d").get(url).
 func (h *HTTP) Persist(args ...value.Value) *HTTP {
-	h.persistOn = true
-	h.persistTTL = ttlOf(args...)
-	return h
+	next := h.clone()
+	next.persistOn = true
+	next.persistTTL = ttlOf(args...)
+	return next
 }
 
 // ttlOf: no arg / true = 0 (forever), number = seconds, string = duration via parseDuration.

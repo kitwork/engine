@@ -3,95 +3,74 @@ package playground
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 )
 
-// OpNames maps VM Opcodes to human readable string names.
-var OpNames = map[runtime.Opcode]string{
-	runtime.PUSH:    "PUSH",
-	runtime.POP:     "POP",
-	runtime.LOAD:    "LOAD",
-	runtime.STORE:   "STORE",
-	runtime.GET:     "GET",
-	runtime.DUP:     "DUP",
-	runtime.BUILTIN: "BUILTIN",
-	runtime.ADD:     "ADD",
-	runtime.SUB:     "SUB",
-	runtime.MUL:     "MUL",
-	runtime.DIV:     "DIV",
-	runtime.AND:     "AND",
-	runtime.OR:      "OR",
-	runtime.NOT:     "NOT",
-	runtime.COMPARE: "COMPARE",
-	runtime.JUMP:    "JUMP",
-	runtime.TRUE:    "TRUE",
-	runtime.FALSE:   "FALSE",
-	runtime.ITER:    "ITER",
-	runtime.HALT:    "HALT",
-	runtime.YIELD:   "YIELD",
-	runtime.MAKE:    "MAKE",
-	runtime.SET:     "SET",
-	runtime.MERGE:   "MERGE",
-	runtime.CALL:    "CALL",
-	runtime.INVOKE:  "INVOKE",
-	runtime.LAMBDA:  "LAMBDA",
-	runtime.RETURN:  "RETURN",
-	runtime.DEFER:   "DEFER",
-	runtime.SPAWN:   "SPAWN",
-	runtime.MOD:     "MOD",
-}
+// OpNames is derived from the VM instruction contract for compatibility with
+// callers that use the playground package directly.
+var OpNames = func() map[runtime.Opcode]string {
+	names := make(map[runtime.Opcode]string)
+	for raw := 0; raw < 256; raw++ {
+		op := runtime.Opcode(raw)
+		if spec, ok := runtime.LookupInstruction(op); ok {
+			names[op] = spec.Name
+		}
+	}
+	return names
+}()
 
 // FormatBytecode formats compiled bytecode instructions into human-readable disassembly lines.
 func FormatBytecode(bc *compiler.Bytecode) []string {
-	if bc == nil {
+	if bc == nil || bc.Program == nil {
 		return nil
 	}
 	var bytecodeOps []string
-	instructions := bc.Instructions
+	instructions := bc.Instructions()
 	i := 0
 	for i < len(instructions) {
-		op := runtime.Opcode(instructions[i])
-		opName, found := OpNames[op]
-		if !found {
-			opName = fmt.Sprintf("UNKNOWN(0x%02x)", instructions[i])
-		}
-
 		addr := i
-		i++
-
-		switch op {
-		case runtime.PUSH, runtime.LOAD, runtime.STORE, runtime.JUMP, runtime.TRUE, runtime.FALSE, runtime.ITER:
-			if i+1 < len(instructions) {
-				idx := uint16(instructions[i])<<8 | uint16(instructions[i+1])
-				bytecodeOps = append(bytecodeOps, fmt.Sprintf("%04d: %-10s %d", addr, opName, idx))
-				i += 2
-			} else {
-				bytecodeOps = append(bytecodeOps, fmt.Sprintf("%04d: %-10s (truncated)", addr, opName))
-			}
-		case runtime.MAKE, runtime.COMPARE, runtime.INVOKE, runtime.BUILTIN:
-			if i < len(instructions) {
-				val := instructions[i]
-				bytecodeOps = append(bytecodeOps, fmt.Sprintf("%04d: %-10s %d", addr, opName, val))
-				i++
-			} else {
-				bytecodeOps = append(bytecodeOps, fmt.Sprintf("%04d: %-10s (truncated)", addr, opName))
-			}
-		default:
-			bytecodeOps = append(bytecodeOps, fmt.Sprintf("%04d: %s", addr, opName))
+		op := runtime.Opcode(instructions[i])
+		spec, found := runtime.LookupInstruction(op)
+		if !found {
+			bytecodeOps = append(bytecodeOps,
+				fmt.Sprintf("%04d: UNKNOWN(0x%02x)", addr, instructions[i]))
+			i++
+			continue
 		}
+
+		i++
+		operands, size, err := runtime.DecodeOperands(spec, instructions[i:])
+		if err != nil {
+			bytecodeOps = append(bytecodeOps,
+				fmt.Sprintf("%04d: %-10s (truncated)", addr, spec.Name))
+			break
+		}
+		i += size
+
+		if len(operands) == 0 {
+			bytecodeOps = append(bytecodeOps, fmt.Sprintf("%04d: %s", addr, spec.Name))
+			continue
+		}
+		values := make([]string, len(operands))
+		for j, operand := range operands {
+			values[j] = fmt.Sprint(operand)
+		}
+		bytecodeOps = append(bytecodeOps,
+			fmt.Sprintf("%04d: %-10s %s", addr, spec.Name, strings.Join(values, " ")))
 	}
 	return bytecodeOps
 }
 
 // FormatConstants formats the constant pool table into human-readable strings.
 func FormatConstants(bc *compiler.Bytecode) []string {
-	if bc == nil {
+	if bc == nil || bc.Program == nil {
 		return nil
 	}
 	var constsList []string
-	for idx, val := range bc.Constants {
+	for idx, val := range bc.Constants() {
 		constsList = append(constsList, fmt.Sprintf("[%d] %s (%s)", idx, val.Text(), val.K.String()))
 	}
 	return constsList

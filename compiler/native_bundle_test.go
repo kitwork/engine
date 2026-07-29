@@ -77,8 +77,8 @@ router.get("/hello").handle((res) => { return res.text(greet("world")); });`,
 	if err := c.Compile(combined); err != nil {
 		t.Fatalf("compile of natively-bundled program failed: %v", err)
 	}
-	if c.ByteCodeResult() == nil {
-		t.Fatal("nil bytecode")
+	if _, err := c.ByteCodeResult(); err != nil {
+		t.Fatalf("program: %v", err)
 	}
 }
 
@@ -94,7 +94,7 @@ r.get("/x").handle((res) => { l("hi"); return res.text(g("x")); });`,
 	if err != nil {
 		t.Fatalf("Bytecode error: %v", err)
 	}
-	if bc == nil || len(bc.Instructions) == 0 {
+	if bc == nil || bc.Program == nil || bc.Len() == 0 {
 		t.Fatal("expected non-empty bytecode")
 	}
 }
@@ -109,7 +109,7 @@ func TestBytecodeNativeForModularTenant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Bytecode error: %v", err)
 	}
-	if bc == nil || len(bc.Instructions) == 0 {
+	if bc == nil || bc.Program == nil || bc.Len() == 0 {
 		t.Fatal("expected non-empty bytecode")
 	}
 }

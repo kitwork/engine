@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -15,17 +16,11 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 			return k
 		}
 
-		var code []byte
-		var constants []value.Value
-		var sourceMap []int32
-		if lambda, ok := fn.V.(*value.Lambda); ok && lambda.Code != nil {
-			code = lambda.Code
-			constants = lambda.Constants
-			sourceMap = lambda.SourceMap
+		var program *runtime.Program
+		if lambda, ok := fn.V.(*value.Lambda); ok && lambda.Program != nil {
+			program, _ = runtime.ProgramFromRef(lambda.Program)
 		} else if tenant.bytecode != nil {
-			code = tenant.bytecode.Instructions
-			constants = tenant.bytecode.Constants
-			sourceMap = tenant.bytecode.SourceMap
+			program = tenant.bytecode.Program
 		}
 		var builtins []value.Value
 		if tenant.vm != nil && len(tenant.vm.Builtins) > 0 {
@@ -68,7 +63,7 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 
 			vm.Context = ctx
 			tenant.prepareExecutionVM(vm, globals, builtins)
-			vm.FastReset(code, constants, vm.Globals, sourceMap)
+			vm.FastReset(program, vm.Globals)
 			vm.MaxEnergy = tenant.MaxEnergy
 
 			for key, val := range vars {
@@ -111,11 +106,13 @@ func snapshotLambdaWithMemo(src *value.Lambda, memo map[*value.Lambda]*value.Lam
 	}
 
 	cloned := &value.Lambda{
-		Address:   src.Address,
-		Params:    append([]string(nil), src.Params...),
-		Code:      src.Code,
-		Constants: src.Constants,
-		SourceMap: src.SourceMap,
+		Address:      src.Address,
+		Name:         src.Name,
+		SourceFile:   src.SourceFile,
+		SourceLine:   src.SourceLine,
+		SourceColumn: src.SourceColumn,
+		Params:       append([]string(nil), src.Params...),
+		Program:      src.Program,
 	}
 	memo[src] = cloned
 	cloned.Scope = snapshotScope(src.Scope, memo)

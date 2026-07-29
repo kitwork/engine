@@ -23,17 +23,27 @@ import (
 // Bất kỳ trường hợp nào không xử lý được (cycle, không tìm thấy file, …) đều trả lỗi
 // để caller (Bytecode) rớt về esbuild — nên đây là đường đi AN TOÀN, additive.
 func nativeBundle(entryPath string, entryProg *Program) (*Program, []string, error) {
+	program, files, _, err := nativeBundleWithSources(entryPath, entryProg)
+	return program, files, err
+}
+
+func nativeBundleWithSources(
+	entryPath string,
+	entryProg *Program,
+) (*Program, []string, map[string]string, error) {
 	abs, err := filepath.Abs(entryPath)
 	if err != nil {
 		abs = entryPath
 	}
 	b := &bundler{
-		modules:  map[string]string{},
-		visiting: map[string]bool{},
+		modules:   map[string]string{},
+		visiting:  map[string]bool{},
+		sources:   map[string]string{},
+		debugRoot: filepath.Dir(abs),
 	}
 	body, err := b.rewriteStatements(entryProg.Statements, filepath.Dir(abs))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	combined := &Program{}
 	combined.Statements = append(combined.Statements, b.defs...) // IIFE const của module (thứ tự phụ thuộc)
@@ -46,14 +56,16 @@ func nativeBundle(entryPath string, entryProg *Program) (*Program, []string, err
 		files = append(files, absPath)
 	}
 	sort.Strings(files)
-	return combined, files, nil
+	return combined, files, b.sources, nil
 }
 
 type bundler struct {
-	modules  map[string]string // abs path đã resolve -> tên biến module (__kw_mod_N)
-	visiting map[string]bool   // phát hiện cycle
-	defs     []Statement
-	counter  int
+	sources   map[string]string
+	debugRoot string
+	modules   map[string]string // abs path đã resolve -> tên biến module (__kw_mod_N)
+	visiting  map[string]bool   // phát hiện cycle
+	defs      []Statement
+	counter   int
 }
 
 // rewriteStatements thay mỗi ImportStatement tương đối bằng binding, và bảo đảm
@@ -85,10 +97,10 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 			continue // IIFE của module đã chạy (side-effect), không cần binding
 		}
 		if imp.Default != nil {
-			out = append(out, memberBinding(imp.Default.Value, modVar, "default"))
+			out = append(out, memberBinding(imp.Default.Value, modVar, "default", imp.Token))
 		}
 		for _, spec := range imp.Names {
-			out = append(out, memberBinding(spec.Local, modVar, spec.Imported))
+			out = append(out, memberBinding(spec.Local, modVar, spec.Imported, imp.Token))
 		}
 	}
 	return out, nil
@@ -141,7 +153,10 @@ func (b *bundler) ensureModule(spec, fromDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	prog, err := parseProgram(string(src))
+	sourceName := b.sourceName(absPath)
+	sourceText := string(src)
+	b.sources[sourceName] = sourceText
+	prog, err := parseProgramSource(sourceText, sourceName)
 	if err != nil {
 		return "", err
 	}
@@ -150,13 +165,26 @@ func (b *bundler) ensureModule(spec, fromDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	body = append(body, exportReturn(prog))
+	origin := Token{
+		Kind:     Return,
+		Source:   sourceName,
+		Position: int32(len(src)),
+	}
+	body = append(body, exportReturn(prog, origin))
 
 	b.counter++
 	name := fmt.Sprintf("__kw_mod_%d", b.counter)
 	b.modules[absPath] = name
 	b.defs = append(b.defs, moduleIIFE(name, body)) // append SAU các module con → đúng thứ tự
 	return name, nil
+}
+
+func (b *bundler) sourceName(path string) string {
+	relative, err := filepath.Rel(b.debugRoot, path)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(path))
+	}
+	return filepath.ToSlash(relative)
 }
 
 // resolveModulePath quy specifier tương đối về đường dẫn file tuyệt đối, thử các
@@ -217,60 +245,87 @@ func statModule(base string) (string, bool) {
 
 // moduleIIFE: const <name> = (() => { body })();
 func moduleIIFE(name string, body []Statement) Statement {
+	origin := Token{}
+	if len(body) > 0 {
+		origin.Source = getNodeSource(body[0])
+		origin.Position = getNodePosition(body[0])
+	}
 	fn := &FunctionLiteral{
-		Token:      Token{Kind: Function},
+		Token:      tokenFrom(origin, Function),
 		Parameters: []*Identifier{},
-		Body:       &BlockStatement{Token: Token{Kind: LeftBrace}, Statements: body},
+		Body:       &BlockStatement{Token: tokenFrom(origin, LeftBrace), Statements: body},
+		DebugName:  "<module>",
 	}
 	return &VarStatement{
-		Token:        constTok(),
-		Names:        []*Identifier{ident(name)},
+		Token:        constTok(origin),
+		Names:        []*Identifier{ident(name, origin)},
 		DestructMode: DestructNone,
 		Value: &CallExpression{
-			Token:    Token{Kind: LeftParen},
+			Token:    tokenFrom(origin, LeftParen),
 			Function: fn,
 		},
 	}
 }
 
 // exportReturn: return { a: a, b: b, default: __kw_default };
-func exportReturn(prog *Program) Statement {
+func exportReturn(prog *Program, origin Token) Statement {
 	entries := make([]ObjectEntry, 0, len(prog.Exports)+1)
 	for _, name := range prog.Exports {
-		entries = append(entries, ObjectEntry{Key: ident(name), Value: ident(name)})
+		entries = append(entries, ObjectEntry{
+			Key:   ident(name, origin),
+			Value: ident(name, origin),
+		})
 	}
 	if prog.HasDefault {
-		entries = append(entries, ObjectEntry{Key: ident("default"), Value: ident(DefaultExportName)})
+		entries = append(entries, ObjectEntry{
+			Key:   ident("default", origin),
+			Value: ident(DefaultExportName, origin),
+		})
 	}
 	return &ReturnStatement{
-		Token:       Token{Kind: Return},
-		ReturnValue: &ObjectLiteral{Token: Token{Kind: LeftBrace}, Entries: entries},
+		Token:       tokenFrom(origin, Return),
+		ReturnValue: &ObjectLiteral{Token: tokenFrom(origin, LeftBrace), Entries: entries},
 	}
 }
 
 // memberBinding: const <local> = <modVar>.<prop>;  (xử lý cả named + alias + default)
-func memberBinding(local, modVar, prop string) Statement {
+func memberBinding(local, modVar, prop string, origin Token) Statement {
 	return &VarStatement{
-		Token:        constTok(),
-		Names:        []*Identifier{ident(local)},
+		Token:        constTok(origin),
+		Names:        []*Identifier{ident(local, origin)},
 		DestructMode: DestructNone,
 		Value: &MemberExpression{
-			Token:    Token{Kind: Dot},
-			Object:   ident(modVar),
-			Property: ident(prop),
+			Token:    tokenFrom(origin, Dot),
+			Object:   ident(modVar, origin),
+			Property: ident(prop, origin),
 		},
 	}
 }
 
-func ident(name string) *Identifier {
+func ident(name string, origin Token) *Identifier {
 	return &Identifier{
-		Token: Token{Kind: Ident, Value: value.NewString(name)},
+		Token: Token{
+			Kind:     Ident,
+			Value:    value.NewString(name),
+			Source:   origin.Source,
+			Position: origin.Position,
+		},
 		Value: name,
 	}
 }
 
-func constTok() Token {
-	return Token{Kind: Const, Value: value.NewString("const")}
+func constTok(origin Token) Token {
+	token := tokenFrom(origin, Const)
+	token.Value = value.NewString("const")
+	return token
+}
+
+func tokenFrom(origin Token, kind Kind) Token {
+	return Token{
+		Kind:     kind,
+		Source:   origin.Source,
+		Position: origin.Position,
+	}
 }
 
 // hasRelativeImports báo Program có ImportStatement (luôn là import tương đối, vì

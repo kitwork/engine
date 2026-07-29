@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+
+	"github.com/kitwork/engine/value"
 )
 
 // The lazy Request must (1) NOT fire until a field is read, (2) fire exactly once no matter how many
@@ -100,5 +102,70 @@ func TestLazyRequestNoRetryOn4xx(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&hits); n != 1 {
 		t.Fatalf("server hit %d times, want 1 (no retry on 4xx)", n)
+	}
+}
+
+func TestRequestModifiersBeforeAndAfterVerbAreEquivalent(t *testing.T) {
+	base := NewClient(nil, nil)
+
+	before := base.
+		Retry(3).
+		Timeout(5000).
+		Header("X-Test", "before").
+		Cache(value.New("5m")).
+		Persist(value.New("1h")).
+		Get("https://example.test").
+		V.(*Request)
+
+	after := base.
+		Get("https://example.test").
+		V.(*Request).
+		Retry(3).
+		Timeout(5000).
+		Header("X-Test", "before").
+		Cache(value.New("5m")).
+		Persist(value.New("1h"))
+
+	if before.h.retry != after.h.retry ||
+		before.h.timeout != after.h.timeout ||
+		before.h.headers["X-Test"] != after.h.headers["X-Test"] ||
+		before.h.cacheOn != after.h.cacheOn ||
+		before.h.cacheTTL != after.h.cacheTTL ||
+		before.h.persistOn != after.h.persistOn ||
+		before.h.persistTTL != after.h.persistTTL {
+		t.Fatalf("request plans differ: before=%+v after=%+v", before.h, after.h)
+	}
+	if base.retry != 0 || base.timeout != 0 || len(base.headers) != 0 ||
+		base.cacheOn || base.persistOn {
+		t.Fatalf("builder was mutated by a derived chain: %+v", base)
+	}
+}
+
+func TestRequestCommitFiresExactlyOnce(t *testing.T) {
+	prev := IsLocalAllowed
+	IsLocalAllowed = func() bool { return true }
+	defer func() { IsLocalAllowed = prev }()
+
+	var hits int32
+	srv := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(stdhttp.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	request := NewClient(nil, nil).Get(srv.URL).V.(*Request)
+	request.onOk = &value.Lambda{}
+	first := request.Commit()
+	second := request.Commit()
+	_ = request.Status()
+
+	if n := atomic.LoadInt32(&hits); n != 1 {
+		t.Fatalf("server hit %d times, want exactly 1", n)
+	}
+	if first.Handler == nil {
+		t.Fatal("first commit did not return its success continuation")
+	}
+	if second.Handler != nil {
+		t.Fatal("second commit returned the continuation again")
 	}
 }

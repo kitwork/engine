@@ -16,7 +16,7 @@ import (
 //   - tick.kitwork.js  → cron.every(...)   (name "tick" from the filename)
 //   - beat.kitwork.js  → cron.every(...)   (name "beat" from the filename)
 //
-// Each handler runs `http.get(url)` (a bare statement → POPFIN fires it) so a real httptest server
+// Each handler runs `http.get(url)` (a bare statement commits it) so a real httptest server
 // counts the ticks per path, which also proves kitwork()/http resolve inside a cron callback (own
 // bytecode FastReset + tenant Builtins).
 func TestCronLoadAndFire(t *testing.T) {

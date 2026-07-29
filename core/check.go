@@ -150,6 +150,12 @@ func Check(root string, maxEnergy uint64) CheckReport {
 				File: issue.File, Err: issue.Err,
 			})
 		}
+		for _, issue := range work.CheckQueueFiles(root, identity) {
+			report.Issues = append(report.Issues, CheckIssue{
+				Stage: "queue compile", Identity: identity,
+				File: issue.File, Err: issue.Err,
+			})
+		}
 	}
 
 	for _, appRuntime := range runtimes {

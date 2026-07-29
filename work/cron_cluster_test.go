@@ -4,16 +4,19 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/kitwork/engine/database"
 )
 
-// Scheduler Phase 3 — the shared-Postgres cluster path, exercised against the real system DB. Gated
-// behind KITWORK_PG_DEMO so it never runs in the ordinary suite (it touches a network Postgres):
+// Scheduler Phase 3 — the shared-Postgres cluster path, exercised against a real system DB. Gated
+// behind the connection environment so it never runs in the ordinary suite (it touches a network
+// Postgres):
 //
-//	KITWORK_PG_DEMO=1 go test ./work/ -run TestCronClusterPostgres -v
+//	KITWORK_PG_HOST=… KITWORK_PG_USER=… KITWORK_PG_PASSWORD=… \
+//	    go test ./work/ -run TestCronClusterPostgres -v
 //
 // Two Tenant instances (node-A + node-B) — same app, same DB — coordinate through cron_runs.
 // It proves the two things that make multi-node work: (1) AT-MOST-ONCE — the UNIQUE(identity, name,
@@ -21,24 +24,22 @@ import (
 // RECOVERY — a slot left 'running' by a dead node whose lease expired is reclaimed and finished by a
 // live node.
 func TestCronClusterPostgres(t *testing.T) {
-	if os.Getenv("KITWORK_PG_DEMO") == "" {
-		t.Skip("set KITWORK_PG_DEMO=1 to run the shared-Postgres multi-node demo")
-	}
-
-	cfg := &database.Config{
-		Alias: "system", Type: "postgres", Host: "103.166.184.138", Port: 5432,
-		User: "postgres", Password: "!kitwork@1612", Name: "kitwork", SSLMode: "disable",
-	}
+	cfg := clusterPostgres(t)
 	db, err := cfg.Connect()
 	if err != nil {
 		t.Fatalf("connect system Postgres: %v", err)
 	}
 	defer db.Close()
 
-	savedSystem, savedLease := database.System, cronLeaseTTL
-	database.System = db           // presence of a system DB routes cron to the shared PG store (no flag)
+	savedSystem, savedDriver, savedLease := database.System, database.SystemDriver, cronLeaseTTL
+	// A connected system database routes cron to the shared store, and the DRIVER decides which
+	// store — the handle alone cannot say what SQL it speaks.
+	database.System = db
+	database.SystemDriver = "postgres"
 	cronLeaseTTL = 2 * time.Second // short lease → fast crash recovery for the demo
-	defer func() { database.System, cronLeaseTTL = savedSystem, savedLease }()
+	defer func() {
+		database.System, database.SystemDriver, cronLeaseTTL = savedSystem, savedDriver, savedLease
+	}()
 
 	tmp, _ := os.MkdirTemp("", "kwcluster-*")
 	defer os.RemoveAll(tmp)
@@ -157,4 +158,50 @@ func TestCronClusterPostgres(t *testing.T) {
 		t.Fatalf("CRASH RECOVERY FAILED: slot not taken over by a live node (owner=%q)", owner)
 	}
 	t.Logf("   → node-DEAD's orphaned work was reclaimed + finished by %s ✓", owner)
+}
+
+// clusterPostgres reads the demo database from the environment, and skips when it is absent.
+//
+// The credentials ARE the gate — there is no separate on/off flag. This repository is public, so a
+// connection written in source would survive every later edit inside git history; the only version
+// that stays private is the one that was never committed. Absent environment means no demo, which
+// is also why the default sslmode here is `require` rather than `disable`.
+func clusterPostgres(t *testing.T) *database.Config {
+	t.Helper()
+
+	host := os.Getenv("KITWORK_PG_HOST")
+	user := os.Getenv("KITWORK_PG_USER")
+	password := os.Getenv("KITWORK_PG_PASSWORD")
+	if host == "" || user == "" || password == "" {
+		t.Skip("set KITWORK_PG_HOST/KITWORK_PG_USER/KITWORK_PG_PASSWORD " +
+			"(optional: KITWORK_PG_PORT/KITWORK_PG_NAME/KITWORK_PG_SSLMODE) " +
+			"to run the shared-Postgres multi-node demo")
+	}
+
+	port := 5432
+	if raw := os.Getenv("KITWORK_PG_PORT"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			t.Fatalf("KITWORK_PG_PORT=%q is not a number: %v", raw, err)
+		}
+		port = parsed
+	}
+
+	return &database.Config{
+		Alias:    "system",
+		Type:     "postgres",
+		Host:     host,
+		Port:     port,
+		User:     user,
+		Password: password,
+		Name:     envOrDefault("KITWORK_PG_NAME", "kitwork"),
+		SSLMode:  envOrDefault("KITWORK_PG_SSLMODE", "require"),
+	}
+}
+
+func envOrDefault(key string, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }

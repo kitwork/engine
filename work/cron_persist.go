@@ -64,8 +64,11 @@ func (t *Tenant) openCronStore() cronStore {
 	if scheduler := t.scheduler(); scheduler != nil && scheduler.store != nil {
 		return scheduler.store
 	}
-	if database.System != nil {
+	if database.SystemIsPostgres() {
 		return newPgStore(database.System, t.nodeID())
+	}
+	if database.System != nil {
+		return newSqliteStore(database.System, t.nodeID())
 	}
 	db := appSqliteFor(t, "scheduler.db").db()
 	if db == nil {
@@ -84,10 +87,16 @@ func (t *Tenant) startPersistedScheduler(scheduler *cronRuntime) error {
 	// Default to the shared Postgres store whenever a system DB is connected — cron state belongs in one
 	// central place. Fall back to a per-tenant SQLite file only when there is NO system DB (pure local
 	// dev / single binary). No flag: the presence of database.System is the switch.
+	// Which DIALECT, not merely whether one is connected: a system database configured as SQLite
+	// would otherwise be handed the Postgres store, whose `$1` placeholders and
+	// `FOR UPDATE SKIP LOCKED` it cannot parse.
 	var store cronStore
-	if database.System != nil {
+	if database.SystemIsPostgres() {
 		scheduler.db = database.System
 		store = newPgStore(database.System, t.nodeID())
+	} else if database.System != nil {
+		scheduler.db = database.System
+		store = newSqliteStore(database.System, t.nodeID())
 	} else {
 		db := appSqliteFor(t, "scheduler.db").db() // apps/<identity>/.data/scheduler.db — one per app
 		if db == nil {
@@ -318,7 +327,7 @@ func (t *Tenant) runInJobVM(job *CronJob, lambda *value.Lambda, args []value.Val
 	}
 	// The generic compute seam (capabilities.Runtime, see compute.go) IS this runner — cron dogfoods
 	// it, so every cron test also exercises the seam a migrated cron capability would use.
-	return t.Execute(job.Bytecode, lambda, args)
+	return t.Execute(job.Bytecode.Program, lambda, args)
 }
 
 // cronSuccessRetention is how long a SUCCESSFUL run's row is kept in cron_runs. Successes are transient

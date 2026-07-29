@@ -25,12 +25,16 @@ func (vm *VM) compare(a, b value.Value, mode uint8) {
 		}
 		if a.K == value.Proxy {
 			if handler, ok := a.V.(value.ProxyHandler); ok {
-				vm.push(handler.OnCompare(op, b))
+				vm.push(vm.nativeValue("proxy comparison", func() value.Value {
+					return handler.OnCompare(op, b)
+				}))
 				return
 			}
 		} else {
 			if handler, ok := b.V.(value.ProxyHandler); ok {
-				vm.push(handler.OnCompare(op, a))
+				vm.push(vm.nativeValue("proxy comparison", func() value.Value {
+					return handler.OnCompare(op, a)
+				}))
 				return
 			}
 		}

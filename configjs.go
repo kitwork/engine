@@ -409,8 +409,7 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 		return nil, fmt.Errorf("config compile error: %w", err)
 	}
 
-	vm := runtime.New(bytecode.Instructions, bytecode.Constants)
-	vm.SourceMap = bytecode.SourceMap
+	vm := runtime.New(bytecode.Program)
 	vm.MaxEnergy = 100_000_000 // rộng tay: setup chạy đúng 1 lần, không phải hot path
 
 	builder := NewServerBuilder()

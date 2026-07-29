@@ -62,6 +62,7 @@ func FetchWith(h *HTTP, args ...value.Value) value.Value {
 	if len(args) == 0 {
 		return value.New(Response{Status: 0, Error: "fetch: url is required"})
 	}
+	h = h.clone()
 	urlStr := args[0].Text()
 
 	method := "GET"
@@ -91,10 +92,10 @@ func FetchWith(h *HTTP, args ...value.Value) value.Value {
 			}
 		}
 		if c, ok := opts["cache"]; ok {
-			h.Cache(c)
+			h = h.Cache(c)
 		}
 		if p, ok := opts["persist"]; ok {
-			h.Persist(p)
+			h = h.Persist(p)
 		}
 		if rt, ok := opts["retry"]; ok && rt.IsNumeric() {
 			h.retry = int(rt.N)
@@ -104,6 +105,6 @@ func FetchWith(h *HTTP, args ...value.Value) value.Value {
 	// fetch(url, opts) returns the SAME lazy *Request as http.get/post: it is just the JS-idiomatic
 	// entry point (options map + the fetch(url).then(res => …) muscle memory) onto the identical
 	// builder. Options configure the request; the chain (.retry/.cache/.then/.catch) still works; it
-	// fires on read or at the end of the statement. h is already fresh (NewClient per call), no clone.
+	// commits on observation or at the end of the statement.
 	return newRequest(h, method, urlStr, body)
 }

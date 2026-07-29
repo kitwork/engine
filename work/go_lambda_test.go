@@ -26,7 +26,7 @@ var makeBackground = (block, callback) => {
 		t.Fatalf("compile fixture: %v", err)
 	}
 
-	vm := runtime.New(bc.Instructions, bc.Constants)
+	vm := runtime.New(bc.Program)
 	vm.Globals = make(map[string]value.Value)
 	if result := vm.Run(); result.K == value.Invalid {
 		t.Fatalf("run fixture: %v", result.V)
@@ -80,7 +80,7 @@ var makeBackground = (block, callback) => {
 	if lambda.Parent != nil && lambda.Parent.Scope != nil {
 		lambda.Parent.Scope["counter"] = value.New(99)
 	}
-	vm.FastReset(nil, nil, nil, nil)
+	vm.FastReset(nil, nil)
 	close(release)
 
 	select {

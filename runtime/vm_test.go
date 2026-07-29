@@ -6,8 +6,21 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
+func mustProgram(t *testing.T, code []byte, constants []value.Value) *Program {
+	t.Helper()
+	program, err := NewProgram(code, constants, nil)
+	if err != nil {
+		t.Fatalf("program: %v", err)
+	}
+	return program
+}
+
 func TestVMEnergyExhaustion(t *testing.T) {
-	vm := New([]byte{byte(ADD), byte(ADD)}, []value.Value{})
+	program := mustProgram(t,
+		[]byte{byte(PUSH), 0, 0, byte(PUSH), 0, 0, byte(ADD), byte(RETURN)},
+		[]value.Value{value.New(1)},
+	)
+	vm := New(program)
 	vm.MaxEnergy = 1
 
 	res := vm.Run()
@@ -17,10 +30,11 @@ func TestVMEnergyExhaustion(t *testing.T) {
 }
 
 func TestVMFastReset(t *testing.T) {
-	vm := New([]byte{byte(ADD)}, []value.Value{})
+	program := mustProgram(t, []byte{byte(RETURN)}, nil)
+	vm := New(program)
 	vm.Globals["x"] = value.New(123)
 
-	vm.FastReset([]byte{byte(ADD)}, []value.Value{}, nil, nil)
+	vm.FastReset(program, nil)
 	if len(vm.Globals) != 0 {
 		t.Fatalf("Expected FastReset to clear globals, got len=%d", len(vm.Globals))
 	}
@@ -28,10 +42,11 @@ func TestVMFastReset(t *testing.T) {
 
 func TestVMFastResetDetachesCapturedRootScope(t *testing.T) {
 	template := &value.Lambda{Address: 0}
-	vm := New(
+	program := mustProgram(t,
 		[]byte{byte(PUSH), 0, 0, byte(RETURN)},
 		[]value.Value{value.New(template)},
 	)
+	vm := New(program)
 	vm.Vars["secret"] = value.NewString("tenant-a")
 
 	result := vm.Run()
@@ -40,7 +55,7 @@ func TestVMFastResetDetachesCapturedRootScope(t *testing.T) {
 		t.Fatalf("expected closure, got %T", result.V)
 	}
 
-	vm.FastReset(nil, nil, nil, nil)
+	vm.FastReset(nil, nil)
 	vm.Vars["secret"] = value.NewString("tenant-b")
 
 	if got := closure.Scope["secret"].Text(); got != "tenant-a" {
@@ -52,7 +67,7 @@ func TestVMFastResetDetachesCapturedRootScope(t *testing.T) {
 }
 
 func TestVMResetForPoolDropsTenantReferences(t *testing.T) {
-	vm := New([]byte{byte(RETURN)}, []value.Value{value.NewString("constant")})
+	vm := New(mustProgram(t, []byte{byte(RETURN)}, []value.Value{value.NewString("constant")}))
 	vm.Globals["tenant"] = value.NewString("a")
 	vm.Vars["request"] = value.NewString("a")
 	vm.Builtins = []value.Value{value.NewString("builtin")}
@@ -61,7 +76,7 @@ func TestVMResetForPoolDropsTenantReferences(t *testing.T) {
 
 	vm.ResetForPool()
 
-	if vm.Bytecode != nil || vm.Constants != nil || vm.Globals != nil || vm.Builtins != nil {
+	if vm.Program() != nil || vm.Globals != nil || vm.Builtins != nil {
 		t.Fatal("pooled VM retained tenant-owned runtime state")
 	}
 	if len(vm.Vars) != 0 || vm.MaxEnergy != 0 || vm.Spawner != nil {

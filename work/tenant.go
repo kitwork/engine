@@ -328,10 +328,9 @@ func (t *Tenant) Run() error {
 	// FILESYSTEM-ROUTED, always. There is no flat app.kitwork.js entry and no route table — the
 	// folder tree IS the router. Build the finite route declaration tree before activation so
 	// requests never publish a partially prepared generation.
-	t.bytecode = &compiler.Bytecode{}
-	t.vm = runtime.New(t.bytecode.Instructions, t.bytecode.Constants)
+	t.bytecode = &compiler.Bytecode{Program: runtime.EmptyProgram()}
+	t.vm = runtime.New(t.bytecode.Program)
 	t.vm.MaxEnergy = t.MaxEnergy
-	t.vm.SourceMap = t.bytecode.SourceMap
 
 	envFile := t.resolve(".env")
 	environment := NewEnv(ParseDotEnv(envFile))
@@ -392,8 +391,12 @@ func (t *Tenant) Run() error {
 		}
 	}
 
+	// App-level background work, loaded once per identity (Domain == "" is the app tenant, not one of
+	// its domains). Both must register before any request arrives: they run on their own clock, so
+	// the lazy compile a route can afford would be too late.
 	if t.entity.Domain == "" {
 		t.LoadCronFiles()
+		t.LoadQueueFiles()
 	}
 
 	return nil
@@ -632,7 +635,7 @@ func (t *Tenant) CompileDynamicRoute(filePath string) error {
 	defer enginePool.Release(vm)
 
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
-	vm.FastReset(bytecode.Instructions, bytecode.Constants, vm.Globals, bytecode.SourceMap)
+	vm.FastReset(bytecode.Program, vm.Globals)
 	vm.MaxEnergy = t.MaxEnergy
 
 	res := vm.Run()

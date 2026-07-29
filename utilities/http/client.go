@@ -27,22 +27,25 @@ type HTTP struct {
 }
 
 func (h *HTTP) Timeout(ms int) *HTTP {
-	h.timeout = time.Duration(ms) * time.Millisecond
-	return h
+	next := h.clone()
+	next.timeout = time.Duration(ms) * time.Millisecond
+	return next
 }
 
 func (h *HTTP) Header(key, val string) *HTTP {
-	if h.headers == nil {
-		h.headers = make(map[string]string)
+	next := h.clone()
+	if next.headers == nil {
+		next.headers = make(map[string]string)
 	}
-	h.headers[key] = val
-	return h
+	next.headers[key] = val
+	return next
 }
 
 // Retry sets how many extra attempts a transient failure (network error / 5xx) gets on a GET/HEAD.
 func (h *HTTP) Retry(n int) *HTTP {
-	h.retry = n
-	return h
+	next := h.clone()
+	next.retry = n
+	return next
 }
 
 // clone copies the configured template so a fired Request never mutates the shared builder.
@@ -57,10 +60,9 @@ func (h *HTTP) clone() *HTTP {
 	return &c
 }
 
-// Get / Post are now LAZY: they return a *Request (see request.go) that fires exactly once when its
-// result is first read (.status/.json()/.body/…) or .send() is called. This is what lets the chain be
-// written flat in any order — http.get(url).retry(3).cache("5m").  do() stays the eager engine used by
-// fetch() and by Request.ensure().
+// Get / Post create a deferred Request. Builder options are copied into the request, whose own
+// modifiers may continue configuring the same plan after the verb. COMMIT or response observation
+// executes the plan exactly once.
 func (h *HTTP) Get(url string) value.Value {
 	return newRequest(h.clone(), "GET", url, value.New(nil))
 }

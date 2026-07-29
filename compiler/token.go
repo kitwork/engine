@@ -219,6 +219,7 @@ func (k Kind) String() string {
 
 type Token struct {
 	Value    value.Value
+	Source   string
 	Position int32
 	Length   int16
 	Kind     Kind

@@ -44,16 +44,26 @@ func KeywordValue(kind Kind, ident string) value.Value {
 }
 
 type Lexer struct {
-	input []byte
-	ch    byte // Ký tự hiện tại
-	pos   int  // Vị trí của ký tự ch
-	next  int  // Vị trí đọc tiếp theo
+	input  []byte
+	source string
+	base   int32
+	ch     byte // Ký tự hiện tại
+	pos    int  // Vị trí của ký tự ch
+	next   int  // Vị trí đọc tiếp theo
 }
 
 func NewLexer(input string) *Lexer {
+	return NewLexerSource(input, "")
+}
+
+func NewLexerSource(input, source string) *Lexer {
+	return newLexerAt(input, source, 0)
+}
+
+func newLexerAt(input, source string, base int32) *Lexer {
 	// Chuyển string thành []byte một lần duy nhất.
 	// Việc này an toàn vì Lexer chỉ đọc chứ không ghi đè vào mảng này.
-	l := &Lexer{input: []byte(input)}
+	l := &Lexer{input: []byte(input), source: source, base: base}
 	l.readChar()
 	return l
 }
@@ -93,7 +103,8 @@ func (l *Lexer) NextToken() Token {
 		return l.NextToken()
 	}
 
-	tok.Position = int32(l.pos)
+	tok.Source = l.source
+	tok.Position = l.base + int32(l.pos)
 
 	// Tra bảng phân loại ký tự (O(1))
 	cType := Table[l.ch]
@@ -333,7 +344,7 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	l.readChar()
-	tok.Length = int16(int32(l.pos) - tok.Position)
+	tok.Length = int16(l.base + int32(l.pos) - tok.Position)
 	return tok
 }
 

@@ -34,7 +34,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 	}
 	// unnamed → filename "beat" is the identity; .persist() AFTER .handle() must still take effect
 	beat := `import { cron } from "kitwork";` + "\n" +
-		`cron.every("1s").handle((ctx) => { ctx.log("tick " + ctx.attempt); }).retention("7d");`
+		`cron.every("1s").handle((ctx) => { ctx.log("tick " + ctx.attempt); }).keep("7d");`
 	if err := os.WriteFile(filepath.Join(cronDir, "beat.kitwork.js"), []byte(beat), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 		t.Errorf("schedules row wrong: name=%q origin=%q expr=%q (want beat/file/@every 1s)", name, origin, expr)
 	}
 	if retention != 7 {
-		t.Errorf("retention_days=%d, want 7 (from .retention(\"7d\"))", retention)
+		t.Errorf("retention_days=%d, want 7 (from .keep(\"7d\"))", retention)
 	}
 
 	// History captured: output has the logged line, gas recorded, all completed.
@@ -112,7 +112,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 	tenant2.StopCronJobs()
 }
 
-// Scheduler-level retry (.retries(n)) + the .error() hook. A handler that always fails (energy limit)
+// Scheduler-level retry (.retry(n)) + the .error() hook. A handler that always fails (energy limit)
 // must cycle attempts up to max, land in 'failed', and fire .error().
 func TestCronPersistRetryAndError(t *testing.T) {
 	savedLocal := AllowLocal
@@ -151,7 +151,7 @@ func TestCronPersistRetryAndError(t *testing.T) {
 	flap := `import { cron, http } from "kitwork";` + "\n" +
 		`cron.every("1s")` + "\n" +
 		`  .handle(() => { for (let i = 0; i < 1000000; i++) {} })` + "\n" +
-		`  .retries(2)` + "\n" +
+		`  .retry(2)` + "\n" +
 		`  .error((ctx, err) => { http.get("` + srv.URL + `/errhit"); });`
 	if err := os.WriteFile(filepath.Join(cronDir, "flap.kitwork.js"), []byte(flap), 0644); err != nil {
 		t.Fatal(err)

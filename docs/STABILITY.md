@@ -6,7 +6,7 @@ automated test on the production execution path.
 
 ## 1. App and site isolation
 
-- A pooled VM must not retain bytecode, constants, globals, builtins, request
+- A pooled VM must not retain a Program, globals, builtins, request
   variables, execution hooks, or gas configuration from its previous owner.
 - Resetting a VM must detach a root scope that escaped into a closure. It must
   never clear a map still owned by that closure.
@@ -59,12 +59,54 @@ Current enforcement:
 ## 2. Energy and bounded execution
 
 - Every opcode consumes energy.
+- `runtime.InstructionSpec` is the canonical source for operand widths, stack
+  effects, and energy. Dispatch and tooling must not maintain parallel tables.
 - Execution stops with an invalid value after exceeding `MaxEnergy`.
+- If execution exhausts `MaxEnergy`, frame cleanup receives one shared,
+  fixed-size energy reserve. The normal limit is restored after unwinding, and
+  a looping defer can consume only that reserve plus the current instruction.
 - Background and scheduled execution use the same energy ceiling as request
   execution.
-- Request and detached-work contexts are checked by both VM dispatch loops.
+- Root, lambda, request, and detached execution all use the same VM dispatch
+  loop.
+- `Run` and `ExecuteLambda` are frame-setup wrappers; opcode semantics exist
+  only in `runtime.execute`.
+- `CALL` and direct `ExecuteLambda` use the same frame constructor. Every exit
+  path restores the caller frame and stack base, including HALT, runtime error,
+  cancellation, and energy exhaustion.
+- Execution contexts are checked by the shared dispatch loop.
   Cancellation interrupts running script execution within at most 64 opcodes;
   energy remains the hard upper bound.
+- Compiler output is structurally verified before publication. Verification
+  rejects unsupported or truncated instructions, invalid constants and jumps,
+  stack underflow, inconsistent control-flow joins, and invalid lambda entries.
+- `runtime.Program` is the only executable publication unit. It copies and
+  verifies its storage once; `runtime.New` and `VM.FastReset` accept no loose
+  bytecode slices.
+- Program code, constants, and compressed debug tables are private. Diagnostic
+  accessors return copies, and detached lambdas retain only an opaque owner
+  reference.
+- A lambda address is valid only inside its owning Program. Cross-program
+  execution must fail before entering a call frame.
+- Runtime failures are published as `runtime.Diagnostic` values with a stable
+  code, top location, and an inner-to-outer call stack. `Value.Text()` retains
+  the formatted error string for compatibility, while `runtime.DiagnosticFrom`
+  exposes the structured form to hosts and tooling.
+- Every active frame records its last executed byte offset. Compiler-created
+  lambda templates carry a stable inferred name and declaration source;
+  unnamed callbacks are reported as `<anonymous>` and the root frame as
+  `<main>`.
+- Callback helpers must propagate an invalid callback result unchanged. They
+  must not hide a diagnostic inside an array, boolean result, cache entry, or
+  sorting key.
+- Lexer tokens retain their source identity through parser lowering and native
+  bundling. The compiler emits source transitions by instruction; Program
+  interns file names and resolves file, line, column, and byte offset through
+  an immutable table. Native-import frames must identify their real module,
+  while synthetic wrappers use the source of the module they wrap.
+- `Program.SourceMap()` remains a compatibility snapshot. Runtime execution
+  and diagnostics use the compressed debug table and never expand a line entry
+  for every byte.
 
 ## 3. Capability lifetime
 
@@ -101,7 +143,7 @@ their stable owner scope, never a request scope retained only for authorization.
 `kitwork().go(fn)` must snapshot its execution inputs before returning:
 
 - builtins, globals, top-level variables, arguments, and the lambda scope chain;
-- the bytecode, constants, and source map carried by the lambda's folder program;
+- the immutable Program reference carried by the lambda;
 - the app energy limit.
 
 The detached lambda must not reference a mutable request frame that can be
@@ -148,3 +190,43 @@ path used by production. It reports every discovered failure in one pass and
 never opens a listener, activates a generation, starts cron, or leaves candidate
 resources alive. Preflight diagnoses invalid paths and imports; it never guesses
 or rewrites application source.
+
+## 9. Deferred effects
+
+- `COMMIT` is the only bytecode boundary for values that defer work while an
+  expression is being configured.
+- `COMMIT` never changes stack depth. Success leaves the committed value in its
+  original slot; a commit panic or invalid callback replaces that slot with the
+  structured failure. The compiler emits ordinary stack cleanup separately.
+- Variable declarations, discarded expressions, and explicit returns commit
+  their completed value before leaving the expression boundary.
+- A committer must be idempotent. Repeated commits or later observations must
+  reuse the first result and must not repeat external work.
+- The VM depends only on `value.Committer`; HTTP-specific policy remains in the
+  HTTP capability.
+- HTTP builders are copy-on-write. A modifier before the verb cannot leak into
+  another chain, while request-local modifiers after the verb configure the
+  same deferred plan.
+
+These two forms are contractually equivalent:
+
+```javascript
+http.retry(3).timeout(5000).get(url)
+http.get(url).retry(3).timeout(5000)
+```
+
+## 10. Failure boundaries
+
+- The VM recovers panics only while invoking host-owned behavior: native
+  functions, methods, proxy callbacks, cache hooks, spawn hooks, and committers.
+  Interpreter and verifier defects remain process-visible programming errors.
+- A recovered host panic becomes `NATIVE_PANIC` with the active source
+  location and VM call stack.
+- Frame defers run exactly once in last-in, first-out order on `RETURN`, natural
+  frame completion, `HALT`, runtime failure, cancellation, and energy
+  exhaustion.
+- A failing defer becomes the result when normal execution succeeded. If
+  execution already failed, that original diagnostic remains primary and
+  cleanup failures are appended to `Diagnostic.Suppressed`.
+- Cleanup after energy exhaustion shares `cleanupEnergyReserve`; it does not
+  reset execution energy or grant a fresh budget to each defer.

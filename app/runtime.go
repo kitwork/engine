@@ -17,7 +17,7 @@ func NewPool() *Pool {
 	return &Pool{
 		pool: sync.Pool{
 			New: func() interface{} {
-				return runtime.New(nil, nil)
+				return runtime.New(nil)
 			},
 		},
 	}

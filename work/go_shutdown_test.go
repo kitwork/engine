@@ -34,7 +34,7 @@ var makeTask = (block, finish) => {
 		t.Fatalf("compile fixture: %v", err)
 	}
 
-	vm := runtime.New(bc.Instructions, bc.Constants)
+	vm := runtime.New(bc.Program)
 	vm.Globals = make(map[string]value.Value)
 	if res := vm.Run(); res.K == value.Invalid {
 		t.Fatalf("run fixture: %v", res.V)

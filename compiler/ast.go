@@ -500,6 +500,7 @@ type FunctionLiteral struct {
 	Parameters []*Identifier
 	Body       *BlockStatement
 	Address    int // Compiled bytecode address
+	DebugName  string
 }
 
 func (fl *FunctionLiteral) expressionNode() {}

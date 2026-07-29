@@ -9,6 +9,7 @@ import (
 // Frame đại diện cho một khung thực thi (Activation Record)
 type Frame struct {
 	IP     int
+	LastIP int
 	Vars   map[string]value.Value // Local scope
 	Fn     *value.Lambda          // Hàm đang được thực thi
 	Defers []*value.Lambda        // Deferred functions
@@ -21,8 +22,7 @@ type Frame struct {
 
 type VM struct {
 	Context   context.Context // Request execution context (for cancellation)
-	Bytecode  []byte
-	Constants []value.Value
+	program   *Program
 	Stack     []value.Value
 	Vars      map[string]value.Value // Biến của từng Request (Cho phép ghi)
 	Globals   map[string]value.Value // Chung cho toàn bộ Host (Chỉ đọc)
@@ -31,22 +31,21 @@ type VM struct {
 	FrameIdx  int                    // Hiện tại đang ở Frame nào
 	Energy    uint64                 // Năng lượng tiêu thụ
 	MaxEnergy uint64                 // Giới hạn năng lượng
-	SourceMap []int32                // Bản đồ dòng lệnh nguồn (IP -> Line)
 	Spawner   func(s *value.Lambda)
 }
 
-func New(code []byte, constants []value.Value) *VM {
+func New(program *Program) *VM {
 	vm := &VM{
-		Bytecode:  code,
-		Constants: constants,
-		Stack:     make([]value.Value, 0, 1024),
-		Vars:      make(map[string]value.Value),
-		Globals:   make(map[string]value.Value),
-		Frames:    make([]Frame, 64), // Tối đa 64 tầng gọi hàm (đủ dùng)
+		program: program,
+		Stack:   make([]value.Value, 0, 1024),
+		Vars:    make(map[string]value.Value),
+		Globals: make(map[string]value.Value),
+		Frames:  make([]Frame, 64), // Tối đa 64 tầng gọi hàm (đủ dùng)
 	}
 	// Khởi tạo Frame gốc (Main entry)
 	vm.FrameIdx = 0
 	vm.Frames[0] = Frame{IP: 0, Vars: vm.Vars, StackBase: 0} // TRANG BỊ VŨ KHÍ: Frame 0 chính là vm.Vars
+	vm.Frames[0].LastIP = -1
 	return vm
 }
 
@@ -54,13 +53,11 @@ func New(code []byte, constants []value.Value) *VM {
 // VM onto each folder's bytecode before running its lambdas (work.execTree) — so it must NOT clear
 // Context: that would drop the request's cancellation signal the moment the handler is loaded.
 // Clearing Context is pool hygiene and belongs to ResetForPool (STABILITY.md §1).
-func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string]value.Value, sourceMap []int32) {
-	vm.Bytecode = code
-	vm.Constants = constants
+func (vm *VM) FastReset(program *Program, globals map[string]value.Value) {
+	vm.program = program
 	clear(vm.Stack)
 	vm.Stack = vm.Stack[:0]
 	vm.Globals = globals
-	vm.SourceMap = sourceMap
 	vm.FrameIdx = 0
 	vm.Energy = 0
 
@@ -76,6 +73,7 @@ func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string
 
 	// Đồng bộ lại Frame gốc
 	root.IP = 0
+	root.LastIP = -1
 	root.Vars = vm.Vars
 	root.Fn = nil
 	clear(root.Defers)
@@ -86,7 +84,7 @@ func (vm *VM) FastReset(code []byte, constants []value.Value, globals map[string
 // ResetForPool drops tenant-owned references before a VM becomes visible to
 // another app. Captured frame maps are detached, never cleared.
 func (vm *VM) ResetForPool() {
-	vm.FastReset(nil, nil, nil, nil)
+	vm.FastReset(nil, nil)
 	vm.Context = nil // a pooled VM must never inherit the previous owner's request context
 	vm.Builtins = nil
 	vm.MaxEnergy = 0
@@ -95,6 +93,7 @@ func (vm *VM) ResetForPool() {
 	for i := 1; i < len(vm.Frames); i++ {
 		f := &vm.Frames[i]
 		f.IP = 0
+		f.LastIP = -1
 		f.Fn = nil
 		clear(f.Defers)
 		f.Defers = f.Defers[:0]
@@ -106,6 +105,14 @@ func (vm *VM) ResetForPool() {
 		}
 		f.captured = false
 	}
+}
+
+// Program reports the immutable program currently loaded by the VM.
+func (vm *VM) Program() *Program {
+	if vm == nil {
+		return nil
+	}
+	return vm.program
 }
 
 func (vm *VM) Stop() {

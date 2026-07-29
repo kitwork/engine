@@ -23,9 +23,11 @@ func TestForGrowingBoundKilledByEnergy(t *testing.T) {
 	if err := c.Compile(prog); err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	bc := c.ByteCodeResult()
-	vm := runtime.New(bc.Instructions, bc.Constants)
-	vm.SourceMap = bc.SourceMap
+	bc, err := c.ByteCodeResult()
+	if err != nil {
+		t.Fatalf("program: %v", err)
+	}
+	vm := runtime.New(bc.Program)
 	vm.MaxEnergy = 50_000 // low cap → must stop fast
 	res := vm.Run()
 	if res.K != value.Invalid {

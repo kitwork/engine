@@ -125,6 +125,9 @@ func Run(configFile ...string) (err error) {
 			defer dbConn.Close()
 
 			database.System = dbConn
+			// Record the DIALECT alongside the handle: a *sql.DB cannot be asked what SQL it
+			// speaks, and the background stores need to know rather than assume.
+			database.SystemDriver = strings.ToLower(strings.TrimSpace(dbCfg.Type))
 			systemConnected = true
 		}
 	}

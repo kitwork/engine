@@ -291,30 +291,56 @@ func hasAlias(specs []ImportSpec) bool {
 }
 
 // memberConst dựng `const <local> = <obj>.<prop>`.
-func memberConst(local string, obj Expression, prop string) Statement {
+func memberConst(local string, obj Expression, prop string, origin Token) Statement {
 	return &VarStatement{
-		Token:        constToken(),
-		Names:        []*Identifier{{Token: Token{Kind: Ident, Value: value.NewString(local)}, Value: local}},
+		Token: constToken(origin),
+		Names: []*Identifier{{
+			Token: tokenWithValue(origin, Ident, value.NewString(local)),
+			Value: local,
+		}},
 		DestructMode: DestructNone,
 		Value: &MemberExpression{
-			Token:    Token{Kind: Dot},
-			Object:   obj,
-			Property: &Identifier{Token: Token{Kind: Ident, Value: value.NewString(prop)}, Value: prop},
+			Token:  tokenWithValue(origin, Dot, value.Value{}),
+			Object: obj,
+			Property: &Identifier{
+				Token: tokenWithValue(origin, Ident, value.NewString(prop)),
+				Value: prop,
+			},
 		},
 	}
 }
 
 // constToken builds a synthetic `const` token for lowered declarations.
-func constToken() Token {
-	return Token{Kind: Const, Value: value.NewString("const")}
+func constToken(origins ...Token) Token {
+	var origin Token
+	if len(origins) > 0 {
+		origin = origins[0]
+	}
+	return tokenWithValue(origin, Const, value.NewString("const"))
 }
 
 // kitworkCall builds the expression `kitwork()`.
-func (p *Parser) kitworkCall() Expression {
+func (p *Parser) kitworkCall(origins ...Token) Expression {
+	var origin Token
+	if len(origins) > 0 {
+		origin = origins[0]
+	}
 	return &CallExpression{
-		Token:     Token{Kind: LeftParen},
-		Function:  &Identifier{Token: Token{Kind: Ident, Value: value.NewString("kitwork")}, Value: "kitwork"},
+		Token: tokenWithValue(origin, LeftParen, value.Value{}),
+		Function: &Identifier{
+			Token: tokenWithValue(origin, Ident, value.NewString("kitwork")),
+			Value: "kitwork",
+		},
 		Arguments: nil,
+	}
+}
+
+func tokenWithValue(origin Token, kind Kind, item value.Value) Token {
+	return Token{
+		Kind:     kind,
+		Value:    item,
+		Source:   origin.Source,
+		Position: origin.Position,
 	}
 }
 
@@ -387,14 +413,22 @@ func (p *Parser) parseImportStatement() Statement {
 				// → const { a, b } = kitwork()
 				names := make([]*Identifier, len(specs))
 				for i, s := range specs {
-					names[i] = &Identifier{Token: Token{Kind: Ident, Value: value.NewString(s.Local)}, Value: s.Local}
+					names[i] = &Identifier{
+						Token: tokenWithValue(importTok, Ident, value.NewString(s.Local)),
+						Value: s.Local,
+					}
 				}
-				return &VarStatement{Token: constToken(), Names: names, DestructMode: DestructObject, Value: p.kitworkCall()}
+				return &VarStatement{
+					Token:        constToken(importTok),
+					Names:        names,
+					DestructMode: DestructObject,
+					Value:        p.kitworkCall(importTok),
+				}
 			}
 			// có alias → nhóm `const local = kitwork().imported`
 			stmts := make([]Statement, len(specs))
 			for i, s := range specs {
-				stmts[i] = memberConst(s.Local, p.kitworkCall(), s.Imported)
+				stmts[i] = memberConst(s.Local, p.kitworkCall(importTok), s.Imported, importTok)
 			}
 			return &GroupStatement{Statements: stmts}
 		}
@@ -421,13 +455,16 @@ func (p *Parser) parseImportStatement() Statement {
 			}
 			// → const name = kitwork().sub
 			return &VarStatement{
-				Token:        constToken(),
+				Token:        constToken(importTok),
 				Names:        []*Identifier{name},
 				DestructMode: DestructNone,
 				Value: &MemberExpression{
-					Token:    Token{Kind: Dot},
-					Object:   p.kitworkCall(),
-					Property: &Identifier{Token: Token{Kind: Ident, Value: value.NewString(sub)}, Value: sub},
+					Token:  tokenWithValue(importTok, Dot, value.Value{}),
+					Object: p.kitworkCall(importTok),
+					Property: &Identifier{
+						Token: tokenWithValue(importTok, Ident, value.NewString(sub)),
+						Value: sub,
+					},
 				},
 			}
 		}
@@ -568,8 +605,9 @@ func (p *Parser) parseLiteral() Expression {
 }
 
 func (p *Parser) parseTemplateLiteral() Expression {
-	fullText := p.curToken.Value.Text()
-	tl := &TemplateLiteral{Token: p.curToken, Parts: []Expression{}}
+	templateToken := p.curToken
+	fullText := templateToken.Value.Text()
+	tl := &TemplateLiteral{Token: templateToken, Parts: []Expression{}}
 
 	start := 0
 	for i := 0; i < len(fullText); i++ {
@@ -578,7 +616,11 @@ func (p *Parser) parseTemplateLiteral() Expression {
 			// 1. Add previous string part if exists
 			if i > start {
 				tl.Parts = append(tl.Parts, &Literal{
-					Token: Token{Kind: String},
+					Token: Token{
+						Kind:     String,
+						Source:   templateToken.Source,
+						Position: templateToken.Position + 1 + int32(start),
+					},
 					Value: value.NewString(fullText[start:i]),
 				})
 			}
@@ -601,7 +643,11 @@ func (p *Parser) parseTemplateLiteral() Expression {
 			exprStr = fullText[exprStart:i]
 
 			// Sub-parse the expression
-			subLexer := NewLexer(exprStr)
+			subLexer := newLexerAt(
+				exprStr,
+				templateToken.Source,
+				templateToken.Position+1+int32(exprStart),
+			)
 			subParser := NewParser(subLexer)
 			expr := subParser.parseExpression(LOWEST)
 			if expr != nil {
@@ -615,7 +661,11 @@ func (p *Parser) parseTemplateLiteral() Expression {
 	// Add trailing string part
 	if start < len(fullText) {
 		tl.Parts = append(tl.Parts, &Literal{
-			Token: Token{Kind: String},
+			Token: Token{
+				Kind:     String,
+				Source:   templateToken.Source,
+				Position: templateToken.Position + 1 + int32(start),
+			},
 			Value: value.NewString(fullText[start:]),
 		})
 	}

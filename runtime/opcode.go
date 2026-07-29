@@ -64,10 +64,10 @@ const (
 	DEFER  // Đảm bảo dọn dẹp/hoàn trả năng lượng khi kết thúc
 	SPAWN  // Chạy lambda trong Goroutine riêng (Fire & Forget)
 
-	// Bổ sung sau (đặt cuối để giữ nguyên giá trị các opcode cũ)
-	MOD    // Chia lấy dư (%)
-	POPFIN // POP một expression-statement + "finalize" nó nếu là value.StatementFinalizer (lazy http
-	//        request tự bắn cuối câu lệnh + chạy .then()/.catch()). Với mọi giá trị khác = POP thường.
-	POPFINSOFT // Như POPFIN nhưng SOFT: chỉ bắn nếu request có handler (.then/.catch). Dùng cho POP dọn
-	//            dẹp của phép GÁN — để request lazy được gán vào biến vẫn giữ nguyên (bắn khi đọc).
+	// Appended opcodes keep the numeric values of the original instruction set stable.
+	MOD    // Remainder (%)
+	COMMIT // Commit a deferred effect at an expression boundary; leave it on the stack.
+
+	_RESERVED // Reserved former POPFINSOFT numeric slot; never execute or reuse it.
+	_LIMIT    // One past the final assigned opcode slot; never execute it.
 )
