@@ -1076,9 +1076,12 @@ func (p *Parser) parseGroupedExpression() Expression {
 	if p.peekTokenIs(FatArrow) {
 		params := make([]*Identifier, len(exps))
 		for i, e := range exps {
-			if id, ok := e.(*Identifier); ok {
-				params[i] = id
+			id, ok := e.(*Identifier)
+			if !ok {
+				p.addError("arrow function parameters must be identifiers")
+				return &ParameterList{Token: p.curToken}
 			}
+			params[i] = id
 		}
 		return &ParameterList{Token: p.curToken, Parameters: params}
 	}
@@ -1098,6 +1101,9 @@ func (p *Parser) parseArrowFunction(left Expression) Expression {
 		params = []*Identifier{id}
 	} else if pl, ok := left.(*ParameterList); ok {
 		params = pl.Parameters
+	} else {
+		p.addError("arrow function parameters must be identifiers")
+		return nil
 	}
 
 	// Xử lý block { } hoặc single expression

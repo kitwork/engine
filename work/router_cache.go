@@ -12,6 +12,7 @@ import (
 
 	"github.com/kitwork/engine/utilities/cache"
 	"github.com/kitwork/engine/utilities/persist"
+	"github.com/kitwork/engine/value"
 )
 
 func cacheKey(r *http.Request) string {
@@ -31,6 +32,9 @@ func hashKey(s string) string {
 }
 
 func responseBytes(resp *Response) (body []byte, contentType string, status int, headers map[string]string, ok bool) {
+	if resp == nil || resp.Data().K == value.Invalid || resp.IsError() {
+		return nil, "", 0, nil, false
+	}
 	status = resp.Code()
 	if status == 0 {
 		status = http.StatusOK

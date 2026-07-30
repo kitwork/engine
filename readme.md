@@ -489,7 +489,20 @@ go test -race ./...
 
 Kitwork Engine is dual-licensed software maintained by the Kitwork Foundation:
 
-- **Open Source License:** **GNU Affero General Public License v3.0 (AGPL-3.0)**.
+- **Open Source License:** **GNU Affero General Public License v3.0 (AGPL-3.0)** — see [`LICENSE`](LICENSE).
 - **Commercial License:** For proprietary closed-source deployments, enterprise embedding, or custom licensing, contact **[support@kitwork.org](mailto:support@kitwork.org)**.
+
+**Your applications are yours.** The AGPL covers the engine, not the code you run on it. The
+[Application Exception](LICENSE-EXCEPTION.md) states this in writing: `.kitwork.js` modules,
+templates, assets and everything the engine generates from them — including pages served to your
+visitors — are separate works you license however you like. What AGPL section 13 asks for is the
+other case: if you **modify the engine itself** and offer that modified engine over a network,
+publish those modifications.
+
+Components meant to be copied into your own codebase are deliberately permissive rather than AGPL:
+`@kitwork/kitjs` (the client kernel) and `kitwork.d.ts` (editor type definitions) are MIT.
+
+Contributions are welcome — start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Because of the
+commercial half of the dual licence, a first contribution needs the agreement in [`CLA.md`](CLA.md).
 
 **Created by Huỳnh Nhân Quốc** · Kitwork Foundation · [Sponsor on GitHub](https://github.com/sponsors/huynhnhanquoc)

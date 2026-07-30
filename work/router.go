@@ -68,6 +68,8 @@ type Router struct {
 	params map[string]string
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
 
+	requestID string
+
 	// Cache configuration
 	cacheTTL       time.Duration
 	staticTTL      time.Duration

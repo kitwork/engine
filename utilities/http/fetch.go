@@ -66,7 +66,7 @@ func FetchWith(h *HTTP, args ...value.Value) value.Value {
 	urlStr := args[0].Text()
 
 	method := "GET"
-	var body value.Value
+	body := value.Value{K: value.Nil}
 
 	if len(args) > 1 && args[1].IsMap() {
 		opts := args[1].Map()

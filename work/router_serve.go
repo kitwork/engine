@@ -49,7 +49,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		response:       &Response{},
 		Method:         r.Method,
 		Path:           r.URL.Path,
+		requestID:      requestID(r),
 	}
+	w.Header().Set("X-Request-ID", reqRouter.requestID)
 	ctxObj := &Context{request: &Request{router: reqRouter}}
 
 	// Read inherited metadata from the immutable generation graph:
@@ -102,7 +104,7 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		if reqRouter.viewBuilder != nil && !reqRouter.response.IsSend() {
 			reqRouter.viewBuilder.flush()
 		}
-		if savMethod != nil {
+		if savMethod != nil && reqRouter.err == nil {
 			t.saveResponse(savMethod, savKey, reqRouter.response)
 		}
 		if reqRouter.response.Kind() == "sse" {
@@ -232,7 +234,8 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 		case method.handle != nil:
 			res := t.execTree(vm, leaf.bytecode, method.handle, ctxObj)
 			if res.K == value.Invalid {
-				reqRouter.err = fmt.Errorf("%v", res.V)
+				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "handler", res)
+				reqRouter.err = fmt.Errorf("%s", res.Text())
 			} else if reqRouter.viewBuilder == nil && !reqRouter.response.IsSend() && res.Truthy() {
 				// A raw value (not a deferred view builder) → send it directly (JSON or HTML).
 				if res.K == value.Map || res.K == value.Array {
@@ -255,6 +258,9 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	if reqRouter.err != nil {
 		if method.errorH != nil {
 			res := t.execTree(vm, leaf.bytecode, method.errorH, ctxObj)
+			if res.K == value.Invalid {
+				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "error", res)
+			}
 			if res.K != value.Invalid && !reqRouter.response.IsSend() && res.Truthy() {
 				if reqRouter.response.Code() == 0 {
 					reqRouter.response.Status(500)
@@ -267,10 +273,20 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			}
 		}
 	} else if method.success != nil {
-		t.execTree(vm, leaf.bytecode, method.success, ctxObj)
+		res := t.execTree(vm, leaf.bytecode, method.success, ctxObj)
+		if res.K == value.Invalid {
+			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "success", res)
+			reqRouter.err = fmt.Errorf("%s", res.Text())
+		}
 	}
 	if method.final != nil {
-		t.execTree(vm, leaf.bytecode, method.final, ctxObj)
+		res := t.execTree(vm, leaf.bytecode, method.final, ctxObj)
+		if res.K == value.Invalid {
+			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "finally", res)
+			if reqRouter.err == nil {
+				reqRouter.err = fmt.Errorf("%s", res.Text())
+			}
+		}
 	}
 
 	finalize()
@@ -316,11 +332,14 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 func (t *Tenant) runStage(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda, ctxObj *Context, r *Router, isGuard bool) bool {
 	res := t.execTree(vm, bc, l, ctxObj)
 	if res.K == value.Invalid {
+		stage := "middleware"
 		if isGuard {
+			stage = "guard"
 			r.err = fmt.Errorf("guard error: %v", res.V)
 		} else {
 			r.err = fmt.Errorf("middleware error: %v", res.V)
 		}
+		t.recordRuntimeFailure(r, bc, stage, res)
 		return false
 	}
 	if r.response.IsSend() {

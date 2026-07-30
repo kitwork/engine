@@ -158,7 +158,7 @@ func (d *DatabaseAdapter) Atomic(args ...value.Value) value.Value {
 		}
 	}()
 
-	var result value.Value
+	result := value.Value{K: value.Nil}
 	if lambda, ok := args[0].V.(*value.Lambda); ok {
 		if runtimeSeam, ok := d.scope.(capabilities.Runtime); ok {
 			_, err := runtimeSeam.Execute(nil, lambda, []value.Value{txVal})

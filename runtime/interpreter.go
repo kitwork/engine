@@ -554,7 +554,7 @@ func (vm *VM) executeInvoke(frame *Frame) {
 					vm.push(result)
 					return
 				}
-				var ttl value.Value
+				ttl := value.Value{K: value.Nil}
 				if len(args) > 2 {
 					ttl = args[2]
 				}
@@ -571,60 +571,6 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	}
 
 	if target.K == value.Array && len(args) > 0 {
-		if callback, ok := args[0].V.(*value.Lambda); ok {
-			items := *target.V.(*[]value.Value)
-			switch method {
-			case "map":
-				result := make([]value.Value, len(items))
-				for index, item := range items {
-					result[index] = vm.ExecuteLambda(
-						callback,
-						[]value.Value{item, value.New(float64(index))},
-					)
-					if result[index].K == value.Invalid {
-						vm.push(result[index])
-						return
-					}
-				}
-				vm.push(value.New(result))
-				return
-			case "filter":
-				result := make([]value.Value, 0, len(items))
-				for index, item := range items {
-					matched := vm.ExecuteLambda(
-						callback,
-						[]value.Value{item, value.New(float64(index))},
-					)
-					if matched.K == value.Invalid {
-						vm.push(matched)
-						return
-					}
-					if matched.Truthy() {
-						result = append(result, item)
-					}
-				}
-				vm.push(value.New(result))
-				return
-			case "find":
-				for index, item := range items {
-					matched := vm.ExecuteLambda(
-						callback,
-						[]value.Value{item, value.New(float64(index))},
-					)
-					if matched.K == value.Invalid {
-						vm.push(matched)
-						return
-					}
-					if matched.Truthy() {
-						vm.push(item)
-						return
-					}
-				}
-				vm.push(value.Value{K: value.Nil})
-				return
-			}
-		}
-
 		if result, handled := vm.arrayCallbackMethod(target, method, args); handled {
 			vm.push(result)
 			return

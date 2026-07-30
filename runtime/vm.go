@@ -66,8 +66,9 @@ func storeScopeChain(fn *value.Lambda, name string, val value.Value) bool {
 	return false
 }
 
-// arrayCallbackMethod xử lý các method Array nhận callback — forEach, some,
-// every, findIndex, reduce, sort(comparator) — chỉ VM mới thực thi được Lambda.
+// arrayCallbackMethod executes every Array method that accepts a script lambda.
+// Keeping callback execution here gives all methods the same failure, energy,
+// cancellation, and frame-restoration semantics.
 // Trả về (kết quả, true) nếu method được xử lý tại đây; ngược lại (zero, false)
 // để rơi xuống prototype table (vd: sort() không comparator).
 func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.Value) (value.Value, bool) {
@@ -89,6 +90,41 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 	}
 
 	switch m {
+	case "map":
+		result := make([]value.Value, len(arr))
+		for i, item := range arr {
+			result[i] = vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			if result[i].K == value.Invalid {
+				return result[i], true
+			}
+		}
+		return value.New(result), true
+
+	case "filter":
+		result := make([]value.Value, 0, len(arr))
+		for i, item := range arr {
+			matched := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			if matched.K == value.Invalid {
+				return matched, true
+			}
+			if matched.Truthy() {
+				result = append(result, item)
+			}
+		}
+		return value.New(result), true
+
+	case "find":
+		for i, item := range arr {
+			matched := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			if matched.K == value.Invalid {
+				return matched, true
+			}
+			if matched.Truthy() {
+				return item, true
+			}
+		}
+		return value.Value{K: value.Nil}, true
+
 	case "forEach":
 		for i, item := range arr {
 			result := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})

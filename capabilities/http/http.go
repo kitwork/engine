@@ -94,7 +94,7 @@ func (h *HTTPAdapter) Post(args ...value.Value) value.Value {
 		return value.Value{K: value.Invalid, V: "http: url required"}
 	}
 	urlVal := args[0]
-	var bodyVal value.Value
+	bodyVal := value.Value{K: value.Nil}
 	if len(args) > 1 {
 		bodyVal = args[1]
 	}

@@ -619,13 +619,18 @@ func (c *Compiler) Compile(node Node) error {
 	case *FunctionLiteral:
 		jumpOver := c.emit(runtime.JUMP, 0, 0)
 		startIP := len(c.instructions)
-		c.Compile(n.Body)
+		if err := c.Compile(n.Body); err != nil {
+			return err
+		}
 		c.emit(runtime.RETURN)
 		endIP := len(c.instructions)
 		c.patchUint16(jumpOver+1, uint16(endIP))
 
 		params := make([]string, len(n.Parameters))
 		for i, p := range n.Parameters {
+			if p == nil {
+				return fmt.Errorf("compiler: arrow function parameter %d is invalid", i+1)
+			}
 			params[i] = p.Value
 		}
 		n.Address = startIP // Propagate address back to AST node

@@ -100,7 +100,7 @@ func (c *GeneralCache) Set(args ...value.Value) value.Value {
 	key := args[0].Text()
 	val := args[1]
 
-	var ttlVal value.Value
+	ttlVal := value.Value{K: value.Nil}
 	if len(args) > 2 {
 		ttlVal = args[2]
 	}
