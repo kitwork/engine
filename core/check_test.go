@@ -48,6 +48,13 @@ router.get((ctx) => ctx.json(missing));`,
 	if report.Sites != 3 || report.Valid != 1 {
 		t.Fatalf("report = %+v, want 3 sites and 1 valid", report)
 	}
+	if report.Programs != 2 || report.Compatible != 2 {
+		t.Fatalf(
+			"compatibility = %d/%d, want 2/2",
+			report.Compatible,
+			report.Programs,
+		)
+	}
 	if len(report.Issues) != 3 {
 		for _, issue := range report.Issues {
 			t.Log(issue.Error())

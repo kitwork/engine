@@ -7,6 +7,7 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
+	"github.com/kitwork/engine/compiler"
 	jitcss "github.com/kitwork/engine/jit/css"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/utilities/cache"
@@ -93,6 +94,35 @@ func TestGenerationActivationAndDrain(t *testing.T) {
 	if !second.Retired() {
 		t.Fatal("site close did not retire the current generation")
 	}
+}
+
+func TestGenerationOwnsOptionalBytecodeCache(t *testing.T) {
+	appRuntime := app.NewRuntime("identity-a")
+	siteRuntime, err := appRuntime.Site("apps", "example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err := siteRuntime.PrepareGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytecodeCache := compiler.NewFileCache(t.TempDir())
+	if err := generation.SetBytecodeCache(bytecodeCache); err != nil {
+		t.Fatal(err)
+	}
+	if generation.BytecodeCache() != bytecodeCache {
+		t.Fatal("generation did not retain its bytecode cache")
+	}
+	if err := generation.SetBytecodeCache(compiler.NewFileCache(t.TempDir())); err == nil {
+		t.Fatal("generation accepted a second bytecode cache")
+	}
+	if _, err := siteRuntime.ActivateGeneration(generation); err != nil {
+		t.Fatal(err)
+	}
+	if err := generation.SetBytecodeCache(compiler.NewFileCache(t.TempDir())); err == nil {
+		t.Fatal("published generation accepted a bytecode cache mutation")
+	}
+	siteRuntime.Close()
 }
 
 func TestGenerationCannotCrossSiteRuntime(t *testing.T) {

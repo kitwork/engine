@@ -48,13 +48,15 @@ func (e tenantLambdaExecutor) ExecuteLambda(fn *value.Lambda, args []value.Value
 		if recovered := recover(); recovered != nil {
 			result = value.Value{K: value.Invalid, V: fmt.Sprintf("panic: %v", recovered)}
 		}
+		e.tenant.recordVMExecution(program, vm, result)
 		releaseVM()
 	}()
 
 	e.tenant.prepareExecutionVM(vm, e.tenant.vm.Globals, e.tenant.vm.Builtins, e.requestScope)
-	vm.FastReset(program, vm.Globals)
+	vm.FastResetPrepared(program)
 	vm.MaxEnergy = e.tenant.MaxEnergy
-	return vm.ExecuteLambda(fn, args)
+	result = vm.ExecuteLambda(fn, args)
+	return result
 }
 
 // Execute implements capabilities.Runtime: run a lambda against its bytecode in a pooled VM, bound to
@@ -81,13 +83,14 @@ func (t *Tenant) Execute(program *runtime.Program, fn *value.Lambda, args []valu
 	}()
 
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
-	vm.FastReset(program, vm.Globals)
+	vm.FastResetPrepared(program)
 	vm.MaxEnergy = t.MaxEnergy
 	for k, v := range t.vm.Vars {
 		vm.Vars[k] = v
 	}
 
 	res := vm.ExecuteLambda(fn, args)
+	t.recordVMExecution(program, vm, res)
 	gas = vm.Energy
 	if res.K == value.Invalid {
 		runErr = fmt.Errorf("%v", res.V)

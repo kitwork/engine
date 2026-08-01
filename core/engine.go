@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/app"
+	"github.com/kitwork/engine/compiler"
 	dom "github.com/kitwork/engine/domain"
 	requestscope "github.com/kitwork/engine/request"
+	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/work"
 )
 
@@ -52,21 +54,24 @@ func (c *cachedTenant) isExpired(now time.Time, timeout time.Duration) bool {
 }
 
 type Engine struct {
-	root        string
-	maxEnergy   uint64
-	hotReload   bool
-	Hostname    string
-	cache       map[string]*cachedTenant
-	appRuntimes map[string]*app.Runtime
-	appTenants  map[string]*work.Tenant // identity → app runtime that owns that identity's _cron scheduler
-	appStarting map[string]struct{}
-	idleTimeout time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
-	rateLimiter *RateLimiter  // host-level limits (nil = off); set qua SetRateLimit trước khi serve
-	authorizer  Authorizer
-	mu          sync.RWMutex
-	stopCleanup chan struct{}
-	closeOnce   sync.Once
-	closed      bool
+	root             string
+	maxEnergy        uint64
+	hotReload        bool
+	Hostname         string
+	cache            map[string]*cachedTenant
+	appRuntimes      map[string]*app.Runtime
+	appTenants       map[string]*work.Tenant // identity → app runtime that owns that identity's _cron scheduler
+	appStarting      map[string]struct{}
+	idleTimeout      time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
+	rateLimiter      *RateLimiter  // host-level limits (nil = off); set qua SetRateLimit trước khi serve
+	authorizer       Authorizer
+	bytecodeCacheMu  sync.RWMutex
+	bytecodeCacheDir string
+	runtimeHealth    *work.RuntimeHealth
+	mu               sync.RWMutex
+	stopCleanup      chan struct{}
+	closeOnce        sync.Once
+	closed           bool
 }
 
 func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
@@ -74,16 +79,17 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		maxEnergy = 10000000 // Default 10M
 	}
 	e := &Engine{
-		root:        root,
-		maxEnergy:   maxEnergy,
-		hotReload:   hotReload,
-		Hostname:    hostname,
-		cache:       make(map[string]*cachedTenant),
-		appRuntimes: make(map[string]*app.Runtime),
-		appTenants:  make(map[string]*work.Tenant),
-		appStarting: make(map[string]struct{}),
-		idleTimeout: 10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
-		stopCleanup: make(chan struct{}),
+		root:          root,
+		maxEnergy:     maxEnergy,
+		hotReload:     hotReload,
+		Hostname:      hostname,
+		cache:         make(map[string]*cachedTenant),
+		appRuntimes:   make(map[string]*app.Runtime),
+		appTenants:    make(map[string]*work.Tenant),
+		appStarting:   make(map[string]struct{}),
+		runtimeHealth: work.NewRuntimeHealth(),
+		idleTimeout:   10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
+		stopCleanup:   make(chan struct{}),
 	}
 	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
 	go e.cleanupLoop(1 * time.Minute)
@@ -132,6 +138,7 @@ func (e *Engine) StartAppSchedulers() (started int) {
 		e.mu.Unlock()
 
 		appTenant := work.NewAppTenantWithRuntime(e.root, identity, appRuntime)
+		appTenant.SetRuntimeHealth(e.runtimeHealth)
 		appTenant.MaxEnergy = e.maxEnergy
 		appTenant.HotReload = e.hotReload
 		if err := appTenant.Run(); err != nil {
@@ -174,6 +181,40 @@ func (e *Engine) SetAuthorizer(authorizer Authorizer) {
 	e.mu.Lock()
 	e.authorizer = authorizer
 	e.mu.Unlock()
+}
+
+// SetBytecodeCache enables generation-scoped bytecode artifacts. An empty
+// directory disables the cache. Call it during host boot before serving.
+func (e *Engine) SetBytecodeCache(directory string) {
+	e.bytecodeCacheMu.Lock()
+	e.bytecodeCacheDir = directory
+	e.bytecodeCacheMu.Unlock()
+}
+
+// Health returns a process-local VM report without exposing request or tenant
+// data. The returned snapshot is safe to serialize while the engine is live.
+func (e *Engine) Health() work.RuntimeHealthSnapshot {
+	if e == nil {
+		return work.RuntimeHealthSnapshot{}
+	}
+	return e.runtimeHealth.Snapshot()
+}
+
+func (e *Engine) prepareGeneration(siteRuntime *site.Runtime) (*site.Generation, error) {
+	generation, err := siteRuntime.PrepareGeneration()
+	if err != nil {
+		return nil, err
+	}
+	e.bytecodeCacheMu.RLock()
+	directory := e.bytecodeCacheDir
+	e.bytecodeCacheMu.RUnlock()
+	if directory != "" {
+		if err := generation.SetBytecodeCache(compiler.NewFileCache(directory)); err != nil {
+			generation.Retire()
+			return nil, err
+		}
+	}
+	return generation, nil
 }
 
 // SetIdleTimeout chỉnh thời gian một tenant idle được giữ trong RAM cache.
@@ -316,12 +357,23 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 						slog.Error("Source manifest check failed; keeping current generation", "error", changeErr)
 					} else if changed {
 						slog.Info("Detecting source change. Preparing generation...", "site", hostname)
+						generation, prepareErr := e.prepareGeneration(current.SiteRuntime())
+						if prepareErr != nil {
+							slog.Error(
+								"Generation preparation failed during hot reload. Fallback to cached version",
+								"error",
+								prepareErr,
+							)
+							return current, nil
+						}
 						newTenant := work.NewTenantWithRuntime(
 							e.root,
 							hostname,
 							current.AppRuntime(),
 							current.SiteRuntime(),
+							generation,
 						)
+						newTenant.SetRuntimeHealth(e.runtimeHealth)
 						newTenant.MaxEnergy = e.maxEnergy
 						newTenant.HotReload = e.hotReload
 
@@ -376,7 +428,13 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 	if err != nil {
 		return nil, err
 	}
-	tenant := work.NewTenantWithRuntime(e.root, hostname, appRuntime, siteRuntime)
+	generation, err := e.prepareGeneration(siteRuntime)
+	if err != nil {
+		appRuntime.RemoveSite(hostname)
+		return nil, err
+	}
+	tenant := work.NewTenantWithRuntime(e.root, hostname, appRuntime, siteRuntime, generation)
+	tenant.SetRuntimeHealth(e.runtimeHealth)
 	tenant.MaxEnergy = e.maxEnergy
 	tenant.HotReload = e.hotReload
 

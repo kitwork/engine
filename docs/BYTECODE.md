@@ -38,6 +38,53 @@ still provide a byte-offset line map:
 - it fingerprints version, code, constants, and debug metadata with SHA-256;
 - it exposes only copied snapshots for diagnostics and serialization.
 
+## Local cache artifacts
+
+`Program.MarshalBinary` and `runtime.UnmarshalProgram` define the verified
+local-cache representation. The envelope carries:
+
+- `ProgramEncodingVersion` for storage framing;
+- `BytecodeVersion` for opcode and constant semantics;
+- the Program checksum;
+- bytecode, immutable constants, and compressed debug entries.
+
+Decoding is not a shortcut around publication. It enforces size bounds,
+rejects incompatible versions and trailing or truncated data, reconstructs
+owned values, runs the complete verifier, and compares the resulting checksum
+before returning an executable Program.
+
+The compiler adds a second `compiler.Bytecode` envelope. Its fingerprint
+combines `CompilerSchemaVersion`, bytecode and storage versions, and the
+instruction-table checksum. Its source fingerprint hashes every bundled source
+name and byte in deterministic order. `Bytecode.CacheKey()` combines both, so
+source or engine changes select a different cache identity.
+
+Artifacts intentionally do not serialize dependency paths. The opt-in
+`compiler.FileCache` therefore performs current source parsing and native
+import discovery before lookup, keys the artifact by the exact bundled source
+fingerprint, and attaches the current dependency list after a hit. A miss,
+stale artifact, or corrupt artifact compiles from source and replaces the local
+file. Cache I/O failure never prevents compilation.
+
+The engine does not enable a process-global disk cache implicitly. A host opts
+in from its web manifest:
+
+```javascript
+app.web({
+  bytecodeCache: true,
+  // Optional. Relative paths resolve from app root.
+  bytecodeCacheDir: ".kitwork/cache/bytecode",
+});
+```
+
+When enabled without a directory, the default is
+`<root>/.kitwork/cache/bytecode`. Every prepared `site.Generation` owns its
+`FileCache` handle and uses it for root and nested router compilation.
+Generation replacement never mutates the active Program. Cron and queue
+programs remain app-owned and compile through their existing app lifecycle.
+The files on disk are reconstructible host storage and may outlive a
+generation.
+
 Closures carry an opaque `value.ProgramRef`, not instruction, constant, and
 debug-table slices. Detached execution resolves that reference and resets a
 pooled VM onto the same owning program. A VM rejects a lambda whose owner does
@@ -150,6 +197,27 @@ reserved so a future opcode can never reinterpret old bytecode.
   rejected. Lambdas are encoded as constants containing an entry address; the
   compiler emits `JUMP` over the function body and `PUSH` for the closure
   prototype.
+
+## Frozen VM v2 contract
+
+VM v2 is frozen by `runtime/contract_test.go`. The test fixes:
+
+- `BytecodeVersion == 2`;
+- every opcode numeric slot, including `_RESERVED` and `_LIMIT`;
+- the complete instruction metadata checksum;
+- `ProgramEncodingVersion == 1`.
+
+Version ownership is deliberately separate:
+
+- change `CompilerSchemaVersion` when lowering or compiler semantics change
+  without changing the VM instruction contract;
+- change `ProgramEncodingVersion` or `BytecodeArtifactVersion` when only a
+  storage envelope becomes incompatible;
+- increment `BytecodeVersion` only when opcode encoding, stack behavior,
+  constant semantics, or execution meaning becomes incompatible.
+
+Updating the VM v2 golden checksum without a deliberate version decision is a
+release failure, not routine test maintenance.
 
 ## Change rule
 

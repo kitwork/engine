@@ -4,6 +4,8 @@ package value
 type Kind uint8
 
 const (
+	// Invalid is also the zero value. Optional values must use Nil explicitly;
+	// use a separate boolean when zero means "not found".
 	Invalid Kind = iota // Internal error or uninitialized
 	Nil                 // Null / undefined
 

@@ -3,11 +3,13 @@ package runtime_test
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -32,12 +34,20 @@ for (let i = 0; i < 20; i++) { result = result + i; }
 	wantOwners := []string{"callbacks", "closure", "loop"}
 	wantResults := []string{"2,4,6", "42", "190"}
 	programs := make([]*compiler.Bytecode, len(sources))
+	fingerprints := make([]executionFingerprint, len(sources))
 	for index, source := range sources {
 		bytecode, err := compiler.CompileSource(source)
 		if err != nil {
 			t.Fatalf("compile fixture %d: %v", index, err)
 		}
 		programs[index] = bytecode
+		fingerprints[index] = runFingerprint(
+			runtime.New(bytecode.Program),
+			bytecode.Program,
+			map[string]value.Value{"fixture": value.New(index)},
+			nil,
+			100_000,
+		)
 	}
 
 	const workers = 16
@@ -56,19 +66,19 @@ for (let i = 0; i < 20; i++) { result = result + i; }
 			for iteration := 0; iteration < iterations; iteration++ {
 				index := (worker + iteration) % len(programs)
 				vm := pool.Acquire()
-				vm.FastReset(
+				fingerprint := runFingerprint(
+					vm,
 					programs[index].Program,
 					map[string]value.Value{"fixture": value.New(index)},
+					nil,
+					100_000,
 				)
-				vm.MaxEnergy = 100_000
-				result := vm.Run()
-				if result.K == value.Invalid {
+				if !reflect.DeepEqual(fingerprint, fingerprints[index]) {
 					pool.Release(vm)
 					failures <- fmt.Errorf(
-						"worker %d iteration %d: %s",
+						"worker %d iteration %d: execution fingerprint changed",
 						worker,
 						iteration,
-						result.Text(),
 					)
 					return
 				}

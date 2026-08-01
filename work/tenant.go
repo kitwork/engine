@@ -60,9 +60,10 @@ type Tenant struct {
 	generation  *site.Generation
 	ownsApp     bool
 
-	bytecode  *compiler.Bytecode
-	vm        *runtime.VM
-	MaxEnergy uint64
+	bytecode      *compiler.Bytecode
+	vm            *runtime.VM
+	runtimeHealth *RuntimeHealth
+	MaxEnergy     uint64
 
 	requestMu      sync.Mutex
 	requestWG      sync.WaitGroup
@@ -625,8 +626,33 @@ func (t *Tenant) SetHostLimiters(s *LimiterStore) {
 	t.limiters[ScopeServer] = s
 }
 
+func (t *Tenant) SetRuntimeHealth(health *RuntimeHealth) {
+	if t != nil {
+		t.runtimeHealth = health
+	}
+}
+
+func (t *Tenant) recordVMExecution(
+	program *runtime.Program,
+	vm *runtime.VM,
+	result value.Value,
+) {
+	if t != nil && t.runtimeHealth != nil && vm != nil {
+		t.runtimeHealth.Record(program, vm.Stats(), result)
+	}
+}
+
+func (t *Tenant) compileFile(paths ...string) (*compiler.Bytecode, error) {
+	if t != nil && t.generation != nil {
+		if bytecodeCache := t.generation.BytecodeCache(); bytecodeCache != nil {
+			return bytecodeCache.CompileFile(paths...)
+		}
+	}
+	return compiler.CompileFile(paths...)
+}
+
 func (t *Tenant) CompileDynamicRoute(filePath string) error {
-	bytecode, err := compiler.CompileFile(filePath)
+	bytecode, err := t.compileFile(filePath)
 	if err != nil {
 		return err
 	}
@@ -635,10 +661,11 @@ func (t *Tenant) CompileDynamicRoute(filePath string) error {
 	defer enginePool.Release(vm)
 
 	t.prepareExecutionVM(vm, t.vm.Globals, t.vm.Builtins)
-	vm.FastReset(bytecode.Program, vm.Globals)
+	vm.FastResetPrepared(bytecode.Program)
 	vm.MaxEnergy = t.MaxEnergy
 
 	res := vm.Run()
+	t.recordVMExecution(bytecode.Program, vm, res)
 	if res.K == value.Invalid {
 		return fmt.Errorf("dynamic runtime error: %v", res.V)
 	}

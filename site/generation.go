@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/kitwork/engine/capabilities"
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/utilities/cache"
 	"github.com/kitwork/engine/value"
 )
@@ -23,6 +24,7 @@ type Generation struct {
 	routeGraph    RouteGraph
 	renderPlan    RenderPlan
 	responseCache *cache.Store
+	bytecodeCache *compiler.FileCache
 	environment   value.Value
 
 	mu         sync.Mutex
@@ -175,6 +177,37 @@ func (g *Generation) ResponseCache() *cache.Store {
 		return nil
 	}
 	return g.responseCache
+}
+
+// SetBytecodeCache installs the optional artifact cache used while preparing
+// this generation. The cache handle belongs to the generation and cannot be
+// replaced after the generation is published.
+func (g *Generation) SetBytecodeCache(bytecodeCache *compiler.FileCache) error {
+	if g == nil {
+		return fmt.Errorf("site generation is nil")
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.published || g.retired {
+		return fmt.Errorf("site generation %d is not mutable", g.version)
+	}
+	if g.bytecodeCache != nil {
+		return fmt.Errorf("site generation %d already has a bytecode cache", g.version)
+	}
+	g.bytecodeCache = bytecodeCache
+	return nil
+}
+
+// BytecodeCache returns the generation-owned compiler cache. A nil result
+// means source compilation is intentionally uncached.
+func (g *Generation) BytecodeCache() *compiler.FileCache {
+	if g == nil {
+		return nil
+	}
+	g.mu.Lock()
+	bytecodeCache := g.bytecodeCache
+	g.mu.Unlock()
+	return bytecodeCache
 }
 
 // Acquire pins this generation for one request.

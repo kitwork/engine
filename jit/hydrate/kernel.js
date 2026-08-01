@@ -14,9 +14,15 @@
 // and auto-closed when their last subscriber leaves the DOM.
 (function () {
   "use strict";
-  var kitwork = (window.kitwork = window.kitwork || {});
+  // `kit` is the canonical author root going forward: authors write data-kit-*, load /kit.js, and
+  // reach the runtime through window.kit. `window.kitwork` remains a DEPRECATED alias pointing at the
+  // SAME object, so every existing component file and module keeps working during the migration —
+  // it is removed only after every caller uses window.kit. (An older page that only seeded
+  // window.kitwork is adopted, so a cached bundle never double-initialises.)
+  var kit = (window.kit = window.kit || window.kitwork || {});
+  var kitwork = (window.kitwork = kit);
 
-  if (kitwork.runtime && kitwork.runtime.loaded) return;
+  if (kit.runtime && kit.runtime.loaded) return;
   var runtimeMeta = kitwork.runtime && typeof kitwork.runtime === "object" ? kitwork.runtime : {};
   runtimeMeta.name = "kitwork";
   runtimeMeta.version = "2.0.0";
@@ -379,7 +385,7 @@
   // so they die with their node; two sibling scopes never see each other.
   // A component boundary is any of these. data-kitwork-component names a REGISTERED blueprint
   // (see kitwork.component); data-kit-scope carries an inline name/init/blueprint.
-  var SCOPE = "[data-kitwork-scope],[data-kit-scope],[data-kitwork-component],[data-kit-component],[data-kitwork-api],[data-kit-api]";
+  var SCOPE = "[data-kitwork-scope],[data-kit-scope],[data-kitwork-component],[data-kit-component],[data-kitwork-api],[data-kit-api],[data-kit-item],[data-kitwork-item]";
 
   // The component registry: kitwork.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
@@ -604,8 +610,91 @@
     return out;
   }
 
+  // ---- data-kit-for: client list rendering ----
+  // The one capability the kernel lacked. It owns STRUCTURE — which item nodes exist, in what order,
+  // matched by data-kit-key — and hands CONTENT to the ordinary text/bind/class pass by giving each
+  // materialised item a per-item scope in its Symbol state (item / index), which chainFor then reads
+  // through to the enclosing component scope. It reuses the SAME keyed-identity idea as morph rather
+  // than diffing: a keyed node that survives is MOVED, never rebuilt, so focus/cursor/input on a row
+  // are preserved across re-renders. No IR runs the list logic — only the tiny author expression that
+  // names the array (`items`) and the key (`item.id`) is walked, exactly like any other attribute.
+  var FOR = "[data-kitwork-for],[data-kit-for]";
+  var forRegistry = [];
+  function parseFor(raw) {
+    var m = /^\s*([$A-Za-z_][\w$]*)\s*(?:,\s*([$A-Za-z_][\w$]*)\s*)?\s+of\s+([\s\S]+)$/.exec(raw || "");
+    if (!m) return null;
+    var list;
+    try { list = parse(lex(m[3])); } catch (e) { return null; }
+    return { item: m[1], index: m[2] || "", list: list, keySrc: "" };
+  }
+  // First sight of a data-kit-for element: capture it as a template, replace it with a comment anchor.
+  // The anchor is where materialised rows are inserted; the source element itself never renders.
+  function collectFor() {
+    document.querySelectorAll(FOR).forEach(function (el) {
+      var parent = el.parentNode;
+      if (!parent) return;
+      var spec = parseFor(el.getAttribute("data-kit-for") || el.getAttribute("data-kitwork-for"));
+      if (!spec) { el.removeAttribute("data-kit-for"); el.removeAttribute("data-kitwork-for"); return; }
+      spec.keySrc = el.getAttribute("data-kit-key") || el.getAttribute("data-kitwork-key") || "";
+      var template = el.cloneNode(true);
+      template.removeAttribute("data-kit-for");
+      template.removeAttribute("data-kitwork-for");
+      var anchor = document.createComment("kit-for");
+      parent.insertBefore(anchor, el);
+      parent.removeChild(el);
+      forRegistry.push({ anchor: anchor, template: template, spec: spec, keyIR: spec.keySrc ? parse(lex(spec.keySrc)) : null });
+    });
+  }
+  function renderFor() {
+    collectFor();
+    for (var r = 0; r < forRegistry.length; r++) {
+      var reg = forRegistry[r];
+      var parent = reg.anchor.parentNode;
+      if (!parent) continue; // anchor left the DOM (a swap removed the region) — nothing to render
+      var arr = run(reg.spec.list, scopeFor(reg.anchor));
+      if (!(arr instanceof Array)) arr = [];
+
+      // current rows: the contiguous data-kit-item siblings right after the anchor.
+      var current = [], curByKey = {}, n = reg.anchor.nextSibling;
+      while (n && n.nodeType === 1 && n.hasAttribute("data-kit-item")) {
+        curByKey[n.getAttribute("data-kit-key")] = n;
+        current.push(n);
+        n = n.nextSibling;
+      }
+
+      var insertAfter = reg.anchor, used = {};
+      for (var i = 0; i < arr.length; i++) {
+        var itemScope = {};
+        itemScope[reg.spec.item] = arr[i];
+        if (reg.spec.index) itemScope[reg.spec.index] = i;
+        var key = reg.keyIR ? String(run(reg.keyIR, itemScope)) : String(i);
+        used[key] = true;
+
+        var node = curByKey[key];
+        if (!node) {
+          node = reg.template.cloneNode(true);
+          node.setAttribute("data-kit-item", "");
+          node.setAttribute("data-kit-key", key);
+        }
+        var st = state(node);
+        st.scope = itemScope; // (re)bind the row to its current item; content is filled by render()
+        st.seeded = true;
+        if (insertAfter.nextSibling !== node) parent.insertBefore(node, insertAfter.nextSibling);
+        insertAfter = node;
+      }
+
+      for (var d = 0; d < current.length; d++) {
+        if (!used[current[d].getAttribute("data-kit-key")]) {
+          cleanupTree(current[d]);
+          current[d].remove();
+        }
+      }
+    }
+  }
+
   function render() {
     rebuildActiveComponents();
+    renderFor();
     document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; });
     document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; el.hidden = !run(x, scopeFor(el)); });
     // bind → attributes: the expression is an OBJECT (reusing the closed grammar), each key an attr.
@@ -928,8 +1017,21 @@
   // compile(src) → IR array — the SAME compiler the server runs, exposed so tools (a playground,
   // a debugger) can show the bytecode a source expression becomes. No eval; pure data out.
   // run(ir[, scope]) walks an IR tree — the walker itself, for tools and tests.
+  function publicScope(s) {
+    if (!s || s === scope) return scope;
+    return new Proxy(s, {
+      get: function (target, key) {
+        if (key === "$") return target;
+        return key in target ? target[key] : 0;
+      },
+      set: function (target, key, value) {
+        target[key] = value;
+        return true;
+      }
+    });
+  }
   kitwork.compile = function (src) { return parse(lex(src)); };
-  kitwork.run = function (ir, s) { return run(ir, s || scope); };
+  kitwork.run = function (ir, s) { return run(ir, publicScope(s)); };
   kitwork.scope = scope;
   kitwork.scopeFor = scopeFor;
   kitwork.render = render;

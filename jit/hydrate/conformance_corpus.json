@@ -1,0 +1,16 @@
+[
+  { "name": "arith-precedence",      "src": "1 + 2 * 3",                                                  "scope": {},                      "want": 7 },
+  { "name": "comparison-and-logic",  "src": "2 + 3 > 4 && 1 < 2",                                         "scope": {},                      "want": true },
+  { "name": "logic-short-circuit",   "src": "a && b",                                                    "scope": { "a": false, "b": true }, "want": false },
+  { "name": "logic-or-returns-operand","src": "a || b",                                                  "scope": { "a": 0, "b": "x" },      "want": "x" },
+  { "name": "ternary-true",          "src": "n > 3 ? 'hi' : 'lo'",                                        "scope": { "n": 5 },              "want": "hi" },
+  { "name": "ternary-false",         "src": "n > 3 ? 'hi' : 'lo'",                                        "scope": { "n": 1 },              "want": "lo" },
+  { "name": "scope-read-arith",      "src": "qty * price",                                               "scope": { "qty": 2, "price": 250 }, "want": 500 },
+  { "name": "paginate-derived",      "src": "(current - 1) * limit + 1",                                  "scope": { "current": 3, "limit": 10 }, "want": 21 },
+  { "name": "scope-write-sequence",  "src": "x = 5; x = x + 1; x",                                        "scope": {},                      "want": 6 },
+  { "name": "string-plus-number",    "src": "'total ' + (qty * price)",                                  "scope": { "qty": 2, "price": 3 }, "want": "total 6" },
+  { "name": "object-blueprint",      "src": "{ count: 5, open: false }",                                  "scope": {},                      "want": { "count": 5, "open": false } },
+  { "name": "array-literal",         "src": "[1, 2, 3]",                                                  "scope": {},                      "want": [1, 2, 3] },
+  { "name": "lambda-method-mutates-state", "src": "count = 0; add = () => count = count + 1; add(); add(); count", "scope": {},          "want": 2 },
+  { "name": "root-scope-read-write",   "src": "$.count = $.count + 1; $.count",                              "scope": { "count": 41 },         "want": 42 }
+]

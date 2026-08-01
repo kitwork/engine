@@ -1,6 +1,11 @@
 package runtime
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+)
 
 const DynamicStack = -1
 
@@ -14,16 +19,22 @@ type InstructionSpec struct {
 	StackOut      int
 	Energy        Cost
 
+	operandSize uint8
 	stackEffect func([]uint16) (int, int)
 }
 
 func instruction(name string, widths []uint8, stackIn, stackOut int, energy Cost) InstructionSpec {
+	var operandSize uint8
+	for _, width := range widths {
+		operandSize += width
+	}
 	return InstructionSpec{
 		Name:          name,
 		OperandWidths: widths,
 		StackIn:       stackIn,
 		StackOut:      stackOut,
 		Energy:        energy,
+		operandSize:   operandSize,
 	}
 }
 
@@ -85,16 +96,49 @@ var instructionTable = [256]InstructionSpec{
 // LookupInstruction returns metadata only for opcodes implemented by the VM.
 // Reserved or historical numeric slots deliberately return false.
 func LookupInstruction(op Opcode) (InstructionSpec, bool) {
-	spec := instructionTable[uint8(op)]
+	spec, ok := lookupInstructionSpec(op)
+	if !ok {
+		return InstructionSpec{}, false
+	}
+	return *spec, true
+}
+
+func lookupInstructionSpec(op Opcode) (*InstructionSpec, bool) {
+	spec := &instructionTable[uint8(op)]
 	return spec, spec.Name != ""
 }
 
-func (s InstructionSpec) OperandSize() int {
-	size := 0
-	for _, width := range s.OperandWidths {
-		size += int(width)
+// InstructionSetChecksum fingerprints the encoded instruction contract.
+// BytecodeVersion remains the explicit compatibility decision; this checksum
+// lets compiler caches also notice accidental metadata drift.
+func InstructionSetChecksum() string {
+	hash := sha256.New()
+	var number [8]byte
+	binary.BigEndian.PutUint16(number[:2], BytecodeVersion)
+	hash.Write(number[:2])
+	for raw := 0; raw < len(instructionTable); raw++ {
+		spec := instructionTable[raw]
+		if spec.Name == "" {
+			continue
+		}
+		hash.Write([]byte{byte(raw)})
+		binary.BigEndian.PutUint16(number[:2], uint16(len(spec.Name)))
+		hash.Write(number[:2])
+		hash.Write([]byte(spec.Name))
+		hash.Write([]byte{byte(len(spec.OperandWidths))})
+		hash.Write(spec.OperandWidths)
+		binary.BigEndian.PutUint32(number[:4], uint32(int32(spec.StackIn)))
+		hash.Write(number[:4])
+		binary.BigEndian.PutUint32(number[:4], uint32(int32(spec.StackOut)))
+		hash.Write(number[:4])
+		binary.BigEndian.PutUint64(number[:], uint64(spec.Energy))
+		hash.Write(number[:])
 	}
-	return size
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func (s InstructionSpec) OperandSize() int {
+	return int(s.operandSize)
 }
 
 func (s InstructionSpec) StackEffect(operands []uint16) (int, int) {

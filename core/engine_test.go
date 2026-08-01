@@ -865,3 +865,54 @@ func TestEngineRateLimitIgnoresSpoofedForwardedFor(t *testing.T) {
 		t.Errorf("#3: spoofed X-Forwarded-For must NOT bypass the per-IP limit, got %d", c)
 	}
 }
+
+func TestEngineRepairsCorruptGenerationBytecodeCache(t *testing.T) {
+	root := t.TempDir()
+	cacheDirectory := filepath.Join(root, ".cache", "bytecode")
+	writeTreeTenant(t, root, "cache-alive")
+
+	request := func(engine *Engine) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(
+			recorder,
+			httptest.NewRequest(http.MethodGet, "http://localhost/", nil),
+		)
+		return recorder
+	}
+
+	first := New(root, 0, false, "")
+	first.SetBytecodeCache(cacheDirectory)
+	response := request(first)
+	if response.Code != http.StatusOK || response.Body.String() != "cache-alive" {
+		t.Fatalf("first generation: %d %q", response.Code, response.Body.String())
+	}
+	health := first.Health()
+	if health.Executions == 0 || health.Successes == 0 || health.Programs == 0 {
+		t.Fatalf("runtime health did not observe request execution: %+v", health)
+	}
+	first.Close()
+
+	artifacts, err := filepath.Glob(filepath.Join(cacheDirectory, "*.kwbc"))
+	if err != nil || len(artifacts) == 0 {
+		t.Fatalf("generation did not publish a cache artifact: %v", err)
+	}
+	if err := os.WriteFile(artifacts[0], []byte("fault-injected"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	second := New(root, 0, false, "")
+	t.Cleanup(second.Close)
+	second.SetBytecodeCache(cacheDirectory)
+	response = request(second)
+	if response.Code != http.StatusOK || response.Body.String() != "cache-alive" {
+		t.Fatalf("repaired generation: %d %q", response.Code, response.Body.String())
+	}
+	repaired, err := os.ReadFile(artifacts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(repaired) == "fault-injected" {
+		t.Fatal("corrupt bytecode artifact was not repaired")
+	}
+}

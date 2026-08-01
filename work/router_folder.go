@@ -544,7 +544,7 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 	routerFile := filepath.Join(n.diskPath(), "router"+extension+".js")
 	n.srcFiles = []string{routerFile} // watched even when absent — a router APPEARING is a change
 	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
-		bc, err := compiler.CompileFile(routerFile)
+		bc, err := t.compileFile(routerFile)
 		if err != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("compile router %s: %w", relative, err)

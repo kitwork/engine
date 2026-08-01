@@ -16,16 +16,18 @@ const queueResourceName = "queue"
 type queueRuntime struct {
 	owner *Tenant
 
-	mu       sync.Mutex
-	handlers []*QueueHandler
-	byName   map[string]*QueueHandler
-	inflight map[string]int // queue name → messages this node is running right now
-	cancels  []chan struct{}
-	wg       sync.WaitGroup
-	db       *sql.DB
-	store    queuestore.Store
-	node     string
-	closed   bool
+	lifecycle sync.Mutex
+	mu        sync.Mutex
+	handlers  []*QueueHandler
+	byName    map[string]*QueueHandler
+	inflight  map[string]int // queue name → messages this node is running right now
+	cancels   []chan struct{}
+	wg        sync.WaitGroup
+	db        *sql.DB
+	store     queuestore.Store
+	node      string
+	running   bool
+	closed    bool
 }
 
 // handlerFor resolves a claimed message's queue to the code that runs it.
@@ -41,7 +43,7 @@ func (q *queueRuntime) handlerFor(name string) *QueueHandler {
 func (q *queueRuntime) capacity() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed {
+	if q.closed || !q.running {
 		return 0
 	}
 	total := 0
@@ -85,6 +87,9 @@ func (q *queueRuntime) Close() {
 	if q == nil {
 		return
 	}
+	q.lifecycle.Lock()
+	defer q.lifecycle.Unlock()
+
 	q.mu.Lock()
 	if q.closed {
 		q.mu.Unlock()
@@ -92,10 +97,7 @@ func (q *queueRuntime) Close() {
 		return
 	}
 	q.closed = true
-	for _, cancel := range q.cancels {
-		close(cancel)
-	}
-	q.cancels = nil
+	stopQueueWorkerNoLock(q)
 	q.mu.Unlock()
 	q.wg.Wait()
 }
@@ -109,7 +111,7 @@ func (q *queueRuntime) startRun() bool {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed {
+	if q.closed || !q.running {
 		return false
 	}
 	q.wg.Add(1)
@@ -150,8 +152,13 @@ func (t *Tenant) ensureQueueWorker() (*queueRuntime, error) {
 // a node is a node, and giving the queue a second identity would make one process look like two in
 // the shared store's lease bookkeeping.
 func (t *Tenant) queueNodeID() string {
-	if worker := t.queueWorker(); worker != nil && worker.node != "" {
-		return worker.node
+	if worker := t.queueWorker(); worker != nil {
+		worker.mu.Lock()
+		node := worker.node
+		worker.mu.Unlock()
+		if node != "" {
+			return node
+		}
 	}
 	return t.nodeID()
 }

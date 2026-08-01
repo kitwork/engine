@@ -56,11 +56,16 @@ func (t *Tenant) StartQueueWorker() {
 	if worker == nil {
 		return
 	}
+	worker.lifecycle.Lock()
+	defer worker.lifecycle.Unlock()
+
+	worker.mu.Lock()
+	stopQueueWorkerNoLock(worker)
+	worker.mu.Unlock()
+	worker.wg.Wait()
+
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
-
-	stopQueueWorkerNoLock(worker)
-
 	if len(worker.handlers) == 0 || worker.closed {
 		return
 	}
@@ -75,15 +80,20 @@ func (t *Tenant) StopQueueWorker() {
 	if worker == nil {
 		return
 	}
+	worker.lifecycle.Lock()
+	defer worker.lifecycle.Unlock()
+
 	worker.mu.Lock()
-	defer worker.mu.Unlock()
 	stopQueueWorkerNoLock(worker)
+	worker.mu.Unlock()
+	worker.wg.Wait()
 }
 
 // stopQueueWorkerNoLock cancels the poller and heartbeat. Caller holds worker.mu; the wait for
 // in-flight runs happens OUTSIDE the lock, because a finishing run needs that same lock to
 // decrement its slot and would otherwise wait for the waiter.
 func stopQueueWorkerNoLock(worker *queueRuntime) {
+	worker.running = false
 	for _, cancel := range worker.cancels {
 		close(cancel)
 	}
@@ -95,6 +105,10 @@ func stopQueueWorkerNoLock(worker *queueRuntime) {
 // Runs under worker.mu, held by the caller, so it must not re-lock.
 func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	appID := t.appID()
+	nodeID := worker.node
+	if nodeID == "" {
+		nodeID = t.nodeID()
+	}
 
 	// No flag: a connected system database is the switch, exactly as it is for the scheduler. It asks
 	// which DIALECT rather than merely whether one is connected — a system database configured as
@@ -103,17 +117,17 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	var store queuestore.Store
 	if database.SystemIsPostgres() {
 		worker.db = database.System
-		store = queuestore.NewPgStore(database.System, t.queueNodeID())
+		store = queuestore.NewPgStore(database.System, nodeID)
 	} else if database.System != nil {
 		worker.db = database.System
-		store = queuestore.NewSqliteStore(database.System, t.queueNodeID())
+		store = queuestore.NewSqliteStore(database.System, nodeID)
 	} else {
 		db := appSqliteFor(t, "queue.db").db() // apps/<identity>/.data/queue.db — one per app
 		if db == nil {
 			return fmt.Errorf("queue.db connection unavailable")
 		}
 		worker.db = db
-		store = queuestore.NewSqliteStore(db, t.queueNodeID())
+		store = queuestore.NewSqliteStore(db, nodeID)
 	}
 	worker.store = store
 
@@ -143,13 +157,14 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	store.Reclaim(appID, true) // boot: SQLite frees all of this app's 'running'; Postgres only expired leases
 
 	worker.inflight = make(map[string]int, len(records))
+	worker.running = true
 
 	poll := make(chan struct{})
 	worker.cancels = append(worker.cancels, poll)
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
-		t.queuePoller(worker, poll, appID)
+		t.queuePoller(worker, poll, appID, nodeID)
 	}()
 
 	beat := make(chan struct{})
@@ -157,11 +172,11 @@ func (t *Tenant) startQueueRuntime(worker *queueRuntime) error {
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
-		t.queueHeartbeat(worker, beat)
+		t.queueHeartbeat(worker, beat, nodeID)
 	}()
 
 	fmt.Printf("[Queue] worker up (%s, node=%s) — %d queue(s) for %q\n",
-		store.Label(), t.queueNodeID(), len(records), appID)
+		store.Label(), nodeID, len(records), appID)
 	return nil
 }
 
@@ -177,7 +192,12 @@ func normalizeQueueDefaults(handler *QueueHandler) {
 	}
 }
 
-func (t *Tenant) queuePoller(worker *queueRuntime, cancel chan struct{}, appID string) {
+func (t *Tenant) queuePoller(
+	worker *queueRuntime,
+	cancel chan struct{},
+	appID,
+	nodeID string,
+) {
 	ticker := time.NewTicker(queuePollInterval)
 	defer ticker.Stop()
 	tick := 0
@@ -186,7 +206,7 @@ func (t *Tenant) queuePoller(worker *queueRuntime, cancel chan struct{}, appID s
 		case <-cancel:
 			return
 		case <-ticker.C:
-			t.claimAndRunQueue(worker, appID)
+			t.claimAndRunQueue(worker, appID, nodeID)
 			worker.store.Reclaim(appID, false)
 			tick++
 			if tick%240 == 0 { // ~once a minute at the default interval
@@ -198,7 +218,11 @@ func (t *Tenant) queuePoller(worker *queueRuntime, cancel chan struct{}, appID s
 
 // queueHeartbeat pushes this node's leases forward while it lives, so the shared store can tell a
 // live-but-busy node from a dead one. A host goroutine — the VM is occupied during a slow job.
-func (t *Tenant) queueHeartbeat(worker *queueRuntime, cancel chan struct{}) {
+func (t *Tenant) queueHeartbeat(
+	worker *queueRuntime,
+	cancel chan struct{},
+	nodeID string,
+) {
 	interval := queueLeaseTTL / 3
 	if interval < 250*time.Millisecond {
 		interval = 250 * time.Millisecond
@@ -210,7 +234,7 @@ func (t *Tenant) queueHeartbeat(worker *queueRuntime, cancel chan struct{}) {
 		case <-cancel:
 			return
 		case <-ticker.C:
-			worker.store.Heartbeat(t.queueNodeID(), queueLeaseTTL)
+			worker.store.Heartbeat(nodeID, queueLeaseTTL)
 		}
 	}
 }
@@ -220,7 +244,7 @@ func (t *Tenant) queueHeartbeat(worker *queueRuntime, cancel chan struct{}) {
 // Capacity is computed BEFORE claiming so a node does not hold messages it cannot start — a claimed
 // message is invisible to every other node until its lease expires, so over-claiming is how a queue
 // appears stalled while another node sits idle.
-func (t *Tenant) claimAndRunQueue(worker *queueRuntime, appID string) {
+func (t *Tenant) claimAndRunQueue(worker *queueRuntime, appID, nodeID string) {
 	capacity := worker.capacity()
 	if capacity < 1 {
 		return
@@ -229,7 +253,7 @@ func (t *Tenant) claimAndRunQueue(worker *queueRuntime, appID string) {
 		capacity = 20
 	}
 
-	for _, claimed := range worker.store.Claim(appID, t.queueNodeID(), queueLeaseTTL, capacity) {
+	for _, claimed := range worker.store.Claim(appID, nodeID, queueLeaseTTL, capacity) {
 		handler := worker.handlerFor(claimed.Name)
 		if handler == nil {
 			// This node has no code for that queue. Dead-letter it rather than loop: a message no

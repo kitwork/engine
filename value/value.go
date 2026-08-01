@@ -61,6 +61,9 @@ func (v Value) Call(name string, args ...Value) Value {
 	}
 
 	if fn, ok := v.V.(reflect.Value); ok {
+		if !fn.IsValid() || fn.Kind() != reflect.Func {
+			return invalidCall(name, "host value is not callable")
+		}
 		fnType := fn.Type()
 		numIn := fnType.NumIn()
 		isVariadic := fnType.IsVariadic()
@@ -71,8 +74,16 @@ func (v Value) Call(name string, args ...Value) Value {
 		}
 
 		if len(args) < minArgs {
-			fmt.Printf("[Value Call] Panic Prevention: Too few arguments for function %s. Expected at least %d, got %d\n", name, minArgs, len(args))
-			return Value{K: Nil}
+			return invalidCall(
+				name,
+				fmt.Sprintf("expected at least %d arguments, got %d", minArgs, len(args)),
+			)
+		}
+		if !isVariadic && len(args) > numIn {
+			return invalidCall(
+				name,
+				fmt.Sprintf("expected %d arguments, got %d", numIn, len(args)),
+			)
 		}
 
 		goArgs := make([]reflect.Value, len(args))
@@ -83,43 +94,82 @@ func (v Value) Call(name string, args ...Value) Value {
 			} else if i < numIn {
 				targetType = fnType.In(i)
 			} else {
-				return Value{K: Invalid}
+				return invalidCall(name, "argument is outside the host function signature")
 			}
-			goArgs[i] = transformArg(args[i], targetType)
+			transformed, compatible := transformArg(args[i], targetType)
+			if !compatible {
+				return invalidCall(
+					name,
+					fmt.Sprintf("argument %d cannot convert to %s", i+1, targetType),
+				)
+			}
+			goArgs[i] = transformed
 		}
 		results := fn.Call(goArgs)
-		if len(results) > 0 {
-			return New(results[0].Interface())
-		}
-		return Value{K: Nil}
+		return reflectedCallResult(name, results)
 	}
 	return Value{K: Invalid}
 }
 
-func transformArg(val Value, targetType reflect.Type) reflect.Value {
+func invalidCall(name, detail string) Value {
+	if name == "" {
+		name = "<anonymous>"
+	}
+	return Value{
+		K: Invalid,
+		V: fmt.Sprintf("call %s: %s", name, detail),
+	}
+}
+
+func transformArg(val Value, targetType reflect.Type) (reflect.Value, bool) {
 	if targetType == reflect.TypeOf(Value{}) {
-		return reflect.ValueOf(val)
+		return reflect.ValueOf(val), true
 	}
 	v := val.Interface()
 	if v == nil {
-		return reflect.Zero(targetType)
+		return reflect.Zero(targetType), true
 	}
 	rv := reflect.ValueOf(v)
 	if rv.Type().AssignableTo(targetType) {
-		return rv
+		return rv, true
 	}
 	if rv.Type().ConvertibleTo(targetType) {
-		return rv.Convert(targetType)
+		return rv.Convert(targetType), true
 	}
 	if val.K == Number {
 		switch targetType.Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-			return reflect.ValueOf(int64(val.N)).Convert(targetType)
+			return reflect.ValueOf(int64(val.N)).Convert(targetType), true
 		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-			return reflect.ValueOf(uint64(val.N)).Convert(targetType)
+			return reflect.ValueOf(uint64(val.N)).Convert(targetType), true
 		}
 	}
-	return reflect.Zero(targetType)
+	return reflect.Value{}, false
+}
+
+func reflectedCallResult(name string, results []reflect.Value) Value {
+	if len(results) == 0 {
+		return Value{K: Nil}
+	}
+
+	last := results[len(results)-1]
+	errorType := reflect.TypeOf((*error)(nil)).Elem()
+	// Only an explicit `error` result is an error channel. Host API objects may
+	// themselves implement Error() while still being ordinary fluent values.
+	if last.IsValid() && last.Type() == errorType {
+		isNil := false
+		switch last.Kind() {
+		case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+			isNil = last.IsNil()
+		}
+		if !isNil {
+			return invalidCall(name, last.Interface().(error).Error())
+		}
+		if len(results) == 1 {
+			return Value{K: Nil}
+		}
+	}
+	return New(results[0].Interface())
 }
 
 // TenantCache enables runtime/VM to query the in-memory cache directly without import cycles.

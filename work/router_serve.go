@@ -323,8 +323,10 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 	if l == nil || bc == nil {
 		return value.Value{K: value.Nil}
 	}
-	vm.FastReset(bc.Program, vm.Globals)
-	return vm.ExecuteLambda(l, ctxObj.arguments(l))
+	vm.FastResetPrepared(bc.Program)
+	result := vm.ExecuteLambda(l, ctxObj.arguments(l))
+	t.recordVMExecution(bc.Program, vm, result)
+	return result
 }
 
 // runStage runs one guard/middleware lambda and reports whether the pipeline may continue.

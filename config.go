@@ -10,19 +10,21 @@ import (
 )
 
 type Config struct {
-	Port       int               `json:"port" yaml:"port"`
-	Root       string            `json:"root" yaml:"root"`
-	Databases  []database.Config `json:"database" yaml:"database"`
-	Domains    []string          `json:"domains" yaml:"domains"`
-	Canonical  string            `json:"canonical" yaml:"canonical"` // "apex" | "www" | "" (off)
-	Redirects  map[string]string `json:"redirects" yaml:"redirects"` // host → target host or full URL
-	MaxEnergy  uint64            `json:"max_energy" yaml:"max_energy"`
-	HotReload  bool              `json:"hot_reload" yaml:"hot_reload"`
-	Hostname   string            `json:"hostname" yaml:"hostname"`
-	AllowLocal bool              `json:"allow_local" yaml:"allow_local"`
-	TrustProxy bool              `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
-	Logger     logger.Config     `json:"logger" yaml:"logger"`
-	RateLimit  *RateLimitConfig  `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
+	Port             int               `json:"port" yaml:"port"`
+	Root             string            `json:"root" yaml:"root"`
+	Databases        []database.Config `json:"database" yaml:"database"`
+	Domains          []string          `json:"domains" yaml:"domains"`
+	Canonical        string            `json:"canonical" yaml:"canonical"` // "apex" | "www" | "" (off)
+	Redirects        map[string]string `json:"redirects" yaml:"redirects"` // host → target host or full URL
+	MaxEnergy        uint64            `json:"max_energy" yaml:"max_energy"`
+	HotReload        bool              `json:"hot_reload" yaml:"hot_reload"`
+	BytecodeCache    bool              `json:"bytecode_cache" yaml:"bytecode_cache"`
+	BytecodeCacheDir string            `json:"bytecode_cache_dir" yaml:"bytecode_cache_dir"`
+	Hostname         string            `json:"hostname" yaml:"hostname"`
+	AllowLocal       bool              `json:"allow_local" yaml:"allow_local"`
+	TrustProxy       bool              `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
+	Logger           logger.Config     `json:"logger" yaml:"logger"`
+	RateLimit        *RateLimitConfig  `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
 }
 
 // RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request
@@ -61,6 +63,23 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	if val, ok := raw["hot_reload"]; ok {
 		if b, ok := val.(bool); ok {
 			cfg.HotReload = b
+		}
+	}
+	if val, ok := raw["bytecode_cache"]; ok {
+		switch cache := val.(type) {
+		case bool:
+			cfg.BytecodeCache = cache
+		case string:
+			if cache != "" {
+				cfg.BytecodeCache = true
+				cfg.BytecodeCacheDir = cache
+			}
+		}
+	}
+	if val, ok := raw["bytecode_cache_dir"]; ok {
+		if directory, ok := val.(string); ok && directory != "" {
+			cfg.BytecodeCache = true
+			cfg.BytecodeCacheDir = directory
 		}
 	}
 	if val, ok := raw["hostname"]; ok {

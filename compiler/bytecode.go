@@ -33,8 +33,16 @@ func parseProgramSource(content, source string) (*Program, error) {
 // subset: anything it can't express is a compile error (by design), not silently
 // normalized by a bundler.
 func CompileFile(paths ...string) (*Bytecode, error) {
+	prog, files, sources, err := prepareFile(paths...)
+	if err != nil {
+		return nil, err
+	}
+	return compilePreparedFile(prog, files, sources)
+}
+
+func prepareFile(paths ...string) (*Program, []string, map[string]string, error) {
 	if paths == nil {
-		return nil, fmt.Errorf("path is required")
+		return nil, nil, nil, fmt.Errorf("path is required")
 	}
 
 	entryPath := filepath.Join(paths...)
@@ -45,14 +53,14 @@ func CompileFile(paths ...string) (*Bytecode, error) {
 
 	data, err := os.ReadFile(entryAbs)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	content := string(data)
 	sourceName := filepath.ToSlash(filepath.Base(entryAbs))
 
 	prog, err := parseProgramSource(content, sourceName)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	files := []string{entryAbs}
 	sources := map[string]string{sourceName: content}
@@ -61,14 +69,21 @@ func CompileFile(paths ...string) (*Bytecode, error) {
 		var moduleSources map[string]string
 		prog, moduleFiles, moduleSources, err = nativeBundleWithSources(entryAbs, prog)
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 		files = append(files, moduleFiles...)
 		for name, source := range moduleSources {
 			sources[name] = source
 		}
 	}
+	return prog, files, sources, nil
+}
 
+func compilePreparedFile(
+	prog *Program,
+	files []string,
+	sources map[string]string,
+) (*Bytecode, error) {
 	c := newCompilerWithSources(sources)
 	if err := c.Compile(prog); err != nil {
 		return nil, err

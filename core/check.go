@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/app"
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/work"
 )
 
@@ -37,10 +38,12 @@ func (i CheckIssue) Error() string {
 
 // CheckReport contains every issue found during one preflight pass.
 type CheckReport struct {
-	Apps   int
-	Sites  int
-	Valid  int
-	Issues []CheckIssue
+	Apps       int
+	Sites      int
+	Valid      int
+	Programs   int
+	Compatible int
+	Issues     []CheckIssue
 }
 
 func (r CheckReport) OK() bool {
@@ -56,7 +59,7 @@ type checkTarget struct {
 // Check prepares every discovered site through the same Tenant.Run production
 // path, then retires it without activation. It opens no listener and starts no
 // cron scheduler.
-func Check(root string, maxEnergy uint64) CheckReport {
+func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) CheckReport {
 	if maxEnergy == 0 {
 		maxEnergy = 10_000_000
 	}
@@ -111,6 +114,18 @@ func Check(root string, maxEnergy uint64) CheckReport {
 			})
 			continue
 		}
+		if len(bytecodeCacheDirectory) > 0 && bytecodeCacheDirectory[0] != "" {
+			if err := generation.SetBytecodeCache(
+				compiler.NewFileCache(bytecodeCacheDirectory[0]),
+			); err != nil {
+				report.Issues = append(report.Issues, CheckIssue{
+					Stage: "bytecode cache", Identity: target.identity,
+					Domain: target.domain, File: target.file, Err: err,
+				})
+				generation.Retire()
+				continue
+			}
+		}
 
 		tenant := work.NewTenantWithRuntime(
 			root,
@@ -155,6 +170,44 @@ func Check(root string, maxEnergy uint64) CheckReport {
 				Stage: "queue compile", Identity: identity,
 				File: issue.File, Err: issue.Err,
 			})
+		}
+	}
+
+	files, entrypointErr := profileEntrypoints(root)
+	if entrypointErr != nil {
+		report.Issues = append(report.Issues, CheckIssue{
+			Stage: "compatibility discovery",
+			File:  root,
+			Err:   entrypointErr,
+		})
+	} else {
+		var artifactCache *compiler.FileCache
+		if len(bytecodeCacheDirectory) > 0 && bytecodeCacheDirectory[0] != "" {
+			artifactCache = compiler.NewFileCache(bytecodeCacheDirectory[0])
+		}
+		for _, file := range files {
+			var bytecode *compiler.Bytecode
+			var compileErr error
+			if artifactCache != nil {
+				bytecode, compileErr = artifactCache.CompileFile(file)
+			} else {
+				bytecode, compileErr = compiler.CompileFile(file)
+			}
+			// Site preparation and app checks already report compilation
+			// failures with their owning runtime context.
+			if compileErr != nil {
+				continue
+			}
+			report.Programs++
+			if err := compiler.ValidateArtifact(bytecode); err != nil {
+				report.Issues = append(report.Issues, CheckIssue{
+					Stage: "bytecode compatibility",
+					File:  profileRelativePath(root, file),
+					Err:   err,
+				})
+				continue
+			}
+			report.Compatible++
 		}
 	}
 

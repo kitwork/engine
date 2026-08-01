@@ -3,6 +3,8 @@ name: Engine CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -28,6 +30,12 @@ jobs:
       - name: Test
         run: go test -count=1 ./...
 
+      - name: VM v2 contract
+        run: go test ./runtime -run=TestVMV2Contract -count=1
+
+      - name: VM fault-injection gate
+        run: go test ./runtime ./compiler ./core ./site ./app -run='(Corrupt|Panic|Cancellation|Fallback|Drain|DrainsTasks)' -count=1
+
       - name: Vet
         run: go vet ./...
 
@@ -36,3 +44,50 @@ jobs:
 
       - name: Compiler fuzz smoke test
         run: go test ./compiler -run=^$ -fuzz=FuzzCompiler -fuzztime=5s
+
+      - name: Compiler to VM fuzz smoke test
+        run: go test ./compiler -run=^$ -fuzz=FuzzCompileVerifyExecute -fuzztime=10s
+
+      - name: Bytecode artifact fuzz smoke test
+        run: go test ./compiler -run=^$ -fuzz=FuzzUnmarshalBytecode -fuzztime=5s
+
+      - name: Verifier fuzz smoke test
+        run: go test ./runtime -run=^$ -fuzz=FuzzVerifyNeverPanics -fuzztime=5s
+
+      - name: Program decoder fuzz smoke test
+        run: go test ./runtime -run=^$ -fuzz=FuzzUnmarshalProgram -fuzztime=5s
+
+      - name: VM determinism fuzz smoke test
+        run: go test ./runtime -run=^$ -fuzz=FuzzVMDeterminism -fuzztime=10s
+
+  vm-soak:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Pooled VM soak
+        env:
+          KITWORK_SOAK: "1"
+        run: go test ./runtime -run='TestPooledVM(SoakAcrossPrograms|ReleasesOversizedVerifiedWorkload)' -count=1 -timeout=10m
+
+      - name: Compiler to VM fuzz
+        run: go test ./compiler -run=^$ -fuzz=FuzzCompileVerifyExecute -fuzztime=60s
+
+      - name: VM determinism fuzz
+        run: go test ./runtime -run=^$ -fuzz=FuzzVMDeterminism -fuzztime=60s
+
+      - name: VM benchmark snapshot
+        run: go test ./runtime -run=^$ -bench=^BenchmarkVM -benchmem -count=3
+
+      - name: Production handler benchmark snapshot
+        run: go test ./work -run=^$ -bench='^BenchmarkServeHandler(Corpus|Engine)$' -benchmem -benchtime=500ms -count=1

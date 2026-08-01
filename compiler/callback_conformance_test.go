@@ -91,6 +91,20 @@ func TestArrayCallbackConformance(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("unique/object-identity", func(t *testing.T) {
+		vm, result := runCallbackSource(t, `
+const first = { id: 1 };
+const second = { id: 1 };
+const result = [first, first, second].unique((item) => item);
+`)
+		if result.K == value.Invalid {
+			t.Fatalf("execution failed: %s", result.Text())
+		}
+		if got := len(vm.Vars["result"].Array()); got != 2 {
+			t.Fatalf("unique object identities = %d, want 2", got)
+		}
+	})
 }
 
 func TestArrayCallbacksPropagateFailures(t *testing.T) {

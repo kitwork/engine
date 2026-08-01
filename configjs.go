@@ -114,6 +114,10 @@ func (b *ServerBuilder) Web(args ...value.Value) *ServerBuilder {
 			b.config["trust_proxy"] = val
 		case "hotReload":
 			b.config["hot_reload"] = val
+		case "bytecodeCache":
+			b.config["bytecode_cache"] = val
+		case "bytecodeCacheDir":
+			b.config["bytecode_cache_dir"] = val
 		case "domain":
 			b.config["domains"] = val
 		default:

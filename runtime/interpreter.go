@@ -40,7 +40,10 @@ func (vm *VM) ExecuteLambda(lambda *value.Lambda, args []value.Value) (result va
 		return vm.diagnosticValue(fault.code, fault.message, vm.Frames[vm.FrameIdx].LastIP)
 	}
 	floor := vm.FrameIdx
+	return vm.executePreparedLambda(callerFrame, stackBase, floor)
+}
 
+func (vm *VM) executePreparedLambda(callerFrame, stackBase, floor int) (result value.Value) {
 	defer func() {
 		if len(vm.Stack) > stackBase {
 			vm.Stack = vm.Stack[:stackBase]
@@ -51,11 +54,74 @@ func (vm *VM) ExecuteLambda(lambda *value.Lambda, args []value.Value) (result va
 	return vm.execute(floor)
 }
 
+func (vm *VM) executeLambdaFixed(
+	lambda *value.Lambda,
+	count int,
+	first value.Value,
+	second value.Value,
+	third value.Value,
+) value.Value {
+	if lambda == nil {
+		return value.Value{K: value.Nil}
+	}
+	if vm == nil || vm.program == nil {
+		return vm.diagnosticValue(DiagnosticNoProgram, "VM has no verified program", -1)
+	}
+
+	callerFrame := vm.FrameIdx
+	stackBase := len(vm.Stack)
+	frame, fault := vm.prepareLambdaFrame(lambda)
+	if fault != nil {
+		return vm.diagnosticValue(fault.code, fault.message, vm.Frames[vm.FrameIdx].LastIP)
+	}
+	if count > 0 && len(lambda.Params) > 0 {
+		frame.Vars[lambda.Params[0]] = first
+	}
+	if count > 1 && len(lambda.Params) > 1 {
+		frame.Vars[lambda.Params[1]] = second
+	}
+	if count > 2 && len(lambda.Params) > 2 {
+		frame.Vars[lambda.Params[2]] = third
+	}
+	return vm.executePreparedLambda(callerFrame, stackBase, vm.FrameIdx)
+}
+
+func (vm *VM) executeLambda1(lambda *value.Lambda, first value.Value) value.Value {
+	return vm.executeLambdaFixed(
+		lambda,
+		1,
+		first,
+		value.Value{K: value.Nil},
+		value.Value{K: value.Nil},
+	)
+}
+
+func (vm *VM) executeLambda2(
+	lambda *value.Lambda,
+	first value.Value,
+	second value.Value,
+) value.Value {
+	return vm.executeLambdaFixed(
+		lambda,
+		2,
+		first,
+		second,
+		value.Value{K: value.Nil},
+	)
+}
+
+func (vm *VM) executeLambda3(
+	lambda *value.Lambda,
+	first value.Value,
+	second value.Value,
+	third value.Value,
+) value.Value {
+	return vm.executeLambdaFixed(lambda, 3, first, second, third)
+}
+
 // execute is the VM's only bytecode dispatch loop. floor is the first frame
 // owned by this invocation; returning below it hands control back to the caller.
 func (vm *VM) execute(floor int) value.Value {
-	steps := uint64(0)
-
 	for vm.FrameIdx >= floor {
 		frame := &vm.Frames[vm.FrameIdx]
 
@@ -79,24 +145,12 @@ func (vm *VM) execute(floor int) value.Value {
 		frame.IP++
 		frame.LastIP = opIP
 
-		spec, known := LookupInstruction(op)
-		if !known {
-			return vm.exitFailure(floor, vm.diagnosticValue(
-				DiagnosticUnknownOpcode,
-				fmt.Sprintf("Unknown or unsupported opcode %d at byte %d", op, opIP),
-				opIP,
-			))
-		}
-		if frame.IP+spec.OperandSize() > len(vm.program.code) {
-			return vm.exitFailure(floor, vm.diagnosticValue(
-				DiagnosticTruncatedBytecode,
-				fmt.Sprintf("Bytecode truncated at byte %d: %s operands", opIP, spec.Name),
-				opIP,
-			))
-		}
+		// Program construction verified every opcode, operand width, constant,
+		// jump, and stack transition before publication. The immutable dispatch
+		// path can therefore read canonical metadata directly.
+		spec := &instructionTable[uint8(op)]
 
-		vm.Energy += uint64(spec.Energy)
-		if vm.MaxEnergy > 0 && vm.Energy > vm.MaxEnergy {
+		if !vm.consumeEnergy(spec.Energy) {
 			return vm.exitFailure(floor, vm.diagnosticValue(
 				DiagnosticEnergyLimit,
 				"Energy Limit Exceeded: Execution halted",
@@ -104,8 +158,8 @@ func (vm *VM) execute(floor int) value.Value {
 			))
 		}
 
-		steps++
-		if vm.Context != nil && steps&63 == 0 {
+		vm.instructions++
+		if vm.Context != nil && vm.instructions&63 == 0 {
 			if err := vm.Context.Err(); err != nil {
 				return vm.exitFailure(floor, vm.diagnosticValue(
 					DiagnosticCancelled,
@@ -228,7 +282,7 @@ func (vm *VM) execute(floor int) value.Value {
 			index := vm.pop()
 			collection := vm.peek()
 			if int(index.N) < collection.Len() {
-				vm.push(value.New(index.N + 1))
+				vm.push(value.Value{K: value.Number, N: index.N + 1})
 				vm.push(collection.At(int(index.N)))
 			} else {
 				vm.pop()
@@ -303,7 +357,11 @@ func (vm *VM) execute(floor int) value.Value {
 			vm.push(committed)
 		}
 
-		if invalid, ok := vm.stackError(); ok {
+		activeFrame := &vm.Frames[vm.FrameIdx]
+		if len(vm.Stack) > activeFrame.StackBase &&
+			vm.Stack[len(vm.Stack)-1].K == value.Invalid {
+			invalid := vm.Stack[len(vm.Stack)-1]
+			vm.Stack = vm.Stack[:len(vm.Stack)-1]
 			if _, structured := DiagnosticFrom(invalid); structured {
 				return vm.exitFailure(floor, invalid)
 			}
@@ -352,23 +410,39 @@ func (vm *VM) store(frame *Frame, name string, item value.Value) {
 }
 
 func (vm *VM) pushLambdaFrame(lambda *value.Lambda, args []value.Value) *runtimeFault {
+	frame, fault := vm.prepareLambdaFrame(lambda)
+	if fault != nil {
+		return fault
+	}
+	for index, name := range lambda.Params {
+		if index < len(args) {
+			frame.Vars[name] = args[index]
+		}
+	}
+	return nil
+}
+
+func (vm *VM) prepareLambdaFrame(lambda *value.Lambda) (*Frame, *runtimeFault) {
 	if lambda.Program != nil {
 		owner, ok := ProgramFromRef(lambda.Program)
 		if !ok || owner != vm.program {
-			return &runtimeFault{
+			return nil, &runtimeFault{
 				code:    DiagnosticProgramMismatch,
 				message: "lambda belongs to a different program",
 			}
 		}
 	}
 	if vm.FrameIdx+1 >= len(vm.Frames) {
-		return &runtimeFault{
+		return nil, &runtimeFault{
 			code:    DiagnosticStackOverflow,
 			message: "Stack overflow: Call stack limit exceeded",
 		}
 	}
 
 	vm.FrameIdx++
+	if vm.FrameIdx > vm.frameHighWater {
+		vm.frameHighWater = vm.FrameIdx
+	}
 	frame := &vm.Frames[vm.FrameIdx]
 	frame.IP = lambda.Address
 	frame.LastIP = -1
@@ -384,12 +458,7 @@ func (vm *VM) pushLambdaFrame(lambda *value.Lambda, args []value.Value) *runtime
 	clear(frame.Defers)
 	frame.Defers = frame.Defers[:0]
 
-	for index, name := range lambda.Params {
-		if index < len(args) {
-			frame.Vars[name] = args[index]
-		}
-	}
-	return nil
+	return frame, nil
 }
 
 func (vm *VM) finishFrame(
@@ -465,16 +534,28 @@ func (vm *VM) unwindToCaller(floor int) {
 	vm.FrameIdx = 0
 }
 
-func (vm *VM) stackError() (value.Value, bool) {
-	if len(vm.Stack) == 0 || vm.peek().K != value.Invalid {
-		return value.Value{}, false
-	}
-	return vm.pop(), true
-}
-
 func (vm *VM) executeCall(frame *Frame) {
 	count := int(vm.program.code[frame.IP])
 	frame.IP++
+
+	// Script lambdas consume arguments immediately into their frame. Bind from
+	// the verified VM stack directly so an internal call does not allocate an
+	// argument slice that no caller can retain.
+	callableIndex := len(vm.Stack) - count - 1
+	if callableIndex >= frame.StackBase {
+		callable := vm.Stack[callableIndex]
+		if callable.K == value.Func {
+			if function, ok := callable.V.(*value.Lambda); ok {
+				args := vm.Stack[callableIndex+1:]
+				vm.Stack = vm.Stack[:callableIndex]
+				if fault := vm.pushLambdaFrame(function, args); fault != nil {
+					vm.push(vm.diagnosticValue(fault.code, fault.message, frame.LastIP))
+				}
+				return
+			}
+		}
+	}
+
 	args := make([]value.Value, count)
 	for index := count - 1; index >= 0; index-- {
 		args[index] = vm.pop()
@@ -483,10 +564,6 @@ func (vm *VM) executeCall(frame *Frame) {
 
 	if callable.K == value.Func {
 		switch function := callable.V.(type) {
-		case *value.Lambda:
-			if fault := vm.pushLambdaFrame(function, args); fault != nil {
-				vm.push(vm.diagnosticValue(fault.code, fault.message, frame.LastIP))
-			}
 		case value.Method:
 			vm.push(vm.nativeValue("function call", func() value.Value {
 				return function(value.Value{K: value.Nil}, args...)
@@ -525,6 +602,32 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	count := int(vm.program.code[frame.IP])
 	frame.IP++
 	method := vm.pop().Text()
+
+	targetIndex := len(vm.Stack) - count - 1
+	if targetIndex >= frame.StackBase &&
+		count > 0 &&
+		isArrayCallbackMethod(method) {
+		target := vm.Stack[targetIndex]
+		callback, _ := vm.Stack[targetIndex+1].V.(*value.Lambda)
+		if target.K == value.Array && callback != nil {
+			initial := value.Value{K: value.Nil}
+			hasInitial := count > 1
+			if hasInitial {
+				initial = vm.Stack[targetIndex+2]
+			}
+			vm.Stack = vm.Stack[:targetIndex]
+			result, _ := vm.arrayCallbackMethod(
+				target,
+				method,
+				callback,
+				initial,
+				hasInitial,
+			)
+			vm.push(result)
+			return
+		}
+	}
+
 	args := make([]value.Value, count)
 	for index := count - 1; index >= 0; index-- {
 		args[index] = vm.pop()
@@ -567,13 +670,6 @@ func (vm *VM) executeInvoke(frame *Frame) {
 				vm.push(result)
 				return
 			}
-		}
-	}
-
-	if target.K == value.Array && len(args) > 0 {
-		if result, handled := vm.arrayCallbackMethod(target, method, args); handled {
-			vm.push(result)
-			return
 		}
 	}
 

@@ -167,6 +167,9 @@ func Run(configFile ...string) (err error) {
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
 	defer handler.Close()
+	if directory := bytecodeCacheDirectory(cfg); directory != "" {
+		handler.SetBytecodeCache(directory)
+	}
 
 	// Client-IP source: as the edge server Kitwork ignores X-Forwarded-For by default (spoofable);
 	// trust_proxy: true opts in when running behind your own reverse proxy.
@@ -257,6 +260,49 @@ func Run(configFile ...string) (err error) {
 // Check validates the executable manifest and prepares every discovered site
 // without opening a listener, publishing a generation, or starting cron.
 func Check(configFile ...string) (core.CheckReport, error) {
+	cfg, err := commandConfig(configFile...)
+	if err != nil {
+		return core.CheckReport{}, err
+	}
+	for i := range cfg.Databases {
+		dbConfig := cfg.Databases[i]
+		alias := dbConfig.Alias
+		if alias == "" {
+			alias = "default"
+		}
+		database.Configs[alias] = dbConfig
+	}
+	work.AllowLocal = cfg.AllowLocal
+	return core.Check(cfg.Root, cfg.MaxEnergy, bytecodeCacheDirectory(cfg)), nil
+}
+
+// ProfileReport is the static bytecode report returned by Profile.
+type ProfileReport = core.ProfileReport
+
+// Profile compiles every executable router, cron, and queue entrypoint and
+// returns immutable bytecode metrics without executing tenant code.
+func Profile(configFile ...string) (core.ProfileReport, error) {
+	cfg, err := commandConfig(configFile...)
+	if err != nil {
+		return core.ProfileReport{}, err
+	}
+	return core.Profile(cfg.Root), nil
+}
+
+func bytecodeCacheDirectory(cfg *Config) string {
+	if cfg == nil || !cfg.BytecodeCache {
+		return ""
+	}
+	if cfg.BytecodeCacheDir == "" {
+		return filepath.Join(cfg.Root, ".kitwork", "cache", "bytecode")
+	}
+	if filepath.IsAbs(cfg.BytecodeCacheDir) {
+		return cfg.BytecodeCacheDir
+	}
+	return filepath.Join(cfg.Root, cfg.BytecodeCacheDir)
+}
+
+func commandConfig(configFile ...string) (*Config, error) {
 	file := ""
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
@@ -269,30 +315,30 @@ func Check(configFile ...string) (core.CheckReport, error) {
 		}
 	}
 	if file == "" {
-		return core.CheckReport{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"không tìm thấy manifest: cần app.kitwork.js (hoặc server.kitwork.js)",
 		)
 	}
 	if !strings.HasSuffix(strings.ToLower(file), ".js") {
-		return core.CheckReport{}, fmt.Errorf(
-			"engine.Check chỉ nhận manifest .kitwork.js, nhận %q",
+		return nil, fmt.Errorf(
+			"engine command chỉ nhận manifest .kitwork.js, nhận %q",
 			file,
 		)
 	}
 
 	builder, err := evalServerBuilder(file)
 	if err != nil {
-		return core.CheckReport{}, fmt.Errorf("failed to evaluate config %s: %w", file, err)
+		return nil, fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
 	if builder.err != "" {
-		return core.CheckReport{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"failed to evaluate config %s: config validation error: %s",
 			file,
 			builder.err,
 		)
 	}
 	if !builder.hasWeb {
-		return core.CheckReport{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"failed to evaluate config %s: %w",
 			file,
 			noWebSurfaceErr(builder, file),
@@ -300,11 +346,11 @@ func Check(configFile ...string) (core.CheckReport, error) {
 	}
 	raw, err := builderToMap(builder, file)
 	if err != nil {
-		return core.CheckReport{}, fmt.Errorf("failed to evaluate config %s: %w", file, err)
+		return nil, fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
 	cfg, err := ParseConfig(raw)
 	if err != nil {
-		return core.CheckReport{}, fmt.Errorf("failed to process configuration: %w", err)
+		return nil, fmt.Errorf("failed to process configuration: %w", err)
 	}
 	if cfg.Root == "apps" {
 		if _, statErr := os.Stat(cfg.Root); os.IsNotExist(statErr) {
@@ -313,16 +359,7 @@ func Check(configFile ...string) (core.CheckReport, error) {
 			}
 		}
 	}
-	for i := range cfg.Databases {
-		dbConfig := cfg.Databases[i]
-		alias := dbConfig.Alias
-		if alias == "" {
-			alias = "default"
-		}
-		database.Configs[alias] = dbConfig
-	}
-	work.AllowLocal = cfg.AllowLocal
-	return core.Check(cfg.Root, cfg.MaxEnergy), nil
+	return cfg, nil
 }
 
 // printBanner renders the Kitwork startup banner: a brand-red "KITWORK" wordmark

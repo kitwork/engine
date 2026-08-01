@@ -56,26 +56,65 @@ type decodedInstruction struct {
 	operands []uint16
 }
 
+// OpcodeProfile describes one opcode's static presence in an immutable Program.
+// EncodedEnergy is Count multiplied by the instruction's canonical energy cost;
+// it does not predict loop iterations or runtime branch frequency.
+type OpcodeProfile struct {
+	Opcode        Opcode `json:"opcode"`
+	Name          string `json:"name"`
+	Count         int    `json:"count"`
+	EncodedEnergy uint64 `json:"encoded_energy"`
+}
+
+// ProgramProfile is a static summary produced by the same pass that verifies
+// bytecode. It describes encoded structure, not dynamic execution frequency.
+type ProgramProfile struct {
+	BytecodeBytes int             `json:"bytecode_bytes"`
+	Constants     int             `json:"constants"`
+	Instructions  int             `json:"instructions"`
+	EntryPoints   int             `json:"entry_points"`
+	MaxStackDepth int             `json:"max_stack_depth"`
+	EncodedEnergy uint64          `json:"encoded_energy"`
+	Opcodes       []OpcodeProfile `json:"opcodes"`
+}
+
 // Verify rejects structurally invalid bytecode before it reaches a VM.
 func Verify(code []byte, constants []value.Value) error {
+	_, err := verifyAndProfile(code, constants)
+	return err
+}
+
+func verifyAndProfile(code []byte, constants []value.Value) (ProgramProfile, error) {
+	profile := ProgramProfile{
+		BytecodeBytes: len(code),
+		Constants:     len(constants),
+	}
 	if len(code) > MaxBytecodeSize {
-		return verifyError(VerifyProgramTooLarge, -1, 0,
-			fmt.Sprintf("%d bytes exceeds %d", len(code), MaxBytecodeSize))
+		return ProgramProfile{}, verifyError(
+			VerifyProgramTooLarge,
+			-1,
+			0,
+			fmt.Sprintf("%d bytes exceeds %d", len(code), MaxBytecodeSize),
+		)
 	}
 	if len(constants) > MaxConstants {
-		return verifyError(VerifyConstantsTooLarge, -1, 0,
-			fmt.Sprintf("%d constants exceeds %d", len(constants), MaxConstants))
+		return ProgramProfile{}, verifyError(
+			VerifyConstantsTooLarge,
+			-1,
+			0,
+			fmt.Sprintf("%d constants exceeds %d", len(constants), MaxConstants),
+		)
 	}
 	if len(code) == 0 {
-		return nil
+		return profile, nil
 	}
 
 	instructions, byIP, boundaries, err := decodeProgram(code)
 	if err != nil {
-		return err
+		return ProgramProfile{}, err
 	}
 	if err := validateOperands(instructions, constants, boundaries, len(code)); err != nil {
-		return err
+		return ProgramProfile{}, err
 	}
 
 	entries := []int{0}
@@ -89,13 +128,43 @@ func Verify(code []byte, constants []value.Value) error {
 			if lambda != nil {
 				address = lambda.Address
 			}
-			return verifyError(VerifyInvalidLambda, -1, PUSH,
-				fmt.Sprintf("constant %d points to non-instruction address %d", i, address))
+			return ProgramProfile{}, verifyError(
+				VerifyInvalidLambda,
+				-1,
+				PUSH,
+				fmt.Sprintf("constant %d points to non-instruction address %d", i, address),
+			)
 		}
 		entries = append(entries, lambda.Address)
 	}
 
-	return verifyStack(entries, instructions, byIP, len(code))
+	maxStackDepth, err := verifyStack(entries, instructions, byIP, len(code))
+	if err != nil {
+		return ProgramProfile{}, err
+	}
+
+	profile.Instructions = len(instructions)
+	profile.EntryPoints = len(entries)
+	profile.MaxStackDepth = maxStackDepth
+	var counts [256]int
+	for _, instruction := range instructions {
+		counts[uint8(instruction.op)]++
+		profile.EncodedEnergy += uint64(instruction.spec.Energy)
+	}
+	for rawOpcode, count := range counts {
+		if count == 0 {
+			continue
+		}
+		opcode := Opcode(rawOpcode)
+		spec, _ := LookupInstruction(opcode)
+		profile.Opcodes = append(profile.Opcodes, OpcodeProfile{
+			Opcode:        opcode,
+			Name:          spec.Name,
+			Count:         count,
+			EncodedEnergy: uint64(spec.Energy) * uint64(count),
+		})
+	}
+	return profile, nil
 }
 
 func decodeProgram(code []byte) ([]decodedInstruction, map[int]int, []bool, error) {
@@ -219,9 +288,10 @@ func verifyStack(
 	instructions []decodedInstruction,
 	byIP map[int]int,
 	codeLen int,
-) error {
+) (int, error) {
 	depthAt := make(map[int]int, len(instructions))
 	queue := make([]stackState, 0, len(instructions))
+	maxDepth := 0
 
 	enqueue := func(ip, depth int) error {
 		if depth < 0 {
@@ -234,6 +304,9 @@ func verifyStack(
 				0,
 				fmt.Sprintf("depth %d exceeds %d", depth, MaxStackDepth),
 			)
+		}
+		if depth > maxDepth {
+			maxDepth = depth
 		}
 		if ip == codeLen {
 			if depth > 1 {
@@ -264,7 +337,7 @@ func verifyStack(
 
 	for _, entry := range entries {
 		if err := enqueue(entry, 0); err != nil {
-			return err
+			return 0, err
 		}
 	}
 
@@ -275,7 +348,7 @@ func verifyStack(
 
 		stackIn, stackOut := ins.spec.StackEffect(ins.operands)
 		if state.depth < stackIn {
-			return verifyError(
+			return 0, verifyError(
 				VerifyStackUnderflow,
 				ins.ip,
 				ins.op,
@@ -287,7 +360,7 @@ func verifyStack(
 		switch ins.op {
 		case RETURN, HALT:
 			if state.depth > 1 {
-				return verifyError(
+				return 0, verifyError(
 					VerifyStackMismatch,
 					ins.ip,
 					ins.op,
@@ -298,32 +371,32 @@ func verifyStack(
 
 		case JUMP:
 			if err := enqueue(int(ins.operands[0]), nextDepth); err != nil {
-				return err
+				return 0, err
 			}
 
 		case TRUE, FALSE:
 			if err := enqueue(ins.next, nextDepth); err != nil {
-				return err
+				return 0, err
 			}
 			if err := enqueue(int(ins.operands[0]), nextDepth); err != nil {
-				return err
+				return 0, err
 			}
 
 		case ITER:
 			if err := enqueue(ins.next, nextDepth); err != nil {
-				return err
+				return 0, err
 			}
 			if err := enqueue(int(ins.operands[0]), state.depth-2); err != nil {
-				return err
+				return 0, err
 			}
 
 		default:
 			if err := enqueue(ins.next, nextDepth); err != nil {
-				return err
+				return 0, err
 			}
 		}
 	}
-	return nil
+	return maxDepth, nil
 }
 
 func verifyError(code VerifyCode, ip int, op Opcode, detail string) error {

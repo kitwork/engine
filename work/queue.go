@@ -360,8 +360,13 @@ func (q *Queue) Replay(args ...value.Value) value.Value {
 // else the app's identity-level SQLite. Same partition key either way, so it reads and writes
 // exactly the rows the worker sees.
 func (t *Tenant) openQueueStore() queuestore.Store {
-	if worker := t.queueWorker(); worker != nil && worker.store != nil {
-		return worker.store
+	if worker := t.queueWorker(); worker != nil {
+		worker.mu.Lock()
+		store := worker.store
+		worker.mu.Unlock()
+		if store != nil {
+			return store
+		}
 	}
 	if database.SystemIsPostgres() {
 		return queuestore.NewPgStore(database.System, t.queueNodeID())

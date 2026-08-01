@@ -35,11 +35,7 @@ func (t *Tenant) prepareExecutionVM(
 		requestScope = requestScopes[0]
 	}
 
-	vm.Globals = make(map[string]value.Value, len(globals))
-	for name, val := range globals {
-		vm.Globals[name] = val
-	}
-	vm.Builtins = append([]value.Value(nil), builtins...)
+	vm.PrepareHostState(globals, builtins)
 
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value {
 		return value.New(&KitWork{tenant: t, vm: vm, requestScope: requestScope})

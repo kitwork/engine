@@ -25,6 +25,7 @@ type Program struct {
 	debug     debugTable
 	version   uint16
 	checksum  [sha256.Size]byte
+	profile   ProgramProfile
 }
 
 // NewProgram copies and verifies a complete program before publishing it.
@@ -52,7 +53,8 @@ func NewProgramWithDebug(
 	if err := validateProgramConstants(ownedConstants); err != nil {
 		return nil, err
 	}
-	if err := Verify(ownedCode, ownedConstants); err != nil {
+	profile, err := verifyAndProfile(ownedCode, ownedConstants)
+	if err != nil {
 		return nil, err
 	}
 	debug, err := newDebugTable(len(ownedCode), debugEntries)
@@ -65,6 +67,7 @@ func NewProgramWithDebug(
 		constants: ownedConstants,
 		debug:     debug,
 		version:   BytecodeVersion,
+		profile:   profile,
 	}
 	program.checksum = programChecksum(program)
 	return program, nil
@@ -99,6 +102,27 @@ func (p *Program) Checksum() string {
 		return ""
 	}
 	return hex.EncodeToString(p.checksum[:])
+}
+
+// ChecksumDigest returns the fixed-size Program identity without allocating or
+// exposing internal storage. Runtime telemetry can use it as a map key without
+// retaining the Program or its generation.
+func (p *Program) ChecksumDigest() [sha256.Size]byte {
+	if p == nil {
+		return [sha256.Size]byte{}
+	}
+	return p.checksum
+}
+
+// Profile returns a detached static profile produced during bytecode
+// verification. It performs no decoding and exposes no Program storage.
+func (p *Program) Profile() ProgramProfile {
+	if p == nil {
+		return ProgramProfile{}
+	}
+	profile := p.profile
+	profile.Opcodes = append([]OpcodeProfile(nil), p.profile.Opcodes...)
+	return profile
 }
 
 // Instructions returns a copy suitable for diagnostics and serialization.
@@ -199,6 +223,12 @@ func cloneConstant(constant value.Value) value.Value {
 
 func validateProgramConstants(constants []value.Value) error {
 	for index, constant := range constants {
+		if constant.ErrorVal != nil {
+			return fmt.Errorf(
+				"program constant %d contains mutable error metadata",
+				index,
+			)
+		}
 		switch constant.K {
 		case value.Nil, value.Number, value.Bool, value.Time, value.Duration:
 			if constant.V != nil {

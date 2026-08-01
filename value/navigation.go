@@ -3,6 +3,7 @@ package value
 import (
 	"reflect"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -245,6 +246,58 @@ func (v Value) At(path ...any) Value {
 	return cur
 }
 
+type reflectedMethod struct {
+	index  int
+	getter bool
+}
+
+type reflectedMembers struct {
+	methods map[string]reflectedMethod
+	fields  map[string]int
+}
+
+var reflectedMemberCache sync.Map // map[reflect.Type]*reflectedMembers
+
+func membersFor(reflectedType reflect.Type) *reflectedMembers {
+	if cached, ok := reflectedMemberCache.Load(reflectedType); ok {
+		return cached.(*reflectedMembers)
+	}
+
+	members := &reflectedMembers{
+		methods: make(map[string]reflectedMethod, reflectedType.NumMethod()),
+	}
+	for index := 0; index < reflectedType.NumMethod(); index++ {
+		method := reflectedType.Method(index)
+		key := strings.ToLower(method.Name)
+		if _, exists := members.methods[key]; !exists {
+			members.methods[key] = reflectedMethod{
+				index:  index,
+				getter: method.Type.NumIn() == 1 && method.Type.NumOut() == 1,
+			}
+		}
+	}
+
+	structType := reflectedType
+	for structType.Kind() == reflect.Ptr {
+		structType = structType.Elem()
+	}
+	if structType.Kind() == reflect.Struct {
+		members.fields = make(map[string]int, structType.NumField())
+		for index := 0; index < structType.NumField(); index++ {
+			field := structType.Field(index)
+			if field.PkgPath == "" {
+				key := strings.ToLower(field.Name)
+				if _, exists := members.fields[key]; !exists {
+					members.fields[key] = index
+				}
+			}
+		}
+	}
+
+	actual, _ := reflectedMemberCache.LoadOrStore(reflectedType, members)
+	return actual.(*reflectedMembers)
+}
+
 func (v Value) reflect(key string) Value {
 	if v.V == nil {
 		return Value{K: Nil}
@@ -252,22 +305,19 @@ func (v Value) reflect(key string) Value {
 
 	ptrRv := reflect.ValueOf(v.V)
 	ptrRt := ptrRv.Type()
+	members := membersFor(ptrRt)
+	foldedKey := strings.ToLower(key)
 
-	// Tìm Method (hỗ trợ gọi 'from' cho hàm 'From')
-	for i := 0; i < ptrRt.NumMethod(); i++ {
-		m := ptrRt.Method(i)
-		if strings.EqualFold(m.Name, key) {
-			method := ptrRv.Method(i)
-			// OPTIMIZATION: Nếu method có 0 tham số, tự động gọi nó (Getter Pattern)
-			if method.Type().NumIn() == 0 {
-				results := method.Call(nil)
-				if len(results) > 0 {
-					return New(results[0].Interface())
-				}
-				return Value{K: Nil}
+	if descriptor, ok := members.methods[foldedKey]; ok {
+		method := ptrRv.Method(descriptor.index)
+		if descriptor.getter {
+			results := method.Call(nil)
+			if len(results) > 0 {
+				return New(results[0].Interface())
 			}
-			return Value{K: Func, V: method}
+			return Value{K: Nil}
 		}
+		return Value{K: Func, V: method}
 	}
 
 	rv := ptrRv
@@ -280,15 +330,14 @@ func (v Value) reflect(key string) Value {
 	}
 
 	for rv.Kind() == reflect.Ptr {
+		if rv.IsNil() {
+			return Value{K: Nil}
+		}
 		rv = rv.Elem()
 	}
 	if rv.Kind() == reflect.Struct {
-		rt := rv.Type()
-		for i := 0; i < rt.NumField(); i++ {
-			f := rt.Field(i)
-			if f.PkgPath == "" && strings.EqualFold(f.Name, key) {
-				return New(rv.Field(i).Interface())
-			}
+		if index, ok := members.fields[foldedKey]; ok {
+			return New(rv.Field(index).Interface())
 		}
 	}
 

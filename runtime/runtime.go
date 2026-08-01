@@ -6,6 +6,15 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
+const (
+	initialStackCapacity   = 1_024
+	maxPooledStackCapacity = 4_096
+	maxReusableVariables   = 1_024
+	maxReusableDefers      = 64
+	maxReusableGlobals     = 1_024
+	maxReusableBuiltins    = 256
+)
+
 // Frame đại diện cho một khung thực thi (Activation Record)
 type Frame struct {
 	IP     int
@@ -32,12 +41,30 @@ type VM struct {
 	Energy    uint64                 // Năng lượng tiêu thụ
 	MaxEnergy uint64                 // Giới hạn năng lượng
 	Spawner   func(s *value.Lambda)
+
+	instructions   uint64
+	frameHighWater int
+
+	reusableGlobals  map[string]value.Value
+	reusableBuiltins []value.Value
+	hostStateOwned   bool
+}
+
+// VMStats is a point-in-time execution snapshot. Read it after execution; a VM
+// is intentionally single-owner and is not safe for concurrent inspection.
+type VMStats struct {
+	Instructions   uint64
+	Energy         uint64
+	StackDepth     int
+	StackCapacity  int
+	FrameDepth     int
+	PeakFrameDepth int
 }
 
 func New(program *Program) *VM {
 	vm := &VM{
 		program: program,
-		Stack:   make([]value.Value, 0, 1024),
+		Stack:   make([]value.Value, 0, initialStackCapacity),
 		Vars:    make(map[string]value.Value),
 		Globals: make(map[string]value.Value),
 		Frames:  make([]Frame, 64), // Tối đa 64 tầng gọi hàm (đủ dùng)
@@ -49,20 +76,36 @@ func New(program *Program) *VM {
 	return vm
 }
 
-// FastReset loads a new program into this VM. It runs MID-REQUEST — a folder router FastResets the
-// VM onto each folder's bytecode before running its lambdas (work.execTree) — so it must NOT clear
-// Context: that would drop the request's cancellation signal the moment the handler is loaded.
-// Clearing Context is pool hygiene and belongs to ResetForPool (STABILITY.md §1).
+// FastReset loads a new Program and caller-owned globals. It does not clear the
+// execution context; pool hygiene belongs to ResetForPool. Production request
+// paths use PrepareHostState followed by FastResetPrepared so container
+// ownership remains explicit.
 func (vm *VM) FastReset(program *Program, globals map[string]value.Value) {
-	vm.program = program
-	clear(vm.Stack)
-	vm.Stack = vm.Stack[:0]
+	vm.resetExecution(program)
 	vm.Globals = globals
+	vm.hostStateOwned = false
+}
+
+// FastResetPrepared resets execution while retaining the VM-owned host state
+// installed by PrepareHostState.
+func (vm *VM) FastResetPrepared(program *Program) {
+	vm.resetExecution(program)
+}
+
+func (vm *VM) resetExecution(program *Program) {
+	vm.program = program
+	vm.resetStack()
 	vm.FrameIdx = 0
 	vm.Energy = 0
+	vm.instructions = 0
+
+	for index := 1; index <= vm.frameHighWater; index++ {
+		resetFrame(&vm.Frames[index])
+	}
+	vm.frameHighWater = 0
 
 	root := &vm.Frames[0]
-	if root.captured {
+	if root.captured || len(vm.Vars) > maxReusableVariables {
 		// A top-level closure still owns the old map. Detach the VM instead of
 		// clearing data that escaped with that closure.
 		vm.Vars = make(map[string]value.Value)
@@ -76,34 +119,75 @@ func (vm *VM) FastReset(program *Program, globals map[string]value.Value) {
 	root.LastIP = -1
 	root.Vars = vm.Vars
 	root.Fn = nil
-	clear(root.Defers)
-	root.Defers = root.Defers[:0]
+	resetDefers(root)
 	root.StackBase = 0
+}
+
+// PrepareHostState copies one owner's host environment into VM-owned reusable
+// storage. ResetForPool clears every value before retaining only the empty
+// containers, so the pool can reduce allocations without exposing references
+// from the previous app.
+func (vm *VM) PrepareHostState(
+	globals map[string]value.Value,
+	builtins []value.Value,
+) {
+	if vm == nil {
+		return
+	}
+
+	ownedGlobals := vm.reusableGlobals
+	vm.reusableGlobals = nil
+	if ownedGlobals == nil {
+		ownedGlobals = make(map[string]value.Value, len(globals)+1)
+	} else {
+		clear(ownedGlobals)
+	}
+	for name, item := range globals {
+		ownedGlobals[name] = item
+	}
+	vm.Globals = ownedGlobals
+
+	ownedBuiltins := vm.reusableBuiltins
+	vm.reusableBuiltins = nil
+	if cap(ownedBuiltins) < len(builtins) {
+		ownedBuiltins = make([]value.Value, len(builtins))
+	} else {
+		ownedBuiltins = ownedBuiltins[:len(builtins)]
+	}
+	copy(ownedBuiltins, builtins)
+	vm.Builtins = ownedBuiltins
+	vm.hostStateOwned = true
 }
 
 // ResetForPool drops tenant-owned references before a VM becomes visible to
 // another app. Captured frame maps are detached, never cleared.
 func (vm *VM) ResetForPool() {
-	vm.FastReset(nil, nil)
+	globals := vm.Globals
+	builtins := vm.Builtins
+	hostStateOwned := vm.hostStateOwned
+	vm.resetExecution(nil)
+	vm.Globals = nil
 	vm.Context = nil // a pooled VM must never inherit the previous owner's request context
 	vm.Builtins = nil
 	vm.MaxEnergy = 0
 	vm.Spawner = nil
+	vm.hostStateOwned = false
+
+	if hostStateOwned && len(globals) <= maxReusableGlobals {
+		clear(globals)
+		vm.reusableGlobals = globals
+	} else if hostStateOwned {
+		vm.reusableGlobals = nil
+	}
+	if hostStateOwned && cap(builtins) <= maxReusableBuiltins {
+		clear(builtins)
+		vm.reusableBuiltins = builtins[:0]
+	} else if hostStateOwned {
+		vm.reusableBuiltins = nil
+	}
 
 	for i := 1; i < len(vm.Frames); i++ {
-		f := &vm.Frames[i]
-		f.IP = 0
-		f.LastIP = -1
-		f.Fn = nil
-		clear(f.Defers)
-		f.Defers = f.Defers[:0]
-		f.StackBase = 0
-		if f.captured {
-			f.Vars = nil
-		} else {
-			clear(f.Vars)
-		}
-		f.captured = false
+		resetFrame(&vm.Frames[i])
 	}
 }
 
@@ -115,8 +199,59 @@ func (vm *VM) Program() *Program {
 	return vm.program
 }
 
+func (vm *VM) Stats() VMStats {
+	if vm == nil {
+		return VMStats{}
+	}
+	frameDepth := 0
+	if vm.FrameIdx >= 0 {
+		frameDepth = vm.FrameIdx + 1
+	}
+	return VMStats{
+		Instructions:   vm.instructions,
+		Energy:         vm.Energy,
+		StackDepth:     len(vm.Stack),
+		StackCapacity:  cap(vm.Stack),
+		FrameDepth:     frameDepth,
+		PeakFrameDepth: vm.frameHighWater + 1,
+	}
+}
+
 func (vm *VM) Stop() {
 	vm.FrameIdx = -1
+}
+
+func (vm *VM) resetStack() {
+	if cap(vm.Stack) > maxPooledStackCapacity {
+		vm.Stack = make([]value.Value, 0, initialStackCapacity)
+		return
+	}
+	clear(vm.Stack)
+	vm.Stack = vm.Stack[:0]
+}
+
+func resetFrame(frame *Frame) {
+	frame.IP = 0
+	frame.LastIP = -1
+	frame.Fn = nil
+	frame.StackBase = 0
+
+	if frame.captured || len(frame.Vars) > maxReusableVariables {
+		frame.Vars = nil
+	} else {
+		clear(frame.Vars)
+	}
+	frame.captured = false
+	resetDefers(frame)
+}
+
+func resetDefers(frame *Frame) {
+	if cap(frame.Defers) > maxReusableDefers {
+		frame.Defers = nil
+		return
+	}
+	clear(frame.Defers)
+	frame.Defers = frame.Defers[:0]
 }
 
 // Helper methods for Stack manipulation

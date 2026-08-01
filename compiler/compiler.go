@@ -16,6 +16,9 @@ type Bytecode struct {
 	// Files lists every source file compiled in: the entry plus all natively-bundled imports.
 	// Hot reload stats these to catch edits — including edits to an imported ./_core module.
 	Files []string
+
+	compilerFingerprint string
+	sourceFingerprint   string
 }
 
 // Compiler chịu trách nhiệm chuyển đổi AST thành Bytecode
@@ -26,6 +29,8 @@ type Compiler struct {
 	sources       map[string][]int32
 	currentSource string
 	currentPos    int32
+
+	sourceFingerprint string
 }
 
 func NewCompiler(source ...string) *Compiler {
@@ -43,20 +48,27 @@ func NewCompiler(source ...string) *Compiler {
 	if offsets != nil {
 		sources[""] = offsets
 	}
-	return &Compiler{
+	compiler := &Compiler{
 		instructions: []byte{},
 		constants:    []value.Value{},
 		debugEntries: []runtime.DebugEntry{},
 		sources:      sources,
 	}
+	sourceText := ""
+	if len(source) > 0 {
+		sourceText = source[0]
+	}
+	compiler.sourceFingerprint = fingerprintSources(map[string]string{"": sourceText})
+	return compiler
 }
 
 func newCompilerWithSources(sources map[string]string) *Compiler {
 	compiler := &Compiler{
-		instructions: []byte{},
-		constants:    []value.Value{},
-		debugEntries: []runtime.DebugEntry{},
-		sources:      make(map[string][]int32, len(sources)),
+		instructions:      []byte{},
+		constants:         []value.Value{},
+		debugEntries:      []runtime.DebugEntry{},
+		sources:           make(map[string][]int32, len(sources)),
+		sourceFingerprint: fingerprintSources(sources),
 	}
 	for name, source := range sources {
 		offsets := []int32{0}
@@ -704,7 +716,11 @@ func (c *Compiler) ByteCodeResult() (*Bytecode, error) {
 		}
 		return nil, fmt.Errorf("compiler produced invalid bytecode: %w", err)
 	}
-	return &Bytecode{Program: program}, nil
+	return &Bytecode{
+		Program:             program,
+		compilerFingerprint: Fingerprint(),
+		sourceFingerprint:   c.sourceFingerprint,
+	}, nil
 }
 
 func (c *Compiler) emit(op runtime.Opcode, operands ...byte) int {

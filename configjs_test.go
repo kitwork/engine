@@ -52,6 +52,37 @@ server.run({
 	}
 }
 
+func TestAppWebBytecodeCacheIsExplicitAndDirectoryScoped(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.web({
+  port: 8080,
+  bytecodeCache: true,
+  bytecodeCacheDir: ".cache/vm",
+});`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.BytecodeCache || cfg.BytecodeCacheDir != ".cache/vm" {
+		t.Fatalf("bytecode cache config = %+v", cfg)
+	}
+	if got := bytecodeCacheDirectory(cfg); got != filepath.Join(cfg.Root, ".cache", "vm") {
+		t.Fatalf("bytecode cache directory = %q", got)
+	}
+
+	disabled, err := ParseConfig(map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.BytecodeCache || bytecodeCacheDirectory(disabled) != "" {
+		t.Fatal("bytecode cache was not opt-in")
+	}
+}
+
 // env.int must read the live env var (overriding the default).
 func TestEvalConfigJS_EnvOverride(t *testing.T) {
 	file := writeServerJS(t, `import { server, env } from "kitwork"; server.run({ port: env.PORT || 3000 });`)

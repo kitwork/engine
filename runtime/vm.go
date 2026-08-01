@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"math"
+	"reflect"
 	"sort"
 
 	"github.com/kitwork/engine/value"
@@ -28,10 +30,7 @@ func (vm *VM) commit(v value.Value) value.Value {
 		return failure
 	}
 	if committed.Handler != nil {
-		result := vm.ExecuteLambda(
-			committed.Handler,
-			[]value.Value{committed.Argument},
-		)
+		result := vm.executeLambda1(committed.Handler, committed.Argument)
 		if result.K == value.Invalid {
 			return result
 		}
@@ -71,7 +70,13 @@ func storeScopeChain(fn *value.Lambda, name string, val value.Value) bool {
 // cancellation, and frame-restoration semantics.
 // Trả về (kết quả, true) nếu method được xử lý tại đây; ngược lại (zero, false)
 // để rơi xuống prototype table (vd: sort() không comparator).
-func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.Value) (value.Value, bool) {
+func (vm *VM) arrayCallbackMethod(
+	target value.Value,
+	m string,
+	cb *value.Lambda,
+	initial value.Value,
+	hasInitial bool,
+) (value.Value, bool) {
 	var arr []value.Value
 	if ptr, ok := target.V.(*[]value.Value); ok {
 		arr = *ptr
@@ -81,10 +86,6 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 		return value.Value{}, false
 	}
 
-	var cb *value.Lambda
-	if len(ivArgs) > 0 && ivArgs[0].K == value.Func {
-		cb, _ = ivArgs[0].V.(*value.Lambda)
-	}
 	if cb == nil {
 		return value.Value{}, false
 	}
@@ -93,7 +94,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 	case "map":
 		result := make([]value.Value, len(arr))
 		for i, item := range arr {
-			result[i] = vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			result[i] = vm.executeLambda2(cb, item, arrayIndex(i))
 			if result[i].K == value.Invalid {
 				return result[i], true
 			}
@@ -103,7 +104,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 	case "filter":
 		result := make([]value.Value, 0, len(arr))
 		for i, item := range arr {
-			matched := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			matched := vm.executeLambda2(cb, item, arrayIndex(i))
 			if matched.K == value.Invalid {
 				return matched, true
 			}
@@ -115,7 +116,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 
 	case "find":
 		for i, item := range arr {
-			matched := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			matched := vm.executeLambda2(cb, item, arrayIndex(i))
 			if matched.K == value.Invalid {
 				return matched, true
 			}
@@ -127,7 +128,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 
 	case "forEach":
 		for i, item := range arr {
-			result := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			result := vm.executeLambda2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -137,7 +138,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 
 	case "some":
 		for i, item := range arr {
-			result := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			result := vm.executeLambda2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -149,7 +150,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 
 	case "every":
 		for i, item := range arr {
-			result := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			result := vm.executeLambda2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -161,12 +162,12 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 
 	case "findIndex":
 		for i, item := range arr {
-			result := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			result := vm.executeLambda2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
 			if result.Truthy() {
-				return value.New(float64(i)), true
+				return arrayIndex(i), true
 			}
 		}
 		return value.Value{K: value.Number, N: -1}, true
@@ -174,8 +175,8 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 	case "reduce":
 		start := 0
 		var acc value.Value
-		if len(ivArgs) > 1 {
-			acc = ivArgs[1]
+		if hasInitial {
+			acc = initial
 		} else {
 			if len(arr) == 0 {
 				return value.Value{K: value.Invalid, V: "reduce: empty array with no initial value"}, true
@@ -184,7 +185,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 			start = 1
 		}
 		for i := start; i < len(arr); i++ {
-			acc = vm.ExecuteLambda(cb, []value.Value{acc, arr[i], value.New(float64(i))})
+			acc = vm.executeLambda3(cb, acc, arr[i], arrayIndex(i))
 			if acc.K == value.Invalid {
 				return acc, true
 			}
@@ -199,7 +200,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 			if failed {
 				return false
 			}
-			result := vm.ExecuteLambda(cb, []value.Value{a, b})
+			result := vm.executeLambda2(cb, a, b)
 			if result.K == value.Invalid {
 				failure = result
 				failed = true
@@ -215,7 +216,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 	case "group", "groupBy":
 		groups := make(map[string]value.Value)
 		for i, item := range arr {
-			keyVal := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			keyVal := vm.executeLambda2(cb, item, arrayIndex(i))
 			if keyVal.K == value.Invalid {
 				return keyVal, true
 			}
@@ -237,7 +238,7 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 		}
 		pairs := make([]pair, len(arr))
 		for i, item := range arr {
-			key := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			key := vm.executeLambda2(cb, item, arrayIndex(i))
 			if key.K == value.Invalid {
 				return key, true
 			}
@@ -257,16 +258,16 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 		return target, true
 
 	case "unique":
-		seen := make(map[any]bool)
-		resArr := []value.Value{}
+		seen := make(map[arrayUniqueKey]struct{}, len(arr))
+		resArr := make([]value.Value, 0, len(arr))
 		for i, item := range arr {
-			keyVal := vm.ExecuteLambda(cb, []value.Value{item, value.New(float64(i))})
+			keyVal := vm.executeLambda2(cb, item, arrayIndex(i))
 			if keyVal.K == value.Invalid {
 				return keyVal, true
 			}
-			key := keyVal.Interface()
-			if !seen[key] {
-				seen[key] = true
+			key := makeArrayUniqueKey(keyVal)
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
 				resArr = append(resArr, item)
 			}
 		}
@@ -279,6 +280,27 @@ func (vm *VM) arrayCallbackMethod(target value.Value, m string, ivArgs []value.V
 	return value.Value{}, false
 }
 
+func isArrayCallbackMethod(method string) bool {
+	switch method {
+	case "map",
+		"filter",
+		"find",
+		"forEach",
+		"some",
+		"every",
+		"findIndex",
+		"reduce",
+		"sort",
+		"group",
+		"groupBy",
+		"sortBy",
+		"unique":
+		return true
+	default:
+		return false
+	}
+}
+
 // sortByComparator — insertion sort ổn định, tránh import sort để giữ vm.go gọn.
 // Mảng tenant thường nhỏ; comparator do user cung cấp chạy qua VM.
 func sortByComparator(a []value.Value, less func(x, y value.Value) bool) {
@@ -286,6 +308,61 @@ func sortByComparator(a []value.Value, less func(x, y value.Value) bool) {
 		for j := i; j > 0 && less(a[j], a[j-1]); j-- {
 			a[j], a[j-1] = a[j-1], a[j]
 		}
+	}
+}
+
+func arrayIndex(index int) value.Value {
+	return value.Value{K: value.Number, N: float64(index)}
+}
+
+type arrayUniqueKey struct {
+	kind     value.Kind
+	number   float64
+	identity any
+}
+
+func makeArrayUniqueKey(item value.Value) arrayUniqueKey {
+	key := arrayUniqueKey{kind: item.K, number: item.N}
+	switch item.K {
+	case value.Number:
+		if math.IsNaN(item.N) {
+			key.identity = "NaN"
+			key.number = 0
+		}
+	case value.String:
+		key.identity = item.Text()
+	case value.Bytes:
+		key.identity = string(item.Bytes())
+	case value.Array, value.Map, value.Func, value.Proxy:
+		key.identity = valueIdentity(item.V)
+	default:
+		if item.V != nil {
+			itemType := reflect.TypeOf(item.V)
+			if itemType.Comparable() {
+				key.identity = item.V
+			} else {
+				key.identity = valueIdentity(item.V)
+			}
+		}
+	}
+	return key
+}
+
+func valueIdentity(item any) uintptr {
+	if item == nil {
+		return 0
+	}
+	reflected := reflect.ValueOf(item)
+	switch reflected.Kind() {
+	case reflect.Chan,
+		reflect.Func,
+		reflect.Map,
+		reflect.Pointer,
+		reflect.Slice,
+		reflect.UnsafePointer:
+		return reflected.Pointer()
+	default:
+		return 0
 	}
 }
 

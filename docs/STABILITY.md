@@ -8,6 +8,12 @@ automated test on the production execution path.
 
 - A pooled VM must not retain a Program, globals, builtins, request
   variables, execution hooks, or gas configuration from its previous owner.
+- Reset sanitizes every previously active frame and releases exceptional stack,
+  variable-map, and defer backing storage instead of pinning request-sized
+  memory in the pool.
+- Reusable backing arrays must be cleared before reslicing. Pool release must
+  remove direct and backing-storage references to request values, closures,
+  contexts, Programs, globals, builtins, and execution hooks.
 - Resetting a VM must detach a root scope that escaped into a closure. It must
   never clear a map still owned by that closure.
 - App-scoped caches, databases, persisted data, and resolved paths must remain
@@ -15,6 +21,9 @@ automated test on the production execution path.
 - Configured database connections are app-owned and shared by sibling sites.
   Site eviction and generation replacement must not close them; app shutdown
   closes every connection exactly once.
+- Queue worker restart is serialized at the app resource boundary. It stops
+  accepting jobs, cancels and drains the old poller, heartbeat, and accepted
+  runs before replacing the store or publishing a new worker cycle.
 - Cross-app isolation must be tested with concurrent execution, not only with
   sequential unit tests.
 
@@ -52,6 +61,9 @@ Current enforcement:
 - `.env`, templates, render plans, presentation, source manifests, RAM
   response/fetch cache, and `LifetimeSite` capabilities are generation-scoped.
   Reload replaces them only after a complete candidate is ready.
+- The optional bytecode `FileCache` handle is generation-scoped. It may reuse
+  reconstructible files in a host-owned directory, but cache corruption or I/O
+  failure must fall back to source compilation and cannot block publication.
 - Disk-persisted responses, rate-limit budgets, SSE connections, and replay
   history are site-scoped. They survive generation replacement and close only
   when that site leaves the app runtime.
@@ -76,22 +88,34 @@ Current enforcement:
   cancellation, and energy exhaustion.
 - Execution contexts are checked by the shared dispatch loop.
   Cancellation interrupts running script execution within at most 64 opcodes;
-  energy remains the hard upper bound.
+  nested lambda executions share that instruction counter, and energy remains
+  the hard upper bound.
+- Energy accounting saturates instead of wrapping around `uint64`.
 - Compiler output is structurally verified before publication. Verification
   rejects unsupported or truncated instructions, invalid constants and jumps,
   stack underflow, inconsistent control-flow joins, and invalid lambda entries.
+- The immutable interpreter trusts that verified structure and must not repeat
+  opcode, operand-width, jump, or constant validation inside the dispatch loop.
+  Runtime checks remain for dynamic policy and behavior: energy, cancellation,
+  host failures, program ownership, and value diagnostics.
 - `runtime.Program` is the only executable publication unit. It copies and
   verifies its storage once; `runtime.New` and `VM.FastReset` accept no loose
   bytecode slices.
 - Program code, constants, and compressed debug tables are private. Diagnostic
   accessors return copies, and detached lambdas retain only an opaque owner
   reference.
+- Static Program profiles are derived during verification and returned as
+  detached snapshots. Profiling executable sources must compile through the
+  native bundler without executing tenant code or starting app resources.
 - A lambda address is valid only inside its owning Program. Cross-program
   execution must fail before entering a call frame.
 - Runtime failures are published as `runtime.Diagnostic` values with a stable
   code, top location, and an inner-to-outer call stack. `Value.Text()` retains
   the formatted error string for compatibility, while `runtime.DiagnosticFrom`
   exposes the structured form to hosts and tooling.
+- Given the same Program, globals, context state, and energy limit, fresh,
+  FastReset-reused, and pooled VMs must produce the same result or diagnostic,
+  top-level variables, energy/instruction counts, and stack/frame state.
 - Every active frame records its last executed byte offset. Compiler-created
   lambda templates carry a stable inferred name and declaration source;
   unnamed callbacks are reported as `<anonymous>` and the root frame as
@@ -172,10 +196,34 @@ go build ./...
 go test ./...
 go vet ./...
 go test -race ./...
+go run . check
 ```
 
 Changes to the lexer, parser, compiler, VM, value conversion, templates, or
 path handling must also add seeds to the relevant fuzz target.
+
+Request-path performance changes must run the production-like handler corpus
+and keep its allocation gates:
+
+```text
+go test ./work -run TestHandlerCorpusAllocationBudgets
+go test ./work -run '^$' -bench '^BenchmarkServeHandlerCorpus$' -benchmem
+```
+
+The compiler-to-VM pipeline must remain fuzzable as one boundary:
+
+```text
+go test ./compiler -run '^$' -fuzz FuzzCompileVerifyExecute -fuzztime=10s
+go test ./runtime -run '^$' -fuzz FuzzVMDeterminism -fuzztime=10s
+```
+
+Long-running pool and generation checks are opt-in locally:
+
+```text
+KITWORK_SOAK=1 go test ./runtime -run TestPooledVMSoakAcrossPrograms
+KITWORK_SOAK=1 go test ./runtime -run TestPooledVMReleasesOversizedVerifiedWorkload
+KITWORK_SOAK=1 go test ./core -run TestEngineHotReloadSoak
+```
 
 ## 7. Stability before expansion
 
@@ -188,8 +236,9 @@ capability permissions, cancellation, and production contract tests are stable.
 `kitwork check` validates with the same route graph and render-plan preparation
 path used by production. It reports every discovered failure in one pass and
 never opens a listener, activates a generation, starts cron, or leaves candidate
-resources alive. Preflight diagnoses invalid paths and imports; it never guesses
-or rewrites application source.
+resources alive. Every successfully compiled executable must also survive the
+bytecode artifact encode/decode/verifier round trip. Preflight diagnoses invalid
+paths and imports; it never guesses or rewrites application source.
 
 ## 9. Deferred effects
 
@@ -220,6 +269,13 @@ http.get(url).retry(3).timeout(5000)
 - The VM recovers panics only while invoking host-owned behavior: native
   functions, methods, proxy callbacks, cache hooks, spawn hooks, and committers.
   Interpreter and verifier defects remain process-visible programming errors.
+- Reflected host calls validate arity and argument conversion instead of
+  silently substituting zero values. An explicit Go `error` result becomes an
+  invalid script value; an ordinary fluent object is not treated as an error
+  merely because it also implements `Error()`.
+- Reflection metadata caches Go types and member indexes only. They never store
+  receivers or request values. A zero-argument method is auto-read as a
+  property only when it returns exactly one value.
 - A recovered host panic becomes `NATIVE_PANIC` with the active source
   location and VM call stack.
 - Frame defers run exactly once in last-in, first-out order on `RETURN`, natural
@@ -230,3 +286,21 @@ http.get(url).retry(3).timeout(5000)
   cleanup failures are appended to `Diagnostic.Suppressed`.
 - Cleanup after energy exhaustion shares `cleanupEnergyReserve`; it does not
   reset execution energy or grant a fresh budget to each defer.
+
+## 11. Value and response validity
+
+- `value.Value{}` is `Invalid`, not an empty or absent value. Optional arguments,
+  bodies, TTLs, and successful empty results must initialize `K: value.Nil`
+  explicitly. A zero value may represent "not found" only when paired with a
+  separate boolean.
+- Every array method that invokes script callbacks uses
+  `runtime.arrayCallbackMethod`. Callback diagnostics, native panics,
+  cancellation, and energy exhaustion propagate unchanged through that single
+  boundary.
+- A response containing an invalid value or originating from a failed handler
+  lifecycle is never eligible for RAM or persistent response caching, even if
+  an error hook deliberately renders a `200` fallback.
+- Every request has an `X-Request-ID`. A safe incoming ID is preserved;
+  otherwise the engine creates one. Runtime failure logs include the request,
+  app, site, generation, method, path, lifecycle stage, Program fingerprint,
+  and structured source diagnostic.

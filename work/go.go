@@ -63,7 +63,7 @@ func (k *KitWork) Go(fn value.Value, args ...value.Value) *KitWork {
 
 			vm.Context = ctx
 			tenant.prepareExecutionVM(vm, globals, builtins)
-			vm.FastReset(program, vm.Globals)
+			vm.FastResetPrepared(program)
 			vm.MaxEnergy = tenant.MaxEnergy
 
 			for key, val := range vars {
