@@ -76,6 +76,31 @@ func TestRenderAwayAndEscapeAreDirectives(t *testing.T) {
 	}
 }
 
+// data-kit-if and data-kit-for are structural directives shipped in the client kernel; the server
+// twin must know them too. `if`'s value is an expression → verified like text/show; `for`'s value is
+// a spec ("item, i of items"), not a compilable expression → NOT verified, but both must still inject
+// the runtime (a page whose only directive is for/if cannot hydrate without /kit.js). Regression here
+// = a for/if-only page silently ships dead markup.
+func TestRenderIfAndForInject(t *testing.T) {
+	// if is a verified expression directive; for is not (its value is a spec).
+	if !directiveRe.MatchString(`data-kit-if="open"`) {
+		t.Error("data-kit-if must be verified as an expression directive")
+	}
+	if directiveRe.MatchString(`data-kit-for="item, i of items"`) {
+		t.Error("data-kit-for value is a spec, not a compilable expression — must NOT be in directiveRe")
+	}
+	// both inject, even alone.
+	for _, only := range []string{
+		`<li data-kit-for="item, i of items"><b data-kit-text="item.name"></b></li>`,
+		`<div data-kit-if="open">panel</div>`,
+	} {
+		in := `<head></head><body>` + marker + only + `</section></body>`
+		if strings.Count(Render(in), injectTag) != 1 {
+			t.Errorf("a page whose only directive is for/if must inject the runtime: %s", only)
+		}
+	}
+}
+
 // The activation gate: a page WITHOUT the root marker is returned byte-for-byte unchanged, even if
 // it contains directive-looking attributes (static pages, docs showing examples as text).
 func TestRenderNoMarkerUntouched(t *testing.T) {

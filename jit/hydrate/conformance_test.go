@@ -88,10 +88,7 @@ func TestConformanceServer(t *testing.T) {
 // Because both TestConformanceServer and this test check against the corpus's `want`, agreement here
 // means the client walker and the Go evaluator computed the same thing — the conformance guarantee.
 func TestConformanceClientMatchesServer(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is required for the client half of the conformance suite")
-	}
+	node := requireNode(t)
 
 	// A DOM shim just complete enough for kernel.js to boot in node (it wires one MutationObserver
 	// and a few delegated listeners at load time). Mirrors bridge_test.go's shim.

@@ -105,7 +105,7 @@ global.document = {
   querySelector: function (s) { return root.querySelector(s); },
   querySelectorAll: function (s) { return root.querySelectorAll(s); },
   createElement: function (t) { return el(t); },
-  createComment: function (txt) { var n = makeNode(8); n._text = txt; return n; }
+  createComment: function (txt) { var n = makeNode(8); n._text = txt; delete n.closest; delete n.matches; return n; } // real comment nodes have neither
 };
 global.navigator = {};
 global.localStorage = { getItem: function () { return null; }, setItem: function () {}, removeItem: function () {} };
@@ -116,15 +116,29 @@ global.CustomEvent = function () {};
 window.document = document; window.history = history; window.location = location;
 `
 
+// requireNode returns the node binary. Locally it SKIPS when node is absent (a convenience). In CI it
+// FAILS instead — these node-shim + conformance-client tests ARE the client half of the twin, and a
+// silent skip there is exactly the blind spot that let two shipped for/if bugs through (scope via a
+// comment anchor; a modal self-closing on its opening click). CI must actually run them.
+func requireNode(t *testing.T) string {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err == nil {
+		return node
+	}
+	if os.Getenv("CI") != "" {
+		t.Fatal("node is required for the client-side tests and CI must provide it — the twin's client half must not silently skip")
+	}
+	t.Skip("node not found — skipping the client-side test locally (CI requires it)")
+	return ""
+}
+
 // runNodeDOMScript concatenates the DOM shim, the compiled kernel (Runtime()), and the test's own
 // assertion script, runs the whole thing under node, and fails on any non-zero exit. The assertion
 // script drives the real kernel (kit.component / kit.render / kit.scopeFor) and throws on mismatch.
 func runNodeDOMScript(t *testing.T, name, assertions string) {
 	t.Helper()
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skipf("node is required for the %s DOM test", name)
-	}
+	node := requireNode(t)
 	script := blockDOMShim + "\n" + Runtime() + "\n" + assertions
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {

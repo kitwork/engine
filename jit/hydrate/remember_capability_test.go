@@ -16,10 +16,7 @@ import (
 // The module source is read from its jit/js home (go test runs with CWD = this package dir). If the
 // seam the module depends on (kit.internal.pageScope / scheduleRender) ever regressed, this goes red.
 func TestRememberCapabilityRestoresAndPersists(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is required for the remember capability DOM test")
-	}
+	node := requireNode(t)
 	moduleSrc, err := os.ReadFile(filepath.Join("..", "js", "capabilities", "remember.js"))
 	if err != nil {
 		t.Fatalf("reading the remember capability module: %v", err)

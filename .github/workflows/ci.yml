@@ -24,6 +24,14 @@ jobs:
           go-version: "1.26.x"
           cache: true
 
+      # node runs the CLIENT half of the twin: the jit/hydrate node-shim tests (for/if/events/modal/
+      # capabilities) and the conformance client runner. Without it those tests t.Skip — and requireNode
+      # turns that skip into a failure under CI, so this step is load-bearing, not optional.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Build
         run: go build ./...
 

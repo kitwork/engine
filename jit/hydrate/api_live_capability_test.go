@@ -22,10 +22,7 @@ import (
 // If the seam regressed (a module can't reach pageScope/boundaryScope/render, or reconcile/onDestroy
 // stopped firing), one of these goes red.
 func TestApiLiveCapabilitiesBehaviour(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is required for the api/live capability DOM test")
-	}
+	node := requireNode(t)
 	apiSrc, err := os.ReadFile(filepath.Join("..", "js", "capabilities", "api.js"))
 	if err != nil {
 		t.Fatalf("reading api capability: %v", err)

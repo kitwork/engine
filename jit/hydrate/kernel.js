@@ -502,7 +502,12 @@
   }
 
   function scopeFor(el) {
-    var b = el && el.closest ? el.closest(SCOPE) : null;
+    // A comment node (a data-kit-for / data-kit-if anchor) has no closest() — resolve through its
+    // parent element, else the region's local/component scope is lost and reads fall to the PAGE
+    // scope (which is why a for/if over a component-scoped array or condition would render nothing).
+    var node = el;
+    if (node && !node.closest) node = node.parentElement || node.parentNode;
+    var b = node && node.closest ? node.closest(SCOPE) : null;
     if (!b) return scope;
     var st = state(b);
     if (st.scopeProxy) return st.scopeProxy;
@@ -692,6 +697,25 @@
     }
   }
 
+  // A subtree mounted DURING a click (a modal opened by that very click) must not be closed by the
+  // same click's data-kit-away check — the opening click is, by definition, outside a panel that did
+  // not exist yet. Fresh mounts are remembered until the next microtask, i.e. until the whole click
+  // dispatch (every delegated listener) has finished; the NEXT outside click closes normally.
+  var freshMounts = [];
+  function markFresh(node) {
+    if (freshMounts.indexOf(node) < 0) freshMounts.push(node);
+    if (freshMounts.length === 1) {
+      (typeof queueMicrotask === "function" ? queueMicrotask : function (f) { setTimeout(f, 0); })(function () { freshMounts.length = 0; });
+    }
+  }
+  function isFresh(el) {
+    for (var i = 0; i < freshMounts.length; i++) {
+      var f = freshMounts[i];
+      if (f === el || (f.contains && f.contains(el))) return true;
+    }
+    return false;
+  }
+
   // ---- data-kit-if: conditional mount / unmount ----
   // The sibling of data-kit-for, on the same machinery — anchor comment, captured template,
   // cleanupTree on removal. The difference from data-kit-show is the whole point: `show` keeps the
@@ -728,6 +752,7 @@
         // this same render, because renderIf runs before the text/show/bind queries.
         reg.mounted = reg.template.cloneNode(true);
         parent.insertBefore(reg.mounted, reg.anchor.nextSibling);
+        markFresh(reg.mounted); // don't let the click that opened it also close it via data-kit-away
       } else if (!show && reg.mounted) {
         cleanupTree(reg.mounted); // release the subtree's listeners/observers/streams before removal
         reg.mounted.remove();
@@ -935,6 +960,7 @@
     var fired = false;
     document.querySelectorAll(AWAY).forEach(function (el) {
       if (el === e.target || (el.contains && el.contains(e.target))) return; // a click inside is not "away"
+      if (isFresh(el)) return; // this region was mounted by the very click being processed — ignore it
       var x = directive(el, "away"); if (!x) return;
       run(x, elementScope(el)); fired = true;
     });
