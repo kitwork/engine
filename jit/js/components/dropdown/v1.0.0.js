@@ -16,5 +16,5 @@ var dropdownDef = {
   close: function () { this.open = false; }
 };
 
-window.kitwork.component("dropdown", dropdownDef);
-window.kitwork.component("dropdown@v1.0.0", dropdownDef);
+window.kit.component("dropdown", dropdownDef);
+window.kit.component("dropdown@v1.0.0", dropdownDef);

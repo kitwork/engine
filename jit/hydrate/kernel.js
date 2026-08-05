@@ -1,7 +1,7 @@
 // Kitwork hydrate kernel. Composed into /kit.js with bridge, morph, capability, compat and Drive
 // modules; jit/js prepends that same composed runtime before verb modules. Expressions, verbs,
-// model, validation and live updates all ride one window.kitwork root, one registry, one delegated
-// event system and one DOM observer.
+// model, validation and background capabilities all ride one window.kit root (window.kitwork is a
+// deprecated alias to the SAME object), one registry, one delegated event system and one DOM observer.
 //
 // Boot-guarded: safe under double inclusion and under Kitwork Drive re-running head scripts.
 // PREFIX = ORIGIN (strict, for expression directives): authors write data-kit-* SOURCE — this
@@ -23,10 +23,10 @@
   var kitwork = (window.kitwork = kit);
 
   if (kit.runtime && kit.runtime.loaded) return;
-  var runtimeMeta = kitwork.runtime && typeof kitwork.runtime === "object" ? kitwork.runtime : {};
+  var runtimeMeta = kit.runtime && typeof kit.runtime === "object" ? kit.runtime : {};
   runtimeMeta.name = "kitwork";
   runtimeMeta.version = "2.0.0";
-  runtimeMeta.engine = kitwork.platform || "web";
+  runtimeMeta.engine = kit.platform || "web";
   runtimeMeta.development = !!runtimeMeta.development;
   runtimeMeta.loaded = true;
   runtimeMeta.booted = false;
@@ -38,20 +38,20 @@
       development: this.development
     };
   };
-  kitwork.runtime = runtimeMeta;
+  kit.runtime = runtimeMeta;
 
   var modules = Object.create(null);
   var startHooks = [];
-  kitwork.modules = modules;
-  kitwork.module = function (name, value) {
+  kit.modules = modules;
+  kit.module = function (name, value) {
     if (arguments.length === 1) return modules[name];
     modules[name] = value;
     return value;
   };
-  kitwork.has = function (name) {
+  kit.has = function (name) {
     return Object.prototype.hasOwnProperty.call(modules, name);
   };
-  kitwork.onStart = function (callback) {
+  kit.onStart = function (callback) {
     if (typeof callback !== "function") return function () { };
     startHooks.push(callback);
     if (runtimeMeta.booted) callback();
@@ -71,7 +71,7 @@
     cleanup(function () { target.removeEventListener(eventName, handler, options); });
     return handler;
   }
-  kitwork.cleanup = cleanup;
+  kit.cleanup = cleanup;
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
   var PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
@@ -384,13 +384,13 @@
   // template language uses for its root data. Scope objects live in the node's Symbol state,
   // so they die with their node; two sibling scopes never see each other.
   // A component boundary is any of these. data-kitwork-component names a REGISTERED blueprint
-  // (see kitwork.component); data-kit-scope carries an inline name/init/blueprint.
+  // (see kit.component); data-kit-scope carries an inline name/init/blueprint.
   var SCOPE = "[data-kitwork-scope],[data-kit-scope],[data-kitwork-component],[data-kit-component],[data-kitwork-api],[data-kit-api],[data-kit-item],[data-kitwork-item]";
 
-  // The component registry: kitwork.component("counter", { count: 0, inc() {…} }). A blueprint is a
+  // The component registry: kit.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
   // component scope); state is deep-cloned per instance so two boundaries never share it.
-  // (Named `blueprints` to stay clear of kitwork.components, which is the verb back-compat surface.)
+  // (Named `blueprints` to stay clear of kit.components, which is the verb back-compat surface.)
   var blueprints = {};
   function cloneState(v) {
     if (v === null || typeof v !== "object") return v;
@@ -417,7 +417,7 @@
       var tag = parseComponentTag(craw);
       var cname = tag.name;
       var alias = tag.alias || b.getAttribute("data-alias") || "";
-      // Component registration (kitwork.component) can run AFTER the first render — so seed lazily,
+      // Component registration (kit.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       if (!st.scope) st.scope = {};
       if (alias) aliases[alias] = st.scope; // global handle → this instance's scope
@@ -427,7 +427,7 @@
           st.seeded = true;
           runInit(b);
         } else {
-          var loader = kitwork.module("componentLoader");
+          var loader = kit.module("componentLoader");
           if (loader) loader.load(cname);
         }
       }
@@ -549,9 +549,9 @@
   var aliases = {};
   // $theme is a boot-registered GLOBAL handle: theme is a global capability, not a DOM-scoped instance,
   // so it needs no per-page boundary — data-kit-click="$theme.toggle()" works everywhere. It delegates
-  // to the one theme source of truth (kitwork.theme setter). Coherent with $sidebar etc. (all in aliases);
-  // NOT stored on kitwork.theme, which is the theme STRING ("light"/"dark").
-  aliases["$theme"] = { toggle: function () { kitwork.toggleTheme(); } };
+  // to the one theme source of truth (kit.theme setter). Coherent with $sidebar etc. (all in aliases);
+  // NOT stored on kit.theme, which is the theme STRING ("light"/"dark").
+  aliases["$theme"] = { toggle: function () { kit.toggleTheme(); } };
   // parseComponentTag splits `name@version=$alias` (all but name optional) → { name, version, alias }.
   function parseComponentTag(raw) {
     var name = raw, version = "", alias = "", i;
@@ -692,9 +692,54 @@
     }
   }
 
+  // ---- data-kit-if: conditional mount / unmount ----
+  // The sibling of data-kit-for, on the same machinery — anchor comment, captured template,
+  // cleanupTree on removal. The difference from data-kit-show is the whole point: `show` keeps the
+  // DOM and only toggles `hidden`, so a hidden subtree's bindings and effects keep running; `if`
+  // MOUNTS and UNMOUNTS, so an absent branch does nothing at all. That is what a modal, an editing
+  // panel or a lazy region needs — not a hidden node quietly holding an SSE stream open.
+  var IF = "[data-kitwork-if],[data-kit-if]";
+  var ifRegistry = [];
+  function collectIf() {
+    document.querySelectorAll(IF).forEach(function (el) {
+      var parent = el.parentNode;
+      if (!parent) return;
+      var cond;
+      try { cond = parse(lex(el.getAttribute("data-kit-if") || el.getAttribute("data-kitwork-if"))); }
+      catch (e) { el.removeAttribute("data-kit-if"); el.removeAttribute("data-kitwork-if"); return; }
+      var template = el.cloneNode(true);
+      template.removeAttribute("data-kit-if");
+      template.removeAttribute("data-kitwork-if");
+      var anchor = document.createComment("kit-if");
+      parent.insertBefore(anchor, el);
+      parent.removeChild(el);
+      ifRegistry.push({ anchor: anchor, template: template, cond: cond, mounted: null });
+    });
+  }
+  function renderIf() {
+    collectIf();
+    for (var r = 0; r < ifRegistry.length; r++) {
+      var reg = ifRegistry[r];
+      var parent = reg.anchor.parentNode;
+      if (!parent) continue;
+      var show = !!run(reg.cond, scopeFor(reg.anchor));
+      if (show && !reg.mounted) {
+        // Mount a fresh clone right after the anchor; the ordinary binding pass (below) fills it in
+        // this same render, because renderIf runs before the text/show/bind queries.
+        reg.mounted = reg.template.cloneNode(true);
+        parent.insertBefore(reg.mounted, reg.anchor.nextSibling);
+      } else if (!show && reg.mounted) {
+        cleanupTree(reg.mounted); // release the subtree's listeners/observers/streams before removal
+        reg.mounted.remove();
+        reg.mounted = null;
+      }
+    }
+  }
+
   function render() {
     rebuildActiveComponents();
     renderFor();
+    renderIf();
     document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; });
     document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; el.hidden = !run(x, scopeFor(el)); });
     // bind → attributes: the expression is an OBJECT (reusing the closed grammar), each key an attr.
@@ -733,60 +778,12 @@
     document.querySelectorAll(MODEL).forEach(function (el) { var k = modelKey(el), s = scopeFor(el); if (String(s[k]) !== el.value) el.value = s[k]; });
   }
 
-  // ---- remember: persist chosen page-scope ($) keys across reloads ----
-  // Declared in markup — data-kit-remember="theme, locale, cart" (comma / space / [brackets] all
-  // accepted; put it on the root, or spread across elements) — or kitwork.remember("theme"). Those
-  // $ keys mirror to localStorage and sync across tabs; everything else in $ stays ephemeral.
-  // Client-only (localStorage) — the SERVER sees the DECLARATION but not the value.
-  var REMEMBER = "[data-kitwork-remember],[data-kit-remember]";
-  var remembered = {};
-  var memCache = {};
-  var rememberStoragePrefix = "kitwork:remember:";
-  function getStorageItem(k) {
-    try {
-      var value = localStorage.getItem(rememberStoragePrefix + k);
-      return value === null ? localStorage.getItem(k) : value;
-    } catch (e) {
-      return memCache[k] !== undefined ? memCache[k] : null;
-    }
-  }
-  function setStorageItem(k, v) {
-    try { localStorage.setItem(rememberStoragePrefix + k, v); } catch (e) { memCache[k] = v; }
-  }
-  function parseKeys(v) {
-    return (v || "").trim().replace(/^\[/, "").replace(/\]$/, "").split(/[\s,]+/).filter(Boolean);
-  }
-  function registerRememberedKey(k) {
-    if (remembered[k]) return;
-    remembered[k] = true;
-    var localVal = getStorageItem(k);
-    var defaultVal = raw[k];
-    Object.defineProperty(raw, k, {
-      get: function () {
-        var val = getStorageItem(k);
-        if (val === null) return undefined;
-        try { return JSON.parse(val); } catch (e) { return val; }
-      },
-      set: function (v) {
-        var s = typeof v === "object" ? JSON.stringify(v) : String(v);
-        if (getStorageItem(k) !== s) {
-          setStorageItem(k, s);
-          scheduleRender();
-        }
-      },
-      configurable: true,
-      enumerable: true
-    });
-    if (localVal === null && defaultVal !== undefined) {
-      raw[k] = defaultVal;
-    }
-  }
-
-  function loadRemembered() {
-    document.querySelectorAll(REMEMBER).forEach(function (el) {
-      parseKeys(el.getAttribute("data-kitwork-remember") || el.getAttribute("data-kit-remember")).forEach(registerRememberedKey);
-    });
-  }
+  // ---- remember: MOVED OUT OF THE CORE ----
+  // Persisting page-scope ($) keys to localStorage is a POLICY, not a mechanism, so it is no longer
+  // in the always-shipped kernel. It rides the only-used /jitjs channel now: a page carrying
+  // data-kit-remember gets the capability module appended (jit/js/capabilities/remember.js), which
+  // installs itself through kit.internal.pageScope + kit.internal.scheduleRender. Pages that do not
+  // use it ship none of this code. See render.go / jit/js runtime.go for the emission.
 
   // ---- behaviors (verbs): ONE registry; jit/js modules register into it ----
   // Per-element runtime state lives behind a private Symbol. Resources registered on the state are
@@ -812,6 +809,10 @@
       store.apiController.abort();
       store.apiController = null;
     }
+    if (store.debounceTimer) {
+      clearTimeout(store.debounceTimer);
+      store.debounceTimer = null;
+    }
     (store.cleanups || []).splice(0).forEach(function (callback) {
       try { callback(); } catch (_) { }
     });
@@ -821,7 +822,7 @@
     cleanupElement(node);
     node.querySelectorAll("*").forEach(cleanupElement);
   }
-  kitwork.onCleanup = onCleanup;
+  kit.onCleanup = onCleanup;
   // data-kitwork-target = "#id"/selector → element; defaults to the actor itself.
   function target(el) {
     var sel = el.getAttribute("data-kitwork-target") || el.getAttribute("data-kit-target");
@@ -832,7 +833,7 @@
     var fn = behaviors[el.getAttribute("data-kitwork-action") || el.getAttribute("data-kit-action")];
     if (fn) fn(el, e);
   }
-  kitwork.behavior = function (name, fn) { behaviors[name] = fn; return kitwork; };
+  kit.behavior = function (name, fn) { behaviors[name] = fn; return kitwork; };
   // Register a reusable stateful component blueprint. Activate it with data-kitwork-component="name".
   // Distinct from behavior() (a stateless verb): a component has state + methods + a scope boundary.
   // Registering (re)renders on the next tick, so components registered after boot still paint.
@@ -845,27 +846,61 @@
       render();
     });
   }
-  kitwork.component = function (name, def) { blueprints[name] = def; scheduleRender(); return kitwork; };
-  // Programmatic form of data-kit-remember: mark $ keys as persisted across reloads.
-  kitwork.remember = function () {
-    for (var i = 0; i < arguments.length; i++) registerRememberedKey(arguments[i]);
-    scheduleRender();
-    return kitwork;
-  };
+  kit.component = function (name, def) { blueprints[name] = def; scheduleRender(); return kitwork; };
+  // kit.remember lives in the remember capability module now (see the note above) — it defines
+  // kit.remember when the page loads the module, so a page that never uses remember carries nothing.
 
-  kitwork.action = function (name, fn) { behaviors[name] = fn; return kitwork; };
-  kitwork.behavior = kitwork.action;
-  kitwork.target = target;
-  kitwork.state = state;
-  kitwork.fire = fire;
-  kitwork.components = activeComponents;
-  kitwork.blueprints = blueprints;
-  kitwork.actions = behaviors;
+  kit.action = function (name, fn) { behaviors[name] = fn; return kitwork; };
+  kit.behavior = kit.action;
+  kit.target = target;
+  kit.state = state;
+  kit.fire = fire;
+  kit.components = activeComponents;
+  kit.blueprints = blueprints;
+  kit.actions = behaviors;
+
+  // ---- event modifiers: dedicated directives + companion attributes (mechanism, not policy) ----
+  // Dispatch is by attribute SELECTOR and the server verifies expressions by exact attribute NAME, so
+  // a modifier can't ride in a directive's name (a suffixed name is neither selectable nor verified).
+  // Two shapes instead: a companion attribute tunes the ACTOR's own event — data-kit-guard on a click,
+  // data-kit-debounce on a model input; a change of event SOURCE is its own ordinary expression
+  // directive — data-kit-away (a click OUTSIDE me) and data-kit-escape (the Escape key), both
+  // selectable and server-verified, and they inject the runtime like any other directive.
+  function guardFlags(el) {
+    var raw = el.getAttribute("data-kitwork-guard") || el.getAttribute("data-kit-guard") || "";
+    return raw ? raw.split(/\s+/) : [];
+  }
+  function applyGuard(el, e) {
+    if (!e) return;
+    var flags = guardFlags(el);
+    for (var i = 0; i < flags.length; i++) {
+      if (flags[i] === "prevent" && e.preventDefault) e.preventDefault();
+      else if (flags[i] === "stop" && e.stopPropagation) e.stopPropagation();
+    }
+  }
+  // data-kit-debounce="300": coalesce a burst of the actor's events into one, ms after it goes quiet.
+  // The pending timer lives in the element's state so cleanupTree cancels it when the actor unmounts.
+  function debounceMs(el) {
+    var raw = el.getAttribute("data-kitwork-debounce") || el.getAttribute("data-kit-debounce");
+    var n = raw ? parseInt(raw, 10) : 0;
+    return n > 0 ? n : 0;
+  }
+  function debounced(el, fn) {
+    var ms = debounceMs(el);
+    if (!ms) { fn(); return; }
+    var st = state(el);
+    if (st.debounceTimer) clearTimeout(st.debounceTimer);
+    st.debounceTimer = setTimeout(function () { st.debounceTimer = null; fn(); }, ms);
+  }
 
   // ---- ONE set of delegated listeners for everything ----
   listen(document, "click", function (e) {
     var ex = e.target.closest && e.target.closest(selector("click"));
-    if (ex) { var x = directive(ex, "click"); if (x) { run(x, elementScope(ex)); render(); } }
+    if (ex) {
+      applyGuard(ex, e); // prevent/stop must run synchronously, before any debounce defers the handler
+      var x = directive(ex, "click");
+      if (x) debounced(ex, function () { run(x, elementScope(ex)); render(); });
+    }
     var act = e.target.closest && e.target.closest(ACTION);
     if (act) fire(act, e);
   });
@@ -876,17 +911,46 @@
   listen(document, "mousedown", function (e) {
     if (e.button !== 0) return;
     if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
-    if (e.target.closest && e.target.closest(DRAG)) kitwork.window("drag");
+    if (e.target.closest && e.target.closest(DRAG)) kit.window("drag");
   });
   listen(document, "dblclick", function (e) {
     if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
-    if (e.target.closest && e.target.closest(DRAG)) kitwork.window("maximize");
+    if (e.target.closest && e.target.closest(DRAG)) kit.window("maximize");
   });
   listen(document, "input", function (e) {
     var el = e.target.closest && e.target.closest(MODEL);
     if (!el) return;
-    scopeFor(el)[modelKey(el)] = modelValue(el);
-    render();
+    // data-kit-debounce on a model input delays the scope write + render until typing settles — the
+    // final value is read inside the timer, so a search box syncs once, not once per keystroke.
+    debounced(el, function () {
+      scopeFor(el)[modelKey(el)] = modelValue(el);
+      render();
+    });
+  });
+  // data-kit-away="expr": a click OUTSIDE this element runs the expression (close a menu/popover).
+  // Pairs with data-kit-if — put it on the panel that only exists while open, and there is no
+  // outside-click work at all when it is closed. One render after the pass, however many regions fired.
+  var AWAY = "[data-kitwork-away],[data-kit-away]";
+  listen(document, "click", function (e) {
+    var fired = false;
+    document.querySelectorAll(AWAY).forEach(function (el) {
+      if (el === e.target || (el.contains && el.contains(e.target))) return; // a click inside is not "away"
+      var x = directive(el, "away"); if (!x) return;
+      run(x, elementScope(el)); fired = true;
+    });
+    if (fired) render();
+  });
+  // data-kit-escape="expr": the Escape key runs the expression of every present escape region. A modal
+  // is a present region, so Escape closes it; the expression itself decides what "close" means.
+  var ESC = "[data-kitwork-escape],[data-kit-escape]";
+  listen(document, "keydown", function (e) {
+    if (e.key !== "Escape" && e.key !== "Esc" && e.keyCode !== 27) return;
+    var fired = false;
+    document.querySelectorAll(ESC).forEach(function (el) {
+      var x = directive(el, "escape"); if (!x) return;
+      run(x, elementScope(el)); fired = true;
+    });
+    if (fired) render();
   });
   // Submit: the validate gate runs FIRST — an invalid form neither submits nor fires its verb;
   // the server re-checks the SAME rule for truth either way. A valid form then fires its verb.
@@ -915,100 +979,33 @@
   }
   listen(document, "kitwork:load", bindVisible);
 
-  // ---- live: data-kit-live="<sse-url>" — the server PUSHES JSON scope patches over SSE ----
-  // Still ONE EventSource per URL (deduped), but the patch is delivered to each subscriber's NEAREST
-  // scope: a live region on a boundary (data-kit-api / -scope / -component) patches THAT scope, so
-  // api (fetch initial) + live (keep fresh) pair on one element; a bare live region patches the page.
-  // A payload that parses as a JSON object is merged and re-rendered; anything else is ignored.
-  var LIVE = "[data-kitwork-live],[data-kit-live]";
-  var streams = {};
-  function liveTarget(el) {
-    var b = el.closest ? el.closest(SCOPE) : null;
-    return b ? boundaryScope(b) : raw;
-  }
-  function syncLive() {
-    if (!window.EventSource) return;
-    var want = {};
-    document.querySelectorAll(LIVE).forEach(function (el) {
-      var u = el.getAttribute("data-kitwork-live") || el.getAttribute("data-kit-live");
-      if (u) (want[u] = want[u] || []).push(el);
-    });
-    Object.keys(want).forEach(function (u) {
-      if (streams[u]) { streams[u].els = want[u]; return; } // refresh subscribers (e.g. after morph)
-      var rec = streams[u] = { es: null, els: want[u] };
-      rec.es = new EventSource(u);
-      rec.es.onmessage = function (e) {
-        var patch = null;
-        try { patch = JSON.parse(e.data); } catch (err) { patch = null; }
-        if (patch && typeof patch === "object" && !(patch instanceof Array)) {
-          rec.els.forEach(function (el) {
-            var target = liveTarget(el);
-            Object.keys(patch).forEach(function (k) { target[k] = patch[k]; });
-          });
-          render();
-        }
-      };
-    });
-    Object.keys(streams).forEach(function (u) {
-      if (!want[u]) { streams[u].es.close(); delete streams[u]; }
-    });
-  }
-  // ---- api: data-kit-api="/url" — seed a boundary's scope from a JSON fetch (once, at mount) ----
-  // The element is a boundary (see SCOPE), so the response fills ITS scope: an object is merged key
-  // by key; anything else lands under `data`. Lifecycle is state→CSS on the element itself —
-  // data-state="loading" → "ready"/"error" — plus `error` in scope for the message. Fetch-once per
-  // element (tracked in Symbol state); same-origin credentials. This is data-source tier A: the URL
-  // is an endpoint the server owns, so it is safe by construction (subject to CORS).
-  var API = "[data-kitwork-api],[data-kit-api]";
-  function syncApi() {
-    if (!window.fetch) return;
-    document.querySelectorAll(API).forEach(function (el) {
-      var st = state(el);
-      if (st.apiState) return; // idle only — already loading/done/error
-      var url = el.getAttribute("data-kitwork-api") || el.getAttribute("data-kit-api");
-      if (!url) return;
-      st.apiState = "loading";
-      el.setAttribute("data-state", "loading");
-      var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-      st.apiController = controller;
-      fetch(url, {
-        credentials: "same-origin",
-        headers: { "Accept": "application/json" },
-        signal: controller ? controller.signal : undefined
-      })
-        .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
-        .then(function (data) {
-          st.apiController = null;
-          if (!el.isConnected) return;
-          var s = boundaryScope(el);
-          if (data && typeof data === "object" && !(data instanceof Array)) {
-            for (var k in data) { if (Object.prototype.hasOwnProperty.call(data, k)) s[k] = data[k]; }
-          } else { s.data = data; }
-          st.apiState = "done";
-          el.setAttribute("data-state", "ready");
-          render();
-        })
-        .catch(function (e) {
-          st.apiController = null;
-          if ((e && e.name === "AbortError") || !el.isConnected) return;
-          st.apiState = "error";
-          el.setAttribute("data-state", "error");
-          boundaryScope(el).error = String((e && e.message) || e);
-          render();
-        });
-    });
+  // ---- api / live: MOVED OUT OF THE CORE (capability modules) ----
+  // Seeding a boundary from a JSON fetch (data-kit-api) and keeping it fresh over SSE (data-kit-live)
+  // are policies, not mechanisms, so they ride the only-used /jitjs channel like remember. The kernel
+  // keeps only the LIFECYCLE they plug into:
+  //   · reconcile hooks — run to (re)scan the DOM at boot, after a Drive swap, and on any mutation, so
+  //     regions arriving via morph get wired and departing ones drop out;
+  //   · destroy hooks   — run by kit.destroy to tear a capability's long-lived resources down.
+  // A capability registers through kit.internal.onReconcile / onDestroy and self-runs once on load
+  // (it is appended after boot, so it cannot rely on boot's reconcile). See jit/js/capabilities.
+  var reconcileHooks = [];
+  var destroyHooks = [];
+  function reconcile() {
+    for (var i = 0; i < reconcileHooks.length; i++) {
+      try { reconcileHooks[i](); } catch (_) { }
+    }
   }
 
-  // ONE observer for the whole kernel: DOM is the manifest — live regions arriving or leaving
-  // (morph, SPA swaps) re-reconcile subscriptions on the next tick.
-  var livePending = false;
+  // ONE observer for the whole kernel: DOM is the manifest — a removed subtree is cleaned up at once,
+  // and capability regions arriving or leaving (morph, SPA swaps) re-reconcile on the next tick.
+  var reconcilePending = false;
   var domObserver = new MutationObserver(function (records) {
     records.forEach(function (record) {
       record.removedNodes.forEach(cleanupTree);
     });
-    if (livePending) return;
-    livePending = true;
-    setTimeout(function () { livePending = false; syncLive(); syncApi(); }, 0);
+    if (reconcilePending) return;
+    reconcilePending = true;
+    setTimeout(function () { reconcilePending = false; reconcile(); }, 0);
   });
   domObserver.observe(document.documentElement, { childList: true, subtree: true });
   cleanup(function () { domObserver.disconnect(); });
@@ -1030,16 +1027,15 @@
       }
     });
   }
-  kitwork.compile = function (src) { return parse(lex(src)); };
-  kitwork.run = function (ir, s) { return run(ir, publicScope(s)); };
-  kitwork.scope = scope;
-  kitwork.scopeFor = scopeFor;
-  kitwork.render = render;
-  kitwork.streams = streams;
-  kitwork.sync = syncLive;
-  kitwork.syncApi = syncApi;
-  kitwork.set = function (k, v) { scope[k] = v; render(); };
-  kitwork.fetchWithRetry = function (url, options, retries, delay) {
+  kit.compile = function (src) { return parse(lex(src)); };
+  kit.run = function (ir, s) { return run(ir, publicScope(s)); };
+  kit.scope = scope;
+  kit.scopeFor = scopeFor;
+  kit.render = render;
+  // kit.streams / .sync / .syncApi are defined by the live + api capability modules now (they own
+  // the EventSource registry and the fetch pass); a page that uses neither carries none of it.
+  kit.set = function (k, v) { scope[k] = v; render(); };
+  kit.fetchWithRetry = function (url, options, retries, delay) {
     var rCount = retries !== undefined ? retries : 2;
     var rDelay = delay !== undefined ? delay : 1000;
     return fetch(url, options).catch(function (err) {
@@ -1048,22 +1044,21 @@
       return new Promise(function (resolve) {
         setTimeout(resolve, rDelay);
       }).then(function () {
-        return kitwork.fetchWithRetry(url, options, rCount - 1, rDelay * 2);
+        return kit.fetchWithRetry(url, options, rCount - 1, rDelay * 2);
       });
     });
   };
-  kitwork.destroy = function () {
-    Object.keys(streams).forEach(function (url) {
-      streams[url].es.close();
-      delete streams[url];
-    });
+  kit.destroy = function () {
+    for (var i = 0; i < destroyHooks.length; i++) {
+      try { destroyHooks[i](); } catch (_) { } // e.g. the live module closes its EventSources
+    }
     while (globalCleanups.length) {
       try { globalCleanups.pop()(); } catch (_) { }
     }
     cleanupTree(document.documentElement);
-    kitwork.hydrate = false;
-    kitwork.runtime.booted = false;
-    kitwork.runtime.loaded = false;
+    kit.hydrate = false;
+    kit.runtime.booted = false;
+    kit.runtime.loaded = false;
   };
 
   function initAppConfig() {
@@ -1091,9 +1086,9 @@
           }
         }
       }
-      kitwork.mode = mode;
-      kitwork.version = version;
-      kitwork.useIndexed = appEl.getAttribute("data-kitwork-indexed") === "true" || appEl.getAttribute("data-kit-indexed") === "true";
+      kit.mode = mode;
+      kit.version = version;
+      kit.useIndexed = appEl.getAttribute("data-kitwork-indexed") === "true" || appEl.getAttribute("data-kit-indexed") === "true";
     }
   }
 
@@ -1101,11 +1096,9 @@
     if (runtimeMeta.booted) return kitwork;
     runtimeMeta.booted = true;
     initAppConfig();
-    loadRemembered();
     seedModels();
     render();
-    syncLive();
-    syncApi();
+    reconcile();
     bindVisible();
     startHooks.slice().forEach(function (start) {
       try { start(); } catch (error) {
@@ -1119,7 +1112,7 @@
     }));
     return kitwork;
   }
-  kitwork.start = boot;
+  kit.start = boot;
 
   Object.defineProperty(kitwork, "internal", {
     value: {
@@ -1127,26 +1120,36 @@
       listen: listen,
       cleanupTree: cleanupTree,
       state: state,
-      target: target
+      target: target,
+      // The capability-module seam. A lazily-loaded capability (remember / api / live) installs
+      // through here instead of living in the always-shipped core:
+      //   pageScope      — the raw $ object, to define accessor properties on chosen keys (remember)
+      //   scheduleRender — the coalesced repaint
+      //   boundaryScope  — resolve an element's nearest scope object (api seeds it, live patches it)
+      //   render         — repaint after a fetch/patch
+      //   scopeSelector  — the boundary selector, to find a live region's target scope
+      //   onReconcile    — register a DOM (re)scan hook (boot / Drive swap / mutation)
+      //   onDestroy      — register a teardown hook (kit.destroy)
+      pageScope: raw,
+      scheduleRender: scheduleRender,
+      boundaryScope: boundaryScope,
+      render: render,
+      scopeSelector: SCOPE,
+      onReconcile: function (fn) { reconcileHooks.push(fn); return fn; },
+      onDestroy: function (fn) { destroyHooks.push(fn); return fn; }
     },
     configurable: true,
     enumerable: false
   });
-  kitwork.module("kernel", {
+  kit.module("kernel", {
     start: boot,
-    compile: kitwork.compile,
-    run: kitwork.run,
+    compile: kit.compile,
+    run: kit.run,
     render: render
   });
-  // Another tab changed a remembered value → adopt it and re-render (live cross-tab sync).
-  listen(window, "storage", function (e) {
-    var key = e.key && e.key.indexOf(rememberStoragePrefix) === 0 ?
-      e.key.slice(rememberStoragePrefix.length) : e.key;
-    if (key && remembered[key]) {
-      scheduleRender();
-    }
-  });
+  // (The cross-tab storage listener moved into the remember capability module — it is the only thing
+  // that watched localStorage.)
   // After every swap: seed any new inputs, re-render expressions, reconcile live streams
   // (bindVisible re-binds through its own kitwork:load listener above).
-  listen(document, "kitwork:load", function () { loadRemembered(); seedModels(); render(); syncLive(); syncApi(); });
+  listen(document, "kitwork:load", function () { seedModels(); render(); reconcile(); });
 })();

@@ -12,5 +12,5 @@ var toastDef = {
   }
 };
 
-window.kitwork.component("toast", toastDef);
-window.kitwork.component("toast@v1.0.0", toastDef);
+window.kit.component("toast", toastDef);
+window.kit.component("toast@v1.0.0", toastDef);

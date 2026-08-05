@@ -2,13 +2,13 @@
 (function (window) {
   "use strict";
 
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("compat")) return;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("compat")) return;
 
-  var components = kitwork.components;
+  var components = kit.components;
   Object.defineProperty(components, "action", {
     value: function (name, handler) {
-      kitwork.action(name, handler);
+      kit.action(name, handler);
       return this;
     },
     configurable: true,
@@ -16,30 +16,30 @@
     enumerable: false
   });
   Object.defineProperty(components, "actions", {
-    value: kitwork.actions,
+    value: kit.actions,
     configurable: true,
     writable: true,
     enumerable: false
   });
   Object.defineProperty(components, "target", {
-    value: kitwork.target,
+    value: kit.target,
     configurable: true,
     writable: true,
     enumerable: false
   });
   Object.defineProperty(components, "state", {
-    value: kitwork.state,
+    value: kit.state,
     configurable: true,
     writable: true,
     enumerable: false
   });
   Object.defineProperty(components, "fire", {
-    value: kitwork.fire,
+    value: kit.fire,
     configurable: true,
     writable: true,
     enumerable: false
   });
 
   window.hydrate = kitwork;
-  kitwork.module("compat", components);
+  kit.module("compat", components);
 })(window);

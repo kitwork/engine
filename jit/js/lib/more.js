@@ -7,9 +7,9 @@
  *   <div id="list"> … <article data-key="123">…</article> … </div>
  *   <a href="/posts?page=2" data-kitwork-action="more" data-kitwork-target="#list">Load more</a>
  */
-window.kitwork.components.action("more", function (el, e) {
+window.kit.components.action("more", function (el, e) {
   if (e && e.preventDefault) e.preventDefault();
-  var store = window.kitwork.components.state(el);
+  var store = window.kit.components.state(el);
   if (store.isLoading) return;
   var href = (el.getAttribute("data-kit-href") || el.getAttribute("data-kitwork-href")) || el.getAttribute("href");
   var selector = (el.getAttribute("data-kit-target") || el.getAttribute("data-kitwork-target"));
@@ -24,7 +24,7 @@ window.kitwork.components.action("more", function (el, e) {
     if (el.tagName !== "A") el.disabled = true;
   }
 
-  var fetchFn = window.kitwork.fetchWithRetry || function (u, o) { return fetch(u, o); };
+  var fetchFn = window.kit.fetchWithRetry || function (u, o) { return fetch(u, o); };
 
   fetchFn(href, { credentials: "same-origin" })
     .then(function (r) { return r.text(); })

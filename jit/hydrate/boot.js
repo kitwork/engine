@@ -2,12 +2,12 @@
 (function (window, document) {
   "use strict";
 
-  var kitwork = window.kitwork;
-  if (!kitwork || typeof kitwork.start !== "function") return;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || typeof kit.start !== "function") return;
 
   if (document.readyState === "loading") {
-    kitwork.internal.listen(document, "DOMContentLoaded", kitwork.start, { once: true });
+    kit.internal.listen(document, "DOMContentLoaded", kit.start, { once: true });
   } else {
-    kitwork.start();
+    kit.start();
   }
 })(window, document);

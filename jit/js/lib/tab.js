@@ -7,8 +7,8 @@
  *   <div role="tabpanel" id="one">…</div>
  *   <div role="tabpanel" id="two" hidden>…</div>
  */
-window.kitwork.components.action("tab", function (el) {
-  var panel = window.kitwork.components.target(el);
+window.kit.components.action("tab", function (el) {
+  var panel = window.kit.components.target(el);
   if (!panel) return;
   var list = el.closest('[role="tablist"]') || el.parentElement;
   if (list) {

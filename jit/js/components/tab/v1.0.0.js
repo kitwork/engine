@@ -8,5 +8,5 @@ var tabDef = {
   }
 };
 
-window.kitwork.component("tab", tabDef);
-window.kitwork.component("tab@v1.0.0", tabDef);
+window.kit.component("tab", tabDef);
+window.kit.component("tab@v1.0.0", tabDef);

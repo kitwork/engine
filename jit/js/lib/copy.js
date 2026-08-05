@@ -2,16 +2,16 @@
  * Flags `.is-copied` for 2s so the author renders the "Copied!" state purely in CSS.
  * Supports: <button data-kitwork-action="copy" data-kitwork-copy="npm i kitwork">Copy</button>
  */
-window.kitwork.components.action("copy", function (el) {
+window.kit.components.action("copy", function (el) {
   var target = null;
   var text = (el.getAttribute("data-kit-copy") || el.getAttribute("data-kitwork-copy"));
   if (text == null) {
-    target = window.kitwork.components.target(el);
+    target = window.kit.components.target(el);
     text = target ? (target.innerText || target.textContent || "") : "";
   }
   var copied = function () {
     el.classList.add("is-copied");
-    var store = window.kitwork.components.state(el);
+    var store = window.kit.components.state(el);
     clearTimeout(store.copyResetTimer);
     store.copyResetTimer = setTimeout(function () { el.classList.remove("is-copied"); }, 2000);
   };
@@ -23,7 +23,7 @@ window.kitwork.components.action("copy", function (el) {
     selection.removeAllRanges();
     selection.addRange(range);
     el.classList.add("is-copy-selected");
-    var store = window.kitwork.components.state(el);
+    var store = window.kit.components.state(el);
     clearTimeout(store.copySelectedResetTimer);
     store.copySelectedResetTimer = setTimeout(function () { el.classList.remove("is-copy-selected"); }, 4000);
   };

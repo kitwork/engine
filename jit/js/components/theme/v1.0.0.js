@@ -3,11 +3,11 @@
  */
 var themeDef = {
   toggle: function () {
-    if (window.kitwork && window.kitwork.toggleTheme) {
-      window.kitwork.toggleTheme();
+    if (window.kit && window.kit.toggleTheme) {
+      window.kit.toggleTheme();
     }
   }
 };
 
-window.kitwork.component("theme", themeDef);
-window.kitwork.component("theme@v1.0.0", themeDef);
+window.kit.component("theme", themeDef);
+window.kit.component("theme@v1.0.0", themeDef);

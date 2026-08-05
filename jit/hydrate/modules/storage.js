@@ -2,10 +2,10 @@
 (function (window) {
   "use strict";
 
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("storage")) return;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("storage")) return;
 
-  var native = kitwork.module("native");
+  var native = kit.module("native");
   var prefix = "kitwork:";
 
   function storageKey(key) {
@@ -56,6 +56,6 @@
     }
   };
 
-  kitwork.storage = storage;
-  kitwork.module("storage", storage);
+  kit.storage = storage;
+  kit.module("storage", storage);
 })(window);

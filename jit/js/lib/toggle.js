@@ -1,6 +1,6 @@
 /* toggle — show/hide a target by flipping a class (default `hidden`). */
-window.kitwork.components.action("toggle", function (el) {
-  var t = window.kitwork.components.target(el);
+window.kit.components.action("toggle", function (el) {
+  var t = window.kit.components.target(el);
   if (!t) return;
   var cls = (el.getAttribute("data-kit-class") || el.getAttribute("data-kitwork-class")) || "hidden";
   t.classList.toggle(cls);

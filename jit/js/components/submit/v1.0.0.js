@@ -16,5 +16,5 @@ var submitDef = {
   }
 };
 
-window.kitwork.component("submit", submitDef);
-window.kitwork.component("submit@v1.0.0", submitDef);
+window.kit.component("submit", submitDef);
+window.kit.component("submit@v1.0.0", submitDef);

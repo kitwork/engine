@@ -18,5 +18,5 @@ var moreDef = {
   }
 };
 
-window.kitwork.component("more", moreDef);
-window.kitwork.component("more@v1.0.0", moreDef);
+window.kit.component("more", moreDef);
+window.kit.component("more@v1.0.0", moreDef);

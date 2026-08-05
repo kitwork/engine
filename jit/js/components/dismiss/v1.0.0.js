@@ -10,5 +10,5 @@ var dismissDef = {
   }
 };
 
-window.kitwork.component("dismiss", dismissDef);
-window.kitwork.component("dismiss@v1.0.0", dismissDef);
+window.kit.component("dismiss", dismissDef);
+window.kit.component("dismiss@v1.0.0", dismissDef);

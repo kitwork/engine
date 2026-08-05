@@ -43,6 +43,39 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 	}
 }
 
+// data-kit-away (a click OUTSIDE) and data-kit-escape (the Escape key) are ordinary expression
+// directives — the server twin must treat them exactly like data-kit-click: verify the expression,
+// keep the source on the wire, and inject the runtime even on a page whose ONLY directive is one of
+// them (the client dispatch cannot run without /kit.js). This is the server half of the event-
+// modifier feature; if the render.go name lists ever drop them, this goes red.
+func TestRenderAwayAndEscapeAreDirectives(t *testing.T) {
+	// verify: an away/escape expression is recognised as authored source (so a typo is caught + logged).
+	if !directiveRe.MatchString(`data-kit-away="open = false"`) {
+		t.Error("data-kit-away must be verified as an authored expression directive")
+	}
+	if !directiveRe.MatchString(`data-kit-escape="open = false"`) {
+		t.Error("data-kit-escape must be verified as an authored expression directive")
+	}
+	// injection: a page whose only directive is away (with a debounce/guard companion) still ships the
+	// runtime, and the authored attributes ride unchanged.
+	in := `<head></head><body>` + marker +
+		`<div data-kit-away="open = false" data-kit-guard="prevent"><a data-kit-escape="open = false">x</a></div>` +
+		`</section></body>`
+	out := Render(in)
+	for _, keep := range []string{
+		`data-kit-away="open = false"`,
+		`data-kit-escape="open = false"`,
+		`data-kit-guard="prevent"`,
+	} {
+		if !strings.Contains(out, keep) {
+			t.Errorf("authored attribute must ride unchanged: %s", keep)
+		}
+	}
+	if strings.Count(out, injectTag) != 1 {
+		t.Error("a page whose only directive is away/escape still needs the runtime injected")
+	}
+}
+
 // The activation gate: a page WITHOUT the root marker is returned byte-for-byte unchanged, even if
 // it contains directive-looking attributes (static pages, docs showing examples as text).
 func TestRenderNoMarkerUntouched(t *testing.T) {
@@ -137,34 +170,36 @@ func TestRuntimeEmbedded(t *testing.T) {
 		t.Error("the -ir suffix form is retired — the long prefix alone marks engine-emitted IR")
 	}
 	for _, want := range []string{
-		"window.hydrate", "PREC", "function lex", "EventSource", "MutationObserver",
+		"window.hydrate", "PREC", "function lex", "MutationObserver",
 		// the unified kernel surfaces: boot guard, behavior registry, verb compat, delegated action
-		"kitwork.runtime", "kitwork.behavior", "kitwork.components", "data-kitwork-action",
+		"kit.runtime", "kit.behavior", "kit.components", "data-kitwork-action",
 		// the composed Drive module: navigation fetch header, morph primitive, head reconcile, history,
 		// the two-way lock against the legacy standalone file, and the swap lifecycle events
-		"X-Kitwork-Hydrate", "kitwork.morph", "mergeHead", "popstate", "kitwork.hydrate",
+		"X-Kitwork-Hydrate", "kit.morph", "mergeHead", "popstate", "kit.hydrate",
 		"kitwork:before-swap", "kitwork:load",
 		// kernel overlays (progress bar, announcer) survive morph via the data-kitwork-ui marker
 		"data-kitwork-ui", "kernelUI",
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
 		"data-kitwork-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
-		`"{}"`, `"[]"`, `"=>"`, `"call"`, "__kitLambda", "tryArrowParams", "boundaryScope", "kitwork.run",
+		`"{}"`, `"[]"`, `"=>"`, `"call"`, "__kitLambda", "tryArrowParams", "boundaryScope", "kit.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
-		"kitwork.component", "data-kitwork-component", "seedComponent", "fn.apply(s, fargs)",
-		// remember: persisted $ keys — register fn, declaration attr, storage key, load/persist
-		"kitwork.remember", "data-kit-remember", "registerRememberedKey", "loadRemembered",
-		"kitwork.platform", "kitwork.bridge", "kitwork.isNative",
-		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kitwork.destroy", "removeEventListener",
+		"kit.component", "data-kitwork-component", "seedComponent", "fn.apply(s, fargs)",
+		// the capability seam remember (and later api/live) installs through, now that it is out of core
+		"pageScope", "scheduleRender",
+		"kit.platform", "kit.bridge", "kit.isNative",
+		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kit.destroy", "removeEventListener",
 		// $app capabilities (Native Bridge RFC v2): bridge-first with web fallback
-		"kitwork.clipboard", `native.call("clipboard.write"`, "navigator.clipboard",
-		"kitwork.camera", `native.call("camera.capture"`, "readAsDataURL",
+		"kit.clipboard", `native.call("clipboard.write"`, "navigator.clipboard",
+		"kit.camera", `native.call("camera.capture"`, "readAsDataURL",
 		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
 		`selector("bind")`,
-		// api: async JSON source — sync fn, activation attr, fetch + state→CSS lifecycle
-		"kitwork.syncApi", "data-kit-api", `el.setAttribute("data-state", "loading")`,
-		// live per-scope + component init() lifecycle hook
-		"liveTarget", "function runInit", "st.scope.init",
+		// an api element is still a core SCOPE boundary (the fetch that fills it is now the capability)
+		"data-kitwork-api", "data-kit-api",
+		// the reconcile/destroy lifecycle capabilities (api/live/remember) install through, out of core
+		"reconcileHooks", "onReconcile", "onDestroy",
+		// component init() lifecycle hook stays in core
+		"function runInit", "st.scope.init",
 		// sandbox: the blocklist that seals the Function-constructor / prototype-pollution escape
 		"function blockedKey", "constructor",
 	} {
@@ -175,6 +210,18 @@ func TestRuntimeEmbedded(t *testing.T) {
 	for _, forbid := range []string{"eval(", "new Function("} {
 		if strings.Contains(rt, forbid) {
 			t.Errorf("composed runtime must never use %q", forbid)
+		}
+	}
+	// remember/api/live were lifted out of the always-shipped core into the jit/js capability channel:
+	// their IMPLEMENTATIONS must be GONE from the core bytes (only pointer comments remain). If any of
+	// them creeps back into the kernel, this catches it — that is the whole point of the extraction.
+	for _, forbid := range []string{
+		"registerRememberedKey", "function loadRemembered", "rememberStoragePrefix", "kitwork:remember:",
+		"function syncApi", "function syncLive", "function liveTarget", "new EventSource",
+		"kit.streams =", "kit.sync =", "kit.syncApi =",
+	} {
+		if strings.Contains(rt, forbid) {
+			t.Errorf("capability implementation must not be in the core runtime: found %q", forbid)
 		}
 	}
 }

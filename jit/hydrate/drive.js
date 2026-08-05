@@ -1,25 +1,25 @@
 // Optional Kitwork Drive module: same-origin navigation, head reconciliation and scroll restore.
 (function (window, document) {
   "use strict";
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("drive")) return;
-  var listen = kitwork.internal.listen;
-  var cleanup = kitwork.cleanup;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("drive")) return;
+  var listen = kit.internal.listen;
+  var cleanup = kit.cleanup;
 
   // ---- Drive: optional SPA navigation over the kernel's morph/lifecycle contracts ----
   // Ported from the proven standalone hydrate.js. Activates at boot ONLY when the page declares a
   // hydrate region ([data-kitwork-hydrate] / [data-kit-hydrate]) AND no drive is already running:
-  // kitwork.hydrate is the two-way lock — the legacy standalone file sets the same flag, so old
+  // kit.hydrate is the two-way lock — the legacy standalone file sets the same flag, so old
   // pages keep their file, new pages use the kernel, and the two never double-drive.
   // Contract unchanged: intercept same-origin links + GET forms, fetch with X-Kitwork-Hydrate,
   // swap the region (fallback <main>), morph, mergeHead swaps data-kitwork-jit blocks, history +
   // scroll restoration and bounded hover prefetch. Everything is delegated.
   function start() {
-    if (typeof kitwork.morph !== "function") return;
-    if (kitwork.hydrate || !window.history.pushState || !window.fetch || !window.DOMParser) return;
+    if (typeof kit.morph !== "function") return;
+    if (kit.hydrate || !window.history.pushState || !window.fetch || !window.DOMParser) return;
     var appEl = document.querySelector("[data-kitwork-app],[data-kit-app],[data-kitwork-hydrate],[data-kit-hydrate]");
     if (!appEl) return;
-    kitwork.hydrate = true;
+    kit.hydrate = true;
 
     // mode & version are parsed globally by initAppConfig at boot
 
@@ -181,7 +181,7 @@
             }
           }
         }
-        if (newVersion !== kitwork.version) {
+        if (newVersion !== kit.version) {
           location.assign(url);
           return;
         }
@@ -204,7 +204,7 @@
       document.dispatchEvent(new CustomEvent("kitwork:before-swap", { detail: { url: url } }));
       if (doc.title) document.title = doc.title;
       mergeHead(doc);
-      kitwork.morph(cur, next);
+      kit.morph(cur, next);
       if (!sameLayout && doc.body) {
         document.body.className = doc.body.className;
         document.body.setAttribute("data-kitwork-layout", layoutKey(doc));
@@ -322,7 +322,7 @@
       cancelAnimationFrame(rafId);
       if (bar.parentNode) bar.parentNode.removeChild(bar);
       if (announcer.parentNode) announcer.parentNode.removeChild(announcer);
-      kitwork.hydrate = false;
+      kit.hydrate = false;
     });
 
     drive.visit = visit;
@@ -332,7 +332,7 @@
   }
 
   var drive = { start: start };
-  kitwork.drive = drive;
-  kitwork.module("drive", drive);
-  kitwork.onStart(start);
+  kit.drive = drive;
+  kit.module("drive", drive);
+  kit.onStart(start);
 })(window, document);

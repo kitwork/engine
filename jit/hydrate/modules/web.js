@@ -2,10 +2,10 @@
 (function (window, document) {
   "use strict";
 
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("web")) return;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("web")) return;
 
-  var native = kitwork.module("native");
+  var native = kit.module("native");
 
   function supports(capability) {
     var name = String(capability || "");
@@ -16,18 +16,18 @@
     return false;
   }
 
-  kitwork.runtimeInfo = function () {
+  kit.runtimeInfo = function () {
     return native.available ?
       native.call("runtime.info") :
-      Promise.resolve(kitwork.runtime.info());
+      Promise.resolve(kit.runtime.info());
   };
-  kitwork.supports = function (capability) {
+  kit.supports = function (capability) {
     return native.available ?
       native.call("runtime.supports", { capability: capability }) :
       Promise.resolve(supports(capability));
   };
 
-  kitwork.dialog = {
+  kit.dialog = {
     alert: function (options) {
       if (native.available) return native.call("dialog.alert", options || {});
       alert((options && options.message) || options || "");
@@ -45,14 +45,14 @@
       ));
     }
   };
-  kitwork.share = {
+  kit.share = {
     open: function (options) {
       if (navigator.share) return navigator.share(options);
       return native.call("share.open", options);
     }
   };
 
-  kitwork.clipboard = function (text) {
+  kit.clipboard = function (text) {
     text = text == null ? "" : String(text);
     if (native.available) {
       native.call("clipboard.write", { text: text }).catch(function () { });
@@ -73,13 +73,13 @@
     area.remove();
     return true;
   };
-  kitwork.clipboard.writeText = function (text) {
-    return kitwork.clipboard(text);
+  kit.clipboard.writeText = function (text) {
+    return kit.clipboard(text);
   };
-  kitwork.clipboard.readText = function () {
+  kit.clipboard.readText = function () {
     return navigator.clipboard ?
       navigator.clipboard.readText() :
-      Promise.reject(kitwork.KitworkError(
+      Promise.reject(kit.KitworkError(
         "Clipboard read is unsupported",
         "UNSUPPORTED",
         "clipboard",
@@ -112,16 +112,16 @@
     });
   }
 
-  kitwork.camera = function (key) {
+  kit.camera = function (key) {
     var request = native.available ? native.call("camera.capture") : captureCamera();
     request.then(function (uri) {
-      if (uri) kitwork.set(key, uri);
+      if (uri) kit.set(key, uri);
     }).catch(function (error) {
-      kitwork.set(key + "_error", String((error && error.message) || error));
+      kit.set(key + "_error", String((error && error.message) || error));
     });
     return true;
   };
-  kitwork.camera.capture = function (options) {
+  kit.camera.capture = function (options) {
     return native.available ? native.call("camera.capture", options) : captureCamera(options);
   };
 
@@ -139,12 +139,12 @@
     configurable: true,
     enumerable: true
   });
-  kitwork.toggleTheme = function () {
-    kitwork.theme = kitwork.theme === "light" ? "dark" : "light";
+  kit.toggleTheme = function () {
+    kit.theme = kit.theme === "light" ? "dark" : "light";
   };
-  kitwork.back = function () { history.back(); };
-  kitwork.forward = function () { history.forward(); };
-  kitwork.reload = function () { location.reload(); };
+  kit.back = function () { history.back(); };
+  kit.forward = function () { history.forward(); };
+  kit.reload = function () { location.reload(); };
 
-  kitwork.module("web", { supports: supports, captureCamera: captureCamera });
+  kit.module("web", { supports: supports, captureCamera: captureCamera });
 })(window, document);

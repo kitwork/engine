@@ -20,5 +20,5 @@ var getDef = {
   }
 };
 
-window.kitwork.component("get", getDef);
-window.kitwork.component("get@v1.0.0", getDef);
+window.kit.component("get", getDef);
+window.kit.component("get@v1.0.0", getDef);

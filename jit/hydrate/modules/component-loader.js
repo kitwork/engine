@@ -1,9 +1,9 @@
 // Optional remote component loader. Off by default; core component registration stays in kernel.
 (function (window, document) {
   "use strict";
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("componentLoader")) return;
-  kitwork.cdnComponents = kitwork.cdnComponents || "";
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("componentLoader")) return;
+  kit.cdnComponents = kit.cdnComponents || "";
 
   // ---- IndexedDB persistence for dynamic CDN components (opt-in via data-kit-persist="true") ----
   var DB_NAME = "kitwork";
@@ -57,7 +57,7 @@
       s.async = true;
       s.onload = function () {
         URL.revokeObjectURL(url);
-        kitwork.render();
+        kit.render();
       };
       s.onerror = function () {
         URL.revokeObjectURL(url);
@@ -88,7 +88,7 @@
 
   var loadingComponents = {};
   function loadComponentFromCDN(cname) {
-    var base = kitwork.cdnComponents;
+    var base = kit.cdnComponents;
     if (!base || loadingComponents[cname]) return;          // opt-in only — off by default
     // Validate name[@version] so a hostile attribute can never build an unexpected URL.
     var m = /^([a-z][a-z0-9-]*)(?:@([v0-9.]+))?$/.exec(cname);
@@ -96,7 +96,7 @@
     loadingComponents[cname] = true;
     var url = base.replace(/\/+$/, "") + "/" + m[1] + "/" + (m[2] || m[1]) + ".js";
 
-    if (kitwork.useIndexed && window.indexedDB) {
+    if (kit.useIndexed && window.indexedDB) {
       dbGet(cname).then(function (cachedCode) {
         if (cachedCode) {
           injectScriptCode(cachedCode, cname);
@@ -110,11 +110,11 @@
       var s = document.createElement("script");
       s.src = url;
       s.async = true;
-      s.onload = function () { kitwork.render(); };
+      s.onload = function () { kit.render(); };
       s.onerror = function () { console.error("kitjs: failed to load component '" + cname + "' from " + url); };
       document.head.appendChild(s);
     }
   }
 
-  kitwork.module("componentLoader", { load: loadComponentFromCDN });
+  kit.module("componentLoader", { load: loadComponentFromCDN });
 })(window, document);

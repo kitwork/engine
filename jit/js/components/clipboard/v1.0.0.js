@@ -15,7 +15,7 @@ var clipboardDef = {
   }
 };
 
-window.kitwork.component("clipboard", clipboardDef);
-window.kitwork.component("clipboard@v1.0.0", clipboardDef);
-window.kitwork.component("copy", clipboardDef);
-window.kitwork.component("copy@v1.0.0", clipboardDef);
+window.kit.component("clipboard", clipboardDef);
+window.kit.component("clipboard@v1.0.0", clipboardDef);
+window.kit.component("copy", clipboardDef);
+window.kit.component("copy@v1.0.0", clipboardDef);

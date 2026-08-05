@@ -71,5 +71,5 @@ var sidebarDef = {
   isHidden: function () { return this.status === "hidden"; }
 };
 
-window.kitwork.component("sidebar", sidebarDef);
-window.kitwork.component("sidebar@v1.0.0", sidebarDef);
+window.kit.component("sidebar", sidebarDef);
+window.kit.component("sidebar@v1.0.0", sidebarDef);

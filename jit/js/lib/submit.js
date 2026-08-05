@@ -6,11 +6,11 @@
  *
  * data-kitwork-swap: "replace" (target's innerHTML, default) | "append" | "prepend" | "outer".
  * Adds `.is-loading` to the form while in flight; ignores re-submits during a request. */
-window.kitwork.components.action("submit", function (form, e) {
+window.kit.components.action("submit", function (form, e) {
   if (e && e.preventDefault) e.preventDefault();
-  var store = window.kitwork.components.state(form);
+  var store = window.kit.components.state(form);
   if (store.isLoading) return;
-  var target = window.kitwork.components.target(form);
+  var target = window.kit.components.target(form);
   var swap = (form.getAttribute("data-kit-swap") || form.getAttribute("data-kitwork-swap")) || "replace";
   var method = (form.getAttribute("method") || "get").toUpperCase();
   var action = form.getAttribute("action") || location.href;
@@ -29,7 +29,7 @@ window.kitwork.components.action("submit", function (form, e) {
   var subButtons = form.querySelectorAll('button[type="submit"], input[type="submit"]');
   subButtons.forEach(function (btn) { btn.disabled = true; });
 
-  var fetchFn = window.kitwork.fetchWithRetry || function (u, o) { return fetch(u, o); };
+  var fetchFn = window.kit.fetchWithRetry || function (u, o) { return fetch(u, o); };
 
   fetchFn(action, options)
     .then(function (r) { return r.text(); })

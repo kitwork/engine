@@ -1,9 +1,9 @@
 // DOM morph module. Keeps navigation optional while sharing the kernel lifecycle contract.
 (function (window) {
   "use strict";
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("morph")) return;
-  var cleanupTree = kitwork.internal.cleanupTree;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("morph")) return;
+  var cleanupTree = kit.internal.cleanupTree;
 
   // ---- morph: kernel primitive — make an existing DOM node match a new one, preserving
   // focus, cursor, scroll and input state (nodes are PATCHED, never recreated).
@@ -101,6 +101,6 @@
     }
   }
 
-  kitwork.morph = morph;
-  kitwork.module("morph", morph);
+  kit.morph = morph;
+  kit.module("morph", morph);
 })(window);

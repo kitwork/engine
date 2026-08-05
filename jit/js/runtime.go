@@ -30,8 +30,19 @@ import (
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
-//go:embed components lib
+//go:embed components lib capabilities
 var jsFS embed.FS
+
+// capabilityAttr maps a capability's authored directive to its module slug. A capability is a chunk
+// of runtime that used to sit in the always-shipped core (remember, and later api/live) but is
+// policy, not mechanism — so it rides this only-used channel: a page carrying data-kit-<attr> gets
+// capabilities/<slug>.js appended, and nothing otherwise. Keyed by the attribute stem after the
+// prefix; both data-kit-* and data-kitwork-* forms are detected.
+var capabilityAttr = map[string]*regexp.Regexp{
+	"remember": regexp.MustCompile(`data-kit(?:work)?-remember=["']`),
+	"api":      regexp.MustCompile(`data-kit(?:work)?-api=["']`),
+	"live":     regexp.MustCompile(`data-kit(?:work)?-live=["']`),
+}
 
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.
 var moduleCache sync.Map
@@ -131,6 +142,26 @@ func readAction(name string) string {
 	return s
 }
 
+// readCapability returns the capability module from capabilities/<name>.js, or "" if absent. Cached
+// under a distinct key so it never collides with an action/component of the same name.
+func readCapability(name string) string {
+	key := "capability:" + name
+	if v, ok := moduleCache.Load(key); ok {
+		return v.(string)
+	}
+	s := ""
+	if verbRe.MatchString(name) {
+		if b, err := jsFS.ReadFile("capabilities/" + name + ".js"); err == nil {
+			s = strings.TrimSpace(string(b))
+		}
+	}
+	moduleCache.Store(key, s)
+	return s
+}
+
+// HasCapability reports whether a capability has a module.
+func HasCapability(name string) bool { return readCapability(name) != "" }
+
 // readComponent returns the (trimmed) contents of components/<name>/<version>.js, or "" if absent. Cached.
 func readComponent(nameWithVersion string) string {
 	key := "component:" + nameWithVersion
@@ -221,6 +252,24 @@ func scanVerbs(html string) []string {
 	return out
 }
 
+// scanCapabilities collects the capability keys (e.g. "capability:remember") a page's directives ask
+// for. Order is deterministic: capabilityAttr is small and the result is sorted with the verbs.
+func scanCapabilities(html string) []string {
+	var out []string
+	for name, re := range capabilityAttr {
+		if re.MatchString(html) && HasCapability(name) {
+			out = append(out, "capability:"+name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// scanModules is scanVerbs plus scanCapabilities — everything jit/js emits for a page.
+func scanModules(html string) []string {
+	return append(scanVerbs(html), scanCapabilities(html)...)
+}
+
 func moduleKeys(names []string) []string {
 	seen := make(map[string]bool)
 	var keys []string
@@ -236,6 +285,10 @@ func moduleKeys(names []string) []string {
 			case "component":
 				name := strings.SplitN(parts[1], "@", 2)[0]
 				if componentNameRe.MatchString(name) && HasComponent(parts[1]) {
+					key = n
+				}
+			case "capability":
+				if verbRe.MatchString(parts[1]) && HasCapability(parts[1]) {
 					key = n
 				}
 			}
@@ -284,6 +337,8 @@ func ModulesJS(names []string) string {
 			b.WriteString(readAction(name))
 		} else if typ == "component" {
 			b.WriteString(readComponent(name))
+		} else if typ == "capability" {
+			b.WriteString(readCapability(name))
 		}
 	}
 	return b.String()
@@ -305,7 +360,7 @@ func SiteRuntimeJS(htmls ...string) string {
 	seen := make(map[string]bool)
 	var all []string
 	for _, h := range htmls {
-		for _, n := range scanVerbs(h) {
+		for _, n := range scanModules(h) {
 			if !seen[n] {
 				seen[n] = true
 				all = append(all, n)
@@ -322,10 +377,11 @@ func Render(html string) string {
 	if !strings.Contains(html, "data-kit-action=") &&
 		!strings.Contains(html, "data-kitwork-action=") &&
 		!strings.Contains(html, "data-kit-component=") &&
-		!strings.Contains(html, "data-kitwork-component=") {
+		!strings.Contains(html, "data-kitwork-component=") &&
+		!hasCapabilityDirective(html) {
 		return html
 	}
-	keys := ModuleKeys(scanVerbs(html))
+	keys := ModuleKeys(scanModules(html))
 	if len(keys) == 0 {
 		return html
 	}
@@ -335,4 +391,15 @@ func Render(html string) string {
 		return html[:i] + tag + html[i:]
 	}
 	return tag + html
+}
+
+// hasCapabilityDirective reports whether any capability's authored directive is present, so a page
+// that uses a capability but no action/component still gets the runtime injected.
+func hasCapabilityDirective(html string) bool {
+	for _, re := range capabilityAttr {
+		if re.MatchString(html) {
+			return true
+		}
+	}
+	return false
 }

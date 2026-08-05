@@ -15,5 +15,5 @@ var dialogDef = {
   }
 };
 
-window.kitwork.component("dialog", dialogDef);
-window.kitwork.component("dialog@v1.0.0", dialogDef);
+window.kit.component("dialog", dialogDef);
+window.kit.component("dialog@v1.0.0", dialogDef);

@@ -1,17 +1,17 @@
 /* toast verb — flash a transient message.
  * Supports: <button data-kitwork-action="toast" data-kitwork-toast="Success">
  */
-window.kitwork.components.action("toast", function (el) {
+window.kit.components.action("toast", function (el) {
   var text = el.getAttribute("data-kit-toast") || el.getAttribute("data-kitwork-toast");
   if (text == null) {
-    var t = window.kitwork.components.target(el);
+    var t = window.kit.components.target(el);
     text = t ? (t.innerText || t.textContent || "") : "";
   }
   var ms = parseInt(el.getAttribute("data-kit-toast-ms") || el.getAttribute("data-kitwork-toast-ms"), 10) || 3000;
   
-  // Use the global kitwork.toast utility if available, else fall back to inline creation
-  if (typeof window.kitwork.toast === "function") {
-    window.kitwork.toast(text, ms);
+  // Use the global kit.toast utility if available, else fall back to inline creation
+  if (typeof window.kit.toast === "function") {
+    window.kit.toast(text, ms);
     return;
   }
 
@@ -41,7 +41,7 @@ window.kitwork.components.action("toast", function (el) {
     msg.style.transform = "translateY(0)";
   });
 
-  var store = window.kitwork.components.state(el);
+  var store = window.kit.components.state(el);
   clearTimeout(store.toastTimer);
   store.toastTimer = setTimeout(function () {
     msg.setAttribute("data-state", "leave");

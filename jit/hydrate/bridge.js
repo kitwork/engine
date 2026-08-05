@@ -1,13 +1,13 @@
 // Kitwork native bridge adapter.
 //
-// Native shells may either seed `window.kitwork.bridge` with a complete adapter exposing
+// Native shells may either seed `window.kit.bridge` with a complete adapter exposing
 // call(action, params), or expose a WebView postMessage handle. Plain web pages keep bridge=null
 // and use the browser fallbacks implemented by the capability modules.
 (function (window) {
   "use strict";
 
-  var kitwork = (window.kitwork = window.kitwork || {});
-  if (kitwork.Bridge) return;
+  var kitwork = (window.kitwork = window.kitwork || {}), kit = (window.kit = kitwork);
+  if (kit.Bridge) return;
 
   function KitworkError(message, code, moduleName, actionName, details) {
     var err = new Error(message || "Kitwork execution error");
@@ -25,7 +25,7 @@
     }
     if (window.webkit && window.webkit.messageHandlers &&
       window.webkit.messageHandlers.kitwork &&
-      window.webkit.messageHandlers.kitwork.postMessage) {
+      window.webkit.messageHandlers.kit.postMessage) {
       return window.webkit.messageHandlers.kitwork;
     }
     return null;
@@ -187,16 +187,16 @@
     this.listeners.clear();
   };
 
-  var seeded = kitwork.bridge;
+  var seeded = kit.bridge;
   var bridge = seeded && typeof seeded.call === "function" ? seeded : null;
   if (!bridge) {
     var handle = seeded && typeof seeded.postMessage === "function" ? seeded : nativeHandle();
     if (handle) bridge = new Bridge(handle, { platform: handle.platform });
   }
 
-  kitwork.KitworkError = KitworkError;
-  kitwork.Bridge = Bridge;
-  kitwork.bridge = bridge;
-  kitwork.platform = bridge ? (bridge.platform || "native") : "web";
-  kitwork.isNative = !!bridge;
+  kit.KitworkError = KitworkError;
+  kit.Bridge = Bridge;
+  kit.bridge = bridge;
+  kit.platform = bridge ? (bridge.platform || "native") : "web";
+  kit.isNative = !!bridge;
 })(window);

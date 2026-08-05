@@ -2,15 +2,15 @@
 (function (window) {
   "use strict";
 
-  var kitwork = window.kitwork;
-  if (!kitwork || !kitwork.module || kitwork.has("native")) return;
+  var kitwork = window.kitwork, kit = kitwork;
+  if (!kitwork || !kit.module || kit.has("native")) return;
 
-  var bridge = kitwork.bridge || null;
+  var bridge = kit.bridge || null;
 
   function call(action, params) {
     if (bridge && typeof bridge.call === "function") return bridge.call(action, params || {});
     var parts = String(action || "").split(".");
-    return Promise.reject(kitwork.KitworkError(
+    return Promise.reject(kit.KitworkError(
       "Capability " + action + " requires a native bridge",
       "UNSUPPORTED",
       parts[0] || "system",
@@ -18,12 +18,12 @@
     ));
   }
 
-  kitwork.app = {
+  kit.app = {
     info: function () { return call("app.info"); },
     exit: function () { return call("app.exit"); },
     restart: function () { return call("app.restart"); }
   };
-  kitwork.permissions = {
+  kit.permissions = {
     check: function (permission) {
       return call("permissions.check", { permission: permission });
     },
@@ -33,7 +33,7 @@
       });
     }
   };
-  kitwork.secureStorage = {
+  kit.secureStorage = {
     get: function (key, options) {
       return call("secureStorage.get", Object.assign({ key: key }, options));
     },
@@ -44,76 +44,76 @@
       return call("secureStorage.remove", { key: key });
     }
   };
-  kitwork.cache = {
+  kit.cache = {
     get: function (key) { return call("cache.get", { key: key }); },
     set: function (key, value, options) {
       return call("cache.set", Object.assign({ key: key, value: value }, options));
     }
   };
-  kitwork.database = {
+  kit.database = {
     open: function (name) { return call("database.open", { name: name }); }
   };
-  kitwork.files = {
+  kit.files = {
     read: function (path) { return call("files.read", { path: path }); },
     write: function (path, content) {
       return call("files.write", { path: path, content: content });
     },
     exists: function (path) { return call("files.exists", { path: path }); }
   };
-  kitwork.media = {
+  kit.media = {
     resize: function (path, options) {
       return call("media.resize", Object.assign({ path: path }, options));
     }
   };
-  kitwork.audio = {
+  kit.audio = {
     record: function (options) { return call("audio.record", options); },
     play: function (source) { return call("audio.play", { src: source }); }
   };
-  kitwork.screen = {
+  kit.screen = {
     capture: function () { return call("screen.capture"); },
     keepAwake: function () { return call("screen.keepAwake"); }
   };
-  kitwork.location = {
+  kit.location = {
     current: function () { return call("location.current"); }
   };
-  kitwork.device = {
+  kit.device = {
     info: function () { return call("device.info"); },
     vibrate: function (pattern) {
       return call("device.vibrate", { pattern: pattern });
     }
   };
-  kitwork.ai = {
+  kit.ai = {
     chat: function (options) { return call("ai.chat", options); },
     transcribe: function (path) { return call("ai.transcribe", { path: path }); }
   };
-  kitwork.auth = {
+  kit.auth = {
     login: function (credentials) { return call("auth.login", credentials); },
     logout: function () { return call("auth.logout"); }
   };
-  kitwork.session = {
+  kit.session = {
     get: function (key) { return call("session.get", { key: key }); },
     set: function (key, value) {
       return call("session.set", { key: key, value: value });
     },
     clear: function () { return call("session.clear"); }
   };
-  kitwork.logs = {
+  kit.logs = {
     info: function (message) { return call("logs.info", { message: message }); },
     error: function (message, error) {
       return call("logs.error", { message: message, error: String(error) });
     }
   };
-  kitwork.shell = {
+  kit.shell = {
     open: function (url) { return call("shell.open", { url: url }); }
   };
-  kitwork.window = function (action) {
+  kit.window = function (action) {
     return bridge ? call("window." + action) : false;
   };
-  kitwork.minimize = function () { return kitwork.window("minimize"); };
-  kitwork.maximize = function () { return kitwork.window("maximize"); };
-  kitwork.closeWindow = function () { return kitwork.window("close"); };
+  kit.minimize = function () { return kit.window("minimize"); };
+  kit.maximize = function () { return kit.window("maximize"); };
+  kit.closeWindow = function () { return kit.window("close"); };
 
-  kitwork.module("native", {
+  kit.module("native", {
     bridge: bridge,
     available: !!bridge,
     call: call

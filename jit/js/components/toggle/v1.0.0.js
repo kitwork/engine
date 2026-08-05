@@ -8,5 +8,5 @@ var toggleDef = {
   }
 };
 
-window.kitwork.component("toggle", toggleDef);
-window.kitwork.component("toggle@v1.0.0", toggleDef);
+window.kit.component("toggle", toggleDef);
+window.kit.component("toggle@v1.0.0", toggleDef);
