@@ -83,6 +83,10 @@ function makeNode(nodeType) {
   Object.defineProperty(node, "isConnected", { get: function () {
     var p = this; while (p) { if (p === root) return true; p = p.parentNode; } return false;
   } });
+  Object.defineProperty(node, "type", { // input.type reflects the type attribute in real DOM
+    get: function () { return this.attributes.type || ""; },
+    set: function (v) { this.attributes.type = String(v); }
+  });
   Object.defineProperty(node, "textContent", {
     get: function () { return this._text; },
     set: function (v) { this._text = v == null ? "" : String(v); this.childNodes = []; }

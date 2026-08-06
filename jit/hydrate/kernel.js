@@ -360,15 +360,16 @@
 
   var MODEL = "[data-kitwork-model],[data-kit-model]";
   function modelKey(el) { return el.getAttribute("data-kitwork-model") || el.getAttribute("data-kit-model"); }
-  function modelValue(el) { return el.type === "number" ? (parseFloat(el.value) || 0) : (el.value || ""); }
+  // number AND range are numeric inputs — coerce to a float so arithmetic (n + step) adds, not
+  // string-concatenates. Every other input type stays a string.
+  function modelValue(el) { return (el.type === "number" || el.type === "range") ? (parseFloat(el.value) || 0) : (el.value || ""); }
 
   var raw = {};
 
   var scope = new Proxy(raw, {
     get: function (t, k) {
       if (k === "$") return t;
-      if (k === "$app") return kitwork;
-      if (k in aliases) return aliases[k]; // $sidebar / $theme … → the named instance's scope
+      if (k in aliases) return aliases[k]; // $app / $sidebar / $theme … → a component handle / surface
       return k in t ? t[k] : 0;
     },
     set: function (t, k, v) {
@@ -416,7 +417,7 @@
     if (craw) {
       var tag = parseComponentTag(craw);
       var cname = tag.name;
-      var alias = tag.alias || b.getAttribute("data-alias") || "";
+      var alias = tag.alias || b.getAttribute("data-kit-alias") || b.getAttribute("data-kitwork-alias") || b.getAttribute("data-alias") || "";
       // Component registration (kit.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       if (!st.scope) st.scope = {};
@@ -493,8 +494,7 @@
       get: function (t, k) {
         if (k === "$el") return el;
         if (k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
-        if (k === "$app") return kitwork;
-        if (k in aliases) return aliases[k]; // $sidebar / $theme … → the named instance's scope
+        if (k in aliases) return aliases[k]; // $app / $sidebar / $theme … → a component handle / surface
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
@@ -514,8 +514,7 @@
     st.scopeProxy = new Proxy(boundaryScope(b), {
       get: function (t, k) {
         if (k === "$") return raw;
-        if (k === "$app") return kitwork;
-        if (k in aliases) return aliases[k]; // $sidebar / $theme … → the named instance's scope
+        if (k in aliases) return aliases[k]; // $app / $sidebar / $theme … → a component handle / surface
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
         return 0;
@@ -557,6 +556,26 @@
   // to the one theme source of truth (kit.theme setter). Coherent with $sidebar etc. (all in aliases);
   // NOT stored on kit.theme, which is the theme STRING ("light"/"dark").
   aliases["$theme"] = { toggle: function () { kit.toggleTheme(); } };
+  // $app is the app CAPABILITY surface — a curated, DEFAULT-DENY view of the runtime for markup, NOT the
+  // whole window.kit. It is a component handle registered in the SAME alias mechanism as $sidebar/$theme,
+  // not a kernel special-case. Markup (increasingly AGENT-authored) reaches ONLY the granted capabilities;
+  // the runtime's own control API (render/component/module/internal/destroy/run/scope/…) is invisible
+  // through $app. That makes a curated $app the small, concrete instance of "a controlled capability
+  // surface for generated code" — granting a new capability to markup is one deliberate word below.
+  var appGrants = {};
+  ("toggleTheme theme window back forward reload minimize maximize maximized closeWindow " +
+    "clipboard camera share dialog media audio screen location permissions device session " +
+    "secureStorage cache files shell auth database ai logs runtimeInfo app supports " +
+    "platform isNative bridge mode version").split(" ").forEach(function (k) { appGrants[k] = true; });
+  var appSurface = new Proxy(kit, {
+    get: function (target, k) {
+      if (!appGrants[k]) return undefined;           // runtime internals are not part of $app
+      var v = kit[k];
+      return typeof v === "function" ? v.bind(kit) : v; // keep the capability's own `this` = kit
+    },
+    set: function () { return true; }                // capabilities are called, never reassigned from markup
+  });
+  aliases["$app"] = appSurface;
   // parseComponentTag splits `name@version=$alias` (all but name optional) → { name, version, alias }.
   function parseComponentTag(raw) {
     var name = raw, version = "", alias = "", i;
@@ -762,6 +781,7 @@
   }
 
   function render() {
+    seedModels();
     rebuildActiveComponents();
     renderFor();
     renderIf();

@@ -66,7 +66,7 @@ func modelScope(htmlStr string) map[string]any {
 		if m := attrValueRe.FindStringSubmatch(tag[0]); m != nil {
 			value = m[1]
 		}
-		if m := attrTypeRe.FindStringSubmatch(tag[0]); m != nil && m[1] == "number" {
+		if m := attrTypeRe.FindStringSubmatch(tag[0]); m != nil && (m[1] == "number" || m[1] == "range") {
 			f, _ := strconv.ParseFloat(strings.TrimSpace(value), 64)
 			scope[key] = f
 		} else {

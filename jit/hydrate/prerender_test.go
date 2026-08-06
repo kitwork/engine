@@ -20,6 +20,16 @@ func TestPreRenderText(t *testing.T) {
 	}
 }
 
+// The server twin of TestModelRangeCoercesToNumber: a type=range model seeds a NUMBER into the
+// PreRender scope, so an expression over it does arithmetic, not string concat.
+func TestPreRenderModelRange(t *testing.T) {
+	in := marker + `<input type="range" data-kit-model="lvl" value="4">` +
+		`<b data-kit-text="lvl * 2">0</b>`
+	if out := PreRender(in); !strings.Contains(out, `<b data-kit-text="lvl * 2">8</b>`) {
+		t.Errorf("range model should seed lvl=4 (number) → lvl*2=8\n got: %s", out)
+	}
+}
+
 func TestPreRenderStringAndFallback(t *testing.T) {
 	in := marker + `<input data-kit-model="name" value="Quốc">` +
 		`<p data-kit-text="name ? 'Chào ' + name : 'Nhập tên'"></p>`
