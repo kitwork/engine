@@ -26,10 +26,10 @@ func TestRenderMarker(t *testing.T) {
 func TestRenderAutoScan(t *testing.T) {
 	// A page that uses the kernel API (no marker) gets the pre-paint injected at the top of <head>.
 	in := `<html><head><link rel="stylesheet" href="a.css"></head>` +
-		`<body><button data-kit-click="$app.toggleTheme()">t</button></body></html>`
+		`<body><button data-kit-click="kit.theme.toggle()">t</button></body></html>`
 	out := Render(in)
 	if !strings.Contains(out, `getItem("theme")`) {
-		t.Fatal("pre-paint not auto-injected for $app.toggleTheme() page")
+		t.Fatal("pre-paint not auto-injected for kit.theme.toggle() page")
 	}
 	// It must land BEFORE the stylesheet (earliest point wins the anti-flash race).
 	if strings.Index(out, `getItem("theme")`) > strings.Index(out, "a.css") {
@@ -38,7 +38,7 @@ func TestRenderAutoScan(t *testing.T) {
 
 	// The other recognised forms also trigger it.
 	for _, use := range []string{
-		`<head></head><body><i data-kit-text="$app.theme"></i></body>`,
+		`<head></head><body><i data-kit-text="kit.theme.mode"></i></body>`,
 		`<head></head><body><button data-kitwork-action="theme"></button></body>`,
 		`<head></head><body><div data-kit-component="theme"></div></body>`,
 	} {

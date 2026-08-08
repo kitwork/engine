@@ -117,7 +117,8 @@ global.history = { back: function () {}, forward: function () {}, replaceState: 
 global.location = { href: "http://x/", pathname: "/", search: "", origin: "http://x", reload: function () {}, assign: function () {} };
 global.MutationObserver = function () { this.observe = function () {}; this.disconnect = function () {}; };
 global.CustomEvent = function () {};
-window.document = document; window.history = history; window.location = location;
+window.document = document; window.navigator = navigator; window.localStorage = localStorage;
+window.history = history; window.location = location;
 `
 
 // requireNode returns the node binary. Locally it SKIPS when node is absent (a convenience). In CI it

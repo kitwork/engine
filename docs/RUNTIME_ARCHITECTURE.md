@@ -73,8 +73,20 @@ Implemented:
   discovers or recompiles a route;
 - every HTML template is copied into an immutable generation snapshot; default
   and notfound render trees are assembled and parsed before activation;
-- request rendering binds data against the prepared render plan without
-  reading templates from disk;
+- server-template paths, literals, operators, and conditions are compiled into
+  immutable expression trees with that render plan. Requests walk those trees
+  through lexical scope frames and write into one output builder; they do not
+  split, parse, or copy the complete scope for each expression or loop item;
+- source-driven JIT CSS, material, icon, logo, client-runtime, font, and theme
+  presentation is prepared with static render trees; parser-aware template
+  minification prepares their inline assets once;
+- templates with data-driven presentation attributes retain the complete
+  request pipeline. Other requests only bind data and hydrate without reading
+  templates or reparsing the already-minified document and inline assets;
+- authored Hydrate expression attributes are decoded from source HTML to the
+  browser-equivalent DOM value before verification, JIT class extraction, and
+  server pre-render. Generation minification keeps quotes until those passes
+  complete; request data remains opaque afterward;
 - every generation owns a frozen executable-source manifest covering routers,
   native imports, templates, `.env`, absent router markers, and
   route-directory structure;
@@ -104,6 +116,12 @@ Implemented:
   and site, prepares route graphs and render plans through the production
   pipeline, compiles cron sources, reports all failures, and exits without
   opening listeners, activating generations, or starting schedulers.
+- `core.Engine.Health()` exposes only bounded process-local aggregates:
+  requests and in-flight high-water marks, fixed latency buckets, VM totals,
+  prepared/fallback render counts, response-cache outcomes, generation
+  prepare/activate/drain outcomes, and current ownership counts. It records no
+  URL, tenant, argument, or user labels; observed Program identities are capped
+  and copied as checksums rather than retained as Program pointers.
 
 ## Runtime responsibilities
 
@@ -158,6 +176,11 @@ The migration is complete only when:
 6. pooled VMs retain no app, site, or request references.
 
 All six conditions are now covered by the production lifecycle and regression
-tests. Read-only logic capsules are the next architecture layer; they must use
-the existing request identity, permission, cancellation, energy, and VM lease
-boundaries rather than create a parallel runtime.
+tests. Filesystem boundaries and static render presentation are prepared with
+the generation. Bounded production observability, allocation budgets, and
+generation publication/drain soak tests now guard that path. Prepared
+template-expression evaluation has its own deterministic allocation gate. The
+next architecture work is continued lifecycle hardening driven by bounded
+runtime signals and production profiles, without adding another runtime layer.
+Logic capsules are a parked experimental RFC; they are not the next layer and
+must not create a parallel runtime or influence current public APIs.

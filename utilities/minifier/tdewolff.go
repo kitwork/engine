@@ -47,13 +47,33 @@ var media = map[string]string{
 var shared = func() *minify.M {
 	m := minify.New()
 	m.AddFunc("text/html", html.Minify)
+	registerEmbedded(m)
+	return m
+}()
+
+// templateShared understands Kitwork's server-template delimiters, allowing
+// immutable template HTML and its inline assets to be minified before binding.
+var templateShared = func() *minify.M {
+	m := minify.New()
+	// Server-side scanners intentionally consume quoted authored attributes.
+	// Preserve those quotes in the generation artifact; request data is bound
+	// afterward without reparsing the document.
+	templateHTML := &html.Minifier{
+		KeepQuotes:     true,
+		TemplateDelims: [2]string{"{{", "}}"},
+	}
+	m.AddFunc("text/html", templateHTML.Minify)
+	registerEmbedded(m)
+	return m
+}()
+
+func registerEmbedded(m *minify.M) {
 	m.AddFunc("text/css", css.Minify)
 	m.AddFunc("image/svg+xml", svg.Minify)
 	m.AddFuncRegexp(regexp.MustCompile(`^(application|text)/(x-)?(java|ecma)script$`), js.Minify)
 	m.AddFuncRegexp(regexp.MustCompile(`[/+]json$`), json.Minify)
 	m.AddFuncRegexp(regexp.MustCompile(`[/+]xml$`), xml.Minify)
-	return m
-}()
+}
 
 // Type minifies s as the given short type name ("html"/"css"/"js"/"json"/"svg"/"xml"). An unknown
 // type or a parse error returns s unchanged.
@@ -70,6 +90,13 @@ func Type(t, s string) string {
 }
 
 func HTML(s string) string { return Type("html", s) }
+
+// TemplateHTML minifies a Kitwork template without consuming {{ }} tokens.
+func TemplateHTML(s string) (string, bool) {
+	out, err := templateShared.String("text/html", s)
+	return out, err == nil
+}
+
 func CSS(s string) string  { return Type("css", s) }
 func JS(s string) string   { return Type("js", s) }
 func JSON(s string) string { return Type("json", s) }

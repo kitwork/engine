@@ -1,0 +1,125 @@
+{
+  "schema": "kitwork-runtime-validation/2",
+  "generated_at": "2026-08-08T11:48:45Z",
+  "runtime": {
+    "name": "Kitwork Client Runtime",
+    "version": "1.0.0-draft",
+    "specification": "0.7.0-draft",
+    "milestone": "M1-M5-integrated",
+    "author_namespace": "data-kit-*",
+    "global": "window.kit"
+  },
+  "build": {
+    "bundle": "dist/kitwork-runtime.js",
+    "bundle_bytes": 215144,
+    "bundle_gzip_bytes": 44299,
+    "bundle_sha256": "7c9e19f2f08619c1f8457e7859e7336f7988e2a1216490ac26558a4b0d213362",
+    "source_modules": 29,
+    "syntax_checked_files": 37,
+    "syntax_passed": true
+  },
+  "tests": {
+    "expression_unit": {
+      "passed": 49,
+      "failed": 0,
+      "total": 49
+    },
+    "lexical_ownership": {
+      "passed": 10,
+      "failed": 0,
+      "total": 10
+    },
+    "task_request_unit": {
+      "passed": 16,
+      "failed": 0,
+      "total": 16
+    },
+    "expression_conformance": {
+      "passed": 25,
+      "failed": 0,
+      "total": 25,
+      "fixture": "test/expression-conformance.json"
+    },
+    "browser": {
+      "passed": 137,
+      "failed": 0,
+      "total": 137,
+      "page_errors": 0,
+      "console_errors": 0,
+      "pages": [
+        {
+          "name": "runtime.test.html",
+          "passed": 64,
+          "failed": 0,
+          "total": 64,
+          "page_errors": 0,
+          "console_errors": 0
+        },
+        {
+          "name": "services.test.html",
+          "passed": 13,
+          "failed": 0,
+          "total": 13,
+          "page_errors": 0,
+          "console_errors": 0
+        },
+        {
+          "name": "lifecycle.test.html",
+          "passed": 18,
+          "failed": 0,
+          "total": 18,
+          "page_errors": 0,
+          "console_errors": 0
+        },
+        {
+          "name": "drive.test.html",
+          "passed": 31,
+          "failed": 0,
+          "total": 31,
+          "page_errors": 0,
+          "console_errors": 0
+        },
+        {
+          "name": "drive-html-root.test.html",
+          "passed": 11,
+          "failed": 0,
+          "total": 11,
+          "page_errors": 0,
+          "console_errors": 0
+        }
+      ]
+    }
+  },
+  "totals": {
+    "assertions_passed": 237,
+    "assertions_failed": 0,
+    "assertions_total": 237
+  },
+  "implemented": [
+    "private zero-eval expression engine with seven parser modes",
+    "AppRecord, NodeRecord, ComponentRecord and BindingRecord ownership",
+    "multi-app isolation and SSR-seeded lexical/component scopes",
+    "component instances, direct aliases, component-local refs and lifecycle",
+    "text, show, model, class, style, bind, if, for, key and persist directives",
+    "unified event modifiers and per-binding Promise observation",
+    "dirty-boundary scheduler and MutationObserver subtree hydration",
+    "kit.task owner cancellation and latest-wins semantics",
+    "kit.request with CSRF, timeout, abort, JSON, FormData and normalized responses",
+    "Drive link/form interception, prefetch, history and scroll restoration",
+    "lifecycle-aware DOM morph with head reconciliation and script activation",
+    "component state, input draft, focus, selection and persisted identity preservation",
+    "expression-safe service grants"
+  ],
+  "deferred_optional_capabilities": [
+    "teleport and transition capabilities",
+    "live/SSE and remember policy modules",
+    "remote component loader/cache",
+    "native platform adapters and only-used capability emission",
+    "legacy KitJS compatibility adapter or Go template rewriter",
+    "Go parser/validator conformance runner and SSR serializer parity"
+  ],
+  "release_gate": {
+    "status": "draft",
+    "reason": "M1-M5 JavaScript runtime is integrated and browser-tested; Engine-wide 1.0 still requires Go-side conformance and migration validation."
+  }
+}

@@ -20,6 +20,17 @@ func TestJITEmitsBothBranchesOfADynamicClass(t *testing.T) {
 	}
 }
 
+func TestJITDecodesEntitiesInDynamicClass(t *testing.T) {
+	html := `<div data-kit-class="count &gt; 0 ? 'text-red-500' : 'text-green-500'">x</div>`
+	css := GenerateJITCached(html, nil)
+
+	for _, want := range []string{".text-red-500", ".text-green-500"} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("encoded dynamic class %s was not emitted\n--- css ---\n%s", want, css)
+		}
+	}
+}
+
 // The author picks the shape; the JIT has to cope with all of them. These are the forms the
 // grammar allows, so each is something someone will write.
 func TestJITEmitsDynamicClassesFromEveryForm(t *testing.T) {

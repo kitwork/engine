@@ -5,6 +5,10 @@
 > Production now uses a filesystem route tree with `router.kitwork.js` and
 > `page.kitwork.html` in each route folder. Treat the capsule sections as an RFC
 > and use `docs/STABILITY.md` as the contract for current engine work.
+>
+> **Decision:** logic capsules are a parked experiment, not an active roadmap item.
+> They must not shape current public APIs. Trusted server actions plus SSR and
+> Hydrate are the production model unless the experiment is explicitly reopened.
 
 ---
 
@@ -40,7 +44,7 @@ isolated site-folders. Keep these levels separate:
 | isolate each tenant in its own VM context (`runtime/`, `value/`) | its own DB / config / secrets |
 | lazy-load + cache compiled bytecode per tenant (`compiler/`, `opcode/`, `jit/`) | hot-reload independently |
 | gas / energy accounting + rate limits per tenant (`energy/`) | its own routes / static / tasks |
-| capsule auth: signature + capability + identity (`security/`, `id/`, `token/`) | — |
+| experimental capsule auth: signature + capability + identity (`security/`, `id/`, `token/`) | — |
 | cluster: tenant is the unit of placement / migration | — |
 
 "Global" inside a site = **per-tenant** (its own `database.connect()`), never process-global.
@@ -227,16 +231,16 @@ identity-scoped). The boundary that must never blur:
 
 ---
 
-## 5. Phased roadmap (ship value at every step — none is a multi-year foundation)
+## 5. Historical sequence
 
-- **Phase 0 — today.** Central `app.kitwork.js`, `render.directory("views")`, catch-all. Works.
-- **Phase 1 — site convention.** Folder = route; `page.html` + `index.js`; explicit `router.use()`;
-  `public/ lib/ components/ tasks/`. Pure refactor of one tenant; engine adds folder mount + `ctx`.
-  *Validate on a copy of `kitwork.io` before committing.*
-- **Phase 2 — capsules, read-only.** `kit.run()` + `/kitwork/run` + identity grant (read), gas,
-  pre-eval. Lowest-risk slice of the moat.
-- **Phase 3 — capsules, writes.** Add write/delete grants + audit. Tighten sandbox.
-- **Phase 4 — cluster.** Tenant placement / migration across nodes.
+This section records how the architecture was originally explored. It is not the active roadmap.
+
+- Central routing and the folder convention evolved into the current immutable route tree.
+- SSR, Hydrate, request scopes, VM pooling, generation ownership, and native imports became the
+  production architecture.
+- Read-only and write capsules remain an experiment. They require a separate threat model,
+  protocol, benchmarks, and an explicit decision before implementation.
+- Clustering is deferred until one-node runtime behavior is stable and observable.
 
 Keep the convention surface **ruthlessly small** — resist adding `(group)`, complex precedence,
 etc. until a real need appears. Kitwork's edge is minimalism; this is a one-person project, not Next.js.
@@ -247,7 +251,8 @@ etc. until a real need appears. Kitwork's edge is minimalism; this is a one-pers
 
 1. Directory names: **`app/`** (signals route modules) vs keep **`views/`** · **`public/`** vs **`assets/`**.
 2. Handler filename: **`index.kitwork.js`** vs **`route.kitwork.js`**.
-3. Capsule location: companion **`client.kitwork.js`** (recommended — keeps HTML pure) — confirmed.
+3. If capsule research resumes, its source location and transport contract must be decided from a
+   fresh prototype; the old `client.kitwork.js` choice is not binding.
 4. Explicit `router.use()` as default, auto-mount as opt-in — confirmed.
 
 ## 7. Non-goals

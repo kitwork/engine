@@ -134,6 +134,10 @@ func TestEvalSandboxBlocksConstructor(t *testing.T) {
 		"''.constructor.constructor('x')", // building Function('x'), must be nil
 		"x.__proto__",                     // prototype access
 		"x.prototype",                     // prototype access
+		"x.__defineGetter__",              // prototype mutation helper
+		"x.__defineSetter__",              // prototype mutation helper
+		"x.__lookupGetter__",              // prototype introspection helper
+		"x.__lookupSetter__",              // prototype introspection helper
 		"x.ownerDocument",                 // browser host escape
 		"x.defaultView",                   // browser host escape
 		"x.globalThis",                    // browser global escape

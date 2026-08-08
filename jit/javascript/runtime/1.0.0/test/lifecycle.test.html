@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script>window.KITWORK_RUNTIME_OPTIONS = { autoStart: false, development: true };</script>
+</head>
+<body>
+<main id="appA" data-kit-app="a">
+  <div id="left"></div>
+  <div id="right"></div>
+  <div id="outer" data-kit-component="outer-box" data-kit-as="$outer" data-kit-scope="showInner: true; count: 3;">
+    <button id="toggleInner" data-kit-click="$component.toggle()"></button>
+    <section data-kit-if="showInner"><span id="innerText" data-kit-text="count"></span></section>
+  </div>
+  <div id="dynamicBinding" data-kit-scope="first: 'A'; second: 'B';"><span id="dynamicText" data-kit-text="first"></span></div>
+</main>
+<aside id="appB" data-kit-app="b"><div id="bTarget"></div></aside>
+<pre id="results">pending</pre>
+<script src="../dist/kitwork-runtime.js"></script>
+<script>
+(function () {
+  const results = [];
+  function assert(name, condition, details) {
+    results.push({ name, passed: !!condition, details: details || '' });
+    if (!condition) console.error('FAIL', name, details || '');
+  }
+  function tick(ms) { return new Promise(resolve => setTimeout(resolve, ms == null ? 0 : ms)); }
+
+  let mounts = 0;
+  let unmounts = 0;
+  kit.component('outer-box', {
+    showInner: true,
+    count: 0,
+    toggle() { this.showInner = !this.showInner; },
+    mount() { mounts++; },
+    unmount() { unmounts++; }
+  });
+  kit.start();
+
+  (async function () {
+    await tick(20);
+    const initialRecord = kit.dev.inspect(outer).component;
+    const initialInstance = initialRecord.instance;
+    assert('component mounted once', mounts === 1, String(mounts));
+    assert('conditional child initially mounted', !!document.getElementById('innerText'));
+
+    toggleInner.click();
+    await tick(10);
+    assert('conditional child unmounted', !document.getElementById('innerText'));
+    assert('conditional child cleanup does not unmount owner component', unmounts === 0, String(unmounts));
+    assert('component host remains registered', kit.dev.inspect(outer).component.instance === initialInstance);
+
+    toggleInner.click();
+    await tick(10);
+    assert('conditional child remounts', document.getElementById('innerText').textContent === '3');
+    assert('component still mounted only once', mounts === 1, String(mounts));
+
+    right.appendChild(outer);
+    await tick(20);
+    assert('same-app DOM move preserves component instance', kit.dev.inspect(outer).component.instance === initialInstance);
+    assert('same-app DOM move does not unmount', unmounts === 0, String(unmounts));
+    assert('same-app DOM move does not remount', mounts === 1, String(mounts));
+
+    dynamicText.setAttribute('data-kit-text', 'second');
+    await tick(20);
+    assert('directive attribute mutation recompiles binding', dynamicText.textContent === 'B', dynamicText.textContent);
+
+    bTarget.appendChild(outer);
+    await tick(30);
+    const movedRecord = kit.dev.inspect(outer).component;
+    assert('cross-app move creates a new component instance', movedRecord.instance !== initialInstance);
+    assert('cross-app move unmounts old instance', unmounts === 1, String(unmounts));
+    assert('cross-app move mounts new instance', mounts === 2, String(mounts));
+    assert('cross-app move reseeds SSR host state', movedRecord.instance.count === 3, String(movedRecord.instance.count));
+    assert('alias migrates to destination app', kit.dev.inspect(appB).app.aliases.get('$outer') === movedRecord);
+    assert('alias removed from source app', !kit.dev.inspect(appA).app.aliases.has('$outer'));
+
+    outer.remove();
+    await tick(30);
+    assert('real removal unmounts destination instance', unmounts === 2, String(unmounts));
+
+    const passed = results.filter(item => item.passed).length;
+    const failed = results.length - passed;
+    const output = document.getElementById('results');
+    output.dataset.total = String(results.length);
+    output.dataset.passed = String(passed);
+    output.dataset.failed = String(failed);
+    output.textContent = JSON.stringify({ total: results.length, passed, failed, results }, null, 2);
+    document.documentElement.setAttribute('data-test-complete', 'true');
+  })().catch(error => {
+    const output = document.getElementById('results');
+    output.dataset.failed = '1';
+    output.textContent = error.stack || String(error);
+    document.documentElement.setAttribute('data-test-complete', 'true');
+  });
+})();
+</script>
+</body>
+</html>

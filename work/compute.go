@@ -2,6 +2,7 @@ package work
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/kitwork/engine/capabilities"
 	requestscope "github.com/kitwork/engine/request"
@@ -44,11 +45,12 @@ func (e tenantLambdaExecutor) ExecuteLambda(fn *value.Lambda, args []value.Value
 		vm = enginePool.Acquire()
 		releaseVM = func() { enginePool.Release(vm) }
 	}
+	started := time.Now()
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			result = value.Value{K: value.Invalid, V: fmt.Sprintf("panic: %v", recovered)}
 		}
-		e.tenant.recordVMExecution(program, vm, result)
+		e.tenant.recordVMExecution(program, vm, result, time.Since(started))
 		releaseVM()
 	}()
 
@@ -89,8 +91,9 @@ func (t *Tenant) Execute(program *runtime.Program, fn *value.Lambda, args []valu
 		vm.Vars[k] = v
 	}
 
+	started := time.Now()
 	res := vm.ExecuteLambda(fn, args)
-	t.recordVMExecution(program, vm, res)
+	t.recordVMExecution(program, vm, res, time.Since(started))
 	gas = vm.Energy
 	if res.K == value.Invalid {
 		runErr = fmt.Errorf("%v", res.V)

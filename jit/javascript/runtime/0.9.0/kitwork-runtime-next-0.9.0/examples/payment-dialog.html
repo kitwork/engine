@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en" data-kit-app="main">
+<head>
+  <meta charset="utf-8">
+  <meta name="csrf-token" content="replace-me">
+  <title>Kitwork Runtime Dialog</title>
+</head>
+<body>
+  <div
+    data-kit-component="payment-dialog"
+    data-kit-as="$paymentModal"
+    data-kit-scope="
+      order: { id: 128, amount: 49.90, currency: 'USD' };
+      open: false;
+      saving: false;
+      error: null;
+    ">
+
+    <section
+      data-kit-if="open"
+      data-kit-class="
+        dialog: true;
+        'opacity-50 pointer-events-none': saving;
+      "
+      data-kit-bind="
+        role: 'dialog';
+        aria-modal: true;
+        aria-busy: saving;
+        data-state: saving ? 'saving' : 'ready';
+      ">
+      <h2 data-kit-text="`Order #${order.id}`">Order #128</h2>
+      <p data-kit-text="`${order.amount} ${order.currency}`">49.90 USD</p>
+      <p data-kit-show="error" data-kit-text="error"></p>
+      <button data-kit-click="$component.close()">Cancel</button>
+      <button
+        data-kit-bind="disabled: saving;"
+        data-kit-click="$component.pay()">
+        Pay
+      </button>
+    </section>
+  </div>
+
+  <button data-kit-click="$paymentModal.show()">Open payment</button>
+
+  <script>
+    window.KITWORK_RUNTIME_OPTIONS = { autoStart: false, development: true };
+  </script>
+  <script src="../dist/kitwork-runtime.js"></script>
+  <script>
+    kit.component("payment-dialog", {
+      open: false,
+      saving: false,
+      error: null,
+
+      show() { this.open = true; },
+      close() { this.open = false; },
+
+      async pay() {
+        this.saving = true;
+        this.error = null;
+        try {
+          const result = await kit.request.post("/api/pay", {
+            orderId: this.order.id
+          });
+          if (!result.ok) throw new Error("Payment failed");
+          this.open = false;
+        } catch (error) {
+          this.error = error.message;
+        } finally {
+          this.saving = false;
+        }
+      }
+    });
+    kit.start();
+  </script>
+</body>
+</html>

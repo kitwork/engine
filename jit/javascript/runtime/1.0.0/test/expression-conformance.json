@@ -1,0 +1,205 @@
+{
+  "schema": "kitwork-expression-conformance/1",
+  "specification": "0.7.0-draft",
+  "milestone": "M1-expression",
+  "notes": [
+    "Fixtures assert observable semantics, not AST shape.",
+    "The Go validator/evaluator should consume the same cases.",
+    "Special value {$undefined:true} represents JavaScript undefined."
+  ],
+  "cases": [
+    {
+      "name": "arithmetic precedence",
+      "mode": "binding",
+      "source": "1 + 2 * 3",
+      "state": {},
+      "expectValue": 7
+    },
+    {
+      "name": "strict equality",
+      "mode": "binding",
+      "source": "count === 2",
+      "state": { "count": 2 },
+      "expectValue": true
+    },
+    {
+      "name": "loose equality rejected",
+      "mode": "binding",
+      "source": "count == 2",
+      "state": { "count": 2 },
+      "expectError": "KIT_PARSE_LOOSE_EQUALITY"
+    },
+    {
+      "name": "nullish keeps zero",
+      "mode": "binding",
+      "source": "value ?? 10",
+      "state": { "value": 0 },
+      "expectValue": 0
+    },
+    {
+      "name": "optional chain on null",
+      "mode": "binding",
+      "source": "user?.profile?.name",
+      "state": { "user": null },
+      "expectValue": { "$undefined": true }
+    },
+    {
+      "name": "non optional null member rejected",
+      "mode": "binding",
+      "source": "user.profile.name",
+      "state": { "user": null },
+      "expectError": "KIT_NULL_MEMBER_ACCESS"
+    },
+    {
+      "name": "computed access",
+      "mode": "binding",
+      "source": "items[index].name",
+      "state": {
+        "items": [{ "name": "A" }, { "name": "B" }],
+        "index": 1
+      },
+      "expectValue": "B"
+    },
+    {
+      "name": "template literal",
+      "mode": "binding",
+      "source": "`Hello ${user.name}`",
+      "state": { "user": { "name": "Quoc" } },
+      "expectValue": "Hello Quoc"
+    },
+    {
+      "name": "template null becomes empty",
+      "mode": "binding",
+      "source": "`A${value}B`",
+      "state": { "value": null },
+      "expectValue": "AB"
+    },
+    {
+      "name": "binding assignment rejected",
+      "mode": "binding",
+      "source": "count = 2",
+      "state": { "count": 1 },
+      "expectError": "KIT_BINDING_ASSIGNMENT"
+    },
+    {
+      "name": "action program writes state",
+      "mode": "action",
+      "source": "count = count + 1; open = true; count",
+      "state": { "count": 0, "open": false },
+      "expectValue": 1,
+      "expectState": { "count": 1, "open": true }
+    },
+    {
+      "name": "nested member assignment",
+      "mode": "action",
+      "source": "user.name = 'B'",
+      "state": { "user": { "name": "A" } },
+      "expectValue": "B",
+      "expectState": { "user": { "name": "B" } }
+    },
+    {
+      "name": "blocked member rejected",
+      "mode": "binding",
+      "source": "value.constructor",
+      "state": { "value": {} },
+      "expectError": "KIT_BLOCKED_MEMBER"
+    },
+    {
+      "name": "named map bare attribute keys",
+      "mode": "named-map",
+      "source": "aria-expanded: open; data-state: status; disabled: saving;",
+      "state": { "open": false, "status": "ready", "saving": true },
+      "expectValue": [
+        { "key": "aria-expanded", "value": false },
+        { "key": "data-state", "value": "ready" },
+        { "key": "disabled", "value": true }
+      ]
+    },
+    {
+      "name": "named map css custom property",
+      "mode": "named-map",
+      "source": "--progress: progress;",
+      "state": { "progress": "50%" },
+      "expectValue": [{ "key": "--progress", "value": "50%" }]
+    },
+    {
+      "name": "named map quoted colon key",
+      "mode": "named-map",
+      "source": "'xlink:href': href;",
+      "state": { "href": "#icon" },
+      "expectValue": [{ "key": "xlink:href", "value": "#icon" }]
+    },
+    {
+      "name": "named map duplicate key rejected",
+      "mode": "named-map",
+      "source": "title: a; title: b;",
+      "state": { "a": "A", "b": "B" },
+      "expectError": "KIT_MAP_DUPLICATE_KEY"
+    },
+    {
+      "name": "class map canonical form",
+      "mode": "class-value",
+      "source": "active: open; 'md:grid-cols-6': desktop;",
+      "state": { "open": true, "desktop": false },
+      "expectValue": [
+        { "key": "active", "value": true },
+        { "key": "md:grid-cols-6", "value": false }
+      ]
+    },
+    {
+      "name": "class object accepted",
+      "mode": "class-value",
+      "source": "{ active: open, loading: saving }",
+      "state": { "open": true, "saving": false },
+      "expectValue": { "active": true, "loading": false }
+    },
+    {
+      "name": "class ternary accepted",
+      "mode": "class-value",
+      "source": "open ? 'active' : 'disabled'",
+      "state": { "open": false },
+      "expectValue": "disabled"
+    },
+    {
+      "name": "writable path read and assign",
+      "mode": "writable-path",
+      "source": "form.name",
+      "state": { "form": { "name": "A" } },
+      "expectValue": "A",
+      "assignValue": "B",
+      "expectState": { "form": { "name": "B" } }
+    },
+    {
+      "name": "optional writable path rejected",
+      "mode": "writable-path",
+      "source": "form?.name",
+      "state": { "form": { "name": "A" } },
+      "expectError": "KIT_MODEL_PATH"
+    },
+    {
+      "name": "identity literal",
+      "mode": "identity",
+      "source": "  $paymentModal  ",
+      "state": {},
+      "expectValue": "$paymentModal"
+    },
+    {
+      "name": "iterator of syntax",
+      "mode": "iterator",
+      "source": "$item, $index of items",
+      "state": { "items": [1, 2] },
+      "expectValue": {
+        "itemName": "$item",
+        "indexName": "$index",
+        "collection": [1, 2]
+      }
+    },
+    {
+      "name": "iterator in syntax rejected",
+      "mode": "iterator",
+      "source": "$item in items",
+      "state": { "items": [1, 2] },
+      "expectError": "KIT_ITERATOR_PARSE"
+    }
+  ]
+}

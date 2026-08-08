@@ -3,8 +3,8 @@
  */
 var themeDef = {
   toggle: function () {
-    if (window.kit && window.kit.toggleTheme) {
-      window.kit.toggleTheme();
+    if (window.kit && window.kit.theme && window.kit.theme.toggle) {
+      window.kit.theme.toggle();
     }
   }
 };

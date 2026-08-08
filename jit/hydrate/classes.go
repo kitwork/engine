@@ -35,6 +35,12 @@ func ClassLiterals(expr string) ([]string, error) {
 	return out, nil
 }
 
+// ClassLiteralsAttribute is ClassLiterals for a value captured from authored
+// HTML. It decodes character references exactly as the browser does first.
+func ClassLiteralsAttribute(raw string) ([]string, error) {
+	return ClassLiterals(authoredAttribute(raw))
+}
+
 // HasConstructedClass reports whether a class expression builds a name by concatenation, i.e.
 // whether it contains a `+` with a string operand. Such a name never appears whole in the source,
 // so the JIT cannot emit it — the caller should tell the author instead of shipping a page that

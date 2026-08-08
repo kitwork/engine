@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Drive Page Three</title>
+  <meta name="description" content="page three">
+</head>
+<body>
+<main id="driveApp" data-kit-app="main" data-kit-drive data-kit-scope="page: 'three'; draft: 'server-three';">
+  <h1 id="heading">Page Three</h1>
+  <div id="counter" data-kit-component="drive-counter" data-kit-as="$driveCounter" data-kit-scope="count: 123;">
+    <span id="counterValue" data-kit-text="count"></span>
+    <button id="counterInc" data-kit-click="$component.increment()">+</button>
+  </div>
+  <div id="persist" data-kit-persist="global-widget">Another server replacement</div>
+  <input id="draft" name="draft" value="server-three" data-kit-model="draft">
+  <span id="draftText" data-kit-text="draft"></span>
+  <a id="toPage2" href="/test/fixtures/drive-page2.html">Page Two</a>
+</main>
+</body>
+</html>

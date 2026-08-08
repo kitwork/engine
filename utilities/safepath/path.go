@@ -9,6 +9,36 @@ import (
 	"strings"
 )
 
+// Boundary is an immutable canonical filesystem root. Preparing it once lets
+// request paths verify changing targets without resolving the owned root on
+// every access.
+type Boundary struct {
+	base string
+}
+
+// NewBoundary resolves and freezes one owned root.
+func NewBoundary(base string) (*Boundary, error) {
+	baseReal, err := canonical(base)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base path: %w", err)
+	}
+	return &Boundary{base: baseReal}, nil
+}
+
+// Contains reports whether target remains inside this canonical boundary.
+// The target is deliberately resolved on every call: a regular path may be
+// replaced by a symlink after the boundary was prepared.
+func (b *Boundary) Contains(target string) (bool, error) {
+	if b == nil || b.base == "" {
+		return false, fmt.Errorf("filesystem boundary is not initialized")
+	}
+	targetReal, err := canonical(target)
+	if err != nil {
+		return false, fmt.Errorf("resolve target path: %w", err)
+	}
+	return containsCanonical(b.base, targetReal)
+}
+
 // Resolve joins paths to base and verifies that the canonical target remains
 // under the canonical base. Missing final components are supported for writes.
 func Resolve(base string, paths ...string) (string, error) {
@@ -30,7 +60,11 @@ func Resolve(base string, paths ...string) (string, error) {
 		return "", fmt.Errorf("invalid target path: %w", err)
 	}
 
-	inside, err := Contains(baseAbs, target)
+	boundary, err := NewBoundary(baseAbs)
+	if err != nil {
+		return "", err
+	}
+	inside, err := boundary.Contains(target)
 	if err != nil {
 		return "", err
 	}
@@ -44,15 +78,14 @@ func Resolve(base string, paths ...string) (string, error) {
 // It resolves the nearest existing ancestor so a not-yet-created write target
 // cannot escape through a symlinked parent directory.
 func Contains(base, target string) (bool, error) {
-	baseReal, err := canonical(base)
+	boundary, err := NewBoundary(base)
 	if err != nil {
-		return false, fmt.Errorf("resolve base path: %w", err)
+		return false, err
 	}
-	targetReal, err := canonical(target)
-	if err != nil {
-		return false, fmt.Errorf("resolve target path: %w", err)
-	}
+	return boundary.Contains(target)
+}
 
+func containsCanonical(baseReal, targetReal string) (bool, error) {
 	rel, err := filepath.Rel(baseReal, targetReal)
 	if err != nil {
 		return false, err

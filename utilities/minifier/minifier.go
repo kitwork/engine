@@ -1,5 +1,7 @@
 // Package minifier is the engine's content-type-aware minifier for everything that can be
 // embedded in an HTML document — the markup itself plus inline CSS, JS, JSON(-LD), SVG and XML.
+// TemplateHTML prepares immutable Kitwork templates before request data is
+// bound, so authored presentation and inline assets are processed once.
 //
 // Two implementations are selected at build time, exposing the SAME package-level functions
 // (HTML, CSS, JS, JSON, SVG, XML, Type) so callers are build-tag-agnostic:

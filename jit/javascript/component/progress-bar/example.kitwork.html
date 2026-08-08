@@ -1,0 +1,18 @@
+<!-- ============================================================================ -->
+<!-- Kitwork Component Example: Progress Bar (Draft 0.4 Compliant)             -->
+<!-- Location: engine/jit/javascript/component/progress-bar/example.kitwork.html-->
+<!-- ============================================================================ -->
+
+<!-- 1. Thanh Top Progressbar mỏng ở mép trên cùng màn hình (Sử dụng data-kit-data và data-kit-as) -->
+<div data-kit-component="progress-bar"
+     data-kit-as="$topProgress"
+     data-kit-data="active: visible; status: status;"
+     data-kit-style="width: width;"
+     class="fixed top-0 left-0 h-1 bg-indigo-600 shadow-md shadow-indigo-500/50 z-50 transition-all duration-200 opacity-0 data-[active=true]:opacity-100">
+</div>
+
+<!-- Nút dùng thử trigger qua $topProgress alias -->
+<div class="p-6 flex gap-2">
+  <button data-kit-click="$topProgress.start()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg">Start</button>
+  <button data-kit-click="$topProgress.done()" class="px-4 py-2 bg-slate-800 text-white text-sm rounded-lg">Done</button>
+</div>

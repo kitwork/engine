@@ -87,83 +87,42 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 		return d
 	}
 
-	var alias string = "default"
-	var configToConnect *database.Config
-
-	if len(vals) == 1 {
-		v := vals[0]
-		if v.K == value.String {
-			alias = v.String()
-		} else if v.K == value.Map {
-			m, _ := v.Interface().(map[string]interface{})
-			if m != nil {
-				if a, ok := m["alias"].(string); ok {
-					alias = a
-				}
-				_, hasType := m["type"]
-				_, hasHost := m["host"]
-				if hasType || hasHost {
-					var dbCfg database.Config
-					v.To(&dbCfg)
-					if dbCfg.Alias == "" {
-						dbCfg.Alias = alias
-					}
-					configToConnect = &dbCfg
-				}
-			}
-		}
-	} else if len(vals) >= 2 {
+	alias := "default"
+	switch {
+	case len(vals) == 0:
+	case len(vals) == 1 && vals[0].K == value.String:
 		alias = vals[0].String()
-		var dbCfg database.Config
-		vals[1].To(&dbCfg)
-		dbCfg.Alias = alias
-		configToConnect = &dbCfg
+	default:
+		// The public contract accepts only a host-declared alias. Letting tenant code submit
+		// type/host/user/password here bypasses connection policy and turns the database API into
+		// an unrestricted network dialer.
+		fmt.Println("[DB] Dynamic connection configuration is not allowed; configure an alias in the host manifest")
+		return d
 	}
 
 	if alias == "" {
 		alias = "default"
 	}
 
-	if configToConnect == nil {
-		if dbCfg, ok := database.Configs[alias]; ok {
-			if dbConn := d.tenant.lookupDatabase(&dbCfg); dbConn != nil {
-				d.sqlDB = dbConn
-			} else {
-				dbConn, err := d.tenant.openDatabase(&dbCfg)
-				if err != nil {
-					fmt.Printf("[DB] Failed to connect to configured database '%s': %v\n", alias, err)
-				} else {
-					d.sqlDB = dbConn
-				}
-			}
-		} else if alias == "default" {
-			sqlitePath := d.tenant.resolve("kitwork.db")
-			fmt.Printf("[DB] Default connection not found. Initializing fallback SQLite at: %s\n", sqlitePath)
-			sqliteCfg := &database.Config{
-				Alias: "default",
-				Type:  "sqlite",
-				Host:  sqlitePath,
-				Name:  sqlitePath,
-			}
-			dbConn, err := d.tenant.openDatabase(sqliteCfg)
-			if err != nil {
-				fmt.Printf("[DB] Failed to connect SQLite fallback database: %v\n", err)
-			} else {
-				d.sqlDB = dbConn
-			}
+	if dbCfg, ok := database.Configs[alias]; ok {
+		if dbConn := d.tenant.lookupDatabase(&dbCfg); dbConn != nil {
+			d.sqlDB = dbConn
 		} else {
-			fmt.Printf("Database connection with alias '%s' not found\n", alias)
+			dbConn, err := d.tenant.openDatabase(&dbCfg)
+			if err != nil {
+				fmt.Printf("[DB] Failed to connect to configured database '%s': %v\n", alias, err)
+			} else {
+				d.sqlDB = dbConn
+			}
 		}
-		return d
+	} else if alias == "default" {
+		// Storage choice is part of the app contract. Creating a local SQLite database here
+		// made a missing shared/external connection look like a healthy but empty database.
+		// Site-local storage remains available through the explicit `sqlite` API.
+		fmt.Println("[DB] Default connection is not configured; use sqlite for local data or configure database alias 'default'")
+	} else {
+		fmt.Printf("Database connection with alias '%s' not found\n", alias)
 	}
-
-	dbConn, err := d.tenant.openDatabase(configToConnect)
-	if err != nil {
-		fmt.Printf("Failed to connect database for alias '%s': %v\n", alias, err)
-		return d
-	}
-
-	d.sqlDB = dbConn
 	return d
 }
 
@@ -177,7 +136,12 @@ func (d *Database) Config(config *database.Config) *Database {
 }
 
 func (d *Database) NewQuery() *query.Query {
-	var exec query.Executor = d.db()
+	var exec query.Executor
+	if dbConn := d.db(); dbConn != nil {
+		// Do not assign a typed nil *sql.DB to the Executor interface: the interface itself would
+		// compare non-nil and query execution would panic inside database/sql.
+		exec = dbConn
+	}
 	if d.tx != nil {
 		exec = d.tx
 	}

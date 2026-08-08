@@ -53,7 +53,7 @@ func TestEngineAuthorizerRunsAtResolvedAppBoundary(t *testing.T) {
 // writeTreeTenant lays a minimal FILESYSTEM-ROUTED tenant on disk (root/test/localhost) whose root
 // router answers GET / with the given body. Returns the router file path (the tenant marker hot
 // reload watches). The flat app.kitwork.js model is gone — every engine test drives the tree.
-func writeTreeTenant(t *testing.T, tmpDir, body string) string {
+func writeTreeTenant(t testing.TB, tmpDir, body string) string {
 	t.Helper()
 	dir := filepath.Join(tmpDir, "test", "localhost")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -64,7 +64,7 @@ func writeTreeTenant(t *testing.T, tmpDir, body string) string {
 	return routerFile
 }
 
-func writeRouterBody(t *testing.T, routerFile, body string) {
+func writeRouterBody(t testing.TB, routerFile, body string) {
 	t.Helper()
 	code := "import { router } from \"kitwork\";\n" +
 		"router.get().handle((ctx) => ctx.text(\"" + body + "\"));\n"

@@ -160,6 +160,120 @@ The second clear target is SSR allocation: approximately 520 KB and 2,516
 allocations per Canary home render. Template/render profiling should follow
 after the static path check is removed from the hot request path.
 
+## Filesystem Boundary Optimization
+
+Measured on 2026-08-06 using the same machine and five sequential runs.
+
+Two changes preserve the existing static-file precedence and symlink escape
+protection:
+
+1. The immutable tenant generation prepares canonical app/site roots once.
+   Candidate targets are still canonicalized before a real file is served.
+2. Static resolution calls `os.Stat` before canonicalization. Dynamic route
+   directories and missing files return immediately; only an existing regular
+   file pays for the symlink-aware containment check.
+
+The prepared-boundary microbenchmark changed from a median of **255.426 us,
+6,816 B, 113 allocations** to **144.191 us, 4,351 B, 60 allocations**.
+
+The production Canary JSON route changed as follows:
+
+| State | Median | Memory/request | Allocations/request |
+|---|---:|---:|---:|
+| Original baseline | 316.868 us | 15,630 B | 239 |
+| Prepared root boundary | 180.741 us | 12,739 B | 195 |
+| Existing-file-only canonicalization | 33.611 us | 7,924 B | 135 |
+
+That is approximately **9.4x lower latency**, **49% less memory**, and **44%
+fewer allocations** for this production JSON path. The parallel JSON median
+is now **29.720 us, 9,133 B, 135 allocations**.
+
+The follow-up CPU profile no longer attributes the request to
+`filepath.EvalSymlinks`. The largest cumulative application costs are VM
+execution (24.8%), the remaining existence check in `os.Stat` (18.7%), native
+method dispatch/response work, and JSON encoding. Removing `os.Stat` would
+require a static manifest or a precedence change, so it is deliberately left
+in place until a real workload justifies that complexity.
+
+## Generation-Prepared SSR Presentation
+
+Measured on 2026-08-06 with the same Canary home page and five sequential
+runs. The original profile attributed 75.8% cumulative CPU and 93.2% of
+allocation space below `Render.tmpl`. JIT CSS, material, icons, fonts, theme,
+client-runtime scans, and inline CSS/JS minification were repeated for every
+request even though the active template generation was immutable.
+
+Static render trees now prepare source-driven presentation once. Templates
+whose `class`, `style`, `data-kit-*`, `data-kitwork-*`, or style-block content
+depends on request data retain the complete request pipeline. The default
+minifier uses parser-level `{{ }}` delimiters to prepare template HTML and
+inline assets. Final requests treat bound data as opaque and do not parse the
+document a second time. The `stdminify` build conservatively keeps request-time
+minification.
+
+| State | Median | Memory/request | Allocations/request |
+|---|---:|---:|---:|
+| Original baseline | 2.086 ms | 519,669 B | 2,516 |
+| Generation-prepared JIT presentation | 564.596 us | 283,416 B | 1,026 |
+| Prepared inline assets + request markup | 230.477 us | 156,781 B | 191 |
+| Prepared document + opaque request data | 121.401 us | 97,469 B | 170 |
+
+The final path is approximately **17.2x faster**, uses **81% less memory**, and
+performs **93% fewer allocations** than the original production SSR baseline.
+Regression tests verify that data-driven classes still generate
+request-specific CSS and that prepared minification leaves bound data
+untouched.
+
+Authored Hydrate entities are now decoded to the same value exposed by the
+browser DOM before verification, pre-render, and dynamic-class extraction.
+Template minification preserves attribute quotes until those server passes
+finish, so Hydrate pages retain generation-prepared minification without an
+entity-sensitive fallback.
+
+## Generation-Prepared Template Evaluation
+
+Measured on 2026-08-06 with a fixed 16-item template corpus covering nested
+paths, `if` comparisons, `for`, arithmetic, nullish coalescing, ternary
+selection, escaped output, and `raw(...)`.
+
+The previous binder repeatedly scanned every expression for every operator,
+parsed failed numeric literals, split paths, copied the complete scope map for
+each loop item, and assembled nested output strings. The prepared render plan
+now owns immutable expression trees and path segments. Requests use lexical
+scope frames, one output builder, and direct escaped `Value` writes.
+
+| State | Median | Memory/op | Allocations/op |
+|---|---:|---:|---:|
+| Request-time expression parsing | 331.746 us | 35,289 B | 583 |
+| Prepared expression tree + scope frames | 11.907 us | 4,560 B | 8 |
+
+The isolated evaluator is approximately **27.9x faster**, uses **87% less
+memory**, and performs **98.6% fewer allocations**. CI caps this corpus at 12
+allocations and separately verifies deterministic output, loop-scope isolation,
+and byte-for-byte equivalence with `html.EscapeString`.
+
+On the production Canary home route, the same change reduced the warm request
+from 170 to 92 allocations and from 97,469 B to approximately 68,188 B. The
+five-run latency median was 124.156 us versus the previous 121.401 us; that
+desktop variance is intentionally recorded rather than treated as a speed
+claim or CI threshold.
+
+## Production Stability Gates
+
+Measured on 2026-08-06 after bounded request/runtime observability was enabled:
+
+| Path | Median | Memory/op | Allocations/op | CI budget |
+|---|---:|---:|---:|---:|
+| Prepared route resolution | 1.265 us | 536 B | 8 | 8 allocations |
+| Observed `core.Engine` text request | 10.850 us | 1,811 B | 42 | 48 allocations |
+| Prepared template evaluator | 11.907 us | 4,560 B | 8 | 12 allocations |
+| Generation-prepared SSR fixture | 204.587 us | 27,898 B | 102 | 110 full / 100 engine |
+
+The SSR fixture includes Tailwind JIT, material, an icon, dark theme classes,
+Hydrate expressions, server bindings, and final minification. Latency remains
+a benchmark record rather than a test assertion; only deterministic allocation
+budgets fail CI.
+
 ## Regression Rule
 
 Always compare the same benchmark, payload, concurrency and machine state.

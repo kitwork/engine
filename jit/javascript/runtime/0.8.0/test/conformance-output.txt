@@ -1,0 +1,34 @@
+✓ arithmetic precedence
+✓ strict equality
+✓ loose equality rejected
+✓ nullish keeps zero
+✓ optional chain on null
+✓ non optional null member rejected
+✓ computed access
+✓ template literal
+✓ template null becomes empty
+✓ binding assignment rejected
+✓ action program writes state
+✓ nested member assignment
+✓ blocked member rejected
+✓ named map bare attribute keys
+✓ named map css custom property
+✓ named map quoted colon key
+✓ named map duplicate key rejected
+✓ class map canonical form
+✓ class object accepted
+✓ class ternary accepted
+✓ writable path read and assign
+✓ optional writable path rejected
+✓ identity literal
+✓ iterator of syntax
+✓ iterator in syntax rejected
+
+{
+  "schema": "kitwork-expression-conformance/1",
+  "specification": "0.7.0-draft",
+  "passed": 25,
+  "failed": 0,
+  "total": 25,
+  "failures": []
+}

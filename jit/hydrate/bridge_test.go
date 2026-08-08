@@ -28,11 +28,78 @@ func TestBridgePlainWebStaysWeb(t *testing.T) {
 	runNodeSourceTest(t, bridgeJS,
 		`global.window = {};`,
 		`
+if (window.kit !== window.kitwork) throw new Error("runtime roots were not aliased");
 if (window.kitwork.isNative !== false) throw new Error("plain web reported native");
 if (window.kitwork.platform !== "web") throw new Error("plain web platform mismatch");
 if (window.kitwork.bridge !== null) throw new Error("plain web created a bridge");
 if (typeof window.kitwork.Bridge !== "function") throw new Error("Bridge constructor missing");
 `)
+}
+
+func TestBridgePrefersCanonicalKitAndPreservesSeededAdapter(t *testing.T) {
+	runNodeSourceTest(t, bridgeJS,
+		`
+var seeded = {
+  platform: "seeded-native",
+  call: function (action, params) {
+    return Promise.resolve({ action: action, params: params });
+  }
+};
+var canonical = { bridge: seeded };
+var legacy = { bridge: { call: function () {} } };
+global.window = { kit: canonical, kitwork: legacy };
+`,
+		`
+(async function () {
+  if (window.kit !== canonical) throw new Error("canonical kit root was replaced");
+  if (window.kitwork !== canonical) throw new Error("legacy root was not aliased to kit");
+  if (window.kit.bridge !== seeded) throw new Error("seeded bridge adapter was replaced");
+  if (!window.kit.isNative) throw new Error("seeded bridge did not enable native mode");
+  if (window.kit.platform !== "seeded-native") throw new Error("seeded platform mismatch");
+
+  var result = await window.kit.bridge.call("echo.write", { text: "hello" });
+  if (result.action !== "echo.write" || result.params.text !== "hello") {
+    throw new Error("seeded bridge behavior changed");
+  }
+})().catch(function (error) {
+  console.error(error);
+  process.exitCode = 1;
+});
+`)
+}
+
+func TestBridgeDetectsWKWebViewHandlers(t *testing.T) {
+	for _, handlerName := range []string{"kit", "kitwork"} {
+		t.Run(handlerName, func(t *testing.T) {
+			runNodeSourceTest(t, bridgeJS,
+				`
+var sent = [];
+var handler = {
+  platform: "wkwebview",
+  postMessage: function (payload) { sent.push(payload); }
+};
+global.window = {
+  webkit: {
+    messageHandlers: {
+      `+handlerName+`: handler
+    }
+  }
+};
+`,
+				`
+if (!window.kit.isNative) throw new Error("WKWebView handler was not detected");
+if (window.kit.platform !== "wkwebview") throw new Error("WKWebView platform mismatch");
+if (window.kit.bridge.handle !== handler) throw new Error("wrong WKWebView handler selected");
+
+window.kit.bridge.call("device.info", {});
+if (sent.length !== 1 || sent[0].module !== "device" || sent[0].action !== "info") {
+  throw new Error("WKWebView request was not posted");
+}
+window.kit.bridge.receive({ id: sent[0].id, result: null });
+window.kit.bridge.destroy();
+`)
+		})
+	}
 }
 
 func TestBridgeRequestResponseEventsAndTimeout(t *testing.T) {
@@ -141,7 +208,10 @@ global.MutationObserver = function () {
 };
 global.CustomEvent = function () {};
 window.document = document;
+window.navigator = navigator;
+window.localStorage = localStorage;
 window.history = history;
+window.location = location;
 		`,
 		`
 (async function () {

@@ -1,0 +1,20 @@
+{
+  "name": "kitwork-runtime-next",
+  "version": "0.9.0-draft",
+  "description": "HTML-first Kitwork Client Runtime next — modular M2 core implementation",
+  "private": true,
+  "main": "src/runtime.js",
+  "browser": "dist/kitwork-runtime.js",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "check": "node scripts/check.js",
+    "test:smoke": "node test/expression-smoke.test.js",
+    "test:expression": "node test/expression.test.js",
+    "test:lexical": "node test/lexical-environment.test.js",
+    "test:services": "node test/services.test.js",
+    "test:conformance": "node test/run-expression-conformance.js",
+    "test:browser": "python3 test/run-browser.py",
+    "test:unit": "npm run test:expression && npm run test:lexical && npm run test:services",
+    "test": "npm run build && npm run check && npm run test:unit && npm run test:conformance && npm run test:browser"
+  }
+}

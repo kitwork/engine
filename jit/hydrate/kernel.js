@@ -34,7 +34,7 @@
     return {
       name: this.name,
       version: this.version,
-      engine: this.engine,
+      engine: kit.platform || this.engine,
       development: this.development
     };
   };
@@ -51,6 +51,88 @@
   kit.has = function (name) {
     return Object.prototype.hasOwnProperty.call(modules, name);
   };
+
+  // Public platform capabilities are services, separate from the runtime's control API. Trusted
+  // JavaScript receives the concrete object at kit.<name>; authored expressions receive only the
+  // exact members explicitly granted at registration time.
+  var services = Object.create(null);
+  var expressionServiceMembers = Object.create(null);
+  var expressionServiceSurfaces = Object.create(null);
+  var reservedServiceNames = Object.create(null);
+  ("service bridge runtime internal module modules has onStart cleanup onCleanup " +
+    "compile run scope scopeFor render set fetchWithRetry destroy start component behavior " +
+    "action actions components blueprints target state fire morph hydrate " +
+    "platform isNative mode version").split(" ").forEach(function (name) {
+      reservedServiceNames[name] = true;
+    });
+
+  function validServiceName(name) {
+    return /^[A-Za-z][A-Za-z0-9]*$/.test(name) &&
+      (!blockedKey(name) || name === "window") &&
+      !Object.prototype.hasOwnProperty.call(reservedServiceNames, name);
+  }
+
+  function expressionServiceSurface(name) {
+    if (Object.prototype.hasOwnProperty.call(expressionServiceSurfaces, name)) {
+      return expressionServiceSurfaces[name];
+    }
+    var surface = new Proxy(Object.create(null), {
+      get: function (_, member) {
+        var grants = expressionServiceMembers[name];
+        if (!grants || !Object.prototype.hasOwnProperty.call(grants, member)) return undefined;
+        var service = services[name];
+        if (service == null) return undefined;
+        var value = service[member];
+        return typeof value === "function" ? value.bind(service) : value;
+      },
+      has: function (_, member) {
+        var grants = expressionServiceMembers[name];
+        return !!grants && Object.prototype.hasOwnProperty.call(grants, member);
+      },
+      ownKeys: function () {
+        var grants = expressionServiceMembers[name];
+        return grants ? Object.keys(grants) : [];
+      },
+      getOwnPropertyDescriptor: function (_, member) {
+        var grants = expressionServiceMembers[name];
+        if (!grants || !Object.prototype.hasOwnProperty.call(grants, member)) return undefined;
+        return { configurable: true, enumerable: true };
+      },
+      set: function () { return false; },
+      defineProperty: function () { return false; },
+      deleteProperty: function () { return false; },
+      setPrototypeOf: function () { return false; },
+      getPrototypeOf: function () { return null; }
+    });
+    expressionServiceSurfaces[name] = surface;
+    return surface;
+  }
+
+  kit.service = function (name, value, options) {
+    name = String(name || "");
+    if (arguments.length === 1) {
+      return Object.prototype.hasOwnProperty.call(services, name) ? services[name] : undefined;
+    }
+    if (!validServiceName(name)) throw new Error("kit: invalid or reserved service name '" + name + "'");
+
+    services[name] = value;
+    kit[name] = value;
+
+    var grants = Object.create(null);
+    var members = options && options.expression;
+    if (Array.isArray(members)) {
+      members.forEach(function (member) {
+        member = String(member || "");
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(member) && !blockedKey(member)) {
+          grants[member] = true;
+        }
+      });
+    }
+    if (Object.keys(grants).length) expressionServiceMembers[name] = grants;
+    else delete expressionServiceMembers[name];
+    return value;
+  };
+
   kit.onStart = function (callback) {
     if (typeof callback !== "function") return function () { };
     startHooks.push(callback);
@@ -258,6 +340,8 @@
   // the precondition for running client-sent expressions (capsules) safely.
   function blockedKey(k) {
     return k === "constructor" || k === "__proto__" || k === "prototype" ||
+      k === "__defineGetter__" || k === "__defineSetter__" ||
+      k === "__lookupGetter__" || k === "__lookupSetter__" ||
       k === "ownerDocument" || k === "defaultView" || k === "contentWindow" ||
       k === "window" || k === "parent" || k === "top" || k === "self" || k === "globalThis";
   }
@@ -320,8 +404,20 @@
       return undefined;
     }
     if (op === "?") return run(x[1], s) ? run(x[2], s) : run(x[3], s);
-    if (op === ".") { var o = run(x[1], s); return (o == null || blockedKey(x[2])) ? undefined : o[x[2]]; }
-    if (op === "()") { var oo = run(x[1], s); if (oo == null || blockedKey(x[2])) return undefined; var a = x[3].map(function (y) { return run(y, s); }); return typeof oo[x[2]] === "function" ? oo[x[2]].apply(oo, a) : undefined; }
+    if (op === ".") {
+      var o = run(x[1], s);
+      var publicService = x[2] === "window" && o === publicKitSurface &&
+        Object.prototype.hasOwnProperty.call(expressionServiceMembers, x[2]);
+      return (o == null || (blockedKey(x[2]) && !publicService)) ? undefined : o[x[2]];
+    }
+    if (op === "()") {
+      var oo = run(x[1], s);
+      var publicMethod = x[2] === "window" && oo === publicKitSurface &&
+        Object.prototype.hasOwnProperty.call(expressionServiceMembers, x[2]);
+      if (oo == null || (blockedKey(x[2]) && !publicMethod)) return undefined;
+      var a = x[3].map(function (y) { return run(y, s); });
+      return typeof oo[x[2]] === "function" ? oo[x[2]].apply(oo, a) : undefined;
+    }
     if (op === "u!") return !run(x[1], s);
     if (op === "u-") return -run(x[1], s);
     var l = run(x[1], s);
@@ -369,7 +465,7 @@
   var scope = new Proxy(raw, {
     get: function (t, k) {
       if (k === "$") return t;
-      if (k in aliases) return aliases[k]; // $app / $sidebar / $theme … → a component handle / surface
+      if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
       return k in t ? t[k] : 0;
     },
     set: function (t, k, v) {
@@ -421,7 +517,7 @@
       // Component registration (kit.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       if (!st.scope) st.scope = {};
-      if (alias) aliases[alias] = st.scope; // global handle → this instance's scope
+      registerAlias(alias, st.scope, b);
       if (!st.seeded) {
         if (blueprints[cname]) {
           seedComponent(st.scope, blueprints[cname]);
@@ -467,8 +563,10 @@
     if (!fn) return;
     try {
       var proxy = scopeFor(b);
-      if (typeof fn === "function") fn.apply(proxy, []);
-      else if (fn.__kitLambda) run(fn, proxy);
+      var result;
+      if (typeof fn === "function") result = fn.apply(proxy, []);
+      else if (fn.__kitLambda) result = run(fn, proxy);
+      observeEffect(result, proxy);
     } catch (e) { }
   }
   function chainFor(el) {
@@ -494,7 +592,7 @@
       get: function (t, k) {
         if (k === "$el") return el;
         if (k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
-        if (k in aliases) return aliases[k]; // $app / $sidebar / $theme … → a component handle / surface
+        if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
@@ -514,7 +612,7 @@
     st.scopeProxy = new Proxy(boundaryScope(b), {
       get: function (t, k) {
         if (k === "$") return raw;
-        if (k in aliases) return aliases[k]; // $app / $sidebar / $theme … → a component handle / surface
+        if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
         return 0;
@@ -550,32 +648,65 @@
   // Named component handles: data-kit-component="sidebar=$sidebar" registers `$sidebar` → that
   // instance's scope, so ANY expression reaches it ($sidebar.cycle()), even from outside its DOM
   // subtree (the scattered-controls case). No alias = purely lexical (bare cycle() = nearest scope).
-  var aliases = {};
-  // $theme is a boot-registered GLOBAL handle: theme is a global capability, not a DOM-scoped instance,
-  // so it needs no per-page boundary — data-kit-click="$theme.toggle()" works everywhere. It delegates
-  // to the one theme source of truth (kit.theme setter). Coherent with $sidebar etc. (all in aliases);
-  // NOT stored on kit.theme, which is the theme STRING ("light"/"dark").
-  aliases["$theme"] = { toggle: function () { kit.toggleTheme(); } };
-  // $app is the app CAPABILITY surface — a curated, DEFAULT-DENY view of the runtime for markup, NOT the
-  // whole window.kit. It is a component handle registered in the SAME alias mechanism as $sidebar/$theme,
-  // not a kernel special-case. Markup (increasingly AGENT-authored) reaches ONLY the granted capabilities;
-  // the runtime's own control API (render/component/module/internal/destroy/run/scope/…) is invisible
-  // through $app. That makes a curated $app the small, concrete instance of "a controlled capability
-  // surface for generated code" — granting a new capability to markup is one deliberate word below.
-  var appGrants = {};
-  ("toggleTheme theme window back forward reload minimize maximize maximized closeWindow " +
-    "clipboard camera share dialog media audio screen location permissions device session " +
-    "secureStorage cache files shell auth database ai logs runtimeInfo app supports " +
-    "platform isNative bridge mode version").split(" ").forEach(function (k) { appGrants[k] = true; });
-  var appSurface = new Proxy(kit, {
-    get: function (target, k) {
-      if (!appGrants[k]) return undefined;           // runtime internals are not part of $app
-      var v = kit[k];
-      return typeof v === "function" ? v.bind(kit) : v; // keep the capability's own `this` = kit
-    },
-    set: function () { return true; }                // capabilities are called, never reassigned from markup
+  var aliases = Object.create(null);
+  var reservedAliases = Object.create(null);
+  ["$", "$el", "$root", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
+  function registerAlias(alias, target, owner) {
+    alias = String(alias || "").trim();
+    var store = owner ? state(owner) : null;
+    var previous = store && store.componentAlias;
+    if (previous && previous !== alias && aliases[previous] === target) delete aliases[previous];
+    if (store) store.componentAlias = "";
+    if (!/^\$[A-Za-z][A-Za-z0-9_]*$/.test(alias) || reservedAliases[alias]) return false;
+    aliases[alias] = target;
+    if (store) store.componentAlias = alias;
+    return true;
+  }
+  // $theme is a compatibility handle for markup that delegates to the registered theme service.
+  // New authored expressions can call kit.theme.toggle() through that service's exact grant.
+  aliases["$theme"] = { toggle: function () { return kit.theme.toggle(); } };
+  // `kit` is the platform/runtime service surface. Trusted JavaScript uses window.kit directly;
+  // authored markup resolves the identifier `kit` through this curated, read-only view so it cannot
+  // reach runtime control internals or the raw native transport. A service becomes callable from
+  // expressions only by an explicit grant here.
+  //
+  // `$app` is deliberately NOT installed by the kernel. It is an ordinary component alias owned by
+  // the application:
+  //   kit.component("app", definition)
+  //   <html data-kit-component="app" data-kit-alias="$app">
+  // This keeps application state/lifecycle separate from shared platform services.
+  var publicKitIntrinsics = Object.create(null);
+  ("platform isNative mode version").split(" ").forEach(function (name) {
+    publicKitIntrinsics[name] = true;
   });
-  aliases["$app"] = appSurface;
+  function expressionService(name) {
+    if (!Object.prototype.hasOwnProperty.call(expressionServiceMembers, name)) return undefined;
+    return expressionServiceSurface(name);
+  }
+  var publicKitSurface = new Proxy(Object.create(null), {
+    get: function (_, name) {
+      if (Object.prototype.hasOwnProperty.call(publicKitIntrinsics, name)) return kit[name];
+      return expressionService(name);
+    },
+    has: function (_, name) {
+      return Object.prototype.hasOwnProperty.call(publicKitIntrinsics, name) ||
+        Object.prototype.hasOwnProperty.call(expressionServiceMembers, name);
+    },
+    ownKeys: function () {
+      return Object.keys(publicKitIntrinsics).concat(Object.keys(expressionServiceMembers));
+    },
+    getOwnPropertyDescriptor: function (_, name) {
+      if (!Object.prototype.hasOwnProperty.call(publicKitIntrinsics, name) &&
+        !Object.prototype.hasOwnProperty.call(expressionServiceMembers, name)) return undefined;
+      return { configurable: true, enumerable: true };
+    },
+    set: function () { return false; },
+    defineProperty: function () { return false; },
+    deleteProperty: function () { return false; },
+    setPrototypeOf: function () { return false; },
+    getPrototypeOf: function () { return null; }
+  });
+  aliases["kit"] = publicKitSurface;
   // parseComponentTag splits `name@version=$alias` (all but name optional) → { name, version, alias }.
   function parseComponentTag(raw) {
     var name = raw, version = "", alias = "", i;
@@ -747,9 +878,8 @@
     document.querySelectorAll(IF).forEach(function (el) {
       var parent = el.parentNode;
       if (!parent) return;
-      var cond;
-      try { cond = parse(lex(el.getAttribute("data-kit-if") || el.getAttribute("data-kitwork-if"))); }
-      catch (e) { el.removeAttribute("data-kit-if"); el.removeAttribute("data-kitwork-if"); return; }
+      var cond = directive(el, "if");
+      if (!cond) { el.removeAttribute("data-kit-if"); el.removeAttribute("data-kitwork-if"); return; }
       var template = el.cloneNode(true);
       template.removeAttribute("data-kit-if");
       template.removeAttribute("data-kitwork-if");
@@ -846,6 +976,10 @@
   function cleanupElement(element) {
     var store = element && element[stateKey];
     if (!store) return;
+    if (store.componentAlias && aliases[store.componentAlias] === store.scope) {
+      delete aliases[store.componentAlias];
+      store.componentAlias = "";
+    }
     if (store.visibilityObserver) {
       store.visibilityObserver.disconnect();
       store.visibilityObserver = null;
@@ -938,29 +1072,56 @@
     st.debounceTimer = setTimeout(function () { st.debounceTimer = null; fn(); }, ms);
   }
 
+  // Component methods are real JavaScript and may return a Promise (camera, clipboard, storage…).
+  // The expression walker stays synchronous, while an event effect observes the returned thenable
+  // and repaints once it settles. Async component methods therefore remain outside the closed
+  // grammar without requiring every method to end with a manual kit.render().
+  function observeEffect(result, current) {
+    if (result && typeof result.then === "function") {
+      result.then(function () {
+        scheduleRender();
+      }, function (error) {
+        current.error = error && error.message ? error.message : String(error);
+        scheduleRender();
+      });
+    }
+    return result;
+  }
+  function runEffect(expression, element) {
+    var current = elementScope(element);
+    return observeEffect(run(expression, current), current);
+  }
+
   // ---- ONE set of delegated listeners for everything ----
   listen(document, "click", function (e) {
     var ex = e.target.closest && e.target.closest(selector("click"));
     if (ex) {
       applyGuard(ex, e); // prevent/stop must run synchronously, before any debounce defers the handler
       var x = directive(ex, "click");
-      if (x) debounced(ex, function () { run(x, elementScope(ex)); render(); });
+      if (x) debounced(ex, function () { runEffect(x, ex); render(); });
     }
     var act = e.target.closest && e.target.closest(ACTION);
     if (act) fire(act, e);
   });
   // data-kit-drag: a native window drag region (a custom title bar). Primary-button press hands the
-  // drag to the OS via $app.window('drag'); double-click maximizes — standard title-bar behaviour.
+  // drag to the OS through the private kit.window transport; double-click maximizes — standard
+  // title-bar behaviour. Application markup never receives the raw dispatcher.
   // A no-op on the web (bridge absent). Buttons inside can opt out with data-kit-no-drag.
   var DRAG = "[data-kitwork-drag],[data-kit-drag]";
+  function runWindowCommand(command) {
+    try {
+      var result = kit.window[command]();
+      if (result && typeof result.catch === "function") result.catch(function () { });
+    } catch (_) { }
+  }
   listen(document, "mousedown", function (e) {
     if (e.button !== 0) return;
     if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
-    if (e.target.closest && e.target.closest(DRAG)) kit.window("drag");
+    if (e.target.closest && e.target.closest(DRAG)) runWindowCommand("drag");
   });
   listen(document, "dblclick", function (e) {
     if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
-    if (e.target.closest && e.target.closest(DRAG)) kit.window("maximize");
+    if (e.target.closest && e.target.closest(DRAG)) runWindowCommand("maximize");
   });
   listen(document, "input", function (e) {
     var el = e.target.closest && e.target.closest(MODEL);
@@ -982,7 +1143,7 @@
       if (el === e.target || (el.contains && el.contains(e.target))) return; // a click inside is not "away"
       if (isFresh(el)) return; // this region was mounted by the very click being processed — ignore it
       var x = directive(el, "away"); if (!x) return;
-      run(x, elementScope(el)); fired = true;
+      runEffect(x, el); fired = true;
     });
     if (fired) render();
   });
@@ -994,7 +1155,7 @@
     var fired = false;
     document.querySelectorAll(ESC).forEach(function (el) {
       var x = directive(el, "escape"); if (!x) return;
-      run(x, elementScope(el)); fired = true;
+      runEffect(x, el); fired = true;
     });
     if (fired) render();
   });

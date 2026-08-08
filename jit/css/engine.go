@@ -59,7 +59,7 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 			}
 
 			// space-*/divide-* target the gaps BETWEEN children, not the element itself.
-			if reg.Type == "tw-space" || reg.Type == "tw-divide" || reg.Type == "tw-divide-color" {
+			if reg.Type == "tw-space" || reg.Type == "tw-divide" || reg.Type == "tw-divide-width" || reg.Type == "tw-divide-color" {
 				sel += " > :not([hidden]) ~ :not([hidden])"
 			}
 			// animate-on-hover pauses DESCENDANTS' animations (the :hover-runs counterpart rule is
@@ -668,11 +668,12 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		propMap := map[string]string{"w": "width", "h": "height", "max-w": "max-width", "min-w": "min-width", "max-h": "max-height", "min-h": "min-height"}
 		prop := propMap[m[1]]
 		val := twUnit(m[2])
-		if m[2] == "screen" && prop == "width" {
-			val = "100vw"
-		}
-		if m[2] == "screen" && prop == "height" {
-			val = "100vh"
+		if m[2] == "screen" {
+			if strings.Contains(prop, "width") {
+				val = "100vw"
+			} else {
+				val = "100vh"
+			}
 		}
 		if m[2] == "full" {
 			val = "100%"
@@ -695,7 +696,11 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		return fmt.Sprintf("%s: %s;", prop, val)
 	case "tw-color-shade":
-		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color", "ring": "box-shadow", "outline": "outline-color"}
+		propMap := map[string]string{
+			"bg": "background-color", "text": "color", "border": "border-color",
+			"ring": "box-shadow", "outline": "outline-color",
+			"decoration": "text-decoration-color", "accent": "accent-color",
+		}
 		prop := propMap[m[1]]
 		color := twColor(m[2], m[3], cfg)
 		alpha := m[4]
@@ -718,7 +723,11 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		return fmt.Sprintf("%s: rgb(%s);", prop, color)
 	case "tw-color-base":
-		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color", "ring": "box-shadow", "outline": "outline-color"}
+		propMap := map[string]string{
+			"bg": "background-color", "text": "color", "border": "border-color",
+			"ring": "box-shadow", "outline": "outline-color",
+			"decoration": "text-decoration-color", "accent": "accent-color",
+		}
 		prop := propMap[m[1]]
 		color := twColor(m[2], "", cfg)
 		alpha := m[3]
@@ -745,7 +754,10 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		return fmt.Sprintf("%s: rgb(%s);", prop, color)
 	case "tw-color-arbitrary":
-		propMap := map[string]string{"bg": "background-color", "text": "color", "border": "border-color"}
+		propMap := map[string]string{
+			"bg": "background-color", "text": "color", "border": "border-color",
+			"decoration": "text-decoration-color", "accent": "accent-color",
+		}
 		prop := propMap[m[1]]
 		hex := m[2]
 		if len(m) > 3 && m[3] != "" { // bg-[#fff]/80 → 8-digit hex with alpha
@@ -787,6 +799,11 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return "border-left-width: 1px;"
 		}
 		return "border-top-width: 1px;"
+	case "tw-divide-width":
+		if m[1] == "x" {
+			return "border-left-width: " + m[2] + "px;"
+		}
+		return "border-top-width: " + m[2] + "px;"
 	case "tw-divide-color":
 		col := twColor(m[1], m[2], cfg)
 		if col == "" {
@@ -795,6 +812,8 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		return "border-color: " + rgbWrap(col) + ";"
 	case "tw-outline":
 		return "outline-style: solid;"
+	case "tw-outline-none":
+		return "outline: 2px solid transparent; outline-offset: 2px;"
 	case "tw-outline-width":
 		return "outline-width: " + m[1] + "px;"
 	case "tw-outline-offset":
@@ -1063,6 +1082,11 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if val == "no-underline" {
 			return "text-decoration-line: none;"
 		}
+	case "tw-underline-offset":
+		if m[1] == "auto" {
+			return "text-underline-offset: auto;"
+		}
+		return "text-underline-offset: " + m[1] + "px;"
 	case "tw-rotate":
 		v := m[2]
 		if strings.HasPrefix(v, "[") {

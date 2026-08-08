@@ -1,0 +1,29 @@
+<!-- ============================================================================ -->
+<!-- Kitwork Component Example: Dropdown Menu (Draft 0.5 Compliant)              -->
+<!-- Location: engine/jit/javascript/component/dropdown/example.kitwork.html     -->
+<!-- ============================================================================ -->
+
+<div data-kit-component="dropdown"
+     data-kit-click:outside="$component.close()"
+     class="relative inline-block text-left">
+  
+  <!-- Nút kích hoạt Dropdown -->
+  <button data-kit-click="$component.toggle()"
+          data-kit-aria="expanded: open; controls: 'dropdown-menu';"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg shadow-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+    <span>Tùy chọn</span>
+    <svg class="w-4 h-4 transition-transform duration-200" data-kit-class="{ 'rotate-180': open }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+    </svg>
+  </button>
+
+  <!-- Menu Dropdown thả xuống (Sử dụng data-kit-show và :outside) -->
+  <div id="dropdown-menu"
+       data-kit-show="open"
+       class="absolute right-0 w-48 mt-2 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-100 dark:border-slate-700 py-1 z-50">
+    <a href="#" data-kit-click="$component.close()" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">Hồ sơ cá nhân</a>
+    <a href="#" data-kit-click="$component.close()" class="block px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">Cài đặt hệ thống</a>
+    <hr class="my-1 border-slate-100 dark:border-slate-700" />
+    <a href="#" data-kit-click="$component.close()" class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">Đăng xuất</a>
+  </div>
+</div>

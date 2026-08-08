@@ -1,0 +1,23 @@
+<!-- ============================================================================ -->
+<!-- Kitwork Component Example: Headless Announce Region (Draft 0.5 Compliant)   -->
+<!-- Location: engine/jit/javascript/component/announce/example.kitwork.html     -->
+<!-- ============================================================================ -->
+
+<!-- Live Region dành riêng cho Screen Reader (Ẩn khỏi giao diện mắt thường nhưng đọc bằng giọng nói) -->
+<div data-kit-component="announce"
+     data-kit-as="$screenReaderAnnouncer"
+     data-kit-bind="
+         'aria-live': mode;
+         'aria-atomic': true;
+     "
+     class="sr-only opacity-0 pointer-events-none fixed w-1 h-1 overflow-hidden">
+  <span data-kit-text="message"></span>
+</div>
+
+<!-- Nút bấm kích hoạt phát âm thanh Screen Reader -->
+<div class="p-6">
+  <button data-kit-click="$screenReaderAnnouncer.speak('Đã thêm sản phẩm vào giỏ hàng thành công!', 'polite')"
+          class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium">
+    Thông báo cho Screen Reader
+  </button>
+</div>

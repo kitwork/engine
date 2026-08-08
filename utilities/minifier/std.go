@@ -75,6 +75,10 @@ func HTML(s string) string {
 	return s
 }
 
+// TemplateHTML declines generation preparation in the stdlib build because its
+// regex minifier has no parser-level template delimiter support.
+func TemplateHTML(s string) (string, bool) { return s, false }
+
 // CSS strips comments + collapses whitespace, removing it around CSS tokens while keeping the
 // single spaces inside values (e.g. `0 1px 2px`).
 func CSS(s string) string {

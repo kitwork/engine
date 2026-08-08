@@ -124,7 +124,8 @@ func Render(html string) string {
 		return html
 	}
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
-		if _, err := Compile(m[2]); err != nil {
+		expression := authoredAttribute(m[2])
+		if _, err := Compile(expression); err != nil {
 			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
 			continue
 		}
@@ -133,7 +134,7 @@ func Render(html string) string {
 		// concatenation is invisible to it, so the class would resolve at runtime to a rule that was
 		// never generated — styling that silently disappears for some values and works for others,
 		// which is far harder to diagnose than an error. Say so at render, next to the markup.
-		if m[1] == "class" && HasConstructedClass(m[2]) {
+		if m[1] == "class" && HasConstructedClass(expression) {
 			fmt.Printf("[hydrate] class names must be written out in full — the CSS JIT cannot emit a "+
 				"name built with '+', so this rule is never generated. Use a conditional between "+
 				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s\n", m[0])

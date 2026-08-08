@@ -1,0 +1,139 @@
+✓ numbers support integers, decimals, leading dot, and exponent
+✓ invalid exponent is rejected
+✓ multiple decimal points are rejected as trailing input
+✓ strings decode common and unicode escapes
+✓ strict equality is supported
+✓ loose equality is rejected
+✓ missing closing token reports expected token
+✓ duplicate object keys are rejected
+✓ blocked object key is rejected during parsing
+✓ arithmetic and precedence
+✓ logical operators short circuit
+✓ nullish preserves zero
+✓ optional member access returns undefined
+✓ non-optional null member access raises a diagnostic
+✓ optional computed access
+✓ computed property access
+✓ template literals interpolate values
+✓ template null and undefined interpolate as empty string
+✓ template scanner handles closing brace inside string
+✓ template scanner handles nested template
+✓ assignment is rejected in binding mode
+✓ binding Promise is rejected
+✓ method call preserves owning object as this
+✓ action program supports assignment and semicolon sequence
+✓ action assignment to nested member
+✓ action cannot assign to runtime context root
+✓ action cannot replace direct alias binding
+✓ action may mutate state on direct component alias
+✓ blocked member access is rejected
+✓ action tracks every top-level Promise once
+✓ named map supports bare hyphenated attributes without quotes
+✓ named map supports CSS custom property keys
+✓ named map supports quoted colon key
+✓ named map duplicate key is rejected
+✓ named map does not split semicolon inside string
+✓ class map is canonical and accepts quoted Tailwind variant
+✓ class object expression remains accepted
+✓ class ternary remains accepted
+✓ writable path can read and assign
+✓ optional path is not writable
+✓ call expression is not writable path
+✓ identity literal is returned unchanged after trim
+✓ iterator parses item, index, and collection
+✓ iterator rejects in syntax
+✓ compile cache returns the same compiled object
+✓ evaluation budget is enforced
+✓ missing identifier resolves to undefined
+✓ environment mutation callback receives member mutation
+✓ testing lexer preserves optional operator token
+
+{
+  "passed": 49,
+  "failed": 0,
+  "total": 49,
+  "failures": []
+}
+✓ read order prefers loop, nearest local, component, then app
+✓ local owner receives assignment before app shadow
+✓ new key is created in nearest local scope
+✓ component method call uses component as this
+✓ component method cannot be overwritten
+✓ component state may be written
+✓ direct alias method/state is accessible
+✓ runtime context binding cannot be reassigned
+✓ runtime DOM handle cannot be mutated through member assignment
+✓ parent component is readable but member assignment is blocked
+
+{
+  "passed": 10,
+  "failed": 0,
+  "total": 10,
+  "failures": []
+}
+✓ arithmetic precedence
+✓ strict equality
+✓ loose equality rejected
+✓ nullish keeps zero
+✓ optional chain on null
+✓ non optional null member rejected
+✓ computed access
+✓ template literal
+✓ template null becomes empty
+✓ binding assignment rejected
+✓ action program writes state
+✓ nested member assignment
+✓ blocked member rejected
+✓ named map bare attribute keys
+✓ named map css custom property
+✓ named map quoted colon key
+✓ named map duplicate key rejected
+✓ class map canonical form
+✓ class object accepted
+✓ class ternary accepted
+✓ writable path read and assign
+✓ optional writable path rejected
+✓ identity literal
+✓ iterator of syntax
+✓ iterator in syntax rejected
+
+{
+  "schema": "kitwork-expression-conformance/1",
+  "specification": "0.7.0-draft",
+  "passed": 25,
+  "failed": 0,
+  "total": 25,
+  "failures": []
+}
+✓ arithmetic precedence
+✓ strict equality
+✓ loose equality rejected
+✓ nullish keeps zero
+✓ optional chain on null
+✓ non optional null member rejected
+✓ computed access
+✓ template literal
+✓ template null becomes empty
+✓ binding assignment rejected
+✓ action program writes state
+✓ nested member assignment
+✓ blocked member rejected
+✓ named map bare attribute keys
+✓ named map css custom property
+✓ named map quoted colon key
+✓ named map duplicate key rejected
+✓ class map canonical form
+✓ class object accepted
+✓ class ternary accepted
+✓ writable path read and assign
+✓ optional writable path rejected
+✓ identity literal
+✓ iterator of syntax
+✓ iterator in syntax rejected
+
+{
+  "passed": 25,
+  "failed": 0,
+  "total": 25,
+  "failures": []
+}

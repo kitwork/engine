@@ -24,7 +24,7 @@ func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
 	if js == "" {
 		t.Fatal("expected runtime for a known verb")
 	}
-	if !strings.Contains(js, "window.kitwork = window.kitwork") {
+	if !strings.Contains(js, "window.kit = kit") || !strings.Contains(js, "window.kitwork = kit") {
 		t.Errorf("core dispatcher missing: %s", js)
 	}
 	if !strings.Contains(js, `components.action("copy"`) {
@@ -114,5 +114,18 @@ func TestRenderInjectsVersionedComponents(t *testing.T) {
 	out := Render(html)
 	if !strings.Contains(out, `components=component%3Aclipboard%40v1.0.0`) {
 		t.Errorf("expected versioned clipboard component (v1.0.0) to be injected, got: %s", out)
+	}
+}
+
+func TestClipboardLatestHasPermissionFallback(t *testing.T) {
+	out := ModulesJS([]string{"component:clipboard@v2.0.0"})
+	for _, want := range []string{
+		`navigator.clipboard.writeText(text).then(copied).catch(fallback)`,
+		`document.execCommand("copy")`,
+		`active.focus({ preventScroll: true })`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("latest clipboard component is missing %q: %s", want, out)
+		}
 	}
 }

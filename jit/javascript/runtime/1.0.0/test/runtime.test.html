@@ -1,0 +1,293 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Kitwork Runtime Unified Core Tests</title>
+  <script>window.KITWORK_RUNTIME_OPTIONS = { autoStart: false, development: true };</script>
+</head>
+<body>
+<main id="app" data-kit-app="main" data-kit-scope="
+  greeting: 'Hello';
+  user: { name: 'Quoc' };
+  count: 0;
+  open: true;
+  visible: true;
+  saving: false;
+  status: 'ready';
+  width: '40px';
+  name: 'Initial';
+  items: [
+    { id: 1, name: 'One' },
+    { id: 2, name: 'Two' }
+  ];
+">
+  <span id="hello" data-kit-text="`${greeting}, ${user?.name ?? 'Guest'}`">SSR</span>
+  <span id="count" data-kit-text="count">0</span>
+  <button id="inc" data-kit-click="count = count + 1">Increment</button>
+
+  <div id="local" data-kit-scope="localCount: 2; copy: localCount;">
+    <span id="localText" data-kit-text="localCount"></span>
+    <span id="localCopy" data-kit-text="copy"></span>
+    <button id="localInc" data-kit-click="localCount = localCount + 1"></button>
+  </div>
+
+  <div id="show" data-kit-show="visible">Shown</div>
+  <div id="classed" class="static" data-kit-class="
+    active: open;
+    'opacity-50 pointer-events-none': saving;
+  "></div>
+  <div id="classObject" class="base" data-kit-class="{ selected: open, disabled: saving }"></div>
+  <div id="styled" style="height: 10px" data-kit-style="width: width; opacity: open ? 1 : 0;"></div>
+  <button id="bound" data-kit-bind="
+    aria-expanded: open;
+    data-state: status;
+    disabled: saving;
+    title: `State ${status}`;
+  "></button>
+
+  <input id="nameInput" data-kit-model="name">
+  <span id="nameText" data-kit-text="name"></span>
+  <input id="newInput" value="Seeded" data-kit-model="newValue">
+  <input id="numberInput" type="number" value="5" data-kit-model="quantity">
+  <input id="checkInput" type="checkbox" data-kit-model="checked">
+
+  <section id="ifSource" data-kit-if="open"><span id="ifText" data-kit-text="`Open ${count}`"></span></section>
+  <ul id="list">
+    <li data-kit-for="$item, $index of items" data-kit-key="$item.id">
+      <span class="row-name" data-kit-text="$item.name"></span>
+      <span class="row-index" data-kit-text="$index"></span>
+    </li>
+  </ul>
+
+  <div id="counterA" data-kit-component="counter" data-kit-as="$counterA" data-kit-scope="count: 5;">
+    <input data-kit-ref="input" value="A">
+    <span class="component-count" data-kit-text="count"></span>
+    <button class="component-inc" data-kit-click="$component.increment()"></button>
+  </div>
+  <div id="counterB" data-kit-component="counter" data-kit-scope="count: 9;">
+    <span class="component-count" data-kit-text="count"></span>
+  </div>
+  <button id="aliasInc" data-kit-click="$counterA.increment()"></button>
+
+  <div id="parentComponent" data-kit-component="parent-box">
+    <div id="childComponent" data-kit-component="child-box">
+      <span id="parentValue" data-kit-text="$parent.value"></span>
+      <button id="parentAction" data-kit-click="$parent.bump()"></button>
+    </div>
+  </div>
+
+  <button id="once" data-kit-click:once="count = count + 10"></button>
+  <input id="enter" data-kit-keydown:enter="count = count + 100">
+  <button id="debounce" data-kit-click:debounce(25)="count = count + 1000"></button>
+  <div id="outsideWrap" data-kit-if="open">
+    <div id="outsidePanel" data-kit-click:outside="open = false">Panel</div>
+  </div>
+
+  <button id="asyncButton" data-kit-click="$componentMissing?.noop()"></button>
+  <div id="asyncComponent" data-kit-component="async-box">
+    <button id="asyncSave" data-kit-click="$component.save()"></button>
+    <span id="asyncState" data-kit-text="state"></span>
+  </div>
+
+  <button id="serviceButton" data-kit-click="kit.demo.bump()"></button>
+  <span id="serviceResult" data-kit-text="count"></span>
+
+  <div id="persisted" data-kit-persist="global-progress"></div>
+  <div id="dynamicTarget"></div>
+</main>
+
+<aside id="island" data-kit-app="island" data-kit-scope="count: 50;">
+  <span id="islandCount" data-kit-text="count"></span>
+  <button id="islandInc" data-kit-click="count = count + 1"></button>
+</aside>
+
+<pre id="results">pending</pre>
+<script src="../dist/kitwork-runtime.js"></script>
+<script>
+(function () {
+  const results = [];
+  function assert(name, condition, details) {
+    results.push({ name, passed: !!condition, details: details || "" });
+    if (!condition) console.error("FAIL", name, details || "");
+  }
+  function tick(ms) { return new Promise(resolve => setTimeout(resolve, ms == null ? 0 : ms)); }
+  function click(id) { document.getElementById(id).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); }
+
+  let mounts = 0;
+  let unmounts = 0;
+  kit.component("counter", {
+    count: 0,
+    increment() { this.count = this.count + 1; },
+    mount() { mounts++; this.$refs.input && this.$refs.input.setAttribute("data-mounted", "true"); },
+    unmount() { unmounts++; }
+  });
+  kit.component("parent-box", {
+    value: 7,
+    bump() { this.value = this.value + 1; }
+  });
+  kit.component("child-box", {});
+  kit.component("async-box", {
+    state: "idle",
+    async save() {
+      this.state = "saving";
+      await tick(35);
+      this.state = "done";
+    }
+  });
+  kit.service("demo", {
+    bump() {
+      const app = document.getElementById("app");
+      const info = kit.dev.inspect(app);
+      info.app.scope.count += 1;
+      kit.render(app);
+    },
+    hidden() { return 99; }
+  }, { expression: ["bump"] });
+
+  kit.start();
+
+  (async function () {
+    await tick(20);
+    assert("template + optional chaining", hello.textContent === "Hello, Quoc", hello.textContent);
+    assert("initial app scope", count.textContent === "0", count.textContent);
+    assert("named map sequential local scope", localCopy.textContent === "2", localCopy.textContent);
+    assert("show visible", show.hidden === false);
+    assert("class map adds class", classed.classList.contains("active"));
+    assert("class map preserves static", classed.classList.contains("static"));
+    assert("class object accepted", classObject.classList.contains("selected"));
+    assert("style width", styled.style.getPropertyValue("width") === "40px", styled.getAttribute("style"));
+    assert("style keeps static height", styled.style.getPropertyValue("height") === "10px");
+    assert("bind aria false/true semantics", bound.getAttribute("aria-expanded") === "true");
+    assert("bind data", bound.getAttribute("data-state") === "ready");
+    assert("bind ordinary title", bound.getAttribute("title") === "State ready");
+    assert("boolean false removes disabled", !bound.hasAttribute("disabled"));
+    assert("model state wins", nameInput.value === "Initial", nameInput.value);
+    assert("model DOM seeds missing", nameText.textContent === "Initial" && newInput.value === "Seeded");
+    assert("number model seeds", kit.dev.inspect(numberInput).app.scope.quantity === 5);
+    assert("checkbox model seeds", kit.dev.inspect(checkInput).app.scope.checked === false);
+    assert("if initial mount", !!document.getElementById("ifText"));
+    assert("for initial rows", document.querySelectorAll("#list li").length === 2);
+    assert("for item text", document.querySelector("#list .row-name").textContent === "One");
+    assert("components independent A", counterA.querySelector(".component-count").textContent === "5");
+    assert("components independent B", counterB.querySelector(".component-count").textContent === "9");
+    assert("component mount + refs", counterA.querySelector("input").getAttribute("data-mounted") === "true");
+    assert("parent context", parentValue.textContent === "7");
+    assert("multiple app isolation initial", islandCount.textContent === "50");
+    assert("persist registry", kit.internal.persist.find(app, "global-progress") === persisted);
+    assert("built-in task service", typeof kit.task.latest === "function" && typeof kit.task.delay === "function");
+    assert("built-in request service", typeof kit.request.get === "function" && typeof kit.request.submit === "function");
+    assert("request expression grant", typeof kit.internal.runtime.services.publicSurface.request.get === "function");
+    assert("task service stays trusted-only", typeof kit.internal.runtime.services.publicSurface.task === "undefined");
+
+    click("inc"); await tick();
+    assert("event action mutates app scope", count.textContent === "1", count.textContent);
+    click("localInc"); await tick();
+    assert("write-to-owner local scope", localText.textContent === "3", localText.textContent);
+    assert("local write does not change app", count.textContent === "1");
+
+    click("counterA"); // no binding on host, harmless
+    counterA.querySelector(".component-inc").click(); await tick();
+    assert("component method invalidates proxy", counterA.querySelector(".component-count").textContent === "6");
+    assert("other component unchanged", counterB.querySelector(".component-count").textContent === "9");
+    click("aliasInc"); await tick();
+    assert("direct alias component call", counterA.querySelector(".component-count").textContent === "7");
+
+    click("parentAction"); await tick();
+    assert("$parent component action", parentValue.textContent === "8", parentValue.textContent);
+
+    nameInput.value = "Changed";
+    nameInput.dispatchEvent(new Event("input", { bubbles: true })); await tick();
+    assert("model input writes scope", nameText.textContent === "Changed", nameText.textContent);
+    numberInput.value = "12";
+    numberInput.dispatchEvent(new Event("input", { bubbles: true })); await tick();
+    assert("number model coercion", kit.dev.inspect(numberInput).app.scope.quantity === 12);
+    checkInput.checked = true;
+    checkInput.dispatchEvent(new Event("change", { bubbles: true })); await tick();
+    assert("checkbox model coercion", kit.dev.inspect(checkInput).app.scope.checked === true);
+
+    click("once"); click("once"); await tick();
+    assert("once modifier", count.textContent === "11", count.textContent);
+    enter.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true })); await tick();
+    assert("enter filter ignores other key", count.textContent === "11");
+    enter.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await tick();
+    assert("enter filter", count.textContent === "111", count.textContent);
+    click("debounce"); click("debounce"); click("debounce");
+    await tick(40);
+    assert("debounce modifier", count.textContent === "1111", count.textContent);
+
+    const firstRow = document.querySelector("#list li");
+    const appInfo = kit.dev.inspect(app);
+    appInfo.app.scope.items = [appInfo.app.scope.items[1], appInfo.app.scope.items[0]];
+    kit.render(app); await tick();
+    assert("keyed for reorders", document.querySelector("#list .row-name").textContent === "Two");
+    assert("keyed for preserves DOM identity", document.querySelectorAll("#list li")[1] === firstRow);
+
+    appInfo.app.scope.saving = true;
+    appInfo.app.scope.open = false;
+    kit.render(app); await tick();
+    assert("class diff removes old", !classed.classList.contains("active"));
+    assert("class adds grouped tokens", classed.classList.contains("opacity-50") && classed.classList.contains("pointer-events-none"));
+    assert("static class remains after diff", classed.classList.contains("static"));
+    assert("bind boolean true", bound.hasAttribute("disabled"));
+    assert("aria false preserved", bound.getAttribute("aria-expanded") === "false");
+    assert("if unmount", !document.getElementById("ifText"));
+    appInfo.app.scope.open = true;
+    appInfo.app.scope.saving = false;
+    kit.render(app); await tick();
+    assert("if remount", !!document.getElementById("ifText"));
+
+    const panel = document.getElementById("outsidePanel");
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true })); await tick();
+    assert("outside modifier closes", appInfo.app.scope.open === false);
+    appInfo.app.scope.open = true; kit.render(app); await tick();
+
+    click("asyncSave"); await tick(5);
+    assert("async action busy", asyncSave.getAttribute("data-busy") === "true");
+    assert("async component state saving", asyncState.textContent === "saving");
+    await tick(50);
+    assert("async action settles", !asyncSave.hasAttribute("data-busy"));
+    assert("async component state done", asyncState.textContent === "done");
+
+    click("serviceButton"); await tick();
+    assert("granted service callable", count.textContent === "1112", count.textContent);
+    assert("ungranted service hidden", typeof kit.internal.runtime.services.publicSurface.demo.hidden === "undefined");
+
+    click("islandInc"); await tick();
+    assert("second app updates independently", islandCount.textContent === "51");
+    assert("first app remains isolated", count.textContent === "1112");
+
+    const dynamic = document.createElement("span");
+    dynamic.id = "dynamicText";
+    dynamic.setAttribute("data-kit-text", "`Dynamic ${count}`");
+    dynamicTarget.appendChild(dynamic);
+    await tick(20);
+    assert("MutationObserver hydrates added subtree", dynamic.textContent === "Dynamic 1112", dynamic.textContent);
+
+    const removable = document.createElement("div");
+    removable.setAttribute("data-kit-component", "counter");
+    removable.setAttribute("data-kit-scope", "count: 3;");
+    app.appendChild(removable);
+    await tick(20);
+    const beforeUnmount = unmounts;
+    removable.remove();
+    await tick(20);
+    assert("removed component unmounts", unmounts === beforeUnmount + 1, `${beforeUnmount} -> ${unmounts}`);
+
+    const passed = results.filter(r => r.passed).length;
+    const failed = results.length - passed;
+    const output = document.getElementById("results");
+    output.dataset.total = String(results.length);
+    output.dataset.passed = String(passed);
+    output.dataset.failed = String(failed);
+    output.textContent = JSON.stringify({ total: results.length, passed, failed, results }, null, 2);
+    document.documentElement.setAttribute("data-test-complete", "true");
+  })().catch(error => {
+    const output = document.getElementById("results");
+    output.dataset.failed = "1";
+    output.textContent = error.stack || String(error);
+    document.documentElement.setAttribute("data-test-complete", "true");
+  });
+})();
+</script>
+</body>
+</html>

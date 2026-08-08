@@ -1,10 +1,11 @@
-// Package theme is the JIT theme pre-paint: the SSR/first-paint half of the kernel's $app.theme.
+// Package theme is the JIT theme pre-paint: the SSR/first-paint half of kit.theme.
 //
 // A tiny SYNCHRONOUS script must run in <head> BEFORE first paint to apply the saved theme, or the
 // page flashes the wrong colours (the hydrate kernel loads too late to prevent it). Render injects
 // that script AUTOMATICALLY when the page uses the theme system — the same zero-config rule as the
 // rest of the JIT family (icons/fonts/js scan usage and emit only what's needed). "Uses the theme
-// system" means any of: $app.toggleTheme() / $app.theme (the kernel API), or the legacy
+// system" means any reference to kit.theme (for example kit.theme.toggle() or kit.theme.mode), or
+// the legacy
 // data-kit(work)-action/component="theme" (kept working through the transition).
 //
 // A page may instead place an explicit marker to control the exact position:
@@ -13,7 +14,7 @@
 //
 // When the marker is present it is replaced in place (author wins); otherwise the script is injected
 // at the very TOP of <head> — the earliest point, before any stylesheet. Either way it reads the
-// same "theme" localStorage key the $app.theme setter writes, so pre-paint and toggle stay in sync.
+// same "theme" localStorage key kit.theme.set() writes, so pre-paint and toggle stay in sync.
 // Dark = the `.dark` class on <html>, matching jitcss darkMode:['class'] and the dark: variant.
 package theme
 
@@ -57,10 +58,13 @@ func Force(html string) string {
 }
 
 // usesTheme reports whether the page references the theme system. Cheap substring checks:
-// `toggleTheme` catches $app.toggleTheme(); `$app.theme` catches reads/binds; the action/component
-// forms catch the legacy jitjs verb + component (data-kit- and data-kitwork- both end this way).
+// `kit.theme` catches the namespaced API (mode/resolved/set/toggle); `toggleTheme` keeps detecting
+// the deprecated trusted-JavaScript alias. The action/component forms catch the legacy jitjs verb
+// + component (data-kit- and data-kitwork- both end this way).
 func usesTheme(html string) bool {
 	return strings.Contains(html, "toggleTheme") ||
+		strings.Contains(html, "kit.theme") ||
+		// Compatibility with pages authored before kit became the service root.
 		strings.Contains(html, "$app.theme") ||
 		strings.Contains(html, `action="theme"`) ||
 		strings.Contains(html, `component="theme"`)

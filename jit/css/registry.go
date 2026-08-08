@@ -29,9 +29,9 @@ var Registry = []Pattern{
 	{`^(backdrop-blur)(?:-(sm|md|lg|xl|2xl|3xl|none|\[.+?\]))?$`, "tw-backdrop-blur"},
 	{`^-?(translate)-(x|y)-([\d.]+|full|px|\d+/\d+|\[.+?\])$`, "tw-translate"},
 	{`^(w|h|max-w|min-w|max-h|min-h)-([\d.]+|full|screen|auto|fit|min|max|\d+/\d+|\[.+?\]|[a-z0-9-]+)$`, "tw-sizing"},
-	{`^(bg|text|border|ring|outline)-([a-z]+)-(\d+)(?:/(\d+|\[.+?\]))?$`, "tw-color-shade"},
-	{`^(bg|text|border|ring|outline)-([a-z][a-z-]*)(?:/(\d+|\[.+?\]))?$`, "tw-color-base"},
-	{`^(bg|text|border)-\[(#[0-9a-fA-F]+)\](?:/(\d+))?$`, "tw-color-arbitrary"},
+	{`^(bg|text|border|ring|outline|decoration|accent)-([a-z]+)-(\d+)(?:/(\d+|\[.+?\]))?$`, "tw-color-shade"},
+	{`^(bg|text|border|ring|outline|decoration|accent)-([a-z][a-z-]*)(?:/(\d+|\[.+?\]))?$`, "tw-color-base"},
+	{`^(bg|text|border|decoration|accent)-\[(#[0-9a-fA-F]+)\](?:/(\d+))?$`, "tw-color-arbitrary"},
 	// gradients
 	{`^bg-gradient-to-(t|b|l|r|tl|tr|bl|br)$`, "tw-gradient-dir"},
 	{`^(from|via|to)-([a-z]+)-(\d+)$`, "tw-gradient-stop"},
@@ -41,9 +41,11 @@ var Registry = []Pattern{
 	// space-between + divide (child selectors, applied in ResolveCore)
 	{`^space-(x|y)-(-?[\d.]+|px|\[.+?\])$`, "tw-space"},
 	{`^divide-(x|y)$`, "tw-divide"},
+	{`^divide-(x|y)-(\d+)$`, "tw-divide-width"},
 	{`^divide-([a-z]+)-(\d+)$`, "tw-divide-color"},
 	// outline
 	{`^outline$`, "tw-outline"},
+	{`^outline-none$`, "tw-outline-none"},
 	{`^outline-(\d+)$`, "tw-outline-width"},
 	{`^outline-offset-(\d+)$`, "tw-outline-offset"},
 	// scroll margin/padding
@@ -72,6 +74,7 @@ var Registry = []Pattern{
 	{`^(font)-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$`, "tw-font-weight"},
 	{`^(text)-(left|center|right|justify|start|end)$`, "tw-text-align"},
 	{`^(italic|not-italic|uppercase|lowercase|capitalize|normal-case|underline|line-through|no-underline)$`, "tw-text-decor"},
+	{`^underline-offset-(auto|\d+)$`, "tw-underline-offset"},
 	// transforms
 	{`^-?(rotate)-(\d+|\[.+?\])$`, "tw-rotate"},
 	{`^-?(scale)-(\d+|\[.+?\])$`, "tw-scale"},

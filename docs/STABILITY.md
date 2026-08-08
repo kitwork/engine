@@ -53,6 +53,20 @@ Current enforcement:
   Template edits create a replacement generation; malformed candidates cannot
   replace the last valid renderer. Normal request rendering must not read
   templates from disk.
+- Template expressions are parsed into immutable evaluator nodes with the
+  generation. Request binding may resolve data and create bounded lexical scope
+  frames, but must not retokenize expressions or copy the complete scope for
+  every loop item. Escaped output must remain byte-for-byte equivalent to
+  `html.EscapeString`.
+- Static template presentation and parser-aware inline-asset minification are
+  generation work. A template whose authored presentation attributes depend on
+  request data must fall back to the complete request pipeline rather than
+  publish an incomplete stylesheet or client runtime. Authored Hydrate
+  attribute values must be decoded exactly as the browser decodes the DOM
+  before verification, JIT scanning, and server pre-render. Generation
+  minification must preserve the quotes those source scanners consume. Once
+  prepared, request data is opaque and must not trigger a second full-document
+  minification pass.
 - The executable source manifest includes every router and native import plus
   watched route directories. Any source-graph change creates a new generation;
   active route nodes are never recompiled in place.
@@ -67,6 +81,13 @@ Current enforcement:
 - Disk-persisted responses, rate-limit budgets, SSE connections, and replay
   history are site-scoped. They survive generation replacement and close only
   when that site leaves the app runtime.
+- Runtime health is bounded and privacy-safe. Latency uses a fixed bucket
+  table; route, tenant, URL, user, and argument values are never telemetry
+  labels. Program identities are checksum values capped at 4096 entries and
+  never retain a Program or retired generation pointer.
+- Response observation must preserve `io.ReaderFrom`, `http.Flusher`, and
+  `ResponseController` unwrapping so metrics cannot disable zero-copy static
+  responses or SSE.
 
 ## 2. Energy and bounded execution
 
@@ -206,8 +227,20 @@ Request-path performance changes must run the production-like handler corpus
 and keep its allocation gates:
 
 ```text
-go test ./work -run TestHandlerCorpusAllocationBudgets
+go test ./core -run TestEngineObservedRequestAllocationBudget
+go test ./render -run 'TestTemplateEvaluatorAllocationBudget|TestPreparedEvaluatorIsDeterministic'
+go test ./render -run '^$' -bench '^BenchmarkTemplateEvaluator$' -benchmem
+go test ./work -run 'TestHandler.*AllocationBudgets|TestPreparedRouteResolveAllocationBudget'
 go test ./work -run '^$' -bench '^BenchmarkServeHandlerCorpus$' -benchmem
+```
+
+Generation lifecycle changes must retain the normal-suite publication/drain
+soaks. They repeatedly replace immutable route/render ownership while leases
+release concurrently:
+
+```text
+go test ./site -run TestGenerationPublicationDrainSoak
+go test ./core -run TestEngineHotReloadGenerationSoak
 ```
 
 The compiler-to-VM pipeline must remain fuzzable as one boundary:
@@ -227,9 +260,10 @@ KITWORK_SOAK=1 go test ./core -run TestEngineHotReloadSoak
 
 ## 7. Stability before expansion
 
-Read-only logic capsules may build on these invariants. Capsule writes,
-multi-node placement, and new transport backbones must wait until app isolation,
-capability permissions, cancellation, and production contract tests are stable.
+New execution surfaces, multi-node placement, and transport backbones must wait
+until app isolation, capability permissions, cancellation, request-path
+performance, rendering, and production contract tests are stable. Logic
+capsules remain a parked experiment rather than an active stability milestone.
 
 ## 8. Preflight parity
 

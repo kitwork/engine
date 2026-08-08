@@ -1,0 +1,40 @@
+<!-- ============================================================================ -->
+<!-- Kitwork Component Example: Tab Switcher                                    -->
+<!-- Location: engine/jit/javascript/component/tab/example.kitwork.html        -->
+<!-- ============================================================================ -->
+
+<div data-kit-component="tab" class="w-full max-w-xl mx-auto my-6 p-6 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700">
+  <!-- Các Nút chọn Tab -->
+  <div class="flex border-b border-slate-200 dark:border-slate-700 gap-4 mb-6">
+    <button data-kit-click="select('tab1')"
+            data-kit-class="border-indigo-600 text-indigo-600 font-semibold: is('tab1'); border-transparent text-slate-500 hover:text-slate-700: !is('tab1');"
+            class="pb-3 border-b-2 font-medium text-sm transition">
+      Tổng quan
+    </button>
+
+    <button data-kit-click="select('tab2')"
+            data-kit-class="border-indigo-600 text-indigo-600 font-semibold: is('tab2'); border-transparent text-slate-500 hover:text-slate-700: !is('tab2');"
+            class="pb-3 border-b-2 font-medium text-sm transition">
+      Tính năng
+    </button>
+
+    <button data-kit-click="select('tab3')"
+            data-kit-class="border-indigo-600 text-indigo-600 font-semibold: is('tab3'); border-transparent text-slate-500 hover:text-slate-700: !is('tab3');"
+            class="pb-3 border-b-2 font-medium text-sm transition">
+      Bảo mật
+    </button>
+  </div>
+
+  <!-- Nội dung các Tab -->
+  <div data-kit-show="is('tab1')" class="text-sm text-slate-600 dark:text-slate-300">
+    Nội dung Tab 1: Kiến trúc Kitwork Engine tối ưu hiệu năng tối đa.
+  </div>
+
+  <div data-kit-show="is('tab2')" class="text-sm text-slate-600 dark:text-slate-300">
+    Nội dung Tab 2: Tính năng JIT CSS, JIT Icons và Dynamic Hydrate Engine.
+  </div>
+
+  <div data-kit-show="is('tab3')" class="text-sm text-slate-600 dark:text-slate-300">
+    Nội dung Tab 3: Cách ly đa ứng dụng Multi-tenant an toàn bằng Go VM.
+  </div>
+</div>

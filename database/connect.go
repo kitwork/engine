@@ -9,20 +9,20 @@ import (
 )
 
 type Config struct {
-	Alias    string `yaml:"alias"` // master, config, data_old, data
-	Type     string `yaml:"type"`  //  postgres, mysql, sqlite
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Name     string `yaml:"name"`
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	SSLMode  string `yaml:"ssl"`
-	Timezone string `yaml:"timezone"`
-	Timeout  int    `yaml:"timeout"`
-	MaxOpen  int    `yaml:"max_open"`
-	MaxIdle  int    `yaml:"max_idle"`
-	Lifetime int    `yaml:"lifetime"`
-	MaxLimit int    `yaml:"max_limit"`
+	Alias    string `json:"alias" yaml:"alias"` // system, default, analytics, ...
+	Type     string `json:"type" yaml:"type"`   // postgres, mysql, sqlite
+	User     string `json:"user" yaml:"user"`
+	Password string `json:"password" yaml:"password"`
+	Name     string `json:"name" yaml:"name"`
+	Host     string `json:"host" yaml:"host"`
+	Port     int    `json:"port" yaml:"port"`
+	SSLMode  string `json:"sslmode" yaml:"sslmode"`
+	Timezone string `json:"timezone" yaml:"timezone"`
+	Timeout  int    `json:"timeout" yaml:"timeout"`
+	MaxOpen  int    `json:"max_open" yaml:"max_open"`
+	MaxIdle  int    `json:"max_idle" yaml:"max_idle"`
+	Lifetime int    `json:"lifetime" yaml:"lifetime"`
+	MaxLimit int    `json:"max_limit" yaml:"max_limit"`
 }
 
 func (d *Config) Connect() (*sql.DB, error) {

@@ -191,17 +191,45 @@ func (e *Engine) SetBytecodeCache(directory string) {
 	e.bytecodeCacheMu.Unlock()
 }
 
-// Health returns a process-local VM report without exposing request or tenant
-// data. The returned snapshot is safe to serialize while the engine is live.
+// Health returns bounded process-local runtime and lifecycle aggregates without
+// exposing request, URL, tenant, or argument data. The returned snapshot is
+// detached and safe to serialize while the engine is live.
 func (e *Engine) Health() work.RuntimeHealthSnapshot {
 	if e == nil {
 		return work.RuntimeHealthSnapshot{}
 	}
-	return e.runtimeHealth.Snapshot()
+	snapshot := e.runtimeHealth.Snapshot()
+	e.mu.RLock()
+	snapshot.LoadedApps = len(e.appRuntimes)
+	snapshot.LoadedSites = len(e.cache)
+	tenants := make([]*work.Tenant, 0, len(e.cache))
+	for _, cached := range e.cache {
+		tenants = append(tenants, cached.current())
+	}
+	e.mu.RUnlock()
+	for _, tenant := range tenants {
+		if tenant == nil {
+			continue
+		}
+		generation := tenant.SiteGeneration()
+		if generation == nil || generation.Retired() {
+			continue
+		}
+		snapshot.ActiveGenerations++
+		snapshot.ActiveGenerationLeases += generation.Active()
+	}
+	return snapshot
 }
 
-func (e *Engine) prepareGeneration(siteRuntime *site.Runtime) (*site.Generation, error) {
-	generation, err := siteRuntime.PrepareGeneration()
+func (e *Engine) prepareGeneration(siteRuntime *site.Runtime) (
+	generation *site.Generation,
+	err error,
+) {
+	started := time.Now()
+	defer func() {
+		e.runtimeHealth.RecordGenerationPrepare(time.Since(started), err == nil)
+	}()
+	generation, err = siteRuntime.PrepareGeneration()
 	if err != nil {
 		return nil, err
 	}
@@ -209,12 +237,32 @@ func (e *Engine) prepareGeneration(siteRuntime *site.Runtime) (*site.Generation,
 	directory := e.bytecodeCacheDir
 	e.bytecodeCacheMu.RUnlock()
 	if directory != "" {
-		if err := generation.SetBytecodeCache(compiler.NewFileCache(directory)); err != nil {
+		if setError := generation.SetBytecodeCache(compiler.NewFileCache(directory)); setError != nil {
+			err = setError
 			generation.Retire()
 			return nil, err
 		}
 	}
 	return generation, nil
+}
+
+func (e *Engine) activateGeneration(tenant *work.Tenant) error {
+	started := time.Now()
+	err := tenant.ActivateGeneration()
+	e.runtimeHealth.RecordGenerationActivate(time.Since(started), err == nil)
+	return err
+}
+
+func (e *Engine) drainTenant(tenant *work.Tenant) {
+	if tenant == nil {
+		return
+	}
+	generation := tenant.SiteGeneration()
+	started := time.Now()
+	tenant.Close()
+	if generation != nil {
+		e.runtimeHealth.RecordGenerationDrain(time.Since(started))
+	}
 }
 
 // SetIdleTimeout chỉnh thời gian một tenant idle được giữ trong RAM cache.
@@ -246,7 +294,7 @@ func (e *Engine) cleanupLoop(interval time.Duration) {
 			}
 			e.mu.Unlock()
 			for _, tenant := range evicted {
-				tenant.Close()
+				e.drainTenant(tenant)
 				if owner := tenant.AppRuntime(); owner != nil {
 					owner.RemoveSite(tenant.Domain())
 				}
@@ -294,7 +342,7 @@ func (e *Engine) Close() {
 		e.mu.Unlock()
 
 		for _, tenant := range tenants {
-			tenant.Close()
+			e.drainTenant(tenant)
 		}
 		for _, appRuntime := range apps {
 			appRuntime.Close()
@@ -343,7 +391,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 						e.mu.Lock()
 						delete(e.cache, hostname)
 						e.mu.Unlock()
-						current.Close()
+						e.drainTenant(current)
 						if owner := current.AppRuntime(); owner != nil {
 							owner.RemoveSite(hostname)
 						}
@@ -389,7 +437,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 								newTenant.Close()
 								return nil, fmt.Errorf("engine is closed")
 							}
-							if err := newTenant.ActivateGeneration(); err != nil {
+							if err := e.activateGeneration(newTenant); err != nil {
 								e.mu.Unlock()
 								newTenant.Close()
 								return nil, fmt.Errorf("activate site generation: %w", err)
@@ -399,7 +447,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 							cached.tenant = newTenant
 							cached.mu.Unlock()
 							e.mu.Unlock()
-							oldTenant.Close()
+							e.drainTenant(oldTenant)
 							slog.Info("Successfully reloaded tenant", "hostname", hostname)
 						}
 					}
@@ -443,7 +491,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 		appRuntime.RemoveSite(hostname)
 		return nil, err
 	}
-	if err := tenant.ActivateGeneration(); err != nil {
+	if err := e.activateGeneration(tenant); err != nil {
 		tenant.Close()
 		appRuntime.RemoveSite(hostname)
 		return nil, err
@@ -519,6 +567,13 @@ func (e *Engine) discoverTenants() []string {
 }
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	observed := &observedResponseWriter{ResponseWriter: w}
+	w = observed
+	started := time.Now()
+	e.runtimeHealth.RequestStarted()
+	defer func() {
+		e.runtimeHealth.RequestCompleted(observed.Status(), time.Since(started))
+	}()
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.Error("Critical panic recovered", "panic", rec)
@@ -556,7 +611,9 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	resolveStarted := time.Now()
 	tenant, err := e.run(domain)
+	e.runtimeHealth.RecordResolve(time.Since(resolveStarted))
 
 	if err != nil {
 		http.Error(w, err.Error(), 404)

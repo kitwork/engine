@@ -212,11 +212,13 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"kit.component", "data-kitwork-component", "seedComponent", "fn.apply(s, fargs)",
 		// the capability seam remember (and later api/live) installs through, now that it is out of core
 		"pageScope", "scheduleRender",
-		"kit.platform", "kit.bridge", "kit.isNative",
+		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,
 		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kit.destroy", "removeEventListener",
-		// $app capabilities (Native Bridge RFC v2): bridge-first with web fallback
-		"kit.clipboard", `native.call("clipboard.write"`, "navigator.clipboard",
-		"kit.camera", `native.call("camera.capture"`, "readAsDataURL",
+		// kit services (Native Bridge RFC): exact namespace grants, bridge-first with web fallback
+		"kit.service", `kit.service("theme"`, `kit.service("clipboard"`,
+		`native.call("clipboard.writeText"`, "navigator.clipboard",
+		`kit.service("camera"`, `native.call("camera.capture"`, "readAsDataURL",
+		`kit.service("navigation"`, `kit.service("window"`, `kit.service("capabilities"`,
 		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
 		`selector("bind")`,
 		// an api element is still a core SCOPE boundary (the fetch that fills it is now the capability)
@@ -257,8 +259,8 @@ func TestRuntimeCompositionOrder(t *testing.T) {
 		"Kitwork native bridge adapter",
 		"Kitwork hydrate kernel",
 		"Native-only capabilities",
-		"Storage capability",
-		"Browser-backed capabilities",
+		"Origin-scoped storage service",
+		"Browser-backed platform services",
 		"Optional remote component loader",
 		"DOM morph module",
 		"Compatibility surface",

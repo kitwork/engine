@@ -114,7 +114,8 @@ global.history = { back: function () {}, forward: function () {} };
 global.location = { reload: function () {} };
 global.MutationObserver = function () { this.observe = function () {}; this.disconnect = function () {}; };
 global.CustomEvent = function () {};
-window.document = document; window.history = history;
+window.document = document; window.navigator = navigator; window.localStorage = localStorage;
+window.history = history; window.location = location;
 `
 
 	// The corpus is injected verbatim so the client reads exactly the bytes the Go side read.

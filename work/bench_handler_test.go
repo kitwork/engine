@@ -120,6 +120,33 @@ router.get((ctx) => ctx.view({
 			},
 		},
 		{
+			name:                 "prepared-ssr",
+			maxAllocations:       110,
+			maxEngineAllocations: 100,
+			router: `
+import { router } from "kitwork";
+
+router.get((ctx) => ctx.view({
+	title: "Generation-prepared SSR",
+	count: 3,
+	ready: true
+}));
+`,
+			files: map[string]string{
+				"index.kitwork.html": `<html data-kit-hydrate="v1"><head><title>{{ title }}</title></head><body class="min-h-dvh bg-white text-zinc-900 dark:bg-zinc-950 dark:text-white">{{ @page }}</body></html>`,
+				"page.kitwork.html": `<main class="mx-auto flex max-w-5xl gap-6 p-6">
+	<section class="card flex-1 border border-zinc-200 p-6 dark:border-zinc-800">
+		<i class="icon-rocket text-red-500"></i>
+		<h1 class="text-3xl font-bold">{{ title }}</h1>
+		<input type="number" data-kit-model="count" value="3">
+		<b data-kit-text="count &gt; 0 ? 'Ready' : 'Waiting'">Waiting</b>
+		<button class="button mt-4" data-kit-click="count = count + 1">Ship</button>
+	</section>
+	<aside class="w-72 border-l border-zinc-200 pl-6 dark:border-zinc-800">{{ ready }}</aside>
+</main>`,
+			},
+		},
+		{
 			name: "collection",
 			router: `
 import { router, collection } from "kitwork";

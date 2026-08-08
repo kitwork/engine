@@ -42,3 +42,22 @@ func TestJSStandalone(t *testing.T) {
 		t.Errorf("JS not minified: %q", out)
 	}
 }
+
+func TestTemplateHTMLPreservesKitworkTokens(t *testing.T) {
+	input := `<html>
+		<head><style>.x { color: red; }</style></head>
+		<body>{{ if visible }}<p>{{ message }}</p>{{ end }}</body>
+	</html>`
+	output, prepared := TemplateHTML(input)
+	if !prepared {
+		t.Fatal("default minifier declined parser-level template minification")
+	}
+	for _, token := range []string{"{{ if visible }}", "{{ message }}", "{{ end }}"} {
+		if !strings.Contains(output, token) {
+			t.Fatalf("template token %q was consumed: %q", token, output)
+		}
+	}
+	if strings.Contains(output, ".x { color: red; }") {
+		t.Fatalf("inline CSS was not prepared: %q", output)
+	}
+}

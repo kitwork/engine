@@ -47,7 +47,7 @@ func collectClasses(html string, seen map[string]bool, classes *[]string) {
 		}
 	}
 	for _, m := range dynamicClassRe.FindAllStringSubmatch(html, -1) {
-		names, err := hydrate.ClassLiterals(m[1])
+		names, err := hydrate.ClassLiteralsAttribute(m[1])
 		if err != nil {
 			// A malformed expression is already reported by the hydrate render pass, which names the
 			// attribute it came from. Reporting it again here would be noise.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/value"
@@ -24,6 +25,7 @@ type plannedRenderer struct {
 	base     *render.Render
 	page     *render.Render
 	notfound *render.Render
+	health   *RuntimeHealth
 }
 
 func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
@@ -73,6 +75,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			base:     baseRender,
 			page:     pageRender,
 			notfound: render.New(notfoundConfig).Prepare(),
+			health:   t.runtimeHealth,
 		}
 	}
 	return plan, nil
@@ -130,6 +133,18 @@ func (r *plannedRenderer) BindPage(page string, notfound bool, data value.Value)
 	if r == nil {
 		return value.New("")
 	}
+	if r.health == nil {
+		return r.bindPage(page, notfound, data)
+	}
+	started := time.Now()
+	output := r.bindPage(page, notfound, data)
+	prepared := page == "" && ((!notfound && r.page.PresentationPrepared()) ||
+		(notfound && r.notfound.PresentationPrepared()))
+	r.health.RecordRender(time.Since(started), prepared)
+	return output
+}
+
+func (r *plannedRenderer) bindPage(page string, notfound bool, data value.Value) value.Value {
 	if page == "" {
 		if notfound {
 			return r.notfound.Bind(data)

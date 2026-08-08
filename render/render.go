@@ -2,11 +2,9 @@ package render
 
 import (
 	"fmt"
-	"html"
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	jitcss "github.com/kitwork/engine/jit/css"
@@ -52,24 +50,26 @@ func New(c Config) *Render {
 }
 
 type Render struct {
-	base          string         // template root — the anchor every path resolves against
-	jitConfig     *jitcss.Config // JIT-CSS config; nil = defaults
-	directory     string
-	path          string // Thư mục gốc, ví dụ: /pages/home
-	page          string // Thư mục trang con, ví dụ: contact/profile
-	index         string // File shell chính, mặc định là index
-	layout        Layout
-	global        value.Value // Dữ liệu dùng chung cho mọi bản render
-	notfound      string
-	notfoundMode  bool     // render the notfound page for {{ @page }}
-	jitCSS        bool     // inject server-side Tailwind/utility CSS for the page's classes
-	minify        []string // content types to minify on the final HTML output
-	minifySet     bool     // whether minify was set explicitly (else default by environment)
-	defaultMinify bool     // minify default when not explicit (injected — replaces AllowLocal)
-	themeMode     string   // theme pre-paint mode (see Config.ThemeMode)
-	source        Source   // immutable generation snapshot; nil = live filesystem
-	program       *node
-	prepareError  string
+	base                 string         // template root — the anchor every path resolves against
+	jitConfig            *jitcss.Config // JIT-CSS config; nil = defaults
+	directory            string
+	path                 string // Thư mục gốc, ví dụ: /pages/home
+	page                 string // Thư mục trang con, ví dụ: contact/profile
+	index                string // File shell chính, mặc định là index
+	layout               Layout
+	global               value.Value // Dữ liệu dùng chung cho mọi bản render
+	notfound             string
+	notfoundMode         bool     // render the notfound page for {{ @page }}
+	jitCSS               bool     // inject server-side Tailwind/utility CSS for the page's classes
+	minify               []string // content types to minify on the final HTML output
+	minifySet            bool     // whether minify was set explicitly (else default by environment)
+	defaultMinify        bool     // minify default when not explicit (injected — replaces AllowLocal)
+	themeMode            string   // theme pre-paint mode (see Config.ThemeMode)
+	source               Source   // immutable generation snapshot; nil = live filesystem
+	program              *node
+	prepareError         string
+	presentationPrepared bool
+	minifyPrepared       bool
 }
 
 type Layout struct {
@@ -217,8 +217,10 @@ func (r *Render) tmpl(data any) string {
 	// Bắt đầu từ file Shell (index.html)
 	program := r.program
 	prepareError := r.prepareError
+	presentationPrepared := r.presentationPrepared
+	minifyPrepared := r.minifyPrepared
 	if program == nil && prepareError == "" {
-		program, prepareError = r.compileTemplate()
+		program, presentationPrepared, minifyPrepared, prepareError = r.compileTemplate(false)
 	}
 	if prepareError != "" {
 		return prepareError
@@ -250,7 +252,26 @@ func (r *Render) tmpl(data any) string {
 
 	// Parse và Eval một lần duy nhất cho toàn bộ cây mẫu
 	out := eval(program, data, scope)
+	if !presentationPrepared {
+		out = r.applyStaticPresentation(out)
+	}
 
+	// Hydrate pre-render evaluates request data, so it deliberately remains on
+	// the request path even when the static presentation was generation-prepared.
+	out = hydrate.PreRender(out)
+
+	if r.shouldMinify() {
+		if !minifyPrepared {
+			out = minifier.HTML(out)
+		}
+	}
+	return out
+}
+
+// applyStaticPresentation performs source-driven JIT work. Prepared renders run
+// it once while building the immutable generation; live or dynamic-attribute
+// renders retain the exact request-time behavior.
+func (r *Render) applyStaticPresentation(out string) string {
 	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
 	// cache theo tập class nên gần như miễn phí sau lần đầu.
@@ -299,7 +320,6 @@ func (r *Render) tmpl(data any) string {
 	// runs the SAME Go walker over data-kit-text/show to bake initial values into the HTML: no flash,
 	// correct with JS off, indexable. Both are marker-gated no-ops on ordinary pages.
 	out = hydrate.Render(out)
-	out = hydrate.PreRender(out)
 
 	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses
 	// (a `font-family: <Name>` value or a `font-<slug>` class) → inject preload links + ONE
@@ -317,29 +337,41 @@ func (r *Render) tmpl(data any) string {
 		out = theme.Render(out)
 	}
 
-	// 4. Minify (opt-in via .minify()): gọn HTML + CSS/JS nội tuyến (giữ nguyên
-	// pre/textarea/script). HTML minify tự lan vào <style>/<script> bên trong.
-	if r.shouldMinify() {
-		out = minifier.HTML(out)
-	}
 	return out
 }
 
 // assemble thực hiện quét template và nạp các thành phần thô một cách đệ quy
-func (r *Render) compileTemplate() (program *node, prepareError string) {
+func (r *Render) compileTemplate(preparePresentation bool) (
+	program *node,
+	presentationPrepared bool,
+	minifyPrepared bool,
+	prepareError string,
+) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			program = nil
+			presentationPrepared = false
+			minifyPrepared = false
 			prepareError = fmt.Sprintf("template parse error: %v", recovered)
 		}
 	}()
 	indexPath := r.getIndexPath()
 	shellRaw, err := r.readFile(indexPath)
 	if err != nil {
-		return nil, fmt.Sprintf("[Error reading index: %v]", indexPath)
+		return nil, false, false, fmt.Sprintf("[Error reading index: %v]", indexPath)
 	}
 	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
-	return parse(specializeTokens(fullTemplate)), ""
+	if preparePresentation && !hasDynamicPresentation(fullTemplate) {
+		fullTemplate = r.applyStaticPresentation(fullTemplate)
+		presentationPrepared = true
+		if r.shouldMinify() {
+			if minified, ok := minifier.TemplateHTML(fullTemplate); ok {
+				fullTemplate = minified
+				minifyPrepared = true
+			}
+		}
+	}
+	return parse(specializeTokens(fullTemplate)), presentationPrepared, minifyPrepared, ""
 }
 
 // Prepare assembles and parses this render path once. The returned Render is
@@ -349,8 +381,65 @@ func (r *Render) Prepare() *Render {
 		return nil
 	}
 	prepared := *r
-	prepared.program, prepared.prepareError = prepared.compileTemplate()
+	prepared.program, prepared.presentationPrepared, prepared.minifyPrepared, prepared.prepareError =
+		prepared.compileTemplate(true)
 	return &prepared
+}
+
+// PresentationPrepared reports whether source-driven presentation work was
+// frozen into this immutable render generation.
+func (r *Render) PresentationPrepared() bool {
+	return r != nil && r.presentationPrepared
+}
+
+// hasDynamicPresentation catches server template expressions that can change
+// authored attributes or style declarations. Those renders keep the legacy
+// request-time scan so a data-driven class/font/action is never omitted.
+func hasDynamicPresentation(template string) bool {
+	for offset := 0; offset < len(template); {
+		relative := strings.Index(template[offset:], "{{")
+		if relative < 0 {
+			return false
+		}
+		index := offset + relative
+		before := template[:index]
+		open := strings.LastIndex(before, "<")
+		if open > strings.LastIndex(before, ">") {
+			segment := strings.TrimSpace(before[open+1:])
+			equal := strings.LastIndex(segment, "=")
+			if equal < 0 {
+				return true
+			}
+			nameEnd := equal
+			for nameEnd > 0 && (segment[nameEnd-1] == ' ' || segment[nameEnd-1] == '\t' ||
+				segment[nameEnd-1] == '\r' || segment[nameEnd-1] == '\n') {
+				nameEnd--
+			}
+			nameStart := nameEnd
+			for nameStart > 0 && isAttributeNameByte(segment[nameStart-1]) {
+				nameStart--
+			}
+			name := strings.ToLower(segment[nameStart:nameEnd])
+			if name == "class" || name == "style" ||
+				strings.HasPrefix(name, "data-kit-") ||
+				strings.HasPrefix(name, "data-kitwork-") {
+				return true
+			}
+		}
+		lower := strings.ToLower(before)
+		if strings.LastIndex(lower, "<style") > strings.LastIndex(lower, "</style>") {
+			return true
+		}
+		offset = index + 2
+	}
+	return false
+}
+
+func isAttributeNameByte(char byte) bool {
+	return char >= 'a' && char <= 'z' ||
+		char >= 'A' && char <= 'Z' ||
+		char >= '0' && char <= '9' ||
+		char == '-' || char == '_' || char == ':'
 }
 
 // PreparationError reports assembly or parse failure captured by Prepare.
@@ -565,10 +654,14 @@ func (r *Render) BindPage(page string, notfoundMode bool, data value.Value) valu
 		rc.page = page
 		rc.program = nil
 		rc.prepareError = ""
+		rc.presentationPrepared = false
+		rc.minifyPrepared = false
 	}
 	if notfoundMode != rc.notfoundMode {
 		rc.program = nil
 		rc.prepareError = ""
+		rc.presentationPrepared = false
+		rc.minifyPrepared = false
 	}
 	rc.notfoundMode = notfoundMode
 	return rc.Bind(data)
@@ -632,8 +725,8 @@ func engineRenderWithSource(tmpl string, data any, viewDir string, globalDir str
 	return eval(node, data, initialScope)
 }
 
-func readScopedTemplate(scope map[string]value.Value, filename string) ([]byte, error) {
-	if sourceValue, ok := scope["__template_source"]; ok {
+func readScopedTemplate(scope *renderScope, filename string) ([]byte, error) {
+	if sourceValue, ok := scope.get("__template_source"); ok {
 		if source, valid := sourceValue.V.(Source); valid && source != nil {
 			return source.ReadFile(filename)
 		}
@@ -657,11 +750,25 @@ type node struct {
 	typ         nodeType
 	val         string   // Variable name or Condition
 	args        []string // Arguments for comparison
-	keyVar      string   // "i" in range i, v := list
-	valVar      string   // "v" in range i, v := list
+	expr        *expression
+	condition   ifCondition
+	raw         bool
+	keyVar      string // "i" in range i, v := list
+	valVar      string // "v" in range i, v := list
 	children    []*node
 	alt         []*node // Else block
 	parsingElse bool    // Parsing state
+	staticBytes int
+}
+
+type ifCondition struct {
+	modulo       bool
+	moduloBy     int
+	moduloTarget int
+	operator     string
+	targetRaw    string
+	targetNumber float64
+	targetIsNum  bool
 }
 
 func specializeTokens(tmpl string) []string {
@@ -732,9 +839,10 @@ func parse(tokens []string) *node {
 
 			switch cmd {
 			case "if":
-				n := &node{typ: nodeIf, val: parts[1]}
+				n := &node{typ: nodeIf, val: parts[1], expr: compileExpression(parts[1])}
 				if len(parts) > 2 {
 					n.args = parts[2:]
+					n.condition = compileIfCondition(n.args)
 				}
 				addChild(current, n)
 				stack = append(stack, n)
@@ -759,12 +867,18 @@ func parse(tokens []string) *node {
 				} else {
 					n.val = parts[1]
 				}
+				n.expr = compileExpression(n.val)
 				addChild(current, n)
 				stack = append(stack, n)
 
 			case "let":
 				if len(parts) >= 4 && parts[2] == "=" {
-					n := &node{typ: nodeLet, keyVar: parts[1], val: parts[3]}
+					n := &node{
+						typ:    nodeLet,
+						keyVar: parts[1],
+						val:    parts[3],
+						expr:   compileExpression(parts[3]),
+					}
 					addChild(current, n)
 				}
 
@@ -785,7 +899,8 @@ func parse(tokens []string) *node {
 				}
 
 			default:
-				n := &node{typ: nodeVar, val: content}
+				expr, raw := compileOutputExpression(content)
+				n := &node{typ: nodeVar, val: content, expr: expr, raw: raw}
 				addChild(current, n)
 			}
 		} else {
@@ -793,7 +908,53 @@ func parse(tokens []string) *node {
 			addChild(current, n)
 		}
 	}
+	root.staticBytes = countStaticBytes(root)
 	return root
+}
+
+func compileIfCondition(args []string) ifCondition {
+	if len(args) >= 4 && args[0] == "%" {
+		var moduloBy float64
+		var moduloTarget float64
+		_, _ = fmt.Sscanf(args[1], "%f", &moduloBy)
+		_, _ = fmt.Sscanf(args[3], "%f", &moduloTarget)
+		return ifCondition{
+			modulo:       true,
+			moduloBy:     int(moduloBy),
+			moduloTarget: int(moduloTarget),
+			operator:     args[2],
+		}
+	}
+	if len(args) < 2 {
+		return ifCondition{}
+	}
+
+	targetRaw := strings.Trim(args[1], `"'`)
+	var targetNumber float64
+	parsed, _ := fmt.Sscanf(targetRaw, "%f", &targetNumber)
+	return ifCondition{
+		operator:     args[0],
+		targetRaw:    targetRaw,
+		targetNumber: targetNumber,
+		targetIsNum:  parsed == 1,
+	}
+}
+
+func countStaticBytes(n *node) int {
+	if n == nil {
+		return 0
+	}
+	if n.typ == nodeText {
+		return len(n.val)
+	}
+	total := 0
+	for _, child := range n.children {
+		total += countStaticBytes(child)
+	}
+	for _, child := range n.alt {
+		total += countStaticBytes(child)
+	}
+	return total
 }
 
 func addChild(parent, child *node) {
@@ -814,128 +975,132 @@ func indexOf(parts []string, target string) int {
 }
 
 func eval(n *node, data any, scope map[string]value.Value) (out string) {
+	var sb strings.Builder
+	if n != nil {
+		sb.Grow(n.staticBytes)
+	}
+	rootScope := renderScope{values: scope}
+	current := value.New(data)
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("[Render Panic] %v\n", r)
 			out = ""
 		}
 	}()
+	evalInto(n, current, &rootScope, &sb)
+	return sb.String()
+}
 
-	var sb strings.Builder
-
+func evalInto(
+	n *node,
+	data value.Value,
+	scope *renderScope,
+	output *strings.Builder,
+) {
+	if n == nil {
+		return
+	}
 	switch n.typ {
 	case nodeRoot:
-		return renderChildren(n.children, data, scope)
+		renderChildrenInto(n.children, data, scope, output)
 
 	case nodeText:
-		return n.val
+		output.WriteString(n.val)
 
 	case nodeVar:
-		return resolveVar(n.val, data, scope)
+		writeResolvedValue(output, resolveExpression(n.expr, data, scope), !n.raw)
 
 	case nodeIf:
-		var truthy bool
-		var val value.Value
+		val := resolveExpression(n.expr, data, scope)
+		truthy := val.Truthy()
+		condition := n.condition
 
-		if len(n.args) >= 4 && n.args[0] == "%" {
-			val = resolveValue(n.val, data, scope)
+		if condition.modulo {
+			truthy = false
 			if val.IsNumeric() {
-				var modBy float64
-				var target float64
-				fmt.Sscanf(n.args[1], "%f", &modBy)
-				fmt.Sscanf(n.args[3], "%f", &target)
-				op := n.args[2]
-				if modBy != 0 {
+				if condition.moduloBy != 0 {
 					current := int(val.Float())
-					rem := current % int(modBy)
-					switch op {
+					remainder := current % condition.moduloBy
+					switch condition.operator {
 					case "==":
-						truthy = (rem == int(target))
+						truthy = remainder == condition.moduloTarget
 					case "!=":
-						truthy = (rem != int(target))
+						truthy = remainder != condition.moduloTarget
 					}
 				}
 			}
-		} else {
-			val = resolveValue(n.val, data, scope)
-			truthy = val.Truthy()
-			if len(n.args) >= 2 {
-				op := n.args[0]
-				targetRaw := strings.Trim(n.args[1], `"'`)
-				if val.IsNumeric() {
-					var targetNum float64
-					if _, err := fmt.Sscanf(targetRaw, "%f", &targetNum); err == nil {
-						currentNum := val.Float()
-						switch op {
-						case "==":
-							truthy = (currentNum == targetNum)
-						case "!=":
-							truthy = (currentNum != targetNum)
-						case ">":
-							truthy = (currentNum > targetNum)
-						case "<":
-							truthy = (currentNum < targetNum)
-						case ">=":
-							truthy = (currentNum >= targetNum)
-						case "<=":
-							truthy = (currentNum <= targetNum)
-						}
-					}
-				} else {
-					strVal := val.String()
-					switch op {
+		} else if condition.operator != "" {
+			if val.IsNumeric() {
+				if condition.targetIsNum {
+					current := val.Float()
+					switch condition.operator {
 					case "==":
-						truthy = (strVal == targetRaw)
+						truthy = current == condition.targetNumber
 					case "!=":
-						truthy = (strVal != targetRaw)
+						truthy = current != condition.targetNumber
+					case ">":
+						truthy = current > condition.targetNumber
+					case "<":
+						truthy = current < condition.targetNumber
+					case ">=":
+						truthy = current >= condition.targetNumber
+					case "<=":
+						truthy = current <= condition.targetNumber
 					}
+				}
+			} else {
+				switch condition.operator {
+				case "==":
+					truthy = val.String() == condition.targetRaw
+				case "!=":
+					truthy = val.String() != condition.targetRaw
 				}
 			}
 		}
 
 		if truthy {
-			sb.WriteString(renderChildren(n.children, data, scope))
+			renderChildrenInto(n.children, data, scope, output)
 		} else {
-			sb.WriteString(renderChildren(n.alt, data, scope))
+			renderChildrenInto(n.alt, data, scope, output)
 		}
 
 	case nodeRange:
-		val := resolveValue(n.val, data, scope)
+		val := resolveExpression(n.expr, data, scope)
 		if val.IsArray() {
 			arr := val.Array()
+			newScope := renderScope{parent: scope}
 			for i, item := range arr {
-				newScope := copyMap(scope)
+				newScope.reset(scope)
 				if n.keyVar != "" {
-					newScope[n.keyVar] = value.New(i)
+					newScope.bind(n.keyVar, value.New(i))
 				}
 				if n.valVar != "" {
-					newScope[n.valVar] = item
+					newScope.bind(n.valVar, item)
 				}
-				sb.WriteString(renderChildren(n.children, item, newScope))
+				renderChildrenInto(n.children, item, &newScope, output)
 			}
 		} else if val.IsMap() {
 			m := val.Map()
+			newScope := renderScope{parent: scope}
 			for k, v := range m {
-				newScope := copyMap(scope)
+				newScope.reset(scope)
 				if n.keyVar != "" {
-					newScope[n.keyVar] = value.New(k)
+					newScope.bind(n.keyVar, value.New(k))
 				}
 				if n.valVar != "" {
-					newScope[n.valVar] = v
+					newScope.bind(n.valVar, v)
 				}
-				sb.WriteString(renderChildren(n.children, v, newScope))
+				renderChildrenInto(n.children, v, &newScope, output)
 			}
 		}
 
 	case nodeLet:
-		val := resolveValue(n.val, data, scope)
-		if scope != nil {
-			scope[n.keyVar] = val
-		}
+		val := resolveExpression(n.expr, data, scope)
+		scope.set(n.keyVar, val)
 
 	case nodePartial:
 		viewDir := ""
-		if v, ok := scope["__view_dir"]; ok {
+		if v, ok := scope.get("__view_dir"); ok {
 			viewDir = v.String()
 		}
 		fname := n.val
@@ -944,15 +1109,16 @@ func eval(n *node, data any, scope map[string]value.Value) (out string) {
 		}
 
 		// Thử tìm trong __layouts map trước (ưu tiên Fluent Layouts)
-		if lMapVal, ok := scope["__layouts"]; ok && lMapVal.IsMap() {
+		if lMapVal, ok := scope.get("__layouts"); ok && lMapVal.IsMap() {
 			if pathVal, ok := lMapVal.Map()[fname]; ok {
 				content, err := readScopedTemplate(scope, pathVal.String())
 				if err == nil {
 					tokens := specializeTokens(string(content))
 					prog := parse(tokens)
-					newScope := copyMap(scope)
-					newScope["__view_dir"] = value.New(filepath.Dir(pathVal.String()))
-					return eval(prog, data, newScope)
+					newScope := renderScope{parent: scope}
+					newScope.bind("__view_dir", value.New(filepath.Dir(pathVal.String())))
+					evalInto(prog, data, &newScope, output)
+					return
 				}
 			}
 			// Thử tìm theo tên không đuôi
@@ -962,9 +1128,10 @@ func eval(n *node, data any, scope map[string]value.Value) (out string) {
 				if err == nil {
 					tokens := specializeTokens(string(content))
 					prog := parse(tokens)
-					newScope := copyMap(scope)
-					newScope["__view_dir"] = value.New(filepath.Dir(pathVal.String()))
-					return eval(prog, data, newScope)
+					newScope := renderScope{parent: scope}
+					newScope.bind("__view_dir", value.New(filepath.Dir(pathVal.String())))
+					evalInto(prog, data, &newScope, output)
+					return
 				}
 			}
 		}
@@ -972,55 +1139,99 @@ func eval(n *node, data any, scope map[string]value.Value) (out string) {
 		fullPath := filepath.Join(viewDir, fname)
 		content, err := readScopedTemplate(scope, fullPath)
 		if err != nil {
-			if globalVal, ok := scope["__global_view_dir"]; ok {
+			if globalVal, ok := scope.get("__global_view_dir"); ok {
 				fallbackDir := globalVal.String()
 				fullPath = filepath.Join(fallbackDir, fname)
 				content, err = readScopedTemplate(scope, fullPath)
 			}
 			if err != nil {
-				return fmt.Sprintf("[Error: %v]", err)
+				output.WriteString(fmt.Sprintf("[Error: %v]", err))
+				return
 			}
 		}
 
 		tokens := specializeTokens(string(content))
 		prog := parse(tokens)
-		newScope := copyMap(scope)
-		newScope["__view_dir"] = value.New(filepath.Dir(fullPath))
+		newScope := renderScope{parent: scope}
+		newScope.bind("__view_dir", value.New(filepath.Dir(fullPath)))
 
-		return eval(prog, data, newScope)
+		evalInto(prog, data, &newScope, output)
 	}
-	return sb.String()
 }
 
-func renderChildren(nodes []*node, data any, scope map[string]value.Value) string {
-	var sb strings.Builder
+func writeResolvedValue(output *strings.Builder, resolved value.Value, escape bool) {
+	if text, ok := resolved.V.(string); ok {
+		if escape {
+			writeEscapedString(output, text)
+		} else {
+			output.WriteString(text)
+		}
+		return
+	}
+
+	var local [128]byte
+	rendered := resolved.Append(local[:0])
+	if escape {
+		writeEscapedBytes(output, rendered)
+	} else {
+		_, _ = output.Write(rendered)
+	}
+}
+
+func writeEscapedString(output *strings.Builder, source string) {
+	start := 0
+	for index := 0; index < len(source); index++ {
+		replacement := htmlReplacement(source[index])
+		if replacement == "" {
+			continue
+		}
+		output.WriteString(source[start:index])
+		output.WriteString(replacement)
+		start = index + 1
+	}
+	output.WriteString(source[start:])
+}
+
+func writeEscapedBytes(output *strings.Builder, source []byte) {
+	start := 0
+	for index := 0; index < len(source); index++ {
+		replacement := htmlReplacement(source[index])
+		if replacement == "" {
+			continue
+		}
+		_, _ = output.Write(source[start:index])
+		output.WriteString(replacement)
+		start = index + 1
+	}
+	_, _ = output.Write(source[start:])
+}
+
+func htmlReplacement(character byte) string {
+	switch character {
+	case '&':
+		return "&amp;"
+	case '\'':
+		return "&#39;"
+	case '<':
+		return "&lt;"
+	case '>':
+		return "&gt;"
+	case '"':
+		return "&#34;"
+	default:
+		return ""
+	}
+}
+
+func renderChildrenInto(
+	nodes []*node,
+	data value.Value,
+	scope *renderScope,
+	output *strings.Builder,
+) {
 	for _, n := range nodes {
-		sb.WriteString(eval(n, data, scope))
+		evalInto(n, data, scope, output)
 	}
-	return sb.String()
-}
-
-func copyMap(src map[string]value.Value) map[string]value.Value {
-	dst := make(map[string]value.Value)
-	for k, v := range src {
-		dst[k] = v
-	}
-	return dst
-}
-
-func resolveVar(rawKey string, data any, scope map[string]value.Value) string {
-	if strings.HasPrefix(rawKey, "raw(") && strings.HasSuffix(rawKey, ")") {
-		innerKey := rawKey[4 : len(rawKey)-1]
-		val := resolveValue(innerKey, data, scope)
-		return val.String()
-	}
-
-	if rawKey == "$" || strings.HasPrefix(rawKey, "$.") {
-		return html.EscapeString(resolveValue(rawKey, data, scope).String())
-	}
-
-	val := resolveValue(rawKey, data, scope)
-	return html.EscapeString(val.String())
 }
 
 func findSplitIndex(s string, checkFn func(int) bool, last bool) int {
@@ -1063,131 +1274,6 @@ func findSplitIndex(s string, checkFn func(int) bool, last bool) int {
 		}
 	}
 	return matchedIdx
-}
-
-func resolveValue(path string, data any, scope map[string]value.Value) value.Value {
-	path = strings.TrimSpace(path)
-	if (strings.HasPrefix(path, `"`) && strings.HasSuffix(path, `"`)) ||
-		(strings.HasPrefix(path, `'`) && strings.HasSuffix(path, `'`)) {
-		return value.New(path[1 : len(path)-1])
-	}
-	if val, err := strconv.ParseFloat(path, 64); err == nil {
-		return value.New(val)
-	}
-
-	// 1. Ternary (cond ? true : false)
-	qIdx := findSplitIndex(path, func(i int) bool { return path[i] == '?' }, false)
-	if qIdx > -1 && (qIdx+1 >= len(path) || path[qIdx+1] != '?') {
-		remainder := path[qIdx+1:]
-		cIdxRel := findSplitIndex(remainder, func(i int) bool { return remainder[i] == ':' }, false)
-		if cIdxRel > -1 {
-			cIdx := qIdx + 1 + cIdxRel
-			cond := resolveValue(path[:qIdx], data, scope)
-			if cond.Truthy() {
-				return resolveValue(path[qIdx+1:cIdx], data, scope)
-			}
-			return resolveValue(path[cIdx+1:], data, scope)
-		}
-	}
-
-	// 2. Logic & Null Coalescing
-	if idx := findSplitIndex(path, func(i int) bool {
-		return path[i] == '?' && i+1 < len(path) && path[i+1] == '?'
-	}, false); idx > -1 {
-		left := resolveValue(path[:idx], data, scope)
-		if left.IsBlank() {
-			return resolveValue(path[idx+2:], data, scope)
-		}
-		return left
-	}
-
-	if idx := findSplitIndex(path, func(i int) bool {
-		return path[i] == '|' && i+1 < len(path) && path[i+1] == '|'
-	}, false); idx > -1 {
-		left := resolveValue(path[:idx], data, scope)
-		if !left.Truthy() {
-			return resolveValue(path[idx+2:], data, scope)
-		}
-		return left
-	}
-
-	if idx := findSplitIndex(path, func(i int) bool {
-		return path[i] == '&' && i+1 < len(path) && path[i+1] == '&'
-	}, false); idx > -1 {
-		left := resolveValue(path[:idx], data, scope)
-		if left.Truthy() {
-			return resolveValue(path[idx+2:], data, scope)
-		}
-		return left
-	}
-
-	// 3. Comparisons & Basic Arithmetic
-	ops := []string{"==", "!=", ">=", "<=", ">", "<", "+", "-", "*", "/", "%"}
-	for _, op := range ops {
-		if idx := findSplitIndex(path, func(i int) bool {
-			return strings.HasPrefix(path[i:], op)
-		}, true); idx > 0 {
-			left := resolveValue(path[:idx], data, scope)
-			right := resolveValue(path[idx+len(op):], data, scope)
-			switch op {
-			case "==":
-				return value.New(left.Equal(right))
-			case "!=":
-				return value.New(!left.Equal(right))
-			case ">=":
-				return value.New(left.GreaterEqual(right))
-			case "<=":
-				return value.New(left.LessEqual(right))
-			case ">":
-				return value.New(left.Greater(right))
-			case "<":
-				return value.New(left.Less(right))
-			case "+":
-				return left.Add(right)
-			case "-":
-				return left.Sub(right)
-			case "*":
-				return left.Mul(right)
-			case "/":
-				return left.Div(right)
-			case "%":
-				return left.Mod(right)
-			}
-		}
-	}
-
-	// 4. variable lookup
-	var current value.Value
-	if v, ok := data.(value.Value); ok {
-		current = v
-	} else {
-		current = value.New(data)
-	}
-
-	if path == "." {
-		return current
-	}
-	if strings.HasPrefix(path, ".") {
-		return traverse(current, strings.Split(strings.TrimPrefix(path, "."), "."))
-	}
-
-	parts := strings.Split(path, ".")
-	if val, ok := scope[parts[0]]; ok {
-		if len(parts) > 1 {
-			return traverse(val, parts[1:])
-		}
-		return val
-	}
-
-	res := traverse(current, parts)
-	if !res.IsNil() {
-		return res
-	}
-	if strings.HasPrefix(parts[0], "$") {
-		parts[0] = strings.TrimPrefix(parts[0], "$")
-		return traverse(current, parts)
-	}
-	return res
 }
 
 func traverse(current value.Value, parts []string) value.Value {

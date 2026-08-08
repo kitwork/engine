@@ -280,6 +280,7 @@ func Truthy(v any) bool { return truthy(v) }
 func blockedKey(name string) bool {
 	switch name {
 	case "constructor", "__proto__", "prototype",
+		"__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
 		"ownerDocument", "defaultView", "contentWindow",
 		"window", "parent", "top", "self", "globalThis":
 		return true

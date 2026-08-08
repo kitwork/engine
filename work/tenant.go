@@ -22,6 +22,7 @@ import (
 	httphelper "github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/utilities/persist"
 	"github.com/kitwork/engine/utilities/ratelimit"
+	"github.com/kitwork/engine/utilities/safepath"
 	"github.com/kitwork/engine/value"
 )
 
@@ -64,6 +65,8 @@ type Tenant struct {
 	vm            *runtime.VM
 	runtimeHealth *RuntimeHealth
 	MaxEnergy     uint64
+	appBoundary   *safepath.Boundary
+	siteBoundary  *safepath.Boundary
 
 	requestMu      sync.Mutex
 	requestWG      sync.WaitGroup
@@ -332,6 +335,9 @@ func (t *Tenant) Run() error {
 	t.bytecode = &compiler.Bytecode{Program: runtime.EmptyProgram()}
 	t.vm = runtime.New(t.bytecode.Program)
 	t.vm.MaxEnergy = t.MaxEnergy
+	if err := t.preparePathBoundaries(); err != nil {
+		return fmt.Errorf("prepare filesystem boundaries: %w", err)
+	}
 
 	envFile := t.resolve(".env")
 	environment := NewEnv(ParseDotEnv(envFile))
@@ -636,9 +642,13 @@ func (t *Tenant) recordVMExecution(
 	program *runtime.Program,
 	vm *runtime.VM,
 	result value.Value,
+	elapsed ...time.Duration,
 ) {
 	if t != nil && t.runtimeHealth != nil && vm != nil {
 		t.runtimeHealth.Record(program, vm.Stats(), result)
+		if len(elapsed) > 0 {
+			t.runtimeHealth.RecordVMLatency(elapsed[0])
+		}
 	}
 }
 
@@ -664,8 +674,9 @@ func (t *Tenant) CompileDynamicRoute(filePath string) error {
 	vm.FastResetPrepared(bytecode.Program)
 	vm.MaxEnergy = t.MaxEnergy
 
+	started := time.Now()
 	res := vm.Run()
-	t.recordVMExecution(bytecode.Program, vm, res)
+	t.recordVMExecution(bytecode.Program, vm, res, time.Since(started))
 	if res.K == value.Invalid {
 		return fmt.Errorf("dynamic runtime error: %v", res.V)
 	}

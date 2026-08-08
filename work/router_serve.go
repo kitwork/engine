@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/kitwork/engine/compiler"
 	requestscope "github.com/kitwork/engine/request"
@@ -200,10 +201,16 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 
 	// Response cache (.cache RAM / .persist disk) — serve a hit with no VM, no render.
 	if body, ct, status, headers, ok := t.cachedResponse(method, savKey); ok {
+		if t.runtimeHealth != nil {
+			t.runtimeHealth.RecordResponseCache(true)
+		}
 		serveCached(w, r, body, ct, status, headers)
 		return
 	}
 	if method.cacheExpiry != nil || method.persistExpiry != nil {
+		if t.runtimeHealth != nil {
+			t.runtimeHealth.RecordResponseCache(false)
+		}
 		savMethod = method // finalize will save the fresh response
 	}
 
@@ -324,8 +331,9 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 		return value.Value{K: value.Nil}
 	}
 	vm.FastResetPrepared(bc.Program)
+	started := time.Now()
 	result := vm.ExecuteLambda(l, ctxObj.arguments(l))
-	t.recordVMExecution(bc.Program, vm, result)
+	t.recordVMExecution(bc.Program, vm, result, time.Since(started))
 	return result
 }
 
@@ -423,11 +431,13 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 
 	base := t.resolve()
 	full := filepath.Join(base, filepath.FromSlash(diskClean))
-	if !t.insideSiteRoot(full) {
-		return false
-	}
 	info, err := os.Stat(full)
 	if err != nil || info.IsDir() {
+		return false
+	}
+	// Most dynamic routes map to a route directory or to no disk entry. Only pay
+	// for symlink-aware containment when there is a file we might actually serve.
+	if !t.insideSiteRoot(full) {
 		return false
 	}
 

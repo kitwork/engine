@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en" data-kit-app="main">
+<head>
+  <meta charset="utf-8">
+  <title>Kitwork 1.0 — Accessible Tabs Component Example</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #111827; color: #f9fafb; padding: 2rem; max-width: 600px; margin: 0 auto; }
+    .card { background: #1f2937; border: 1px solid #374151; border-radius: 0.75rem; overflow: hidden; }
+    .tab-list { display: flex; background: #111827; border-bottom: 1px solid #374151; }
+    .tab-btn { flex: 1; background: transparent; color: #9ca3af; border: none; padding: 0.875rem 1rem; font-size: 0.95rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab-btn:hover { color: #f3f4f6; }
+    .tab-btn.active { color: #818cf8; border-bottom-color: #6366f1; background: #1f2937; }
+    .tab-content { padding: 1.5rem; line-height: 1.6; }
+    .badge { background: #312e81; color: #a5b4fc; padding: 0.2rem 0.5rem; border-radius: 0.25rem; font-size: 0.75rem; font-family: monospace; }
+  </style>
+</head>
+<body>
+
+  <h1>Kitwork 1.0 — Accessible Tabs</h1>
+
+  <div
+    data-kit-component="tabs-component"
+    data-kit-as="$tabs"
+    data-kit-scope="
+      activeTab: 'overview';
+    "
+    class="card">
+
+    <!-- Tab Buttons List -->
+    <div class="tab-list" role="tablist" aria-label="Component Documentation Tabs">
+
+      <button
+        class="tab-btn"
+        role="tab"
+        data-kit-class="active: activeTab === 'overview';"
+        data-kit-bind="
+          aria-selected: activeTab === 'overview';
+          aria-controls: 'tab-panel-overview';
+        "
+        data-kit-click="$component.select('overview')">
+        Overview
+      </button>
+
+      <button
+        class="tab-btn"
+        role="tab"
+        data-kit-class="active: activeTab === 'features';"
+        data-kit-bind="
+          aria-selected: activeTab === 'features';
+          aria-controls: 'tab-panel-features';
+        "
+        data-kit-click="$component.select('features')">
+        Features
+      </button>
+
+      <button
+        class="tab-btn"
+        role="tab"
+        data-kit-class="active: activeTab === 'code';"
+        data-kit-bind="
+          aria-selected: activeTab === 'code';
+          aria-controls: 'tab-panel-code';
+        "
+        data-kit-click="$component.select('code')">
+        Specification
+      </button>
+
+    </div>
+
+    <!-- Tab Panels controlled by data-kit-show -->
+    <div class="tab-content">
+
+      <!-- Panel 1: Overview -->
+      <div id="tab-panel-overview" role="tabpanel" data-kit-show="activeTab === 'overview'">
+        <h3>Kitwork 1.0 Core Engine</h3>
+        <p>A sovereign multi-tenant logic engine built on Go & JS. Static assets are served straight from disk (Zero-VM), while client reactivity is powered by a zero-eval Pratt parser runtime.</p>
+        <p>Active Tab State: <span class="badge" data-kit-text="activeTab">overview</span></p>
+      </div>
+
+      <!-- Panel 2: Features -->
+      <div id="tab-panel-features" role="tabpanel" data-kit-show="activeTab === 'features'">
+        <h3>Key Architectural Highlights</h3>
+        <ul>
+          <li>7 Formal Parser Modes</li>
+          <li>Zero-Eval Expression Walker (`new Function` & `eval` blocked)</li>
+          <li>Class Map Canonical Shorthand (`active: open;`)</li>
+          <li>Unified Attribute Binding (`data-kit-bind`)</li>
+        </ul>
+      </div>
+
+      <!-- Panel 3: Code -->
+      <div id="tab-panel-code" role="tabpanel" data-kit-show="activeTab === 'code'">
+        <h3>Normative Master Matrix</h3>
+        <p>Complies 100% with <strong>Architecture Draft 0.7 Implementation Baseline</strong> with 25/25 Conformance Tests Passed.</p>
+        <button
+          style="background: #4f46e5; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.375rem; cursor: pointer;"
+          data-kit-click="$tabs.select('overview')">
+          Back to Overview ($tabs.select('overview'))
+        </button>
+      </div>
+
+    </div>
+
+  </div>
+
+  <script src="../dist/kitwork-runtime.js"></script>
+  <script>
+    kit.component("tabs-component", {
+      select(tabId) {
+        this.activeTab = tabId;
+      }
+    });
+    kit.start();
+  </script>
+</body>
+</html>

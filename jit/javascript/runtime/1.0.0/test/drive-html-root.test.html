@@ -1,0 +1,90 @@
+<!doctype html>
+<html data-kit-app="main" data-kit-drive data-kit-scope="draft: 'initial';">
+<head>
+  <meta charset="utf-8">
+  <base href="https://kitwork.test/">
+  <title>HTML Root One</title>
+  <meta name="description" content="html one">
+  <script>
+    window.KITWORK_RUNTIME_OPTIONS = { autoStart: false, development: true };
+    const incoming = `<!doctype html>
+<html data-kit-app="main" data-kit-drive data-kit-scope="draft: 'server-new';">
+<head><meta charset="utf-8"><title>HTML Root Two</title><meta name="description" content="html two"></head>
+<body>
+  <h1 id="htmlHeading">HTML Root Two</h1>
+  <input id="htmlDraft" value="server-new" data-kit-model="draft">
+  <span id="htmlDraftText" data-kit-text="draft"></span>
+  <div id="htmlPersist" data-kit-persist="html-persist">server</div>
+  <pre id="results">pending</pre>
+  <script>window.__htmlRootScript = (window.__htmlRootScript || 0) + 1;<\/script>
+</body>
+</html>`;
+    window.fetch = function () {
+      return Promise.resolve(new Response(incoming, { status: 200, headers: { "content-type": "text/html" } }));
+    };
+    history.pushState = function () {};
+    history.replaceState = function () {};
+  </script>
+  <script src="../dist/kitwork-runtime.js"></script>
+</head>
+<body>
+  <h1 id="htmlHeading">HTML Root One</h1>
+  <input id="htmlDraft" value="initial" data-kit-model="draft">
+  <span id="htmlDraftText" data-kit-text="draft"></span>
+  <div id="htmlPersist" data-kit-persist="html-persist">client</div>
+  <pre id="results">pending</pre>
+  <script>
+  (function () {
+    const results = [];
+    const output = document.getElementById("results");
+    function assert(name, condition, details) {
+      results.push({ name, passed: !!condition, details: details || "" });
+      if (!condition) console.error("FAIL", name, details || "");
+    }
+    function tick(ms) { return new Promise(resolve => setTimeout(resolve, ms == null ? 0 : ms)); }
+    function finish() {
+      const passed = results.filter(item => item.passed).length;
+      const failed = results.length - passed;
+      const nextOutput = document.getElementById("results") || output;
+      nextOutput.dataset.total = String(results.length);
+      nextOutput.dataset.passed = String(passed);
+      nextOutput.dataset.failed = String(failed);
+      nextOutput.textContent = JSON.stringify({ total: results.length, passed, failed, results }, null, 2);
+      document.documentElement.setAttribute("data-test-complete", "true");
+    }
+    kit.start();
+    (async function () {
+      await tick(20);
+      const root = document.documentElement;
+      const persist = document.getElementById("htmlPersist");
+      const draft = document.getElementById("htmlDraft");
+      draft.value = "client-html-draft";
+      draft.dispatchEvent(new Event("input", { bubbles: true }));
+      draft.focus();
+      draft.setSelectionRange(1, 5);
+      persist.textContent = "client-html-persist";
+      await tick();
+      await kit.drive.visit("/html-root-two", { app: root, fallback: false });
+      await tick(20);
+      const nextDraft = document.getElementById("htmlDraft");
+      assert("html app root identity preserved", document.documentElement === root);
+      assert("html root title reconciled", document.title === "HTML Root Two", document.title);
+      assert("html root head metadata reconciled", document.querySelector('meta[name="description"]').content === "html two");
+      assert("html root body morphed", document.getElementById("htmlHeading").textContent === "HTML Root Two");
+      assert("html root model state preserved", nextDraft.value === "client-html-draft", nextDraft.value);
+      assert("html root model renders", document.getElementById("htmlDraftText").textContent === "client-html-draft");
+      assert("html root persist identity", document.getElementById("htmlPersist") === persist);
+      assert("html root persist content", persist.textContent === "client-html-persist", persist.textContent);
+      assert("html root focus restored", document.activeElement === nextDraft);
+      assert("html root selection restored", nextDraft.selectionStart === 1 && nextDraft.selectionEnd === 5);
+      assert("html root inline script executes once", window.__htmlRootScript === 1, String(window.__htmlRootScript));
+      finish();
+    })().catch(error => {
+      output.dataset.failed = "1";
+      output.textContent = error.stack || String(error);
+      document.documentElement.setAttribute("data-test-complete", "true");
+    });
+  })();
+  </script>
+</body>
+</html>

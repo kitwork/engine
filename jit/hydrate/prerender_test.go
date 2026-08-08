@@ -94,3 +94,104 @@ func TestPreRenderMatchesEval(t *testing.T) {
 		t.Errorf("display mismatch: %q", display(v))
 	}
 }
+
+func TestPreRenderSkipsScopedCatalogCards(t *testing.T) {
+	in := marker +
+		`<section data-kit-scope="{ query: '', category: 'all' }">` +
+		`<article id="clipboard" data-kit-show="category == 'all'">Clipboard</article>` +
+		`</section>`
+
+	if out := PreRender(in); out != in {
+		t.Fatalf("a catalog card owned by an inline scope must stay untouched\nwant: %s\n got: %s", in, out)
+	}
+}
+
+func TestPreRenderSkipsEveryLocalBoundary(t *testing.T) {
+	cases := []string{
+		`data-kit-scope="{ open: true, label: 'local' }"`,
+		`data-kit-component="dropdown@v1.0.0"`,
+		`data-kit-api="/state.json"`,
+		`data-kit-for="item of items"`,
+	}
+	for _, boundary := range cases {
+		t.Run(boundary, func(t *testing.T) {
+			local := `<div ` + boundary + ` data-kit-show="open">` +
+				`<div><div><b data-kit-text="label">fallback</b></div></div>` +
+				`</div>`
+			in := marker + local
+			if out := PreRender(in); !strings.Contains(out, local) {
+				t.Fatalf("local boundary and its nested content must remain byte-for-byte\n got: %s", out)
+			}
+		})
+	}
+}
+
+func TestPreRenderStillRendersPageScopeSiblings(t *testing.T) {
+	in := marker +
+		`<input type="number" data-kit-model="qty" value="3">` +
+		`<b data-kit-text="qty * 2">fallback</b>` +
+		`<section data-kit-component="dropdown"><i data-kit-text="qty">local</i></section>` +
+		`<em data-kit-show="qty > 2">visible</em>`
+	out := PreRender(in)
+
+	if !strings.Contains(out, `<b data-kit-text="qty * 2">6</b>`) {
+		t.Fatalf("page-scope sibling was not pre-rendered\n got: %s", out)
+	}
+	if !strings.Contains(out, `<i data-kit-text="qty">local</i>`) {
+		t.Fatalf("component-local text was changed\n got: %s", out)
+	}
+	if strings.Contains(out, `<em data-kit-show="qty > 2" hidden>`) {
+		t.Fatalf("truthy page-scope show was hidden\n got: %s", out)
+	}
+}
+
+func TestPreRenderDoesNotSeedPageScopeFromLocalModel(t *testing.T) {
+	in := marker +
+		`<section data-kit-scope="local"><input data-kit-model="status" value="local"></section>` +
+		`<b data-kit-text="status ? status : 'page-default'">fallback</b>`
+	out := PreRender(in)
+	if !strings.Contains(out, `>page-default</b>`) {
+		t.Fatalf("a model inside a local boundary leaked into page scope\n got: %s", out)
+	}
+}
+
+func TestPreRenderTreatsRawTextAsOpaque(t *testing.T) {
+	script := `<script>var sample = '<b data-kit-text="1 + 1">x</b>';</script>`
+	in := marker + script + `<b data-kit-text="'right'">fallback</b>`
+	out := PreRender(in)
+	if !strings.Contains(out, script) {
+		t.Fatalf("script content containing tag-like text was rewritten\n got: %s", out)
+	}
+	if !strings.Contains(out, `<b data-kit-text="'right'">right</b>`) {
+		t.Fatalf("page text after raw-text content was not rendered\n got: %s", out)
+	}
+}
+
+func TestPreRenderShowBeforeBoundaryKeepsAdjustedRangeOpaque(t *testing.T) {
+	local := `<section data-kit-component="dropdown"><b data-kit-text="'local'">fallback</b></section>`
+	in := marker +
+		`<i data-kit-show="false">hidden</i>` +
+		`<i data-kit-show="false">also hidden</i>` +
+		local +
+		`<b data-kit-text="'page'">fallback</b>`
+	out := PreRender(in)
+
+	if strings.Count(out, " hidden>") != 2 {
+		t.Fatalf("both page-scope show bindings should be hidden\n got: %s", out)
+	}
+	if !strings.Contains(out, local) {
+		t.Fatalf("show insertions shifted and exposed a component boundary\n got: %s", out)
+	}
+	if !strings.Contains(out, `<b data-kit-text="'page'">page</b>`) {
+		t.Fatalf("page-scope text after the boundary was not rendered\n got: %s", out)
+	}
+}
+
+func TestPreRenderShowAndTextOnSameElement(t *testing.T) {
+	in := marker + `<span data-kit-show="false" data-kit-text="'ready'">fallback</span>`
+	out := PreRender(in)
+	want := `<span data-kit-show="false" data-kit-text="'ready'" hidden>ready</span>`
+	if !strings.Contains(out, want) {
+		t.Fatalf("show and text should compose on one element\nwant: %s\n got: %s", want, out)
+	}
+}

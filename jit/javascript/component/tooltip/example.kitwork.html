@@ -1,0 +1,22 @@
+<!-- ============================================================================ -->
+<!-- Kitwork Component Example: Headless Tooltip (Draft 0.5 Compliant)           -->
+<!-- Location: engine/jit/javascript/component/tooltip/example.kitwork.html       -->
+<!-- ============================================================================ -->
+
+<div data-kit-component="tooltip" class="relative inline-block">
+  <button data-kit-click="$component.show()"
+          data-kit-click:outside="$component.hide()"
+          data-kit-bind="
+              'aria-describedby': 'tooltip-bubble';
+          "
+          class="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-lg text-sm">
+    Rê chuột hoặc Bấm để xem chú thích
+  </button>
+
+  <div id="tooltip-bubble"
+       role="tooltip"
+       data-kit-show="visible"
+       class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 text-white text-xs rounded-md shadow-lg whitespace-nowrap z-50">
+    Chú thích trợ giúp ngắn gọn!
+  </div>
+</div>

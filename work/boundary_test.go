@@ -80,6 +80,13 @@ func TestContextFileServesOwnFile(t *testing.T) {
 	}
 }
 
+func TestTenantPreparesCanonicalPathBoundaries(t *testing.T) {
+	_, tenant := buildBoundaryFixture(t, boundaryFileRouter)
+	if tenant.siteBoundary == nil || tenant.appBoundary == nil {
+		t.Fatal("tenant did not prepare generation path boundaries")
+	}
+}
+
 // The boundary is the app IDENTITY, not the domain folder (STABILITY.md §1). Leaving the domain
 // folder to reach an identity-level share is legitimate and must keep working — this is what stops
 // the fix from being quietly over-restrictive.

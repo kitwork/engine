@@ -10,10 +10,10 @@ import "testing"
 //  2. true   → the branch MOUNTS and its bindings run (text bound from the component scope);
 //  3. live   → while mounted it re-binds on state change WITHOUT being rebuilt (node identity holds);
 //  4. false  → it UNMOUNTS: gone from the DOM, detached, and cleanupTree DISPOSES the subtree's
-//              effects (the registered cleanup fires — an SSE stream / listener a hidden node would
-//              have kept open is released);
+//     effects (the registered cleanup fires — an SSE stream / listener a hidden node would
+//     have kept open is released);
 //  5. true again → a FRESH node mounts (proving 4 was a real unmount, not a toggle), and it shows the
-//              LATEST state, because component state lives on the boundary and outlives the view.
+//     LATEST state, because component state lives on the boundary and outlives the view.
 //
 // If renderIf skipped cleanupTree, step 4's dispose count stays 0. If it toggled `hidden` like show
 // instead of removing, steps 1/4's element count never drops to 0. Either regression turns this red.
@@ -77,4 +77,20 @@ if (texts()[0].textContent !== "Renamed") throw new Error("reopen: state did not
 console.log("data-kit-if: mount/unmount + dispose OK (absent -> mount -> relabel -> unmount+dispose -> fresh remount)");
 `
 	runNodeDOMScript(t, "if.test.js", assertions)
+}
+
+func TestKitIfReadsEngineIRThroughTheDirectiveDecoder(t *testing.T) {
+	const assertions = `
+var branch = el("div", { "data-kitwork-if": '["#",false]' });
+branch.appendChild(el("span", { "data-ir-if-probe": "yes" }));
+document.body.appendChild(branch);
+
+window.kit.render();
+if (document.querySelectorAll("[data-ir-if-probe]").length !== 0) {
+  throw new Error("false engine IR was parsed as authored array source and mounted");
+}
+
+console.log("data-kitwork-if: engine IR decoded through directive()");
+`
+	runNodeDOMScript(t, "if-ir.test.js", assertions)
 }

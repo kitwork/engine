@@ -8,13 +8,14 @@
 // Drive: swapped-in markup just works, swapped-out markup leaks nothing.
 //
 // Each verb is one file in ./lib (copy.js, toggle.js, dismiss.js, tab.js, theme.js, dialog.js, …).
-// Drop a `lib/<name>.js` that calls `window.kitwork.components.action("<name>", fn)` and it is
+// Drop a `lib/<name>.js` that calls `window.kit.components.action("<name>", fn)` and it is
 // emitted only on pages that use `data-kit-action="<name>"`. Heavy widgets use the platform,
 // not JS: dropdown → popover, accordion → <details>, modal → <dialog> (the dialog verb only
 // opens/closes it).
 //
-// THE CORE IS hydrate.Runtime(): ordered modules behind one window.kitwork root, one behavior
-// registry and one delegated event system shared with expressions/model/validate/live.
+// THE CORE IS hydrate.Runtime(): ordered modules behind the canonical window.kit root
+// (window.kitwork remains a compatibility alias), one behavior registry and one delegated event
+// system shared with expressions/model/validate/live.
 // Render requests that core plus a typed, only-used action/component set from one cacheable URL.
 package js
 

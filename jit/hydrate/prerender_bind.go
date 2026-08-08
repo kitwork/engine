@@ -41,7 +41,7 @@ func PreRenderBind(htmlStr string, state map[string]map[string]any) string {
 		if cm == nil {
 			return tag
 		}
-		scope, ok := state[ComponentName(cm[1])]
+		scope, ok := state[ComponentName(authoredAttribute(cm[1]))]
 		if !ok || len(scope) == 0 {
 			return tag
 		}
@@ -49,7 +49,7 @@ func PreRenderBind(htmlStr string, state map[string]map[string]any) string {
 		if bm == nil {
 			return tag
 		}
-		node, err := Compile(bm[1])
+		node, err := compileAuthoredAttribute(bm[1])
 		if err != nil {
 			return tag // a broken expression is reported by Render, not fixed up here
 		}

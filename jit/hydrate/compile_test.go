@@ -68,15 +68,31 @@ func TestCompileErrors(t *testing.T) {
 	}
 }
 
-// $app capability calls (Native Bridge RFC v2) are ordinary member calls in the ONE grammar — the
-// server compiler must verify them like any expression (data-kit-click="$app.clipboard(bill_id)").
-func TestCompileAppCapabilities(t *testing.T) {
+// `kit` service calls and `$app` component calls are ordinary member expressions. Compilation proves
+// grammar validity; runtime capability availability remains a separate platform concern.
+func TestCompileKitServicesAndAppComponent(t *testing.T) {
 	for _, src := range []string{
-		"$app.toggleTheme()",
-		"$app.clipboard('npm i kitwork')",
-		"$app.clipboard(bill_id)",
-		"$app.camera('user_avatar')",
-		"$app.biometric('login_success')",
+		"kit.theme.toggle()",
+		"kit.theme.set('dark')",
+		"kit.theme.mode",
+		"kit.theme.resolved",
+		"kit.clipboard.writeText('npm i kitwork')",
+		"kit.clipboard.writeText(bill_id)",
+		"kit.clipboard.readText()",
+		"kit.clipboard.copy(bill_id)",
+		"kit.camera.capture()",
+		"kit.navigation.back()",
+		"kit.navigation.forward()",
+		"kit.navigation.reload()",
+		"kit.window.minimize()",
+		"kit.window.maximize()",
+		"kit.window.restore()",
+		"kit.window.close()",
+		"kit.capabilities.supports('camera.capture')",
+		"kit.storage.get('theme')",
+		"kit.dialog.confirm({ message: 'Continue?' })",
+		"kit.share.open({ title: 'Kitwork' })",
+		"$app.captureAvatar()",
 		"{ src: avatar, alt: name, disabled: n > 3 }",
 	} {
 		if _, err := Compile(src); err != nil {

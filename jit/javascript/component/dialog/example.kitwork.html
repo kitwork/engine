@@ -1,0 +1,55 @@
+<!-- ============================================================================ -->
+<!-- Kitwork Component Example: Dialog / Modal (Draft 0.4 Compliant)              -->
+<!-- Location: engine/jit/javascript/component/dialog/example.kitwork.html     -->
+<!-- ============================================================================ -->
+
+<!-- 1. Giao diện Modal Hộp thoại TailwindCSS -->
+<div data-kit-component="dialog"
+     data-kit-as="$dialogModal"
+     data-kit-show="!hidden"
+     class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm transition-opacity">
+  
+  <div class="w-full max-w-md p-6 bg-white dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700">
+    <!-- Tiêu đề -->
+    <h3 data-kit-text="title" class="text-lg font-bold text-slate-800 dark:text-slate-100 mb-2"></h3>
+
+    <!-- Nội dung thông điệp -->
+    <p data-kit-text="message" class="text-sm text-slate-600 dark:text-slate-300 mb-4"></p>
+
+    <!-- Ô nhập dữ liệu (Chỉ hiện khi type === 'prompt') -->
+    <div data-kit-show="type === 'prompt'" class="mb-4">
+      <input type="text" 
+             data-kit-model="value" 
+             class="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+    </div>
+
+    <!-- Nút bấm hành động -->
+    <div class="flex justify-end gap-2">
+      <!-- Nút Hủy (Chỉ hiện khi confirm hoặc prompt) -->
+      <button data-kit-show="type !== 'alert'"
+              data-kit-click="$component.cancel()"
+              class="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition">
+        Hủy
+      </button>
+
+      <!-- Nút Đồng ý -->
+      <button data-kit-click="$component.accept()"
+              class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 shadow-sm transition">
+        Đồng ý
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 2. Nút kích hoạt mở Dialog bằng $dialogModal.alert() hoặc $component.alert() -->
+<div class="flex gap-2 p-6">
+  <button data-kit-click="$dialogModal.alert('Chào mừng bạn đến với Kitwork Engine!')"
+          class="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm font-medium">
+    Mở Alert
+  </button>
+
+  <button data-kit-click="$dialogModal.confirm('Bạn có chắc chắn muốn xóa dữ liệu này?')"
+          class="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium">
+    Mở Confirm
+  </button>
+</div>

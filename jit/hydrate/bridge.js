@@ -6,7 +6,9 @@
 (function (window) {
   "use strict";
 
-  var kitwork = (window.kitwork = window.kitwork || {}), kit = (window.kit = kitwork);
+  var kit = window.kit || window.kitwork || {};
+  window.kit = kit;
+  window.kitwork = kit;
   if (kit.Bridge) return;
 
   function KitworkError(message, code, moduleName, actionName, details) {
@@ -23,10 +25,11 @@
     if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
       return window.chrome.webview;
     }
-    if (window.webkit && window.webkit.messageHandlers &&
-      window.webkit.messageHandlers.kitwork &&
-      window.webkit.messageHandlers.kit.postMessage) {
-      return window.webkit.messageHandlers.kitwork;
+    var handlers = window.webkit && window.webkit.messageHandlers;
+    if (handlers) {
+      var handler = handlers.kit;
+      if (!handler || typeof handler.postMessage !== "function") handler = handlers.kitwork;
+      if (handler && typeof handler.postMessage === "function") return handler;
     }
     return null;
   }
@@ -197,6 +200,21 @@
   kit.KitworkError = KitworkError;
   kit.Bridge = Bridge;
   kit.bridge = bridge;
-  kit.platform = bridge ? (bridge.platform || "native") : "web";
-  kit.isNative = !!bridge;
+  // The shell normally seeds the bridge at document-start, but these accessors also keep metadata
+  // coherent if a test harness or host attaches/replaces the adapter later.
+  Object.defineProperty(kit, "platform", {
+    get: function () {
+      var current = kit.bridge;
+      return current && typeof current.call === "function" ? (current.platform || "native") : "web";
+    },
+    configurable: true,
+    enumerable: true
+  });
+  Object.defineProperty(kit, "isNative", {
+    get: function () {
+      return !!(kit.bridge && typeof kit.bridge.call === "function");
+    },
+    configurable: true,
+    enumerable: true
+  });
 })(window);

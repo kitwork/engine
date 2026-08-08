@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-kit-app="main">
+<head>
+  <meta charset="utf-8">
+  <title>Kitwork 1.0 — Keyed Todo List Example</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; max-width: 500px; margin: 0 auto; }
+    .card { background: #1e293b; border: 1px solid #334155; padding: 1.5rem; border-radius: 0.75rem; }
+    .input-group { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+    .input { flex: 1; background: #0f172a; border: 1px solid #475569; color: white; padding: 0.6rem; border-radius: 0.375rem; font-size: 1rem; }
+    .btn { background: #3b82f6; color: white; border: none; padding: 0.6rem 1rem; border-radius: 0.375rem; font-weight: 600; cursor: pointer; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .todo-list { list-style: none; padding: 0; margin: 0; }
+    .todo-item { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem; border-bottom: 1px solid #334155; transition: background 0.2s; }
+    .todo-item.completed span { text-decoration: line-through; opacity: 0.5; }
+    .del-btn { background: #ef4444; color: white; border: none; border-radius: 0.25rem; padding: 0.25rem 0.5rem; cursor: pointer; }
+    .footer { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; font-size: 0.875rem; color: #94a3b8; }
+  </style>
+</head>
+<body>
+
+  <h1>Kitwork 1.0 — Todo App</h1>
+
+  <div
+    data-kit-component="todo-app"
+    data-kit-as="$todo"
+    data-kit-scope="
+      newText: '';
+      nextId: 4;
+      items: [
+        { id: 1, text: 'Learn Kitwork Spec 0.7', done: true },
+        { id: 2, text: 'Build Pratt Parser Zero-Eval', done: true },
+        { id: 3, text: 'Ship Kitwork 1.0.0 Bundle', done: false }
+      ];
+    "
+    class="card">
+
+    <!-- Add Input with Keyboard Modifier :enter -->
+    <div class="input-group">
+      <input
+        class="input"
+        type="text"
+        placeholder="Add a new task..."
+        data-kit-model="newText"
+        data-kit-keydown:enter="$component.add()">
+      <button class="btn" data-kit-bind="disabled: !newText.trim();" data-kit-click="$component.add()">
+        Add Task
+      </button>
+    </div>
+
+    <!-- Keyed Loop using data-kit-for & data-kit-key -->
+    <ul class="todo-list">
+      <li
+        data-kit-for="$item, $index of items"
+        data-kit-key="$item.id"
+        class="todo-item"
+        data-kit-class="completed: $item.done;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <input
+            type="checkbox"
+            data-kit-bind="checked: $item.done;"
+            data-kit-click="$component.toggle($item.id)">
+          <span data-kit-text="$item.text">Task</span>
+        </div>
+        <button class="del-btn" data-kit-click="$component.remove($item.id)">✕</button>
+      </li>
+    </ul>
+
+    <!-- Footer Counter -->
+    <div class="footer">
+      <span><strong data-kit-text="$component.remainingCount()">0</strong> tasks remaining</span>
+      <button
+        style="background: transparent; color: #94a3b8; border: none; cursor: pointer; text-decoration: underline;"
+        data-kit-click="$component.clearCompleted()">
+        Clear Completed
+      </button>
+    </div>
+
+  </div>
+
+  <script src="../dist/kitwork-runtime.js"></script>
+  <script>
+    kit.component("todo-app", {
+      add() {
+        var text = (this.newText || "").trim();
+        if (!text) return;
+        this.items.push({ id: this.nextId++, text: text, done: false });
+        this.newText = "";
+      },
+      toggle(id) {
+        for (var i = 0; i < this.items.length; i++) {
+          if (this.items[i].id === id) {
+            this.items[i].done = !this.items[i].done;
+            break;
+          }
+        }
+      },
+      remove(id) {
+        this.items = this.items.filter(function(item) { return item.id !== id; });
+      },
+      clearCompleted() {
+        this.items = this.items.filter(function(item) { return !item.done; });
+      },
+      remainingCount() {
+        return this.items.filter(function(item) { return !item.done; }).length;
+      }
+    });
+    kit.start();
+  </script>
+</body>
+</html>
