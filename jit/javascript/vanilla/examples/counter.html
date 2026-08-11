@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS counter</title>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="mx-auto flex min-h-screen max-w-xl items-center justify-center px-6 py-16">
+    <section
+      id="counter-demo"
+      data-kit-component="counter"
+      aria-labelledby="counter-title"
+      class="w-full rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl shadow-black/30">
+      <h1 id="counter-title" class="text-sm font-semibold uppercase tracking-widest text-indigo-300">
+        KitJS counter
+      </h1>
+
+      <output
+        id="counter-output"
+        data-kit-text="count"
+        aria-live="polite"
+        aria-atomic="true"
+        class="mt-5 block text-7xl font-black tracking-tight text-white">0</output>
+
+      <div class="mt-7 flex flex-wrap items-center justify-center gap-3">
+        <button
+          id="counter-decrement"
+          type="button"
+          data-kit-click="count = count - 1"
+          class="rounded-xl border border-slate-700 bg-slate-950 px-5 py-3 text-base font-bold text-slate-100 transition hover:border-indigo-400 hover:text-indigo-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+          Decrease
+        </button>
+        <button
+          id="counter-reset"
+          type="button"
+          data-kit-click="count = 0"
+          class="rounded-xl px-5 py-3 text-base font-semibold text-slate-400 transition hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+          Reset
+        </button>
+        <button
+          id="counter-increment"
+          type="button"
+          data-kit-click="count = count + 1"
+          class="rounded-xl bg-indigo-500 px-5 py-3 text-base font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">
+          Increase
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <script src="../kit.js"></script>
+  <script>
+    kit.component("counter", {
+      count: 0
+    });
+  </script>
+</body>
+</html>

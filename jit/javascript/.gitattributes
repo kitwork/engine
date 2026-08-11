@@ -1,0 +1,9 @@
+/core/*.js text eol=lf
+/service/**/*.js text eol=lf
+/component/**/*.js text eol=lf
+/component/**/example.html text eol=lf
+/*.go text eol=lf
+/README.md text eol=lf
+/test/*.html text eol=lf
+/test/browser/*.html text eol=lf
+/test/drive/*.html text eol=lf

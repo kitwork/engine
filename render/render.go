@@ -11,6 +11,7 @@ import (
 	fonts "github.com/kitwork/engine/jit/fonts"
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 	icons "github.com/kitwork/engine/jit/icons"
+	kitjavascript "github.com/kitwork/engine/jit/javascript"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
 	material "github.com/kitwork/engine/jit/material"
@@ -22,21 +23,22 @@ import (
 // Config is everything the render engine needs — no *Tenant, no HTTP. Build a render with New(),
 // then Bind(data) for a page or HTML(tmpl, data) for a raw string template (e.g. an email).
 type Config struct {
-	Base          string         // template root — the anchor every path resolves against
-	JitConfig     *jitcss.Config // JIT-CSS config (brand colors, keyframes…); nil = defaults
-	Directory     string         // sub-root under Base (tree uses "."; legacy used "views"/"app")
-	Path          string         // the folder whose page/index/slots resolve, walked up
-	Page          string         // explicit page override (usually "" — derived from Path)
-	Index         string         // explicit shell filename override
-	Notfound      string         // notfound filename (default "notfound")
-	NotfoundMode  bool           // render the notfound page for {{ @page }}
-	JitCSS        bool           // inline the minimal JIT CSS for the page's classes
-	Global        value.Value    // data merged into every render
-	Minify        []string       // explicit minify content types
-	MinifySet     bool           // whether Minify was set explicitly
-	DefaultMinify bool           // minify when not set explicitly (caller passes !AllowLocal)
-	ThemeMode     string         // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
-	Source        Source         // immutable template source; nil reads the live filesystem
+	Base          string                    // template root — the anchor every path resolves against
+	JitConfig     *jitcss.Config            // JIT-CSS config (brand colors, keyframes…); nil = defaults
+	Directory     string                    // sub-root under Base (tree uses "."; legacy used "views"/"app")
+	Path          string                    // the folder whose page/index/slots resolve, walked up
+	Page          string                    // explicit page override (usually "" — derived from Path)
+	Index         string                    // explicit shell filename override
+	Notfound      string                    // notfound filename (default "notfound")
+	NotfoundMode  bool                      // render the notfound page for {{ @page }}
+	JitCSS        bool                      // inline the minimal JIT CSS for the page's classes
+	Global        value.Value               // data merged into every render
+	Minify        []string                  // explicit minify content types
+	MinifySet     bool                      // whether Minify was set explicitly
+	DefaultMinify bool                      // minify when not set explicitly (caller passes !AllowLocal)
+	ThemeMode     string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
+	KitJSAssets   *kitjavascript.AssetStore // non-nil opts into generation-prepared component-first KitJS
+	Source        Source                    // immutable template source; nil reads the live filesystem
 }
 
 func New(c Config) *Render {
@@ -45,7 +47,8 @@ func New(c Config) *Render {
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
 		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode,
-		source: c.Source,
+		kitJSAssets: c.KitJSAssets,
+		source:      c.Source,
 	}
 }
 
@@ -65,7 +68,8 @@ type Render struct {
 	minifySet            bool     // whether minify was set explicitly (else default by environment)
 	defaultMinify        bool     // minify default when not explicit (injected — replaces AllowLocal)
 	themeMode            string   // theme pre-paint mode (see Config.ThemeMode)
-	source               Source   // immutable generation snapshot; nil = live filesystem
+	kitJSAssets          *kitjavascript.AssetStore
+	source               Source // immutable generation snapshot; nil = live filesystem
 	program              *node
 	prepareError         string
 	presentationPrepared bool
@@ -256,9 +260,11 @@ func (r *Render) tmpl(data any) string {
 		out = r.applyStaticPresentation(out)
 	}
 
-	// Hydrate pre-render evaluates request data, so it deliberately remains on
-	// the request path even when the static presentation was generation-prepared.
-	out = hydrate.PreRender(out)
+	// The legacy twin evaluator remains request-bound. Component-first KitJS is
+	// browser-owned in this preview and deliberately bypasses legacy pre-render.
+	if r.kitJSAssets == nil {
+		out = hydrate.PreRender(out)
+	}
 
 	if r.shouldMinify() {
 		if !minifyPrepared {
@@ -312,14 +318,18 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// swap (mergeHead). SERVICE: if the tenant declared router.jitjs(), one shared cached runtime is
 	// served at jitjsRoute, so we skip inlining and auto-inject <script src> (same guards as
 	// router.icons()). A cheap no-op when no verbs are used.
-	out = jitjs.Render(out)
+	if r.kitJSAssets == nil {
+		out = jitjs.Render(out)
+	}
 
 	// 3h. hydrate (frontend bytecode VM): on a page that opts in via the data-kitwork-hydrate root
 	// marker, verify every authored expression (compile-time linting) and inject the kernel runtime
 	// reference — only-used. The wire ships the SOURCE; the client parses it (no eval). Then PreRender
 	// runs the SAME Go walker over data-kit-text/show to bake initial values into the HTML: no flash,
 	// correct with JS off, indexable. Both are marker-gated no-ops on ordinary pages.
-	out = hydrate.Render(out)
+	if r.kitJSAssets == nil {
+		out = hydrate.Render(out)
+	}
 
 	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses
 	// (a `font-family: <Name>` value or a `font-<slug>` class) → inject preload links + ONE
@@ -361,6 +371,24 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 		return nil, false, false, fmt.Sprintf("[Error reading index: %v]", indexPath)
 	}
 	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
+	if r.kitJSAssets != nil {
+		if !preparePresentation {
+			return nil, false, false, "KitJS preview requires a generation-prepared template; dynamic page overrides are not supported"
+		}
+		scanSource, scanErr := kitJSStaticScanSource(fullTemplate)
+		if scanErr != nil {
+			return nil, false, false, fmt.Sprintf("KitJS preview requires static data-kit-* attributes and statically scannable HTML during generation preparation: %v", scanErr)
+		}
+		bundle, composeErr := r.kitJSAssets.ComposeHTML(scanSource)
+		if composeErr != nil {
+			return nil, false, false, fmt.Sprintf("prepare KitJS runtime: %v", composeErr)
+		}
+		injected, injectErr := kitjavascript.InjectRuntime([]byte(fullTemplate), bundle)
+		if injectErr != nil {
+			return nil, false, false, fmt.Sprintf("inject KitJS runtime: %v", injectErr)
+		}
+		fullTemplate = string(injected)
+	}
 	if preparePresentation && !hasDynamicPresentation(fullTemplate) {
 		fullTemplate = r.applyStaticPresentation(fullTemplate)
 		presentationPrepared = true
@@ -390,6 +418,376 @@ func (r *Render) Prepare() *Render {
 // frozen into this immutable render generation.
 func (r *Render) PresentationPrepared() bool {
 	return r != nil && r.presentationPrepared
+}
+
+func hasDynamicKitJSAttribute(template string) bool {
+	_, err := kitJSStaticScanSource(template)
+	return err != nil
+}
+
+func kitAttributeName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.HasPrefix(name, "data-kit-") || strings.HasPrefix(name, "data-kitwork-")
+}
+
+func htmlTemplateSpace(char byte) bool {
+	return char == ' ' || char == '\t' || char == '\r' || char == '\n' || char == '\f'
+}
+
+type kitJSTemplateTokenKind uint8
+
+const (
+	kitJSTemplateOutput kitJSTemplateTokenKind = iota
+	kitJSTemplateControl
+	kitJSTemplateFragment
+)
+
+type kitJSTemplateHTMLMode uint8
+
+const (
+	kitJSHTMLData kitJSTemplateHTMLMode = iota
+	kitJSHTMLTagOpen
+	kitJSHTMLTagName
+	kitJSHTMLBeforeAttribute
+	kitJSHTMLAttributeName
+	kitJSHTMLAfterAttributeName
+	kitJSHTMLBeforeAttributeValue
+	kitJSHTMLUnquotedAttributeValue
+	kitJSHTMLQuotedAttributeValue
+	kitJSHTMLDeclaration
+	kitJSHTMLComment
+	kitJSHTMLRawText
+	kitJSHTMLRawCandidate
+)
+
+type kitJSTemplateHTMLContext struct {
+	mode         kitJSTemplateHTMLMode
+	tagName      string
+	attribute    string
+	quote        byte
+	closing      bool
+	selfClosing  bool
+	rawName      string
+	rawCandidate string
+	declaration  string
+	commentTail  string
+}
+
+func classifyKitJSTemplateToken(content string) kitJSTemplateTokenKind {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return kitJSTemplateControl
+	}
+	fields := strings.Fields(content)
+	command := fields[0]
+	switch command {
+	case "if", "else", "elseif", "end", "for", "let":
+		return kitJSTemplateControl
+	case "include", "layout":
+		return kitJSTemplateFragment
+	}
+	if strings.HasPrefix(command, "@") || kitJSTemplateRawCall(content) {
+		return kitJSTemplateFragment
+	}
+	return kitJSTemplateOutput
+}
+
+func kitJSTemplateRawCall(content string) bool {
+	if !strings.HasPrefix(content, "raw") {
+		return false
+	}
+	rest := content[len("raw"):]
+	if rest != "" && (rest[0] == '_' || rest[0] >= 'a' && rest[0] <= 'z' || rest[0] >= 'A' && rest[0] <= 'Z' || rest[0] >= '0' && rest[0] <= '9') {
+		return false
+	}
+	rest = strings.TrimLeftFunc(rest, func(char rune) bool {
+		return char == ' ' || char == '\t' || char == '\r' || char == '\n' || char == '\f'
+	})
+	return strings.HasPrefix(rest, "(")
+}
+
+func (context *kitJSTemplateHTMLContext) rejectToken(kind kitJSTemplateTokenKind) string {
+	if kind == kitJSTemplateFragment {
+		return "raw or deferred template fragments can synthesize elements and attributes"
+	}
+	switch context.mode {
+	case kitJSHTMLData, kitJSHTMLRawText:
+		return ""
+	case kitJSHTMLBeforeAttribute:
+		if kind == kitJSTemplateControl {
+			return ""
+		}
+		return "template output in a start tag can synthesize attributes"
+	case kitJSHTMLQuotedAttributeValue:
+		if !kitAttributeName(context.attribute) {
+			return ""
+		}
+		return "template tokens cannot change a data-kit-* attribute value"
+	case kitJSHTMLComment:
+		return "template tokens inside HTML comments can change the scanner boundary"
+	case kitJSHTMLRawCandidate:
+		return "template tokens can synthesize a raw-text closing tag"
+	default:
+		return "template tokens cannot synthesize tag names, attribute names, or unquoted attribute fragments"
+	}
+}
+
+func (context *kitJSTemplateHTMLContext) advance(source string) {
+	for index := 0; index < len(source); index++ {
+		context.advanceByte(source[index])
+	}
+}
+
+func (context *kitJSTemplateHTMLContext) advanceGap(length int) {
+	for index := 0; index < length; index++ {
+		context.advanceByte(' ')
+	}
+}
+
+func (context *kitJSTemplateHTMLContext) advanceByte(char byte) {
+	switch context.mode {
+	case kitJSHTMLData:
+		if char == '<' {
+			context.mode = kitJSHTMLTagOpen
+			context.tagName = ""
+			context.attribute = ""
+			context.closing = false
+			context.selfClosing = false
+		}
+	case kitJSHTMLTagOpen:
+		switch {
+		case char == '!':
+			context.mode = kitJSHTMLDeclaration
+			context.declaration = "!"
+		case char == '?':
+			context.mode = kitJSHTMLDeclaration
+			context.declaration = "?"
+		case char == '/':
+			context.closing = true
+			context.mode = kitJSHTMLTagName
+		case htmlTemplateTagNameStart(char):
+			context.tagName = string(htmlTemplateLower(char))
+			context.mode = kitJSHTMLTagName
+		default:
+			context.mode = kitJSHTMLData
+		}
+	case kitJSHTMLTagName:
+		switch {
+		case htmlTemplateTagNamePart(char):
+			context.tagName += string(htmlTemplateLower(char))
+		case htmlTemplateSpace(char):
+			if context.closing {
+				context.mode = kitJSHTMLDeclaration
+			} else {
+				context.mode = kitJSHTMLBeforeAttribute
+			}
+		case char == '>':
+			context.finishTag()
+		case char == '/':
+			context.selfClosing = true
+			context.mode = kitJSHTMLBeforeAttribute
+		default:
+			context.mode = kitJSHTMLBeforeAttribute
+			context.advanceByte(char)
+		}
+	case kitJSHTMLBeforeAttribute:
+		switch {
+		case htmlTemplateSpace(char):
+		case char == '>':
+			context.finishTag()
+		case char == '/':
+			context.selfClosing = true
+		default:
+			context.attribute = string(htmlTemplateLower(char))
+			context.mode = kitJSHTMLAttributeName
+		}
+	case kitJSHTMLAttributeName:
+		switch {
+		case htmlTemplateSpace(char):
+			context.mode = kitJSHTMLAfterAttributeName
+		case char == '=':
+			context.mode = kitJSHTMLBeforeAttributeValue
+		case char == '>':
+			context.finishTag()
+		case char == '/':
+			context.attribute = ""
+			context.selfClosing = true
+			context.mode = kitJSHTMLBeforeAttribute
+		default:
+			context.attribute += string(htmlTemplateLower(char))
+		}
+	case kitJSHTMLAfterAttributeName:
+		switch {
+		case htmlTemplateSpace(char):
+		case char == '=':
+			context.mode = kitJSHTMLBeforeAttributeValue
+		case char == '>':
+			context.finishTag()
+		case char == '/':
+			context.attribute = ""
+			context.selfClosing = true
+			context.mode = kitJSHTMLBeforeAttribute
+		default:
+			context.attribute = string(htmlTemplateLower(char))
+			context.mode = kitJSHTMLAttributeName
+		}
+	case kitJSHTMLBeforeAttributeValue:
+		switch {
+		case htmlTemplateSpace(char):
+		case char == '"' || char == '\'':
+			context.quote = char
+			context.mode = kitJSHTMLQuotedAttributeValue
+		case char == '>':
+			context.finishTag()
+		default:
+			context.mode = kitJSHTMLUnquotedAttributeValue
+		}
+	case kitJSHTMLUnquotedAttributeValue:
+		switch {
+		case htmlTemplateSpace(char):
+			context.attribute = ""
+			context.mode = kitJSHTMLBeforeAttribute
+		case char == '>':
+			context.finishTag()
+		}
+	case kitJSHTMLQuotedAttributeValue:
+		if char == context.quote {
+			context.quote = 0
+			context.attribute = ""
+			context.mode = kitJSHTMLBeforeAttribute
+		}
+	case kitJSHTMLDeclaration:
+		if context.declaration == "!" && char == '-' {
+			context.declaration = "!-"
+		} else if context.declaration == "!-" && char == '-' {
+			context.declaration = "!--"
+			context.commentTail = ""
+			context.mode = kitJSHTMLComment
+		} else if char == '>' {
+			context.mode = kitJSHTMLData
+		} else {
+			context.declaration = "?"
+		}
+	case kitJSHTMLComment:
+		context.commentTail += string(char)
+		if len(context.commentTail) > 3 {
+			context.commentTail = context.commentTail[len(context.commentTail)-3:]
+		}
+		if context.commentTail == "-->" {
+			context.commentTail = ""
+			context.mode = kitJSHTMLData
+		}
+	case kitJSHTMLRawText:
+		if char == '<' {
+			context.rawCandidate = "<"
+			context.mode = kitJSHTMLRawCandidate
+		}
+	case kitJSHTMLRawCandidate:
+		if char == '<' {
+			context.rawCandidate = "<"
+			return
+		}
+		context.rawCandidate += string(htmlTemplateLower(char))
+		if char == '>' {
+			if rawTemplateClose(context.rawCandidate, context.rawName) {
+				context.rawName = ""
+				context.mode = kitJSHTMLData
+			} else {
+				context.mode = kitJSHTMLRawText
+			}
+			context.rawCandidate = ""
+		} else if len(context.rawCandidate) > 64 {
+			context.rawCandidate = ""
+			context.mode = kitJSHTMLRawText
+		}
+	}
+}
+
+func (context *kitJSTemplateHTMLContext) finishTag() {
+	if !context.closing && !context.selfClosing && rawTemplateElement(context.tagName) {
+		context.rawName = context.tagName
+		context.mode = kitJSHTMLRawText
+	} else {
+		context.mode = kitJSHTMLData
+	}
+	context.tagName = ""
+	context.attribute = ""
+	context.quote = 0
+	context.closing = false
+	context.selfClosing = false
+}
+
+func rawTemplateElement(name string) bool {
+	switch name {
+	case "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "plaintext":
+		return true
+	default:
+		return false
+	}
+}
+
+func rawTemplateClose(candidate, name string) bool {
+	candidate = strings.TrimSpace(candidate)
+	if len(candidate) < 4 || !strings.HasPrefix(candidate, "</") || candidate[len(candidate)-1] != '>' {
+		return false
+	}
+	inside := strings.TrimSpace(candidate[2 : len(candidate)-1])
+	fields := strings.Fields(inside)
+	return len(fields) > 0 && strings.EqualFold(fields[0], name)
+}
+
+func htmlTemplateTagNameStart(char byte) bool {
+	return char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z'
+}
+
+func htmlTemplateTagNamePart(char byte) bool {
+	return htmlTemplateTagNameStart(char) || char >= '0' && char <= '9' || char == '-' || char == ':'
+}
+
+func htmlTemplateLower(char byte) byte {
+	if char >= 'A' && char <= 'Z' {
+		return char + ('a' - 'A')
+	}
+	return char
+}
+
+// kitJSStaticScanSource removes Kitwork template control/interpolation tokens
+// before the HTML scanner runs. The assembled template remains the sole module
+// authority: conditional branches remain as a safe static superset, while
+// tokens that could synthesize tags, attributes, or reserved values fail the
+// generation scan instead of being mistaken for authored static HTML.
+func kitJSStaticScanSource(template string) ([]byte, error) {
+	var output strings.Builder
+	output.Grow(len(template))
+	context := kitJSTemplateHTMLContext{mode: kitJSHTMLData}
+	for offset := 0; offset < len(template); {
+		relative := strings.Index(template[offset:], "{{")
+		if relative < 0 {
+			remainder := template[offset:]
+			output.WriteString(remainder)
+			context.advance(remainder)
+			break
+		}
+		start := offset + relative
+		static := template[offset:start]
+		output.WriteString(static)
+		context.advance(static)
+		closeRelative := strings.Index(template[start+2:], "}}")
+		if closeRelative < 0 {
+			return nil, fmt.Errorf("unterminated template token at byte %d", start)
+		}
+		end := start + 2 + closeRelative + 2
+		content := template[start+2 : end-2]
+		if reason := context.rejectToken(classifyKitJSTemplateToken(content)); reason != "" {
+			return nil, fmt.Errorf("unsafe template token at byte %d: %s", start, reason)
+		}
+		for index := start; index < end; index++ {
+			output.WriteByte(' ')
+		}
+		context.advanceGap(end - start)
+		offset = end
+	}
+	return []byte(output.String()), nil
 }
 
 // hasDynamicPresentation catches server template expressions that can change
@@ -448,6 +846,31 @@ func (r *Render) PreparationError() error {
 		return nil
 	}
 	return fmt.Errorf("%s", r.prepareError)
+}
+
+// ScanKitJS assembles the same static document used by Prepare and returns its
+// authored runtime use without composing or injecting an asset. Generation
+// owners use this first pass to close one Drive-compatible graph across every
+// route that shares a data-kit-app identity.
+func (r *Render) ScanKitJS() (kitjavascript.ScanResult, error) {
+	if r == nil {
+		return kitjavascript.ScanResult{}, fmt.Errorf("scan KitJS template: nil render")
+	}
+	indexPath := r.getIndexPath()
+	shellRaw, err := r.readFile(indexPath)
+	if err != nil {
+		return kitjavascript.ScanResult{}, fmt.Errorf("read KitJS index %s: %w", indexPath, err)
+	}
+	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
+	scanSource, err := kitJSStaticScanSource(fullTemplate)
+	if err != nil {
+		return kitjavascript.ScanResult{}, fmt.Errorf("KitJS preview requires static data-kit-* attributes and statically scannable HTML during generation preparation: %w", err)
+	}
+	use, err := kitjavascript.ScanHTML(scanSource)
+	if err != nil {
+		return kitjavascript.ScanResult{}, err
+	}
+	return use, nil
 }
 
 func (r *Render) assemble(content string, currentDir string, depth int) string {

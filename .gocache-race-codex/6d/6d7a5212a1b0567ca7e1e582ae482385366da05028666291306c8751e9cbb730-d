@@ -1,0 +1,8 @@
+./callbacks.go
+./handle.go
+./iscgo.go
+./windows.go
+_cgo_gotypes.go
+cgo.cgo1.go
+_cgo_import.go
+./asm_amd64.s

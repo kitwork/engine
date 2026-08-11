@@ -1,0 +1,6 @@
+./collection.go
+./document.go
+./frontmatter.go
+./markdown.go
+./query.go
+./store.go

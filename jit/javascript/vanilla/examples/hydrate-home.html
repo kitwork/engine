@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS Hydrate · Home</title>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main
+    id="hydrate-demo"
+    data-kit-component="hydrate-demo"
+    class="mx-auto min-h-screen max-w-8xl px-6 py-10 sm:px-8 lg:px-12 lg:py-16">
+    <header class="flex flex-col gap-6 border-b border-slate-800 pb-8 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-widest text-indigo-300">Hydrate profile</p>
+        <h1 class="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Home route</h1>
+        <p class="mt-4 max-w-2xl text-base leading-7 text-slate-400">
+          Change the local state, type in the field, then follow the route link. Drive morphs the body while compatible component state and DOM-local input state stay intact.
+        </p>
+      </div>
+      <span class="w-fit rounded-full border border-emerald-400/30 bg-emerald-400/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+        Direct load + Drive
+      </span>
+    </header>
+
+    <div class="grid gap-6 py-10 lg:grid-cols-2">
+      <section
+        aria-labelledby="hydrate-counter-title"
+        class="rounded-3xl border border-slate-800 bg-slate-900 p-7 shadow-2xl shadow-black/20 sm:p-8">
+        <p class="text-sm font-semibold uppercase tracking-widest text-slate-500">Component state</p>
+        <h2 id="hydrate-counter-title" class="mt-3 text-2xl font-bold text-white">Counter survives navigation</h2>
+        <output
+          id="hydrate-count"
+          data-kit-text="count"
+          aria-live="polite"
+          aria-atomic="true"
+          class="mt-8 block text-7xl font-black tracking-tight text-indigo-300">0</output>
+        <div class="mt-8 flex flex-wrap gap-3">
+          <button
+            id="hydrate-decrement"
+            type="button"
+            data-kit-click="count = count - 1"
+            class="rounded-xl border border-slate-700 bg-slate-950 px-5 py-3 text-sm font-bold text-slate-100 transition hover:border-indigo-400 hover:text-indigo-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+            Decrease
+          </button>
+          <button
+            id="hydrate-increment"
+            type="button"
+            data-kit-click="count = count + 1"
+            class="rounded-xl bg-indigo-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">
+            Increase
+          </button>
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="hydrate-input-title"
+        class="rounded-3xl border border-slate-800 bg-slate-900 p-7 shadow-2xl shadow-black/20 sm:p-8">
+        <p class="text-sm font-semibold uppercase tracking-widest text-slate-500">DOM continuity</p>
+        <h2 id="hydrate-input-title" class="mt-3 text-2xl font-bold text-white">Dirty value and focus</h2>
+        <label for="hydrate-note" class="mt-7 block text-sm font-semibold text-slate-200">Navigation note</label>
+        <input
+          id="hydrate-note"
+          data-kit-model="note"
+          type="text"
+          autocomplete="off"
+          placeholder="Type before navigating"
+          class="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base text-white placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/30">
+        <p class="mt-5 text-sm leading-6 text-slate-400">
+          Current value:
+          <output id="hydrate-note-output" data-kit-text="note ? note : 'Nothing typed yet.'" class="font-semibold text-slate-100">Nothing typed yet.</output>
+        </p>
+      </section>
+    </div>
+
+    <section
+      id="hydrate-route-panel"
+      aria-labelledby="hydrate-route-title"
+      class="flex flex-col gap-6 rounded-3xl border border-indigo-400/20 bg-indigo-400/10 p-7 sm:flex-row sm:items-center sm:justify-between sm:p-8">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-widest text-indigo-300">Route 01</p>
+        <h2 id="hydrate-route-title" class="mt-2 text-2xl font-bold text-white">Continue to the next document</h2>
+        <p class="mt-2 text-sm leading-6 text-slate-300">The target declares the same closed component graph and Hydrate artifact.</p>
+      </div>
+      <a
+        id="hydrate-route-link"
+        href="./hydrate-next.html"
+        class="inline-flex shrink-0 items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+        Open next route
+      </a>
+    </section>
+  </main>
+
+  <script src="../hydrate.kit.js"></script>
+  <script>
+    kit.component("hydrate-demo", {
+      count: 0,
+      note: ""
+    });
+  </script>
+</body>
+</html>

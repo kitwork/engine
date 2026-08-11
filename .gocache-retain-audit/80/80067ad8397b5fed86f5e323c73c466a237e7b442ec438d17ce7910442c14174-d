@@ -1,0 +1,14 @@
+./alignment.go
+./analyzer.go
+./background.go
+./cell.go
+./contrast.go
+./element.go
+./finder.go
+./logo.go
+./module.go
+./options.go
+./png.go
+./render.go
+./stroke.go
+./svg.go

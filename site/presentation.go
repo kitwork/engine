@@ -19,6 +19,7 @@ type PresentationSnapshot struct {
 	FaviconFile string
 	AssetMounts []AssetMount
 	ThemeMode   string
+	KitJS       bool
 	Frozen      bool
 }
 
@@ -32,6 +33,7 @@ type Presentation struct {
 	faviconFile string
 	assetMounts []AssetMount
 	themeMode   string
+	kitJS       bool
 	frozen      bool
 
 	frozenSnapshot PresentationSnapshot
@@ -98,6 +100,22 @@ func (p *Presentation) SetThemeMode(mode string) bool {
 	return true
 }
 
+// SetKitJS opts this complete site generation into the component-first KitJS
+// composer. The default is false so existing tenants retain the legacy
+// jit/hydrate pipeline until they migrate deliberately.
+func (p *Presentation) SetKitJS(enabled bool) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	p.kitJS = enabled
+	return true
+}
+
 // Freeze prevents further mutations. It is idempotent.
 func (p *Presentation) Freeze() {
 	if p == nil {
@@ -160,6 +178,7 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 		FaviconFile: p.faviconFile,
 		AssetMounts: append([]AssetMount(nil), p.assetMounts...),
 		ThemeMode:   p.themeMode,
+		KitJS:       p.kitJS,
 		Frozen:      p.frozen,
 	}
 }

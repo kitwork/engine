@@ -1,0 +1,9 @@
+./bezier.go
+./context.go
+./gradient.go
+./matrix.go
+./path.go
+./pattern.go
+./point.go
+./util.go
+./wrap.go

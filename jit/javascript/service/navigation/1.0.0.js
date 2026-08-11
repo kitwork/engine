@@ -1,41 +1,41 @@
-// ============================================================================
-// Kitwork Client Runtime Service: Navigation (1.0.0)
-// ============================================================================
-
-(function (window) {
+// KitJS service: navigation@1.0.0
+;(function (global) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var kit = global.kit;
+  var version = "1.0.0";
+  var OWN = Object.prototype.hasOwnProperty;
 
-  if (kit.navigation) return;
+  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
+    throw new Error("KitJS core must be loaded before service:navigation");
+  }
+  if (OWN.call(kit, "navigation")) {
+    if (kit.navigation.version === version) return;
+    throw new Error("KitJS service conflict: navigation");
+  }
 
-  kit.navigation = {
-    // 1. Quay lại trang trước đó trong lịch sử
-    back: function () {
-      if (typeof window !== "undefined" && window.history && window.history.back) {
-        window.history.back();
-        return Promise.resolve(true);
-      }
-      return Promise.reject("history.back unavailable");
-    },
+  function back() {
+    if (!global.history || typeof global.history.back !== "function") throw new Error("History API is unavailable");
+    global.history.back();
+  }
 
-    // 2. Đi tới trang kế tiếp trong lịch sử
-    forward: function () {
-      if (typeof window !== "undefined" && window.history && window.history.forward) {
-        window.history.forward();
-        return Promise.resolve(true);
-      }
-      return Promise.reject("history.forward unavailable");
-    },
+  function forward() {
+    if (!global.history || typeof global.history.forward !== "function") throw new Error("History API is unavailable");
+    global.history.forward();
+  }
 
-    // 3. Tải lại trang hiện tại
-    reload: function () {
-      if (typeof window !== "undefined" && window.location && window.location.reload) {
-        window.location.reload();
-        return Promise.resolve(true);
-      }
-      return Promise.reject("location.reload unavailable");
-    }
-  };
+  function reload() {
+    if (!global.location || typeof global.location.reload !== "function") throw new Error("Location API is unavailable");
+    global.location.reload();
+  }
 
-})(typeof window !== "undefined" ? window : globalThis);
+  var service = { back: back, forward: forward, reload: reload };
+  Object.defineProperty(service, "version", { value: version, enumerable: false });
+  Object.freeze(service);
+  Object.defineProperty(kit, "navigation", {
+    value: service,
+    enumerable: true,
+    configurable: false,
+    writable: false
+  });
+})(globalThis);

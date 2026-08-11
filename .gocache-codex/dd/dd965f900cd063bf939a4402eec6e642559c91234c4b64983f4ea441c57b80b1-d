@@ -1,0 +1,16 @@
+./arithmetic.go
+./commit.go
+./constructor.go
+./conversion.go
+./format.go
+./json.go
+./kind.go
+./lambda.go
+./mapping.go
+./methods.go
+./navigation.go
+./predicates.go
+./proxy.go
+./result.go
+./sql.go
+./value.go

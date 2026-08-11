@@ -139,6 +139,7 @@ Implemented:
 - domain;
 - generation publication and retirement;
 - persistent response store;
+- bounded immutable content-addressed assets retained across generation hand-off;
 - rate-limit budgets;
 - SSE connections and replay history;
 
@@ -147,7 +148,7 @@ Implemented:
 - per-generation filesystem route tree;
 - compiled folder programs, handlers, guards, and metadata;
 - immutable HTML template snapshot and prepared render plan;
-- frozen rendering, assets, and JIT configuration;
+- frozen rendering, asset selection/references, and JIT configuration;
 - immutable environment and executable-source manifest;
 - RAM response and fetch caches;
 - generation-scoped capabilities.

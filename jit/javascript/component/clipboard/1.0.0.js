@@ -1,39 +1,47 @@
-// ============================================================================
-// Kitwork Client Runtime Component: Clipboard Copy Button (1.0.0)
-// ============================================================================
-// Location: engine/jit/javascript/component/clipboard/1.0.0.js
-// ============================================================================
-
-(function (window) {
+// KitJS component: clipboard@1.0.0
+;(function (kit) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var revisions = new WeakMap();
 
-  if (!kit.component) return;
+  function nextRevision(instance) {
+    var revision = (revisions.get(instance) || 0) + 1;
+    revisions.set(instance, revision);
+    return revision;
+  }
 
   kit.component("clipboard", {
     copied: false,
-    _timer: null,
+    error: "",
 
-    copy: function (text, duration) {
-      text = String(text || "");
-      if (!text) return;
+    init() {
+      var instance = this;
+      revisions.set(instance, 0);
+      return function () { revisions.delete(instance); };
+    },
 
-      duration = typeof duration === "number" ? duration : 2000;
-      var self = this;
-
-      if (kit.clipboard && kit.clipboard.copy) {
-        return kit.clipboard.copy(text).then(function () {
-          self.copied = true;
-          if (self._timer) clearTimeout(self._timer);
-          self._timer = setTimeout(function () {
-            self.copied = false;
-          }, duration);
-          return true;
-        });
+    async copy(value) {
+      var text = value === null || value === undefined ? "" : String(value);
+      var revision = nextRevision(this);
+      this.copied = false;
+      this.error = "";
+      if (!text) return false;
+      try {
+        await kit.clipboard.writeText(text);
+        if (revisions.get(this) !== revision) return false;
+        this.copied = true;
+        return true;
+      } catch (error) {
+        if (revisions.get(this) !== revision) return false;
+        this.error = String(error && error.message || error);
+        throw error;
       }
-      return Promise.reject("kit.clipboard service unavailable");
+    },
+
+    reset() {
+      nextRevision(this);
+      this.copied = false;
+      this.error = "";
     }
   });
-
-})(typeof window !== "undefined" ? window : globalThis);
+})(globalThis.kit);

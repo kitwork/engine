@@ -1,54 +1,55 @@
-// ============================================================================
-// Kitwork Client Runtime Service: Clipboard (1.0.0)
-// ============================================================================
-
-(function (window) {
+// KitJS service: clipboard@1.0.0
+;(function (global) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var kit = global.kit;
+  var version = "1.0.0";
+  var OWN = Object.prototype.hasOwnProperty;
 
-  if (kit.clipboard) return;
+  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
+    throw new Error("KitJS core must be loaded before service:clipboard");
+  }
+  if (OWN.call(kit, "clipboard")) {
+    if (kit.clipboard.version === version) return;
+    throw new Error("KitJS service conflict: clipboard");
+  }
 
-  kit.clipboard = {
-    // 1. Ghi văn bản vào bộ nhớ tạm (Promise)
-    writeText: function (text) {
-      text = String(text || "");
+  function unavailable(operation) {
+    return Promise.reject(new Error("Clipboard " + operation + " is unavailable"));
+  }
 
-      // Web Browser Async Clipboard API
-      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
-        return navigator.clipboard.writeText(text).then(function () { return true; });
-      }
-
-      // Fallback cho môi trường bị giới hạn (document.execCommand)
-      try {
-        var textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-        return Promise.resolve(true);
-      } catch (err) {
-        return Promise.reject(err);
-      }
-    },
-
-    // 2. Đọc văn bản từ bộ nhớ tạm (Promise)
-    readText: function () {
-      // Web Browser Async Clipboard API
-      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText) {
-        return navigator.clipboard.readText();
-      }
-
-      return Promise.reject("Clipboard readText API not supported or permission denied");
-    },
-
-    // 3. Alias ngắn gọn cho writeText
-    copy: function (text) {
-      return this.writeText(text);
+  function writeText(value) {
+    var clipboard = global.navigator && global.navigator.clipboard;
+    if (!clipboard || typeof clipboard.writeText !== "function") return unavailable("writeText");
+    try {
+      return Promise.resolve(clipboard.writeText(value === null || value === undefined ? "" : String(value)));
+    } catch (error) {
+      return Promise.reject(error);
     }
-  };
+  }
 
-})(typeof window !== "undefined" ? window : globalThis);
+  function readText() {
+    var clipboard = global.navigator && global.navigator.clipboard;
+    if (!clipboard || typeof clipboard.readText !== "function") return unavailable("readText");
+    try {
+      return Promise.resolve(clipboard.readText()).then(function (value) { return String(value); });
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  var service = { 
+    writeText: writeText, 
+    readText: readText,
+    copy: writeText,
+    read: readText
+  };
+  Object.defineProperty(service, "version", { value: version, enumerable: false });
+  Object.freeze(service);
+  Object.defineProperty(kit, "clipboard", {
+    value: service,
+    enumerable: true,
+    configurable: false,
+    writable: false
+  });
+})(globalThis);

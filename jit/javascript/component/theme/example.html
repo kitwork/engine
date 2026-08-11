@@ -1,0 +1,45 @@
+<!doctype html>
+<html
+  lang="vi"
+  data-kit-bind="data-theme: $theme.resolved;"
+  data-kit-class="$theme.resolved === 'dark' ? 'dark' : ''">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS theme component</title>
+</head>
+<body class="min-h-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <main class="mx-auto flex min-h-screen max-w-xl items-center px-6 py-16">
+    <section
+      data-kit-component="theme"
+      data-kit-as="$theme"
+      class="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+
+      <p class="text-sm font-medium text-slate-500 dark:text-slate-400">
+        Chế độ hiện tại:
+        <strong data-kit-text="mode + ' (' + resolved + ')'" class="text-slate-900 dark:text-white">system (light)</strong>
+      </p>
+
+      <div class="mt-5">
+        <button
+          id="theme-toggle"
+          type="button"
+          data-kit-click="toggle()"
+          data-kit-bind="aria-pressed: resolved === 'dark';"
+          class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-white dark:text-slate-900">
+          Toggle
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <script src="../../core/global.js"></script>
+  <script src="../../core/expression.js"></script>
+  <script src="../../core/component.js"></script>
+  <script src="../../core/dom.js"></script>
+  <script src="../../core/lifecycle.js"></script>
+  <script src="../../service/storage/1.0.0.js"></script>
+  <script src="./1.0.0.js"></script>
+  <script src="../../core/boot.js"></script>
+</body>
+</html>

@@ -1,24 +1,7 @@
-// ============================================================================
-// Kitwork Client Runtime Component: ProgressBar (1.0.0)
-// ============================================================================
-// Location: engine/jit/javascript/component/progressbar/1.0.0.js
-// ============================================================================
-
-(function (window) {
-  "use strict";
-
-  var kit = window.kit = window.kit || {};
-
-  if (!kit.component) return;
-
-  kit.component("progress-bar", {
-    get value() {
-      return kit.progress ? kit.progress.value : 0;
-    },
-
-    get status() {
-      return kit.progress ? kit.progress.status : "idle";
-    },
+// KitJS component: progress-bar@1.0.0
+kit.component("progress-bar", {
+    value: 0,
+    status: "idle",
 
     get hidden() {
       return this.status === "idle";
@@ -28,21 +11,28 @@
       return this.value + "%";
     },
 
-    start: function () {
-      if (kit.progress) kit.progress.start();
+    start() {
+      this.value = 0;
+      this.status = "running";
     },
 
-    set: function (val) {
-      if (kit.progress) kit.progress.set(val);
+    set(value) {
+      this.value = Math.min(100, Math.max(0, Number(value) || 0));
+      this.status = this.value >= 100 ? "completed" : "running";
+      return this.value;
     },
 
-    inc: function (amount) {
-      if (kit.progress) kit.progress.inc(amount);
+    inc(amount) {
+      amount = amount === null || amount === undefined ? 10 : Number(amount);
+      return this.set(this.value + (Number.isFinite(amount) ? amount : 0));
     },
 
-    done: function () {
-      if (kit.progress) kit.progress.done();
+    done() {
+      return this.set(100);
+    },
+
+    reset() {
+      this.value = 0;
+      this.status = "idle";
     }
-  });
-
-})(typeof window !== "undefined" ? window : globalThis);
+});

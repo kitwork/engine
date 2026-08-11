@@ -1,0 +1,12 @@
+./array.go
+./bigint.go
+./boolean.go
+./builtins.go
+./console.go
+./date.go
+./error.go
+./json.go
+./math.go
+./number.go
+./object.go
+./string.go

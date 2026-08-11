@@ -124,7 +124,11 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer requestScope.Close()
 
-	// /kit.js — the client runtime the render injects into every hydrated page.
+	// Generation-owned component-first assets use /kit.js/<sha256>.js. The
+	// legacy runtime remains on the exact /kit.js path.
+	if t.serveKitJSAssetIf(w, r) {
+		return
+	}
 	if serveHydrateIf(w, r) {
 		return
 	}

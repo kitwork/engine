@@ -1,0 +1,3 @@
+./main.go
+./main_test.go
+./version_options_test.go

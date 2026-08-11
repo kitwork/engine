@@ -1,74 +1,112 @@
-// ============================================================================
-// Kitwork Client Runtime Component: Dialog / Modal (1.0.0)
-// ============================================================================
-// Location: engine/jit/javascript/component/dialog/1.0.0.js
-// ============================================================================
-
-(function (window) {
+// KitJS component: dialog@1.0.0
+;(function (global, kit) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var overlay = kit.__kitwork_core__.overlay;
+  var FOCUSABLE =
+    "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled])," +
+    "textarea:not([disabled]),[tabindex]:not([tabindex='-1'])";
 
-  if (!kit.component) return;
+  function enqueue(callback) {
+    if (typeof global.queueMicrotask === "function") global.queueMicrotask(callback);
+    else Promise.resolve().then(callback);
+  }
+
+  function safeFocus(element) {
+    if (!element || element.isConnected === false || typeof element.focus !== "function") return;
+    try { element.focus({ preventScroll: true }); }
+    catch (_) { try { element.focus(); } catch (_) {} }
+  }
+
+  function focusable(host) {
+    if (!host || host.isConnected === false) return [];
+    return Array.prototype.filter.call(host.querySelectorAll(FOCUSABLE), function (element) {
+      return element.tabIndex >= 0 && !element.hidden && !element.closest("[hidden]");
+    });
+  }
+
+  function focusDialog(instance) {
+    if (!overlay.isOwner(instance) || !instance.open) return;
+    var host = instance.$host;
+    if (!host || host.isConnected === false) return;
+    var panel = instance.$refs.panel || host;
+    var items = focusable(host);
+    safeFocus(items[0] || panel);
+  }
+
+  function containFocus(instance, event) {
+    if (!overlay.isOwner(instance) || !instance.open) return;
+    var host = instance.$host;
+    if (!host || host.isConnected === false || host.contains(event.target)) return;
+    enqueue(function () { focusDialog(instance); });
+  }
+
+  function trapFocus(instance, event) {
+    if (!overlay.isOwner(instance) || !instance.open) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      instance.close();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    var host = instance.$host;
+    var items = focusable(host);
+    if (!items.length) {
+      event.preventDefault();
+      safeFocus(instance.$refs.panel || host);
+      return;
+    }
+
+    var first = items[0];
+    var last = items[items.length - 1];
+    var current = global.document.activeElement;
+    if (event.shiftKey && (current === first || !host.contains(current))) {
+      event.preventDefault();
+      safeFocus(last);
+    } else if (!event.shiftKey && (current === last || !host.contains(current))) {
+      event.preventDefault();
+      safeFocus(first);
+    }
+  }
 
   kit.component("dialog", {
-    // 1. State của Modal Dialog
     open: false,
-    title: "",
+    title: "Dialog",
     message: "",
-    type: "alert", // "alert" | "confirm" | "prompt"
-    value: "",     // Giá trị ô nhập liệu khi dùng prompt
-    _resolver: null,
 
-    get hidden() {
-      return !this.open;
+    init: function () {
+      var instance = this;
+      var onKeydown = function (event) { trapFocus(instance, event); };
+      var onFocusin = function (event) { containFocus(instance, event); };
+      global.document.addEventListener("keydown", onKeydown, true);
+      global.document.addEventListener("focusin", onFocusin, true);
+      return function () {
+        global.document.removeEventListener("keydown", onKeydown, true);
+        global.document.removeEventListener("focusin", onFocusin, true);
+        overlay.release(instance, true);
+      };
     },
 
-    // 2. Mở Hộp thoại (Trả về Promise)
-    alert: function (msg, title) {
-      return this.show({ type: "alert", message: msg, title: title || "Thông báo" });
-    },
-
-    confirm: function (msg, title) {
-      return this.show({ type: "confirm", message: msg, title: title || "Xác nhận" });
-    },
-
-    prompt: function (msg, defaultVal, title) {
-      return this.show({ type: "prompt", message: msg, value: defaultVal || "", title: title || "Nhập thông tin" });
-    },
-
-    show: function (opts) {
-      opts = opts || {};
-      this.type = opts.type || "alert";
-      this.message = opts.message || "";
-      this.title = opts.title || "";
-      this.value = opts.value || "";
+    show: function (title, message) {
+      if (title !== undefined && title !== null) this.title = String(title);
+      if (message !== undefined && message !== null) this.message = String(message);
+      var instance = this;
+      overlay.claim(instance, function (restoreFocus) { return instance.close(restoreFocus); });
       this.open = true;
-
-      var self = this;
-      return new Promise(function (resolve) {
-        self._resolver = resolve;
-      });
+      enqueue(function () { focusDialog(instance); });
+      return true;
     },
 
-    // 3. Phản hồi hành động từ Nút bấm UI
-    accept: function () {
+    close: function (restoreFocus) {
       this.open = false;
-      if (this._resolver) {
-        var res = this.type === "prompt" ? this.value : true;
-        this._resolver(res);
-        this._resolver = null;
-      }
+      overlay.release(this, restoreFocus);
+      return false;
     },
 
-    cancel: function () {
-      this.open = false;
-      if (this._resolver) {
-        var res = this.type === "confirm" ? false : null;
-        this._resolver(res);
-        this._resolver = null;
-      }
+    toggle: function () {
+      return this.open ? this.close() : this.show();
     }
   });
-
-})(typeof window !== "undefined" ? window : globalThis);
+})(globalThis, globalThis.kit);

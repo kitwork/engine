@@ -1,0 +1,13 @@
+./boundary.go
+./debug.go
+./diagnostic.go
+./energy.go
+./instruction.go
+./interpreter.go
+./opcode.go
+./ops.go
+./program.go
+./program_binary.go
+./runtime.go
+./verify.go
+./vm.go

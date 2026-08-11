@@ -1,0 +1,4 @@
+./geom.go
+./paint.go
+./raster.go
+./stroke.go

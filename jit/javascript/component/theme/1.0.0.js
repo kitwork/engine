@@ -1,43 +1,50 @@
-// ============================================================================
-// Kitwork Client Runtime Component: Theme (1.0.0)
-// ============================================================================
-// Location: engine/jit/javascript/component/theme/1.0.0.js
-// ============================================================================
-
-(function (window) {
+// KitJS component: theme@1.0.0
+// Small component state; storage remains a reusable primitive service.
+;(function (global, kit) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  function modeOf(value) {
+    value = String(value || "system").toLowerCase();
+    return value === "light" || value === "dark" ? value : "system";
+  }
 
-  if (!kit.component) return;
+  function preference() {
+    if (typeof global.matchMedia !== "function") return null;
+    return global.matchMedia("(prefers-color-scheme: dark)");
+  }
 
   kit.component("theme", {
-    // 1. Getter & Setter cho `mode` - Cho phép gán trực tiếp: mode = 'dark'
-    get mode() {
-      return kit.theme ? kit.theme.mode : "system";
-    },
+    mode: "system",
 
-    set mode(m) {
-      if (kit.theme) kit.theme.set(m);
-    },
-
-    // 2. Read-only Getters
     get resolved() {
-      return kit.theme ? kit.theme.resolved : "light";
+      if (this.mode === "light" || this.mode === "dark") return this.mode;
+      var media = preference();
+      return media && media.matches ? "dark" : "light";
     },
 
-    get isDark() {
-      return this.resolved === "dark";
+    async init() {
+      this.mode = modeOf(await kit.storage.get("theme", "system"));
+      var component = this;
+      var media = preference();
+      if (!media) return;
+      var onChange = function () {
+        if (component.mode === "system") component.$invalidate();
+      };
+      if (typeof media.addEventListener === "function") media.addEventListener("change", onChange);
+      else if (typeof media.addListener === "function") media.addListener(onChange);
+      return function () {
+        if (typeof media.removeEventListener === "function") media.removeEventListener("change", onChange);
+        else if (typeof media.removeListener === "function") media.removeListener(onChange);
+      };
     },
 
-    get isLight() {
-      return this.resolved === "light";
+    set(mode) {
+      this.mode = modeOf(mode);
+      return kit.storage.set("theme", this.mode);
     },
 
-    // 3. Phương thức chuyển đổi
-    toggle: function () {
-      if (kit.theme) return kit.theme.toggle();
+    toggle() {
+      return this.set(this.resolved === "dark" ? "light" : "dark");
     }
   });
-
-})(typeof window !== "undefined" ? window : globalThis);
+})(globalThis, globalThis.kit);

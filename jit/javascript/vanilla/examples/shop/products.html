@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plain Shop · Products</title>
+  <script defer src="./hydrate.kit.0.5.0.3d9a3213c5e76157c829866ad214b23aabee235ed997d07a54dcf797b7eee3be.js"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div id="shop-shell" class="min-h-screen">
+    <header id="shop-header" class="border-b border-slate-800 bg-slate-950/95">
+      <div class="mx-auto flex max-w-8xl flex-col gap-5 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:justify-between lg:px-12">
+        <a href="./products.html" class="text-xl font-black tracking-tight text-white">Plain Shop</a>
+        <nav aria-label="Shop routes" class="flex flex-wrap gap-2 text-sm font-semibold">
+          <a id="shop-nav-products" href="./products.html" aria-current="page" class="rounded-xl bg-indigo-500 px-4 py-2.5 text-white">Products</a>
+          <a id="shop-nav-cart" href="./cart.html" class="rounded-xl px-4 py-2.5 text-slate-300 transition hover:bg-slate-800 hover:text-white">Cart</a>
+          <a id="shop-nav-checkout" href="./checkout.html" class="rounded-xl px-4 py-2.5 text-slate-300 transition hover:bg-slate-800 hover:text-white">Checkout</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="shop-layout" class="mx-auto grid max-w-8xl gap-8 px-6 py-10 sm:px-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:px-12 lg:py-14">
+      <section id="shop-products" data-kit-component="shop-products" data-kit-version="1.0.0" aria-labelledby="shop-products-title">
+        <p class="text-sm font-bold uppercase tracking-widest text-indigo-300">Small Hydrate demo</p>
+        <h1 id="shop-products-title" class="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Useful objects, plain JavaScript</h1>
+        <p class="mt-4 max-w-2xl text-base leading-7 text-slate-400">
+          Add a product, then move between routes. The cart component keeps its own state while Drive replaces the surrounding document.
+        </p>
+
+        <div class="mt-9 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <template data-kit-for="product, index of products" data-kit-key="product.id">
+            <article class="flex min-h-72 flex-col rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl shadow-black/20">
+              <span class="w-fit rounded-full bg-slate-800 px-3 py-1 text-xs font-bold uppercase tracking-widest text-slate-400">
+                Product <span data-kit-text="index + 1"></span>
+              </span>
+              <h2 class="mt-6 text-2xl font-bold text-white" data-kit-text="product.name"></h2>
+              <p class="mt-3 flex-1 text-sm leading-6 text-slate-400" data-kit-text="product.description"></p>
+              <div class="mt-7 flex items-center justify-between gap-4">
+                <span class="text-lg font-black text-indigo-300" data-kit-text="money(product.price)"></span>
+                <button
+                  type="button"
+                  data-kit-click="$cart.add(product)"
+                  data-kit-bind="aria-label: 'Add ' + product.name + ' to cart';"
+                  data-shop-add
+                  class="rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">
+                  Add to cart
+                </button>
+              </div>
+            </article>
+          </template>
+        </div>
+      </section>
+
+      <aside
+        id="shop-cart"
+        data-kit-component="shop-cart"
+        data-kit-version="1.0.0"
+        data-kit-as="$cart"
+        aria-labelledby="shop-cart-title"
+        class="h-fit rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl shadow-black/20 lg:sticky lg:top-8">
+        <p class="text-sm font-bold uppercase tracking-widest text-slate-500">Retained boundary</p>
+        <h2 id="shop-cart-title" class="mt-2 text-2xl font-black text-white">Your cart</h2>
+        <div class="mt-6 grid grid-cols-2 gap-3">
+          <div class="rounded-2xl bg-slate-950 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Items</p>
+            <output id="shop-cart-count" data-kit-text="count" aria-live="polite" class="mt-2 block text-2xl font-black text-white">0</output>
+          </div>
+          <div class="rounded-2xl bg-slate-950 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</p>
+            <output id="shop-cart-total" data-kit-text="money(total)" class="mt-2 block text-2xl font-black text-indigo-300">$0.00</output>
+          </div>
+        </div>
+        <template data-kit-if="count === 0">
+          <p class="mt-5 rounded-2xl border border-dashed border-slate-700 p-4 text-sm leading-6 text-slate-400">Your cart is empty. Add any product to begin.</p>
+        </template>
+        <a href="./cart.html" class="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-white px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
+          Review cart
+        </a>
+      </aside>
+    </main>
+  </div>
+
+</body>
+</html>

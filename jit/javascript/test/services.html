@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en" data-test-status="pending" data-kit-bind="data-theme: $theme.mode;">
+<head>
+  <meta charset="utf-8">
+  <meta name="csrf-token" content="browser-contract-token">
+  <title>KitJS browser contract: services and migrated components</title>
+</head>
+<body>
+  <section id="clipboard-host" data-kit-component="clipboard" data-kit-version="1.0.0" data-kit-as="$clipboardComponent">
+    <button id="clipboard-copy" type="button" data-kit-click="copy('component-copy')">Copy</button>
+    <output id="clipboard-state" data-kit-text="copied ? 'copied' : 'idle'">pending</output>
+    <output id="clipboard-error" data-kit-text="error">pending</output>
+  </section>
+
+  <section id="progress-host" data-kit-component="progress-bar" data-kit-version="1.0.0" data-kit-as="$progress">
+    <button id="progress-start" type="button" data-kit-click="start()">Start</button>
+    <button id="progress-inc" type="button" data-kit-click="inc(15)">Increment</button>
+    <button id="progress-done" type="button" data-kit-click="done()">Done</button>
+    <button id="progress-reset" type="button" data-kit-click="reset()">Reset</button>
+    <output id="progress-status" data-kit-text="status">pending</output>
+    <output id="progress-width" data-kit-text="width">pending</output>
+  </section>
+
+  <section id="theme-host" data-kit-component="theme" data-kit-version="1.0.0" data-kit-as="$theme">
+    <button id="theme-toggle" type="button" data-kit-click="toggle()">Toggle theme</button>
+    <output id="theme-mode" data-kit-text="mode">pending</output>
+  </section>
+
+  <form id="request-form" action="/form-target?existing=yes" method="get">
+    <input name="query" value="kit js">
+    <input name="page" value="2">
+  </form>
+
+  <section id="component-version-conflict" data-kit-component="theme@1.0.0" data-kit-version="1.0.0">
+    <output id="component-version-conflict-state" data-kit-text="mode">inert</output>
+  </section>
+  <div id="component-version-orphan" data-kit-version="1.0.0"></div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var clipboardText = "";
+      var online = true;
+      var fullscreenElement = null;
+      var connection = new EventTarget();
+      var navigationCalls = [];
+      var navigationStubbed = false;
+      var requestCalls = [];
+      var shareCalls = [];
+      var warnings = [];
+
+      var consoleWarn = console.warn;
+      console.warn = function () {
+        warnings.push(Array.prototype.join.call(arguments, " "));
+        if (typeof consoleWarn === "function") consoleWarn.apply(console, arguments);
+      };
+
+      connection.type = "wifi";
+      connection.effectiveType = "4g";
+      connection.downlink = 12.5;
+      connection.rtt = 40;
+      connection.saveData = false;
+
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: function (value) {
+            clipboardText = String(value);
+            return Promise.resolve();
+          },
+          readText: function () { return Promise.resolve(clipboardText); }
+        }
+      });
+      Object.defineProperty(navigator, "connection", { configurable: true, value: connection });
+      Object.defineProperty(navigator, "onLine", {
+        configurable: true,
+        get: function () { return online; }
+      });
+      Object.defineProperty(navigator, "canShare", {
+        configurable: true,
+        value: function (data) { return data.title !== "fallback"; }
+      });
+      Object.defineProperty(navigator, "share", {
+        configurable: true,
+        value: function (data) {
+          shareCalls.push(data);
+          return Promise.resolve();
+        }
+      });
+
+      Object.defineProperty(Element.prototype, "requestFullscreen", {
+        configurable: true,
+        value: function () {
+          fullscreenElement = this;
+          return Promise.resolve();
+        }
+      });
+      Object.defineProperty(document, "fullscreenElement", {
+        configurable: true,
+        get: function () { return fullscreenElement; }
+      });
+      Object.defineProperty(document, "exitFullscreen", {
+        configurable: true,
+        value: function () {
+          fullscreenElement = null;
+          return Promise.resolve();
+        }
+      });
+
+      try {
+        var contractBack = function () { navigationCalls.push("back"); };
+        var contractForward = function () { navigationCalls.push("forward"); };
+        Object.defineProperty(history, "back", {
+          configurable: true,
+          value: contractBack
+        });
+        Object.defineProperty(history, "forward", {
+          configurable: true,
+          value: contractForward
+        });
+        navigationStubbed = history.back === contractBack && history.forward === contractForward;
+      } catch (_) {}
+
+      window.fetch = function (input, options) {
+        var url = new URL(String(input), location.href);
+        options = options || {};
+        var call = {
+          url: url,
+          method: String(options.method || "GET").toUpperCase(),
+          headers: new Headers(options.headers || {}),
+          body: options.body,
+          signal: options.signal || null
+        };
+        requestCalls.push(call);
+
+        if (url.pathname === "/slow") {
+          return new Promise(function (resolve, reject) {
+            var timer = setTimeout(function () {
+              resolve(jsonResponse({ path: url.pathname, sequence: requestCalls.length }));
+            }, 30);
+            if (call.signal) {
+              var abort = function () {
+                clearTimeout(timer);
+                reject(new DOMException("Request aborted", "AbortError"));
+              };
+              if (call.signal.aborted) abort();
+              else call.signal.addEventListener("abort", abort, { once: true });
+            }
+          });
+        }
+        if (url.pathname === "/failure") {
+          return Promise.resolve(jsonResponse({ code: "teapot" }, 418));
+        }
+        if (url.pathname === "/echo") {
+          return Promise.resolve(jsonResponse({
+            method: call.method,
+            body: call.body,
+            requestedWith: call.headers.get("X-Requested-With"),
+            csrf: call.headers.get("X-CSRF-Token"),
+            contentType: call.headers.get("Content-Type")
+          }));
+        }
+        return Promise.resolve(jsonResponse({
+          path: url.pathname,
+          query: Object.fromEntries(url.searchParams.entries()),
+          method: call.method
+        }));
+      };
+
+      function jsonResponse(value, status) {
+        return new Response(JSON.stringify(value), {
+          status: status || 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
+      window.__kitContract = {
+        clipboardText: function () { return clipboardText; },
+        setOnline: function (value) { online = Boolean(value); },
+        navigationStubbed: function () { return navigationStubbed; },
+        navigationCalls: navigationCalls,
+        requestCalls: requestCalls,
+        shareCalls: shareCalls,
+        warnings: warnings
+      };
+    })();
+  </script>
+
+  <script src="../core/global.js"></script>
+  <script src="../core/expression.js"></script>
+  <script src="../core/component.js"></script>
+  <script src="../core/dom.js"></script>
+  <script src="../core/lifecycle.js"></script>
+  <script src="../service/announce/1.0.0.js"></script>
+  <script src="../service/clipboard/1.0.0.js"></script>
+  <script src="../service/cookie/1.0.0.js"></script>
+  <script src="../service/fullscreen/1.0.0.js"></script>
+  <script src="../service/navigation/1.0.0.js"></script>
+  <script src="../service/network/1.0.0.js"></script>
+  <script src="../service/request/1.0.0.js"></script>
+  <script src="../service/share/1.0.0.js"></script>
+  <script src="../service/storage/1.0.0.js"></script>
+  <script>localStorage.setItem("kit:theme", JSON.stringify("dark"));</script>
+  <script src="../component/clipboard/1.0.0.js"></script>
+  <script src="../component/progress-bar/1.0.0.js"></script>
+  <script src="../component/theme/1.0.0.js"></script>
+  <script src="../core/boot.js"></script>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var root = document.documentElement;
+
+      function fail(error) {
+        root.setAttribute("data-test-status", "failed");
+        root.setAttribute("data-test-error", String(error && error.message || error));
+      }
+
+      function assert(condition, message) {
+        if (!condition) throw new Error(message);
+      }
+
+      function wait(milliseconds) {
+        return new Promise(function (resolve) { setTimeout(resolve, milliseconds); });
+      }
+
+      function click(id) {
+        document.getElementById(id).click();
+        return wait(0);
+      }
+
+      function assertServiceContract(name, methods) {
+        var service = kit[name];
+        var descriptor = Object.getOwnPropertyDescriptor(kit, name);
+        assert(service && service.version === "1.0.0", name + " version contract failed");
+        assert(Object.isFrozen(service), name + " must be frozen");
+        assert(!Object.prototype.propertyIsEnumerable.call(service, "version"), name + " version must be hidden");
+        assert(descriptor && descriptor.writable === false, name + " must be non-writable");
+        assert(descriptor && descriptor.configurable === false, name + " must be non-configurable");
+        methods.forEach(function (method) {
+          assert(typeof service[method] === "function", name + "." + method + " is missing");
+        });
+      }
+
+      async function testServiceContracts() {
+        assert(window.kit && typeof kit.component === "function", "KitJS core API is missing");
+        assert(window.KitworkRuntime === undefined, "unexpected second runtime global");
+        assert(!Object.prototype.hasOwnProperty.call(kit, "__kitwork_core__"), "private core capsule leaked after boot");
+        assertServiceContract("announce", ["say", "polite", "assertive", "clear"]);
+        assertServiceContract("clipboard", ["writeText", "readText"]);
+        assertServiceContract("cookie", ["get", "set", "remove", "has"]);
+        assertServiceContract("fullscreen", ["request", "exit", "active"]);
+        assertServiceContract("navigation", ["back", "forward", "reload"]);
+        assertServiceContract("network", ["snapshot", "subscribe"]);
+        assertServiceContract("request", ["request", "get", "post", "submit", "abort"]);
+        assertServiceContract("share", ["open", "canShare"]);
+        assertServiceContract("storage", ["get", "set", "remove", "has", "clear"]);
+
+        assert(document.getElementById("clipboard-state").textContent === "idle", "clipboard component is missing");
+        assert(document.getElementById("progress-status").textContent === "idle", "progress-bar component is missing");
+        assert(document.getElementById("theme-mode").textContent === "dark", "theme component is missing");
+        assert(kit.theme === undefined, "theme leaked into the service namespace");
+        assert(kit["progress-bar"] === undefined, "progress-bar leaked into the service namespace");
+        assert(window.__kitContract.warnings.some(function (warning) {
+          return warning.indexOf("KIT_COMPONENT_VERSION_CONFLICT") !== -1;
+        }), "dual component version declaration was not rejected");
+        assert(window.__kitContract.warnings.some(function (warning) {
+          return warning.indexOf("KIT_COMPONENT_VERSION_ORPHAN") !== -1;
+        }), "orphan component version declaration was not rejected");
+        assert(document.getElementById("component-version-conflict-state").textContent === "inert", "invalid component host was compiled");
+      }
+
+      async function testPrimitiveServices() {
+        await kit.clipboard.writeText(42);
+        assert(await kit.clipboard.readText() === "42", "clipboard did not coerce or read text");
+
+        kit.cookie.set("kit_contract", "cookie value", { sameSite: "Strict" });
+        assert(kit.cookie.has("kit_contract"), "cookie has failed");
+        assert(kit.cookie.get("kit_contract") === "cookie value", "cookie get failed");
+        kit.cookie.remove("kit_contract");
+        assert(!kit.cookie.has("kit_contract"), "cookie remove failed");
+
+        await kit.fullscreen.request(document.getElementById("progress-host"));
+        assert(kit.fullscreen.active(), "fullscreen request/active failed");
+        await kit.fullscreen.exit();
+        assert(!kit.fullscreen.active(), "fullscreen exit failed");
+
+        var firstAnnouncement = kit.announce.polite("first");
+        var secondAnnouncement = kit.announce.polite("second");
+        assert(await firstAnnouncement === false, "superseded announcement did not cancel");
+        assert(await secondAnnouncement === true, "announcement did not resolve");
+        assert(document.getElementById("kit-announce-polite").textContent === "second", "announcement region was not updated");
+        kit.announce.clear();
+        assert(document.getElementById("kit-announce-polite").textContent === "", "announcement clear failed");
+
+        var snapshots = [];
+        var unsubscribe = kit.network.subscribe(function (value) { snapshots.push(value); });
+        assert(kit.network.online && snapshots.length === 1, "network initial snapshot failed");
+        assert(Object.isFrozen(snapshots[0]) && Object.isFrozen(snapshots[0].connection), "network snapshot must be immutable");
+        window.__kitContract.setOnline(false);
+        window.dispatchEvent(new Event("offline"));
+        assert(!kit.network.online && snapshots.length === 2 && snapshots[1].online === false, "network offline update failed");
+        unsubscribe();
+        window.__kitContract.setOnline(true);
+        window.dispatchEvent(new Event("online"));
+        assert(snapshots.length === 2, "network unsubscribe failed");
+
+        if (window.__kitContract.navigationStubbed()) {
+          kit.navigation.back();
+          kit.navigation.forward();
+          assert(window.__kitContract.navigationCalls.join(",") === "back,forward", "navigation delegation failed");
+        }
+
+        await kit.storage.set("contract", { count: 2 });
+        assert(await kit.storage.has("contract"), "storage has failed");
+        var stored = await kit.storage.get("contract", null);
+        assert(stored && stored.count === 2, "storage get/set failed");
+        await kit.storage.remove("contract");
+        assert(!await kit.storage.has("contract"), "storage remove failed");
+        localStorage.setItem("foreign:contract", "keep");
+        await kit.storage.set("clear-one", 1);
+        await kit.storage.set("clear-two", 2);
+        assert(await kit.storage.clear() >= 2, "storage clear count failed");
+        assert(localStorage.getItem("foreign:contract") === "keep", "storage clear crossed its namespace");
+      }
+
+      async function testRequestService() {
+        var beforeInvalidURL = window.__kitContract.requestCalls.length;
+        var invalidURL = await kit.request.get(new Request("https://example.invalid/private")).then(
+          function () { return null; },
+          function (error) { return error; }
+        );
+        assert(invalidURL instanceof TypeError, "request accepted a Request object instead of an explicit URL");
+        assert(window.__kitContract.requestCalls.length === beforeInvalidURL, "request forwarded an invalid URL input");
+
+        var getResult = await kit.request.get("/json?kind=get");
+        assert(getResult.path === "/json" && getResult.query.kind === "get", "request GET failed");
+
+        var postResult = await kit.request.post("/echo", { answer: 42 });
+        assert(postResult.method === "POST", "request POST method failed");
+        assert(JSON.parse(postResult.body).answer === 42, "request JSON body failed");
+        assert(postResult.requestedWith === "XMLHttpRequest", "request same-origin marker missing");
+        assert(postResult.csrf === "browser-contract-token", "request CSRF header missing");
+        assert(postResult.contentType === "application/json", "request content type missing");
+
+        var failure = await kit.request.get("/failure").then(
+          function () { return null; },
+          function (error) { return error; }
+        );
+        assert(failure && failure.name === "KitRequestError" && failure.status === 418, "request HTTP error contract failed");
+        assert(failure.data && failure.data.code === "teapot", "request HTTP error data missing");
+
+        var first = kit.request.get("/slow?request=first", { key: "latest" }).then(
+          function () { return null; },
+          function (error) { return error; }
+        );
+        var second = kit.request.get("/slow?request=second", { key: "latest" });
+        var firstError = await first;
+        var secondResult = await second;
+        assert(firstError && firstError.name === "AbortError", "keyed request did not supersede the previous request");
+        assert(secondResult.path === "/slow", "latest keyed request did not complete");
+
+        var aborting = kit.request.get("/slow?request=abort", { key: "manual" }).then(
+          function () { return null; },
+          function (error) { return error; }
+        );
+        assert(kit.request.abort("manual", "contract") === true, "request abort did not find active key");
+        assert((await aborting).name === "AbortError", "request abort did not reject fetch");
+        assert(kit.request.abort("manual") === false, "request abort retained completed key");
+
+        var formResult = await kit.request.submit(document.getElementById("request-form"));
+        assert(formResult.path === "/form-target", "request form target failed");
+        assert(formResult.query.existing === "yes" && formResult.query.query === "kit js" && formResult.query.page === "2", "request GET form serialization failed");
+      }
+
+      async function testShareService() {
+        assert(kit.share.canShare({ title: "native", url: "/native" }), "share canShare native path failed");
+        assert(await kit.share.open({ title: "native", text: "hello", url: "/native" }), "share native path failed");
+        assert(window.__kitContract.shareCalls.length === 1, "native share was not invoked");
+        assert(!kit.share.canShare({ title: "fallback", url: "/fallback" }), "share fallback capability failed");
+        assert(await kit.share.open({ title: "fallback", url: "/fallback" }), "share fallback path failed");
+        assert(window.__kitContract.clipboardText() === "/fallback", "share did not delegate fallback to clipboard");
+      }
+
+      async function testComponents() {
+        assert(document.getElementById("theme-mode").textContent === "dark", "theme init did not read storage");
+        assert(root.getAttribute("data-theme") === "dark", "theme alias binding did not render");
+        await click("theme-toggle");
+        await wait(0);
+        assert(document.getElementById("theme-mode").textContent === "light", "theme toggle did not render");
+        assert(await kit.storage.get("theme") === "light", "theme toggle did not persist");
+
+        await click("clipboard-copy");
+        await wait(0);
+        assert(document.getElementById("clipboard-state").textContent === "copied", "clipboard component state did not render");
+        assert(document.getElementById("clipboard-error").textContent === "", "clipboard component reported an error");
+        assert(window.__kitContract.clipboardText() === "component-copy", "clipboard component did not use clipboard service");
+
+        await click("progress-start");
+        assert(document.getElementById("progress-status").textContent === "running", "progress start failed");
+        assert(document.getElementById("progress-width").textContent === "0%", "progress initial width failed");
+        await click("progress-inc");
+        assert(document.getElementById("progress-width").textContent === "15%", "progress increment failed");
+        await click("progress-done");
+        assert(document.getElementById("progress-status").textContent === "completed", "progress done status failed");
+        assert(document.getElementById("progress-width").textContent === "100%", "progress done width failed");
+        await click("progress-reset");
+        assert(document.getElementById("progress-status").textContent === "idle", "progress reset failed");
+      }
+
+      window.addEventListener("error", function (event) { fail(event.error || event.message || "browser error"); });
+      window.addEventListener("unhandledrejection", function (event) { fail(event.reason || "unhandled rejection"); });
+
+      document.addEventListener("DOMContentLoaded", function () {
+        wait(50).then(async function () {
+          await testServiceContracts();
+          await testComponents();
+          await testPrimitiveServices();
+          await testRequestService();
+          await testShareService();
+          root.setAttribute("data-test-status", "passed");
+        }).catch(fail);
+      }, { once: true });
+    })();
+  </script>
+</body>
+</html>

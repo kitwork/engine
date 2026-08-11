@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS form</title>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="mx-auto max-w-3xl px-6 py-16">
+    <section
+      id="form-demo"
+      data-kit-component="profile-form"
+      class="rounded-3xl border border-slate-800 bg-slate-900 p-8 shadow-2xl shadow-black/30">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p class="text-sm font-semibold uppercase tracking-widest text-indigo-300">KitJS form</p>
+          <h1 class="mt-2 text-3xl font-black tracking-tight text-white">Direct state, ordinary HTML</h1>
+        </div>
+        <button
+          id="form-highlight"
+          type="button"
+          data-kit-click="highlighted = !highlighted"
+          class="rounded-xl border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 transition hover:border-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
+          Toggle summary
+        </button>
+      </div>
+
+      <div class="mt-8 grid gap-5 sm:grid-cols-2">
+        <label class="grid gap-2 text-sm font-semibold text-slate-200">
+          Name
+          <input
+            id="form-name"
+            data-kit-model="name"
+            value="Server name"
+            autocomplete="name"
+            class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500">
+        </label>
+
+        <label class="grid gap-2 text-sm font-semibold text-slate-200">
+          Country
+          <select
+            id="form-country"
+            data-kit-model="country"
+            class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500">
+            <option value="us" selected>United States</option>
+            <option value="vn">Vietnam</option>
+            <option value="jp">Japan</option>
+          </select>
+        </label>
+
+        <label class="grid gap-2 text-sm font-semibold text-slate-200 sm:col-span-2">
+          Biography
+          <textarea
+            id="form-biography"
+            data-kit-model="biography"
+            rows="3"
+            class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500">Server biography</textarea>
+        </label>
+
+        <label class="grid gap-2 text-sm font-semibold text-slate-200">
+          Age
+          <input
+            id="form-age"
+            type="number"
+            data-kit-model="age"
+            value="1"
+            class="rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500">
+        </label>
+
+        <label class="grid gap-2 text-sm font-semibold text-slate-200">
+          Volume
+          <input id="form-volume" type="range" min="0" max="100" data-kit-model="volume" value="0" class="w-full accent-indigo-500">
+        </label>
+
+        <fieldset class="rounded-2xl border border-slate-800 p-4">
+          <legend class="px-2 text-sm font-semibold text-slate-200">Plan</legend>
+          <div class="mt-2 flex gap-5 text-sm text-slate-300">
+            <label class="flex items-center gap-2">
+              <input id="form-plan-basic" type="radio" name="plan" value="basic" data-kit-model="plan" checked class="accent-indigo-500">
+              Basic
+            </label>
+            <label class="flex items-center gap-2">
+              <input id="form-plan-pro" type="radio" name="plan" value="pro" data-kit-model="plan" class="accent-indigo-500">
+              Pro
+            </label>
+          </div>
+        </fieldset>
+
+        <label class="flex items-center gap-3 rounded-2xl border border-slate-800 p-4 text-sm font-semibold text-slate-200">
+          <input id="form-subscribed" type="checkbox" data-kit-model="subscribed" class="size-4 accent-indigo-500">
+          Product updates
+        </label>
+      </div>
+
+      <div
+        id="form-summary"
+        data-kit-class="highlighted ? 'shared-token bg-emerald-600 text-white md:grid-cols-2' : 'bg-slate-100 text-slate-900 md:grid-cols-1'"
+        class="form-summary shared-token mt-8 grid gap-2 rounded-2xl p-5 transition">
+        <p>Name: <strong id="form-name-output" data-kit-text="probeName()">Server name</strong></p>
+        <p>Biography: <span id="form-biography-output" data-kit-text="biography">Server biography</span></p>
+        <p>Country: <span id="form-country-output" data-kit-text="country">server</span></p>
+        <p>Subscribed: <span id="form-subscribed-output" data-kit-text="subscribed">server</span></p>
+        <p>Plan: <span id="form-plan-output" data-kit-text="plan">server</span></p>
+        <p>Age: <span id="form-age-output" data-kit-text="age">server</span> (<span id="form-age-kind" data-kit-text="ageKind()">server</span>)</p>
+        <p>Volume: <span id="form-volume-output" data-kit-text="volume">server</span> (<span id="form-volume-kind" data-kit-text="volumeKind()">server</span>)</p>
+      </div>
+
+      <button
+        id="form-load-example"
+        type="button"
+        data-kit-click="loadExample()"
+        class="mt-6 rounded-xl bg-indigo-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">
+        Load example state
+      </button>
+
+      <div id="form-invalid-models" class="mt-8 hidden" aria-hidden="true">
+        <input id="form-missing" data-kit-model="missingField" value="server-missing">
+        <input id="form-readonly" data-kit-model="locked" value="server-readonly">
+        <input id="form-nested" data-kit-model="profile.name" value="server-nested">
+        <output id="form-missing-output" data-kit-text="missingFieldExists()">server</output>
+        <output id="form-readonly-output" data-kit-text="locked">server</output>
+        <output id="form-nested-output" data-kit-text="profile.name">server</output>
+      </div>
+    </section>
+  </main>
+
+  <script src="../kit.js"></script>
+  <script>
+    globalThis.__kitFormRenderReads = 0;
+    kit.component("profile-form", {
+      name: "Ada Lovelace",
+      biography: "First computer programmer",
+      country: "vn",
+      subscribed: true,
+      plan: "pro",
+      age: 36,
+      volume: 60,
+      highlighted: false,
+      profile: { name: "Nested Ada" },
+
+      get locked() {
+        return "locked";
+      },
+
+      probeName() {
+        globalThis.__kitFormRenderReads++;
+        return this.name;
+      },
+
+      ageKind() {
+        return typeof this.age;
+      },
+
+      volumeKind() {
+        return typeof this.volume;
+      },
+
+      missingFieldExists() {
+        return Object.prototype.hasOwnProperty.call(this, "missingField");
+      },
+
+      loadExample() {
+        this.name = "Grace Hopper";
+        this.biography = "Compiler pioneer";
+        this.country = "us";
+        this.subscribed = true;
+        this.plan = "pro";
+        this.age = 85;
+        this.volume = 25;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -23,6 +23,7 @@ type Generation struct {
 	sources       *SourceManifest
 	routeGraph    RouteGraph
 	renderPlan    RenderPlan
+	contentAssets []string
 	responseCache *cache.Store
 	bytecodeCache *compiler.FileCache
 	environment   value.Value
@@ -265,12 +266,17 @@ func (g *Generation) Retire() {
 		g.routeGraph = nil
 		plan := g.renderPlan
 		g.renderPlan = nil
+		contentAssets := g.contentAssets
+		g.contentAssets = nil
 		g.mu.Unlock()
 		if graph != nil {
 			graph.Close()
 		}
 		if plan != nil {
 			plan.Close()
+		}
+		if g.owner != nil {
+			g.owner.releaseContentAssets(contentAssets)
 		}
 		close(g.retireDone)
 	})

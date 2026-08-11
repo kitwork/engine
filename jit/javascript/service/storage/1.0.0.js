@@ -1,40 +1,106 @@
-// ============================================================================
-// Kitwork Client Runtime Service: Storage (1.0.0)
-// ============================================================================
-
-(function (window) {
+// KitJS service: storage@1.0.0
+;(function (global) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var kit = global.kit;
+  var version = "1.0.0";
+  var OWN = Object.prototype.hasOwnProperty;
+  var prefix = "kit:";
 
-  if (kit.storage || !window.localStorage) return;
+  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
+    throw new Error("KitJS core must be loaded before service:storage");
+  }
+  if (OWN.call(kit, "storage")) {
+    if (kit.storage.version === version) return;
+    throw new Error("KitJS service conflict: storage");
+  }
 
-  kit.storage = {
-    get: function (key, fallback) {
-      var val = localStorage.getItem(key);
-      if (val === null) return Promise.resolve(fallback !== undefined ? fallback : null);
-      try { 
-        return Promise.resolve(JSON.parse(val)); 
-      } catch (_) { 
-        return Promise.resolve(val); 
-      }
-    },
+  function keyOf(value) {
+    value = String(value === undefined || value === null ? "" : value);
+    if (!value) throw new TypeError("Storage key cannot be empty");
+    return prefix + value;
+  }
 
-    set: function (key, value) {
-      var serialized = typeof value === "object" ? JSON.stringify(value) : String(value);
-      localStorage.setItem(key, serialized);
-      return Promise.resolve(true);
-    },
+  function local() {
+    try { return global.localStorage || null; }
+    catch (_) { return null; }
+  }
 
-    remove: function (key) {
-      localStorage.removeItem(key);
-      return Promise.resolve(true);
-    },
+  function decode(value, fallback) {
+    if (value === null) return fallback;
+    try { return JSON.parse(value); }
+    catch (_) { return value; }
+  }
 
-    clear: function () {
-      localStorage.clear();
-      return Promise.resolve(true);
+  async function get(key, fallback) {
+    key = keyOf(key);
+    var target = local();
+    if (!target) return fallback;
+    try { return decode(target.getItem(key), fallback); }
+    catch (_) { return fallback; }
+  }
+
+  async function set(key, value) {
+    key = keyOf(key);
+    var encoded;
+    if (value !== undefined) {
+      encoded = JSON.stringify(value);
+      if (encoded === undefined) throw new TypeError("Storage value must be JSON-serializable");
     }
-  };
+    var target = local();
+    if (!target) return false;
+    try {
+      if (value === undefined) target.removeItem(key);
+      else target.setItem(key, encoded);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
-})(typeof window !== "undefined" ? window : globalThis);
+  async function remove(key) {
+    key = keyOf(key);
+    var target = local();
+    if (!target) return false;
+    try {
+      target.removeItem(key);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function has(key) {
+    key = keyOf(key);
+    var target = local();
+    if (!target) return false;
+    try { return target.getItem(key) !== null; }
+    catch (_) { return false; }
+  }
+
+  async function clear() {
+    var target = local();
+    if (!target) return 0;
+    var keys = [];
+    try {
+      for (var index = 0; index < target.length; index++) {
+        var key = target.key(index);
+        if (key && key.indexOf(prefix) === 0) keys.push(key);
+      }
+      keys.forEach(function (key) { target.removeItem(key); });
+      return keys.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  var storage = { get: get, set: set, remove: remove, has: has, clear: clear };
+  Object.defineProperty(storage, "version", { value: version, enumerable: false });
+  Object.freeze(storage);
+  Object.defineProperty(kit, "storage", {
+    value: storage,
+    enumerable: true,
+    configurable: false,
+    writable: false
+  });
+})(globalThis);

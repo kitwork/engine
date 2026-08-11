@@ -288,7 +288,8 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 	if !presentation.SetJITConfig(config) ||
 		!presentation.SetFaviconFile("favicon.ico") ||
 		!presentation.AddAssetMount(site.AssetMount{URL: "assets", Disk: "_assets"}) ||
-		!presentation.SetThemeMode("force") {
+		!presentation.SetThemeMode("force") ||
+		!presentation.SetKitJS(true) {
 		t.Fatal("presentation rejected preparation-time declarations")
 	}
 	if err := generation.SetEnvironment(value.New("env-v1")); err != nil {
@@ -304,6 +305,9 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 	if !snapshot.Frozen {
 		t.Fatal("activated generation presentation is mutable")
 	}
+	if !snapshot.KitJS {
+		t.Fatal("activated presentation lost the KitJS opt-in")
+	}
 	if !generation.Sources().Frozen() {
 		t.Fatal("activated generation source manifest is mutable")
 	}
@@ -312,6 +316,9 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 	}
 	if presentation.SetThemeMode("off") {
 		t.Fatal("frozen presentation accepted a mutation")
+	}
+	if presentation.SetKitJS(false) {
+		t.Fatal("frozen presentation accepted a KitJS mutation")
 	}
 	if err := generation.SetEnvironment(value.New("env-v2")); err == nil {
 		t.Fatal("published generation accepted an environment mutation")

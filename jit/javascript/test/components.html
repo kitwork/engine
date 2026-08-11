@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en" data-test-status="pending">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS component catalog contract</title>
+</head>
+<body>
+  <section id="accordion-host" data-kit-component="accordion">
+    <button id="accordion-one" type="button" data-accordion-trigger data-kit-click="toggle('one')">One</button>
+    <button id="accordion-two" type="button" data-accordion-trigger data-kit-click="toggle('two')">Two</button>
+    <div id="accordion-panel" data-kit-show="isOpen('one')" hidden>Panel</div>
+  </section>
+
+  <section id="announce-host" data-kit-component="announce"></section>
+  <section id="clipboard-host" data-kit-component="clipboard"></section>
+  <section id="counter-host" data-kit-component="counter">
+    <button id="counter-increment" type="button" data-kit-click="count = count + 1">Increment</button>
+    <output id="counter-value" data-kit-text="count">pending</output>
+  </section>
+
+  <section id="combobox-host" data-kit-component="combobox">
+    <input id="combobox-input" data-kit-ref="input" role="combobox" aria-controls="combobox-options">
+    <div id="combobox-options" role="listbox" data-kit-show="open" hidden>
+      <button id="combobox-alpha" type="button" role="option" data-value="alpha" data-label="Alpha">Alpha</button>
+      <button id="combobox-beta" type="button" role="option" data-value="beta" data-label="Beta">Beta</button>
+      <section data-kit-component="missing-nested">
+        <button id="combobox-nested" type="button" role="option" data-value="nested" data-label="Nested option">Nested option</button>
+      </section>
+    </div>
+  </section>
+
+  <section id="command-host" data-kit-component="command-palette">
+    <button type="button" data-command-trigger>Commands</button>
+    <div data-kit-ref="panel" role="dialog" data-kit-show="open" hidden>
+      <input id="command-input" data-kit-ref="input" role="combobox">
+      <button id="command-open" type="button" data-command data-value="open" data-label="Open project">Open project</button>
+      <button type="button" data-command data-value="settings" data-label="Settings">Settings</button>
+      <section data-kit-component="missing-nested">
+        <button id="command-nested" type="button" data-command data-value="nested" data-label="Nested command">Nested command</button>
+      </section>
+    </div>
+  </section>
+
+  <section id="command-host-two" data-kit-component="command-palette">
+    <button type="button" data-command-trigger>Commands two</button>
+    <div data-kit-ref="panel" role="dialog" data-kit-show="open" hidden>
+      <input id="command-input-two" data-kit-ref="input" role="combobox">
+      <button type="button" data-command data-value="second" data-label="Second palette">Second palette</button>
+    </div>
+  </section>
+
+  <section id="dialog-host" data-kit-component="dialog">
+    <button id="dialog-backdrop" type="button" tabindex="-1">Backdrop</button>
+    <div id="dialog-panel" data-kit-ref="panel" role="dialog" aria-modal="true" tabindex="-1" data-kit-show="open" hidden>
+      <button type="button" data-kit-click="close()">Close</button>
+    </div>
+  </section>
+
+  <section id="dialog-host-two" data-kit-component="dialog">
+    <div id="dialog-panel-two" data-kit-ref="panel" role="dialog" aria-modal="true" tabindex="-1" data-kit-show="open" hidden>
+      <button type="button" data-kit-click="close()">Close</button>
+    </div>
+  </section>
+
+  <button id="overlay-origin" type="button">Overlay origin</button>
+
+  <section id="drawer-host" data-kit-component="drawer">
+    <button id="drawer-backdrop" type="button" tabindex="-1">Backdrop</button>
+    <aside id="drawer-panel" data-kit-ref="panel" role="dialog" aria-modal="true" tabindex="-1" data-kit-show="open" hidden>
+      <button type="button" data-kit-click="close()">Close</button>
+    </aside>
+  </section>
+
+  <section
+    id="dropdown-host"
+    data-kit-component="dropdown"
+    data-kit-click:outside="open = false"
+    data-kit-keydown:escape="open = false">
+    <button
+      id="dropdown-trigger"
+      type="button"
+      data-kit-ref="trigger"
+      aria-expanded="false"
+      data-kit-click="open = !open"
+      data-kit-bind="'aria-expanded': open;">Dropdown</button>
+    <div id="dropdown-panel" data-kit-show="open" hidden>
+      <a id="dropdown-first" href="#first">First</a>
+      <a href="#second">Second</a>
+      <section
+        id="nested-dropdown-host"
+        data-kit-component="dropdown"
+        data-kit-keydown:escape:stop="open = false">
+        <button
+          id="nested-dropdown-trigger"
+          type="button"
+          data-kit-ref="trigger"
+          data-kit-click="open = !open">Nested dropdown</button>
+        <div data-kit-show="open" hidden>
+          <button id="nested-dropdown-item" type="button">Nested item</button>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section
+    id="dropdown-no-ref-host"
+    data-kit-component="dropdown"
+    data-kit-key="dropdown-no-ref"
+    data-kit-keydown:escape="open = false">
+    <button id="dropdown-invalid-modifier" type="button" data-kit-click:typo="open = true">Invalid modifier</button>
+    <button id="dropdown-no-ref-toggle" type="button" data-kit-click="open = !open">No ref</button>
+    <div data-kit-show="open" hidden>
+      <button id="dropdown-no-ref-item" type="button">No-ref item</button>
+    </div>
+  </section>
+
+  <section id="menu-host" data-kit-component="menu">
+    <button id="menu-trigger" type="button" data-kit-ref="trigger" data-menu-trigger>Menu</button>
+    <div data-kit-ref="menu" role="menu" data-kit-show="open" hidden>
+      <button id="menu-first" type="button" role="menuitem" data-value="first">First</button>
+      <button type="button" role="menuitem" data-value="second">Second</button>
+      <section data-kit-component="missing-nested">
+        <button id="menu-nested" type="button" role="menuitem" data-value="nested">Nested item</button>
+      </section>
+    </div>
+  </section>
+
+  <section
+    id="popover-host"
+    data-kit-component="popover"
+    data-kit-click:outside="open = false"
+    data-kit-keydown:escape="open = false">
+    <button
+      id="popover-trigger"
+      type="button"
+      data-kit-ref="trigger"
+      aria-expanded="false"
+      data-kit-click="open = !open"
+      data-kit-bind="'aria-expanded': open;">Popover</button>
+    <div id="popover-panel" data-kit-show="open" hidden>
+      <button id="popover-inside" type="button">Panel item</button>
+    </div>
+  </section>
+
+  <section id="progress-host" data-kit-component="progress-bar">
+    <span id="progress-value" data-kit-text="value">0</span>
+  </section>
+
+  <section id="tabs-host" data-kit-component="tabs" data-tabs-default="one">
+    <div role="tablist">
+      <button id="tab-one" type="button" role="tab" data-tab="one" aria-selected="true">One</button>
+      <button id="tab-two" type="button" role="tab" data-tab="two">Two</button>
+    </div>
+    <div data-kit-show="is('one')">One panel</div>
+    <div data-kit-show="is('two')" hidden>Two panel</div>
+  </section>
+
+  <section id="theme-host" data-kit-component="theme">
+    <output id="theme-resolved" data-kit-text="resolved">light</output>
+  </section>
+  <section id="toast-host" data-kit-component="toast"><div data-kit-show="visible" hidden></div></section>
+  <section id="tooltip-host" data-kit-component="tooltip">
+    <button id="tooltip-trigger" type="button">Tooltip</button>
+    <span role="tooltip" data-kit-show="visible" hidden>Help</span>
+  </section>
+
+  <script src="../core/global.js"></script>
+  <script src="../core/expression.js"></script>
+  <script src="../core/component.js"></script>
+  <script src="../core/dom.js"></script>
+  <script src="../core/lifecycle.js"></script>
+  <script>window.__kitComponentCore = window.kit.__kitwork_core__;</script>
+
+  <script>
+    window.__clipboardWrites = [];
+    window.__clipboardStub = {
+      writeText: function (value) {
+        return new Promise(function (resolve, reject) {
+          window.__clipboardWrites.push({ value: value, resolve: resolve, reject: reject });
+        });
+      },
+      readText: function () { return Promise.resolve(""); }
+    };
+    try {
+      Object.defineProperty(window.navigator, "clipboard", { value: window.__clipboardStub, configurable: true });
+    } catch (_) {
+      Object.defineProperty(Object.getPrototypeOf(window.navigator), "clipboard", { value: window.__clipboardStub, configurable: true });
+    }
+
+    window.__themeMedia = {
+      matches: false,
+      listeners: [],
+      addEventListener: function (name, listener) { if (name === "change") this.listeners.push(listener); },
+      removeEventListener: function (name, listener) {
+        if (name !== "change") return;
+        this.listeners = this.listeners.filter(function (current) { return current !== listener; });
+      },
+      dispatch: function () {
+        var media = this;
+        this.listeners.slice().forEach(function (listener) { listener({ matches: media.matches }); });
+      }
+    };
+    window.matchMedia = function () { return window.__themeMedia; };
+  </script>
+
+  <script src="../service/announce/1.0.0.js"></script>
+  <script src="../service/clipboard/1.0.0.js"></script>
+  <script src="../service/storage/1.0.0.js"></script>
+
+  <script src="../component/accordion/1.0.0.js"></script>
+  <script src="../component/announce/1.0.0.js"></script>
+  <script src="../component/clipboard/1.0.0.js"></script>
+  <script src="../component/combobox/1.0.0.js"></script>
+  <script src="../component/command-palette/1.0.0.js"></script>
+  <script src="../component/counter/1.0.0.js"></script>
+  <script src="../component/dialog/1.0.0.js"></script>
+  <script src="../component/drawer/1.0.0.js"></script>
+  <script src="../component/dropdown/1.0.0.js"></script>
+  <script src="../component/menu/1.0.0.js"></script>
+  <script src="../component/popover/1.0.0.js"></script>
+  <script src="../component/progress-bar/1.0.0.js"></script>
+  <script src="../component/tabs/1.0.0.js"></script>
+  <script src="../component/theme/1.0.0.js"></script>
+  <script src="../component/toast/1.0.0.js"></script>
+  <script src="../component/tooltip/1.0.0.js"></script>
+  <script src="../core/boot.js"></script>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var unsupportedAttributeErrors = 0;
+      var unsupportedAttributeDirectives = [];
+      document.addEventListener("kit:error", function (event) {
+        var context = event.detail && event.detail.context;
+        if (context && context.code === "KIT_UNSUPPORTED_ATTRIBUTE") {
+          unsupportedAttributeErrors++;
+          unsupportedAttributeDirectives.push(context.directive);
+        }
+      });
+
+      function assert(condition, message) {
+        if (!condition) throw new Error(message);
+      }
+
+      function tick() {
+        return new Promise(function (resolve) { setTimeout(resolve, 0); });
+      }
+
+      function key(target, name, options) {
+        options = options || {};
+        target.dispatchEvent(new KeyboardEvent("keydown", {
+          bubbles: true,
+          cancelable: true,
+          key: name,
+          ctrlKey: Boolean(options.ctrlKey),
+          metaKey: Boolean(options.metaKey),
+          shiftKey: Boolean(options.shiftKey)
+        }));
+      }
+
+      function instances(name) {
+        return window.__kitComponentCore.runtime.components.filter(function (record) {
+          return record.name === name && !record.disposed;
+        });
+      }
+
+      function instance(name) {
+        var records = instances(name);
+        assert(records.length > 0, "expected a live " + name + " instance");
+        return records[0].instance;
+      }
+
+      async function run() {
+        await tick();
+        await tick();
+
+        var duplicateRegistrationRejected = false;
+        try {
+          kit.component("dropdown", {});
+        } catch (error) {
+          duplicateRegistrationRejected = String(error && error.message || error).indexOf("Component already registered: dropdown") !== -1;
+        }
+        assert(duplicateRegistrationRejected, "duplicate component registration was not rejected centrally");
+
+        assert(!Object.prototype.hasOwnProperty.call(window.kit, "__kitwork_core__"), "private core capsule leaked");
+        assert(!document.querySelector("dialog,details,[popover]"), "catalog fixture used a native disclosure/overlay primitive");
+        assert(window.__kitComponentCore.runtime.components.length === 20, "canonical and multi-instance components did not mount");
+
+        ["accordion", "announce", "clipboard", "combobox", "command-palette", "dialog", "drawer",
+          "counter", "dropdown", "menu", "popover", "progress-bar", "tabs", "theme", "toast", "tooltip"].forEach(function (name) {
+          var definition = window.__kitComponentCore.blueprints[name];
+          assert(definition && typeof definition === "object", name + " definition missing");
+          assert(typeof definition.mount === "undefined" && typeof definition.unmount === "undefined", name + " exposes legacy lifecycle");
+          instance(name);
+        });
+
+        var accordion = instance("accordion");
+        accordion.toggle("one");
+        await tick();
+        assert(accordion.isOpen("one") && !document.getElementById("accordion-panel").hidden, "accordion did not open custom panel");
+        document.getElementById("accordion-one").focus();
+        key(document.getElementById("accordion-one"), "ArrowDown");
+        assert(document.activeElement === document.getElementById("accordion-two"), "accordion keyboard navigation failed");
+
+        var announce = instance("announce");
+        assert(await announce.speak("Saved", "polite"), "announce service facade failed");
+        assert(announce.message === "Saved", "announce state did not update");
+
+		var clipboardRecord = instances("clipboard")[0];
+		var clipboard = clipboardRecord.instance;
+        var firstCopy = clipboard.copy("first");
+        var secondCopy = clipboard.copy("second");
+        assert(window.__clipboardWrites.length === 2, "clipboard operations were not forwarded");
+        window.__clipboardWrites[1].resolve();
+        assert(await secondCopy, "latest clipboard operation did not settle");
+        clipboard.reset();
+        window.__clipboardWrites[0].resolve();
+        assert(await firstCopy === false, "stale clipboard operation was not ignored");
+        assert(!clipboard.copied && clipboard.error === "", "stale clipboard operation overwrote reset state");
+		var disposedCopy = clipboard.copy("disposed");
+		document.getElementById("clipboard-host").remove();
+		await tick();
+		await tick();
+		window.__clipboardWrites[2].resolve();
+		assert(await disposedCopy === false && clipboardRecord.disposed, "disposed clipboard operation committed stale state");
+
+		var counter = instance("counter");
+		assert(counter.count === 0 && document.getElementById("counter-value").textContent === "0", "counter initial binding failed");
+		document.getElementById("counter-increment").click();
+		await tick();
+		assert(counter.count === 1 && document.getElementById("counter-value").textContent === "1", "counter declarative increment failed");
+
+        var combobox = instance("combobox");
+        var comboboxInput = document.getElementById("combobox-input");
+        comboboxInput.value = "Al";
+        comboboxInput.dispatchEvent(new Event("input", { bubbles: true }));
+        assert(combobox.query === "Al" && combobox.open && combobox.hasMatches, "combobox input/filter state failed");
+        key(comboboxInput, "Enter");
+        assert(combobox.value === "alpha" && !combobox.open, "combobox selection failed");
+		combobox.search("Nested");
+		assert(!combobox.hasMatches, "combobox crossed a nested component boundary");
+		document.getElementById("combobox-nested").click();
+		assert(combobox.value === "alpha", "nested option changed parent combobox state");
+
+		var commands = instances("command-palette").map(function (record) { return record.instance; });
+		assert(commands.length === 2, "command palette multi-instance fixture is incomplete");
+		document.body.style.overflow = "scroll";
+		document.getElementById("overlay-origin").focus();
+        key(document, "k", { ctrlKey: true });
+        await tick();
+		assert(commands.filter(function (command) { return command.open; }).length === 1, "command palette shortcut opened multiple owners");
+		assert(document.body.style.overflow === "hidden", "command palette did not lock body scroll");
+		commands[1].show();
+		await tick();
+		assert(commands[1].open && !commands[0].open, "command palette owner handoff failed");
+		assert(document.body.style.overflow === "hidden", "overlay handoff released body scroll early");
+		commands[1].close();
+		await tick();
+		assert(document.activeElement === document.getElementById("overlay-origin"), "command palette did not preserve original focus");
+		assert(document.body.style.overflow === "scroll", "overlay close did not restore the prior body overflow");
+		document.body.style.removeProperty("overflow");
+
+		var command = commands[0];
+		command.show();
+        command.search("open");
+        assert(command.hasMatches, "command palette filtering failed");
+		command.search("Nested");
+		assert(!command.hasMatches, "command palette crossed a nested component boundary");
+		document.getElementById("command-nested").click();
+		assert(command.selected === "", "nested command changed parent palette state");
+		command.search("open");
+        assert(command.run("open", "Open project", 0) === "open" && !command.open, "command palette selection failed");
+
+		var dialogs = instances("dialog").map(function (record) { return record.instance; });
+		assert(dialogs.length === 2, "dialog multi-instance fixture is incomplete");
+		var dialog = dialogs[0];
+		document.getElementById("overlay-origin").focus();
+		dialog.show("Confirm", "Continue?");
+        await tick();
+        assert(dialog.open && !document.getElementById("dialog-panel").hidden, "custom dialog did not open");
+		assert(document.activeElement !== document.getElementById("dialog-backdrop") && document.getElementById("dialog-panel").contains(document.activeElement), "dialog focused its backdrop");
+		dialogs[1].show("Second", "Handoff");
+		await tick();
+		assert(!dialog.open && dialogs[1].open, "dialog owner handoff failed");
+		dialogs[1].close();
+		await tick();
+		assert(document.activeElement === document.getElementById("overlay-origin"), "dialog handoff lost original focus");
+
+		dialog.show("Confirm", "Continue?");
+		await tick();
+        key(document, "Escape");
+        await tick();
+        assert(!dialog.open && document.getElementById("dialog-panel").hidden, "custom dialog Escape close failed");
+
+		var drawerRecord = instances("drawer")[0];
+		var drawer = drawerRecord.instance;
+		document.body.style.overflow = "auto";
+		document.getElementById("overlay-origin").focus();
+		command.show();
+		await tick();
+        drawer.show("Navigation");
+        await tick();
+		assert(drawer.open && !command.open, "cross-overlay owner handoff failed");
+		assert(document.body.style.overflow === "hidden", "cross-overlay handoff released body scroll early");
+		assert(document.activeElement !== document.getElementById("drawer-backdrop") && document.getElementById("drawer-panel").contains(document.activeElement), "drawer focused its backdrop");
+		dialog.show("Cross owner", "Dialog replaces drawer");
+		await tick();
+		assert(dialog.open && !drawer.open, "drawer-to-dialog owner handoff failed");
+		assert(document.body.style.overflow === "hidden", "drawer-to-dialog handoff released body scroll early");
+		dialog.close();
+		await tick();
+		assert(document.activeElement === document.getElementById("overlay-origin"), "cross-overlay handoff lost original focus");
+		assert(document.body.style.overflow === "auto", "cross-overlay close did not restore body overflow");
+		document.body.style.removeProperty("overflow");
+
+		drawer.show("Navigation");
+		await tick();
+        key(document, "Escape");
+        assert(!drawer.open, "custom drawer Escape close failed");
+
+		document.body.style.overflow = "clip";
+		drawer.show("Cleanup");
+		await tick();
+		assert(document.body.style.overflow === "hidden", "drawer cleanup fixture did not acquire scroll lock");
+		document.getElementById("drawer-host").remove();
+		await tick();
+		await tick();
+		assert(drawerRecord.disposed && document.body.style.overflow === "clip", "overlay disposal did not release body scroll");
+		document.body.style.removeProperty("overflow");
+
+		var dropdownRecord = instances("dropdown")[0];
+		var dropdown = dropdownRecord.instance;
+		var dropdownTrigger = document.getElementById("dropdown-trigger");
+		var dropdownPanel = document.getElementById("dropdown-panel");
+		dropdownTrigger.focus();
+		dropdownTrigger.click();
+		await tick();
+		assert(dropdown.open && !dropdownPanel.hidden && dropdownTrigger.getAttribute("aria-expanded") === "true", "dropdown declarative toggle failed");
+		dropdownPanel.click();
+		assert(dropdown.open, "dropdown treated an inside click as outside");
+		var nestedDropdown = instances("dropdown").filter(function (record) {
+			return record.host && record.host.id === "nested-dropdown-host";
+		})[0].instance;
+		document.getElementById("nested-dropdown-trigger").click();
+		await tick();
+		document.getElementById("nested-dropdown-item").focus();
+		key(document.getElementById("nested-dropdown-item"), "Escape");
+		await tick();
+		assert(!nestedDropdown.open && dropdown.open, "nested Escape crossed its nearest component boundary");
+		assert(document.activeElement === document.getElementById("nested-dropdown-trigger"), "nested Escape did not choose the nearest trigger ref");
+		document.getElementById("dropdown-first").focus();
+		key(document.getElementById("dropdown-first"), "Escape");
+		await tick();
+		assert(!dropdown.open && document.activeElement === dropdownTrigger, "dropdown declarative Escape close failed");
+        dropdownTrigger.click();
+        document.body.click();
+        await tick();
+        assert(!dropdown.open && dropdownTrigger.getAttribute("aria-expanded") === "false", "dropdown outside close failed");
+
+		var noRefDropdown = instances("dropdown").filter(function (record) {
+			return record.host && record.host.id === "dropdown-no-ref-host";
+		})[0].instance;
+		assert(unsupportedAttributeDirectives.indexOf("data-kit-key") === -1, "valid data-kit-key metadata was reported as unsupported");
+		assert(unsupportedAttributeErrors === 1, "unsupported event modifier was not reported during compilation");
+		document.getElementById("dropdown-invalid-modifier").click();
+		await tick();
+		assert(!noRefDropdown.open, "unsupported event modifier downgraded to a plain click action");
+		assert(unsupportedAttributeErrors === 1, "unsupported event modifier was not reported exactly once");
+		document.getElementById("dropdown-no-ref-toggle").click();
+		await tick();
+		document.getElementById("dropdown-no-ref-item").focus();
+		key(document.getElementById("dropdown-no-ref-item"), "Escape");
+		await tick();
+		assert(!noRefDropdown.open, "Escape without a trigger ref changed action behavior");
+
+        var menu = instance("menu");
+        key(document.getElementById("menu-trigger"), "ArrowDown");
+        await tick();
+        assert(menu.open && menu.activeIndex === 0, "menu keyboard open failed");
+        assert(menu.select("first", 0) === "first" && !menu.open, "menu selection failed");
+		menu.show();
+		document.getElementById("menu-nested").click();
+		assert(menu.selected === "first", "nested menu item changed parent menu state");
+		menu.close();
+
+		var popoverRecord = instances("popover")[0];
+		var popover = popoverRecord.instance;
+		var popoverTrigger = document.getElementById("popover-trigger");
+		var popoverPanel = document.getElementById("popover-panel");
+		popoverTrigger.focus();
+		popoverTrigger.click();
+		await tick();
+		assert(popover.open && !popoverPanel.hidden && popoverTrigger.getAttribute("aria-expanded") === "true", "popover declarative toggle failed");
+		document.getElementById("popover-inside").focus();
+		key(document.getElementById("popover-inside"), "Escape");
+		await tick();
+		assert(!popover.open && document.activeElement === popoverTrigger, "popover declarative Escape close failed");
+		popoverTrigger.click();
+        document.body.click();
+        await tick();
+        assert(!popover.open && popoverTrigger.getAttribute("aria-expanded") === "false", "popover outside close failed");
+
+        var progress = instance("progress-bar");
+        progress.start();
+        progress.inc(25);
+        await tick();
+        assert(progress.value === 25 && document.getElementById("progress-value").textContent === "25", "progress state/render failed");
+
+        var tabs = instance("tabs");
+        document.getElementById("tab-one").focus();
+        key(document.getElementById("tab-one"), "ArrowRight");
+        await tick();
+        assert(tabs.is("two") && document.activeElement === document.getElementById("tab-two"), "tabs keyboard selection failed");
+
+		var themeRecord = instances("theme")[0];
+		var theme = themeRecord.instance;
+        theme.mode = "system";
+        assert(theme.resolved === "light", "system theme did not read media preference");
+        window.__themeMedia.matches = true;
+        window.__themeMedia.dispatch();
+        await tick();
+        assert(theme.resolved === "dark" && document.getElementById("theme-resolved").textContent === "dark", "system theme change did not render");
+        await theme.set("invalid-mode");
+        assert(theme.mode === "system", "theme mode validation failed");
+		assert(window.__themeMedia.listeners.length === 1, "theme preference listener ownership is invalid");
+		document.getElementById("theme-host").remove();
+		await tick();
+		await tick();
+		assert(themeRecord.disposed && window.__themeMedia.listeners.length === 0, "theme preference listener was not cleaned up");
+
+        var toast = instance("toast");
+        await toast.show("Persistent", "success", 0);
+        assert(toast.visible && toast.duration === 0, "persistent toast failed");
+        toast.close();
+        assert(!toast.visible, "toast close failed");
+
+        var tooltipRecord = window.__kitComponentCore.runtime.components.filter(function (record) {
+          return record.name === "tooltip";
+        })[0];
+        var tooltip = tooltipRecord.instance;
+        document.getElementById("tooltip-host").dispatchEvent(new PointerEvent("pointerenter"));
+        assert(tooltip.visible, "tooltip pointer behavior failed");
+        document.getElementById("tooltip-host").remove();
+        await tick();
+        await tick();
+        assert(tooltipRecord.disposed && tooltipRecord.host === null, "component cleanup/disposal failed");
+
+		document.getElementById("dropdown-host").remove();
+		document.getElementById("popover-host").remove();
+		await tick();
+		await tick();
+		assert(dropdownRecord.disposed && popoverRecord.disposed, "disclosure component disposal failed");
+		dropdown.open = true;
+		popover.open = true;
+		document.body.click();
+		assert(dropdown.open && popover.open, "disposed disclosure retained a document listener");
+
+        document.documentElement.setAttribute("data-test-status", "passed");
+      }
+
+      function fail(error) {
+        document.documentElement.setAttribute("data-test-status", "failed");
+        document.documentElement.setAttribute("data-test-error", String(error && error.stack || error));
+		var output = document.createElement("pre");
+		output.id = "test-error";
+		output.textContent = String(error && error.stack || error);
+		document.body.appendChild(output);
+      }
+
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { run().catch(fail); }, { once: true });
+      else run().catch(fail);
+    })();
+  </script>
+</body>
+</html>

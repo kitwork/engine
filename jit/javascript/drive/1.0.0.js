@@ -1,104 +1,75 @@
-// ============================================================================
-// Kitwork Client Runtime: Drive & Hydrate Morphing Engine (1.0.0 - Draft 0.5)
-// ============================================================================
-// Location: engine/jit/javascript/drive/1.0.0.js
-// ============================================================================
-// Động cơ SPA Navigation, DOM Morphing & Re-hydration tích hợp các cải tiến từ legacy:
-// 1. Native Bridge IPC Adapter Handle (WebView2 / WebKit support).
-// 2. Built-in Progress Bar (>120ms threshold to prevent flash).
-// 3. Screen Reader Live Region Announcer (aria-live="polite").
-// 4. Hover/Touch Link Prefetching với FIFO Cache Cap.
-// 5. Head Script & Style Re-reconciler (Tracks loaded external scripts).
-// ============================================================================
-
-(function (window) {
+// KitJS module: drive@1.0.0
+// Production SPA Navigation, Link Interception, Hover Prefetching & DOM Morphing Engine
+;(function (global) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var kit = (global.kit = global.kit || {});
+  if (kit.drive && kit.drive.version === "1.0.0") return;
 
-  if (kit.drive) return;
-
-  var prefetchCache = {};
+  var prefetchCache = Object.create(null);
   var prefetchOrder = [];
-  var PREFETCH_CAP = 20;
+  var PREFETCH_CAP = 30;
   var loadedScripts = new Set();
 
-  if (typeof document !== "undefined") {
-    var existingScripts = document.querySelectorAll("script[src]");
-    for (var s = 0; s < existingScripts.length; s++) {
-      loadedScripts.add(existingScripts[s].src);
+  if (typeof global.document !== "undefined") {
+    var existing = global.document.querySelectorAll("script[src]");
+    for (var index = 0; index < existing.length; index++) {
+      if (existing[index].src) loadedScripts.add(existing[index].src);
     }
   }
 
   // --------------------------------------------------------------------------
-  // 1. PROGRESS BAR & ANNOUNCER CHROME OVERLAYS
+  // 1. PROGRESS BAR OVERLAY
   // --------------------------------------------------------------------------
   var bar = null;
   var barTimer = null;
   var barShown = false;
-  var announcer = null;
 
-  function initChromeOverlays() {
-    if (typeof document === "undefined" || !document.body) return;
-
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.setAttribute("data-kit-ui", "progress");
-      bar.style.cssText = "position:fixed;top:0;left:0;height:2px;width:0;" +
-        "background:var(--kit-progress,#1a73e8);" +
-        "z-index:2147483647;opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s";
-      document.body.appendChild(bar);
-    }
-
-    if (!announcer) {
-      announcer = document.createElement("div");
-      announcer.setAttribute("data-kit-ui", "announcer");
-      announcer.setAttribute("aria-live", "polite");
-      announcer.setAttribute("aria-atomic", "true");
-      announcer.style.cssText = "position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;" +
-        "overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap";
-      document.body.appendChild(announcer);
-    }
+  function initProgressBar() {
+    if (typeof global.document === "undefined" || !global.document.body || bar) return;
+    bar = global.document.createElement("div");
+    bar.setAttribute("data-kit-ui", "progress");
+    bar.style.cssText =
+      "position:fixed;top:0;left:0;height:2px;width:0;" +
+      "background:var(--kit-progress,#4f46e5);z-index:2147483647;" +
+      "opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s;";
+    global.document.body.appendChild(bar);
   }
 
   function showProgress(on) {
-    if (!bar) initChromeOverlays();
+    initProgressBar();
     if (!bar) return;
 
-    clearTimeout(barTimer);
+    global.clearTimeout(barTimer);
     if (on) {
-      // Only show when navigation is actually slow (>120ms) to avoid flashing on instant pages
-      barTimer = setTimeout(function () {
-        if (!bar.isConnected) document.body.appendChild(bar);
+      barTimer = global.setTimeout(function () {
+        if (!bar.isConnected) global.document.body.appendChild(bar);
         barShown = true;
         bar.style.transition = "width .2s ease,opacity .3s";
         bar.style.opacity = "1";
         bar.style.width = "0";
-        requestAnimationFrame(function () {
-          bar.style.transition = "width 8s cubic-bezier(.1,.7,.1,1)";
+        if (typeof global.requestAnimationFrame === "function") {
+          global.requestAnimationFrame(function () {
+            bar.style.transition = "width 8s cubic-bezier(.1,.7,.1,1)";
+            bar.style.width = "90%";
+          });
+        } else {
           bar.style.width = "90%";
-        });
+        }
       }, 120);
     } else if (barShown) {
       barShown = false;
       bar.style.transition = "width .2s ease,opacity .4s";
       bar.style.width = "100%";
-      setTimeout(function () {
+      global.setTimeout(function () {
         bar.style.opacity = "0";
         bar.style.width = "0";
       }, 220);
     }
   }
 
-  function announce(msg) {
-    if (!announcer) initChromeOverlays();
-    if (announcer && msg) {
-      announcer.textContent = msg;
-    }
-  }
-
   // --------------------------------------------------------------------------
-  // 2. DOM MORPHING ALGORITHM & HEAD RECONCILIATION
+  // 2. DOM MORPHING ALGORITHM
   // --------------------------------------------------------------------------
   function isSameNode(n1, n2) {
     if (n1.nodeType !== n2.nodeType) return false;
@@ -125,19 +96,19 @@
     if (!fromAttrs || !toAttrs) return;
 
     for (var i = fromAttrs.length - 1; i >= 0; i--) {
-      var attrName = fromAttrs[i].name;
-      if (attrName === "value" && fromNode === document.activeElement) continue;
-      if (!toNode.hasAttribute(attrName)) {
-        fromNode.removeAttribute(attrName);
+      var name = fromAttrs[i].name;
+      if (name === "value" && fromNode === global.document.activeElement) continue;
+      if (!toNode.hasAttribute(name)) {
+        fromNode.removeAttribute(name);
       }
     }
 
     for (var j = 0; j < toAttrs.length; j++) {
-      var tName = toAttrs[j].name;
-      var tVal = toAttrs[j].value;
-      if (tName === "value" && fromNode === document.activeElement) continue;
-      if (fromNode.getAttribute(tName) !== tVal) {
-        fromNode.setAttribute(tName, tVal);
+      var attrName = toAttrs[j].name;
+      var attrVal = toAttrs[j].value;
+      if (attrName === "value" && fromNode === global.document.activeElement) continue;
+      if (fromNode.getAttribute(attrName) !== attrVal) {
+        fromNode.setAttribute(attrName, attrVal);
       }
     }
   }
@@ -214,23 +185,25 @@
       var child = newHeadChildren[i];
       var tagName = child.tagName.toLowerCase();
 
-      if (tagName === "title" && document.title !== child.textContent) {
-        document.title = child.textContent;
-        announce(document.title);
+      if (tagName === "title" && global.document.title !== child.textContent) {
+        global.document.title = child.textContent;
+        if (kit.announce && typeof kit.announce.polite === "function") {
+          kit.announce.polite(global.document.title);
+        }
       } else if (tagName === "link" && child.rel === "stylesheet") {
         var href = child.getAttribute("href");
-        if (href && !document.querySelector('link[href="' + href + '"]')) {
-          var newLink = document.createElement("link");
+        if (href && !global.document.querySelector('link[href="' + href + '"]')) {
+          var newLink = global.document.createElement("link");
           newLink.rel = "stylesheet";
           newLink.href = href;
-          document.head.appendChild(newLink);
+          global.document.head.appendChild(newLink);
         }
       } else if (tagName === "script" && child.src) {
         if (!loadedScripts.has(child.src)) {
           loadedScripts.add(child.src);
-          var newScript = document.createElement("script");
+          var newScript = global.document.createElement("script");
           newScript.src = child.src;
-          document.head.appendChild(newScript);
+          global.document.head.appendChild(newScript);
         }
       }
     }
@@ -240,14 +213,12 @@
   // 3. HOVER PREFETCHING ENGINE
   // --------------------------------------------------------------------------
   function prefetchUrl(url) {
-    if (!url || prefetchCache[url] || typeof fetch === "undefined") return;
+    if (!url || prefetchCache[url] || typeof global.fetch === "undefined") return;
 
-    var promise = fetch(url, {
-      headers: { "X-Kit-Drive": "true", "Accept": "text/html" }
-    }).then(function (res) {
-      if (!res.ok) return null;
-      return res.text();
-    })["catch"](function () { return null; });
+    var promise = global
+      .fetch(url, { headers: { "X-Kit-Drive": "true", Accept: "text/html" } })
+      .then(function (res) { return res.ok ? res.text() : null; })
+      ["catch"](function () { return null; });
 
     prefetchCache[url] = promise;
     prefetchOrder.push(url);
@@ -259,87 +230,111 @@
   }
 
   // --------------------------------------------------------------------------
-  // 4. SPA NAVIGATION ENGINE
+  // 4. SPA NAVIGATION & MORPH EXECUTION
   // --------------------------------------------------------------------------
+  function triggerRuntimeInvalidate() {
+    if (kit.__kitwork_core__ && typeof kit.__kitwork_core__.refreshRuntime === "function") {
+      kit.__kitwork_core__.refreshRuntime();
+    }
+  }
+
   function fetchAndMorph(url, isPopState) {
-    if (typeof fetch === "undefined") return Promise.reject("Fetch unavailable");
+    if (typeof global.fetch === "undefined") return Promise.reject("Fetch unavailable");
 
     showProgress(true);
 
-    var htmlPromise = prefetchCache[url] || fetch(url, {
-      headers: { "X-Kit-Drive": "true", "Accept": "text/html" }
-    }).then(function (res) {
-      if (!res.ok) {
-        window.location.href = url;
-        return;
-      }
-      return res.text();
-    });
+    var htmlPromise =
+      prefetchCache[url] ||
+      global.fetch(url, { headers: { "X-Kit-Drive": "true", Accept: "text/html" } }).then(function (res) {
+        if (!res.ok) {
+          global.location.href = url;
+          return null;
+        }
+        return res.text();
+      });
 
-    return htmlPromise.then(function (htmlText) {
-      showProgress(false);
-      if (!htmlText) return;
+    return Promise.resolve(htmlPromise)
+      .then(function (htmlText) {
+        showProgress(false);
+        if (!htmlText) return;
 
-      var parser = new DOMParser();
-      var newDoc = parser.parseFromString(htmlText, "text/html");
+        var parser = new global.DOMParser();
+        var newDoc = parser.parseFromString(htmlText, "text/html");
 
-      reconcileHead(newDoc);
-      morphNode(document.body, newDoc.body);
+        reconcileHead(newDoc);
+        morphNode(global.document.body, newDoc.body);
 
-      if (!isPopState) {
-        window.history.pushState({ drive: true, url: url }, document.title, url);
-      }
+        if (!isPopState && global.history && typeof global.history.pushState === "function") {
+          global.history.pushState({ drive: true, url: url }, global.document.title, url);
+        }
 
-      if (kit.render) kit.render();
-      window.scrollTo(0, 0);
-
-      return true;
-    })["catch"](function (err) {
-      showProgress(false);
-      if (kit.onError) kit.onError(err, { source: "kit.drive.navigate", url: url });
-      window.location.href = url;
-    });
+        triggerRuntimeInvalidate();
+        global.scrollTo(0, 0);
+        return true;
+      })
+      ["catch"](function (err) {
+        showProgress(false);
+        console.warn("kit.drive navigation error:", err);
+        global.location.href = url;
+      });
   }
 
   function setupLinkInterception() {
-    if (typeof document === "undefined") return;
-    initChromeOverlays();
+    if (typeof global.document === "undefined") return;
+    initProgressBar();
 
-    document.addEventListener("click", function (evt) {
-      var anchor = evt.target;
-      while (anchor && anchor !== document && anchor.tagName !== "A") {
-        anchor = anchor.parentNode;
-      }
+    global.document.addEventListener(
+      "click",
+      function (evt) {
+        var anchor = evt.target;
+        while (anchor && anchor !== global.document && anchor.tagName !== "A") {
+          anchor = anchor.parentNode;
+        }
 
-      if (!anchor || !anchor.href) return;
-      if (anchor.hasAttribute("data-kit-native") || anchor.hasAttribute("download") || anchor.target === "_blank") return;
+        if (!anchor || !anchor.href) return;
+        if (
+          anchor.hasAttribute("data-kit-native") ||
+          anchor.hasAttribute("download") ||
+          anchor.target === "_blank"
+        ) {
+          return;
+        }
 
-      var href = anchor.getAttribute("href");
-      if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0) return;
-      if (anchor.origin !== window.location.origin) return;
+        var href = anchor.getAttribute("href");
+        if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0) return;
+        if (anchor.origin !== global.location.origin) return;
 
-      evt.preventDefault();
-      fetchAndMorph(anchor.href, false);
-    }, false);
+        evt.preventDefault();
+        fetchAndMorph(anchor.href, false);
+      },
+      false
+    );
 
-    // Hover / Touch Prefetching
-    document.addEventListener("mouseover", function (evt) {
-      var anchor = evt.target;
-      while (anchor && anchor !== document && anchor.tagName !== "A") anchor = anchor.parentNode;
-      if (anchor && anchor.href && anchor.origin === window.location.origin) {
-        prefetchUrl(anchor.href);
-      }
-    }, { passive: true });
+    // Hover Prefetching
+    global.document.addEventListener(
+      "mouseover",
+      function (evt) {
+        var anchor = evt.target;
+        while (anchor && anchor !== global.document && anchor.tagName !== "A") {
+          anchor = anchor.parentNode;
+        }
+        if (anchor && anchor.href && anchor.origin === global.location.origin) {
+          prefetchUrl(anchor.href);
+        }
+      },
+      { passive: true }
+    );
 
-    window.addEventListener("popstate", function (evt) {
-      fetchAndMorph(window.location.href, true);
+    global.addEventListener("popstate", function () {
+      fetchAndMorph(global.location.href, true);
     });
   }
 
   // --------------------------------------------------------------------------
   // 5. PUBLIC DRIVE SERVICE INTERFACE
   // --------------------------------------------------------------------------
-  kit.drive = {
+  var driveService = {
+    version: "1.0.0",
     navigate: function (url) {
       return fetchAndMorph(url, false);
     },
@@ -348,23 +343,30 @@
     },
     morph: function (targetDocument) {
       if (typeof targetDocument === "string") {
-        var parser = new DOMParser();
+        var parser = new global.DOMParser();
         targetDocument = parser.parseFromString(targetDocument, "text/html");
       }
       if (targetDocument && targetDocument.body) {
         reconcileHead(targetDocument);
-        morphNode(document.body, targetDocument.body);
-        if (kit.render) kit.render();
+        morphNode(global.document.body, targetDocument.body);
+        triggerRuntimeInvalidate();
       }
     }
   };
 
-  if (typeof document !== "undefined") {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", setupLinkInterception);
+  Object.freeze(driveService);
+  Object.defineProperty(kit, "drive", {
+    value: driveService,
+    enumerable: true,
+    configurable: false,
+    writable: false
+  });
+
+  if (typeof global.document !== "undefined") {
+    if (global.document.readyState === "loading") {
+      global.document.addEventListener("DOMContentLoaded", setupLinkInterception);
     } else {
       setupLinkInterception();
     }
   }
-
-})(typeof window !== "undefined" ? window : globalThis);
+})(globalThis);

@@ -1,0 +1,14 @@
+./asset_store.go
+./assets.go
+./compose.go
+./doc.go
+./registry.go
+./scan.go
+./asset_store_test.go
+./browser_services_test.go
+./compose_test.go
+./composed_browser_test.go
+./contract_test.go
+./drive_browser_test.go
+./retain_scan_test.go
+./scan_test.go

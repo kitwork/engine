@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS accordion component</title>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="mx-auto flex min-h-screen max-w-3xl items-center px-6 py-16">
+    <section class="w-full">
+      <p class="text-sm font-semibold uppercase tracking-widest text-indigo-400">KitJS component</p>
+      <h1 class="mt-2 text-3xl font-bold tracking-tight text-white">Frequently asked questions</h1>
+      <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
+        A custom button-and-panel accordion with single-open state and Arrow, Home, and End navigation.
+      </p>
+
+      <div
+        data-kit-component="accordion"
+        class="mt-8 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl shadow-black/20">
+        <article class="border-b border-slate-800">
+          <h2>
+            <button
+              id="accordion-trigger-delivery"
+              type="button"
+              data-accordion-trigger
+              aria-controls="accordion-panel-delivery"
+              aria-expanded="false"
+              data-kit-click="toggle('delivery')"
+              data-kit-bind="'aria-expanded': isOpen('delivery');"
+              class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500">
+              <span>How is KitJS delivered?</span>
+              <span
+                aria-hidden="true"
+                data-kit-class="isOpen('delivery') ? 'rotate-180 text-indigo-300' : 'rotate-0 text-slate-500'"
+                class="text-lg transition-transform">⌄</span>
+            </button>
+          </h2>
+          <div
+            id="accordion-panel-delivery"
+            role="region"
+            aria-labelledby="accordion-trigger-delivery"
+            data-kit-show="isOpen('delivery')"
+            hidden
+            class="border-t border-slate-800 bg-slate-950/60 px-5 py-4 text-sm leading-6 text-slate-300">
+            Kitwork scans authored HTML and composes one immutable runtime containing only the selected modules.
+          </div>
+        </article>
+
+        <article class="border-b border-slate-800">
+          <h2>
+            <button
+              id="accordion-trigger-state"
+              type="button"
+              data-accordion-trigger
+              aria-controls="accordion-panel-state"
+              aria-expanded="false"
+              data-kit-click="toggle('state')"
+              data-kit-bind="'aria-expanded': isOpen('state');"
+              class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500">
+              <span>Where does component state live?</span>
+              <span
+                aria-hidden="true"
+                data-kit-class="isOpen('state') ? 'rotate-180 text-indigo-300' : 'rotate-0 text-slate-500'"
+                class="text-lg transition-transform">⌄</span>
+            </button>
+          </h2>
+          <div
+            id="accordion-panel-state"
+            role="region"
+            aria-labelledby="accordion-trigger-state"
+            data-kit-show="isOpen('state')"
+            hidden
+            class="border-t border-slate-800 bg-slate-950/60 px-5 py-4 text-sm leading-6 text-slate-300">
+            Every component host receives an isolated instance, while named aliases can expose intentional shared state.
+          </div>
+        </article>
+
+        <article>
+          <h2>
+            <button
+              id="accordion-trigger-keyboard"
+              type="button"
+              data-accordion-trigger
+              aria-controls="accordion-panel-keyboard"
+              aria-expanded="false"
+              data-kit-click="toggle('keyboard')"
+              data-kit-bind="'aria-expanded': isOpen('keyboard');"
+              class="flex w-full items-center justify-between gap-4 px-5 py-4 text-left text-sm font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500">
+              <span>Is keyboard navigation included?</span>
+              <span
+                aria-hidden="true"
+                data-kit-class="isOpen('keyboard') ? 'rotate-180 text-indigo-300' : 'rotate-0 text-slate-500'"
+                class="text-lg transition-transform">⌄</span>
+            </button>
+          </h2>
+          <div
+            id="accordion-panel-keyboard"
+            role="region"
+            aria-labelledby="accordion-trigger-keyboard"
+            data-kit-show="isOpen('keyboard')"
+            hidden
+            class="border-t border-slate-800 bg-slate-950/60 px-5 py-4 text-sm leading-6 text-slate-300">
+            Yes. Arrow Up, Arrow Down, Home, and End move focus between enabled accordion triggers.
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="../../core/global.js"></script>
+  <script src="../../core/expression.js"></script>
+  <script src="../../core/component.js"></script>
+  <script src="../../core/dom.js"></script>
+  <script src="../../core/lifecycle.js"></script>
+  <script src="./1.0.0.js"></script>
+  <script src="../../core/boot.js"></script>
+</body>
+</html>

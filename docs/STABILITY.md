@@ -53,6 +53,11 @@ Current enforcement:
   Template edits create a replacement generation; malformed candidates cannot
   replace the last valid renderer. Normal request rendering must not read
   templates from disk.
+- External content-addressed presentation bytes are copied into a bounded
+  site-runtime CAS before publication. A generation pins its selected hashes
+  until retirement, and the site retains unpinned bytes through a bounded
+  hand-off window so the script request following an HTML response cannot race
+  generation teardown.
 - Template expressions are parsed into immutable evaluator nodes with the
   generation. Request binding may resolve data and create bounded lexical scope
   frames, but must not retokenize expressions or copy the complete scope for

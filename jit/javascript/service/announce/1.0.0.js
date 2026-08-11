@@ -1,77 +1,102 @@
-// ============================================================================
-// Kitwork Client Runtime Service: Announcer (1.0.0)
-// ============================================================================
-// Location: engine/jit/javascript/service/announce/1.0.0.js
-// ============================================================================
-
-(function (window) {
+// KitJS service: announce@1.0.0
+;(function (global) {
   "use strict";
 
-  var kit = window.kit = window.kit || {};
+  var kit = global.kit;
+  var version = "1.0.0";
+  var OWN = Object.prototype.hasOwnProperty;
+  var pending = { polite: null, assertive: null };
 
-  if (kit.announce) return;
-
-  function getRegionElement(assertive) {
-    var id = assertive ? "kit-announcer-assertive" : "kit-announcer-polite";
-    var el = document.getElementById(id);
-    if (!el && typeof document !== "undefined" && document.body) {
-      el = document.createElement("div");
-      el.id = id;
-      el.setAttribute("data-kit-keep", "true");
-      el.setAttribute("aria-live", assertive ? "assertive" : "polite");
-      el.setAttribute("aria-atomic", "true");
-      el.style.position = "absolute";
-      el.style.width = "1px";
-      el.style.height = "1px";
-      el.style.padding = "0";
-      el.style.overflow = "hidden";
-      el.style.clip = "rect(0,0,0,0)";
-      el.style.whiteSpace = "nowrap";
-      el.style.border = "0";
-      document.body.appendChild(el);
-    }
-    return el;
+  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
+    throw new Error("KitJS core must be loaded before service:announce");
+  }
+  if (OWN.call(kit, "announce")) {
+    if (kit.announce.version === version) return;
+    throw new Error("KitJS service conflict: announce");
   }
 
-  kit.announce = {
-    say: function (message, mode) {
-      message = String(message || "").trim();
-      if (!message) return Promise.resolve(false);
+  function modeOf(value) {
+    return value === "assertive" || value === "urgent" ? "assertive" : "polite";
+  }
 
-      var isAssertive = mode === "assertive" || mode === "urgent";
-      var el = getRegionElement(isAssertive);
+  function region(mode) {
+    var document = global.document;
+    if (!document || !document.body) throw new Error("Announcement region is unavailable");
+    var id = "kit-announce-" + mode;
+    var element = document.getElementById(id);
+    if (element) return element;
 
-      if (el) {
-        el.textContent = "";
-        setTimeout(function () {
-          el.textContent = message;
-        }, 50);
-        return Promise.resolve(true);
-      }
+    element = document.createElement("div");
+    element.id = id;
+    element.setAttribute("role", mode === "assertive" ? "alert" : "status");
+    element.setAttribute("aria-live", mode);
+    element.setAttribute("aria-atomic", "true");
+    element.style.position = "fixed";
+    element.style.width = "1px";
+    element.style.height = "1px";
+    element.style.padding = "0";
+    element.style.margin = "-1px";
+    element.style.overflow = "hidden";
+    element.style.clipPath = "inset(50%)";
+    element.style.whiteSpace = "nowrap";
+    element.style.border = "0";
+    document.body.appendChild(element);
+    return element;
+  }
 
-      return Promise.reject("Announcer DOM unavailable");
-    },
+  function cancel(mode) {
+    var current = pending[mode];
+    if (!current) return;
+    global.clearTimeout(current.timer);
+    current.resolve(false);
+    pending[mode] = null;
+  }
 
-    polite: function (message) {
-      return this.say(message, "polite");
-    },
+  function say(message, mode) {
+    message = message === null || message === undefined ? "" : String(message).trim();
+    if (!message) return Promise.resolve(false);
+    mode = modeOf(mode);
 
-    assertive: function (message) {
-      return this.say(message, "assertive");
-    }
+    var element;
+    try { element = region(mode); }
+    catch (error) { return Promise.reject(error); }
+
+    cancel(mode);
+    element.textContent = "";
+    return new Promise(function (resolve) {
+      pending[mode] = {
+        resolve: resolve,
+        timer: global.setTimeout(function () {
+          pending[mode] = null;
+          element.textContent = message;
+          resolve(true);
+        }, 20)
+      };
+    });
+  }
+
+  function clear(mode) {
+    var modes = mode ? [modeOf(mode)] : ["polite", "assertive"];
+    modes.forEach(function (name) {
+      cancel(name);
+      var element = global.document && global.document.getElementById("kit-announce-" + name);
+      if (element) element.textContent = "";
+    });
+    return true;
+  }
+
+  var announce = {
+    say: say,
+    polite: function (message) { return say(message, "polite"); },
+    assertive: function (message) { return say(message, "assertive"); },
+    clear: clear
   };
-
-  if (typeof document !== "undefined") {
-    document.addEventListener("click", function (e) {
-      var target = e.target && e.target.closest ? e.target.closest("[data-kit-announce]") : null;
-      if (target) {
-        var msg = target.getAttribute("data-kit-announce");
-        var mode = target.getAttribute("data-kit-announce-mode") || "polite";
-        if (msg) {
-          kit.announce.say(msg, mode);
-        }
-      }
-    }, true);
-  }
-
-})(typeof window !== "undefined" ? window : globalThis);
+  Object.defineProperty(announce, "version", { value: version, enumerable: false });
+  Object.freeze(announce);
+  Object.defineProperty(kit, "announce", {
+    value: announce,
+    enumerable: true,
+    configurable: false,
+    writable: false
+  });
+})(globalThis);

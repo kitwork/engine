@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KitJS tooltip component</title>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <main class="mx-auto flex min-h-screen max-w-2xl items-center justify-center px-6 py-16">
+    <section class="w-full rounded-3xl border border-slate-800 bg-slate-900 p-8 text-center shadow-2xl shadow-black/30">
+      <p class="text-xs font-semibold uppercase tracking-widest text-fuchsia-400">KitJS component</p>
+      <h1 class="mt-2 text-3xl font-bold tracking-tight text-white">Hover and focus tooltip</h1>
+      <p class="mx-auto mt-3 max-w-lg text-sm leading-6 text-slate-400">
+        The trigger keeps focus. Hover, keyboard focus, and Escape are handled by the component and fully cleaned up on disposal.
+      </p>
+
+      <div data-kit-component="tooltip" class="relative mt-10 inline-flex">
+        <button
+          type="button"
+          data-kit-ref="trigger"
+          aria-describedby="kit-tooltip-bubble"
+          class="rounded-xl bg-fuchsia-500 px-5 py-3 text-sm font-semibold text-white transition hover:bg-fuchsia-400 focus:outline-none focus:ring-2 focus:ring-fuchsia-400 focus:ring-offset-2 focus:ring-offset-slate-900">
+          Focus or hover me
+        </button>
+
+        <div
+          id="kit-tooltip-bubble"
+          role="tooltip"
+          data-kit-show="visible"
+          hidden
+          class="pointer-events-none absolute bottom-full left-1/2 z-20 mb-3 w-max max-w-xs -translate-x-1/2 rounded-lg bg-white px-3 py-2 text-xs font-medium leading-5 text-slate-900 shadow-xl">
+          A concise, non-interactive explanation.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="../../core/global.js"></script>
+  <script src="../../core/expression.js"></script>
+  <script src="../../core/component.js"></script>
+  <script src="../../core/dom.js"></script>
+  <script src="../../core/lifecycle.js"></script>
+  <script src="./1.0.0.js"></script>
+  <script src="../../core/boot.js"></script>
+</body>
+</html>

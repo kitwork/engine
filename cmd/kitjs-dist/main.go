@@ -1,50 +1,183 @@
-// kitjs-dist emits the publishable dist files for @kitwork/kitjs — the open-source, CDN-served
-// build returned by hydrate.Runtime(). The engine's ordered modules are the single source of truth:
-// this command is the only sanctioned way to produce dist/, so the npm package can never drift
-// from what the engine serves at /kit.js.
+// kitjs-dist emits standalone/CDN artifacts from the same component-first Go
+// registry and composer used by generation-owned Kitwork assets.
 //
-//	go run ./cmd/kitjs-dist <version> <outdir>
-//	go run ./cmd/kitjs-dist 1.0.0 ../packages/kitjs/dist
+//	go run ./cmd/kitjs-dist 1.0.0 ../packages/kitjs/dist --component counter@1.0.0
+//	go run ./cmd/kitjs-dist 1.0.0 ../packages/kitjs/dist --drive \
+//	  --component theme@1.0.0 --component dialog
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
-	hydrate "github.com/kitwork/engine/jit/hydrate"
+	kitjavascript "github.com/kitwork/engine/jit/javascript"
 	"github.com/kitwork/engine/utilities/minifier"
 )
 
+type distConfig struct {
+	version    string
+	outdir     string
+	drive      bool
+	components []kitjavascript.ComponentRef
+}
+
+type distOutput struct {
+	name string
+	body []byte
+}
+
 func main() {
-	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: kitjs-dist <version> <outdir>")
+	config, err := parseDistArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "kitjs-dist:", err)
+		fmt.Fprintln(os.Stderr, "usage: kitjs-dist <version> <outdir> [--drive] [--component <name[@version]>]...")
 		os.Exit(1)
 	}
-	version, outdir := os.Args[1], os.Args[2]
-
-	banner := "/*! @kitwork/kitjs v" + version + " | MIT | https://kitwork.io | " +
-		"generated from engine/jit/hydrate Runtime() — do not edit */\n"
-
-	src := hydrate.Runtime()
-	min := minifier.JS(src)
-	if min == "" || len(min) >= len(src) {
-		fmt.Fprintln(os.Stderr, "kitjs-dist: minification produced nothing smaller — refusing to write")
-		os.Exit(1)
-	}
-
-	if err := os.MkdirAll(outdir, 0o755); err != nil {
+	bundle, source, minified, err := composeDistribution(config)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "kitjs-dist:", err)
 		os.Exit(1)
 	}
-	write := func(name, body string) {
-		path := filepath.Join(outdir, name)
-		if err := os.WriteFile(path, []byte(banner+body), 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, "kitjs-dist:", err)
-			os.Exit(1)
-		}
-		fmt.Printf("%s  %d bytes\n", path, len(banner)+len(body))
+	outputs, err := writeDistribution(config.outdir, bundle, source, minified)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "kitjs-dist:", err)
+		os.Exit(1)
 	}
-	write("kitjs.js", src)
-	write("kitjs.min.js", min)
+	for _, output := range outputs {
+		filename := filepath.Join(config.outdir, output.name)
+		fmt.Printf("%s  %d bytes\n", filename, len(output.body))
+	}
+	fmt.Printf("graph %s  %d modules\n", bundle.ContentHash, len(bundle.Modules))
+}
+
+func parseDistArgs(arguments []string) (distConfig, error) {
+	if len(arguments) < 2 {
+		return distConfig{}, fmt.Errorf("version and output directory are required")
+	}
+	config := distConfig{version: arguments[0], outdir: arguments[1]}
+	if config.version == "" || config.outdir == "" {
+		return distConfig{}, fmt.Errorf("version and output directory cannot be empty")
+	}
+	if err := validateDistributionVersion(config.version); err != nil {
+		return distConfig{}, err
+	}
+	for index := 2; index < len(arguments); index++ {
+		switch argument := arguments[index]; argument {
+		case "--drive":
+			config.drive = true
+		case "--component":
+			index++
+			if index >= len(arguments) {
+				return distConfig{}, fmt.Errorf("--component requires a value")
+			}
+			reference, err := parseComponentArgument(arguments[index])
+			if err != nil {
+				return distConfig{}, err
+			}
+			config.components = append(config.components, reference)
+		default:
+			if strings.HasPrefix(argument, "--component=") {
+				reference, err := parseComponentArgument(strings.TrimPrefix(argument, "--component="))
+				if err != nil {
+					return distConfig{}, err
+				}
+				config.components = append(config.components, reference)
+				continue
+			}
+			return distConfig{}, fmt.Errorf("unknown argument %q", argument)
+		}
+	}
+	return config, nil
+}
+
+func parseComponentArgument(specification string) (kitjavascript.ComponentRef, error) {
+	specification = strings.TrimSpace(specification)
+	if specification == "" {
+		return kitjavascript.ComponentRef{}, fmt.Errorf("component specification cannot be empty")
+	}
+	reference := kitjavascript.ComponentRef{Name: specification}
+	if at := strings.LastIndexByte(specification, '@'); at >= 0 {
+		if at == 0 || at == len(specification)-1 || strings.Contains(specification[:at], "@") {
+			return kitjavascript.ComponentRef{}, fmt.Errorf("invalid component specification %q", specification)
+		}
+		reference.Name = specification[:at]
+		reference.Version = strings.TrimPrefix(specification[at+1:], "v")
+	}
+	return reference, nil
+}
+
+func composeDistribution(config distConfig) (kitjavascript.Bundle, []byte, []byte, error) {
+	if err := validateDistributionVersion(config.version); err != nil {
+		return kitjavascript.Bundle{}, nil, nil, err
+	}
+	composer, err := kitjavascript.NewDefaultComposer()
+	if err != nil {
+		return kitjavascript.Bundle{}, nil, nil, err
+	}
+	bundle, err := composer.ComposeStandalone(config.components, config.drive)
+	if err != nil {
+		return kitjavascript.Bundle{}, nil, nil, err
+	}
+	banner := []byte("/*! KitJS v" + config.version + " | MIT | https://kitjs.org | graph " +
+		bundle.ContentHash + " | generated by engine/jit/javascript - do not edit */\n")
+	source := append(append([]byte(nil), banner...), bundle.JavaScript...)
+	minifiedBody := minifier.JS(string(bundle.JavaScript))
+	if strings.TrimSpace(minifiedBody) == "" {
+		return kitjavascript.Bundle{}, nil, nil, fmt.Errorf("minification produced an empty artifact")
+	}
+	minified := append(append([]byte(nil), banner...), []byte(minifiedBody)...)
+	return bundle, source, minified, nil
+}
+
+func validateDistributionVersion(version string) error {
+	if !kitjavascript.ValidExactSemVer(version) {
+		return fmt.Errorf("version must be an exact SemVer 2.0.0 value, got %q", version)
+	}
+	return nil
+}
+
+func distributionOutputs(bundle kitjavascript.Bundle, source, minified []byte) []distOutput {
+	sourceCanonical := "kitjs." + artifactHash(source) + ".js"
+	minifiedCanonical := "kitjs." + artifactHash(minified) + ".min.js"
+	snippet := []byte("<script src=\"./" + minifiedCanonical + "\" defer></script>\n")
+	if bundleIncludesDrive(bundle) {
+		snippet = []byte("<script data-kitwork-runtime data-kitwork-plan=\"" + bundle.ContentHash +
+			"\" src=\"./" + minifiedCanonical + "\" defer></script>\n")
+	}
+	return []distOutput{
+		{name: "kitjs.js", body: source},
+		{name: "kitjs.min.js", body: minified},
+		{name: sourceCanonical, body: source},
+		{name: minifiedCanonical, body: minified},
+		{name: "kitjs.snippet.html", body: snippet},
+	}
+}
+
+func bundleIncludesDrive(bundle kitjavascript.Bundle) bool {
+	for _, module := range bundle.Modules {
+		if module.Kind == kitjavascript.CoreModule && module.Name == "drive" {
+			return true
+		}
+	}
+	return false
+}
+
+func artifactHash(body []byte) string {
+	return fmt.Sprintf("%x", sha256.Sum256(body))
+}
+
+func writeDistribution(outdir string, bundle kitjavascript.Bundle, source, minified []byte) ([]distOutput, error) {
+	if err := os.MkdirAll(outdir, 0o755); err != nil {
+		return nil, err
+	}
+	outputs := distributionOutputs(bundle, source, minified)
+	for _, output := range outputs {
+		if err := os.WriteFile(filepath.Join(outdir, output.name), output.body, 0o644); err != nil {
+			return nil, err
+		}
+	}
+	return outputs, nil
 }

@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plain Shop · Checkout</title>
+  <script defer src="./hydrate.kit.0.5.0.3d9a3213c5e76157c829866ad214b23aabee235ed997d07a54dcf797b7eee3be.js"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <div id="shop-shell" class="min-h-screen">
+    <header id="shop-header" class="border-b border-slate-800 bg-slate-950/95">
+      <div class="mx-auto flex max-w-8xl flex-col gap-5 px-6 py-6 sm:px-8 lg:flex-row lg:items-center lg:justify-between lg:px-12">
+        <a href="./products.html" class="text-xl font-black tracking-tight text-white">Plain Shop</a>
+        <nav aria-label="Shop routes" class="flex flex-wrap gap-2 text-sm font-semibold">
+          <a id="shop-nav-products" href="./products.html" class="rounded-xl px-4 py-2.5 text-slate-300 transition hover:bg-slate-800 hover:text-white">Products</a>
+          <a id="shop-nav-cart" href="./cart.html" class="rounded-xl px-4 py-2.5 text-slate-300 transition hover:bg-slate-800 hover:text-white">Cart</a>
+          <a id="shop-nav-checkout" href="./checkout.html" aria-current="page" class="rounded-xl bg-indigo-500 px-4 py-2.5 text-white">Checkout</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="shop-layout" class="mx-auto grid max-w-8xl gap-8 px-6 py-10 sm:px-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:px-12 lg:py-14">
+      <section id="shop-checkout" data-kit-component="shop-checkout" data-kit-version="1.0.0" aria-labelledby="shop-checkout-title" class="rounded-3xl border border-slate-800 bg-slate-900 p-7 sm:p-9">
+        <p class="text-sm font-bold uppercase tracking-widest text-indigo-300">Modeled form + external command</p>
+        <h1 id="shop-checkout-title" class="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Checkout without a page controller</h1>
+        <p class="mt-4 max-w-2xl text-base leading-7 text-slate-400">
+          The form owns only its fields. Submitting asks the separate dialog component to confirm; its callback clears the cart and finishes this order.
+        </p>
+
+        <template data-kit-if="placed">
+          <section id="shop-order-success" aria-live="polite" class="mt-8 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 p-5 text-emerald-100">
+            <p class="font-bold text-emerald-300">Order placed</p>
+            <p class="mt-2 text-sm leading-6">Thanks, <span id="shop-order-name" data-kit-text="orderName" class="font-bold text-white"></span>. The cart is empty and ready for another route.</p>
+          </section>
+        </template>
+
+        <form id="shop-checkout-form" data-kit-submit:prevent="ready && $dialog.open('shop-checkout-submit', () => $cart.clear() && completeOrder())" class="mt-8 grid gap-5">
+          <div>
+            <label for="shop-checkout-name" class="text-sm font-bold text-slate-200">Full name</label>
+            <input
+              id="shop-checkout-name"
+              data-kit-model="name"
+              type="text"
+              name="name"
+              autocomplete="name"
+              required
+              placeholder="Ada Lovelace"
+              class="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base text-white placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/30">
+          </div>
+
+          <div>
+            <label for="shop-checkout-email" class="text-sm font-bold text-slate-200">Email</label>
+            <input
+              id="shop-checkout-email"
+              data-kit-model="email"
+              type="email"
+              name="email"
+              autocomplete="email"
+              required
+              placeholder="ada@example.com"
+              class="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base text-white placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/30">
+          </div>
+
+          <div>
+            <label for="shop-checkout-address" class="text-sm font-bold text-slate-200">Delivery address</label>
+            <textarea
+              id="shop-checkout-address"
+              data-kit-model="address"
+              name="address"
+              autocomplete="street-address"
+              required
+              rows="4"
+              placeholder="12 Analytical Engine Way"
+              class="mt-2 w-full resize-y rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-base text-white placeholder:text-slate-600 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-400/30"></textarea>
+          </div>
+
+          <button
+            id="shop-checkout-submit"
+            type="submit"
+            disabled
+            aria-haspopup="dialog"
+            aria-controls="shop-confirm-dialog"
+            data-kit-bind="disabled: !ready; aria-disabled: !ready;"
+            class="mt-2 inline-flex items-center justify-center rounded-xl bg-indigo-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">
+            Review order
+          </button>
+        </form>
+      </section>
+
+      <aside
+        id="shop-cart"
+        data-kit-component="shop-cart"
+        data-kit-version="1.0.0"
+        data-kit-as="$cart"
+        aria-labelledby="shop-cart-title"
+        class="h-fit rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl shadow-black/20 lg:sticky lg:top-8">
+        <p class="text-sm font-bold uppercase tracking-widest text-slate-500">Retained boundary</p>
+        <h2 id="shop-cart-title" class="mt-2 text-2xl font-black text-white">Order summary</h2>
+        <div class="mt-6 grid grid-cols-2 gap-3">
+          <div class="rounded-2xl bg-slate-950 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Items</p>
+            <output id="shop-cart-count" data-kit-text="count" aria-live="polite" class="mt-2 block text-2xl font-black text-white">0</output>
+          </div>
+          <div class="rounded-2xl bg-slate-950 p-4">
+            <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">Total</p>
+            <output id="shop-cart-total" data-kit-text="money(total)" class="mt-2 block text-2xl font-black text-indigo-300">$0.00</output>
+          </div>
+        </div>
+        <template data-kit-if="count === 0">
+          <p class="mt-5 rounded-2xl border border-dashed border-slate-700 p-4 text-sm leading-6 text-slate-400">Your cart is empty, but the form still demonstrates model and dialog ownership.</p>
+        </template>
+        <a href="./cart.html" class="mt-6 inline-flex w-full items-center justify-center rounded-xl border border-slate-700 px-5 py-3 text-sm font-bold text-slate-100 transition hover:border-indigo-400 hover:text-indigo-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+          Back to cart
+        </a>
+      </aside>
+    </main>
+  </div>
+
+  <div
+    id="shop-confirm-dialog"
+    data-kit-component="shop-dialog"
+    data-kit-version="1.0.0"
+    data-kit-as="$dialog"
+    data-kit-show="visible"
+    data-kit-click:self="close()"
+    data-kit-keydown:escape:stop="close()"
+    hidden
+    tabindex="-1"
+    class="fixed inset-0 z-50 grid place-items-center bg-slate-950/85 p-6">
+    <section role="dialog" aria-modal="true" aria-labelledby="shop-dialog-title" aria-describedby="shop-dialog-description" class="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 p-7 shadow-2xl shadow-black/50">
+      <p class="text-sm font-bold uppercase tracking-widest text-indigo-300">External component</p>
+      <h2 id="shop-dialog-title" class="mt-3 text-2xl font-black text-white">Place this order?</h2>
+      <p id="shop-dialog-description" class="mt-3 text-sm leading-6 text-slate-400">
+        Confirming invokes the callback in the checkout component, then releases that callback and its origin.
+      </p>
+      <div class="mt-7 flex justify-end gap-3">
+        <button
+          id="shop-dialog-cancel"
+          type="button"
+          data-kit-click="close()"
+          class="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-300 transition hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500">
+          Cancel
+        </button>
+        <button
+          id="shop-dialog-confirm"
+          type="button"
+          data-kit-click="confirm()"
+          class="rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300">
+          Place order
+        </button>
+      </div>
+    </section>
+  </div>
+</body>
+</html>
