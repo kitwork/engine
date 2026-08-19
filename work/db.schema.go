@@ -435,10 +435,23 @@ func (t *SchemaTable) source() *SQLite {
 
 func (t *SchemaTable) builder() *query.Query {
 	if t.q == nil {
-		t.ensureTable()
 		t.q = t.source().Table(t.table)
 	}
 	return t.q
+}
+
+// ready runs the lazy migration and reports a failure as an in-band Invalid, so every terminal opens
+// with `if v, ok := t.ready(); !ok { return v }`. A failed migration then surfaces as a clear
+// "migration failed: …" instead of the cryptic "no such column" the raw SQL would throw against a
+// table the ALTER never actually reached.
+func (t *SchemaTable) ready() (value.Value, bool) {
+	if t.failed {
+		return t.failVal(), false
+	}
+	if err := t.ensureTable(); err != nil {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: table %q migration failed: %v", t.table, err)}, false
+	}
+	return value.Value{}, true
 }
 
 func (t *SchemaTable) known(col string) bool { _, ok := t.columns[col]; return ok }
@@ -640,13 +653,16 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 // ensureTable runs the migration once per (engine, file, table, SCHEMA HASH). The hash in the key is
 // what makes it react to schema changes: edit the schema (add a column) and the key changes, so a
 // hot-reload re-runs migrate() and ALTERs the live table — not just first boot.
-func (t *SchemaTable) ensureTable() {
+func (t *SchemaTable) ensureTable() error {
 	key := t.engine + ":" + t.tenant.resolve(".data", t.dbName) + "::" + t.table + "::" + schemaHash(t.columns)
 	if _, done := ensuredTables.Load(key); done {
-		return
+		return nil
 	}
-	migrate(t.source().db(), t.table, t.columns, false, t.allowDrop)
+	if err := migrate(t.source().db(), t.table, t.columns, false, t.allowDrop); err != nil {
+		return err
+	}
 	ensuredTables.Store(key, true)
+	return nil
 }
 
 // schemaDDL builds CREATE TABLE IF NOT EXISTS from the schema. `extra` prepends raw column definitions
@@ -869,16 +885,19 @@ func (t *EntityTable) Delete(_ ...value.Value) value.Value {
 func (t *EntityTable) Remove(args ...value.Value) value.Value { return t.Delete(args...) }
 
 // ensureTable migrates the shared table on database.System, with the extra `identity` column.
-func (t *EntityTable) ensureTable() {
+func (t *EntityTable) ensureTable() error {
 	if database.System == nil {
-		return
+		return nil
 	}
 	key := fmt.Sprintf("system:%p:%s:%s", database.System, t.table, schemaHash(t.columns))
 	if _, done := ensuredTables.Load(key); done {
-		return
+		return nil
 	}
-	migrate(database.System, t.table, t.columns, true, false) // shared world: no destructive drop in the spike
+	if err := migrate(database.System, t.table, t.columns, true, false); err != nil {
+		return err
+	}
 	ensuredTables.Store(key, true)
+	return nil
 }
 
 // ============================================================================
@@ -1049,16 +1068,15 @@ func sortedTableNames(tables map[string]map[string]*ColumnSpec) []string {
 	return names
 }
 
-func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) {
+func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) error {
 	if db == nil {
-		return
+		return fmt.Errorf("connection unavailable")
 	}
 	ensureHistory(db)
 
 	current, err := tableColumns(db, table)
 	if err != nil {
-		fmt.Printf("[db.migrate] introspect %q failed: %v\n", table, err)
-		return
+		return fmt.Errorf("introspect %q: %w", table, err)
 	}
 
 	steps := planMigration(current, columns, withIdentity, allowDrop)
@@ -1072,11 +1090,10 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 		}
 		ddl := schemaDDL(table, columns, extra...)
 		if _, err := db.Exec(ddl); err != nil {
-			fmt.Printf("[db.migrate] create %q failed: %v\n", table, err)
-			return
+			return fmt.Errorf("create %q: %w", table, err)
 		}
 		recordMigration(db, table, "create-table", ddl)
-		return
+		return nil
 	}
 
 	// Split the plan into what actually applies (destructive steps are here only when allowed).
@@ -1094,19 +1111,34 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 
 	// A type change or an allowed drop → full table rebuild.
 	if len(typeChanged) > 0 || len(extras) > 0 {
-		rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged)
-		return
+		return rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged)
 	}
 
 	// Otherwise purely additive: ADD the new columns (static defaults backfill existing rows).
 	for _, name := range newCols {
 		stmt := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", table, addColumnSQL(name, columns[name]))
 		if _, err := db.Exec(stmt); err != nil {
-			fmt.Printf("[db.migrate] add %q.%q failed: %v\n", table, name, err)
-			continue
+			return fmt.Errorf("add %q.%q: %w", table, name, err)
 		}
 		recordMigration(db, table, "add-column", stmt)
 	}
+
+	// Verify the ADDs actually landed. Turso, when another process/connection is mid-write on the file,
+	// has been observed to return NO error from an ALTER that nonetheless does not take — which then
+	// surfaces as a cryptic "table X has no column Y" on the very next insert. Re-introspect and fail
+	// loudly HERE instead, so ensureTable does not cache success and the next request retries.
+	if len(newCols) > 0 {
+		after, err := tableColumns(db, table)
+		if err != nil {
+			return fmt.Errorf("verify %q: %w", table, err)
+		}
+		for _, name := range newCols {
+			if _, ok := after[name]; !ok {
+				return fmt.Errorf("column %q did not persist on %q — the ALTER returned no error but the column is absent (another process likely holds the database)", name, table)
+			}
+		}
+	}
+	return nil
 }
 
 // rebuild is the SQLite table-rebuild ("12-step"): CREATE a new table with the desired schema, COPY
@@ -1114,7 +1146,7 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 // a failure rolls back to the untouched original. With allowDrop=false, extra columns (in the DB, not
 // the schema) are PRESERVED in the new table; with allowDrop=true they are dropped.
 func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current map[string]string,
-	withIdentity, allowDrop bool, extras, typeChanged []string) {
+	withIdentity, allowDrop bool, extras, typeChanged []string) error {
 
 	tmp := table + "__kwrebuild"
 	var defs, intoCols, selectExprs []string
@@ -1144,37 +1176,31 @@ func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current m
 
 	tx, err := db.Begin()
 	if err != nil {
-		fmt.Printf("[db.migrate] rebuild %q: begin: %v\n", table, err)
-		return
+		return fmt.Errorf("rebuild %q begin: %w", table, err)
 	}
-	fail := func(stage string, e error) {
+	fail := func(stage string, e error) error {
 		tx.Rollback()
-		fmt.Printf("[db.migrate] rebuild %q rolled back at %s: %v\n", table, stage, e)
+		return fmt.Errorf("rebuild %q rolled back at %s: %w", table, stage, e)
 	}
 	createDDL := fmt.Sprintf("CREATE TABLE %q (%s)", tmp, strings.Join(defs, ", "))
 	if _, err := tx.Exec(createDDL); err != nil {
-		fail("create", err)
-		return
+		return fail("create", err)
 	}
 	if len(intoCols) > 0 {
 		copyStmt := fmt.Sprintf("INSERT INTO %q (%s) SELECT %s FROM %q",
 			tmp, strings.Join(intoCols, ", "), strings.Join(selectExprs, ", "), table)
 		if _, err := tx.Exec(copyStmt); err != nil {
-			fail("copy", err)
-			return
+			return fail("copy", err)
 		}
 	}
 	if _, err := tx.Exec(fmt.Sprintf("DROP TABLE %q", table)); err != nil {
-		fail("drop-old", err)
-		return
+		return fail("drop-old", err)
 	}
 	if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE %q RENAME TO %q", tmp, table)); err != nil {
-		fail("rename", err)
-		return
+		return fail("rename", err)
 	}
 	if err := tx.Commit(); err != nil {
-		fmt.Printf("[db.migrate] rebuild %q: commit: %v\n", table, err)
-		return
+		return fmt.Errorf("rebuild %q commit: %w", table, err)
 	}
 
 	action := "rebuild-table"
@@ -1185,6 +1211,7 @@ func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current m
 		action += " drop[" + strings.Join(extras, ",") + "]"
 	}
 	recordMigration(db, table, action, createDDL)
+	return nil
 }
 
 // castExpr copies a column, wrapping it in CAST when the target type differs (a type change).
