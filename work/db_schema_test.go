@@ -2,6 +2,7 @@ package work
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -715,11 +716,11 @@ router.get((ctx) => {
 		}
 	}
 	assert(`"beforeClicks":0`)
-	assert(`"afterClicks":1`)  // update() wrote — the regression guard
-	assert(`"hasKit":true`)    // exists() true for a present row
+	assert(`"afterClicks":1`) // update() wrote — the regression guard
+	assert(`"hasKit":true`)   // exists() true for a present row
 	assert(`"hasMissing":false`)
-	assert(`"hasGone":false`)  // delete() removed the row
-	assert(`"total":1`)        // 2 created, 1 deleted
+	assert(`"hasGone":false`) // delete() removed the row
+	assert(`"total":1`)       // 2 created, 1 deleted
 }
 
 // migrate() used to be void and swallowed every failure (a failed ALTER only printed a line), so a
@@ -797,4 +798,96 @@ router.get((ctx) => ctx.json({ n: db.notes.count() }));`
 	if !strings.Contains(body, "migration failed") {
 		t.Errorf("expected a clear 'migration failed' message, got: %s", body)
 	}
+}
+
+// now().onUpdate() = auto-touch: created_at is stamped once and stays frozen; updated_at is re-stamped
+// on EVERY update() even when the caller never mentions it. Driven through the VM.
+func TestSchemaNowOnUpdateAutoTouch(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The trick that makes this deterministic despite second-granularity timestamps: first PIN
+	// updated_at to the year 2000 explicitly (caller-provided value must win — touch skips it), then
+	// do a normal update that never mentions updated_at. Auto-touch must move it OFF 2000 to now().
+	router := `import { router, database } from "kitwork";
+const { turso, kitid, text, int, now } = database;
+const posts = {
+  id: kitid().primaryKey(),
+  title: text(),
+  views: int().default(0),
+  created_at: now(),
+  updated_at: now().onUpdate()
+};
+const db = turso("app.db", { posts: posts });
+router.get((ctx) => {
+  const created = db.posts.create({ title: "hello" });
+  // 1) explicit updated_at → caller wins, touch must NOT override it.
+  db.posts.where("id", "=", created.id).update({ views: 1, updated_at: "2000-01-01T00:00:00Z" });
+  const pinned = db.posts.where("id", "=", created.id).first();
+  // 2) caller never mentions updated_at → auto-touch must re-stamp it to now().
+  db.posts.where("id", "=", created.id).update({ views: 2 });
+  const touched = db.posts.where("id", "=", created.id).first();
+  return ctx.json({
+    createdAt: created.created_at,
+    pinnedUpdatedAt: pinned.updated_at,
+    touchedUpdatedAt: touched.updated_at,
+    touchedCreatedAt: touched.created_at,
+    views: touched.views
+  });
+});`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("route status %d, body: %s", rec.Code, body)
+	}
+	t.Logf("body: %s", body)
+
+	f := decodeJSONObject(t, body)
+
+	// Explicit value wins: after update #1, updated_at is exactly what the caller passed.
+	if f["pinnedUpdatedAt"] != "2000-01-01T00:00:00Z" {
+		t.Errorf("caller-provided updated_at should win over touch, got %q", f["pinnedUpdatedAt"])
+	}
+	// Auto-touch fired on update #2 (no updated_at in the payload): it moved OFF 2000 to the current year.
+	if f["touchedUpdatedAt"] == "2000-01-01T00:00:00Z" {
+		t.Errorf("auto-touch did not fire — updated_at is still the pinned 2000 value")
+	}
+	if !strings.HasPrefix(f["touchedUpdatedAt"], "2026-") {
+		t.Errorf("touched updated_at should be a current (2026) timestamp, got %q", f["touchedUpdatedAt"])
+	}
+	// created_at was stamped once and never re-stamped by either update.
+	if f["createdAt"] == "" || f["createdAt"] == "<nil>" || f["touchedCreatedAt"] != f["createdAt"] {
+		t.Errorf("created_at must be stamped once and frozen: created=%q afterTouch=%q", f["createdAt"], f["touchedCreatedAt"])
+	}
+	if !strings.Contains(body, `"views":2`) {
+		t.Errorf("the unrelated update should have applied, body: %s", body)
+	}
+}
+
+// decodeJSONObject reads a flat {"k":"v"|n|null} object from a handler body without pulling in a JSON
+// dependency shape assumption — values come back as strings ("<nil>" for null/absent).
+func decodeJSONObject(t *testing.T, body string) map[string]string {
+	t.Helper()
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatalf("body is not JSON: %v (%s)", err, body)
+	}
+	out := map[string]string{}
+	for k, v := range raw {
+		out[k] = fmt.Sprint(v)
+	}
+	return out
 }

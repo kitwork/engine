@@ -61,6 +61,7 @@ type ColumnSpec struct {
 	hasDefault bool
 	def        value.Value
 	defaultNow bool
+	touch      bool     // touchOnUpdate: re-stamp the current time on every update() (updated_at)
 	enumVals   []string // for kind == "enum": the allowed values
 }
 
@@ -70,6 +71,11 @@ func (c *ColumnSpec) PrimaryKey(_ ...value.Value) *ColumnSpec { c.primary = true
 func (c *ColumnSpec) NotNull(_ ...value.Value) *ColumnSpec    { c.notNull = true; return c }
 func (c *ColumnSpec) Unique(_ ...value.Value) *ColumnSpec     { c.unique = true; return c }
 func (c *ColumnSpec) DefaultNow(_ ...value.Value) *ColumnSpec { c.defaultNow = true; return c }
+
+// OnUpdate marks an "updated_at" column: it is re-stamped with the current time on EVERY update()
+// (unless the caller passes the column explicitly). Pair it with now() — now().onUpdate() stamps on
+// both insert (defaultNow) and update (touch); datetime().onUpdate() stamps on update only.
+func (c *ColumnSpec) OnUpdate(_ ...value.Value) *ColumnSpec { c.touch = true; return c }
 func (c *ColumnSpec) Default(args ...value.Value) *ColumnSpec {
 	c.hasDefault = true
 	if len(args) > 0 {
@@ -585,6 +591,23 @@ func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (m
 	return row, ""
 }
 
+// applyTouch re-stamps every touchOnUpdate column (an "updated_at" declared with now().onUpdate()) to
+// the current time on an update — unless the caller set it explicitly, which wins. This is the ONE
+// write where a defaultNow column is regenerated: create() stamps defaultNow via fillRow; update()
+// leaves created_at frozen and only refreshes touch columns here.
+func applyTouch(columns map[string]*ColumnSpec, row map[string]value.Value) {
+	now := value.New(time.Now().UTC().Format(time.RFC3339))
+	for name, spec := range columns {
+		if !spec.touch {
+			continue
+		}
+		if _, given := row[name]; given {
+			continue
+		}
+		row[name] = coerceWrite(spec.kind, now)
+	}
+}
+
 // ---- CREATE TABLE IF NOT EXISTS, once per (db file, table) ----
 
 var ensuredTables sync.Map // key: "<abs db path>::<table>"
@@ -599,6 +622,7 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 		if errMsg != "" {
 			return value.Value{K: value.Invalid, V: fmt.Sprintf("db.update: table %q %s", t.table, errMsg)}
 		}
+		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
 		args[0] = value.New(row)
 	}
 	return t.builder().Update(args...)
@@ -881,6 +905,7 @@ func (t *EntityTable) Update(args ...value.Value) value.Value {
 		if errMsg != "" {
 			return value.Value{K: value.Invalid, V: fmt.Sprintf("db.update: table %q %s", t.table, errMsg)}
 		}
+		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
 		args[0] = value.New(row)
 	}
 	return t.builder().Update(args...)
