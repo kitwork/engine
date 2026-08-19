@@ -1,5 +1,3 @@
-//go:build turso
-
 package database
 
 import (

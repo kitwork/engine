@@ -1,8 +1,0 @@
-./animate.go
-./brand.go
-./config.go
-./engine.go
-./jit.go
-./registry.go
-./twpalette.go
-./utils.go

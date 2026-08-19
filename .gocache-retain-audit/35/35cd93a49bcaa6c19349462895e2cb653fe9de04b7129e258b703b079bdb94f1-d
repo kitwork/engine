@@ -1,7 +1,0 @@
-./attribute.go
-./classes.go
-./compile.go
-./eval.go
-./prerender.go
-./prerender_bind.go
-./render.go

@@ -1,5 +1,0 @@
-./defs.go
-./hooks.go
-./libsqlite3_windows.go
-./mutex.go
-./sqlite_windows.go
