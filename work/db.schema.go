@@ -1,7 +1,9 @@
 package work
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -52,13 +54,14 @@ import (
 // ---- column DSL: kitid()/text()/integer()/datetime() + chainable modifiers ----
 
 type ColumnSpec struct {
-	kind       string // kitid | text | integer | datetime
+	kind       string // see colStorage below for the full set
 	primary    bool
 	notNull    bool
 	unique     bool
 	hasDefault bool
 	def        value.Value
 	defaultNow bool
+	enumVals   []string // for kind == "enum": the allowed values
 }
 
 // The modifiers are variadic so the VM does NOT auto-call them as getters (a 0-in/1-out method is a
@@ -94,11 +97,227 @@ func columnFunc(kind string) value.Value {
 //
 // Each column builder is a 0-arg getter returning a callable Func, so `const { text } = database`
 // binds `text` to a function and `text()` builds a column spec.
-func (d *Database) Kitid() value.Value    { return columnFunc("kitid") }
-func (d *Database) Text() value.Value     { return columnFunc("text") }
-func (d *Database) Integer() value.Value  { return columnFunc("integer") }
-func (d *Database) Int() value.Value      { return columnFunc("integer") } // alias of integer()
+// Identifiers
+func (d *Database) Kitid() value.Value  { return columnFunc("kitid") }
+func (d *Database) Uuid() value.Value   { return columnFunc("uuid") }
+func (d *Database) Serial() value.Value { return columnFunc("serial") } // INTEGER; auto-increment not wired yet
+
+// Text
+func (d *Database) Text() value.Value    { return columnFunc("text") }
+func (d *Database) Varchar() value.Value { return paramFunc("varchar") } // length is metadata (no-op on sqlite)
+func (d *Database) Char() value.Value    { return paramFunc("char") }
+
+// Numbers
+func (d *Database) Integer() value.Value { return columnFunc("integer") }
+func (d *Database) Int() value.Value     { return columnFunc("integer") } // alias
+func (d *Database) Float() value.Value   { return columnFunc("float") }
+func (d *Database) Real() value.Value    { return columnFunc("float") }  // alias
+func (d *Database) Double() value.Value  { return columnFunc("float") }  // doublePrecision alias
+func (d *Database) Decimal() value.Value { return paramFunc("decimal") } // stored as TEXT (exact), read as number
+
+// Boolean
+func (d *Database) Bool() value.Value    { return columnFunc("bool") }
+func (d *Database) Boolean() value.Value { return columnFunc("bool") } // alias
+
+// Enum — variadic, values passed straight: enum("draft", "published")
+func (d *Database) Enum() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		c := &ColumnSpec{kind: "enum"}
+		for _, a := range args {
+			if a.K == value.String {
+				c.enumVals = append(c.enumVals, a.String())
+			}
+		}
+		return value.New(c)
+	})
+}
+
+// Time — datetime/date/time are MANUAL; now() is the auto-timestamp preset.
 func (d *Database) Datetime() value.Value { return columnFunc("datetime") }
+func (d *Database) Date() value.Value     { return columnFunc("date") }
+func (d *Database) Time() value.Value     { return columnFunc("time") }
+func (d *Database) Year() value.Value     { return columnFunc("year") }  // INTEGER, auto current year on insert
+func (d *Database) Month() value.Value    { return columnFunc("month") } // INTEGER, auto current month
+func (d *Database) Day() value.Value      { return columnFunc("day") }   // INTEGER, auto current day
+
+// Structured
+func (d *Database) Json() value.Value  { return columnFunc("json") }
+func (d *Database) Jsonb() value.Value { return columnFunc("jsonb") } // ≡ json on sqlite (both TEXT)
+func (d *Database) Array() value.Value { return columnFunc("array") } // JSON array in TEXT
+func (d *Database) Blob() value.Value  { return columnFunc("blob") }
+func (d *Database) Bytes() value.Value { return columnFunc("blob") } // alias
+
+// Networking & AI
+func (d *Database) Ip() value.Value     { return columnFunc("ip") }  // TEXT (no native type)
+func (d *Database) Mac() value.Value    { return columnFunc("mac") } // TEXT
+func (d *Database) Vector() value.Value { return paramFunc("vector") }
+
+// Presets — the two universal patterns get a one-word name; compose the rest with modifiers.
+func (d *Database) Id() value.Value { // = kitid().primaryKey()
+	return value.NewFunc(func(_ ...value.Value) value.Value {
+		return value.New(&ColumnSpec{kind: "kitid", primary: true})
+	})
+}
+func (d *Database) Now() value.Value { // = datetime().defaultNow()
+	return value.NewFunc(func(_ ...value.Value) value.Value {
+		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true})
+	})
+}
+
+// paramFunc builds a column whose first arg is a size/precision/dimension hint (varchar(50),
+// decimal(10,2), vector(1536)). The hint is metadata for v1 — sqlite ignores length/precision, and the
+// vector is stored as a JSON array — but it is accepted so schemas read the same across engines.
+func paramFunc(kind string) value.Value {
+	return value.NewFunc(func(_ ...value.Value) value.Value {
+		return value.New(&ColumnSpec{kind: kind})
+	})
+}
+
+// ---- storage classes + coercion: the type registry ----
+
+// colStorage maps each column kind to one of SQLite's 5 storage classes. Everything a schema declares
+// resolves to TEXT / INTEGER / REAL / BLOB; the semantic types (bool, json, enum, uuid, …) ride on top
+// via coercion (coerceWrite / coerceRead). Unknown kinds default to TEXT.
+var colStorage = map[string]string{
+	"text": "TEXT", "varchar": "TEXT", "char": "TEXT", "kitid": "TEXT", "uuid": "TEXT",
+	"datetime": "TEXT", "date": "TEXT", "time": "TEXT", "decimal": "TEXT", "enum": "TEXT",
+	"json": "TEXT", "jsonb": "TEXT", "array": "TEXT", "vector": "TEXT", "ip": "TEXT", "mac": "TEXT",
+	"integer": "INTEGER", "bool": "INTEGER", "serial": "INTEGER", "year": "INTEGER", "month": "INTEGER", "day": "INTEGER",
+	"float": "REAL",
+	"blob":  "BLOB",
+}
+
+func storageClass(kind string) string {
+	if s, ok := colStorage[kind]; ok {
+		return s
+	}
+	return "TEXT"
+}
+
+// coerceWrite converts a JS value to its stored form: bool → 0/1, json/array/vector → a JSON string,
+// decimal → an exact TEXT string. Everything else passes through.
+func coerceWrite(kind string, v value.Value) value.Value {
+	switch kind {
+	case "bool":
+		if v.K == value.Bool {
+			if v.N != 0 {
+				return value.New(1)
+			}
+			return value.New(0)
+		}
+	case "json", "jsonb", "array", "vector":
+		if v.K == value.Map || v.K == value.Array {
+			if b, err := json.Marshal(v); err == nil {
+				return value.New(string(b))
+			}
+		}
+	case "decimal":
+		if v.K == value.Number {
+			return value.New(numText(v.N)) // exact-as-authored text; pass a string for full precision
+		}
+	}
+	return v
+}
+
+// coerceRead converts a stored value back to its JS form (the inverse of coerceWrite), so callers get
+// booleans, objects and numbers — not 0/1 and JSON strings.
+func coerceRead(kind string, v value.Value) value.Value {
+	switch kind {
+	case "bool":
+		if v.K == value.Number {
+			return value.New(v.N != 0)
+		}
+	case "json", "jsonb", "array", "vector":
+		if v.K == value.String {
+			var out value.Value
+			if err := json.Unmarshal([]byte(v.String()), &out); err == nil {
+				return out
+			}
+		}
+	case "decimal":
+		if v.K == value.String {
+			if f, err := strconv.ParseFloat(v.String(), 64); err == nil {
+				return value.New(f)
+			}
+		}
+	}
+	return v
+}
+
+func numText(n float64) string {
+	if n == float64(int64(n)) {
+		return strconv.FormatInt(int64(n), 10)
+	}
+	return strconv.FormatFloat(n, 'g', -1, 64)
+}
+
+func inEnum(spec *ColumnSpec, s string) bool {
+	for _, e := range spec.enumVals {
+		if e == s {
+			return true
+		}
+	}
+	return false
+}
+
+func uuidV4() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// autoValue returns the value a column generates on insert when the caller omits it: a kitid/uuid, the
+// current timestamp (now/defaultNow), the current year/month/day, or a static default.
+func autoValue(spec *ColumnSpec) (value.Value, bool) {
+	nowT := time.Now().UTC()
+	switch {
+	case spec.kind == "kitid":
+		return value.New(id.Entity()), true
+	case spec.kind == "uuid":
+		return value.New(uuidV4()), true
+	case spec.defaultNow:
+		return value.New(nowT.Format(time.RFC3339)), true
+	case spec.kind == "year":
+		return value.New(nowT.Year()), true
+	case spec.kind == "month":
+		return value.New(int(nowT.Month())), true
+	case spec.kind == "day":
+		return value.New(nowT.Day()), true
+	case spec.hasDefault:
+		return spec.def, true
+	}
+	return value.Value{}, false
+}
+
+// coerceResult maps a query result (an array of row maps, or one row map) back to JS types per the
+// schema, so reads return booleans/objects/numbers rather than 0/1 and JSON strings.
+func coerceResult(columns map[string]*ColumnSpec, result value.Value) value.Value {
+	switch result.K {
+	case value.Array:
+		if arr, ok := result.V.(*[]value.Value); ok {
+			for i := range *arr {
+				coerceRowInPlace(columns, (*arr)[i])
+			}
+		}
+	case value.Map:
+		coerceRowInPlace(columns, result)
+	}
+	return result
+}
+
+func coerceRowInPlace(columns map[string]*ColumnSpec, row value.Value) {
+	if row.K != value.Map {
+		return
+	}
+	m := row.Map()
+	for name, spec := range columns {
+		if v, ok := m[name]; ok {
+			m[name] = coerceRead(spec.kind, v)
+		}
+	}
+}
 
 // Turso and Sqlite are the LOCAL per-tenant file factories. They are VARIADIC (not 0-arg getters) so
 // that `const { turso } = database` yields a callable: database.turso("app.db", schema) and the
@@ -266,14 +485,14 @@ func (t *SchemaTable) List(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
 	}
-	return t.builder().List(args...)
+	return coerceResult(t.columns, t.builder().List(args...))
 }
 
 func (t *SchemaTable) First(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
 	}
-	return t.builder().First(args...)
+	return coerceResult(t.columns, t.builder().First(args...))
 }
 
 // Find looks a row up by primary key — the schema knows which column that is.
@@ -281,7 +500,7 @@ func (t *SchemaTable) Find(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
 	}
-	return t.builder().Find(args...)
+	return coerceResult(t.columns, t.builder().Find(args...))
 }
 
 // Count is COUNT(*) through the builder — not list().length, which would load every row to count it.
@@ -301,12 +520,12 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 	if len(args) == 0 || args[0].K != value.Map {
 		return value.Value{K: value.Invalid, V: "db.create: expects an object"}
 	}
-	row, badCol := fillRow(t.columns, args[0].Map())
-	if badCol != "" {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q has no column %q", t.table, badCol)}
+	row, errMsg := fillRow(t.columns, args[0].Map())
+	if errMsg != "" {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q %s", t.table, errMsg)}
 	}
 	t.ensureTable()
-	return t.source().Table(t.table).Create(value.New(row))
+	return coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row)))
 }
 
 // fillRow is the shared create logic for BOTH worlds (local turso and shared entity): validate every
@@ -316,22 +535,21 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (map[string]value.Value, string) {
 	row := map[string]value.Value{}
 	for k, v := range provided {
-		if _, ok := columns[k]; !ok {
-			return nil, k
+		spec, ok := columns[k]
+		if !ok {
+			return nil, fmt.Sprintf("has no column %q", k)
 		}
-		row[k] = v
+		if spec.kind == "enum" && v.K == value.String && !inEnum(spec, v.String()) {
+			return nil, fmt.Sprintf("column %q must be one of %v (got %q)", k, spec.enumVals, v.String())
+		}
+		row[k] = coerceWrite(spec.kind, v) // bool→0/1, json/array→JSON, decimal→text
 	}
 	for name, spec := range columns {
 		if _, given := row[name]; given {
 			continue
 		}
-		switch {
-		case spec.kind == "kitid":
-			row[name] = value.New(id.Entity())
-		case spec.defaultNow:
-			row[name] = value.New(time.Now().UTC().Format(time.RFC3339))
-		case spec.hasDefault:
-			row[name] = spec.def
+		if v, ok := autoValue(spec); ok {
+			row[name] = coerceWrite(spec.kind, v)
 		}
 	}
 	return row, ""
@@ -403,11 +621,7 @@ func schemaDDL(table string, columns map[string]*ColumnSpec, extra ...string) st
 }
 
 func columnSQL(name string, c *ColumnSpec) string {
-	sqlType := "TEXT"
-	if c.kind == "integer" {
-		sqlType = "INTEGER"
-	}
-	parts := []string{fmt.Sprintf("%q %s", name, sqlType)}
+	parts := []string{fmt.Sprintf("%q %s", name, storageClass(c.kind))}
 	if c.primary {
 		parts = append(parts, "PRIMARY KEY")
 	}
@@ -537,21 +751,21 @@ func (t *EntityTable) List(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
 	}
-	return t.builder().List(args...)
+	return coerceResult(t.columns, t.builder().List(args...))
 }
 
 func (t *EntityTable) First(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
 	}
-	return t.builder().First(args...)
+	return coerceResult(t.columns, t.builder().First(args...))
 }
 
 func (t *EntityTable) Find(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
 	}
-	return t.builder().Find(args...)
+	return coerceResult(t.columns, t.builder().Find(args...))
 }
 
 func (t *EntityTable) Count(args ...value.Value) value.Value {
@@ -568,12 +782,12 @@ func (t *EntityTable) Create(args ...value.Value) value.Value {
 	if len(args) == 0 || args[0].K != value.Map {
 		return value.Value{K: value.Invalid, V: "db.create: expects an object"}
 	}
-	row, badCol := fillRow(t.columns, args[0].Map())
-	if badCol != "" {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q has no column %q", t.table, badCol)}
+	row, errMsg := fillRow(t.columns, args[0].Map())
+	if errMsg != "" {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q %s", t.table, errMsg)}
 	}
 	// Entities.Create stamps the `identity` column itself — we never set it here.
-	return t.builder().Create(value.New(row))
+	return coerceResult(t.columns, t.builder().Create(value.New(row)))
 }
 
 // ensureTable migrates the shared table on database.System, with the extra `identity` column.
@@ -903,12 +1117,7 @@ func castExpr(name, want, cur string) string {
 	return fmt.Sprintf("CAST(%q AS %s)", name, want)
 }
 
-func desiredType(c *ColumnSpec) string {
-	if c.kind == "integer" {
-		return "INTEGER"
-	}
-	return "TEXT"
-}
+func desiredType(c *ColumnSpec) string { return storageClass(c.kind) }
 
 func sameType(a, b string) bool { return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b)) }
 
@@ -939,15 +1148,11 @@ func tableColumns(db *sql.DB, table string) (map[string]string, error) {
 // rows — so a static schema default BACKFILLS old rows here, not only new rows via fillRow. (defaultNow
 // is left to fillRow: old rows keep NULL rather than a fabricated "created just now" timestamp.)
 func addColumnSQL(name string, c *ColumnSpec) string {
-	sqlType := "TEXT"
-	if c.kind == "integer" {
-		sqlType = "INTEGER"
-	}
 	def := ""
 	if c.hasDefault {
-		def = " DEFAULT " + sqlLiteral(c.def)
+		def = " DEFAULT " + sqlLiteral(coerceWrite(c.kind, c.def)) // coerce bool/json defaults for the backfill
 	}
-	return fmt.Sprintf("%q %s%s", name, sqlType, def)
+	return fmt.Sprintf("%q %s%s", name, storageClass(c.kind), def)
 }
 
 // sqlLiteral renders a column default as a SQL literal for DDL (the ADD COLUMN backfill above).

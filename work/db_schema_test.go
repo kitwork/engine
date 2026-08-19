@@ -453,6 +453,98 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	}
 }
 
+// The type vocabulary end to end through a real tenant VM: bool/array/json/enum + auto now()/year().
+// Proves COERCION both ways — writes store 0/1 and JSON strings, reads come back as booleans/objects.
+func TestSchemaColumnTypesRoundTrip(t *testing.T) {
+	tmp, err := os.MkdirTemp("", "kitwork-types-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmp)
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	router := `import { router, database } from "kitwork";` + "\n" +
+		`const { turso, id, text, int, float, bool, enum, now, year, jsonb, array } = database;` + "\n" +
+		`const items = {` + "\n" +
+		`  id: id(),` + "\n" +
+		`  name: text().notNull(),` + "\n" +
+		`  active: bool().default(true),` + "\n" +
+		`  count: int().default(0),` + "\n" +
+		`  rating: float().default(4.5),` + "\n" +
+		`  status: enum("draft", "published").default("draft"),` + "\n" +
+		`  tags: array().default([]),` + "\n" +
+		`  meta: jsonb().default({}),` + "\n" +
+		`  created: now(),` + "\n" +
+		`  fy: year()` + "\n" +
+		`};` + "\n" +
+		`const db = turso("app.db", { items });` + "\n" +
+		`router.get((ctx) => {` + "\n" +
+		`  db.items.create({ name: "A", active: false, tags: ["x","y"], meta: { k: 1 }, status: "published" });` + "\n" +
+		`  const row = db.items.where("name", "=", "A").first();` + "\n" +
+		`  return ctx.json({` + "\n" +
+		`    active: row.active,` + "\n" +
+		`    tagsLen: row.tags.length,` + "\n" +
+		`    metaK: row.meta.k,` + "\n" +
+		`    status: row.status,` + "\n" +
+		`    fy: row.fy,` + "\n" +
+		`    hasCreated: row.created != "",` + "\n" +
+		`    hasId: row.id != ""` + "\n" +
+		`  });` + "\n" +
+		`});`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("status %d, body: %s", rec.Code, body)
+	}
+
+	checks := map[string]string{
+		`"active":false`:       "bool read-coercion (stored 0/1) failed",
+		`"tagsLen":2`:          "array read-coercion (JSON string → array) failed",
+		`"metaK":1`:            "json read-coercion (JSON string → object) failed",
+		`"status":"published"`: "enum value round-trip failed",
+		`"fy":2026`:            "year() did not auto-fill the current year",
+		`"hasCreated":true`:    "now() did not auto-fill a timestamp",
+		`"hasId":true`:         "id() did not generate a kitid",
+	}
+	for want, msg := range checks {
+		if !strings.Contains(body, want) {
+			t.Errorf("%s — want %s in body: %s", msg, want, body)
+		}
+	}
+}
+
+// Enum validation happens at write time (engine-agnostic, no CHECK constraint): a value outside the set
+// is rejected with a clear message.
+func TestSchemaEnumRejectsInvalid(t *testing.T) {
+	columns := map[string]*ColumnSpec{
+		"status": {kind: "enum", enumVals: []string{"draft", "published"}},
+	}
+	_, errMsg := fillRow(columns, map[string]value.Value{"status": value.New("bogus")})
+	if errMsg == "" {
+		t.Fatal("invalid enum value was accepted")
+	}
+	if !strings.Contains(errMsg, "status") || !strings.Contains(errMsg, "bogus") {
+		t.Errorf("enum error should name the column and value, got: %q", errMsg)
+	}
+	// A valid value passes.
+	if _, errMsg := fillRow(columns, map[string]value.Value{"status": value.New("draft")}); errMsg != "" {
+		t.Errorf("valid enum value rejected: %q", errMsg)
+	}
+}
+
 // A schema declared during Tenant.Run (no request needed) is discoverable via MigrationPlansFor — the
 // hook kitwork check uses to preview a deploy. A fresh tenant (no .data DB yet) → a "create" plan.
 func TestMigrationPlansForPreviewsSchema(t *testing.T) {
