@@ -1107,6 +1107,19 @@ func sortedTableNames(tables map[string]map[string]*ColumnSpec) []string {
 	return names
 }
 
+// checkpointWAL flushes the write-ahead log into the main database file. A schema change (DDL) that
+// lives only in the WAL is NOT reliably visible to a separate turso instance/process opening the same
+// file — the ALTER runs and records, the WAL grows, but the main file (and thus another process's view)
+// still shows the old columns, which surfaces as "table X has no column Y" on the next insert. Forcing
+// the DDL down into the main file makes it durable and visible to every reader. Best-effort: on a WAL-
+// less db (":memory:") the PRAGMA is a harmless no-op.
+func checkpointWAL(db *sql.DB) {
+	if db == nil {
+		return
+	}
+	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+}
+
 func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) error {
 	if db == nil {
 		return fmt.Errorf("connection unavailable")
@@ -1132,6 +1145,7 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 			return fmt.Errorf("create %q: %w", table, err)
 		}
 		recordMigration(db, table, "create-table", ddl)
+		checkpointWAL(db)
 		return nil
 	}
 
@@ -1150,7 +1164,11 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 
 	// A type change or an allowed drop → full table rebuild.
 	if len(typeChanged) > 0 || len(extras) > 0 {
-		return rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged)
+		if err := rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged); err != nil {
+			return err
+		}
+		checkpointWAL(db)
+		return nil
 	}
 
 	// Otherwise purely additive: ADD the new columns (static defaults backfill existing rows).
@@ -1176,6 +1194,8 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 				return fmt.Errorf("column %q did not persist on %q — the ALTER returned no error but the column is absent (another process likely holds the database)", name, table)
 			}
 		}
+		// Flush the ADDs to the main file so a separate process/instance sees them (see checkpointWAL).
+		checkpointWAL(db)
 	}
 	return nil
 }

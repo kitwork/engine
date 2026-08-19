@@ -877,6 +877,48 @@ router.get((ctx) => {
 	}
 }
 
+// A schema migration must flush its DDL out of the write-ahead log into the MAIN database file, so a
+// separate turso process/instance opening the same file sees the new columns instead of "no such
+// column". This pins that: after migrate() adds a column, the -wal file is truncated (the checkpoint
+// ran). Without checkpointWAL the ALTER frames sit in a growing WAL and the fix is undone.
+func TestMigrationCheckpointsWALToMainFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.ToSlash(filepath.Join(dir, "c.db"))
+	db, err := sql.Open("turso", path)
+	if err != nil {
+		t.Skipf("turso driver not available: %v", err)
+	}
+	defer db.Close()
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
+	}
+
+	schema := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "code": {kind: "text"}}
+	if err := migrate(db, "t", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ { // enough writes to grow the WAL
+		if _, err := db.Exec(`INSERT INTO t (id, code) VALUES (?, ?)`, fmt.Sprintf("row-%04d", i), "c"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The LAST operation is a DDL migration — its checkpoint must truncate the WAL.
+	schema["extra"] = &ColumnSpec{kind: "text"}
+	if err := migrate(db, "t", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	wal := filepath.Join(dir, "c.db-wal")
+	fi, err := os.Stat(wal)
+	if err != nil {
+		return // WAL removed entirely = fully checkpointed, ideal.
+	}
+	// TRUNCATE leaves a 0-byte (or header-only) WAL; anything larger means DDL is stranded in the log.
+	if fi.Size() > 4096 {
+		t.Errorf("WAL not checkpointed after migration: %d bytes still in the log (DDL stranded, separate processes would miss the column)", fi.Size())
+	}
+}
+
 // decodeJSONObject reads a flat {"k":"v"|n|null} object from a handler body without pulling in a JSON
 // dependency shape assumption — values come back as strings ("<nil>" for null/absent).
 func decodeJSONObject(t *testing.T, body string) map[string]string {
