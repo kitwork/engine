@@ -400,6 +400,88 @@ func TestSchemaMigrationBackfillsDefaultOnAddColumn(t *testing.T) {
 	}
 }
 
+// planMigration classifies the delta (the dry-run's engine): create for a fresh table, nothing when
+// up-to-date, and add/retype/drop steps with WillApply reflecting the { drop: true } flag.
+func TestMigrationPlanClassifies(t *testing.T) {
+	schema := map[string]*ColumnSpec{
+		"id":     {kind: "kitid", primary: true},
+		"code":   {kind: "text"},
+		"amount": {kind: "integer"},
+	}
+
+	// Fresh table → one "create" step.
+	if steps := planMigration(map[string]string{}, schema, false, false); len(steps) != 1 || steps[0].Action != "create" {
+		t.Fatalf("fresh: want [create], got %+v", steps)
+	}
+	// Exact match → no steps.
+	upToDate := map[string]string{"id": "TEXT", "code": "TEXT", "amount": "INTEGER"}
+	if steps := planMigration(upToDate, schema, false, false); len(steps) != 0 {
+		t.Errorf("up-to-date: want no steps, got %+v", steps)
+	}
+
+	// Live table: amount is TEXT (retype), 'old' is extra (drop), 'code' matches.
+	current := map[string]string{"id": "TEXT", "code": "TEXT", "amount": "TEXT", "old": "TEXT"}
+	byCol := func(steps []planStep) map[string]planStep {
+		m := map[string]planStep{}
+		for _, s := range steps {
+			m[s.Action+":"+s.Column] = s
+		}
+		return m
+	}
+
+	// Without the flag: destructive steps are planned but NOT WillApply.
+	noFlag := byCol(planMigration(current, schema, false, false))
+	if s := noFlag["retype:amount"]; s.From != "TEXT" || s.To != "INTEGER" || !s.Destructive || s.WillApply {
+		t.Errorf("retype:amount (no flag) = %+v", s)
+	}
+	if s, ok := noFlag["drop:old"]; !ok || s.WillApply {
+		t.Errorf("drop:old (no flag) = %+v ok=%v", s, ok)
+	}
+
+	// With the flag: destructive steps WillApply.
+	for _, s := range planMigration(current, schema, false, true) {
+		if s.Destructive && !s.WillApply {
+			t.Errorf("with flag, destructive step should WillApply: %+v", s)
+		}
+	}
+
+	// A new column → an "add" step that always applies.
+	addSteps := planMigration(map[string]string{"id": "TEXT"},
+		map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "brand": {kind: "text"}}, false, false)
+	if len(addSteps) != 1 || addSteps[0].Action != "add" || addSteps[0].Column != "brand" || !addSteps[0].WillApply {
+		t.Fatalf("add: want [add brand], got %+v", addSteps)
+	}
+}
+
+// The dry run (planMigration / db.plan()) must be PURE: computing a plan never changes the table.
+func TestMigrationPlanDoesNotMutate(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	migrate(db, "t", map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "amount": {kind: "text"}}, false, false)
+	if _, err := db.Exec(`INSERT INTO t (id, amount) VALUES ('x1','40000')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plan an evolved schema (retype amount) WITHOUT applying.
+	v2 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "amount": {kind: "integer"}}
+	current, _ := tableColumns(db, "t")
+	_ = planMigration(current, v2, false, true) // even with the flag, planning must not apply
+
+	after, _ := tableColumns(db, "t")
+	if after["amount"] != "TEXT" {
+		t.Errorf("planning mutated the schema: amount = %q, want TEXT (unchanged)", after["amount"])
+	}
+	var amt string
+	if err := db.QueryRow(`SELECT amount FROM t WHERE id='x1'`).Scan(&amt); err != nil || amt != "40000" {
+		t.Errorf("planning mutated data: amount=%q err=%v", amt, err)
+	}
+}
+
 // Drop only happens with the EXPLICIT flag. With allowDrop=true the extra column is rebuilt away (and
 // its data goes with it — that is the point of the opt-in); with allowDrop=false it is preserved (the
 // TestSchemaMigrationNeverDropsColumn case).

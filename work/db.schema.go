@@ -322,6 +322,38 @@ func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (m
 
 var ensuredTables sync.Map // key: "<abs db path>::<table>"
 
+// Plan is a DRY RUN: it reports what migrate() would do to bring the live table up to the schema,
+// WITHOUT changing anything. db.vouchers.plan() returns an array of
+// { action, column, from, to, destructive, willApply } so a handler (or a check command) can preview
+// exactly what a deploy will migrate — including destructive steps that will be refused without
+// { drop: true }.
+func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	db := t.source().db()
+	if db == nil {
+		return value.Value{K: value.Invalid, V: "db.plan: connection unavailable"}
+	}
+	current, err := tableColumns(db, t.table)
+	if err != nil {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.plan: %v", err)}
+	}
+	steps := planMigration(current, t.columns, false, t.allowDrop)
+	out := make([]value.Value, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, value.New(map[string]value.Value{
+			"action":      value.New(s.Action),
+			"column":      value.New(s.Column),
+			"from":        value.New(s.From),
+			"to":          value.New(s.To),
+			"destructive": value.New(s.Destructive),
+			"willApply":   value.New(s.WillApply),
+		}))
+	}
+	return value.New(out)
+}
+
 // ensureTable runs the migration once per (engine, file, table, SCHEMA HASH). The hash in the key is
 // what makes it react to schema changes: edit the schema (add a column) and the key changes, so a
 // hot-reload re-runs migrate() and ALTERs the live table — not just first boot.
@@ -555,6 +587,77 @@ func (t *EntityTable) ensureTable() {
 
 const migrationsTable = "_kitwork_migrations"
 
+// planStep is one item of a migration plan — the delta between the schema and the live table. WillApply
+// carries the { drop: true } decision: a destructive step (retype/drop) applies only when it is set.
+type planStep struct {
+	Action      string // "create" | "add" | "retype" | "drop"
+	Column      string
+	From        string // current type (retype/drop)
+	To          string // desired type (add/retype)
+	Destructive bool
+	WillApply   bool
+}
+
+// planMigration computes what migrate() would do WITHOUT touching the database — the single classifier
+// shared by the dry-run (db.<table>.plan()) and the applier (migrate). Pure: (current, schema) in, plan
+// out. Destructive steps (retype/drop) are marked WillApply only when allowDrop is set.
+func planMigration(current map[string]string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) []planStep {
+	if len(current) == 0 {
+		return []planStep{{Action: "create", WillApply: true}}
+	}
+	var steps []planStep
+	for _, name := range sortedColumns(columns) {
+		cur, ok := current[name]
+		want := desiredType(columns[name])
+		switch {
+		case !ok:
+			steps = append(steps, planStep{Action: "add", Column: name, To: want, WillApply: true})
+		case !sameType(cur, want):
+			steps = append(steps, planStep{Action: "retype", Column: name, From: cur, To: want, Destructive: true, WillApply: allowDrop})
+		}
+	}
+	var drops []string
+	for col := range current {
+		if _, want := columns[col]; want {
+			continue
+		}
+		if withIdentity && col == identityColumn {
+			continue
+		}
+		drops = append(drops, col)
+	}
+	sort.Strings(drops)
+	for _, col := range drops {
+		steps = append(steps, planStep{Action: "drop", Column: col, From: current[col], Destructive: true, WillApply: allowDrop})
+	}
+	return steps
+}
+
+// logPlan announces the plan — so an auto-migration is never silent about what it changes or refuses.
+// It is the single place that reports the delta; the apply path below only logs failures.
+func logPlan(table string, steps []planStep) {
+	for _, s := range steps {
+		switch s.Action {
+		case "create":
+			fmt.Printf("[db.migrate] %q — create table\n", table)
+		case "add":
+			fmt.Printf("[db.migrate] %q — add column %q %s\n", table, s.Column, s.To)
+		case "retype":
+			if s.WillApply {
+				fmt.Printf("[db.migrate] %q — retype %q %s→%s (rebuild + CAST)\n", table, s.Column, s.From, s.To)
+			} else {
+				fmt.Printf("[db.migrate] %q — retype %q %s→%s REFUSED (pass { drop: true }; may lose data) — left intact\n", table, s.Column, s.From, s.To)
+			}
+		case "drop":
+			if s.WillApply {
+				fmt.Printf("[db.migrate] %q — drop column %q\n", table, s.Column)
+			} else {
+				fmt.Printf("[db.migrate] %q — extra column %q kept (pass { drop: true } to drop)\n", table, s.Column)
+			}
+		}
+	}
+}
+
 func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) {
 	if db == nil {
 		return
@@ -566,6 +669,9 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 		fmt.Printf("[db.migrate] introspect %q failed: %v\n", table, err)
 		return
 	}
+
+	steps := planMigration(current, columns, withIdentity, allowDrop)
+	logPlan(table, steps) // announce the plan (including any refused destructive step) before applying
 
 	// New table → straight CREATE.
 	if len(current) == 0 {
@@ -582,38 +688,26 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 		return
 	}
 
-	// Classify the delta between the schema and the live table.
+	// Split the plan into what actually applies (destructive steps are here only when allowed).
 	var newCols, typeChanged, extras []string
-	for _, name := range sortedColumns(columns) {
-		curType, ok := current[name]
+	for _, s := range steps {
 		switch {
-		case !ok:
-			newCols = append(newCols, name)
-		case !sameType(curType, desiredType(columns[name])):
-			typeChanged = append(typeChanged, name)
+		case s.Action == "add":
+			newCols = append(newCols, s.Column)
+		case s.Action == "retype" && s.WillApply:
+			typeChanged = append(typeChanged, s.Column)
+		case s.Action == "drop" && s.WillApply:
+			extras = append(extras, s.Column)
 		}
 	}
-	for col := range current {
-		if _, want := columns[col]; want {
-			continue
-		}
-		if withIdentity && col == identityColumn {
-			continue
-		}
-		extras = append(extras, col)
-	}
-	sort.Strings(extras)
 
-	// DESTRUCTIVE changes — a type change (rebuild + CAST, which can silently lose data) or dropping
-	// extra columns — run ONLY with the explicit { drop: true } flag. Neither is applied silently:
-	// without the flag they are refused and warned, leaving the data untouched.
-	if allowDrop && (len(typeChanged) > 0 || len(extras) > 0) {
+	// A type change or an allowed drop → full table rebuild.
+	if len(typeChanged) > 0 || len(extras) > 0 {
 		rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged)
 		return
 	}
 
-	// Additive path: ADD the new columns (safe; static defaults backfill existing rows), then REFUSE
-	// (warn about) the destructive changes.
+	// Otherwise purely additive: ADD the new columns (static defaults backfill existing rows).
 	for _, name := range newCols {
 		stmt := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", table, addColumnSQL(name, columns[name]))
 		if _, err := db.Exec(stmt); err != nil {
@@ -621,13 +715,6 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 			continue
 		}
 		recordMigration(db, table, "add-column", stmt)
-	}
-	for _, name := range typeChanged {
-		fmt.Printf("[db.migrate] %q.%q type change %s → %s needs { drop: true } (rebuild + CAST may lose data) — refused, column left intact\n",
-			table, name, current[name], desiredType(columns[name]))
-	}
-	for _, col := range extras {
-		fmt.Printf("[db.migrate] %q.%q is in the database but not the schema — left intact (pass { drop: true } to remove)\n", table, col)
 	}
 }
 
