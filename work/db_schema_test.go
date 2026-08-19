@@ -282,14 +282,15 @@ func TestSchemaMigrationRebuildsOnTypeChange(t *testing.T) {
 	}
 	db1.Close()
 
-	// v2: discount becomes INTEGER → rebuild + CAST.
+	// v2: discount becomes INTEGER. A type change is destructive (CAST), so it runs ONLY with the
+	// explicit flag → rebuild + CAST.
 	v2 := map[string]*ColumnSpec{
 		"id":       {kind: "kitid", primary: true},
 		"discount": {kind: "integer"},
 	}
 	db2 := open()
 	defer db2.Close()
-	migrate(db2, "prices", v2, false, false)
+	migrate(db2, "prices", v2, false, true) // allowDrop=true opts into the destructive rebuild
 
 	// The column is now INTEGER...
 	types, err := tableColumns(db2, "prices")
@@ -311,6 +312,91 @@ func TestSchemaMigrationRebuildsOnTypeChange(t *testing.T) {
 	db2.QueryRow(`SELECT count(*) FROM _kitwork_migrations WHERE table_name='prices' AND action LIKE 'rebuild-table%'`).Scan(&n)
 	if n < 1 {
 		t.Error("rebuild-table not recorded in migration history")
+	}
+}
+
+// Safety: WITHOUT the flag, a type change is REFUSED — no silent rebuild/CAST that could lose data.
+// The column keeps its old type and its data.
+func TestSchemaMigrationRefusesTypeChangeWithoutFlag(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	open := func() *sql.DB {
+		d, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+
+	v1 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "note": {kind: "text"}}
+	db1 := open()
+	migrate(db1, "notes", v1, false, false)
+	if _, err := db1.Exec(`INSERT INTO notes (id, note) VALUES ('x1', 'keep-me')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	db1.Close()
+
+	// note: text → integer, but NO flag → must be refused.
+	v2 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "note": {kind: "integer"}}
+	db2 := open()
+	defer db2.Close()
+	migrate(db2, "notes", v2, false, false)
+
+	types, err := tableColumns(db2, "notes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if types["note"] != "TEXT" {
+		t.Errorf("type change was applied without the flag: note type = %q, want TEXT (unchanged)", types["note"])
+	}
+	var note string
+	if err := db2.QueryRow(`SELECT note FROM notes WHERE id='x1'`).Scan(&note); err != nil {
+		t.Fatalf("data lost: %v", err)
+	}
+	if note != "keep-me" {
+		t.Errorf("note = %q, want keep-me", note)
+	}
+	var rebuilds int
+	db2.QueryRow(`SELECT count(*) FROM _kitwork_migrations WHERE table_name='notes' AND action LIKE 'rebuild%'`).Scan(&rebuilds)
+	if rebuilds != 0 {
+		t.Errorf("a rebuild ran without the flag (%d recorded)", rebuilds)
+	}
+}
+
+// ADD COLUMN with a STATIC default backfills existing rows (SQLite applies the DEFAULT to old rows).
+func TestSchemaMigrationBackfillsDefaultOnAddColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	open := func() *sql.DB {
+		d, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+
+	v1 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "code": {kind: "text"}}
+	db1 := open()
+	migrate(db1, "vouchers", v1, false, false)
+	if _, err := db1.Exec(`INSERT INTO vouchers (id, code) VALUES ('x1', 'A1')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	db1.Close()
+
+	// v2 adds status with a default → the OLD row must get 'active', not NULL.
+	v2 := map[string]*ColumnSpec{
+		"id":     {kind: "kitid", primary: true},
+		"code":   {kind: "text"},
+		"status": {kind: "text", hasDefault: true, def: value.New("active")},
+	}
+	db2 := open()
+	defer db2.Close()
+	migrate(db2, "vouchers", v2, false, false)
+
+	var status string
+	if err := db2.QueryRow(`SELECT status FROM vouchers WHERE id='x1'`).Scan(&status); err != nil {
+		t.Fatalf("old row lost: %v", err)
+	}
+	if status != "active" {
+		t.Errorf("existing row not backfilled: status = %q, want active", status)
 	}
 }
 

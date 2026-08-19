@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,33 +17,36 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// SPIKE (gated, -tags turso): a schema-aware `db.<table>` surface, sketched to feel out the API from
-// the last few turns — NOT the finished feature. It deliberately stops before migrations.
+// Schema-aware `db.<table>` surface under the `database` capability: a schema maps table names to
+// column specs; the engine auto-migrates the table to match and hands back a validated query builder.
 //
-//	// schema module (imported once, module-scope — not per request)
-//	import { defineDb, kitid, text, integer, datetime } from "kitwork/db";
+//	import { database } from "kitwork";
+//	const { turso, sqlite, kitid, text, int, datetime } = database;
 //	const vouchers = {
 //	  id: kitid().primaryKey(),
 //	  code: text().notNull().unique(),
-//	  discount: integer().default(0),
+//	  discount: int().default(0),
 //	  status: text().default("active"),
 //	  created_at: datetime().defaultNow(),
 //	};
-//	export const db = defineDb("app.db", { vouchers });
+//	export const db = turso("app.db", { vouchers });          // or sqlite("app.db", { vouchers })
 //
 //	// handler
 //	db.vouchers.where("status", "=", "active").orderBy("created_at", "desc").limit(10).list();
 //	db.vouchers.find("voucher_123");
 //	db.vouchers.create({ code: "HD169K40", discount: 40000 });  // id/status/created_at auto-filled
 //
-// What the spike PROVES (the parts that were in question):
-//   - db.<table> resolves via the VM's existing Proxy.OnGet — no VM changes.
-//   - schema-awareness pays off: create() generates the kitid PK + applies defaults; where()/orderBy()
-//     reject an unknown column instead of building an empty-identifier query that silently returns 0.
-//   - the table is CREATEd once (first use, cached), not with exec("CREATE TABLE") on every request.
+// How it works:
+//   - db.<table> resolves via the VM's Proxy.OnGet — no VM changes.
+//   - create() generates the kitid PK + applies defaults; where()/orderBy() validate columns.
+//   - the table is migrated on first use, cached by schema hash — not re-checked per request.
+//   - database.turso → tursogo, database.sqlite → modernc; database.define(alias) → entity-scoped
+//     shared tables (rows partitioned by identity).
 //
-// What it deliberately does NOT do (the hard 80%, on purpose): migrations/ALTER, engine selection
-// (it is turso-only here), and the string vs lambda where() only validates the string form.
+// Migration (see migrate() below): additive ADD COLUMN with default backfill runs automatically; type
+// changes and column drops are DESTRUCTIVE (rebuild + CAST / drop) and run ONLY with { drop: true }.
+// Known limits: the rebuild does not restore indexes/triggers/FKs (the DSL declares none), and the
+// shared (entity) migration is not yet coordinated across nodes.
 
 // ---- column DSL: kitid()/text()/integer()/datetime() + chainable modifiers ----
 
@@ -118,8 +122,9 @@ type dbProxy struct {
 }
 
 // newDbProxy parses turso("app.db", { …schema }, { drop: true }): args[0]=file, args[1]=schema,
-// args[2]=options. `drop` is the EXPLICIT flag that lets migration rebuild the table to drop columns
-// the schema removed; without it, extra columns are preserved.
+// args[2]=options. `drop` is the EXPLICIT opt-in for DESTRUCTIVE migration — dropping columns the
+// schema removed AND rebuilding for type changes (CAST may lose data). Without it, both are refused
+// and the data is left untouched.
 func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
 	p := &dbProxy{tenant: tenant, scope: scope, engine: engine, dbName: "app.db", tables: map[string]map[string]*ColumnSpec{}}
 	if len(args) > 0 && args[0].K == value.String {
@@ -599,13 +604,16 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 	}
 	sort.Strings(extras)
 
-	// A type change (SQLite cannot ALTER a type) OR an explicit drop of extras → full table rebuild.
-	if len(typeChanged) > 0 || (allowDrop && len(extras) > 0) {
+	// DESTRUCTIVE changes — a type change (rebuild + CAST, which can silently lose data) or dropping
+	// extra columns — run ONLY with the explicit { drop: true } flag. Neither is applied silently:
+	// without the flag they are refused and warned, leaving the data untouched.
+	if allowDrop && (len(typeChanged) > 0 || len(extras) > 0) {
 		rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged)
 		return
 	}
 
-	// Otherwise purely additive: ADD the new columns (nullable), leave extras intact.
+	// Additive path: ADD the new columns (safe; static defaults backfill existing rows), then REFUSE
+	// (warn about) the destructive changes.
 	for _, name := range newCols {
 		stmt := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", table, addColumnSQL(name, columns[name]))
 		if _, err := db.Exec(stmt); err != nil {
@@ -613,6 +621,10 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 			continue
 		}
 		recordMigration(db, table, "add-column", stmt)
+	}
+	for _, name := range typeChanged {
+		fmt.Printf("[db.migrate] %q.%q type change %s → %s needs { drop: true } (rebuild + CAST may lose data) — refused, column left intact\n",
+			table, name, current[name], desiredType(columns[name]))
 	}
 	for _, col := range extras {
 		fmt.Printf("[db.migrate] %q.%q is in the database but not the schema — left intact (pass { drop: true } to remove)\n", table, col)
@@ -736,15 +748,38 @@ func tableColumns(db *sql.DB, table string) (map[string]string, error) {
 	return cols, rows.Err()
 }
 
-// addColumnSQL is a NAKED column def (name + type only): SQLite's ALTER TABLE ADD COLUMN cannot carry
-// PRIMARY KEY / UNIQUE, and NOT NULL needs a default. The added column is nullable — a schema-level
-// default still applies to new rows via fillRow.
+// addColumnSQL is a column def for ALTER TABLE ADD COLUMN. SQLite's ADD COLUMN cannot carry PRIMARY
+// KEY / UNIQUE (so the added column is nullable), but a DEFAULT is allowed AND is applied to EXISTING
+// rows — so a static schema default BACKFILLS old rows here, not only new rows via fillRow. (defaultNow
+// is left to fillRow: old rows keep NULL rather than a fabricated "created just now" timestamp.)
 func addColumnSQL(name string, c *ColumnSpec) string {
 	sqlType := "TEXT"
 	if c.kind == "integer" {
 		sqlType = "INTEGER"
 	}
-	return fmt.Sprintf("%q %s", name, sqlType)
+	def := ""
+	if c.hasDefault {
+		def = " DEFAULT " + sqlLiteral(c.def)
+	}
+	return fmt.Sprintf("%q %s%s", name, sqlType, def)
+}
+
+// sqlLiteral renders a column default as a SQL literal for DDL (the ADD COLUMN backfill above).
+func sqlLiteral(v value.Value) string {
+	switch v.K {
+	case value.Number:
+		if v.N == float64(int64(v.N)) {
+			return strconv.FormatInt(int64(v.N), 10)
+		}
+		return strconv.FormatFloat(v.N, 'g', -1, 64)
+	case value.Bool:
+		if v.N != 0 {
+			return "1"
+		}
+		return "0"
+	default:
+		return "'" + strings.ReplaceAll(v.String(), "'", "''") + "'"
+	}
 }
 
 func ensureHistory(db *sql.DB) {
