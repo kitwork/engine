@@ -45,7 +45,26 @@ func (t *Tenant) openDatabase(config *database.Config) (*sql.DB, error) {
 	if manager == nil {
 		return nil, fmt.Errorf("app database manager is unavailable")
 	}
-	return manager.Open(databaseConnectionKey(config), config.Connect)
+	key := databaseConnectionKey(config)
+	connect := config.Connect
+	lockPath, guarded := lockableDBPath(config)
+	// A local file backend is single-process: take the single-instance lock BEFORE opening it, so a
+	// second kitwork process fails loudly here instead of silently diverging (see dblock.go). Wrapped
+	// inside the connector so it runs exactly once per file (manager.Open calls it only on a cache miss).
+	if guarded {
+		connect = func() (*sql.DB, error) {
+			if err := acquireDBLock(lockPath); err != nil {
+				return nil, err
+			}
+			return config.Connect()
+		}
+	}
+	conn, err := manager.Open(key, connect)
+	if err == nil && guarded {
+		// Release the lock when this app's connections are torn down (Runtime.Close / hot-reload).
+		manager.SetCleanup(key, func() { releaseDBLock(lockPath) })
+	}
+	return conn, err
 }
 
 func (t *Tenant) lookupDatabase(config *database.Config) *sql.DB {

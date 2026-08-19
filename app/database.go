@@ -12,11 +12,34 @@ import (
 type DatabaseManager struct {
 	mu          sync.Mutex
 	connections map[string]*sql.DB
+	cleanups    map[string]func() // per-key teardown (e.g. releasing a single-instance file lock)
 	closed      bool
 }
 
 func newDatabaseManager() *DatabaseManager {
-	return &DatabaseManager{connections: make(map[string]*sql.DB)}
+	return &DatabaseManager{
+		connections: make(map[string]*sql.DB),
+		cleanups:    make(map[string]func()),
+	}
+}
+
+// SetCleanup registers a teardown to run for `key` when the manager closes — used to release the OS
+// file lock a local database holds. Idempotent: re-registering the same key overwrites. Safe to call
+// after Open returns (it does not run under Open's lock).
+func (m *DatabaseManager) SetCleanup(key string, cleanup func()) {
+	if m == nil || key == "" || cleanup == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		cleanup() // already torn down — release immediately rather than leak the lock
+		return
+	}
+	if m.cleanups == nil {
+		m.cleanups = make(map[string]func())
+	}
+	m.cleanups[key] = cleanup
 }
 
 // Open returns an existing connection or creates exactly one while holding the
@@ -84,10 +107,15 @@ func (m *DatabaseManager) Close() {
 	}
 	m.closed = true
 	connections := m.connections
+	cleanups := m.cleanups
 	m.connections = nil
+	m.cleanups = nil
 	m.mu.Unlock()
 
 	for _, connection := range connections {
 		_ = connection.Close()
+	}
+	for _, cleanup := range cleanups {
+		cleanup()
 	}
 }
