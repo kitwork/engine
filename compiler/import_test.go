@@ -12,7 +12,11 @@ func parseSrc(src string) (*Program, *Parser) {
 func TestNativeImportLowering(t *testing.T) {
 	cases := []struct{ src, want string }{
 		{`import { router, log } from "kitwork";`, `const { router, log } = kitwork();`},
-		{`import { router } from "kitwork/router";`, `const { router } = kitwork();`},
+		// Named imports now honor the subpath too (previously dropped it): a subpath specifier
+		// destructures from that sub-module, matching default-import behavior. This is what makes
+		// `import { turso, kitid } from "kitwork/database"` resolve to the `database` namespace.
+		{`import { router } from "kitwork/router";`, `const { router } = kitwork().router;`},
+		{`import { turso, kitid } from "kitwork/database";`, `const { turso, kitid } = kitwork().database;`},
 		{`import http from "kitwork/http";`, `const http = kitwork().http;`},
 		{`export const x = 5;`, `const x = 5;`},
 	}

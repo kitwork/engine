@@ -37,6 +37,13 @@ func (d *Config) Connect() (*sql.DB, error) {
 	if driver == "sqlite3" {
 		driver = "sqlite"
 	}
+	// The Turso backend (the Rust rewrite of SQLite, reached over turso.tech/database/tursogo) is
+	// GATED behind the `turso` build tag so the default build stays a pure-Go static binary with no
+	// new dependency. When it is not compiled in, refuse with an ACTIONABLE message instead of
+	// letting database/sql surface its cryptic `unknown driver "turso"`.
+	if driver == "turso" && !driverRegistered("turso") {
+		return nil, fmt.Errorf("database type %q needs the Turso backend compiled in — rebuild with `-tags turso` after `go get turso.tech/database/tursogo`; default builds stay pure-Go on modernc sqlite", d.Type)
+	}
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
@@ -48,7 +55,7 @@ func (d *Config) Connect() (*sql.DB, error) {
 
 	// A :memory: SQLite database exists PER CONNECTION — with a pool, every new conn would be a
 	// fresh empty database. Pin the pool to one connection so it behaves like one database.
-	if driver == "sqlite" && strings.Contains(dsn, ":memory:") {
+	if (driver == "sqlite" || driver == "turso") && strings.Contains(dsn, ":memory:") {
 		db.SetMaxOpenConns(1)
 		db.SetMaxIdleConns(1)
 	}
@@ -60,9 +67,12 @@ func (d *Config) Connect() (*sql.DB, error) {
 
 	// Print success connection log
 	dbType := strings.ToLower(d.Type)
-	if dbType == "sqlite" || dbType == "sqlite3" {
+	switch {
+	case dbType == "sqlite" || dbType == "sqlite3":
 		fmt.Printf("Successfully connected to SQLite database: %s\n", dsn)
-	} else {
+	case dbType == "turso":
+		fmt.Printf("Successfully connected to Turso database: %s\n", dsn)
+	default:
 		fmt.Printf("Successfully connected to database (%s) at %s:%d (DB: %s)\n", d.Type, d.Host, d.Port, d.Name)
 	}
 
@@ -120,7 +130,39 @@ func (d *Config) BuildDSN() (string, error) {
 		return "file:" + filepath.ToSlash(path) +
 			"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)", nil
 
+	case "turso":
+		// Turso Database reads the SAME on-disk SQLite FILE FORMAT, but tursogo takes a PLAIN file
+		// path — modernc's `file:...?_pragma=` DSN is modernc-specific and Turso would not parse it.
+		// So the DSN is just the path; engine-level options (WAL, and MVCC via `BEGIN CONCURRENT` —
+		// the one thing plain SQLite cannot do) are configured differently and MUST be verified
+		// against tursogo when the dependency is wired in. Path selection mirrors the sqlite case.
+		path := d.Name
+		if path == "" {
+			path = d.Host
+		}
+		if path == "" {
+			path = "kitwork.db"
+		}
+		if strings.Contains(path, ":memory:") {
+			return ":memory:", nil
+		}
+		return filepath.ToSlash(path), nil
+
 	default:
 		return "", fmt.Errorf("unsupported database type: %s", d.Type)
 	}
+}
+
+// driverRegistered reports whether a database/sql driver of the given name is present in THIS binary.
+// The Turso backend is gated behind the `turso` build tag: the blank import that registers the
+// "turso" driver only compiles in with `-tags turso` (see turso_driver.go), so a default build
+// answers false and Connect can return a clear "not compiled in" error rather than the cryptic
+// database/sql default.
+func driverRegistered(name string) bool {
+	for _, d := range sql.Drivers() {
+		if d == name {
+			return true
+		}
+	}
+	return false
 }

@@ -319,6 +319,25 @@ func constToken(origins ...Token) Token {
 	return tokenWithValue(origin, Const, value.NewString("const"))
 }
 
+// kitworkModule returns the object a `kitwork`-family NAMED import destructures from: `kitwork()` for
+// the bare specifier, or `kitwork().<sub>` for a subpath like "kitwork/database" — so named imports
+// honor the subpath the same way default imports already do (`import http from "kitwork/http"`).
+func (p *Parser) kitworkModule(spec string, origin Token) Expression {
+	base := p.kitworkCall(origin)
+	sub := kitworkSubpath(spec)
+	if sub == "" {
+		return base
+	}
+	return &MemberExpression{
+		Token:  tokenWithValue(origin, Dot, value.Value{}),
+		Object: base,
+		Property: &Identifier{
+			Token: tokenWithValue(origin, Ident, value.NewString(sub)),
+			Value: sub,
+		},
+	}
+}
+
 // kitworkCall builds the expression `kitwork()`.
 func (p *Parser) kitworkCall(origins ...Token) Expression {
 	var origin Token
@@ -410,7 +429,7 @@ func (p *Parser) parseImportStatement() Statement {
 		}
 		if isKitworkSpecifier(spec) {
 			if !hasAlias(specs) {
-				// → const { a, b } = kitwork()
+				// → const { a, b } = kitwork()   (or kitwork().<sub> for a subpath specifier)
 				names := make([]*Identifier, len(specs))
 				for i, s := range specs {
 					names[i] = &Identifier{
@@ -422,13 +441,13 @@ func (p *Parser) parseImportStatement() Statement {
 					Token:        constToken(importTok),
 					Names:        names,
 					DestructMode: DestructObject,
-					Value:        p.kitworkCall(importTok),
+					Value:        p.kitworkModule(spec, importTok),
 				}
 			}
 			// có alias → nhóm `const local = kitwork().imported`
 			stmts := make([]Statement, len(specs))
 			for i, s := range specs {
-				stmts[i] = memberConst(s.Local, p.kitworkCall(importTok), s.Imported, importTok)
+				stmts[i] = memberConst(s.Local, p.kitworkModule(spec, importTok), s.Imported, importTok)
 			}
 			return &GroupStatement{Statements: stmts}
 		}
