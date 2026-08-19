@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"hash/fnv"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -148,7 +149,25 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 			p.allowDrop = true
 		}
 	}
+	registerSchema(p)
 	return value.Value{K: value.Proxy, V: p}
+}
+
+// registerSchema records a declared schema so a preflight (kitwork check) can preview its migration
+// plan without a live request. Keyed by tenant + engine + file, so redeclaring the same db dedupes.
+var (
+	schemaRegMu sync.Mutex
+	schemaReg   = map[string]*dbProxy{}
+)
+
+func registerSchema(p *dbProxy) {
+	if p == nil || p.tenant == nil {
+		return
+	}
+	key := p.tenant.appID() + "|" + p.tenant.Domain() + "|" + p.engine + "|" + p.dbName
+	schemaRegMu.Lock()
+	schemaReg[key] = p
+	schemaRegMu.Unlock()
 }
 
 // OnGet is the whole point: db.vouchers routes here. A known table → a schema-aware handle; an unknown
@@ -633,29 +652,109 @@ func planMigration(current map[string]string, columns map[string]*ColumnSpec, wi
 	return steps
 }
 
+// describe renders one plan step as a human-readable line — shared by the migrate log and the CLI.
+func (s planStep) describe() string {
+	switch s.Action {
+	case "create":
+		return "create table"
+	case "add":
+		return fmt.Sprintf("add column %s %s", s.Column, s.To)
+	case "retype":
+		if s.WillApply {
+			return fmt.Sprintf("retype %s %s→%s (rebuild + CAST)", s.Column, s.From, s.To)
+		}
+		return fmt.Sprintf("retype %s %s→%s REFUSED (pass { drop: true }; may lose data)", s.Column, s.From, s.To)
+	case "drop":
+		if s.WillApply {
+			return fmt.Sprintf("drop column %s", s.Column)
+		}
+		return fmt.Sprintf("extra column %s kept (pass { drop: true } to drop)", s.Column)
+	}
+	return s.Action
+}
+
 // logPlan announces the plan — so an auto-migration is never silent about what it changes or refuses.
 // It is the single place that reports the delta; the apply path below only logs failures.
 func logPlan(table string, steps []planStep) {
 	for _, s := range steps {
-		switch s.Action {
-		case "create":
-			fmt.Printf("[db.migrate] %q — create table\n", table)
-		case "add":
-			fmt.Printf("[db.migrate] %q — add column %q %s\n", table, s.Column, s.To)
-		case "retype":
-			if s.WillApply {
-				fmt.Printf("[db.migrate] %q — retype %q %s→%s (rebuild + CAST)\n", table, s.Column, s.From, s.To)
-			} else {
-				fmt.Printf("[db.migrate] %q — retype %q %s→%s REFUSED (pass { drop: true }; may lose data) — left intact\n", table, s.Column, s.From, s.To)
-			}
-		case "drop":
-			if s.WillApply {
-				fmt.Printf("[db.migrate] %q — drop column %q\n", table, s.Column)
-			} else {
-				fmt.Printf("[db.migrate] %q — extra column %q kept (pass { drop: true } to drop)\n", table, s.Column)
-			}
+		fmt.Printf("[db.migrate] %q — %s\n", table, s.describe())
+	}
+}
+
+// ---- kitwork check integration: preview migrations without a live request ----
+
+// TablePlan is one table's migration plan for a preflight (kitwork check): what migrate() would do to
+// the live table to match the schema, computed WITHOUT applying anything.
+type TablePlan struct {
+	Engine string
+	DB     string
+	Table  string
+	Steps  []planStep
+}
+
+// Lines renders the plan as CLI-ready strings ("<engine>/<db>.<table>: <step>"), so callers outside
+// this package need not touch the internal step type.
+func (tp TablePlan) Lines() []string {
+	prefix := fmt.Sprintf("%s/%s.%s", tp.Engine, tp.DB, tp.Table)
+	if len(tp.Steps) == 0 {
+		return []string{prefix + ": up to date"}
+	}
+	out := make([]string, 0, len(tp.Steps))
+	for _, s := range tp.Steps {
+		out = append(out, prefix+": "+s.describe())
+	}
+	return out
+}
+
+// MigrationPlansFor returns the migration plan for every schema tenant t declared during its Run. It
+// introspects each table's live state — or, when the tenant DB does not exist yet, treats it as empty
+// so the plan is a clean "create". NOTHING is applied. Used by kitwork check to preview a deploy.
+func MigrationPlansFor(t *Tenant) []TablePlan {
+	if t == nil {
+		return nil
+	}
+	id, dom := t.appID(), t.Domain()
+
+	schemaRegMu.Lock()
+	var proxies []*dbProxy
+	for _, p := range schemaReg {
+		if p.tenant != nil && p.tenant.appID() == id && p.tenant.Domain() == dom {
+			proxies = append(proxies, p)
 		}
 	}
+	schemaRegMu.Unlock()
+	sort.Slice(proxies, func(i, j int) bool {
+		return proxies[i].engine+proxies[i].dbName < proxies[j].engine+proxies[j].dbName
+	})
+
+	var plans []TablePlan
+	for _, p := range proxies {
+		// Introspect the live DB only if it already exists — never create a file during a preflight.
+		live := map[string]map[string]string{}
+		if _, err := os.Stat(p.tenant.resolve(".data", p.dbName)); err == nil {
+			if db := (&SchemaTable{tenant: p.tenant, engine: p.engine, dbName: p.dbName}).source().db(); db != nil {
+				for name := range p.tables {
+					if cols, err := tableColumns(db, name); err == nil {
+						live[name] = cols
+					}
+				}
+			}
+		}
+		for _, name := range sortedTableNames(p.tables) {
+			steps := planMigration(live[name], p.tables[name], false, p.allowDrop)
+			plans = append(plans, TablePlan{Engine: p.engine, DB: p.dbName, Table: name, Steps: steps})
+		}
+	}
+	return plans
+}
+
+func sortedTableNames(tables map[string]map[string]*ColumnSpec) []string {
+	names := make([]string, 0, len(tables))
+	for n := range tables {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) {

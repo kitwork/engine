@@ -44,6 +44,7 @@ type CheckReport struct {
 	Programs   int
 	Compatible int
 	Issues     []CheckIssue
+	Migrations []work.TablePlan // per-table migration preview (dry-run) for schemas declared at Run
 }
 
 func (r CheckReport) OK() bool {
@@ -143,6 +144,8 @@ func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) Chec
 			})
 		} else {
 			report.Valid++
+			// Schemas registered during Run — preview their migration (dry-run, applies nothing).
+			report.Migrations = append(report.Migrations, work.MigrationPlansFor(tenant)...)
 		}
 		tenant.Close()
 		appRuntime.RemoveSite(target.domain)

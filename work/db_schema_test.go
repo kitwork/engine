@@ -453,6 +453,45 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	}
 }
 
+// A schema declared during Tenant.Run (no request needed) is discoverable via MigrationPlansFor — the
+// hook kitwork check uses to preview a deploy. A fresh tenant (no .data DB yet) → a "create" plan.
+func TestMigrationPlansForPreviewsSchema(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "planhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";` + "\n" +
+		`const { turso, kitid, text } = database;` + "\n" +
+		`const vouchers = { id: kitid().primaryKey(), code: text() };` + "\n" +
+		`const db = turso("app.db", { vouchers });` + "\n" +
+		`router.get((ctx) => ctx.json({ ok: 1 }));`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(tmp, "planhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	plans := MigrationPlansFor(tenant)
+	var vouchers *TablePlan
+	for i := range plans {
+		if plans[i].Table == "vouchers" && plans[i].Engine == "turso" {
+			vouchers = &plans[i]
+		}
+	}
+	if vouchers == nil {
+		t.Fatalf("no plan for vouchers; got %+v", plans)
+	}
+	if len(vouchers.Steps) != 1 || vouchers.Steps[0].Action != "create" {
+		t.Errorf("fresh vouchers plan = %+v, want [create]", vouchers.Steps)
+	}
+	if lines := vouchers.Lines(); len(lines) != 1 || !strings.Contains(lines[0], "create table") {
+		t.Errorf("Lines() = %v, want a create line", lines)
+	}
+}
+
 // The dry run (planMigration / db.plan()) must be PURE: computing a plan never changes the table.
 func TestMigrationPlanDoesNotMutate(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "app.db")
