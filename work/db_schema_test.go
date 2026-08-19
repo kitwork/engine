@@ -721,3 +721,80 @@ router.get((ctx) => {
 	assert(`"hasGone":false`)  // delete() removed the row
 	assert(`"total":1`)        // 2 created, 1 deleted
 }
+
+// migrate() used to be void and swallowed every failure (a failed ALTER only printed a line), so a
+// migration that could not apply looked identical to one that did — the kiturl bug. It now returns an
+// error. This pins error propagation: a closed connection makes migrate fail instead of silently
+// "succeeding".
+func TestMigrateReturnsErrorOnFailure(t *testing.T) {
+	path := filepath.ToSlash(filepath.Join(t.TempDir(), "m.db"))
+	db, err := sql.Open("turso", path)
+	if err != nil {
+		t.Skipf("turso driver not available: %v", err)
+	}
+	if err := db.Ping(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE t (id TEXT PRIMARY KEY, a TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	schema := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "a": {kind: "text"}, "b": {kind: "text"}}
+
+	// Happy path: migrate returns nil and the ADD lands.
+	if err := migrate(db, "t", schema, false, false); err != nil {
+		t.Fatalf("healthy migrate should return nil, got: %v", err)
+	}
+	cols, _ := tableColumns(db, "t")
+	if _, ok := cols["b"]; !ok {
+		t.Fatal("column b was not added on the healthy path")
+	}
+
+	// Failure path: a CLOSED connection must yield a non-nil error, not a silent no-op.
+	db.Close()
+	schema["c"] = &ColumnSpec{kind: "text"}
+	if err := migrate(db, "t", schema, false, false); err == nil {
+		t.Fatal("migrate on a closed db returned nil — the failure was swallowed")
+	} else {
+		t.Logf("migrate surfaced the failure: %v", err)
+	}
+}
+
+// A migration that cannot run must SURFACE to the request as a clear "migration failed", not proceed
+// against an unmigrated table and throw a cryptic "no such column". A poisoned (non-database) file at
+// the db path makes the connection fail deterministically.
+func TestSchemaMigrationFailureSurfacesToHandler(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(filepath.Join(dir, ".data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Poison the db file: turso cannot open garbage, so the connection (and migration) fails.
+	if err := os.WriteFile(filepath.Join(dir, ".data", "app.db"), []byte("this is not a sqlite database"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	router := `import { router, database } from "kitwork";
+const { turso, kitid, text } = database;
+const notes = { id: kitid().primaryKey(), body: text() };
+const db = turso("app.db", { notes: notes });
+router.get((ctx) => ctx.json({ n: db.notes.count() }));`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code == 200 {
+		t.Fatalf("a broken migration should not return 200 with data, body: %s", body)
+	}
+	if !strings.Contains(body, "migration failed") {
+		t.Errorf("expected a clear 'migration failed' message, got: %s", body)
+	}
+}

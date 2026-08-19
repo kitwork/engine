@@ -495,39 +495,39 @@ func (t *SchemaTable) Limit(n int) *SchemaTable {
 // ---- terminals ----
 
 func (t *SchemaTable) List(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return coerceResult(t.columns, t.builder().List(args...))
 }
 
 func (t *SchemaTable) First(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return coerceResult(t.columns, t.builder().First(args...))
 }
 
 // Find looks a row up by primary key — the schema knows which column that is.
 func (t *SchemaTable) Find(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return coerceResult(t.columns, t.builder().Find(args...))
 }
 
 // Count is COUNT(*) through the builder — not list().length, which would load every row to count it.
 func (t *SchemaTable) Count(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return t.builder().Count(args...)
 }
 
 // Exists is a cheap SELECT 1 … LIMIT 1 existence check (returns a bool), not list().length > 0.
 func (t *SchemaTable) Exists(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return t.builder().Exists(args...)
 }
@@ -535,8 +535,8 @@ func (t *SchemaTable) Exists(args ...value.Value) value.Value {
 // Create fills what the schema promises: a generated kitid primary key, defaultNow timestamps, and
 // column defaults for anything the caller omitted — then rejects any field that is not a column.
 func (t *SchemaTable) Create(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	if len(args) == 0 || args[0].K != value.Map {
 		return value.Value{K: value.Invalid, V: "db.create: expects an object"}
@@ -545,7 +545,6 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 	if errMsg != "" {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q %s", t.table, errMsg)}
 	}
-	t.ensureTable()
 	return coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row)))
 }
 
@@ -592,8 +591,8 @@ var ensuredTables sync.Map // key: "<abs db path>::<table>"
 
 // Update sets the given fields (coerced per the schema) on rows matching the current where().
 func (t *SchemaTable) Update(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	if len(args) > 0 && args[0].K == value.Map {
 		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
@@ -610,8 +609,8 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 // builder's Delete() is a soft delete that assumes such a column, which a schema table need not have.
 // For soft delete, declare a `deleted_at` column and update({ deleted_at: now() }) explicitly.
 func (t *SchemaTable) Delete(_ ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return t.builder().Remove()
 }
@@ -658,7 +657,10 @@ func (t *SchemaTable) ensureTable() error {
 	if _, done := ensuredTables.Load(key); done {
 		return nil
 	}
+	// Do NOT cache on failure: a migration that could not apply (e.g. the ALTER did not take because
+	// another process held the database) must be RETRIED on the next request, not silently marked done.
 	if err := migrate(t.source().db(), t.table, t.columns, false, t.allowDrop); err != nil {
+		fmt.Printf("[db.migrate] ERROR table %q: %v — not applied; will retry next request\n", t.table, err)
 		return err
 	}
 	ensuredTables.Store(key, true)
@@ -771,10 +773,21 @@ func (t *EntityTable) known(col string) bool        { _, ok := t.columns[col]; r
 
 func (t *EntityTable) builder() *Entities {
 	if t.e == nil {
-		t.ensureTable()
 		t.e = (&Database{tenant: t.tenant, requestScope: t.scope}).Entity().Table(t.table)
 	}
 	return t.e
+}
+
+// ready runs the shared-world migration lazily and surfaces a failure as an in-band Invalid — the
+// EntityTable mirror of SchemaTable.ready (see there).
+func (t *EntityTable) ready() (value.Value, bool) {
+	if t.failed {
+		return t.failVal(), false
+	}
+	if err := t.ensureTable(); err != nil {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: table %q migration failed: %v", t.table, err)}, false
+	}
+	return value.Value{}, true
 }
 
 func (t *EntityTable) Where(args ...value.Value) *EntityTable {
@@ -810,43 +823,43 @@ func (t *EntityTable) Limit(n int) *EntityTable {
 }
 
 func (t *EntityTable) List(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return coerceResult(t.columns, t.builder().List(args...))
 }
 
 func (t *EntityTable) First(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return coerceResult(t.columns, t.builder().First(args...))
 }
 
 func (t *EntityTable) Find(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return coerceResult(t.columns, t.builder().Find(args...))
 }
 
 func (t *EntityTable) Count(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return t.builder().Count(args...)
 }
 
 func (t *EntityTable) Exists(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return t.builder().Exists(args...)
 }
 
 func (t *EntityTable) Create(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	if len(args) == 0 || args[0].K != value.Map {
 		return value.Value{K: value.Invalid, V: "db.create: expects an object"}
@@ -860,8 +873,8 @@ func (t *EntityTable) Create(args ...value.Value) value.Value {
 }
 
 func (t *EntityTable) Update(args ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	if len(args) > 0 && args[0].K == value.Map {
 		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
@@ -876,8 +889,8 @@ func (t *EntityTable) Update(args ...value.Value) value.Value {
 // Delete is a hard delete (see SchemaTable.Delete) — but still bounded by the identity predicate the
 // EntityTable's builder carries, so one app can never delete another app's rows in the shared table.
 func (t *EntityTable) Delete(_ ...value.Value) value.Value {
-	if t.failed {
-		return t.failVal()
+	if v, ok := t.ready(); !ok {
+		return v
 	}
 	return t.builder().Remove()
 }
@@ -894,6 +907,7 @@ func (t *EntityTable) ensureTable() error {
 		return nil
 	}
 	if err := migrate(database.System, t.table, t.columns, true, false); err != nil {
+		fmt.Printf("[db.migrate] ERROR shared table %q: %v — not applied; will retry next request\n", t.table, err)
 		return err
 	}
 	ensuredTables.Store(key, true)
