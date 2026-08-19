@@ -654,3 +654,70 @@ func TestSchemaMigrationDropsColumnOnlyWithFlag(t *testing.T) {
 		t.Errorf("code = %q, want A1", code)
 	}
 }
+
+// The write-path methods on db.<table> — update(), exists(), delete() — driven end to end through the
+// VM, modelled on the kiturl.com URL-shortener redirect handler that first exposed them missing:
+// where(code).first() → update({clicks:+1}) → read back. Before the fix db.<table>.update() did not
+// exist, so the VM's reflection found no method and the click counter silently stayed 0; exists()
+// likewise returned undefined. The afterClicks==1 assertion pins exactly that regression.
+func TestSchemaTableWritePathThroughVM(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	router := `import { router, database } from "kitwork";
+const { turso, kitid, text, int, datetime } = database;
+const links = {
+  id: kitid().primaryKey(),
+  code: text().notNull().unique(),
+  original_url: text().notNull(),
+  clicks: int().default(0),
+  created_at: datetime().defaultNow()
+};
+const db = turso("app.db", { links: links });
+router.get((ctx) => {
+  db.links.create({ code: "kitwork", original_url: "https://github.com/kitwork", clicks: 0 });
+  db.links.create({ code: "gone", original_url: "https://x.example", clicks: 0 });
+  const before = db.links.where("code", "=", "kitwork").first();
+  db.links.where("code", "=", "kitwork").update({ clicks: (before.clicks || 0) + 1 });
+  const after = db.links.where("code", "=", "kitwork").first();
+  db.links.where("code", "=", "gone").delete();
+  return ctx.json({
+    beforeClicks: before.clicks,
+    afterClicks: after.clicks,
+    hasKit: db.links.where("code", "=", "kitwork").exists(),
+    hasMissing: db.links.where("code", "=", "does-not-exist").exists(),
+    hasGone: db.links.where("code", "=", "gone").exists(),
+    total: db.links.count()
+  });
+});`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	body := rec.Body.String()
+	if rec.Code != 200 {
+		t.Fatalf("route status %d, body: %s", rec.Code, body)
+	}
+
+	assert := func(want string) {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s — body: %s", want, body)
+		}
+	}
+	assert(`"beforeClicks":0`)
+	assert(`"afterClicks":1`)  // update() wrote — the regression guard
+	assert(`"hasKit":true`)    // exists() true for a present row
+	assert(`"hasMissing":false`)
+	assert(`"hasGone":false`)  // delete() removed the row
+	assert(`"total":1`)        // 2 created, 1 deleted
+}

@@ -511,6 +511,14 @@ func (t *SchemaTable) Count(args ...value.Value) value.Value {
 	return t.builder().Count(args...)
 }
 
+// Exists is a cheap SELECT 1 … LIMIT 1 existence check (returns a bool), not list().length > 0.
+func (t *SchemaTable) Exists(args ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	return t.builder().Exists(args...)
+}
+
 // Create fills what the schema promises: a generated kitid primary key, defaultNow timestamps, and
 // column defaults for anything the caller omitted — then rejects any field that is not a column.
 func (t *SchemaTable) Create(args ...value.Value) value.Value {
@@ -532,8 +540,10 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 // provided field against the schema, then fill what was omitted — a generated kitid PK, defaultNow
 // timestamps, and column defaults. Returns the offending column name if a field is not in the schema.
 // (The entity world stamps `identity` separately, in Entities.Create.)
-func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (map[string]value.Value, string) {
-	row := map[string]value.Value{}
+// coerceWriteRow validates + coerces the provided fields for a WRITE (create or update): it rejects an
+// unknown column or a bad enum value, and coerces bool→0/1, json/array→JSON, decimal→text.
+func coerceWriteRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (map[string]value.Value, string) {
+	out := map[string]value.Value{}
 	for k, v := range provided {
 		spec, ok := columns[k]
 		if !ok {
@@ -542,7 +552,15 @@ func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (m
 		if spec.kind == "enum" && v.K == value.String && !inEnum(spec, v.String()) {
 			return nil, fmt.Sprintf("column %q must be one of %v (got %q)", k, spec.enumVals, v.String())
 		}
-		row[k] = coerceWrite(spec.kind, v) // bool→0/1, json/array→JSON, decimal→text
+		out[k] = coerceWrite(spec.kind, v)
+	}
+	return out, ""
+}
+
+func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (map[string]value.Value, string) {
+	row, errMsg := coerceWriteRow(columns, provided)
+	if errMsg != "" {
+		return nil, errMsg
 	}
 	for name, spec := range columns {
 		if _, given := row[name]; given {
@@ -558,6 +576,34 @@ func fillRow(columns map[string]*ColumnSpec, provided map[string]value.Value) (m
 // ---- CREATE TABLE IF NOT EXISTS, once per (db file, table) ----
 
 var ensuredTables sync.Map // key: "<abs db path>::<table>"
+
+// Update sets the given fields (coerced per the schema) on rows matching the current where().
+func (t *SchemaTable) Update(args ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	if len(args) > 0 && args[0].K == value.Map {
+		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
+		if errMsg != "" {
+			return value.Value{K: value.Invalid, V: fmt.Sprintf("db.update: table %q %s", t.table, errMsg)}
+		}
+		args[0] = value.New(row)
+	}
+	return t.builder().Update(args...)
+}
+
+// Delete removes the matching rows for real (DELETE FROM … WHERE …). The schema DSL declares exactly
+// the columns it has, so there is no hidden `deleted_at` soft-delete convention here — the base query
+// builder's Delete() is a soft delete that assumes such a column, which a schema table need not have.
+// For soft delete, declare a `deleted_at` column and update({ deleted_at: now() }) explicitly.
+func (t *SchemaTable) Delete(_ ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	return t.builder().Remove()
+}
+
+func (t *SchemaTable) Remove(args ...value.Value) value.Value { return t.Delete(args...) }
 
 // Plan is a DRY RUN: it reports what migrate() would do to bring the live table up to the schema,
 // WITHOUT changing anything. db.vouchers.plan() returns an array of
@@ -775,6 +821,13 @@ func (t *EntityTable) Count(args ...value.Value) value.Value {
 	return t.builder().Count(args...)
 }
 
+func (t *EntityTable) Exists(args ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	return t.builder().Exists(args...)
+}
+
 func (t *EntityTable) Create(args ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
@@ -789,6 +842,31 @@ func (t *EntityTable) Create(args ...value.Value) value.Value {
 	// Entities.Create stamps the `identity` column itself — we never set it here.
 	return coerceResult(t.columns, t.builder().Create(value.New(row)))
 }
+
+func (t *EntityTable) Update(args ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	if len(args) > 0 && args[0].K == value.Map {
+		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
+		if errMsg != "" {
+			return value.Value{K: value.Invalid, V: fmt.Sprintf("db.update: table %q %s", t.table, errMsg)}
+		}
+		args[0] = value.New(row)
+	}
+	return t.builder().Update(args...)
+}
+
+// Delete is a hard delete (see SchemaTable.Delete) — but still bounded by the identity predicate the
+// EntityTable's builder carries, so one app can never delete another app's rows in the shared table.
+func (t *EntityTable) Delete(_ ...value.Value) value.Value {
+	if t.failed {
+		return t.failVal()
+	}
+	return t.builder().Remove()
+}
+
+func (t *EntityTable) Remove(args ...value.Value) value.Value { return t.Delete(args...) }
 
 // ensureTable migrates the shared table on database.System, with the extra `identity` column.
 func (t *EntityTable) ensureTable() {
