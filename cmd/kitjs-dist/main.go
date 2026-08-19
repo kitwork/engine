@@ -50,7 +50,7 @@ func main() {
 		filename := filepath.Join(config.outdir, output.name)
 		fmt.Printf("%s  %d bytes\n", filename, len(output.body))
 	}
-	fmt.Printf("graph %s  %d modules\n", bundle.ContentHash, len(bundle.Modules))
+	fmt.Printf("graph %s  profile=%s release=%s\n", bundle.ContentHash, bundle.Profile, bundle.Release)
 }
 
 func parseDistArgs(arguments []string) (distConfig, error) {
@@ -136,6 +136,9 @@ func validateDistributionVersion(version string) error {
 	if !kitjavascript.ValidExactSemVer(version) {
 		return fmt.Errorf("version must be an exact SemVer 2.0.0 value, got %q", version)
 	}
+	if version != kitjavascript.ReleaseVersion {
+		return fmt.Errorf("version %q does not match embedded KitJS release %q", version, kitjavascript.ReleaseVersion)
+	}
 	return nil
 }
 
@@ -157,12 +160,7 @@ func distributionOutputs(bundle kitjavascript.Bundle, source, minified []byte) [
 }
 
 func bundleIncludesDrive(bundle kitjavascript.Bundle) bool {
-	for _, module := range bundle.Modules {
-		if module.Kind == kitjavascript.CoreModule && module.Name == "drive" {
-			return true
-		}
-	}
-	return false
+	return bundle.Profile == kitjavascript.ProfileHydrate
 }
 
 func artifactHash(body []byte) string {

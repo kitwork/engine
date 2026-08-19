@@ -80,6 +80,26 @@ Implemented:
 - source-driven JIT CSS, material, icon, logo, client-runtime, font, and theme
   presentation is prepared with static render trees; parser-aware template
   minification prepares their inline assets once;
+- a KitJS-enabled generation prepares one exact closed Hydrate delivery for
+  every distinct document component graph. Each delivery freezes the only
+  valid classic-`defer` order: runtime, Hydrate, graph opener, dependency-ordered
+  services, an optional common-components bundle, then individual components;
+- staged KitJS scripts are immutable site content assets addressed as
+  `/jit/<sha256>.<suffix>.js`. The generation owns their exact ordered
+  role/hash/URL/SRI references, while the site content store retains identical
+  bytes across generation hand-off for cache continuity;
+- at least two exact component name/version pairs common to every prepared
+  document form one stable `components` chunk. Those packages are excluded
+  from all individual component chunks; route-only components remain separately
+  cacheable. A different incoming delivery graph forces Drive to normal browser
+  navigation before Morph, while unchanged chunks reuse immutable browser and
+  site caches;
+- staged injection preserves effective charset and meta CSP declarations before
+  the script sequence and places that sequence before any active or potential
+  base URL. Unsafe or dynamic head order fails generation preparation. Drive
+  additionally requires exact ordered effective meta CSP equality; either CSP
+  response header (`Content-Security-Policy` or its report-only form) forces
+  normal navigation because a fetched policy cannot be installed by Morph;
 - templates with data-driven presentation attributes retain the complete
   request pipeline. Other requests only bind data and hydrate without reading
   templates or reparsing the already-minified document and inline assets;
@@ -140,6 +160,7 @@ Implemented:
 - generation publication and retirement;
 - persistent response store;
 - bounded immutable content-addressed assets retained across generation hand-off;
+- immutable staged KitJS bytes keyed by exact SHA-256 plus validated role/suffix;
 - rate-limit budgets;
 - SSE connections and replay history;
 
@@ -149,6 +170,7 @@ Implemented:
 - compiled folder programs, handlers, guards, and metadata;
 - immutable HTML template snapshot and prepared render plan;
 - frozen rendering, asset selection/references, and JIT configuration;
+- per-document staged KitJS graph selection and ordered SRI references;
 - immutable environment and executable-source manifest;
 - RAM response and fetch caches;
 - generation-scoped capabilities.

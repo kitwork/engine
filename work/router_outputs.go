@@ -82,6 +82,11 @@ func (t *Tenant) executeGeneratedOutput(
 			response.Header("Last-Modified", modified.Format(http.TimeFormat))
 		}
 		response.Send(value.New(document))
+	case "robots":
+		document := publishing.Robots(data, base)
+		response := ctx.Type(publishing.RobotsMediaType)
+		response.Header("ETag", publishing.ETag(document))
+		response.Send(value.New(document))
 	default:
 		return fmt.Errorf("unknown generated output %q", method.outputKind)
 	}

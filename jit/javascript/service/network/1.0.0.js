@@ -1,108 +1,148 @@
+;(function (global, kit) {
+"use strict";
+
 // KitJS service: network@1.0.0
-;(function (global) {
-  "use strict";
+var listeners = new Set();
+var deliveries = [];
+var delivering = false;
+var attached = false;
 
-  var kit = global.kit;
-  var version = "1.0.0";
-  var OWN = Object.prototype.hasOwnProperty;
-  var subscriptions = [];
-  var listening = false;
-  var listenedConnection = null;
-
-  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
-    throw new Error("KitJS core must be loaded before service:network");
+function readOnline() {
+  try {
+    var navigator = global.navigator;
+    return !navigator || navigator.onLine !== false;
+  } catch (_) {
+    return true;
   }
-  if (OWN.call(kit, "network")) {
-    if (kit.network.version === version) return;
-    throw new Error("KitJS service conflict: network");
-  }
+}
 
-  function connectionSource() {
-    return global.navigator && global.navigator.connection || null;
-  }
+function freeze(online) {
+  return Object.freeze({ online: online === true });
+}
 
-  function connection() {
-    var source = connectionSource();
-    if (!source) return null;
-    return Object.freeze({
-      type: source.type || null,
-      effectiveType: source.effectiveType || null,
-      downlink: typeof source.downlink === "number" ? source.downlink : null,
-      rtt: typeof source.rtt === "number" ? source.rtt : null,
-      saveData: Boolean(source.saveData)
-    });
-  }
+var current = freeze(readOnline());
 
-  function snapshot() {
-    return Object.freeze({
-      online: !global.navigator || global.navigator.onLine !== false,
-      connection: connection()
-    });
-  }
-
-  function report(error) {
-    if (typeof global.reportError === "function") global.reportError(error);
-    else global.setTimeout(function () { throw error; }, 0);
-  }
-
-  function emit() {
-    var value = snapshot();
-    subscriptions.slice().forEach(function (entry) {
-      if (!entry.active) return;
-      try { entry.listener(value); }
-      catch (error) { report(error); }
-    });
-  }
-
-  function attach() {
-    if (listening) return;
-    listening = true;
-    global.addEventListener("online", emit);
-    global.addEventListener("offline", emit);
-    listenedConnection = connectionSource();
-    if (listenedConnection && typeof listenedConnection.addEventListener === "function") {
-      listenedConnection.addEventListener("change", emit);
+function report(error) {
+  try {
+    if (typeof global.reportError === "function") {
+      global.reportError(error);
+      return;
     }
-  }
-
-  function detach() {
-    if (!listening || subscriptions.some(function (entry) { return entry.active; })) return;
-    listening = false;
-    global.removeEventListener("online", emit);
-    global.removeEventListener("offline", emit);
-    if (listenedConnection && typeof listenedConnection.removeEventListener === "function") {
-      listenedConnection.removeEventListener("change", emit);
+    if (global.console && typeof global.console.error === "function") {
+      global.console.error(error);
     }
-    listenedConnection = null;
-  }
+  } catch (_) { /* Reporting must not break another subscriber. */ }
+}
 
-  function subscribe(listener) {
-    if (typeof listener !== "function") throw new TypeError("kit.network.subscribe requires a function");
-    var entry = { active: true, listener: listener };
-    subscriptions.push(entry);
-    attach();
-    try { listener(snapshot()); }
-    catch (error) { report(error); }
-    return function unsubscribe() {
-      if (!entry.active) return;
-      entry.active = false;
-      var index = subscriptions.indexOf(entry);
-      if (index >= 0) subscriptions.splice(index, 1);
-      detach();
-    };
-  }
+function deliver(subscription, value) {
+  if (!subscription.listener) return;
+  try { subscription.listener(value); }
+  catch (error) { report(error); }
+}
 
-  var service = {
-    get online() { return !global.navigator || global.navigator.onLine !== false; },
-    snapshot: snapshot,
-    subscribe: subscribe
-  };
-  Object.defineProperty(service, "version", { value: version, enumerable: false });
-  Object.freeze(service);
-  Object.defineProperty(kit, "network", {
-    value: service,
-    enumerable: true,
-    configurable: false,
-    writable: false
+function publish(online) {
+  if (current.online === online) return current;
+  current = freeze(online);
+  deliveries.push({
+    value: current,
+    subscriptions: Array.from(listeners)
   });
-})(globalThis);
+  if (delivering) return current;
+
+  delivering = true;
+  try {
+    var index = 0;
+    while (index < deliveries.length) {
+      var delivery = deliveries[index];
+      deliveries[index] = null;
+      index++;
+      delivery.subscriptions.forEach(function (subscription) {
+        deliver(subscription, delivery.value);
+      });
+    }
+  } finally {
+    deliveries.length = 0;
+    delivering = false;
+  }
+  return current;
+}
+
+function change() {
+  publish(readOnline());
+}
+
+function attach() {
+  if (attached) return;
+  if (typeof global.addEventListener !== "function" ||
+    typeof global.removeEventListener !== "function") {
+    throw new TypeError("Network subscriptions require browser event listeners");
+  }
+  global.addEventListener("online", change);
+  try {
+    global.addEventListener("offline", change);
+  } catch (error) {
+    try { global.removeEventListener("online", change); }
+    catch (_) { /* The original attachment error is authoritative. */ }
+    throw error;
+  }
+  attached = true;
+}
+
+function detach() {
+  if (!attached) return;
+  attached = false;
+  try { global.removeEventListener("online", change); }
+  catch (error) { report(error); }
+  try { global.removeEventListener("offline", change); }
+  catch (error) { report(error); }
+}
+
+function snapshot() {
+  if (!attached) {
+    var online = readOnline();
+    if (current.online !== online) current = freeze(online);
+  }
+  return current;
+}
+
+function subscribe(listener) {
+  if (typeof listener !== "function") {
+    throw new TypeError("Network subscriber must be a function");
+  }
+  var subscription = { listener: listener };
+  listeners.add(subscription);
+  if (listeners.size === 1) {
+    try {
+      attach();
+      var online = readOnline();
+      if (current.online !== online) current = freeze(online);
+    } catch (error) {
+      listeners.delete(subscription);
+      subscription.listener = null;
+      listener = null;
+      throw error;
+    }
+  }
+  deliver(subscription, current);
+
+  var subscribed = true;
+  return function () {
+    if (!subscribed) return;
+    subscribed = false;
+    listeners.delete(subscription);
+    subscription.listener = null;
+    listener = null;
+    if (listeners.size === 0) detach();
+  };
+}
+
+var namespace = Object.create(null);
+Object.defineProperty(namespace, "online", {
+  enumerable: true,
+  get: function () { return snapshot().online; }
+});
+namespace.snapshot = snapshot;
+namespace.subscribe = subscribe;
+
+kit.service("network", namespace);
+})(globalThis, kit);

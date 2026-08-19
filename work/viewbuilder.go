@@ -1,6 +1,10 @@
 package work
 
-import "github.com/kitwork/engine/value"
+import (
+	"encoding/json"
+
+	"github.com/kitwork/engine/value"
+)
 
 // ViewBuilder is the DEFERRED view result a filesystem-routed handler returns. Instead of
 // rendering immediately, ctx.view()/ctx.bind()/ctx.data()/ctx.meta() accumulate binding + meta on
@@ -19,6 +23,7 @@ type ViewBuilder struct {
 	havePage bool
 	data     map[string]value.Value
 	meta     map[string]value.Value
+	jsonld   []value.Value // ctx.jsonld() nodes for this request, appended to the inherited chain
 	rendered bool
 }
 
@@ -68,6 +73,17 @@ func (vb *ViewBuilder) Url(v value.Value) *ViewBuilder         { vb.meta["url"] 
 func (vb *ViewBuilder) Type(v value.Value) *ViewBuilder        { vb.meta["type"] = v; return vb }
 func (vb *ViewBuilder) Language(v value.Value) *ViewBuilder    { vb.meta["language"] = v; return vb }
 
+// Jsonld appends one or more JSON-LD nodes for this page; they accumulate on top of any router-level
+// router.jsonld() nodes and render as <script type="application/ld+json"> in <head>.
+func (vb *ViewBuilder) Jsonld(args ...value.Value) *ViewBuilder {
+	for _, a := range args {
+		if a.K == value.Map || a.K == value.Array {
+			vb.jsonld = append(vb.jsonld, a)
+		}
+	}
+	return vb
+}
+
 // flush renders the accumulated view exactly once. The tree lifecycle calls it at the end.
 func (vb *ViewBuilder) flush() {
 	if vb.rendered {
@@ -89,6 +105,18 @@ func (vb *ViewBuilder) flush() {
 	}
 	for k, v := range vb.meta {
 		meta[k] = v
+	}
+
+	// jsonld = inherited chain nodes + this builder's, serialised HTML-safe into ONE JSON string
+	// exposed as $.meta.jsonld (the head template wraps it in a <script>). Only overrides a
+	// manually-set meta.jsonld when router.jsonld()/ctx.jsonld() was used, so the legacy
+	// meta({ jsonld }) path stays working.
+	if nodes := append(append([]value.Value{}, r.chainJsonld...), vb.jsonld...); len(nodes) > 0 {
+		if blocks := renderJSONLD(nodes); blocks != "" {
+			jv := value.New(blocks)
+			jv.Raw = true // already HTML-safe → the head can write {{ $.meta.jsonld }} without raw()
+			meta["jsonld"] = jv
+		}
 	}
 
 	// binding: two always-present defaults ($.request, $.meta) + the user data.
@@ -114,4 +142,43 @@ func (vb *ViewBuilder) flush() {
 	} else {
 		c.Response().HTML(html)
 	}
+}
+
+// renderJSONLD serialises the accumulated JSON-LD nodes into ONE HTML-safe JSON string exposed as
+// $.meta.jsonld — DATA, not markup. The head template owns the <script type="application/ld+json">
+// wrapper; the string is nonetheless safe to drop in verbatim because json.Marshal escapes <, > and
+// & so no value (even one containing "</script>") can break out of the element. A single node is
+// emitted as-is (a default schema.org @context added when absent); several nodes are combined under
+// one @context into an @graph array so the author still writes just one script tag.
+func renderJSONLD(nodes []value.Value) string {
+	if len(nodes) == 0 {
+		return ""
+	}
+	var doc any
+	if len(nodes) == 1 {
+		doc = withContext(nodes[0].Interface())
+	} else {
+		graph := make([]any, 0, len(nodes))
+		for _, n := range nodes {
+			graph = append(graph, n.Interface())
+		}
+		doc = map[string]any{"@context": "https://schema.org", "@graph": graph}
+	}
+	data, err := json.Marshal(doc) // escapes < > & → safe inside a <script>
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// withContext adds a default schema.org @context to a node that omits one. Interface() returns a
+// fresh Go map, so this never mutates the VM object.
+func withContext(obj any) any {
+	if m, ok := obj.(map[string]any); ok {
+		if _, has := m["@context"]; !has {
+			m["@context"] = "https://schema.org"
+		}
+		return m
+	}
+	return obj
 }

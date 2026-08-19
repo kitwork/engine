@@ -72,3 +72,39 @@ func TestContentAssetStoreRejectsInvalidContent(t *testing.T) {
 		t.Fatalf("invalid hash error = %v", err)
 	}
 }
+
+func TestContentAssetStorePreservesAndSealsDeliveryMetadata(t *testing.T) {
+	store := newContentAssetStore()
+	defer store.close()
+
+	asset := testContentAsset("staged runtime")
+	asset.Role = "runtime"
+	asset.Suffix = "runtime"
+	if _, err := store.retain([]ContentAsset{asset}); err != nil {
+		t.Fatal(err)
+	}
+	retained, ok := store.lookup(asset.ContentHash)
+	if !ok || retained.Role != asset.Role || retained.Suffix != asset.Suffix {
+		t.Fatalf("retained metadata = role %q suffix %q", retained.Role, retained.Suffix)
+	}
+
+	mismatch := asset
+	mismatch.Role = "component"
+	mismatch.Suffix = "dialog"
+	if _, err := store.retain([]ContentAsset{mismatch}); !errors.Is(err, errInvalidContentAsset) {
+		t.Fatalf("metadata mismatch error = %v", err)
+	}
+
+	incomplete := testContentAsset("incomplete metadata")
+	incomplete.Role = "graph"
+	if _, err := store.retain([]ContentAsset{incomplete}); !errors.Is(err, errInvalidContentAsset) {
+		t.Fatalf("incomplete metadata error = %v", err)
+	}
+
+	wrongSuffix := testContentAsset("wrong fixed suffix")
+	wrongSuffix.Role = "runtime"
+	wrongSuffix.Suffix = "dialog"
+	if _, err := store.retain([]ContentAsset{wrongSuffix}); !errors.Is(err, errInvalidContentAsset) {
+		t.Fatalf("fixed role suffix error = %v", err)
+	}
+}

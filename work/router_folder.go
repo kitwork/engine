@@ -265,7 +265,9 @@ type FolderRouter struct {
 	notFound *value.Lambda
 	errorH   *value.Lambda
 	meta     map[string]value.Value // declared via router.meta()/.favicon(); inherited down the chain
+	jsonld   []value.Value          // router.jsonld() nodes — inherited down the chain, accumulated
 	limits   []methodLimit          // router.ratelimit() rules — this folder AND every descendant
+	assetErr error                  // first fatal .assets() conflict, surfaced as a generation error
 }
 
 func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
@@ -308,6 +310,18 @@ func (f *FolderRouter) output(kind, defaultPath string, args ...value.Value) *Fo
 	m := &FolderMethod{method: "GET", outputKind: kind, outputData: value.New(map[string]value.Value{})}
 	outputPath := defaultPath
 	if len(args) > 0 {
+		if args[0].IsString() { // FILE mode: serve the disk file at the canonical URL (Zero-VM static)
+			m.outputPath = "/" + strings.TrimPrefix(path.Clean("/"+defaultPath), "/")
+			if disk := cleanAssetPrefix(args[0].Text()); disk != "" {
+				if err := f.tenant.presentation().AddAssetMount(site.AssetMount{
+					URL:  path.Join(f.node.relPath(), cleanAssetPrefix(defaultPath)),
+					Disk: path.Join(f.node.relPath(), disk),
+				}); err != nil && f.assetErr == nil {
+					f.assetErr = err
+				}
+			}
+			return m // served statically; not registered as a generated output
+		}
 		if args[0].K == value.Func {
 			m.handle = lambdaOf(args[0])
 		} else {
@@ -357,6 +371,15 @@ func (f *FolderRouter) RSS(args ...value.Value) *FolderMethod {
 // Sitemap declares a generated sitemap at /sitemap.xml from a provider callback or page map.
 func (f *FolderRouter) Sitemap(args ...value.Value) *FolderMethod {
 	return f.output("sitemap", "/sitemap.xml", args...)
+}
+
+// Robots declares the site's /robots.txt. Like sitemap/rss it is polymorphic by argument shape:
+// a STRING serves that disk file verbatim (Zero-VM static — e.g. router.robots("./robots.txt"));
+// a MAP / no-arg GENERATES the file — router.robots() is allow-all plus an auto Sitemap line for
+// the serving domain, router.robots({ disallow: ["/dashboard"] }) blocks paths. Per-page indexing
+// is a different concern: use meta({ robots: "noindex" }) for a <meta name="robots"> tag.
+func (f *FolderRouter) Robots(args ...value.Value) *FolderMethod {
+	return f.output("robots", "/robots.txt", args...)
 }
 
 // Guard registers folder-level before-hooks (auth/prepare) that run IN ORDER for this folder and
@@ -420,30 +443,36 @@ func (f *FolderRouter) Favicon(args ...value.Value) *FolderRouter {
 // Assets DECLARES the public static roots — an allowlist. Without any declaration every safe disk
 // file under the tenant is auto-served (zero-config, see serveTreeStatic); once a folder declares
 // .assets(...), ONLY the declared prefixes are public and everything else routes through the tree.
-// Two forms (relative to this folder, accumulating + idempotent under hot-reload):
+// Forms (relative to this folder, accumulating + idempotent under hot-reload):
 //
-//	.assets("assets/*")             // serve disk "assets/" at URL /assets/*   (1:1)
-//	.assets("/assets/*", "_assets") // serve disk "_assets/" at URL /assets/*   (alias a private dir)
+//	.assets("assets/*")             // serve disk "assets/"  at URL /assets/*   (1:1, no underscore)
+//	.assets("_assets")              // serve disk "_assets/" at URL /assets/*   (leading "_" stripped from the URL)
+//	.assets("/assets/*", "_assets") // explicit alias: the two args are the URL and the disk, taken as-is
 //
-// The alias exposes a folder the router never routes (an underscore-prefixed "_assets/") at a clean
-// public URL — without leaking the underscore or making the folder routable.
+// A SINGLE arg derives the public URL from the disk prefix but drops the leading underscore of each
+// segment — "_" marks a private, non-routable folder and must never leak into a public URL, so disk
+// "_assets" serves at /assets/*. The forms "_assets", "/_assets/", "./_assets/*" all normalise the
+// same way. Use the two-arg form when the URL must differ from that default.
 func (f *FolderRouter) Assets(args ...value.Value) *FolderRouter {
 	add := func(url, disk string) {
 		url, disk = cleanAssetPrefix(url), cleanAssetPrefix(disk)
 		if url == "" || disk == "" {
 			return
 		}
-		f.tenant.presentation().AddAssetMount(site.AssetMount{
+		if err := f.tenant.presentation().AddAssetMount(site.AssetMount{
 			URL:  path.Join(f.node.relPath(), url),
 			Disk: path.Join(f.node.relPath(), disk),
-		})
+		}); err != nil && f.assetErr == nil {
+			f.assetErr = err
+		}
 	}
-	if len(args) == 2 { // alias form: (publicURLGlob, diskDir)
+	if len(args) == 2 { // alias form: (publicURLGlob, diskDir) — explicit, taken as-is
 		add(args[0].Text(), args[1].Text())
 		return f
 	}
-	for _, a := range args { // 1:1 form(s): each arg is both the URL and the disk prefix
-		add(a.Text(), a.Text())
+	for _, a := range args { // single form: serve the (possibly private) dir at a clean public URL
+		disk := cleanAssetPrefix(a.Text())
+		add(publicAssetURL(disk), disk)
 	}
 	return f
 }
@@ -457,6 +486,23 @@ func cleanAssetPrefix(s string) string {
 		return ""
 	}
 	return s
+}
+
+// publicAssetURL derives the PUBLIC url prefix from a (cleaned) disk prefix by dropping the leading
+// underscore of each path segment. The underscore marks a private, non-routable folder, so it must
+// never leak into a public URL: disk "_assets" → url "assets" (served at /assets/*), "_a/_b" →
+// "a/b". A segment without an underscore is unchanged, so "assets" stays "assets" — the historical
+// single-arg 1:1 case is untouched. Only the single-arg .assets() form uses this; the two-arg alias
+// form takes the URL exactly as given.
+func publicAssetURL(disk string) string {
+	if disk == "" {
+		return ""
+	}
+	segs := strings.Split(disk, "/")
+	for i, s := range segs {
+		segs[i] = strings.TrimPrefix(s, "_")
+	}
+	return strings.Join(segs, "/")
 }
 
 // Language is sugar for meta({ language }) — $.meta.language in the view, for <html lang="…">.
@@ -485,6 +531,22 @@ func (f *FolderRouter) Description(v value.Value) *FolderRouter { f.meta["descri
 func (f *FolderRouter) Image(v value.Value) *FolderRouter       { f.meta["image"] = v; return f }
 func (f *FolderRouter) Url(v value.Value) *FolderRouter         { f.meta["url"] = v; return f }
 func (f *FolderRouter) Type(v value.Value) *FolderRouter        { f.meta["type"] = v; return f }
+
+// Jsonld declares a JSON-LD structured-data node for SEO. Each call adds ONE node (a plain object or
+// array); the engine serialises them HTML-safe — no </script> breakout — into the JSON string
+// $.meta.jsonld, which the head template drops into a <script type="application/ld+json">. Declared
+// at any folder it inherits down the chain and ACCUMULATES with page-level ctx.jsonld(...), so a
+// site-wide Organization at the root plus a per-page FAQPage combine (several nodes are emitted under
+// one @context in an @graph array). A default "@context":"https://schema.org" is added when a node
+// has none, so callers pass only the schema body.
+func (f *FolderRouter) Jsonld(args ...value.Value) *FolderRouter {
+	for _, a := range args {
+		if a.K == value.Map || a.K == value.Array {
+			f.jsonld = append(f.jsonld, a)
+		}
+	}
+	return f
+}
 
 // ── tree-mode kitwork() binding ─────────────────────────────────────────────
 
@@ -556,6 +618,10 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 		if err := runFolderRouter(t, n, bc); err != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("initialize router %s: %w", relative, err)
+		}
+		if fr.assetErr != nil {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			return fmt.Errorf("router %s: %w", relative, fr.assetErr)
 		}
 	}
 	return nil

@@ -1,81 +1,61 @@
-// KitJS component: tabs@1.0.0
-;(function (kit) {
-  "use strict";
+;(function () {
+"use strict";
 
-  function tabValue(tab) {
-    return String(tab.getAttribute("data-tab") || "");
+function tabID(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+function tabIDs(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map(tabID).filter(function (id) { return id !== ""; });
+}
+
+kit.component("tabs", {
+  tabs: [],
+  active: "",
+
+  select: function (value) {
+    var id = tabID(value);
+    var items = tabIDs(this.tabs);
+    if (!id || items.indexOf(id) < 0) return this.active;
+    this.active = id;
+    return id;
+  },
+
+  next: function () {
+    var items = tabIDs(this.tabs);
+    if (!items.length) return this.active;
+    var index = items.indexOf(tabID(this.active));
+    this.active = items[index < 0 || index + 1 >= items.length ? 0 : index + 1];
+    return this.active;
+  },
+
+  previous: function () {
+    var items = tabIDs(this.tabs);
+    if (!items.length) return this.active;
+    var index = items.indexOf(tabID(this.active));
+    this.active = items[index <= 0 ? items.length - 1 : index - 1];
+    return this.active;
+  },
+
+  first: function () {
+    var items = tabIDs(this.tabs);
+    if (items.length) this.active = items[0];
+    return this.active;
+  },
+
+  last: function () {
+    var items = tabIDs(this.tabs);
+    if (items.length) this.active = items[items.length - 1];
+    return this.active;
+  },
+
+  isActive: function (value) {
+    var id = tabID(value);
+    return id !== "" && tabID(this.active) === id;
   }
+});
 
-  function tabs(host, tablist) {
-    return Array.prototype.slice.call(tablist.querySelectorAll("[role='tab'][data-tab]")).filter(function (tab) {
-      return tab.closest("[data-kit-component]") === host &&
-        !tab.disabled && tab.getAttribute("aria-disabled") !== "true";
-    });
-  }
-
-  function firstTablist(host) {
-    return Array.prototype.slice.call(host.querySelectorAll("[role='tablist']")).filter(function (tablist) {
-      return tablist.closest("[data-kit-component]") === host;
-    })[0] || null;
-  }
-
-  kit.component("tabs", {
-    activeTab: "overview",
-
-    select(tab) {
-      tab = String(tab || "");
-      if (tab) this.activeTab = tab;
-      return this.activeTab;
-    },
-
-    is(tab) {
-      return this.activeTab === String(tab || "");
-    },
-
-    init() {
-      var component = this;
-      var host = this.$host;
-      var tablist = firstTablist(host);
-      if (tablist) {
-        var items = tabs(host, tablist);
-        if (items.length) {
-          var requested = host.getAttribute("data-tabs-default") || "";
-          var preferred = requested || component.activeTab;
-          var selected = items.filter(function (tab) { return tabValue(tab) === preferred; })[0];
-          if (!selected) {
-            selected = items.filter(function (tab) { return tab.getAttribute("aria-selected") === "true"; })[0];
-          }
-          component.activeTab = tabValue(selected || items[0]);
-        }
-      }
-
-      function onKeydown(event) {
-        var tab = event.target.closest && event.target.closest("[role='tab'][data-tab]");
-        if (!tab || !host.contains(tab) || tab.closest("[data-kit-component]") !== host) return;
-        var currentTablist = tab.closest("[role='tablist']");
-        if (!currentTablist || !host.contains(currentTablist)) return;
-
-        var current = tabs(host, currentTablist);
-        var index = current.indexOf(tab);
-        var vertical = currentTablist.getAttribute("aria-orientation") === "vertical";
-        var next = -1;
-        if ((!vertical && event.key === "ArrowRight") || (vertical && event.key === "ArrowDown")) {
-          next = (index + 1) % current.length;
-        } else if ((!vertical && event.key === "ArrowLeft") || (vertical && event.key === "ArrowUp")) {
-          next = (index - 1 + current.length) % current.length;
-        } else if (event.key === "Home") next = 0;
-        else if (event.key === "End") next = current.length - 1;
-        if (next < 0 || !current[next]) return;
-
-        event.preventDefault();
-        component.select(tabValue(current[next]));
-        current[next].focus();
-      }
-
-      host.addEventListener("keydown", onKeydown);
-      return function () {
-        host.removeEventListener("keydown", onKeydown);
-      };
-    }
-  });
-})(globalThis.kit);
+})();

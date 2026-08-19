@@ -1,19 +1,8 @@
-// KitJS service: storage@1.0.0
-;(function (global) {
+; (function (global, kit) {
   "use strict";
 
-  var kit = global.kit;
-  var version = "1.0.0";
-  var OWN = Object.prototype.hasOwnProperty;
+  // KitJS service: storage@1.0.0
   var prefix = "kit:";
-
-  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
-    throw new Error("KitJS core must be loaded before service:storage");
-  }
-  if (OWN.call(kit, "storage")) {
-    if (kit.storage.version === version) return;
-    throw new Error("KitJS service conflict: storage");
-  }
 
   function keyOf(value) {
     value = String(value === undefined || value === null ? "" : value);
@@ -94,13 +83,11 @@
     }
   }
 
-  var storage = { get: get, set: set, remove: remove, has: has, clear: clear };
-  Object.defineProperty(storage, "version", { value: version, enumerable: false });
-  Object.freeze(storage);
-  Object.defineProperty(kit, "storage", {
-    value: storage,
-    enumerable: true,
-    configurable: false,
-    writable: false
+  kit.service("storage", {
+    get: get,
+    set: set,
+    remove: remove,
+    has: has,
+    clear: clear
   });
-})(globalThis);
+})(globalThis, kit);

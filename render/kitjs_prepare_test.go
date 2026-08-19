@@ -9,12 +9,12 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-var preparedKitJSRuntimePattern = regexp.MustCompile(`data-kitwork-plan="([0-9a-f]{64})" src="/kit\.js/([0-9a-f]{64})\.js"`)
+var preparedKitJSTagPattern = regexp.MustCompile(`data-kitwork-jit="?([a-z]+)"? data-kitwork-hash="?([0-9a-f]{64})"? src="?/jit/([0-9a-f]{64})\.([A-Za-z0-9._-]+)\.js"?`)
 
-func TestKitJSComponentPreparesRuntimeWithoutActivationMarker(t *testing.T) {
+func TestKitJSScopePreparesRuntimeWithoutActivationMarker(t *testing.T) {
 	root := t.TempDir()
 	mkfile(t, root, "index.kitwork.html", `<html><head><title>Counter</title></head><body>{{ @page }}</body></html>`)
-	mkfile(t, root, "page.kitwork.html", `<section data-kit-component="counter"><button data-kit-click="count = count + 1">Add</button><output data-kit-text="count">0</output></section>`)
+	mkfile(t, root, "page.kitwork.html", `<section data-kit-scope="count: 0"><button data-kit-click="count = count + 1">Add</button><output data-kit-text="count">0</output></section>`)
 	assets, err := kitjavascript.NewDefaultAssetStore()
 	if err != nil {
 		t.Fatal(err)
@@ -26,31 +26,42 @@ func TestKitJSComponentPreparesRuntimeWithoutActivationMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := prepared.Bind(value.New(map[string]any{})).String()
-	match := preparedKitJSRuntimePattern.FindStringSubmatch(html)
-	if len(match) != 3 || match[1] != match[2] {
-		t.Fatalf("content-addressed runtime tag missing or inconsistent:\n%s", html)
+	matches := preparedKitJSTagPattern.FindAllStringSubmatch(html, -1)
+	if len(matches) != 2 || matches[0][1] != "runtime" || matches[1][1] != "graph" {
+		t.Fatalf("staged runtime/graph tags missing or out of order:\n%s", html)
 	}
-	if strings.Contains(html, "data-kit-app") || strings.Contains(html, "data-kit-hydrate") {
+	for _, match := range matches {
+		if match[2] != match[3] || match[1] != match[4] {
+			t.Fatalf("content-addressed staged tag is inconsistent: %v", match)
+		}
+	}
+	if strings.Contains(html, "data-kit-app") || strings.Contains(html, "data-kit-hydrate") ||
+		strings.Contains(html, "data-kitwork-plan") || strings.Contains(html, "data-kitwork-runtime") {
 		t.Fatalf("ordinary component render invented an activation marker:\n%s", html)
 	}
-	asset, ok := assets.Lookup(match[1])
+	runtimeAsset, ok := assets.Lookup(matches[0][2])
 	if !ok {
-		t.Fatal("prepared counter runtime is missing from the generation asset store")
+		t.Fatal("prepared runtime is missing from the generation asset store")
 	}
-	source := string(asset.JavaScript)
-	if !strings.Contains(source, `kit.component("counter"`) || !strings.Contains(source, "KitJS auto boot") {
-		t.Fatal("prepared graph omitted the counter or automatic boot")
+	graphAsset, ok := assets.Lookup(matches[1][2])
+	if !ok {
+		t.Fatal("prepared graph is missing from the generation asset store")
 	}
-	if strings.Contains(source, "KitJS same-plan Drive navigation") {
-		t.Fatal("ordinary component unexpectedly selected Drive without data-kit-app")
+	if !strings.Contains(string(runtimeAsset.JavaScript), "data-kit-scope") ||
+		!strings.Contains(string(graphAsset.JavaScript), "KitJS: boot loaded out of order") {
+		t.Fatal("staged delivery omitted scope support or automatic boot")
+	}
+	if strings.Contains(string(runtimeAsset.JavaScript), "KitJS: Drive fragment loaded out of order") ||
+		strings.Contains(string(graphAsset.JavaScript), "KitJS: Drive fragment loaded out of order") {
+		t.Fatal("plain render composition unexpectedly selected Hydrate/Drive")
 	}
 }
 
 func TestKitJSTemplateTokenPreparation(t *testing.T) {
 	for _, source := range []string{
 		`<body {{ if section == "docs" }}aria-current="page" {{ end }}></body>`,
-		`<div {{ if enabled }} data-kit-component="dialog" {{ end }}></div>`,
-		`<div data-kit-component="dialog"{{ if enabled }} data-ready="yes"{{ end }}></div>`,
+		`<div {{ if enabled }} data-kit-component="dialog@1.0.0" {{ end }}></div>`,
+		`<div data-kit-component="dialog@1.0.0"{{ if enabled }} data-ready="yes"{{ end }}></div>`,
 		`<div {{ if enabled }}data-kit-click="run()"{{ else }}data-ready="no"{{ end }}></div>`,
 		`<meta name="description" content="{{ description }}">`,
 		`<script>window.__label = "{{ label }}";</script>`,
@@ -68,7 +79,7 @@ func TestKitJSTemplateTokenPreparation(t *testing.T) {
 		}
 	}
 
-	conditional, err := kitJSStaticScanSource(`<div {{ if enabled }} data-kit-component="dialog" {{ end }}></div>`)
+	conditional, err := kitJSStaticScanSource(`<div {{ if enabled }} data-kit-component="dialog@1.0.0" {{ end }}></div>`)
 	if err != nil {
 		t.Fatal(err)
 	}

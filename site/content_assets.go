@@ -28,6 +28,8 @@ var (
 type ContentAsset struct {
 	ContentHash string
 	Body        []byte
+	Role        string
+	Suffix      string
 }
 
 // ContentAssetProvider is an optional RenderPlan extension. Activation copies
@@ -46,6 +48,8 @@ type contentAssetLimits struct {
 
 type contentAssetEntry struct {
 	body       []byte
+	role       string
+	suffix     string
 	references int
 	releasedAt time.Time
 }
@@ -98,19 +102,19 @@ func (store *contentAssetStore) retain(assets []ContentAsset) ([]string, error) 
 	if store == nil {
 		return nil, errInvalidContentAsset
 	}
-	validated := make(map[string][]byte, len(assets))
+	validated := make(map[string]ContentAsset, len(assets))
 	for _, asset := range assets {
 		if err := validateContentAsset(asset); err != nil {
 			return nil, err
 		}
-		body := append([]byte(nil), asset.Body...)
+		asset.Body = append([]byte(nil), asset.Body...)
 		if prior, exists := validated[asset.ContentHash]; exists {
-			if !bytes.Equal(prior, body) {
-				return nil, fmt.Errorf("%w: duplicate hash %s has different bytes", errInvalidContentAsset, asset.ContentHash)
+			if !bytes.Equal(prior.Body, asset.Body) || prior.Role != asset.Role || prior.Suffix != asset.Suffix {
+				return nil, fmt.Errorf("%w: duplicate hash %s has different bytes or delivery metadata", errInvalidContentAsset, asset.ContentHash)
 			}
 			continue
 		}
-		validated[asset.ContentHash] = body
+		validated[asset.ContentHash] = asset
 	}
 	hashes := make([]string, 0, len(validated))
 	for contentHash := range validated {
@@ -127,14 +131,15 @@ func (store *contentAssetStore) retain(assets []ContentAsset) ([]string, error) 
 	additionalEntries := 0
 	additionalBytes := 0
 	for _, contentHash := range hashes {
+		incoming := validated[contentHash]
 		if current, exists := store.assets[contentHash]; exists {
-			if !bytes.Equal(current.body, validated[contentHash]) {
-				return nil, fmt.Errorf("%w: SHA-256 collision for %s", errInvalidContentAsset, contentHash)
+			if !bytes.Equal(current.body, incoming.Body) || current.role != incoming.Role || current.suffix != incoming.Suffix {
+				return nil, fmt.Errorf("%w: SHA-256 collision or delivery metadata mismatch for %s", errInvalidContentAsset, contentHash)
 			}
 			continue
 		}
 		additionalEntries++
-		additionalBytes += len(validated[contentHash])
+		additionalBytes += len(incoming.Body)
 	}
 	if additionalEntries > store.limits.maxEntries || additionalBytes > store.limits.maxBytes {
 		return nil, fmt.Errorf("%w: incoming entries=%d/%d bytes=%d/%d",
@@ -193,10 +198,14 @@ func (store *contentAssetStore) retain(assets []ContentAsset) ([]string, error) 
 	for _, contentHash := range hashes {
 		current := store.assets[contentHash]
 		if current == nil {
-			body := validated[contentHash]
-			current = &contentAssetEntry{body: body}
+			incoming := validated[contentHash]
+			current = &contentAssetEntry{
+				body:   incoming.Body,
+				role:   incoming.Role,
+				suffix: incoming.Suffix,
+			}
 			store.assets[contentHash] = current
-			store.bytes += len(body)
+			store.bytes += len(incoming.Body)
 		}
 		current.references++
 		current.releasedAt = time.Time{}
@@ -241,7 +250,12 @@ func (store *contentAssetStore) lookup(contentHash string) (ContentAsset, bool) 
 	if current == nil || closed {
 		return ContentAsset{}, false
 	}
-	return ContentAsset{ContentHash: contentHash, Body: body}, true
+	return ContentAsset{
+		ContentHash: contentHash,
+		Body:        body,
+		Role:        current.role,
+		Suffix:      current.suffix,
+	}, true
 }
 
 func (store *contentAssetStore) close() {
@@ -259,11 +273,46 @@ func validateContentAsset(asset ContentAsset) error {
 	if !validContentHash(asset.ContentHash) || len(asset.Body) == 0 {
 		return errInvalidContentAsset
 	}
+	if (asset.Role == "") != (asset.Suffix == "") {
+		return fmt.Errorf("%w: role and suffix must either both be set or both be empty", errInvalidContentAsset)
+	}
+	if asset.Role != "" && (!validContentAssetToken(asset.Role) || !validContentAssetToken(asset.Suffix) ||
+		!validContentAssetDelivery(asset.Role, asset.Suffix)) {
+		return fmt.Errorf("%w: invalid delivery role or suffix", errInvalidContentAsset)
+	}
 	digest := sha256.Sum256(asset.Body)
 	if hex.EncodeToString(digest[:]) != asset.ContentHash {
 		return fmt.Errorf("%w: content hash does not match body", errInvalidContentAsset)
 	}
 	return nil
+}
+
+func validContentAssetDelivery(role, suffix string) bool {
+	switch role {
+	case "runtime", "hydrate", "graph", "components":
+		return suffix == role
+	case "service", "component":
+		return suffix != ""
+	default:
+		return false
+	}
+}
+
+func validContentAssetToken(token string) bool {
+	if token == "" || len(token) > 128 {
+		return false
+	}
+	for index := range len(token) {
+		char := token[index]
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' {
+			continue
+		}
+		if index > 0 && (char == '-' || char == '.' || char == '_') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validContentHash(contentHash string) bool {

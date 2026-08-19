@@ -287,10 +287,12 @@ func TestGenerationFreezesPresentationAtActivation(t *testing.T) {
 	}
 	if !presentation.SetJITConfig(config) ||
 		!presentation.SetFaviconFile("favicon.ico") ||
-		!presentation.AddAssetMount(site.AssetMount{URL: "assets", Disk: "_assets"}) ||
 		!presentation.SetThemeMode("force") ||
 		!presentation.SetKitJS(true) {
 		t.Fatal("presentation rejected preparation-time declarations")
+	}
+	if err := presentation.AddAssetMount(site.AssetMount{URL: "assets", Disk: "_assets"}); err != nil {
+		t.Fatalf("AddAssetMount rejected a valid mount: %v", err)
 	}
 	if err := generation.SetEnvironment(value.New("env-v1")); err != nil {
 		t.Fatal(err)

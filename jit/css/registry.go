@@ -73,6 +73,7 @@ var Registry = []Pattern{
 	{`^(border)(?:-(t|b|l|r|x|y))?(?:-(\d+|\[.+?\]))?$`, "tw-border"},
 	{`^(font)-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$`, "tw-font-weight"},
 	{`^(text)-(left|center|right|justify|start|end)$`, "tw-text-align"},
+	{`^list-(none|disc|decimal)$`, "tw-list-style"},
 	{`^(italic|not-italic|uppercase|lowercase|capitalize|normal-case|underline|line-through|no-underline)$`, "tw-text-decor"},
 	{`^underline-offset-(auto|\d+)$`, "tw-underline-offset"},
 	// transforms

@@ -54,9 +54,6 @@ type Router struct {
 	// JIT icon stylesheet route: serve the tenant's site-wide icon CSS (masks, no JS handler,
 	// no VM). Set by .icons(); the path defaults to /jiticons.
 	isIcons bool
-	// jitjs runtime route: serve the tenant's site-wide JS runtime (verbs, no JS handler, no VM).
-	// Set by .jitjs(); the path defaults to /jitjs.
-	isJitjs bool
 	// JIT logo stylesheet route: serve the tenant's site-wide brand-logo CSS (Simple Icons masks,
 	// no JS handler, no VM). Set by .logo(); the path defaults to /jitlogo.
 	isLogo bool
@@ -94,6 +91,9 @@ type Router struct {
 	// chainMeta is the meta declared via router.meta() merged down the folder chain (root→leaf),
 	// the inherited base every page's $.meta starts from.
 	chainMeta map[string]value.Value
+	// chainJsonld is the router.jsonld() nodes accumulated down the folder chain (root→leaf); the
+	// view appends its own ctx.jsonld() nodes and renders them all into <head>.
+	chainJsonld []value.Value
 }
 
 // rateRule is one rate-limit rule. Type is the key dimension ("ip" | "user" | "browser" |

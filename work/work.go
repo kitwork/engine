@@ -124,8 +124,12 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer requestScope.Close()
 
-	// Generation-owned component-first assets use /kit.js/<sha256>.js. The
-	// legacy runtime remains on the exact /kit.js path.
+	// Generation-owned staged assets use /jit/<sha256>.<suffix>.js. Historical
+	// hashed entries and the shared legacy runtime remain isolated under
+	// /kit.js so existing standalone tooling keeps working.
+	if t.serveJITAssetIf(w, r) {
+		return
+	}
 	if t.serveKitJSAssetIf(w, r) {
 		return
 	}

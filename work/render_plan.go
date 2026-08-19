@@ -3,7 +3,6 @@ package work
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 
@@ -47,6 +46,10 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 	}
 
 	presentation := t.presentation().View()
+	if len(presentation.JITComponents) > 0 && !presentation.KitJS {
+		snapshot.Close()
+		return nil, fmt.Errorf("router.jitComponent requires router.jitjs(true) for the pending generation")
+	}
 	plan := &RenderPlan{
 		base:      base,
 		snapshot:  snapshot,
@@ -59,7 +62,15 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 		}
 	}()
 	if presentation.KitJS {
-		plan.kitJSAssets, err = kitjavascript.NewDefaultAssetStore()
+		tenantComponents := make([]kitjavascript.ComponentPackage, len(presentation.JITComponents))
+		for index, component := range presentation.JITComponents {
+			tenantComponents[index] = kitjavascript.ComponentPackage{
+				Name:    component.Name,
+				Version: component.Version,
+				Source:  append([]byte(nil), component.JavaScript...),
+			}
+		}
+		plan.kitJSAssets, err = kitjavascript.NewDefaultAssetStore(tenantComponents...)
 		if err != nil {
 			return nil, fmt.Errorf("prepare KitJS asset store: %w", err)
 		}
@@ -79,7 +90,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 		}
 	}
 	if plan.kitJSAssets != nil {
-		appScans := make(map[string][]kitjavascript.ScanResult)
+		generationScans := make([]kitjavascript.ScanResult, 0, len(tree.routeNodes())*2)
 		for _, node := range tree.routeNodes() {
 			relative := node.relPath()
 			config := configFor(relative)
@@ -87,9 +98,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			if scanErr != nil {
 				return nil, fmt.Errorf("scan KitJS template for route %q: %w", relative, scanErr)
 			}
-			if pageUse.HasApp {
-				appScans[pageUse.App] = append(appScans[pageUse.App], pageUse)
-			}
+			generationScans = append(generationScans, pageUse)
 
 			notfoundConfig := config
 			notfoundConfig.NotfoundMode = true
@@ -97,19 +106,10 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			if scanErr != nil {
 				return nil, fmt.Errorf("scan KitJS notfound template for route %q: %w", relative, scanErr)
 			}
-			if notfoundUse.HasApp {
-				appScans[notfoundUse.App] = append(appScans[notfoundUse.App], notfoundUse)
-			}
+			generationScans = append(generationScans, notfoundUse)
 		}
-		identities := make([]string, 0, len(appScans))
-		for identity := range appScans {
-			identities = append(identities, identity)
-		}
-		sort.Strings(identities)
-		for _, identity := range identities {
-			if _, err := plan.kitJSAssets.PrepareAppBundle(appScans[identity]); err != nil {
-				return nil, fmt.Errorf("prepare KitJS application graph %q: %w", identity, err)
-			}
+		if err := plan.kitJSAssets.PrepareGeneration(generationScans); err != nil {
+			return nil, fmt.Errorf("prepare KitJS generation graph: %w", err)
 		}
 	}
 	for _, node := range tree.routeNodes() {
@@ -249,6 +249,8 @@ func (p *RenderPlan) ContentAssets() ([]site.ContentAsset, error) {
 		contentAssets = append(contentAssets, site.ContentAsset{
 			ContentHash: asset.ContentHash,
 			Body:        asset.JavaScript,
+			Role:        string(asset.Role),
+			Suffix:      asset.Suffix,
 		})
 	}
 	return contentAssets, nil

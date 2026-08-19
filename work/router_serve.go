@@ -58,14 +58,17 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 	// Read inherited metadata from the immutable generation graph:
 	// router.meta() merged root→leaf is the base every page's $.meta starts from.
 	chainMeta := map[string]value.Value{}
+	chainJsonld := []value.Value{}
 	for _, node := range match.Chain {
 		if node.folder != nil {
 			for k, v := range node.folder.meta {
 				chainMeta[k] = v
 			}
+			chainJsonld = append(chainJsonld, node.folder.jsonld...)
 		}
 	}
 	reqRouter.chainMeta = chainMeta
+	reqRouter.chainJsonld = chainJsonld
 	// Presentation declarations were frozen with the graph before activation.
 	reqRouter.treeRender = t.treeRender(match.Node)
 

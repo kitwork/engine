@@ -19,6 +19,7 @@ import (
 const (
 	RSSMediaType     = "application/rss+xml; charset=utf-8"
 	SitemapMediaType = "application/xml; charset=utf-8"
+	RobotsMediaType  = "text/plain; charset=utf-8"
 	SitemapURLLimit  = 50000
 	SitemapByteLimit = 50 * 1024 * 1024
 )
@@ -313,4 +314,82 @@ func sitemapWithLimit(data value.Value, requestBase, outputPath, requestPath str
 		end = len(entries)
 	}
 	return renderURLSet(entries[start:end])
+}
+
+// Robots renders a /robots.txt from a declaration map. An empty map (router.robots()) yields an
+// allow-all policy plus a Sitemap line pointing at <base>/sitemap.xml. Recognised fields:
+//
+//	disallow: ["/path", ...]   allow: ["/path", ...]   host: "example.com"
+//	sitemap:  false → omit · "url" → custom · absent → <base>/sitemap.xml
+//	agents:   [ { userAgent, allow, disallow }, ... ]  → per-agent blocks (replaces the single block)
+//
+// The base is the request scheme://host, so the Sitemap line follows whichever domain served the
+// file — no hard-coded domain to drift.
+func Robots(data value.Value, base string) string {
+	arr := func(v value.Value) []value.Value {
+		if v.K == value.Array {
+			return v.Array()
+		}
+		return nil
+	}
+	str := func(v value.Value) string { // "" unless it is really a string — an absent key must not print
+		if v.K == value.String {
+			return v.Text()
+		}
+		return ""
+	}
+	m := map[string]value.Value{}
+	if data.IsMap() {
+		m = data.Map()
+	}
+
+	var b strings.Builder
+	writeAgent := func(ua string, allow, disallow []value.Value) {
+		if ua == "" {
+			ua = "*"
+		}
+		b.WriteString("User-agent: " + ua + "\n")
+		wrote := false
+		for _, d := range disallow {
+			if p := d.Text(); p != "" {
+				b.WriteString("Disallow: " + p + "\n")
+				wrote = true
+			}
+		}
+		for _, a := range allow {
+			if p := a.Text(); p != "" {
+				b.WriteString("Allow: " + p + "\n")
+				wrote = true
+			}
+		}
+		if !wrote {
+			b.WriteString("Allow: /\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if agents := arr(m["agents"]); len(agents) > 0 {
+		for _, ag := range agents {
+			if ag.IsMap() {
+				am := ag.Map()
+				writeAgent(str(am["userAgent"]), arr(am["allow"]), arr(am["disallow"]))
+			}
+		}
+	} else {
+		writeAgent("*", arr(m["allow"]), arr(m["disallow"]))
+	}
+
+	if host := str(m["host"]); host != "" {
+		b.WriteString("Host: " + host + "\n")
+	}
+
+	if sm := m["sitemap"]; sm.K == value.Bool && sm.N == 0 {
+		// sitemap: false → omit the Sitemap line entirely
+	} else if sm.IsString() && sm.Text() != "" {
+		b.WriteString("Sitemap: " + absolute(base, sm.Text()) + "\n")
+	} else {
+		b.WriteString("Sitemap: " + absolute(base, "/sitemap.xml") + "\n")
+	}
+
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }

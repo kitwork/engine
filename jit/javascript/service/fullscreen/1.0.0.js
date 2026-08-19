@@ -1,48 +1,65 @@
+;(function (global, document, kit) {
+"use strict";
+
 // KitJS service: fullscreen@1.0.0
-;(function (global) {
-  "use strict";
-
-  var kit = global.kit;
-  var version = "1.0.0";
-  var OWN = Object.prototype.hasOwnProperty;
-
-  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
-    throw new Error("KitJS core must be loaded before service:fullscreen");
-  }
-  if (OWN.call(kit, "fullscreen")) {
-    if (kit.fullscreen.version === version) return;
-    throw new Error("KitJS service conflict: fullscreen");
-  }
-
-  function request(element, options) {
-    var target = element || global.document && global.document.documentElement;
-    if (!target || typeof target.requestFullscreen !== "function") {
-      return Promise.reject(new Error("Fullscreen API is unavailable"));
-    }
-    try { return Promise.resolve(target.requestFullscreen(options)); }
-    catch (error) { return Promise.reject(error); }
-  }
-
-  function exit() {
-    var document = global.document;
-    if (!document || typeof document.exitFullscreen !== "function") {
-      return Promise.reject(new Error("Fullscreen API is unavailable"));
-    }
-    try { return Promise.resolve(document.exitFullscreen()); }
-    catch (error) { return Promise.reject(error); }
-  }
-
-  function active() {
-    return Boolean(global.document && global.document.fullscreenElement);
-  }
-
-  var service = { request: request, exit: exit, active: active };
-  Object.defineProperty(service, "version", { value: version, enumerable: false });
-  Object.freeze(service);
-  Object.defineProperty(kit, "fullscreen", {
-    value: service,
-    enumerable: true,
-    configurable: false,
-    writable: false
+function failure(code, operation) {
+  var error = new Error("Fullscreen " + operation + " failed");
+  Object.defineProperties(error, {
+    name: { value: "KitFullscreenError" },
+    code: { value: code, enumerable: true },
+    operation: { value: operation, enumerable: true }
   });
-})(globalThis);
+  return Object.freeze(error);
+}
+
+function targetOf(value) {
+  var target = value === undefined ? document.documentElement : value;
+  if (!target || typeof global.Element !== "function" || !(target instanceof global.Element) ||
+    target.ownerDocument !== document) {
+    throw new TypeError("Fullscreen target must be an Element in the current document");
+  }
+  return target;
+}
+
+async function request(target) {
+  target = targetOf(target);
+  var method;
+  try { method = target.requestFullscreen; }
+  catch (_) { throw failure("REQUEST_FAILED", "request"); }
+  if (typeof method !== "function" || document.fullscreenEnabled === false) {
+    throw failure("UNAVAILABLE", "request");
+  }
+  try {
+    await method.call(target);
+    return true;
+  } catch (_) {
+    throw failure("REQUEST_FAILED", "request");
+  }
+}
+
+async function exit() {
+  if (!document.fullscreenElement) return false;
+  var method;
+  try { method = document.exitFullscreen; }
+  catch (_) { throw failure("EXIT_FAILED", "exit"); }
+  if (typeof method !== "function") {
+    throw failure("UNAVAILABLE", "exit");
+  }
+  try {
+    await method.call(document);
+    return true;
+  } catch (_) {
+    throw failure("EXIT_FAILED", "exit");
+  }
+}
+
+function active() {
+  return !!document.fullscreenElement;
+}
+
+kit.service("fullscreen", {
+  request: request,
+  exit: exit,
+  active: active
+});
+})(globalThis, document, kit);

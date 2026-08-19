@@ -1,0 +1,1 @@
+;kit.component("app", {});

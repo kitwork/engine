@@ -18,6 +18,11 @@ type Value struct {
 
 	IsError  bool
 	ErrorVal any
+	// Raw marks a string as ALREADY-safe trusted HTML: templates emit it verbatim without escaping,
+	// so an engine-produced value (e.g. serialized+escaped JSON-LD) needs no raw() in the template.
+	// Only the engine sets this — the JS subset has no way to mark data trusted, so it adds no XSS
+	// surface. It does not propagate: any operation on the value produces a fresh, non-Raw result.
+	Raw bool
 }
 
 func (v Value) Prototype(name string, fn Method)  { v.K.Prototype(name, fn) }

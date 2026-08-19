@@ -1,102 +1,118 @@
+;(function (document, kit) {
+"use strict";
+
 // KitJS service: announce@1.0.0
-;(function (global) {
-  "use strict";
+var MAX_MESSAGE_LENGTH = 1024;
+var REVEAL_DELAY = 20;
+var CLEAR_DELAY = 10000;
+var states = {
+  polite: { revealTimer: 0, clearTimer: 0, generation: 0, settle: null },
+  assertive: { revealTimer: 0, clearTimer: 0, generation: 0, settle: null }
+};
 
-  var kit = global.kit;
-  var version = "1.0.0";
-  var OWN = Object.prototype.hasOwnProperty;
-  var pending = { polite: null, assertive: null };
-
-  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
-    throw new Error("KitJS core must be loaded before service:announce");
+function messageOf(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError("Announcement must be a non-empty string");
   }
-  if (OWN.call(kit, "announce")) {
-    if (kit.announce.version === version) return;
-    throw new Error("KitJS service conflict: announce");
+  if (value.length > MAX_MESSAGE_LENGTH) {
+    throw new TypeError("Announcement must not exceed 1024 characters");
   }
+  return value;
+}
 
-  function modeOf(value) {
-    return value === "assertive" || value === "urgent" ? "assertive" : "polite";
+function modeOf(value) {
+  if (value === undefined) return "polite";
+  if (value !== "polite" && value !== "assertive") {
+    throw new TypeError("Announcement mode must be polite or assertive");
   }
+  return value;
+}
 
-  function region(mode) {
-    var document = global.document;
-    if (!document || !document.body) throw new Error("Announcement region is unavailable");
-    var id = "kit-announce-" + mode;
-    var element = document.getElementById(id);
-    if (element) return element;
+function connected(mode) {
+  var candidate = document.getElementById("kit-announcer-" + mode);
+  if (!candidate || candidate.ownerDocument !== document || !candidate.isConnected ||
+    candidate.getAttribute("data-kit-announcer") !== mode) return null;
+  return candidate;
+}
 
-    element = document.createElement("div");
-    element.id = id;
-    element.setAttribute("role", mode === "assertive" ? "alert" : "status");
-    element.setAttribute("aria-live", mode);
-    element.setAttribute("aria-atomic", "true");
-    element.style.position = "fixed";
-    element.style.width = "1px";
-    element.style.height = "1px";
-    element.style.padding = "0";
-    element.style.margin = "-1px";
-    element.style.overflow = "hidden";
-    element.style.clipPath = "inset(50%)";
-    element.style.whiteSpace = "nowrap";
-    element.style.border = "0";
-    document.body.appendChild(element);
-    return element;
+function createRegion(mode) {
+  var region = document.createElement("div");
+  region.id = "kit-announcer-" + mode;
+  region.setAttribute("data-kit-announcer", mode);
+  region.setAttribute("role", mode === "assertive" ? "alert" : "status");
+  region.setAttribute("aria-live", mode);
+  region.setAttribute("aria-atomic", "true");
+  region.style.cssText = "position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0";
+  (document.body || document.documentElement).appendChild(region);
+  return region;
+}
+
+function region(mode) {
+  return connected(mode) || createRegion(mode);
+}
+
+function cancel(mode) {
+  var state = states[mode];
+  state.generation++;
+  if (state.revealTimer) clearTimeout(state.revealTimer);
+  if (state.clearTimer) clearTimeout(state.clearTimer);
+  state.revealTimer = 0;
+  state.clearTimer = 0;
+  if (state.settle) {
+    var settle = state.settle;
+    state.settle = null;
+    settle(false);
   }
+  var current = connected(mode);
+  if (current) current.textContent = "";
+}
 
-  function cancel(mode) {
-    var current = pending[mode];
-    if (!current) return;
-    global.clearTimeout(current.timer);
-    current.resolve(false);
-    pending[mode] = null;
-  }
+function say(message, mode) {
+  message = messageOf(message);
+  mode = modeOf(mode);
+  cancel(mode);
+  var state = states[mode];
+  var ownGeneration = state.generation;
+  return new Promise(function (resolve) {
+    state.settle = resolve;
+    state.revealTimer = setTimeout(function () {
+      state.revealTimer = 0;
+      if (state.generation !== ownGeneration) return;
+      region(mode).textContent = message;
+      state.settle = null;
+      resolve(true);
+      state.clearTimer = setTimeout(function () {
+        state.clearTimer = 0;
+        if (state.generation !== ownGeneration) return;
+        var current = connected(mode);
+        if (current) current.textContent = "";
+      }, CLEAR_DELAY);
+    }, REVEAL_DELAY);
+  });
+}
 
-  function say(message, mode) {
-    message = message === null || message === undefined ? "" : String(message).trim();
-    if (!message) return Promise.resolve(false);
-    mode = modeOf(mode);
+function polite(message) {
+  return say(message, "polite");
+}
 
-    var element;
-    try { element = region(mode); }
-    catch (error) { return Promise.reject(error); }
+function assertive(message) {
+  return say(message, "assertive");
+}
 
-    cancel(mode);
-    element.textContent = "";
-    return new Promise(function (resolve) {
-      pending[mode] = {
-        resolve: resolve,
-        timer: global.setTimeout(function () {
-          pending[mode] = null;
-          element.textContent = message;
-          resolve(true);
-        }, 20)
-      };
-    });
-  }
-
-  function clear(mode) {
-    var modes = mode ? [modeOf(mode)] : ["polite", "assertive"];
-    modes.forEach(function (name) {
-      cancel(name);
-      var element = global.document && global.document.getElementById("kit-announce-" + name);
-      if (element) element.textContent = "";
-    });
+function clear(mode) {
+  if (mode === undefined) {
+    cancel("polite");
+    cancel("assertive");
     return true;
   }
+  cancel(modeOf(mode));
+  return true;
+}
 
-  var announce = {
-    say: say,
-    polite: function (message) { return say(message, "polite"); },
-    assertive: function (message) { return say(message, "assertive"); },
-    clear: clear
-  };
-  Object.defineProperty(announce, "version", { value: version, enumerable: false });
-  Object.freeze(announce);
-  Object.defineProperty(kit, "announce", {
-    value: announce,
-    enumerable: true,
-    configurable: false,
-    writable: false
-  });
-})(globalThis);
+kit.service("announce", {
+  say: say,
+  polite: polite,
+  assertive: assertive,
+  clear: clear
+});
+})(document, kit);

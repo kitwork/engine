@@ -1062,6 +1062,8 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		return "font-weight: " + w + ";"
 	case "tw-text-align":
 		return "text-align: " + m[2] + ";"
+	case "tw-list-style":
+		return "list-style-type: " + m[1] + ";"
 	case "tw-text-decor":
 		val := m[1]
 		if val == "italic" {

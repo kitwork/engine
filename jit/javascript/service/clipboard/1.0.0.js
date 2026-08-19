@@ -1,55 +1,88 @@
+;(function (global, kit) {
+"use strict";
+
 // KitJS service: clipboard@1.0.0
-;(function (global) {
-  "use strict";
+var MAX_TEXT_LENGTH = 1024 * 1024;
 
-  var kit = global.kit;
-  var version = "1.0.0";
-  var OWN = Object.prototype.hasOwnProperty;
-
-  if (!kit || !OWN.call(kit, "component") || typeof kit.component !== "function") {
-    throw new Error("KitJS core must be loaded before service:clipboard");
+function inputText(value) {
+  if (typeof value !== "string") throw new TypeError("Clipboard text must be a string");
+  if (value.length > MAX_TEXT_LENGTH) {
+    throw new TypeError("Clipboard text cannot exceed 1048576 characters");
   }
-  if (OWN.call(kit, "clipboard")) {
-    if (kit.clipboard.version === version) return;
-    throw new Error("KitJS service conflict: clipboard");
-  }
+  return value;
+}
 
-  function unavailable(operation) {
-    return Promise.reject(new Error("Clipboard " + operation + " is unavailable"));
-  }
+function errorCode(value) {
+  var name = "";
+  try { name = value && typeof value.name === "string" ? value.name : ""; }
+  catch (_) { /* An untrusted adapter error never escapes normalization. */ }
+  if (name === "NotAllowedError" || name === "SecurityError") return "DENIED";
+  if (name === "AbortError") return "CANCELLED";
+  if (name === "NotFoundError" || name === "NotSupportedError") return "UNAVAILABLE";
+  return "FAILED";
+}
 
-  function writeText(value) {
-    var clipboard = global.navigator && global.navigator.clipboard;
-    if (!clipboard || typeof clipboard.writeText !== "function") return unavailable("writeText");
-    try {
-      return Promise.resolve(clipboard.writeText(value === null || value === undefined ? "" : String(value)));
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
-  function readText() {
-    var clipboard = global.navigator && global.navigator.clipboard;
-    if (!clipboard || typeof clipboard.readText !== "function") return unavailable("readText");
-    try {
-      return Promise.resolve(clipboard.readText()).then(function (value) { return String(value); });
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
-  var service = { 
-    writeText: writeText, 
-    readText: readText,
-    copy: writeText,
-    read: readText
+function clipboardError(code, operation) {
+  var messages = {
+    UNAVAILABLE: "Clipboard is unavailable",
+    DENIED: "Clipboard permission was denied",
+    CANCELLED: "Clipboard operation was cancelled",
+    FAILED: "Clipboard operation failed"
   };
-  Object.defineProperty(service, "version", { value: version, enumerable: false });
-  Object.freeze(service);
-  Object.defineProperty(kit, "clipboard", {
-    value: service,
-    enumerable: true,
-    configurable: false,
-    writable: false
+  var error = new Error(messages[code]);
+  Object.defineProperties(error, {
+    name: { value: "KitClipboardError" },
+    code: { value: code, enumerable: true },
+    operation: { value: operation, enumerable: true }
   });
-})(globalThis);
+  return Object.freeze(error);
+}
+
+function capability(operation) {
+  var navigator;
+  var clipboard;
+  var method;
+  try {
+    navigator = global.navigator;
+    clipboard = navigator && navigator.clipboard;
+    method = clipboard && clipboard[operation];
+  } catch (error) {
+    return { error: clipboardError(errorCode(error), operation) };
+  }
+  if (!clipboard || typeof method !== "function") {
+    return { error: clipboardError("UNAVAILABLE", operation) };
+  }
+  return { target: clipboard, method: method };
+}
+
+function invoke(operation, value) {
+  var selected = capability(operation);
+  if (selected.error) return Promise.reject(selected.error);
+  try {
+    return Promise.resolve(selected.method.call(selected.target, value)).then(null, function (error) {
+      throw clipboardError(errorCode(error), operation);
+    });
+  } catch (error) {
+    return Promise.reject(clipboardError(errorCode(error), operation));
+  }
+}
+
+function writeText(value) {
+  value = inputText(value);
+  return invoke("writeText", value).then(function () { return undefined; });
+}
+
+function readText() {
+  return invoke("readText").then(function (value) {
+    if (typeof value !== "string" || value.length > MAX_TEXT_LENGTH) {
+      throw clipboardError("FAILED", "readText");
+    }
+    return value;
+  });
+}
+
+kit.service("clipboard", {
+  writeText: writeText,
+  readText: readText
+});
+})(globalThis, kit);

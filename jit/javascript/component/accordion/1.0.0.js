@@ -1,63 +1,62 @@
-// KitJS component: accordion@1.0.0
-;(function (kit) {
-  "use strict";
+;(function () {
+"use strict";
 
-  function triggers(host) {
-    return Array.prototype.slice.call(host.querySelectorAll("[data-accordion-trigger]")).filter(function (trigger) {
-      return trigger.closest("[data-kit-component]") === host &&
-        !trigger.disabled && trigger.getAttribute("aria-disabled") !== "true";
-    });
-  }
+function itemID(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
 
-  kit.component("accordion", {
-    activeItem: null,
+function includes(items, id) {
+  return Array.isArray(items) && items.indexOf(id) >= 0;
+}
 
-    toggle(item) {
-      item = String(item || "");
-      if (!item) return this.activeItem;
-      this.activeItem = this.activeItem === item ? null : item;
-      return this.activeItem;
-    },
+kit.component("accordion", {
+  multiple: false,
+  openItems: [],
 
-    open(item) {
-      item = String(item || "");
-      if (item) this.activeItem = item;
-      return this.activeItem;
-    },
-
-    close(item) {
-      if (item === undefined || this.activeItem === String(item || "")) this.activeItem = null;
-      return this.activeItem;
-    },
-
-    isOpen(item) {
-      return this.activeItem === String(item || "");
-    },
-
-    init() {
-      var host = this.$host;
-
-      function onKeydown(event) {
-        var trigger = event.target.closest && event.target.closest("[data-accordion-trigger]");
-        if (!trigger || !host.contains(trigger) || trigger.closest("[data-kit-component]") !== host) return;
-
-        var items = triggers(host);
-        var index = items.indexOf(trigger);
-        var next = -1;
-        if (event.key === "ArrowDown") next = (index + 1) % items.length;
-        else if (event.key === "ArrowUp") next = (index - 1 + items.length) % items.length;
-        else if (event.key === "Home") next = 0;
-        else if (event.key === "End") next = items.length - 1;
-        if (next < 0 || !items[next]) return;
-
-        event.preventDefault();
-        items[next].focus();
-      }
-
-      host.addEventListener("keydown", onKeydown);
-      return function () {
-        host.removeEventListener("keydown", onKeydown);
-      };
+  toggle: function (value) {
+    var id = itemID(value);
+    if (!id) return false;
+    if (this.isOpen(id)) {
+      this.collapse(id);
+      return false;
     }
-  });
-})(globalThis.kit);
+    this.expand(id);
+    return true;
+  },
+
+  expand: function (value) {
+    var id = itemID(value);
+    if (!id) return false;
+    if (!this.multiple) {
+      this.openItems = [id];
+      return true;
+    }
+    var current = Array.isArray(this.openItems) ? this.openItems.slice() : [];
+    if (!includes(current, id)) current.push(id);
+    this.openItems = current;
+    return true;
+  },
+
+  collapse: function (value) {
+    var id = itemID(value);
+    if (!id) return false;
+    var current = Array.isArray(this.openItems) ? this.openItems : [];
+    this.openItems = current.filter(function (item) { return itemID(item) !== id; });
+    return false;
+  },
+
+  collapseAll: function () {
+    this.openItems = [];
+  },
+
+  isOpen: function (value) {
+    var id = itemID(value);
+    if (!id) return false;
+    var current = Array.isArray(this.openItems) ? this.openItems : [];
+    return current.some(function (item) { return itemID(item) === id; });
+  }
+});
+
+})();

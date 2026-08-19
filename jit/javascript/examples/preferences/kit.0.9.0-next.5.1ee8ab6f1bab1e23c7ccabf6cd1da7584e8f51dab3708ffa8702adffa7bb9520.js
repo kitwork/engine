@@ -1,0 +1,4695 @@
+; (function (global, document) {
+  "use strict";
+
+  var VERSION = "0.9.0-next.5";
+  var ASSEMBLY = Symbol.for("kitjs:assembly");
+  var INSTALL = Symbol.for("kitjs:runtime");
+  var ownKit = Object.prototype.hasOwnProperty.call(global, "kit");
+  var currentKit = global.kit;
+  var nextObservation = 0;
+
+  if (Object.prototype.hasOwnProperty.call(document, ASSEMBLY)) {
+    throw new Error("KitJS: another assembly is already in progress");
+  }
+  if (currentKit && currentKit[INSTALL] === VERSION &&
+    currentKit.version === VERSION && typeof currentKit.component === "function") {
+    Object.defineProperty(document, ASSEMBLY, {
+      value: { phase: "core", reuse: true },
+      configurable: true
+    });
+    return;
+  }
+  if (ownKit || currentKit !== undefined) {
+    throw new Error("KitJS: globalThis.kit is already owned by another script");
+  }
+
+  var OWN = Object.prototype.hasOwnProperty;
+  function words(source) {
+    var output = Object.create(null);
+    source.split(" ").forEach(function (word) { if (word) output[word] = true; });
+    return output;
+  }
+  var BLOCKED = words(
+    "constructor prototype __proto__ __defineGetter__ __defineSetter__ " +
+    "__lookupGetter__ __lookupSetter__ ownerDocument defaultView contentWindow " +
+    "window globalThis top parent self caller callee arguments"
+  );
+  var FORBIDDEN = words(
+    "var let const function class return if else for while do switch case new " +
+    "delete void typeof instanceof in await yield throw try catch finally import export " +
+    "this super with debugger of async document location navigator Function eval " +
+    "undefined NaN Infinity"
+  );
+  var INVALID_MEMBER = {};
+
+  function syntax(message, source, position) {
+    throw new SyntaxError("KitJS: " + message + " in \"" + source + "\" at " + position);
+  }
+  function report(error) {
+    if (global.console && typeof global.console.error === "function") global.console.error(error);
+  }
+  function equal(left, right) {
+    return left === right || left !== left && right !== right;
+  }
+  function blocked(value) {
+    return typeof value === "string" && BLOCKED[value] === true;
+  }
+  function ignoredForRuntime(element) {
+    while (element && element !== document) {
+      if (element.nodeType === 1 && element.hasAttribute && element.hasAttribute("data-kit-ignore")) {
+        return true;
+      }
+      element = element.parentElement;
+    }
+    return false;
+  }
+  function memberKey(value) {
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) return INVALID_MEMBER;
+      value = String(value);
+    } else if (typeof value !== "string") return INVALID_MEMBER;
+    return blocked(value) ? INVALID_MEMBER : value;
+  }
+
+  var core = {
+    phase: "core",
+    reuse: false,
+    version: VERSION,
+    install: INSTALL,
+    assembly: ASSEMBLY,
+    OWN: OWN,
+    FORBIDDEN: FORBIDDEN,
+    INVALID_MEMBER: INVALID_MEMBER,
+    syntax: syntax,
+    report: report,
+    equal: equal,
+    blocked: blocked,
+    ignoredForRuntime: ignoredForRuntime,
+    memberKey: memberKey,
+    registry: new Map(),
+    compiled: new Map(),
+    scopes: new WeakMap(),
+    scopeRecords: new WeakMap(),
+    records: new WeakMap(),
+    cacheLimit: 256,
+    booted: false,
+    dirtyAll: false,
+    dirtyRecords: new Set(),
+    queued: false,
+    render: null,
+    renderPending: null,
+    startHooks: []
+  };
+
+  core.invalidate = function (record) {
+    if (record && typeof record === "object") {
+      if (record.disposed || core.renderPending && core.renderPending.has(record)) return;
+      core.dirtyRecords.add(record);
+    }
+    else core.dirtyAll = true;
+    if (core.queued) return;
+    core.queued = true;
+    queueMicrotask(function () {
+      core.queued = false;
+      if (!core.render || !core.dirtyAll && !core.dirtyRecords.size) return;
+      var all = core.dirtyAll;
+      var records = all ? null : Array.from(core.dirtyRecords);
+      core.dirtyAll = false;
+      core.dirtyRecords.clear();
+      core.render(records);
+    });
+  };
+  core.resetDirty = function () {
+    core.dirtyAll = false;
+    core.dirtyRecords.clear();
+  };
+  function attachObservation(value, then, tickets) {
+    var settled = false;
+    function settle(error, rejected) {
+      if (settled) return;
+      settled = true;
+      if (rejected) report(error);
+      var waiting = new Set(tickets);
+      document.querySelectorAll("[data-kit-component],[data-kit-scope]").forEach(function (element) {
+        if (ignoredForRuntime(element)) return;
+        var record = core.scopes.get(element);
+        if (!record || record.disposed || !record.observations) return;
+        tickets.forEach(function (ticket) {
+          if (!waiting.has(ticket) || !record.observations.delete(ticket)) return;
+          waiting.delete(ticket);
+          core.invalidate(record);
+        });
+      });
+      tickets.length = 0;
+    }
+    try {
+      then.call(value, function () { settle(null, false); }, function (error) { settle(error, true); });
+    } catch (error) {
+      settle(error, true);
+    }
+  }
+  core.observe = function (value, owners) {
+    if (!value) return;
+    var then;
+    try { then = value.then; }
+    catch (error) { report(error); return; }
+    if (typeof then !== "function") return;
+    if (!Array.isArray(owners)) owners = owners ? [owners] : [];
+    var seen = new Set();
+    var tickets = [];
+    owners.forEach(function (record) {
+      if (!record || record.disposed || seen.has(record)) return;
+      seen.add(record);
+      var ticket = ++nextObservation;
+      if (!record.observations) record.observations = new Set();
+      record.observations.add(ticket);
+      tickets.push(ticket);
+    });
+    attachObservation(value, then, tickets);
+  };
+
+  Object.defineProperty(document, ASSEMBLY, {
+    value: core,
+    configurable: true
+  });
+})(globalThis, document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "core") throw new Error("KitJS: lexer loaded out of order");
+  if (core.reuse) { core.phase = "lexer"; return; }
+
+  function space(character) {
+    return character === " " || character === "\t" || character === "\n" ||
+      character === "\r" || character === "\f";
+  }
+  function digit(character) { return character >= "0" && character <= "9"; }
+  function identifierStart(character) {
+    return character === "$" || character === "_" ||
+      character >= "a" && character <= "z" || character >= "A" && character <= "Z";
+  }
+  function identifierPart(character) { return identifierStart(character) || digit(character); }
+
+  function lex(source) {
+    var tokens = [];
+    var index = 0;
+    function token(type, value, position) {
+      tokens.push({ type: type, value: value, position: position });
+    }
+
+    while (index < source.length) {
+      var character = source.charAt(index);
+      if (space(character)) { index++; continue; }
+      var start = index;
+
+      if (digit(character) || character === "." && digit(source.charAt(index + 1))) {
+        if (character === ".") index++;
+        while (digit(source.charAt(index))) index++;
+        if (source.charAt(index) === ".") {
+          index++;
+          while (digit(source.charAt(index))) index++;
+        }
+        if (source.charAt(index) === "e" || source.charAt(index) === "E") {
+          var exponent = index++;
+          if (source.charAt(index) === "+" || source.charAt(index) === "-") index++;
+          var digits = index;
+          while (digit(source.charAt(index))) index++;
+          if (digits === index) core.syntax("invalid number exponent", source, exponent);
+        }
+        var number = Number(source.slice(start, index));
+        if (!Number.isFinite(number)) core.syntax("number is outside the supported range", source, start);
+        token("literal", number, start);
+        continue;
+      }
+
+      if (character === "'" || character === '"') {
+        var quote = character;
+        var value = "";
+        index++;
+        while (index < source.length) {
+          character = source.charAt(index++);
+          if (character === quote) break;
+          if (character !== "\\") { value += character; continue; }
+          if (index >= source.length) core.syntax("unfinished string", source, start);
+          character = source.charAt(index++);
+          if ("nrtbf\\'\"".indexOf(character) < 0) {
+            core.syntax("unsupported string escape \\" + character, source, index - 2);
+          }
+          value += character === "n" ? "\n" : character === "r" ? "\r" :
+            character === "t" ? "\t" : character === "b" ? "\b" :
+              character === "f" ? "\f" : character;
+        }
+        if (character !== quote) core.syntax("unfinished string", source, start);
+        token("literal", value, start);
+        continue;
+      }
+
+      if (identifierStart(character)) {
+        index++;
+        while (identifierPart(source.charAt(index))) index++;
+        var identifier = source.slice(start, index);
+        if (identifier === "true") token("literal", true, start);
+        else if (identifier === "false") token("literal", false, start);
+        else if (identifier === "null") token("literal", null, start);
+        else {
+          if (core.FORBIDDEN[identifier]) core.syntax("forbidden keyword \"" + identifier + "\"", source, start);
+          token("identifier", identifier, start);
+        }
+        continue;
+      }
+
+      var operator = source.slice(index, index + 3);
+      if (operator === "===" || operator === "!==") {
+        token("operator", operator, start);
+        index += 3;
+        continue;
+      }
+      operator = source.slice(index, index + 2);
+      if (["??", "&&", "||", "<=", ">=", "=>", "==", "!=", "?.", "++", "--"].indexOf(operator) >= 0) {
+        token("operator", operator, start);
+        index += 2;
+        continue;
+      }
+      if (["+=", "-=", "*=", "/=", "%=", "**", "<<", ">>"].indexOf(operator) >= 0) {
+        core.syntax("unsupported operator \"" + operator + "\"", source, start);
+      }
+      if ("+-*/%!?:.,()[]{}=;<>".indexOf(character) >= 0) {
+        token("operator", character, start);
+        index++;
+        continue;
+      }
+      core.syntax("unexpected character \"" + character + "\"", source, start);
+    }
+    token("end", "", source.length);
+    return tokens;
+  }
+
+  core.lex = lex;
+  core.phase = "lexer";
+})(document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "lexer") throw new Error("KitJS: parser loaded out of order");
+  if (core.reuse) { core.phase = "parser"; return; }
+
+  var NODE_LIMIT = 10000;
+  var NESTING_LIMIT = 64;
+
+  function parse(tokens, source, mode) {
+    var position = 0;
+    var nodes = 0;
+    var nesting = 0;
+    var action = mode === "action";
+
+    function current() { return tokens[position]; }
+    function look(offset) { return tokens[position + (offset || 0)]; }
+    function is(value) { return current().type === "operator" && current().value === value; }
+    function take(value) { if (!is(value)) return false; position++; return true; }
+    function expect(value) {
+      if (!take(value)) core.syntax("expected \"" + value + "\"", source, current().position);
+    }
+    function make(type, fields) {
+      if (++nodes > NODE_LIMIT) core.syntax("expression is too large", source, current().position);
+      fields = fields || {};
+      fields.type = type;
+      return fields;
+    }
+    function nested(read) {
+      if (++nesting > NESTING_LIMIT) core.syntax("expression nesting is too deep", source, current().position);
+      try { return read(); } finally { nesting--; }
+    }
+    function safeName(name, at) {
+      if (core.blocked(name)) core.syntax("blocked name \"" + name + "\"", source, at);
+      return name;
+    }
+
+    function assignment() {
+      var left = conditional();
+      if (!take("=")) return left;
+      if (!action) core.syntax("assignment is only allowed in actions", source, current().position);
+      if (left.type !== "identifier") core.syntax("assignment target must be a component field", source, current().position);
+      if (left.name.charAt(0) === "$") core.syntax("the $ namespace is read-only", source, current().position);
+      return make("assign", { name: left.name, value: nested(assignment) });
+    }
+    function conditional() {
+      var condition = coalesce();
+      if (!take("?")) return condition;
+      var yes = nested(assignment);
+      expect(":");
+      return make("conditional", { condition: condition, yes: yes, no: nested(assignment) });
+    }
+    function coalesce() {
+      var left = logicalOr();
+      while (take("??")) {
+        if (left.type === "logical") core.syntax("parentheses are required when mixing ?? with && or ||", source, current().position);
+        var right = logicalOr();
+        if (right.type === "logical") core.syntax("parentheses are required when mixing ?? with && or ||", source, current().position);
+        left = make("coalesce", { left: left, right: right });
+      }
+      return left;
+    }
+    function logicalOr() {
+      var left = logicalAnd();
+      while (take("||")) left = make("logical", { operator: "||", left: left, right: logicalAnd() });
+      return left;
+    }
+    function logicalAnd() {
+      var left = equality();
+      while (take("&&")) left = make("logical", { operator: "&&", left: left, right: equality() });
+      return left;
+    }
+    function equality() {
+      var left = relation();
+      while (["==", "!=", "===", "!=="].indexOf(current().value) >= 0) {
+        var operator = current().value;
+        position++;
+        left = make("binary", { operator: operator, left: left, right: relation() });
+      }
+      return left;
+    }
+    function relation() {
+      var left = addition();
+      while (["<", "<=", ">", ">="].indexOf(current().value) >= 0) {
+        var operator = current().value;
+        position++;
+        left = make("binary", { operator: operator, left: left, right: addition() });
+      }
+      return left;
+    }
+    function addition() {
+      var left = multiplication();
+      while (is("+") || is("-")) {
+        var operator = current().value;
+        position++;
+        left = make("binary", { operator: operator, left: left, right: multiplication() });
+      }
+      return left;
+    }
+    function multiplication() {
+      var left = unary();
+      while (is("*") || is("/") || is("%")) {
+        var operator = current().value;
+        position++;
+        left = make("binary", { operator: operator, left: left, right: unary() });
+      }
+      return left;
+    }
+    function updateTarget(value, at) {
+      if (!action) core.syntax("update is only allowed in actions", source, at);
+      if (value.type !== "identifier") {
+        core.syntax("update target must be a direct writable identifier", source, at);
+      }
+      if (value.name.charAt(0) === "$") core.syntax("the $ namespace is read-only", source, at);
+      return value.name;
+    }
+    function unary() {
+      if (is("++") || is("--")) {
+        var update = current();
+        position++;
+        var target = nested(unary);
+        return make("update", {
+          name: updateTarget(target, update.position),
+          operator: update.value,
+          prefix: true
+        });
+      }
+      if (is("!") || is("-") || is("+")) {
+        var operator = current().value;
+        position++;
+        return make("unary", { operator: operator, value: nested(unary) });
+      }
+      return postfix();
+    }
+    function argumentsList() {
+      var args = [];
+      if (!is(")")) {
+        do {
+          if (is(")")) core.syntax("calls reject a trailing comma", source, current().position);
+          args.push(assignment());
+        } while (take(","));
+      }
+      expect(")");
+      return args;
+    }
+    function postfix() {
+      var value = primary();
+      var chain = false;
+      while (true) {
+        if (take(".")) {
+          if (current().type !== "identifier") core.syntax("expected a member name", source, current().position);
+          value = make("member", {
+            object: value,
+            property: safeName(current().value, current().position),
+            computed: false,
+            optional: false
+          });
+          position++;
+        } else if (take("[")) {
+          var key = nested(assignment);
+          expect("]");
+          if (key.type === "literal" && core.blocked(String(key.value))) {
+            core.syntax("blocked member \"" + key.value + "\"", source, current().position);
+          }
+          value = make("member", {
+            object: value,
+            property: key,
+            computed: true,
+            optional: false
+          });
+        } else if (take("?.")) {
+          chain = true;
+          if (current().type === "identifier") {
+            value = make("member", {
+              object: value,
+              property: safeName(current().value, current().position),
+              computed: false,
+              optional: true
+            });
+            position++;
+          } else if (take("[")) {
+            var optionalKey = nested(assignment);
+            expect("]");
+            if (optionalKey.type === "literal" && core.blocked(String(optionalKey.value))) {
+              core.syntax("blocked member \"" + optionalKey.value + "\"", source, current().position);
+            }
+            value = make("member", {
+              object: value,
+              property: optionalKey,
+              computed: true,
+              optional: true
+            });
+          } else if (take("(")) {
+            value = make("call", {
+              callee: value,
+              args: nested(argumentsList),
+              optional: true
+            });
+          } else {
+            core.syntax("expected a member name, computed member, or call after optional chain", source, current().position);
+          }
+        } else if (take("(")) {
+          value = make("call", {
+            callee: value,
+            args: nested(argumentsList),
+            optional: false
+          });
+        } else if (is("++") || is("--")) {
+          var postfixUpdate = current();
+          position++;
+          value = make("update", {
+            name: updateTarget(value, postfixUpdate.position),
+            operator: postfixUpdate.value,
+            prefix: false
+          });
+          break;
+        } else break;
+      }
+      return chain ? make("chain", { value: value }) : value;
+    }
+    function arrowParameters() {
+      var saved = position;
+      if (!take("(")) return null;
+      var params = [];
+      var seen = Object.create(null);
+      if (!take(")")) {
+        while (true) {
+          if (current().type !== "identifier") { position = saved; return null; }
+          var name = safeName(current().value, current().position);
+          if (name.charAt(0) === "$") core.syntax("lambda parameters cannot use the $ namespace", source, current().position);
+          if (seen[name]) core.syntax("duplicate lambda parameter \"" + name + "\"", source, current().position);
+          seen[name] = true;
+          params.push(name);
+          position++;
+          if (!take(",")) break;
+          if (is(")")) core.syntax("lambdas reject a trailing comma", source, current().position);
+        }
+        if (!take(")")) { position = saved; return null; }
+      }
+      if (!take("=>")) { position = saved; return null; }
+      return params;
+    }
+    function primary() {
+      var token = current();
+      if (token.type === "literal") {
+        position++;
+        return make("literal", { value: token.value });
+      }
+      if (token.type === "identifier") {
+        position++;
+        var name = safeName(token.value, token.position);
+        if (!action && name.charAt(0) === "$" && name !== "$app") {
+          core.syntax("the $ namespace is action-only", source, token.position);
+        }
+        return make("identifier", { name: name });
+      }
+      if (is("(")) {
+        var params = arrowParameters();
+        if (params) return make("lambda", { params: params, body: nested(assignment) });
+        expect("(");
+        var grouped = nested(assignment);
+        expect(")");
+        return make("group", { value: grouped });
+      }
+      if (take("[")) {
+        var items = [];
+        if (!is("]")) {
+          while (true) {
+            items.push(nested(assignment));
+            if (!take(",")) break;
+            if (is("]")) core.syntax("arrays reject a trailing comma", source, current().position);
+          }
+        }
+        expect("]");
+        return make("array", { items: items });
+      }
+      if (take("{")) {
+        var entries = [];
+        while (!is("}")) {
+          var key = current();
+          if (key.type !== "identifier" &&
+            !(key.type === "literal" && typeof key.value === "string")) {
+            core.syntax("expected an object key", source, key.position);
+          }
+          position++;
+          var keyName = safeName(String(key.value), key.position);
+          expect(":");
+          entries.push({ key: keyName, value: nested(assignment) });
+          if (!take(",")) break;
+          if (is("}")) break;
+        }
+        expect("}");
+        return make("object", { entries: entries });
+      }
+      core.syntax("expected an expression", source, token.position);
+    }
+
+    var output = assignment();
+    if (take(";")) {
+      if (!action) core.syntax("sequences are only allowed in actions", source, current().position);
+      var expressions = [output];
+      while (current().type !== "end") {
+        expressions.push(assignment());
+        if (!take(";")) break;
+      }
+      output = make("sequence", { expressions: expressions });
+    }
+    if (current().type !== "end") core.syntax("unexpected token \"" + current().value + "\"", source, current().position);
+    return output;
+  }
+
+  core.parse = parse;
+  core.phase = "parser";
+})(document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "parser") throw new Error("KitJS: evaluator loaded out of order");
+  if (core.reuse) { core.phase = "evaluator"; return; }
+
+  var NODE_LIMIT = 10000;
+  var CALL_LIMIT = 64;
+  var OWN = core.OWN;
+  var lambdas = new WeakMap();
+  var aliasRefs = new WeakMap();
+  var CHAIN_SKIP = Object.freeze(Object.create(null));
+  var activeOwnership = null;
+  var activeInvocation = null;
+
+  function serviceCapability(value) {
+    var services = activeOwnership && activeOwnership.services;
+    return services && value && (typeof value === "object" || typeof value === "function") ?
+      services.get(value) || null : null;
+  }
+  function markServiceCapability(value, name, owner) {
+    if (!activeOwnership || !activeOwnership.services || !value) {
+      throw new TypeError("KitJS: app services are action-only");
+    }
+    activeOwnership.services.set(value, { name: name, owner: owner });
+    return value;
+  }
+  function serviceName(value) {
+    return typeof core.serviceName === "function" ? core.serviceName(value) : null;
+  }
+  function rejectServiceValue(value) {
+    if (serviceCapability(value) || serviceName(value)) {
+      throw new TypeError("KitJS: app service namespaces cannot be used as expression values");
+    }
+    return value;
+  }
+
+  function aliasReference(name) {
+    var reference = Object.freeze(Object.create(null));
+    aliasRefs.set(reference, name);
+    return reference;
+  }
+  function markResultOwner(value, owner, replace) {
+    var owners = activeOwnership && activeOwnership.owners;
+    if (owners && owner && value && (typeof value === "object" || typeof value === "function") &&
+      (replace || !owners.has(value))) {
+      owners.set(value, { owner: owner, stamp: ++activeOwnership.stamp });
+    }
+    return value;
+  }
+  function resultOwner(value) {
+    var owners = activeOwnership && activeOwnership.owners;
+    return owners && value && (typeof value === "object" || typeof value === "function") ?
+      (owners.get(value) || {}).owner || null : null;
+  }
+  function markCallResult(value, owner, startedAt) {
+    var owners = activeOwnership && activeOwnership.owners;
+    var current = owners && value && (typeof value === "object" || typeof value === "function") ?
+      owners.get(value) : null;
+    return current && current.stamp > startedAt ? value : markResultOwner(value, owner, true);
+  }
+  function takeResultOwner(value, fallback) {
+    var owners = activeOwnership && activeOwnership.owners;
+    if (!value || typeof value !== "object" && typeof value !== "function" ||
+      !owners || !owners.has(value)) return fallback || null;
+    var owner = owners.get(value).owner;
+    owners.delete(value);
+    return owner && !owner.disposed ? owner : null;
+  }
+
+  function requireField(scope, name) {
+    if (core.blocked(name) || !OWN.call(scope, name)) {
+      throw new ReferenceError("KitJS: unknown component field \"" + name + "\"");
+    }
+  }
+  function requireWritableData(scope, name) {
+    requireField(scope, name);
+    var descriptor = Object.getOwnPropertyDescriptor(scope, name);
+    if (!descriptor || !OWN.call(descriptor, "value") || !descriptor.writable) {
+      throw new TypeError("KitJS: component field \"" + name + "\" is read-only");
+    }
+  }
+  function directResolver(scope) {
+    return {
+      parent: null,
+      scope: scope,
+      owner: core.scopeRecords.get(scope) || null,
+      mode: "binding",
+      thisValue: scope,
+      get: function (name) {
+        requireField(scope, name);
+        return Reflect.get(scope, name, scope);
+      },
+      set: function (name, value) {
+        requireWritableData(scope, name);
+        if (!Reflect.set(scope, name, value, scope)) {
+          throw new TypeError("KitJS: component field \"" + name + "\" is read-only");
+        }
+        return value;
+      }
+    };
+  }
+  function actionResolver(scope) {
+    var writes = Object.create(null);
+    var order = [];
+    var aliases = new Map();
+    var status = "active";
+    var proxy;
+
+    function read(name) {
+      if (!OWN.call(scope, name)) {
+        if (name.charAt(0) === "$" && core.validAlias && core.validAlias(name)) {
+          return aliasReference(name);
+        }
+        requireField(scope, name);
+      }
+      if (status === "active" && OWN.call(writes, name)) return writes[name];
+      return Reflect.get(scope, name, proxy);
+    }
+    function write(name, value) {
+      rejectServiceValue(value);
+      requireWritableData(scope, name);
+      if (status === "aborted") throw new Error("KitJS: action transaction is no longer active");
+      if (status !== "active") {
+        if (!Reflect.set(scope, name, value, scope)) throw new TypeError("KitJS: component field is read-only");
+        return value;
+      }
+      if (!OWN.call(writes, name)) order.push(name);
+      writes[name] = value;
+      return value;
+    }
+    function writeFromMethod(name, value) {
+      rejectServiceValue(value);
+      requireField(scope, name);
+      var descriptor = Object.getOwnPropertyDescriptor(scope, name);
+      if (descriptor && !OWN.call(descriptor, "value") && descriptor.set) {
+        if (!Reflect.set(scope, name, value, scope)) {
+          throw new TypeError("KitJS: component field \"" + name + "\" is read-only");
+        }
+        return value;
+      }
+      return write(name, value);
+    }
+    proxy = new Proxy(scope, {
+      get: function (_, name) {
+        if (typeof name === "symbol") return Reflect.get(scope, name, scope);
+        return read(String(name));
+      },
+      set: function (_, name, value) {
+        if (typeof name === "symbol") return false;
+        writeFromMethod(String(name), value);
+        return true;
+      },
+      deleteProperty: function () { return false; }
+    });
+    return {
+      parent: null,
+      scope: scope,
+      owner: core.scopeRecords.get(scope) || null,
+      mode: "action",
+      thisValue: proxy,
+      get: read,
+      set: write,
+      resolveAliasRecord: function (name) {
+        if (aliases.has(name)) return aliases.get(name);
+        var current = core.resolveAlias(name);
+        aliases.set(name, current);
+        return current;
+      },
+      resolveAlias: function (name) {
+        return this.resolveAliasRecord(name).scope;
+      },
+      resolveAppService: function (alias, service) {
+        var current = this.resolveAliasRecord(alias);
+        var namespace = core.resolveAppService && core.resolveAppService(alias, current, service);
+        return namespace === undefined ? undefined : markServiceCapability(namespace, service, current);
+      },
+      commit: function () {
+        if (status !== "active") return;
+        status = "committed";
+        try {
+          order.forEach(function (name) {
+            if (!Reflect.set(scope, name, writes[name], scope)) {
+              throw new TypeError("KitJS: component field \"" + name + "\" is read-only");
+            }
+          });
+        } finally {
+          writes = Object.create(null);
+          order.length = 0;
+          aliases.clear();
+        }
+      },
+      abort: function () {
+        if (status !== "active") return;
+        status = "aborted";
+        writes = Object.create(null);
+        order.length = 0;
+        aliases.clear();
+      }
+    };
+  }
+
+  function localResolver(parent, locals) {
+    return {
+      kind: "local",
+      parent: parent,
+      locals: locals,
+      thisValue: parent.thisValue,
+      get: function (name) {
+        return OWN.call(locals, name) ? locals[name] : parent.get(name);
+      },
+      set: function (name, value) {
+        if (OWN.call(locals, name)) { locals[name] = value; return value; }
+        return parent.set(name, value);
+      }
+    };
+  }
+  function contextResolver(parent, locals) {
+    return {
+      kind: "context",
+      parent: parent,
+      locals: locals,
+      thisValue: parent.thisValue,
+      get: function (name) {
+        return OWN.call(locals, name) ? locals[name] : parent.get(name);
+      },
+      set: function (name, value) {
+        if (OWN.call(locals, name)) {
+          throw new TypeError("KitJS: event context \"" + name + "\" is read-only");
+        }
+        return parent.set(name, value);
+      }
+    };
+  }
+  function childResolver(parent, params, args) {
+    var locals = Object.create(null);
+    params.forEach(function (name, index) { locals[name] = args[index]; });
+    return localResolver(parent, locals);
+  }
+  function rootOf(resolver) {
+    while (resolver.parent) resolver = resolver.parent;
+    return resolver;
+  }
+  function rebaseResolver(captured, root) {
+    if (!captured.parent) return root;
+    var parent = rebaseResolver(captured.parent, root);
+    return captured.kind === "context" ? contextResolver(parent, captured.locals) :
+      localResolver(parent, captured.locals);
+  }
+  function captureLayers(resolver, owner) {
+    if (!owner) return null;
+    var layers = [];
+    while (resolver.parent) {
+      var token = {};
+      owner.captures.set(token, resolver.locals);
+      layers.push({ kind: resolver.kind, token: token });
+      resolver = resolver.parent;
+    }
+    return layers;
+  }
+  function restoreLayers(record, root) {
+    var resolver = root;
+    for (var index = record.layers.length - 1; index >= 0; index--) {
+      var layer = record.layers[index];
+      var locals = record.owner.captures && record.owner.captures.get(layer.token);
+      if (!locals) return null;
+      resolver = layer.kind === "context" ? contextResolver(resolver, locals) :
+        localResolver(resolver, locals);
+    }
+    return resolver;
+  }
+
+  function resolveAliasValue(value, resolver) {
+    var name = value && aliasRefs.get(value);
+    if (!name) return value;
+    var root = rootOf(resolver);
+    if (!root.resolveAlias) throw new ReferenceError("KitJS: aliases are action-only");
+    return root.resolveAlias(name);
+  }
+
+  function member(owner, key, resolver, computed, optional, allowAppProjection) {
+    var inheritedOwner = resultOwner(owner);
+    var alias = owner && aliasRefs.get(owner);
+    key = core.memberKey(key);
+    if (key === core.INVALID_MEMBER) throw new TypeError("KitJS: invalid or blocked member key");
+    var root = rootOf(resolver);
+    if (alias && allowAppProjection && !computed && !optional && root.resolveAppService) {
+      var projected = root.resolveAppService(alias, key);
+      if (projected !== undefined) return projected;
+      var appGrants = core.graph && core.graph.grants && core.graph.grants.app;
+      if (alias === "$app" && appGrants && OWN.call(appGrants, key)) {
+        throw new TypeError("KitJS: app service namespace is unavailable for this component");
+      }
+    }
+    owner = resolveAliasValue(owner, resolver);
+    var resolvedOwner = alias ? core.scopeRecords.get(owner) : inheritedOwner;
+    if (root.mode !== "action") resolvedOwner = null;
+    if (owner === null || owner === undefined) {
+      throw new TypeError("KitJS: cannot read a member of a nullish value");
+    }
+    if (serviceCapability(owner) || serviceName(owner)) {
+      throw new TypeError("KitJS: app service methods must be called directly");
+    }
+    if (typeof owner === "string") {
+      if (key === "length") return owner.length;
+      if (/^(?:0|[1-9][0-9]*)$/.test(key)) return owner[Number(key)];
+      return undefined;
+    }
+    if (Array.isArray(owner)) {
+      if (key === "length") return owner.length;
+      return OWN.call(owner, key) ? owner[key] : undefined;
+    }
+    if ((typeof owner === "object" || typeof owner === "function") && OWN.call(owner, key)) {
+      return markResultOwner(owner[key], resolvedOwner, true);
+    }
+    return undefined;
+  }
+
+  function hasMethod(receiver, name) {
+    if (typeof receiver === "string") {
+      return ["includes", "startsWith", "endsWith", "trim", "toLowerCase", "toUpperCase"].indexOf(name) >= 0;
+    }
+    if (typeof receiver === "number") return name === "toFixed";
+    if (Array.isArray(receiver)) {
+      return ["join", "includes", "indexOf", "slice", "map", "filter", "find", "some", "every"].indexOf(name) >= 0;
+    }
+    return (typeof receiver === "object" || typeof receiver === "function") &&
+      OWN.call(receiver, name) && typeof receiver[name] === "function";
+  }
+  function method(receiver, name, args) {
+    if (typeof receiver === "string") {
+      if (name === "includes" && args.length === 1) return receiver.includes(String(args[0]));
+      if (name === "startsWith" && args.length === 1) return receiver.startsWith(String(args[0]));
+      if (name === "endsWith" && args.length === 1) return receiver.endsWith(String(args[0]));
+      if (name === "trim" && args.length === 0) return receiver.trim();
+      if (name === "toLowerCase" && args.length === 0) return receiver.toLowerCase();
+      if (name === "toUpperCase" && args.length === 0) return receiver.toUpperCase();
+      return undefined;
+    }
+    if (typeof receiver === "number") {
+      return name === "toFixed" && args.length <= 1 ?
+        receiver.toFixed(args.length ? Number(args[0]) : 0) : undefined;
+    }
+    if (Array.isArray(receiver)) {
+      if (name === "join" && args.length <= 1) return receiver.join(args[0]);
+      if (name === "includes" && args.length === 1) return receiver.includes(args[0]);
+      if (name === "indexOf" && args.length === 1) return receiver.indexOf(args[0]);
+      if (name === "slice" && args.length <= 2) return receiver.slice.apply(receiver, args);
+      if (["map", "filter", "find", "some", "every"].indexOf(name) >= 0 &&
+        args.length === 1 && typeof args[0] === "function") {
+        return Array.prototype[name].call(receiver, args[0]);
+      }
+      return undefined;
+    }
+    return receiver[name].apply(receiver, args);
+  }
+
+  function makeLambda(record) {
+    return function () {
+      if (record.owner && (record.owner.disposed || !record.owner.host || !record.owner.host.isConnected)) {
+        return undefined;
+      }
+      var context = activeInvocation;
+      var startedAt = activeOwnership ? activeOwnership.stamp : 0;
+      var activeBudget = context ? context.budget : { nodes: 0, depth: 0 };
+      var activeRoot = context && rootOf(context.resolver);
+      var sameOwner = activeRoot && record.owner && activeRoot.owner === record.owner;
+      var scope = record.owner ? record.owner.scope : record.scope;
+      if (!scope) return undefined;
+      var root = sameOwner ? activeRoot : record.mode === "action" ?
+        actionResolver(scope) : directResolver(scope);
+      var parent = record.owner ? restoreLayers(record, root) : rebaseResolver(record.resolver, root);
+      if (!parent) return undefined;
+      try {
+        var result = evaluate(record.ast.body,
+          childResolver(parent, record.ast.params, arguments), activeBudget);
+        if (!sameOwner && root.commit) root.commit();
+        return record.mode === "action" ?
+          markCallResult(result, record.owner || root.owner, startedAt) : result;
+      } catch (error) {
+        if (!sameOwner && root.abort) root.abort();
+        throw error;
+      }
+    };
+  }
+
+  function callTarget(ast) {
+    var grouped = false;
+    while (ast.type === "group") { grouped = true; ast = ast.value; }
+    if (grouped && ast.type === "chain" && ast.value.type === "member") {
+      return { value: ast.value, closedChain: true };
+    }
+    return { value: ast, closedChain: false };
+  }
+
+  function appLoaderLeaf(ast) {
+    if (!ast || ast.type !== "member" || ast.computed || ast.optional ||
+      ast.property !== "visible" && ast.property !== "value") return null;
+    var loader = ast.object;
+    if (!loader || loader.type !== "member" || loader.computed || loader.optional ||
+      loader.property !== "loader" || !loader.object || loader.object.type !== "identifier" ||
+      loader.object.name !== "$app") return null;
+    return ast.property;
+  }
+
+  function evaluate(ast, resolver, budget) {
+    if (++budget.nodes > NODE_LIMIT) throw new Error("KitJS: expression budget exceeded");
+    var type = ast.type;
+    if (type === "literal") return ast.value;
+    if (type === "identifier") return resolver.get(ast.name);
+    if (type === "group") return evaluate(ast.value, resolver, budget);
+    if (type === "array") {
+      return ast.items.map(function (item) {
+        return rejectServiceValue(evaluate(item, resolver, budget));
+      });
+    }
+    if (type === "object") {
+      var object = Object.create(null);
+      ast.entries.forEach(function (entry) {
+        if (core.blocked(entry.key)) throw new TypeError("KitJS: blocked object key");
+        object[entry.key] = rejectServiceValue(evaluate(entry.value, resolver, budget));
+      });
+      return object;
+    }
+    if (type === "lambda") {
+      var capturedRoot = rootOf(resolver);
+      var record = {
+        ast: ast,
+        owner: capturedRoot.owner,
+        mode: capturedRoot.mode,
+        layers: captureLayers(resolver, capturedRoot.owner),
+        resolver: capturedRoot.owner ? null : resolver,
+        scope: capturedRoot.owner ? null : capturedRoot.scope
+      };
+      var lambda = makeLambda(record);
+      lambdas.set(lambda, record);
+      return lambda;
+    }
+    if (type === "sequence") {
+      var sequence;
+      ast.expressions.forEach(function (expression) {
+        sequence = evaluate(expression, resolver, budget);
+      });
+      return sequence;
+    }
+    if (type === "assign") {
+      return resolver.set(ast.name, rejectServiceValue(evaluate(ast.value, resolver, budget)));
+    }
+    if (type === "update") {
+      var previous = resolver.get(ast.name);
+      var returned = ast.operator === "++" ? previous++ : previous--;
+      resolver.set(ast.name, previous);
+      return ast.prefix ? previous : returned;
+    }
+    if (type === "unary") {
+      var unary = rejectServiceValue(evaluate(ast.value, resolver, budget));
+      return ast.operator === "!" ? !unary : ast.operator === "-" ? -unary : +unary;
+    }
+    if (type === "logical") {
+      var logical = rejectServiceValue(evaluate(ast.left, resolver, budget));
+      return ast.operator === "&&" ?
+        (logical ? evaluate(ast.right, resolver, budget) : logical) :
+        (logical ? logical : evaluate(ast.right, resolver, budget));
+    }
+    if (type === "coalesce") {
+      var nullable = rejectServiceValue(evaluate(ast.left, resolver, budget));
+      return nullable === null || nullable === undefined ? evaluate(ast.right, resolver, budget) : nullable;
+    }
+    if (type === "conditional") {
+      return rejectServiceValue(evaluate(ast.condition, resolver, budget)) ?
+        evaluate(ast.yes, resolver, budget) : evaluate(ast.no, resolver, budget);
+    }
+    if (type === "binary") {
+      var left = rejectServiceValue(evaluate(ast.left, resolver, budget));
+      var right = rejectServiceValue(evaluate(ast.right, resolver, budget));
+      if (ast.operator === "+") return left + right;
+      if (ast.operator === "-") return left - right;
+      if (ast.operator === "*") return left * right;
+      if (ast.operator === "/") return left / right;
+      if (ast.operator === "%") return left % right;
+      if (ast.operator === "<") return left < right;
+      if (ast.operator === "<=") return left <= right;
+      if (ast.operator === ">") return left > right;
+      if (ast.operator === ">=") return left >= right;
+      if (ast.operator === "==") return left == right;
+      if (ast.operator === "!=") return left != right;
+      if (ast.operator === "===") return left === right;
+      return left !== right;
+    }
+    if (type === "member") {
+      var bindingRoot = rootOf(resolver);
+      var loaderLeaf = bindingRoot.mode === "binding" ? appLoaderLeaf(ast) : null;
+      if (loaderLeaf) {
+        if (typeof core.resolveAppLoader !== "function") {
+          throw new ReferenceError("KitJS: $app.loader is unavailable");
+        }
+        return core.resolveAppLoader(bindingRoot.owner, loaderLeaf);
+      }
+      var owner = evaluate(ast.object, resolver, budget);
+      if (owner === CHAIN_SKIP) return CHAIN_SKIP;
+      if (owner === null || owner === undefined) {
+        if (ast.optional) return CHAIN_SKIP;
+        throw new TypeError("KitJS: cannot read a member of a nullish value");
+      }
+      var key = ast.computed ? evaluate(ast.property, resolver, budget) : ast.property;
+      return member(owner, key, resolver, ast.computed, ast.optional,
+        ast.object.type === "identifier" && ast.object.name === "$app");
+    }
+    if (type === "chain") {
+      var chain = evaluate(ast.value, resolver, budget);
+      return chain === CHAIN_SKIP ? undefined : chain;
+    }
+    if (type === "call") {
+      var receiver;
+      var callable;
+      var methodName;
+      var callOwner;
+      var callReference = callTarget(ast.callee);
+      var target = callReference.value;
+      var memberCall = target.type === "member";
+      var startedAt = activeOwnership ? activeOwnership.stamp : 0;
+      if (memberCall) {
+        receiver = evaluate(target.object, resolver, budget);
+        if (receiver === CHAIN_SKIP) {
+          if (!callReference.closedChain || ast.optional) return CHAIN_SKIP;
+          throw new TypeError("KitJS: value is not callable");
+        }
+        receiver = resolveAliasValue(receiver, resolver);
+        if (receiver === null || receiver === undefined) {
+          if (target.optional) {
+            if (!callReference.closedChain || ast.optional) return CHAIN_SKIP;
+            throw new TypeError("KitJS: value is not callable");
+          }
+          throw new TypeError("KitJS: cannot call a member of a nullish value");
+        }
+        methodName = target.computed ?
+          evaluate(target.property, resolver, budget) : target.property;
+        methodName = core.memberKey(methodName);
+        if (methodName === core.INVALID_MEMBER) throw new TypeError("KitJS: invalid or blocked member key");
+        var capability = serviceCapability(receiver);
+        var registeredService = serviceName(receiver);
+        if (registeredService && !capability) {
+          throw new TypeError("KitJS: service namespace is unavailable to authored HTML");
+        }
+        if (capability) {
+          if (target.computed || target.optional || callReference.closedChain || ast.optional ||
+            !core.graph.actions[capability.name][methodName]) {
+            throw new TypeError("KitJS: authored action \"" + capability.name + "." + methodName + "\" is not granted");
+          }
+        }
+        if (!hasMethod(receiver, methodName)) {
+          var methodValue = member(receiver, methodName, resolver);
+          if (ast.optional && (methodValue === null || methodValue === undefined)) return CHAIN_SKIP;
+          throw new TypeError("KitJS: member \"" + methodName + "\" is not callable");
+        }
+        callOwner = capability ? capability.owner :
+          resultOwner(receiver) || core.scopeRecords.get(receiver) || rootOf(resolver).owner;
+      } else {
+        callable = evaluate(ast.callee, resolver, budget);
+        if (callable === CHAIN_SKIP) return CHAIN_SKIP;
+        if (callable === null || callable === undefined) {
+          if (ast.optional) return CHAIN_SKIP;
+          throw new TypeError("KitJS: value is not callable");
+        }
+        if (typeof callable !== "function") throw new TypeError("KitJS: value is not callable");
+        callOwner = lambdas.has(callable) ? lambdas.get(callable).owner : rootOf(resolver).owner;
+      }
+      var args = ast.args.map(function (argument) {
+        return rejectServiceValue(evaluate(argument, resolver, budget));
+      });
+      if (++budget.depth > CALL_LIMIT) {
+        budget.depth--;
+        throw new Error("KitJS: expression call depth exceeded");
+      }
+      var previousInvocation = activeInvocation;
+      activeInvocation = { budget: budget, resolver: resolver };
+      try {
+        var result = memberCall ?
+          method(receiver, methodName, args) : callable.apply(resolver.thisValue, args);
+        return rootOf(resolver).mode === "action" ? markCallResult(result, callOwner, startedAt) : result;
+      } finally {
+        activeInvocation = previousInvocation;
+        budget.depth--;
+      }
+    }
+    throw new Error("KitJS: invalid private expression node");
+  }
+
+  function appServiceRoot(ast) {
+    if (!ast || ast.type !== "member" || !ast.object || ast.object.type !== "identifier" ||
+      ast.object.name !== "$app") return null;
+    var grants = core.graph && core.graph.grants && core.graph.grants.app;
+    if (!grants) return null;
+    if (!ast.computed) {
+      return OWN.call(grants, ast.property) ? { name: ast.property, direct: !ast.optional } : null;
+    }
+    if (!ast.property || ast.property.type !== "literal") return { name: "", direct: false };
+    var name = typeof ast.property.value === "string" ? ast.property.value : "";
+    return name && OWN.call(grants, name) ? { name: name, direct: false } : null;
+  }
+
+  function appServiceCommand(ast) {
+    if (!ast || ast.type !== "call" || ast.optional || !ast.callee || ast.callee.type !== "member" ||
+      ast.callee.computed || ast.callee.optional) return null;
+    var root = appServiceRoot(ast.callee.object);
+    if (!root || !root.direct) return null;
+    return { service: root.name, method: ast.callee.property, args: ast.args };
+  }
+
+  function ordinaryDirectAppMember(ast) {
+    if (!ast || ast.type !== "member" || ast.computed || ast.optional || !ast.object ||
+      ast.object.type !== "identifier" || ast.object.name !== "$app") return false;
+    var grants = core.graph && core.graph.grants && core.graph.grants.app;
+    return !grants || !OWN.call(grants, ast.property);
+  }
+
+  function validateAppLoaderBinding(ast, source, mode) {
+    function containsLoaderRoot(node) {
+      if (!node) return false;
+      if (node.type === "member") {
+        if (node.object && node.object.type === "identifier" && node.object.name === "$app" &&
+          (!node.computed && node.property === "loader" || node.computed && node.property &&
+            node.property.type === "literal" && node.property.value === "loader")) return true;
+        return containsLoaderRoot(node.object) || node.computed && containsLoaderRoot(node.property);
+      }
+      if (node.type === "group" || node.type === "unary" || node.type === "chain") {
+        return containsLoaderRoot(node.value);
+      }
+      if (node.type === "logical" || node.type === "coalesce" || node.type === "binary") {
+        return containsLoaderRoot(node.left) || containsLoaderRoot(node.right);
+      }
+      if (node.type === "conditional") {
+        return containsLoaderRoot(node.condition) || containsLoaderRoot(node.yes) ||
+          containsLoaderRoot(node.no);
+      }
+      if (node.type === "array") return node.items.some(containsLoaderRoot);
+      if (node.type === "object") {
+        return node.entries.some(function (entry) { return containsLoaderRoot(entry.value); });
+      }
+      if (node.type === "lambda") return containsLoaderRoot(node.body);
+      if (node.type === "assign") return containsLoaderRoot(node.value);
+      if (node.type === "sequence") return node.expressions.some(containsLoaderRoot);
+      if (node.type === "call") {
+        return containsLoaderRoot(node.callee) || node.args.some(containsLoaderRoot);
+      }
+      return false;
+    }
+    function invalid() {
+      core.syntax("$app bindings may only read loader.visible or loader.value", source, 0);
+    }
+    var loaderExpression = containsLoaderRoot(ast);
+    if (mode === "action") {
+      if (loaderExpression) invalid();
+      return;
+    }
+    function walk(node, allowLeaf) {
+      if (!node) return;
+      if (appLoaderLeaf(node)) {
+        if (!allowLeaf) invalid();
+        return;
+      }
+      if (node.type === "identifier") {
+        if (node.name === "$app") invalid();
+        return;
+      }
+      if (node.type === "literal") return;
+      if (node.type === "group" || node.type === "chain" || node.type === "call" ||
+        node.type === "array" || node.type === "object" || node.type === "lambda" ||
+        node.type === "assign" || node.type === "sequence" || node.type === "update") {
+        if (loaderExpression) invalid();
+      }
+      if (node.type === "unary") {
+        walk(node.value, true);
+        return;
+      }
+      if (node.type === "logical" || node.type === "coalesce" || node.type === "binary") {
+        walk(node.left, true);
+        walk(node.right, true);
+        return;
+      }
+      if (node.type === "conditional") {
+        walk(node.condition, true);
+        walk(node.yes, true);
+        walk(node.no, true);
+        return;
+      }
+      if (node.type === "group" || node.type === "chain") {
+        walk(node.value, false);
+        return;
+      }
+      if (node.type === "array") {
+        node.items.forEach(function (item) { walk(item, false); });
+        return;
+      }
+      if (node.type === "object") {
+        node.entries.forEach(function (entry) { walk(entry.value, false); });
+        return;
+      }
+      if (node.type === "lambda") {
+        walk(node.body, false);
+        return;
+      }
+      if (node.type === "assign") {
+        walk(node.value, false);
+        return;
+      }
+      if (node.type === "sequence") {
+        node.expressions.forEach(function (expression) { walk(expression, false); });
+        return;
+      }
+      if (node.type === "member") {
+        if (loaderExpression && node.computed) invalid();
+        if (node.object && node.object.type === "identifier" && node.object.name === "$app" &&
+          !node.computed && node.property === "loader") invalid();
+        walk(node.object, false);
+        if (node.computed) walk(node.property, false);
+        return;
+      }
+      if (node.type === "call") {
+        walk(node.callee, false);
+        node.args.forEach(function (argument) { walk(argument, false); });
+      }
+    }
+    walk(ast, true);
+  }
+
+  function validateAppServiceStructure(ast, source, mode) {
+    var grants = core.graph && core.graph.grants && core.graph.grants.app;
+    if (!grants || !Object.keys(grants).length) return;
+
+    function invalid(message) { core.syntax(message, source, 0); }
+    function walk(node, commandPosition) {
+      if (!node) return;
+      var command = appServiceCommand(node);
+      if (command) {
+        if (mode !== "action" || !commandPosition) {
+          invalid("app service commands must be top-level action statements");
+        }
+        if (!core.graph.actions[command.service][command.method]) {
+          invalid("app service method \"" + command.service + "." + command.method + "\" is not granted");
+        }
+        command.args.forEach(function (argument) { walk(argument, false); });
+        return;
+      }
+      if (appServiceRoot(node)) {
+        invalid("app service namespaces may only be used in static command calls");
+      }
+      if (node.type === "identifier") {
+        if (node.name === "$app") invalid("the $app alias may only name a static service command");
+        return;
+      }
+      if (node.type === "literal" || node.type === "update") return;
+      if (node.type === "group" || node.type === "unary" || node.type === "chain") {
+        walk(node.value, false);
+        return;
+      }
+      if (node.type === "array") {
+        node.items.forEach(function (item) { walk(item, false); });
+        return;
+      }
+      if (node.type === "object") {
+        node.entries.forEach(function (entry) { walk(entry.value, false); });
+        return;
+      }
+      if (node.type === "lambda") {
+        walk(node.body, false);
+        return;
+      }
+      if (node.type === "assign") {
+        walk(node.value, false);
+        return;
+      }
+      if (node.type === "logical" || node.type === "coalesce" || node.type === "binary") {
+        walk(node.left, false);
+        walk(node.right, false);
+        return;
+      }
+      if (node.type === "conditional") {
+        walk(node.condition, false);
+        walk(node.yes, false);
+        walk(node.no, false);
+        return;
+      }
+      if (node.type === "member") {
+        if (ordinaryDirectAppMember(node)) return;
+        walk(node.object, false);
+        if (node.computed) walk(node.property, false);
+        return;
+      }
+      if (node.type === "call") {
+        if (!ordinaryDirectAppMember(node.callee)) walk(node.callee, false);
+        node.args.forEach(function (argument) { walk(argument, false); });
+      }
+    }
+
+    if (ast.type === "sequence") {
+      ast.expressions.forEach(function (expression) { walk(expression, true); });
+    } else walk(ast, true);
+  }
+
+  function compile(source, mode) {
+    source = typeof source === "string" ? source.trim() : "";
+    mode = mode === "action" ? "action" : "binding";
+    var key = mode + "\u0000" + source;
+    if (core.compiled.has(key)) return core.compiled.get(key);
+    if (!source) core.syntax("empty expression", source, 0);
+    var ast = core.parse(core.lex(source), source, mode);
+    validateAppLoaderBinding(ast, source, mode);
+    validateAppServiceStructure(ast, source, mode);
+    var read = function (scope, locals, observeResult) {
+      var root = mode === "action" ? actionResolver(scope) : directResolver(scope);
+      var resolver = locals ? contextResolver(root, locals) : root;
+      var results = [];
+      var previousOwnership = activeOwnership;
+      if (mode === "action") activeOwnership = { owners: new WeakMap(), services: new WeakMap(), stamp: 0 };
+      function publish() {
+        if (mode !== "action" || typeof observeResult !== "function") return;
+        var grouped = new Map();
+        results.forEach(function (entry) {
+          var owners = grouped.get(entry.value);
+          if (!owners) {
+            owners = [];
+            grouped.set(entry.value, owners);
+          }
+          if (entry.owner && owners.indexOf(entry.owner) < 0) owners.push(entry.owner);
+        });
+        grouped.forEach(function (owners, value) { observeResult(value, owners); });
+        results.length = 0;
+      }
+      function capture(value) {
+        rejectServiceValue(value);
+        results.push({ value: value, owner: takeResultOwner(value, root.owner) });
+      }
+      try {
+        var budget = { nodes: 0, depth: 0 };
+        var result;
+        if (mode === "action" && ast.type === "sequence") {
+          ast.expressions.forEach(function (expression) {
+            result = evaluate(expression, resolver, budget);
+            capture(result);
+          });
+        } else {
+          result = evaluate(ast, resolver, budget);
+          if (mode === "action") capture(result);
+        }
+        if (root.commit) root.commit();
+        publish();
+        return result;
+      } catch (error) {
+        if (root.abort) root.abort();
+        publish();
+        throw error;
+      } finally {
+        activeOwnership = previousOwnership;
+      }
+    };
+    if (core.compiled.size >= core.cacheLimit) {
+      core.compiled.delete(core.compiled.keys().next().value);
+    }
+    core.compiled.set(key, read);
+    return read;
+  }
+
+  core.compile = compile;
+  core.phase = "evaluator";
+})(document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "evaluator") throw new Error("KitJS: scope loaded out of order");
+  if (core.reuse) { core.phase = "scope"; return; }
+
+  var SOURCE_LIMIT = 16384;
+  var DEPTH_LIMIT = 32;
+  var NODE_LIMIT = 1024;
+  var IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  var VALUE_WORDS = Object.create(null);
+  VALUE_WORDS.true = VALUE_WORDS.false = VALUE_WORDS.null = true;
+  var PROTOTYPE_KEYS = Object.create(null);
+  ("constructor prototype __proto__ __defineGetter__ __defineSetter__ " +
+    "__lookupGetter__ __lookupSetter__").split(" ").forEach(function (name) {
+      PROTOTYPE_KEYS[name] = true;
+    });
+  var metadata = new WeakMap();
+  var MOUNTED = Object.freeze(Object.create(null));
+
+  function parseScope(source) {
+    source = typeof source === "string" ? source : "";
+    if (source.length > SOURCE_LIMIT) {
+      throw new RangeError("KitJS: data-kit-scope exceeds " + SOURCE_LIMIT + " UTF-16 code units");
+    }
+
+    var index = 0;
+    var nodes = 0;
+
+    function syntax(message, at) { core.syntax(message, source, at === undefined ? index : at); }
+    function space(character) {
+      return character === " " || character === "\t" || character === "\n" ||
+        character === "\r" || character === "\f";
+    }
+    function skip() { while (space(source.charAt(index))) index++; }
+    function count(value) {
+      if (++nodes > NODE_LIMIT) {
+        throw new RangeError("KitJS: data-kit-scope exceeds " + NODE_LIMIT + " data nodes");
+      }
+      return value;
+    }
+    function depth(level) {
+      if (level > DEPTH_LIMIT) {
+        throw new RangeError("KitJS: data-kit-scope exceeds " + DEPTH_LIMIT + " data levels");
+      }
+    }
+    function hexadecimal(character) {
+      return character >= "0" && character <= "9" || character >= "a" && character <= "f" ||
+        character >= "A" && character <= "F";
+    }
+
+    function stringValue() {
+      var start = index;
+      var quote = source.charAt(index++);
+      var output = "";
+      function appendCodeUnit(unit, at) {
+        if (unit >= 0xDC00 && unit <= 0xDFFF) syntax("lone UTF-16 low surrogate", at);
+        if (unit < 0xD800 || unit > 0xDBFF) {
+          output += String.fromCharCode(unit);
+          return;
+        }
+        var low;
+        if (source.charAt(index) === "\\") {
+          if (source.charAt(index + 1) !== "u") syntax("invalid UTF-16 surrogate pair", at);
+          var lowHex = source.slice(index + 2, index + 6);
+          if (lowHex.length !== 4 || !Array.prototype.every.call(lowHex, hexadecimal)) {
+            syntax("invalid UTF-16 surrogate pair", at);
+          }
+          low = parseInt(lowHex, 16);
+          if (low < 0xDC00 || low > 0xDFFF) syntax("invalid UTF-16 surrogate pair", at);
+          index += 6;
+        } else {
+          low = source.charCodeAt(index);
+          if (low < 0xDC00 || low > 0xDFFF) syntax("invalid UTF-16 surrogate pair", at);
+          index++;
+        }
+        output += String.fromCharCode(unit, low);
+      }
+      while (index < source.length) {
+        var character = source.charAt(index++);
+        if (character === quote) return output;
+        if (character === "\\") {
+          if (index >= source.length) syntax("unfinished string", start);
+          var escaped = source.charAt(index++);
+          if (escaped === "u") {
+            var unicodeAt = index - 2;
+            var hexadecimalValue = source.slice(index, index + 4);
+            if (hexadecimalValue.length !== 4 || !Array.prototype.every.call(hexadecimalValue, hexadecimal)) {
+              syntax("invalid unicode string escape", unicodeAt);
+            }
+            index += 4;
+            appendCodeUnit(parseInt(hexadecimalValue, 16), unicodeAt);
+          } else if (escaped === "n") output += "\n";
+          else if (escaped === "r") output += "\r";
+          else if (escaped === "t") output += "\t";
+          else if (escaped === "b") output += "\b";
+          else if (escaped === "f") output += "\f";
+          else if (escaped === "\\" || escaped === "/" || escaped === '"' || escaped === "'") {
+            output += escaped;
+          } else syntax("unsupported string escape \\" + escaped, index - 2);
+          continue;
+        }
+        var unit = character.charCodeAt(0);
+        if (unit < 32) syntax("unescaped control character in string", index - 1);
+        appendCodeUnit(unit, index - 1);
+      }
+      syntax("unfinished string", start);
+    }
+
+    function name() {
+      skip();
+      var start = index;
+      var character = source.charAt(index);
+      var output;
+      if (character === '"' || character === "'") output = stringValue();
+      else {
+        if (!/[A-Za-z_$]/.test(character)) syntax("expected a scope field name", start);
+        index++;
+        while (/[A-Za-z0-9_$]/.test(source.charAt(index))) index++;
+        output = source.slice(start, index);
+      }
+      if (!IDENTIFIER.test(output) || VALUE_WORDS[output] || core.FORBIDDEN[output] || core.blocked(output)) {
+        syntax("invalid scope field \"" + output + "\"", start);
+      }
+      return output;
+    }
+
+    function objectKey(topLevel) {
+      skip();
+      var start = index;
+      var character = source.charAt(index);
+      if (topLevel || character !== '"' && character !== "'") return name();
+      var output = stringValue();
+      if (PROTOTYPE_KEYS[output]) syntax("blocked object key \"" + output + "\"", start);
+      return output;
+    }
+
+    function numberValue() {
+      var start = index;
+      var match = /^[+-]?(?:(?:0|[1-9][0-9]*)(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/.exec(source.slice(index));
+      if (!match) syntax("invalid number", start);
+      index += match[0].length;
+      var output = Number(match[0]);
+      if (!Number.isFinite(output)) syntax("number is outside the supported range", start);
+      return output;
+    }
+
+    function objectValue(level, requireEntry, topLevel) {
+      depth(level);
+      var output = count(Object.create(null));
+      var seen = Object.create(null);
+      index++;
+      skip();
+      if (source.charAt(index) === "}") {
+        if (requireEntry) syntax("scope objects cannot be empty", index);
+        index++;
+        return output;
+      }
+      while (index < source.length) {
+        var keyAt = index;
+        var key = objectKey(topLevel);
+        if (seen[key]) syntax("duplicate scope field \"" + key + "\"", keyAt);
+        seen[key] = true;
+        skip();
+        if (source.charAt(index) !== ":") syntax("expected \":\"", index);
+        index++;
+        output[key] = value(level);
+        skip();
+        var separator = source.charAt(index);
+        if (separator === "}") { index++; return output; }
+        if (separator !== ",") syntax("expected \",\" or \"}\"", index);
+        index++;
+        skip();
+        if (source.charAt(index) === "}") { index++; return output; }
+      }
+      syntax("expected \"}\"", index);
+    }
+
+    function arrayValue(level) {
+      depth(level);
+      var output = count([]);
+      index++;
+      skip();
+      if (source.charAt(index) === "]") { index++; return output; }
+      while (index < source.length) {
+        output.push(value(level));
+        skip();
+        var separator = source.charAt(index);
+        if (separator === "]") { index++; return output; }
+        if (separator !== ",") syntax("expected \",\" or \"]\"", index);
+        index++;
+        skip();
+        if (source.charAt(index) === "]") syntax("arrays reject a trailing comma", index);
+      }
+      syntax("expected \"]\"", index);
+    }
+
+    function value(parentLevel) {
+      skip();
+      var character = source.charAt(index);
+      if (character === "{") return objectValue(parentLevel + 1, false, false);
+      if (character === "[") return arrayValue(parentLevel + 1);
+      if (character === '"' || character === "'") return count(stringValue());
+      if (character === "+" || character === "-" || character === "." ||
+        character >= "0" && character <= "9") return count(numberValue());
+      var start = index;
+      if (/[A-Za-z_$]/.test(character)) {
+        index++;
+        while (/[A-Za-z0-9_$]/.test(source.charAt(index))) index++;
+        var word = source.slice(start, index);
+        if (word === "true") return count(true);
+        if (word === "false") return count(false);
+        if (word === "null") return count(null);
+        syntax("scope values must be pure data; found identifier \"" + word + "\"", start);
+      }
+      syntax("expected a scope value", start);
+    }
+
+    function shorthand() {
+      depth(1);
+      var output = count(Object.create(null));
+      var seen = Object.create(null);
+      while (index < source.length) {
+        var keyAt = index;
+        var key = name();
+        if (seen[key]) syntax("duplicate scope field \"" + key + "\"", keyAt);
+        seen[key] = true;
+        skip();
+        if (source.charAt(index) !== ":") syntax("expected \":\"", index);
+        index++;
+        output[key] = value(1);
+        skip();
+        if (index >= source.length) return output;
+        if (source.charAt(index) !== ";") syntax("expected \";\"", index);
+        index++;
+        skip();
+        if (index >= source.length) return output;
+      }
+      return output;
+    }
+
+    skip();
+    if (index >= source.length) syntax("empty data-kit-scope", index);
+    var output = source.charAt(index) === "{" ? objectValue(1, true, true) : shorthand();
+    skip();
+    if (index !== source.length) syntax("unexpected token \"" + source.charAt(index) + "\"", index);
+    return output;
+  }
+
+  function scopeElementValue(element) {
+    if (String(element.localName || "").toLowerCase() === "template") {
+      throw new TypeError(
+        "KitJS: data-kit-scope cannot be used on a template; place the boundary inside template.content"
+      );
+    }
+    return parseScope(element.getAttribute("data-kit-scope"));
+  }
+
+  function scopeSeed(element, shouldReport) {
+    if (!element || element.nodeType !== 1 || !element.hasAttribute("data-kit-scope")) return undefined;
+    if (core.ignoredForRuntime(element)) return undefined;
+    var mounted = core.scopes && core.scopes.get(element);
+    if (mounted) return mounted.failed || mounted.disposed ? null : MOUNTED;
+    var source = element.getAttribute("data-kit-scope");
+    var entry = metadata.get(element);
+    if (!entry || entry.source !== source) {
+      entry = { source: source, value: null, error: null, reported: false };
+      try { entry.value = scopeElementValue(element); }
+      catch (error) { entry.error = error; }
+      metadata.set(element, entry);
+    }
+    if (entry.error && shouldReport && !entry.reported) {
+      entry.reported = true;
+      core.report(entry.error);
+    }
+    return entry.error ? null : entry.value;
+  }
+
+  function validateScopeTree(root) {
+    if (!root || root.nodeType !== 1 && root.nodeType !== 9 && root.nodeType !== 11) return true;
+    if (root.nodeType === 1 && core.ignoredForRuntime(root)) return true;
+    if (root.nodeType === 1 && root.hasAttribute("data-kit-scope")) {
+      scopeElementValue(root);
+    }
+    if (!root.querySelectorAll) return true;
+    root.querySelectorAll("[data-kit-scope]").forEach(function (element) {
+      if (core.ignoredForRuntime(element)) return;
+      scopeElementValue(element);
+    });
+    root.querySelectorAll("template").forEach(function (template) {
+      if (!core.ignoredForRuntime(template) && template.content) validateScopeTree(template.content);
+    });
+    return true;
+  }
+
+  core.parseScope = parseScope;
+  core.blockedScopeKey = function (name) { return PROTOTYPE_KEYS[name] === true; };
+  core.scopeSeed = scopeSeed;
+  core.releaseScopeSeed = function (element) { metadata.delete(element); };
+  core.validateScopeTree = validateScopeTree;
+  core.phase = "scope";
+})(document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "scope") throw new Error("KitJS: component loaded out of order");
+  if (core.reuse) { core.phase = "component"; return; }
+
+  var OWN = core.OWN;
+  var BOUNDARIES = "[data-kit-component],[data-kit-scope]";
+  var METADATA = "[data-kit-component],[data-kit-version],[data-kit-scope]";
+  var ALIASES = "[data-kit-as]";
+  var aliases = new WeakMap();
+  var metadata = new WeakMap();
+  var cleanupObserver = null;
+  var cleanupOwners = 0;
+  var removedRoots = new Set();
+  var removalQueued = false;
+  var retainValidity = new WeakMap();
+  var retainStructureValidity = new WeakMap();
+  var retainReports = new WeakMap();
+  var COMPONENT_NAME = /^[A-Za-z_$][A-Za-z0-9_$.-]*$/;
+  var SERVICE_NAME = /^[A-Za-z][A-Za-z0-9_.-]*$/;
+  var SERVICE_ACTION = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  var GRAPH_ID = /^[0-9a-f]{64}$/;
+  var RETAIN_KEY = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
+  var EXACT_SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+  var RESERVED_ALIASES = {
+    $element: true, $host: true, $event: true, $refs: true, $component: true,
+    $parent: true, $error: true, $alias: true, $invalidate: true
+  };
+
+  function enqueue(callback) {
+    var schedule = document.defaultView && document.defaultView.queueMicrotask;
+    if (typeof schedule === "function") schedule.call(document.defaultView, callback);
+    else Promise.resolve().then(callback);
+  }
+
+  function connectedHere(element) {
+    return !!element && element.isConnected === true && element.ownerDocument === document;
+  }
+
+  function flushRemovedRoots() {
+    removalQueued = false;
+    var roots = Array.from(removedRoots);
+    removedRoots.clear();
+    roots.forEach(function (root) {
+      if (connectedHere(root) || typeof core.disposeTree !== "function") return;
+      try { core.disposeTree(root); }
+      catch (error) { core.report(error); }
+    });
+  }
+
+  function queueRemovedRoot(root) {
+    if (!root || root.nodeType !== 1) return;
+    removedRoots.add(root);
+    if (removalQueued) return;
+    removalQueued = true;
+    enqueue(flushRemovedRoots);
+  }
+
+  function startCleanupObserver() {
+    if (cleanupObserver || cleanupOwners < 1) return;
+    var Observer = document.defaultView && document.defaultView.MutationObserver;
+    if (typeof Observer !== "function") return;
+    cleanupObserver = new Observer(function (mutations) {
+      mutations.forEach(function (mutation) {
+        Array.prototype.forEach.call(mutation.removedNodes || [], queueRemovedRoot);
+      });
+    });
+    cleanupObserver.observe(document, { childList: true, subtree: true });
+  }
+
+  function stopCleanupObserver() {
+    if (cleanupOwners > 0 || !cleanupObserver) return;
+    cleanupObserver.disconnect();
+    cleanupObserver = null;
+  }
+
+  var NOOP_CANCEL = Object.freeze(function () { });
+
+  function ensureCleanupOwner(current) {
+    if (current.ownsCleanup) return;
+    if (!connectedHere(current.host)) {
+      queueRemovedRoot(current.host);
+      return;
+    }
+    current.ownsCleanup = true;
+    cleanupOwners++;
+    startCleanupObserver();
+  }
+
+  function releaseCleanupOwner(current) {
+    if (!current.ownsCleanup || current.cleanups.length || current.afterRenders.length) return;
+    current.ownsCleanup = false;
+    cleanupOwners--;
+    stopCleanupObserver();
+  }
+
+  function removeLifecycleEntry(entries, entry) {
+    var index = entries.indexOf(entry);
+    if (index >= 0) entries.splice(index, 1);
+  }
+
+  function invokeLifecycle(current, callback) {
+    try { callback.call(current.scope); }
+    catch (error) { core.report(error); }
+  }
+
+  function ownCleanup(current, cleanup) {
+    if (!current || current.disposed) return NOOP_CANCEL;
+    var entry = { callback: cleanup, active: true };
+    current.cleanups.push(entry);
+    ensureCleanupOwner(current);
+    return Object.freeze(function () {
+      if (!entry.active) return;
+      entry.active = false;
+      removeLifecycleEntry(current.cleanups, entry);
+      invokeLifecycle(current, cleanup);
+      releaseCleanupOwner(current);
+    });
+  }
+
+  function lifecycleContext(current) {
+    function owned(selector) {
+      if (typeof selector !== "string") throw new TypeError("KitJS: context.owned(selector) expects a string");
+      if (current.disposed) return Object.freeze([]);
+      return Object.freeze(ownedElements(current, selector));
+    }
+    function cleanup(callback) {
+      if (typeof callback !== "function") throw new TypeError("KitJS: context.cleanup(fn) expects a function");
+      return ownCleanup(current, callback);
+    }
+    function listen(target, type, callback, options) {
+      if (!target || typeof target.addEventListener !== "function" ||
+        typeof target.removeEventListener !== "function") {
+        throw new TypeError("KitJS: context.listen(target, type, fn, options) expects an EventTarget");
+      }
+      if (typeof type !== "string" || typeof callback !== "function") {
+        throw new TypeError("KitJS: context.listen(target, type, fn, options) expects a string and function");
+      }
+      if (current.disposed) return NOOP_CANCEL;
+      var capture = typeof options === "boolean" ? options : !!(options && options.capture);
+      target.addEventListener(type, callback, options);
+      return ownCleanup(current, function () {
+        target.removeEventListener(type, callback, capture);
+      });
+    }
+    function afterRender(callback) {
+      if (typeof callback !== "function") {
+        throw new TypeError("KitJS: context.afterRender(fn) expects a function");
+      }
+      if (current.disposed) return NOOP_CANCEL;
+      var entry = { callback: callback, active: true };
+      current.afterRenders.push(entry);
+      ensureCleanupOwner(current);
+      return Object.freeze(function () {
+        if (!entry.active) return;
+        entry.active = false;
+        removeLifecycleEntry(current.afterRenders, entry);
+        releaseCleanupOwner(current);
+      });
+    }
+    var context = {};
+    Object.defineProperties(context, {
+      host: { get: function () { return current.host; }, enumerable: true },
+      owned: { value: Object.freeze(owned), enumerable: true },
+      listen: { value: Object.freeze(listen), enumerable: true },
+      cleanup: { value: Object.freeze(cleanup), enumerable: true },
+      afterRender: { value: Object.freeze(afterRender), enumerable: true }
+    });
+    return Object.freeze(context);
+  }
+
+  function flushAfterRender(current) {
+    if (!current || current.disposed || !current.afterRenders.length) return;
+    if (!connectedHere(current.host)) {
+      queueRemovedRoot(current.host);
+      return;
+    }
+    var entries = current.afterRenders.slice();
+    current.afterRenders.length = 0;
+    entries.forEach(function (entry) {
+      if (!entry.active || current.disposed) return;
+      entry.active = false;
+      invokeLifecycle(current, entry.callback);
+    });
+    releaseCleanupOwner(current);
+  }
+
+  function copyValue(value, seen, scopeData) {
+    if (value === null || typeof value !== "object") return value;
+    var prototype = Object.getPrototypeOf(value);
+    if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("KitJS: component state must contain only plain objects and arrays");
+    }
+    if (seen.has(value)) throw new TypeError("KitJS: circular component state is not supported");
+    seen.add(value);
+    var output = Array.isArray(value) ? [] : Object.create(prototype);
+    Object.keys(value).forEach(function (name) {
+      if (scopeData ? core.blockedScopeKey(name) : core.blocked(name)) {
+        throw new TypeError("KitJS: blocked component state key \"" + name + "\"");
+      }
+      output[name] = copyValue(value[name], seen, scopeData);
+    });
+    seen.delete(value);
+    return output;
+  }
+
+  function snapshot(definition) {
+    var descriptors = Object.getOwnPropertyDescriptors(definition);
+    if (Object.getOwnPropertySymbols(definition).length) {
+      throw new TypeError("KitJS: component definitions cannot contain symbol fields");
+    }
+    Object.keys(descriptors).forEach(function (name) {
+      if (name.charAt(0) === "$") {
+        throw new TypeError("KitJS: component fields cannot use the reserved $ namespace");
+      }
+      if (core.blocked(name)) throw new TypeError("KitJS: blocked component field \"" + name + "\"");
+      var descriptor = descriptors[name];
+      if (OWN.call(descriptor, "value") && typeof descriptor.value === "object" && descriptor.value !== null) {
+        descriptor.value = copyValue(descriptor.value, new WeakSet());
+      }
+    });
+    return descriptors;
+  }
+
+  function validComponentName(name) {
+    return typeof name === "string" && COMPONENT_NAME.test(name) && !core.blocked(name);
+  }
+
+  function validServiceName(name) {
+    return typeof name === "string" && SERVICE_NAME.test(name) &&
+      name !== "version" && name !== "component" && name !== "service" &&
+      !core.blocked(name);
+  }
+
+  function validVersion(version) {
+    return typeof version === "string" && EXACT_SEMVER.test(version);
+  }
+
+  function graphError(message) {
+    throw new TypeError("KitJS: invalid component graph: " + message);
+  }
+
+  function installComponentGraph(source) {
+    if (core.graph) throw new Error("KitJS: component graph is already installed");
+    if (core.booted || core.phase !== "events" && core.phase !== "drive") {
+      throw new Error("KitJS: component graph must be installed immediately before boot");
+    }
+    var prototype = source && Object.getPrototypeOf(source);
+    if (!source || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(source).length) graphError("expected a plain object");
+    var id = source.id;
+    var profile = source.profile;
+    var services = source.services;
+    var components = source.components;
+    var actions = source.actions;
+    var grants = source.grants;
+    if (typeof id !== "string" || !GRAPH_ID.test(id)) graphError("invalid id");
+    if (profile !== "kit" && profile !== "hydrate") graphError("invalid profile");
+    if (profile !== core.profile) {
+      graphError("profile does not match the assembled runtime");
+    }
+    prototype = services && Object.getPrototypeOf(services);
+    if (!services || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(services).length) graphError("services must be a plain object");
+    prototype = components && Object.getPrototypeOf(components);
+    if (!components || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(components).length) graphError("components must be a plain object");
+    prototype = actions && Object.getPrototypeOf(actions);
+    if (!actions || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(actions).length) graphError("actions must be a plain object");
+    prototype = grants && Object.getPrototypeOf(grants);
+    if (!grants || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(grants).length) graphError("grants must be a plain object");
+
+    var serviceManifest = Object.create(null);
+    Object.keys(services).forEach(function (name) {
+      var version = services[name];
+      if (!validServiceName(name)) graphError("invalid service name \"" + name + "\"");
+      if (!validVersion(version)) graphError("invalid version for service \"" + name + "\"");
+      serviceManifest[name] = version;
+    });
+    if (Object.keys(serviceManifest).length && !(core.serviceRegistry instanceof Map)) {
+      graphError("services require the service registrar");
+    }
+    if (core.serviceRegistry) {
+      core.serviceRegistry.forEach(function (_, name) {
+        if (!OWN.call(serviceManifest, name)) {
+          graphError("registered service \"" + name + "\" is not declared");
+        }
+      });
+    }
+
+    var componentManifest = Object.create(null);
+    Object.keys(components).forEach(function (name) {
+      var version = components[name];
+      if (!validComponentName(name)) graphError("invalid component name \"" + name + "\"");
+      if (!validVersion(version)) graphError("invalid version for component \"" + name + "\"");
+      componentManifest[name] = version;
+    });
+    core.registry.forEach(function (_, name) {
+      if (!OWN.call(componentManifest, name)) {
+        graphError("registered component \"" + name + "\" is not declared");
+      }
+    });
+
+    var actionManifest = Object.create(null);
+    Object.keys(actions).forEach(function (serviceName) {
+      if (!OWN.call(serviceManifest, serviceName)) {
+        graphError("actions name undeclared service \"" + serviceName + "\"");
+      }
+      var members = actions[serviceName];
+      var memberPrototype = members && Object.getPrototypeOf(members);
+      if (!members || memberPrototype !== Object.prototype && memberPrototype !== null ||
+        Object.getOwnPropertySymbols(members).length) {
+        graphError("actions for service \"" + serviceName + "\" must be a plain object");
+      }
+      var normalized = Object.create(null);
+      Object.keys(members).forEach(function (memberName) {
+        if (!SERVICE_ACTION.test(memberName) || core.blocked(memberName) || members[memberName] !== true) {
+          graphError("invalid authored action \"" + serviceName + "." + memberName + "\"");
+        }
+        normalized[memberName] = true;
+      });
+      actionManifest[serviceName] = Object.freeze(normalized);
+    });
+    Object.keys(serviceManifest).forEach(function (serviceName) {
+      if (!OWN.call(actionManifest, serviceName)) {
+        graphError("missing actions for service \"" + serviceName + "\"");
+      }
+    });
+
+    var grantManifest = Object.create(null);
+    Object.keys(grants).forEach(function (componentName) {
+      if (!OWN.call(componentManifest, componentName)) {
+        graphError("grants name undeclared component \"" + componentName + "\"");
+      }
+      var dependencies = grants[componentName];
+      var dependencyPrototype = dependencies && Object.getPrototypeOf(dependencies);
+      if (!dependencies || dependencyPrototype !== Object.prototype && dependencyPrototype !== null ||
+        Object.getOwnPropertySymbols(dependencies).length) {
+        graphError("grants for component \"" + componentName + "\" must be a plain object");
+      }
+      var normalized = Object.create(null);
+      Object.keys(dependencies).forEach(function (serviceName) {
+        if (!OWN.call(serviceManifest, serviceName) || dependencies[serviceName] !== serviceManifest[serviceName]) {
+          graphError("invalid grant \"" + componentName + " -> " + serviceName + "\"");
+        }
+        normalized[serviceName] = dependencies[serviceName];
+      });
+      grantManifest[componentName] = Object.freeze(normalized);
+    });
+    Object.keys(componentManifest).forEach(function (componentName) {
+      if (!OWN.call(grantManifest, componentName)) {
+        graphError("missing grants for component \"" + componentName + "\"");
+      }
+    });
+    Object.freeze(serviceManifest);
+    Object.freeze(componentManifest);
+    Object.freeze(actionManifest);
+    Object.freeze(grantManifest);
+    var graph = Object.freeze({
+      id: id,
+      profile: profile,
+      services: serviceManifest,
+      components: componentManifest,
+      actions: actionManifest,
+      grants: grantManifest
+    });
+    Object.defineProperty(core.kit, Symbol.for("kitjs:graph"), { value: graph });
+    core.graph = graph;
+  }
+
+  function metadataError(element, entry, message, shouldReport) {
+    entry.value = null;
+    entry.error = message;
+    if (shouldReport && !entry.reported) {
+      entry.reported = true;
+      core.report(new TypeError("KitJS: " + message));
+    }
+    metadata.set(element, entry);
+    return null;
+  }
+
+  // Undefined means this element carries no component metadata. Null means its
+  // metadata is invalid. A record means it is a valid component host.
+  function componentMetadata(element, shouldReport) {
+    if (!element || element.nodeType !== 1 || !element.hasAttribute) return undefined;
+    if (core.ignoredForRuntime(element)) return undefined;
+    var hasComponent = element.hasAttribute("data-kit-component");
+    var hasVersion = element.hasAttribute("data-kit-version");
+    if (!hasComponent && !hasVersion) return undefined;
+    var componentSource = hasComponent ? element.getAttribute("data-kit-component") : null;
+    var versionSource = hasVersion ? element.getAttribute("data-kit-version") : null;
+    var entry = metadata.get(element);
+    if (entry && entry.componentSource === componentSource && entry.versionSource === versionSource) {
+      if (shouldReport && entry.error && !entry.reported) {
+        entry.reported = true;
+        core.report(new TypeError("KitJS: " + entry.error));
+      }
+      return entry.value;
+    }
+    entry = {
+      componentSource: componentSource,
+      versionSource: versionSource,
+      value: undefined,
+      error: "",
+      reported: false
+    };
+    if (!hasComponent) {
+      return metadataError(element, entry, "data-kit-version requires a component host", shouldReport);
+    }
+    if (String(element.localName || "").toLowerCase() === "template") {
+      return metadataError(element, entry,
+        "data-kit-component cannot be used on a template; place the boundary inside template.content",
+        shouldReport);
+    }
+    var name = String(componentSource || "").trim();
+    if (name.indexOf("@") >= 0) {
+      return metadataError(element, entry,
+        "inline component versions are not supported; use data-kit-version", shouldReport);
+    }
+    if (!validComponentName(name)) {
+      return metadataError(element, entry, "invalid component name \"" + name + "\"", shouldReport);
+    }
+    var version = null;
+    if (hasVersion) {
+      version = String(versionSource || "").trim();
+      if (!validVersion(version)) {
+        return metadataError(element, entry,
+          "data-kit-version must be an exact semantic version", shouldReport);
+      }
+      if (!core.graph || !OWN.call(core.graph.components, name)) {
+        return metadataError(element, entry,
+          "component \"" + name + "\" is not present in the installed graph", shouldReport);
+      }
+      if (core.graph.components[name] !== version) {
+        return metadataError(element, entry,
+          "component \"" + name + "\" requires " + version +
+          " but the installed graph provides " + core.graph.components[name], shouldReport);
+      }
+    }
+    entry.value = { name: name, version: version };
+    metadata.set(element, entry);
+    return entry.value;
+  }
+
+  function retainIssue(entry, message) {
+    if (entry.errors.indexOf(message) < 0) entry.errors.push(message);
+  }
+
+  function inspectRetains(root, shouldReport, strict) {
+    root = root && (root.nodeType === 1 || root.nodeType === 9 || root.nodeType === 11) ? root : document;
+    var entries = [];
+
+    function rememberStructural(element) {
+      retainStructureValidity.set(element, false);
+    }
+
+    function visit(node, templates, structures, retainedAncestor) {
+      if (!node) return;
+      if (node.nodeType === 1) {
+        if (node.hasAttribute("data-kit-ignore")) return;
+        var name = String(node.localName || "").toLowerCase();
+        var nextTemplates = templates;
+        var nextStructures = structures;
+        if (name === "template") {
+          rememberStructural(node);
+          nextTemplates = templates.concat(node);
+        }
+        if (node.hasAttribute("data-kit-if") || node.hasAttribute("data-kit-for")) {
+          rememberStructural(node);
+          nextStructures = structures.concat(node);
+        }
+
+        var nextRetained = retainedAncestor;
+        if (node.hasAttribute("data-kit-retain")) {
+          var key = node.getAttribute("data-kit-retain");
+          var entry = {
+            key: key,
+            element: node,
+            request: null,
+            mounted: null,
+            blocked: false,
+            errors: []
+          };
+          retainValidity.set(node, false);
+          if (!RETAIN_KEY.test(key)) retainIssue(entry, "invalid key \"" + key + "\"");
+          if (!node.hasAttribute("data-kit-component")) {
+            retainIssue(entry, "key \"" + key + "\" requires a component host");
+          } else {
+            entry.request = componentMetadata(node, false);
+            if (!entry.request) retainIssue(entry, "key \"" + key + "\" has invalid component metadata");
+          }
+          var mounted = core.scopes.get(node);
+          if (core.scopes.has(node)) {
+            if (mounted && !mounted.failed && !mounted.disposed && mounted.componentIdentity) {
+              entry.mounted = mounted.componentIdentity;
+            } else entry.blocked = true;
+          }
+          if (nextTemplates.length) {
+            retainIssue(entry, "key \"" + key + "\" cannot be used inside a template");
+            nextTemplates.forEach(function (template) { retainStructureValidity.set(template, true); });
+          }
+          if (nextStructures.length) {
+            retainIssue(entry, "key \"" + key + "\" cannot be used in a structural region");
+            nextStructures.forEach(function (structure) { retainStructureValidity.set(structure, true); });
+          }
+          if (retainedAncestor) {
+            retainIssue(entry, "key \"" + key + "\" cannot be nested below retained key \"" +
+              retainedAncestor.key + "\"");
+            retainIssue(retainedAncestor, "retained key \"" + retainedAncestor.key +
+              "\" cannot contain retained key \"" + key + "\"");
+          }
+          entries.push(entry);
+          nextRetained = entry;
+        }
+
+        var child = node.firstChild;
+        while (child) {
+          visit(child, nextTemplates, nextStructures, nextRetained);
+          child = child.nextSibling;
+        }
+        if (name === "template" && node.content) {
+          child = node.content.firstChild;
+          while (child) {
+            visit(child, nextTemplates, nextStructures, nextRetained);
+            child = child.nextSibling;
+          }
+        }
+        return;
+      }
+      var descendant = node.firstChild;
+      while (descendant) {
+        visit(descendant, templates, structures, retainedAncestor);
+        descendant = descendant.nextSibling;
+      }
+    }
+
+    visit(root, [], [], null);
+    var duplicates = new Map();
+    entries.forEach(function (entry) {
+      if (!duplicates.has(entry.key)) duplicates.set(entry.key, []);
+      duplicates.get(entry.key).push(entry);
+    });
+    duplicates.forEach(function (matches, key) {
+      if (matches.length < 2) return;
+      matches.forEach(function (entry) { retainIssue(entry, "duplicate key \"" + key + "\""); });
+    });
+
+    var firstError = "";
+    var byKey = new Map();
+    entries.forEach(function (entry) {
+      var invalid = entry.errors.length > 0;
+      retainValidity.set(entry.element, invalid);
+      if (!invalid) {
+        retainReports.delete(entry.element);
+        byKey.set(entry.key, entry);
+        return;
+      }
+      var message = entry.errors[0];
+      if (!firstError) firstError = message;
+      if (shouldReport && retainReports.get(entry.element) !== message) {
+        retainReports.set(entry.element, message);
+        core.report(new TypeError("KitJS: invalid data-kit-retain: " + message));
+      }
+    });
+    if (strict && firstError) throw new TypeError("KitJS: invalid data-kit-retain: " + firstError);
+    return firstError ? null : byKey;
+  }
+
+  function prepareComponentTree(root, nested) {
+    root = root && root.querySelectorAll ? root : document;
+    if (root.nodeType === 1 && core.ignoredForRuntime(root)) return;
+    if (root.nodeType === 1 && root.matches(METADATA)) {
+      componentMetadata(root, true);
+      core.scopeSeed(root, true);
+    }
+    root.querySelectorAll(METADATA).forEach(function (element) {
+      if (core.ignoredForRuntime(element)) return;
+      componentMetadata(element, true);
+      core.scopeSeed(element, true);
+    });
+    root.querySelectorAll("template").forEach(function (template) {
+      if (!core.ignoredForRuntime(template) && template.content) prepareComponentTree(template.content, true);
+    });
+    if (!nested) inspectRetains(root, true, false);
+  }
+
+  function validateComponentTree(root) {
+    if (!root || root.nodeType !== 1 && root.nodeType !== 9 && root.nodeType !== 11) return true;
+    function visit(node) {
+      if (!node) return;
+      if (node.nodeType === 1 && core.ignoredForRuntime(node)) return;
+      if (node.nodeType === 1 && String(node.localName || "").toLowerCase() === "template") {
+        if (node.hasAttribute("data-kit-component")) {
+          throw new TypeError(
+            "KitJS: data-kit-component cannot be used on a template; place the boundary inside template.content"
+          );
+        }
+        if (node.content) visit(node.content);
+      }
+      var child = node.firstChild;
+      while (child) {
+        visit(child);
+        child = child.nextSibling;
+      }
+    }
+    visit(root);
+    return true;
+  }
+
+  function assertComponentGraph() {
+    if (!core.graph) return;
+    if (core.serviceRegistry) {
+      core.serviceRegistry.forEach(function (_, name) {
+        if (!OWN.call(core.graph.services, name)) {
+          throw new Error("KitJS: service \"" + name + "\" is not declared by the installed graph");
+        }
+      });
+    }
+    Object.keys(core.graph.services).forEach(function (name) {
+      if (!core.serviceRegistry || !core.serviceRegistry.has(name)) {
+        throw new Error("KitJS: service graph is missing definition \"" + name + "\"");
+      }
+    });
+    core.registry.forEach(function (_, name) {
+      if (!OWN.call(core.graph.components, name)) {
+        throw new Error("KitJS: component \"" + name + "\" is not declared by the installed graph");
+      }
+    });
+    Object.keys(core.graph.components).forEach(function (name) {
+      if (!core.registry.has(name)) {
+        throw new Error("KitJS: component graph is missing definition \"" + name + "\"");
+      }
+    });
+  }
+
+  function component(name, definition) {
+    if (arguments.length !== 2) throw new TypeError("KitJS: component(name, definition) expects two arguments");
+    if (typeof name !== "string" || !COMPONENT_NAME.test(name)) {
+      throw new TypeError("KitJS: invalid component name");
+    }
+    if (core.blocked(name)) throw new TypeError("KitJS: blocked component name");
+    if (core.graph && !OWN.call(core.graph.components, name)) {
+      throw new Error("KitJS: component \"" + name + "\" is not declared by the installed graph");
+    }
+    var prototype = definition && Object.getPrototypeOf(definition);
+    if (!definition || prototype !== Object.prototype && prototype !== null) {
+      throw new TypeError("KitJS: component definition must be a plain object");
+    }
+    // Only the canonical app boundary projects service names into its authored
+    // action alias. Other trusted components may use a same-named reactive
+    // field even when their JavaScript package depends on that service.
+    var granted = name === "app" && core.graph && core.graph.grants[name];
+    if (granted) Object.keys(granted).forEach(function (serviceName) {
+      if (OWN.call(definition, serviceName)) {
+        throw new TypeError("KitJS: component field \"" + serviceName +
+          "\" conflicts with a granted service");
+      }
+    });
+    if (core.registry.has(name)) throw new Error("KitJS: component \"" + name + "\" already exists");
+    core.registry.set(name, snapshot(definition));
+    if (core.booted) core.invalidate();
+  }
+
+  function supportsAppLoader(version) {
+    return version === "1.1.0";
+  }
+
+  function releaseAppLoaderLinks(current) {
+    if (current.loaderSources) {
+      current.loaderSources.forEach(function (source) {
+        if (source.loaderDependents) source.loaderDependents.delete(current);
+      });
+      current.loaderSources.clear();
+      current.loaderSources = null;
+    }
+    if (current.loaderDependents) {
+      current.loaderDependents.forEach(function (dependent) {
+        if (dependent.loaderSources) dependent.loaderSources.delete(current);
+      });
+      current.loaderDependents.clear();
+      current.loaderDependents = null;
+    }
+  }
+
+  function trackAppLoaderDependency(source, dependent) {
+    if (!source || !dependent || source === dependent || source.disposed || dependent.disposed) return;
+    if (!source.loaderDependents) source.loaderDependents = new Set();
+    if (!dependent.loaderSources) dependent.loaderSources = new Set();
+    source.loaderDependents.add(dependent);
+    dependent.loaderSources.add(source);
+  }
+
+  function invalidateAppLoaderDependents(source) {
+    if (!source.loaderDependents) return;
+    source.loaderDependents.forEach(function (dependent) {
+      if (!dependent || dependent.disposed || !connectedHere(dependent.host)) {
+        source.loaderDependents.delete(dependent);
+        if (dependent && dependent.loaderSources) dependent.loaderSources.delete(source);
+        return;
+      }
+      core.invalidate(dependent);
+    });
+  }
+
+  function createInstance(descriptors, host, request, seed) {
+    var own = {};
+    Object.keys(descriptors).forEach(function (name) {
+      own[name] = Object.assign({}, descriptors[name]);
+      if (name !== "init" && OWN.call(own[name], "value")) {
+        own[name].value = copyValue(own[name].value, new WeakSet());
+      }
+    });
+    if (seed !== undefined) Object.keys(seed).forEach(function (name) {
+      if (request) {
+        var seeded = own[name];
+        if (!seeded) {
+          throw new TypeError("KitJS: data-kit-scope field \"" + name +
+            "\" is not declared by component \"" + request.name + "\"");
+        }
+        if (!OWN.call(seeded, "value") || typeof seeded.value === "function" || name === "init") {
+          throw new TypeError("KitJS: data-kit-scope cannot seed non-data component field \"" + name + "\"");
+        }
+        if (!seeded.writable) {
+          throw new TypeError("KitJS: data-kit-scope cannot seed read-only component field \"" + name + "\"");
+        }
+        seeded.value = copyValue(seed[name], new WeakSet(), true);
+      } else {
+        own[name] = {
+          value: copyValue(seed[name], new WeakSet(), true),
+          writable: true,
+          enumerable: true,
+          configurable: true
+        };
+      }
+    });
+    var init = own.init && own.init.value;
+    if (own.init && (typeof init !== "function" || own.init.get || own.init.set)) {
+      throw new TypeError("KitJS: init must be a method");
+    }
+    delete own.init;
+    var target = Object.defineProperties(Object.create(null), own);
+    var current = {
+      host: host,
+      scope: null,
+      init: init,
+      cleanups: [],
+      afterRenders: [],
+      context: null,
+      ownsCleanup: false,
+      initialized: false,
+      rendered: false,
+      disposed: false,
+      structures: undefined,
+      observations: null,
+      captures: new WeakMap(),
+      loaderSources: null,
+      loaderDependents: null,
+      componentIdentity: request ? Object.freeze({
+        name: request.name,
+        version: request.version,
+        alias: host.hasAttribute("data-kit-as") ? aliasName(host) : null
+      }) : null
+    };
+    var scope = new Proxy(target, {
+      set: function (object, name, value, receiver) {
+        if (core.blocked(String(name))) return false;
+        var before = Reflect.get(object, name, receiver);
+        var success = Reflect.set(object, name, value, receiver);
+        if (success && !core.equal(before, Reflect.get(object, name, receiver))) {
+          if (String(name) === "loader") invalidateAppLoaderDependents(current);
+          core.invalidate(current);
+        }
+        return success;
+      },
+      deleteProperty: function (object, name) {
+        if (core.blocked(String(name))) return false;
+        var had = OWN.call(object, name);
+        var success = Reflect.deleteProperty(object, name);
+        if (success && had) {
+          if (String(name) === "loader") invalidateAppLoaderDependents(current);
+          core.invalidate(current);
+        }
+        return success;
+      }
+    });
+    current.scope = scope;
+    current.context = lifecycleContext(current);
+    core.scopeRecords.set(scope, current);
+    return current;
+  }
+
+  function nearest(element) {
+    while (element) {
+      if (element.nodeType === 1) {
+        if (element.hasAttribute("data-kit-ignore")) return null;
+        if (element.hasAttribute("data-kit-component") || element.hasAttribute("data-kit-scope")) return element;
+      }
+      element = element.parentElement;
+    }
+    return null;
+  }
+  function invalidRetainHost(element) {
+    if (!element || !element.hasAttribute("data-kit-retain")) return false;
+    if (!retainValidity.has(element)) {
+      inspectRetains(connectedHere(element) ? document : element, true, false);
+    }
+    return retainValidity.get(element) === true;
+  }
+  function ensureComponent(element) {
+    if (!element || core.ignoredForRuntime(element)) return null;
+    var current = core.scopes.get(element);
+    if (current) return current.failed ? null : current;
+    if (invalidRetainHost(element)) {
+      core.scopes.set(element, { host: element, failed: true, disposed: false });
+      if (element.hasAttribute("data-kit-scope") && core.releaseScopeSeed) core.releaseScopeSeed(element);
+      return null;
+    }
+    var hasScope = element.hasAttribute("data-kit-scope");
+    var seed = core.scopeSeed(element, true);
+    var request = componentMetadata(element, true);
+    var invalidAlias = request === undefined && hasScope && element.hasAttribute("data-kit-as");
+    if (invalidAlias) aliasName(element);
+    if (request === null || hasScope && seed === null || request === undefined && !hasScope || invalidAlias) {
+      core.scopes.set(element, { host: element, failed: true, disposed: false });
+      if (hasScope && core.releaseScopeSeed) core.releaseScopeSeed(element);
+      return null;
+    }
+    var descriptors = request ? core.registry.get(request.name) : Object.create(null);
+    if (request && !descriptors) return null;
+    try {
+      current = createInstance(descriptors, element, request, seed);
+      core.scopes.set(element, current);
+      return current;
+    } catch (error) {
+      core.report(error);
+      core.scopes.set(element, { host: element, failed: true, disposed: false });
+      return null;
+    } finally {
+      if (hasScope && core.releaseScopeSeed) core.releaseScopeSeed(element);
+    }
+  }
+  function scopeRecordFor(element) {
+    var boundary = nearest(element);
+    return boundary ? ensureComponent(boundary) : null;
+  }
+  function ownedElements(current, selector) {
+    var output = [];
+    var host = current && current.host;
+    if (!host || current.disposed || !host.isConnected || core.ignoredForRuntime(host)) return output;
+    if (host.matches(selector)) output.push(host);
+    var walker = document.createTreeWalker(host, 1, {
+      acceptNode: function (element) {
+        if (element.hasAttribute("data-kit-ignore")) return 2;
+        if (element.hasAttribute("data-kit-component") || element.hasAttribute("data-kit-scope")) return 2;
+        return element.matches(selector) ? 1 : 3;
+      }
+    });
+    var element;
+    while ((element = walker.nextNode())) output.push(element);
+    return output;
+  }
+  function initialize(current) {
+    if (!current || current.initialized || current.disposed) return;
+    current.initialized = true;
+    if (!current.init) return;
+    try {
+      var initialized = current.init.call(current.scope, current.context);
+      if (typeof initialized === "function") ownCleanup(current, initialized);
+      else core.observe(initialized, current);
+    }
+    catch (error) { core.report(error); }
+  }
+  function componentElements(root) {
+    var output = [];
+    root = root && root.querySelectorAll ? root : document;
+    if (root.nodeType === 1 && core.ignoredForRuntime(root)) return output;
+    if (root.nodeType === 1 && root.matches(BOUNDARIES)) output.push(root);
+    root.querySelectorAll(BOUNDARIES).forEach(function (element) {
+      if (!core.ignoredForRuntime(element)) output.push(element);
+    });
+    return output;
+  }
+  function liveComponents(root) {
+    var output = [];
+    componentElements(root).forEach(function (element) {
+      if (element.hasAttribute("data-kit-as")) aliasName(element);
+      var current = ensureComponent(element);
+      if (current) output.push(current);
+    });
+    return output;
+  }
+  function disposeComponent(element) {
+    var current = core.scopes.get(element);
+    if (!current || current.disposed) return;
+    current.disposed = true;
+    if (current.failed) {
+      current.host = null;
+      core.dirtyRecords.delete(current);
+      if (core.renderPending) core.renderPending.delete(current);
+      core.scopes.delete(element);
+      aliases.delete(element);
+      metadata.delete(element);
+      retainValidity.delete(element);
+      retainStructureValidity.delete(element);
+      retainReports.delete(element);
+      return;
+    }
+    var scope = current.scope;
+    var cleanups = current.cleanups.slice().reverse();
+    current.cleanups.length = 0;
+    current.afterRenders.forEach(function (entry) { entry.active = false; });
+    current.afterRenders.length = 0;
+    if (current.ownsCleanup) {
+      current.ownsCleanup = false;
+      cleanupOwners--;
+      stopCleanupObserver();
+    }
+    cleanups.forEach(function (entry) {
+      if (!entry.active) return;
+      entry.active = false;
+      try { entry.callback.call(scope); }
+      catch (error) { core.report(error); }
+    });
+    releaseAppLoaderLinks(current);
+    if (current.observations) current.observations.clear();
+    if (current.scope) core.scopeRecords.delete(current.scope);
+    current.host = null;
+    current.scope = null;
+    current.init = null;
+    current.context = null;
+    current.cleanups = null;
+    current.afterRenders = null;
+    current.captures = null;
+    current.componentIdentity = null;
+    core.dirtyRecords.delete(current);
+    if (core.renderPending) core.renderPending.delete(current);
+    core.scopes.delete(element);
+    aliases.delete(element);
+  }
+  function validAlias(name) {
+    return /^\$[A-Za-z][A-Za-z0-9_]*$/.test(name) && !RESERVED_ALIASES[name];
+  }
+  function aliasName(element) {
+    if (aliases.has(element)) return aliases.get(element);
+    var name = (element.getAttribute("data-kit-as") || "").trim();
+    if (!element.hasAttribute("data-kit-component") || !validAlias(name)) {
+      core.report(new TypeError("KitJS: data-kit-as requires a component host and a valid $alias"));
+      name = null;
+    }
+    aliases.set(element, name);
+    return name;
+  }
+  function resolveAlias(name) {
+    if (!validAlias(name)) throw new ReferenceError("KitJS: unknown component alias \"" + name + "\"");
+    var matches = [];
+    document.querySelectorAll(ALIASES).forEach(function (element) {
+      if (core.ignoredForRuntime(element)) return;
+      if (aliasName(element) === name) matches.push(element);
+    });
+    if (matches.length > 1) throw new TypeError("KitJS: duplicate component alias \"" + name + "\"");
+    if (!matches.length) throw new ReferenceError("KitJS: unknown component alias \"" + name + "\"");
+    var current = ensureComponent(matches[0]);
+    if (!current || current.disposed || !current.host || !current.host.isConnected) {
+      throw new ReferenceError("KitJS: unavailable component alias \"" + name + "\"");
+    }
+    initialize(current);
+    return current;
+  }
+
+  function resolveAppService(alias, current, serviceName) {
+    if (alias !== "$app" || !current || !current.componentIdentity ||
+      current.componentIdentity.name !== "app" || current.componentIdentity.alias !== "$app" ||
+      !core.graph || !core.graph.grants || !core.serviceRegistry) return undefined;
+    var granted = core.graph.grants.app;
+    if (!granted || !OWN.call(granted, serviceName) ||
+      granted[serviceName] !== core.graph.services[serviceName]) return undefined;
+    return core.serviceRegistry.get(serviceName);
+  }
+
+  function resolveAppLoader(dependent, leaf) {
+    if (leaf !== "visible" && leaf !== "value" || !dependent || dependent.disposed ||
+      !connectedHere(dependent.host)) {
+      throw new ReferenceError("KitJS: $app.loader is unavailable");
+    }
+    var current = resolveAlias("$app");
+    var identity = current.componentIdentity;
+    if (!identity || identity.name !== "app" || identity.alias !== "$app" ||
+      !supportsAppLoader(identity.version) || !core.graph ||
+      core.graph.components.app !== identity.version || !current.host.contains(dependent.host)) {
+      throw new ReferenceError("KitJS: $app.loader requires the canonical app@1.1.0 ancestor");
+    }
+    var granted = core.graph.grants && core.graph.grants.app;
+    if (granted && OWN.call(granted, "loader")) {
+      throw new TypeError("KitJS: $app.loader cannot expose a granted service");
+    }
+    var loader = Reflect.get(current.scope, "loader", current.scope);
+    if (!loader || typeof loader !== "object" || !Object.isFrozen(loader) || !OWN.call(loader, leaf) ||
+      typeof core.serviceName === "function" && core.serviceName(loader)) {
+      throw new TypeError("KitJS: invalid $app.loader snapshot");
+    }
+    var value = loader[leaf];
+    var invalidValue = leaf === "visible" ? typeof value !== "boolean" :
+      value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100);
+    if (invalidValue ||
+      typeof core.serviceName === "function" && core.serviceName(value)) {
+      throw new TypeError("KitJS: invalid $app.loader snapshot");
+    }
+    trackAppLoaderDependency(current, dependent);
+    return value;
+  }
+
+  core.component = component;
+  var kit = {};
+  Object.defineProperties(kit, {
+    version: { value: core.version, enumerable: true },
+    component: { value: component, enumerable: true },
+    [core.install]: { value: core.version }
+  });
+  core.kit = kit;
+  core.sealKit = function () {
+    if (OWN.call(kit, "service")) {
+      throw new Error("KitJS: service registrar must be removed before publication");
+    }
+    if (!Object.isFrozen(kit)) Object.freeze(kit);
+    return kit;
+  };
+  core.installComponentGraph = installComponentGraph;
+  core.componentMetadata = componentMetadata;
+  core.inspectRetains = function (root) { return inspectRetains(root, false, true); };
+  core.invalidRetainStructure = function (element) {
+    if (!retainStructureValidity.has(element)) {
+      inspectRetains(connectedHere(element) ? document : element, true, false);
+    }
+    return retainStructureValidity.get(element) === true;
+  };
+  core.prepareComponentTree = prepareComponentTree;
+  core.validateComponentTree = validateComponentTree;
+  core.assertComponentGraph = assertComponentGraph;
+  core.ensureComponent = ensureComponent;
+  core.ownerFor = nearest;
+  core.scopeRecordFor = scopeRecordFor;
+  core.ownedElements = ownedElements;
+  core.initialize = initialize;
+  core.flushAfterRender = flushAfterRender;
+  core.liveComponents = liveComponents;
+  core.disposeComponent = disposeComponent;
+  core.validAlias = validAlias;
+  core.validServiceName = validServiceName;
+  core.resolveAlias = resolveAlias;
+  core.resolveAppLoader = resolveAppLoader;
+  core.resolveAppService = resolveAppService;
+  core.phase = "component";
+})(document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "component") throw new Error("KitJS: directives loaded out of order");
+  if (core.reuse) { core.phase = "directives"; return; }
+
+  var EVENTS = Object.create(null);
+  var MODIFIERS = Object.create(null);
+  var RESERVED = Object.create(null);
+  var OUTSIDE = Object.create(null);
+  var EVENT_NAMES = (
+    "click dblclick submit input change keydown keyup pointerdown pointerup focusin focusout"
+  ).split(" ");
+
+  EVENT_NAMES.forEach(function (name) { EVENTS[name] = true; });
+  "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
+    MODIFIERS[name] = true;
+  });
+  "component scope version as retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
+    RESERVED[name] = true;
+  });
+  "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
+    OUTSIDE[name] = true;
+  });
+
+  function directiveError(message, name) {
+    throw new SyntaxError("KitJS: " + message + " in attribute \"" + name + "\"");
+  }
+
+  function parseEventAttribute(name) {
+    if (typeof name !== "string" || name.indexOf("data-kit-") !== 0) return null;
+    var source = name.slice(9);
+    var parts = source.split(":");
+    var type = parts.shift();
+    if (!EVENTS[type]) {
+      if (RESERVED[type]) {
+        if (parts.length) directiveError("directive does not accept modifiers", name);
+        return null;
+      }
+      directiveError("unsupported directive", name);
+    }
+
+    var seen = Object.create(null);
+    var descriptor = {
+      name: name,
+      type: type,
+      self: false,
+      prevent: false,
+      stop: false,
+      once: false,
+      outside: false,
+      key: "",
+      delay: 0
+    };
+
+    parts.forEach(function (modifier) {
+      if (!modifier) directiveError("empty event modifier", name);
+      var canonical = modifier;
+      var debounce = /^debounce\(([0-9]+)\)$/.exec(modifier);
+      if (debounce) canonical = "debounce";
+      else if (!MODIFIERS[modifier]) directiveError("unsupported event modifier \"" + modifier + "\"", name);
+      if (seen[canonical]) directiveError("duplicate event modifier \"" + canonical + "\"", name);
+      seen[canonical] = true;
+
+      if (canonical === "debounce") {
+        var delay = Number(debounce[1]);
+        if (!Number.isInteger(delay) || delay < 1 || delay > 60000) {
+          directiveError("debounce delay must be between 1 and 60000", name);
+        }
+        descriptor.delay = delay;
+      } else if (canonical === "enter" || canonical === "escape") {
+        if (type !== "keydown" && type !== "keyup") {
+          directiveError("keyboard modifier requires keydown or keyup", name);
+        }
+        if (descriptor.key) directiveError("event cannot use both enter and escape", name);
+        descriptor.key = canonical === "enter" ? "Enter" : "Escape";
+      } else descriptor[canonical] = true;
+    });
+
+    if (descriptor.outside && !OUTSIDE[type]) {
+      directiveError("outside is not supported for this event", name);
+    }
+    if (descriptor.outside && descriptor.self) {
+      directiveError("outside and self cannot be combined", name);
+    }
+    return descriptor;
+  }
+
+  core.eventTypes = EVENT_NAMES;
+  core.outsideEventTypes = OUTSIDE;
+  core.parseEventAttribute = parseEventAttribute;
+  core.prepareHooks = [];
+  core.renderHooks = [];
+  core.phase = "directives";
+})(document);
+; (function (global, document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "directives") throw new Error("KitJS: DOM fragment loaded out of order");
+  if (core.reuse) { core.phase = "dom"; return; }
+
+  var OWN = core.OWN;
+  var EMPTY = {};
+  var EMPTY_SCOPE = Object.freeze(Object.create(null));
+  var BINDINGS = "[data-kit-text],[data-kit-show],[data-kit-bind]";
+  var SAFE_PROPERTIES = {
+    value: "value",
+    checked: "checked",
+    selected: "selected",
+    disabled: "disabled",
+    hidden: "hidden",
+    readonly: "readOnly",
+    required: "required",
+    multiple: "multiple",
+    indeterminate: "indeterminate"
+  };
+  var BOOLEAN_PROPERTIES = {
+    checked: true, selected: true, disabled: true, hidden: true,
+    readonly: true, required: true, multiple: true, indeterminate: true
+  };
+
+  function elementRecord(element) {
+    var record = core.records.get(element);
+    if (record) return record;
+    record = {
+      programs: Object.create(null),
+      events: Object.create(null),
+      modules: Object.create(null),
+      invalid: Object.create(null)
+    };
+    core.records.set(element, record);
+    return record;
+  }
+  function safeProgram(element, name, mode) {
+    var programs = elementRecord(element).programs;
+    if (OWN.call(programs, name)) return programs[name];
+    try {
+      programs[name] = {
+        read: core.compile(element.getAttribute(name), mode),
+        last: EMPTY
+      };
+    } catch (error) {
+      core.report(error);
+      programs[name] = null;
+    }
+    return programs[name];
+  }
+
+  function splitTop(source, separators) {
+    var output = [];
+    var start = 0;
+    var depth = 0;
+    var quote = "";
+    for (var index = 0; index < source.length; index++) {
+      var character = source.charAt(index);
+      if (quote) {
+        if (character === "\\") index++;
+        else if (character === quote) quote = "";
+      } else if (character === "'" || character === '"') quote = character;
+      else if (character === "(" || character === "[" || character === "{") depth++;
+      else if (character === ")" || character === "]" || character === "}") depth--;
+      else if (depth === 0 && separators.indexOf(character) >= 0) {
+        output.push(source.slice(start, index));
+        start = index + 1;
+      }
+    }
+    output.push(source.slice(start));
+    return output;
+  }
+  function bindEntries(source) {
+    source = source.trim();
+    if (source.charAt(0) === "{" && source.charAt(source.length - 1) === "}") {
+      source = source.slice(1, -1);
+    }
+    var entries = [];
+    splitTop(source, ",;").forEach(function (part) {
+      if (!part.trim()) return;
+      var pieces = splitTop(part, ":");
+      if (pieces.length < 2) core.syntax("invalid bind entry", source, 0);
+      var key = pieces.shift().trim();
+      var quoted = /^(['"])([A-Za-z_][A-Za-z0-9_.:-]*)\1$/.exec(key);
+      if (quoted) key = quoted[2];
+      else if (!/^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(key)) core.syntax("invalid bind name", source, 0);
+      var lowerKey = key.toLowerCase();
+      if (/^on/i.test(key) || /^data-kit-/i.test(key) ||
+        ["srcdoc", "style", "innerhtml", "outerhtml", "insertadjacenthtml",
+          "textcontent", "innertext", "outertext"].indexOf(lowerKey) >= 0) {
+        core.syntax("unsafe bind name \"" + key + "\"", source, 0);
+      }
+      entries.push({
+        name: key,
+        read: core.compile(pieces.join(":").trim(), "binding"),
+        last: EMPTY
+      });
+    });
+    if (!entries.length) core.syntax("empty bind map", source, 0);
+    return entries;
+  }
+  function safeBind(element) {
+    var programs = elementRecord(element).programs;
+    if (OWN.call(programs, "data-kit-bind")) return programs["data-kit-bind"];
+    try { programs["data-kit-bind"] = bindEntries(element.getAttribute("data-kit-bind")); }
+    catch (error) { core.report(error); programs["data-kit-bind"] = null; }
+    return programs["data-kit-bind"];
+  }
+
+  function safeURL(name, value) {
+    if (["href", "src", "action", "formaction", "poster", "xlink:href"].indexOf(name.toLowerCase()) < 0) {
+      return true;
+    }
+    var text = String(value).replace(/[\u0000-\u0020]+/g, "").toLowerCase();
+    return text.indexOf("javascript:") !== 0 && text.indexOf("vbscript:") !== 0 &&
+      text.indexOf("data:text/html") !== 0;
+  }
+  function writeBound(element, name, value) {
+    if (!safeURL(name, value)) throw new TypeError("KitJS: unsafe URL binding");
+    var lowerName = name.toLowerCase();
+    var property = SAFE_PROPERTIES[lowerName];
+    if (property) {
+      value = BOOLEAN_PROPERTIES[lowerName] ? !!value :
+        value === null || value === undefined ? "" : value;
+      if (!core.equal(element[property], value)) element[property] = value;
+    } else if (value === null || value === undefined || value === false && name.indexOf("aria-") !== 0) {
+      if (element.hasAttribute(name)) element.removeAttribute(name);
+    } else {
+      var text = value === true && name.indexOf("aria-") !== 0 ? "" : String(value);
+      if (element.getAttribute(name) !== text) element.setAttribute(name, text);
+    }
+  }
+  function asyncBinding(value) {
+    if (!value || typeof value.then !== "function") return false;
+    value.then(function () { }, core.report);
+    core.report(new TypeError("KitJS: bindings must return synchronously"));
+    return true;
+  }
+
+  function prepareBoundary(current) {
+    if (!current || current.disposed || !current.host || !current.host.isConnected ||
+      core.ignoredForRuntime(current.host)) return [];
+    core.initialize(current);
+    var structuresChanged = core.reconcileStructures && core.reconcileStructures(current);
+    core.prepareHooks.forEach(function (prepare) { prepare(current); });
+    if (!structuresChanged) return [];
+    return core.liveComponents(current.host).filter(function (candidate) {
+      return candidate !== current && !candidate.rendered;
+    });
+  }
+  function renderElement(element) {
+    if (core.ignoredForRuntime(element)) return;
+    var current = core.scopeRecordFor(element);
+    if (!current) return;
+    var scope = current.scope;
+    var program;
+    if (element.hasAttribute("data-kit-text")) {
+      program = safeProgram(element, "data-kit-text", "binding");
+      if (program) {
+        var value = program.read(scope, core.localsFor ? core.localsFor(element) : null);
+        if (!asyncBinding(value)) {
+          var text = value === null || value === undefined ? "" : String(value);
+          if (!core.equal(program.last, text)) {
+            program.last = text;
+            if (element.textContent !== text) element.textContent = text;
+          }
+        }
+      }
+    }
+    if (element.hasAttribute("data-kit-show")) {
+      program = safeProgram(element, "data-kit-show", "binding");
+      if (program) {
+        var shown = program.read(scope, core.localsFor ? core.localsFor(element) : null);
+        if (!asyncBinding(shown)) {
+          var hidden = !shown;
+          if (!core.equal(program.last, hidden)) {
+            program.last = hidden;
+            if (element.hidden !== hidden) element.hidden = hidden;
+          }
+        }
+      }
+    }
+    if (element.hasAttribute("data-kit-bind")) {
+      var entries = safeBind(element);
+      if (entries) entries.forEach(function (entry) {
+        var bound = entry.read(scope, core.localsFor ? core.localsFor(element) : null);
+        if (asyncBinding(bound) || core.equal(entry.last, bound)) return;
+        entry.last = bound;
+        writeBound(element, entry.name, bound);
+      });
+    }
+  }
+  function render(records) {
+    var initial = Array.isArray(records) ? records : core.liveComponents();
+    if (Array.isArray(records)) {
+      var order = new Map();
+      var depths = new Map();
+      initial.forEach(function (current, index) {
+        order.set(current, index);
+        var depth = 0;
+        var ancestor = current.host && current.host.parentElement;
+        while (ancestor) {
+          if (ancestor.hasAttribute("data-kit-component") || ancestor.hasAttribute("data-kit-scope")) depth++;
+          ancestor = ancestor.parentElement;
+        }
+        depths.set(current, depth);
+      });
+      initial.sort(function (left, right) {
+        return depths.get(left) - depths.get(right) || order.get(left) - order.get(right);
+      });
+    }
+    var queue = [];
+    var pending = new Set();
+    function enqueue(current) {
+      if (!current || current.disposed || !current.host || !current.host.isConnected ||
+        core.ignoredForRuntime(current.host) || pending.has(current)) return;
+      pending.add(current);
+      queue.push(current);
+    }
+    initial.forEach(enqueue);
+    core.renderPending = pending;
+    try {
+      for (var index = 0; index < queue.length; index++) {
+        var current = queue[index];
+        pending.delete(current);
+        if (current.disposed || !current.host || !current.host.isConnected) continue;
+        var children;
+        try { children = prepareBoundary(current); }
+        catch (error) { core.report(error); children = []; }
+        core.ownedElements(current, BINDINGS).forEach(function (element) {
+          try { renderElement(element); } catch (error) { core.report(error); }
+        });
+        core.renderHooks.forEach(function (renderHook) {
+          try { renderHook(current); } catch (error) { core.report(error); }
+        });
+        current.rendered = true;
+        core.flushAfterRender(current);
+        children.forEach(enqueue);
+      }
+    } finally {
+      core.renderPending = null;
+    }
+  }
+  function executeAttribute(element, name, locals) {
+    if (core.ignoredForRuntime(element)) return false;
+    var boundary = core.ownerFor(element);
+    var current = core.scopeRecordFor(element);
+    if (boundary && !current) return false;
+    var program = safeProgram(element, name, "action");
+    if (!program) return false;
+    if (current) core.initialize(current);
+    try {
+      if (core.localsFor) locals = core.localsFor(element, locals);
+      program.read(current ? current.scope : EMPTY_SCOPE, locals, function (value, owner) {
+        core.observe(value, owner);
+      });
+      return true;
+    } catch (error) {
+      core.report(error);
+      return false;
+    }
+  }
+
+  core.BINDINGS = BINDINGS;
+  core.elementRecord = elementRecord;
+  core.safeProgram = safeProgram;
+  core.asyncBinding = asyncBinding;
+  core.executeAttribute = executeAttribute;
+  core.render = render;
+  core.phase = "dom";
+})(globalThis, document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "dom") throw new Error("KitJS: structure loaded out of order");
+  if (core.reuse) { core.phase = "structure"; return; }
+
+  var OWN = core.OWN;
+  var SELECTOR = "[data-kit-if],[data-kit-for],[data-kit-key]";
+  var MAX_DEPTH = 64;
+  var UNSET = {};
+  var contexts = new WeakMap();
+  var levels = new WeakMap();
+
+  function copyOwn(target, source) {
+    if (!source) return target;
+    Object.keys(source).forEach(function (name) { target[name] = source[name]; });
+    return target;
+  }
+
+  function replaceOwn(target, source) {
+    source = source || Object.create(null);
+    var targetKeys = Object.keys(target);
+    var sourceKeys = Object.keys(source);
+    var changed = targetKeys.length !== sourceKeys.length || sourceKeys.some(function (name) {
+      return !OWN.call(target, name) || !core.equal(target[name], source[name]);
+    });
+    Object.keys(target).forEach(function (name) { delete target[name]; });
+    copyOwn(target, source);
+    return changed;
+  }
+
+  function localsFor(element, extra) {
+    var chain = [];
+    var node = element;
+    while (node && node !== document) {
+      var local = contexts.get(node);
+      if (local) chain.push(local);
+      node = node.parentElement;
+    }
+    if (!chain.length) return extra || null;
+    if (chain.length === 1 && !extra) return chain[0];
+    var output = Object.create(null);
+    for (var index = chain.length - 1; index >= 0; index--) copyOwn(output, chain[index]);
+    return copyOwn(output, extra);
+  }
+
+  function validLocal(name) {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
+      !core.blocked(name) && !core.FORBIDDEN[name];
+  }
+
+  function parseFor(source) {
+    var match = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\s+of\s+([\s\S]+?)\s*$/.exec(source || "");
+    if (!match || !validLocal(match[1]) || match[2] && !validLocal(match[2]) ||
+        match[2] && match[1] === match[2]) {
+      throw new SyntaxError("KitJS: invalid for specification");
+    }
+    return { item: match[1], index: match[2] || "", source: match[3] };
+  }
+
+  function fail(state, error) {
+    var message = String(error && error.message || error);
+    if (state.error !== message) {
+      state.error = message;
+      core.report(error);
+    }
+    return false;
+  }
+
+  function clearFailure(state) { state.error = ""; }
+
+  function structureState(element) {
+    if (core.ignoredForRuntime(element)) return null;
+    var modules = core.elementRecord(element).modules;
+    if (OWN.call(modules, "structure")) return modules.structure;
+    if (core.invalidRetainStructure && core.invalidRetainStructure(element)) {
+      modules.structure = null;
+      return null;
+    }
+    try {
+      if (element.tagName !== "TEMPLATE") {
+        throw new TypeError("KitJS: if, for, and key require a template element");
+      }
+      var hasIf = element.hasAttribute("data-kit-if");
+      var hasFor = element.hasAttribute("data-kit-for");
+      var hasKey = element.hasAttribute("data-kit-key");
+      if (hasIf && hasFor) throw new TypeError("KitJS: one template cannot combine if and for");
+      if (hasKey && !hasFor) throw new TypeError("KitJS: key requires for on the same template");
+      if (!hasIf && !hasFor) throw new TypeError("KitJS: orphan structural template");
+      if (element.content.querySelector("script")) {
+        throw new TypeError("KitJS: structural templates cannot contain script elements");
+      }
+      if (hasIf) {
+        var condition = core.safeProgram(element, "data-kit-if", "binding");
+        if (!condition) throw new SyntaxError("KitJS: invalid if expression");
+        modules.structure = {
+          kind: "if",
+          condition: condition,
+          branch: null,
+          error: ""
+        };
+      } else {
+        var spec = parseFor(element.getAttribute("data-kit-for"));
+        modules.structure = {
+          kind: "for",
+          item: spec.item,
+          index: spec.index,
+          list: core.compile(spec.source, "binding"),
+          key: hasKey ? core.compile(element.getAttribute("data-kit-key"), "binding") : null,
+          keyInvalid: false,
+          lastList: UNSET,
+          rows: new Map(),
+          order: [],
+          error: ""
+        };
+      }
+    } catch (error) {
+      core.report(error);
+      modules.structure = null;
+    }
+    return modules.structure;
+  }
+
+  function rangeNodes(range) {
+    if (range.nodes) return range.nodes.slice();
+    var output = [];
+    var node = range.start;
+    while (node) {
+      output.push(node);
+      if (node === range.end) break;
+      node = node.nextSibling;
+    }
+    return output;
+  }
+
+  function bindRange(range) {
+    rangeNodes(range).forEach(function (node) {
+      if (node.nodeType !== 1) return;
+      contexts.set(node, range.locals);
+      levels.set(node, range.level);
+    });
+  }
+
+  function createRange(template, locals) {
+    var fragment = template.content.cloneNode(true);
+    var start = document.createComment("kit-structure-start");
+    var end = document.createComment("kit-structure-end");
+    var nodes = [start].concat(Array.prototype.slice.call(fragment.childNodes), [end]);
+    var range = {
+      start: start,
+      end: end,
+      nodes: nodes,
+      locals: locals,
+      level: contextLevel(template) + 1
+    };
+    bindRange(range);
+    return range;
+  }
+
+  function insertRange(range, before, fresh) {
+    var nodes = rangeNodes(range);
+    var parent = before.parentNode;
+    nodes.forEach(function (node) { parent.insertBefore(node, before); });
+    range.nodes = null;
+    if (fresh && core.prepareEventTree) {
+      nodes.forEach(function (node) {
+        if (node.nodeType === 1) core.prepareEventTree(node);
+      });
+    }
+  }
+
+  function disposeElement(element) {
+    if (core.disposeElementEvents) core.disposeElementEvents(element);
+    if (core.disposeComponent) core.disposeComponent(element);
+    core.records.delete(element);
+    core.scopes.delete(element);
+    contexts.delete(element);
+    levels.delete(element);
+  }
+
+  function disposeTree(root) {
+    if (!root || root.nodeType !== 1) return;
+    var descendants = Array.prototype.slice.call(root.querySelectorAll("*")).reverse();
+    descendants.forEach(disposeElement);
+    disposeElement(root);
+  }
+
+  function removeRange(range) {
+    var nodes = rangeNodes(range);
+    nodes.forEach(function (node) { if (node.nodeType === 1) disposeTree(node); });
+    nodes.forEach(function (node) { if (node.parentNode) node.parentNode.removeChild(node); });
+    range.nodes = [];
+  }
+
+  function makeLocals(outer, itemName, item, indexName, index) {
+    var output = Object.create(null);
+    copyOwn(output, outer);
+    output[itemName] = item;
+    if (indexName) output[indexName] = index;
+    return output;
+  }
+
+  function dirtyRangeComponents(range, owner) {
+    rangeNodes(range).forEach(function (node) {
+      if (node.nodeType !== 1) return;
+      core.liveComponents(node).forEach(function (current) {
+        if (current !== owner) core.invalidate(current);
+      });
+    });
+  }
+
+  function keyValue(value) {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    throw new TypeError("KitJS: key must return a string or finite number");
+  }
+
+  function processIf(template, state) {
+    var current = core.scopeRecordFor(template);
+    if (!current) return false;
+    core.initialize(current);
+    var outer = localsFor(template);
+    var visible;
+    try {
+      visible = state.condition.read(current.scope, outer);
+      if (core.asyncBinding(visible)) return false;
+      visible = !!visible;
+      clearFailure(state);
+    } catch (error) { return fail(state, error); }
+
+    if (!visible) {
+      if (!state.branch) return false;
+      removeRange(state.branch);
+      state.branch = null;
+      return true;
+    }
+    if (state.branch) {
+      if (replaceOwn(state.branch.locals, outer)) dirtyRangeComponents(state.branch, current);
+      return false;
+    }
+    var locals = copyOwn(Object.create(null), outer);
+    state.branch = createRange(template, locals);
+    insertRange(state.branch, template, true);
+    return true;
+  }
+
+  function sameOrder(left, right) {
+    if (left.length !== right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] !== right[index]) return false;
+    }
+    return true;
+  }
+
+  function contextLevel(element) {
+    var node = element;
+    while (node && node !== document) {
+      if (levels.has(node)) return levels.get(node);
+      node = node.parentElement;
+    }
+    return 0;
+  }
+
+  function elementDepth(element) {
+    var depth = 0;
+    while (element && element !== document) {
+      depth++;
+      element = element.parentElement;
+    }
+    return depth;
+  }
+
+  function processFor(template, state) {
+    if (state.keyInvalid) return false;
+    var current = core.scopeRecordFor(template);
+    if (!current) return false;
+    core.initialize(current);
+    var outer = localsFor(template);
+    var items;
+    var plan = [];
+    var keys = [];
+    var seen = new Map();
+    var listChanged = false;
+    try {
+      items = state.list(current.scope, outer);
+      if (core.asyncBinding(items)) return false;
+      if (!Array.isArray(items)) throw new TypeError("KitJS: for expression must return an array");
+      for (var index = 0; index < items.length; index++) {
+        var locals = makeLocals(outer, state.item, items[index], state.index, index);
+        var key = index;
+        if (state.key) {
+          var rawKey = state.key(current.scope, locals);
+          if (core.asyncBinding(rawKey)) {
+            state.keyInvalid = true;
+            return false;
+          }
+          key = keyValue(rawKey);
+        }
+        if (seen.has(key)) throw new TypeError("KitJS: duplicate for key \"" + key + "\"");
+        seen.set(key, true);
+        keys.push(key);
+        plan.push({ key: key, locals: locals, row: state.rows.get(key) || null, fresh: false });
+      }
+      for (var createIndex = 0; createIndex < plan.length; createIndex++) {
+        if (!plan[createIndex].row) {
+          plan[createIndex].row = createRange(template, plan[createIndex].locals);
+          plan[createIndex].fresh = true;
+        }
+      }
+      listChanged = !core.equal(state.lastList, items);
+      clearFailure(state);
+    } catch (error) { return fail(state, error); }
+
+    var nextRows = new Map();
+    plan.forEach(function (entry) {
+      if (!entry.fresh) {
+        var localsChanged = replaceOwn(entry.row.locals, entry.locals);
+        if (listChanged || localsChanged) dirtyRangeComponents(entry.row, current);
+      }
+      nextRows.set(entry.key, entry.row);
+    });
+
+    var removed = false;
+    state.rows.forEach(function (row, key) {
+      if (nextRows.has(key)) return;
+      removeRange(row);
+      removed = true;
+    });
+
+    var orderChanged = !sameOrder(state.order, keys);
+    if (orderChanged) {
+      var before = template;
+      for (var moveIndex = plan.length - 1; moveIndex >= 0; moveIndex--) {
+        var entry = plan[moveIndex];
+        if (!entry.row.start.parentNode || entry.row.end.nextSibling !== before) {
+          insertRange(entry.row, before, entry.fresh);
+        }
+        before = entry.row.start;
+      }
+    }
+    state.rows = nextRows;
+    state.order = keys;
+    state.lastList = items;
+    return removed || orderChanged;
+  }
+
+  function reconcile(current) {
+    if (current.structures === false) return false;
+    var changedAny = false;
+    for (var pass = 0; pass < 64; pass++) {
+      var changed = false;
+      var elements = core.ownedElements(current, SELECTOR);
+      if (current.structures === undefined) current.structures = elements.length > 0;
+      if (!current.structures) return false;
+      elements.sort(function (left, right) {
+        return contextLevel(left) - contextLevel(right) || elementDepth(left) - elementDepth(right);
+      });
+      elements.forEach(function (element) {
+        if (!element.isConnected) return;
+        var state = structureState(element);
+        if (!state) return;
+        if (contextLevel(element) >= MAX_DEPTH) {
+          fail(state, new RangeError("KitJS: structural nesting exceeds " + MAX_DEPTH + " levels"));
+          return;
+        }
+        if (state.kind === "if" ? processIf(element, state) : processFor(element, state)) changed = true;
+      });
+      if (!changed) return changedAny;
+      changedAny = true;
+    }
+    core.report(new RangeError("KitJS: structural reconciliation exceeds " + MAX_DEPTH + " passes"));
+    return changedAny;
+  }
+
+  function resetStructures(root) {
+    if (!root || root.nodeType !== 1) return;
+    var templates = [];
+    if (root.matches && root.matches(SELECTOR)) templates.push(root);
+    Array.prototype.push.apply(templates, root.querySelectorAll(SELECTOR));
+    templates.reverse().forEach(function (template) {
+      if (core.ignoredForRuntime(template)) return;
+      var record = core.records.get(template);
+      var state = record && record.modules.structure;
+      if (!state) return;
+      if (state.kind === "if") {
+        if (state.branch) removeRange(state.branch);
+        state.branch = null;
+      } else {
+        state.rows.forEach(removeRange);
+        state.rows.clear();
+        state.order = [];
+        state.lastList = UNSET;
+      }
+    });
+    core.liveComponents(root).forEach(function (current) {
+      current.structures = undefined;
+    });
+  }
+
+  core.localsFor = localsFor;
+  core.disposeTree = disposeTree;
+  core.resetStructures = resetStructures;
+  core.reconcileStructures = reconcile;
+  core.phase = "structure";
+})(document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "structure") throw new Error("KitJS: class loaded out of order");
+  if (core.reuse) { core.phase = "class"; return; }
+
+  var SELECTOR = "[data-kit-class]";
+
+  function addTokens(output, source) {
+    String(source).trim().split(/\s+/).forEach(function (token) {
+      if (token) output[token] = true;
+    });
+  }
+
+  function classTokens(value) {
+    var output = Object.create(null);
+    if (value === null || value === undefined || value === false) return output;
+    if (typeof value === "string") {
+      addTokens(output, value);
+      return output;
+    }
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw new TypeError("KitJS: class binding must return a string or object");
+    }
+    Object.keys(value).forEach(function (name) {
+      if (value[name]) addTokens(output, name);
+    });
+    return output;
+  }
+
+  function classState(element) {
+    var modules = core.elementRecord(element).modules;
+    if (modules.classes) return modules.classes;
+    var fixed = Object.create(null);
+    element.classList.forEach(function (name) { fixed[name] = true; });
+    modules.classes = { fixed: fixed, owned: Object.create(null) };
+    return modules.classes;
+  }
+
+  function render(current) {
+    core.ownedElements(current, SELECTOR).forEach(function (element) {
+      try {
+        var program = core.safeProgram(element, "data-kit-class", "binding");
+        if (!program) return;
+        var value = program.read(current.scope, core.localsFor ? core.localsFor(element) : null);
+        if (core.asyncBinding(value)) return;
+        var next = classTokens(value);
+        var state = classState(element);
+        Object.keys(state.owned).forEach(function (name) {
+          if (next[name]) return;
+          element.classList.remove(name);
+          delete state.owned[name];
+        });
+        Object.keys(next).forEach(function (name) {
+          if (state.fixed[name]) return;
+          if (state.owned[name]) return;
+          if (!element.classList.contains(name)) {
+            element.classList.add(name);
+            state.owned[name] = true;
+          }
+        });
+      } catch (error) { core.report(error); }
+    });
+  }
+
+  core.renderHooks.push(render);
+  core.phase = "class";
+})(document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "class") throw new Error("KitJS: style loaded out of order");
+  if (core.reuse) { core.phase = "style"; return; }
+
+  var OWN = core.OWN;
+  var SELECTOR = "[data-kit-style]";
+  var SOURCE_LIMIT = 16384;
+  var ENTRY_LIMIT = 128;
+  var UNSET = {};
+  var RESET = {};
+  var BLOCKED_NAMES = Object.create(null);
+  "css-text csstext behavior -moz-binding".split(" ").forEach(function (name) {
+    BLOCKED_NAMES[name] = true;
+  });
+  var SHORTHANDS = Object.create(null);
+  (
+    "-webkit-animation -webkit-border-after -webkit-border-before -webkit-border-end " +
+    "-webkit-border-radius -webkit-border-start -webkit-column-rule -webkit-columns " +
+    "-webkit-flex -webkit-flex-flow -webkit-mask -webkit-mask-box-image " +
+    "-webkit-mask-position -webkit-text-emphasis -webkit-text-stroke -webkit-transition " +
+    "all animation animation-range background background-position border border-block " +
+    "border-block-color border-block-end border-block-start border-block-style border-block-width " +
+    "border-bottom border-color border-image border-inline border-inline-color border-inline-end " +
+    "border-inline-start border-inline-style border-inline-width border-left border-radius " +
+    "border-right border-spacing border-style border-top border-width column-rule " +
+    "column-rule-inset column-rule-inset-cap column-rule-inset-end column-rule-inset-junction " +
+    "column-rule-inset-start columns contain-intrinsic-size container corner-block-end-shape " +
+    "corner-block-start-shape corner-bottom-shape corner-inline-end-shape " +
+    "corner-inline-start-shape corner-left-shape corner-right-shape corner-shape " +
+    "corner-top-shape flex flex-flow font font-synthesis font-variant gap grid grid-area " +
+    "grid-column grid-gap grid-row grid-template inset inset-block inset-inline interest-delay " +
+    "list-style margin margin-block margin-inline marker mask mask-position offset outline " +
+    "overflow overscroll-behavior padding padding-block padding-inline place-content place-items " +
+    "place-self position-try row-rule row-rule-inset row-rule-inset-cap row-rule-inset-end " +
+    "row-rule-inset-junction row-rule-inset-start rule rule-break rule-color rule-inset " +
+    "rule-inset-cap rule-inset-end rule-inset-junction rule-inset-start rule-style " +
+    "rule-visibility-items rule-width scroll-margin scroll-margin-block scroll-margin-inline " +
+    "scroll-padding scroll-padding-block scroll-padding-inline scroll-timeline text-box " +
+    "text-decoration text-emphasis text-wrap timeline-trigger timeline-trigger-activation-range " +
+    "timeline-trigger-active-range transition view-timeline white-space"
+  ).split(" ").forEach(function (name) { SHORTHANDS[name] = true; });
+
+  function styleSyntax(message, source, position) {
+    core.syntax(message, source, position < 0 ? 0 : position);
+  }
+
+  function propertyName(source, raw, position, seen) {
+    var name = raw.trim();
+    if (!name) styleSyntax("empty style property name", source, position);
+
+    var custom = name.indexOf("--") === 0;
+    if (custom) {
+      if (!/^--[A-Za-z_][A-Za-z0-9_-]*$/.test(name)) {
+        styleSyntax("invalid style property name \"" + name + "\"", source, position);
+      }
+      if (/^--(?:kit|kitwork)-/i.test(name)) {
+        styleSyntax("unsafe style property name \"" + name + "\"", source, position);
+      }
+    } else {
+      if (!/^-?[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name)) {
+        styleSyntax("invalid style property name \"" + name + "\"", source, position);
+      }
+      if (BLOCKED_NAMES[name]) {
+        styleSyntax("unsafe style property name \"" + name + "\"", source, position);
+      }
+      if (SHORTHANDS[name]) {
+        styleSyntax("shorthand style property \"" + name + "\" is not supported", source, position);
+      }
+    }
+
+    var duplicateKey = custom ? name : name.toLowerCase();
+    if (seen[duplicateKey]) {
+      styleSyntax("duplicate style property \"" + name + "\"", source, position);
+    }
+    seen[duplicateKey] = true;
+    return name;
+  }
+
+  function styleEntries(rawSource) {
+    var source = rawSource === null ? "" : String(rawSource);
+    if (source.length > SOURCE_LIMIT) {
+      styleSyntax("style source exceeds 16384 UTF-16 code units", source, SOURCE_LIMIT);
+    }
+
+    var trimmed = source.trim();
+    if (!trimmed) styleSyntax("empty style map", source, 0);
+    if (trimmed.charAt(0) === "{") {
+      styleSyntax("style map cannot use outer braces", source, source.indexOf("{"));
+    }
+
+    var parts = [];
+    var stack = [];
+    var quote = "";
+    var partStart = 0;
+    var colon = -1;
+
+    function finish(end) {
+      parts.push({ start: partStart, end: end, colon: colon });
+    }
+
+    for (var index = 0; index < trimmed.length; index++) {
+      var character = trimmed.charAt(index);
+      if (quote) {
+        if (character === "\\") index++;
+        else if (character === quote) quote = "";
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        quote = character;
+        continue;
+      }
+      if (character === "(" || character === "[" || character === "{") {
+        stack.push(character);
+        continue;
+      }
+      if (character === ")" || character === "]" || character === "}") {
+        var expected = character === ")" ? "(" : character === "]" ? "[" : "{";
+        if (stack.pop() !== expected) styleSyntax("unbalanced style map", source, index);
+        continue;
+      }
+      if (!stack.length && character === ":" && colon < partStart) {
+        colon = index;
+        continue;
+      }
+      if (!stack.length && character === ";") {
+        finish(index);
+        partStart = index + 1;
+        colon = -1;
+      }
+    }
+
+    if (quote) styleSyntax("unterminated string in style map", source, trimmed.length);
+    if (stack.length) styleSyntax("unbalanced style map", source, trimmed.length);
+    if (partStart < trimmed.length) finish(trimmed.length);
+    if (!parts.length) styleSyntax("empty style map", source, 0);
+    if (parts.length > ENTRY_LIMIT) styleSyntax("style map exceeds 128 entries", source, 0);
+
+    var entries = [];
+    var seen = Object.create(null);
+    parts.forEach(function (part) {
+      var rawPart = trimmed.slice(part.start, part.end);
+      if (!rawPart.trim()) styleSyntax("empty style entry", source, part.start);
+      if (part.colon < part.start) styleSyntax("invalid style entry", source, part.start);
+      var name = propertyName(source, trimmed.slice(part.start, part.colon), part.start, seen);
+      var expression = trimmed.slice(part.colon + 1, part.end).trim();
+      if (!expression) {
+        styleSyntax("empty style expression for \"" + name + "\"", source, part.colon + 1);
+      }
+      entries.push({ name: name, read: core.compile(expression, "binding"), last: UNSET });
+    });
+    return entries;
+  }
+
+  function safeStyle(element) {
+    var programs = core.elementRecord(element).programs;
+    if (OWN.call(programs, "data-kit-style")) return programs["data-kit-style"];
+    try { programs["data-kit-style"] = styleEntries(element.getAttribute("data-kit-style")); }
+    catch (error) { core.report(error); programs["data-kit-style"] = null; }
+    return programs["data-kit-style"];
+  }
+
+  function unsafeValue(text) {
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(text) || /[;{}\\@]/.test(text) ||
+      text.indexOf("/*") >= 0 || text.indexOf("*/") >= 0 || /!\s*important\b/i.test(text) ||
+      /(^|[^A-Za-z0-9_-])(url|image-set|-webkit-image-set|src|expression|var|attr)\s*\(/i.test(text)) {
+      return true;
+    }
+    var compact = text.replace(/\s+/g, "").toLowerCase();
+    return compact.indexOf("javascript:") >= 0 || compact.indexOf("vbscript:") >= 0 ||
+      compact.indexOf("data:text/html") >= 0;
+  }
+
+  function styleValue(name, value) {
+    if (value === null || value === undefined || value === false || value === "") return RESET;
+    var text;
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new TypeError("KitJS: invalid style value for \"" + name + "\"");
+      }
+      text = String(value);
+    } else if (typeof value === "string") text = value;
+    else throw new TypeError("KitJS: invalid style value for \"" + name + "\"");
+    if (unsafeValue(text)) throw new TypeError("KitJS: unsafe style value for \"" + name + "\"");
+    return text;
+  }
+
+  function styleState(element, entries) {
+    var modules = core.elementRecord(element).modules;
+    if (OWN.call(modules, "style")) return modules.style;
+    var baseline = Object.create(null);
+    entries.forEach(function (entry) {
+      baseline[entry.name] = {
+        value: element.style.getPropertyValue(entry.name),
+        priority: element.style.getPropertyPriority(entry.name)
+      };
+    });
+    modules.style = { baseline: baseline };
+    return modules.style;
+  }
+
+  function writeStyle(element, state, name, value) {
+    if (value !== RESET) {
+      element.style.setProperty(name, value, "");
+      return;
+    }
+    var baseline = state.baseline[name];
+    if (baseline.value !== "") element.style.setProperty(name, baseline.value, baseline.priority);
+    else element.style.removeProperty(name);
+  }
+
+  function render(current) {
+    core.ownedElements(current, SELECTOR).forEach(function (element) {
+      try {
+        var entries = safeStyle(element);
+        if (!entries) return;
+        var locals = core.localsFor ? core.localsFor(element) : null;
+        var next = [];
+        for (var index = 0; index < entries.length; index++) {
+          var value = entries[index].read(current.scope, locals);
+          if (core.asyncBinding(value)) return;
+          next.push(styleValue(entries[index].name, value));
+        }
+
+        var state = styleState(element, entries);
+        entries.forEach(function (entry, entryIndex) {
+          var value = next[entryIndex];
+          if (entry.last === value) return;
+          writeStyle(element, state, entry.name, value);
+          entry.last = value;
+        });
+      } catch (error) { core.report(error); }
+    });
+  }
+
+  core.renderHooks.push(render);
+  core.phase = "style";
+})(document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "style") throw new Error("KitJS: model loaded out of order");
+  if (core.reuse) { core.phase = "model"; return; }
+
+  var OWN = core.OWN;
+  var SELECTOR = "[data-kit-model]";
+  var composing = new WeakSet();
+
+  function controlKind(element) {
+    var tag = element.tagName && element.tagName.toLowerCase();
+    if (tag === "textarea") return "text";
+    if (tag === "select") return element.multiple ? "select-multiple" : "select";
+    if (tag !== "input") return "";
+    var type = (element.type || "text").toLowerCase();
+    if (type === "checkbox" || type === "radio" || type === "number" || type === "range") return type;
+    if (["button", "submit", "reset", "image", "file", "hidden"].indexOf(type) >= 0) return "";
+    return "text";
+  }
+
+  function modelState(element) {
+    var modules = core.elementRecord(element).modules;
+    if (OWN.call(modules, "model")) return modules.model;
+    var source = (element.getAttribute("data-kit-model") || "").trim();
+    if (source.charAt(0) === "$") {
+      core.report(new SyntaxError("KitJS: model cannot use the reserved $ namespace"));
+      modules.model = null;
+      return null;
+    }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source) || core.blocked(source)) {
+      core.report(new SyntaxError("KitJS: model must name one component field"));
+      modules.model = null;
+      return null;
+    }
+    if (!controlKind(element)) {
+      core.report(new TypeError("KitJS: model requires a supported form control"));
+      modules.model = null;
+      return null;
+    }
+    modules.model = { name: source, failed: false };
+    return modules.model;
+  }
+
+  function writable(scope, state) {
+    if (state.failed) return null;
+    var descriptor = Object.getOwnPropertyDescriptor(scope, state.name);
+    if (!descriptor || !OWN.call(descriptor, "value") || !descriptor.writable) {
+      state.failed = true;
+      core.report(new TypeError("KitJS: model field \"" + state.name + "\" is not writable"));
+      return null;
+    }
+    return descriptor;
+  }
+
+  function setValue(element, kind, value) {
+    if (kind === "checkbox") {
+      var checked = Array.isArray(value) ? value.some(function (item) {
+        return String(item) === element.value;
+      }) : !!value;
+      if (element.checked !== checked) element.checked = checked;
+      return;
+    }
+    if (kind === "radio") {
+      var selected = value !== null && value !== undefined && String(value) === element.value;
+      if (element.checked !== selected) element.checked = selected;
+      return;
+    }
+    if (kind === "select-multiple") {
+      var selectedValues = Array.isArray(value) ? value.map(String) : [];
+      Array.prototype.forEach.call(element.options, function (option) {
+        var selected = selectedValues.indexOf(option.value) >= 0;
+        if (option.selected !== selected) option.selected = selected;
+      });
+      return;
+    }
+    var text = value === null || value === undefined ? "" : String(value);
+    if (element.value !== text) element.value = text;
+  }
+
+  function eventValue(element, kind, current) {
+    if (kind === "checkbox") {
+      if (!Array.isArray(current)) return !!element.checked;
+      var next = current.slice();
+      var found = -1;
+      next.some(function (item, index) {
+        if (String(item) !== element.value) return false;
+        found = index;
+        return true;
+      });
+      if (element.checked && found < 0) next.push(element.value);
+      else if (!element.checked && found >= 0) next.splice(found, 1);
+      return next;
+    }
+    if (kind === "radio") return element.checked ? element.value : current;
+    if (kind === "select-multiple") {
+      return Array.prototype.filter.call(element.options, function (option) {
+        return option.selected;
+      }).map(function (option) { return option.value; });
+    }
+    if (kind === "number" || kind === "range") {
+      if (element.value === "") return null;
+      var number = Number(element.value);
+      return Number.isFinite(number) ? number : null;
+    }
+    return element.value;
+  }
+
+  function expectedEvent(kind) {
+    return kind === "checkbox" || kind === "radio" || kind === "select" || kind === "select-multiple" ?
+      "change" : "input";
+  }
+
+  function update(element, eventType, force) {
+    if (!element || !element.hasAttribute || !element.hasAttribute("data-kit-model")) return false;
+    if (core.ignoredForRuntime(element)) return false;
+    var state = modelState(element);
+    if (!state || state.failed) return false;
+    var kind = controlKind(element);
+    if (!force && expectedEvent(kind) !== eventType) return false;
+    if (kind === "text" && composing.has(element)) return false;
+    var current = core.scopeRecordFor(element);
+    if (!current || !writable(current.scope, state)) return false;
+    core.initialize(current);
+    var before = Reflect.get(current.scope, state.name, current.scope);
+    var value = eventValue(element, kind, before);
+    if (kind === "radio" && !element.checked) return false;
+    if (!Reflect.set(current.scope, state.name, value, current.scope)) {
+      core.report(new TypeError("KitJS: model field \"" + state.name + "\" rejected a write"));
+      return false;
+    }
+    return true;
+  }
+
+  function render(current) {
+    core.ownedElements(current, SELECTOR).forEach(function (element) {
+      try {
+        var state = modelState(element);
+        if (!state || !writable(current.scope, state)) return;
+        setValue(element, controlKind(element), Reflect.get(current.scope, state.name, current.scope));
+      } catch (error) { core.report(error); }
+    });
+  }
+
+  core.renderHooks.push(render);
+  core.updateModel = update;
+  core.modelCompositionStart = function (element) {
+    if (element && element.hasAttribute && element.hasAttribute("data-kit-model") &&
+      !core.ignoredForRuntime(element)) composing.add(element);
+  };
+  core.modelCompositionEnd = function (element) {
+    if (!element || core.ignoredForRuntime(element)) return;
+    composing.delete(element);
+    update(element, "input", true);
+  };
+  core.phase = "model";
+})(document);
+;(function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || core.phase !== "model") throw new Error("KitJS: events fragment loaded out of order");
+  if (core.reuse) { core.phase = "events"; return; }
+
+  var OWN = core.OWN;
+  var outsideActive = Object.create(null);
+  var prepared = false;
+
+  function validMetadata(element) {
+    if (core.ignoredForRuntime(element)) return false;
+    function valid(candidate) {
+      return (!core.componentMetadata || core.componentMetadata(candidate, true) !== null) &&
+        (!core.scopeSeed || core.scopeSeed(candidate, true) !== null);
+    }
+    if (!valid(element)) return false;
+    var boundary = core.ownerFor && core.ownerFor(element);
+    return !boundary || boundary === element || valid(boundary);
+  }
+
+  function eventElement(event) {
+    var target = event.target;
+    return target && target.nodeType === 1 ? target : target && target.parentElement;
+  }
+
+  function safeEvent(element, name) {
+    if (core.ignoredForRuntime(element)) return null;
+    if (!validMetadata(element)) return null;
+    var events = core.elementRecord(element).events;
+    if (OWN.call(events, name)) return events[name];
+    try {
+      var descriptor = core.parseEventAttribute(name);
+      if (!descriptor) return null;
+      var program = core.safeProgram(element, name, "action");
+      events[name] = program ? {
+        descriptor: descriptor,
+        program: program,
+        onceDone: false,
+        timer: 0,
+        generation: 0
+      } : null;
+      if (events[name] && descriptor.outside) {
+        outsideActive[descriptor.type] = (outsideActive[descriptor.type] || 0) + 1;
+      }
+    } catch (error) {
+      core.report(error);
+      events[name] = null;
+    }
+    return events[name];
+  }
+
+  function eventStates(element, type) {
+    if (core.ignoredForRuntime(element)) return [];
+    var prefix = "data-kit-" + type;
+    var output = [];
+    element.getAttributeNames().forEach(function (name) {
+      if (name !== prefix && name.indexOf(prefix + ":") !== 0) return;
+      var state = safeEvent(element, name);
+      if (state) output.push(state);
+    });
+    return output;
+  }
+
+  function validateElement(element) {
+    if (core.ignoredForRuntime(element)) return;
+    var record = core.records.get(element);
+    if (!validMetadata(element)) {
+      if (!record) record = core.elementRecord(element);
+      if (element.hasAttribute("data-kit-component")) record.invalid["data-kit-component"] = true;
+      if (element.hasAttribute("data-kit-version")) record.invalid["data-kit-version"] = true;
+      if (element.hasAttribute("data-kit-scope")) record.invalid["data-kit-scope"] = true;
+      return;
+    }
+    element.getAttributeNames().forEach(function (name) {
+      if (name.indexOf("data-kit-") !== 0 || record && OWN.call(record.invalid, name)) return;
+      try {
+        var descriptor = core.parseEventAttribute(name);
+        if (descriptor) safeEvent(element, name);
+      } catch (error) {
+        core.report(error);
+        if (!record) record = core.elementRecord(element);
+        record.invalid[name] = true;
+      }
+    });
+  }
+
+  function prepare() {
+    if (prepared) return;
+    prepared = true;
+    if (core.prepareComponentTree) core.prepareComponentTree(document);
+    document.querySelectorAll("*").forEach(validateElement);
+  }
+
+  function prepareTree(root) {
+    if (!root || root.nodeType === 1 && core.ignoredForRuntime(root)) return;
+    if (core.prepareComponentTree) core.prepareComponentTree(root);
+    if (root.nodeType === 1) validateElement(root);
+    if (root.querySelectorAll) root.querySelectorAll("*").forEach(validateElement);
+  }
+
+  function disposeElement(element) {
+    var record = core.records.get(element);
+    if (!record) return;
+    Object.keys(record.events).forEach(function (name) {
+      var state = record.events[name];
+      if (!state) return;
+      if (state.timer) clearTimeout(state.timer);
+      state.timer = 0;
+      state.generation++;
+      if (state.descriptor.outside && outsideActive[state.descriptor.type]) {
+        outsideActive[state.descriptor.type]--;
+      }
+    });
+  }
+
+  function snapshot(event, target) {
+    var value = null;
+    if (target && "value" in target) {
+      var candidate = target.value;
+      if (candidate === null || typeof candidate === "string" || typeof candidate === "boolean" ||
+          typeof candidate === "number" && Number.isFinite(candidate)) value = candidate;
+    }
+    var checked = target && "checked" in target ? !!target.checked : false;
+    var output = Object.create(null);
+    Object.assign(output, {
+      type: String(event.type || ""),
+      key: typeof event.key === "string" ? event.key : "",
+      code: typeof event.code === "string" ? event.code : "",
+      button: typeof event.button === "number" ? event.button : 0,
+      buttons: typeof event.buttons === "number" ? event.buttons : 0,
+      clientX: typeof event.clientX === "number" ? event.clientX : 0,
+      clientY: typeof event.clientY === "number" ? event.clientY : 0,
+      detail: typeof event.detail === "number" ? event.detail : 0,
+      ctrlKey: !!event.ctrlKey,
+      shiftKey: !!event.shiftKey,
+      altKey: !!event.altKey,
+      metaKey: !!event.metaKey,
+      repeat: !!event.repeat,
+      isComposing: !!event.isComposing,
+      value: value,
+      checked: checked
+    });
+    return Object.freeze(output);
+  }
+
+  function locals(eventSnapshot) {
+    var output = Object.create(null);
+    output.$event = eventSnapshot;
+    return output;
+  }
+
+  function matches(state, element, target, event) {
+    var descriptor = state.descriptor;
+    if (state.onceDone) return false;
+    if (descriptor.self && target !== element) return false;
+    if (descriptor.key && (event.isComposing || event.keyCode === 229 || event.key !== descriptor.key)) {
+      return false;
+    }
+    return true;
+  }
+
+  function connectedOwner(state) {
+    var owner = null;
+    Array.prototype.some.call(document.querySelectorAll("*"), function (element) {
+      if (core.ignoredForRuntime(element)) return false;
+      var record = core.records.get(element);
+      if (!record || record.events[state.descriptor.name] !== state ||
+          !element.hasAttribute(state.descriptor.name)) return false;
+      owner = element;
+      return true;
+    });
+    return owner;
+  }
+
+  function scheduleDebounce(state, eventSnapshot) {
+    if (state.timer) clearTimeout(state.timer);
+    var generation = ++state.generation;
+    state.timer = setTimeout(function () {
+      state.timer = 0;
+      if (generation !== state.generation || state.onceDone) return;
+      var owner = connectedOwner(state);
+      if (!owner) return;
+      if (core.executeAttribute(owner, state.descriptor.name, locals(eventSnapshot)) &&
+          state.descriptor.once) state.onceDone = true;
+    }, state.descriptor.delay);
+  }
+
+  function execute(state, element, event, eventSnapshot) {
+    var descriptor = state.descriptor;
+    if (descriptor.prevent && event.cancelable) event.preventDefault();
+    if (descriptor.stop) event.stopPropagation();
+
+    if (descriptor.delay) {
+      scheduleDebounce(state, eventSnapshot);
+      return true;
+    }
+
+    var success = core.executeAttribute(element, descriptor.name, locals(eventSnapshot));
+    if (success && descriptor.once) state.onceDone = true;
+    return success;
+  }
+
+  function direct(event, target, eventSnapshot) {
+    var element = target;
+    while (element && element !== document) {
+      var states = eventStates(element, event.type);
+      var stopped = false;
+      for (var index = 0; index < states.length; index++) {
+        var state = states[index];
+        if (state.descriptor.outside || !matches(state, element, target, event)) continue;
+        execute(state, element, event, eventSnapshot);
+        if (state.descriptor.stop) stopped = true;
+      }
+      if (stopped) return true;
+      element = element.parentElement;
+    }
+    return false;
+  }
+
+  function outside(event, target, eventSnapshot) {
+    return Array.prototype.some.call(document.querySelectorAll("*"), function (element) {
+      if (core.ignoredForRuntime(element)) return false;
+      if (element.contains(target)) return false;
+      var states = eventStates(element, event.type);
+      var stopped = false;
+      for (var index = 0; index < states.length; index++) {
+        var state = states[index];
+        if (!state.descriptor.outside || !matches(state, element, target, event)) continue;
+        execute(state, element, event, eventSnapshot);
+        if (state.descriptor.stop) stopped = true;
+      }
+      return stopped;
+    });
+  }
+
+  function dispatch(event) {
+    try {
+      var target = eventElement(event);
+      if (!target || core.ignoredForRuntime(target)) return;
+      if (event.type === "input" || event.type === "change") core.updateModel(target, event.type, false);
+      var eventSnapshot = snapshot(event, target);
+      if (!direct(event, target, eventSnapshot) && outsideActive[event.type]) {
+        outside(event, target, eventSnapshot);
+      }
+    } catch (error) { core.report(error); }
+  }
+
+  core.prepareHooks.push(prepare);
+  core.prepareEventTree = prepareTree;
+  core.disposeElementEvents = disposeElement;
+  core.installEvents = function () {
+    core.eventTypes.forEach(function (type) { document.addEventListener(type, dispatch); });
+    document.addEventListener("compositionstart", function (event) {
+      core.modelCompositionStart(eventElement(event));
+    });
+    document.addEventListener("compositionend", function (event) {
+      core.modelCompositionEnd(eventElement(event));
+    });
+  };
+  core.phase = "events";
+})(document);
+; (function (global, document) {
+  "use strict";
+
+  var ASSEMBLY = Symbol.for("kitjs:assembly");
+  var PROFILE = Symbol.for("kitjs:profile");
+  var expected = "kit";
+  var core = document[ASSEMBLY];
+  if (!core || core.phase !== "events") {
+    delete document[ASSEMBLY];
+    throw new Error("KitJS: kit profile marker loaded out of order");
+  }
+
+  try {
+    if (core.reuse) {
+      var active = global.kit && global.kit[PROFILE];
+      if (active !== expected) {
+        if (active === "hydrate") {
+          throw new Error("KitJS: cannot install kit profile over active hydrate profile");
+        }
+        throw new Error("KitJS: active runtime has no compatible kit profile marker");
+      }
+      core.profile = expected;
+      return;
+    }
+    if (!core.kit || core.OWN.call(core.kit, PROFILE)) {
+      throw new Error("KitJS: kit profile marker cannot be installed");
+    }
+    Object.defineProperty(core.kit, PROFILE, { value: expected });
+    core.profile = expected;
+  } catch (error) {
+    delete document[ASSEMBLY];
+    throw error;
+  }
+})(globalThis, document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || ["events", "drive"].indexOf(core.phase) < 0) {
+    throw new Error("KitJS: service registrar loaded out of order");
+  }
+  if (core.reuse) return;
+  if (!core.kit || typeof core.validServiceName !== "function" ||
+    typeof core.sealKit !== "function" || core.serviceRegistry) {
+    throw new Error("KitJS: service registrar cannot be installed");
+  }
+
+  var OWN = core.OWN;
+  var registry = new Map();
+  var identities = new WeakMap();
+  var kit = core.kit;
+  var sealed = false;
+
+  function snapshot(name, namespace) {
+    var prototype = namespace && Object.getPrototypeOf(namespace);
+    if (!namespace || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(namespace).length) {
+      throw new TypeError("KitJS: service namespace must be a plain object");
+    }
+    var descriptors = Object.getOwnPropertyDescriptors(namespace);
+    var output = Object.create(null);
+    Object.keys(descriptors).forEach(function (member) {
+      if (member === "version" || core.blocked(member)) {
+        throw new TypeError("KitJS: invalid service member \"" + member + "\"");
+      }
+      var descriptor = descriptors[member];
+      if (descriptor.set || !OWN.call(descriptor, "value") && typeof descriptor.get !== "function") {
+        throw new TypeError("KitJS: service members must be values or readonly getters");
+      }
+      if (OWN.call(descriptor, "value")) {
+        Object.defineProperty(output, member, {
+          value: descriptor.value,
+          enumerable: descriptor.enumerable !== false
+        });
+      } else {
+        Object.defineProperty(output, member, {
+          get: descriptor.get,
+          enumerable: descriptor.enumerable !== false
+        });
+      }
+    });
+    Object.defineProperty(output, "version", {
+      value: core.graph.services[name]
+    });
+    return Object.freeze(output);
+  }
+
+  function service(name, namespace) {
+    if (arguments.length !== 2) {
+      throw new TypeError("KitJS: service(name, namespace) expects two arguments");
+    }
+    if (sealed) throw new Error("KitJS: service registrar is sealed");
+    if (!core.graph) throw new Error("KitJS: services must register after the graph is installed");
+    if (!core.validServiceName(name)) throw new TypeError("KitJS: invalid service name");
+    if (!OWN.call(core.graph.services, name)) {
+      throw new Error("KitJS: service \"" + name + "\" is not declared by the installed graph");
+    }
+    if (registry.has(name)) throw new Error("KitJS: service \"" + name + "\" already exists");
+    var value = snapshot(name, namespace);
+    Object.defineProperty(kit, name, {
+      value: value,
+      enumerable: true
+    });
+    registry.set(name, value);
+    identities.set(value, name);
+  }
+
+  Object.defineProperty(kit, "service", {
+    value: service,
+    configurable: true
+  });
+
+  core.serviceRegistry = registry;
+  core.sealServices = function () {
+    if (sealed) throw new Error("KitJS: services are already sealed");
+    if (!core.graph) throw new Error("KitJS: service graph is not installed");
+    Object.keys(core.graph.services).forEach(function (name) {
+      if (!registry.has(name)) {
+        throw new Error("KitJS: service graph is missing definition \"" + name + "\"");
+      }
+      Object.keys(core.graph.actions[name]).forEach(function (member) {
+        if (typeof registry.get(name)[member] !== "function") {
+          throw new Error("KitJS: authored action \"" + name + "." + member + "\" is not callable");
+        }
+      });
+    });
+    sealed = true;
+    if (!delete kit.service) throw new Error("KitJS: service registrar could not be removed");
+    core.servicesSealed = true;
+    return core.sealKit();
+  };
+  core.serviceName = function (value) { return identities.get(value) || null; };
+})(document);
+; (function (global, document) {
+  "use strict";
+
+  var ASSEMBLY = Symbol.for("kitjs:assembly");
+  var GRAPH = Symbol.for("kitjs:graph");
+  var core = document[ASSEMBLY];
+  if (!core || core.phase !== "events") throw new Error("KitJS: component graph loaded out of order");
+  var services = Object.create(null);
+  services["storage"] = "1.0.0";
+  var components = Object.create(null);
+  components["preferences"] = "1.0.0";
+  var actions = Object.create(null);
+  actions["storage"] = Object.create(null);
+  var grants = Object.create(null);
+  grants["preferences"] = Object.create(null);
+  grants["preferences"]["storage"] = "1.0.0";
+  var graph = { id: "2ea9277996c87d96403ad0fca15baa51f45ee6b92f385da48b63c9875c39730c", profile: "kit", services: services, components: components, actions: actions, grants: grants };
+  if (core.reuse) {
+    var installed = global.kit && global.kit[GRAPH];
+    if (!installed || installed.id !== graph.id || installed.profile !== graph.profile) {
+      delete document[ASSEMBLY];
+      throw new Error("KitJS: installed component graph does not match this artifact");
+    }
+    core.graphValidated = true;
+    return;
+  }
+  try {
+    if (typeof core.installComponentGraph !== "function") throw new Error("KitJS: component graph installer is unavailable");
+    core.installComponentGraph(graph);
+    var kit = core.kit;
+    if (!kit || kit.version !== core.version || kit.component !== core.component) throw new Error("KitJS: package facade is unavailable");
+    ; (function (kit) {
+; (function (global, kit) {
+  "use strict";
+
+  // KitJS service: storage@1.0.0
+  var prefix = "kit:";
+
+  function keyOf(value) {
+    value = String(value === undefined || value === null ? "" : value);
+    if (!value) throw new TypeError("Storage key cannot be empty");
+    return prefix + value;
+  }
+
+  function local() {
+    try { return global.localStorage || null; }
+    catch (_) { return null; }
+  }
+
+  function decode(value, fallback) {
+    if (value === null) return fallback;
+    try { return JSON.parse(value); }
+    catch (_) { return value; }
+  }
+
+  async function get(key, fallback) {
+    key = keyOf(key);
+    var target = local();
+    if (!target) return fallback;
+    try { return decode(target.getItem(key), fallback); }
+    catch (_) { return fallback; }
+  }
+
+  async function set(key, value) {
+    key = keyOf(key);
+    var encoded;
+    if (value !== undefined) {
+      encoded = JSON.stringify(value);
+      if (encoded === undefined) throw new TypeError("Storage value must be JSON-serializable");
+    }
+    var target = local();
+    if (!target) return false;
+    try {
+      if (value === undefined) target.removeItem(key);
+      else target.setItem(key, encoded);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function remove(key) {
+    key = keyOf(key);
+    var target = local();
+    if (!target) return false;
+    try {
+      target.removeItem(key);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function has(key) {
+    key = keyOf(key);
+    var target = local();
+    if (!target) return false;
+    try { return target.getItem(key) !== null; }
+    catch (_) { return false; }
+  }
+
+  async function clear() {
+    var target = local();
+    if (!target) return 0;
+    var keys = [];
+    try {
+      for (var index = 0; index < target.length; index++) {
+        var key = target.key(index);
+        if (key && key.indexOf(prefix) === 0) keys.push(key);
+      }
+      keys.forEach(function (key) { target.removeItem(key); });
+      return keys.length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  kit.service("storage", {
+    get: get,
+    set: set,
+    remove: remove,
+    has: has,
+    clear: clear
+  });
+})(globalThis, kit);
+    })(kit);
+    if (typeof core.sealServices !== "function") throw new Error("KitJS: service graph sealer is unavailable");
+    core.sealServices();
+    ; (function (kit) {
+;(function () {
+"use strict";
+
+kit.component("preferences", {
+  mode: "system",
+  message: "Loading saved preference…",
+
+  init: async function () {
+    this.mode = await kit.storage.get("theme", "system");
+    this.message = "Preference ready";
+  },
+
+  choose: async function (mode) {
+    var stored = await kit.storage.set("theme", mode);
+    if (!stored) {
+      this.message = "Could not save preference";
+      return;
+    }
+    this.mode = await kit.storage.get("theme", "system");
+    this.message = "Saved " + this.mode;
+  },
+
+  reset: async function () {
+    await kit.storage.remove("theme");
+    this.mode = await kit.storage.get("theme", "system");
+    this.message = "Reset to system";
+  }
+});
+
+})();
+    })(kit);
+  } catch (error) {
+    delete document[ASSEMBLY];
+    throw error;
+  }
+})(globalThis, document);
+; (function (global, document) {
+  "use strict";
+
+  var ASSEMBLY = Symbol.for("kitjs:assembly");
+  var GRAPH = Symbol.for("kitjs:graph");
+  var core = document[ASSEMBLY];
+  if (!core || ["events", "drive"].indexOf(core.phase) < 0) {
+    throw new Error("KitJS: boot loaded out of order");
+  }
+  var expectedProfile = core.phase === "drive" ? "hydrate" : "kit";
+  if (core.profile !== expectedProfile) {
+    delete document[ASSEMBLY];
+    throw new Error("KitJS: runtime profile marker is unavailable");
+  }
+  if (core.reuse) {
+    if (global.kit && Object.prototype.hasOwnProperty.call(global.kit, GRAPH) &&
+      core.graphValidated !== true) {
+      delete document[ASSEMBLY];
+      throw new Error("KitJS: installed component graph does not match this artifact");
+    }
+    delete document[ASSEMBLY];
+    return;
+  }
+  if (typeof core.component !== "function" || typeof core.render !== "function" ||
+    typeof core.installEvents !== "function" || typeof core.sealKit !== "function" || !core.kit) {
+    delete document[ASSEMBLY];
+    throw new Error("KitJS: incomplete runtime assembly");
+  }
+  try {
+    if (typeof core.assertComponentGraph === "function") core.assertComponentGraph();
+    if (core.serviceRegistry && core.servicesSealed !== true) {
+      throw new Error("KitJS: services must be sealed before publication");
+    }
+    core.sealKit();
+  } catch (error) {
+    delete document[ASSEMBLY];
+    throw error;
+  }
+
+  var kit = core.kit;
+
+  function boot() {
+    if (core.booted) return;
+    core.booted = true;
+    if (typeof core.prepareComponentTree === "function") core.prepareComponentTree(document);
+    core.render();
+    core.resetDirty();
+  }
+
+  delete document[ASSEMBLY];
+  core.installEvents();
+  global.kit = kit;
+  core.startHooks.forEach(function (start) {
+    try { start(); } catch (error) { core.report(error); }
+  });
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  } else queueMicrotask(boot);
+})(globalThis, document);

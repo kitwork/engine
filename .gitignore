@@ -22,8 +22,11 @@ config/smtp/mail.yaml
 *.out
 
 .tmp
-.gochche.*
+.gochche-*
 .gocache.*
+
+
+.gocache*
 
 # --- Logs & Output ---
 *.log

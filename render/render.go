@@ -37,7 +37,7 @@ type Config struct {
 	MinifySet     bool                      // whether Minify was set explicitly
 	DefaultMinify bool                      // minify when not set explicitly (caller passes !AllowLocal)
 	ThemeMode     string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
-	KitJSAssets   *kitjavascript.AssetStore // non-nil opts into generation-prepared component-first KitJS
+	KitJSAssets   *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
 	Source        Source                    // immutable template source; nil reads the live filesystem
 }
 
@@ -260,8 +260,8 @@ func (r *Render) tmpl(data any) string {
 		out = r.applyStaticPresentation(out)
 	}
 
-	// The legacy twin evaluator remains request-bound. Component-first KitJS is
-	// browser-owned in this preview and deliberately bypasses legacy pre-render.
+	// The legacy Hydrate pre-render remains request-bound. Staged KitJS is
+	// browser-owned and deliberately bypasses that legacy pre-render.
 	if r.kitJSAssets == nil {
 		out = hydrate.PreRender(out)
 	}
@@ -269,6 +269,9 @@ func (r *Render) tmpl(data any) string {
 	if r.shouldMinify() {
 		if !minifyPrepared {
 			out = minifier.HTML(out)
+			if r.themeMode != "off" {
+				out = theme.Canonicalize(out)
+			}
 		}
 	}
 	return out
@@ -313,11 +316,9 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// as icons (jit/logo). router.logo() switches to the shared cached /jitlogo stylesheet.
 	out = logo.Render(out)
 
-	// 3e. jitjs. DEFAULT (inline): inject a per-page <script data-kitwork-jit="js"> with the core
-	// dispatcher + ONLY the data-kitwork-action verbs the page uses (jit/js); Drive re-runs it on
-	// swap (mergeHead). SERVICE: if the tenant declared router.jitjs(), one shared cached runtime is
-	// served at jitjsRoute, so we skip inlining and auto-inject <script src> (same guards as
-	// router.icons()). A cheap no-op when no verbs are used.
+	// 3e. Legacy action-only JIT JS: inject a per-page script with the dispatcher and only the
+	// data-kitwork-action verbs the page uses. Staged KitJS delivery bypasses this compatibility
+	// path. A page with no legacy actions remains a cheap no-op.
 	if r.kitJSAssets == nil {
 		out = jitjs.Render(out)
 	}
@@ -379,11 +380,11 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 		if scanErr != nil {
 			return nil, false, false, fmt.Sprintf("KitJS preview requires static data-kit-* attributes and statically scannable HTML during generation preparation: %v", scanErr)
 		}
-		bundle, composeErr := r.kitJSAssets.ComposeHTML(scanSource)
+		delivery, composeErr := r.kitJSAssets.ComposeHTML(scanSource)
 		if composeErr != nil {
 			return nil, false, false, fmt.Sprintf("prepare KitJS runtime: %v", composeErr)
 		}
-		injected, injectErr := kitjavascript.InjectRuntime([]byte(fullTemplate), bundle)
+		injected, injectErr := kitjavascript.InjectDelivery([]byte(fullTemplate), delivery)
 		if injectErr != nil {
 			return nil, false, false, fmt.Sprintf("inject KitJS runtime: %v", injectErr)
 		}
@@ -395,6 +396,9 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 		if r.shouldMinify() {
 			if minified, ok := minifier.TemplateHTML(fullTemplate); ok {
 				fullTemplate = minified
+				if r.themeMode != "off" {
+					fullTemplate = theme.Canonicalize(fullTemplate)
+				}
 				minifyPrepared = true
 			}
 		}
@@ -851,7 +855,7 @@ func (r *Render) PreparationError() error {
 // ScanKitJS assembles the same static document used by Prepare and returns its
 // authored runtime use without composing or injecting an asset. Generation
 // owners use this first pass to close one Drive-compatible graph across every
-// route that shares a data-kit-app identity.
+// route in the opted-in generation.
 func (r *Render) ScanKitJS() (kitjavascript.ScanResult, error) {
 	if r == nil {
 		return kitjavascript.ScanResult{}, fmt.Errorf("scan KitJS template: nil render")
@@ -1583,6 +1587,7 @@ func evalInto(
 }
 
 func writeResolvedValue(output *strings.Builder, resolved value.Value, escape bool) {
+	escape = escape && !resolved.Raw // a Raw-marked (already-safe) value is never re-escaped
 	if text, ok := resolved.V.(string); ok {
 		if escape {
 			writeEscapedString(output, text)

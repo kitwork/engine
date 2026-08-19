@@ -5,10 +5,14 @@ package main
 import (
 	"bytes"
 	"testing"
+
+	kitjavascript "github.com/kitwork/engine/jit/javascript"
 )
 
 func TestStandardLibraryBuildEmitsValidDistribution(t *testing.T) {
-	config, err := parseDistArgs([]string{"1.0.0", t.TempDir(), "--component=dropdown@1.0.0"})
+	config, err := parseDistArgs([]string{
+		kitjavascript.ReleaseVersion, t.TempDir(), "--component=progress-bar@2.0.0",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

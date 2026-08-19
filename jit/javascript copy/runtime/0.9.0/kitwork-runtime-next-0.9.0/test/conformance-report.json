@@ -1,8 +1,0 @@
-{
-  "schema": "kitwork-expression-conformance/1",
-  "specification": "0.7.0-draft",
-  "passed": 25,
-  "failed": 0,
-  "total": 25,
-  "failures": []
-}

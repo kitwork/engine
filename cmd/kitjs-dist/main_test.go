@@ -14,7 +14,7 @@ import (
 
 func TestDistributionMatchesNativeComposerGraph(t *testing.T) {
 	config, err := parseDistArgs([]string{
-		"1.0.0", t.TempDir(), "--drive", "--component", "theme@v1.0.0", "--component=dialog",
+		kitjavascript.ReleaseVersion, t.TempDir(), "--drive", "--component", "progress-bar@v2.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -27,10 +27,7 @@ func TestDistributionMatchesNativeComposerGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err := composer.ComposeHTML([]byte(
-		`<html data-kit-app="standalone"><main data-kit-component="theme@1.0.0"></main>` +
-			`<aside data-kit-component="dialog"></aside></html>`,
-	))
+	native, err := composer.ComposeStandalone([]kitjavascript.ComponentRef{{Name: "progress-bar", Version: "2.0.0"}}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +91,7 @@ func TestDistributionMatchesNativeComposerGraph(t *testing.T) {
 }
 
 func TestDistributionCoreOnlyAndArgumentValidation(t *testing.T) {
-	config, err := parseDistArgs([]string{"1.0.0", t.TempDir()})
+	config, err := parseDistArgs([]string{kitjavascript.ReleaseVersion, t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,13 +99,8 @@ func TestDistributionCoreOnlyAndArgumentValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle.Empty() || len(bundle.Modules) == 0 {
+	if bundle.Empty() || bundle.Profile != kitjavascript.ProfileKit || bundle.Release != kitjavascript.ReleaseVersion {
 		t.Fatal("standalone script opt-in must emit the core without components")
-	}
-	for _, module := range bundle.Modules {
-		if module.Kind == kitjavascript.ComponentModule {
-			t.Fatalf("core-only distribution unexpectedly selected %s", module)
-		}
 	}
 	outputs := distributionOutputs(bundle, source, minified)
 	var snippet []byte
@@ -148,19 +140,22 @@ func TestDistributionCoreOnlyAndArgumentValidation(t *testing.T) {
 			t.Fatalf("parseDistArgs(%q) unexpectedly succeeded", arguments)
 		}
 	}
-	valid, err := parseDistArgs([]string{"1.2.3-rc.1+build.7", t.TempDir()})
-	if err != nil || valid.version != "1.2.3-rc.1+build.7" {
-		t.Fatalf("valid exact SemVer rejected: config=%+v err=%v", valid, err)
+	valid, err := parseDistArgs([]string{kitjavascript.ReleaseVersion, t.TempDir()})
+	if err != nil || valid.version != kitjavascript.ReleaseVersion {
+		t.Fatalf("embedded release rejected: config=%+v err=%v", valid, err)
+	}
+	if _, _, _, err := composeDistribution(distConfig{version: "1.2.3-rc.1+build.7"}); err == nil {
+		t.Fatal("composeDistribution accepted a version different from the embedded release")
 	}
 	if _, _, _, err := composeDistribution(distConfig{version: "1.0.0\nalert(1)"}); err == nil {
 		t.Fatal("composeDistribution accepted an unsafe banner version")
 	}
 
-	invalid, err := parseDistArgs([]string{"1.0.0", t.TempDir(), "--component=missing@1.0.0"})
+	invalid, err := parseDistArgs([]string{kitjavascript.ReleaseVersion, t.TempDir(), "--component=missing@1.0.0"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := composeDistribution(invalid); err == nil || !strings.Contains(err.Error(), "module not found") {
+	if _, _, _, err := composeDistribution(invalid); err == nil || !strings.Contains(err.Error(), "component package not found") {
 		t.Fatalf("unknown graph error=%v", err)
 	}
 }

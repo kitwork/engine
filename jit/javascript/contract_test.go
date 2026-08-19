@@ -1,421 +1,256 @@
 package javascript
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
 
-var canonicalComponentNames = []string{
-	"accordion",
-	"announce",
-	"clipboard",
-	"combobox",
-	"command-palette",
-	"counter",
-	"dialog",
-	"drawer",
-	"dropdown",
-	"menu",
-	"popover",
-	"progress-bar",
-	"tabs",
-	"theme",
-	"toast",
-	"tooltip",
-}
+var (
+	externalScriptRE  = regexp.MustCompile(`(?is)<script\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>`)
+	publicControlRE   = regexp.MustCompile(`(?i)\bkit\s*(?:\.\s*(?:start|destroy|use|mount|unmount)\b|\[\s*["'](?:start|destroy|use|mount|unmount)["']\s*\])`)
+	globalKitTargetRE = regexp.MustCompile(`(?m)\b(?:window|globalThis|self|global|root)\s*\.\s*kit\b`)
+)
 
-func TestDefaultRegistryPublishesCanonicalModules(t *testing.T) {
-	t.Parallel()
-	registry, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestKitJSHasOneSmallBrowserContract(t *testing.T) {
+	source := readVanillaFile(t, "kit.js")
+	text := string(source)
+	code := javascriptWithoutComments(text)
+	tokens := javascriptIdentifiers(text)
 
-	want := map[ModuleID]string{
-		{Kind: CoreModule, Name: "global", Version: "0.1.0-preview.1"}:     "core/global.js",
-		{Kind: CoreModule, Name: "expression", Version: "0.1.0-preview.1"}: "core/expression.js",
-		{Kind: CoreModule, Name: "component", Version: "0.1.0-preview.1"}:  "core/component.js",
-		{Kind: CoreModule, Name: "dom", Version: "0.1.0-preview.1"}:        "core/dom.js",
-		{Kind: CoreModule, Name: "lifecycle", Version: "0.1.0-preview.1"}:  "core/lifecycle.js",
-		{Kind: CoreModule, Name: "morph", Version: "0.1.0-preview.1"}:      "core/morph.js",
-		{Kind: CoreModule, Name: "drive", Version: "0.1.0-preview.1"}:      "core/drive.js",
-		{Kind: CoreModule, Name: "boot", Version: "0.1.0-preview.1"}:       "core/boot.js",
-		{Kind: ServiceModule, Name: "announce", Version: "1.0.0"}:          "service/announce/1.0.0.js",
-		{Kind: ServiceModule, Name: "clipboard", Version: "1.0.0"}:         "service/clipboard/1.0.0.js",
-		{Kind: ServiceModule, Name: "cookie", Version: "1.0.0"}:            "service/cookie/1.0.0.js",
-		{Kind: ServiceModule, Name: "fullscreen", Version: "1.0.0"}:        "service/fullscreen/1.0.0.js",
-		{Kind: ServiceModule, Name: "navigation", Version: "1.0.0"}:        "service/navigation/1.0.0.js",
-		{Kind: ServiceModule, Name: "network", Version: "1.0.0"}:           "service/network/1.0.0.js",
-		{Kind: ServiceModule, Name: "request", Version: "1.0.0"}:           "service/request/1.0.0.js",
-		{Kind: ServiceModule, Name: "share", Version: "1.0.0"}:             "service/share/1.0.0.js",
-		{Kind: ServiceModule, Name: "storage", Version: "1.0.0"}:           "service/storage/1.0.0.js",
-		{Kind: ComponentModule, Name: "accordion", Version: "1.0.0"}:       "component/accordion/1.0.0.js",
-		{Kind: ComponentModule, Name: "announce", Version: "1.0.0"}:        "component/announce/1.0.0.js",
-		{Kind: ComponentModule, Name: "clipboard", Version: "1.0.0"}:       "component/clipboard/1.0.0.js",
-		{Kind: ComponentModule, Name: "combobox", Version: "1.0.0"}:        "component/combobox/1.0.0.js",
-		{Kind: ComponentModule, Name: "command-palette", Version: "1.0.0"}: "component/command-palette/1.0.0.js",
-		{Kind: ComponentModule, Name: "counter", Version: "1.0.0"}:         "component/counter/1.0.0.js",
-		{Kind: ComponentModule, Name: "dialog", Version: "1.0.0"}:          "component/dialog/1.0.0.js",
-		{Kind: ComponentModule, Name: "drawer", Version: "1.0.0"}:          "component/drawer/1.0.0.js",
-		{Kind: ComponentModule, Name: "dropdown", Version: "1.0.0"}:        "component/dropdown/1.0.0.js",
-		{Kind: ComponentModule, Name: "menu", Version: "1.0.0"}:            "component/menu/1.0.0.js",
-		{Kind: ComponentModule, Name: "popover", Version: "1.0.0"}:         "component/popover/1.0.0.js",
-		{Kind: ComponentModule, Name: "progress-bar", Version: "1.0.0"}:    "component/progress-bar/1.0.0.js",
-		{Kind: ComponentModule, Name: "tabs", Version: "1.0.0"}:            "component/tabs/1.0.0.js",
-		{Kind: ComponentModule, Name: "theme", Version: "1.0.0"}:           "component/theme/1.0.0.js",
-		{Kind: ComponentModule, Name: "toast", Version: "1.0.0"}:           "component/toast/1.0.0.js",
-		{Kind: ComponentModule, Name: "tooltip", Version: "1.0.0"}:         "component/tooltip/1.0.0.js",
-	}
-	if len(registry.modules) != len(want) {
-		t.Fatalf("default registry publishes %d modules, want %d", len(registry.modules), len(want))
-	}
-	for id, path := range want {
-		module, exists := registry.modules[id]
-		if !exists {
-			t.Errorf("default registry is missing %s", id)
-			continue
-		}
-		if module.Path != path {
-			t.Errorf("%s path = %q, want %q", id, module.Path, path)
-		}
-	}
-}
-
-func TestDefaultServiceContracts(t *testing.T) {
-	t.Parallel()
-	registry, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tests := []struct {
-		name     string
-		required []string
-	}{
-		{name: "announce", required: []string{"say: say", "polite:", "assertive:", "clear: clear"}},
-		{name: "clipboard", required: []string{"writeText: writeText", "readText: readText"}},
-		{name: "cookie", required: []string{"get: get", "set: set", "remove: remove", "has: has"}},
-		{name: "fullscreen", required: []string{"request: request", "exit: exit", "active: active"}},
-		{name: "navigation", required: []string{"back: back", "forward: forward", "reload: reload"}},
-		{name: "network", required: []string{"get online()", "snapshot: snapshot", "subscribe: subscribe"}},
-		{name: "request", required: []string{"request: request", "get: get", "post: post", "submit: submit", "abort: abort"}},
-		{name: "share", required: []string{"open: open", "canShare: canShare", "kit.clipboard.writeText"}},
-		{name: "storage", required: []string{"get: get", "set: set", "remove: remove", "has: has", "clear: clear"}},
-	}
-
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			id := ModuleID{Kind: ServiceModule, Name: test.name, Version: "1.0.0"}
-			module, exists := registry.modules[id]
-			if !exists {
-				t.Fatalf("default registry is missing %s", id)
-			}
-			source := string(module.Source)
-			common := []string{
-				"KitJS service: " + test.name + "@1.0.0",
-				`var version = "1.0.0"`,
-				`OWN.call(kit, "component")`,
-				`OWN.call(kit, "` + test.name + `")`,
-				"Object.freeze(",
-				`Object.defineProperty(kit, "` + test.name + `"`,
-				"configurable: false",
-				"writable: false",
-			}
-			for _, required := range append(common, test.required...) {
-				if !strings.Contains(source, required) {
-					t.Errorf("%s is missing contract marker %q", id, required)
-				}
-			}
-			for _, forbidden := range []string{"kit.component(", "data-kit-", "innerHTML"} {
-				if strings.Contains(source, forbidden) {
-					t.Errorf("%s contains component/markup concern %q", id, forbidden)
-				}
-			}
-		})
-	}
-}
-
-func TestDefaultComponentContracts(t *testing.T) {
-	t.Parallel()
-	registry, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tests := []struct {
-		name      string
-		required  []string
-		forbidden []string
-	}{
-		{
-			name:      "counter",
-			required:  []string{`kit.component("counter"`, `count: 0`},
-			forbidden: []string{"init()", "addEventListener", "document.", "this.$host", "this.$refs", "innerHTML"},
-		},
-		{
-			name: "clipboard",
-			required: []string{
-				`kit.component("clipboard"`, `copied: false`, `error: ""`, `async copy(value)`,
-				"kit.clipboard.writeText", "nextRevision", "reset()",
-			},
-			forbidden: []string{"kit.clipboard =", "document.", "innerHTML"},
-		},
-		{
-			name: "progress-bar",
-			required: []string{
-				`kit.component("progress-bar"`, `status: "idle"`, "get hidden()", "get width()",
-				"start()", "set(value)", "inc(amount)", "done()", "reset()",
-			},
-			forbidden: []string{"kit.progress", "document.", "innerHTML"},
-		},
-		{
-			name:      "dropdown",
-			required:  []string{`kit.component("dropdown"`, `open: false`},
-			forbidden: []string{"init()", "addEventListener", "document.", "this.$host", "this.$refs", "queueMicrotask", "toggle()", "close()", "innerHTML"},
-		},
-		{
-			name:      "popover",
-			required:  []string{`kit.component("popover"`, `open: false`},
-			forbidden: []string{"init()", "addEventListener", "document.", "this.$host", "this.$refs", "queueMicrotask", "toggle()", "show()", "close()", "innerHTML"},
-		},
-		{
-			name: "theme",
-			required: []string{
-				`kit.component("theme"`, `mode: "system"`, "get resolved()", "async init()", "kit.storage.get", "set(mode)", "toggle()", "kit.storage.set",
-			},
-			forbidden: []string{"kit.theme", "mount", "unmount", "WeakMap", "document.", "innerHTML"},
-		},
-	}
-
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			id := ModuleID{Kind: ComponentModule, Name: test.name, Version: "1.0.0"}
-			module, exists := registry.modules[id]
-			if !exists {
-				t.Fatalf("default registry is missing %s", id)
-			}
-			source := string(module.Source)
-			for _, required := range append([]string{"KitJS component: " + test.name + "@1.0.0"}, test.required...) {
-				if !strings.Contains(source, required) {
-					t.Errorf("%s is missing contract marker %q", id, required)
-				}
-			}
-			for _, forbidden := range append(test.forbidden, "data-kit-") {
-				if strings.Contains(source, forbidden) {
-					t.Errorf("%s contains service/markup concern %q", id, forbidden)
-				}
-			}
-		})
-	}
-}
-
-func TestCanonicalComponentSourcesRegisterOnceAndStayHeadless(t *testing.T) {
-	t.Parallel()
-	registry, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, name := range canonicalComponentNames {
-		name := name
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			id := ModuleID{Kind: ComponentModule, Name: name, Version: "1.0.0"}
-			module, exists := registry.modules[id]
-			if !exists {
-				t.Fatalf("default registry is missing %s", id)
-			}
-			source := string(module.Source)
-			for _, required := range []string{
-				"KitJS component: " + name + "@1.0.0",
-			} {
-				if !strings.Contains(source, required) {
-					t.Errorf("%s is missing contract marker %q", id, required)
-				}
-			}
-			registration := `kit.component("` + name + `",`
-			if count := strings.Count(source, registration); count != 1 {
-				t.Errorf("%s registers %d times with %q, want exactly one", id, count, registration)
-			}
-			for _, forbidden := range []string{
-				"window.kit = window.kit ||",
-				"global.kit = global.kit ||",
-				"Object.prototype.hasOwnProperty",
-				"OWN.call(kit",
-				"KitJS core must be loaded before component:",
-				`kit.component("` + name + `")) return`,
-				"innerHTML",
-				"insertAdjacentHTML",
-				"document.write",
-				"kit.render",
-				"mount:",
-				"unmount:",
-				"showModal(",
-				"showPopover(",
-			} {
-				if strings.Contains(source, forbidden) {
-					t.Errorf("%s contains forbidden implementation concern %q", id, forbidden)
-				}
-			}
-		})
-	}
-}
-
-func TestCanonicalComponentExamplesAreCustomTailwindHTML(t *testing.T) {
-	t.Parallel()
-	registry, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	composer, err := NewComposer(registry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range canonicalComponentNames {
-		name := name
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			path := filepath.Join("component", name, "example.html")
-			source, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
-			}
-			html := strings.ToLower(string(source))
-			if !strings.Contains(html, `data-kit-component="`+name) {
-				t.Errorf("%s does not demonstrate component %q", path, name)
-			}
-			for _, script := range []string{
-				`src="../../core/global.js"`,
-				`src="../../core/expression.js"`,
-				`src="../../core/component.js"`,
-				`src="../../core/dom.js"`,
-				`src="../../core/lifecycle.js"`,
-				`src="./1.0.0.js"`,
-				`src="../../core/boot.js"`,
-			} {
-				if !strings.Contains(html, script) {
-					t.Errorf("%s is missing classic-script dependency %q", path, script)
-				}
-			}
-			module := registry.modules[ModuleID{Kind: ComponentModule, Name: name, Version: "1.0.0"}]
-			for _, dependency := range module.Requires {
-				if dependency.Kind != ServiceModule {
-					continue
-				}
-				script := `src="../../service/` + dependency.Name + `/` + dependency.Version + `.js"`
-				if !strings.Contains(html, script) {
-					t.Errorf("%s is missing exact dependency %s", path, dependency)
-				}
-			}
-			for _, forbidden := range []string{
-				"<dialog",
-				"<details",
-				"<style",
-				"tailwindcss.com",
-				" showpopover",
-				`type="module"`,
-			} {
-				if strings.Contains(html, forbidden) {
-					t.Errorf("%s contains forbidden browser/CSS primitive %q", path, forbidden)
-				}
-			}
-			bundle, err := composer.ComposeHTML(source)
-			if err != nil {
-				t.Fatalf("compose %s: %v", path, err)
-			}
-			wantComponent := ModuleID{Kind: ComponentModule, Name: name, Version: "1.0.0"}
-			found := false
-			for _, id := range bundle.Modules {
-				if id == wantComponent {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("%s did not select %s", path, wantComponent)
-			}
-		})
-	}
-}
-
-func TestCanonicalBrowserSourcesNeedNoDynamicLoader(t *testing.T) {
-	t.Parallel()
-	registry, err := DefaultRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for id, module := range registry.modules {
-		if bytes.Contains(module.Source, []byte("\r\n")) {
-			t.Errorf("%s contains CRLF; content hashes require canonical LF source", id)
-		}
-		source := string(module.Source)
-		for _, forbidden := range []string{
-			"eval(",
-			"new Function",
-			"module.exports",
-			"require(",
-			"KitworkRuntime",
-		} {
-			if strings.Contains(source, forbidden) {
-				t.Errorf("%s contains forbidden browser source %q", id, forbidden)
-			}
-		}
-	}
-}
-
-func TestCorePublicSurfaceKeepsLifecyclePrivate(t *testing.T) {
-	t.Parallel()
-
-	files := []string{
-		"core/global.js",
-		"core/expression.js",
-		"core/component.js",
-		"core/dom.js",
-		"core/lifecycle.js",
-		"core/morph.js",
-		"core/drive.js",
-		"core/boot.js",
-	}
-	var combined strings.Builder
-	for _, path := range files {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
-		}
-		combined.Write(source)
-		combined.WriteByte('\n')
-	}
-	source := combined.String()
 	for _, forbidden := range []string{
-		"kit.start =",
-		"kit.destroy =",
-		"kit.use =",
-		"kit.mount =",
-		"kit.unmount =",
+		"eval", "import", "require", "WeakRef", "FinalizationRegistry",
 	} {
-		if strings.Contains(source, forbidden) {
-			t.Errorf("core exposes forbidden public control %q", forbidden)
+		if indexOfToken(tokens, forbidden) >= 0 {
+			t.Fatalf("kit.js contains forbidden JavaScript token %q", forbidden)
 		}
+	}
+	for index := 0; index+1 < len(tokens); index++ {
+		if tokens[index] == "new" && tokens[index+1] == "Function" {
+			t.Fatal("kit.js contains the Function constructor")
+		}
+	}
+	if match := publicControlRE.FindString(code); match != "" {
+		t.Fatalf("kit.js exposes a runtime control on the public kit object: %q", match)
+	}
+	if got := globalKitAssignmentCount(code); got != 1 {
+		t.Fatalf("kit.js global kit assignment count = %d, want exactly one", got)
 	}
 	for _, required := range []string{
-		"kit.component = function (name, definition)",
-		"arguments.length !== 2",
-		"must be a plain object",
-		"core.startRuntime = startRuntime",
-		"core.destroyRuntime = destroyRuntime",
-		"startRuntime(document.documentElement)",
-		"delete kit.__kitwork_core__",
+		"cacheLimit: 256",
+		"core.compiled.size >= core.cacheLimit",
+		"core.compiled.delete(",
+		"cleanupOwners < 1",
+		"document.defaultView.MutationObserver",
+		"cleanupObserver.disconnect()",
 	} {
-		if !strings.Contains(source, required) {
-			t.Errorf("core is missing private lifecycle/public surface marker %q", required)
+		if !strings.Contains(code, required) {
+			t.Fatalf("kit.js lost bounded compile-cache contract %q", required)
 		}
 	}
+}
+
+func globalKitAssignmentCount(source string) int {
+	count := 0
+	for _, location := range globalKitTargetRE.FindAllStringIndex(source, -1) {
+		index := location[1]
+		for index < len(source) && (source[index] == ' ' || source[index] == '\t' || source[index] == '\r' || source[index] == '\n') {
+			index++
+		}
+		if index < len(source) && source[index] == '=' && (index+1 == len(source) || source[index+1] != '=') {
+			count++
+		}
+	}
+	return count
+}
+
+func TestExamplesUseOnlyTheStandaloneRuntime(t *testing.T) {
+	examples := []struct {
+		name    string
+		runtime string
+	}{
+		{name: "counter.html", runtime: "../kit.js"},
+		{name: "dialog.html", runtime: "../kit.js"},
+		{name: "dropdown.html", runtime: "../kit.js"},
+		{name: "form.html", runtime: "../kit.js"},
+		{name: "list.html", runtime: "../kit.js"},
+		{name: "hydrate-home.html", runtime: "../hydrate.kit.js"},
+		{name: "hydrate-next.html", runtime: "../hydrate.kit.js"},
+	}
+	for _, example := range examples {
+		example := example
+		t.Run(strings.TrimSuffix(example.name, filepath.Ext(example.name)), func(t *testing.T) {
+			source := readVanillaFile(t, "examples", example.name)
+			lower := strings.ToLower(string(source))
+			matches := externalScriptRE.FindAllStringSubmatch(string(source), -1)
+			if len(matches) != 1 {
+				t.Fatalf("%s external script count = %d, want one", example.name, len(matches))
+			}
+			got := matches[0][1]
+			if got == "" {
+				got = matches[0][2]
+			}
+			if got != example.runtime {
+				t.Fatalf("%s external runtime = %q, want %s", example.name, got, example.runtime)
+			}
+			for _, marker := range []string{
+				"data-kit-app",
+				"data-kit-hydrate",
+				"data-kit-plan",
+				"data-kitwork-plan",
+				"__kitjs_plan__",
+			} {
+				if strings.Contains(lower, marker) {
+					t.Fatalf("%s contains server/runtime marker %q", example.name, marker)
+				}
+			}
+			if example.runtime == "../hydrate.kit.js" && strings.Contains(lower, "<style") {
+				t.Fatalf("%s contains custom CSS instead of Tailwind utilities", example.name)
+			}
+		})
+	}
+}
+
+func TestHydrateExamplesShareTheClosedComponentDefinition(t *testing.T) {
+	home := string(readVanillaFile(t, "examples", "hydrate-home.html"))
+	next := string(readVanillaFile(t, "examples", "hydrate-next.html"))
+	definition := `kit.component("hydrate-demo", {
+      count: 0,
+      note: ""
+    });`
+	if !strings.Contains(home, definition) || !strings.Contains(next, definition) {
+		t.Fatal("Hydrate examples must carry the same component definition for direct loads")
+	}
+}
+
+func javascriptWithoutComments(source string) string {
+	var clean strings.Builder
+	clean.Grow(len(source))
+	for index := 0; index < len(source); {
+		switch {
+		case source[index] == '/' && index+1 < len(source) && source[index+1] == '/':
+			clean.WriteString("  ")
+			index += 2
+			for index < len(source) && source[index] != '\n' {
+				clean.WriteByte(' ')
+				index++
+			}
+		case source[index] == '/' && index+1 < len(source) && source[index+1] == '*':
+			clean.WriteString("  ")
+			index += 2
+			for index+1 < len(source) && !(source[index] == '*' && source[index+1] == '/') {
+				if source[index] == '\n' {
+					clean.WriteByte('\n')
+				} else {
+					clean.WriteByte(' ')
+				}
+				index++
+			}
+			if index+1 < len(source) {
+				clean.WriteString("  ")
+				index += 2
+			}
+		case source[index] == '\'' || source[index] == '"' || source[index] == '`':
+			quote := source[index]
+			clean.WriteByte(source[index])
+			index++
+			for index < len(source) {
+				clean.WriteByte(source[index])
+				if source[index] == '\\' && index+1 < len(source) {
+					index++
+					clean.WriteByte(source[index])
+				} else if source[index] == quote {
+					index++
+					break
+				}
+				index++
+			}
+		default:
+			clean.WriteByte(source[index])
+			index++
+		}
+	}
+	return clean.String()
+}
+
+func readVanillaFile(t *testing.T, path ...string) []byte {
+	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot resolve KitJS test directory")
+	}
+	parts := append([]string{filepath.Dir(filename)}, path...)
+	source, err := os.ReadFile(filepath.Join(parts...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
+}
+
+// javascriptIdentifiers returns identifiers outside comments and string literals.
+// It is deliberately small: this gate only needs to reject dependency/evaluation
+// primitives, while the browser test proves the executable public contract.
+func javascriptIdentifiers(source string) []string {
+	identifiers := make([]string, 0, len(source)/12)
+	for index := 0; index < len(source); {
+		switch {
+		case source[index] == '/' && index+1 < len(source) && source[index+1] == '/':
+			index += 2
+			for index < len(source) && source[index] != '\n' {
+				index++
+			}
+		case source[index] == '/' && index+1 < len(source) && source[index+1] == '*':
+			index += 2
+			for index+1 < len(source) && !(source[index] == '*' && source[index+1] == '/') {
+				index++
+			}
+			if index+1 < len(source) {
+				index += 2
+			}
+		case source[index] == '\'' || source[index] == '"' || source[index] == '`':
+			quote := source[index]
+			index++
+			for index < len(source) {
+				if source[index] == '\\' {
+					index += 2
+					continue
+				}
+				if source[index] == quote {
+					index++
+					break
+				}
+				index++
+			}
+		case isJSIdentifierStart(source[index]):
+			start := index
+			index++
+			for index < len(source) && isJSIdentifierPart(source[index]) {
+				index++
+			}
+			identifiers = append(identifiers, source[start:index])
+		default:
+			index++
+		}
+	}
+	return identifiers
+}
+
+func isJSIdentifierStart(value byte) bool {
+	return value == '$' || value == '_' || value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+}
+
+func isJSIdentifierPart(value byte) bool {
+	return isJSIdentifierStart(value) || value >= '0' && value <= '9'
+}
+
+func indexOfToken(tokens []string, want string) int {
+	for index, token := range tokens {
+		if token == want {
+			return index
+		}
+	}
+	return -1
 }
