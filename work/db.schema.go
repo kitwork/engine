@@ -62,11 +62,20 @@ type ColumnSpec struct {
 	hasDefault bool
 	def        value.Value
 	defaultNow bool
-	touch      bool     // touchOnUpdate: re-stamp the current time on every update() (updated_at)
-	enumVals   []string // for kind == "enum": the allowed values
-	seq        uint64   // creation order — the VM evaluates the column builders in source order, so
+	touch      bool          // touchOnUpdate: re-stamp the current time on every update() (updated_at)
+	enumVals   []string      // for kind == "enum": the allowed values
+	indexes    []colIndexRef // .index() memberships — an index this column participates in
+	seq        uint64        // creation order — the VM evaluates the column builders in source order, so
 	// sorting a schema's columns by seq reproduces the DECLARED order (the alternative, a plain Go map,
 	// loses it, and DDL sorted by name would show columns alphabetically instead of as written).
+}
+
+// colIndexRef records that a column takes part in an index. name "" means an auto-named single-column
+// index; a shared name across columns forms a composite. pos (>0) pins the column's position within a
+// composite; pos 0 means "use declaration order".
+type colIndexRef struct {
+	name string
+	pos  int
 }
 
 // colSeqCounter stamps each ColumnSpec with a monotonic creation number. kitid()/text()/… run in the
@@ -86,6 +95,25 @@ func (c *ColumnSpec) DefaultNow(_ ...value.Value) *ColumnSpec { c.defaultNow = t
 // (unless the caller passes the column explicitly). Pair it with now() — now().onUpdate() stamps on
 // both insert (defaultNow) and update (touch); datetime().onUpdate() stamps on update only.
 func (c *ColumnSpec) OnUpdate(_ ...value.Value) *ColumnSpec { c.touch = true; return c }
+
+// Index adds this column to an index:
+//
+//	slug: text().index()                                  // single column, auto-named idx_<table>_slug
+//	code:   text().index("links_status_code")             // composite: same name on several columns,
+//	status: text().index("links_status_code")             //   ordered by DECLARATION order
+//	a: text().index("ab", 2)                              // composite with an explicit position — pins
+//	b: text().index("ab", 1)                              //   the order → index on (b, a)
+func (c *ColumnSpec) Index(args ...value.Value) *ColumnSpec {
+	ref := colIndexRef{}
+	if len(args) > 0 && args[0].K == value.String {
+		ref.name = args[0].String()
+	}
+	if len(args) > 1 && args[1].K == value.Number {
+		ref.pos = int(args[1].N)
+	}
+	c.indexes = append(c.indexes, ref)
+	return c
+}
 func (c *ColumnSpec) Default(args ...value.Value) *ColumnSpec {
 	c.hasDefault = true
 	if len(args) > 0 {
@@ -832,6 +860,147 @@ func columnSQL(name string, c *ColumnSpec) string {
 	return strings.Join(parts, " ")
 }
 
+// ---- indexes declared with .index() ----
+
+type indexDef struct {
+	name    string
+	columns []string // in index order
+}
+
+// collectIndexes turns per-column .index() memberships into concrete index definitions: an unnamed
+// .index() becomes a single-column index named idx_<table>_<col>; columns sharing a name become one
+// composite ordered by explicit position when given, else by declaration order (seq). The result is
+// sorted by name so it is deterministic.
+func collectIndexes(table string, columns map[string]*ColumnSpec) []indexDef {
+	type member struct {
+		col string
+		pos int
+		seq uint64
+	}
+	groups := map[string][]member{}
+	var out []indexDef
+	for _, colName := range orderedColumns(columns) { // stable iteration
+		for _, ref := range columns[colName].indexes {
+			if ref.name == "" {
+				out = append(out, indexDef{name: fmt.Sprintf("idx_%s_%s", table, colName), columns: []string{colName}})
+				continue
+			}
+			groups[ref.name] = append(groups[ref.name], member{col: colName, pos: ref.pos, seq: columns[colName].seq})
+		}
+	}
+	for name, ms := range groups {
+		allHavePos := true
+		for _, m := range ms {
+			if m.pos == 0 {
+				allHavePos = false
+				break
+			}
+		}
+		sort.SliceStable(ms, func(i, j int) bool {
+			if allHavePos {
+				return ms[i].pos < ms[j].pos
+			}
+			return ms[i].seq < ms[j].seq
+		})
+		cols := make([]string, len(ms))
+		for i, m := range ms {
+			cols[i] = m.col
+		}
+		out = append(out, indexDef{name: name, columns: cols})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].name < out[j].name })
+	return out
+}
+
+func indexSQL(table string, idx indexDef) string {
+	cols := make([]string, len(idx.columns))
+	for i, c := range idx.columns {
+		cols[i] = fmt.Sprintf("%q", c)
+	}
+	return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %q ON %q (%s)", idx.name, table, strings.Join(cols, ", "))
+}
+
+// liveIndexNames returns the explicitly-created indexes on a table (skipping the sqlite_autoindex_*
+// indexes that a UNIQUE/PRIMARY KEY constraint creates implicitly — those are managed by the column DDL,
+// not by .index()).
+func liveIndexNames(db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA index_list(%q)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := map[string]bool{}
+	cols, _ := rows.Columns()
+	for rows.Next() {
+		cells := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range cells {
+			ptrs[i] = &cells[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		name, _ := cells[1].(string)
+		if name == "" {
+			if b, ok := cells[1].([]byte); ok {
+				name = string(b)
+			}
+		}
+		if name == "" || strings.HasPrefix(name, "sqlite_autoindex_") {
+			continue
+		}
+		names[name] = true
+	}
+	return names, rows.Err()
+}
+
+func liveIndexColumns(db *sql.DB, name string) ([]string, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA index_info(%q)", name))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var seqno, cid int
+		var col sql.NullString
+		if err := rows.Scan(&seqno, &cid, &col); err != nil {
+			return nil, err
+		}
+		cols = append(cols, col.String)
+	}
+	return cols, rows.Err()
+}
+
+// syncIndexes brings the table's indexes in line with the schema: CREATE any declared index that is
+// missing, and DROP+CREATE one whose columns/order changed. Indexes present on the table but not in the
+// schema are LEFT ALONE (dropping an unknown/manual index is not the schema's call — and an index holds
+// no data, so leaving a stale one costs nothing but disk).
+func syncIndexes(db *sql.DB, table string, want []indexDef) error {
+	live, err := liveIndexNames(db, table)
+	if err != nil {
+		return err
+	}
+	for _, idx := range want {
+		if live[idx.name] {
+			cols, err := liveIndexColumns(db, idx.name)
+			if err != nil {
+				return err
+			}
+			if strings.Join(cols, ",") == strings.Join(idx.columns, ",") {
+				continue // already matches
+			}
+			if _, err := db.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %q", idx.name)); err != nil {
+				return fmt.Errorf("drop index %q: %w", idx.name, err)
+			}
+		}
+		if _, err := db.Exec(indexSQL(table, idx)); err != nil {
+			return fmt.Errorf("create index %q: %w", idx.name, err)
+		}
+	}
+	return nil
+}
+
 // ============================================================================
 // database.define(alias, { … }) → the SHARED world: schema-aware tables that
 // ride on database.entity(), so rows are identity-scoped across tenants.
@@ -1228,11 +1397,24 @@ func checkpointWAL(db *sql.DB) {
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
-func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) error {
+func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) (err error) {
 	if db == nil {
 		return fmt.Errorf("connection unavailable")
 	}
 	ensureHistory(db)
+
+	// After the table reaches its final shape (create / alter / rebuild / no-op), sync its .index()
+	// definitions — the ONE place that covers every success path, including the rebuild that recreates
+	// the table without its indexes. Runs only when the migration itself succeeded.
+	defer func() {
+		if err == nil {
+			if e := syncIndexes(db, table, collectIndexes(table, columns)); e != nil {
+				err = e
+				return
+			}
+			checkpointWAL(db)
+		}
+	}()
 
 	current, err := tableColumns(db, table)
 	if err != nil {
@@ -1608,6 +1790,11 @@ func schemaHash(columns map[string]*ColumnSpec) string {
 	for pos, name := range orderedColumns(columns) {
 		c := columns[name]
 		fmt.Fprintf(h, "%d:%s|%s|%t|%t|%t|%t;", pos, name, c.kind, c.primary, c.notNull, c.unique, c.defaultNow)
+	}
+	// Indexes are part of the shape too — adding/removing/reordering one re-runs migrate. A fixed table
+	// name keeps the hash stable across runs (only the index set/columns should move it).
+	for _, idx := range collectIndexes("t", columns) {
+		fmt.Fprintf(h, "idx:%s(%s);", idx.name, strings.Join(idx.columns, ","))
 	}
 	return fmt.Sprintf("%x", h.Sum64())
 }

@@ -1076,3 +1076,107 @@ func TestSchemaPrimaryKeyIsNotNull(t *testing.T) {
 		t.Errorf("data lost in the pk-fix rebuild: err=%v code=%q", err, code)
 	}
 }
+
+// .index() creates indexes: a bare .index() → auto-named single column; a shared name → composite in
+// declaration order; an explicit position → composite pinned in that order; and a rebuild recreates
+// them.
+func TestSchemaIndexDefinitions(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "a.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	schema := map[string]*ColumnSpec{
+		"id":     {kind: "kitid", primary: true, seq: 1},
+		"slug":   {kind: "text", seq: 2, indexes: []colIndexRef{{name: ""}}},
+		"code":   {kind: "text", seq: 3, indexes: []colIndexRef{{name: "status_code"}}},
+		"status": {kind: "text", seq: 4, indexes: []colIndexRef{{name: "status_code"}}},
+		"a":      {kind: "text", seq: 5, indexes: []colIndexRef{{name: "ab", pos: 2}}},
+		"b":      {kind: "text", seq: 6, indexes: []colIndexRef{{name: "ab", pos: 1}}},
+	}
+	if err := migrate(db, "links", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	cols := func(name string) string {
+		c, _ := liveIndexColumns(db, name)
+		return strings.Join(c, ",")
+	}
+	if cols("idx_links_slug") != "slug" {
+		t.Errorf("bare .index() should be a single-column auto-named index, got %q", cols("idx_links_slug"))
+	}
+	if cols("status_code") != "code,status" {
+		t.Errorf("composite (no position) should follow declaration order, got %q", cols("status_code"))
+	}
+	if cols("ab") != "b,a" {
+		t.Errorf("composite with positions should be pinned (b,a), got %q", cols("ab"))
+	}
+}
+
+// A schema-declared index survives a table rebuild (the rebuild drops the table's indexes; syncIndexes
+// recreates them). Triggered here by the primary-key NOT NULL fix.
+func TestSchemaIndexSurvivesRebuild(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "b.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.Exec(`CREATE TABLE t (id TEXT PRIMARY KEY, code TEXT)`) // nullable PK forces a rebuild
+	db.Exec(`INSERT INTO t (id, code) VALUES ('x','c1')`)
+	schema := map[string]*ColumnSpec{
+		"id":   {kind: "kitid", primary: true, seq: 1},
+		"code": {kind: "text", seq: 2, indexes: []colIndexRef{{name: "idx_code"}}},
+	}
+	if err := migrate(db, "t", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := liveIndexColumns(db, "idx_code"); strings.Join(c, ",") != "code" {
+		t.Errorf("index should survive the rebuild, got %v", c)
+	}
+	var code string
+	if err := db.QueryRow(`SELECT code FROM t WHERE id='x'`).Scan(&code); err != nil || code != "c1" {
+		t.Errorf("data lost in the rebuild: %v %q", err, code)
+	}
+}
+
+// End to end through the VM: the .index() modifier in JS creates the index, visible in sqlite_master
+// exactly as a db manager would list it.
+func TestSchemaIndexThroughVM(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { turso, kitid, text } = database;
+const links = {
+  id: kitid().primaryKey(),
+  slug: text().index(),
+  code: text().notNull().index("status_code"),
+  status: text().default("active").index("status_code"),
+};
+const db = turso("app.db", { links: links }, { token: "tok", access: "readwrite" });
+router.get((ctx) => { db.links.create({ slug: "s", code: "c", status: "active" }); return ctx.json({ ok: true }); });`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	// create (runs the migration + index creation)
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if rec.Code != 200 {
+		t.Fatalf("seed failed: %d %s", rec.Code, rec.Body.String())
+	}
+	// list indexes the way a manager does
+	body := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL","want_rows":true}},{"type":"close"}]}`
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer tok")
+	rec = httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	got := rec.Body.String()
+	if !strings.Contains(got, "idx_links_slug") || !strings.Contains(got, "status_code") {
+		t.Errorf(".index() indexes not found via sqlite_master; body: %s", got)
+	}
+}
