@@ -44,7 +44,13 @@ func (d *Config) Connect() (*sql.DB, error) {
 	if driver == "turso" && !driverRegistered("turso") {
 		return nil, fmt.Errorf("database type %q needs the Turso backend compiled in — rebuild with `-tags turso` after `go get turso.tech/database/tursogo`; default builds stay pure-Go on modernc sqlite", d.Type)
 	}
-	db, err := sql.Open(driver, dsn)
+	var db *sql.DB
+	if driver == "turso" {
+		// Turso needs foreign keys enabled per connection (see turso_fk.go).
+		db, err = openTurso(dsn)
+	} else {
+		db, err = sql.Open(driver, dsn)
+	}
 	if err != nil {
 		return nil, err
 	}
