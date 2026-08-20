@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitwork/engine/database"
@@ -63,7 +64,16 @@ type ColumnSpec struct {
 	defaultNow bool
 	touch      bool     // touchOnUpdate: re-stamp the current time on every update() (updated_at)
 	enumVals   []string // for kind == "enum": the allowed values
+	seq        uint64   // creation order — the VM evaluates the column builders in source order, so
+	// sorting a schema's columns by seq reproduces the DECLARED order (the alternative, a plain Go map,
+	// loses it, and DDL sorted by name would show columns alphabetically instead of as written).
 }
+
+// colSeqCounter stamps each ColumnSpec with a monotonic creation number. kitid()/text()/… run in the
+// order they appear in the schema object literal, so seq === declaration order.
+var colSeqCounter atomic.Uint64
+
+func nextColSeq() uint64 { return colSeqCounter.Add(1) }
 
 // The modifiers are variadic so the VM does NOT auto-call them as getters (a 0-in/1-out method is a
 // getter here; a variadic method stays a callable). They ignore any args and return the spec to chain.
@@ -86,7 +96,7 @@ func (c *ColumnSpec) Default(args ...value.Value) *ColumnSpec {
 
 func columnFunc(kind string) value.Value {
 	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: kind})
+		return value.New(&ColumnSpec{kind: kind, seq: nextColSeq()})
 	})
 }
 
@@ -128,7 +138,7 @@ func (d *Database) Boolean() value.Value { return columnFunc("bool") } // alias
 // Enum — variadic, values passed straight: enum("draft", "published")
 func (d *Database) Enum() value.Value {
 	return value.NewFunc(func(args ...value.Value) value.Value {
-		c := &ColumnSpec{kind: "enum"}
+		c := &ColumnSpec{kind: "enum", seq: nextColSeq()}
 		for _, a := range args {
 			if a.K == value.String {
 				c.enumVals = append(c.enumVals, a.String())
@@ -161,12 +171,12 @@ func (d *Database) Vector() value.Value { return paramFunc("vector") }
 // Presets — the two universal patterns get a one-word name; compose the rest with modifiers.
 func (d *Database) Id() value.Value { // = kitid().primaryKey()
 	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: "kitid", primary: true})
+		return value.New(&ColumnSpec{kind: "kitid", primary: true, seq: nextColSeq()})
 	})
 }
 func (d *Database) Now() value.Value { // = datetime().defaultNow()
 	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true})
+		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true, seq: nextColSeq()})
 	})
 }
 
@@ -175,7 +185,7 @@ func (d *Database) Now() value.Value { // = datetime().defaultNow()
 // vector is stored as a JSON array — but it is accepted so schemas read the same across engines.
 func paramFunc(kind string) value.Value {
 	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: kind})
+		return value.New(&ColumnSpec{kind: kind, seq: nextColSeq()})
 	})
 }
 
@@ -795,15 +805,9 @@ func (t *SchemaTable) ensureTable() error {
 // schemaDDL builds CREATE TABLE IF NOT EXISTS from the schema. `extra` prepends raw column definitions
 // (the entity world passes `"identity" TEXT NOT NULL` so shared rows can be scoped).
 func schemaDDL(table string, columns map[string]*ColumnSpec, extra ...string) string {
-	names := make([]string, 0, len(columns))
-	for n := range columns {
-		names = append(names, n)
-	}
-	sort.Strings(names) // deterministic DDL
-
 	defs := make([]string, 0, len(columns)+len(extra))
 	defs = append(defs, extra...)
-	for _, n := range names {
+	for _, n := range orderedColumns(columns) { // lay the table out AS DECLARED, not alphabetically
 		defs = append(defs, columnSQL(n, columns[n]))
 	}
 	return fmt.Sprintf("CREATE TABLE IF NOT EXISTS %q (%s)", table, strings.Join(defs, ", "))
@@ -1272,8 +1276,50 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 		return nil
 	}
 
+	// Reorder guard (LOCAL file dbs only — the schema DSL): an ALTER can only APPEND a column, so if the
+	// declared layout differs from what appending would produce (an existing table whose columns sit in
+	// a different order, or a new column declared in the middle), rebuild to match the declared order.
+	// The rebuild preserves ALL data and drops nothing — extras (live columns not in the schema) are
+	// kept, appended at the end. The shared/entity world (withIdentity) stays append-only.
+	addOrder := newCols
+	if !withIdentity {
+		live, err := tableColumnsOrdered(db, table)
+		if err != nil {
+			return fmt.Errorf("introspect order %q: %w", table, err)
+		}
+		desired := orderedColumns(columns)
+		if reorderNeeded(live, desired) {
+			// Existing columns are out of declared order → rebuild to fix the layout (data preserved,
+			// extras kept). rebuild lays every column out via orderedColumns, so new columns also land in
+			// their declared position here.
+			var keptExtras []string
+			for _, name := range live {
+				if _, inSchema := columns[name]; !inSchema {
+					keptExtras = append(keptExtras, name)
+				}
+			}
+			if err := rebuild(db, table, columns, current, false, false, keptExtras, nil); err != nil {
+				return err
+			}
+			checkpointWAL(db)
+			return nil
+		}
+		// Order is fine — append any new columns in DECLARED order.
+		newSet := map[string]bool{}
+		for _, n := range newCols {
+			newSet[n] = true
+		}
+		orderedNew := make([]string, 0, len(newCols))
+		for _, n := range desired {
+			if newSet[n] {
+				orderedNew = append(orderedNew, n)
+			}
+		}
+		addOrder = orderedNew
+	}
+
 	// Otherwise purely additive: ADD the new columns (static defaults backfill existing rows).
-	for _, name := range newCols {
+	for _, name := range addOrder {
 		stmt := fmt.Sprintf("ALTER TABLE %q ADD COLUMN %s", table, addColumnSQL(name, columns[name]))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("add %q.%q: %w", table, name, err)
@@ -1318,7 +1364,7 @@ func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current m
 			selectExprs = append(selectExprs, fmt.Sprintf("%q", identityColumn))
 		}
 	}
-	for _, name := range sortedColumns(columns) {
+	for _, name := range orderedColumns(columns) { // rebuild lays columns out AS DECLARED
 		defs = append(defs, columnSQL(name, columns[name]))
 		if curType, ok := current[name]; ok {
 			intoCols = append(intoCols, fmt.Sprintf("%q", name))
@@ -1408,6 +1454,51 @@ func tableColumns(db *sql.DB, table string) (map[string]string, error) {
 	return cols, rows.Err()
 }
 
+// tableColumnsOrdered returns the LIVE column names in physical (cid) order — used to detect when the
+// table's layout no longer matches the schema's declared order.
+func tableColumnsOrdered(db *sql.DB, table string) ([]string, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
+// reorderNeeded reports whether the EXISTING columns sit in a different relative order than the schema
+// declares. If so, a data-preserving rebuild is required to lay them out as written (an ALTER cannot
+// move a column). New columns (declared but not yet in the table) are ignored — they are simply
+// appended by the additive path; only a genuine out-of-order EXISTING column forces a rebuild, so
+// adding a column never turns into a rebuild by itself.
+func reorderNeeded(live, desired []string) bool {
+	pos := make(map[string]int, len(desired))
+	for i, n := range desired {
+		pos[n] = i
+	}
+	prev := -1
+	for _, n := range live {
+		p, ok := pos[n]
+		if !ok {
+			continue // a column not in the schema (kept extra) — does not constrain order
+		}
+		if p < prev {
+			return true // this column is declared before one that already precedes it → out of order
+		}
+		prev = p
+	}
+	return false
+}
+
 // addColumnSQL is a column def for ALTER TABLE ADD COLUMN. SQLite's ADD COLUMN cannot carry PRIMARY
 // KEY / UNIQUE (so the added column is nullable), but a DEFAULT is allowed AND is applied to EXISTING
 // rows — so a static schema default BACKFILLS old rows here, not only new rows via fillRow. (defaultNow
@@ -1459,13 +1550,32 @@ func sortedColumns(columns map[string]*ColumnSpec) []string {
 	return names
 }
 
+// orderedColumns returns the column names in DECLARATION order (by seq), so generated DDL lays the
+// table out as the schema was written rather than alphabetically. Ties (e.g. columns built outside the
+// counter) fall back to name for determinism.
+func orderedColumns(columns map[string]*ColumnSpec) []string {
+	names := make([]string, 0, len(columns))
+	for n := range columns {
+		names = append(names, n)
+	}
+	sort.SliceStable(names, func(i, j int) bool {
+		si, sj := columns[names[i]].seq, columns[names[j]].seq
+		if si != sj {
+			return si < sj
+		}
+		return names[i] < names[j]
+	})
+	return names
+}
+
 // schemaHash is a deterministic fingerprint of the schema shape — the migration cache key, so an
-// edited schema re-runs migrate().
+// edited schema re-runs migrate(). It walks columns in DECLARATION order and includes each column's
+// position, so REORDERING the schema changes the hash and triggers a (data-preserving) reorder.
 func schemaHash(columns map[string]*ColumnSpec) string {
 	h := fnv.New64a()
-	for _, name := range sortedColumns(columns) {
+	for pos, name := range orderedColumns(columns) {
 		c := columns[name]
-		fmt.Fprintf(h, "%s|%s|%t|%t|%t|%t;", name, c.kind, c.primary, c.notNull, c.unique, c.defaultNow)
+		fmt.Fprintf(h, "%d:%s|%s|%t|%t|%t|%t;", pos, name, c.kind, c.primary, c.notNull, c.unique, c.defaultNow)
 	}
 	return fmt.Sprintf("%x", h.Sum64())
 }

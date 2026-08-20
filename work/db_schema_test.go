@@ -933,3 +933,87 @@ func decodeJSONObject(t *testing.T, body string) map[string]string {
 	}
 	return out
 }
+
+// Columns come out in DECLARED order, not alphabetical. Declared id, zebra, apple, mango — a table
+// built by the OLD sort.Strings would show apple, id, mango, zebra. Driven through the VM so the
+// column builders get their real declaration-order seq.
+func TestSchemaColumnDeclarationOrder(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { turso, kitid, text } = database;
+const things = { id: kitid().primaryKey(), zebra: text(), apple: text(), mango: text() };
+const db = turso("app.db", { things: things }, { token: "tok", access: "readwrite" });
+router.get((ctx) => { db.things.create({ zebra: "z", apple: "a", mango: "m" }); return ctx.json({ ok: true }); });`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	// seed (creates the table)
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if rec.Code != 200 {
+		t.Fatalf("seed failed: %d %s", rec.Code, rec.Body.String())
+	}
+	// SELECT * via libSQL and check the column order in the response.
+	body := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT * FROM things","want_rows":true}},{"type":"close"}]}`
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer tok")
+	rec = httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	got := rec.Body.String()
+	// The cols must appear in declared order.
+	idx := func(s string) int { return strings.Index(got, `"name":"`+s+`"`) }
+	if !(idx("id") < idx("zebra") && idx("zebra") < idx("apple") && idx("apple") < idx("mango")) {
+		t.Errorf("columns not in declared order (id,zebra,apple,mango); body: %s", got)
+	}
+}
+
+// An EXISTING table whose columns are in the wrong order is REBUILT into the declared order on
+// migrate, preserving the data.
+func TestSchemaMigrationReordersToDeclared(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// Live table in a non-declared order, with a row.
+	if _, err := db.Exec(`CREATE TABLE t (apple TEXT, id TEXT PRIMARY KEY, zebra TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO t (id, apple, zebra) VALUES ('x','a1','z1')`); err != nil {
+		t.Fatal(err)
+	}
+	// Schema declares id, zebra, apple (seq set to mimic the VM's declaration order).
+	schema := map[string]*ColumnSpec{
+		"id":    {kind: "kitid", primary: true, seq: 1},
+		"zebra": {kind: "text", seq: 2},
+		"apple": {kind: "text", seq: 3},
+	}
+	if err := migrate(db, "t", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	order, err := tableColumnsOrdered(db, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"id", "zebra", "apple"}
+	if strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("column order = %v, want %v", order, want)
+	}
+	// Data survived the reorder rebuild.
+	var apple, zebra string
+	if err := db.QueryRow(`SELECT apple, zebra FROM t WHERE id='x'`).Scan(&apple, &zebra); err != nil {
+		t.Fatalf("row lost in reorder: %v", err)
+	}
+	if apple != "a1" || zebra != "z1" {
+		t.Errorf("data changed in reorder: apple=%q zebra=%q", apple, zebra)
+	}
+}
