@@ -140,5 +140,9 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if serveFontIf(w, r) {
 		return
 	}
+	// /_db/query — authenticated read-only SQL over HTTP (the tenant db as a URL). Off unless DB_TOKEN.
+	if t.serveDataAPIIf(w, r, requestScope) {
+		return
+	}
 	t.serveTree(requestScope)
 }
