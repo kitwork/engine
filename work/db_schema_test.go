@@ -1180,3 +1180,44 @@ router.get((ctx) => { db.links.create({ slug: "s", code: "c", status: "active" }
 		t.Errorf(".index() indexes not found via sqlite_master; body: %s", got)
 	}
 }
+
+// .index() options: { unique: true } builds a UNIQUE index; { where: "..." } a partial index. Changing
+// an index's definition (adding a WHERE) is detected and the index is DROP+CREATEd, not left stale.
+func TestSchemaIndexUniqueAndPartial(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "a.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sqlOf := func(name string) string { s, _ := liveIndexSQL(db, name); return s }
+
+	schema := map[string]*ColumnSpec{
+		"id":         {kind: "kitid", primary: true, seq: 1},
+		"code":       {kind: "text", seq: 2, indexes: []colIndexRef{{name: "uniq_code", unique: true}}},
+		"deleted_at": {kind: "datetime", seq: 3},
+		"created_at": {kind: "datetime", seq: 4, indexes: []colIndexRef{{name: "active_recent", where: "deleted_at IS NULL"}}},
+	}
+	if err := migrate(db, "links", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ToUpper(sqlOf("uniq_code")), "UNIQUE INDEX") {
+		t.Errorf("uniq_code should be a UNIQUE index, got %q", sqlOf("uniq_code"))
+	}
+	if !strings.Contains(sqlOf("active_recent"), "WHERE deleted_at IS NULL") {
+		t.Errorf("active_recent should be partial, got %q", sqlOf("active_recent"))
+	}
+	// UNIQUE actually enforced.
+	db.Exec(`INSERT INTO links(id, code) VALUES('a','X')`)
+	if _, err := db.Exec(`INSERT INTO links(id, code) VALUES('b','X')`); err == nil {
+		t.Error("uniq_code did not reject a duplicate code")
+	}
+
+	// Change detection: drop the partial predicate → index is rebuilt to a full index.
+	schema["created_at"].indexes = []colIndexRef{{name: "active_recent"}} // no where now
+	if err := migrate(db, "links", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(sqlOf("active_recent"), "WHERE") {
+		t.Errorf("active_recent should no longer be partial after the change, got %q", sqlOf("active_recent"))
+	}
+}
