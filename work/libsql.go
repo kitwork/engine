@@ -2,17 +2,68 @@ package work
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	requestscope "github.com/kitwork/engine/request"
 )
+
+// ---- interactive streams (Hrana baton) ----
+//
+// A db manager edits a row by opening a transaction that SPANS several HTTP requests: BEGIN, then the
+// UPDATE/DELETE, then COMMIT — each its own pipeline. Hrana ties them together with a `baton`: the
+// server pins one connection to a stream and hands back a baton the client sends on the next request.
+// Without this, each request lands on a different pooled connection, the write autocommits, and the
+// later COMMIT fails with "no transaction" — the change applies yet the manager reports a commit error.
+
+type hranaStream struct {
+	conn      *sql.Conn
+	store     map[int32]string // prepared statements persist for the stream's life
+	tenantKey string
+	lastUsed  time.Time
+}
+
+var (
+	streamsMu  sync.Mutex
+	streams    = map[string]*hranaStream{}
+	reaperOnce sync.Once
+	streamIdle = 60 * time.Second
+)
+
+func newBaton() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// startStreamReaper closes streams left idle (a client that opened a transaction and went away), so a
+// pinned connection is never leaked indefinitely.
+func startStreamReaper() {
+	reaperOnce.Do(func() {
+		go func() {
+			for range time.Tick(15 * time.Second) {
+				cutoff := time.Now().Add(-streamIdle)
+				streamsMu.Lock()
+				for baton, s := range streams {
+					if s.lastUsed.Before(cutoff) {
+						_ = s.conn.Close()
+						delete(streams, baton)
+					}
+				}
+				streamsMu.Unlock()
+			}
+		}()
+	})
+}
 
 // libSQL / Hrana-over-HTTP server: Kitwork speaks turso's wire protocol, so any libSQL client — the
 // turso CLI, @libsql/client, Drizzle/Prisma libSQL adapters, a turso-compatible db manager — connects
@@ -25,9 +76,9 @@ import (
 // access: "readwrite" }) — so the decision to open it is visible in code, not a side effect of an env var
 // existing. access:"readonly" (the default) refuses writes. The client POSTs Hrana pipelines to
 // /v2/pipeline or /v3/pipeline; we run them on the connection the tenant already holds and answer in
-// Hrana's JSON envelope. A pipeline runs on ONE pinned connection (so BEGIN…COMMIT inside a single
-// pipeline is a real transaction); interactive streams are not persisted across requests (baton stays
-// null), which is what a db manager's autocommit queries need.
+// Hrana's JSON envelope. A pipeline runs on ONE pinned connection, and interactive transactions that
+// span requests are held together with a baton (see the stream machinery above) — so a db manager's
+// BEGIN … edit … COMMIT commits atomically instead of half-applying.
 
 // ---- Hrana wire types (per HRANA_3_SPEC; v2 shares this JSON shape) ----
 
@@ -116,29 +167,65 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
 		return true
 	}
-
-	// One pinned connection for the whole pipeline, so a BEGIN…COMMIT within it is a real transaction.
 	ctx := r.Context()
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
-		return true
+	readonly := cfg.access != "readwrite" // access:"readonly" (default) → writes are refused
+	startStreamReaper()
+
+	// Resolve the stream: a baton reuses a PINNED connection (so an interactive BEGIN … COMMIT spanning
+	// several requests — a manager's row edit — is one real transaction); no baton opens a fresh stream.
+	scopeKey := tenantScopeKey(t)
+	var stream *hranaStream
+	baton := ""
+	if req.Baton != nil && *req.Baton != "" {
+		streamsMu.Lock()
+		if s := streams[*req.Baton]; s != nil && s.tenantKey == scopeKey {
+			stream, baton = s, *req.Baton
+			s.lastUsed = time.Now()
+		}
+		streamsMu.Unlock()
+		if stream == nil {
+			writeDataJSON(w, http.StatusOK, map[string]any{
+				"baton": nil, "base_url": nil,
+				"results": []any{hranaErr("stream expired — open a new one")},
+			})
+			return true
+		}
+	} else {
+		conn, err := pool.Conn(ctx)
+		if err != nil {
+			writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+			return true
+		}
+		stream = &hranaStream{conn: conn, store: map[int32]string{}, tenantKey: scopeKey, lastUsed: time.Now()}
+		baton = newBaton()
 	}
-	defer conn.Close()
 
-	// access:"readonly" (the default) → writes are refused; only "readwrite" lets them through.
-	readonly := cfg.access != "readwrite"
-
-	// Prepared statements (store_sql/sql_id) that @libsql/client uses for batch() are resolved within
-	// the pipeline: the client stores the SQL and references it in the same pipeline (baton is null, so
-	// nothing needs to persist across HTTP requests).
-	store := map[int32]string{}
+	closed := false
 	results := make([]map[string]any, 0, len(req.Requests))
 	for _, sr := range req.Requests {
-		results = append(results, runHranaRequest(ctx, conn, sr, store, readonly))
+		if sr.Type == "close" {
+			closed = true
+		}
+		results = append(results, runHranaRequest(ctx, stream.conn, sr, stream.store, readonly))
+	}
+
+	// A `close` request ends the stream (release the connection, return baton null); otherwise keep it
+	// alive and hand the baton back so the client can continue the transaction on the next request.
+	var batonOut any
+	streamsMu.Lock()
+	if closed {
+		delete(streams, baton)
+		streamsMu.Unlock()
+		_ = stream.conn.Close()
+		batonOut = nil
+	} else {
+		streams[baton] = stream
+		stream.lastUsed = time.Now()
+		streamsMu.Unlock()
+		batonOut = baton
 	}
 	writeDataJSON(w, http.StatusOK, map[string]any{
-		"baton":    nil,
+		"baton":    batonOut,
 		"base_url": nil,
 		"results":  results,
 	})

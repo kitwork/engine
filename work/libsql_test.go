@@ -181,6 +181,52 @@ func TestLibSQLStoreSQLAndBatch(t *testing.T) {
 	}
 }
 
+// An interactive transaction that SPANS requests — BEGIN, then the write, then COMMIT, each its own
+// pipeline tied by a baton — must commit atomically. This is what a db manager does for a grid edit;
+// without baton streams the write autocommits and the COMMIT fails ("all changes failed to commit").
+func TestLibSQLInteractiveTransaction(t *testing.T) {
+	tenant := servedTenant(t, "app.db", "tok", "readwrite")
+	pipe := func(body string) map[string]any {
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		tenant.Serve(rec, req)
+		var m map[string]any
+		json.Unmarshal(rec.Body.Bytes(), &m)
+		return m
+	}
+	pipe(`{"baton":null,"requests":[
+	  {"type":"execute","stmt":{"sql":"CREATE TABLE links (id integer primary key, code text)","want_rows":false}},
+	  {"type":"execute","stmt":{"sql":"INSERT INTO links(code) VALUES('keep')","want_rows":false}},
+	  {"type":"execute","stmt":{"sql":"INSERT INTO links(code) VALUES('gone')","want_rows":false}},
+	  {"type":"close"}]}`)
+
+	// BEGIN in its own request → a baton comes back (the stream is kept open).
+	r1 := pipe(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"BEGIN","want_rows":false}}]}`)
+	b, _ := r1["baton"].(string)
+	if b == "" {
+		t.Fatal("BEGIN should return a non-null baton keeping the stream open")
+	}
+	// DELETE on the same stream, then COMMIT + close — all reusing the pinned connection.
+	if r2 := pipe(`{"baton":"` + b + `","requests":[{"type":"execute","stmt":{"sql":"DELETE FROM links WHERE code='gone'","want_rows":false}}]}`); r2["baton"] != b {
+		t.Errorf("baton must persist across the transaction, got %v", r2["baton"])
+	}
+	r3 := pipe(`{"baton":"` + b + `","requests":[{"type":"execute","stmt":{"sql":"COMMIT","want_rows":false}},{"type":"close"}]}`)
+	if r3["baton"] != nil {
+		t.Errorf("after close the baton should be null, got %v", r3["baton"])
+	}
+	body, _ := json.Marshal(pipe(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"SELECT code FROM links","want_rows":true}},{"type":"close"}]}`))
+	if !bytes.Contains(body, []byte(`"keep"`)) || bytes.Contains(body, []byte(`"gone"`)) {
+		t.Errorf("interactive DELETE+COMMIT did not commit correctly; final: %s", body)
+	}
+	// A made-up baton is rejected as expired, not silently accepted.
+	if r := pipe(`{"baton":"deadbeef","requests":[{"type":"execute","stmt":{"sql":"select 1","want_rows":true}}]}`); !bytes.Contains(mustJSON(r), []byte("stream expired")) {
+		t.Errorf("unknown baton should report an expired stream; got %s", mustJSON(r))
+	}
+}
+
+func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
+
 // access:"readonly" (also the default when access is omitted) must refuse writes while allowing reads.
 func TestLibSQLReadonlyRefusesWrites(t *testing.T) {
 	tenant := servedTenant(t, "app.db", "ro", "readonly")
