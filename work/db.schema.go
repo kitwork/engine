@@ -72,13 +72,19 @@ type ColumnSpec struct {
 
 // colIndexRef records that a column takes part in an index. name "" means an auto-named single-column
 // index; a shared name across columns forms a composite. pos (>0) pins the column's position within a
-// composite; pos 0 means "use declaration order". unique/where come from the .index() options object;
-// for a composite they may be set on any one member.
+// composite; pos 0 means "use declaration order". filter is the partial-index condition (from the
+// .index() object arg) — for a composite it may be set on any one member.
 type colIndexRef struct {
 	name   string
 	pos    int
-	unique bool
-	where  string // partial-index predicate (raw SQL, schema-author-written — trusted like DDL)
+	filter []indexCond // partial-index predicate as structured equality/IS NULL conditions (AND-ed)
+}
+
+// indexCond is one "column = value" (or "column IS NULL" when val is nil) part of a partial index's
+// filter. Structured, not raw SQL, so the public API never takes a WHERE string.
+type indexCond struct {
+	col string
+	val value.Value
 }
 
 // colSeqCounter stamps each ColumnSpec with a monotonic creation number. kitid()/text()/… run in the
@@ -90,6 +96,11 @@ func nextColSeq() uint64 { return colSeqCounter.Add(1) }
 // The modifiers are variadic so the VM does NOT auto-call them as getters (a 0-in/1-out method is a
 // getter here; a variadic method stays a callable). They ignore any args and return the spec to chain.
 func (c *ColumnSpec) PrimaryKey(_ ...value.Value) *ColumnSpec { c.primary = true; return c }
+
+// Key is the preferred spelling of PrimaryKey: text().key() / uuid().key() make any column the primary
+// key. A key is PRIMARY KEY + NOT NULL (columnSQL emits both) and unique by nature — no extra unique
+// index needed. .primaryKey() stays as a compatibility alias.
+func (c *ColumnSpec) Key(_ ...value.Value) *ColumnSpec        { c.primary = true; return c }
 func (c *ColumnSpec) NotNull(_ ...value.Value) *ColumnSpec    { c.notNull = true; return c }
 func (c *ColumnSpec) Unique(_ ...value.Value) *ColumnSpec     { c.unique = true; return c }
 func (c *ColumnSpec) DefaultNow(_ ...value.Value) *ColumnSpec { c.defaultNow = true; return c }
@@ -107,8 +118,8 @@ func (c *ColumnSpec) OnUpdate(_ ...value.Value) *ColumnSpec { c.touch = true; re
 //	status: text().index("links_status_code")              //   ordered by DECLARATION order
 //	a: text().index("ab", 2)                               // composite with an explicit position — pins
 //	b: text().index("ab", 1)                               //   the order → index on (b, a)
-//	code: text().index("uniq_code", { unique: true })      // unique index
-//	created_at: now().index("active_recent", { where: "deleted_at IS NULL" })  // partial index
+//	created_at: now().index("active_recent", { status: "active", deleted_at: null })  // partial index
+//	                                          // → WHERE status = 'active' AND deleted_at IS NULL
 func (c *ColumnSpec) Index(args ...value.Value) *ColumnSpec {
 	ref := colIndexRef{}
 	for _, a := range args {
@@ -118,15 +129,10 @@ func (c *ColumnSpec) Index(args ...value.Value) *ColumnSpec {
 		case value.Number:
 			ref.pos = int(a.N)
 		case value.Map:
-			opts := a.Map()
-			if p, ok := opts["pos"]; ok && p.K == value.Number {
-				ref.pos = int(p.N)
-			}
-			if u, ok := opts["unique"]; ok && u.K == value.Bool {
-				ref.unique = u.N != 0
-			}
-			if w, ok := opts["where"]; ok && w.K == value.String {
-				ref.where = w.String()
+			// The object arg is a partial-index FILTER: each key is a column, the value the equality
+			// target (null → IS NULL). Structured, so no raw SQL enters the schema.
+			for col, v := range a.Map() {
+				ref.filter = append(ref.filter, indexCond{col: col, val: v})
 			}
 		}
 	}
@@ -224,6 +230,11 @@ func (d *Database) Id() value.Value { // = kitid().primaryKey()
 func (d *Database) Now() value.Value { // = datetime().defaultNow()
 	return value.NewFunc(func(_ ...value.Value) value.Value {
 		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true, seq: nextColSeq()})
+	})
+}
+func (d *Database) Updated() value.Value { // = now().onUpdate() — stamped on insert AND every update
+	return value.NewFunc(func(_ ...value.Value) value.Value {
+		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true, touch: true, seq: nextColSeq()})
 	})
 }
 
@@ -884,8 +895,26 @@ func columnSQL(name string, c *ColumnSpec) string {
 type indexDef struct {
 	name    string
 	columns []string // in index order
-	unique  bool
-	where   string // partial-index predicate (raw SQL from the schema author)
+	filter  []indexCond
+}
+
+// partialWhere renders an index's filter conditions to a WHERE clause, sorted by column so the SQL is
+// deterministic (order does not matter for AND). Values are emitted as SQL literals (never raw text).
+func partialWhere(filter []indexCond) string {
+	if len(filter) == 0 {
+		return ""
+	}
+	conds := append([]indexCond{}, filter...)
+	sort.Slice(conds, func(i, j int) bool { return conds[i].col < conds[j].col })
+	parts := make([]string, 0, len(conds))
+	for _, c := range conds {
+		if c.val.IsNil() {
+			parts = append(parts, fmt.Sprintf("%q IS NULL", c.col))
+		} else {
+			parts = append(parts, fmt.Sprintf("%q = %s", c.col, sqlLiteral(c.val)))
+		}
+	}
+	return strings.Join(parts, " AND ")
 }
 
 // collectIndexes turns per-column .index() memberships into concrete index definitions: an unnamed
@@ -906,8 +935,7 @@ func collectIndexes(table string, columns map[string]*ColumnSpec) []indexDef {
 				out = append(out, indexDef{
 					name:    fmt.Sprintf("idx_%s_%s", table, colName),
 					columns: []string{colName},
-					unique:  ref.unique,
-					where:   ref.where,
+					filter:  ref.filter,
 				})
 				continue
 			}
@@ -931,11 +959,8 @@ func collectIndexes(table string, columns map[string]*ColumnSpec) []indexDef {
 		idx := indexDef{name: name}
 		for _, m := range ms {
 			idx.columns = append(idx.columns, m.col)
-			if m.ref.unique {
-				idx.unique = true
-			}
-			if m.ref.where != "" && idx.where == "" {
-				idx.where = m.ref.where
+			if len(m.ref.filter) > 0 && len(idx.filter) == 0 {
+				idx.filter = m.ref.filter
 			}
 		}
 		out = append(out, idx)
@@ -949,15 +974,11 @@ func indexSQL(table string, idx indexDef) string {
 	for i, c := range idx.columns {
 		cols[i] = fmt.Sprintf("%q", c)
 	}
-	unique := ""
-	if idx.unique {
-		unique = "UNIQUE "
-	}
 	where := ""
-	if strings.TrimSpace(idx.where) != "" {
-		where = " WHERE " + strings.TrimSpace(idx.where)
+	if w := partialWhere(idx.filter); w != "" {
+		where = " WHERE " + w
 	}
-	return fmt.Sprintf("CREATE %sINDEX IF NOT EXISTS %q ON %q (%s)%s", unique, idx.name, table, strings.Join(cols, ", "), where)
+	return fmt.Sprintf("CREATE INDEX IF NOT EXISTS %q ON %q (%s)%s", idx.name, table, strings.Join(cols, ", "), where)
 }
 
 func liveIndexColumns(db *sql.DB, name string) ([]string, error) {
@@ -1406,6 +1427,19 @@ func sortedTableNames(tables map[string]map[string]*ColumnSpec) []string {
 	return names
 }
 
+// validateSchema catches declaration-time mistakes before any DDL runs. Today: an enum default that is
+// not one of the enum's values (enum("active","disabled").default("archived")) — caught here so it
+// fails loudly at migrate rather than silently writing an out-of-range default.
+func validateSchema(columns map[string]*ColumnSpec) error {
+	for _, name := range orderedColumns(columns) {
+		c := columns[name]
+		if c.kind == "enum" && c.hasDefault && c.def.K == value.String && !inEnum(c, c.def.String()) {
+			return fmt.Errorf("column %q default %q is not one of the enum values %v", name, c.def.String(), c.enumVals)
+		}
+	}
+	return nil
+}
+
 // checkpointWAL flushes the write-ahead log into the main database file. A schema change (DDL) that
 // lives only in the WAL is NOT reliably visible to a separate turso instance/process opening the same
 // file — the ALTER runs and records, the WAL grows, but the main file (and thus another process's view)
@@ -1422,6 +1456,9 @@ func checkpointWAL(db *sql.DB) {
 func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) (err error) {
 	if db == nil {
 		return fmt.Errorf("connection unavailable")
+	}
+	if err := validateSchema(columns); err != nil {
+		return fmt.Errorf("schema %q: %w", table, err)
 	}
 	ensureHistory(db)
 
@@ -1816,7 +1853,7 @@ func schemaHash(columns map[string]*ColumnSpec) string {
 	// Indexes are part of the shape too — adding/removing/reordering one, or changing UNIQUE/WHERE,
 	// re-runs migrate. A fixed table name keeps the hash stable across runs (only the index set moves it).
 	for _, idx := range collectIndexes("t", columns) {
-		fmt.Fprintf(h, "idx:%s(%s)|%t|%s;", idx.name, strings.Join(idx.columns, ","), idx.unique, strings.TrimSpace(idx.where))
+		fmt.Fprintf(h, "idx:%s(%s)|%s;", idx.name, strings.Join(idx.columns, ","), partialWhere(idx.filter))
 	}
 	return fmt.Sprintf("%x", h.Sum64())
 }

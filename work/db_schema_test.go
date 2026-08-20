@@ -1182,8 +1182,9 @@ router.get((ctx) => { db.links.create({ slug: "s", code: "c", status: "active" }
 }
 
 // .index() options: { unique: true } builds a UNIQUE index; { where: "..." } a partial index. Changing
-// an index's definition (adding a WHERE) is detected and the index is DROP+CREATEd, not left stale.
-func TestSchemaIndexUniqueAndPartial(t *testing.T) {
+// an index's definition (adding/removing the partial filter) is detected and DROP+CREATEd, not left
+// stale. The partial filter is a STRUCTURED object ({ status: "active", deleted_at: null }), not raw SQL.
+func TestSchemaIndexPartialFilter(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "a.db")))
 	if err != nil {
 		t.Fatal(err)
@@ -1193,31 +1194,53 @@ func TestSchemaIndexUniqueAndPartial(t *testing.T) {
 
 	schema := map[string]*ColumnSpec{
 		"id":         {kind: "kitid", primary: true, seq: 1},
-		"code":       {kind: "text", seq: 2, indexes: []colIndexRef{{name: "uniq_code", unique: true}}},
+		"status":     {kind: "text", seq: 2},
 		"deleted_at": {kind: "datetime", seq: 3},
-		"created_at": {kind: "datetime", seq: 4, indexes: []colIndexRef{{name: "active_recent", where: "deleted_at IS NULL"}}},
+		"created_at": {kind: "datetime", seq: 4, indexes: []colIndexRef{{name: "active_recent", filter: []indexCond{
+			{col: "status", val: value.New("active")},
+			{col: "deleted_at", val: value.Value{K: value.Nil}},
+		}}}},
 	}
 	if err := migrate(db, "links", schema, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.ToUpper(sqlOf("uniq_code")), "UNIQUE INDEX") {
-		t.Errorf("uniq_code should be a UNIQUE index, got %q", sqlOf("uniq_code"))
-	}
-	if !strings.Contains(sqlOf("active_recent"), "WHERE deleted_at IS NULL") {
-		t.Errorf("active_recent should be partial, got %q", sqlOf("active_recent"))
-	}
-	// UNIQUE actually enforced.
-	db.Exec(`INSERT INTO links(id, code) VALUES('a','X')`)
-	if _, err := db.Exec(`INSERT INTO links(id, code) VALUES('b','X')`); err == nil {
-		t.Error("uniq_code did not reject a duplicate code")
+	// The object filter renders to a real partial predicate — equality quoted, null → IS NULL.
+	got := sqlOf("active_recent")
+	if !strings.Contains(got, "WHERE") || !strings.Contains(got, `"status" = 'active'`) || !strings.Contains(got, `"deleted_at" IS NULL`) {
+		t.Errorf("partial filter not rendered correctly: %q", got)
 	}
 
-	// Change detection: drop the partial predicate → index is rebuilt to a full index.
-	schema["created_at"].indexes = []colIndexRef{{name: "active_recent"}} // no where now
+	// Change detection: drop the filter → index rebuilt to a full index.
+	schema["created_at"].indexes = []colIndexRef{{name: "active_recent"}}
 	if err := migrate(db, "links", schema, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(sqlOf("active_recent"), "WHERE") {
 		t.Errorf("active_recent should no longer be partial after the change, got %q", sqlOf("active_recent"))
+	}
+}
+
+// An enum default that is not one of the enum values is rejected at migrate, not silently written.
+func TestSchemaEnumDefaultValidated(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "e.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	bad := map[string]*ColumnSpec{
+		"id":     {kind: "kitid", primary: true, seq: 1},
+		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New("archived"), seq: 2},
+	}
+	if err := migrate(db, "t", bad, false, false); err == nil {
+		t.Error("an enum default outside the enum values must be rejected")
+	} else if !strings.Contains(err.Error(), "archived") {
+		t.Errorf("error should name the bad default, got: %v", err)
+	}
+	good := map[string]*ColumnSpec{
+		"id":     {kind: "kitid", primary: true, seq: 1},
+		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New("active"), seq: 2},
+	}
+	if err := migrate(db, "t2", good, false, false); err != nil {
+		t.Errorf("a valid enum default should be accepted: %v", err)
 	}
 }
