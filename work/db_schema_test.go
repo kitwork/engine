@@ -1017,3 +1017,62 @@ func TestSchemaMigrationReordersToDeclared(t *testing.T) {
 		t.Errorf("data changed in reorder: apple=%q zebra=%q", apple, zebra)
 	}
 }
+
+// A primary key must be NOT NULL. SQLite lets a non-INTEGER PRIMARY KEY (our TEXT kitid) hold NULLs
+// unless declared NOT NULL — so a manager reported "primary key can be null". New tables get NOT NULL,
+// and an existing table with a nullable PK is rebuilt to fix it (data preserved).
+func TestSchemaPrimaryKeyIsNotNull(t *testing.T) {
+	pkNotNull := func(db *sql.DB, table string) (bool, bool) {
+		rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var cid, notnull, pk int
+			var name, ctype string
+			var dflt sql.NullString
+			rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk)
+			if pk == 1 {
+				return notnull == 1, true
+			}
+		}
+		return false, false
+	}
+	schema := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true, seq: 1}, "code": {kind: "text", seq: 2}}
+
+	// New table.
+	fresh, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "a.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fresh.Close()
+	if err := migrate(fresh, "t", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if nn, ok := pkNotNull(fresh, "t"); !ok || !nn {
+		t.Error("a new table's primary key must be NOT NULL")
+	}
+
+	// Existing table with a nullable PK (declared order already), plus a row.
+	old, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "b.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	old.Exec(`CREATE TABLE t (id TEXT PRIMARY KEY, code TEXT)`)
+	old.Exec(`INSERT INTO t (id, code) VALUES ('x','c1')`)
+	if nn, _ := pkNotNull(old, "t"); nn {
+		t.Fatal("precondition: the PK should start nullable")
+	}
+	if err := migrate(old, "t", schema, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if nn, _ := pkNotNull(old, "t"); !nn {
+		t.Error("an existing nullable primary key must be rebuilt to NOT NULL")
+	}
+	var code string
+	if err := old.QueryRow(`SELECT code FROM t WHERE id='x'`).Scan(&code); err != nil || code != "c1" {
+		t.Errorf("data lost in the pk-fix rebuild: err=%v code=%q", err, code)
+	}
+}

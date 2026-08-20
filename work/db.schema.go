@@ -818,7 +818,10 @@ func columnSQL(name string, c *ColumnSpec) string {
 	if c.primary {
 		parts = append(parts, "PRIMARY KEY")
 	}
-	if c.notNull {
+	// A primary key is NOT NULL — SQLite otherwise lets a non-INTEGER PRIMARY KEY (e.g. our TEXT kitid)
+	// hold NULLs, a legacy quirk that surprises clients ("primary key can be null"). Emit NOT NULL for
+	// any primary key, not just columns the caller marked notNull.
+	if c.notNull || c.primary {
 		parts = append(parts, "NOT NULL")
 	}
 	if c.unique {
@@ -1288,10 +1291,15 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 			return fmt.Errorf("introspect order %q: %w", table, err)
 		}
 		desired := orderedColumns(columns)
-		if reorderNeeded(live, desired) {
-			// Existing columns are out of declared order → rebuild to fix the layout (data preserved,
-			// extras kept). rebuild lays every column out via orderedColumns, so new columns also land in
-			// their declared position here.
+		nullablePK, err := liveNullablePK(db, table, columns)
+		if err != nil {
+			return fmt.Errorf("introspect pk %q: %w", table, err)
+		}
+		if reorderNeeded(live, desired) || nullablePK {
+			// Existing columns are out of declared order, or the primary key is nullable → rebuild to fix
+			// the layout / constraint (data preserved, extras kept). rebuild lays every column out via
+			// orderedColumns with the current DDL, so new columns land in their declared position and the
+			// primary key comes out NOT NULL.
 			var keptExtras []string
 			for _, name := range live {
 				if _, inSchema := columns[name]; !inSchema {
@@ -1452,6 +1460,30 @@ func tableColumns(db *sql.DB, table string) (map[string]string, error) {
 		cols[name] = strings.ToUpper(strings.TrimSpace(ctype))
 	}
 	return cols, rows.Err()
+}
+
+// liveNullablePK reports whether a column the schema marks as a PRIMARY KEY is currently NULLABLE in
+// the live table — SQLite lets a non-INTEGER primary key hold NULLs unless it was declared NOT NULL.
+// Such a table is rebuilt so the key becomes NOT NULL; the rebuild is safe because primary-key values
+// are never NULL, so the copy cannot violate the new constraint.
+func liveNullablePK(db *sql.DB, table string, columns map[string]*ColumnSpec) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%q)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, ctype string
+		var dflt sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if spec, ok := columns[name]; ok && spec.primary && notnull == 0 {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // tableColumnsOrdered returns the LIVE column names in physical (cid) order — used to detect when the
