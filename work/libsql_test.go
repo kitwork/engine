@@ -227,6 +227,38 @@ func TestLibSQLInteractiveTransaction(t *testing.T) {
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }
 
+// A write sent with want_rows:true (what a db manager does — it asks for a result to confirm the edit)
+// must still report the real affected_row_count. The bug: want_rows routed the DELETE through Query,
+// which cannot report RowsAffected, so it came back 0 and the manager concluded "nothing changed" even
+// though the row was gone — "all changes failed to commit" while the delete actually happened.
+func TestLibSQLWriteWithWantRowsReportsAffected(t *testing.T) {
+	tenant := servedTenant(t, "app.db", "tok", "readwrite")
+	pipe := func(body string) []byte {
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", "Bearer tok")
+		rec := httptest.NewRecorder()
+		tenant.Serve(rec, req)
+		return rec.Body.Bytes()
+	}
+	pipe(`{"baton":null,"requests":[
+	  {"type":"execute","stmt":{"sql":"CREATE TABLE t(id integer primary key, c text)","want_rows":false}},
+	  {"type":"execute","stmt":{"sql":"INSERT INTO t(c) VALUES('a'),('b'),('c')","want_rows":false}},
+	  {"type":"close"}]}`)
+	del := pipe(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"DELETE FROM t WHERE c='b'","want_rows":true}},{"type":"close"}]}`)
+	if !bytes.Contains(del, []byte(`"affected_row_count":1`)) {
+		t.Errorf("DELETE with want_rows:true must report affected_row_count:1, got: %s", del)
+	}
+	upd := pipe(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"UPDATE t SET c='A' WHERE c='a'","want_rows":true}},{"type":"close"}]}`)
+	if !bytes.Contains(upd, []byte(`"affected_row_count":1`)) {
+		t.Errorf("UPDATE with want_rows:true must report affected_row_count:1, got: %s", upd)
+	}
+	// An INSERT … RETURNING with want_rows still comes back as rows.
+	ins := pipe(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"INSERT INTO t(c) VALUES('z') RETURNING c","want_rows":true}},{"type":"close"}]}`)
+	if !bytes.Contains(ins, []byte(`"type":"text","value":"z"`)) {
+		t.Errorf("INSERT … RETURNING should still yield its row, got: %s", ins)
+	}
+}
+
 // access:"readonly" (also the default when access is omitted) must refuse writes while allowing reads.
 func TestLibSQLReadonlyRefusesWrites(t *testing.T) {
 	tenant := servedTenant(t, "app.db", "ro", "readonly")

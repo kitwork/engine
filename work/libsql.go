@@ -339,7 +339,18 @@ func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt, store map
 	}
 	start := time.Now()
 
-	if stmt.WantRows {
+	// Decide Query vs Exec by whether the statement actually YIELDS ROWS, not by want_rows alone. A plain
+	// write (INSERT/UPDATE/DELETE without RETURNING) returns no rows but DOES have an affected count — and
+	// QueryContext cannot report RowsAffected, so a client that sends a DELETE with want_rows:true would
+	// see affected_row_count:0 and conclude "nothing changed" even though the row was deleted. Route such
+	// writes through Exec so the affected count is real. (A SELECT, or a write with RETURNING, still uses
+	// Query to return its rows.)
+	yieldsRows := stmt.WantRows
+	if isWriteSQL(sqlText) && !strings.Contains(strings.ToLower(sqlText), "returning") {
+		yieldsRows = false
+	}
+
+	if yieldsRows {
 		rows, err := conn.QueryContext(ctx, sqlText, args...)
 		if err != nil {
 			return nil, err
