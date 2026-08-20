@@ -41,6 +41,8 @@ type hranaStreamRequest struct {
 	Type  string      `json:"type"`
 	Stmt  *hranaStmt  `json:"stmt"`
 	Batch *hranaBatch `json:"batch"`
+	SQLID *int32      `json:"sql_id"` // store_sql / close_sql
+	SQL   *string     `json:"sql"`    // store_sql
 }
 
 type hranaStmt struct {
@@ -131,9 +133,13 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 	}
 	defer conn.Close()
 
+	// Prepared statements (store_sql/sql_id) that @libsql/client uses for batch() are resolved within
+	// the pipeline: the client stores the SQL and references it in the same pipeline (baton is null, so
+	// nothing needs to persist across HTTP requests).
+	store := map[int32]string{}
 	results := make([]map[string]any, 0, len(req.Requests))
 	for _, sr := range req.Requests {
-		results = append(results, runHranaRequest(ctx, conn, sr))
+		results = append(results, runHranaRequest(ctx, conn, sr, store))
 	}
 	writeDataJSON(w, http.StatusOK, map[string]any{
 		"baton":    nil,
@@ -164,17 +170,28 @@ func hranaTarget(path string) (db string, kind string, ok bool) {
 	return "", "", false
 }
 
-func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest) map[string]any {
+func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest, store map[int32]string) map[string]any {
 	switch sr.Type {
 	case "close":
 		return hranaOK(map[string]any{"type": "close"})
 	case "get_autocommit":
 		return hranaOK(map[string]any{"type": "get_autocommit", "is_autocommit": true})
+	case "store_sql":
+		if sr.SQLID == nil || sr.SQL == nil {
+			return hranaErr("store_sql: missing sql_id or sql")
+		}
+		store[*sr.SQLID] = *sr.SQL
+		return hranaOK(map[string]any{"type": "store_sql"})
+	case "close_sql":
+		if sr.SQLID != nil {
+			delete(store, *sr.SQLID)
+		}
+		return hranaOK(map[string]any{"type": "close_sql"})
 	case "execute":
 		if sr.Stmt == nil {
 			return hranaErr("execute: missing stmt")
 		}
-		res, err := runHranaStmt(ctx, conn, *sr.Stmt)
+		res, err := runHranaStmt(ctx, conn, *sr.Stmt, store)
 		if err != nil {
 			return hranaErr(err.Error())
 		}
@@ -183,24 +200,24 @@ func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest)
 		if sr.Batch == nil {
 			return hranaErr("batch: missing batch")
 		}
-		stepResults := make([]any, 0, len(sr.Batch.Steps))
-		stepErrors := make([]any, 0, len(sr.Batch.Steps))
-		var failed bool
-		for _, step := range sr.Batch.Steps {
-			if failed {
-				stepResults = append(stepResults, nil)
-				stepErrors = append(stepErrors, nil)
-				continue
-			}
-			res, err := runHranaStmt(ctx, conn, step.Stmt)
+		n := len(sr.Batch.Steps)
+		stepResults := make([]any, n)
+		stepErrors := make([]any, n)
+		// The client manages the transaction itself: a "write" batch already sends BEGIN … COMMIT as
+		// steps. So run the steps as-is; do NOT impose our own transaction (that would nest BEGINs). On a
+		// failure, stop and ROLLBACK so a half-open client transaction is not leaked on the pooled conn.
+		failed := false
+		for i, step := range sr.Batch.Steps {
+			res, err := runHranaStmt(ctx, conn, step.Stmt, store)
 			if err != nil {
-				stepResults = append(stepResults, nil)
-				stepErrors = append(stepErrors, map[string]any{"message": err.Error()})
+				stepErrors[i] = map[string]any{"message": err.Error()}
 				failed = true
-				continue
+				break
 			}
-			stepResults = append(stepResults, res)
-			stepErrors = append(stepErrors, nil)
+			stepResults[i] = res
+		}
+		if failed {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK") // no-op if there was no open transaction
 		}
 		return hranaOK(map[string]any{
 			"type":   "batch",
@@ -211,9 +228,24 @@ func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest)
 	}
 }
 
-func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt) (map[string]any, error) {
-	if stmt.SQL == nil {
-		return nil, errString("only inline sql is supported (sql_id / prepared statements not implemented)")
+// stmtSQL resolves a statement's SQL from inline `sql` or a stored `sql_id`.
+func stmtSQL(stmt hranaStmt, store map[int32]string) (string, error) {
+	if stmt.SQL != nil {
+		return *stmt.SQL, nil
+	}
+	if stmt.SQLID != nil {
+		if s, ok := store[*stmt.SQLID]; ok {
+			return s, nil
+		}
+		return "", errString("unknown sql_id (statement was not stored in this pipeline)")
+	}
+	return "", errString("statement has neither sql nor sql_id")
+}
+
+func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt, store map[int32]string) (map[string]any, error) {
+	sqlText, err := stmtSQL(stmt, store)
+	if err != nil {
+		return nil, err
 	}
 	args, err := hranaArgs(stmt)
 	if err != nil {
@@ -222,7 +254,7 @@ func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt) (map[stri
 	start := time.Now()
 
 	if stmt.WantRows {
-		rows, err := conn.QueryContext(ctx, *stmt.SQL, args...)
+		rows, err := conn.QueryContext(ctx, sqlText, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +262,7 @@ func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt) (map[stri
 		return hranaRowsResult(rows, time.Since(start))
 	}
 
-	result, err := conn.ExecContext(ctx, *stmt.SQL, args...)
+	result, err := conn.ExecContext(ctx, sqlText, args...)
 	if err != nil {
 		return nil, err
 	}

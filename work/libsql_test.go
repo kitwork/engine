@@ -148,3 +148,43 @@ func TestLibSQLTransactionInPipeline(t *testing.T) {
 		t.Errorf("committed transaction should count 2 rows; body: %s", rec.Body.String())
 	}
 }
+
+// Prepared statements + batch, the shape @libsql/client sends for db.batch(): store_sql once, then a
+// batch whose steps reference it by sql_id. This was the case that broke the first real-client run.
+func TestLibSQLStoreSQLAndBatch(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_TOKEN=tok\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "router.kitwork.js"),
+		[]byte("import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({}));"), 0644)
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"baton":null,"requests":[
+	  {"type":"execute","stmt":{"sql":"CREATE TABLE t (n integer)","want_rows":false}},
+	  {"type":"store_sql","sql_id":1,"sql":"INSERT INTO t (n) VALUES (?)"},
+	  {"type":"batch","batch":{"steps":[
+	     {"stmt":{"sql_id":1,"args":[{"type":"integer","value":"10"}]}},
+	     {"stmt":{"sql_id":1,"args":[{"type":"integer","value":"20"}]}}
+	  ]}},
+	  {"type":"close_sql","sql_id":1},
+	  {"type":"execute","stmt":{"sql":"SELECT sum(n) s FROM t","want_rows":true}},
+	  {"type":"close"}
+	]}`
+	req := httptest.NewRequest(http.MethodPost, "http://localhost/v3/pipeline", bytes.NewReader([]byte(body)))
+	req.Header.Set("Authorization", "Bearer tok")
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	if bytes.Contains(rec.Body.Bytes(), []byte(`"type":"error"`)) {
+		t.Fatalf("no result should be an error; body: %s", rec.Body.String())
+	}
+	// sum(10,20) = 30 → integer encoded as the string "30".
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"value":"30"`)) {
+		t.Errorf("store_sql + batch should have inserted 10 and 20 (sum 30); body: %s", rec.Body.String())
+	}
+}
