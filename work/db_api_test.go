@@ -20,14 +20,11 @@ func TestDataAPIQueryOverHTTP(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// DB_TOKEN turns the endpoint on.
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_TOKEN=secret-token-123\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// The db is DECLARED served in JS (token + access) — that is what turns the endpoint on, not a .env.
 	router := `import { router, database } from "kitwork";
 const { turso, kitid, text, int } = database;
 const links = { id: kitid().primaryKey(), code: text().notNull().unique(), clicks: int().default(0) };
-const db = turso("kiturl.db", { links: links });
+const db = turso("kiturl.db", { links: links }, { token: "secret-token-123", access: "readwrite" });
 router.get((ctx) => {
   db.links.create({ code: "kitwork", clicks: 3 });
   return ctx.json({ ok: true });
@@ -94,7 +91,7 @@ router.get((ctx) => {
 	}
 }
 
-// With no DB_TOKEN configured the endpoint stays invisible (404), exposing nothing.
+// With no db declared served (no turso(..., { token })), the endpoint stays invisible (404).
 func TestDataAPIDisabledWithoutToken(t *testing.T) {
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "test", "localhost")
@@ -116,6 +113,6 @@ router.get((ctx) => ctx.json({ ok: true }));`
 	rec := httptest.NewRecorder()
 	tenant.Serve(rec, req)
 	if rec.Code != http.StatusNotFound {
-		t.Errorf("endpoint should be 404 when DB_TOKEN unset, got %d", rec.Code)
+		t.Errorf("endpoint should be 404 when no db is declared served, got %d", rec.Code)
 	}
 }

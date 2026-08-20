@@ -370,8 +370,19 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 		}
 	}
 	if len(args) > 2 && args[2].K == value.Map {
-		if d, ok := args[2].Map()["drop"]; ok && d.K == value.Bool && d.N != 0 {
+		opts := args[2].Map()
+		if d, ok := opts["drop"]; ok && d.K == value.Bool && d.N != 0 {
 			p.allowDrop = true
+		}
+		// serve: a `token` in the options declares THIS db reachable over libSQL/HTTP (the value stays
+		// in env — token: env.require("DB_TOKEN") — but the DECISION to expose is visible here in JS, not
+		// hidden in .env). `access` defaults to "readonly"; only "readwrite" grants writes.
+		if tok, ok := opts["token"]; ok && !tok.IsNil() && tok.String() != "" {
+			access := ""
+			if a, ok := opts["access"]; ok && a.K == value.String {
+				access = a.String()
+			}
+			registerServe(tenant, p.dbName, tok.String(), access)
 		}
 	}
 	registerSchema(p)
@@ -393,6 +404,96 @@ func registerSchema(p *dbProxy) {
 	schemaRegMu.Lock()
 	schemaReg[key] = p
 	schemaRegMu.Unlock()
+}
+
+// ---- serve registry: which tenant dbs are exposed over libSQL/HTTP, and how ----
+//
+// Populated by turso("db", {schema}, { token, access }) at declare time (which runs during Tenant.Run,
+// so the endpoint is live before the first request). The libSQL and /_db handlers consult THIS instead
+// of reading env.DB_TOKEN — exposure is a declared fact, not the side effect of an env var existing.
+
+type serveConfig struct {
+	token  string
+	access string // "readonly" | "readwrite"
+}
+
+var (
+	serveRegMu sync.Mutex
+	serveReg   = map[string]serveConfig{} // "appID|domain|dbName" -> config (engine-agnostic)
+)
+
+// tenantScopeKey identifies a tenant uniquely. config.base is its resolved directory (root/identity/
+// domain), so two tenants never collide — including many test tenants that all use domain "localhost".
+func tenantScopeKey(t *Tenant) string {
+	if t.config != nil && t.config.base != "" {
+		return t.config.base
+	}
+	return t.appID() + "|" + t.Domain()
+}
+
+func serveDBKey(t *Tenant, dbName string) string {
+	return tenantScopeKey(t) + "|" + dbName
+}
+
+// registerServe records an exposed db. Access defaults to the SAFE option: only an explicit
+// "readwrite" grants writes; anything else (including empty) is read-only.
+func registerServe(t *Tenant, dbName, token, access string) {
+	if t == nil || token == "" {
+		return
+	}
+	if strings.ToLower(strings.TrimSpace(access)) != "readwrite" {
+		access = "readonly"
+	} else {
+		access = "readwrite"
+	}
+	serveRegMu.Lock()
+	serveReg[serveDBKey(t, dbName)] = serveConfig{token: token, access: access}
+	serveRegMu.Unlock()
+}
+
+// resolveServe finds the exposure for (tenant, dbName). An empty dbName resolves to the tenant's single
+// exposed db when there is exactly one (so a bare URL works); ambiguous → not served.
+func resolveServe(t *Tenant, dbName string) (string, serveConfig, bool) {
+	if t == nil {
+		return "", serveConfig{}, false
+	}
+	serveRegMu.Lock()
+	defer serveRegMu.Unlock()
+	if dbName != "" {
+		c, ok := serveReg[serveDBKey(t, dbName)]
+		return dbName, c, ok
+	}
+	prefix := tenantScopeKey(t) + "|"
+	var outName string
+	var outCfg serveConfig
+	found := 0
+	for key, cfg := range serveReg {
+		if strings.HasPrefix(key, prefix) {
+			outName = strings.TrimPrefix(key, prefix)
+			outCfg = cfg
+			found++
+		}
+	}
+	if found != 1 {
+		return "", serveConfig{}, false
+	}
+	return outName, outCfg, true
+}
+
+// isWriteSQL reports whether a statement mutates data/schema — used to enforce access:"readonly".
+// SELECT/WITH/BEGIN/COMMIT/ROLLBACK/PRAGMA/EXPLAIN are allowed through; the rest are writes.
+func isWriteSQL(text string) bool {
+	s := strings.TrimSpace(text)
+	end := strings.IndexFunc(s, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '(' })
+	first := s
+	if end > 0 {
+		first = s[:end]
+	}
+	switch strings.ToLower(first) {
+	case "insert", "update", "delete", "replace", "create", "drop", "alter", "truncate", "reindex", "vacuum", "attach", "detach":
+		return true
+	}
+	return false
 }
 
 // OnGet is the whole point: db.vouchers routes here. A known table → a schema-aware handle; an unknown

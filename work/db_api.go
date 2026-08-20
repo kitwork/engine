@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	requestscope "github.com/kitwork/engine/request"
-	"github.com/kitwork/engine/value"
 )
 
 // Data API — the tenant's database exposed over an authenticated URL, so app.db can be reached "as a
@@ -23,10 +22,10 @@ import (
 //	{ "db": "app.db", "sql": "select code, clicks from links where clicks > ?", "args": [0] }
 //	→ { "rows": [ { "code": "kitwork", "clicks": 3 }, ... ] }
 //
-// Safety: OFF unless the tenant sets env DB_TOKEN (no token → 404, nothing exposed). Read-only — only
-// SELECT/WITH is accepted, and stacked statements are rejected — so a leaked token cannot mutate or
-// drop data. Writes over the wire are a deliberate, separate step (a scoped write token) once this
-// read path is proven.
+// Safety: OFF unless the db is declared served — turso("db", {schema}, { token }) (no serve → 404,
+// nothing exposed). Read-only — only SELECT/WITH is accepted, and stacked statements are rejected — so
+// a leaked token cannot mutate or drop data here (writes go through the libSQL endpoint under an
+// access:"readwrite" serve).
 const dataAPIQueryPath = "/_db/query"
 
 // serveDataAPIIf handles the reserved /_db/query path. Returns true when it owned the response.
@@ -35,23 +34,8 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 		return false
 	}
 
-	tokenVal := t.envValue().Get("DB_TOKEN")
-	if tokenVal.IsNil() {
-		// Feature disabled (no DB_TOKEN): reveal nothing — looks like an ordinary missing path.
-		writeDataJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
-		return true
-	}
-	token := tokenVal.String()
-	if token == "" {
-		writeDataJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
-		return true
-	}
 	if r.Method != http.MethodPost {
 		writeDataJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "POST only"})
-		return true
-	}
-	if !bearerMatches(r.Header.Get("Authorization"), token) {
-		writeDataJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return true
 	}
 
@@ -64,15 +48,23 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 		writeDataJSON(w, http.StatusBadRequest, map[string]any{"error": "bad json: " + err.Error()})
 		return true
 	}
+
+	// The db must be DECLARED served — turso("db", {schema}, { token }). Not served → reveal nothing.
+	dbName, cfg, served := resolveServe(t, req.DB)
+	if !served {
+		writeDataJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return true
+	}
+	if !bearerMatches(r.Header.Get("Authorization"), cfg.token) {
+		writeDataJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+		return true
+	}
+	// /_db/query is the simple, always-read-only surface (writes go through the libSQL endpoint).
 	if !isReadOnlySQL(req.SQL) {
 		writeDataJSON(w, http.StatusForbidden, map[string]any{"error": "read-only endpoint: only a single SELECT/WITH statement is allowed"})
 		return true
 	}
 
-	dbName := req.DB
-	if dbName == "" {
-		dbName = "app.db"
-	}
 	conn := tursoForRequest(t, dbName, scope).db()
 	if conn == nil {
 		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
@@ -92,20 +84,6 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 	}
 	writeDataJSON(w, http.StatusOK, map[string]any{"rows": out})
 	return true
-}
-
-// envValue resolves the tenant's env surface (generation env, then the tenant .env), mirroring the VM's
-// KitWork.Env() so DB_TOKEN reads the same value tenant code sees.
-func (t *Tenant) envValue() value.Value {
-	if generation := t.SiteGeneration(); generation != nil {
-		if env := generation.Environment(); env.K == value.Proxy {
-			return env
-		}
-	}
-	if t.env.K == value.Proxy {
-		return t.env
-	}
-	return NewEnv(nil)
 }
 
 func bearerMatches(header, token string) bool {

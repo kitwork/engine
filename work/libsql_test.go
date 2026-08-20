@@ -3,6 +3,7 @@ package work
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,26 +11,35 @@ import (
 	"testing"
 )
 
-// Drive the endpoint with the exact Hrana pipeline JSON a libSQL client sends, and verify the response
-// envelope + typed value encoding (integer as a STRING, text as text). This is what turso's own clients
-// and db managers speak.
-func TestLibSQLHranaPipeline(t *testing.T) {
+// servedTenant boots a tenant that DECLARES a served db in JS — turso(db, {schema}, { token, access }).
+// That declaration (run during tenant.Run) is what enables the libSQL and /_db endpoints; there is no
+// .env magic. The declared `seed` table just turns exposure on — a client can create other tables.
+func servedTenant(t *testing.T, dbName, token, access string) *Tenant {
+	t.Helper()
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "test", "localhost")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_TOKEN=tok-abc\nDB_DEFAULT=app.db\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"),
-		[]byte("import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({ ok: true }));"), 0644); err != nil {
+	router := fmt.Sprintf(`import { router, database } from "kitwork";
+const { turso, kitid } = database;
+export const db = turso(%q, { seed: { id: kitid().primaryKey() } }, { token: %q, access: %q });
+router.get((ctx) => ctx.json({ ok: true }));`, dbName, token, access)
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
+	return tenant
+}
+
+// Drive the endpoint with the exact Hrana pipeline JSON a libSQL client sends, and verify the response
+// envelope + typed value encoding (integer as a STRING, text as text). This is what turso's own clients
+// and db managers speak.
+func TestLibSQLHranaPipeline(t *testing.T) {
+	tenant := servedTenant(t, "app.db", "tok-abc", "readwrite")
 
 	pipeline := func(token string, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", bytes.NewReader([]byte(body)))
@@ -118,16 +128,7 @@ func TestLibSQLHranaPipeline(t *testing.T) {
 // A transaction inside a single pipeline is real (same pinned connection): BEGIN/INSERT/COMMIT then
 // COUNT sees the row.
 func TestLibSQLTransactionInPipeline(t *testing.T) {
-	tmp := t.TempDir()
-	dir := filepath.Join(tmp, "test", "localhost")
-	os.MkdirAll(dir, 0755)
-	os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_TOKEN=tok\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "router.kitwork.js"),
-		[]byte("import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({}));"), 0644)
-	tenant := NewTenant(tmp, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
+	tenant := servedTenant(t, "app.db", "tok", "readwrite")
 	body := `{"baton":null,"requests":[
 	  {"type":"execute","stmt":{"sql":"CREATE TABLE t (n integer)","want_rows":false}},
 	  {"type":"execute","stmt":{"sql":"BEGIN","want_rows":false}},
@@ -152,16 +153,7 @@ func TestLibSQLTransactionInPipeline(t *testing.T) {
 // Prepared statements + batch, the shape @libsql/client sends for db.batch(): store_sql once, then a
 // batch whose steps reference it by sql_id. This was the case that broke the first real-client run.
 func TestLibSQLStoreSQLAndBatch(t *testing.T) {
-	tmp := t.TempDir()
-	dir := filepath.Join(tmp, "test", "localhost")
-	os.MkdirAll(dir, 0755)
-	os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_TOKEN=tok\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "router.kitwork.js"),
-		[]byte("import { router } from \"kitwork\";\nrouter.get((ctx) => ctx.json({}));"), 0644)
-	tenant := NewTenant(tmp, "localhost")
-	if err := tenant.Run(); err != nil {
-		t.Fatal(err)
-	}
+	tenant := servedTenant(t, "app.db", "tok", "readwrite")
 	body := `{"baton":null,"requests":[
 	  {"type":"execute","stmt":{"sql":"CREATE TABLE t (n integer)","want_rows":false}},
 	  {"type":"store_sql","sql_id":1,"sql":"INSERT INTO t (n) VALUES (?)"},
@@ -186,5 +178,26 @@ func TestLibSQLStoreSQLAndBatch(t *testing.T) {
 	// sum(10,20) = 30 → integer encoded as the string "30".
 	if !bytes.Contains(rec.Body.Bytes(), []byte(`"value":"30"`)) {
 		t.Errorf("store_sql + batch should have inserted 10 and 20 (sum 30); body: %s", rec.Body.String())
+	}
+}
+
+// access:"readonly" (also the default when access is omitted) must refuse writes while allowing reads.
+func TestLibSQLReadonlyRefusesWrites(t *testing.T) {
+	tenant := servedTenant(t, "app.db", "ro", "readonly")
+	pipe := func(sql string, wantRows bool) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":%q,"want_rows":%v}}]}`, sql, wantRows)
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", "Bearer ro")
+		rec := httptest.NewRecorder()
+		tenant.Serve(rec, req)
+		return rec
+	}
+	// A write is refused with the read-only error, never reaching the db.
+	if w := pipe("CREATE TABLE x (n integer)", false); !bytes.Contains(w.Body.Bytes(), []byte("read-only")) {
+		t.Errorf("readonly serve must refuse a write; body: %s", w.Body.String())
+	}
+	// A read passes.
+	if r := pipe("select 1 as n", true); bytes.Contains(r.Body.Bytes(), []byte(`"type":"error"`)) {
+		t.Errorf("readonly serve must allow SELECT; body: %s", r.Body.String())
 	}
 }

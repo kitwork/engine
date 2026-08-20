@@ -18,17 +18,16 @@ import (
 // turso CLI, @libsql/client, Drizzle/Prisma libSQL adapters, a turso-compatible db manager — connects
 // to a tenant's database by URL + auth token, exactly like turso.io:
 //
-//	client = createClient({ url: "http://localhost:8080", authToken: "<DB_TOKEN>" })   // Host selects the tenant
+//	client = createClient({ url: "http://localhost:8080", authToken: "<token>" })   // Host selects the tenant
 //	client = createClient({ url: "http://localhost:8080/kiturl.db", authToken: "..." }) // path selects the db file
 //
-// The client POSTs Hrana pipelines to /v2/pipeline or /v3/pipeline; we run them on the connection the
-// tenant already holds and answer in Hrana's JSON envelope. Enabled only when the tenant sets DB_TOKEN.
-// A pipeline runs on ONE pinned connection (so BEGIN…COMMIT inside a single pipeline is a real
-// transaction); we do not persist interactive streams across HTTP requests (baton is always returned
+// The db is exposed by DECLARING it in JS — turso("kiturl.db", {schema}, { token: env.require("DB_TOKEN"),
+// access: "readwrite" }) — so the decision to open it is visible in code, not a side effect of an env var
+// existing. access:"readonly" (the default) refuses writes. The client POSTs Hrana pipelines to
+// /v2/pipeline or /v3/pipeline; we run them on the connection the tenant already holds and answer in
+// Hrana's JSON envelope. A pipeline runs on ONE pinned connection (so BEGIN…COMMIT inside a single
+// pipeline is a real transaction); interactive streams are not persisted across requests (baton stays
 // null), which is what a db manager's autocommit queries need.
-//
-// Full read+write, like a turso auth token — the token is the whole gate. (The narrower, read-only
-// /_db/query endpoint remains for simple curl use.)
 
 // ---- Hrana wire types (per HRANA_3_SPEC; v2 shares this JSON shape) ----
 
@@ -75,16 +74,16 @@ type hranaValue struct {
 }
 
 func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *requestscope.Scope) bool {
-	dbName, kind, ok := hranaTarget(r.URL.Path)
-	if !ok {
+	pathDB, kind, matched := hranaTarget(r.URL.Path)
+	if !matched {
 		return false
 	}
-	// Gate the whole libSQL surface on DB_TOKEN. Off → let the path fall through to normal routing.
-	tokenVal := t.envValue().Get("DB_TOKEN")
-	if tokenVal.IsNil() || tokenVal.String() == "" {
+	// The db must be DECLARED served — turso("db", {schema}, { token, access }). Not served → fall
+	// through to normal routing (the /v2,/v3 paths are only reserved for an exposed db).
+	dbName, cfg, served := resolveServe(t, pathDB)
+	if !served {
 		return false
 	}
-	token := tokenVal.String()
 
 	// GET /v2 or /v3 — version probe. A 200 means "this version is supported".
 	if kind == "version" {
@@ -101,7 +100,7 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return true
 	}
-	if !bearerMatches(r.Header.Get("Authorization"), token) {
+	if !bearerMatches(r.Header.Get("Authorization"), cfg.token) {
 		writeDataJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 		return true
 	}
@@ -112,12 +111,6 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 		return true
 	}
 
-	if dbName == "" {
-		dbName = t.envValue().Get("DB_DEFAULT").String()
-		if strings.TrimSpace(dbName) == "" || t.envValue().Get("DB_DEFAULT").IsNil() {
-			dbName = "app.db"
-		}
-	}
 	pool := tursoForRequest(t, dbName, scope).db()
 	if pool == nil {
 		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
@@ -133,13 +126,16 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 	}
 	defer conn.Close()
 
+	// access:"readonly" (the default) → writes are refused; only "readwrite" lets them through.
+	readonly := cfg.access != "readwrite"
+
 	// Prepared statements (store_sql/sql_id) that @libsql/client uses for batch() are resolved within
 	// the pipeline: the client stores the SQL and references it in the same pipeline (baton is null, so
 	// nothing needs to persist across HTTP requests).
 	store := map[int32]string{}
 	results := make([]map[string]any, 0, len(req.Requests))
 	for _, sr := range req.Requests {
-		results = append(results, runHranaRequest(ctx, conn, sr, store))
+		results = append(results, runHranaRequest(ctx, conn, sr, store, readonly))
 	}
 	writeDataJSON(w, http.StatusOK, map[string]any{
 		"baton":    nil,
@@ -170,7 +166,7 @@ func hranaTarget(path string) (db string, kind string, ok bool) {
 	return "", "", false
 }
 
-func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest, store map[int32]string) map[string]any {
+func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest, store map[int32]string, readonly bool) map[string]any {
 	switch sr.Type {
 	case "close":
 		return hranaOK(map[string]any{"type": "close"})
@@ -191,7 +187,7 @@ func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest,
 		if sr.Stmt == nil {
 			return hranaErr("execute: missing stmt")
 		}
-		res, err := runHranaStmt(ctx, conn, *sr.Stmt, store)
+		res, err := runHranaStmt(ctx, conn, *sr.Stmt, store, readonly)
 		if err != nil {
 			return hranaErr(err.Error())
 		}
@@ -208,7 +204,7 @@ func runHranaRequest(ctx context.Context, conn *sql.Conn, sr hranaStreamRequest,
 		// failure, stop and ROLLBACK so a half-open client transaction is not leaked on the pooled conn.
 		failed := false
 		for i, step := range sr.Batch.Steps {
-			res, err := runHranaStmt(ctx, conn, step.Stmt, store)
+			res, err := runHranaStmt(ctx, conn, step.Stmt, store, readonly)
 			if err != nil {
 				stepErrors[i] = map[string]any{"message": err.Error()}
 				failed = true
@@ -242,10 +238,13 @@ func stmtSQL(stmt hranaStmt, store map[int32]string) (string, error) {
 	return "", errString("statement has neither sql nor sql_id")
 }
 
-func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt, store map[int32]string) (map[string]any, error) {
+func runHranaStmt(ctx context.Context, conn *sql.Conn, stmt hranaStmt, store map[int32]string, readonly bool) (map[string]any, error) {
 	sqlText, err := stmtSQL(stmt, store)
 	if err != nil {
 		return nil, err
+	}
+	if readonly && isWriteSQL(sqlText) {
+		return nil, errString("database is read-only (serve access: readonly) — writes are refused")
 	}
 	args, err := hranaArgs(stmt)
 	if err != nil {
