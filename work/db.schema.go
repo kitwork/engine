@@ -65,6 +65,7 @@ type ColumnSpec struct {
 	touch      bool          // touchOnUpdate: re-stamp the current time on every update() (updated_at)
 	enumVals   []string      // for kind == "enum": the allowed values
 	indexes    []colIndexRef // .index() memberships — an index this column participates in
+	fk         *fkRef        // set by ref() — a foreign key on this column
 	seq        uint64        // creation order — the VM evaluates the column builders in source order, so
 	// sorting a schema's columns by seq reproduces the DECLARED order (the alternative, a plain Go map,
 	// loses it, and DDL sorted by name would show columns alphabetically instead of as written).
@@ -85,6 +86,19 @@ type colIndexRef struct {
 type indexCond struct {
 	col string
 	val value.Value
+}
+
+// fkRef is a foreign key declared with ref(target, { onDelete, onUpdate }). target is the referenced
+// column's spec (resolved to table/column by pointer identity when the schema is registered). A ref
+// inherits ONLY the target's storage type — never its primary-key/unique/default/auto-gen, so a FK to a
+// kitid column does NOT auto-generate a random id when left blank.
+type fkRef struct {
+	target   *ColumnSpec
+	onDelete string
+	onUpdate string
+	// resolved from target by pointer identity at registration:
+	table  string
+	column string
 }
 
 // colSeqCounter stamps each ColumnSpec with a monotonic creation number. kitid()/text()/… run in the
@@ -236,6 +250,65 @@ func (d *Database) Updated() value.Value { // = now().onUpdate() — stamped on 
 	return value.NewFunc(func(_ ...value.Value) value.Value {
 		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true, touch: true, seq: nextColSeq()})
 	})
+}
+
+// Ref declares a foreign key: ref(users.id, { onDelete: "cascade" }). The column inherits ONLY the
+// target's storage type — not its primary-key/unique/default/auto-gen — so a ref to a kitid never
+// auto-generates a random id when left blank. Target/column names are resolved by pointer identity when
+// the schema is registered (see newDbProxy).
+func (d *Database) Ref() value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		spec := &ColumnSpec{seq: nextColSeq()}
+		fk := &fkRef{}
+		if len(args) > 0 {
+			if target, ok := args[0].V.(*ColumnSpec); ok {
+				fk.target = target
+				spec.kind = plainKindFor(target.kind) // same storage class, no auto-gen
+			}
+		}
+		if len(args) > 1 && args[1].K == value.Map {
+			opts := args[1].Map()
+			if v, ok := opts["onDelete"]; ok && v.K == value.String {
+				fk.onDelete = v.String()
+			}
+			if v, ok := opts["onUpdate"]; ok && v.K == value.String {
+				fk.onUpdate = v.String()
+			}
+		}
+		spec.fk = fk
+		return value.New(spec)
+	})
+}
+
+// plainKindFor maps a target column's kind to a plain kind with the SAME storage class but no auto-gen,
+// so a foreign key stores compatible values without inheriting the target's id generation.
+func plainKindFor(targetKind string) string {
+	switch storageClass(targetKind) {
+	case "INTEGER":
+		return "integer"
+	case "REAL":
+		return "float"
+	case "BLOB":
+		return "blob"
+	default:
+		return "text" // TEXT storage — kitid, uuid, text, …
+	}
+}
+
+// fkAction maps a JS onDelete/onUpdate value to its SQL action.
+func fkAction(a string) string {
+	switch strings.ToLower(strings.TrimSpace(a)) {
+	case "cascade":
+		return "CASCADE"
+	case "restrict":
+		return "RESTRICT"
+	case "setnull":
+		return "SET NULL"
+	case "setdefault":
+		return "SET DEFAULT"
+	default:
+		return "NO ACTION"
+	}
 }
 
 // paramFunc builds a column whose first arg is a size/precision/dimension hint (varchar(50),
@@ -436,6 +509,7 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 			}
 			p.tables[tableName] = cols
 		}
+		p.resolveForeignKeys()
 	}
 	if len(args) > 2 && args[2].K == value.Map {
 		opts := args[2].Map()
@@ -455,6 +529,28 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 	}
 	registerSchema(p)
 	return value.Value{K: value.Proxy, V: p}
+}
+
+// resolveForeignKeys fills each ref()'s target table/column by POINTER IDENTITY: users.id in ref(users.id)
+// is the very same *ColumnSpec stored under tables["users"]["id"], so a pointer→(table,col) map resolves
+// it. A ref whose target is not a column of this database stays unresolved and is rejected by
+// validateSchema.
+func (p *dbProxy) resolveForeignKeys() {
+	loc := map[*ColumnSpec][2]string{}
+	for tableName, cols := range p.tables {
+		for colName, spec := range cols {
+			loc[spec] = [2]string{tableName, colName}
+		}
+	}
+	for _, cols := range p.tables {
+		for _, spec := range cols {
+			if spec.fk != nil && spec.fk.target != nil {
+				if l, ok := loc[spec.fk.target]; ok {
+					spec.fk.table, spec.fk.column = l[0], l[1]
+				}
+			}
+		}
+	}
 }
 
 // registerSchema records a declared schema so a preflight (kitwork check) can preview its migration
@@ -571,7 +667,7 @@ func (p *dbProxy) OnGet(key string) value.Value {
 	if !ok {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: no table %q defined in this database", key)}
 	}
-	return value.New(&SchemaTable{tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName, allowDrop: p.allowDrop, table: key, columns: cols})
+	return value.New(&SchemaTable{tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName, allowDrop: p.allowDrop, table: key, columns: cols, siblings: p.tables})
 }
 
 // OnCompare and OnInvoke complete the ProxyHandler interface (a dbProxy that only implemented OnGet
@@ -590,6 +686,7 @@ type SchemaTable struct {
 	allowDrop bool
 	table     string
 	columns   map[string]*ColumnSpec
+	siblings  map[string]map[string]*ColumnSpec // every table in this db (for FK targets to exist)
 
 	q       *query.Query
 	failed  bool
@@ -846,17 +943,28 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 // what makes it react to schema changes: edit the schema (add a column) and the key changes, so a
 // hot-reload re-runs migrate() and ALTERs the live table — not just first boot.
 func (t *SchemaTable) ensureTable() error {
-	key := t.engine + ":" + t.tenant.resolve(".data", t.dbName) + "::" + t.table + "::" + schemaHash(t.columns)
-	if _, done := ensuredTables.Load(key); done {
-		return nil
+	// Migrate EVERY table in this database, not just the one being queried, so a foreign key's target
+	// table exists before any insert (SQLite allows creating a child before its parent, but the parent
+	// must exist by insert time). Ordering does not matter for CREATE, so a plain name order is fine.
+	// Each table is cached individually by its own schema hash.
+	tables := t.siblings
+	if tables == nil {
+		tables = map[string]map[string]*ColumnSpec{t.table: t.columns}
 	}
-	// Do NOT cache on failure: a migration that could not apply (e.g. the ALTER did not take because
-	// another process held the database) must be RETRIED on the next request, not silently marked done.
-	if err := migrate(t.source().db(), t.table, t.columns, false, t.allowDrop); err != nil {
-		fmt.Printf("[db.migrate] ERROR table %q: %v — not applied; will retry next request\n", t.table, err)
-		return err
+	for _, name := range sortedTableNames(tables) {
+		cols := tables[name]
+		key := t.engine + ":" + t.tenant.resolve(".data", t.dbName) + "::" + name + "::" + schemaHash(cols)
+		if _, done := ensuredTables.Load(key); done {
+			continue
+		}
+		// Do NOT cache on failure: a migration that could not apply (e.g. the ALTER did not take because
+		// another process held the database) must be RETRIED on the next request, not silently marked done.
+		if err := migrate(t.source().db(), name, cols, false, t.allowDrop); err != nil {
+			fmt.Printf("[db.migrate] ERROR table %q: %v — not applied; will retry next request\n", name, err)
+			return err
+		}
+		ensuredTables.Store(key, true)
 	}
-	ensuredTables.Store(key, true)
 	return nil
 }
 
@@ -884,6 +992,18 @@ func columnSQL(name string, c *ColumnSpec) string {
 	}
 	if c.unique {
 		parts = append(parts, "UNIQUE")
+	}
+	// Foreign key: REFERENCES target(column) [ON DELETE …] [ON UPDATE …]. Emitted inline so the rebuild
+	// (which reuses columnSQL) preserves the constraint automatically.
+	if c.fk != nil && c.fk.table != "" {
+		ref := fmt.Sprintf("REFERENCES %q(%q)", c.fk.table, c.fk.column)
+		if strings.TrimSpace(c.fk.onDelete) != "" {
+			ref += " ON DELETE " + fkAction(c.fk.onDelete)
+		}
+		if strings.TrimSpace(c.fk.onUpdate) != "" {
+			ref += " ON UPDATE " + fkAction(c.fk.onUpdate)
+		}
+		parts = append(parts, ref)
 	}
 	// Defaults are applied in Create() (kitid/defaultNow need engine involvement anyway), so the DDL
 	// carries no DEFAULT clause in this spike.
@@ -1436,6 +1556,20 @@ func validateSchema(columns map[string]*ColumnSpec) error {
 		if c.kind == "enum" && c.hasDefault && c.def.K == value.String && !inEnum(c, c.def.String()) {
 			return fmt.Errorf("column %q default %q is not one of the enum values %v", name, c.def.String(), c.enumVals)
 		}
+		if c.fk != nil {
+			if c.fk.target == nil || c.fk.table == "" {
+				return fmt.Errorf("column %q: ref() target could not be resolved — reference a column of another table in the SAME database", name)
+			}
+			if !c.fk.target.primary && !c.fk.target.unique {
+				return fmt.Errorf("column %q references %s.%s, which is not a primary key or unique column", name, c.fk.table, c.fk.column)
+			}
+			if storageClass(c.kind) != storageClass(c.fk.target.kind) {
+				return fmt.Errorf("column %q type (%s) does not match its reference target %s.%s (%s)", name, storageClass(c.kind), c.fk.table, c.fk.column, storageClass(c.fk.target.kind))
+			}
+			if strings.EqualFold(strings.TrimSpace(c.fk.onDelete), "setnull") && (c.notNull || c.primary) {
+				return fmt.Errorf("column %q is NOT NULL, so onDelete:\"setNull\" is impossible", name)
+			}
+		}
 	}
 	return nil
 }
@@ -1636,6 +1770,12 @@ func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current m
 	fail := func(stage string, e error) error {
 		tx.Rollback()
 		return fmt.Errorf("rebuild %q rolled back at %s: %w", table, stage, e)
+	}
+	// Defer foreign-key checks to COMMIT: the DROP-old/RENAME-new dance transiently detaches a table
+	// that other tables may reference, which would trip immediate FK enforcement. Referential integrity
+	// is intact by commit (the table returns under its original name), so the deferred check passes.
+	if _, err := tx.Exec("PRAGMA defer_foreign_keys=ON"); err != nil {
+		return fail("defer-fk", err)
 	}
 	createDDL := fmt.Sprintf("CREATE TABLE %q (%s)", tmp, strings.Join(defs, ", "))
 	if _, err := tx.Exec(createDDL); err != nil {

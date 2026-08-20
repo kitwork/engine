@@ -1244,3 +1244,105 @@ func TestSchemaEnumDefaultValidated(t *testing.T) {
 		t.Errorf("a valid enum default should be accepted: %v", err)
 	}
 }
+
+// ref() foreign keys end to end on turso: the DDL carries REFERENCES … ON DELETE CASCADE, the FK is
+// enforced, a delete cascades, and — critically — a ref to a kitid does NOT auto-generate a random id
+// (the FK column keeps the value it was given).
+func TestSchemaRefForeignKey(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "test", "localhost")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { turso, id, text, ref } = database;
+const users = { id: id(), email: text().notNull().unique() };
+const links = {
+  id: id(),
+  user_id: ref(users.id, { onDelete: "cascade" }).notNull(),
+  code: text().notNull().unique(),
+};
+const db = turso("app.db", { users, links }, { token: "tok", access: "readwrite" });
+router.get((ctx) => {
+  const u = db.users.create({ email: "a@b.c" });
+  const ln = db.links.create({ user_id: u.id, code: "x" });
+  return ctx.json({ uid: u.id, link_user: ln.user_id });
+});`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if rec.Code != 200 {
+		t.Fatalf("handler failed: %s", rec.Body.String())
+	}
+	f := decodeJSONObject(t, rec.Body.String())
+	if f["uid"] == "" || f["link_user"] != f["uid"] {
+		t.Errorf("FK column must keep the given id (no auto-gen): uid=%q link_user=%q", f["uid"], f["link_user"])
+	}
+
+	q := func(sql string, wantRows bool) string {
+		w := "false"
+		if wantRows {
+			w = "true"
+		}
+		body := `{"baton":null,"requests":[{"type":"execute","stmt":{"sql":"` + sql + `","want_rows":` + w + `}},{"type":"close"}]}`
+		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer tok")
+		rr := httptest.NewRecorder()
+		tenant.Serve(rr, req)
+		return rr.Body.String()
+	}
+	if ddl := q("SELECT sql FROM sqlite_master WHERE type='table' AND name='links'", true); !strings.Contains(ddl, "REFERENCES") || !strings.Contains(ddl, "ON DELETE CASCADE") {
+		t.Errorf("links DDL missing the FK: %s", ddl)
+	}
+	if bad := q("INSERT INTO links(id,user_id,code) VALUES('l9','GHOST','z')", false); !strings.Contains(bad, "FOREIGN KEY") && !strings.Contains(bad, "constraint") {
+		t.Errorf("FK not enforced: %s", bad)
+	}
+	q("DELETE FROM users", false)
+	if after := q("SELECT count(*) c FROM links", true); !strings.Contains(after, `"value":"0"`) {
+		t.Errorf("ON DELETE CASCADE did not fire: %s", after)
+	}
+}
+
+// ref() validation: the target must be a primary key or unique, types must match, and onDelete:setNull
+// cannot apply to a NOT NULL column.
+func TestSchemaRefValidation(t *testing.T) {
+	pk := &ColumnSpec{kind: "kitid", primary: true, seq: 1}
+	open := func() *sql.DB {
+		db, _ := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "v.db")))
+		return db
+	}
+	cases := []struct {
+		name string
+		fk   *fkRef
+		col  *ColumnSpec
+		want string
+	}{
+		{"non-pk target", &fkRef{target: &ColumnSpec{kind: "text"}, table: "users", column: "name"}, nil, "not a primary key or unique"},
+		{"type mismatch", &fkRef{target: pk, table: "users", column: "id"}, &ColumnSpec{kind: "integer"}, "does not match"},
+		{"setNull on notNull", &fkRef{target: pk, table: "users", column: "id", onDelete: "setNull"}, &ColumnSpec{kind: "text", notNull: true}, "setNull"},
+		{"unresolved", &fkRef{target: pk}, &ColumnSpec{kind: "text"}, "could not be resolved"},
+	}
+	for _, c := range cases {
+		col := c.col
+		if col == nil {
+			col = &ColumnSpec{kind: "text"}
+		}
+		col.fk = c.fk
+		col.seq = 2
+		schema := map[string]*ColumnSpec{"id": pk, "user_id": col}
+		db := open()
+		err := migrate(db, "t", schema, false, false)
+		db.Close()
+		if err == nil {
+			t.Errorf("%s: expected a validation error", c.name)
+		} else if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: error %q should contain %q", c.name, err.Error(), c.want)
+		}
+	}
+}
