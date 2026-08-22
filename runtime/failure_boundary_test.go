@@ -25,6 +25,20 @@ func (*panicCommitter) Commit() value.CommitResult {
 	panic("commit exploded")
 }
 
+type panicInvokeProxy struct{}
+
+func (panicInvokeProxy) OnGet(string) value.Value {
+	return value.Value{K: value.Nil}
+}
+
+func (panicInvokeProxy) OnCompare(string, value.Value) value.Value {
+	return value.Value{K: value.Nil}
+}
+
+func (panicInvokeProxy) OnInvoke(string, ...value.Value) value.Value {
+	panic("method exploded")
+}
+
 func TestCommitCallbackFailurePropagates(t *testing.T) {
 	program := mustProgram(t,
 		[]byte{
@@ -122,6 +136,57 @@ func TestNativeFunctionPanicBecomesDiagnostic(t *testing.T) {
 		t.Fatalf("stack = %#v", diagnostic.Stack)
 	}
 	if !strings.Contains(result.Text(), "Native panic in function call: host exploded") {
+		t.Fatalf("result = %q", result.Text())
+	}
+}
+
+func TestNativeMethodPanicBecomesDiagnostic(t *testing.T) {
+	program := mustProgram(t,
+		[]byte{
+			byte(LOAD), 0, 0,
+			byte(PUSH), 0, 1,
+			byte(INVOKE), 0,
+			byte(RETURN),
+		},
+		[]value.Value{
+			value.NewString("target"),
+			value.NewString("explode"),
+		},
+	)
+	vm := New(program)
+	vm.Globals["target"] = value.Value{K: value.Proxy, V: panicInvokeProxy{}}
+
+	result := vm.Run()
+	diagnostic, ok := DiagnosticFrom(result)
+	if !ok {
+		t.Fatalf("result has no diagnostic: %#v", result)
+	}
+	if diagnostic.Code != DiagnosticNativePanic {
+		t.Fatalf("diagnostic code = %q, want %q", diagnostic.Code, DiagnosticNativePanic)
+	}
+	if !strings.Contains(result.Text(), "Native panic in method explode: method exploded") {
+		t.Fatalf("result = %q", result.Text())
+	}
+}
+
+func TestNativeStandardMethodPanicBecomesDiagnostic(t *testing.T) {
+	vm := New(mustProgram(t, []byte{byte(RETURN)}, nil))
+	result := vm.nativeStandardMethod(
+		value.Value{K: value.Nil},
+		"explode",
+		func(value.Value, ...value.Value) value.Value {
+			panic("standard method exploded")
+		},
+		nil,
+	)
+	diagnostic, ok := DiagnosticFrom(result)
+	if !ok {
+		t.Fatalf("result has no diagnostic: %#v", result)
+	}
+	if diagnostic.Code != DiagnosticNativePanic {
+		t.Fatalf("diagnostic code = %q, want %q", diagnostic.Code, DiagnosticNativePanic)
+	}
+	if !strings.Contains(result.Text(), "Native panic in method explode: standard method exploded") {
 		t.Fatalf("result = %q", result.Text())
 	}
 }

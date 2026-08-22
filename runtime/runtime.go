@@ -39,11 +39,12 @@ type VM struct {
 	Frames    []Frame                // Call Stack
 	FrameIdx  int                    // Hiện tại đang ở Frame nào
 	Energy    uint64                 // Năng lượng tiêu thụ
-	MaxEnergy uint64                 // Giới hạn năng lượng
+	MaxEnergy uint64                 // Per-execution energy ceiling; zero disables energy enforcement.
 	Spawner   func(s *value.Lambda)
 
 	instructions   uint64
 	frameHighWater int
+	stackHighWater int
 
 	reusableGlobals  map[string]value.Value
 	reusableBuiltins []value.Value
@@ -57,6 +58,7 @@ type VMStats struct {
 	Energy         uint64
 	StackDepth     int
 	StackCapacity  int
+	PeakStackDepth int
 	FrameDepth     int
 	PeakFrameDepth int
 }
@@ -67,7 +69,7 @@ func New(program *Program) *VM {
 		Stack:   make([]value.Value, 0, initialStackCapacity),
 		Vars:    make(map[string]value.Value),
 		Globals: make(map[string]value.Value),
-		Frames:  make([]Frame, 64), // Tối đa 64 tầng gọi hàm (đủ dùng)
+		Frames:  make([]Frame, defaultMaxCallDepth),
 	}
 	// Khởi tạo Frame gốc (Main entry)
 	vm.FrameIdx = 0
@@ -212,6 +214,7 @@ func (vm *VM) Stats() VMStats {
 		Energy:         vm.Energy,
 		StackDepth:     len(vm.Stack),
 		StackCapacity:  cap(vm.Stack),
+		PeakStackDepth: vm.stackHighWater,
 		FrameDepth:     frameDepth,
 		PeakFrameDepth: vm.frameHighWater + 1,
 	}
@@ -224,10 +227,19 @@ func (vm *VM) Stop() {
 func (vm *VM) resetStack() {
 	if cap(vm.Stack) > maxPooledStackCapacity {
 		vm.Stack = make([]value.Value, 0, initialStackCapacity)
+		vm.stackHighWater = 0
 		return
 	}
-	clear(vm.Stack)
+	used := vm.stackHighWater
+	if len(vm.Stack) > used {
+		used = len(vm.Stack)
+	}
+	if used > cap(vm.Stack) {
+		used = cap(vm.Stack)
+	}
+	clear(vm.Stack[:used])
 	vm.Stack = vm.Stack[:0]
+	vm.stackHighWater = 0
 }
 
 func resetFrame(frame *Frame) {
@@ -255,7 +267,12 @@ func resetDefers(frame *Frame) {
 }
 
 // Helper methods for Stack manipulation
-func (vm *VM) push(v value.Value) { vm.Stack = append(vm.Stack, v) }
+func (vm *VM) push(v value.Value) {
+	vm.Stack = append(vm.Stack, v)
+	if len(vm.Stack) > vm.stackHighWater {
+		vm.stackHighWater = len(vm.Stack)
+	}
+}
 
 func (vm *VM) pop() value.Value {
 	var base int

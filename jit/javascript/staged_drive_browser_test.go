@@ -76,25 +76,25 @@ kit.service("handoff-service", { ping: function () { return "pong"; } });
 	}
 
 	first, err := BuildStaged(StagedBuildOptions{
-		Profile: ProfileHydrate, Components: []ComponentPackage{counter},
+		Profile: ProfileHydrate, MinifyCore: true, Components: []ComponentPackage{counter},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	second, err := BuildStaged(StagedBuildOptions{
-		Profile: ProfileHydrate, Components: []ComponentPackage{counter, extra},
+		Profile: ProfileHydrate, MinifyCore: true, Components: []ComponentPackage{counter, extra},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	serviceGraph, err := BuildStaged(StagedBuildOptions{
-		Profile: ProfileHydrate, Services: []Service{service}, Components: []ComponentPackage{counter},
+		Profile: ProfileHydrate, MinifyCore: true, Services: []Service{service}, Components: []ComponentPackage{counter},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	broken, err := BuildStaged(StagedBuildOptions{
-		Profile: ProfileHydrate, Components: []ComponentPackage{counter, stagedBeforeFailure, missing},
+		Profile: ProfileHydrate, MinifyCore: true, Components: []ComponentPackage{counter, stagedBeforeFailure, missing},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -409,12 +409,12 @@ func stagedDriveHandoffDocument(assembly StagedAssembly, page stagedDrivePageFix
 <a id="to-live-anchor" href="/live-anchor">Live anchor</a>
 </nav>
 <main id="route">` + html.EscapeString(page.route) + `</main>
-<section id="counter-host" data-kit-component="counter" data-kit-version="1.0.0">
+<section id="counter-host" data-kit-component="counter@1.0.0">
   <button id="counter-add" type="button" data-kit-click="count = count + 1">Add</button>
   <output id="counter-value" data-kit-text="count">0</output>
 </section>`)
 	if page.extra {
-		output.WriteString(`<section id="extra-host" data-kit-component="extra" data-kit-version="1.0.0">
+		output.WriteString(`<section id="extra-host" data-kit-component="extra@1.0.0">
   <output id="extra-value" data-kit-text="ready">server-extra</output>
 </section>`)
 	}

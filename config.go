@@ -25,6 +25,14 @@ type Config struct {
 	TrustProxy       bool              `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
 	Logger           logger.Config     `json:"logger" yaml:"logger"`
 	RateLimit        *RateLimitConfig  `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
+	Search           SearchConfig      `json:"search" yaml:"search"`
+}
+
+// SearchConfig controls host-owned search rollout. CollectionCanary is
+// deliberately opt-in while collection.search() still serves the legacy
+// SQLite projection and compares the segment engine asynchronously.
+type SearchConfig struct {
+	CollectionCanary bool `json:"collection_canary" yaml:"collection_canary"`
 }
 
 // RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request
@@ -95,6 +103,17 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	if val, ok := raw["trust_proxy"]; ok {
 		if b, ok := val.(bool); ok {
 			cfg.TrustProxy = b
+		}
+	}
+	if val, ok := raw["search"]; ok {
+		if search, ok := val.(map[string]interface{}); ok {
+			canary := search["collection_canary"]
+			if camel, exists := search["collectionCanary"]; exists {
+				canary = camel
+			}
+			if enabled, ok := canary.(bool); ok {
+				cfg.Search.CollectionCanary = enabled
+			}
 		}
 	}
 

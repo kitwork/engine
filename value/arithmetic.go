@@ -2,6 +2,8 @@ package value
 
 import (
 	"bytes"
+	"math"
+	"reflect"
 )
 
 /* =============================================================================
@@ -85,13 +87,22 @@ func (a Value) Mod(b Value) Value {
 		if b.N == 0 {
 			return Value{K: Nil}
 		}
-		return Value{K: Number, N: float64(int64(a.N) % int64(b.N))}
+		return Value{K: Number, N: math.Mod(a.N, b.N)}
 	}
 	return Value{K: Invalid}
 }
 
 // Deep equality
 func (a Value) Equal(b Value) bool {
+	return equalValue(a, b, nil)
+}
+
+type equalityVisit struct {
+	kind        Kind
+	left, right uintptr
+}
+
+func equalValue(a, b Value, seen map[equalityVisit]struct{}) bool {
 	if a.K != b.K {
 		return false
 	}
@@ -111,30 +122,86 @@ func (a Value) Equal(b Value) bool {
 	case Bytes:
 		return bytes.Equal(a.Bytes(), b.Bytes())
 	case Array:
-		x, y := a.V.([]Value), b.V.([]Value)
+		x, y := a.Array(), b.Array()
 		if len(x) != len(y) {
 			return false
 		}
+		if same, visited, nextSeen := equalityCollectionVisit(a, b, seen); same || visited {
+			return true
+		} else {
+			seen = nextSeen
+		}
 		for i := range x {
-			if !x[i].Equal(y[i]) {
+			if !equalValue(x[i], y[i], seen) {
 				return false
 			}
 		}
 		return true
 	case Map:
-		x, y := a.V.(map[string]Value), b.V.(map[string]Value)
+		x, y := a.Map(), b.Map()
 		if len(x) != len(y) {
 			return false
 		}
+		if same, visited, nextSeen := equalityCollectionVisit(a, b, seen); same || visited {
+			return true
+		} else {
+			seen = nextSeen
+		}
 		for k, xv := range x {
 			yv, ok := y[k]
-			if !ok || !xv.Equal(yv) {
+			if !ok || !equalValue(xv, yv, seen) {
 				return false
 			}
 		}
 		return true
 	default:
-		return a.V == b.V
+		if a.V == nil || b.V == nil {
+			return a.V == nil && b.V == nil
+		}
+		leftType := reflect.TypeOf(a.V)
+		if leftType != reflect.TypeOf(b.V) {
+			return false
+		}
+		if leftType.Comparable() {
+			return a.V == b.V
+		}
+		return reflect.DeepEqual(a.V, b.V)
+	}
+}
+
+func equalityCollectionVisit(
+	a, b Value,
+	seen map[equalityVisit]struct{},
+) (same, visited bool, next map[equalityVisit]struct{}) {
+	left := equalityCollectionReference(a)
+	right := equalityCollectionReference(b)
+	if left == 0 || right == 0 {
+		return false, false, seen
+	}
+	if left == right {
+		return true, false, seen
+	}
+	visit := equalityVisit{kind: a.K, left: left, right: right}
+	if _, ok := seen[visit]; ok {
+		return false, true, seen
+	}
+	if seen == nil {
+		seen = make(map[equalityVisit]struct{})
+	}
+	seen[visit] = struct{}{}
+	return false, false, seen
+}
+
+func equalityCollectionReference(item Value) uintptr {
+	switch data := item.V.(type) {
+	case *[]Value:
+		return reflect.ValueOf(data).Pointer()
+	case []Value:
+		return reflect.ValueOf(data).Pointer()
+	case map[string]Value:
+		return reflect.ValueOf(data).Pointer()
+	default:
+		return 0
 	}
 }
 

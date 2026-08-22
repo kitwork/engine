@@ -133,14 +133,14 @@ func cleanupLifecycleScriptTags(assetPath, preludeIntegrity, artifactIntegrity, 
 }
 
 func cleanupLifecycleRetainedHost() string {
-	return `<section id="cleanup-retained" data-kit-component="cleanup-retained" data-kit-version="1.0.0">
+	return `<section id="cleanup-retained" data-kit-component="cleanup-retained@1.0.0">
     <span>retained host</span>
   </section>`
 }
 
 func cleanupLifecycleDisposableHosts() string {
-	return `<section id="cleanup-throw" data-kit-component="cleanup-throw" data-kit-version="1.0.0">throw cleanup</section>
-  <section id="cleanup-after" data-kit-component="cleanup-after" data-kit-version="1.0.0">cleanup after throw</section>`
+	return `<section id="cleanup-throw" data-kit-component="cleanup-throw@1.0.0">throw cleanup</section>
+  <section id="cleanup-after" data-kit-component="cleanup-after@1.0.0">cleanup after throw</section>`
 }
 
 func cleanupLifecycleInitialDocument(scriptTags string) string {
@@ -153,16 +153,16 @@ func cleanupLifecycleInitialDocument(scriptTags string) string {
 </head>
 <body>
   <main id="route-main">
-    <section data-kit-component="cleanup-if-owner" data-kit-version="1.0.0">
+    <section data-kit-component="cleanup-if-owner@1.0.0">
       <button id="cleanup-remove-if" type="button" data-kit-click="hide()">remove if</button>
       <template data-kit-if="visible">
-        <section id="cleanup-if-child" data-kit-component="cleanup-if-child" data-kit-version="1.0.0">if child</section>
+        <section id="cleanup-if-child" data-kit-component="cleanup-if-child@1.0.0">if child</section>
       </template>
     </section>
-    <section data-kit-component="cleanup-for-owner" data-kit-version="1.0.0">
+    <section data-kit-component="cleanup-for-owner@1.0.0">
       <button id="cleanup-remove-for" type="button" data-kit-click="removeFirst()">remove row</button>
       <template data-kit-for="item of items" data-kit-key="item">
-        <section class="cleanup-for-child" data-kit-component="cleanup-for-child" data-kit-version="1.0.0">for child</section>
+        <section class="cleanup-for-child" data-kit-component="cleanup-for-child@1.0.0">for child</section>
       </template>
     </section>
     %s
@@ -271,7 +271,7 @@ func TestBrowserCleanupObserverIsLazyWithoutOwners(t *testing.T) {
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = fmt.Fprintf(response, `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Passive cleanup</title>
 <script>%s globalThis.__cleanupPassiveInit = 0;</script><script src=%q></script></head>
-<body><section data-kit-component="cleanup-passive" data-kit-version="1.0.0"><output data-kit-text="ready">server</output></section>
+<body><section data-kit-component="cleanup-passive@1.0.0"><output data-kit-text="ready">server</output></section>
 <script>%s __runStandaloneKitTest(async function () {
   await __kitTestWaitFor(function () { return globalThis.__cleanupPassiveInit === 1; }, "passive init did not run");
   __kitTestAssert(globalThis.__cleanupObserverProbe.observe === 0,
@@ -362,7 +362,7 @@ globalThis.__cleanupDirect = { init: 0, cleanup: 0, wrongThis: 0, scope: null };
 <body>
   <div id="cleanup-move-target"></div>
   <section id="cleanup-direct-control"><output>control</output></section>
-  <section id="cleanup-direct" data-kit-component="cleanup-direct" data-kit-version="1.0.0">
+  <section id="cleanup-direct" data-kit-component="cleanup-direct@1.0.0">
     <output data-kit-text="value">server</output>
   </section>
   <script>

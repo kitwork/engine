@@ -8,12 +8,13 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-const driveProgressArtifactName = "hydrate.kit.0.9.0-next.12.6bebdf54ffc53b64ab6fe85fa1c582f9d7e2ae5e56feeeeeb0553d8b4e0709e2.js"
+const driveProgressArtifactName = "hydrate.kit.1.0.0-rc.2.6b55b24d94aef6f2ea01ea5e2501c60c56c27835b88bd5bb17098c0c501f8e52.js"
 
 var driveProgressHostRE = regexp.MustCompile(`(?is)<section\b[^>]*\bdata-kit-retain\s*=\s*"app-progress"[^>]*>`)
 
@@ -46,7 +47,7 @@ func TestDriveProgressExampleContract(t *testing.T) {
 			t.Fatalf("%s must contain exactly one stable Hydrate artifact tag", route)
 		}
 		for _, required := range []string{
-			`data-kit-retain="app-progress"`, `data-kit-component="progress-bar"`, `data-kit-version="2.0.0"`,
+			`data-kit-retain="app-progress"`, `data-kit-component="progress-bar@2.0.0"`,
 			`role="progressbar"`, `aria-valuemin="0"`, `aria-valuemax="100"`,
 			`aria-valuenow: value`, `max-w-8xl`,
 			`focus-visible:outline`, `focus-visible:outline-2`, `focus-visible:outline-offset-2`,
@@ -140,10 +141,20 @@ func TestBrowserDriveProgressExample(t *testing.T) {
 	}
 	var artifactRequests atomic.Int64
 	var styleRequests atomic.Int64
+	slowRelease := make(chan struct{})
+	var slowReleaseOnce sync.Once
+	releaseSlowResponse := func() {
+		slowReleaseOnce.Do(func() { close(slowRelease) })
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/drive-progress-contract.js" {
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write(contractSource)
+			return
+		}
+		if request.URL.Path == "/drive-progress-release" {
+			releaseSlowResponse()
+			response.WriteHeader(http.StatusNoContent)
 			return
 		}
 		if request.URL.Path == assetPath {
@@ -193,12 +204,13 @@ func TestBrowserDriveProgressExample(t *testing.T) {
 			return
 		}
 		if isDrive && variant == "slow" {
-			writeSlowDriveProgressResponse(response, request, page)
+			writeSlowDriveProgressResponse(response, request, page, slowRelease)
 			return
 		}
 		writeDriveProgressResponse(response, page)
 	}))
 	defer server.Close()
+	defer releaseSlowResponse()
 
 	runVanillaBrowser(t, browser, server.URL+"/examples/drive-progress/index.html")
 	if got := artifactRequests.Load(); got != 1 {
@@ -297,17 +309,20 @@ func writeDriveProgressResponse(response http.ResponseWriter, source []byte) {
 	_, _ = response.Write(source)
 }
 
-func writeSlowDriveProgressResponse(response http.ResponseWriter, request *http.Request, source []byte) {
+func writeSlowDriveProgressResponse(response http.ResponseWriter, request *http.Request, source []byte, release <-chan struct{}) {
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	response.Header().Set("Content-Encoding", "identity")
 	response.Header().Set("Content-Length", strconv.Itoa(len(source)))
 	response.WriteHeader(http.StatusOK)
+	if flusher, ok := response.(http.Flusher); ok {
+		flusher.Flush()
+	}
 
 	first := len(source) / 3
 	select {
 	case <-request.Context().Done():
 		return
-	case <-time.After(300 * time.Millisecond):
+	case <-release:
 	}
 	_, _ = response.Write(source[:first])
 	if flusher, ok := response.(http.Flusher); ok {
@@ -365,6 +380,8 @@ const driveProgressAssertions = `__runStandaloneKitTest(async function () {
     return host.hidden === false && bar.getAttribute("aria-busy") === "true" &&
       !bar.hasAttribute("aria-valuenow");
   }, "real Drive start was not indeterminate");
+  var release = await fetch("/drive-progress-release", { cache: "no-store" });
+  assert(release.status === 204, "slow Drive response release failed");
   await waitFor(function () {
     var value = Number(bar.getAttribute("aria-valuenow"));
     return value > 0 && value < 100;
@@ -421,7 +438,7 @@ func TestDriveProgressHelpersDoNotLeakGoroutines(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() {
-		writeSlowDriveProgressResponse(recorder, request, []byte("complete response"))
+		writeSlowDriveProgressResponse(recorder, request, []byte("complete response"), make(chan struct{}))
 		close(done)
 	}()
 	select {

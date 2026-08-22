@@ -49,7 +49,7 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 		return true
 	}
 
-	// The db must be DECLARED served — turso("db", {schema}, { token }). Not served → reveal nothing.
+	// The db must be explicitly declared served. Not served means reveal nothing.
 	dbName, cfg, served := resolveServe(t, req.DB)
 	if !served {
 		writeDataJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
@@ -64,8 +64,22 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 		writeDataJSON(w, http.StatusForbidden, map[string]any{"error": "read-only endpoint: only a single SELECT/WITH statement is allowed"})
 		return true
 	}
+	if cfg.engine == "kitdb" {
+		result, err := executeKitDBRemoteSQL(
+			r.Context(), scope, cfg.database, req.SQL, kitSQLBindingsFromAny(req.Args), true,
+		)
+		if err != nil {
+			writeDataJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return true
+		}
+		writeDataJSON(w, http.StatusOK, map[string]any{"rows": kitDBRemoteResultMaps(result)})
+		return true
+	}
 
 	conn := tursoForRequest(t, dbName, scope).db()
+	if cfg.engine == "sqlite" {
+		conn = sqliteForRequest(t, dbName, scope).db()
+	}
 	if conn == nil {
 		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
 		return true

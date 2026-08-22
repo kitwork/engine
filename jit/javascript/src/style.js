@@ -211,8 +211,9 @@
     else element.style.removeProperty(name);
   }
 
-  function render(current) {
-    core.ownedElements(current, SELECTOR).forEach(function (element) {
+  function render(current, plan) {
+    plan.styles.forEach(function (element) {
+      if (!core.ownsElement(current, element) || !element.hasAttribute("data-kit-style")) return;
       try {
         var entries = safeStyle(element);
         if (!entries) return;

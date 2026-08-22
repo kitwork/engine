@@ -158,9 +158,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 
 	switch kind {
 	case "sse":
-		// The VM was already returned to the pool before this responder runs (Tenant.Serve), so
-		// the long-lived stream below holds NO VM — only this goroutine. See SSE_ARCHITECTURE.md.
-		r.streamSSE(w)
+		r.streamSSE(w, nil)
 		return
 
 	case "redirect":
@@ -234,12 +232,11 @@ func (r *Router) responder(w http.ResponseWriter) {
 	}
 }
 
-// streamSSE runs the Go-native side of an SSE connection. The engine calls it from Tenant.Serve
-// AFTER the request's VM has been returned to the pool, so NO VM is held for the (potentially
-// hours-long) connection — only this lightweight HTTP goroutine. It writes the stream headers,
-// registers the client, replays missed events (Last-Event-ID), then fans broker messages +
-// heartbeats out to the wire until the client disconnects.
-func (r *Router) streamSSE(w http.ResponseWriter) {
+// streamSSE runs the Go-native side of an SSE connection. Once the site broker
+// accepts the client, handoff closes the request scope and releases its VM and
+// generation ownership. Only the HTTP goroutine and site broker remain for the
+// potentially hours-long connection.
+func (r *Router) streamSSE(w http.ResponseWriter, handoff func()) {
 	client, ok := r.response.Data().V.(*SSEClient)
 	if !ok {
 		http.Error(w, "invalid sse client", http.StatusInternalServerError)
@@ -262,12 +259,19 @@ func (r *Router) streamSSE(w http.ResponseWriter) {
 		return
 	}
 
+	if !broker.Register(client) {
+		http.Error(w, "streaming unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	defer broker.Unregister(client)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
-
-	broker.Register(client)
+	if handoff != nil {
+		handoff()
+	}
 
 	// Send clientSessionId init event
 	initPayload, err := sse.FormatSSEPayload("", "init", map[string]string{"clientSessionId": client.ID})
@@ -285,10 +289,7 @@ func (r *Router) streamSSE(w http.ResponseWriter) {
 	}
 
 	ticker := time.NewTicker(15 * time.Second)
-	defer func() {
-		ticker.Stop()
-		broker.Unregister(client)
-	}()
+	defer ticker.Stop()
 
 	notify := r.request.Context().Done()
 	flusher.Flush()

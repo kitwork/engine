@@ -531,7 +531,7 @@ func progressLifecycleScriptTags(assetPath, artifactIntegrity, contractIntegrity
 
 const progressLifecycleFirstDocument = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Progress lifecycle one</title>%s</head><body>
-<main id="progress-one" data-kit-component="progress-bar" data-kit-version="1.2.0">
+<main id="progress-one" data-kit-component="progress-bar@1.2.0">
   <output id="progress-one-message" data-kit-text="message">server</output>
 </main>
 <a id="progress-next" href="/two.html">Next</a>
@@ -587,14 +587,14 @@ __runStandaloneKitTest(async function () {
 
 const progressLifecycleSecondDocument = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Progress lifecycle two</title>%s</head><body>
-<main id="progress-two" data-kit-component="progress-bar" data-kit-version="1.2.0">
+<main id="progress-two" data-kit-component="progress-bar@1.2.0">
   <output id="progress-two-message" data-kit-text="message">server</output>
 </main>
 </body></html>`
 
 const progressRetentionDocument = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <title>Progress subscriber retention</title><script defer src=%q></script></head><body>
-<main id="progress-retention" data-kit-component="progress-bar" data-kit-version="1.2.0">
+<main id="progress-retention" data-kit-component="progress-bar@1.2.0">
   <output data-kit-text="message">server</output>
 </main>
 <script>

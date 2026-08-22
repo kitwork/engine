@@ -13,6 +13,7 @@ func FuzzCompiler(f *testing.F) {
 		`let f = (a, b) => a + b;`,
 		`import { router } from "kitwork"; router.get("/test", ctx => ctx.text("ok"));`,
 		`var obj = { name: "test", count: 123 };`,
+		`switch (2) { case 1: result = "one"; break; case 2: result = "two"; break; default: result = "other"; }`,
 		`..`,
 	}
 	for _, seed := range seeds {
@@ -33,6 +34,8 @@ func FuzzCompileVerifyExecute(f *testing.F) {
 		`const result = [3, 1, 2].sort((a, b) => a - b);`,
 		`const add = (a, b) => a + b; const result = add(2, 3);`,
 		`let total = 0; for (let i = 0; i < 10; i++) { total = total + i; }`,
+		`let total = 0; for (const item of [1, 2, 3]) { if (item == 2) { break; } total = total + item; }`,
+		`let result = ""; switch (2) { case 1: case 2: result = result + "a"; case 3: result = result + "b"; break; }`,
 		`const nested = { value: { count: 3 } }; const result = nested.value.count;`,
 	}
 	for _, seed := range seeds {

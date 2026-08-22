@@ -42,6 +42,7 @@
   function boot() {
     if (core.booted) return;
     core.booted = true;
+    if (typeof core.prepareStructureTree === "function") core.prepareStructureTree(document);
     if (typeof core.prepareComponentTree === "function") core.prepareComponentTree(document);
     core.render();
     core.resetDirty();
@@ -53,7 +54,10 @@
   core.startHooks.forEach(function (start) {
     try { start(); } catch (error) { core.report(error); }
   });
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  var script = document.currentScript;
+  var waitingForDeferredPeers = document.readyState === "interactive" && script &&
+    script.defer === true && script.async !== true;
+  if (document.readyState === "loading" || waitingForDeferredPeers) {
+    document.addEventListener("DOMContentLoaded", boot, { once: true, capture: true });
   } else queueMicrotask(boot);
 })(globalThis, document);

@@ -115,6 +115,29 @@ func TestKitJSTemplateTokenPreparation(t *testing.T) {
 	}
 }
 
+func TestKitJSDirectIfPreparesRuntimeAndPreservesAuthoredFallback(t *testing.T) {
+	root := t.TempDir()
+	mkfile(t, root, "index.kitwork.html", `<html><head></head><body>{{ @page }}</body></html>`)
+	mkfile(t, root, "page.kitwork.html", `<main data-kit-scope="open: false"><section data-kit-if="open"><b data-kit-text="'client'">server fallback</b></section></main>`)
+	assets, err := kitjavascript.NewDefaultAssetStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer assets.Close()
+
+	prepared := New(Config{Base: root, Directory: ".", KitJSAssets: assets}).Prepare()
+	if err := prepared.PreparationError(); err != nil {
+		t.Fatal(err)
+	}
+	html := prepared.Bind(value.New(map[string]any{})).String()
+	if !strings.Contains(html, `<section data-kit-if="open"><b data-kit-text="'client'">server fallback</b></section>`) {
+		t.Fatalf("staged preparation rewrote the authored direct-if fallback:\n%s", html)
+	}
+	if len(preparedKitJSTagPattern.FindAllStringSubmatch(html, -1)) != 2 {
+		t.Fatalf("direct-if page did not receive the staged runtime and graph:\n%s", html)
+	}
+}
+
 func TestKitJSOptInPreparationRejectsUnscannableMarkupAndReservedAttributes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -124,7 +147,6 @@ func TestKitJSOptInPreparationRejectsUnscannableMarkupAndReservedAttributes(t *t
 		{name: "dynamic attribute name", page: `<div data-kit-{{ directive }}="run()"></div>`, want: "statically scannable HTML"},
 		{name: "raw attribute fragment", page: `<div {{ raw(attributes) }}></div>`, want: "statically scannable HTML"},
 		{name: "raw element fragment", page: `{{ raw(fragment) }}`, want: "statically scannable HTML"},
-		{name: "unsupported legacy directive", page: `<div data-kit-if="open"></div>`, want: "unsupported reserved attribute"},
 		{name: "unknown reserved directive", page: `<div data-kit-surprise="value"></div>`, want: "unsupported reserved attribute"},
 		{name: "unknown event modifier", page: `<button data-kit-click:typo="run()"></button>`, want: "unsupported event modifier"},
 		{name: "authored engine namespace", page: `<div data-kitwork-action="toggle"></div>`, want: "engine-emitted namespace"},

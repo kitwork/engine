@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Plain Shop · Checkout</title>
-  <script defer src="./hydrate.kit.0.5.0.3d9a3213c5e76157c829866ad214b23aabee235ed997d07a54dcf797b7eee3be.js"></script>
+  <script defer src="./hydrate.kit.1.0.0-rc.2.2ee4f2deb3085760773a5ce50d3b1afdc66c1cbc8ad01d4c7fa6636fde56054e.js" data-kit-drive="stable"></script>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100">
   <div id="shop-shell" class="min-h-screen">
@@ -20,7 +20,7 @@
     </header>
 
     <main id="shop-layout" class="mx-auto grid max-w-8xl gap-8 px-6 py-10 sm:px-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:px-12 lg:py-14">
-      <section id="shop-checkout" data-kit-component="shop-checkout" data-kit-version="1.0.0" aria-labelledby="shop-checkout-title" class="rounded-3xl border border-slate-800 bg-slate-900 p-7 sm:p-9">
+      <section id="shop-checkout" data-kit-component="shop-checkout@1.0.0" aria-labelledby="shop-checkout-title" class="rounded-3xl border border-slate-800 bg-slate-900 p-7 sm:p-9">
         <p class="text-sm font-bold uppercase tracking-widest text-indigo-300">Modeled form + external command</p>
         <h1 id="shop-checkout-title" class="mt-3 text-4xl font-black tracking-tight text-white sm:text-5xl">Checkout without a page controller</h1>
         <p class="mt-4 max-w-2xl text-base leading-7 text-slate-400">
@@ -89,8 +89,7 @@
 
       <aside
         id="shop-cart"
-        data-kit-component="shop-cart"
-        data-kit-version="1.0.0"
+        data-kit-component="shop-cart@1.0.0"
         data-kit-as="$cart"
         aria-labelledby="shop-cart-title"
         class="h-fit rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-xl shadow-black/20 lg:sticky lg:top-8">
@@ -118,8 +117,7 @@
 
   <div
     id="shop-confirm-dialog"
-    data-kit-component="shop-dialog"
-    data-kit-version="1.0.0"
+    data-kit-component="shop-dialog@1.0.0"
     data-kit-as="$dialog"
     data-kit-show="visible"
     data-kit-click:self="close()"

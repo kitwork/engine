@@ -43,6 +43,25 @@ func TestJSStandalone(t *testing.T) {
 	}
 }
 
+func TestJSStrictShrinksAndReportsParserErrors(t *testing.T) {
+	input := `const  add  =  ( left , right )  =>  left  +  right ;`
+	output, err := JSStrict(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(output) >= len(input) {
+		t.Fatalf("strict JS output did not shrink: input=%d output=%d", len(input), len(output))
+	}
+
+	invalid := `function broken( {`
+	if _, err := JSStrict(invalid); err == nil {
+		t.Fatal("strict JS minifier accepted malformed JavaScript")
+	}
+	if output := JS(invalid); output != invalid {
+		t.Fatalf("compatibility JS helper changed malformed input: %q", output)
+	}
+}
+
 func TestTemplateHTMLPreservesKitworkTokens(t *testing.T) {
 	input := `<html>
 		<head><style>.x { color: red; }</style></head>

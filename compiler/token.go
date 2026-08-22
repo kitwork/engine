@@ -83,6 +83,7 @@ const (
 	// --- Modules (native import/export) ---
 	Import // import { x } from "..."
 	Export // export const / export default / export { ... }
+	Switch // switch (value) { case ... }
 
 	// Reserved: từ khóa bị loại bỏ có chủ đích khỏi ngôn ngữ (while, try, ...)
 	// Parser sẽ báo lỗi biên dịch thân thiện kèm hướng dẫn thay thế.
@@ -206,6 +207,8 @@ func (k Kind) String() string {
 		return "import"
 	case Export:
 		return "export"
+	case Switch:
+		return "switch"
 	case Reserved:
 		return "RESERVED"
 	// case Go:
@@ -246,6 +249,7 @@ var Keywords = map[string]Kind{
 	"new":      New,
 	"import":   Import,
 	"export":   Export,
+	"switch":   Switch,
 
 	// Từ khóa bị loại bỏ có chủ đích (triết lý thiết kế: không vòng lặp vô tận,
 	// không try/catch — dùng .map()/.forEach() và .done()/.fail()).
@@ -255,7 +259,6 @@ var Keywords = map[string]Kind{
 	"catch":   Reserved,
 	"finally": Reserved,
 	"throw":   Reserved,
-	"switch":  Reserved,
 	"class":   Reserved,
 	// "go":     Go,
 	// "defer":  Defer,

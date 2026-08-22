@@ -199,6 +199,55 @@ type ReturnStatement struct {
 	ReturnValue Expression
 }
 
+// BreakStatement exits the nearest switch or bounded loop. Labels are not part
+// of the Kitwork subset.
+type BreakStatement struct {
+	Token Token
+}
+
+func (bs *BreakStatement) statementNode() {}
+func (bs *BreakStatement) String() string { return "break;" }
+
+// SwitchCase keeps source order because JavaScript switch bodies may fall
+// through. Test is nil for the single default clause.
+type SwitchCase struct {
+	Token      Token
+	Test       Expression
+	Statements []Statement
+}
+
+// SwitchStatement evaluates Discriminant once, dispatches cases in source
+// order, and preserves ordinary JavaScript fallthrough semantics.
+type SwitchStatement struct {
+	Token        Token
+	Discriminant Expression
+	Cases        []SwitchCase
+}
+
+func (ss *SwitchStatement) statementNode() {}
+func (ss *SwitchStatement) String() string {
+	var out bytes.Buffer
+	out.WriteString("switch (")
+	if ss.Discriminant != nil {
+		out.WriteString(ss.Discriminant.String())
+	}
+	out.WriteString(") {")
+	for _, clause := range ss.Cases {
+		if clause.Test == nil {
+			out.WriteString("default:")
+		} else {
+			out.WriteString("case ")
+			out.WriteString(clause.Test.String())
+			out.WriteString(":")
+		}
+		for _, statement := range clause.Statements {
+			out.WriteString(statement.String())
+		}
+	}
+	out.WriteString("}")
+	return out.String()
+}
+
 func (rs *ReturnStatement) statementNode() {}
 func (rs *ReturnStatement) String() string {
 	var out bytes.Buffer

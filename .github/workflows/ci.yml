@@ -3,6 +3,7 @@ name: Engine CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
   schedule:
     - cron: "17 3 * * *"
 
@@ -11,8 +12,13 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -24,54 +30,32 @@ jobs:
           go-version: "1.26.x"
           cache: true
 
-      # node runs the CLIENT half of the twin: the jit/hydrate node-shim tests (for/if/events/modal/
-      # capabilities) and the conformance client runner. Without it those tests t.Skip — and requireNode
-      # turns that skip into a failure under CI, so this step is load-bearing, not optional.
+      # Node executes the client half of the JIT/hydrate conformance suite.
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Build
-        run: go build ./...
+      - name: Run verification gate
+        run: go run ./cmd/releasegate --mode verify --report .artifacts/verify.json --timeout 25m
 
-      - name: Test
-        run: go test -count=1 ./...
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-${{ runner.os }}
+          path: .artifacts/verify.json
+          if-no-files-found: warn
+          retention-days: 14
 
-      - name: VM v2 contract
-        run: go test ./runtime -run=TestVMV2Contract -count=1
-
-      - name: VM fault-injection gate
-        run: go test ./runtime ./compiler ./core ./site ./app -run='(Corrupt|Panic|Cancellation|Fallback|Drain|DrainsTasks)' -count=1
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Race
-        run: go test -count=1 -race ./...
-
-      - name: Compiler fuzz smoke test
-        run: go test ./compiler -run=^$ -fuzz=FuzzCompiler -fuzztime=5s
-
-      - name: Compiler to VM fuzz smoke test
-        run: go test ./compiler -run=^$ -fuzz=FuzzCompileVerifyExecute -fuzztime=10s
-
-      - name: Bytecode artifact fuzz smoke test
-        run: go test ./compiler -run=^$ -fuzz=FuzzUnmarshalBytecode -fuzztime=5s
-
-      - name: Verifier fuzz smoke test
-        run: go test ./runtime -run=^$ -fuzz=FuzzVerifyNeverPanics -fuzztime=5s
-
-      - name: Program decoder fuzz smoke test
-        run: go test ./runtime -run=^$ -fuzz=FuzzUnmarshalProgram -fuzztime=5s
-
-      - name: VM determinism fuzz smoke test
-        run: go test ./runtime -run=^$ -fuzz=FuzzVMDeterminism -fuzztime=10s
-
-  vm-soak:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  runtime-hardening:
+    name: Runtime hardening (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -83,19 +67,72 @@ jobs:
           go-version: "1.26.x"
           cache: true
 
-      - name: Pooled VM soak
-        env:
-          KITWORK_SOAK: "1"
-        run: go test ./runtime -run='TestPooledVM(SoakAcrossPrograms|ReleasesOversizedVerifiedWorkload)' -count=1 -timeout=10m
+      - name: Add MinGW for the Windows race detector
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
 
-      - name: Compiler to VM fuzz
-        run: go test ./compiler -run=^$ -fuzz=FuzzCompileVerifyExecute -fuzztime=60s
+      - name: Focused race gate
+        run: go test -race ./runtime ./compiler ./conformance ./compatibility ./core ./site ./app ./request ./work ./utilities/sse -run Test -count=1
 
-      - name: VM determinism fuzz
-        run: go test ./runtime -run=^$ -fuzz=FuzzVMDeterminism -fuzztime=60s
+      - name: VM fault-injection gate
+        run: go test ./runtime ./compiler ./core ./site ./app -run "(FaultGauntlet|Runtime(Limits|StructuralLimitBoundaries|EnergyBoundary|CallDepth)|Corrupt|Panic|Cancellation|Fallback|Drain|DrainsTasks)" -count=1
+
+      - name: Compiler-to-VM fuzz smoke
+        run: go test ./compiler -run=^$ -fuzz=FuzzCompileVerifyExecute -fuzztime=10s
+
+      - name: VM determinism fuzz smoke
+        run: go test ./runtime -run=^$ -fuzz=FuzzVMDeterminism -fuzztime=10s
+
+  release-campaign:
+    name: Release campaign (${{ matrix.os }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Add MinGW for the Windows race detector
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+
+      - name: Run release gate
+        run: go run ./cmd/releasegate --mode release --report .artifacts/release.json --timeout 40m
+
+      - name: Run synthetic lifecycle canary
+        run: go run ./cmd/canary --duration 2m --interval 25ms --workers 4 --reload-every 2s --report-every 30s --max-error-rate 0 --json .artifacts/canary.json --bundle .artifacts/canary.zip
 
       - name: VM benchmark snapshot
+        if: runner.os == 'Linux'
         run: go test ./runtime -run=^$ -bench=^BenchmarkVM -benchmem -count=3
 
       - name: Production handler benchmark snapshot
-        run: go test ./work -run=^$ -bench='^BenchmarkServeHandler(Corpus|Engine)$' -benchmem -benchtime=500ms -count=1
+        if: runner.os == 'Linux'
+        run: go test ./work -run=^$ -bench="^BenchmarkServeHandler(Corpus|Engine)$" -benchmem -benchtime=500ms -count=1
+
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: .artifacts/
+          if-no-files-found: warn
+          retention-days: 14

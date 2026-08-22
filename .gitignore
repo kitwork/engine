@@ -32,6 +32,8 @@ config/smtp/mail.yaml
 *.log
 test_output.txt
 debug.txt
+.artifacts/
+.tmp-*/
 
 # --- IDE & OS ---
 .idea/

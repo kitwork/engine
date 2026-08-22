@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"runtime/debug"
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
-	"github.com/kitwork/engine/runtime"
+	kitruntime "github.com/kitwork/engine/runtime"
 )
 
 // Version Constants
@@ -29,19 +30,19 @@ type VersionInfo struct {
 
 // GetVersionInfo returns current runtime and compiler version specs.
 func GetVersionInfo() VersionInfo {
-	goVer := "unknown"
-	if info, ok := debug.ReadBuildInfo(); ok {
+	goVer := goruntime.Version()
+	if info, ok := debug.ReadBuildInfo(); ok && info.GoVersion != "" {
 		goVer = info.GoVersion
 	}
 
 	return VersionInfo{
 		EngineVersion:          Version,
-		BytecodeVersion:        runtime.BytecodeVersion,
-		ProgramEncodingVersion: runtime.ProgramEncodingVersion,
+		BytecodeVersion:        kitruntime.BytecodeVersion,
+		ProgramEncodingVersion: kitruntime.ProgramEncodingVersion,
 		CompilerSchemaVersion:  compiler.CompilerSchemaVersion,
 		GoVersion:              goVer,
-		OS:                     "windows",
-		Arch:                   "amd64",
+		OS:                     goruntime.GOOS,
+		Arch:                   goruntime.GOARCH,
 	}
 }
 

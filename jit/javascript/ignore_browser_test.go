@@ -142,7 +142,7 @@ func ignoreOpaqueZone(serverText string) string {
 }
 
 func ignoreActiveAlias() string {
-	return `<section id="ignore-active" data-kit-component="ignore-active" data-kit-version="1.0.0" data-kit-as="$target">
+	return `<section id="ignore-active" data-kit-component="ignore-active@1.0.0" data-kit-as="$target">
   <output id="ignore-touches" data-kit-text="touches">server-active</output>
 </section>
 <button id="ignore-alias-call" type="button" data-kit-click="$target.touch()">active alias</button>`
@@ -154,7 +154,7 @@ func ignoreInitialPage(scriptTags string) string {
   <output id="ignore-count" data-kit-text="count">server-count</output>
   %s
   %s
-  <section id="ignore-transition" data-kit-component="ignore-transition" data-kit-version="1.0.0">
+  <section id="ignore-transition" data-kit-component="ignore-transition@1.0.0">
     <output data-kit-text="value">server-transition</output>
   </section>
   <div id="ignore-drive-marker" data-kit-drive="false">Drive marker</div>
@@ -184,7 +184,7 @@ func ignoreFinalPage(scriptTags string) string {
   <output id="ignore-count" data-kit-text="count">final-count</output>
   %s
   %s
-  <section id="ignore-transition" data-kit-component="ignore-transition" data-kit-version="1.0.0">
+  <section id="ignore-transition" data-kit-component="ignore-transition@1.0.0">
     <output data-kit-text="value">final transition</output>
   </section>
   <div id="ignore-final-marker">final route</div>

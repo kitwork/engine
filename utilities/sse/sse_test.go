@@ -47,3 +47,42 @@ func TestSSEBrokerPubSub(t *testing.T) {
 		t.Fatalf("Expected 0 clients after unregister, got %d", count)
 	}
 }
+
+func TestSSEBrokerStopDrainsAndRejectsLateRegistration(t *testing.T) {
+	broker := sse.NewSSEBroker()
+	client := &sse.SSEClient{
+		ID:       "accepted",
+		SendChan: make(chan []byte, 1),
+		Channels: []string{"updates"},
+	}
+	if !broker.Register(client) {
+		t.Fatal("open broker rejected a client")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for broker.ClientCount() != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if broker.ClientCount() != 1 {
+		t.Fatal("broker did not take ownership of the accepted client")
+	}
+
+	broker.Stop()
+	select {
+	case _, open := <-client.SendChan:
+		if open {
+			t.Fatal("broker stop left the accepted client channel open")
+		}
+	default:
+		t.Fatal("broker stop returned before closing the accepted client")
+	}
+
+	late := &sse.SSEClient{
+		ID:       "late",
+		SendChan: make(chan []byte, 1),
+	}
+	if broker.Register(late) {
+		t.Fatal("stopped broker accepted a late client")
+	}
+	close(late.SendChan)
+}

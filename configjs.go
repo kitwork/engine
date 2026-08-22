@@ -186,6 +186,12 @@ func (b *ServerBuilder) RateLimit(v value.Value) *ServerBuilder {
 	return b
 }
 
+// Search declares host-owned search rollout separately from any one surface.
+func (b *ServerBuilder) Search(v value.Value) *ServerBuilder {
+	b.config["search"] = v
+	return b
+}
+
 // TrustProxy: believe X-Forwarded-For/X-Real-IP for the client IP. Enable ONLY when Kitwork runs
 // behind a reverse proxy you control — as the edge server those headers are client-spoofable.
 func (b *ServerBuilder) TrustProxy(v value.Value) *ServerBuilder {

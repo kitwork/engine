@@ -27,7 +27,8 @@ func TestEngineHealthIncludesRequestsAndCurrentOwnership(t *testing.T) {
 	if snapshot.Requests.Inflight != 0 || snapshot.Requests.MaxInflight == 0 {
 		t.Fatalf("request concurrency = %+v", snapshot.Requests)
 	}
-	if snapshot.LoadedApps != 1 ||
+	if !snapshot.OwnershipSnapshotAvailable ||
+		snapshot.LoadedApps != 1 ||
 		snapshot.LoadedSites != 1 ||
 		snapshot.ActiveGenerations != 1 ||
 		snapshot.ActiveGenerationLeases != 0 {

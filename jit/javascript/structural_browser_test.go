@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// TestBrowserStructuralDirectives is the public-surface contract for the
-// template-only data-kit-if and data-kit-for directives. The fixture never
+// TestBrowserStructuralDirectives is the public-surface contract for direct
+// and template data-kit-if plus template-only data-kit-for. The fixture never
 // reaches into a private registry: node identity, refreshed locals, component
 // ownership, event delegation, and fail-closed behavior are all observed from
 // authored HTML.
@@ -47,12 +47,10 @@ const structuralDirectiveDocument = `<!doctype html>
       <button type="button" id="conditional-toggle" data-kit-click="toggleConditional()">toggle conditional</button>
       <output id="conditional-direct-count" data-kit-text="directCount"></output>
       <output id="conditional-delay-count" data-kit-text="delayCount"></output>
-      <template id="conditional-template" data-kit-if="visible">
-        <article class="conditional-branch">
-          <button type="button" class="conditional-direct" data-kit-click="recordDirect($event.type)">direct</button>
-          <input class="conditional-debounce" data-kit-input:debounce(40)="recordDelayed($event.value)">
-        </article>
-      </template>
+      <article id="conditional-template" class="conditional-branch" data-kit-if="visible">
+        <button type="button" class="conditional-direct" data-kit-click="recordDirect($event.type)">direct</button>
+        <input class="conditional-debounce" data-kit-input:debounce(40)="recordDelayed($event.value)">
+      </article>
     </section>
 
     <section id="keyed-region">
@@ -137,7 +135,7 @@ const structuralDirectiveDocument = `<!doctype html>
   </main>
 
   <section id="invalid-root" data-kit-component="invalid-structure">
-    <div id="invalid-nontemplate-if" data-kit-if="visible"><b id="invalid-if-server-child">server if child</b></div>
+    <div id="invalid-nontemplate-if" data-kit-if="visible("><b id="invalid-if-server-child">server if child</b></div>
     <div id="invalid-nontemplate-for" data-kit-for="item, i of items">server for element</div>
 
     <template id="invalid-spec" data-kit-for="item, i items">
@@ -188,6 +186,7 @@ const structuralDirectiveDocument = `<!doctype html>
   (function () {
     "use strict";
     globalThis.__rowActionCalls = 0;
+    globalThis.__initialConditionalBranch = document.querySelector("#conditional-region .conditional-branch");
     globalThis.__structureErrors = [];
     globalThis.__structureUnhandled = 0;
     globalThis.addEventListener("unhandledrejection", function () {
@@ -401,6 +400,8 @@ __runStandaloneKitTest(async function () {
   // data-kit-if mounts a fresh branch, disposes it, and suppresses pending
   // delegated work once that branch is no longer connected.
   var firstConditional = document.querySelector("#conditional-region .conditional-branch");
+  assert(firstConditional === globalThis.__initialConditionalBranch,
+    "truthy direct data-kit-if replaced its authored server node during boot");
   var detachedDirect = firstConditional.querySelector(".conditional-direct");
   var pendingInput = firstConditional.querySelector(".conditional-debounce");
   detachedDirect.click();
@@ -597,11 +598,11 @@ __runStandaloneKitTest(async function () {
   assert(retainedMulti.length === 3 && retainedMulti[0] === yHead && retainedMulti[1] === yChild && retainedMulti[2] === yTail,
     "removing a neighboring multi-root range replaced or split the retained range");
 
-  // Invalid structural authorship is inert. Non-template hosts retain their
-  // server DOM; malformed specs/keys and non-array values clone nothing.
+  // Invalid structural authorship is inert. Invalid direct-if expressions
+  // retain their server DOM; malformed specs/keys and non-array values clone nothing.
   assert(document.getElementById("invalid-nontemplate-if").textContent.trim() === "server if child" &&
     document.getElementById("invalid-if-server-child").isConnected,
-    "invalid non-template if partially mutated server DOM");
+    "invalid direct-if expression partially mutated server DOM");
   assert(document.getElementById("invalid-nontemplate-for").textContent.trim() === "server for element",
     "invalid non-template for partially mutated server DOM");
   ["invalid-spec-clone", "invalid-key-syntax-clone", "invalid-key-value-clone", "invalid-async-key-clone",

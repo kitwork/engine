@@ -1,0 +1,705 @@
+{
+  "schema_version": 1,
+  "archive": "vm-v2",
+  "bytecode_version": 2,
+  "program_encoding_version": 1,
+  "instruction_set_checksum": "10872c964d1c5c284b8ec4fd1acc429e31568151dc03d17a77d1da76774c7e91",
+  "producer": {
+    "compiler_schema_version": 2,
+    "compiler_fingerprint": "aa8250eda7fb056436c15a279e12f37a3e0b25d5597f3ad8059a6bfc120627e4"
+  },
+  "cases": [
+    {
+      "name": "expressions",
+      "entry": "sources/expressions.kitwork.js",
+      "sources": [
+        {
+          "path": "sources/expressions.kitwork.js",
+          "sha256": "7f12feeeb34b9b6d5965578e28bb44c519e8522184612fcdb95b7aafbfb1c370"
+        }
+      ],
+      "program": "programs/expressions.kwpb",
+      "kind": "execute",
+      "expected": 22,
+      "max_energy": 1000000,
+      "source_fingerprint": "418549025e35053a1369452385a0bfb1553c6457d6a489450c64daa19b07a1f6",
+      "program_checksum": "655f6a236b21b32ca86fb7b02f9537aa63b0e17081d9db7e5250e6be553f6115",
+      "program_sha256": "ca89db60b47d54a44812e7313d02bf4d4fd8e23969c1ac287d9d0c99ab1b6a4f",
+      "profile": {
+        "bytecode_bytes": 104,
+        "constants": 22,
+        "instructions": 54,
+        "entry_points": 1,
+        "max_stack_depth": 4,
+        "encoded_energy": 318,
+        "opcodes": [
+          {
+            "opcode": 0,
+            "name": "PUSH",
+            "count": 15,
+            "encoded_energy": 15
+          },
+          {
+            "opcode": 1,
+            "name": "POP",
+            "count": 8,
+            "encoded_energy": 8
+          },
+          {
+            "opcode": 2,
+            "name": "LOAD",
+            "count": 4,
+            "encoded_energy": 8
+          },
+          {
+            "opcode": 3,
+            "name": "STORE",
+            "count": 3,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 4,
+            "name": "GET",
+            "count": 4,
+            "encoded_energy": 48
+          },
+          {
+            "opcode": 5,
+            "name": "DUP",
+            "count": 5,
+            "encoded_energy": 5
+          },
+          {
+            "opcode": 7,
+            "name": "ADD",
+            "count": 2,
+            "encoded_energy": 4
+          },
+          {
+            "opcode": 15,
+            "name": "JUMP",
+            "count": 1,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 17,
+            "name": "FALSE",
+            "count": 1,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 21,
+            "name": "MAKE",
+            "count": 2,
+            "encoded_energy": 160
+          },
+          {
+            "opcode": 22,
+            "name": "SET",
+            "count": 5,
+            "encoded_energy": 50
+          },
+          {
+            "opcode": 27,
+            "name": "RETURN",
+            "count": 1,
+            "encoded_energy": 5
+          },
+          {
+            "opcode": 31,
+            "name": "COMMIT",
+            "count": 3,
+            "encoded_energy": 3
+          }
+        ]
+      },
+      "execution": {
+        "returned_kind": "nil",
+        "has_result": true,
+        "result": 22,
+        "variables": {
+          "config": {
+            "enabled": true,
+            "offset": 10
+          },
+          "numbers": [
+            4,
+            8,
+            15
+          ],
+          "result": 22
+        },
+        "instructions": 53,
+        "energy": 317,
+        "stack_depth": 0,
+        "frame_depth": 1,
+        "peak_frame_depth": 1
+      }
+    },
+    {
+      "name": "functions",
+      "entry": "sources/functions.kitwork.js",
+      "sources": [
+        {
+          "path": "sources/functions.kitwork.js",
+          "sha256": "40c8dfc757d21fb9731fc8abf5a7a81d00751b6f516e3442886dabc6506b5957"
+        }
+      ],
+      "program": "programs/functions.kwpb",
+      "kind": "execute",
+      "expected": 42,
+      "max_energy": 1000000,
+      "source_fingerprint": "64b9a2b824c9960d08297fcdfbd5b3eab3c0bb0d8722b1cc707e0681fe131344",
+      "program_checksum": "82b53f9d6f9ad3e87d5f07832669bf6a93714424d2077beb82239c63ccd15e13",
+      "program_sha256": "e5bf43d6cdbba13b4e2763c1ff25474891db1726bb6f0f219e53480dc8b9de82",
+      "profile": {
+        "bytecode_bytes": 57,
+        "constants": 11,
+        "instructions": 29,
+        "entry_points": 3,
+        "max_stack_depth": 2,
+        "encoded_energy": 359,
+        "opcodes": [
+          {
+            "opcode": 0,
+            "name": "PUSH",
+            "count": 4,
+            "encoded_energy": 4
+          },
+          {
+            "opcode": 1,
+            "name": "POP",
+            "count": 3,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 2,
+            "name": "LOAD",
+            "count": 4,
+            "encoded_energy": 8
+          },
+          {
+            "opcode": 3,
+            "name": "STORE",
+            "count": 3,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 7,
+            "name": "ADD",
+            "count": 1,
+            "encoded_energy": 2
+          },
+          {
+            "opcode": 15,
+            "name": "JUMP",
+            "count": 2,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 24,
+            "name": "CALL",
+            "count": 2,
+            "encoded_energy": 300
+          },
+          {
+            "opcode": 27,
+            "name": "RETURN",
+            "count": 5,
+            "encoded_energy": 25
+          },
+          {
+            "opcode": 31,
+            "name": "COMMIT",
+            "count": 5,
+            "encoded_energy": 5
+          }
+        ]
+      },
+      "execution": {
+        "returned_kind": "nil",
+        "has_result": true,
+        "result": 42,
+        "variables": {
+          "addThirtySeven": "\u003cfunction\u003e",
+          "makeAdder": "\u003cfunction\u003e",
+          "result": 42
+        },
+        "instructions": 27,
+        "energy": 349,
+        "stack_depth": 0,
+        "frame_depth": 1,
+        "peak_frame_depth": 2
+      }
+    },
+    {
+      "name": "loops",
+      "entry": "sources/loops.kitwork.js",
+      "sources": [
+        {
+          "path": "sources/loops.kitwork.js",
+          "sha256": "af9fe27f4a03d25d014894ffc3cad99aa59529f081f2cefe8f3c6245de316678"
+        }
+      ],
+      "program": "programs/loops.kwpb",
+      "kind": "execute",
+      "expected": 36,
+      "max_energy": 1000000,
+      "source_fingerprint": "a33abde360c9d66fd081d870b231850e355b2879e6c09904cee9673a676c251a",
+      "program_checksum": "6aef19292b2f0d2ca75df19b6cd63fcb6f9dedcf318002ec044510c18eacfefb",
+      "program_sha256": "db930bb119605432a7ade3f6345ec9931e80cf21b3be0396d817e68a0e7014b3",
+      "profile": {
+        "bytecode_bytes": 146,
+        "constants": 29,
+        "instructions": 68,
+        "entry_points": 1,
+        "max_stack_depth": 4,
+        "encoded_energy": 234,
+        "opcodes": [
+          {
+            "opcode": 0,
+            "name": "PUSH",
+            "count": 13,
+            "encoded_energy": 13
+          },
+          {
+            "opcode": 1,
+            "name": "POP",
+            "count": 12,
+            "encoded_energy": 12
+          },
+          {
+            "opcode": 2,
+            "name": "LOAD",
+            "count": 9,
+            "encoded_energy": 18
+          },
+          {
+            "opcode": 3,
+            "name": "STORE",
+            "count": 7,
+            "encoded_energy": 14
+          },
+          {
+            "opcode": 5,
+            "name": "DUP",
+            "count": 3,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 7,
+            "name": "ADD",
+            "count": 3,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 14,
+            "name": "COMPARE",
+            "count": 3,
+            "encoded_energy": 12
+          },
+          {
+            "opcode": 15,
+            "name": "JUMP",
+            "count": 4,
+            "encoded_energy": 12
+          },
+          {
+            "opcode": 17,
+            "name": "FALSE",
+            "count": 3,
+            "encoded_energy": 9
+          },
+          {
+            "opcode": 18,
+            "name": "ITER",
+            "count": 1,
+            "encoded_energy": 15
+          },
+          {
+            "opcode": 21,
+            "name": "MAKE",
+            "count": 1,
+            "encoded_energy": 80
+          },
+          {
+            "opcode": 22,
+            "name": "SET",
+            "count": 3,
+            "encoded_energy": 30
+          },
+          {
+            "opcode": 27,
+            "name": "RETURN",
+            "count": 1,
+            "encoded_energy": 5
+          },
+          {
+            "opcode": 31,
+            "name": "COMMIT",
+            "count": 5,
+            "encoded_energy": 5
+          }
+        ]
+      },
+      "execution": {
+        "returned_kind": "nil",
+        "has_result": true,
+        "result": 36,
+        "variables": {
+          "index": 4,
+          "number": 20,
+          "result": 36,
+          "total": 36
+        },
+        "instructions": 149,
+        "energy": 415,
+        "stack_depth": 0,
+        "frame_depth": 1,
+        "peak_frame_depth": 1
+      }
+    },
+    {
+      "name": "switch",
+      "entry": "sources/switch.kitwork.js",
+      "sources": [
+        {
+          "path": "sources/switch.kitwork.js",
+          "sha256": "e12d8e79faf6df9d023b72bae2ab4952cfa7b2109ae2840d30c8f93fd11238c1"
+        }
+      ],
+      "program": "programs/switch.kwpb",
+      "kind": "execute",
+      "expected": "review:ready",
+      "max_energy": 1000000,
+      "source_fingerprint": "44f81e71713d53772671adfbbd3185c27a6682237bd8cfe20ce326b0ddd718b3",
+      "program_checksum": "85b569d94462c6f24562936cb18bd8f9fa6a191027d3caa7c49514ba9afc776b",
+      "program_sha256": "919741e2ce8a58749d03ae7cc3a32ddbb51168f623361fbcc1955202a8194814",
+      "profile": {
+        "bytecode_bytes": 110,
+        "constants": 19,
+        "instructions": 53,
+        "entry_points": 1,
+        "max_stack_depth": 3,
+        "encoded_energy": 95,
+        "opcodes": [
+          {
+            "opcode": 0,
+            "name": "PUSH",
+            "count": 9,
+            "encoded_energy": 9
+          },
+          {
+            "opcode": 1,
+            "name": "POP",
+            "count": 10,
+            "encoded_energy": 10
+          },
+          {
+            "opcode": 2,
+            "name": "LOAD",
+            "count": 4,
+            "encoded_energy": 8
+          },
+          {
+            "opcode": 3,
+            "name": "STORE",
+            "count": 6,
+            "encoded_energy": 12
+          },
+          {
+            "opcode": 5,
+            "name": "DUP",
+            "count": 3,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 7,
+            "name": "ADD",
+            "count": 3,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 14,
+            "name": "COMPARE",
+            "count": 3,
+            "encoded_energy": 12
+          },
+          {
+            "opcode": 15,
+            "name": "JUMP",
+            "count": 5,
+            "encoded_energy": 15
+          },
+          {
+            "opcode": 16,
+            "name": "TRUE",
+            "count": 3,
+            "encoded_energy": 9
+          },
+          {
+            "opcode": 27,
+            "name": "RETURN",
+            "count": 1,
+            "encoded_energy": 5
+          },
+          {
+            "opcode": 31,
+            "name": "COMMIT",
+            "count": 6,
+            "encoded_energy": 6
+          }
+        ]
+      },
+      "execution": {
+        "returned_kind": "nil",
+        "has_result": true,
+        "result": "review:ready",
+        "variables": {
+          "result": "review:ready",
+          "stage": "review"
+        },
+        "instructions": 33,
+        "energy": 60,
+        "stack_depth": 0,
+        "frame_depth": 1,
+        "peak_frame_depth": 1
+      }
+    },
+    {
+      "name": "relative-import",
+      "entry": "sources/modules/main.kitwork.js",
+      "sources": [
+        {
+          "path": "sources/modules/lib/math.kitwork.js",
+          "sha256": "bf54f8d92c4c4ebaff44e7c1d34208f273834e4246a4f1755e35c0bfc235cfc5"
+        },
+        {
+          "path": "sources/modules/main.kitwork.js",
+          "sha256": "5d460c678caf6ed28fb7006e3b6b272e5d8ee376da41a6abcc60cb8021b82ebd"
+        }
+      ],
+      "program": "programs/relative-import.kwpb",
+      "kind": "execute",
+      "expected": 42,
+      "max_energy": 1000000,
+      "source_fingerprint": "bfbe2d96999f3273f5c687b16f9c134ab21f209b6e0bd84b7855fb7ba63f9222",
+      "program_checksum": "e12883aa0663c862624540f8d00dd41b9de6f448739f1eee5815b5284467c561",
+      "program_sha256": "f80fc1d648402398cfe178ef9af7c92af55c6614b9eb52c626be78c2731cce32",
+      "profile": {
+        "bytecode_bytes": 107,
+        "constants": 22,
+        "instructions": 56,
+        "entry_points": 3,
+        "max_stack_depth": 4,
+        "encoded_energy": 516,
+        "opcodes": [
+          {
+            "opcode": 0,
+            "name": "PUSH",
+            "count": 9,
+            "encoded_energy": 9
+          },
+          {
+            "opcode": 1,
+            "name": "POP",
+            "count": 8,
+            "encoded_energy": 8
+          },
+          {
+            "opcode": 2,
+            "name": "LOAD",
+            "count": 7,
+            "encoded_energy": 14
+          },
+          {
+            "opcode": 3,
+            "name": "STORE",
+            "count": 6,
+            "encoded_energy": 12
+          },
+          {
+            "opcode": 4,
+            "name": "GET",
+            "count": 2,
+            "encoded_energy": 24
+          },
+          {
+            "opcode": 5,
+            "name": "DUP",
+            "count": 2,
+            "encoded_energy": 2
+          },
+          {
+            "opcode": 7,
+            "name": "ADD",
+            "count": 1,
+            "encoded_energy": 2
+          },
+          {
+            "opcode": 9,
+            "name": "MUL",
+            "count": 1,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 15,
+            "name": "JUMP",
+            "count": 2,
+            "encoded_energy": 6
+          },
+          {
+            "opcode": 21,
+            "name": "MAKE",
+            "count": 1,
+            "encoded_energy": 80
+          },
+          {
+            "opcode": 22,
+            "name": "SET",
+            "count": 2,
+            "encoded_energy": 20
+          },
+          {
+            "opcode": 24,
+            "name": "CALL",
+            "count": 2,
+            "encoded_energy": 300
+          },
+          {
+            "opcode": 27,
+            "name": "RETURN",
+            "count": 5,
+            "encoded_energy": 25
+          },
+          {
+            "opcode": 31,
+            "name": "COMMIT",
+            "count": 8,
+            "encoded_energy": 8
+          }
+        ]
+      },
+      "execution": {
+        "returned_kind": "nil",
+        "has_result": true,
+        "result": 42,
+        "variables": {
+          "__kw_mod_1": {
+            "double": "\u003cfunction\u003e",
+            "offset": 2
+          },
+          "double": "\u003cfunction\u003e",
+          "offset": 2,
+          "result": 42
+        },
+        "instructions": 54,
+        "energy": 506,
+        "stack_depth": 0,
+        "frame_depth": 1,
+        "peak_frame_depth": 2
+      }
+    },
+    {
+      "name": "energy-diagnostic",
+      "entry": "sources/energy.kitwork.js",
+      "sources": [
+        {
+          "path": "sources/energy.kitwork.js",
+          "sha256": "793b4aab20a4479df9ec4ccb1835c5d1faa8b3c2ed10e0bdc7e4b02a90d59a67"
+        }
+      ],
+      "program": "programs/energy-diagnostic.kwpb",
+      "kind": "diagnostic",
+      "diagnostic": "ENERGY_LIMIT",
+      "max_energy": 25,
+      "source_fingerprint": "03cc1eeb020072c30c9ae262a440e96af99afa762605f199044ad717c81f1fe4",
+      "program_checksum": "b48d28da3933da2191962747337d73b6b239b2e08730985807634707c526c47a",
+      "program_sha256": "55e057afdb56c61ac66a75db7a2d8e4fc70d41153f0b2a4fe45b670badf605f2",
+      "profile": {
+        "bytecode_bytes": 62,
+        "constants": 14,
+        "instructions": 29,
+        "entry_points": 1,
+        "max_stack_depth": 2,
+        "encoded_energy": 52,
+        "opcodes": [
+          {
+            "opcode": 0,
+            "name": "PUSH",
+            "count": 4,
+            "encoded_energy": 4
+          },
+          {
+            "opcode": 1,
+            "name": "POP",
+            "count": 5,
+            "encoded_energy": 5
+          },
+          {
+            "opcode": 2,
+            "name": "LOAD",
+            "count": 5,
+            "encoded_energy": 10
+          },
+          {
+            "opcode": 3,
+            "name": "STORE",
+            "count": 5,
+            "encoded_energy": 10
+          },
+          {
+            "opcode": 7,
+            "name": "ADD",
+            "count": 2,
+            "encoded_energy": 4
+          },
+          {
+            "opcode": 14,
+            "name": "COMPARE",
+            "count": 1,
+            "encoded_energy": 4
+          },
+          {
+            "opcode": 15,
+            "name": "JUMP",
+            "count": 1,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 17,
+            "name": "FALSE",
+            "count": 1,
+            "encoded_energy": 3
+          },
+          {
+            "opcode": 27,
+            "name": "RETURN",
+            "count": 1,
+            "encoded_energy": 5
+          },
+          {
+            "opcode": 31,
+            "name": "COMMIT",
+            "count": 4,
+            "encoded_energy": 4
+          }
+        ]
+      },
+      "execution": {
+        "returned_kind": "invalid",
+        "has_result": false,
+        "variables": {
+          "index": 0,
+          "total": 0
+        },
+        "diagnostic": "ENERGY_LIMIT",
+        "instructions": 14,
+        "energy": 25,
+        "stack_depth": 0,
+        "frame_depth": 1,
+        "peak_frame_depth": 1
+      }
+    }
+  ]
+}

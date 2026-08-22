@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "arithmetic",
+      "category": "expressions",
+      "file": "expressions/arithmetic.kitwork.js",
+      "kind": "execute",
+      "expected": 42
+    },
+    {
+      "name": "fractional-modulo",
+      "category": "expressions",
+      "file": "expressions/fractional-modulo.kitwork.js",
+      "kind": "execute",
+      "expected": [1.5, 0, 0, -1.5]
+    },
+    {
+      "name": "members",
+      "category": "expressions",
+      "file": "expressions/members.kitwork.js",
+      "kind": "execute",
+      "expected": 42
+    },
+    {
+      "name": "logical-ternary",
+      "category": "expressions",
+      "file": "expressions/logical-ternary.kitwork.js",
+      "kind": "execute",
+      "expected": "yes"
+    },
+    {
+      "name": "closure",
+      "category": "functions",
+      "file": "functions/closure.kitwork.js",
+      "kind": "execute",
+      "expected": 42
+    },
+    {
+      "name": "callbacks",
+      "category": "functions",
+      "file": "functions/callbacks.kitwork.js",
+      "kind": "execute",
+      "expected": "2,4,6"
+    },
+    {
+      "name": "counted-break",
+      "category": "loops",
+      "file": "loops/counted-break.kitwork.js",
+      "kind": "execute",
+      "expected": 103
+    },
+    {
+      "name": "forof-break",
+      "category": "loops",
+      "file": "loops/forof-break.kitwork.js",
+      "kind": "execute",
+      "expected": 103
+    },
+    {
+      "name": "fallthrough",
+      "category": "switch",
+      "file": "switch/fallthrough.kitwork.js",
+      "kind": "execute",
+      "expected": "ab"
+    },
+    {
+      "name": "default-middle",
+      "category": "switch",
+      "file": "switch/default-middle.kitwork.js",
+      "kind": "execute",
+      "expected": "db"
+    },
+    {
+      "name": "relative-import",
+      "category": "modules",
+      "file": "modules/main.kitwork.js",
+      "kind": "execute",
+      "expected": 42
+    },
+    {
+      "name": "energy-limit",
+      "category": "diagnostics",
+      "file": "diagnostics/energy-limit.kitwork.js",
+      "kind": "diagnostic",
+      "diagnostic": "ENERGY_LIMIT",
+      "max_energy": 1
+    },
+    {
+      "name": "while",
+      "category": "rejected",
+      "file": "rejected/while.kitwork.js",
+      "kind": "reject",
+      "error_contains": "while"
+    },
+    {
+      "name": "unbounded-for",
+      "category": "rejected",
+      "file": "rejected/unbounded-for.kitwork.js",
+      "kind": "reject",
+      "error_contains": "while"
+    },
+    {
+      "name": "break-outside-control-flow",
+      "category": "rejected",
+      "file": "rejected/break.kitwork.js",
+      "kind": "reject",
+      "error_contains": "break"
+    },
+    {
+      "name": "duplicate-default",
+      "category": "rejected",
+      "file": "rejected/duplicate-default.kitwork.js",
+      "kind": "reject",
+      "error_contains": "default"
+    },
+    {
+      "name": "try-catch",
+      "category": "rejected",
+      "file": "rejected/try-catch.kitwork.js",
+      "kind": "reject",
+      "error_contains": "try"
+    },
+    {
+      "name": "array-trailing-comma",
+      "category": "rejected",
+      "file": "rejected/array-trailing-comma.kitwork.js",
+      "kind": "reject",
+      "error_contains": "trailing comma"
+    }
+  ]
+}

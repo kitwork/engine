@@ -2,11 +2,31 @@ package javascript
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	stdhtml "html"
 	"strconv"
 	"strings"
+
+	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
+
+// ScanHTML runs while an immutable generation is being prepared. These
+// deliberately generous internal limits keep malformed or generated markup
+// from turning its HTML-equivalence bookkeeping into unbounded allocation or
+// quadratic ancestor walks. They do not describe a browser grammar limit.
+const (
+	scanHTMLSourceByteLimit         = 8 << 20
+	scanHTMLTagLimit                = 65536
+	scanHTMLDepthLimit              = 1024
+	scanHTMLTagNameByteLimit        = 256
+	scanHTMLAttributeLimit          = 256
+	scanHTMLAttributeNameByteLimit  = 1024
+	scanHTMLAttributeValueByteLimit = 512 << 10
+	scanHTMLAncestorVisitLimit      = 4 << 20
+	scanHTMLExpressionByteLimit     = 256 << 10
+)
+
+var errHTMLScanLimit = errors.New("kitjs: HTML scan resource limit exceeded")
 
 // ComponentRef is one authored component host discovered in HTML. Alias comes
 // only from data-kit-as; legacy inline aliases are deliberately not parsed.
@@ -33,6 +53,10 @@ type ScanResult struct {
 // data-kit-ignore subtrees are opaque so examples or third-party DOM cannot
 // accidentally select runtime modules.
 func ScanHTML(source []byte) (ScanResult, error) {
+	if len(source) > scanHTMLSourceByteLimit {
+		return ScanResult{}, fmt.Errorf("%w: document source bytes=%d limit=%d",
+			errHTMLScanLimit, len(source), scanHTMLSourceByteLimit)
+	}
 	result := ScanResult{
 		Components:      make([]ComponentRef, 0, 8),
 		LocalComponents: make([]ComponentRef, 0, 4),
@@ -42,12 +66,19 @@ func ScanHTML(source []byte) (ScanResult, error) {
 	retains := make(map[string]int)
 	serviceCalls := make([]expressionServiceCall, 0, 4)
 	frames := make([]scanFrame, 0, 16)
+	work := scanHTMLWork{}
+	tags := 0
 	for offset := 0; offset < len(source); {
 		relative := bytes.IndexByte(source[offset:], '<')
 		if relative < 0 {
 			break
 		}
 		start := offset + relative
+		tags++
+		if tags > scanHTMLTagLimit {
+			return ScanResult{}, fmt.Errorf("%w: markup candidates=%d limit=%d at byte %d",
+				errHTMLScanLimit, tags, scanHTMLTagLimit, start)
+		}
 
 		if bytes.HasPrefix(source[start:], []byte("<!--")) {
 			end := bytes.Index(source[start+4:], []byte("-->"))
@@ -58,8 +89,14 @@ func ScanHTML(source []byte) (ScanResult, error) {
 			continue
 		}
 		if start+1 < len(source) && source[start+1] == '/' {
-			name, next := scanClosingTag(source, start)
-			frames = closeScanFrames(frames, name)
+			name, next, err := scanClosingTag(source, start)
+			if err != nil {
+				return ScanResult{}, err
+			}
+			frames, err = closeScanFrames(frames, name, &work, start)
+			if err != nil {
+				return ScanResult{}, err
+			}
 			offset = next
 			continue
 		}
@@ -68,16 +105,18 @@ func ScanHTML(source []byte) (ScanResult, error) {
 			continue
 		}
 
-		opaque := scanFramesContainIgnore(frames)
+		opaque, err := scanFramesContainIgnore(frames, &work, start)
+		if err != nil {
+			return ScanResult{}, err
+		}
 		var tag scannedTag
-		var err error
 		if opaque {
-			tag = scanOpaqueStartTag(source, start)
+			tag, err = scanOpaqueStartTag(source, start)
 		} else {
-			tag, err = scanStartTag(source, start)
-			if err != nil {
-				return ScanResult{}, err
-			}
+			tag, err = scanStartTag(source, start, &work)
+		}
+		if err != nil {
+			return ScanResult{}, err
 		}
 		if tag.next <= start {
 			offset = start + 1
@@ -85,8 +124,22 @@ func ScanHTML(source []byte) (ScanResult, error) {
 		}
 		foreignChildren := scanFramesHaveForeignChildren(frames)
 		if !foreignChildren {
-			frames = closeImpliedHTMLFrames(frames, tag.name)
-			if scanFramesContainIgnore(frames) && fosterParentsFromIgnoredTable(frames, tag.name) {
+			frames, err = closeImpliedHTMLFrames(frames, tag.name, &work, start)
+			if err != nil {
+				return ScanResult{}, err
+			}
+			ignored, containErr := scanFramesContainIgnore(frames, &work, start)
+			if containErr != nil {
+				return ScanResult{}, containErr
+			}
+			fostered := false
+			if ignored {
+				fostered, err = fosterParentsFromIgnoredTable(frames, tag.name, &work, start)
+				if err != nil {
+					return ScanResult{}, err
+				}
+			}
+			if fostered {
 				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-ignore cannot contain foster-parented table content", ErrUnsupportedAttribute, start)
 			}
 		}
@@ -94,9 +147,12 @@ func ScanHTML(source []byte) (ScanResult, error) {
 		// example, div closes p and li closes li). Reparse that incoming tag with
 		// full validation because it belongs to the live DOM, not the opaque
 		// subtree that preceded it in source order.
-		stillOpaque := scanFramesContainIgnore(frames)
+		stillOpaque, err := scanFramesContainIgnore(frames, &work, start)
+		if err != nil {
+			return ScanResult{}, err
+		}
 		if opaque && !stillOpaque {
-			tag, err = scanStartTag(source, start)
+			tag, err = scanStartTag(source, start, &work)
 			if err != nil {
 				return ScanResult{}, err
 			}
@@ -112,6 +168,10 @@ func ScanHTML(source []byte) (ScanResult, error) {
 				continue
 			}
 			if !(!tag.foreign && voidElement(tag.name)) && !(tag.foreign && tag.selfClosing) {
+				if len(frames) >= scanHTMLDepthLimit {
+					return ScanResult{}, fmt.Errorf("%w: open element depth=%d limit=%d at byte %d",
+						errHTMLScanLimit, len(frames)+1, scanHTMLDepthLimit, start)
+				}
 				frames = append(frames, scanFrame{
 					name: tag.name, template: tag.name == "template",
 					foreign: tag.foreign, ignore: true,
@@ -128,34 +188,48 @@ func ScanHTML(source []byte) (ScanResult, error) {
 		if tag.alias.present && !tag.component.present {
 			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-as requires data-kit-component on the same element", ErrInvalidComponentUse, tag.alias.offset)
 		}
-		if tag.version.present && !tag.component.present {
-			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-version requires data-kit-component on the same element", ErrInvalidComponentUse, tag.version.offset)
-		}
-		if tag.local.present && !tag.component.present {
-			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-local requires data-kit-component on the same element", ErrInvalidComponentUse, tag.local.offset)
-		}
 		if tag.retain.present && !tag.component.present {
 			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-retain requires data-kit-component on the same element", ErrInvalidComponentUse, tag.retain.offset)
 		}
-		if tag.retain.present && (tag.name == "template" || tag.structural || scanFramesContainTemplate(frames) || scanFramesContainStructural(frames)) {
-			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-retain is not allowed in structural templates", ErrInvalidComponentUse, tag.retain.offset)
-		}
-		if tag.retain.present && scanFramesContainRetain(frames) {
-			return ScanResult{}, fmt.Errorf("%w at byte %d: retained component hosts cannot be nested", ErrInvalidComponentUse, tag.retain.offset)
+		if tag.retain.present {
+			insideTemplate, containErr := scanFramesContainTemplate(frames, &work, start)
+			if containErr != nil {
+				return ScanResult{}, containErr
+			}
+			insideStructural, containErr := scanFramesContainStructural(frames, &work, start)
+			if containErr != nil {
+				return ScanResult{}, containErr
+			}
+			if tag.name == "template" || tag.structural || insideTemplate || insideStructural {
+				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-retain is not allowed in structural templates", ErrInvalidComponentUse, tag.retain.offset)
+			}
+			insideRetain, containErr := scanFramesContainRetain(frames, &work, start)
+			if containErr != nil {
+				return ScanResult{}, containErr
+			}
+			if insideRetain {
+				return ScanResult{}, fmt.Errorf("%w at byte %d: retained component hosts cannot be nested", ErrInvalidComponentUse, tag.retain.offset)
+			}
 		}
 		if tag.structural {
-			if tag.name != "template" {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: if, for, and key require a template element", ErrUnsupportedAttribute, tag.structuralOffset())
-			}
 			if tag.ifDirective.present && tag.forDirective.present {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: one template cannot combine if and for", ErrUnsupportedAttribute, tag.forDirective.offset)
+				return ScanResult{}, fmt.Errorf("%w at byte %d: one structural host cannot combine if and for", ErrUnsupportedAttribute, tag.forDirective.offset)
 			}
 			if tag.keyDirective.present && !tag.forDirective.present {
 				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-key requires data-kit-for on the same template", ErrUnsupportedAttribute, tag.keyDirective.offset)
 			}
+			if tag.name != "template" && (tag.forDirective.present || tag.keyDirective.present) {
+				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-for and data-kit-key require a template element", ErrUnsupportedAttribute, tag.structuralOffset())
+			}
 		}
-		if tag.name == "script" && scanFramesContainStructural(frames) {
-			return ScanResult{}, fmt.Errorf("%w at byte %d: structural templates cannot contain script elements", ErrUnsupportedAttribute, start)
+		if tag.name == "script" {
+			insideStructural, containErr := scanFramesContainStructural(frames, &work, start)
+			if containErr != nil {
+				return ScanResult{}, containErr
+			}
+			if tag.structural || insideStructural {
+				return ScanResult{}, fmt.Errorf("%w at byte %d: structural branches cannot contain script elements", ErrUnsupportedAttribute, start)
+			}
 		}
 		if tag.component.present && tag.name == "template" {
 			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-component cannot be used on a template; place the boundary inside template content", ErrInvalidComponentUse, tag.component.offset)
@@ -176,29 +250,14 @@ func ScanHTML(source []byte) (ScanResult, error) {
 			if err != nil {
 				return ScanResult{}, fmt.Errorf("%w at byte %d: %v", ErrInvalidComponentUse, tag.component.offset, err)
 			}
-			if inlineVersion != "" && tag.version.present {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: inline component versions cannot be combined with data-kit-version", ErrInvalidComponentUse, tag.version.offset)
-			}
-			if tag.local.present && tag.version.present {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-local components cannot use data-kit-version", ErrInvalidComponentUse, tag.version.offset)
-			}
-			if tag.local.present && inlineVersion != "" {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-local cannot mark a versioned component", ErrInvalidComponentUse, tag.local.offset)
-			}
 			version := inlineVersion
-			if tag.version.present {
-				version, err = parseExactVersion(tag.version.value)
-				if err != nil {
-					return ScanResult{}, fmt.Errorf("%w at byte %d: %v", ErrInvalidComponentUse, tag.version.offset, err)
-				}
-			}
 			client := version == ""
 			if client && tag.retain.present {
 				return ScanResult{}, fmt.Errorf("%w at byte %d: unversioned client components cannot use data-kit-retain", ErrInvalidComponentUse, tag.retain.offset)
 			}
 			alias := ""
 			if tag.alias.present {
-				alias = trimECMAScriptSpace(stdhtml.UnescapeString(tag.alias.value))
+				alias = trimECMAScriptSpace(htmlattr.Decode(tag.alias.value))
 				if !validAlias(alias) || reservedAlias(alias) {
 					return ScanResult{}, fmt.Errorf("%w at byte %d: invalid data-kit-as value %q", ErrInvalidComponentUse, tag.alias.offset, alias)
 				}
@@ -252,6 +311,10 @@ func ScanHTML(source []byte) (ScanResult, error) {
 			continue
 		}
 		if !(!tag.foreign && voidElement(tag.name)) && !(tag.foreign && tag.selfClosing) {
+			if len(frames) >= scanHTMLDepthLimit {
+				return ScanResult{}, fmt.Errorf("%w: open element depth=%d limit=%d at byte %d",
+					errHTMLScanLimit, len(frames)+1, scanHTMLDepthLimit, start)
+			}
 			frames = append(frames, scanFrame{
 				name: tag.name, template: tag.name == "template",
 				structural: tag.structural, retain: tag.retain.present, foreign: tag.foreign,
@@ -309,8 +372,6 @@ type scannedTag struct {
 	foreign      bool
 	needsRuntime bool
 	component    scannedAttribute
-	version      scannedAttribute
-	local        scannedAttribute
 	alias        scannedAttribute
 	retain       scannedAttribute
 	scope        scannedAttribute
@@ -348,26 +409,56 @@ type scanFrame struct {
 	ignore     bool
 }
 
-func scanClosingTag(source []byte, start int) (string, int) {
-	index := skipHTMLSpace(source, start+2)
-	nameStart := index
-	for index < len(source) && asciiTagNamePart(source[index]) {
-		index++
-	}
-	name := strings.ToLower(string(source[nameStart:index]))
-	return name, skipTag(source, index)
+type scanHTMLWork struct {
+	ancestorVisits  int
+	expressionBytes int
 }
 
-func closeScanFrames(frames []scanFrame, name string) []scanFrame {
-	if name == "" {
-		return frames
+func (work *scanHTMLWork) visitFrame(at int) error {
+	if work.ancestorVisits >= scanHTMLAncestorVisitLimit {
+		return fmt.Errorf("%w: ancestor frame visits=%d limit=%d at byte %d",
+			errHTMLScanLimit, work.ancestorVisits+1, scanHTMLAncestorVisitLimit, at)
 	}
-	for index := len(frames) - 1; index >= 0; index-- {
-		if frames[index].name == name {
-			return frames[:index]
+	work.ancestorVisits++
+	return nil
+}
+
+func (work *scanHTMLWork) chargeExpression(bytes, at int) error {
+	if bytes > scanHTMLExpressionByteLimit-work.expressionBytes {
+		return fmt.Errorf("%w: authored expression bytes=%d limit=%d at byte %d",
+			errHTMLScanLimit, work.expressionBytes+bytes, scanHTMLExpressionByteLimit, at)
+	}
+	work.expressionBytes += bytes
+	return nil
+}
+
+func scanClosingTag(source []byte, start int) (string, int, error) {
+	index := skipHTMLSpace(source, start+2)
+	nameStart := index
+	for index < len(source) && htmlTagNamePart(source[index]) {
+		index++
+		if index-nameStart > scanHTMLTagNameByteLimit {
+			return "", index, fmt.Errorf("%w: closing tag name bytes=%d limit=%d at byte %d",
+				errHTMLScanLimit, index-nameStart, scanHTMLTagNameByteLimit, start)
 		}
 	}
-	return frames
+	name := asciiLowerTagName(source[nameStart:index])
+	return name, skipTag(source, index), nil
+}
+
+func closeScanFrames(frames []scanFrame, name string, work *scanHTMLWork, at int) ([]scanFrame, error) {
+	if name == "" {
+		return frames, nil
+	}
+	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return frames, err
+		}
+		if frames[index].name == name {
+			return frames[:index], nil
+		}
+	}
+	return frames, nil
 }
 
 func scanFramesHaveForeignChildren(frames []scanFrame) bool {
@@ -386,77 +477,95 @@ func scanFramesHaveForeignChildren(frames []scanFrame) bool {
 	}
 }
 
-func closeImpliedHTMLFrames(frames []scanFrame, incoming string) []scanFrame {
+func closeImpliedHTMLFrames(frames []scanFrame, incoming string, work *scanHTMLWork, at int) ([]scanFrame, error) {
+	var err error
 	// In the HTML "in column group" insertion mode, every ordinary start tag
 	// other than col/template first closes the open colgroup and is reprocessed.
 	if incoming != "col" && incoming != "template" {
-		frames = closeFrameInScope(frames, []string{"colgroup"}, []string{"table", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"colgroup"}, []string{"table", "html", "template"}, work, at)
+		if err != nil {
+			return frames, err
+		}
 	}
 	switch incoming {
 	case "li":
-		frames = closeFrameInScope(frames, []string{"li"}, []string{"ul", "ol", "menu", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"li"}, []string{"ul", "ol", "menu", "html", "template"}, work, at)
 	case "dt", "dd":
-		frames = closeFrameInScope(frames, []string{"dt", "dd"}, []string{"dl", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"dt", "dd"}, []string{"dl", "html", "template"}, work, at)
 	case "rb":
-		frames = closeFrameInScope(frames, []string{"rb", "rt", "rp", "rtc"}, []string{"ruby", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"rb", "rt", "rp", "rtc"}, []string{"ruby", "html", "template"}, work, at)
 	case "rtc":
-		frames = closeFrameInScope(frames, []string{"rb", "rt", "rp", "rtc"}, []string{"ruby", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"rb", "rt", "rp", "rtc"}, []string{"ruby", "html", "template"}, work, at)
 	case "rt", "rp":
-		frames = closeFrameInScope(frames, []string{"rb", "rt", "rp"}, []string{"ruby", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"rb", "rt", "rp"}, []string{"ruby", "html", "template"}, work, at)
 	case "option":
-		frames = closeFrameInScope(frames, []string{"option"}, []string{"select", "datalist", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"option"}, []string{"select", "datalist", "html", "template"}, work, at)
 	case "optgroup":
-		frames = closeFrameInScope(frames, []string{"option"}, []string{"select", "datalist", "html", "template"})
-		frames = closeFrameInScope(frames, []string{"optgroup"}, []string{"select", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"option"}, []string{"select", "datalist", "html", "template"}, work, at)
+		if err == nil {
+			frames, err = closeFrameInScope(frames, []string{"optgroup"}, []string{"select", "html", "template"}, work, at)
+		}
 	case "tr":
-		frames = closeFrameInScope(frames, []string{"tr"}, []string{"table", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"tr"}, []string{"table", "html", "template"}, work, at)
 	case "td", "th":
-		frames = closeFrameInScope(frames, []string{"td", "th"}, []string{"tr", "table", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"td", "th"}, []string{"tr", "table", "html", "template"}, work, at)
 	case "thead", "tbody", "tfoot":
-		frames = closeFrameInScope(frames, []string{"thead", "tbody", "tfoot"}, []string{"table", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"thead", "tbody", "tfoot"}, []string{"table", "html", "template"}, work, at)
 	case "button":
-		frames = closeFrameInScope(frames, []string{"button"}, []string{"html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"button"}, []string{"html", "template"}, work, at)
 	case "a":
-		frames = closeFrameInScope(frames, []string{"a"}, []string{"html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"a"}, []string{"html", "template"}, work, at)
 	case "h1", "h2", "h3", "h4", "h5", "h6":
-		frames = closeFrameInScope(frames, []string{"h1", "h2", "h3", "h4", "h5", "h6"}, []string{"html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"h1", "h2", "h3", "h4", "h5", "h6"}, []string{"html", "template"}, work, at)
+	}
+	if err != nil {
+		return frames, err
 	}
 	if closesParagraph(incoming) {
-		frames = closeFrameInScope(frames, []string{"p"}, []string{"button", "table", "td", "th", "html", "template"})
+		frames, err = closeFrameInScope(frames, []string{"p"}, []string{"button", "table", "td", "th", "html", "template"}, work, at)
+		if err != nil {
+			return frames, err
+		}
 	}
-	return frames
+	return frames, nil
 }
 
-func fosterParentsFromIgnoredTable(frames []scanFrame, incoming string) bool {
+func fosterParentsFromIgnoredTable(frames []scanFrame, incoming string, work *scanHTMLWork, at int) (bool, error) {
 	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return false, err
+		}
 		frame := frames[index]
 		// Caption and table cells switch the HTML parser back to ordinary body
 		// rules. Content below them stays inside the ignored subtree and must not
 		// be mistaken for foster-parented table content.
 		if frame.name == "template" || frame.name == "caption" || frame.name == "td" || frame.name == "th" {
-			return false
+			return false, nil
 		}
 		if frame.name != "table" && frame.name != "tbody" && frame.name != "tfoot" &&
 			frame.name != "thead" && frame.name != "tr" {
 			continue
 		}
 		if !frame.ignore {
-			return false
+			return false, nil
 		}
 		if allowedInTableContext(frame.name, incoming) {
-			return false
+			return false, nil
 		}
 		// Foster parenting inserts before the table. If a broader ignored
 		// ancestor encloses that table, the relocated node remains opaque. It is
 		// ambiguous only when the table region is the outermost ignored boundary.
 		for ancestor := index - 1; ancestor >= 0; ancestor-- {
+			if err := work.visitFrame(at); err != nil {
+				return false, err
+			}
 			if frames[ancestor].ignore {
-				return false
+				return false, nil
 			}
 		}
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 func allowedInTableContext(context, incoming string) bool {
@@ -477,17 +586,20 @@ func allowedInTableContext(context, incoming string) bool {
 	return false
 }
 
-func closeFrameInScope(frames []scanFrame, targets, boundaries []string) []scanFrame {
+func closeFrameInScope(frames []scanFrame, targets, boundaries []string, work *scanHTMLWork, at int) ([]scanFrame, error) {
 	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return frames, err
+		}
 		name := frames[index].name
 		if stringInSlice(name, targets) {
-			return frames[:index]
+			return frames[:index], nil
 		}
 		if stringInSlice(name, boundaries) {
-			return frames
+			return frames, nil
 		}
 	}
-	return frames
+	return frames, nil
 }
 
 func stringInSlice(value string, values []string) bool {
@@ -508,59 +620,75 @@ func closesParagraph(name string) bool {
 	}
 }
 
-func scanFramesContainTemplate(frames []scanFrame) bool {
+func scanFramesContainTemplate(frames []scanFrame, work *scanHTMLWork, at int) (bool, error) {
 	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return false, err
+		}
 		if frames[index].template {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func scanFramesContainRetain(frames []scanFrame) bool {
+func scanFramesContainRetain(frames []scanFrame, work *scanHTMLWork, at int) (bool, error) {
 	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return false, err
+		}
 		if frames[index].retain {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func scanFramesContainStructural(frames []scanFrame) bool {
+func scanFramesContainStructural(frames []scanFrame, work *scanHTMLWork, at int) (bool, error) {
 	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return false, err
+		}
 		if frames[index].structural {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func scanFramesContainIgnore(frames []scanFrame) bool {
+func scanFramesContainIgnore(frames []scanFrame, work *scanHTMLWork, at int) (bool, error) {
 	for index := len(frames) - 1; index >= 0; index-- {
+		if err := work.visitFrame(at); err != nil {
+			return false, err
+		}
 		if frames[index].ignore {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func scanOpaqueStartTag(source []byte, start int) scannedTag {
+func scanOpaqueStartTag(source []byte, start int) (scannedTag, error) {
 	tag := scannedTag{next: start + 1}
 	index := start + 1
 	if index >= len(source) || !asciiTagNameStart(source[index]) {
-		return tag
+		return tag, nil
 	}
 	nameStart := index
-	for index < len(source) && asciiTagNamePart(source[index]) {
+	for index < len(source) && htmlTagNamePart(source[index]) {
 		index++
+		if index-nameStart > scanHTMLTagNameByteLimit {
+			return scannedTag{}, fmt.Errorf("%w: tag name bytes=%d limit=%d at byte %d",
+				errHTMLScanLimit, index-nameStart, scanHTMLTagNameByteLimit, start)
+		}
 	}
-	tag.name = strings.ToLower(string(source[nameStart:index]))
+	tag.name = asciiLowerTagName(source[nameStart:index])
 	tag.next = skipTag(source, index)
 	tag.selfClosing = tagSelfClosing(source, start, tag.next)
-	return tag
+	return tag, nil
 }
 
-func scanStartTag(source []byte, start int) (scannedTag, error) {
+func scanStartTag(source []byte, start int, work *scanHTMLWork) (scannedTag, error) {
 	tag := scannedTag{next: start + 1}
 	attributes := make([]rawScannedAttribute, 0, 8)
 	index := start + 1
@@ -568,10 +696,14 @@ func scanStartTag(source []byte, start int) (scannedTag, error) {
 		return tag, nil
 	}
 	nameStart := index
-	for index < len(source) && asciiTagNamePart(source[index]) {
+	for index < len(source) && htmlTagNamePart(source[index]) {
 		index++
+		if index-nameStart > scanHTMLTagNameByteLimit {
+			return scannedTag{}, fmt.Errorf("%w: tag name bytes=%d limit=%d at byte %d",
+				errHTMLScanLimit, index-nameStart, scanHTMLTagNameByteLimit, start)
+		}
 	}
-	tag.name = strings.ToLower(string(source[nameStart:index]))
+	tag.name = asciiLowerTagName(source[nameStart:index])
 
 	for index < len(source) {
 		index = skipHTMLSpace(source, index)
@@ -580,23 +712,31 @@ func scanStartTag(source []byte, start int) (scannedTag, error) {
 		}
 		if source[index] == '>' {
 			tag.next = index + 1
-			return finalizeScannedTag(tag, attributes)
+			return finalizeScannedTag(tag, attributes, work)
 		}
 		if source[index] == '/' && index+1 < len(source) && source[index+1] == '>' {
 			tag.next = index + 2
 			tag.selfClosing = true
-			return finalizeScannedTag(tag, attributes)
+			return finalizeScannedTag(tag, attributes, work)
+		}
+		if len(attributes) >= scanHTMLAttributeLimit {
+			return scannedTag{}, fmt.Errorf("%w: tag attributes=%d limit=%d at byte %d",
+				errHTMLScanLimit, len(attributes)+1, scanHTMLAttributeLimit, index)
 		}
 
 		attributeOffset := index
 		for index < len(source) && !attributeNameDelimiter(source[index]) {
 			index++
+			if index-attributeOffset > scanHTMLAttributeNameByteLimit {
+				return scannedTag{}, fmt.Errorf("%w: attribute name bytes=%d limit=%d at byte %d",
+					errHTMLScanLimit, index-attributeOffset, scanHTMLAttributeNameByteLimit, attributeOffset)
+			}
 		}
 		if attributeOffset == index {
 			index++
 			continue
 		}
-		attributeName := strings.ToLower(string(source[attributeOffset:index]))
+		attributeName := asciiLowerAttributeName(source[attributeOffset:index])
 		index = skipHTMLSpace(source, index)
 
 		hasValue := false
@@ -625,7 +765,7 @@ func scanStartTag(source []byte, start int) (scannedTag, error) {
 	return scannedTag{}, fmt.Errorf("kitjs: unterminated <%s> tag at byte %d", tag.name, start)
 }
 
-func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute) (scannedTag, error) {
+func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute, work *scanHTMLWork) (scannedTag, error) {
 	// data-kit-ignore makes the host and its descendants opaque. Find it before
 	// validating any KitJS metadata so ignored third-party markup cannot affect
 	// dependency selection or fail a generation scan.
@@ -649,22 +789,6 @@ func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute) (scann
 				return scannedTag{}, fmt.Errorf("%w at byte %d: data-kit-component requires a value", ErrInvalidComponentUse, attribute.offset)
 			}
 			tag.component = scannedAttribute{present: true, value: attribute.value, offset: attribute.offset}
-		case "data-kit-version":
-			if tag.version.present {
-				return scannedTag{}, fmt.Errorf("%w at byte %d: duplicate data-kit-version", ErrInvalidComponentUse, attribute.offset)
-			}
-			if !attribute.hasValue {
-				return scannedTag{}, fmt.Errorf("%w at byte %d: data-kit-version requires a value", ErrInvalidComponentUse, attribute.offset)
-			}
-			tag.version = scannedAttribute{present: true, value: attribute.value, offset: attribute.offset}
-		case "data-kit-local":
-			if tag.local.present {
-				return scannedTag{}, fmt.Errorf("%w at byte %d: duplicate data-kit-local", ErrInvalidComponentUse, attribute.offset)
-			}
-			if attribute.hasValue && stdhtml.UnescapeString(attribute.value) != "" {
-				return scannedTag{}, fmt.Errorf("%w at byte %d: data-kit-local is an empty presence marker", ErrInvalidComponentUse, attribute.offset)
-			}
-			tag.local = scannedAttribute{present: true, value: attribute.value, offset: attribute.offset}
 		case "data-kit-as":
 			if tag.alias.present {
 				return scannedTag{}, fmt.Errorf("%w at byte %d: duplicate data-kit-as", ErrInvalidComponentUse, attribute.offset)
@@ -714,6 +838,11 @@ func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute) (scann
 			tag.keyDirective = scannedAttribute{present: true, value: attribute.value, offset: attribute.offset}
 			tag.structural = true
 		}
+		if authoredExpressionAttribute(attribute.name) && len(attribute.value) <= expressionAuthoredSourceByteLimit {
+			if err := work.chargeExpression(len(attribute.value), attribute.offset); err != nil {
+				return scannedTag{}, err
+			}
+		}
 		calls, err := directiveExpressionServiceCalls(attribute)
 		if err != nil {
 			return scannedTag{}, fmt.Errorf("%w at byte %d in %s: %v", ErrInvalidExpressionUse, attribute.offset, attribute.name, err)
@@ -748,7 +877,7 @@ func validateReservedAttribute(attribute rawScannedAttribute) error {
 	case "click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout":
 		return validateEventModifiers(attribute, base, parts[1:])
 	case "text", "show", "class", "bind", "style", "model", "scope", "component",
-		"version", "local", "as", "retain", "drive", "ignore", "if", "for", "key":
+		"as", "retain", "drive", "ignore", "if", "for", "key":
 		if len(parts) != 1 {
 			return fmt.Errorf("%w at byte %d: %q only permits modifiers on event attributes", ErrUnsupportedAttribute, attribute.offset, name)
 		}
@@ -837,6 +966,10 @@ func scanAttributeValue(source []byte, index int) (string, int, error) {
 		start := index
 		for index < len(source) && source[index] != quote {
 			index++
+			if index-start > scanHTMLAttributeValueByteLimit {
+				return "", index, fmt.Errorf("%w: attribute value bytes=%d limit=%d",
+					errHTMLScanLimit, index-start, scanHTMLAttributeValueByteLimit)
+			}
 		}
 		if index >= len(source) {
 			return "", index, fmt.Errorf("unterminated quoted attribute")
@@ -850,6 +983,10 @@ func scanAttributeValue(source []byte, index int) (string, int, error) {
 			return "", index, fmt.Errorf("invalid unquoted attribute value")
 		}
 		index++
+		if index-start > scanHTMLAttributeValueByteLimit {
+			return "", index, fmt.Errorf("%w: attribute value bytes=%d limit=%d",
+				errHTMLScanLimit, index-start, scanHTMLAttributeValueByteLimit)
+		}
 	}
 	if start == index {
 		return "", index, fmt.Errorf("empty unquoted attribute value")
@@ -928,11 +1065,7 @@ func skipRawTextClosed(source []byte, offset int, tagName string) (int, bool) {
 		if start < 0 {
 			return len(source), false
 		}
-		nameStart := start + 2
-		nameEnd := nameStart + len(tagName)
-		if start+2 <= len(source) && nameEnd <= len(source) && source[start+1] == '/' &&
-			strings.EqualFold(string(source[nameStart:nameEnd]), tagName) &&
-			(nameEnd == len(source) || htmlSpace(source[nameEnd]) || source[nameEnd] == '>') {
+		if nameEnd, matches := rawTextClosingTagName(source, start, len(source), tagName); matches {
 			return skipTag(source, nameEnd), true
 		}
 		offset = start + 1
@@ -1016,10 +1149,10 @@ func deliveryHeadOffset(source []byte) (int, error) {
 			continue
 		}
 		nameStart := index
-		for index < contentEnd && asciiTagNamePart(source[index]) {
+		for index < contentEnd && htmlTagNamePart(source[index]) {
 			index++
 		}
-		name := strings.ToLower(string(source[nameStart:index]))
+		name := asciiLowerTagName(source[nameStart:index])
 		next := skipDeliveryTag(source, index)
 		if next > contentEnd {
 			next = contentEnd
@@ -1149,10 +1282,10 @@ func deliveryHeadStart(source []byte) (int, error) {
 			return deliveryHeadBoundary(controlStart, start), nil
 		}
 		nameStart := index
-		for index < len(source) && asciiTagNamePart(source[index]) {
+		for index < len(source) && htmlTagNamePart(source[index]) {
 			index++
 		}
-		name := strings.ToLower(string(source[nameStart:index]))
+		name := asciiLowerTagName(source[nameStart:index])
 		next := skipDeliveryTag(source, index)
 		if next == len(source) && (len(source) == 0 || source[len(source)-1] != '>') {
 			return deliveryHeadBoundary(controlStart, start), nil
@@ -1250,10 +1383,10 @@ func deliveryEffectiveHeadEnd(source []byte, contentStart int) (int, error) {
 			return start, nil
 		}
 		nameStart := index
-		for index < len(source) && asciiTagNamePart(source[index]) {
+		for index < len(source) && htmlTagNamePart(source[index]) {
 			index++
 		}
-		name := strings.ToLower(string(source[nameStart:index]))
+		name := asciiLowerTagName(source[nameStart:index])
 		next := skipDeliveryTag(source, index)
 		if next == len(source) && (len(source) == 0 || source[len(source)-1] != '>') {
 			if templateDepth > 0 {
@@ -1493,10 +1626,10 @@ func validateDeliveryTemplateStructure(source []byte, start, end int, opaqueWhol
 			continue
 		}
 		nameStart := index
-		for index < end && asciiTagNamePart(source[index]) {
+		for index < end && htmlTagNamePart(source[index]) {
 			index++
 		}
-		name := strings.ToLower(string(source[nameStart:index]))
+		name := asciiLowerTagName(source[nameStart:index])
 		next := skipDeliveryTag(source, index)
 		if next > end {
 			next = end
@@ -1567,10 +1700,10 @@ func deliveryTemplateClose(source []byte, offset, end int) (int, int, bool) {
 			continue
 		}
 		nameStart := index
-		for index < end && asciiTagNamePart(source[index]) {
+		for index < end && htmlTagNamePart(source[index]) {
 			index++
 		}
-		name := strings.ToLower(string(source[nameStart:index]))
+		name := asciiLowerTagName(source[nameStart:index])
 		next := skipDeliveryTag(source, index)
 		if next > end {
 			return 0, 0, false
@@ -1609,11 +1742,7 @@ func deliveryRawTextClose(source []byte, offset, end int, tagName string) (int, 
 		if start < 0 {
 			return 0, 0, false
 		}
-		nameStart := start + 2
-		nameEnd := nameStart + len(tagName)
-		if start+2 <= end && nameEnd <= end && source[start+1] == '/' &&
-			strings.EqualFold(string(source[nameStart:nameEnd]), tagName) &&
-			(nameEnd == end || htmlSpace(source[nameEnd]) || source[nameEnd] == '>') {
+		if nameEnd, matches := rawTextClosingTagName(source, start, end, tagName); matches {
 			next := skipDeliveryTag(source, nameEnd)
 			if next <= end {
 				return start, next, true
@@ -1623,6 +1752,21 @@ func deliveryRawTextClose(source []byte, offset, end int, tagName string) (int, 
 		offset = start + 1
 	}
 	return 0, 0, false
+}
+
+func rawTextClosingTagName(source []byte, start, end int, expected string) (int, bool) {
+	if start < 0 || start+2 > end || end > len(source) || source[start] != '<' || source[start+1] != '/' {
+		return 0, false
+	}
+	index := start + 2
+	if index >= end || !asciiTagNameStart(source[index]) {
+		return 0, false
+	}
+	nameStart := index
+	for index < end && htmlTagNamePart(source[index]) {
+		index++
+	}
+	return index, asciiLowerTagName(source[nameStart:index]) == expected
 }
 
 func validateDeliveryOpaqueTokens(source []byte, start, end int) error {
@@ -1719,7 +1863,7 @@ func deliveryHeadAttributes(source []byte, index, next int) (map[string]delivery
 			index++
 			continue
 		}
-		name := strings.ToLower(string(source[attributeStart:index]))
+		name := asciiLowerAttributeName(source[attributeStart:index])
 		attribute := deliveryHeadAttribute{}
 		index = skipHTMLSpace(source, index)
 		if index < end && source[index] == '=' {
@@ -1754,12 +1898,12 @@ func deliveryHeadAttributes(source []byte, index, next int) (map[string]delivery
 
 func deliveryMetaSecurity(attributes map[string]deliveryHeadAttribute) (bool, bool) {
 	_, charset := attributes["charset"]
-	httpEquiv := strings.ToLower(strings.TrimSpace(stdhtml.UnescapeString(attributes["http-equiv"].value)))
+	httpEquiv := strings.ToLower(strings.TrimSpace(htmlattr.Decode(attributes["http-equiv"].value)))
 	if httpEquiv == "content-security-policy" {
 		return charset, true
 	}
 	if httpEquiv == "content-type" {
-		content := strings.ToLower(stdhtml.UnescapeString(attributes["content"].value))
+		content := strings.ToLower(htmlattr.Decode(attributes["content"].value))
 		charset = charset || strings.Contains(content, "charset=")
 	}
 	return charset, false
@@ -1791,10 +1935,10 @@ func hasRuntimeMarkerAttribute(source []byte) bool {
 			continue
 		}
 		nameStart := index
-		for index < len(source) && asciiTagNamePart(source[index]) {
+		for index < len(source) && htmlTagNamePart(source[index]) {
 			index++
 		}
-		name := strings.ToLower(string(source[nameStart:index]))
+		name := asciiLowerTagName(source[nameStart:index])
 		next := skipTag(source, index)
 		end := next
 		if end > 0 && end <= len(source) && source[end-1] == '>' {
@@ -1817,7 +1961,7 @@ func hasRuntimeMarkerAttribute(source []byte) bool {
 			for index < end && !attributeNameDelimiter(source[index]) {
 				index++
 			}
-			attributeName := strings.ToLower(string(source[attributeStart:index]))
+			attributeName := asciiLowerAttributeName(source[attributeStart:index])
 			index = skipHTMLSpace(source, index)
 			if index >= end || source[index] != '=' {
 				if reservedDeliveryMarker(name, attributeName, "", false) {
@@ -1878,7 +2022,7 @@ func reservedDeliveryMarker(tagName, attributeName, value string, hasValue bool)
 		if tagName != "script" || !hasValue {
 			return false
 		}
-		role := strings.ToLower(strings.TrimSpace(stdhtml.UnescapeString(value)))
+		role := strings.ToLower(strings.TrimSpace(htmlattr.Decode(value)))
 		switch JITRole(role) {
 		case JITRoleRuntime, JITRoleHydrate, JITRoleGraph, JITRoleService, JITRoleComponent, JITRoleComponents:
 			return true
@@ -1897,7 +2041,7 @@ func rawTextElement(name string) bool {
 }
 
 func parseComponentSpec(raw string) (string, string, error) {
-	decoded := stdhtml.UnescapeString(raw)
+	decoded := htmlattr.Decode(raw)
 	spec := trimECMAScriptSpace(decoded)
 	if spec == "" {
 		return "", "", fmt.Errorf("empty data-kit-component value")
@@ -1919,16 +2063,8 @@ func parseComponentSpec(raw string) (string, string, error) {
 	return name, version, nil
 }
 
-func parseExactVersion(raw string) (string, error) {
-	version := trimECMAScriptSpace(stdhtml.UnescapeString(raw))
-	if !validExactSemVer(version) {
-		return "", fmt.Errorf("requires an exact SemVer, got %q", trimECMAScriptSpace(stdhtml.UnescapeString(raw)))
-	}
-	return version, nil
-}
-
 func parseRetainKey(raw string) (string, error) {
-	key := stdhtml.UnescapeString(raw)
+	key := htmlattr.Decode(raw)
 	if !validRetainKey(key) {
 		return "", fmt.Errorf("invalid data-kit-retain value %q", key)
 	}
@@ -2058,8 +2194,41 @@ func asciiTagNameStart(char byte) bool {
 	return (char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')
 }
 
-func asciiTagNamePart(char byte) bool {
-	return asciiTagNameStart(char) || (char >= '0' && char <= '9') || char == ':' || char == '-'
+// htmlTagNamePart mirrors the HTML tokenizer's tag-name state after the
+// required ASCII-alpha opener. ASCII whitespace, slash, and greater-than end
+// the name; every other input byte belongs to it. In particular, punctuation,
+// NUL, and non-ASCII bytes must not turn a custom script-like tag into the
+// actual raw-text element "script".
+func htmlTagNamePart(char byte) bool {
+	return !htmlSpace(char) && char != '/' && char != '>'
+}
+
+// asciiLowerHTMLName applies only the ASCII case folding performed by the HTML
+// tokenizer for tag and attribute names. Keeping every other byte unchanged
+// prevents Go's Unicode case folding from merging an identity that the browser
+// keeps distinct (for example, the Kelvin sign must not become ASCII "k").
+func asciiLowerHTMLName(source []byte) string {
+	for index, char := range source {
+		if char < 'A' || char > 'Z' {
+			continue
+		}
+		lowered := append([]byte(nil), source...)
+		for tail := index; tail < len(lowered); tail++ {
+			if lowered[tail] >= 'A' && lowered[tail] <= 'Z' {
+				lowered[tail] += 'a' - 'A'
+			}
+		}
+		return string(lowered)
+	}
+	return string(source)
+}
+
+func asciiLowerTagName(source []byte) string {
+	return asciiLowerHTMLName(source)
+}
+
+func asciiLowerAttributeName(source []byte) string {
+	return asciiLowerHTMLName(source)
 }
 
 func attributeNameDelimiter(char byte) bool {

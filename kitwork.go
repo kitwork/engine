@@ -170,6 +170,12 @@ func Run(configFile ...string) (err error) {
 	if directory := bytecodeCacheDirectory(cfg); directory != "" {
 		handler.SetBytecodeCache(directory)
 	}
+	if cfg.Search.CollectionCanary {
+		if err := handler.SetCollectionSearchCanary(true); err != nil {
+			return fmt.Errorf("configure collection search canary: %w", err)
+		}
+		slog.Info("Collection search segment canary enabled")
+	}
 
 	// Client-IP source: as the edge server Kitwork ignores X-Forwarded-For by default (spoofable);
 	// trust_proxy: true opts in when running behind your own reverse proxy.

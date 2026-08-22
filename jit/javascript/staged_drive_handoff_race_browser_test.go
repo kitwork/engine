@@ -196,16 +196,16 @@ func stagedDriveRaceDocument(
 <a id="to-slow" href="/slow">Slow</a>
 <a id="to-fast" href="/fast">Fast</a>
 </nav><main id="race-route">` + html.EscapeString(route) + `</main>
-<section data-kit-component="race-base" data-kit-version="1.0.0">
+<section data-kit-component="race-base@1.0.0">
   <output id="race-base" data-kit-text="ready">server-base</output>
 </section>`)
 	if route == "slow" {
-		output.WriteString(`<section data-kit-component="race-slow" data-kit-version="1.0.0">
+		output.WriteString(`<section data-kit-component="race-slow@1.0.0">
   <output id="race-slow" data-kit-text="ready">server-slow</output>
 </section>`)
 	}
 	if route == "fast" {
-		output.WriteString(`<section data-kit-component="race-fast" data-kit-version="1.0.0">
+		output.WriteString(`<section data-kit-component="race-fast@1.0.0">
   <output id="race-fast" data-kit-text="ready">server-fast</output>
 </section>`)
 	}

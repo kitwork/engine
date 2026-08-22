@@ -63,6 +63,8 @@ func TestRenderAutoScan(t *testing.T) {
 		`<head></head><body><div data-kit-component=' theme '></div></body>`,
 		`<head></head><body><main data-kit-component="app@1.1.0" data-kit-as="$app"></main></body>`,
 		`<head></head><body><div data-kit-component='theme@3.0.0'></div></body>`,
+		`<head></head><body><div data-kit-component='th&#101;me@3.0.0'></div></body>`,
+		`<head></head><body><button data-kitwork-action='th&#101;me'></button></body>`,
 		`<head></head><body><main data-kit-component="&#xfeff;app@1.1.0" data-kit-as="$app"></main></body>`,
 		`<head></head><body><div data-kit-component='&#x1680;theme&#x3000;'></div></body>`,
 		`<head></head><body><button data-kit-click="$app . appearance . toggle()"></button></body>`,
@@ -80,6 +82,10 @@ func TestRenderDoesNotConfuseAppearanceLookalikes(t *testing.T) {
 		`<head></head><body><div data-kit-component="&#x85;theme&#x85;"></div></body>`,
 		`<head></head><body><code>$application.appearance.toggle()</code></body>`,
 		`<head></head><body><div data-kit-action="themed"></div></body>`,
+		`<head></head><body><p>kit&#46;theme</p></body>`,
+		`<head></head><body><script>kit&#46;theme</script></body>`,
+		`<head></head><body><div data-kit-component="th&notit;eme"></div></body>`,
+		`<head></head><body><button data-kit-action="th&notit;eme"></button></body>`,
 	} {
 		if Render(html) != html {
 			t.Errorf("appearance lookalike triggered pre-paint: %s", html)

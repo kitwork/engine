@@ -25,7 +25,10 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
+func (t *Tenant) serveTree(
+	requestScope *requestscope.Scope,
+	streamDetached *bool,
+) {
 	w := requestScope.Writer()
 	r := requestScope.Request()
 	tree := t.routeTree()
@@ -112,10 +115,17 @@ func (t *Tenant) serveTree(requestScope *requestscope.Scope) {
 			t.saveResponse(savMethod, savKey, reqRouter.response)
 		}
 		if reqRouter.response.Kind() == "sse" {
-			// Streaming can remain open for hours. The SSE response retains only
-			// Go-native broker state, so the request VM can return to the pool now.
-			requestScope.ReleaseVM()
-			reqRouter.streamSSE(w)
+			reqRouter.streamSSE(w, func() {
+				// Streaming can remain open for hours and belongs to the site
+				// broker, not to the request or generation that configured it.
+				// streamSSE invokes this only after the broker accepts the client,
+				// so site shutdown can always disconnect the detached stream.
+				requestScope.Close()
+				if streamDetached != nil && !*streamDetached {
+					*streamDetached = true
+					t.endRequest()
+				}
+			})
 		} else {
 			reqRouter.responder(w)
 		}

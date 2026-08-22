@@ -5,6 +5,8 @@
   if (!core || core.phase !== "core") throw new Error("KitJS: lexer loaded out of order");
   if (core.reuse) { core.phase = "lexer"; return; }
 
+  var TOKEN_LIMIT = 32768;
+
   function space(character) {
     return character === " " || character === "\t" || character === "\n" ||
       character === "\r" || character === "\f";
@@ -20,6 +22,9 @@
     var tokens = [];
     var index = 0;
     function token(type, value, position) {
+      if (tokens.length >= TOKEN_LIMIT) {
+        core.syntax("expression exceeds " + TOKEN_LIMIT + " tokens", source, position);
+      }
       tokens.push({ type: type, value: value, position: position });
     }
 

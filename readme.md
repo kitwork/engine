@@ -178,7 +178,20 @@ const makeUser = (id) => ({ id: id, role: "member" });
 const makeUser = (id) => { id: id, role: "member" };
 ```
 
-#### 5. Native Native Import Resolution (ESM)
+#### 5. Bounded Control Flow
+`switch` follows JavaScript case matching and fallthrough without adding a VM opcode. `break;` exits the nearest `switch` or bounded `for` loop; labels and `continue` remain outside the subset.
+```javascript
+switch (status) {
+case "draft":
+case "review":
+    publish(status);
+    break;
+default:
+    log.info("nothing to publish");
+}
+```
+
+#### 6. Native Import Resolution (ESM)
 Modules are resolved directly by the engine's built-in bundler without Node.js or external toolchains:
 ```javascript
 import { router, database } from "kitwork"
@@ -191,7 +204,6 @@ import { formatCurrency } from "./_core/utils.js"
 | :--- | :--- | :--- |
 | `while`, `do-while` | Eliminates infinite / unbounded compute loops on host threads | `.map()`, `.filter()`, `.find()`, `.reduce()` |
 | `try` / `catch` / `throw` | Avoids hidden control-flow jumps; forces explicit error returns | Explicit checks, `safe()` wrappers, `.catch()` |
-| `switch` | Simplifies VM opcode tree; encourages lookup maps | `if / else if / else` or object lookup dictionaries |
 | `class` / `this` | Data remains pure data; behavior is composition of functions | Object literals and factory arrow functions |
 
 ---
@@ -473,15 +485,39 @@ Before deploying tenant code to production, run preflight validation to verify r
 go run . check
 ```
 
-Or run test suites inside the `engine/` directory:
+Profile every executable Program or inspect one source instruction by
+instruction without executing tenant code:
+
+```bash
+go run . profile --json
+go run . inspect apps/<identity>/<domain>/router.kitwork.js
+go run . inspect apps/<identity>/<domain>/router.kitwork.js --json
+```
+
+The language conformance corpus independently verifies accepted behavior,
+structured diagnostics, and rejected syntax across artifact, fresh, reused,
+and pooled VM boundaries:
 
 ```bash
 cd engine
-go build ./...
-go test ./...
-go vet ./...
-go test -race ./...
+go test ./conformance -run TestLanguageConformanceCorpus -count=1
+go test ./compatibility -run TestVMV2CompatibilityArchive -count=1
+go test ./runtime -run ^TestVMFaultGauntlet -count=1
 ```
+
+Inside the `engine/` directory, run the repeatable verification gate:
+
+```bash
+cd engine
+go run ./cmd/releasegate --mode verify --report .artifacts/verify.json
+```
+
+VM v2 compatibility is frozen in [`docs/VM_V2_FREEZE.md`](docs/VM_V2_FREEZE.md)
+and backed by committed Program evidence in [`compatibility/`](compatibility/).
+The complete cross-platform release gate, 24 to 72 hour canary, and promotion
+criteria are documented in [`docs/RELEASE.md`](docs/RELEASE.md). Operational
+snapshots and private diagnostic bundles are specified in
+[`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md).
 
 ---
 

@@ -12,7 +12,7 @@ import (
 // Collections end to end through a real tenant VM:
 //   - collection.open("posts") resolves the blessed _collection/posts home (bare-name sugar)
 //   - where/orderBy/limit chain runs on the frontmatter index (draft excluded, date-desc, paged)
-//   - search() hits the FTS5 projection: Vietnamese WITHOUT diacritics finds accented documents
+//   - search() hits the BM25 term projection: Vietnamese WITHOUT diacritics finds accented documents
 //   - one broken-frontmatter file is skipped, never taking down the listing
 func TestCollectionQueryAndSearchE2E(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-coll-*")
@@ -96,7 +96,7 @@ func TestCollectionQueryAndSearchE2E(t *testing.T) {
 
 	// The projection database landed in the tenant's .data (disposable, gitignored).
 	if _, err := os.Stat(filepath.Join(dir, ".data", "collection.db")); err != nil {
-		t.Errorf("FTS projection .data/collection.db missing: %v", err)
+		t.Errorf("search projection .data/collection.db missing: %v", err)
 	}
 }
 
@@ -147,5 +147,14 @@ func TestCollectionSearchResync(t *testing.T) {
 	}
 	if strings.Contains(body, `"alpha":[{`) {
 		t.Errorf("after edit: stale 'alpha' still matches (old row not replaced); body: %s", body)
+	}
+
+	// Delete the source document. A whole-index rebuild must remove its posting lists and hydrated row.
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	body = serve()
+	if strings.Contains(body, `"beta":[{`) {
+		t.Errorf("after delete: stale 'beta' still matches; body: %s", body)
 	}
 }

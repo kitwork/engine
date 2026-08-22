@@ -97,8 +97,15 @@ func TemplateHTML(s string) (string, bool) {
 	return out, err == nil
 }
 
-func CSS(s string) string  { return Type("css", s) }
-func JS(s string) string   { return Type("js", s) }
+func CSS(s string) string { return Type("css", s) }
+func JS(s string) string  { return Type("js", s) }
+
+// JSStrict minifies JavaScript and reports parser failures instead of silently returning the
+// readable input. Use it when minified bytes form an immutable artifact identity.
+func JSStrict(s string) (string, error) {
+	return shared.String(media["js"], s)
+}
+
 func JSON(s string) string { return Type("json", s) }
 func SVG(s string) string  { return Type("svg", s) }
 func XML(s string) string  { return Type("xml", s) }

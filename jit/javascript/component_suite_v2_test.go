@@ -116,7 +116,7 @@ func TestComponentSuiteV2ExactHTMLScanMatchesExplicitSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, contract := range componentSuiteV2Contracts {
-		html := []byte(`<main data-kit-component="` + contract.name + `" data-kit-version="1.0.0"></main>`)
+		html := []byte(`<main data-kit-component="` + contract.name + `@1.0.0"></main>`)
 		use, err := ScanHTML(html)
 		if err != nil {
 			t.Fatal(err)
@@ -179,7 +179,7 @@ func TestBrowserComponentSuiteV2StateAndDirectiveContract(t *testing.T) {
 
 var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS component suite v2</title></head><body>
-  <section data-kit-component="alert" data-kit-version="1.0.0">
+  <section data-kit-component="alert@1.0.0">
     <button id="alert-show" data-kit-click="show('Saved', 'success')">Show alert</button>
     <button id="alert-invalid" data-kit-click="show('Still saved', 'loud')">Invalid tone</button>
     <button id="alert-dismiss" data-kit-click="dismiss()">Dismiss</button>
@@ -187,14 +187,14 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
     <output id="alert-tone" data-kit-text="tone"></output>
   </section>
 
-  <section data-kit-component="switch" data-kit-version="1.0.0">
+  <section data-kit-component="switch@1.0.0">
     <button id="switch-toggle" role="switch" data-kit-click="toggle()" data-kit-bind="'aria-checked': checked;">Switch</button>
     <button id="switch-off" data-kit-click="off()">Off</button>
     <button id="switch-disable" data-kit-click="disabled = true">Disable</button>
     <output id="switch-state" data-kit-text="checked ? 'on' : 'off'"></output>
   </section>
 
-  <section data-kit-component="pagination" data-kit-version="1.0.0" data-kit-scope="page: 1; pages: 3">
+  <section data-kit-component="pagination@1.0.0" data-kit-scope="page: 1; pages: 3">
     <button id="page-next" data-kit-click="next()">Next</button>
     <button id="page-last" data-kit-click="last()">Last</button>
     <button id="page-bad" data-kit-click="select('bad')">Bad</button>
@@ -203,7 +203,7 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
     <output id="page-can-next" data-kit-text="canNext() ? 'yes' : 'no'"></output>
   </section>
 
-  <section data-kit-component="carousel" data-kit-version="1.0.0" data-kit-scope="slides: ['one', 'two', 'three']; active: 0">
+  <section data-kit-component="carousel@1.0.0" data-kit-scope="slides: ['one', 'two', 'three']; active: 0">
     <button id="carousel-next" data-kit-click="next()">Next</button>
     <button id="carousel-previous" data-kit-click="previous()">Previous</button>
     <button id="carousel-last" data-kit-click="last()">Last</button>
@@ -212,7 +212,7 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
     <output id="carousel-state" data-kit-text="active"></output>
   </section>
 
-  <section data-kit-component="popover" data-kit-version="1.0.0">
+  <section data-kit-component="popover@1.0.0">
     <button id="popover-toggle" data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;">Popover</button>
     <button id="popover-top" data-kit-click="place('top')">Top</button>
     <button id="popover-bad" data-kit-click="place('center')">Bad placement</button>
@@ -220,20 +220,20 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
     <output id="popover-placement" data-kit-text="placement"></output>
   </section>
 
-  <section data-kit-component="tooltip" data-kit-version="1.0.0">
+  <section data-kit-component="tooltip@1.0.0">
     <button id="tooltip-show" data-kit-click="show('Copied')">Show tooltip</button>
     <button id="tooltip-toggle" data-kit-click="toggle()">Toggle tooltip</button>
     <div id="tooltip-panel" role="tooltip" data-kit-show="open" data-kit-text="content" hidden></div>
   </section>
 
-  <section data-kit-component="toast" data-kit-version="1.0.0">
+  <section data-kit-component="toast@1.0.0">
     <button id="toast-show" data-kit-click="show('Uploaded', 'warning')">Show toast</button>
     <button id="toast-dismiss" data-kit-click="dismiss()">Dismiss toast</button>
     <div id="toast-panel" role="status" data-kit-show="visible" hidden><span id="toast-message" data-kit-text="message"></span></div>
     <output id="toast-tone" data-kit-text="tone"></output>
   </section>
 
-  <section data-kit-component="drawer" data-kit-version="1.0.0">
+  <section data-kit-component="drawer@1.0.0">
     <button id="drawer-show" data-kit-click="show()">Show drawer</button>
     <button id="drawer-left" data-kit-click="place('left')">Left</button>
     <button id="drawer-bad" data-kit-click="place('middle')">Bad side</button>

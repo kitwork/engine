@@ -43,16 +43,16 @@ func TestBrowserDrivePreservesCompatibleDocumentRootAndRejectsBoundaryDrift(t *t
 		switch request.URL.Path {
 		case "/drive-root-component":
 			source = driveRootRejectedDocument(assetPath, assetIntegrity,
-				`data-kit-component="shell" data-kit-version="1.0.0" data-kit-as="$app" data-kit-scope="{ count: 0 }"`)
+				`data-kit-component="shell@1.0.0" data-kit-as="$app" data-kit-scope="{ count: 0 }"`)
 		case "/drive-root-version":
 			source = driveRootRejectedDocument(assetPath, assetIntegrity,
-				`data-kit-component="app" data-kit-version="2.0.0" data-kit-as="$app" data-kit-scope="{ count: 0 }"`)
+				`data-kit-component="app@2.0.0" data-kit-as="$app" data-kit-scope="{ count: 0 }"`)
 		case "/drive-root-alias":
 			source = driveRootRejectedDocument(assetPath, assetIntegrity,
-				`data-kit-component="app" data-kit-version="1.0.0" data-kit-as="$other" data-kit-scope="{ count: 0 }"`)
+				`data-kit-component="app@1.0.0" data-kit-as="$other" data-kit-scope="{ count: 0 }"`)
 		case "/drive-root-scope":
 			source = driveRootRejectedDocument(assetPath, assetIntegrity,
-				`data-kit-component="app" data-kit-version="1.0.0" data-kit-as="$app" data-kit-scope="{ count: 99 }"`)
+				`data-kit-component="app@1.0.0" data-kit-as="$app" data-kit-scope="{ count: 99 }"`)
 		case "/drive-root-removed":
 			source = driveRootRejectedDocument(assetPath, assetIntegrity, "")
 		case "/drive-root-unknown":
@@ -102,7 +102,7 @@ func buildDriveRootBoundaryArtifact(t *testing.T) Artifact {
 
 func driveRootInitialDocument(assetPath, assetIntegrity string) string {
 	return fmt.Sprintf(`<!doctype html>
-<html lang="en" data-kit-component=" app " data-kit-version=" 1.0.0 " data-kit-as=" $app " data-kit-scope=" { count: 0 } ">
+<html lang="en" data-kit-component=" app@1.0.0" data-kit-as=" $app " data-kit-scope=" { count: 0 } ">
 <head>
   <meta charset="utf-8">
   <meta name="description" content="Root initial">
@@ -121,7 +121,7 @@ func driveRootInitialDocument(assetPath, assetIntegrity string) string {
 
 func driveRootSameDocument(assetPath, assetIntegrity string) string {
 	return fmt.Sprintf(`<!doctype html>
-<html lang="vi" data-kit-component="app" data-kit-version="1.0.0" data-kit-as="$app" data-kit-scope="{ count: 0 }">
+<html lang="vi" data-kit-component="app@1.0.0" data-kit-as="$app" data-kit-scope="{ count: 0 }">
 <head>
   <meta charset="utf-8">
   <meta name="description" content="Root accepted">
@@ -186,7 +186,7 @@ const driveRootBoundaryAssertions = `__runStandaloneKitTest(async function () {
   }, "compatible document-root boundary did not commit with live state");
   assert(document.documentElement === root, "Drive replaced a compatible document root");
   assert(globalThis.__driveRootInitCount === 1, "Drive reinitialized a compatible document-root component");
-  assert(document.documentElement.getAttribute("data-kit-component") === " app ",
+  assert(document.documentElement.getAttribute("data-kit-component") === " app@1.0.0",
     "Drive reconciled document-root component metadata");
   assert(document.title === "Root accepted" &&
     document.querySelector('meta[name="description"]').content === "Root accepted" &&

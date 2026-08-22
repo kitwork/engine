@@ -31,6 +31,12 @@ type Compiler struct {
 	currentPos    int32
 
 	sourceFingerprint string
+	breakFrames       []compilerBreakFrame
+}
+
+type compilerBreakFrame struct {
+	cleanup int
+	jumps   []int
 }
 
 func NewCompiler(source ...string) *Compiler {
@@ -112,6 +118,10 @@ func getNodePosition(node Node) int32 {
 		return n.Token.Position
 	case *ReturnStatement:
 		return n.Token.Position
+	case *BreakStatement:
+		return n.Token.Position
+	case *SwitchStatement:
+		return n.Token.Position
 	case *ForStatement:
 		return n.Token.Position
 	case *ForRangeStatement:
@@ -178,6 +188,10 @@ func getNodeSource(node Node) string {
 	case *BlockStatement:
 		return n.Token.Source
 	case *ReturnStatement:
+		return n.Token.Source
+	case *BreakStatement:
+		return n.Token.Source
+	case *SwitchStatement:
 		return n.Token.Source
 	case *ForStatement:
 		return n.Token.Source
@@ -514,8 +528,16 @@ func (c *Compiler) Compile(node Node) error {
 			c.patchUint16(falsePos+1, uint16(len(c.instructions)))
 		}
 
+	case *SwitchStatement:
+		return c.compileSwitchStatement(n)
+
+	case *BreakStatement:
+		return c.compileBreakStatement()
+
 	case *ForStatement:
-		c.Compile(n.Iterable)
+		if err := c.Compile(n.Iterable); err != nil {
+			return err
+		}
 		constZero := c.addConstant(value.New(0))
 		c.emit(runtime.PUSH, byte(constZero>>8), byte(constZero&0xFF))
 		loopStart := len(c.instructions)
@@ -523,9 +545,16 @@ func (c *Compiler) Compile(node Node) error {
 		symbolIndex := c.addConstant(value.NewString(n.Item.Value))
 		c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		c.emit(runtime.POP)
-		c.Compile(n.Body)
+		c.pushBreakFrame(2)
+		bodyErr := c.Compile(n.Body)
+		breakJumps := c.popBreakFrame()
+		if bodyErr != nil {
+			return bodyErr
+		}
 		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
-		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
+		loopEnd := len(c.instructions)
+		c.patchUint16(exitJump+1, uint16(loopEnd))
+		c.patchBreakJumps(breakJumps, loopEnd)
 
 	case *ForRangeStatement:
 		// Counting loop, compiled to a plain condition-jump — bounded by construction because the
@@ -540,8 +569,11 @@ func (c *Compiler) Compile(node Node) error {
 			return err
 		}
 		exitJump := c.emit(runtime.FALSE, 0, 0)
-		if err := c.Compile(n.Body); err != nil {
-			return err
+		c.pushBreakFrame(0)
+		bodyErr := c.Compile(n.Body)
+		breakJumps := c.popBreakFrame()
+		if bodyErr != nil {
+			return bodyErr
 		}
 		//   update: i = i + 1      (AssignmentExpression leaves its value on the stack → POP it)
 		if err := c.Compile(n.Update); err != nil {
@@ -549,11 +581,15 @@ func (c *Compiler) Compile(node Node) error {
 		}
 		c.emit(runtime.POP)
 		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
-		c.patchUint16(exitJump+1, uint16(len(c.instructions)))
+		loopEnd := len(c.instructions)
+		c.patchUint16(exitJump+1, uint16(loopEnd))
+		c.patchBreakJumps(breakJumps, loopEnd)
 
 	case *BlockStatement:
 		for _, s := range n.Statements {
-			c.Compile(s)
+			if err := c.Compile(s); err != nil {
+				return err
+			}
 		}
 
 	case *ReturnStatement:
@@ -575,11 +611,22 @@ func (c *Compiler) Compile(node Node) error {
 
 	case *ObjectLiteral:
 		c.emit(runtime.MAKE, 0)
-		for _, entry := range n.Entries {
+		for index, entry := range n.Entries {
 			if entry.IsSpread {
-				c.Compile(entry.Value)
+				if entry.Value == nil {
+					return fmt.Errorf("compiler: object spread %d has no value", index+1)
+				}
+				if err := c.Compile(entry.Value); err != nil {
+					return err
+				}
 				c.emit(runtime.MERGE)
 			} else {
+				if entry.Key == nil {
+					return fmt.Errorf("compiler: object entry %d has no key", index+1)
+				}
+				if entry.Value == nil {
+					return fmt.Errorf("compiler: object entry %d has no value", index+1)
+				}
 				c.emit(runtime.DUP)
 				// Nếu key là Identifier, ta coi như chuỗi (JS style: { name: "..." })
 				if id, ok := entry.Key.(*Identifier); ok {
@@ -588,9 +635,13 @@ func (c *Compiler) Compile(node Node) error {
 					c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
 				} else {
 					nameFunction(entry.Value, entry.Key.String())
-					c.Compile(entry.Key)
+					if err := c.Compile(entry.Key); err != nil {
+						return err
+					}
 				}
-				c.Compile(entry.Value)
+				if err := c.Compile(entry.Value); err != nil {
+					return err
+				}
 				c.emit(runtime.SET)
 				c.emit(runtime.POP) // Loại bỏ giá trị dư từ SET (SET đẩy lại target lên stack)
 			}
@@ -631,8 +682,12 @@ func (c *Compiler) Compile(node Node) error {
 	case *FunctionLiteral:
 		jumpOver := c.emit(runtime.JUMP, 0, 0)
 		startIP := len(c.instructions)
-		if err := c.Compile(n.Body); err != nil {
-			return err
+		outerBreakFrames := c.breakFrames
+		c.breakFrames = nil
+		bodyErr := c.Compile(n.Body)
+		c.breakFrames = outerBreakFrames
+		if bodyErr != nil {
+			return bodyErr
 		}
 		c.emit(runtime.RETURN)
 		endIP := len(c.instructions)
@@ -686,6 +741,117 @@ func (c *Compiler) Compile(node Node) error {
 	return nil
 }
 
+func (c *Compiler) compileSwitchStatement(statement *SwitchStatement) error {
+	if statement == nil || statement.Discriminant == nil {
+		return fmt.Errorf("compiler: switch discriminant is required")
+	}
+	if err := c.Compile(statement.Discriminant); err != nil {
+		return err
+	}
+
+	caseDispatchJumps := make([]int, len(statement.Cases))
+	for index := range caseDispatchJumps {
+		caseDispatchJumps[index] = -1
+	}
+	defaultIndex := -1
+	for index, clause := range statement.Cases {
+		if clause.Test == nil {
+			if defaultIndex >= 0 {
+				return fmt.Errorf("compiler: switch has multiple default clauses")
+			}
+			defaultIndex = index
+			continue
+		}
+		c.emit(runtime.DUP)
+		if err := c.Compile(clause.Test); err != nil {
+			return err
+		}
+		c.emit(runtime.COMPARE, 0)
+		caseDispatchJumps[index] = c.emit(runtime.TRUE, 0, 0)
+	}
+
+	// Both matched and unmatched dispatch paths discard the single discriminant
+	// before entering a body, so fallthrough bodies all share one stack shape.
+	c.emit(runtime.POP)
+	noMatchJump := c.emit(runtime.JUMP, 0, 0)
+	bodyDispatchJumps := make([]int, len(statement.Cases))
+	for index := range bodyDispatchJumps {
+		bodyDispatchJumps[index] = -1
+	}
+	for index, dispatchJump := range caseDispatchJumps {
+		if dispatchJump < 0 {
+			continue
+		}
+		c.patchUint16(dispatchJump+1, uint16(len(c.instructions)))
+		c.emit(runtime.POP)
+		bodyDispatchJumps[index] = c.emit(runtime.JUMP, 0, 0)
+	}
+
+	bodyPositions := make([]int, len(statement.Cases))
+	c.pushBreakFrame(0)
+	var bodyErr error
+	for index, clause := range statement.Cases {
+		bodyPositions[index] = len(c.instructions)
+		for _, caseStatement := range clause.Statements {
+			if err := c.Compile(caseStatement); err != nil {
+				bodyErr = err
+				break
+			}
+		}
+		if bodyErr != nil {
+			break
+		}
+	}
+	breakJumps := c.popBreakFrame()
+	if bodyErr != nil {
+		return bodyErr
+	}
+
+	switchEnd := len(c.instructions)
+	for index, bodyJump := range bodyDispatchJumps {
+		if bodyJump >= 0 {
+			c.patchUint16(bodyJump+1, uint16(bodyPositions[index]))
+		}
+	}
+	if defaultIndex >= 0 {
+		c.patchUint16(noMatchJump+1, uint16(bodyPositions[defaultIndex]))
+	} else {
+		c.patchUint16(noMatchJump+1, uint16(switchEnd))
+	}
+	c.patchBreakJumps(breakJumps, switchEnd)
+	return nil
+}
+
+func (c *Compiler) compileBreakStatement() error {
+	if len(c.breakFrames) == 0 {
+		return fmt.Errorf("compiler: break outside switch or bounded loop")
+	}
+	frameIndex := len(c.breakFrames) - 1
+	for cleanup := 0; cleanup < c.breakFrames[frameIndex].cleanup; cleanup++ {
+		c.emit(runtime.POP)
+	}
+	jump := c.emit(runtime.JUMP, 0, 0)
+	c.breakFrames[frameIndex].jumps = append(c.breakFrames[frameIndex].jumps, jump)
+	return nil
+}
+
+func (c *Compiler) pushBreakFrame(cleanup int) {
+	c.breakFrames = append(c.breakFrames, compilerBreakFrame{cleanup: cleanup})
+}
+
+func (c *Compiler) popBreakFrame() []int {
+	last := len(c.breakFrames) - 1
+	jumps := c.breakFrames[last].jumps
+	c.breakFrames = c.breakFrames[:last]
+	return jumps
+}
+
+func (c *Compiler) patchBreakJumps(jumps []int, target int) {
+	for _, jump := range jumps {
+		c.patchUint16(jump+1, uint16(target))
+	}
+}
+
 func (c *Compiler) Reset() {
 	if c.instructions != nil {
 		c.instructions = c.instructions[:0]
@@ -695,6 +861,9 @@ func (c *Compiler) Reset() {
 	}
 	if c.debugEntries != nil {
 		c.debugEntries = c.debugEntries[:0]
+	}
+	if c.breakFrames != nil {
+		c.breakFrames = c.breakFrames[:0]
 	}
 }
 

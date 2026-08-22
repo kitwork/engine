@@ -38,8 +38,9 @@
     return modules.classes;
   }
 
-  function render(current) {
-    core.ownedElements(current, SELECTOR).forEach(function (element) {
+  function render(current, plan) {
+    plan.classes.forEach(function (element) {
+      if (!core.ownsElement(current, element) || !element.hasAttribute("data-kit-class")) return;
       try {
         var program = core.safeProgram(element, "data-kit-class", "binding");
         if (!program) return;

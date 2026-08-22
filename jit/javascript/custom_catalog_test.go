@@ -11,7 +11,7 @@ func tenantCounterPackage(source []byte) ComponentPackage {
 	return ComponentPackage{Name: "tenant-counter", Version: "1.2.3", Source: source}
 }
 
-func TestTenantComponentCatalogResolvesInlineAndLegacyExactVersion(t *testing.T) {
+func TestTenantComponentCatalogRequiresInlineExactVersion(t *testing.T) {
 	source := []byte(";kit.component(\"tenant-counter\", { count: 0 });\n")
 	composer, err := NewDefaultComposer(tenantCounterPackage(source))
 	if err != nil {
@@ -26,18 +26,14 @@ func TestTenantComponentCatalogResolvesInlineAndLegacyExactVersion(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	exact, err := composer.ComposeHTML([]byte(`<main data-kit-component="tenant-counter" data-kit-version="1.2.3"></main>`))
-	if err != nil {
-		t.Fatal(err)
+	if _, err := composer.ComposeHTML([]byte(`<main data-kit-component="tenant-counter" data-kit-version="1.2.3"></main>`)); !errors.Is(err, ErrUnsupportedAttribute) {
+		t.Fatalf("removed split tenant component pin error = %v", err)
 	}
-	if inline.ContentHash != exact.ContentHash || !bytes.Equal(inline.JavaScript, exact.JavaScript) {
-		t.Fatal("inline exact and legacy separate exact versions resolved differently")
-	}
-	if !bytes.Contains(exact.JavaScript, []byte(`kit.component("tenant-counter"`)) ||
-		bytes.Contains(exact.JavaScript, []byte(`Xit.component("tenant-counter"`)) {
+	if !bytes.Contains(inline.JavaScript, []byte(`kit.component("tenant-counter"`)) ||
+		bytes.Contains(inline.JavaScript, []byte(`Xit.component("tenant-counter"`)) {
 		t.Fatal("composer did not retain detached tenant JavaScript")
 	}
-	_, err = composer.ComposeHTML([]byte(`<main data-kit-component="tenant-counter" data-kit-version="1.2.4"></main>`))
+	_, err = composer.ComposeHTML([]byte(`<main data-kit-component="tenant-counter@1.2.4"></main>`))
 	if !errors.Is(err, ErrModuleNotFound) {
 		t.Fatalf("mismatched explicit version error = %v", err)
 	}

@@ -3,12 +3,13 @@ package javascript
 import (
 	"errors"
 	"fmt"
-	"html"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
 // ErrInvalidScopeUse reports authored scope metadata that cannot be decoded
@@ -66,7 +67,7 @@ func validateScopeInitializer(authored string) error {
 // top-level field names. Callers use the result to reject metadata-owned names
 // without maintaining a second, less precise scope parser.
 func scopeInitializerFields(authored string) (map[string]struct{}, error) {
-	decoded := html.UnescapeString(authored)
+	decoded := htmlattr.Decode(authored)
 	parser := scopeSeedParser{source: decoded, topLevelFields: make(map[string]struct{})}
 	if parser.utf16Length() > scopeSourceLimit {
 		return nil, fmt.Errorf("data-kit-scope exceeds %d UTF-16 code units", scopeSourceLimit)

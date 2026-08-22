@@ -93,7 +93,7 @@ func shortcutDriveDocument(route, href string, searchInput bool, bundleIntegrity
 		`<script defer src="/shortcut.js" integrity="` + bundleIntegrity + `" crossorigin="anonymous"></script>` +
 		`<script defer src="/shortcut-contract.js" integrity="` + contractIntegrity + `" crossorigin="anonymous"></script>` +
 		`</head><body>
-<header><a id="shortcut" href="` + href + `" data-kit-component="shortcut" data-kit-version="1.0.0" data-shortcut="mod+k" aria-keyshortcuts="Control+K Meta+K">Search</a></header>
+<header><a id="shortcut" href="` + href + `" data-kit-component="shortcut@1.0.0" data-shortcut="mod+k" aria-keyshortcuts="Control+K Meta+K">Search</a></header>
 <main id="main" tabindex="-1"><h1 id="route">` + route + `</h1>`)
 	if searchInput {
 		output.WriteString(`<label for="docs-search-input">Search docs</label><input id="docs-search-input" type="search" autofocus>`)
@@ -124,7 +124,7 @@ func shortcutExternalContract(t *testing.T) []byte {
 func shortcutLegacyDriveDocument(route, href string, searchInput bool) string {
 	var output strings.Builder
 	output.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Shortcut ` + route + `</title><script src="/shortcut.js"></script></head><body>
-<header><a id="shortcut" href="` + href + `" data-kit-component="shortcut" data-kit-version="1.0.0" data-shortcut="mod+k" aria-keyshortcuts="Control+K Meta+K">Search</a></header>
+<header><a id="shortcut" href="` + href + `" data-kit-component="shortcut@1.0.0" data-shortcut="mod+k" aria-keyshortcuts="Control+K Meta+K">Search</a></header>
 <main id="main" tabindex="-1"><h1 id="route">` + route + `</h1>`)
 	if searchInput {
 		output.WriteString(`<label for="docs-search-input">Search docs</label><input id="docs-search-input" type="search" autofocus>`)

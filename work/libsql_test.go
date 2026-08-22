@@ -207,11 +207,17 @@ func TestLibSQLInteractiveTransaction(t *testing.T) {
 	if b == "" {
 		t.Fatal("BEGIN should return a non-null baton keeping the stream open")
 	}
-	// DELETE on the same stream, then COMMIT + close — all reusing the pinned connection.
-	if r2 := pipe(`{"baton":"` + b + `","requests":[{"type":"execute","stmt":{"sql":"DELETE FROM links WHERE code='gone'","want_rows":false}}]}`); r2["baton"] != b {
-		t.Errorf("baton must persist across the transaction, got %v", r2["baton"])
+	// DELETE on the same stream. Hrana rotates the single-use baton after each
+	// request while retaining the pinned connection behind it.
+	r2 := pipe(`{"baton":"` + b + `","requests":[{"type":"execute","stmt":{"sql":"DELETE FROM links WHERE code='gone'","want_rows":false}}]}`)
+	b2, _ := r2["baton"].(string)
+	if b2 == "" || b2 == b {
+		t.Fatalf("baton must rotate while retaining the stream, old=%q new=%q", b, b2)
 	}
-	r3 := pipe(`{"baton":"` + b + `","requests":[{"type":"execute","stmt":{"sql":"COMMIT","want_rows":false}},{"type":"close"}]}`)
+	if replay := pipe(`{"baton":"` + b + `","requests":[{"type":"get_autocommit"}]}`); !bytes.Contains(mustJSON(replay), []byte("stream expired")) {
+		t.Fatalf("consumed baton must not be replayable: %s", mustJSON(replay))
+	}
+	r3 := pipe(`{"baton":"` + b2 + `","requests":[{"type":"execute","stmt":{"sql":"COMMIT","want_rows":false}},{"type":"close"}]}`)
 	if r3["baton"] != nil {
 		t.Errorf("after close the baton should be null, got %v", r3["baton"])
 	}

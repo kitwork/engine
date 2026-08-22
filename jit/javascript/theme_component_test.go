@@ -176,7 +176,7 @@ func TestBrowserThemeComponentPersistenceSystemAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle, err := composer.ComposeHTML([]byte(
-		`<html data-kit-component="theme" data-kit-version="2.0.0"></html>`,
+		`<html data-kit-component="theme@2.0.0"></html>`,
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestBrowserThemeV3MirrorsAppearanceAndDelegatesActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	bundle, err := composer.ComposeHTML([]byte(
-		`<html data-kit-component="theme" data-kit-version="3.0.0"></html>`,
+		`<html data-kit-component="theme@3.0.0"></html>`,
 	))
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestBrowserThemeV3MirrorsAppearanceAndDelegatesActions(t *testing.T) {
 }
 
 var themeComponentBrowserDocument = fmt.Sprintf(`<!doctype html>
-<html lang="en" data-kit-component="theme" data-kit-version="2.0.0" data-kit-as="$theme">
+<html lang="en" data-kit-component="theme@2.0.0" data-kit-as="$theme">
 <head><meta charset="utf-8"><title>Theme component contract</title>
 <script>
   (function () {
@@ -262,7 +262,7 @@ var themeComponentBrowserDocument = fmt.Sprintf(`<!doctype html>
   <button id="system" type="button" data-kit-click="$theme.system()">System</button>
   <output id="mode" data-kit-text="mode">server</output>
   <output id="resolved" data-kit-text="resolved">server</output>
-  <section id="cleanup-theme" data-kit-component="theme" data-kit-version="2.0.0"></section>
+  <section id="cleanup-theme" data-kit-component="theme@2.0.0"></section>
   <script src="/theme.js"></script>
   <script>
 %s
@@ -324,7 +324,7 @@ __runStandaloneKitTest(async function () {
 </body></html>`, browserHarness)
 
 var themeV3BrowserDocument = fmt.Sprintf(`<!doctype html>
-<html lang="en" data-kit-component="theme" data-kit-version="3.0.0" data-kit-as="$theme">
+<html lang="en" data-kit-component="theme@3.0.0" data-kit-as="$theme">
 <head><meta charset="utf-8"><title>Theme v3 appearance adapter contract</title>
 <script>
   (function () {
@@ -358,7 +358,7 @@ var themeV3BrowserDocument = fmt.Sprintf(`<!doctype html>
   <button id="system-v3" type="button" data-kit-click="$theme.system()">System</button>
   <output id="mode-v3" data-kit-text="mode">server</output>
   <output id="resolved-v3" data-kit-text="resolved">server</output>
-  <section id="theme-v3-sibling" data-kit-component="theme" data-kit-version="3.0.0">
+  <section id="theme-v3-sibling" data-kit-component="theme@3.0.0">
     <output id="sibling-mode-v3" data-kit-text="mode">server</output>
   </section>
   <script src="/theme-v3.js"></script>

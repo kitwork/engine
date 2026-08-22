@@ -3,7 +3,7 @@
 This page loads one immutable KitJS artifact containing exactly:
 
 ```text
-KitJS Kit profile 0.9.0-next.12
+KitJS Kit profile 1.0.0-rc.2
 storage@1.0.0
 preferences@1.0.0
 ```
@@ -21,7 +21,7 @@ go run ./jit/javascript/cmd/assemble -profile kit -service storage=1.0.0=jit/jav
 With unchanged runtime and package bytes, the command produces the same file:
 
 ```text
-kit.0.9.0-next.12.98a8c798d65496fc2ba815f6155257b7eed2c725676275d84fb212c27800c400.js
+kit.1.0.0-rc.2.f67d99b48a716b6efbf4f15c30e8f96a61f02a20b3f21aacfe27e9d6d80498b6.js
 ```
 
 The page loads the shared checked, content-addressed `../kitjs.examples.<sha256>.css`, generated only from

@@ -52,8 +52,11 @@ type Manager struct {
 	scope capabilities.Scope
 	err   error
 
-	ftsMu  sync.Mutex
-	ftsMap map[string]string
+	ftsMu    sync.Mutex
+	ftsReady bool
+	ftsMap   map[string]string
+
+	segmentCanary *segmentSearchCanary
 }
 
 type capabilitiesStore interface {
@@ -74,12 +77,30 @@ type CollectionQuery struct {
 func NewManager(scope capabilities.Scope) *Manager {
 	cs := newCollectionStore(scope)
 	store, err := collectionhelper.NewStore(scope.ResolvePath(), cs)
-	return &Manager{
-		store:  store,
-		scope:  scope,
-		err:    err,
-		ftsMap: make(map[string]string),
+	var telemetry *SegmentSearchCanaryTelemetry
+	if provider, ok := scope.(collectionSegmentTelemetryScope); ok {
+		telemetry = provider.CollectionSearchCanaryTelemetry()
 	}
+	manager := &Manager{
+		store:         store,
+		scope:         scope,
+		err:           err,
+		ftsMap:        make(map[string]string),
+		segmentCanary: newSegmentSearchCanary(telemetry),
+	}
+	if provider, ok := scope.(collectionSegmentCanaryScope); ok && provider.CollectionSearchCanaryEnabled() {
+		manager.EnableSegmentSearchCanary(true)
+	}
+	return manager
+}
+
+// Close stops generation-owned shadow work. The serving SQLite projection has
+// no manager-owned resource to close here.
+func (m *Manager) Close() error {
+	if m != nil && m.segmentCanary != nil {
+		m.segmentCanary.close()
+	}
+	return nil
 }
 
 func (m *Manager) Open(args ...value.Value) value.Value {
@@ -210,11 +231,6 @@ func (h *Handle) Search(args ...value.Value) value.Value {
 		limit = int(args[1].N)
 	}
 
-	match := escapeMatch(text)
-	if match == "" {
-		return collectionValue([]any{})
-	}
-
 	db := h.scope.DB("collection.db")
 	if db == nil {
 		return value.Value{K: value.Invalid, V: "collection: search index unavailable"}
@@ -228,29 +244,23 @@ func (h *Handle) Search(args ...value.Value) value.Value {
 		return collectionInvalid(err)
 	}
 
-	rows, err := db.Query(`SELECT slug, title, snippet(docs, 4, '<b>', '</b>', '…', 12), -bm25(docs)
-		FROM docs WHERE collection = ? AND docs MATCH ? ORDER BY bm25(docs) LIMIT ?`,
-		h.collection.Path(), match, limit)
+	idx := &ftsIndex{db: db, collection: h.collection.Path()}
+	hits, err := idx.search(text, limit)
 	if err != nil {
 		return collectionInvalid(fmt.Errorf("collection: search: %w", err))
 	}
-	defer rows.Close()
+	h.runSegmentSearchCanary(collectionDirSignature(index), text, limit, hits)
 
 	metaBySlug := make(map[string]map[string]any, len(index))
 	for _, entry := range index {
 		metaBySlug[entry.File.Slug] = entry.Meta
 	}
 
-	results := make([]map[string]any, 0, limit)
-	for rows.Next() {
-		var slug, title, snippet string
-		var score float64
-		if rows.Scan(&slug, &title, &snippet, &score) != nil {
-			continue
-		}
+	results := make([]map[string]any, 0, len(hits))
+	for _, hit := range hits {
 		results = append(results, map[string]any{
-			"slug": slug, "title": title, "snippet": snippet, "score": score,
-			"meta": metaBySlug[slug],
+			"slug": hit.slug, "title": hit.title, "snippet": hit.snippet, "score": hit.score,
+			"meta": metaBySlug[hit.slug],
 		})
 	}
 	return collectionValue(results)
@@ -262,73 +272,43 @@ func (h *Handle) syncFTS(db *sql.DB, index []collectionhelper.IndexEntry) error 
 
 	h.manager.ftsMu.Lock()
 	defer h.manager.ftsMu.Unlock()
+
+	searchIndex := &ftsIndex{db: db, collection: key}
+	if !h.manager.ftsReady {
+		if err := searchIndex.ensureSchema(); err != nil {
+			return fmt.Errorf("collection: search schema: %w", err)
+		}
+		h.manager.ftsReady = true
+	}
 	if h.manager.ftsMap[key] == dirSig {
 		return nil
 	}
-
-	stmts := []string{
-		`CREATE VIRTUAL TABLE IF NOT EXISTS docs USING fts5(
-			collection UNINDEXED, slug UNINDEXED, title, description, body,
-			tokenize = "unicode61 remove_diacritics 2")`,
-		`CREATE TABLE IF NOT EXISTS doc_state (
-			collection TEXT NOT NULL, slug TEXT NOT NULL, sig TEXT NOT NULL,
-			PRIMARY KEY (collection, slug))`,
-	}
-	for _, q := range stmts {
-		if _, err := db.Exec(q); err != nil {
-			return fmt.Errorf("collection: search schema: %w", err)
-		}
-	}
-
-	known := map[string]string{}
-	rows, err := db.Query(`SELECT slug, sig FROM doc_state WHERE collection = ?`, key)
+	persistedSignature, err := searchIndex.signature()
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var slug, sig string
-		if rows.Scan(&slug, &sig) == nil {
-			known[slug] = sig
-		}
-	}
-	rows.Close()
-
-	live := make(map[string]bool, len(index))
-	for _, entry := range index {
-		slug := entry.File.Slug
-		live[slug] = true
-		sig := entry.File.Signature()
-		if sig != "" && known[slug] == sig {
-			continue
-		}
-		doc, err := h.collection.Read(slug)
-		if err != nil {
-			fmt.Printf("[Collection] search index skip %s/%s: %v\n", key, slug, err)
-			continue
-		}
-		title, _ := doc.Meta["title"].(string)
-		description, _ := doc.Meta["description"].(string)
-		if _, err := db.Exec(`DELETE FROM docs WHERE collection = ? AND slug = ?`, key, slug); err != nil {
-			return err
-		}
-		if _, err := db.Exec(`INSERT INTO docs (collection, slug, title, description, body) VALUES (?,?,?,?,?)`,
-			key, slug, title, description, doc.Body); err != nil {
-			return err
-		}
-		if _, err := db.Exec(`INSERT INTO doc_state (collection, slug, sig) VALUES (?,?,?)
-			ON CONFLICT(collection, slug) DO UPDATE SET sig = excluded.sig`, key, slug, sig); err != nil {
-			return err
-		}
+	if persistedSignature == dirSig {
+		h.manager.ftsMap[key] = dirSig
+		return nil
 	}
 
-	for slug := range known {
-		if !live[slug] {
-			db.Exec(`DELETE FROM docs WHERE collection = ? AND slug = ?`, key, slug)
-			db.Exec(`DELETE FROM doc_state WHERE collection = ? AND slug = ?`, key, slug)
-		}
+	documents, complete := h.searchSources(index)
+
+	committedSignature := dirSig
+	if !complete {
+		// Keep a usable partial projection, but leave it dirty so the next search retries files that
+		// disappeared or became unreadable between Index and Read.
+		committedSignature = ""
+	}
+	if err := searchIndex.rebuild(documents, committedSignature); err != nil {
+		return fmt.Errorf("collection: rebuild search index: %w", err)
 	}
 
-	h.manager.ftsMap[key] = dirSig
+	if complete {
+		h.manager.ftsMap[key] = dirSig
+	} else {
+		delete(h.manager.ftsMap, key)
+	}
 	return nil
 }
 
@@ -338,18 +318,6 @@ func collectionDirSignature(index []collectionhelper.IndexEntry) string {
 		fmt.Fprintf(hash, "%s|%s\n", entry.File.Slug, entry.File.Signature())
 	}
 	return hex.EncodeToString(hash.Sum(nil)[:16])
-}
-
-func escapeMatch(text string) string {
-	fields := strings.Fields(text)
-	if len(fields) == 0 {
-		return ""
-	}
-	quoted := make([]string, len(fields))
-	for i, f := range fields {
-		quoted[i] = `"` + strings.ReplaceAll(f, `"`, `""`) + `"`
-	}
-	return strings.Join(quoted, " ")
 }
 
 func (cq *CollectionQuery) Where(args ...value.Value) *CollectionQuery {

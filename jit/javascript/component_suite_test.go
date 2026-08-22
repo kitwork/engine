@@ -122,7 +122,7 @@ func TestComponentSuiteCatalogKeepsSimpleV1Defaults(t *testing.T) {
 	}
 	composer := &Composer{catalog: catalog}
 	_, err = composer.ComposeHTML([]byte(
-		`<main data-kit-component="dialog" data-kit-version="3.0.0"></main>`,
+		`<main data-kit-component="dialog@3.0.0"></main>`,
 	))
 	if !errors.Is(err, ErrModuleNotFound) {
 		t.Fatalf("authored unknown suite version error = %v", err)
@@ -165,7 +165,7 @@ func TestComponentSuiteHTMLScanMatchesExplicitSelection(t *testing.T) {
 	}
 	for _, contract := range componentSuiteContracts {
 		html := []byte(`<main data-kit-component="` + contract.name +
-			`" data-kit-version="1.0.0"></main>`)
+			`@1.0.0"></main>`)
 		use, err := ScanHTML(html)
 		if err != nil {
 			t.Fatal(err)
@@ -229,7 +229,7 @@ func TestBrowserComponentSuiteStateAndDirectiveContract(t *testing.T) {
 
 var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS component suite</title></head><body>
-  <section id="accordion" data-kit-component="accordion" data-kit-version="1.0.0"
+  <section id="accordion" data-kit-component="accordion@1.0.0"
     data-kit-scope="multiple: true; openItems: ['first']">
     <button id="accordion-first" type="button" data-kit-click="toggle('first')"
       data-kit-bind="'aria-expanded': isOpen('first');">First</button>
@@ -239,7 +239,7 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
     <output id="accordion-state" data-kit-text="(isOpen('first') ? 'first' : '') + (isOpen('second') ? 'second' : '')">server</output>
   </section>
 
-  <section id="dialog" data-kit-component="dialog" data-kit-version="1.0.0">
+  <section id="dialog" data-kit-component="dialog@1.0.0">
     <button id="dialog-show" type="button" data-kit-click="show()">Show</button>
     <div id="dialog-panel" role="dialog" aria-modal="true" aria-labelledby="dialog-title"
       data-kit-show="open" data-kit-keydown:escape="close('escape')" hidden>
@@ -250,7 +250,7 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
     <output id="dialog-result" data-kit-text="returnValue">server</output>
   </section>
 
-  <section id="tabs" data-kit-component="tabs" data-kit-version="1.0.0"
+  <section id="tabs" data-kit-component="tabs@1.0.0"
     data-kit-scope="tabs: ['overview', 'api', 'examples']; active: 'overview'">
     <div role="tablist">
       <button id="tab-overview" type="button" role="tab" data-kit-click="select('overview')"
@@ -266,7 +266,7 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
     <output id="tabs-active" data-kit-text="active">server</output>
   </section>
 
-  <section id="dropdown" data-kit-component="dropdown" data-kit-version="1.0.0"
+  <section id="dropdown" data-kit-component="dropdown@1.0.0"
     data-kit-scope="items: ['profile', 'settings', 'sign-out']" data-kit-click:outside="hide()">
     <button id="dropdown-trigger" type="button" data-kit-click="toggle()"
       data-kit-keydown="$event.key === 'ArrowDown' ? next() : $event.key === 'ArrowUp' ? previous() : activeIndex"

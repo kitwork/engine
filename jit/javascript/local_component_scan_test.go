@@ -13,7 +13,7 @@ func TestScanHTMLSeparatesUnversionedClientComponentsFromManagedGraph(t *testing
 <section data-kit-component="test" data-kit-as="$test" data-kit-scope="{ count: 1 }">
   <button data-kit-click="count = count + 1"></button>
 </section>
-<aside data-kit-component="notice" data-kit-local=""></aside>`)
+<aside data-kit-component="notice"></aside>`)
 
 	got, err := ScanHTML(source)
 	if err != nil {
@@ -45,20 +45,16 @@ func TestScanHTMLSeparatesUnversionedClientComponentsFromManagedGraph(t *testing
 	}
 }
 
-func TestScanHTMLRejectsAmbiguousLocalComponentMetadata(t *testing.T) {
+func TestScanHTMLRejectsRemovedLocalMarker(t *testing.T) {
 	tests := []struct {
 		name    string
 		source  string
 		message string
 	}{
-		{name: "missing host", source: `<section data-kit-local></section>`, message: "requires data-kit-component"},
-		{name: "nonempty marker", source: `<section data-kit-component="test" data-kit-local="false"></section>`, message: "empty presence marker"},
-		{name: "whitespace marker", source: `<section data-kit-component="test" data-kit-local=" "></section>`, message: "empty presence marker"},
-		{name: "duplicate marker", source: `<section data-kit-component="test" data-kit-local data-kit-local></section>`, message: "duplicate data-kit-local"},
-		{name: "version", source: `<section data-kit-component="test" data-kit-local data-kit-version="1.0.0"></section>`, message: "cannot use data-kit-version"},
-		{name: "inline version", source: `<section data-kit-component="test@1.0.0" data-kit-local></section>`, message: "cannot mark a versioned component"},
-		{name: "retain", source: `<section data-kit-component="test" data-kit-local data-kit-retain="test"></section>`, message: "cannot use data-kit-retain"},
-		{name: "modifier", source: `<section data-kit-component="test" data-kit-local:once></section>`, message: "only permits modifiers on event attributes"},
+		{name: "presence", source: `<section data-kit-local></section>`, message: "is not implemented"},
+		{name: "component marker", source: `<section data-kit-component="test" data-kit-local></section>`, message: "is not implemented"},
+		{name: "valued marker", source: `<section data-kit-component="test" data-kit-local="false"></section>`, message: "is not implemented"},
+		{name: "modifier", source: `<section data-kit-component="test" data-kit-local:once></section>`, message: "is not implemented"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -89,7 +85,7 @@ func TestScanHTMLKeepsAliasesStrictAcrossManagedAndLocalComponents(t *testing.T)
 	}
 }
 
-func TestScanHTMLKeepsIgnoredLocalMetadataOpaque(t *testing.T) {
+func TestScanHTMLKeepsIgnoredUnsupportedMetadataOpaque(t *testing.T) {
 	got, err := ScanHTML([]byte(`
 <section data-kit-ignore>
   <div data-kit-local="false" data-kit-version="latest" data-kit-retain="bad key"></div>

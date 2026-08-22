@@ -43,6 +43,9 @@ router.get((ctx) => {
 	if got := enginePool.Active(); got != baseline {
 		t.Fatalf("open SSE stream retained a request VM: active=%d baseline=%d", got, baseline)
 	}
+	if active := tenant.SiteGeneration().Active(); active != 0 {
+		t.Fatalf("open SSE stream retained %d generation leases", active)
+	}
 
 	closed := make(chan struct{})
 	go func() {

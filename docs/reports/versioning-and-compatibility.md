@@ -12,7 +12,7 @@ This document defines the formal semantic versioning rules, compatibility guaran
   ├── 2. Kitwork JS Subset Language Spec (SemVer)
   ├── 3. Bytecode Format Version (Frozen BytecodeVersion = 2)
   ├── 4. Storage Encoding Version (ProgramEncodingVersion = 1)
-  └── 5. Compiler Schema Version (CompilerSchemaVersion = 1)
+  └── 5. Compiler Schema Version (CompilerSchemaVersion = 2)
 ```
 
 ---

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/compiler"
+	kitruntime "github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/work"
 )
 
@@ -62,7 +63,7 @@ type checkTarget struct {
 // cron scheduler.
 func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) CheckReport {
 	if maxEnergy == 0 {
-		maxEnergy = 10_000_000
+		maxEnergy = kitruntime.Limits().DefaultMaxEnergy
 	}
 	targets, discoveryErr := discoverCheckTargets(root)
 	report := CheckReport{}

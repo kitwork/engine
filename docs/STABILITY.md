@@ -21,6 +21,14 @@ automated test on the production execution path.
 - Configured database connections are app-owned and shared by sibling sites.
   Site eviction and generation replacement must not close them; app shutdown
   closes every connection exactly once.
+- Full-text search admission and open-index ownership are host-wide and
+  bounded. Tenant generations borrow the host manager and must not close or
+  duplicate it during reload; source projection rebuilds must stream rows and
+  publish atomically rather than retain a tenant-sized document slice.
+- A collection search migration must remain fail-open while it is a canary:
+  the legacy index serves the response, shadow admission never blocks, its
+  queue and retained query/Top-K payloads are bounded, and generation retirement
+  cancels and drains the only worker before releasing capability state.
 - Queue worker restart is serialized at the app resource boundary. It stops
   accepting jobs, cancels and drains the old poller, heartbeat, and accepted
   runs before replacing the store or publishing a new worker cycle.
@@ -40,6 +48,19 @@ Current enforcement:
 - `app.Runtime` owns database connections, detached work, and the scheduler.
   Compatibility tenants may adapt those resources but never close them unless
   they own and close the entire app runtime.
+- `core.Engine` injects one `search.Manager` into every tenant facade and closes
+  it after tenant/app drain. Production database-search tests prove a site does
+  not open a second manager, while standalone tenants own and close only their
+  local fallback. `CloseIndex` stops new leases and drains admitted operations;
+  a same-key arrival waits and reopens instead of borrowing a closing owner.
+- The collection segment canary uses a 32-entry non-blocking queue and one
+  worker per active generation plus a shared 256-task host admission budget.
+  It rechecks the source signature off the
+  request path, streams rebuilds through the host manager, persists only a
+  generation-qualified freshness signature below the site, and reports shared
+  label-free counters that do not reset on hot reload. Queue saturation,
+  cancellation, stale work, and comparison failure cannot alter the legacy
+  response.
 - A site generation is prepared before publication, activates monotonically,
   cannot be reactivated after replacement, and retires only after all accepted
   request leases drain.
@@ -58,6 +79,14 @@ Current enforcement:
   until retirement, and the site retains unpinned bytes through a bounded
   hand-off window so the script request following an HTML response cannot race
   generation teardown.
+- Staged KitJS candidate work is bounded before publication. Runtime/Hydrate
+  are prepared once and each exact component/service source is normalized once
+  in a candidate-local cache across distinct route graphs. Each individual
+  package artifact and the single optional common bundle are materialized and
+  content-addressed once, then reused without rehashing; prepared HTML lookup
+  cannot copy package source. Capacity
+  or validation failure discards that complete private candidate without
+  changing the active generation.
 - Template expressions are parsed into immutable evaluator nodes with the
   generation. Request binding may resolve data and create bounded lexical scope
   frames, but must not retokenize expressions or copy the complete scope for
@@ -86,16 +115,59 @@ Current enforcement:
 - Disk-persisted responses, rate-limit budgets, SSE connections, and replay
   history are site-scoped. They survive generation replacement and close only
   when that site leaves the app runtime.
+- Once an SSE handler has configured its native client, the request scope is
+  closed before streaming begins. Its primary and child VM leases, request
+  capabilities, generation lease, and tenant request accounting are released;
+  only the site-owned broker and HTTP goroutine remain. Hot reload therefore
+  cannot be held open by an earlier stream, while site shutdown still stops all
+  streams through the broker.
 - Runtime health is bounded and privacy-safe. Latency uses a fixed bucket
   table; route, tenant, URL, user, and argument values are never telemetry
   labels. Program identities are checksum values capped at 4096 entries and
-  never retain a Program or retired generation pointer.
+  never retain a Program pointer. Generation preparation and activation use
+  scalar in-progress gauges. A preparation success covers the complete private
+  candidate through `Tenant.Run`; activation is measured separately. The drain
+  tracker retains only an internal lease observer during one registered attempt,
+  removes it on every terminal path, and publishes only attempt outcomes,
+  aggregate leases, and bounded scalar ages without generation or tenant
+  identity. It retains no unbounded completed-generation tombstones.
+- VM pool health reports active, created, acquired, and released scalar
+  process-global counters. It does not pretend that `sync.Pool` exposes its
+  current idle capacity. `active` reaches zero only after all VM leases in the
+  process drain; closing one engine cannot assert zero while another is live.
+- VM reset clears every stack slot up to the execution high-water mark before
+  reuse. A zero stack length is not sufficient evidence because popped values
+  can otherwise survive in reusable backing storage.
+- Engine ownership health is best effort and never waits for the engine
+  ownership mutex. `ownership_snapshot_available=false` leaves the top-level
+  app/site/generation ownership fields at zero while lifecycle and process-wide
+  VM gauges remain available.
+- `core.Engine.Diagnostics()` combines detached runtime health with bounded
+  process memory/GC and compatibility metadata. Its schema excludes roots,
+  hostnames, routes, request values, source, environment data, and owner
+  pointers. Diagnostic ZIP output contains JSON only unless the caller
+  explicitly requests a private heap profile. Engine and bytecode policy locks
+  are tried independently and never nested; if either is busy, the complete
+  policy remains zero with `policy_snapshot_available=false` while health stays
+  available.
+- The opt-in memory-retention campaign drives closure factories, array
+  callbacks, native HTTP, pooled VMs, and 250 generation replacements. Its
+  post-GC heap, object count, and goroutine checkpoints must plateau after
+  warm-up; each replaced generation must already have released its route graph.
+- The opt-in VM value-pressure campaign isolates script array growth, nested
+  object retention, native buffers, reflected native collections, and pool
+  reuse. It requires deterministic instruction and energy counts, zero retained
+  VM owners, balanced pool leases, and a post-GC plateau before release.
 - Response observation must preserve `io.ReaderFrom`, `http.Flusher`, and
   `ResponseController` unwrapping so metrics cannot disable zero-copy static
   responses or SSE.
 
 ## 2. Energy and bounded execution
 
+- `runtime/limits.go` is the only source of truth for structural and default
+  execution ceilings. `runtime.Limits()` exposes a detached read-only snapshot
+  to inspector, diagnostics, and release evidence; tenant code receives no
+  mutation path.
 - Every opcode consumes energy.
 - `runtime.InstructionSpec` is the canonical source for operand widths, stack
   effects, and energy. Dispatch and tooling must not maintain parallel tables.
@@ -116,6 +188,8 @@ Current enforcement:
   Cancellation interrupts running script execution within at most 64 opcodes;
   nested lambda executions share that instruction counter, and energy remains
   the hard upper bound.
+- Call depth is checked against policy, not slice capacity. Enlarging frame
+  backing storage cannot widen the 64-frame execution ceiling.
 - Energy accounting saturates instead of wrapping around `uint64`.
 - Compiler output is structurally verified before publication. Verification
   rejects unsupported or truncated instructions, invalid constants and jumps,
@@ -133,6 +207,10 @@ Current enforcement:
 - Static Program profiles are derived during verification and returned as
   detached snapshots. Profiling executable sources must compile through the
   native bundler without executing tenant code or starting app resources.
+- Program inspection must decode through the canonical instruction table and
+  stack analyzer. Its reports are detached, use bounded constant previews,
+  identify unreachable instructions, and never become an executable
+  representation.
 - A lambda address is valid only inside its owning Program. Cross-program
   execution must fail before entering a call frame.
 - Runtime failures are published as `runtime.Diagnostic` values with a stable
@@ -181,7 +259,8 @@ terminal and cannot recreate resources after shutdown.
 
 Request shutdown cancels its context, releases the primary VM, waits for
 accepted child VM leases, and then closes request-scoped capabilities. SSE must
-release the primary VM before blocking on the stream.
+complete that request shutdown and release its generation lease before handing
+the long-lived connection to the site broker.
 
 An authenticated principal and its permissions are immutable request inputs
 attached by trusted host middleware. A capability with declared permissions
@@ -215,6 +294,22 @@ database connections close last.
 
 ## 6. Required verification
 
+The canonical commands are:
+
+```text
+go run ./cmd/releasegate --mode verify --report .artifacts/verify.json
+go run ./cmd/releasegate --mode release --require-clean --report .artifacts/release.json
+```
+
+The release command composes the detailed checks below and writes portable
+evidence. VM/compiler compatibility is frozen by `docs/VM_V2_FREEZE.md`; the
+cross-platform release and 24 to 72 hour canary procedure is in
+`docs/RELEASE.md`.
+
+The compatibility gate includes cold-process compiler determinism. Six fresh
+processes must produce identical artifact hashes, Program checksums, source
+fingerprints, cache keys, and encoded sizes for the frozen compiler corpus.
+
 Before merging an engine change:
 
 ```text
@@ -223,6 +318,13 @@ go test ./...
 go vet ./...
 go test -race ./...
 go run . check
+```
+
+Changes to production diagnostics must also run:
+
+```text
+go test ./core -run 'TestEngineDiagnostics|TestEngineDiagnosticBundle|TestEngineLifecycleGauntlet'
+go test -race ./core -run 'TestEngineDiagnostics|TestEngineLifecycleGauntlet'
 ```
 
 Changes to the lexer, parser, compiler, VM, value conversion, templates, or
@@ -246,6 +348,7 @@ release concurrently:
 ```text
 go test ./site -run TestGenerationPublicationDrainSoak
 go test ./core -run TestEngineHotReloadGenerationSoak
+go test -race ./core -run TestEngineLifecycleGauntlet -count=10
 ```
 
 The compiler-to-VM pipeline must remain fuzzable as one boundary:
@@ -255,13 +358,61 @@ go test ./compiler -run '^$' -fuzz FuzzCompileVerifyExecute -fuzztime=10s
 go test ./runtime -run '^$' -fuzz FuzzVMDeterminism -fuzztime=10s
 ```
 
+Language compatibility and VM failure behavior must also cross artifact,
+fresh, reused, and pooled VM boundaries:
+
+```text
+go test ./conformance -run TestLanguageConformanceCorpus -count=1
+go test ./compatibility -run TestVMV2CompatibilityArchive -count=1
+go test ./runtime -run ^TestVMFaultGauntlet -count=1
+go test ./runtime -run 'TestRuntimeLimits|TestRuntimeStructuralLimitBoundaries|TestRuntimeEnergyBoundary|TestRuntimeCallDepth' -count=1
+```
+
 Long-running pool and generation checks are opt-in locally:
 
 ```text
 KITWORK_SOAK=1 go test ./runtime -run TestPooledVMSoakAcrossPrograms
 KITWORK_SOAK=1 go test ./runtime -run TestPooledVMReleasesOversizedVerifiedWorkload
+KITWORK_VALUE_PRESSURE=1 go test ./runtime -run '^TestVMValuePressureCampaign$' -count=1 -timeout=10m -v
 KITWORK_SOAK=1 go test ./core -run TestEngineHotReloadSoak
+KITWORK_RETENTION=1 go test ./core -run TestEngineMemoryRetentionCampaign -count=1 -v
+KITWORK_RESTART_CAMPAIGN=1 go test ./core -run '^TestEngineRestartRecoveryCampaign$' -count=1 -timeout=10m -v
+KITWORK_CONTENTION_CAMPAIGN=1 go test ./core -run '^TestEngineCacheContentionCampaign$' -count=1 -timeout=10m -v
 ```
+
+The retention campaign defaults to 250 generation replacements and eight
+ordinary requests per generation, in addition to each activation request.
+`KITWORK_RETENTION_GENERATIONS` and `KITWORK_RETENTION_REQUESTS` may shorten an
+investigation run. Set `KITWORK_HEAP_PROFILE` to a file path to write a Go heap
+profile after the final forced-GC checkpoint. The gate uses post-warm-up deltas
+and a per-generation slope rather than a machine-specific absolute heap size.
+
+The VM value-pressure campaign defaults to 48 measured rounds after six warm-up
+rounds. Its four workloads retain a 4,096-item array, a 2,048-node object chain,
+two 512 KiB native buffers, and a 1,024-record reflected native collection for
+the duration of each execution. `KITWORK_VALUE_PRESSURE_*` inputs are bounded;
+the JSON report records only configuration, scalar VM/allocation metrics,
+post-GC checkpoints, pool counters, observed growth, and gate allowances. The
+campaign is evidence for pool hygiene and value retention, not a tenant-visible
+heap or collection limit.
+
+The restart/recovery campaign defaults to 24 fresh engine processes sharing one
+application tree and bytecode cache. Across each eight-process revision it
+proves cold publication, read-only cache hits, deterministic repair after
+truncation, stale compiler identity, checksum corruption, and deletion, plus
+recovery after a process exits without lifecycle cleanup. The JSON evidence is
+bounded and excludes roots, routes, source, URLs, environment values, and
+secrets. `KITWORK_RESTART_CYCLES` may select 1 through 256 cycles and
+`KITWORK_RESTART_REPORT` selects the report path.
+
+The cache-contention campaign complements sequential restart evidence with a
+barrier-synchronized multi-process boundary. Its cold, warm, corrupt, and
+source-revision rounds require every child to serve identical output and drain
+cleanly; the final artifacts must exactly match compiler-produced hashes and no
+temporary publication file may remain. The default is eight workers with four
+requests each. `KITWORK_CONTENTION_WORKERS` and
+`KITWORK_CONTENTION_REQUESTS` are independently bounded from 1 through 32;
+`KITWORK_CONTENTION_REPORT` selects the JSON evidence path.
 
 ## 7. Stability before expansion
 

@@ -8,6 +8,103 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
+type retainingInvokeProxy struct {
+	args []value.Value
+}
+
+func (*retainingInvokeProxy) OnGet(string) value.Value {
+	return value.Value{K: value.Nil}
+}
+
+func (*retainingInvokeProxy) OnCompare(string, value.Value) value.Value {
+	return value.Value{K: value.Nil}
+}
+
+func (proxy *retainingInvokeProxy) OnInvoke(_ string, args ...value.Value) value.Value {
+	proxy.args = args
+	return args[0]
+}
+
+func TestDynamicInvokeArgumentsDoNotAliasVMStack(t *testing.T) {
+	program := mustProgram(t,
+		[]byte{
+			byte(LOAD), 0, 0,
+			byte(PUSH), 0, 1,
+			byte(PUSH), 0, 2,
+			byte(INVOKE), 1,
+			byte(RETURN),
+		},
+		[]value.Value{
+			value.NewString("target"),
+			value.NewString("kept"),
+			value.NewString("capture"),
+		},
+	)
+	proxy := &retainingInvokeProxy{}
+	vm := New(program)
+	vm.Globals["target"] = value.Value{K: value.Proxy, V: proxy}
+
+	if result := vm.Run(); result.Text() != "kept" {
+		t.Fatalf("result = %q, want kept", result.Text())
+	}
+	stackStorage := vm.Stack[:vm.stackHighWater]
+	for index := range stackStorage {
+		stackStorage[index] = value.NewString("overwritten")
+	}
+	vm.FastReset(program, nil)
+
+	if len(proxy.args) != 1 || proxy.args[0].Text() != "kept" {
+		t.Fatalf("dynamic invoke retained VM stack storage: %#v", proxy.args)
+	}
+}
+
+func TestExtensionInvokeArgumentsDoNotAliasVMStack(t *testing.T) {
+	const method = "__test_capture_owned_args"
+	previous, existed := value.Methods[value.Array][method]
+	defer func() {
+		if existed {
+			value.Methods[value.Array][method] = previous
+		} else {
+			delete(value.Methods[value.Array], method)
+		}
+	}()
+
+	var retained []value.Value
+	value.Array.Prototype(method, func(_ value.Value, args ...value.Value) value.Value {
+		retained = args
+		return args[0]
+	})
+	program := mustProgram(t,
+		[]byte{
+			byte(LOAD), 0, 0,
+			byte(PUSH), 0, 1,
+			byte(PUSH), 0, 2,
+			byte(INVOKE), 1,
+			byte(RETURN),
+		},
+		[]value.Value{
+			value.NewString("target"),
+			value.NewString("kept"),
+			value.NewString(method),
+		},
+	)
+	vm := New(program)
+	vm.Globals["target"] = value.New([]value.Value{})
+
+	if result := vm.Run(); result.Text() != "kept" {
+		t.Fatalf("result = %q, want kept", result.Text())
+	}
+	stackStorage := vm.Stack[:vm.stackHighWater]
+	for index := range stackStorage {
+		stackStorage[index] = value.NewString("overwritten")
+	}
+	vm.FastReset(program, nil)
+
+	if len(retained) != 1 || retained[0].Text() != "kept" {
+		t.Fatalf("extension invoke retained VM stack storage: %#v", retained)
+	}
+}
+
 func TestVMResetForPoolReleasesExceptionalState(t *testing.T) {
 	program := mustProgram(t, []byte{byte(RETURN)}, nil)
 	vm := New(program)
@@ -97,11 +194,12 @@ func TestVMResetForPoolReleasesExceptionalState(t *testing.T) {
 	if vm.Frames[0].Defers != nil {
 		t.Fatal("pool reset retained oversized root defer storage")
 	}
-	if vm.FrameIdx != 0 || vm.frameHighWater != 0 {
+	if vm.FrameIdx != 0 || vm.frameHighWater != 0 || vm.stackHighWater != 0 {
 		t.Fatalf(
-			"pool reset retained frame state: current=%d high-water=%d",
+			"pool reset retained execution high-water: frame=%d/%d stack=%d",
 			vm.FrameIdx,
 			vm.frameHighWater,
+			vm.stackHighWater,
 		)
 	}
 
@@ -132,7 +230,8 @@ func TestVMResetClearsReusableBackingStorage(t *testing.T) {
 	payload := value.NewString("previous-request")
 	deferred := &value.Lambda{Address: 0, Program: program}
 
-	vm.Stack = append(vm.Stack, payload)
+	vm.push(payload)
+	_ = vm.pop()
 	vm.Frames[0].Defers = append(vm.Frames[0].Defers, deferred)
 	vm.Frames[1].Vars = map[string]value.Value{"payload": payload}
 	vm.Frames[1].Defers = append(vm.Frames[1].Defers, deferred)

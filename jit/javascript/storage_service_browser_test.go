@@ -33,7 +33,7 @@ func TestPreferencesExampleContract(t *testing.T) {
 		t.Fatalf("preferences artifact URL = %q, want %q", source, want)
 	}
 	for _, required := range []string{
-		`data-kit-component="preferences"`, `data-kit-version="1.0.0"`,
+		`data-kit-component="preferences@1.0.0"`,
 		`data-kit-click="choose('dark')"`, `data-kit-click="reset()"`, `max-w-8xl`,
 		`id="preferences-message" role="status" aria-live="polite" aria-atomic="true"`,
 		`bg-indigo-600 text-white`,
@@ -405,7 +405,7 @@ func storageContractDocument(assetPath string) string {
   <script defer src=%q></script>
 </head>
 <body>
-  <main data-kit-component="storage-contract" data-kit-version="1.0.0">
+  <main data-kit-component="storage-contract@1.0.0">
     <output id="storage-value" data-kit-text="value">server</output>
     <output id="storage-status" data-kit-text="status">server</output>
     <output id="storage-present" data-kit-text="present">server</output>
@@ -428,7 +428,7 @@ func storageContractDocument(assetPath string) string {
 func serviceGraphGuardDocument(installed, different Artifact) string {
 	return fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Service graph guard</title></head><body>
-<main data-kit-component="service-guard" data-kit-version="1.0.0">
+<main data-kit-component="service-guard@1.0.0">
   <output id="service-guard-value" data-kit-text="value">server</output>
 </main>
 <script>

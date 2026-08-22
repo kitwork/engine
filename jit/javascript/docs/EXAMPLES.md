@@ -1,7 +1,7 @@
 # KitJS examples
 
-The examples in this directory target KitJS `0.9.0-next.12`. They use literal
-Tailwind utility classes only; there are no hand-written component styles or
+The examples in this directory target the unpublished KitJS `1.0.0-rc.2`
+source candidate. They use literal Tailwind utility classes only; there are no hand-written component styles or
 runtime-generated class names. Read the [browser contract](https://github.com/kitwork/kit.js/blob/master/KITJS_SPEC.md)
 and [runtime README](../README.md) before treating an example as API guidance.
 
@@ -13,7 +13,7 @@ working on the browser kernel:
 - [`counter.html`](../examples/counter.html): component state, actions, and text.
 - [`dropdown.html`](../examples/dropdown.html): `show`, safe `bind`, outside click, and Escape.
 - [`form.html`](../examples/form.html): model coercion, IME handling, classes, and component methods.
-- [`list.html`](../examples/list.html): template-only `if`, keyed `for`, and row reuse.
+- [`list.html`](../examples/list.html): the template-fragment form of `if`, keyed `for`, and row reuse.
 - [`dialog.html`](../examples/dialog.html): an action-only component alias and lexical callback.
 - [`hydrate-home.html`](../examples/hydrate-home.html) and [`hydrate-next.html`](../examples/hydrate-next.html): direct load and same-document Hydrate continuity.
 
@@ -132,6 +132,6 @@ go run ./jit/javascript/cmd/assemble -profile hydrate `
   -canonical-dir jit/javascript/examples/drive-progress
 ```
 
-The output filename includes `0.9.0-next.12` and the SHA-256 of the exact graph
+The output filename includes `1.0.0-rc.2` and the SHA-256 of the exact graph
 bytes. Keep an old artifact available while any old page or open tab still
 references its URL.

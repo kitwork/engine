@@ -12,10 +12,10 @@ import (
 	"github.com/kitwork/engine/site"
 )
 
-func TestRouterJITComponentLoadsTenantSourceWithInlineAndLegacyExactVersion(t *testing.T) {
+func TestRouterJITComponentLoadsTenantSourceWithInlineExactVersion(t *testing.T) {
 	tenant, directory := writeKitJSTestSite(t,
 		`router.jitjs(true); router.jitComponent("tenant-counter", "1.2.3", "components/tenant-counter.js");`,
-		`<main data-kit-component="tenant-counter@1.2.3"></main><aside data-kit-component="tenant-counter" data-kit-version="1.2.3"></aside>`)
+		`<main data-kit-component="tenant-counter@1.2.3"></main><aside data-kit-component="tenant-counter@1.2.3"></aside>`)
 	raw := "kit.component(\"tenant-counter\", {\r\n  count: 0\r\n});"
 	writeKitJSFile(t, directory, "components/tenant-counter.js", raw)
 	if err := tenant.Run(); err != nil {

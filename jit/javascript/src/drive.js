@@ -15,6 +15,7 @@
     ? profileScript.getAttribute("data-kitwork-plan")
     : null;
   var HANDOFF = Symbol.for("kitjs:handoff");
+  var DRIVE_FALLBACK = {};
   var activeVisit = null;
   var navigationCritical = false;
   var navigationTerminal = false;
@@ -29,6 +30,9 @@
   var SCROLL_SAVE_DELAY = 250;
   var HANDOFF_LOAD_TIMEOUT = 10000;
   var HANDOFF_GRAPH_CACHE_LIMIT = 32;
+  var DRIVE_RESPONSE_BYTES_LIMIT = 8 * 1024 * 1024;
+  var DRIVE_DOCUMENT_NODE_LIMIT = 100000;
+  var DRIVE_DOCUMENT_DEPTH_LIMIT = 256;
   var NAVIGATION_EVENT = "kit:navigation";
   var THEME_PREPAINT_SOURCE = '(function(){var r=document.documentElement,c=r.classList,m="system";try{var t=localStorage.getItem("theme");t=t&&t.toLowerCase();if(t==="light"||t==="dark"||t==="system")m=t}catch(e){}if(m==="system"){try{m=typeof matchMedia==="function"&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){m="light"}}if(m==="dark")c.add("dark");else c.remove("dark");try{r.style.colorScheme=m}catch(e){}})();';
   var handoffGraphs = new Map();
@@ -258,21 +262,46 @@
     if (intent) executeNavigationIntent(intent);
   }
 
-  function exactBodyLength(response) {
+  function declaredBodyLength(response) {
     if (!response || !response.headers || typeof response.headers.get !== "function") return 0;
-    var encoding = String(response.headers.get("content-encoding") || "").trim().toLowerCase();
-    if (encoding && encoding !== "identity") return 0;
     var source = String(response.headers.get("content-length") || "").trim();
     if (!/^[1-9][0-9]*$/.test(source)) return 0;
     var total = Number(source);
     return Number.isSafeInteger(total) && total > 0 ? total : 0;
   }
 
+  function exactBodyLength(response) {
+    var total = declaredBodyLength(response);
+    if (!total) return 0;
+    var encoding = String(response.headers.get("content-encoding") || "").trim().toLowerCase();
+    return !encoding || encoding === "identity" ? total : 0;
+  }
+
+  function driveFallbackError(message) {
+    var error = new RangeError(message);
+    error.kitDriveFallback = DRIVE_FALLBACK;
+    return error;
+  }
+
+  function cancelResponseBody(body) {
+    if (!body || typeof body.cancel !== "function") return;
+    try {
+      var cancelled = body.cancel();
+      if (cancelled && typeof cancelled.catch === "function") cancelled.catch(function () {});
+    } catch (_) { /* A locked or already-settled body is best-effort cleanup. */ }
+  }
+
   function responseText(response, visit) {
     var total = exactBodyLength(response);
     var body = response && response.body;
-    if (!total || !body || typeof body.getReader !== "function" ||
-      typeof global.TextDecoder !== "function") return response.text();
+    if (declaredBodyLength(response) > DRIVE_RESPONSE_BYTES_LIMIT) {
+      cancelResponseBody(body);
+      return Promise.reject(driveFallbackError("KitJS: navigation response exceeds the byte limit"));
+    }
+    if (!body || typeof body.getReader !== "function" || typeof global.TextDecoder !== "function") {
+      cancelResponseBody(body);
+      return Promise.reject(driveFallbackError("KitJS: navigation response cannot be read with a bounded stream"));
+    }
 
     var decoder;
     var reader;
@@ -280,14 +309,20 @@
       decoder = new global.TextDecoder();
       reader = body.getReader();
     } catch (_) {
-      if (reader && typeof reader.releaseLock === "function") reader.releaseLock();
-      return response.text();
+      if (reader && typeof reader.releaseLock === "function") {
+        try { reader.releaseLock(); } catch (_) { /* Initialization already failed closed. */ }
+      }
+      cancelResponseBody(body);
+      return Promise.reject(driveFallbackError("KitJS: navigation response stream could not be initialized"));
     }
 
     var chunks = [];
     var loaded = 0;
     var lastPercent = 0;
+    var readerCancelled = false;
     function cancelReader() {
+      if (readerCancelled) return;
+      readerCancelled = true;
       try {
         var cancelled = reader.cancel();
         if (cancelled && typeof cancelled.catch === "function") cancelled.catch(function () {});
@@ -314,12 +349,14 @@
         var value = result.value;
         var size = value && Number(value.byteLength);
         if (!Number.isSafeInteger(size) || size < 0) {
+          cancelReader();
           throw new TypeError("KitJS: invalid navigation response chunk");
         }
-        loaded += size;
-        if (!Number.isSafeInteger(loaded)) {
-          throw new TypeError("KitJS: navigation response is too large");
+        if (size > DRIVE_RESPONSE_BYTES_LIMIT - loaded) {
+          cancelReader();
+          throw driveFallbackError("KitJS: navigation response exceeds the byte limit");
         }
+        loaded += size;
         var text = decoder.decode(value, { stream: true });
         if (text) chunks.push(text);
         if (loaded < total) {
@@ -334,9 +371,50 @@
           }
         }
         return read();
+      }).catch(function (error) {
+        cancelReader();
+        throw error;
       });
     }
     return read();
+  }
+
+  function boundedDestinationDocument(incoming) {
+    if (!incoming) throw driveFallbackError("KitJS: navigation response did not produce a document");
+    var nodes = [incoming];
+    var depths = [0];
+    var discovered = 1;
+
+    function enqueue(node, depth) {
+      if (!node) return;
+      if (depth > DRIVE_DOCUMENT_DEPTH_LIMIT) {
+        throw driveFallbackError("KitJS: navigation document exceeds the depth limit");
+      }
+      discovered++;
+      if (discovered > DRIVE_DOCUMENT_NODE_LIMIT) {
+        throw driveFallbackError("KitJS: navigation document exceeds the node limit");
+      }
+      nodes.push(node);
+      depths.push(depth);
+    }
+
+    while (nodes.length) {
+      var node = nodes.pop();
+      var depth = depths.pop();
+      if (node.nodeType === 1 && String(node.localName || "").toLowerCase() === "template" && node.content) {
+        enqueue(node.content, depth + 1);
+      }
+      var child = node.lastChild;
+      while (child) {
+        enqueue(child, depth + 1);
+        child = child.previousSibling;
+      }
+    }
+    return incoming;
+  }
+
+  function parseDestinationDocument(sourceText) {
+    return boundedDestinationDocument(new DOMParser().parseFromString(sourceText, "text/html"));
   }
 
   function incomingBase(incoming, responseURL) {
@@ -463,10 +541,50 @@
     return policy === "stable";
   }
 
-  function warnDriveDisabled() {
+  function topologyFailure(diagnostic, cause, script, remedy) {
+    if (diagnostic && !diagnostic.cause) {
+      diagnostic.cause = cause;
+      diagnostic.script = script || null;
+      diagnostic.remedy = remedy;
+    }
+    return null;
+  }
+
+  function diagnosticScript(script) {
+    if (!script) return "no script node was available";
+    var source = "";
+    if (script.hasAttribute && script.hasAttribute("src")) {
+      try {
+        var rawSource = String(script.getAttribute("src") || "");
+        var parsed = new URL(rawSource, script.ownerDocument && script.ownerDocument.baseURI || document.baseURI);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          source = "[" + parsed.protocol + " URL redacted]";
+        } else {
+          source = parsed.origin === global.location.origin ? parsed.pathname : parsed.origin + parsed.pathname;
+          if (parsed.search) source += "?[redacted]";
+          if (parsed.hash) source += "#[redacted]";
+        }
+      } catch (_) { source = "[unresolvable URL redacted]"; }
+      source = source.replace(/\s+/g, " ").slice(0, 160);
+    }
+    var owner = script.ownerDocument;
+    var location = owner && script.parentNode === owner.head ? "head" :
+      owner && script.parentNode === owner.body ? "body" : "document";
+    return source ? "<script src=" + JSON.stringify(source) + "> in <" + location + ">" :
+      "inline <script> in <" + location + ">";
+  }
+
+  function warnDriveDisabled(failure) {
     if (!driveDisabledWarning && global.console && typeof global.console.warn === "function") {
       driveDisabledWarning = true;
-      global.console.warn("KitJS Drive: disabled because the initial executable script topology is incompatible");
+      failure = failure && failure.cause ? failure : {
+        cause: "the initial executable script topology is incompatible",
+        script: profileScript,
+        remedy: "keep one identical ordered set of supported classic external scripts"
+      };
+      global.console.warn("KitJS Drive: disabled. Cause: " + failure.cause +
+        ". Offending script: " + diagnosticScript(failure.script) +
+        ". Remedy: " + failure.remedy + ".");
     }
     return false;
   }
@@ -524,36 +642,96 @@
     return candidate;
   }
 
-  function standaloneProfileScript(root, base, current) {
-    if (!root || !root.querySelectorAll || !profileURL) return null;
+  function standaloneProfileScript(root, base, current, diagnostic) {
+    if (!root || !root.querySelectorAll || !profileURL) {
+      return topologyFailure(diagnostic, "the standalone Hydrate profile script cannot be identified",
+        profileScript, "load one external Hydrate profile as a direct child of <head>");
+    }
     var matches = array(root.querySelectorAll("script[src]")).filter(function (script) {
       return absoluteURL(script.getAttribute("src"), base) === profileURL;
     });
-    if (matches.length !== 1 || current && matches[0] !== profileScript) return null;
+    if (matches.length !== 1) {
+      return topologyFailure(diagnostic, matches.length ? "the Hydrate profile script is duplicated" :
+        "the Hydrate profile script is missing", matches[1] || matches[0] || profileScript,
+      "keep exactly one unchanged Hydrate profile script as a direct child of <head>");
+    }
+    if (current && matches[0] !== profileScript) {
+      return topologyFailure(diagnostic, "the running Hydrate profile script was replaced", matches[0],
+        "do not replace or rewrite the Hydrate profile script after it executes");
+    }
     var script = matches[0];
-    if (!script.parentNode || script.parentNode !== root.head ||
-      executableScriptKind(script) !== "classic" || !script.hasAttribute("defer") ||
-      script.hasAttribute("async") || script.hasAttribute("nomodule") ||
-      String(script.textContent || "")) return null;
-    if (!compatibleScriptIdentity(script, profileURL)) return null;
-    var attributes = scriptAttributeSignature(script);
-    if (attributes === null) return null;
+    var signature = stableHeadScriptSignature(script, base, diagnostic);
+    if (!signature) return null;
     return {
       node: script,
-      signature: "profile\nurl=" + profileURL + "\n" + attributes
+      signature: "profile\n" + signature
     };
   }
 
-  function stableHeadScriptSignature(script, base) {
-    if (!script || !script.parentNode || script.parentNode !== script.ownerDocument.head ||
-      executableScriptKind(script) !== "classic" || !script.hasAttribute("src") ||
-      !script.hasAttribute("defer") || script.hasAttribute("async") ||
-      script.hasAttribute("nomodule") || String(script.textContent || "")) return null;
+  function stableHeadScriptSignature(script, base, diagnostic) {
+    if (!script) {
+      return topologyFailure(diagnostic, "an executable script node is missing", null,
+        "restore the missing external script in <head>");
+    }
+    var directHead = !!(script && script.parentNode && script.ownerDocument &&
+      script.parentNode === script.ownerDocument.head);
+    var kind = executableScriptKind(script);
+    if (kind !== "classic") {
+      return topologyFailure(diagnostic, "a " + (kind || "non-classic") + " script cannot survive Morph",
+        script, "use a classic external script for Drive pages or allow this link to navigate natively");
+    }
+    if (!script.hasAttribute("src")) {
+      return topologyFailure(diagnostic, "an executable inline script cannot survive Morph", script,
+        directHead ? "move its code to a same-origin external script, add defer, and mark it data-kit-drive=\"stable\"" :
+          "move its code to a same-origin external classic script in <head>, add defer, and mark it data-kit-drive=\"stable\"");
+    }
+    if (!directHead) {
+      return topologyFailure(diagnostic, "an executable script is not a direct child of <head>", script,
+        "move it to <head> so Drive can compare one stable execution order");
+    }
+    if (String(script.textContent || "")) {
+      return topologyFailure(diagnostic, "an external script also contains inline code", script,
+        "remove the inline text and keep all executable code in the external resource");
+    }
+    if (script.hasAttribute("async")) {
+      return topologyFailure(diagnostic, "an async script has no stable execution order", script,
+        "remove async and use defer");
+    }
+    if (script.hasAttribute("nomodule")) {
+      return topologyFailure(diagnostic, "a nomodule script has browser-dependent execution", script,
+        "remove nomodule or allow this link to navigate natively");
+    }
+    if (!script.hasAttribute("defer")) {
+      return topologyFailure(diagnostic, "an executable script is missing defer", script,
+        "add defer and keep the script in the same ordered position on every Drive page");
+    }
     var source = absoluteURL(script.getAttribute("src"), base);
-    if (!source) return null;
-    if (!compatibleScriptIdentity(script, source)) return null;
+    if (!source) {
+      return topologyFailure(diagnostic, "the script URL cannot be resolved", script,
+        "use a valid HTTP(S) script URL");
+    }
+    var policy = scriptDrivePolicy(script);
+    if (policy === null) {
+      return topologyFailure(diagnostic, "data-kit-drive has an unsupported value", script,
+        "use exactly data-kit-drive=\"stable\" for an unchanged same-origin script");
+    }
+    if (policy === "stable" && !sameOriginScriptSource(source)) {
+      return topologyFailure(diagnostic, "data-kit-drive=\"stable\" is restricted to same-origin scripts", script,
+        "remove the stable marker and provide valid SRI for the cross-origin script");
+    }
+    if (script.hasAttribute("integrity") && !validIntegrityMetadata(script.getAttribute("integrity"))) {
+      return topologyFailure(diagnostic, "the script integrity metadata is malformed", script,
+        "provide a valid sha256, sha384, or sha512 SRI value");
+    }
+    if (!compatibleScriptIdentity(script, source)) {
+      return topologyFailure(diagnostic, "the script has no stable identity", script,
+        "add valid SRI, or use data-kit-drive=\"stable\" when the script is same-origin and unchanged");
+    }
     var attributes = scriptAttributeSignature(script);
-    if (attributes === null) return null;
+    if (attributes === null) {
+      return topologyFailure(diagnostic, "the script has an executable event-handler attribute", script,
+        "remove attributes whose names begin with on");
+    }
     return "url=" + source + "\n" + attributes;
   }
 
@@ -619,21 +797,34 @@
     return candidate.scripts;
   }
 
-  function executableScriptTopology(root, base, current) {
-    if (!root || !root.querySelectorAll) return null;
+  function executableScriptTopology(root, base, current, diagnostic) {
+    if (!root || !root.querySelectorAll) {
+      return topologyFailure(diagnostic, "the document cannot enumerate its script topology", null,
+        "use a complete HTML document with a <head>");
+    }
     var themePrepaint = themePrepaintForTopology(root);
-    if (themePrepaint === undefined) return null;
+    if (themePrepaint === undefined) {
+      return topologyFailure(diagnostic, "the engine-owned theme prepaint script is malformed or replaced",
+        root.querySelector("[data-kitwork-jit=\"theme\"]"),
+      "restore the exact server-emitted theme prepaint script");
+    }
     var managed;
     var marker;
     if (stagedProfile) {
       managed = stagedScriptsForTopology(root, base);
       marker = "managed=staged";
     } else {
-      var profile = standaloneProfileScript(root, base, current);
+      var profile = standaloneProfileScript(root, base, current, diagnostic);
       managed = profile ? [profile.node] : null;
       marker = profile && profile.signature;
     }
-    if (!managed || !marker) return null;
+    if (!managed || !marker) {
+      return topologyFailure(diagnostic, stagedProfile ?
+        "the engine-managed staged script lane is malformed or no longer matches the active graph" :
+        "the standalone Hydrate profile script is incompatible", profileScript,
+      stagedProfile ? "restore the exact contiguous server-emitted runtime, Hydrate, graph, service, and component scripts" :
+        "restore the unchanged external Hydrate profile script");
+    }
     var managedSet = new Set(managed);
     var managedSeen = 0;
     var markerWritten = false;
@@ -644,7 +835,10 @@
       var script = scripts[index];
       if (engineHandoffScripts.has(script)) continue;
       if (managedSet.has(script)) {
-        if (managedBlockClosed) return null;
+        if (managedBlockClosed) {
+          return topologyFailure(diagnostic, "the managed script lane is interrupted or reordered", script,
+            "keep every engine-managed script contiguous and in its emitted order");
+        }
         managedSeen++;
         if (!markerWritten) {
           signatures.push(marker);
@@ -659,11 +853,15 @@
       }
       if (!executableScriptKind(script)) continue;
       if (markerWritten) managedBlockClosed = true;
-      var signature = stableHeadScriptSignature(script, base);
+      var signature = stableHeadScriptSignature(script, base, diagnostic);
       if (!signature) return null;
       signatures.push("authored\n" + signature);
     }
-    return managedSeen === managed.length ? signatures : null;
+    if (managedSeen !== managed.length) {
+      return topologyFailure(diagnostic, "a required managed script is missing from the document", profileScript,
+        "restore every server-emitted managed script without moving or replacing it");
+    }
+    return signatures;
   }
 
   function compatibleExecutableScripts(incoming, responseURL) {
@@ -1177,9 +1375,9 @@
   function collectComponents(root, output) {
     if (!root || root.nodeType === 1 && core.ignoredForRuntime(root)) return;
     if (root.nodeType === 1 && (root.hasAttribute("data-kit-component") ||
-      root.hasAttribute("data-kit-version") || root.hasAttribute("data-kit-local"))) output.push(root);
+      root.hasAttribute("data-kit-version"))) output.push(root);
     if (!root.querySelectorAll) return;
-    array(root.querySelectorAll("[data-kit-component],[data-kit-version],[data-kit-local]")).forEach(function (element) {
+    array(root.querySelectorAll("[data-kit-component],[data-kit-version]")).forEach(function (element) {
       if (!core.ignoredForRuntime(element)) output.push(element);
     });
     array(root.querySelectorAll("template")).forEach(function (template) {
@@ -1193,8 +1391,7 @@
       typeof core.hasComponentDefinition !== "function") return false;
     var components = [];
     var root = incoming.documentElement;
-    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version") ||
-      root.hasAttribute("data-kit-local")) {
+    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version")) {
       // The document root is outside body morphing, so data-kit-ignore cannot
       // exempt its component identity from the incoming graph check.
       components.push(root);
@@ -1212,8 +1409,7 @@
       typeof core.hasComponentDefinition !== "function") return false;
     var components = [];
     var root = incoming.documentElement;
-    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version") ||
-      root.hasAttribute("data-kit-local")) {
+    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version")) {
       components.push(root);
     }
     collectComponents(incoming.body, components);
@@ -1737,6 +1933,7 @@
       var responseURL = preserveRequestedFragment(response.url || url.href, url);
       var finalURL = sameOriginURL(responseURL);
       if (!response.ok || !isHTML(response) || !finalURL || hasContentSecurityPolicyHeader(response)) {
+        cancelResponseBody(response && response.body);
         fallbackVisit(visitRecord, responseURL, "fallback");
         return null;
       }
@@ -1744,7 +1941,7 @@
       return responseText(response, visitRecord).then(function (sourceText) {
         if (sourceText === null || !currentVisit(visitRecord)) return null;
         return {
-          document: new DOMParser().parseFromString(sourceText, "text/html"),
+          document: parseDestinationDocument(sourceText),
           url: finalURL
         };
       });
@@ -1826,6 +2023,9 @@
       if (controller.signal.aborted || error && error.name === "AbortError") {
         finishVisit(visitRecord, "cancelled", visitRecord.url);
         return false;
+      }
+      if (error && error.kitDriveFallback === DRIVE_FALLBACK) {
+        return fallbackVisit(visitRecord, visitRecord.url, "fallback");
       }
       return fallbackVisit(visitRecord, visitRecord.url, "error", error);
     }).finally(function () {
@@ -1912,10 +2112,19 @@
     if (started || !profileURL || typeof global.fetch !== "function" ||
       typeof global.DOMParser !== "function" || typeof global.AbortController !== "function" ||
       !global.history || typeof global.history.pushState !== "function") return false;
-    if (!captureLiveThemePrepaint()) return warnDriveDisabled();
-    if (stagedProfile && !captureLiveStagedDelivery()) return warnDriveDisabled();
-    liveExecutableTopology = executableScriptTopology(document, document.baseURI, true);
-    if (!liveExecutableTopology) return warnDriveDisabled();
+    if (!captureLiveThemePrepaint()) return warnDriveDisabled({
+      cause: "the engine-owned theme prepaint script is malformed or replaced",
+      script: document.querySelector("[data-kitwork-jit=\"theme\"]"),
+      remedy: "restore the exact server-emitted theme prepaint script"
+    });
+    if (stagedProfile && !captureLiveStagedDelivery()) return warnDriveDisabled({
+      cause: "the engine-managed staged script lane is malformed or no longer matches the active graph",
+      script: stagedReservedNodes(document)[0] || profileScript,
+      remedy: "restore the exact contiguous server-emitted runtime, Hydrate, graph, service, and component scripts"
+    });
+    var topologyDiagnostic = {};
+    liveExecutableTopology = executableScriptTopology(document, document.baseURI, true, topologyDiagnostic);
+    if (!liveExecutableTopology) return warnDriveDisabled(topologyDiagnostic);
     started = true;
     if (stagedProfile && core.graph && core.delivery && core.delivery.graphHash) {
       rememberHandoffGraph(core.delivery.graphHash, { graph: core.graph, delivery: core.delivery });

@@ -1,6 +1,6 @@
 # KitJS Package Documentation & Developer Guide
 
-> **Runtime Version:** `0.9.0-next.13`
+> **Source Candidate Runtime:** `1.0.0-rc.2` (unpublished)
 > **Package Architecture:** Standalone HTML-First Browser Runtime & Go JIT Staged Delivery  
 > **Profiles:** `kit.js` (Base Profile) & `hydrate.kit.js` (Hydrate Profile)  
 > **Security Model:** Zero-eval Closed AST Sandbox · Fail-Closed · Zero Runtime Dependencies
@@ -31,7 +31,7 @@
 Hai standalone profile chỉ công khai **một frozen global object** trên `globalThis.kit`:
 
 ```javascript
-kit.version                     // Return exact SemVer string (e.g. "0.9.0-next.13")
+kit.version                     // Return exact SemVer string (e.g. "1.0.0-rc.2")
 kit.component(name, plainObject) // Register a plain-object component definition
 ```
 
@@ -99,7 +99,10 @@ KitJS sử dụng mô hình **Shallow Dirty-Bit Boundary Scheduler**:
 | `data-kit-retain="..."` | Retain Key | Trong Hydrate profile, giữ component host và live store khi phía incoming có cùng key cùng namespace, tag, component identity, version và alias. Key phải duy nhất; host không được lồng nhau hoặc nằm trong template/structural region. |
 | `data-kit-ignore` | Static Marker | Kit scanner không mount cây con. Morph chỉ giữ nguyên boundary khi cả node hiện tại và incoming tương ứng đều có marker; thêm/bỏ marker sẽ thay boundary, còn thiếu counterpart vẫn bị remove bình thường. |
 
-Dạng tách `data-kit-version` và marker rỗng `data-kit-local` chỉ là compatibility input deprecated trong dòng 0.9; markup mới phải dùng một trong hai dạng canonical của `data-kit-component` ở trên.
+Dạng tách `data-kit-version` đã bị loại bỏ và fail closed ngoài vùng
+`data-kit-ignore`. Managed component phải đặt exact version trực tiếp trong
+`data-kit-component`; direct client component dùng tên không version và không
+cần marker riêng.
 
 ### B. State Bindings & Presentation
 
@@ -116,9 +119,33 @@ Dạng tách `data-kit-version` và marker rỗng `data-kit-local` chỉ là com
 
 | Directive | Dynamic Expression | Mô tả Contract |
 |---|---|---|
-| `data-kit-if="..."` | Boolean Expression | Materialize một nhánh `<template>` khi biểu thức truthy. |
+| `data-kit-if="..."` | Boolean Expression | Mount/unmount một direct host một-root, hoặc materialize fragment của `<template>`. |
 | `data-kit-for="..."` | `item, index of items` | Reconcile các nhóm clone của `<template>`; dạng `item of items` cũng hợp lệ. |
 | `data-kit-key="..."` | Expression | Cung cấp identity string hoặc finite number duy nhất cho một row. |
+
+`data-kit-if` không bắt buộc phải nằm trên `<template>`:
+
+```html
+<section data-kit-scope="open: true">
+  <div data-kit-if="open">Một conditional root</div>
+</section>
+```
+
+Direct element cần một scope hoặc component boundary bao ngoài, và biểu thức
+đọc boundary cha gần nhất đó. `data-kit-scope` hoặc `data-kit-component` trên
+chính host chỉ thuộc nhánh sau khi mount và không thể cung cấp điều kiện cho sự
+tồn tại của chính nó. Authored host là fallback SSR
+và no-JavaScript: truthy ở lần render đầu giữ host đó, falsy unmount nó, còn lần
+mở lại tạo host mới. Trong standalone runtime, biểu thức sai phát diagnostic
+nhưng giữ fallback nguyên vẹn; Kitwork preflight từ chối source sai trước khi
+publish generation.
+
+Dùng `<template data-kit-if>` cho fragment nhiều top-level node hoặc khi nội
+dung phải inert trước lúc KitJS boot. Direct host vẫn tuân theo browser loading
+bình thường, vì vậy ảnh, iframe, media hoặc resource descendant có thể bắt đầu
+tải trước khi điều kiện false được đánh giá. Script executable không hợp lệ
+trong mọi structural region. `data-kit-for` và `data-kit-key` vẫn template-only;
+retain bị cấm trên hoặc bên trong cả hai dạng conditional branch.
 
 ### D. Event và modifier được hỗ trợ
 

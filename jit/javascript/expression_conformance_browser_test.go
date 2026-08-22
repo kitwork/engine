@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -288,6 +289,30 @@ func buildClosedExpressionDocument(t *testing.T) []byte {
 	document.WriteString("    <output id=\"expression-budget\" data-kit-text=\"")
 	document.WriteString(html.EscapeString(budgetSource))
 	document.WriteString("\">budget-blocked</output>\n")
+	exactSource := "one" + strings.Repeat(" ", expressionDecodedSourceLimit-len("one"))
+	document.WriteString("    <output id=\"expression-source-exact\" data-kit-text=\"")
+	document.WriteString(exactSource)
+	document.WriteString("\">source-exact-blocked</output>\n")
+	document.WriteString("    <output id=\"expression-source-over\" data-kit-text=\"")
+	document.WriteString(exactSource + " ")
+	document.WriteString("\">source-over-blocked</output>\n")
+	ambiguousExact := `'` + strings.Repeat("&notit;", (expressionDecodedSourceLimit-2)/len("&notit;")) + `'`
+	document.WriteString("    <output id=\"expression-attribute-ambiguous-exact\" data-kit-text=\"")
+	document.WriteString(ambiguousExact)
+	document.WriteString("\">ambiguous-exact-blocked</output>\n")
+	document.WriteString("    <output id=\"expression-attribute-ambiguous-over\" data-kit-text=\"")
+	document.WriteString(ambiguousExact[:len(ambiguousExact)-1] + "&notit;'")
+	document.WriteString("\">ambiguous-over-blocked</output>\n")
+	crlfExact := `'` + strings.Repeat("\r\n", expressionDecodedSourceLimit-2) + `'`
+	document.WriteString("    <output id=\"expression-attribute-crlf-exact\" data-kit-text=\"")
+	document.WriteString(crlfExact)
+	document.WriteString("\">crlf-exact-blocked</output>\n")
+	document.WriteString("    <output id=\"expression-attribute-crlf-over\" data-kit-text=\"")
+	document.WriteString(crlfExact[:len(crlfExact)-1] + "\r\n'")
+	document.WriteString("\">crlf-over-blocked</output>\n")
+	document.WriteString("    <output id=\"expression-token-over\" data-kit-text=\"")
+	document.WriteString(strings.Repeat(",", expressionTokenLimit))
+	document.WriteString("\">token-over-blocked</output>\n")
 	depthSource := strings.Repeat("(", 80) + "one" + strings.Repeat(")", 80)
 	document.WriteString("    <output id=\"expression-parser-depth\" data-kit-text=\"")
 	document.WriteString(html.EscapeString(depthSource))
@@ -495,6 +520,18 @@ func closedExpressionAssertions(positiveJSON, rejectedJSON string) string {
     assert(document.getElementById(id).textContent === "blocked", id + " did not fail closed");
   });
   assert(document.getElementById("expression-budget").textContent === "budget-blocked", "oversized expression did not fail closed");
+  assert(document.getElementById("expression-source-exact").textContent === "1", "exact expression source limit did not compile");
+  assert(document.getElementById("expression-source-over").textContent === "source-over-blocked", "expression source overflow did not fail closed");
+  assert(document.getElementById("expression-attribute-ambiguous-exact").textContent.length === ` + strconv.Itoa(expressionDecodedSourceLimit-2) + `,
+    "attribute-context ambiguous entity exact boundary did not compile");
+  assert(document.getElementById("expression-attribute-ambiguous-over").textContent === "ambiguous-over-blocked",
+    "attribute-context ambiguous entity overflow did not fail closed");
+  assert(document.getElementById("expression-attribute-crlf-exact").textContent.length === ` + strconv.Itoa(expressionDecodedSourceLimit-2) + `,
+    "CRLF-normalized exact boundary did not compile");
+  assert(document.getElementById("expression-attribute-crlf-over").textContent === "crlf-over-blocked",
+    "CRLF-normalized expression overflow did not fail closed");
+  assert(document.getElementById("expression-token-over").textContent === "token-over-blocked",
+    "browser lexer token overflow did not fail closed");
   assert(document.getElementById("expression-parser-depth").textContent === "depth-blocked", "parser depth limit was not enforced");
   assert(text("expression-strict-dot-null") === "server-strict-dot",
     "ordinary dot access on nullish data did not preserve server DOM");

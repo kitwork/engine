@@ -12,7 +12,7 @@ import (
 // CompilerSchemaVersion is the explicit compiler-cache contract. Increment it
 // whenever lowering or constant semantics change without an incompatible
 // opcode encoding change.
-const CompilerSchemaVersion uint16 = 1
+const CompilerSchemaVersion uint16 = 2
 
 var currentCompilerFingerprint = buildCompilerFingerprint()
 

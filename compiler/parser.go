@@ -71,6 +71,7 @@ type Parser struct {
 	// Module metadata thu thập khi parse (cho bundler native ở package script).
 	exports    []string // tên export qua `export const/function` / `export { }`
 	hasDefault bool     // có `export default …` (đã hạ về const DefaultExportName)
+	breakDepth int      // switch/loop nesting; function bodies reset this boundary
 }
 
 func NewParser(l *Lexer) *Parser {
@@ -161,6 +162,15 @@ func (p *Parser) ParseProgram() *Program {
 }
 
 func (p *Parser) parseStatement() Statement {
+	if p.curTokenIs(Ident) {
+		switch p.curToken.Value.Text() {
+		case "break":
+			return p.parseBreakStatement()
+		case "case", "default":
+			p.addError(fmt.Sprintf("'%s' chỉ hợp lệ bên trong switch", p.curToken.Value.Text()))
+			return nil
+		}
+	}
 	switch p.curToken.Kind {
 	case Let, Const:
 		return p.parseVarStatement()
@@ -174,6 +184,8 @@ func (p *Parser) parseStatement() Statement {
 		return p.parseFunctionStatement()
 	case For:
 		return p.parseForStatement()
+	case Switch:
+		return p.parseSwitchStatement()
 	default:
 		return p.parseExpressionStatement()
 	}
@@ -563,6 +575,90 @@ func (p *Parser) parseReturnStatement() Statement {
 	return stmt
 }
 
+func (p *Parser) parseBreakStatement() Statement {
+	stmt := &BreakStatement{Token: p.curToken}
+	if p.breakDepth == 0 {
+		p.addError("'break' chỉ hợp lệ bên trong switch hoặc vòng for")
+	}
+	if p.peekTokenIs(Semicolon) {
+		p.nextToken()
+		return stmt
+	}
+	if p.peekTokenIs(RightBrace) || p.peekTokenIs(EOF) ||
+		isContextualToken(p.peekToken, "case") ||
+		isContextualToken(p.peekToken, "default") {
+		return stmt
+	}
+	p.addError("Kitwork không hỗ trợ labeled break; hãy dùng 'break;'")
+	return stmt
+}
+
+func (p *Parser) parseSwitchStatement() Statement {
+	stmt := &SwitchStatement{Token: p.curToken, Cases: []SwitchCase{}}
+	if !p.expectPeek(LeftParen) {
+		return nil
+	}
+	p.nextToken()
+	stmt.Discriminant = p.parseExpression(LOWEST)
+	if stmt.Discriminant == nil || !p.expectPeek(RightParen) || !p.expectPeek(LeftBrace) {
+		return nil
+	}
+
+	p.breakDepth++
+	defer func() { p.breakDepth-- }()
+	seenDefault := false
+	p.nextToken()
+	for !p.curTokenIs(RightBrace) && !p.curTokenIs(EOF) {
+		if p.curTokenIs(Semicolon) {
+			p.nextToken()
+			continue
+		}
+
+		clause := SwitchCase{Token: p.curToken, Statements: []Statement{}}
+		switch {
+		case isContextualToken(p.curToken, "case"):
+			p.nextToken()
+			clause.Test = p.parseExpression(LOWEST)
+			if clause.Test == nil || !p.expectPeek(Colon) {
+				return nil
+			}
+		case isContextualToken(p.curToken, "default"):
+			if seenDefault {
+				p.addError("switch chỉ được có một default")
+				return nil
+			}
+			seenDefault = true
+			if !p.expectPeek(Colon) {
+				return nil
+			}
+		default:
+			p.addError("switch chỉ chấp nhận 'case' hoặc 'default' ở cấp thân trực tiếp")
+			return nil
+		}
+
+		p.nextToken()
+		for !p.curTokenIs(RightBrace) && !p.curTokenIs(EOF) &&
+			!isContextualToken(p.curToken, "case") &&
+			!isContextualToken(p.curToken, "default") {
+			if p.curTokenIs(Semicolon) {
+				p.nextToken()
+				continue
+			}
+			caseStatement := p.parseStatement()
+			if caseStatement != nil {
+				clause.Statements = append(clause.Statements, caseStatement)
+			}
+			p.nextToken()
+		}
+		stmt.Cases = append(stmt.Cases, clause)
+	}
+	if p.curTokenIs(EOF) {
+		p.addError("switch thiếu dấu '}' kết thúc")
+		return nil
+	}
+	return stmt
+}
+
 func (p *Parser) parseExpressionStatement() Statement {
 	stmt := &ExpressionStatement{Token: p.curToken}
 	stmt.Expression = p.parseExpression(LOWEST)
@@ -590,6 +686,23 @@ func (p *Parser) parseBlockStatement() *BlockStatement {
 		p.nextToken()
 	}
 	return block
+}
+
+func (p *Parser) parseBreakableBlock() *BlockStatement {
+	p.breakDepth++
+	defer func() { p.breakDepth-- }()
+	return p.parseBlockStatement()
+}
+
+func (p *Parser) parseFunctionBlock() *BlockStatement {
+	outerBreakDepth := p.breakDepth
+	p.breakDepth = 0
+	defer func() { p.breakDepth = outerBreakDepth }()
+	return p.parseBlockStatement()
+}
+
+func isContextualToken(token Token, word string) bool {
+	return token.Kind == Ident && token.Value.Text() == word
 }
 
 /* =============================================================================
@@ -659,6 +772,10 @@ func (p *Parser) parseTemplateLiteral() Expression {
 					i++
 				}
 			}
+			if braceCount != 0 {
+				p.addError("unterminated template interpolation")
+				return nil
+			}
 			exprStr = fullText[exprStart:i]
 
 			// Sub-parse the expression
@@ -669,9 +786,15 @@ func (p *Parser) parseTemplateLiteral() Expression {
 			)
 			subParser := NewParser(subLexer)
 			expr := subParser.parseExpression(LOWEST)
-			if expr != nil {
-				tl.Parts = append(tl.Parts, expr)
+			if errors := subParser.Errors(); len(errors) > 0 {
+				p.addError("invalid template expression: " + errors[0])
+				return nil
 			}
+			if expr == nil {
+				p.addError("template interpolation requires an expression")
+				return nil
+			}
+			tl.Parts = append(tl.Parts, expr)
 
 			start = i + 1 // skip }
 		}
@@ -832,8 +955,6 @@ func (p *Parser) parseReservedKeyword() Expression {
 		p.addError(fmt.Sprintf("Kitwork không hỗ trợ vòng điều kiện tuỳ ý '%s' (có thể lặp vô tận). Hãy dùng vòng ĐẾM 'for (let i = 0; i < n; i++)', duyệt 'for (const x of arr)', hoặc .map()/.filter()/.find() trên mảng.", word))
 	case "try", "catch", "finally", "throw":
 		p.addError(fmt.Sprintf("Kitwork không hỗ trợ '%s' (loại bỏ có chủ đích cho đơn giản). Hãy dùng chuỗi .done(callback) / .fail(callback) để xử lý kết quả và lỗi.", word))
-	case "switch":
-		p.addError("Kitwork không hỗ trợ 'switch'. Hãy dùng if / else hoặc tra cứu qua object map.")
 	case "class":
 		p.addError("Kitwork không hỗ trợ 'class'. Hãy dùng object literal và arrow function.")
 	default:
@@ -960,7 +1081,7 @@ func (p *Parser) parseCountedFor(forTok, declTok Token, counter *Identifier) Sta
 	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
-	stmt.Body = p.parseBlockStatement()
+	stmt.Body = p.parseBreakableBlock()
 	return stmt
 }
 
@@ -976,7 +1097,7 @@ func (p *Parser) parseForOf(forTok Token, item *Identifier) Statement {
 	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
-	stmt.Body = p.parseBlockStatement()
+	stmt.Body = p.parseBreakableBlock()
 	return stmt
 }
 
@@ -1033,16 +1154,28 @@ func (p *Parser) parseObjectLiteral() Expression {
 		if p.curTokenIs(Spread) {
 			p.nextToken()
 			val := p.parseExpression(LOWEST)
+			if val == nil {
+				p.addError("object spread requires an expression")
+				return nil
+			}
 			obj.Entries = append(obj.Entries, ObjectEntry{
 				Value:    val,
 				IsSpread: true,
 			})
 		} else {
 			key := p.parseExpression(LOWEST)
+			if key == nil {
+				p.addError("object key requires an expression")
+				return nil
+			}
 			if p.peekTokenIs(Colon) {
 				p.nextToken()
 				p.nextToken()
 				val := p.parseExpression(LOWEST)
+				if val == nil {
+					p.addError("object value requires an expression")
+					return nil
+				}
 				obj.Entries = append(obj.Entries, ObjectEntry{
 					Key:   key,
 					Value: val,
@@ -1130,7 +1263,7 @@ func (p *Parser) parseArrowFunction(left Expression) Expression {
 		return &FunctionLiteral{
 			Token:      tok,
 			Parameters: params,
-			Body:       p.parseBlockStatement(),
+			Body:       p.parseFunctionBlock(),
 		}
 	}
 
@@ -1181,6 +1314,10 @@ func (p *Parser) parseExpressionList(end Kind) []Expression {
 	list = append(list, p.parseExpression(LOWEST))
 	for p.peekTokenIs(Comma) {
 		p.nextToken()
+		if p.peekTokenIs(end) {
+			p.addError(fmt.Sprintf("trailing comma is not supported before %s", end))
+			return nil
+		}
 		p.nextToken()
 		list = append(list, p.parseExpression(LOWEST))
 	}
@@ -1237,7 +1374,7 @@ func (p *Parser) parseFunctionStatement() Statement {
 		return nil
 	}
 
-	body := p.parseBlockStatement()
+	body := p.parseFunctionBlock()
 
 	funcLit := &FunctionLiteral{
 		Token:      tok,
@@ -1279,7 +1416,7 @@ func (p *Parser) parseFunctionExpression() Expression {
 		return nil
 	}
 
-	body := p.parseBlockStatement()
+	body := p.parseFunctionBlock()
 
 	return &FunctionLiteral{
 		Token:      tok,

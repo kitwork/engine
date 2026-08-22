@@ -280,7 +280,8 @@ func TestExpressionValidatorBudgets(t *testing.T) {
 		t.Fatalf("large expression error = %v", err)
 	}
 
-	largeOptionalChain := "value" + strings.Repeat("?.field", expressionNodeLimit-1)
+	// Keep the node-budget probe below the independent pre-lex source fence.
+	largeOptionalChain := "value" + strings.Repeat("?.x", expressionNodeLimit-1)
 	if err := validateExpression(largeOptionalChain, "binding"); err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("large optional chain error = %v", err)
 	}

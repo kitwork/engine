@@ -442,8 +442,14 @@ func (v Value) Shift(_ ...Value) Value {
 }
 
 func (v Value) Unshift(args ...Value) Value {
+	if len(args) == 0 {
+		return v
+	}
 	if ptr, ok := v.V.(*[]Value); ok {
-		*ptr = append(args, *ptr...)
+		result := make([]Value, len(args)+len(*ptr))
+		copy(result, args)
+		copy(result[len(args):], *ptr)
+		*ptr = result
 	}
 	return v
 }

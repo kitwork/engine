@@ -106,14 +106,16 @@ const browserHarness = `(function () {
     if (!condition) throw new Error(message);
   }
 
-  function waitFor(predicate, message) {
+  function waitFor(predicate, message, timeout, interval) {
     return new Promise(function (resolve, reject) {
-      var deadline = performance.now() + 2000;
+      var duration = typeof timeout === "number" && timeout > 0 ? timeout : 2000;
+      var delay = typeof interval === "number" && interval >= 0 ? interval : 8;
+      var deadline = performance.now() + duration;
       function poll() {
         try {
           if (predicate()) { resolve(); return; }
           if (performance.now() >= deadline) { reject(new Error(message)); return; }
-          setTimeout(poll, 8);
+          setTimeout(poll, delay);
         } catch (error) { reject(error); }
       }
       poll();

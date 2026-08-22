@@ -39,7 +39,8 @@
         program: program,
         onceDone: false,
         timer: 0,
-        generation: 0
+        generation: 0,
+        ownsRemoval: false
       } : null;
       if (events[name] && descriptor.outside) {
         outsideActive[descriptor.type] = (outsideActive[descriptor.type] || 0) + 1;
@@ -89,7 +90,6 @@
   function prepare() {
     if (prepared) return;
     prepared = true;
-    if (core.prepareComponentTree) core.prepareComponentTree(document);
     document.querySelectorAll("*").forEach(validateElement);
   }
 
@@ -109,6 +109,10 @@
       if (state.timer) clearTimeout(state.timer);
       state.timer = 0;
       state.generation++;
+      if (state.ownsRemoval) {
+        state.ownsRemoval = false;
+        if (core.releaseRemovalOwner) core.releaseRemovalOwner();
+      }
       if (state.descriptor.outside && outsideActive[state.descriptor.type]) {
         outsideActive[state.descriptor.type]--;
       }
@@ -161,30 +165,36 @@
     return true;
   }
 
-  function connectedOwner(state) {
-    var owner = null;
-    Array.prototype.some.call(document.querySelectorAll("*"), function (element) {
-      if (core.ignoredForRuntime(element)) return false;
-      var record = core.records.get(element);
-      if (!record || record.events[state.descriptor.name] !== state ||
-          !element.hasAttribute(state.descriptor.name)) return false;
-      owner = element;
-      return true;
-    });
-    return owner;
+  function connectedOwner(state, element) {
+    if (!element || element.ownerDocument !== document || !document.contains(element) ||
+      core.ignoredForRuntime(element)) return null;
+    var record = core.records.get(element);
+    if (!record || record.events[state.descriptor.name] !== state ||
+        !element.hasAttribute(state.descriptor.name)) return null;
+    return element;
   }
 
-  function scheduleDebounce(state, eventSnapshot) {
+  function scheduleDebounce(state, element, eventSnapshot) {
     if (state.timer) clearTimeout(state.timer);
+    else if (!state.ownsRemoval) {
+      state.ownsRemoval = true;
+      if (core.retainRemovalOwner) core.retainRemovalOwner();
+    }
     var generation = ++state.generation;
-    state.timer = setTimeout(function () {
+    var timer = setTimeout(function () {
+      if (state.timer !== timer) return;
       state.timer = 0;
+      if (state.ownsRemoval) {
+        state.ownsRemoval = false;
+        if (core.releaseRemovalOwner) core.releaseRemovalOwner();
+      }
       if (generation !== state.generation || state.onceDone) return;
-      var owner = connectedOwner(state);
+      var owner = connectedOwner(state, element);
       if (!owner) return;
       if (core.executeAttribute(owner, state.descriptor.name, locals(eventSnapshot)) &&
           state.descriptor.once) state.onceDone = true;
     }, state.descriptor.delay);
+    state.timer = timer;
   }
 
   function execute(state, element, event, eventSnapshot) {
@@ -193,7 +203,7 @@
     if (descriptor.stop) event.stopPropagation();
 
     if (descriptor.delay) {
-      scheduleDebounce(state, eventSnapshot);
+      scheduleDebounce(state, element, eventSnapshot);
       return true;
     }
 

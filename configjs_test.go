@@ -83,6 +83,39 @@ app.web({
 	}
 }
 
+func TestAppSearchCollectionCanaryIsExplicit(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.search({ collectionCanary: true }).web({ port: 8080 });`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Search.CollectionCanary {
+		t.Fatalf("collection search canary config = %+v", cfg.Search)
+	}
+
+	disabled, err := ParseConfig(map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Search.CollectionCanary {
+		t.Fatal("collection search canary was not opt-in")
+	}
+	snake, err := ParseConfig(map[string]interface{}{
+		"search": map[string]interface{}{"collection_canary": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snake.Search.CollectionCanary {
+		t.Fatal("snake-case collection search canary was not parsed")
+	}
+}
+
 // env.int must read the live env var (overriding the default).
 func TestEvalConfigJS_EnvOverride(t *testing.T) {
 	file := writeServerJS(t, `import { server, env } from "kitwork"; server.run({ port: env.PORT || 3000 });`)

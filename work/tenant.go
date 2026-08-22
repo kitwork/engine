@@ -13,9 +13,11 @@ import (
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
+	collectioncap "github.com/kitwork/engine/capabilities/collection"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/search"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/utilities/cache"
 	collectionhelper "github.com/kitwork/engine/utilities/collection"
@@ -94,6 +96,15 @@ type Tenant struct {
 	collectionErr   error
 	collectionFTS   map[string]string // collection path → dir signature at last FTS sync
 
+	searchMu          sync.Mutex
+	searchManager     *search.Manager
+	searchManagerErr  error
+	searchManagerSet  bool
+	ownsSearchManager bool
+	searchStates      map[string]*searchIndexState
+	collectionCanary  bool
+	collectionMetrics *collectioncap.SegmentSearchCanaryTelemetry
+
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
 
@@ -153,6 +164,143 @@ func (t *Tenant) SiteGeneration() *site.Generation {
 		return nil
 	}
 	return t.generation
+}
+
+// SetSearchManager injects the host-owned bounded manager before Tenant.Run.
+// A nil manager with a non-nil error preserves the host initialization failure
+// instead of silently creating an unbounded per-generation fallback.
+func (t *Tenant) SetSearchManager(manager *search.Manager, managerErr error) {
+	if t == nil {
+		return
+	}
+	t.searchMu.Lock()
+	defer t.searchMu.Unlock()
+	if t.searchManagerSet {
+		return
+	}
+	t.searchManager = manager
+	t.searchManagerErr = managerErr
+	t.searchManagerSet = true
+}
+
+// SetCollectionSearchCanary configures the generation before capabilities are
+// resolved. Serving remains on the legacy collection index; only shadow work
+// is enabled.
+func (t *Tenant) SetCollectionSearchCanary(enabled bool) {
+	if t == nil {
+		return
+	}
+	t.searchMu.Lock()
+	t.collectionCanary = enabled
+	t.searchMu.Unlock()
+}
+
+func (t *Tenant) SetCollectionSearchCanaryTelemetry(telemetry *collectioncap.SegmentSearchCanaryTelemetry) {
+	if t == nil {
+		return
+	}
+	t.searchMu.Lock()
+	t.collectionMetrics = telemetry
+	t.searchMu.Unlock()
+}
+
+// CollectionSearchCanaryEnabled is the optional collection capability seam.
+func (t *Tenant) CollectionSearchCanaryEnabled() bool {
+	if t == nil {
+		return false
+	}
+	t.searchMu.Lock()
+	enabled := t.collectionCanary
+	t.searchMu.Unlock()
+	return enabled
+}
+
+func (t *Tenant) CollectionSearchCanaryTelemetry() *collectioncap.SegmentSearchCanaryTelemetry {
+	if t == nil {
+		return nil
+	}
+	t.searchMu.Lock()
+	telemetry := t.collectionMetrics
+	t.searchMu.Unlock()
+	return telemetry
+}
+
+// CollectionSearchManager lets the collection canary borrow the same bounded
+// host owner used by database search.
+func (t *Tenant) CollectionSearchManager() (*search.Manager, error) {
+	return t.searchManagerFor()
+}
+
+// RegisterCollectionSearchIndex includes a hashed collection index in proven
+// site-idle cleanup without exposing tenant paths or collection names.
+func (t *Tenant) RegisterCollectionSearchIndex(key string) {
+	if t == nil || key == "" {
+		return
+	}
+	t.searchIndexState(key)
+}
+
+func (t *Tenant) searchManagerFor() (*search.Manager, error) {
+	if t == nil {
+		return nil, fmt.Errorf("search: tenant is nil")
+	}
+	t.searchMu.Lock()
+	defer t.searchMu.Unlock()
+	if t.searchManagerSet {
+		if t.searchManager == nil && t.searchManagerErr == nil {
+			return nil, search.ErrClosed
+		}
+		return t.searchManager, t.searchManagerErr
+	}
+	manager, err := search.NewManager(t.resolve(".data", "search"), search.ManagerOptions{})
+	if err == nil {
+		t.searchManager = manager
+		t.ownsSearchManager = true
+	}
+	t.searchManagerErr = err
+	t.searchManagerSet = true
+	return manager, err
+}
+
+// InheritSearchState keeps per-site rebuild gates and opened index identities
+// stable across generation replacement. Both tenants borrow the same host
+// manager; the state contains no request or generation-owned values.
+func (t *Tenant) InheritSearchState(previous *Tenant) {
+	if t == nil || previous == nil || t == previous {
+		return
+	}
+	previous.searchMu.Lock()
+	states := make(map[string]*searchIndexState, len(previous.searchStates))
+	for key, state := range previous.searchStates {
+		states[key] = state
+	}
+	previous.searchMu.Unlock()
+
+	t.searchMu.Lock()
+	if t.searchStates == nil {
+		t.searchStates = make(map[string]*searchIndexState, len(states))
+	}
+	for key, state := range states {
+		if t.searchStates[key] == nil {
+			t.searchStates[key] = state
+		}
+	}
+	t.searchMu.Unlock()
+}
+
+// SearchIndexKeys returns a detached list used by the host's proven site-idle
+// lifecycle. It contains hashes only, never tenant paths or query text.
+func (t *Tenant) SearchIndexKeys() []string {
+	if t == nil {
+		return nil
+	}
+	t.searchMu.Lock()
+	defer t.searchMu.Unlock()
+	keys := make([]string, 0, len(t.searchStates))
+	for key := range t.searchStates {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // SourcesChanged compares the active generation's executable source manifest
@@ -602,6 +750,18 @@ func (t *Tenant) Close() {
 			t.capabilitiesCache.Close()
 		}
 		t.capabilitiesMu.Unlock()
+
+		t.searchMu.Lock()
+		searchManager := t.searchManager
+		ownsSearchManager := t.ownsSearchManager
+		t.searchManager = nil
+		if ownsSearchManager {
+			t.searchStates = nil
+		}
+		t.searchMu.Unlock()
+		if ownsSearchManager && searchManager != nil {
+			_ = searchManager.Close()
+		}
 
 		if t.ownsApp && t.appRuntime != nil {
 			t.appRuntime.Close()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +67,8 @@ type ColumnSpec struct {
 	enumVals   []string      // for kind == "enum": the allowed values
 	indexes    []colIndexRef // .index() memberships — an index this column participates in
 	fk         *fkRef        // set by ref() — a foreign key on this column
+	searchable bool          // set by .searchable() — this column feeds the full-text index
+	searchWt   int           // .searchable({ weight }) — term-frequency multiplier at index time (default 1)
 	seq        uint64        // creation order — the VM evaluates the column builders in source order, so
 	// sorting a schema's columns by seq reproduces the DECLARED order (the alternative, a plain Go map,
 	// loses it, and DDL sorted by name would show columns alphabetically instead of as written).
@@ -153,6 +156,25 @@ func (c *ColumnSpec) Index(args ...value.Value) *ColumnSpec {
 	c.indexes = append(c.indexes, ref)
 	return c
 }
+
+// Searchable marks a column for full-text search: db.posts.search("…") ranks rows by BM25 over every
+// searchable column. The optional object sets a weight — text().searchable({ weight: 3 }) makes matches
+// in this column count triple, so a title outranks a body — mirroring the .index({ … }) object shape.
+// Bare .searchable() is weight 1. Turso has no native FTS in the pure-Go build, so search runs on a
+// modernc sidecar index (the same hand-written engine collection.search uses), never on the turso file.
+func (c *ColumnSpec) Searchable(args ...value.Value) *ColumnSpec {
+	c.searchable = true
+	c.searchWt = 1
+	for _, a := range args {
+		if a.K == value.Map {
+			if w, ok := a.Map()["weight"]; ok && w.K == value.Number && w.N > 0 {
+				c.searchWt = int(w.N)
+			}
+		}
+	}
+	return c
+}
+
 func (c *ColumnSpec) Default(args ...value.Value) *ColumnSpec {
 	c.hasDefault = true
 	if len(args) > 0 {
@@ -466,10 +488,10 @@ func coerceRowInPlace(columns map[string]*ColumnSpec, row value.Value) {
 	}
 }
 
-// Turso and Sqlite are the LOCAL per-tenant file factories. They are VARIADIC (not 0-arg getters) so
-// that `const { turso } = database` yields a callable: database.turso("app.db", schema) and the
-// destructured turso("app.db", schema) are the SAME call. The engine picks the backend — turso →
-// tursogo, sqlite → modernc — and both reuse the .data/ + path-safety plumbing of the raw capability.
+// Turso, Sqlite and Kitdb are local per-tenant factories. They are variadic (not 0-arg getters), so a
+// destructured factory and database.<factory>(...) are the same call. SQLite/Turso render the shared
+// ORM state to SQL; KitDB executes its storage-neutral plan directly. All files remain confined to
+// the tenant's .data directory and are owned by the app runtime.
 func (d *Database) Turso(args ...value.Value) value.Value {
 	return newDbProxy(d.tenant, d.requestScope, "turso", args...)
 }
@@ -482,10 +504,11 @@ func (d *Database) Sqlite(args ...value.Value) value.Value {
 type dbProxy struct {
 	tenant    *Tenant
 	scope     *requestscope.Scope
-	engine    string // "turso" | "sqlite"
+	engine    string // "turso" | "sqlite" | "kitdb"
 	dbName    string
 	allowDrop bool // opt-in via turso("app.db", schema, { drop: true }) — enables destructive migration
 	tables    map[string]map[string]*ColumnSpec
+	structs   map[string]*StructDef
 }
 
 // newDbProxy parses turso("app.db", { …schema }, { drop: true }): args[0]=file, args[1]=schema,
@@ -493,38 +516,60 @@ type dbProxy struct {
 // schema removed AND rebuilding for type changes (CAST may lose data). Without it, both are refused
 // and the data is left untouched.
 func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
-	p := &dbProxy{tenant: tenant, scope: scope, engine: engine, dbName: "app.db", tables: map[string]map[string]*ColumnSpec{}}
+	defaultName := "app.db"
+	if engine == "kitdb" {
+		defaultName = kitDBDefaultFile
+	}
+	p := &dbProxy{
+		tenant: tenant, scope: scope, engine: engine, dbName: defaultName,
+		tables: map[string]map[string]*ColumnSpec{}, structs: map[string]*StructDef{},
+	}
 	if len(args) > 0 && args[0].K == value.String {
 		p.dbName = args[0].String()
 	}
 	if len(args) > 1 && args[1].K == value.Map {
 		for tableName, tableVal := range args[1].Map() {
 			cols := map[string]*ColumnSpec{}
-			if tableVal.K == value.Map {
+			var source *StructDef
+			if candidate, ok := tableVal.V.(*StructDef); ok && candidate != nil {
+				source = candidate
+				for colName, spec := range candidate.columns {
+					cols[colName] = spec
+				}
+			} else if tableVal.K == value.Map {
+				if engine == "kitdb" {
+					return value.Value{K: value.Invalid, V: fmt.Sprintf("db: KitDB struct %q must be declared with struct({ ... })", tableName)}
+				}
 				for colName, colVal := range tableVal.Map() {
 					if spec, ok := colVal.V.(*ColumnSpec); ok {
 						cols[colName] = spec
 					}
 				}
+			} else {
+				return value.Value{K: value.Invalid, V: fmt.Sprintf("db: schema %q is not a struct", tableName)}
 			}
 			p.tables[tableName] = cols
+			p.structs[tableName] = source
 		}
 		p.resolveForeignKeys()
+		for tableName, columns := range p.tables {
+			p.structs[tableName] = bindStructDef(tableName, p.structs[tableName], columns)
+		}
 	}
 	if len(args) > 2 && args[2].K == value.Map {
 		opts := args[2].Map()
 		if d, ok := opts["drop"]; ok && d.K == value.Bool && d.N != 0 {
 			p.allowDrop = true
 		}
-		// serve: a `token` in the options declares THIS db reachable over libSQL/HTTP (the value stays
-		// in env — token: env.require("DB_TOKEN") — but the DECISION to expose is visible here in JS, not
-		// hidden in .env). `access` defaults to "readonly"; only "readwrite" grants writes.
+		// A token explicitly exposes this database over HTTP. The registry retains
+		// the backend and normalized schema so a KitDB file can never be opened by
+		// the SQLite driver merely because both use the same Hrana transport.
 		if tok, ok := opts["token"]; ok && !tok.IsNil() && tok.String() != "" {
 			access := ""
 			if a, ok := opts["access"]; ok && a.K == value.String {
 				access = a.String()
 			}
-			registerServe(tenant, p.dbName, tok.String(), access)
+			registerServe(p, tok.String(), access)
 		}
 	}
 	registerSchema(p)
@@ -572,18 +617,20 @@ func registerSchema(p *dbProxy) {
 
 // ---- serve registry: which tenant dbs are exposed over libSQL/HTTP, and how ----
 //
-// Populated by turso("db", {schema}, { token, access }) at declare time (which runs during Tenant.Run,
-// so the endpoint is live before the first request). The libSQL and /_db handlers consult THIS instead
-// of reading env.DB_TOKEN — exposure is a declared fact, not the side effect of an env var existing.
+// Populated by turso(...), sqlite(...) or kitdb(...) with { token, access } at declare time. The Hrana
+// and /_db handlers consult this registry instead of environment variables: exposure is a declared
+// application capability, not the side effect of a secret existing.
 
 type serveConfig struct {
-	token  string
-	access string // "readonly" | "readwrite"
+	token    string
+	access   string // "readonly" | "readwrite"
+	engine   string
+	database *dbProxy
 }
 
 var (
 	serveRegMu sync.Mutex
-	serveReg   = map[string]serveConfig{} // "appID|domain|dbName" -> config (engine-agnostic)
+	serveReg   = map[string]serveConfig{} // "appID|domain|dbName" -> backend-aware config
 )
 
 // tenantScopeKey identifies a tenant uniquely. config.base is its resolved directory (root/identity/
@@ -601,8 +648,8 @@ func serveDBKey(t *Tenant, dbName string) string {
 
 // registerServe records an exposed db. Access defaults to the SAFE option: only an explicit
 // "readwrite" grants writes; anything else (including empty) is read-only.
-func registerServe(t *Tenant, dbName, token, access string) {
-	if t == nil || token == "" {
+func registerServe(database *dbProxy, token, access string) {
+	if database == nil || database.tenant == nil || token == "" {
 		return
 	}
 	if strings.ToLower(strings.TrimSpace(access)) != "readwrite" {
@@ -611,7 +658,9 @@ func registerServe(t *Tenant, dbName, token, access string) {
 		access = "readwrite"
 	}
 	serveRegMu.Lock()
-	serveReg[serveDBKey(t, dbName)] = serveConfig{token: token, access: access}
+	serveReg[serveDBKey(database.tenant, database.dbName)] = serveConfig{
+		token: token, access: access, engine: database.engine, database: database,
+	}
 	serveRegMu.Unlock()
 }
 
@@ -667,7 +716,11 @@ func (p *dbProxy) OnGet(key string) value.Value {
 	if !ok {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: no table %q defined in this database", key)}
 	}
-	return value.New(&SchemaTable{tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName, allowDrop: p.allowDrop, table: key, columns: cols, siblings: p.tables})
+	return value.New(&SchemaTable{
+		tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName,
+		allowDrop: p.allowDrop, table: key, columns: cols, siblings: p.tables,
+		definition: p.structs[key], definitions: p.structs,
+	})
 }
 
 // OnCompare and OnInvoke complete the ProxyHandler interface (a dbProxy that only implemented OnGet
@@ -679,26 +732,35 @@ func (p *dbProxy) OnInvoke(method string, _ ...value.Value) value.Value { return
 // ---- SchemaTable: the schema-aware wrapper around the ordinary query builder ----
 
 type SchemaTable struct {
-	tenant    *Tenant
-	scope     *requestscope.Scope
-	engine    string // "turso" | "sqlite"
-	dbName    string
-	allowDrop bool
-	table     string
-	columns   map[string]*ColumnSpec
-	siblings  map[string]map[string]*ColumnSpec // every table in this db (for FK targets to exist)
+	tenant      *Tenant
+	scope       *requestscope.Scope
+	engine      string // "turso" | "sqlite" | "kitdb"
+	dbName      string
+	allowDrop   bool
+	table       string
+	columns     map[string]*ColumnSpec
+	siblings    map[string]map[string]*ColumnSpec // every table in this db (for FK targets to exist)
+	definition  *StructDef
+	definitions map[string]*StructDef
 
 	q       *query.Query
 	failed  bool
 	failMsg string
+
+	searchActive bool   // set by .search("…") — List runs the full-text path instead of the plain query
+	searchText   string // the query string passed to .search()
+	limitN       int    // .limit(n) captured for the search path (the plain path uses the builder's own)
 }
 
 func (t *SchemaTable) fail(msg string) *SchemaTable { t.failed = true; t.failMsg = msg; return t }
 func (t *SchemaTable) failVal() value.Value         { return value.Value{K: value.Invalid, V: t.failMsg} }
 
-// source builds the local blueprint for this table's engine — sqlite → modernc, anything else → turso.
-// Both resolve the file under .data/ with the same path-safety, so the schema layer is engine-agnostic.
+// source builds the SQL blueprint for SQLite or Turso. KitDB does not expose an
+// SQL source; it consumes builder state through ExecutionPlan instead.
 func (t *SchemaTable) source() *SQLite {
+	if t.engine == "kitdb" {
+		return nil
+	}
 	if t.engine == "sqlite" {
 		return sqliteForRequest(t.tenant, t.dbName, t.scope)
 	}
@@ -707,7 +769,11 @@ func (t *SchemaTable) source() *SQLite {
 
 func (t *SchemaTable) builder() *query.Query {
 	if t.q == nil {
-		t.q = t.source().Table(t.table)
+		if t.engine == "kitdb" {
+			t.q = query.New(nil, tenantLambdaExecutor{tenant: t.tenant, requestScope: t.scope}).Table(t.table)
+		} else {
+			t.q = t.source().Table(t.table)
+		}
 	}
 	return t.q
 }
@@ -760,7 +826,24 @@ func (t *SchemaTable) Limit(n int) *SchemaTable {
 	if t.failed {
 		return t
 	}
+	t.limitN = n
 	t.builder().Limit(n)
+	return t
+}
+
+// Search opens a full-text query over the table's .searchable() columns: db.posts.search("react").
+// It is a narrowing step, so it chains like the rest — db.posts.search("react").limit(24).list() —
+// and List() runs the ranked search instead of the plain query. Variadic so the VM treats it as a
+// callable, not a getter.
+func (t *SchemaTable) Search(args ...value.Value) *SchemaTable {
+	if t.failed {
+		return t
+	}
+	if len(args) == 0 || args[0].K != value.String {
+		return t.fail("db: search(text) needs a query string")
+	}
+	t.searchActive = true
+	t.searchText = args[0].String()
 	return t
 }
 
@@ -770,12 +853,28 @@ func (t *SchemaTable) List(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
+	if t.engine == "kitdb" {
+		if t.searchActive {
+			return value.Value{K: value.Invalid, V: "db: KitDB search projection is not connected yet"}
+		}
+		return t.kitDBList(args...)
+	}
+	if t.searchActive {
+		return t.runSearch()
+	}
 	return coerceResult(t.columns, t.builder().List(args...))
 }
+
+// All is the collection-style spelling of the terminal; search reads naturally as
+// db.posts.search("react").limit(24).all().
+func (t *SchemaTable) All(args ...value.Value) value.Value { return t.List(args...) }
 
 func (t *SchemaTable) First(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
+	}
+	if t.engine == "kitdb" {
+		return t.kitDBFirst(args...)
 	}
 	return coerceResult(t.columns, t.builder().First(args...))
 }
@@ -785,6 +884,9 @@ func (t *SchemaTable) Find(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
+	if t.engine == "kitdb" {
+		return t.kitDBFind(args...)
+	}
 	return coerceResult(t.columns, t.builder().Find(args...))
 }
 
@@ -793,6 +895,9 @@ func (t *SchemaTable) Count(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
+	if t.engine == "kitdb" {
+		return t.kitDBCount(args...)
+	}
 	return t.builder().Count(args...)
 }
 
@@ -800,6 +905,9 @@ func (t *SchemaTable) Count(args ...value.Value) value.Value {
 func (t *SchemaTable) Exists(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
+	}
+	if t.engine == "kitdb" {
+		return t.kitDBExists(args...)
 	}
 	return t.builder().Exists(args...)
 }
@@ -817,7 +925,11 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 	if errMsg != "" {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q %s", t.table, errMsg)}
 	}
-	return coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row)))
+	if t.engine == "kitdb" {
+		return t.kitDBCreate(row)
+	}
+	result := coerceResult(t.columns, t.source().Table(t.table).Create(value.New(row)))
+	return result
 }
 
 // fillRow is the shared create logic for BOTH worlds (local turso and shared entity): validate every
@@ -883,6 +995,9 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
+	if t.engine == "kitdb" {
+		return t.kitDBUpdate(args...)
+	}
 	if len(args) > 0 && args[0].K == value.Map {
 		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
 		if errMsg != "" {
@@ -891,7 +1006,8 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
 		args[0] = value.New(row)
 	}
-	return t.builder().Update(args...)
+	result := t.builder().Update(args...)
+	return result
 }
 
 // Delete removes the matching rows for real (DELETE FROM … WHERE …). The schema DSL declares exactly
@@ -902,7 +1018,11 @@ func (t *SchemaTable) Delete(_ ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
-	return t.builder().Remove()
+	if t.engine == "kitdb" {
+		return t.kitDBDelete()
+	}
+	result := t.builder().Remove()
+	return result
 }
 
 func (t *SchemaTable) Remove(args ...value.Value) value.Value { return t.Delete(args...) }
@@ -915,6 +1035,9 @@ func (t *SchemaTable) Remove(args ...value.Value) value.Value { return t.Delete(
 func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 	if t.failed {
 		return t.failVal()
+	}
+	if t.engine == "kitdb" {
+		return t.kitDBPlan()
 	}
 	db := t.source().db()
 	if db == nil {
@@ -943,6 +1066,9 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 // what makes it react to schema changes: edit the schema (add a column) and the key changes, so a
 // hot-reload re-runs migrate() and ALTERs the live table — not just first boot.
 func (t *SchemaTable) ensureTable() error {
+	if t.engine == "kitdb" {
+		return t.ensureKitDBStruct()
+	}
 	// Migrate EVERY table in this database, not just the one being queried, so a foreign key's target
 	// table exists before any insert (SQLite allows creating a child before its parent, but the parent
 	// must exist by insert time). Ordering does not matter for CREATE, so a plain name order is fine.
@@ -1459,6 +1585,10 @@ func (s planStep) describe() string {
 			return fmt.Sprintf("drop column %s", s.Column)
 		}
 		return fmt.Sprintf("extra column %s kept (pass { drop: true } to drop)", s.Column)
+	case "change":
+		return fmt.Sprintf("schema %s→%s requires explicit migration", shortSchemaHash(s.From), shortSchemaHash(s.To))
+	case "error":
+		return "inspection failed: " + s.From
 	}
 	return s.Action
 }
@@ -1519,6 +1649,48 @@ func MigrationPlansFor(t *Tenant) []TablePlan {
 
 	var plans []TablePlan
 	for _, p := range proxies {
+		if p.engine == "kitdb" {
+			path := p.tenant.resolve(".data", filepath.FromSlash(kitDBRel(p.dbName)))
+			_, statErr := os.Stat(path)
+			var managed *managedKitDB
+			var openErr error
+			if statErr == nil {
+				managed, openErr = kitDBForRequest(p.tenant, p.dbName, nil).database()
+			}
+			for _, name := range sortedTableNames(p.tables) {
+				steps := []planStep{{Action: "create", WillApply: true}}
+				switch {
+				case statErr != nil && !os.IsNotExist(statErr):
+					steps = []planStep{{Action: "error", From: statErr.Error()}}
+				case openErr != nil:
+					steps = []planStep{{Action: "error", From: openErr.Error()}}
+				case managed != nil:
+					definition := p.structs[name]
+					key, err := kitDBCatalogKey(definition)
+					if err != nil {
+						steps = []planStep{{Action: "error", From: err.Error()}}
+						break
+					}
+					encoded, found, err := managed.database.Get(key)
+					switch {
+					case err != nil:
+						steps = []planStep{{Action: "error", From: err.Error()}}
+					case !found:
+					case found:
+						var stored StructDef
+						if err := json.Unmarshal(encoded, &stored); err != nil {
+							steps = []planStep{{Action: "error", From: err.Error()}}
+						} else if stored.Hash == definition.Hash {
+							steps = nil
+						} else {
+							steps = []planStep{{Action: "change", From: stored.Hash, To: definition.Hash, Destructive: true}}
+						}
+					}
+				}
+				plans = append(plans, TablePlan{Engine: p.engine, DB: p.dbName, Table: name, Steps: steps})
+			}
+			continue
+		}
 		// Introspect the live DB only if it already exists — never create a file during a preflight.
 		live := map[string]map[string]string{}
 		if _, err := os.Stat(p.tenant.resolve(".data", p.dbName)); err == nil {

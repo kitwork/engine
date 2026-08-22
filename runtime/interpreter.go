@@ -159,7 +159,7 @@ func (vm *VM) execute(floor int) value.Value {
 		}
 
 		vm.instructions++
-		if vm.Context != nil && vm.instructions&63 == 0 {
+		if vm.Context != nil && vm.instructions&cancellationCheckMask == 0 {
 			if err := vm.Context.Err(); err != nil {
 				return vm.exitFailure(floor, vm.diagnosticValue(
 					DiagnosticCancelled,
@@ -432,7 +432,7 @@ func (vm *VM) prepareLambdaFrame(lambda *value.Lambda) (*Frame, *runtimeFault) {
 			}
 		}
 	}
-	if vm.FrameIdx+1 >= len(vm.Frames) {
+	if vm.FrameIdx+1 >= defaultMaxCallDepth || vm.FrameIdx+1 >= len(vm.Frames) {
 		return nil, &runtimeFault{
 			code:    DiagnosticStackOverflow,
 			message: "Stack overflow: Call stack limit exceeded",
@@ -628,6 +628,21 @@ func (vm *VM) executeInvoke(frame *Frame) {
 		}
 	}
 
+	if targetIndex >= frame.StackBase {
+		target := vm.Stack[targetIndex]
+		if standardMethodUsesStackArgs(target.K) {
+			if standard, ok := target.K.StandardMethod(method); ok {
+				top := len(vm.Stack)
+				args := vm.Stack[targetIndex+1 : top : top]
+				result := vm.nativeStandardMethod(target, method, standard, args)
+				clear(vm.Stack[targetIndex:top])
+				vm.Stack = vm.Stack[:targetIndex]
+				vm.push(result)
+				return
+			}
+		}
+	}
+
 	args := make([]value.Value, count)
 	for index := count - 1; index >= 0; index-- {
 		args[index] = vm.pop()
@@ -682,7 +697,21 @@ func (vm *VM) executeInvoke(frame *Frame) {
 		}
 	}
 
-	vm.push(vm.nativeValue("method "+method, func() value.Value {
-		return target.Invoke(method, args...)
-	}))
+	vm.push(vm.nativeMethod(target, method, args))
+}
+
+func standardMethodUsesStackArgs(kind value.Kind) bool {
+	switch kind {
+	case value.Number,
+		value.Bool,
+		value.Time,
+		value.Duration,
+		value.String,
+		value.Bytes,
+		value.Map,
+		value.Array:
+		return true
+	default:
+		return false
+	}
 }

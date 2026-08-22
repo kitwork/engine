@@ -72,8 +72,9 @@ func (r *Runtime) SSEBroker() *sse.SSEBroker {
 	return broker
 }
 
-// StopStreams disconnects live streams before generation drain. SSE requests
-// otherwise keep their generation lease until the stream ends.
+// StopStreams disconnects the site-owned streams during site shutdown. An SSE
+// handler releases its request and generation ownership before entering the
+// long-lived stream, so generation replacement deliberately leaves it open.
 func (r *Runtime) StopStreams() {
 	if r == nil {
 		return

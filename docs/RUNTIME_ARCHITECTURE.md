@@ -15,7 +15,11 @@ Host / Engine
             VM lease
 ```
 
-- The host owns listeners, TLS, process signals, the VM pool, and the app registry.
+- The host owns listeners, TLS, process signals, the VM pool, the app registry,
+  and the bounded process-wide full-text search manager.
+- The host may capture detached diagnostics and an explicitly requested private
+  heap profile. Diagnostics observe owners through bounded snapshots; they do
+  not become a parallel owner or an automatic HTTP surface.
 - One `AppRuntime` exists per identity and owns identity-wide infrastructure.
 - One `SiteRuntime` exists per domain, publishes monotonic generations, and
   owns persistent cache, rate-limit, and SSE state across reloads.
@@ -49,6 +53,26 @@ Implemented:
 - configured database connections are opened exactly once per app runtime;
 - site-local SQLite connections are keyed by canonical path but owned and
   closed by the parent app runtime;
+- `core.Engine` owns one bounded `search.Manager` across every identity and
+  domain. Tenant facades borrow it, generation replacement does not close it,
+  and engine shutdown closes it only after tenant and app-runtime drain;
+- search manager limits may be replaced only during host boot, before any app
+  or site loads; runtime stats remain bounded and contain no tenant/query labels;
+- search index identities and rebuild gates survive generation hand-off; proven
+  site idle/removal closes those indexes, while hot reload leaves them open;
+  a same-site request arriving at that boundary waits for the old owner to
+  drain, then reopens the durable generation instead of using a closing owner;
+- schema database search keeps Turso/SQLite as source of truth, tracks table
+  freshness through same-transaction revision triggers, and streams stale
+  projections into immutable search generations without retaining all rows;
+- the opt-in `collection.search()` canary keeps the legacy SQLite result on the
+  request path and sends only a bounded Top-K comparison to one non-blocking,
+  generation-owned worker. That worker borrows the host search manager, streams
+  replacement documents, revalidates source freshness, and is cancelled and
+  drained with its generation. A shared 256-task admission budget bounds
+  retained shadow work across all loaded generations. Its fixed-cardinality host counters survive
+  generation replacement and contain no tenant, collection, document, or query
+  labels;
 - detached work is accepted, cancelled, and drained by the app runtime, so
   site eviction and generation reload do not stop app work;
 - the cron scheduler is an app-owned lifecycle resource; compatibility
@@ -84,6 +108,14 @@ Implemented:
   every distinct document component graph. Each delivery freezes the only
   valid classic-`defer` order: runtime, Hydrate, graph opener, dependency-ordered
   services, an optional common-components bundle, then individual components;
+- KitJS candidate preparation owns one bounded, generation-local package
+  materializer. It normalizes each exact component/service source once; each
+  individual package artifact and the single optional common bundle are
+  materialized and content-addressed once, then exact-compared and reused by
+  later graphs without rehashing. Prepared HTML lookup uses canonical
+  identities only. The cache remains candidate-local and
+  is discarded; only complete artifacts are retained atomically after every
+  validation and capacity check passes;
 - staged KitJS scripts are immutable site content assets addressed as
   `/jit/<sha256>.<suffix>.js`. The generation owns their exact ordered
   role/hash/URL/SRI references, while the site content store retains identical
@@ -119,7 +151,7 @@ Implemented:
 - disk-persisted responses and rate-limit budgets belong to `SiteRuntime` and
   survive generation replacement;
 - the SSE broker and replay history belong to `SiteRuntime`; reload preserves
-  them, while site shutdown stops streams before waiting for generation drain;
+  them, while site shutdown synchronously stops and drains the broker;
 - a generation that fails compilation or initialization is discarded while
   the previous generation continues serving;
 - `LifetimeSite` capability instances live on the generation and close only
@@ -127,8 +159,9 @@ Implemented:
 - reload prepares and initializes a generation before atomically activating it;
   stale generations cannot be reactivated and retire only after their request
   leases drain;
-- SSE releases its VM before entering the long-lived stream while retaining
-  the request scope until the stream ends;
+- SSE first transfers its client to the site broker, then closes its request
+  scope, releases all VM and generation leases, and leaves only the native HTTP
+  goroutine under site ownership for the long-lived stream;
 - hot reload never recompiles an active route node in place; it replaces the
   `work.Tenant` execution facade while preserving both runtimes;
 - site eviction closes only that site; engine shutdown closes the full hierarchy.
@@ -139,9 +172,19 @@ Implemented:
 - `core.Engine.Health()` exposes only bounded process-local aggregates:
   requests and in-flight high-water marks, fixed latency buckets, VM totals,
   prepared/fallback render counts, response-cache outcomes, generation
-  prepare/activate/drain outcomes, and current ownership counts. It records no
-  URL, tenant, argument, or user labels; observed Program identities are capped
-  and copied as checksums rather than retained as Program pointers.
+  prepare/activate/drain-attempt outcomes, in-progress lifecycle gauges, and
+  current ownership counts. Preparation succeeds only after the generation,
+  bytecode cache, tenant facade, route graph, and render plan have all completed
+  `Tenant.Run`; activation remains a separate publication outcome. A generation
+  under an observed drain attempt contributes its aggregate lease count plus
+  scalar current and high-water oldest-drain ages even after it leaves the
+  current tenant cache. Ownership uses a nonblocking engine read lock:
+  `ownership_snapshot_available=false` means its top-level counts are zero and
+  unavailable while lifecycle and process-global VM gauges remain live. When
+  the lock is available, lifecycle gauges are captured only after acquiring it,
+  so activation cannot finish between lifecycle and ownership capture. Health
+  records no URL, tenant, argument, or user labels; observed Program identities
+  are capped and copied as checksums rather than retained as Program pointers.
 
 ## Runtime responsibilities
 
@@ -201,9 +244,12 @@ The migration is complete only when:
 All six conditions are now covered by the production lifecycle and regression
 tests. Filesystem boundaries and static render presentation are prepared with
 the generation. Bounded production observability, allocation budgets, and
-generation publication/drain soak tests now guard that path. Prepared
-template-expression evaluation has its own deterministic allocation gate. The
-next architecture work is continued lifecycle hardening driven by bounded
-runtime signals and production profiles, without adding another runtime layer.
-Logic capsules are a parked experimental RFC; they are not the next layer and
-must not create a parallel runtime or influence current public APIs.
+generation publication/drain soak tests now guard that path. A production-path
+memory campaign also verifies that closure-heavy requests, native HTTP, pooled
+VMs, Programs, and retired generations reach a post-warm-up heap plateau.
+Prepared template-expression evaluation has its own deterministic allocation
+gate. The next architecture work is continued lifecycle hardening driven by
+bounded runtime signals and production profiles, without adding another
+runtime layer. Logic capsules are a parked experimental RFC; they are not the
+next layer and must not create a parallel runtime or influence current public
+APIs.

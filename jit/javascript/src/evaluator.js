@@ -800,7 +800,7 @@
   }
 
   function compile(source, mode) {
-    source = typeof source === "string" ? source.trim() : "";
+    source = core.expressionSource(source).trim();
     mode = mode === "action" ? "action" : "binding";
     var key = mode + "\u0000" + source;
     if (core.compiled.has(key)) return core.compiled.get(key);

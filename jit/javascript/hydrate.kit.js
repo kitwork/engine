@@ -1,12 +1,11 @@
 ; (function (global, document) {
   "use strict";
 
-  var VERSION = "0.9.0-next.12";
+  var VERSION = "1.0.0-rc.2";
   var ASSEMBLY = Symbol.for("kitjs:assembly");
   var INSTALL = Symbol.for("kitjs:runtime");
   var ownKit = Object.prototype.hasOwnProperty.call(global, "kit");
   var currentKit = global.kit;
-  var nextObservation = 0;
 
   if (Object.prototype.hasOwnProperty.call(document, ASSEMBLY)) {
     throw new Error("KitJS: another assembly is already in progress");
@@ -41,6 +40,7 @@
     "undefined NaN Infinity"
   );
   var INVALID_MEMBER = {};
+  var EXPRESSION_SOURCE_LIMIT = 65536;
 
   function syntax(message, source, position) {
     throw new SyntaxError("KitJS: " + message + " in \"" + source + "\" at " + position);
@@ -70,6 +70,15 @@
     } else if (typeof value !== "string") return INVALID_MEMBER;
     return blocked(value) ? INVALID_MEMBER : value;
   }
+  function expressionSource(value) {
+    var source = typeof value === "string" ? value : "";
+    if (source.length > EXPRESSION_SOURCE_LIMIT) {
+      throw new RangeError(
+        "KitJS: expression source exceeds " + EXPRESSION_SOURCE_LIMIT + " UTF-16 code units"
+      );
+    }
+    return source;
+  }
 
   var core = {
     phase: "core",
@@ -86,6 +95,8 @@
     blocked: blocked,
     ignoredForRuntime: ignoredForRuntime,
     memberKey: memberKey,
+    expressionSourceLimit: EXPRESSION_SOURCE_LIMIT,
+    expressionSource: expressionSource,
     registry: new Map(),
     compiled: new Map(),
     scopes: new WeakMap(),
@@ -123,24 +134,39 @@
     core.dirtyAll = false;
     core.dirtyRecords.clear();
   };
-  function attachObservation(value, then, tickets) {
+  function activeObservationRecord(observation) {
+    var owner = observation.owner;
+    observation.owner = null;
+    var record = owner;
+    if (!record || !record.observations || !record.observations.delete(observation)) return null;
+    if (typeof core.releaseObservationOwner === "function") core.releaseObservationOwner(record);
+    var host = record.host;
+    if (record.disposed || !host || host.ownerDocument !== document || !document.contains(host) ||
+      ignoredForRuntime(host) ||
+      (!host.hasAttribute("data-kit-component") && !host.hasAttribute("data-kit-scope")) ||
+      core.scopes.get(host) !== record) return null;
+    return record;
+  }
+  function attachObservation(value, then, observations) {
     var settled = false;
     function settle(error, rejected) {
       if (settled) return;
       settled = true;
       if (rejected) report(error);
-      var waiting = new Set(tickets);
-      document.querySelectorAll("[data-kit-component],[data-kit-scope]").forEach(function (element) {
-        if (ignoredForRuntime(element)) return;
-        var record = core.scopes.get(element);
-        if (!record || record.disposed || !record.observations) return;
-        tickets.forEach(function (ticket) {
-          if (!waiting.has(ticket) || !record.observations.delete(ticket)) return;
-          waiting.delete(ticket);
-          core.invalidate(record);
-        });
+      var records = [];
+      observations.forEach(function (observation) {
+        var record = activeObservationRecord(observation);
+        if (record) records.push(record);
       });
-      tickets.length = 0;
+      records.sort(function (left, right) {
+        if (left.host === right.host) return 0;
+        var position = left.host.compareDocumentPosition(right.host);
+        if (position & 2) return 1;
+        if (position & 4) return -1;
+        return 0;
+      });
+      records.forEach(function (record) { core.invalidate(record); });
+      observations.length = 0;
     }
     try {
       then.call(value, function () { settle(null, false); }, function (error) { settle(error, true); });
@@ -156,16 +182,25 @@
     if (typeof then !== "function") return;
     if (!Array.isArray(owners)) owners = owners ? [owners] : [];
     var seen = new Set();
-    var tickets = [];
+    var observations = [];
     owners.forEach(function (record) {
       if (!record || record.disposed || seen.has(record)) return;
       seen.add(record);
-      var ticket = ++nextObservation;
+      var observation = { owner: record };
       if (!record.observations) record.observations = new Set();
-      record.observations.add(ticket);
-      tickets.push(ticket);
+      record.observations.add(observation);
+      if (typeof core.retainObservationOwner === "function") core.retainObservationOwner(record);
+      observations.push(observation);
     });
-    attachObservation(value, then, tickets);
+    attachObservation(value, then, observations);
+  };
+  core.cancelObservations = function (record) {
+    if (!record || !record.observations) return;
+    record.observations.forEach(function (observation) {
+      observation.owner = null;
+    });
+    record.observations.clear();
+    if (typeof core.releaseObservationOwner === "function") core.releaseObservationOwner(record);
   };
 
   Object.defineProperty(document, ASSEMBLY, {
@@ -179,6 +214,8 @@
   var core = document[Symbol.for("kitjs:assembly")];
   if (!core || core.phase !== "core") throw new Error("KitJS: lexer loaded out of order");
   if (core.reuse) { core.phase = "lexer"; return; }
+
+  var TOKEN_LIMIT = 32768;
 
   function space(character) {
     return character === " " || character === "\t" || character === "\n" ||
@@ -195,6 +232,9 @@
     var tokens = [];
     var index = 0;
     function token(type, value, position) {
+      if (tokens.length >= TOKEN_LIMIT) {
+        core.syntax("expression exceeds " + TOKEN_LIMIT + " tokens", source, position);
+      }
       tokens.push({ type: type, value: value, position: position });
     }
 
@@ -1405,7 +1445,7 @@
   }
 
   function compile(source, mode) {
-    source = typeof source === "string" ? source.trim() : "";
+    source = core.expressionSource(source).trim();
     mode = mode === "action" ? "action" : "binding";
     var key = mode + "\u0000" + source;
     if (core.compiled.has(key)) return core.compiled.get(key);
@@ -1782,7 +1822,7 @@
 
   var OWN = core.OWN;
   var BOUNDARIES = "[data-kit-component],[data-kit-scope]";
-  var METADATA = "[data-kit-component],[data-kit-version],[data-kit-local],[data-kit-scope]";
+  var METADATA = "[data-kit-component],[data-kit-version],[data-kit-scope]";
   var ALIASES = "[data-kit-as]";
   var aliases = new WeakMap();
   var metadata = new WeakMap();
@@ -1858,6 +1898,17 @@
     cleanupObserver = null;
   }
 
+  function retainRemovalOwner() {
+    cleanupOwners++;
+    startCleanupObserver();
+  }
+
+  function releaseRemovalOwner() {
+    if (cleanupOwners < 1) return;
+    cleanupOwners--;
+    stopCleanupObserver();
+  }
+
   var NOOP_CANCEL = Object.freeze(function () { });
 
   function ensureCleanupOwner(current) {
@@ -1867,15 +1918,14 @@
       return;
     }
     current.ownsCleanup = true;
-    cleanupOwners++;
-    startCleanupObserver();
+    retainRemovalOwner();
   }
 
   function releaseCleanupOwner(current) {
-    if (!current.ownsCleanup || current.cleanups.length || current.afterRenders.length) return;
+    if (!current.ownsCleanup || current.cleanups.length || current.afterRenders.length ||
+      current.observations && current.observations.size) return;
     current.ownsCleanup = false;
-    cleanupOwners--;
-    stopCleanupObserver();
+    releaseRemovalOwner();
   }
 
   function removeLifecycleEntry(entries, entry) {
@@ -2393,18 +2443,16 @@
     if (!element || element.nodeType !== 1 || !element.hasAttribute) return undefined;
     if (core.ignoredForRuntime(element)) return undefined;
     var hasComponent = element.hasAttribute("data-kit-component");
-    var hasVersion = element.hasAttribute("data-kit-version");
-    var hasLocal = element.hasAttribute("data-kit-local");
-    if (!hasComponent && !hasVersion && !hasLocal) return undefined;
+    var rejectedSplitVersion = element.hasAttribute("data-kit-version");
+    if (!hasComponent && !rejectedSplitVersion) return undefined;
     var componentSource = hasComponent ? element.getAttribute("data-kit-component") : null;
-    var versionSource = hasVersion ? element.getAttribute("data-kit-version") : null;
-    var localSource = hasLocal ? element.getAttribute("data-kit-local") : null;
     var retainSource = element.hasAttribute("data-kit-retain") ? element.getAttribute("data-kit-retain") : null;
     var cacheable = arguments.length < 3;
     var graphIdentity = cacheable ? core.graph || null : requestedGraph || null;
     var entry = cacheable ? metadata.get(element) : null;
-    if (entry && entry.componentSource === componentSource && entry.versionSource === versionSource &&
-      entry.localSource === localSource && entry.retainSource === retainSource &&
+    if (entry && entry.componentSource === componentSource &&
+      entry.rejectedSplitVersion === rejectedSplitVersion &&
+      entry.retainSource === retainSource &&
       entry.graphIdentity === graphIdentity) {
       if (shouldReport && entry.error && !entry.reported) {
         entry.reported = true;
@@ -2414,8 +2462,7 @@
     }
     entry = {
       componentSource: componentSource,
-      versionSource: versionSource,
-      localSource: localSource,
+      rejectedSplitVersion: rejectedSplitVersion,
       retainSource: retainSource,
       graphIdentity: graphIdentity,
       value: undefined,
@@ -2423,10 +2470,9 @@
       reported: false,
       cacheable: cacheable
     };
-    if (!hasComponent) {
+    if (rejectedSplitVersion) {
       return metadataError(element, entry,
-        hasLocal ? "data-kit-local requires a component host" :
-          "data-kit-version requires a component host", shouldReport);
+        "data-kit-version is not supported; put an exact version in data-kit-component", shouldReport);
     }
     if (String(element.localName || "").toLowerCase() === "template") {
       return metadataError(element, entry,
@@ -2446,30 +2492,10 @@
     if (!validComponentName(name)) {
       return metadataError(element, entry, "invalid component name \"" + name + "\"", shouldReport);
     }
-    if (hasLocal && localSource !== "") {
-      return metadataError(element, entry,
-        "data-kit-local must be an empty presence marker", shouldReport);
-    }
-    if (inlineVersion !== null && hasVersion) {
-      return metadataError(element, entry,
-        "inline component versions cannot be combined with data-kit-version", shouldReport);
-    }
     var version = inlineVersion;
-    if (hasVersion) {
-      version = String(versionSource || "").trim();
-      if (!validVersion(version)) {
-        return metadataError(element, entry,
-          "data-kit-version must be an exact semantic version", shouldReport);
-      }
-    }
     var managed = version !== null;
-    if (hasLocal && managed) {
-      return metadataError(element, entry,
-        hasVersion ? "data-kit-local components cannot use data-kit-version" :
-          "data-kit-local cannot mark a versioned component", shouldReport);
-    }
     if (!managed) {
-      if (element.hasAttribute("data-kit-retain") && (hasLocal || graphIdentity)) {
+      if (element.hasAttribute("data-kit-retain") && graphIdentity) {
         return metadataError(element, entry,
           "unversioned client components cannot use data-kit-retain", shouldReport);
       }
@@ -3272,6 +3298,12 @@
     var boundary = nearest(element);
     return boundary ? ensureComponent(boundary) : null;
   }
+  function ownsElement(current, element) {
+    var host = current && current.host;
+    return !!host && !current.disposed && core.scopes.get(host) === current &&
+      connectedHere(host) && connectedHere(element) && !core.ignoredForRuntime(element) &&
+      nearest(element) === host;
+  }
   function ownedElements(current, selector) {
     var output = [];
     var host = current && current.host;
@@ -3322,6 +3354,7 @@
     var current = core.scopes.get(element);
     if (!current || current.disposed) return;
     current.disposed = true;
+    core.cancelObservations(current);
     if (current.failed) {
       current.host = null;
       core.dirtyRecords.delete(current);
@@ -3341,8 +3374,7 @@
     current.afterRenders.length = 0;
     if (current.ownsCleanup) {
       current.ownsCleanup = false;
-      cleanupOwners--;
-      stopCleanupObserver();
+      releaseRemovalOwner();
     }
     cleanups.forEach(function (entry) {
       if (!entry.active) return;
@@ -3351,7 +3383,6 @@
       catch (error) { core.report(error); }
     });
     releaseAppLoaderLinks(current);
-    if (current.observations) current.observations.clear();
     if (current.scope) core.scopeRecords.delete(current.scope);
     current.host = null;
     current.scope = null;
@@ -3445,7 +3476,10 @@
       if (typeof schedule === "function") schedule.call(document.defaultView, auditLocalComponents, 0);
       else enqueue(auditLocalComponents);
     }
-    if (document.readyState === "loading") {
+    var script = document.currentScript;
+    var waitingForDeferredPeers = document.readyState === "interactive" && script &&
+      script.defer === true && script.async !== true;
+    if (document.readyState === "loading" || waitingForDeferredPeers) {
       document.addEventListener("DOMContentLoaded", scheduleAudit, { once: true });
     } else scheduleAudit();
   });
@@ -3477,6 +3511,10 @@
   core.componentMetadataForGraph = componentMetadataForGraph;
   core.hasComponentDefinition = hasComponentDefinition;
   core.inspectRetains = function (root) { return inspectRetains(root, false, true); };
+  core.retainRemovalOwner = retainRemovalOwner;
+  core.releaseRemovalOwner = releaseRemovalOwner;
+  core.retainObservationOwner = ensureCleanupOwner;
+  core.releaseObservationOwner = releaseCleanupOwner;
   core.invalidRetainStructure = function (element) {
     if (!retainStructureValidity.has(element)) {
       inspectRetains(connectedHere(element) ? document : element, true, false);
@@ -3489,6 +3527,7 @@
   core.ensureComponent = ensureComponent;
   core.ownerFor = nearest;
   core.scopeRecordFor = scopeRecordFor;
+  core.ownsElement = ownsElement;
   core.ownedElements = ownedElements;
   core.initialize = initialize;
   core.flushAfterRender = flushAfterRender;
@@ -3520,7 +3559,7 @@
   "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version local as retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
+  "component scope version as retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
@@ -3608,6 +3647,7 @@
   var EMPTY = {};
   var EMPTY_SCOPE = Object.freeze(Object.create(null));
   var BINDINGS = "[data-kit-text],[data-kit-show],[data-kit-bind]";
+  var RENDER_TARGETS = BINDINGS + ",[data-kit-class],[data-kit-style],[data-kit-model]";
   var SAFE_PROPERTIES = {
     value: "value",
     checked: "checked",
@@ -3673,7 +3713,7 @@
     return output;
   }
   function bindEntries(source) {
-    source = source.trim();
+    source = core.expressionSource(source).trim();
     if (source.charAt(0) === "{" && source.charAt(source.length - 1) === "}") {
       source = source.slice(1, -1);
     }
@@ -3750,10 +3790,8 @@
       return candidate !== current && !candidate.rendered;
     });
   }
-  function renderElement(element) {
-    if (core.ignoredForRuntime(element)) return;
-    var current = core.scopeRecordFor(element);
-    if (!current) return;
+  function renderElement(current, element) {
+    if (!core.ownsElement(current, element)) return;
     var scope = current.scope;
     var program;
     if (element.hasAttribute("data-kit-text")) {
@@ -3792,6 +3830,22 @@
       });
     }
   }
+  function collectRenderPlan(current) {
+    var plan = {
+      bindings: [],
+      classes: [],
+      styles: [],
+      models: []
+    };
+    core.ownedElements(current, RENDER_TARGETS).forEach(function (element) {
+      if (element.hasAttribute("data-kit-text") || element.hasAttribute("data-kit-show") ||
+        element.hasAttribute("data-kit-bind")) plan.bindings.push(element);
+      if (element.hasAttribute("data-kit-class")) plan.classes.push(element);
+      if (element.hasAttribute("data-kit-style")) plan.styles.push(element);
+      if (element.hasAttribute("data-kit-model")) plan.models.push(element);
+    });
+    return plan;
+  }
   function render(records) {
     var initial = Array.isArray(records) ? records : core.liveComponents();
     if (Array.isArray(records)) {
@@ -3829,11 +3883,12 @@
         var children;
         try { children = prepareBoundary(current); }
         catch (error) { core.report(error); children = []; }
-        core.ownedElements(current, BINDINGS).forEach(function (element) {
-          try { renderElement(element); } catch (error) { core.report(error); }
+        var plan = collectRenderPlan(current);
+        plan.bindings.forEach(function (element) {
+          try { renderElement(current, element); } catch (error) { core.report(error); }
         });
         core.renderHooks.forEach(function (renderHook) {
-          try { renderHook(current); } catch (error) { core.report(error); }
+          try { renderHook(current, plan); } catch (error) { core.report(error); }
         });
         current.rendered = true;
         core.flushAfterRender(current);
@@ -3924,7 +3979,8 @@
   }
 
   function parseFor(source) {
-    var match = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\s+of\s+([\s\S]+?)\s*$/.exec(source || "");
+    source = core.expressionSource(source || "");
+    var match = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\s+of\s+([\s\S]+?)\s*$/.exec(source);
     if (!match || !validLocal(match[1]) || match[2] && !validLocal(match[2]) ||
         match[2] && match[1] === match[2]) {
       throw new SyntaxError("KitJS: invalid for specification");
@@ -3943,6 +3999,88 @@
 
   function clearFailure(state) { state.error = ""; }
 
+  function rejectDirectIf(element, error) {
+    var modules = core.elementRecord(element).modules;
+    modules.structure = null;
+    core.report(error);
+    return null;
+  }
+
+  function prepareDirectIf(element) {
+    if (!element || element.nodeType !== 1 || element.tagName === "TEMPLATE" ||
+      !element.hasAttribute("data-kit-if") || core.ignoredForRuntime(element)) return null;
+    if (element.hasAttribute("data-kit-for") || element.hasAttribute("data-kit-key")) return null;
+    var modules = core.elementRecord(element).modules;
+    if (OWN.call(modules, "structure")) return null;
+    if (!element.parentNode) {
+      return rejectDirectIf(element, new TypeError("KitJS: direct if requires a connected element"));
+    }
+    if (!core.ownerFor(element.parentElement)) {
+      return rejectDirectIf(element,
+        new TypeError("KitJS: direct if requires an enclosing component or scope"));
+    }
+    if (element.tagName === "SCRIPT" || element.querySelector("script")) {
+      return rejectDirectIf(element,
+        new TypeError("KitJS: structural branches cannot contain script elements"));
+    }
+    if (element.hasAttribute("data-kit-retain") || element.querySelector("[data-kit-retain]")) {
+      return rejectDirectIf(element,
+        new TypeError("KitJS: data-kit-retain cannot be used in a structural branch"));
+    }
+    var condition = core.safeProgram(element, "data-kit-if", "binding");
+    if (!condition) {
+      modules.structure = null;
+      return null;
+    }
+
+    var source = element.getAttribute("data-kit-if");
+    var blueprint = element.cloneNode(true);
+    blueprint.removeAttribute("data-kit-if");
+    element.removeAttribute("data-kit-if");
+
+    var anchor = document.createElement("template");
+    anchor.setAttribute("data-kit-if", source);
+    anchor.content.appendChild(blueprint);
+    var start = document.createComment("kit-structure-start");
+    var end = document.createComment("kit-structure-end");
+    var parent = element.parentNode;
+    var locals = copyOwn(Object.create(null), localsFor(element));
+    var level = contextLevel(element) + 1;
+    parent.insertBefore(start, element);
+    parent.insertBefore(end, element.nextSibling);
+    parent.insertBefore(anchor, end.nextSibling);
+
+    var state = {
+      kind: "if",
+      condition: condition,
+      branch: {
+        start: start,
+        end: end,
+        nodes: null,
+        locals: locals,
+        level: level
+      },
+      direct: true,
+      error: ""
+    };
+    core.elementRecord(anchor).modules.structure = state;
+    bindRange(state.branch);
+    return anchor;
+  }
+
+  function prepareStructureTree(root) {
+    if (!root || !root.querySelectorAll) return false;
+    var elements = [];
+    if (root.nodeType === 1 && root.matches && root.matches("[data-kit-if]") &&
+      root.tagName !== "TEMPLATE") elements.push(root);
+    Array.prototype.push.apply(elements, root.querySelectorAll("[data-kit-if]"));
+    var changed = false;
+    elements.forEach(function (element) {
+      if (element.tagName !== "TEMPLATE" && prepareDirectIf(element)) changed = true;
+    });
+    return changed;
+  }
+
   function structureState(element) {
     if (core.ignoredForRuntime(element)) return null;
     var modules = core.elementRecord(element).modules;
@@ -3952,14 +4090,16 @@
       return null;
     }
     try {
-      if (element.tagName !== "TEMPLATE") {
-        throw new TypeError("KitJS: if, for, and key require a template element");
-      }
       var hasIf = element.hasAttribute("data-kit-if");
       var hasFor = element.hasAttribute("data-kit-for");
       var hasKey = element.hasAttribute("data-kit-key");
-      if (hasIf && hasFor) throw new TypeError("KitJS: one template cannot combine if and for");
+      if (hasIf && hasFor) throw new TypeError("KitJS: one structural host cannot combine if and for");
       if (hasKey && !hasFor) throw new TypeError("KitJS: key requires for on the same template");
+      if (element.tagName !== "TEMPLATE") {
+        throw new TypeError(hasFor || hasKey
+          ? "KitJS: for and key require a template element"
+          : "KitJS: direct if could not be prepared");
+      }
       if (!hasIf && !hasFor) throw new TypeError("KitJS: orphan structural template");
       if (element.content.querySelector("script")) {
         throw new TypeError("KitJS: structural templates cannot contain script elements");
@@ -4219,9 +4359,13 @@
   }
 
   function reconcile(current) {
+    if (prepareStructureTree(current.host) && current.structures === false) {
+      current.structures = undefined;
+    }
     if (current.structures === false) return false;
     var changedAny = false;
     for (var pass = 0; pass < 64; pass++) {
+      if (pass > 0 && prepareStructureTree(current.host)) current.structures = undefined;
       var changed = false;
       var elements = core.ownedElements(current, SELECTOR);
       if (current.structures === undefined) current.structures = elements.length > 0;
@@ -4273,6 +4417,7 @@
 
   core.localsFor = localsFor;
   core.disposeTree = disposeTree;
+  core.prepareStructureTree = prepareStructureTree;
   core.resetStructures = resetStructures;
   core.reconcileStructures = reconcile;
   core.phase = "structure";
@@ -4317,8 +4462,9 @@
     return modules.classes;
   }
 
-  function render(current) {
-    core.ownedElements(current, SELECTOR).forEach(function (element) {
+  function render(current, plan) {
+    plan.classes.forEach(function (element) {
+      if (!core.ownsElement(current, element) || !element.hasAttribute("data-kit-class")) return;
       try {
         var program = core.safeProgram(element, "data-kit-class", "binding");
         if (!program) return;
@@ -4559,8 +4705,9 @@
     else element.style.removeProperty(name);
   }
 
-  function render(current) {
-    core.ownedElements(current, SELECTOR).forEach(function (element) {
+  function render(current, plan) {
+    plan.styles.forEach(function (element) {
+      if (!core.ownsElement(current, element) || !element.hasAttribute("data-kit-style")) return;
       try {
         var entries = safeStyle(element);
         if (!entries) return;
@@ -4611,7 +4758,9 @@
   function modelState(element) {
     var modules = core.elementRecord(element).modules;
     if (OWN.call(modules, "model")) return modules.model;
-    var source = (element.getAttribute("data-kit-model") || "").trim();
+    var source;
+    try { source = core.expressionSource(element.getAttribute("data-kit-model") || "").trim(); }
+    catch (error) { core.report(error); modules.model = null; return null; }
     if (source.charAt(0) === "$") {
       core.report(new SyntaxError("KitJS: model cannot use the reserved $ namespace"));
       modules.model = null;
@@ -4721,8 +4870,9 @@
     return true;
   }
 
-  function render(current) {
-    core.ownedElements(current, SELECTOR).forEach(function (element) {
+  function render(current, plan) {
+    plan.models.forEach(function (element) {
+      if (!core.ownsElement(current, element) || !element.hasAttribute("data-kit-model")) return;
       try {
         var state = modelState(element);
         if (!state || !writable(current.scope, state)) return;
@@ -4785,7 +4935,8 @@
         program: program,
         onceDone: false,
         timer: 0,
-        generation: 0
+        generation: 0,
+        ownsRemoval: false
       } : null;
       if (events[name] && descriptor.outside) {
         outsideActive[descriptor.type] = (outsideActive[descriptor.type] || 0) + 1;
@@ -4835,7 +4986,6 @@
   function prepare() {
     if (prepared) return;
     prepared = true;
-    if (core.prepareComponentTree) core.prepareComponentTree(document);
     document.querySelectorAll("*").forEach(validateElement);
   }
 
@@ -4855,6 +5005,10 @@
       if (state.timer) clearTimeout(state.timer);
       state.timer = 0;
       state.generation++;
+      if (state.ownsRemoval) {
+        state.ownsRemoval = false;
+        if (core.releaseRemovalOwner) core.releaseRemovalOwner();
+      }
       if (state.descriptor.outside && outsideActive[state.descriptor.type]) {
         outsideActive[state.descriptor.type]--;
       }
@@ -4907,30 +5061,36 @@
     return true;
   }
 
-  function connectedOwner(state) {
-    var owner = null;
-    Array.prototype.some.call(document.querySelectorAll("*"), function (element) {
-      if (core.ignoredForRuntime(element)) return false;
-      var record = core.records.get(element);
-      if (!record || record.events[state.descriptor.name] !== state ||
-          !element.hasAttribute(state.descriptor.name)) return false;
-      owner = element;
-      return true;
-    });
-    return owner;
+  function connectedOwner(state, element) {
+    if (!element || element.ownerDocument !== document || !document.contains(element) ||
+      core.ignoredForRuntime(element)) return null;
+    var record = core.records.get(element);
+    if (!record || record.events[state.descriptor.name] !== state ||
+        !element.hasAttribute(state.descriptor.name)) return null;
+    return element;
   }
 
-  function scheduleDebounce(state, eventSnapshot) {
+  function scheduleDebounce(state, element, eventSnapshot) {
     if (state.timer) clearTimeout(state.timer);
+    else if (!state.ownsRemoval) {
+      state.ownsRemoval = true;
+      if (core.retainRemovalOwner) core.retainRemovalOwner();
+    }
     var generation = ++state.generation;
-    state.timer = setTimeout(function () {
+    var timer = setTimeout(function () {
+      if (state.timer !== timer) return;
       state.timer = 0;
+      if (state.ownsRemoval) {
+        state.ownsRemoval = false;
+        if (core.releaseRemovalOwner) core.releaseRemovalOwner();
+      }
       if (generation !== state.generation || state.onceDone) return;
-      var owner = connectedOwner(state);
+      var owner = connectedOwner(state, element);
       if (!owner) return;
       if (core.executeAttribute(owner, state.descriptor.name, locals(eventSnapshot)) &&
           state.descriptor.once) state.onceDone = true;
     }, state.descriptor.delay);
+    state.timer = timer;
   }
 
   function execute(state, element, event, eventSnapshot) {
@@ -4939,7 +5099,7 @@
     if (descriptor.stop) event.stopPropagation();
 
     if (descriptor.delay) {
-      scheduleDebounce(state, eventSnapshot);
+      scheduleDebounce(state, element, eventSnapshot);
       return true;
     }
 
@@ -5019,10 +5179,9 @@
   var COMMENT = 8;
   var RETAIN = "data-kit-retain";
   var IGNORE = "data-kit-ignore";
+  var REJECTED_COMPONENT_VERSION = "data-kit-version";
   var COMPONENT_METADATA = {
-    "data-kit-component": true,
-    "data-kit-version": true,
-    "data-kit-local": true
+    "data-kit-component": true
   };
   var URL_ATTRIBUTES = {
     action: true,
@@ -5166,6 +5325,8 @@
   }
 
   function componentCompatible(current, incoming) {
+    if (current.hasAttribute(REJECTED_COMPONENT_VERSION) ||
+      incoming.hasAttribute(REJECTED_COMPONENT_VERSION)) return false;
     var currentHasComponent = current.hasAttribute("data-kit-component");
     var incomingHasComponent = incoming.hasAttribute("data-kit-component");
     var currentScope = current.getAttribute("data-kit-scope");
@@ -5173,8 +5334,7 @@
     if (!currentHasComponent && !incomingHasComponent) {
       if (currentScope === null && incomingScope === null) return true;
       return currentScope !== null && incomingScope !== null && currentScope === incomingScope &&
-        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as") &&
-        current.getAttribute("data-kit-version") === incoming.getAttribute("data-kit-version");
+        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as");
     }
     if (!currentHasComponent || !incomingHasComponent || typeof core.componentMetadata !== "function") return false;
     var currentRequest = core.componentMetadata(current, false);
@@ -5475,6 +5635,7 @@
     var context = retainContext(currentRoot, incoming);
     if (core.resetStructures) core.resetStructures(currentRoot);
     var result = morphNode(currentRoot, incoming, context);
+    if (core.prepareStructureTree) core.prepareStructureTree(result);
     if (core.prepareEventTree) core.prepareEventTree(result);
     restoreFocus(result, focus);
     invalidateBoundaries(result);
@@ -5511,6 +5672,7 @@
     ? profileScript.getAttribute("data-kitwork-plan")
     : null;
   var HANDOFF = Symbol.for("kitjs:handoff");
+  var DRIVE_FALLBACK = {};
   var activeVisit = null;
   var navigationCritical = false;
   var navigationTerminal = false;
@@ -5525,6 +5687,9 @@
   var SCROLL_SAVE_DELAY = 250;
   var HANDOFF_LOAD_TIMEOUT = 10000;
   var HANDOFF_GRAPH_CACHE_LIMIT = 32;
+  var DRIVE_RESPONSE_BYTES_LIMIT = 8 * 1024 * 1024;
+  var DRIVE_DOCUMENT_NODE_LIMIT = 100000;
+  var DRIVE_DOCUMENT_DEPTH_LIMIT = 256;
   var NAVIGATION_EVENT = "kit:navigation";
   var THEME_PREPAINT_SOURCE = '(function(){var r=document.documentElement,c=r.classList,m="system";try{var t=localStorage.getItem("theme");t=t&&t.toLowerCase();if(t==="light"||t==="dark"||t==="system")m=t}catch(e){}if(m==="system"){try{m=typeof matchMedia==="function"&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){m="light"}}if(m==="dark")c.add("dark");else c.remove("dark");try{r.style.colorScheme=m}catch(e){}})();';
   var handoffGraphs = new Map();
@@ -5754,21 +5919,46 @@
     if (intent) executeNavigationIntent(intent);
   }
 
-  function exactBodyLength(response) {
+  function declaredBodyLength(response) {
     if (!response || !response.headers || typeof response.headers.get !== "function") return 0;
-    var encoding = String(response.headers.get("content-encoding") || "").trim().toLowerCase();
-    if (encoding && encoding !== "identity") return 0;
     var source = String(response.headers.get("content-length") || "").trim();
     if (!/^[1-9][0-9]*$/.test(source)) return 0;
     var total = Number(source);
     return Number.isSafeInteger(total) && total > 0 ? total : 0;
   }
 
+  function exactBodyLength(response) {
+    var total = declaredBodyLength(response);
+    if (!total) return 0;
+    var encoding = String(response.headers.get("content-encoding") || "").trim().toLowerCase();
+    return !encoding || encoding === "identity" ? total : 0;
+  }
+
+  function driveFallbackError(message) {
+    var error = new RangeError(message);
+    error.kitDriveFallback = DRIVE_FALLBACK;
+    return error;
+  }
+
+  function cancelResponseBody(body) {
+    if (!body || typeof body.cancel !== "function") return;
+    try {
+      var cancelled = body.cancel();
+      if (cancelled && typeof cancelled.catch === "function") cancelled.catch(function () {});
+    } catch (_) { /* A locked or already-settled body is best-effort cleanup. */ }
+  }
+
   function responseText(response, visit) {
     var total = exactBodyLength(response);
     var body = response && response.body;
-    if (!total || !body || typeof body.getReader !== "function" ||
-      typeof global.TextDecoder !== "function") return response.text();
+    if (declaredBodyLength(response) > DRIVE_RESPONSE_BYTES_LIMIT) {
+      cancelResponseBody(body);
+      return Promise.reject(driveFallbackError("KitJS: navigation response exceeds the byte limit"));
+    }
+    if (!body || typeof body.getReader !== "function" || typeof global.TextDecoder !== "function") {
+      cancelResponseBody(body);
+      return Promise.reject(driveFallbackError("KitJS: navigation response cannot be read with a bounded stream"));
+    }
 
     var decoder;
     var reader;
@@ -5776,14 +5966,20 @@
       decoder = new global.TextDecoder();
       reader = body.getReader();
     } catch (_) {
-      if (reader && typeof reader.releaseLock === "function") reader.releaseLock();
-      return response.text();
+      if (reader && typeof reader.releaseLock === "function") {
+        try { reader.releaseLock(); } catch (_) { /* Initialization already failed closed. */ }
+      }
+      cancelResponseBody(body);
+      return Promise.reject(driveFallbackError("KitJS: navigation response stream could not be initialized"));
     }
 
     var chunks = [];
     var loaded = 0;
     var lastPercent = 0;
+    var readerCancelled = false;
     function cancelReader() {
+      if (readerCancelled) return;
+      readerCancelled = true;
       try {
         var cancelled = reader.cancel();
         if (cancelled && typeof cancelled.catch === "function") cancelled.catch(function () {});
@@ -5810,12 +6006,14 @@
         var value = result.value;
         var size = value && Number(value.byteLength);
         if (!Number.isSafeInteger(size) || size < 0) {
+          cancelReader();
           throw new TypeError("KitJS: invalid navigation response chunk");
         }
-        loaded += size;
-        if (!Number.isSafeInteger(loaded)) {
-          throw new TypeError("KitJS: navigation response is too large");
+        if (size > DRIVE_RESPONSE_BYTES_LIMIT - loaded) {
+          cancelReader();
+          throw driveFallbackError("KitJS: navigation response exceeds the byte limit");
         }
+        loaded += size;
         var text = decoder.decode(value, { stream: true });
         if (text) chunks.push(text);
         if (loaded < total) {
@@ -5830,9 +6028,50 @@
           }
         }
         return read();
+      }).catch(function (error) {
+        cancelReader();
+        throw error;
       });
     }
     return read();
+  }
+
+  function boundedDestinationDocument(incoming) {
+    if (!incoming) throw driveFallbackError("KitJS: navigation response did not produce a document");
+    var nodes = [incoming];
+    var depths = [0];
+    var discovered = 1;
+
+    function enqueue(node, depth) {
+      if (!node) return;
+      if (depth > DRIVE_DOCUMENT_DEPTH_LIMIT) {
+        throw driveFallbackError("KitJS: navigation document exceeds the depth limit");
+      }
+      discovered++;
+      if (discovered > DRIVE_DOCUMENT_NODE_LIMIT) {
+        throw driveFallbackError("KitJS: navigation document exceeds the node limit");
+      }
+      nodes.push(node);
+      depths.push(depth);
+    }
+
+    while (nodes.length) {
+      var node = nodes.pop();
+      var depth = depths.pop();
+      if (node.nodeType === 1 && String(node.localName || "").toLowerCase() === "template" && node.content) {
+        enqueue(node.content, depth + 1);
+      }
+      var child = node.lastChild;
+      while (child) {
+        enqueue(child, depth + 1);
+        child = child.previousSibling;
+      }
+    }
+    return incoming;
+  }
+
+  function parseDestinationDocument(sourceText) {
+    return boundedDestinationDocument(new DOMParser().parseFromString(sourceText, "text/html"));
   }
 
   function incomingBase(incoming, responseURL) {
@@ -5959,10 +6198,50 @@
     return policy === "stable";
   }
 
-  function warnDriveDisabled() {
+  function topologyFailure(diagnostic, cause, script, remedy) {
+    if (diagnostic && !diagnostic.cause) {
+      diagnostic.cause = cause;
+      diagnostic.script = script || null;
+      diagnostic.remedy = remedy;
+    }
+    return null;
+  }
+
+  function diagnosticScript(script) {
+    if (!script) return "no script node was available";
+    var source = "";
+    if (script.hasAttribute && script.hasAttribute("src")) {
+      try {
+        var rawSource = String(script.getAttribute("src") || "");
+        var parsed = new URL(rawSource, script.ownerDocument && script.ownerDocument.baseURI || document.baseURI);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          source = "[" + parsed.protocol + " URL redacted]";
+        } else {
+          source = parsed.origin === global.location.origin ? parsed.pathname : parsed.origin + parsed.pathname;
+          if (parsed.search) source += "?[redacted]";
+          if (parsed.hash) source += "#[redacted]";
+        }
+      } catch (_) { source = "[unresolvable URL redacted]"; }
+      source = source.replace(/\s+/g, " ").slice(0, 160);
+    }
+    var owner = script.ownerDocument;
+    var location = owner && script.parentNode === owner.head ? "head" :
+      owner && script.parentNode === owner.body ? "body" : "document";
+    return source ? "<script src=" + JSON.stringify(source) + "> in <" + location + ">" :
+      "inline <script> in <" + location + ">";
+  }
+
+  function warnDriveDisabled(failure) {
     if (!driveDisabledWarning && global.console && typeof global.console.warn === "function") {
       driveDisabledWarning = true;
-      global.console.warn("KitJS Drive: disabled because the initial executable script topology is incompatible");
+      failure = failure && failure.cause ? failure : {
+        cause: "the initial executable script topology is incompatible",
+        script: profileScript,
+        remedy: "keep one identical ordered set of supported classic external scripts"
+      };
+      global.console.warn("KitJS Drive: disabled. Cause: " + failure.cause +
+        ". Offending script: " + diagnosticScript(failure.script) +
+        ". Remedy: " + failure.remedy + ".");
     }
     return false;
   }
@@ -6020,36 +6299,96 @@
     return candidate;
   }
 
-  function standaloneProfileScript(root, base, current) {
-    if (!root || !root.querySelectorAll || !profileURL) return null;
+  function standaloneProfileScript(root, base, current, diagnostic) {
+    if (!root || !root.querySelectorAll || !profileURL) {
+      return topologyFailure(diagnostic, "the standalone Hydrate profile script cannot be identified",
+        profileScript, "load one external Hydrate profile as a direct child of <head>");
+    }
     var matches = array(root.querySelectorAll("script[src]")).filter(function (script) {
       return absoluteURL(script.getAttribute("src"), base) === profileURL;
     });
-    if (matches.length !== 1 || current && matches[0] !== profileScript) return null;
+    if (matches.length !== 1) {
+      return topologyFailure(diagnostic, matches.length ? "the Hydrate profile script is duplicated" :
+        "the Hydrate profile script is missing", matches[1] || matches[0] || profileScript,
+      "keep exactly one unchanged Hydrate profile script as a direct child of <head>");
+    }
+    if (current && matches[0] !== profileScript) {
+      return topologyFailure(diagnostic, "the running Hydrate profile script was replaced", matches[0],
+        "do not replace or rewrite the Hydrate profile script after it executes");
+    }
     var script = matches[0];
-    if (!script.parentNode || script.parentNode !== root.head ||
-      executableScriptKind(script) !== "classic" || !script.hasAttribute("defer") ||
-      script.hasAttribute("async") || script.hasAttribute("nomodule") ||
-      String(script.textContent || "")) return null;
-    if (!compatibleScriptIdentity(script, profileURL)) return null;
-    var attributes = scriptAttributeSignature(script);
-    if (attributes === null) return null;
+    var signature = stableHeadScriptSignature(script, base, diagnostic);
+    if (!signature) return null;
     return {
       node: script,
-      signature: "profile\nurl=" + profileURL + "\n" + attributes
+      signature: "profile\n" + signature
     };
   }
 
-  function stableHeadScriptSignature(script, base) {
-    if (!script || !script.parentNode || script.parentNode !== script.ownerDocument.head ||
-      executableScriptKind(script) !== "classic" || !script.hasAttribute("src") ||
-      !script.hasAttribute("defer") || script.hasAttribute("async") ||
-      script.hasAttribute("nomodule") || String(script.textContent || "")) return null;
+  function stableHeadScriptSignature(script, base, diagnostic) {
+    if (!script) {
+      return topologyFailure(diagnostic, "an executable script node is missing", null,
+        "restore the missing external script in <head>");
+    }
+    var directHead = !!(script && script.parentNode && script.ownerDocument &&
+      script.parentNode === script.ownerDocument.head);
+    var kind = executableScriptKind(script);
+    if (kind !== "classic") {
+      return topologyFailure(diagnostic, "a " + (kind || "non-classic") + " script cannot survive Morph",
+        script, "use a classic external script for Drive pages or allow this link to navigate natively");
+    }
+    if (!script.hasAttribute("src")) {
+      return topologyFailure(diagnostic, "an executable inline script cannot survive Morph", script,
+        directHead ? "move its code to a same-origin external script, add defer, and mark it data-kit-drive=\"stable\"" :
+          "move its code to a same-origin external classic script in <head>, add defer, and mark it data-kit-drive=\"stable\"");
+    }
+    if (!directHead) {
+      return topologyFailure(diagnostic, "an executable script is not a direct child of <head>", script,
+        "move it to <head> so Drive can compare one stable execution order");
+    }
+    if (String(script.textContent || "")) {
+      return topologyFailure(diagnostic, "an external script also contains inline code", script,
+        "remove the inline text and keep all executable code in the external resource");
+    }
+    if (script.hasAttribute("async")) {
+      return topologyFailure(diagnostic, "an async script has no stable execution order", script,
+        "remove async and use defer");
+    }
+    if (script.hasAttribute("nomodule")) {
+      return topologyFailure(diagnostic, "a nomodule script has browser-dependent execution", script,
+        "remove nomodule or allow this link to navigate natively");
+    }
+    if (!script.hasAttribute("defer")) {
+      return topologyFailure(diagnostic, "an executable script is missing defer", script,
+        "add defer and keep the script in the same ordered position on every Drive page");
+    }
     var source = absoluteURL(script.getAttribute("src"), base);
-    if (!source) return null;
-    if (!compatibleScriptIdentity(script, source)) return null;
+    if (!source) {
+      return topologyFailure(diagnostic, "the script URL cannot be resolved", script,
+        "use a valid HTTP(S) script URL");
+    }
+    var policy = scriptDrivePolicy(script);
+    if (policy === null) {
+      return topologyFailure(diagnostic, "data-kit-drive has an unsupported value", script,
+        "use exactly data-kit-drive=\"stable\" for an unchanged same-origin script");
+    }
+    if (policy === "stable" && !sameOriginScriptSource(source)) {
+      return topologyFailure(diagnostic, "data-kit-drive=\"stable\" is restricted to same-origin scripts", script,
+        "remove the stable marker and provide valid SRI for the cross-origin script");
+    }
+    if (script.hasAttribute("integrity") && !validIntegrityMetadata(script.getAttribute("integrity"))) {
+      return topologyFailure(diagnostic, "the script integrity metadata is malformed", script,
+        "provide a valid sha256, sha384, or sha512 SRI value");
+    }
+    if (!compatibleScriptIdentity(script, source)) {
+      return topologyFailure(diagnostic, "the script has no stable identity", script,
+        "add valid SRI, or use data-kit-drive=\"stable\" when the script is same-origin and unchanged");
+    }
     var attributes = scriptAttributeSignature(script);
-    if (attributes === null) return null;
+    if (attributes === null) {
+      return topologyFailure(diagnostic, "the script has an executable event-handler attribute", script,
+        "remove attributes whose names begin with on");
+    }
     return "url=" + source + "\n" + attributes;
   }
 
@@ -6115,21 +6454,34 @@
     return candidate.scripts;
   }
 
-  function executableScriptTopology(root, base, current) {
-    if (!root || !root.querySelectorAll) return null;
+  function executableScriptTopology(root, base, current, diagnostic) {
+    if (!root || !root.querySelectorAll) {
+      return topologyFailure(diagnostic, "the document cannot enumerate its script topology", null,
+        "use a complete HTML document with a <head>");
+    }
     var themePrepaint = themePrepaintForTopology(root);
-    if (themePrepaint === undefined) return null;
+    if (themePrepaint === undefined) {
+      return topologyFailure(diagnostic, "the engine-owned theme prepaint script is malformed or replaced",
+        root.querySelector("[data-kitwork-jit=\"theme\"]"),
+      "restore the exact server-emitted theme prepaint script");
+    }
     var managed;
     var marker;
     if (stagedProfile) {
       managed = stagedScriptsForTopology(root, base);
       marker = "managed=staged";
     } else {
-      var profile = standaloneProfileScript(root, base, current);
+      var profile = standaloneProfileScript(root, base, current, diagnostic);
       managed = profile ? [profile.node] : null;
       marker = profile && profile.signature;
     }
-    if (!managed || !marker) return null;
+    if (!managed || !marker) {
+      return topologyFailure(diagnostic, stagedProfile ?
+        "the engine-managed staged script lane is malformed or no longer matches the active graph" :
+        "the standalone Hydrate profile script is incompatible", profileScript,
+      stagedProfile ? "restore the exact contiguous server-emitted runtime, Hydrate, graph, service, and component scripts" :
+        "restore the unchanged external Hydrate profile script");
+    }
     var managedSet = new Set(managed);
     var managedSeen = 0;
     var markerWritten = false;
@@ -6140,7 +6492,10 @@
       var script = scripts[index];
       if (engineHandoffScripts.has(script)) continue;
       if (managedSet.has(script)) {
-        if (managedBlockClosed) return null;
+        if (managedBlockClosed) {
+          return topologyFailure(diagnostic, "the managed script lane is interrupted or reordered", script,
+            "keep every engine-managed script contiguous and in its emitted order");
+        }
         managedSeen++;
         if (!markerWritten) {
           signatures.push(marker);
@@ -6155,11 +6510,15 @@
       }
       if (!executableScriptKind(script)) continue;
       if (markerWritten) managedBlockClosed = true;
-      var signature = stableHeadScriptSignature(script, base);
+      var signature = stableHeadScriptSignature(script, base, diagnostic);
       if (!signature) return null;
       signatures.push("authored\n" + signature);
     }
-    return managedSeen === managed.length ? signatures : null;
+    if (managedSeen !== managed.length) {
+      return topologyFailure(diagnostic, "a required managed script is missing from the document", profileScript,
+        "restore every server-emitted managed script without moving or replacing it");
+    }
+    return signatures;
   }
 
   function compatibleExecutableScripts(incoming, responseURL) {
@@ -6673,9 +7032,9 @@
   function collectComponents(root, output) {
     if (!root || root.nodeType === 1 && core.ignoredForRuntime(root)) return;
     if (root.nodeType === 1 && (root.hasAttribute("data-kit-component") ||
-      root.hasAttribute("data-kit-version") || root.hasAttribute("data-kit-local"))) output.push(root);
+      root.hasAttribute("data-kit-version"))) output.push(root);
     if (!root.querySelectorAll) return;
-    array(root.querySelectorAll("[data-kit-component],[data-kit-version],[data-kit-local]")).forEach(function (element) {
+    array(root.querySelectorAll("[data-kit-component],[data-kit-version]")).forEach(function (element) {
       if (!core.ignoredForRuntime(element)) output.push(element);
     });
     array(root.querySelectorAll("template")).forEach(function (template) {
@@ -6689,8 +7048,7 @@
       typeof core.hasComponentDefinition !== "function") return false;
     var components = [];
     var root = incoming.documentElement;
-    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version") ||
-      root.hasAttribute("data-kit-local")) {
+    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version")) {
       // The document root is outside body morphing, so data-kit-ignore cannot
       // exempt its component identity from the incoming graph check.
       components.push(root);
@@ -6708,8 +7066,7 @@
       typeof core.hasComponentDefinition !== "function") return false;
     var components = [];
     var root = incoming.documentElement;
-    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version") ||
-      root.hasAttribute("data-kit-local")) {
+    if (root.hasAttribute("data-kit-component") || root.hasAttribute("data-kit-version")) {
       components.push(root);
     }
     collectComponents(incoming.body, components);
@@ -7233,6 +7590,7 @@
       var responseURL = preserveRequestedFragment(response.url || url.href, url);
       var finalURL = sameOriginURL(responseURL);
       if (!response.ok || !isHTML(response) || !finalURL || hasContentSecurityPolicyHeader(response)) {
+        cancelResponseBody(response && response.body);
         fallbackVisit(visitRecord, responseURL, "fallback");
         return null;
       }
@@ -7240,7 +7598,7 @@
       return responseText(response, visitRecord).then(function (sourceText) {
         if (sourceText === null || !currentVisit(visitRecord)) return null;
         return {
-          document: new DOMParser().parseFromString(sourceText, "text/html"),
+          document: parseDestinationDocument(sourceText),
           url: finalURL
         };
       });
@@ -7322,6 +7680,9 @@
       if (controller.signal.aborted || error && error.name === "AbortError") {
         finishVisit(visitRecord, "cancelled", visitRecord.url);
         return false;
+      }
+      if (error && error.kitDriveFallback === DRIVE_FALLBACK) {
+        return fallbackVisit(visitRecord, visitRecord.url, "fallback");
       }
       return fallbackVisit(visitRecord, visitRecord.url, "error", error);
     }).finally(function () {
@@ -7408,10 +7769,19 @@
     if (started || !profileURL || typeof global.fetch !== "function" ||
       typeof global.DOMParser !== "function" || typeof global.AbortController !== "function" ||
       !global.history || typeof global.history.pushState !== "function") return false;
-    if (!captureLiveThemePrepaint()) return warnDriveDisabled();
-    if (stagedProfile && !captureLiveStagedDelivery()) return warnDriveDisabled();
-    liveExecutableTopology = executableScriptTopology(document, document.baseURI, true);
-    if (!liveExecutableTopology) return warnDriveDisabled();
+    if (!captureLiveThemePrepaint()) return warnDriveDisabled({
+      cause: "the engine-owned theme prepaint script is malformed or replaced",
+      script: document.querySelector("[data-kitwork-jit=\"theme\"]"),
+      remedy: "restore the exact server-emitted theme prepaint script"
+    });
+    if (stagedProfile && !captureLiveStagedDelivery()) return warnDriveDisabled({
+      cause: "the engine-managed staged script lane is malformed or no longer matches the active graph",
+      script: stagedReservedNodes(document)[0] || profileScript,
+      remedy: "restore the exact contiguous server-emitted runtime, Hydrate, graph, service, and component scripts"
+    });
+    var topologyDiagnostic = {};
+    liveExecutableTopology = executableScriptTopology(document, document.baseURI, true, topologyDiagnostic);
+    if (!liveExecutableTopology) return warnDriveDisabled(topologyDiagnostic);
     started = true;
     if (stagedProfile && core.graph && core.delivery && core.delivery.graphHash) {
       rememberHandoffGraph(core.delivery.graphHash, { graph: core.graph, delivery: core.delivery });
@@ -7509,6 +7879,7 @@
   function boot() {
     if (core.booted) return;
     core.booted = true;
+    if (typeof core.prepareStructureTree === "function") core.prepareStructureTree(document);
     if (typeof core.prepareComponentTree === "function") core.prepareComponentTree(document);
     core.render();
     core.resetDirty();
@@ -7520,7 +7891,10 @@
   core.startHooks.forEach(function (start) {
     try { start(); } catch (error) { core.report(error); }
   });
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot, { once: true });
+  var script = document.currentScript;
+  var waitingForDeferredPeers = document.readyState === "interactive" && script &&
+    script.defer === true && script.async !== true;
+  if (document.readyState === "loading" || waitingForDeferredPeers) {
+    document.addEventListener("DOMContentLoaded", boot, { once: true, capture: true });
   } else queueMicrotask(boot);
 })(globalThis, document);

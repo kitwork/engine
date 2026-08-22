@@ -12,6 +12,17 @@ import (
 
 var enginePool = app.NewPool()
 
+// VMPoolHealth returns counters only. It never exposes or retains a pooled VM.
+func VMPoolHealth() VMPoolHealthSnapshot {
+	stats := enginePool.Stats()
+	return VMPoolHealthSnapshot{
+		Active:   stats.Active,
+		Created:  stats.Created,
+		Acquired: stats.Acquired,
+		Released: stats.Released,
+	}
+}
+
 // Router struct is defined in router.go
 type Config struct {
 	root     string
@@ -110,7 +121,12 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	defer t.endRequest()
+	streamDetached := false
+	defer func() {
+		if !streamDetached {
+			t.endRequest()
+		}
+	}()
 	generationLease, err := t.generationLease()
 	if err != nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
@@ -140,7 +156,7 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if serveFontIf(w, r) {
 		return
 	}
-	// /_db/query — authenticated read-only SQL over HTTP (the tenant db as a URL). Off unless DB_TOKEN.
+	// /_db/query — authenticated read-only SQL over HTTP. Off unless a database declaration exposes it.
 	if t.serveDataAPIIf(w, r, requestScope) {
 		return
 	}
@@ -148,5 +164,5 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if t.serveLibSQLIf(w, r, requestScope) {
 		return
 	}
-	t.serveTree(requestScope)
+	t.serveTree(requestScope, &streamDetached)
 }

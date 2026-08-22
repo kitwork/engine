@@ -1,9 +1,12 @@
 # KitJS integration contract
 
 This file is an integration map, not a second KitJS specification. The
-canonical source-candidate contract for `0.9.0-next.12` is the package-tree
-`packages/kit.js/KITJS_SPEC.md`. The version identifies locally checked source;
-it does not establish npm or CDN availability. The flattened engine copy and
+canonical unpublished source-candidate contract for `1.0.0-rc.2` is the
+package-tree `packages/kit.js/KITJS_SPEC.md`. The independently verified public
+prerelease remains [`1.0.0-rc.1`](https://www.npmjs.com/package/@kitwork/kitjs/v/1.0.0-rc.1),
+with its [exact tagged source](https://github.com/kitwork/kit.js/tree/v1.0.0-rc.1);
+this `1.0.0-rc.2` candidate does not establish npm or CDN publication. The
+flattened engine copy and
 Kitwork-specific delivery behavior are documented in the
 [KitJS runtime README](../README.md).
 
@@ -31,10 +34,36 @@ service namespaces; their one narrow App path is the read-only ordinary state
 ordinary JavaScript and remain part of the application's trusted computing
 base.
 
+Each browser expression source is capped at 65,536 UTF-16 code units and its
+stored-token budget at 32,768. Crossing either budget fails closed before
+evaluation.
+
 `data-kit-ignore` is one shared ownership boundary across Kitwork preflight,
 the browser runtime, and Hydrate Morph. Its host and complete subtree are inert
 to KitJS, and Morph treats that subtree as opaque. It is not a component store,
 retention key, or package boundary.
+
+`data-kit-if` has two authored forms. On an ordinary element it owns that one
+host as a single-root conditional branch. On `<template>` it owns the template
+content as an inert fragment that may have multiple top-level nodes. The direct
+form requires a nearest enclosing reactive boundary and reads its condition
+from that parent. A scope or component declared on the same direct host belongs
+to the branch after mount and cannot provide the condition that controls its
+own existence.
+
+The direct host is authored SSR and no-JavaScript fallback. A valid truthy
+initial render keeps that host; false unmounts it, and a later true transition
+mounts a fresh host. An invalid standalone condition reports a diagnostic and
+must leave the authored fallback unchanged. Kitwork's prepared-document scan
+rejects the same invalid expression before publishing a generation. The direct
+form is not an inert resource boundary: images, iframes, media, and other
+resource-bearing descendants may start work before KitJS evaluates a false
+condition. Authors use `<template data-kit-if>` when inert or lazy-first
+behavior is required. Executable scripts are invalid in every structural
+region, and retained components cannot occupy or descend from either form.
+
+`data-kit-for` and its optional `data-kit-key` remain template-only. A template
+cannot combine `if` and `for`, and `key` without `for` is invalid.
 
 ## Kitwork delivery
 
@@ -100,11 +129,36 @@ error, not a request-time rewrite.
 </section>
 ```
 
-The generation owns each route graph. Runtime, Hydrate, services, components,
-and identical graphs deduplicate by content hash. If at least two exact
-component name/version pairs occur in every prepared document, that intersection
-is emitted once as the stable `components` chunk. Those packages are removed
-from the individual component set, so the two chunk classes never overlap.
+The generation owns each route graph. Candidate preparation creates runtime
+and Hydrate once, then normalizes each exact service/component source once.
+Each individual package artifact and the single optional common bundle are
+materialized and content-addressed once across all distinct graphs; later graph
+references reuse them without rehashing, and shared components are wrapped only
+in that bundle. Prepared-document lookup uses only
+canonical component identities and never rematerializes package source.
+The resulting exact artifacts deduplicate by content hash under bounded
+candidate asset/byte limits; failure publishes neither partial artifacts nor
+the local package cache. If at least two exact component name/version pairs
+occur in every prepared document, that intersection is emitted once as the
+stable `components` chunk. Those packages are removed from the individual
+component set, so the two chunk classes never overlap.
+
+The server-side prepared-document scan caps source bytes at 8 MiB, markup
+candidates at 65,536, nesting depth at 1,024, attributes per tag at 256,
+ancestor-frame visits at 4,194,304, and cumulative authored expression source
+at 256 KiB. Exceeding a budget rejects generation preparation without
+publishing partial output. These are Kitwork generation limits, not additional
+standalone-browser grammar restrictions.
+
+In a production Kitwork generation, the server minifies only the assembled
+runtime and Hydrate chunks before computing their content hashes, filenames,
+SRI, graph references, and CAS entries. Local development retains readable core
+bytes; the explicit `stdminify` build is also a deterministic no-JavaScript-
+minification policy. Service, component, and shared-bundle bytes remain exact
+package source, including raw component-source identity. The graph source is
+not minified by this policy, but is regenerated because it binds the selected
+core hash and SRI. Standalone package artifacts are outside this server-only
+transformation.
 
 A Drive response with the identical ordered staged delivery is compatible when
 its document checks pass. A response with a different graph may also be
@@ -163,8 +217,15 @@ claims history/scroll ownership. An invalid initial topology disables Drive and
 leaves navigation native without a Drive fetch or lifecycle event. A mismatch
 found in a fetched destination after a valid start uses normal browser
 navigation before live mutation. The disabled initial state emits one console
-warning identifying KitJS Drive; the exact message is not API. Drive never
-evaluates fetched source.
+warning identifying KitJS Drive, stating the cause, describing the offending
+script when present with unsafe URL details redacted, and giving a remedy; the
+exact wording is not API. Drive never evaluates fetched source.
+
+Drive rejects a fetched response whose usable declared length exceeds 8 MiB or
+whose decoded body crosses 8 MiB while being read. A parsed fetched document
+with more than 100,000 nodes or a depth greater than 256 is also rejected. The
+visit produces one fallback outcome and hands navigation to the browser before
+title, head, history, or body mutation.
 
 Explicit same-document fragment clicks remain native, including `#`, so the
 browser retains `hashchange` and CSS `:target`; fragment-only Back/Forward does
@@ -197,16 +258,15 @@ the sealed target graph.
 
 Managed component identity uses `data-kit-component="name@exact-semver"` and
 is checked against the artifact's private manifest. Ranges, `latest`, and a
-`v` prefix are invalid. The split `data-kit-version` form is a deprecated
-compatibility input for one 0.9 release and is removed in 1.0.
+`v` prefix are invalid. The split `data-kit-version` form is removed and fails
+closed outside a `data-kit-ignore` boundary.
 `data-kit-retain` is a Hydrate Morph identity for an application-owned
 component; it is neither a package selector nor an HTML `id`.
 
 Trusted client code registers an unknown page component against an unversioned
 host. It may not carry `data-kit-retain`, shadow a managed catalog name, or
-receive graph grants. The empty `data-kit-local` marker remains a deprecated
-compatibility input for one 0.9 release and is removed in 1.0; canonical direct
-registration does not use it.
+receive graph grants. An unversioned component name already selects direct
+client registration; there is no separate local marker.
 
 Services are sealed platform primitives exposed only when selected. Their
 component-facing namespaces are frozen, carry an exact non-enumerable version,
@@ -225,8 +285,10 @@ component has one shallow dirty flag and schedules at most one render in the
 next microtask. KitJS does not build a property-read dependency graph or a
 virtual DOM.
 
-Structural templates own only their clones. Removed private boundaries dispose
-deepest-first; moving a host within the same document is not removal. A
+Conditional owners retain only their active direct host or materialized
+template fragment; repeated templates own only their row clones. Removed
+private boundaries dispose deepest-first; moving a host within the same
+document is not removal. A
 component's synchronous `init()` may return one cleanup function. No
 page-lifetime collection may keep detached hosts or stores alive.
 
@@ -245,7 +307,7 @@ reconciled as KitJS UI.
 
 ## Version and change policy
 
-- `0.9.0-next.12` identifies this prerelease browser contract.
+- `1.0.0-rc.2` identifies this unpublished source-candidate browser contract.
 - An npm version identifies the immutable standalone base artifacts.
 - A closed artifact additionally uses the SHA-256 of its exact runtime,
   packages, versions, and dependency edges.

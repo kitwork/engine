@@ -6,12 +6,6 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-const (
-	MaxBytecodeSize = 1<<16 - 1
-	MaxConstants    = 1 << 16
-	MaxStackDepth   = 1<<16 - 1
-)
-
 type VerifyCode string
 
 const (
@@ -289,6 +283,16 @@ func verifyStack(
 	byIP map[int]int,
 	codeLen int,
 ) (int, error) {
+	maxDepth, _, err := analyzeStack(entries, instructions, byIP, codeLen)
+	return maxDepth, err
+}
+
+func analyzeStack(
+	entries []int,
+	instructions []decodedInstruction,
+	byIP map[int]int,
+	codeLen int,
+) (int, map[int]int, error) {
 	depthAt := make(map[int]int, len(instructions))
 	queue := make([]stackState, 0, len(instructions))
 	maxDepth := 0
@@ -337,7 +341,7 @@ func verifyStack(
 
 	for _, entry := range entries {
 		if err := enqueue(entry, 0); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 	}
 
@@ -348,7 +352,7 @@ func verifyStack(
 
 		stackIn, stackOut := ins.spec.StackEffect(ins.operands)
 		if state.depth < stackIn {
-			return 0, verifyError(
+			return 0, nil, verifyError(
 				VerifyStackUnderflow,
 				ins.ip,
 				ins.op,
@@ -360,7 +364,7 @@ func verifyStack(
 		switch ins.op {
 		case RETURN, HALT:
 			if state.depth > 1 {
-				return 0, verifyError(
+				return 0, nil, verifyError(
 					VerifyStackMismatch,
 					ins.ip,
 					ins.op,
@@ -371,32 +375,32 @@ func verifyStack(
 
 		case JUMP:
 			if err := enqueue(int(ins.operands[0]), nextDepth); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 
 		case TRUE, FALSE:
 			if err := enqueue(ins.next, nextDepth); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 			if err := enqueue(int(ins.operands[0]), nextDepth); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 
 		case ITER:
 			if err := enqueue(ins.next, nextDepth); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 			if err := enqueue(int(ins.operands[0]), state.depth-2); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 
 		default:
 			if err := enqueue(ins.next, nextDepth); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 		}
 	}
-	return maxDepth, nil
+	return maxDepth, depthAt, nil
 }
 
 func verifyError(code VerifyCode, ip int, op Opcode, detail string) error {

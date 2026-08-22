@@ -1,12 +1,11 @@
 ; (function (global, document) {
   "use strict";
 
-  var VERSION = "0.9.0-next.12";
+  var VERSION = "1.0.0-rc.2";
   var ASSEMBLY = Symbol.for("kitjs:assembly");
   var INSTALL = Symbol.for("kitjs:runtime");
   var ownKit = Object.prototype.hasOwnProperty.call(global, "kit");
   var currentKit = global.kit;
-  var nextObservation = 0;
 
   if (Object.prototype.hasOwnProperty.call(document, ASSEMBLY)) {
     throw new Error("KitJS: another assembly is already in progress");
@@ -41,6 +40,7 @@
     "undefined NaN Infinity"
   );
   var INVALID_MEMBER = {};
+  var EXPRESSION_SOURCE_LIMIT = 65536;
 
   function syntax(message, source, position) {
     throw new SyntaxError("KitJS: " + message + " in \"" + source + "\" at " + position);
@@ -70,6 +70,15 @@
     } else if (typeof value !== "string") return INVALID_MEMBER;
     return blocked(value) ? INVALID_MEMBER : value;
   }
+  function expressionSource(value) {
+    var source = typeof value === "string" ? value : "";
+    if (source.length > EXPRESSION_SOURCE_LIMIT) {
+      throw new RangeError(
+        "KitJS: expression source exceeds " + EXPRESSION_SOURCE_LIMIT + " UTF-16 code units"
+      );
+    }
+    return source;
+  }
 
   var core = {
     phase: "core",
@@ -86,6 +95,8 @@
     blocked: blocked,
     ignoredForRuntime: ignoredForRuntime,
     memberKey: memberKey,
+    expressionSourceLimit: EXPRESSION_SOURCE_LIMIT,
+    expressionSource: expressionSource,
     registry: new Map(),
     compiled: new Map(),
     scopes: new WeakMap(),
@@ -123,24 +134,39 @@
     core.dirtyAll = false;
     core.dirtyRecords.clear();
   };
-  function attachObservation(value, then, tickets) {
+  function activeObservationRecord(observation) {
+    var owner = observation.owner;
+    observation.owner = null;
+    var record = owner;
+    if (!record || !record.observations || !record.observations.delete(observation)) return null;
+    if (typeof core.releaseObservationOwner === "function") core.releaseObservationOwner(record);
+    var host = record.host;
+    if (record.disposed || !host || host.ownerDocument !== document || !document.contains(host) ||
+      ignoredForRuntime(host) ||
+      (!host.hasAttribute("data-kit-component") && !host.hasAttribute("data-kit-scope")) ||
+      core.scopes.get(host) !== record) return null;
+    return record;
+  }
+  function attachObservation(value, then, observations) {
     var settled = false;
     function settle(error, rejected) {
       if (settled) return;
       settled = true;
       if (rejected) report(error);
-      var waiting = new Set(tickets);
-      document.querySelectorAll("[data-kit-component],[data-kit-scope]").forEach(function (element) {
-        if (ignoredForRuntime(element)) return;
-        var record = core.scopes.get(element);
-        if (!record || record.disposed || !record.observations) return;
-        tickets.forEach(function (ticket) {
-          if (!waiting.has(ticket) || !record.observations.delete(ticket)) return;
-          waiting.delete(ticket);
-          core.invalidate(record);
-        });
+      var records = [];
+      observations.forEach(function (observation) {
+        var record = activeObservationRecord(observation);
+        if (record) records.push(record);
       });
-      tickets.length = 0;
+      records.sort(function (left, right) {
+        if (left.host === right.host) return 0;
+        var position = left.host.compareDocumentPosition(right.host);
+        if (position & 2) return 1;
+        if (position & 4) return -1;
+        return 0;
+      });
+      records.forEach(function (record) { core.invalidate(record); });
+      observations.length = 0;
     }
     try {
       then.call(value, function () { settle(null, false); }, function (error) { settle(error, true); });
@@ -156,16 +182,25 @@
     if (typeof then !== "function") return;
     if (!Array.isArray(owners)) owners = owners ? [owners] : [];
     var seen = new Set();
-    var tickets = [];
+    var observations = [];
     owners.forEach(function (record) {
       if (!record || record.disposed || seen.has(record)) return;
       seen.add(record);
-      var ticket = ++nextObservation;
+      var observation = { owner: record };
       if (!record.observations) record.observations = new Set();
-      record.observations.add(ticket);
-      tickets.push(ticket);
+      record.observations.add(observation);
+      if (typeof core.retainObservationOwner === "function") core.retainObservationOwner(record);
+      observations.push(observation);
     });
-    attachObservation(value, then, tickets);
+    attachObservation(value, then, observations);
+  };
+  core.cancelObservations = function (record) {
+    if (!record || !record.observations) return;
+    record.observations.forEach(function (observation) {
+      observation.owner = null;
+    });
+    record.observations.clear();
+    if (typeof core.releaseObservationOwner === "function") core.releaseObservationOwner(record);
   };
 
   Object.defineProperty(document, ASSEMBLY, {

@@ -37,7 +37,7 @@ func TestScanHTMLValidatesScopeSeedContract(t *testing.T) {
 		`<section data-kit-scope="count: 3; open: true;"></section>`,
 		`<section data-kit-scope='{"count": 3, map: {"": 1, "$nested": 2, "kebab-key": 3, "window": 4, "true": 5}, list: [null, false, +.5, -2e3]}'></section>`,
 		`<section data-kit-scope="toString: 1; valueOf: 2; hasOwnProperty: 3"></section>`,
-		`<section data-kit-component="profile" data-kit-version="1.0.0" data-kit-scope='name: "Ada"'></section>`,
+		`<section data-kit-component="profile@1.0.0" data-kit-scope='name: "Ada"'></section>`,
 		`<template><section data-kit-scope="count: 1"></section></template>`,
 		`<div data-kit-ignore><section data-kit-scope></section></div>`,
 	}

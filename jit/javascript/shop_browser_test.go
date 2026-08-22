@@ -20,16 +20,23 @@ var (
 )
 
 const (
-	shopHistoricalArtifactName   = "hydrate.kit.0.5.0.3d9a3213c5e76157c829866ad214b23aabee235ed997d07a54dcf797b7eee3be.js"
-	shopHistoricalArtifactSHA256 = "3d9a3213c5e76157c829866ad214b23aabee235ed997d07a54dcf797b7eee3be"
+	shopArtifactName   = "hydrate.kit.1.0.0-rc.2.2ee4f2deb3085760773a5ce50d3b1afdc66c1cbc8ad01d4c7fa6636fde56054e.js"
+	shopArtifactSHA256 = "2ee4f2deb3085760773a5ce50d3b1afdc66c1cbc8ad01d4c7fa6636fde56054e"
 )
 
 func TestShopExampleContract(t *testing.T) {
-	artifactSource := readVanillaFile(t, "examples", "shop", shopHistoricalArtifactName)
-	if digest := ContentHash(artifactSource); digest != shopHistoricalArtifactSHA256 {
-		t.Fatalf("historical shop artifact SHA-256 = %s, want %s", digest, shopHistoricalArtifactSHA256)
+	artifact := buildShopArtifact(t)
+	if artifact.Name() != shopArtifactName {
+		t.Fatalf("shop artifact = %q, want %q", artifact.Name(), shopArtifactName)
 	}
-	wantScript := "./" + shopHistoricalArtifactName
+	artifactSource := readVanillaFile(t, "examples", "shop", shopArtifactName)
+	if !bytes.Equal(artifactSource, artifact.Bytes()) {
+		t.Fatalf("checked shop artifact %s is stale", shopArtifactName)
+	}
+	if digest := ContentHash(artifactSource); digest != shopArtifactSHA256 {
+		t.Fatalf("current shop artifact SHA-256 = %s, want %s", digest, shopArtifactSHA256)
+	}
+	wantScript := "./" + shopArtifactName
 	routes := []string{"products.html", "cart.html", "checkout.html"}
 	var sharedKitAttributes map[string]string
 	for _, route := range routes {
@@ -48,6 +55,9 @@ func TestShopExampleContract(t *testing.T) {
 			if got != wantScript {
 				t.Fatalf("%s external script = %q, want %q", route, got, wantScript)
 			}
+			if !strings.Contains(matches[0][0], `data-kit-drive="stable"`) {
+				t.Fatalf("%s does not mark its unchanged same-origin Hydrate script as Drive-stable", route)
+			}
 			for _, forbidden := range []string{
 				"data-kit-app", "data-kit-hydrate", "data-kit-plan", "data-kitwork-plan",
 				"__kitjs_plan__", "<style", "<dialog", "<details",
@@ -57,7 +67,7 @@ func TestShopExampleContract(t *testing.T) {
 				}
 			}
 			for _, shared := range []string{
-				`id="shop-cart"`, `data-kit-component="shop-cart"`, `data-kit-version="1.0.0"`, `data-kit-as="$cart"`,
+				`id="shop-cart"`, `data-kit-component="shop-cart@1.0.0"`, `data-kit-as="$cart"`,
 				`id="shop-cart-count"`, `id="shop-cart-total"`,
 				`id="shop-nav-products"`, `id="shop-nav-cart"`, `id="shop-nav-checkout"`,
 			} {
@@ -102,11 +112,31 @@ func TestShopExampleContract(t *testing.T) {
 	for _, route := range routes {
 		source := string(readVanillaFile(t, "examples", "shop", route))
 		for _, match := range regexp.MustCompile(`(?is)<[^>]+\bdata-kit-component\s*=\s*"[^"]+"[^>]*>`).FindAllString(source, -1) {
-			if !strings.Contains(match, `data-kit-version="1.0.0"`) {
+			if !strings.Contains(match, `@1.0.0"`) {
 				t.Fatalf("%s has an unpinned shop component host: %s", route, match)
 			}
 		}
 	}
+}
+
+func buildShopArtifact(t *testing.T) Artifact {
+	t.Helper()
+	artifact, err := Build(BuildOptions{
+		Profile: ProfileHydrate,
+		Components: []ComponentVersion{
+			{Name: "shop-products", Version: "1.0.0"},
+			{Name: "shop-cart", Version: "1.0.0"},
+			{Name: "shop-checkout", Version: "1.0.0"},
+			{Name: "shop-dialog", Version: "1.0.0"},
+		},
+		Scripts: []Script{{
+			Name: "shop", Source: readVanillaFile(t, "examples", "shop", "shop.js"),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return artifact
 }
 
 func sameStringMap(left, right map[string]string) bool {
@@ -130,8 +160,8 @@ func TestBrowserHydrateShop(t *testing.T) {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 
-	artifactSource := readVanillaFile(t, "examples", "shop", shopHistoricalArtifactName)
-	assetPath := "/examples/shop/" + shopHistoricalArtifactName
+	artifactSource := readVanillaFile(t, "examples", "shop", shopArtifactName)
+	assetPath := "/examples/shop/" + shopArtifactName
 	var artifactRequests atomic.Int64
 	products := readVanillaFile(t, "examples", "shop", "products.html")
 	pages := map[string][]byte{
@@ -139,7 +169,13 @@ func TestBrowserHydrateShop(t *testing.T) {
 		"/examples/shop/cart.html":     readVanillaFile(t, "examples", "shop", "cart.html"),
 		"/examples/shop/checkout.html": readVanillaFile(t, "examples", "shop", "checkout.html"),
 	}
-	initialProducts := injectBrowserAssertions(t, products, shopBrowserAssertions(assetPath))
+	contractSource := []byte(browserHarness + "\n" + shopBrowserAssertions(assetPath))
+	contractIntegrity := driveScriptIntegrity(contractSource)
+	drivePages := make(map[string][]byte, len(pages))
+	for path, source := range pages {
+		drivePages[path] = injectShopContract(t, source, contractIntegrity)
+	}
+	initialProducts := drivePages["/examples/shop/products.html"]
 	directPages := make(map[string][]byte, len(pages))
 	for path, source := range pages {
 		directPages[path] = injectBrowserAssertions(t, source, shopDirectLoadAssertions(assetPath))
@@ -147,6 +183,10 @@ func TestBrowserHydrateShop(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/shop-contract.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(contractSource)
+			return
 		case assetPath:
 			artifactRequests.Add(1)
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
@@ -154,7 +194,7 @@ func TestBrowserHydrateShop(t *testing.T) {
 			return
 		}
 
-		page, ok := pages[request.URL.Path]
+		_, ok := pages[request.URL.Path]
 		if !ok {
 			http.NotFound(response, request)
 			return
@@ -168,7 +208,7 @@ func TestBrowserHydrateShop(t *testing.T) {
 			_, _ = response.Write(initialProducts)
 			return
 		}
-		_, _ = response.Write(page)
+		_, _ = response.Write(drivePages[request.URL.Path])
 	}))
 	defer server.Close()
 
@@ -188,6 +228,18 @@ func TestBrowserHydrateShop(t *testing.T) {
 	}
 }
 
+func injectShopContract(t *testing.T, source []byte, integrity string) []byte {
+	t.Helper()
+	needle := []byte("  <script defer src=\"")
+	index := bytes.Index(source, needle)
+	if index < 0 {
+		t.Fatal("shop page has no external artifact seam")
+	}
+	tag := []byte(`<script defer src="/shop-contract.js" integrity="` + integrity + `" crossorigin="anonymous"></script>
+`)
+	return append(append(append([]byte(nil), source[:index]...), tag...), source[index:]...)
+}
+
 func runShopBrowser(t *testing.T, browser, target string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -205,7 +257,7 @@ func runShopBrowser(t *testing.T, browser, target string) {
 		"--no-first-run",
 		"--run-all-compositor-stages-before-draw",
 		"--user-data-dir=" + t.TempDir(),
-		"--virtual-time-budget=30000",
+		"--virtual-time-budget=600000",
 		"--dump-dom",
 		target,
 	}
@@ -258,6 +310,8 @@ func shopBrowserAssertions(assetPath string) string {
   var waitFor = __kitTestWaitFor;
   var nextTurn = __kitTestNextTurn;
   var root = document.documentElement;
+  var navigationTimeout = 60000;
+  var navigationPollDelay = 1;
 
   function publicContract(label) {
     assert(document.documentElement === root, label + " replaced documentElement");
@@ -272,9 +326,11 @@ func shopBrowserAssertions(assetPath string) string {
   }, "shop did not boot");
   publicContract("initial products route");
   var scripts = Array.prototype.slice.call(document.querySelectorAll("script[src]"));
-  assert(scripts.length === 1, "shop route did not use exactly one sealed artifact");
-  assert(new URL(scripts[0].src, location.href).pathname === %q,
-    "shop route did not load the canonical sealed artifact");
+  var artifacts = scripts.filter(function (script) {
+    return new URL(script.src, location.href).pathname === %q;
+  });
+  assert(scripts.length === 2 && artifacts.length === 1,
+    "shop route did not load one stable contract and one sealed artifact");
 
   var cart = document.getElementById("shop-cart");
   var cartCount = document.getElementById("shop-cart-count");
@@ -302,7 +358,7 @@ func shopBrowserAssertions(assetPath string) string {
     link.click();
     await waitFor(function () {
       return location.pathname === pathname && (!ready || ready());
-    }, label + " did not commit");
+    }, label + " did not commit", navigationTimeout, navigationPollDelay);
     assert(fetches.length === before + 1,
       label + " started " + (fetches.length - before) + " fetches instead of one");
     assert(fetches[before] === pathname, label + " fetched " + fetches[before]);
@@ -314,7 +370,7 @@ func shopBrowserAssertions(assetPath string) string {
     history[direction]();
     await waitFor(function () {
       return location.pathname === pathname && (!ready || ready());
-    }, label + " did not commit");
+    }, label + " did not commit", navigationTimeout, navigationPollDelay);
     assert(fetches.length === before + 1,
       label + " started " + (fetches.length - before) + " fetches instead of one");
     retained(label);

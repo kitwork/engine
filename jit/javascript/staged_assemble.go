@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
+
+	"github.com/kitwork/engine/utilities/minifier"
 )
 
 // JITRole is one engine-owned role in the staged browser delivery contract.
@@ -42,6 +45,12 @@ type StagedBuildOptions struct {
 	Components           []ComponentPackage
 	ComponentRequires    []ComponentServiceRequirement
 	SharedComponentNames []string
+	// MinifyCore applies only to the engine-owned runtime and Hydrate chunks.
+	// Service, component, and bundle source are not transformed. The graph is
+	// regenerated so it binds the final core identities. Server generation
+	// enables this in production; standalone and local-development builders
+	// leave it disabled.
+	MinifyCore bool
 }
 
 // JITArtifact is one immutable, content-addressed staged script.
@@ -130,9 +139,20 @@ type stagedComponentArtifact struct {
 	artifact  JITArtifact
 }
 
+type stagedCoreArtifacts struct {
+	profile    Profile
+	minifyCore bool
+	runtime    JITArtifact
+	hydrate    *JITArtifact
+}
+
 // BuildStaged creates independently cacheable scripts without changing the
 // standalone one-file SourceForProfile and Build contracts.
 func BuildStaged(options StagedBuildOptions) (StagedAssembly, error) {
+	return buildStaged(options, nil)
+}
+
+func buildStaged(options StagedBuildOptions, preparedCore *stagedCoreArtifacts) (StagedAssembly, error) {
 	if _, err := profileFragments(options.Profile); err != nil {
 		return StagedAssembly{}, err
 	}
@@ -172,26 +192,25 @@ func BuildStaged(options StagedBuildOptions) (StagedAssembly, error) {
 		return StagedAssembly{}, err
 	}
 
-	runtimeSource, err := stagedRuntimeSource()
-	if err != nil {
-		return StagedAssembly{}, err
+	core := preparedCore
+	if core == nil {
+		prepared, prepareErr := prepareStagedCoreArtifacts(options.Profile, options.MinifyCore)
+		if prepareErr != nil {
+			return StagedAssembly{}, prepareErr
+		}
+		core = &prepared
 	}
-	runtime, err := newJITArtifact(JITRoleRuntime, "", "", "runtime", runtimeSource)
-	if err != nil {
-		return StagedAssembly{}, err
+	if core.profile != options.Profile || core.minifyCore != options.MinifyCore {
+		return StagedAssembly{}, fmt.Errorf("kitjs: prepared staged core does not match build policy")
 	}
-
+	// JITArtifact has no mutators and Bytes always returns a detached copy, so
+	// prepared core source can be shared across assemblies in one generation.
+	// This avoids cloning the same large runtime/Hydrate buffers per route.
+	runtime := core.runtime
 	var hydrate *JITArtifact
-	if options.Profile == ProfileHydrate {
-		hydrateSource, sourceErr := stagedHydrateSource()
-		if sourceErr != nil {
-			return StagedAssembly{}, sourceErr
-		}
-		artifact, artifactErr := newJITArtifact(JITRoleHydrate, "", "", "hydrate", hydrateSource)
-		if artifactErr != nil {
-			return StagedAssembly{}, artifactErr
-		}
-		hydrate = &artifact
+	if core.hydrate != nil {
+		copy := *core.hydrate
+		hydrate = &copy
 	}
 
 	serviceArtifacts := make([]JITArtifact, 0, len(services))
@@ -214,6 +233,12 @@ func BuildStaged(options StagedBuildOptions) (StagedAssembly, error) {
 	shared := make([]stagedComponentArtifact, 0, len(sharedNames))
 	individual := make([]stagedComponentArtifact, 0, len(components)-len(sharedNames))
 	for _, component := range components {
+		if sharedSet[component.identity.Name] {
+			// The bundle consumes normalized component metadata/source directly;
+			// building a singular component artifact here would be discarded.
+			shared = append(shared, stagedComponentArtifact{component: component})
+			continue
+		}
 		source, sourceErr := stagedComponentSource(component)
 		if sourceErr != nil {
 			return StagedAssembly{}, sourceErr
@@ -223,11 +248,7 @@ func BuildStaged(options StagedBuildOptions) (StagedAssembly, error) {
 			return StagedAssembly{}, artifactErr
 		}
 		entry := stagedComponentArtifact{component: component, artifact: artifact}
-		if sharedSet[component.identity.Name] {
-			shared = append(shared, entry)
-		} else {
-			individual = append(individual, entry)
-		}
+		individual = append(individual, entry)
 	}
 
 	var componentsBundle *JITArtifact
@@ -243,11 +264,31 @@ func BuildStaged(options StagedBuildOptions) (StagedAssembly, error) {
 		componentsBundle = &artifact
 	}
 
-	graphKey, err := stagedGraphKey(options.Profile, runtime, hydrate, services, serviceArtifacts, shared, componentsBundle, individual, requirements)
+	return assemblePreparedStaged(options.Profile, runtime, hydrate, services, serviceArtifacts,
+		components, requirements, shared, componentsBundle, individual)
+}
+
+// assemblePreparedStaged creates only the route-specific graph around already
+// normalized, immutable core/package artifacts. Generation preparation uses
+// this seam so exact package source is validated, wrapped, and hashed once even
+// when many distinct document graphs reference it.
+func assemblePreparedStaged(
+	profile Profile,
+	runtime JITArtifact,
+	hydrate *JITArtifact,
+	services []Service,
+	serviceArtifacts []JITArtifact,
+	components []normalizedComponentPackage,
+	requirements []ComponentServiceRequirement,
+	shared []stagedComponentArtifact,
+	componentsBundle *JITArtifact,
+	individual []stagedComponentArtifact,
+) (StagedAssembly, error) {
+	graphKey, err := stagedGraphKey(profile, runtime, hydrate, services, serviceArtifacts, shared, componentsBundle, individual, requirements)
 	if err != nil {
 		return StagedAssembly{}, err
 	}
-	graphSource, err := stagedGraphSource(options.Profile, graphKey, runtime, hydrate, services, serviceArtifacts, components, requirements, shared, componentsBundle, individual)
+	graphSource, err := stagedGraphSource(profile, graphKey, runtime, hydrate, services, serviceArtifacts, components, requirements, shared, componentsBundle, individual)
 	if err != nil {
 		return StagedAssembly{}, err
 	}
@@ -262,22 +303,73 @@ func BuildStaged(options StagedBuildOptions) (StagedAssembly, error) {
 	}
 	return StagedAssembly{
 		Runtime:          runtime,
-		Hydrate:          cloneOptionalJITArtifact(hydrate),
+		Hydrate:          hydrate,
 		Graph:            graph,
 		Services:         append([]JITArtifact(nil), serviceArtifacts...),
-		ComponentsBundle: cloneOptionalJITArtifact(componentsBundle),
+		ComponentsBundle: componentsBundle,
 		Components:       componentArtifacts,
 		graphKey:         graphKey,
 	}, nil
 }
 
-func cloneOptionalJITArtifact(artifact *JITArtifact) *JITArtifact {
-	if artifact == nil {
-		return nil
+func prepareStagedCoreArtifacts(profile Profile, minifyCore bool) (stagedCoreArtifacts, error) {
+	runtimeSource, err := stagedRuntimeSource()
+	if err != nil {
+		return stagedCoreArtifacts{}, err
 	}
-	clone := *artifact
-	clone.source = append([]byte(nil), artifact.source...)
-	return &clone
+	runtimeSource, err = prepareStagedCoreSource(JITRoleRuntime, runtimeSource, minifyCore)
+	if err != nil {
+		return stagedCoreArtifacts{}, err
+	}
+	runtime, err := newJITArtifact(JITRoleRuntime, "", "", "runtime", runtimeSource)
+	if err != nil {
+		return stagedCoreArtifacts{}, err
+	}
+
+	core := stagedCoreArtifacts{
+		profile:    profile,
+		minifyCore: minifyCore,
+		runtime:    runtime,
+	}
+	if profile != ProfileHydrate {
+		return core, nil
+	}
+	hydrateSource, err := stagedHydrateSource()
+	if err != nil {
+		return stagedCoreArtifacts{}, err
+	}
+	hydrateSource, err = prepareStagedCoreSource(JITRoleHydrate, hydrateSource, minifyCore)
+	if err != nil {
+		return stagedCoreArtifacts{}, err
+	}
+	hydrate, err := newJITArtifact(JITRoleHydrate, "", "", "hydrate", hydrateSource)
+	if err != nil {
+		return stagedCoreArtifacts{}, err
+	}
+	core.hydrate = &hydrate
+	return core, nil
+}
+
+func prepareStagedCoreSource(role JITRole, source []byte, minifyCore bool) ([]byte, error) {
+	if !minifyCore {
+		return append([]byte(nil), source...), nil
+	}
+	output, err := minifier.JSStrict(string(source))
+	if err != nil {
+		return nil, fmt.Errorf("kitjs: minify staged %s: %w", role, err)
+	}
+	output = strings.TrimSpace(output)
+	if output == "" {
+		return nil, fmt.Errorf("kitjs: minify staged %s: empty JavaScript", role)
+	}
+	// Preserve the staged fragment framing contract after the minifier removes
+	// insignificant leading/trailing bytes. The leading semicolon protects the
+	// first IIFE from a preceding script, and the LF keeps artifact validation
+	// and deterministic concatenation identical in every delivery path.
+	if output[0] != ';' {
+		output = ";" + output
+	}
+	return []byte(output + "\n"), nil
 }
 
 func validStagedPackageSuffix(name string) bool {

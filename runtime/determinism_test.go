@@ -21,6 +21,7 @@ type executionFingerprint struct {
 	Instructions   uint64
 	Energy         uint64
 	StackDepth     int
+	PeakStackDepth int
 	FrameDepth     int
 	PeakFrameDepth int
 }
@@ -88,6 +89,7 @@ func runFingerprint(
 		Instructions:   stats.Instructions,
 		Energy:         stats.Energy,
 		StackDepth:     stats.StackDepth,
+		PeakStackDepth: stats.PeakStackDepth,
 		FrameDepth:     stats.FrameDepth,
 		PeakFrameDepth: stats.PeakFrameDepth,
 	}

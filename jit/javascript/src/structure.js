@@ -51,7 +51,8 @@
   }
 
   function parseFor(source) {
-    var match = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\s+of\s+([\s\S]+?)\s*$/.exec(source || "");
+    source = core.expressionSource(source || "");
+    var match = /^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\s+of\s+([\s\S]+?)\s*$/.exec(source);
     if (!match || !validLocal(match[1]) || match[2] && !validLocal(match[2]) ||
         match[2] && match[1] === match[2]) {
       throw new SyntaxError("KitJS: invalid for specification");
@@ -70,6 +71,88 @@
 
   function clearFailure(state) { state.error = ""; }
 
+  function rejectDirectIf(element, error) {
+    var modules = core.elementRecord(element).modules;
+    modules.structure = null;
+    core.report(error);
+    return null;
+  }
+
+  function prepareDirectIf(element) {
+    if (!element || element.nodeType !== 1 || element.tagName === "TEMPLATE" ||
+      !element.hasAttribute("data-kit-if") || core.ignoredForRuntime(element)) return null;
+    if (element.hasAttribute("data-kit-for") || element.hasAttribute("data-kit-key")) return null;
+    var modules = core.elementRecord(element).modules;
+    if (OWN.call(modules, "structure")) return null;
+    if (!element.parentNode) {
+      return rejectDirectIf(element, new TypeError("KitJS: direct if requires a connected element"));
+    }
+    if (!core.ownerFor(element.parentElement)) {
+      return rejectDirectIf(element,
+        new TypeError("KitJS: direct if requires an enclosing component or scope"));
+    }
+    if (element.tagName === "SCRIPT" || element.querySelector("script")) {
+      return rejectDirectIf(element,
+        new TypeError("KitJS: structural branches cannot contain script elements"));
+    }
+    if (element.hasAttribute("data-kit-retain") || element.querySelector("[data-kit-retain]")) {
+      return rejectDirectIf(element,
+        new TypeError("KitJS: data-kit-retain cannot be used in a structural branch"));
+    }
+    var condition = core.safeProgram(element, "data-kit-if", "binding");
+    if (!condition) {
+      modules.structure = null;
+      return null;
+    }
+
+    var source = element.getAttribute("data-kit-if");
+    var blueprint = element.cloneNode(true);
+    blueprint.removeAttribute("data-kit-if");
+    element.removeAttribute("data-kit-if");
+
+    var anchor = document.createElement("template");
+    anchor.setAttribute("data-kit-if", source);
+    anchor.content.appendChild(blueprint);
+    var start = document.createComment("kit-structure-start");
+    var end = document.createComment("kit-structure-end");
+    var parent = element.parentNode;
+    var locals = copyOwn(Object.create(null), localsFor(element));
+    var level = contextLevel(element) + 1;
+    parent.insertBefore(start, element);
+    parent.insertBefore(end, element.nextSibling);
+    parent.insertBefore(anchor, end.nextSibling);
+
+    var state = {
+      kind: "if",
+      condition: condition,
+      branch: {
+        start: start,
+        end: end,
+        nodes: null,
+        locals: locals,
+        level: level
+      },
+      direct: true,
+      error: ""
+    };
+    core.elementRecord(anchor).modules.structure = state;
+    bindRange(state.branch);
+    return anchor;
+  }
+
+  function prepareStructureTree(root) {
+    if (!root || !root.querySelectorAll) return false;
+    var elements = [];
+    if (root.nodeType === 1 && root.matches && root.matches("[data-kit-if]") &&
+      root.tagName !== "TEMPLATE") elements.push(root);
+    Array.prototype.push.apply(elements, root.querySelectorAll("[data-kit-if]"));
+    var changed = false;
+    elements.forEach(function (element) {
+      if (element.tagName !== "TEMPLATE" && prepareDirectIf(element)) changed = true;
+    });
+    return changed;
+  }
+
   function structureState(element) {
     if (core.ignoredForRuntime(element)) return null;
     var modules = core.elementRecord(element).modules;
@@ -79,14 +162,16 @@
       return null;
     }
     try {
-      if (element.tagName !== "TEMPLATE") {
-        throw new TypeError("KitJS: if, for, and key require a template element");
-      }
       var hasIf = element.hasAttribute("data-kit-if");
       var hasFor = element.hasAttribute("data-kit-for");
       var hasKey = element.hasAttribute("data-kit-key");
-      if (hasIf && hasFor) throw new TypeError("KitJS: one template cannot combine if and for");
+      if (hasIf && hasFor) throw new TypeError("KitJS: one structural host cannot combine if and for");
       if (hasKey && !hasFor) throw new TypeError("KitJS: key requires for on the same template");
+      if (element.tagName !== "TEMPLATE") {
+        throw new TypeError(hasFor || hasKey
+          ? "KitJS: for and key require a template element"
+          : "KitJS: direct if could not be prepared");
+      }
       if (!hasIf && !hasFor) throw new TypeError("KitJS: orphan structural template");
       if (element.content.querySelector("script")) {
         throw new TypeError("KitJS: structural templates cannot contain script elements");
@@ -346,9 +431,13 @@
   }
 
   function reconcile(current) {
+    if (prepareStructureTree(current.host) && current.structures === false) {
+      current.structures = undefined;
+    }
     if (current.structures === false) return false;
     var changedAny = false;
     for (var pass = 0; pass < 64; pass++) {
+      if (pass > 0 && prepareStructureTree(current.host)) current.structures = undefined;
       var changed = false;
       var elements = core.ownedElements(current, SELECTOR);
       if (current.structures === undefined) current.structures = elements.length > 0;
@@ -400,6 +489,7 @@
 
   core.localsFor = localsFor;
   core.disposeTree = disposeTree;
+  core.prepareStructureTree = prepareStructureTree;
   core.resetStructures = resetStructures;
   core.reconcileStructures = reconcile;
   core.phase = "structure";

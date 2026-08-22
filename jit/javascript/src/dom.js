@@ -9,6 +9,7 @@
   var EMPTY = {};
   var EMPTY_SCOPE = Object.freeze(Object.create(null));
   var BINDINGS = "[data-kit-text],[data-kit-show],[data-kit-bind]";
+  var RENDER_TARGETS = BINDINGS + ",[data-kit-class],[data-kit-style],[data-kit-model]";
   var SAFE_PROPERTIES = {
     value: "value",
     checked: "checked",
@@ -74,7 +75,7 @@
     return output;
   }
   function bindEntries(source) {
-    source = source.trim();
+    source = core.expressionSource(source).trim();
     if (source.charAt(0) === "{" && source.charAt(source.length - 1) === "}") {
       source = source.slice(1, -1);
     }
@@ -151,10 +152,8 @@
       return candidate !== current && !candidate.rendered;
     });
   }
-  function renderElement(element) {
-    if (core.ignoredForRuntime(element)) return;
-    var current = core.scopeRecordFor(element);
-    if (!current) return;
+  function renderElement(current, element) {
+    if (!core.ownsElement(current, element)) return;
     var scope = current.scope;
     var program;
     if (element.hasAttribute("data-kit-text")) {
@@ -193,6 +192,22 @@
       });
     }
   }
+  function collectRenderPlan(current) {
+    var plan = {
+      bindings: [],
+      classes: [],
+      styles: [],
+      models: []
+    };
+    core.ownedElements(current, RENDER_TARGETS).forEach(function (element) {
+      if (element.hasAttribute("data-kit-text") || element.hasAttribute("data-kit-show") ||
+        element.hasAttribute("data-kit-bind")) plan.bindings.push(element);
+      if (element.hasAttribute("data-kit-class")) plan.classes.push(element);
+      if (element.hasAttribute("data-kit-style")) plan.styles.push(element);
+      if (element.hasAttribute("data-kit-model")) plan.models.push(element);
+    });
+    return plan;
+  }
   function render(records) {
     var initial = Array.isArray(records) ? records : core.liveComponents();
     if (Array.isArray(records)) {
@@ -230,11 +245,12 @@
         var children;
         try { children = prepareBoundary(current); }
         catch (error) { core.report(error); children = []; }
-        core.ownedElements(current, BINDINGS).forEach(function (element) {
-          try { renderElement(element); } catch (error) { core.report(error); }
+        var plan = collectRenderPlan(current);
+        plan.bindings.forEach(function (element) {
+          try { renderElement(current, element); } catch (error) { core.report(error); }
         });
         core.renderHooks.forEach(function (renderHook) {
-          try { renderHook(current); } catch (error) { core.report(error); }
+          try { renderHook(current, plan); } catch (error) { core.report(error); }
         });
         current.rendered = true;
         core.flushAfterRender(current);

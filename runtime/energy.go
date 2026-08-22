@@ -3,10 +3,6 @@ package runtime
 // Cost is one unit of VM execution energy.
 type Cost uint64
 
-// cleanupEnergyReserve is the total energy available to deferred cleanup after
-// normal execution exhausts its budget. All defers in the unwind share it.
-const cleanupEnergyReserve uint64 = 10_000
-
 func (vm *VM) consumeEnergy(cost Cost) bool {
 	amount := uint64(cost)
 	if vm.MaxEnergy > 0 &&

@@ -89,7 +89,12 @@ func CSS(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func JS(s string) string   { return s }
+func JS(s string) string { return s }
+
+// JSStrict preserves JavaScript unchanged in the explicit stdminify opt-out build. Returning nil
+// distinguishes this deliberate build policy from a parser failure in the default implementation.
+func JSStrict(s string) (string, error) { return s, nil }
+
 func JSON(s string) string { return s }
 func SVG(s string) string  { return s }
 func XML(s string) string  { return s }

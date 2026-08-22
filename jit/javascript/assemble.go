@@ -15,7 +15,7 @@ import (
 
 // ReleaseVersion is the exact SemVer of the KitJS browser runtime assembled
 // by this package. A source change shipped to users must advance this value.
-const ReleaseVersion = "0.9.0-next.12"
+const ReleaseVersion = "1.0.0-rc.2"
 
 // Profile selects one public, deterministic browser artifact.
 type Profile string
@@ -480,61 +480,14 @@ func normalizeServices(input []Service) ([]Service, error) {
 	byName := make(map[string]Service, len(input))
 	names := make([]string, 0, len(input))
 	for _, service := range input {
-		identity := ServiceVersion{Name: service.Name, Version: service.Version}
-		if !serviceNamePattern.MatchString(service.Name) || blockedComponentNames[service.Name] || reservedServiceNames[service.Name] {
-			return nil, fmt.Errorf("kitjs: invalid service name %q", service.Name)
-		}
-		if !exactSemVer(service.Version) {
-			return nil, fmt.Errorf("kitjs: service %q has non-exact SemVer %q", service.Name, service.Version)
-		}
 		if _, exists := byName[service.Name]; exists {
 			return nil, fmt.Errorf("kitjs: duplicate service %q in graph", service.Name)
 		}
-		if err := validateClassicScript("service:"+service.Name+"@"+service.Version, service.Source); err != nil {
+		normalized, err := normalizeServiceDefinition(service)
+		if err != nil {
 			return nil, err
 		}
-
-		requires := make([]ServiceVersion, len(service.Requires))
-		seenRequires := make(map[string]ServiceVersion, len(service.Requires))
-		for index, dependency := range service.Requires {
-			if !validServiceVersion(dependency) {
-				return nil, fmt.Errorf("kitjs: service %s@%s has invalid dependency %s@%s",
-					identity.Name, identity.Version, dependency.Name, dependency.Version)
-			}
-			if prior, exists := seenRequires[dependency.Name]; exists {
-				return nil, fmt.Errorf("kitjs: service %s@%s repeats dependency %s (versions %s and %s)",
-					identity.Name, identity.Version, dependency.Name, prior.Version, dependency.Version)
-			}
-			seenRequires[dependency.Name] = dependency
-			requires[index] = dependency
-		}
-		sort.Slice(requires, func(left, right int) bool {
-			if requires[left].Name != requires[right].Name {
-				return requires[left].Name < requires[right].Name
-			}
-			return requires[left].Version < requires[right].Version
-		})
-		actions := append([]string(nil), service.Actions...)
-		seenActions := make(map[string]bool, len(actions))
-		for _, action := range actions {
-			if !serviceActionPattern.MatchString(action) || blockedComponentNames[action] {
-				return nil, fmt.Errorf("kitjs: service %s@%s has invalid authored action %q",
-					identity.Name, identity.Version, action)
-			}
-			if seenActions[action] {
-				return nil, fmt.Errorf("kitjs: service %s@%s repeats authored action %q",
-					identity.Name, identity.Version, action)
-			}
-			seenActions[action] = true
-		}
-		sort.Strings(actions)
-		byName[service.Name] = Service{
-			Name:     service.Name,
-			Version:  service.Version,
-			Requires: requires,
-			Actions:  actions,
-			Source:   append([]byte(nil), service.Source...),
-		}
+		byName[service.Name] = normalized
 		names = append(names, service.Name)
 	}
 
@@ -591,6 +544,65 @@ func normalizeServices(input []Service) ([]Service, error) {
 		}
 	}
 	return ordered, nil
+}
+
+// normalizeServiceDefinition validates and detaches one service without
+// requiring its dependency closure to be present. normalizeServices performs
+// the closed-graph validation and ordering; generation preparation uses this
+// smaller seam to cache each immutable service package exactly once.
+func normalizeServiceDefinition(service Service) (Service, error) {
+	identity := ServiceVersion{Name: service.Name, Version: service.Version}
+	if !serviceNamePattern.MatchString(service.Name) || blockedComponentNames[service.Name] || reservedServiceNames[service.Name] {
+		return Service{}, fmt.Errorf("kitjs: invalid service name %q", service.Name)
+	}
+	if !exactSemVer(service.Version) {
+		return Service{}, fmt.Errorf("kitjs: service %q has non-exact SemVer %q", service.Name, service.Version)
+	}
+	if err := validateClassicScript("service:"+service.Name+"@"+service.Version, service.Source); err != nil {
+		return Service{}, err
+	}
+
+	requires := make([]ServiceVersion, len(service.Requires))
+	seenRequires := make(map[string]ServiceVersion, len(service.Requires))
+	for index, dependency := range service.Requires {
+		if !validServiceVersion(dependency) {
+			return Service{}, fmt.Errorf("kitjs: service %s@%s has invalid dependency %s@%s",
+				identity.Name, identity.Version, dependency.Name, dependency.Version)
+		}
+		if prior, exists := seenRequires[dependency.Name]; exists {
+			return Service{}, fmt.Errorf("kitjs: service %s@%s repeats dependency %s (versions %s and %s)",
+				identity.Name, identity.Version, dependency.Name, prior.Version, dependency.Version)
+		}
+		seenRequires[dependency.Name] = dependency
+		requires[index] = dependency
+	}
+	sort.Slice(requires, func(left, right int) bool {
+		if requires[left].Name != requires[right].Name {
+			return requires[left].Name < requires[right].Name
+		}
+		return requires[left].Version < requires[right].Version
+	})
+	actions := append([]string(nil), service.Actions...)
+	seenActions := make(map[string]bool, len(actions))
+	for _, action := range actions {
+		if !serviceActionPattern.MatchString(action) || blockedComponentNames[action] {
+			return Service{}, fmt.Errorf("kitjs: service %s@%s has invalid authored action %q",
+				identity.Name, identity.Version, action)
+		}
+		if seenActions[action] {
+			return Service{}, fmt.Errorf("kitjs: service %s@%s repeats authored action %q",
+				identity.Name, identity.Version, action)
+		}
+		seenActions[action] = true
+	}
+	sort.Strings(actions)
+	return Service{
+		Name:     service.Name,
+		Version:  service.Version,
+		Requires: requires,
+		Actions:  actions,
+		Source:   append([]byte(nil), service.Source...),
+	}, nil
 }
 
 func normalizeScripts(input []Script) ([]Script, error) {

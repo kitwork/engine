@@ -23,7 +23,9 @@
   function modelState(element) {
     var modules = core.elementRecord(element).modules;
     if (OWN.call(modules, "model")) return modules.model;
-    var source = (element.getAttribute("data-kit-model") || "").trim();
+    var source;
+    try { source = core.expressionSource(element.getAttribute("data-kit-model") || "").trim(); }
+    catch (error) { core.report(error); modules.model = null; return null; }
     if (source.charAt(0) === "$") {
       core.report(new SyntaxError("KitJS: model cannot use the reserved $ namespace"));
       modules.model = null;
@@ -133,8 +135,9 @@
     return true;
   }
 
-  function render(current) {
-    core.ownedElements(current, SELECTOR).forEach(function (element) {
+  function render(current, plan) {
+    plan.models.forEach(function (element) {
+      if (!core.ownsElement(current, element) || !element.hasAttribute("data-kit-model")) return;
       try {
         var state = modelState(element);
         if (!state || !writable(current.scope, state)) return;

@@ -87,8 +87,9 @@ func (k Kind) Prototype(name string, fn Method) {
 	}
 }
 
-// Method tìm kiếm phương thức: Sử dụng Method Expressions để đạt hiệu năng tối đa
-func (k Kind) Method(name string) (Method, bool) {
+// StandardMethod resolves engine-owned value methods. Implementations consume
+// the argument slice synchronously and must not retain the slice itself.
+func (k Kind) StandardMethod(name string) (Method, bool) {
 	// 1. GLOBAL / ANY METHODS
 	switch name {
 	case "string", "text", "toString":
@@ -234,7 +235,15 @@ func (k Kind) Method(name string) (Method, bool) {
 		}
 	}
 
-	// 3. DYNAMIC FALLBACK
+	return nil, false
+}
+
+// Method resolves standard methods before externally registered extensions.
+func (k Kind) Method(name string) (Method, bool) {
+	if fn, ok := k.StandardMethod(name); ok {
+		return fn, true
+	}
+
 	if k < MaxKinds {
 		if fn, ok := Methods[k][name]; ok {
 			return fn, true

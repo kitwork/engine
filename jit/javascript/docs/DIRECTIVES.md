@@ -1,7 +1,8 @@
 # KitJS directives
 
-This is a practical reference for KitJS `0.9.0-next.12`. The normative browser
-contract is [KITJS_SPEC.md](https://github.com/kitwork/kit.js/blob/master/KITJS_SPEC.md);
+This is a practical reference for the unpublished KitJS `1.0.0-rc.2` source
+candidate. The normative browser contract is
+[KITJS_SPEC.md](https://github.com/kitwork/kit.js/blob/master/KITJS_SPEC.md);
 the Kitwork delivery model is described in the [runtime README](../README.md).
 Unknown directives, events, modifiers, and invalid combinations fail closed.
 
@@ -37,8 +38,10 @@ Prefer a content-addressed tenant package declared with
 client-defined components outside that graph use an unversioned host and
 direct registration; they cannot shadow either the embedded catalog or a
 tenant package, receive service grants, or be retained across Morph. The split
-`data-kit-version` attribute and empty `data-kit-local` marker remain deprecated
-compatibility inputs for one 0.9 release and are removed in 1.0.
+`data-kit-version` attribute is removed and fails closed outside a
+`data-kit-ignore` boundary. Put the exact version directly in
+`data-kit-component`; direct client registration uses an unversioned name and
+no separate marker.
 
 Use `data-kit-ignore` only when another owner controls a DOM subtree:
 
@@ -79,6 +82,13 @@ disabled for that document: links and forms remain native, no Drive fetch or
 script execution. One console warning identifies KitJS Drive as disabled. A
 mismatch discovered only after a valid Drive start and destination fetch still
 falls back to normal navigation before live mutation.
+
+That initial warning states the cause, describes the offending script when one
+exists with unsafe URL details redacted, and gives a remedy; its exact wording
+is not API. During a Drive visit, a usable declared response length above 8 MiB
+or a decoded body that crosses 8 MiB is rejected. A parsed fetched document
+with more than 100,000 nodes or depth greater than 256 is also rejected. Each
+case produces one fallback outcome and native navigation before live mutation.
 
 ## Bindings and models
 
@@ -138,9 +148,45 @@ Models support text inputs, textareas, single and multiple selects, checkbox
 booleans or arrays, radio groups, and finite number/range values. Invalid or
 empty numeric input becomes `null`; text input respects IME composition.
 
-## Structural templates
+## Conditional branches and structural templates
 
-`data-kit-if` and `data-kit-for` are valid only on `<template>`:
+`data-kit-if` may own one ordinary element directly:
+
+```html
+<section data-kit-scope="open: true">
+  <aside data-kit-if="open" class="rounded-xl bg-slate-100 p-4">
+    One conditional root
+  </aside>
+</section>
+```
+
+The direct form requires a nearest enclosing scope or component boundary, and
+the condition resolves against that parent. A scope or component declared on
+the same direct host belongs to the mounted branch and cannot provide its own
+condition. The authored host is the SSR and
+no-JavaScript fallback. At boot, a valid truthy condition keeps it, a falsy
+condition unmounts it, and a later truthy transition mounts a fresh host. An
+invalid standalone expression reports a diagnostic and leaves that fallback
+untouched; Kitwork generation rejects invalid source during preflight.
+
+Use `<template data-kit-if>` when the conditional branch is a fragment with
+multiple top-level nodes or must remain inert before KitJS boots:
+
+```html
+<template data-kit-if="open">
+  <h2>Fragment title</h2>
+  <p>Fragment body</p>
+</template>
+```
+
+A direct host follows ordinary browser loading rules before the condition is
+evaluated. Images, iframes, media, and other resource-bearing descendants may
+therefore start work even when the first condition is false; use the template
+form for lazy/inert content. Executable scripts are invalid in every structural
+region. Retained components cannot be the direct host or appear inside either
+form.
+
+`data-kit-for` and `data-kit-key` remain valid only on `<template>`:
 
 ```html
 <section data-kit-scope="items: [{ id: 1, name: 'Alpha' }, { id: 2, name: 'Beta' }]">
@@ -192,4 +238,10 @@ Bindings are read-only. Actions may assign an existing writable top-level
 field and sequence expressions with semicolons. This is the closed KitJS
 expression language, not JavaScript: page globals, declarations, member
 assignment, implicit fields, template literals, and arbitrary method calls are
-not available.
+not available. An individual source longer than 65,536 UTF-16 code units or one
+that would exceed 32,768 stored tokens fails closed before evaluation.
+
+Kitwork generation preflight has separate, engine-only prepared-document
+budgets: 8 MiB of source, 65,536 markup candidates, depth 1,024, 256 attributes
+per tag, 4,194,304 ancestor-frame visits, and 256 KiB of cumulative authored
+expression source. These do not impose additional standalone-browser grammar.

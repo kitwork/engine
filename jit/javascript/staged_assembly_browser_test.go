@@ -41,6 +41,7 @@ func TestStagedAssemblyBrowserContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	options.Profile = ProfileHydrate
+	options.MinifyCore = true
 	hydrateAssembly, err := BuildStaged(options)
 	if err != nil {
 		t.Fatal(err)
@@ -185,8 +186,9 @@ func TestStagedComponentTransactionBrowserContract(t *testing.T) {
 	appSource := []byte("; globalThis.__handoffCore = document[Symbol.for(\"kitjs:assembly\")];\n" +
 		"kit.component(\"app\", { ready: true });\n")
 	initialOptions := StagedBuildOptions{
-		Profile:  ProfileHydrate,
-		Services: []Service{storage},
+		Profile:    ProfileHydrate,
+		MinifyCore: true,
+		Services:   []Service{storage},
 		Components: []ComponentPackage{
 			{Name: "app", Version: "1.0.0", Source: appSource},
 			{Name: "alpha", Version: "1.0.0", Source: []byte("; kit.component(\"alpha\", { value: \"alpha\" });\n")},
@@ -196,8 +198,9 @@ func TestStagedComponentTransactionBrowserContract(t *testing.T) {
 		}},
 	}
 	targetOptions := StagedBuildOptions{
-		Profile:  ProfileHydrate,
-		Services: []Service{storage},
+		Profile:    ProfileHydrate,
+		MinifyCore: true,
+		Services:   []Service{storage},
 		Components: []ComponentPackage{
 			{Name: "app", Version: "1.0.0", Source: appSource},
 			{Name: "beta", Version: "1.0.0", Source: []byte("; globalThis.__betaInstallerRuns = (globalThis.__betaInstallerRuns || 0) + 1;\nglobalThis.__betaCapturedKit = kit;\nglobalThis.__betaGraphAtInstall = kit[Symbol.for(\"kitjs:graph\")].artifact;\nkit.component(\"beta\", { value: \"beta\" });\n")},
@@ -433,7 +436,7 @@ document.addEventListener("DOMContentLoaded", function () {
     root.setAttribute("data-kit-test-error", String(error && error.message || error));
   });
 }, { once: true });
-</script></head><body><main data-kit-component="app" data-kit-version="1.0.0"></main></body></html>`
+</script></head><body><main data-kit-component="app@1.0.0"></main></body></html>`
 }
 
 func stagedArtifactForDocument(artifacts []JITArtifact, packageName string) JITArtifact {
@@ -545,7 +548,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 }, { once: true });
 </script></head><body>
-<main data-kit-component="counter" data-kit-version="1.0.0"><output id="count" data-kit-text="count">server</output></main>
+<main data-kit-component="counter@1.0.0"><output id="count" data-kit-text="count">server</output></main>
 <script data-kitwork-jit="legacy-theme" src="/legacy-theme.js" defer></script>
 	`)
 	page.WriteString("</body></html>")

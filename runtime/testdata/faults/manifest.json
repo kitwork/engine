@@ -1,0 +1,138 @@
+{
+  "schema_version": 2,
+  "decoder": [
+    {
+      "name": "invalid-magic",
+      "mutation": "invalid-magic",
+      "error_contains": "invalid magic"
+    },
+    {
+      "name": "oversized-code-length",
+      "mutation": "oversized-code-length",
+      "error_contains": "bytecode length"
+    },
+    {
+      "name": "oversized-constant-count",
+      "mutation": "oversized-constant-count",
+      "error_contains": "constant count"
+    },
+    {
+      "name": "debug-count-exceeds-code",
+      "mutation": "debug-count-exceeds-code",
+      "error_contains": "debug entry count"
+    },
+    {
+      "name": "unsupported-constant-flags",
+      "mutation": "unsupported-constant-flags",
+      "error_contains": "unsupported flags"
+    },
+    {
+      "name": "unsupported-constant-kind",
+      "mutation": "unsupported-constant-kind",
+      "error_contains": "unsupported constant kind"
+    },
+    {
+      "name": "truncated-string-payload",
+      "mutation": "truncated-string-payload",
+      "error_contains": "truncated payload"
+    },
+    {
+      "name": "debug-ip-outside-program",
+      "mutation": "debug-ip-outside-program",
+      "error_contains": "outside program length"
+    }
+  ],
+  "verifier": [
+    {
+      "name": "oversized-program",
+      "scenario": "oversized-program",
+      "code": "PROGRAM_TOO_LARGE"
+    },
+    {
+      "name": "oversized-constant-pool",
+      "scenario": "oversized-constant-pool",
+      "code": "CONSTANTS_TOO_LARGE"
+    },
+    {
+      "name": "store-requires-string",
+      "scenario": "store-requires-string",
+      "code": "INVALID_CONSTANT"
+    },
+    {
+      "name": "store-rejects-malformed-string",
+      "scenario": "store-rejects-malformed-string",
+      "code": "INVALID_CONSTANT"
+    },
+    {
+      "name": "jump-past-program",
+      "scenario": "jump-past-program",
+      "code": "INVALID_JUMP"
+    },
+    {
+      "name": "iter-target-inside-operand",
+      "scenario": "iter-target-inside-operand",
+      "code": "INVALID_JUMP"
+    },
+    {
+      "name": "lambda-target-inside-operand",
+      "scenario": "lambda-target-inside-operand",
+      "code": "INVALID_LAMBDA"
+    },
+    {
+      "name": "unsupported-assigned-opcode",
+      "scenario": "unsupported-assigned-opcode",
+      "code": "UNKNOWN_OPCODE"
+    }
+  ],
+  "execution": [
+    {
+      "name": "no-program",
+      "scenario": "no-program",
+      "diagnostic": "NO_PROGRAM",
+      "minimum_stack_frames": 0
+    },
+    {
+      "name": "stopped-vm",
+      "scenario": "stopped-vm",
+      "diagnostic": "VM_STOPPED",
+      "minimum_stack_frames": 0
+    },
+    {
+      "name": "native-panic",
+      "scenario": "native-panic",
+      "diagnostic": "NATIVE_PANIC",
+      "minimum_stack_frames": 1
+    },
+    {
+      "name": "runtime-error",
+      "scenario": "runtime-error",
+      "diagnostic": "RUNTIME_ERROR",
+      "minimum_stack_frames": 1
+    },
+    {
+      "name": "energy-limit",
+      "scenario": "energy-limit",
+      "diagnostic": "ENERGY_LIMIT",
+      "minimum_stack_frames": 1
+    },
+    {
+      "name": "cancelled",
+      "scenario": "cancelled",
+      "diagnostic": "EXECUTION_CANCELLED",
+      "minimum_stack_frames": 1
+    },
+    {
+      "name": "stack-overflow",
+      "scenario": "stack-overflow",
+      "diagnostic": "STACK_OVERFLOW",
+      "minimum_stack_frames": 2,
+      "expected_stack_frames": 64
+    },
+    {
+      "name": "program-mismatch",
+      "scenario": "program-mismatch",
+      "diagnostic": "PROGRAM_MISMATCH",
+      "minimum_stack_frames": 1
+    }
+  ]
+}

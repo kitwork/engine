@@ -3,13 +3,14 @@ package javascript
 import (
 	"errors"
 	"fmt"
-	"html"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf16"
+
+	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
 // ErrInvalidExpressionUse reports authored directive source that the browser
@@ -18,10 +19,13 @@ import (
 var ErrInvalidExpressionUse = errors.New("kitjs: invalid expression use")
 
 const (
-	expressionNodeLimit  = 10000
-	expressionDepthLimit = 64
-	styleSourceLimit     = 16384
-	styleEntryLimit      = 128
+	expressionNodeLimit               = 10000
+	expressionDepthLimit              = 64
+	expressionAuthoredSourceByteLimit = 256 << 10
+	expressionDecodedSourceLimit      = 64 << 10
+	expressionTokenLimit              = 32 << 10
+	styleSourceLimit                  = 16384
+	styleEntryLimit                   = 128
 )
 
 var expressionModelPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -54,6 +58,24 @@ var expressionForbiddenNames = map[string]bool{
 func validateDirectiveExpression(attribute rawScannedAttribute) error {
 	_, err := directiveExpressionServiceCalls(attribute)
 	return err
+}
+
+func authoredExpressionAttribute(name string) bool {
+	if !strings.HasPrefix(name, "data-kit-") {
+		return false
+	}
+	directive := strings.TrimPrefix(name, "data-kit-")
+	if colon := strings.IndexByte(directive, ':'); colon >= 0 {
+		directive = directive[:colon]
+	}
+	switch directive {
+	case "text", "show", "class", "if", "key", "bind", "style", "model", "for",
+		"click", "dblclick", "submit", "input", "change", "keydown", "keyup",
+		"pointerdown", "pointerup", "focusin", "focusout":
+		return true
+	default:
+		return false
+	}
 }
 
 // directiveExpressionServiceCalls validates one authored directive and returns
@@ -155,11 +177,18 @@ func validateDecodedExpression(source, mode string) error {
 }
 
 func expressionServiceCalls(authored, mode string) ([]expressionServiceCall, error) {
-	source := trimECMAScriptSpace(html.UnescapeString(authored))
+	source, err := decodeAuthoredExpression(authored)
+	if err != nil {
+		return nil, err
+	}
+	source = trimECMAScriptSpace(source)
 	return decodedExpressionServiceCalls(source, mode)
 }
 
 func decodedExpressionServiceCalls(source, mode string) ([]expressionServiceCall, error) {
+	if expressionUTF16Length(source) > expressionDecodedSourceLimit {
+		return nil, fmt.Errorf("expression source exceeds %d UTF-16 code units", expressionDecodedSourceLimit)
+	}
 	source = trimECMAScriptSpace(source)
 	if source == "" {
 		return nil, fmt.Errorf("empty expression")
@@ -195,6 +224,20 @@ func decodedExpressionServiceCalls(source, mode string) ([]expressionServiceCall
 		calls = append(calls, reference.call)
 	}
 	return calls, nil
+}
+
+// decodeAuthoredExpression bounds the raw attribute before entity decoding
+// allocates, then bounds the browser-equivalent decoded source before lexing.
+// The parser's node/depth budgets remain the semantic complexity fence.
+func decodeAuthoredExpression(authored string) (string, error) {
+	if len(authored) > expressionAuthoredSourceByteLimit {
+		return "", fmt.Errorf("expression source exceeds %d authored bytes", expressionAuthoredSourceByteLimit)
+	}
+	decoded := htmlattr.Decode(authored)
+	if expressionUTF16Length(decoded) > expressionDecodedSourceLimit {
+		return "", fmt.Errorf("expression source exceeds %d UTF-16 code units", expressionDecodedSourceLimit)
+	}
+	return decoded, nil
 }
 
 // normalizeAppLoaderBindingTokens admits exactly the two inert presentation
@@ -247,7 +290,11 @@ func normalizeAppLoaderBindingTokens(tokens []expressionToken, mode string) ([]e
 }
 
 func validateModelExpression(authored string) error {
-	source := trimECMAScriptSpace(html.UnescapeString(authored))
+	source, err := decodeAuthoredExpression(authored)
+	if err != nil {
+		return err
+	}
+	source = trimECMAScriptSpace(source)
 	if strings.HasPrefix(source, "$") {
 		return fmt.Errorf("model cannot use the reserved $ namespace")
 	}
@@ -258,7 +305,10 @@ func validateModelExpression(authored string) error {
 }
 
 func validateForExpression(authored string) error {
-	source := html.UnescapeString(authored)
+	source, err := decodeAuthoredExpression(authored)
+	if err != nil {
+		return err
+	}
 	match := expressionForPattern.FindStringSubmatch(source)
 	if match == nil || !validExpressionLocal(match[1]) || match[2] != "" && !validExpressionLocal(match[2]) || match[2] != "" && match[1] == match[2] {
 		return fmt.Errorf("invalid for specification")
@@ -279,7 +329,11 @@ func validExpressionLocal(name string) bool {
 }
 
 func validateBindExpression(authored string) error {
-	source := trimECMAScriptSpace(html.UnescapeString(authored))
+	source, err := decodeAuthoredExpression(authored)
+	if err != nil {
+		return err
+	}
+	source = trimECMAScriptSpace(source)
 	if len(source) >= 2 && source[0] == '{' && source[len(source)-1] == '}' {
 		source = source[1 : len(source)-1]
 	}
@@ -314,7 +368,10 @@ func validateBindExpression(authored string) error {
 }
 
 func validateStyleExpression(authored string) error {
-	source := html.UnescapeString(authored)
+	source, err := decodeAuthoredExpression(authored)
+	if err != nil {
+		return err
+	}
 	if expressionUTF16Length(source) > styleSourceLimit {
 		return fmt.Errorf("style source exceeds %d UTF-16 code units", styleSourceLimit)
 	}
@@ -498,7 +555,18 @@ func splitExpressionTop(source, separators string) []string {
 }
 
 func lexExpression(source string) ([]expressionToken, error) {
-	tokens := make([]expressionToken, 0, len(source)/2+1)
+	capacity := len(source)/2 + 1
+	if capacity > 64 {
+		capacity = 64
+	}
+	tokens := make([]expressionToken, 0, capacity)
+	appendToken := func(token expressionToken) error {
+		if len(tokens) >= expressionTokenLimit {
+			return expressionSyntax(fmt.Sprintf("expression exceeds %d tokens", expressionTokenLimit), token.position)
+		}
+		tokens = append(tokens, token)
+		return nil
+	}
 	for index := 0; index < len(source); {
 		character := source[index]
 		if expressionSpace(character) {
@@ -538,7 +606,9 @@ func lexExpression(source string) ([]expressionToken, error) {
 			if parseErr != nil || math.IsInf(number, 0) || math.IsNaN(number) {
 				return nil, expressionSyntax("number is outside the supported range", start)
 			}
-			tokens = append(tokens, expressionToken{kind: expressionLiteral, value: text, literal: number, position: start})
+			if err := appendToken(expressionToken{kind: expressionLiteral, value: text, literal: number, position: start}); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if character == '\'' || character == '"' {
@@ -582,7 +652,10 @@ func lexExpression(source string) ([]expressionToken, error) {
 			if !closed {
 				return nil, expressionSyntax("unfinished string", start)
 			}
-			tokens = append(tokens, expressionToken{kind: expressionLiteral, value: value.String(), literal: value.String(), position: start})
+			literal := value.String()
+			if err := appendToken(expressionToken{kind: expressionLiteral, value: literal, literal: literal, position: start}); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if expressionIdentifierStart(character) {
@@ -593,23 +666,33 @@ func lexExpression(source string) ([]expressionToken, error) {
 			identifier := source[start:index]
 			switch identifier {
 			case "true":
-				tokens = append(tokens, expressionToken{kind: expressionLiteral, value: identifier, literal: true, position: start})
+				if err := appendToken(expressionToken{kind: expressionLiteral, value: identifier, literal: true, position: start}); err != nil {
+					return nil, err
+				}
 			case "false":
-				tokens = append(tokens, expressionToken{kind: expressionLiteral, value: identifier, literal: false, position: start})
+				if err := appendToken(expressionToken{kind: expressionLiteral, value: identifier, literal: false, position: start}); err != nil {
+					return nil, err
+				}
 			case "null":
-				tokens = append(tokens, expressionToken{kind: expressionLiteral, value: identifier, literal: nil, position: start})
+				if err := appendToken(expressionToken{kind: expressionLiteral, value: identifier, literal: nil, position: start}); err != nil {
+					return nil, err
+				}
 			default:
 				if expressionForbiddenNames[identifier] {
 					return nil, expressionSyntax(fmt.Sprintf("forbidden keyword %q", identifier), start)
 				}
-				tokens = append(tokens, expressionToken{kind: expressionIdentifier, value: identifier, position: start})
+				if err := appendToken(expressionToken{kind: expressionIdentifier, value: identifier, position: start}); err != nil {
+					return nil, err
+				}
 			}
 			continue
 		}
 		if index+3 <= len(source) {
 			op := source[index : index+3]
 			if op == "===" || op == "!==" {
-				tokens = append(tokens, expressionToken{kind: expressionOperator, value: op, position: start})
+				if err := appendToken(expressionToken{kind: expressionOperator, value: op, position: start}); err != nil {
+					return nil, err
+				}
 				index += 3
 				continue
 			}
@@ -617,7 +700,9 @@ func lexExpression(source string) ([]expressionToken, error) {
 		if index+2 <= len(source) {
 			op := source[index : index+2]
 			if expressionTwoCharacterOperator(op) {
-				tokens = append(tokens, expressionToken{kind: expressionOperator, value: op, position: start})
+				if err := appendToken(expressionToken{kind: expressionOperator, value: op, position: start}); err != nil {
+					return nil, err
+				}
 				index += 2
 				continue
 			}
@@ -626,13 +711,17 @@ func lexExpression(source string) ([]expressionToken, error) {
 			}
 		}
 		if strings.ContainsRune("+-*/%!?:.,()[]{}=;<>", rune(character)) {
-			tokens = append(tokens, expressionToken{kind: expressionOperator, value: string(character), position: start})
+			if err := appendToken(expressionToken{kind: expressionOperator, value: source[start : start+1], position: start}); err != nil {
+				return nil, err
+			}
 			index++
 			continue
 		}
 		return nil, expressionSyntax(fmt.Sprintf("unexpected character %q", character), start)
 	}
-	tokens = append(tokens, expressionToken{kind: expressionEnd, position: len(source)})
+	if err := appendToken(expressionToken{kind: expressionEnd, position: len(source)}); err != nil {
+		return nil, err
+	}
 	return tokens, nil
 }
 

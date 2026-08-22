@@ -62,7 +62,7 @@ func TestInteractiveComponentV2SourcesAndExactGraph(t *testing.T) {
 			[]byte(`components["`+name+`"] = "1.0.0"`)) {
 			t.Fatalf("%s simple artifact lost its exact v1 manifest", name)
 		}
-		fromHTML, err := composer.ComposeHTML([]byte(`<main data-kit-component="` + name + `" data-kit-version="2.0.0"></main>`))
+		fromHTML, err := composer.ComposeHTML([]byte(`<main data-kit-component="` + name + `@2.0.0"></main>`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,7 +194,7 @@ func interactiveComponentV2HydrateDocument(scriptTags string) string {
 	return fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>hydrate dialog</title>%s</head><body>
   <main id="route">
-    <section id="morph-dialog" data-kit-component="dialog" data-kit-version="2.0.0">
+    <section id="morph-dialog" data-kit-component="dialog@2.0.0">
       <button id="morph-open" type="button" data-dialog-trigger>Open</button>
       <div id="morph-panel" data-dialog-panel role="dialog" aria-modal="true" hidden><button data-dialog-close>Close</button></div>
     </section>
@@ -226,7 +226,7 @@ __runStandaloneKitTest(async function () {
 var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>interactive v2</title></head><body>
   <main id="background">
-    <section id="outer" data-kit-component="dialog" data-kit-version="2.0.0" data-kit-as="$outer">
+    <section id="outer" data-kit-component="dialog@2.0.0" data-kit-as="$outer">
       <button id="outer-trigger" type="button" data-dialog-trigger>Open outer</button>
       <div id="outer-panel" data-dialog-panel role="dialog" aria-modal="true" hidden>
         <input id="outer-hidden-input" type="hidden" data-dialog-initial-focus>
@@ -236,7 +236,7 @@ var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
         <button id="outer-second" type="button">Second</button>
         <button id="outer-close" type="button" data-dialog-close data-dialog-value="accepted">Close</button>
         <button id="reactive-close-outer" type="button" data-kit-click="open = false">Close parent state</button>
-        <section id="inner" data-kit-component="dialog" data-kit-version="2.0.0">
+        <section id="inner" data-kit-component="dialog@2.0.0">
           <button id="inner-trigger" type="button" data-dialog-trigger>Open inner</button>
           <div id="inner-panel" data-dialog-panel role="dialog" aria-modal="true" hidden>
             <button id="inner-cancel" type="button" data-dialog-cancel data-dialog-value="button-cancel" data-dialog-initial-focus>Cancel</button>
@@ -248,7 +248,7 @@ var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
     </section>
   </main>
 
-  <section id="swap-dialog" data-kit-component="dialog" data-kit-version="2.0.0">
+  <section id="swap-dialog" data-kit-component="dialog@2.0.0">
     <button id="swap-trigger" type="button" data-dialog-trigger>Open swap dialog</button>
     <button id="swap-refresh" type="button" hidden data-kit-click="returnValue = returnValue === 'refresh-a' ? 'refresh-b' : 'refresh-a'">Refresh</button>
     <div id="swap-path-a">
@@ -265,7 +265,7 @@ var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
     </template>
   </section>
 
-  <section id="dropdown" data-kit-component="dropdown" data-kit-version="2.0.0">
+  <section id="dropdown" data-kit-component="dropdown@2.0.0">
     <button id="dropdown-trigger" type="button" data-dropdown-trigger>Actions</button>
     <div id="dropdown-menu" role="menu" data-dropdown-menu hidden>
       <button id="dropdown-alpha" role="menuitem" data-dropdown-item data-dropdown-value="alpha">Alpha</button>
@@ -281,7 +281,7 @@ var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
   </section>
   <button id="outside" type="button">Outside</button>
 
-  <section id="tabs-auto" data-kit-component="tabs" data-kit-version="2.0.0">
+  <section id="tabs-auto" data-kit-component="tabs@2.0.0">
     <div data-tabs-list role="tablist">
       <button id="auto-one" role="tab" data-tab="one">One</button>
       <button id="auto-disabled" role="tab" data-tab="disabled" disabled>Disabled</button>
@@ -294,7 +294,7 @@ var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
     <output id="auto-active" data-kit-text="active"></output>
     <button id="auto-refresh" type="button" hidden data-kit-click="tabs = tabs.length ? [] : ['refresh']">Refresh</button>
   </section>
-  <section id="tabs-manual" data-kit-component="tabs" data-kit-version="2.0.0" data-tabs-activation="manual">
+  <section id="tabs-manual" data-kit-component="tabs@2.0.0" data-tabs-activation="manual">
     <div data-tabs-list role="tablist" aria-orientation="vertical">
       <button id="manual-one" role="tab" data-tab="one">One</button>
       <button id="manual-two" role="tab" data-tab="two">Two</button>

@@ -248,7 +248,7 @@ const networkCookieContractDocument = `<!doctype html>
 })();
 </script>
 <script src=%q></script></head><body>
-<main data-kit-component="network-cookie-contract" data-kit-version="1.0.0">
+<main data-kit-component="network-cookie-contract@1.0.0">
   <output id="html-network" data-kit-text="kit.network.online">server-only</output>
   <button id="html-cookie" type="button" data-kit-click="kit.cookie.set('html-poison', 'bad')">Try HTML cookie</button>
 </main>

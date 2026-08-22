@@ -267,11 +267,11 @@ func driveReentrantDocument(
 <a id="to-forbidden" href="/forbidden">Forbidden</a>
 </nav><main id="atomic-route">` + html.EscapeString(route) + `</main>
 <div id="atomic-target">Target</div>
-<section data-kit-component="drive-atomic-base" data-kit-version="1.0.0">
+<section data-kit-component="drive-atomic-base@1.0.0">
   <output id="atomic-base" data-kit-text="ready">server-base</output>
 </section>`)
 	if route == "a" {
-		output.WriteString(`<section id="atomic-cleanup" data-kit-component="drive-atomic-cleanup" data-kit-version="1.0.0"></section>`)
+		output.WriteString(`<section id="atomic-cleanup" data-kit-component="drive-atomic-cleanup@1.0.0"></section>`)
 	}
 	if incompatibleInline {
 		output.WriteString(`<script>globalThis.__incomingFallbackScriptMustNotRun = true;</script>`)

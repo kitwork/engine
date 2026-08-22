@@ -8,12 +8,16 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitwork/engine/app"
+	collectioncap "github.com/kitwork/engine/capabilities/collection"
 	"github.com/kitwork/engine/compiler"
 	dom "github.com/kitwork/engine/domain"
 	requestscope "github.com/kitwork/engine/request"
+	kitruntime "github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/search"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/work"
 )
@@ -54,6 +58,7 @@ func (c *cachedTenant) isExpired(now time.Time, timeout time.Duration) bool {
 }
 
 type Engine struct {
+	startedAt        time.Time
 	root             string
 	maxEnergy        uint64
 	hotReload        bool
@@ -68,6 +73,10 @@ type Engine struct {
 	bytecodeCacheMu  sync.RWMutex
 	bytecodeCacheDir string
 	runtimeHealth    *work.RuntimeHealth
+	searchManager    *search.Manager
+	searchManagerErr error
+	collectionCanary atomic.Bool
+	collectionStats  *collectioncap.SegmentSearchCanaryTelemetry
 	mu               sync.RWMutex
 	stopCleanup      chan struct{}
 	closeOnce        sync.Once
@@ -76,20 +85,31 @@ type Engine struct {
 
 func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
 	if maxEnergy == 0 {
-		maxEnergy = 10000000 // Default 10M
+		maxEnergy = kitruntime.Limits().DefaultMaxEnergy
+	}
+	searchManager, searchManagerErr := search.NewManager(
+		filepath.Join(root, ".data", "search"),
+		search.ManagerOptions{},
+	)
+	if searchManagerErr != nil {
+		slog.Warn("Search manager failed to initialize", "error", searchManagerErr)
 	}
 	e := &Engine{
-		root:          root,
-		maxEnergy:     maxEnergy,
-		hotReload:     hotReload,
-		Hostname:      hostname,
-		cache:         make(map[string]*cachedTenant),
-		appRuntimes:   make(map[string]*app.Runtime),
-		appTenants:    make(map[string]*work.Tenant),
-		appStarting:   make(map[string]struct{}),
-		runtimeHealth: work.NewRuntimeHealth(),
-		idleTimeout:   10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
-		stopCleanup:   make(chan struct{}),
+		startedAt:        time.Now(),
+		root:             root,
+		maxEnergy:        maxEnergy,
+		hotReload:        hotReload,
+		Hostname:         hostname,
+		cache:            make(map[string]*cachedTenant),
+		appRuntimes:      make(map[string]*app.Runtime),
+		appTenants:       make(map[string]*work.Tenant),
+		appStarting:      make(map[string]struct{}),
+		runtimeHealth:    work.NewRuntimeHealth(),
+		searchManager:    searchManager,
+		searchManagerErr: searchManagerErr,
+		collectionStats:  collectioncap.NewSegmentSearchCanaryTelemetry(),
+		idleTimeout:      10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
+		stopCleanup:      make(chan struct{}),
 	}
 	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
 	go e.cleanupLoop(1 * time.Minute)
@@ -138,6 +158,9 @@ func (e *Engine) StartAppSchedulers() (started int) {
 		e.mu.Unlock()
 
 		appTenant := work.NewAppTenantWithRuntime(e.root, identity, appRuntime)
+		appTenant.SetSearchManager(e.searchManager, e.searchManagerErr)
+		appTenant.SetCollectionSearchCanary(e.collectionCanary.Load())
+		appTenant.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 		appTenant.SetRuntimeHealth(e.runtimeHealth)
 		appTenant.MaxEnergy = e.maxEnergy
 		appTenant.HotReload = e.hotReload
@@ -191,23 +214,102 @@ func (e *Engine) SetBytecodeCache(directory string) {
 	e.bytecodeCacheMu.Unlock()
 }
 
+// SetSearchManagerOptions replaces the default bounded search owner during
+// host boot. It must run before schedulers, prewarm, or request-driven tenant
+// loading so no tenant can retain the previous owner.
+func (e *Engine) SetSearchManagerOptions(options search.ManagerOptions) error {
+	if e == nil {
+		return fmt.Errorf("engine is nil")
+	}
+	replacement, err := search.NewManager(filepath.Join(e.root, ".data", "search"), options)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	if e.closed || len(e.cache) != 0 || len(e.appTenants) != 0 || len(e.appRuntimes) != 0 {
+		e.mu.Unlock()
+		_ = replacement.Close()
+		return fmt.Errorf("search manager options must be set before loading apps or sites")
+	}
+	previous := e.searchManager
+	e.searchManager = replacement
+	e.searchManagerErr = nil
+	e.mu.Unlock()
+	if previous != nil {
+		return previous.Close()
+	}
+	return nil
+}
+
+// SetCollectionSearchCanary enables bounded shadow comparison during host
+// boot. The legacy collection engine remains the serving path. Configuration
+// is frozen once an app or site starts loading.
+func (e *Engine) SetCollectionSearchCanary(enabled bool) error {
+	if e == nil {
+		return fmt.Errorf("engine is nil")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || len(e.cache) != 0 || len(e.appTenants) != 0 ||
+		len(e.appRuntimes) != 0 || len(e.appStarting) != 0 {
+		return fmt.Errorf("collection search canary must be set before loading apps or sites")
+	}
+	e.collectionCanary.Store(enabled)
+	return nil
+}
+
+// CollectionSearchCanaryStats returns fixed-cardinality host counters that
+// survive tenant generation replacement.
+func (e *Engine) CollectionSearchCanaryStats() collectioncap.SegmentSearchCanaryStats {
+	if e == nil || e.collectionStats == nil {
+		return collectioncap.SegmentSearchCanaryStats{}
+	}
+	stats := e.collectionStats.Snapshot()
+	stats.Enabled = e.collectionCanary.Load()
+	return stats
+}
+
+// SearchStats returns bounded process-local manager counters without tenant or
+// query labels and without opening an index.
+func (e *Engine) SearchStats() search.ManagerStats {
+	if e == nil {
+		return search.ManagerStats{}
+	}
+	e.mu.RLock()
+	manager := e.searchManager
+	e.mu.RUnlock()
+	return manager.Stats()
+}
+
 // Health returns bounded process-local runtime and lifecycle aggregates without
 // exposing request, URL, tenant, or argument data. The returned snapshot is
-// detached and safe to serialize while the engine is live.
+// detached and safe to serialize while the engine is live. Ownership fields
+// are best effort: a busy engine ownership lock leaves them zero and marks
+// OwnershipSnapshotAvailable false without delaying lifecycle gauges.
 func (e *Engine) Health() work.RuntimeHealthSnapshot {
 	if e == nil {
 		return work.RuntimeHealthSnapshot{}
 	}
+	if !e.mu.TryRLock() {
+		snapshot := e.runtimeHealth.Snapshot()
+		snapshot.VMPool = work.VMPoolHealth()
+		return snapshot
+	}
+	defer e.mu.RUnlock()
+	// Cold preparation and every activation begin while owning e.mu. Capture
+	// lifecycle only after the ownership read lock is secured so an available
+	// snapshot cannot pair stale lifecycle gauges with post-transition ownership.
 	snapshot := e.runtimeHealth.Snapshot()
-	e.mu.RLock()
+	snapshot.VMPool = work.VMPoolHealth()
+	snapshot.OwnershipSnapshotAvailable = true
 	snapshot.LoadedApps = len(e.appRuntimes)
 	snapshot.LoadedSites = len(e.cache)
-	tenants := make([]*work.Tenant, 0, len(e.cache))
+	maxInt := int(^uint(0) >> 1)
+	// Every cached.tenant mutation requires e.mu for writing. Reading it directly
+	// under this read lock avoids waiting for cachedTenant.mu and makes the
+	// ownership portion one consistent best-effort snapshot.
 	for _, cached := range e.cache {
-		tenants = append(tenants, cached.current())
-	}
-	e.mu.RUnlock()
-	for _, tenant := range tenants {
+		tenant := cached.tenant
 		if tenant == nil {
 			continue
 		}
@@ -216,19 +318,46 @@ func (e *Engine) Health() work.RuntimeHealthSnapshot {
 			continue
 		}
 		snapshot.ActiveGenerations++
-		snapshot.ActiveGenerationLeases += generation.Active()
+		active := generation.Active()
+		if active > maxInt-snapshot.ActiveGenerationLeases {
+			snapshot.ActiveGenerationLeases = maxInt
+		} else {
+			snapshot.ActiveGenerationLeases += active
+		}
+	}
+	drainingLeases := snapshot.Generations.DrainingLeases
+	if drainingLeases > uint64(maxInt-snapshot.ActiveGenerationLeases) {
+		snapshot.ActiveGenerationLeases = maxInt
+	} else {
+		snapshot.ActiveGenerationLeases += int(drainingLeases)
 	}
 	return snapshot
 }
 
-func (e *Engine) prepareGeneration(siteRuntime *site.Runtime) (
-	generation *site.Generation,
-	err error,
-) {
-	started := time.Now()
+func (e *Engine) prepareTenantCandidate(
+	hostname string,
+	appRuntime *app.Runtime,
+	siteRuntime *site.Runtime,
+) (_ *work.Tenant, err error) {
+	finish := e.runtimeHealth.BeginGenerationPrepare()
+	succeeded := false
+	var generation *site.Generation
+	var candidate *work.Tenant
 	defer func() {
-		e.runtimeHealth.RecordGenerationPrepare(time.Since(started), err == nil)
+		finish(succeeded)
 	}()
+	defer func() {
+		if !succeeded {
+			if candidate != nil {
+				candidate.Close()
+			} else if generation != nil {
+				generation.Retire()
+			}
+		}
+	}()
+	if siteRuntime == nil {
+		return nil, fmt.Errorf("site runtime is nil")
+	}
 	generation, err = siteRuntime.PrepareGeneration()
 	if err != nil {
 		return nil, err
@@ -238,18 +367,37 @@ func (e *Engine) prepareGeneration(siteRuntime *site.Runtime) (
 	e.bytecodeCacheMu.RUnlock()
 	if directory != "" {
 		if setError := generation.SetBytecodeCache(compiler.NewFileCache(directory)); setError != nil {
-			err = setError
-			generation.Retire()
-			return nil, err
+			return nil, setError
 		}
 	}
-	return generation, nil
+	candidate = work.NewTenantWithRuntime(
+		e.root,
+		hostname,
+		appRuntime,
+		siteRuntime,
+		generation,
+	)
+	candidate.SetSearchManager(e.searchManager, e.searchManagerErr)
+	candidate.SetCollectionSearchCanary(e.collectionCanary.Load())
+	candidate.SetCollectionSearchCanaryTelemetry(e.collectionStats)
+	candidate.SetRuntimeHealth(e.runtimeHealth)
+	candidate.MaxEnergy = e.maxEnergy
+	candidate.HotReload = e.hotReload
+	if err = candidate.Run(); err != nil {
+		return nil, err
+	}
+	succeeded = true
+	return candidate, nil
 }
 
-func (e *Engine) activateGeneration(tenant *work.Tenant) error {
-	started := time.Now()
-	err := tenant.ActivateGeneration()
-	e.runtimeHealth.RecordGenerationActivate(time.Since(started), err == nil)
+func (e *Engine) activateGeneration(tenant *work.Tenant) (err error) {
+	finish := e.runtimeHealth.BeginGenerationActivate()
+	succeeded := false
+	defer func() {
+		finish(succeeded)
+	}()
+	err = tenant.ActivateGeneration()
+	succeeded = err == nil
 	return err
 }
 
@@ -258,11 +406,17 @@ func (e *Engine) drainTenant(tenant *work.Tenant) {
 		return
 	}
 	generation := tenant.SiteGeneration()
-	started := time.Now()
-	tenant.Close()
-	if generation != nil {
-		e.runtimeHealth.RecordGenerationDrain(time.Since(started))
+	if generation == nil {
+		tenant.Close()
+		return
 	}
+	finish := e.runtimeHealth.BeginGenerationDrain(generation)
+	succeeded := false
+	defer func() {
+		finish(succeeded)
+	}()
+	tenant.Close()
+	succeeded = true
 }
 
 // SetIdleTimeout chỉnh thời gian một tenant idle được giữ trong RAM cache.
@@ -295,12 +449,24 @@ func (e *Engine) cleanupLoop(interval time.Duration) {
 			e.mu.Unlock()
 			for _, tenant := range evicted {
 				e.drainTenant(tenant)
+				e.closeTenantSearch(tenant)
 				if owner := tenant.AppRuntime(); owner != nil {
 					owner.RemoveSite(tenant.Domain())
 				}
 			}
 		case <-e.stopCleanup:
 			return
+		}
+	}
+}
+
+func (e *Engine) closeTenantSearch(tenant *work.Tenant) {
+	if e == nil || tenant == nil || e.searchManager == nil {
+		return
+	}
+	for _, key := range tenant.SearchIndexKeys() {
+		if err := e.searchManager.CloseIndex(key); err != nil {
+			slog.Warn("Search index failed to close during site eviction", "error", err)
 		}
 	}
 }
@@ -347,6 +513,11 @@ func (e *Engine) Close() {
 		for _, appRuntime := range apps {
 			appRuntime.Close()
 		}
+		if e.searchManager != nil {
+			if err := e.searchManager.Close(); err != nil {
+				slog.Warn("Search manager failed to close cleanly", "error", err)
+			}
+		}
 	})
 }
 
@@ -392,6 +563,7 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 						delete(e.cache, hostname)
 						e.mu.Unlock()
 						e.drainTenant(current)
+						e.closeTenantSearch(current)
 						if owner := current.AppRuntime(); owner != nil {
 							owner.RemoveSite(hostname)
 						}
@@ -405,7 +577,11 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 						slog.Error("Source manifest check failed; keeping current generation", "error", changeErr)
 					} else if changed {
 						slog.Info("Detecting source change. Preparing generation...", "site", hostname)
-						generation, prepareErr := e.prepareGeneration(current.SiteRuntime())
+						newTenant, prepareErr := e.prepareTenantCandidate(
+							hostname,
+							current.AppRuntime(),
+							current.SiteRuntime(),
+						)
 						if prepareErr != nil {
 							slog.Error(
 								"Generation preparation failed during hot reload. Fallback to cached version",
@@ -414,42 +590,27 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 							)
 							return current, nil
 						}
-						newTenant := work.NewTenantWithRuntime(
-							e.root,
-							hostname,
-							current.AppRuntime(),
-							current.SiteRuntime(),
-							generation,
-						)
-						newTenant.SetRuntimeHealth(e.runtimeHealth)
-						newTenant.MaxEnergy = e.maxEnergy
-						newTenant.HotReload = e.hotReload
-
-						if err := newTenant.Run(); err != nil {
-							// Lỗi cú pháp hoặc file dở dang -> Graceful Compile Fallback
-							slog.Error("Compile error during hot reload. Fallback to cached version", "error", err)
-							newTenant.Close()
-						} else {
-							// Thành công -> cập nhật cache
-							e.mu.Lock()
-							if e.closed {
-								e.mu.Unlock()
-								newTenant.Close()
-								return nil, fmt.Errorf("engine is closed")
-							}
-							if err := e.activateGeneration(newTenant); err != nil {
-								e.mu.Unlock()
-								newTenant.Close()
-								return nil, fmt.Errorf("activate site generation: %w", err)
-							}
-							cached.mu.Lock()
-							oldTenant := cached.tenant
-							cached.tenant = newTenant
-							cached.mu.Unlock()
+						newTenant.InheritSearchState(current)
+						// Thành công -> cập nhật cache
+						e.mu.Lock()
+						if e.closed {
 							e.mu.Unlock()
-							e.drainTenant(oldTenant)
-							slog.Info("Successfully reloaded tenant", "hostname", hostname)
+							newTenant.Close()
+							return nil, fmt.Errorf("engine is closed")
 						}
+						if err := e.activateGeneration(newTenant); err != nil {
+							e.mu.Unlock()
+							newTenant.Close()
+							return nil, fmt.Errorf("activate site generation: %w", err)
+						}
+						cached.mu.Lock()
+						oldTenant := cached.tenant
+						cached.tenant = newTenant
+						cached.mu.Unlock()
+						e.mu.Unlock()
+						e.drainTenant(oldTenant)
+						newTenant.InheritSearchState(oldTenant)
+						slog.Info("Successfully reloaded tenant", "hostname", hostname)
 					}
 				}
 			}
@@ -476,18 +637,8 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 	if err != nil {
 		return nil, err
 	}
-	generation, err := e.prepareGeneration(siteRuntime)
+	tenant, err := e.prepareTenantCandidate(hostname, appRuntime, siteRuntime)
 	if err != nil {
-		appRuntime.RemoveSite(hostname)
-		return nil, err
-	}
-	tenant := work.NewTenantWithRuntime(e.root, hostname, appRuntime, siteRuntime, generation)
-	tenant.SetRuntimeHealth(e.runtimeHealth)
-	tenant.MaxEnergy = e.maxEnergy
-	tenant.HotReload = e.hotReload
-
-	if err := tenant.Run(); err != nil {
-		tenant.Close()
 		appRuntime.RemoveSite(hostname)
 		return nil, err
 	}

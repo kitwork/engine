@@ -26,10 +26,11 @@ import (
 // later COMMIT fails with "no transaction" — the change applies yet the manager reports a commit error.
 
 type hranaStream struct {
-	conn      *sql.Conn
-	store     map[int32]string // prepared statements persist for the stream's life
-	tenantKey string
-	lastUsed  time.Time
+	conn        *sql.Conn
+	kitdb       *dbProxy
+	store       map[int32]string // prepared statements persist for the stream's life
+	databaseKey string
+	lastUsed    time.Time
 }
 
 var (
@@ -55,7 +56,9 @@ func startStreamReaper() {
 				streamsMu.Lock()
 				for baton, s := range streams {
 					if s.lastUsed.Before(cutoff) {
-						_ = s.conn.Close()
+						if s.conn != nil {
+							_ = s.conn.Close()
+						}
 						delete(streams, baton)
 					}
 				}
@@ -65,20 +68,17 @@ func startStreamReaper() {
 	})
 }
 
-// libSQL / Hrana-over-HTTP server: Kitwork speaks turso's wire protocol, so any libSQL client — the
+// libSQL / Hrana-over-HTTP server: Kitwork speaks Turso's transport protocol, so a libSQL client can
 // turso CLI, @libsql/client, Drizzle/Prisma libSQL adapters, a turso-compatible db manager — connects
 // to a tenant's database by URL + auth token, exactly like turso.io:
 //
 //	client = createClient({ url: "http://localhost:8080", authToken: "<token>" })   // Host selects the tenant
 //	client = createClient({ url: "http://localhost:8080/kiturl.db", authToken: "..." }) // path selects the db file
 //
-// The db is exposed by DECLARING it in JS — turso("kiturl.db", {schema}, { token: env.require("DB_TOKEN"),
-// access: "readwrite" }) — so the decision to open it is visible in code, not a side effect of an env var
-// existing. access:"readonly" (the default) refuses writes. The client POSTs Hrana pipelines to
-// /v2/pipeline or /v3/pipeline; we run them on the connection the tenant already holds and answer in
-// Hrana's JSON envelope. A pipeline runs on ONE pinned connection, and interactive transactions that
-// span requests are held together with a baton (see the stream machinery above) — so a db manager's
-// BEGIN … edit … COMMIT commits atomically instead of half-applying.
+// The db is exposed by declaring turso(...) or kitdb(...) with { token, access }. SQL backends run
+// Hrana against one pinned connection. KitDB uses a deliberately bounded SQL-light adapter over its
+// Schema IR and ORM; it does not open the .kitdb file through SQLite. Multi-request transactions are
+// currently a SQL-backend feature and the KitDB profile rejects transaction-control SQL.
 
 // ---- Hrana wire types (per HRANA_3_SPEC; v2 shares this JSON shape) ----
 
@@ -162,25 +162,22 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 		return true
 	}
 
-	pool := tursoForRequest(t, dbName, scope).db()
-	if pool == nil {
-		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
-		return true
-	}
 	ctx := r.Context()
 	readonly := cfg.access != "readwrite" // access:"readonly" (default) → writes are refused
 	startStreamReaper()
 
 	// Resolve the stream: a baton reuses a PINNED connection (so an interactive BEGIN … COMMIT spanning
 	// several requests — a manager's row edit — is one real transaction); no baton opens a fresh stream.
-	scopeKey := tenantScopeKey(t)
+	databaseKey := serveDBKey(t, dbName) + "|" + cfg.engine
 	var stream *hranaStream
-	baton := ""
 	if req.Baton != nil && *req.Baton != "" {
 		streamsMu.Lock()
-		if s := streams[*req.Baton]; s != nil && s.tenantKey == scopeKey {
-			stream, baton = s, *req.Baton
+		if s := streams[*req.Baton]; s != nil && s.databaseKey == databaseKey {
+			stream = s
 			s.lastUsed = time.Now()
+			// A baton is single-use. Removing it before execution serializes the
+			// stream and prevents concurrent replay of the same transaction state.
+			delete(streams, *req.Baton)
 		}
 		streamsMu.Unlock()
 		if stream == nil {
@@ -191,13 +188,31 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 			return true
 		}
 	} else {
-		conn, err := pool.Conn(ctx)
-		if err != nil {
-			writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
-			return true
+		stream = &hranaStream{store: map[int32]string{}, databaseKey: databaseKey, lastUsed: time.Now()}
+		if cfg.engine == "kitdb" {
+			if cfg.database == nil {
+				writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "KitDB schema unavailable"})
+				return true
+			}
+			stream.kitdb = cfg.database
+		} else {
+			var pool *sql.DB
+			if cfg.engine == "sqlite" {
+				pool = sqliteForRequest(t, dbName, scope).db()
+			} else {
+				pool = tursoForRequest(t, dbName, scope).db()
+			}
+			if pool == nil {
+				writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
+				return true
+			}
+			conn, err := pool.Conn(ctx)
+			if err != nil {
+				writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": err.Error()})
+				return true
+			}
+			stream.conn = conn
 		}
-		stream = &hranaStream{conn: conn, store: map[int32]string{}, tenantKey: scopeKey, lastUsed: time.Now()}
-		baton = newBaton()
 	}
 
 	closed := false
@@ -206,7 +221,11 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 		if sr.Type == "close" {
 			closed = true
 		}
-		results = append(results, runHranaRequest(ctx, stream.conn, sr, stream.store, readonly))
+		if stream.kitdb != nil {
+			results = append(results, runKitDBHranaRequest(ctx, scope, stream.kitdb, sr, stream.store, readonly))
+		} else {
+			results = append(results, runHranaRequest(ctx, stream.conn, sr, stream.store, readonly))
+		}
 	}
 
 	// A `close` request ends the stream (release the connection, return baton null); otherwise keep it
@@ -214,15 +233,17 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 	var batonOut any
 	streamsMu.Lock()
 	if closed {
-		delete(streams, baton)
 		streamsMu.Unlock()
-		_ = stream.conn.Close()
+		if stream.conn != nil {
+			_ = stream.conn.Close()
+		}
 		batonOut = nil
 	} else {
-		streams[baton] = stream
+		nextBaton := newBaton()
+		streams[nextBaton] = stream
 		stream.lastUsed = time.Now()
 		streamsMu.Unlock()
-		batonOut = baton
+		batonOut = nextBaton
 	}
 	writeDataJSON(w, http.StatusOK, map[string]any{
 		"baton":    batonOut,

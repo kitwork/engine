@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/value"
 )
 
@@ -50,6 +51,98 @@ func TestRuntimeHealthSnapshot(t *testing.T) {
 	snapshot.Diagnostics[runtime.DiagnosticEnergyLimit] = 99
 	if health.Snapshot().Diagnostics[runtime.DiagnosticEnergyLimit] != 1 {
 		t.Fatal("snapshot exposed mutable health state")
+	}
+}
+
+func TestRuntimeHealthGenerationLifecycleGauges(t *testing.T) {
+	health := NewRuntimeHealth()
+
+	finishPrepare := health.BeginGenerationPrepare()
+	finishActivate := health.BeginGenerationActivate()
+	snapshot := health.Snapshot()
+	if snapshot.Generations.Preparing != 1 || snapshot.Generations.Activating != 1 {
+		t.Fatalf("in-progress generation gauges = %+v", snapshot.Generations)
+	}
+
+	finishPrepare(false)
+	finishPrepare(true)
+	finishActivate(true)
+	finishActivate(false)
+	snapshot = health.Snapshot()
+	if snapshot.Generations.Preparing != 0 ||
+		snapshot.Generations.Activating != 0 ||
+		snapshot.Generations.PrepareFailures != 1 ||
+		snapshot.Generations.Activated != 1 ||
+		snapshot.Latencies.GenerationPrepare.Count != 1 ||
+		snapshot.Latencies.GenerationActivate.Count != 1 {
+		t.Fatalf("completed generation gauges = %+v latencies=%+v", snapshot.Generations, snapshot.Latencies)
+	}
+
+	siteRuntime := site.NewRuntime(nil, "", "")
+	generation, err := siteRuntime.PrepareGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstLease, firstOK := generation.Acquire()
+	secondLease, secondOK := generation.Acquire()
+	if !firstOK || !secondOK {
+		t.Fatal("could not acquire generation health test leases")
+	}
+	finishDrain := health.BeginGenerationDrain(generation)
+	finishDuplicateDrain := health.BeginGenerationDrain(generation)
+	time.Sleep(time.Millisecond)
+	snapshot = health.Snapshot()
+	if snapshot.Generations.Draining != 1 ||
+		snapshot.Generations.DrainingLeases != 2 ||
+		snapshot.Generations.OldestDrainNanoseconds == 0 ||
+		snapshot.Generations.MaxOldestDrainNanoseconds < snapshot.Generations.OldestDrainNanoseconds {
+		t.Fatalf("draining generation gauges = %+v", snapshot.Generations)
+	}
+
+	firstLease.Release()
+	secondLease.Release()
+	finishDrain(true)
+	finishDrain(false)
+	finishDuplicateDrain(true)
+	generation.Retire()
+	snapshot = health.Snapshot()
+	if snapshot.Generations.Draining != 0 ||
+		snapshot.Generations.DrainingLeases != 0 ||
+		snapshot.Generations.OldestDrainNanoseconds != 0 ||
+		snapshot.Generations.Drained != 1 ||
+		snapshot.Generations.DrainFailures != 0 ||
+		snapshot.Latencies.GenerationDrain.Count != 1 ||
+		snapshot.Generations.MaxOldestDrainNanoseconds == 0 {
+		t.Fatalf("completed drain gauges = %+v latency=%+v", snapshot.Generations, snapshot.Latencies.GenerationDrain)
+	}
+
+	failedGeneration, err := siteRuntime.PrepareGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishFailedDrain := health.BeginGenerationDrain(failedGeneration)
+	finishFailedDrain(false)
+	finishFailedDrain(true)
+	failedGeneration.Retire()
+	snapshot = health.Snapshot()
+	if snapshot.Generations.Drained != 1 ||
+		snapshot.Generations.DrainFailures != 1 ||
+		snapshot.Latencies.GenerationDrain.Count != 2 {
+		t.Fatalf("idempotent failed drain outcome = %+v latency=%+v", snapshot.Generations, snapshot.Latencies.GenerationDrain)
+	}
+
+	reobservedGeneration, err := siteRuntime.PrepareGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	health.BeginGenerationDrain(reobservedGeneration)(true)
+	health.BeginGenerationDrain(reobservedGeneration)(true)
+	reobservedGeneration.Retire()
+	snapshot = health.Snapshot()
+	if snapshot.Generations.Drained != 3 ||
+		snapshot.Generations.DrainFailures != 1 ||
+		snapshot.Latencies.GenerationDrain.Count != 4 {
+		t.Fatalf("reobserved drain attempts = %+v latency=%+v", snapshot.Generations, snapshot.Latencies.GenerationDrain)
 	}
 }
 
@@ -109,7 +202,8 @@ func TestRuntimeHealthOperationalSignalsAreBoundedSnapshots(t *testing.T) {
 		snapshot.Generations.PrepareFailures != 1 ||
 		snapshot.Generations.Activated != 1 ||
 		snapshot.Generations.ActivateFailures != 1 ||
-		snapshot.Generations.Drained != 1 {
+		snapshot.Generations.Drained != 1 ||
+		snapshot.Generations.DrainFailures != 0 {
 		t.Fatalf("generation health = %+v", snapshot.Generations)
 	}
 	if snapshot.Latencies.Request.Count != 3 ||

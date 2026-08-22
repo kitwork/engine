@@ -29,6 +29,9 @@ artifact URL in all three HTML routes and keep the old artifact for old pages.
 
 Hydrate navigation needs same-origin HTTP. Opening these files through `file://`
 uses normal browser navigation and therefore reloads the page.
+Each route marks that unchanged same-origin artifact with
+`data-kit-drive="stable"`, giving Drive an explicit executable-script identity
+without changing the artifact bytes.
 
 From `engine/jit/javascript`, run:
 

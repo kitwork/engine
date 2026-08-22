@@ -1,0 +1,6 @@
+diff --git a/sync/sdk-kit/Cargo.toml b/sync/sdk-kit/Cargo.toml
+--- a/sync/sdk-kit/Cargo.toml
++++ b/sync/sdk-kit/Cargo.toml
+@@ -11,1 +11,2 @@
+ pure-rust-crypto = ["turso_core/pure-rust-crypto", "turso_sdk_kit/pure-rust-crypto"]
++fts = ["turso_core/fts", "turso_sdk_kit/fts"]

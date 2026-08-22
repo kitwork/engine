@@ -68,6 +68,7 @@ type SSEBroker struct {
 	unsubscribe chan unsubscribeRequest
 	sendTo      chan sendToRequest
 	stopChan    chan struct{}
+	done        chan struct{}
 	stopOnce    sync.Once
 	mu          sync.RWMutex
 }
@@ -86,6 +87,7 @@ func NewSSEBroker() *SSEBroker {
 		unsubscribe: make(chan unsubscribeRequest),
 		sendTo:      make(chan sendToRequest),
 		stopChan:    make(chan struct{}),
+		done:        make(chan struct{}),
 	}
 	go b.run()
 	return b
@@ -115,6 +117,7 @@ func ReleaseSSEBroker(key string) {
 }
 
 func (b *SSEBroker) run() {
+	defer close(b.done)
 	for {
 		select {
 		case <-b.stopChan:
@@ -234,11 +237,22 @@ func (b *SSEBroker) run() {
 	}
 }
 
-// Register registers a client connection to the broker.
-func (b *SSEBroker) Register(c *SSEClient) {
+// Register transfers a client connection to the broker. False means shutdown
+// won the handoff and the caller still owns the client.
+func (b *SSEBroker) Register(c *SSEClient) bool {
+	if b == nil || c == nil {
+		return false
+	}
+	select {
+	case <-b.stopChan:
+		return false
+	default:
+	}
 	select {
 	case b.register <- c:
+		return true
 	case <-b.stopChan:
+		return false
 	}
 }
 
@@ -290,6 +304,7 @@ func (b *SSEBroker) Stop() {
 	b.stopOnce.Do(func() {
 		close(b.stopChan)
 	})
+	<-b.done
 }
 
 // ClientCount returns the number of active clients on the broker.

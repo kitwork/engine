@@ -7,7 +7,7 @@
 
   var OWN = core.OWN;
   var BOUNDARIES = "[data-kit-component],[data-kit-scope]";
-  var METADATA = "[data-kit-component],[data-kit-version],[data-kit-local],[data-kit-scope]";
+  var METADATA = "[data-kit-component],[data-kit-version],[data-kit-scope]";
   var ALIASES = "[data-kit-as]";
   var aliases = new WeakMap();
   var metadata = new WeakMap();
@@ -83,6 +83,17 @@
     cleanupObserver = null;
   }
 
+  function retainRemovalOwner() {
+    cleanupOwners++;
+    startCleanupObserver();
+  }
+
+  function releaseRemovalOwner() {
+    if (cleanupOwners < 1) return;
+    cleanupOwners--;
+    stopCleanupObserver();
+  }
+
   var NOOP_CANCEL = Object.freeze(function () { });
 
   function ensureCleanupOwner(current) {
@@ -92,15 +103,14 @@
       return;
     }
     current.ownsCleanup = true;
-    cleanupOwners++;
-    startCleanupObserver();
+    retainRemovalOwner();
   }
 
   function releaseCleanupOwner(current) {
-    if (!current.ownsCleanup || current.cleanups.length || current.afterRenders.length) return;
+    if (!current.ownsCleanup || current.cleanups.length || current.afterRenders.length ||
+      current.observations && current.observations.size) return;
     current.ownsCleanup = false;
-    cleanupOwners--;
-    stopCleanupObserver();
+    releaseRemovalOwner();
   }
 
   function removeLifecycleEntry(entries, entry) {
@@ -618,18 +628,16 @@
     if (!element || element.nodeType !== 1 || !element.hasAttribute) return undefined;
     if (core.ignoredForRuntime(element)) return undefined;
     var hasComponent = element.hasAttribute("data-kit-component");
-    var hasVersion = element.hasAttribute("data-kit-version");
-    var hasLocal = element.hasAttribute("data-kit-local");
-    if (!hasComponent && !hasVersion && !hasLocal) return undefined;
+    var rejectedSplitVersion = element.hasAttribute("data-kit-version");
+    if (!hasComponent && !rejectedSplitVersion) return undefined;
     var componentSource = hasComponent ? element.getAttribute("data-kit-component") : null;
-    var versionSource = hasVersion ? element.getAttribute("data-kit-version") : null;
-    var localSource = hasLocal ? element.getAttribute("data-kit-local") : null;
     var retainSource = element.hasAttribute("data-kit-retain") ? element.getAttribute("data-kit-retain") : null;
     var cacheable = arguments.length < 3;
     var graphIdentity = cacheable ? core.graph || null : requestedGraph || null;
     var entry = cacheable ? metadata.get(element) : null;
-    if (entry && entry.componentSource === componentSource && entry.versionSource === versionSource &&
-      entry.localSource === localSource && entry.retainSource === retainSource &&
+    if (entry && entry.componentSource === componentSource &&
+      entry.rejectedSplitVersion === rejectedSplitVersion &&
+      entry.retainSource === retainSource &&
       entry.graphIdentity === graphIdentity) {
       if (shouldReport && entry.error && !entry.reported) {
         entry.reported = true;
@@ -639,8 +647,7 @@
     }
     entry = {
       componentSource: componentSource,
-      versionSource: versionSource,
-      localSource: localSource,
+      rejectedSplitVersion: rejectedSplitVersion,
       retainSource: retainSource,
       graphIdentity: graphIdentity,
       value: undefined,
@@ -648,10 +655,9 @@
       reported: false,
       cacheable: cacheable
     };
-    if (!hasComponent) {
+    if (rejectedSplitVersion) {
       return metadataError(element, entry,
-        hasLocal ? "data-kit-local requires a component host" :
-          "data-kit-version requires a component host", shouldReport);
+        "data-kit-version is not supported; put an exact version in data-kit-component", shouldReport);
     }
     if (String(element.localName || "").toLowerCase() === "template") {
       return metadataError(element, entry,
@@ -671,30 +677,10 @@
     if (!validComponentName(name)) {
       return metadataError(element, entry, "invalid component name \"" + name + "\"", shouldReport);
     }
-    if (hasLocal && localSource !== "") {
-      return metadataError(element, entry,
-        "data-kit-local must be an empty presence marker", shouldReport);
-    }
-    if (inlineVersion !== null && hasVersion) {
-      return metadataError(element, entry,
-        "inline component versions cannot be combined with data-kit-version", shouldReport);
-    }
     var version = inlineVersion;
-    if (hasVersion) {
-      version = String(versionSource || "").trim();
-      if (!validVersion(version)) {
-        return metadataError(element, entry,
-          "data-kit-version must be an exact semantic version", shouldReport);
-      }
-    }
     var managed = version !== null;
-    if (hasLocal && managed) {
-      return metadataError(element, entry,
-        hasVersion ? "data-kit-local components cannot use data-kit-version" :
-          "data-kit-local cannot mark a versioned component", shouldReport);
-    }
     if (!managed) {
-      if (element.hasAttribute("data-kit-retain") && (hasLocal || graphIdentity)) {
+      if (element.hasAttribute("data-kit-retain") && graphIdentity) {
         return metadataError(element, entry,
           "unversioned client components cannot use data-kit-retain", shouldReport);
       }
@@ -1497,6 +1483,12 @@
     var boundary = nearest(element);
     return boundary ? ensureComponent(boundary) : null;
   }
+  function ownsElement(current, element) {
+    var host = current && current.host;
+    return !!host && !current.disposed && core.scopes.get(host) === current &&
+      connectedHere(host) && connectedHere(element) && !core.ignoredForRuntime(element) &&
+      nearest(element) === host;
+  }
   function ownedElements(current, selector) {
     var output = [];
     var host = current && current.host;
@@ -1547,6 +1539,7 @@
     var current = core.scopes.get(element);
     if (!current || current.disposed) return;
     current.disposed = true;
+    core.cancelObservations(current);
     if (current.failed) {
       current.host = null;
       core.dirtyRecords.delete(current);
@@ -1566,8 +1559,7 @@
     current.afterRenders.length = 0;
     if (current.ownsCleanup) {
       current.ownsCleanup = false;
-      cleanupOwners--;
-      stopCleanupObserver();
+      releaseRemovalOwner();
     }
     cleanups.forEach(function (entry) {
       if (!entry.active) return;
@@ -1576,7 +1568,6 @@
       catch (error) { core.report(error); }
     });
     releaseAppLoaderLinks(current);
-    if (current.observations) current.observations.clear();
     if (current.scope) core.scopeRecords.delete(current.scope);
     current.host = null;
     current.scope = null;
@@ -1670,7 +1661,10 @@
       if (typeof schedule === "function") schedule.call(document.defaultView, auditLocalComponents, 0);
       else enqueue(auditLocalComponents);
     }
-    if (document.readyState === "loading") {
+    var script = document.currentScript;
+    var waitingForDeferredPeers = document.readyState === "interactive" && script &&
+      script.defer === true && script.async !== true;
+    if (document.readyState === "loading" || waitingForDeferredPeers) {
       document.addEventListener("DOMContentLoaded", scheduleAudit, { once: true });
     } else scheduleAudit();
   });
@@ -1702,6 +1696,10 @@
   core.componentMetadataForGraph = componentMetadataForGraph;
   core.hasComponentDefinition = hasComponentDefinition;
   core.inspectRetains = function (root) { return inspectRetains(root, false, true); };
+  core.retainRemovalOwner = retainRemovalOwner;
+  core.releaseRemovalOwner = releaseRemovalOwner;
+  core.retainObservationOwner = ensureCleanupOwner;
+  core.releaseObservationOwner = releaseCleanupOwner;
   core.invalidRetainStructure = function (element) {
     if (!retainStructureValidity.has(element)) {
       inspectRetains(connectedHere(element) ? document : element, true, false);
@@ -1714,6 +1712,7 @@
   core.ensureComponent = ensureComponent;
   core.ownerFor = nearest;
   core.scopeRecordFor = scopeRecordFor;
+  core.ownsElement = ownsElement;
   core.ownedElements = ownedElements;
   core.initialize = initialize;
   core.flushAfterRender = flushAfterRender;

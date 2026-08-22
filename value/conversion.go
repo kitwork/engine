@@ -10,6 +10,17 @@ import (
 // Strftime to Go Layout Converter moved to format.go
 
 func (v Value) Text() string {
+	// String values already own their canonical text. Returning the payload
+	// directly keeps property names and method names allocation-free in the VM.
+	if v.K == String {
+		s, _ := v.V.(string)
+		return s
+	}
+	if v.K == Invalid {
+		if s, ok := v.V.(string); ok {
+			return s
+		}
+	}
 	buf := make([]byte, 0, 64)
 	return string(v.Append(buf))
 }

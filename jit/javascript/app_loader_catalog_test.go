@@ -2,6 +2,7 @@ package javascript
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -20,12 +21,8 @@ func TestAppLoaderCatalogPins110AndPreserves100(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy110, err := composer.ComposeHTML([]byte(`<html data-kit-component="app" data-kit-version="1.1.0" data-kit-as="$app"></html>`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if canonical110.ContentHash != legacy110.ContentHash || !bytes.Equal(canonical110.JavaScript, legacy110.JavaScript) {
-		t.Fatal("canonical and legacy app@1.1.0 pins resolved differently")
+	if _, err := composer.ComposeHTML([]byte(`<html data-kit-component="app" data-kit-version="1.1.0" data-kit-as="$app"></html>`)); !errors.Is(err, ErrUnsupportedAttribute) {
+		t.Fatalf("removed split app pin error = %v", err)
 	}
 	for _, marker := range [][]byte{
 		[]byte(`kit.service("progress"`),

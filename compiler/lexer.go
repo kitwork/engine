@@ -29,7 +29,7 @@ var lexerPool = sync.Pool{
 
 func init() {
 	// Khởi tạo sẵn Value cho các từ khóa quan trọng
-	keywords := []Kind{Const, Let, If, Else, Return, Import, Export}
+	keywords := []Kind{Const, Let, If, Else, Return, Import, Export, Switch}
 	for _, k := range keywords {
 		valKeywords[k] = value.NewString(k.String())
 	}

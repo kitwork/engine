@@ -48,7 +48,7 @@ func writeKitJSRouteGraphSite(t *testing.T, rootIndex, docsIndex string) *Tenant
 		writeKitJSFile(t, directory, "docs/index.kitwork.html", docsIndex)
 	}
 	writeKitJSFile(t, directory, "page.kitwork.html", `<main data-kit-scope="count: 0"><a id="docs-link" href="/docs">Docs</a><output data-kit-text="count">0</output></main>`)
-	writeKitJSFile(t, directory, "docs/page.kitwork.html", `<main data-kit-component="progress-bar" data-kit-version="2.0.0"><a id="home-link" href="/">Home</a></main>`)
+	writeKitJSFile(t, directory, "docs/page.kitwork.html", `<main data-kit-component="progress-bar@2.0.0"><a id="home-link" href="/">Home</a></main>`)
 	writeKitJSFile(t, directory, "notfound.kitwork.html", `<main>Not found</main>`)
 
 	tenant := NewTenant(root, "localhost")
@@ -203,7 +203,7 @@ func TestKitJSRoutesUseSpecificGraphsAndReuseStableChunks(t *testing.T) {
 
 func TestKitJSStagedAssetsServeCanonicalImmutableURLs(t *testing.T) {
 	tenant, _ := writeKitJSTestSite(t, `router.jitjs(true);`,
-		`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`)
+		`<main data-kit-component="progress-bar@2.0.0"></main>`)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +355,7 @@ func TestKitJSStagedAssetsReuseAcrossGenerationsAndOldGraphSurvivesRetirement(t 
 	writeKitJSFile(t, directory, "router.kitwork.js", `import { router } from "kitwork"; router.jitjs(true);`)
 	writeKitJSFile(t, directory, "index.kitwork.html", `<!doctype html><html><head><title>KitJS</title></head><body>{{ @page }}</body></html>`)
 	writeKitJSFile(t, directory, "notfound.kitwork.html", `<main>Not found</main>`)
-	writeKitJSFile(t, directory, "page.kitwork.html", `<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`)
+	writeKitJSFile(t, directory, "page.kitwork.html", `<main data-kit-component="progress-bar@2.0.0"></main>`)
 
 	appRuntime := app.NewRuntime("test")
 	t.Cleanup(appRuntime.Close)
@@ -377,7 +377,7 @@ func TestKitJSStagedAssetsReuseAcrossGenerationsAndOldGraphSurvivesRetirement(t 
 	firstPlan := firstTenant.renderPlan()
 	firstTags, _ := serveKitJSPage(t, firstTenant, "/")
 
-	writeKitJSFile(t, directory, "page.kitwork.html", `<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main><aside data-kit-component="dialog" data-kit-version="2.0.0"></aside>`)
+	writeKitJSFile(t, directory, "page.kitwork.html", `<main data-kit-component="progress-bar@2.0.0"></main><aside data-kit-component="dialog@2.0.0"></aside>`)
 	secondGeneration, err := siteRuntime.PrepareGeneration()
 	if err != nil {
 		t.Fatal(err)
@@ -507,7 +507,7 @@ func TestKitJSDynamicViewOverrideCannotCreateRequestAsset(t *testing.T) {
 	tenant, directory := writeKitJSTestSite(t,
 		`router.jitjs(true); router.get((ctx) => ctx.view("alternate"));`,
 		`<main data-kit-scope="count: 0"></main>`)
-	writeKitJSFile(t, directory, "alternate/page.kitwork.html", `<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`)
+	writeKitJSFile(t, directory, "alternate/page.kitwork.html", `<main data-kit-component="progress-bar@2.0.0"></main>`)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}

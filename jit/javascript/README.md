@@ -5,14 +5,16 @@ standalone KitJS browser library. The canonical package release tree is
 `packages/kit.js`; this copy is kept byte-identical for Kitwork integration,
 closed-graph assembly, and examples. The browser artifacts still have no Node
 runtime, package loader, Go server, or SSR dependency. The same readable source
-fragments produce two delivery profiles. The current locally checked source
-candidate is `0.9.0-next.12`; this version string does not establish npm or CDN
-availability:
+fragments produce two delivery profiles. The locally checked source candidate
+is `1.0.0-rc.2`; it is not an npm or CDN installation target until its release
+gate and soak complete. The independently byte-verified public prerelease
+remains [`1.0.0-rc.1`](https://www.npmjs.com/package/@kitwork/kitjs/v/1.0.0-rc.1),
+with its [exact tagged source](https://github.com/kitwork/kit.js/tree/v1.0.0-rc.1):
 
 | Profile | Development alias | Content-addressed candidate artifact | Contract |
 |---|---|---|---|
-| Kit | `kit.js` | `kit.0.9.0-next.12.<sha256>.js` | scope, component, expression, directive, event, and dirty-boundary runtime |
-| Hydrate | `hydrate.kit.js` | `hydrate.kit.0.9.0-next.12.<sha256>.js` | the exact Kit profile plus private Morph and Drive continuity before boot |
+| Kit | `kit.js` | `kit.1.0.0-rc.2.<sha256>.js` | scope, component, expression, directive, event, and dirty-boundary runtime |
+| Hydrate | `hydrate.kit.js` | `hydrate.kit.1.0.0-rc.2.<sha256>.js` | the exact Kit profile plus private Morph and Drive continuity before boot |
 
 Choose one artifact; never load both on the same page.
 
@@ -88,6 +90,16 @@ Integrity metadata:
   crossorigin="anonymous" defer></script>
 ```
 
+Production generation minifies only the engine-owned `runtime` and `hydrate`
+chunks, once, before their SHA-256, filename, SRI, graph identity, and site CAS
+entry are created. `ALLOW_LOCAL=true` keeps those two chunks readable for local
+debugging. The explicit `stdminify` build remains a JavaScript-minification
+opt-out and therefore also emits readable core bytes with their own exact
+hashes. Service, component, and common-bundle source is never transformed by
+this step; the graph is regenerated normally to bind whichever core identities
+the generation selected. The standalone `kit.js` and `hydrate.kit.js` package
+artifacts remain readable exact-source compositions.
+
 Service and component filenames use the exact package name as their suffix;
 the other suffixes are their role names. The graph script opens the private
 manifest before any selected package registers. Publication and boot happen
@@ -104,12 +116,26 @@ satisfy that security sequence fails generation preparation instead of moving
 policy metadata or trusting a changed base.
 
 The graph is exact per prepared document, not one union forced onto every
-route. Runtime, Hydrate, service, and component bytes deduplicate naturally by
-content hash. When at least two component name/version pairs occur in every
-prepared document, Kitwork places that exact intersection in one stable
-`components` chunk and omits those packages from every individual component
-chunk, so a page never receives the same component twice. All remaining
-components stay individually cacheable.
+route. During candidate preparation, runtime and Hydrate are prepared once and
+each exact service/component source is normalized once for the generation.
+Each individual package artifact and the single optional common bundle are
+materialized and content-addressed once; later graphs exact-compare and reuse
+them without rehashing. Shared components are wrapped only inside that bundle.
+Prepared HTML lookup resolves only the canonical component identities and does
+not reopen package source. Exact artifacts then deduplicate by content hash
+under the generation's asset-count and byte limits; a failed candidate retains
+nothing and cannot affect the active generation. When at least two component
+name/version pairs occur in every prepared document, Kitwork places that exact
+intersection in one stable `components` chunk and omits those packages from
+every individual component chunk, so a page never receives the same component
+twice. All remaining components stay individually cacheable.
+
+Prepared HTML scanning is also bounded per document: source bytes are capped at
+8 MiB, markup candidates at 65,536, nesting depth at 1,024, attributes per tag
+at 256, ancestor-frame visits at 4,194,304, and cumulative authored expression
+source at 256 KiB. Crossing one of these budgets fails generation preparation
+without publishing the candidate. These are engine generation budgets, not
+additional grammar restrictions on a standalone browser page.
 
 Drive accepts an identical ordered staged delivery directly. It may also hand
 off to a different **component-only** graph when runtime, Hydrate, the complete
@@ -182,7 +208,7 @@ must carry the same Hydrate artifact URL before Drive may mutate the current
 document. A missing or different artifact falls back to normal browser
 navigation. Production standalone delivery uses a canonical immutable filename,
 for example
-`/hydrate.kit.0.9.0-next.12.<sha256>.js`. A changed runtime, service/component
+`/hydrate.kit.1.0.0-rc.2.<sha256>.js`. A changed runtime, service/component
 pin, or package source produces a new SHA-256 and therefore a new URL.
 Previously generated canonical files remain byte-for-byte unchanged so old
 pages, open tabs, caches, and rollbacks can keep requesting them.
@@ -222,9 +248,17 @@ Hydrate validates the current document's executable topology before Drive
 installs navigation listeners, changes scroll restoration, or emits lifecycle
 events. An incompatible initial topology disables Drive for that document, so
 links and forms remain native and no Drive fetch occurs. One console warning
-identifies KitJS Drive as disabled. If a valid initial document later fetches
-an incompatible destination, Drive performs normal browser navigation before
-live mutation; the destination document loader then executes its scripts.
+identifies KitJS Drive as disabled, states the cause, describes the offending
+script when present with unsafe URL details redacted, and gives a remedy. Its
+exact wording is not API. If a valid initial document later fetches an
+incompatible destination, Drive performs normal browser navigation before live
+mutation; the destination document loader then executes its scripts.
+
+Drive rejects a fetched response whose usable declared length exceeds 8 MiB or
+whose decoded body crosses 8 MiB while being read. It also rejects a parsed
+fetched document with more than 100,000 nodes or a depth greater than 256. The
+visit produces one fallback outcome, then native navigation continues before
+Drive mutates title, head, history, or body.
 
 An explicit fragment link for the currently rendered path and query, including
 `href="#"`, remains native browser navigation. Drive flushes the leaving scroll
@@ -334,7 +368,8 @@ request@1.0.0 -> progress@1.0.0
 share@1.0.0   -> clipboard@1.0.0
 ```
 
-The complete KitJS 0.9.0-next.12 catalog currently contains eleven exact packages:
+The complete KitJS `1.0.0-rc.2` source-candidate catalog currently contains
+eleven exact packages:
 
 | Service | Public surface | Purpose |
 |---|---|---|
@@ -406,7 +441,7 @@ generic bridge or runtime service locator.
 
 Runtime and package versions have different jobs:
 
-- `0.9.0-next.12` identifies the compatible KitJS runtime release.
+- `1.0.0-rc.2` identifies the compatible KitJS source-candidate runtime.
 - The full lowercase SHA-256 in the canonical filename identifies the exact
   artifact bytes.
 - A managed `data-kit-component` contains `name@exact-semver`.
@@ -419,7 +454,7 @@ The canonical exact declaration is:
   data-kit-component="dialog@1.0.0">
 </section>
 
-<script defer src="/kit.0.9.0-next.12.<sha256>.js"></script>
+<script defer src="/kit.1.0.0-rc.2.<sha256>.js"></script>
 ```
 
 Version ranges, `latest`, and a `v` prefix are forbidden. These declarations
@@ -438,9 +473,9 @@ the host. It never uses authored HTML to fetch a package, choose `latest`, or ex
 through `window.kit`. A graph may contain only one exact version of each
 component name.
 
-The split `data-kit-component="name" data-kit-version="1.2.3"` form remains a
-deprecated compatibility input for one 0.9 release and is removed in 1.0. New
-managed markup must embed the exact version in `data-kit-component`.
+The split `data-kit-component="name" data-kit-version="1.2.3"` form is removed
+and fails closed outside a `data-kit-ignore` boundary. Managed markup must
+embed the exact version in `data-kit-component`.
 
 Trusted client code registers an otherwise unknown page component against an
 ordinary unversioned host. It cannot use `data-kit-retain`, shadow an embedded
@@ -472,14 +507,14 @@ route:
 The external file must remain identical by resolved URL, order, and complete
 attributes. A cross-origin file must omit the stable marker and use valid SRI.
 Use `router.jitjs({ components: { ... } })` when Kitwork should manage the
-content-addressed component graph and component-only handoff. The empty
-`data-kit-local` marker remains a deprecated compatibility input for one 0.9
-release and is removed in 1.0; do not author it in new markup.
+content-addressed component graph and component-only handoff. An unversioned
+component name already selects direct client registration; no separate local
+marker exists. Split `data-kit-version` is rejected as removed syntax.
 
 ## Embedded UI component catalog
 
 The flattened Kitwork delivery catalog currently closes these browser
-components. Component versions are independent from the `0.9.0-next.12` runtime
+components. Component versions are independent from the `1.0.0-rc.2` runtime
 release:
 
 | Component | Canonical exact version | State and purpose | Service dependency |
@@ -589,7 +624,7 @@ for `for`, not a separate family:
 | style | `data-kit-style="width: progress + '%'; opacity: visible ? 1 : 0;"` | transactionally owns fixed CSS properties with continuous binding values |
 | model | `data-kit-model="name"` | two-way binds one existing writable field on the nearest reactive boundary to a supported form control |
 | event | `data-kit-click="count = count + 1"` | runs an action through the generic delegated event pipeline |
-| if | `<template data-kit-if="ready">` | owns one conditional clone of the template content |
+| if | `<section data-kit-if="ready">` or `<template data-kit-if="ready">` | owns one direct host or one conditional template fragment |
 | for + key | `<template data-kit-for="item, index of items" data-kit-key="item.id">` | reconciles keyed clone groups while preserving retained DOM identity |
 
 `data-kit-ignore` is a presence-only ownership marker rather than another
@@ -695,12 +730,26 @@ small component:
 </script>
 ```
 
-`if` and `for` are template-only structural directives. Put the directive on a
-real `<template>`; KitJS owns the materialized clone, not the template itself.
-`for` accepts `item of items` or `item, index of items`. The optional
+`data-kit-if` accepts either an ordinary element or a real `<template>`. An
+ordinary element is a one-root conditional branch and requires an enclosing
+scope or component boundary. Its condition belongs to that parent boundary,
+while any scope or component on the same host belongs to the branch and cannot
+provide that condition. The authored host is
+the SSR and no-JavaScript fallback. A valid truthy first render keeps that host;
+a falsy render unmounts it, and a later truthy render mounts a fresh host. An
+invalid standalone expression reports a diagnostic and leaves the authored
+fallback untouched. Kitwork generation rejects the same invalid source during
+preflight.
+
+Use `<template data-kit-if>` for a multi-root fragment or when content must be
+inert before KitJS boots. Direct hosts follow normal browser loading rules, so
+images, iframes, media, and other resource-bearing descendants may start work
+before a false condition is evaluated. Executable scripts are invalid in every
+structural region. `data-kit-for` and its optional `data-kit-key` remain
+template-only. `for` accepts `item of items` or `item, index of items`. The optional
 `data-kit-key` evaluates per row and must produce a unique string or finite
 number; without it, the current index is the row identity. Row locals are
-read-only, and nested structural templates are capped at 64 levels. Replace the
+read-only, and nested structural branches are capped at 64 levels. Replace the
 array shallowly after add, remove, or reorder operations so the component's
 single dirty flag can schedule reconciliation.
 
@@ -786,7 +835,7 @@ responsibility:
 | `src/component.js` | definition registry, per-host state, dirty-boundary ownership, action-only aliases, frozen `init(context)`, and owned lifecycle cleanup |
 | `src/directives.js` | the reserved directive surface, exact event grammar, and private render hooks |
 | `src/dom.js` | node-owned compiled records plus `text`, `show`, and `bind` rendering |
-| `src/structure.js` | template-only `if` ownership and keyed `for` reconciliation |
+| `src/structure.js` | direct-host and template-fragment `if` ownership plus keyed `for` reconciliation |
 | `src/class.js` | dynamic class ownership while preserving authored static classes |
 | `src/style.js` | bounded per-property CSSOM ownership with transactional value validation |
 | `src/model.js` | form-control coercion, IME handling, and two-way field synchronization |
@@ -823,9 +872,9 @@ go run ./jit/javascript/cmd/assemble `
   -canonical-dir ./dist
 ```
 
-The assembler writes `kit.0.9.0-next.12.<sha256>.js` without replacing an existing
+The assembler writes `kit.1.0.0-rc.2.<sha256>.js` without replacing an existing
 different file at that path. Use `-profile hydrate` to produce
-`hydrate.kit.0.9.0-next.12.<sha256>.js`. Repeat
+`hydrate.kit.1.0.0-rc.2.<sha256>.js`. Repeat
 `-service-require owner=dependency=version` for exact service dependencies.
 Repeat `-component-require owner=service=version` for exact component-to-service
 dependencies. Repeat `-service-action service=method` for any method a custom
@@ -888,8 +937,10 @@ transaction.
 
 The parser and walker both block prototype/global escape names. Object literals
 use `Object.create(null)`, computed keys accept only strings or finite numbers,
-evaluation is limited to 10,000 node visits and 64 nested calls, and no parser
-or evaluator is exposed publicly.
+evaluation is limited to 10,000 node visits and 64 nested calls, and an
+individual source longer than 65,536 UTF-16 code units or one that would exceed
+32,768 stored tokens fails closed before evaluation. No parser or evaluator is
+exposed publicly.
 
 ## Ownership and rendering
 
@@ -925,25 +976,27 @@ Events use one document listener per supported event type, plus composition
 start/end listeners for IME-safe models. Outside handlers query their current
 candidates at event time. Every top-level Promise returned by an action is
 observed against the boundary that produced it; repeated references to the same
-Promise are grouped across their owners. Pending observations retain only
-primitive tokens and resolve owners from the connected DOM, never from a global
-component registry.
+Promise are grouped across their owners. Pending observations retain their
+exact boundary records only while pending, participate in the move-aware
+removal observer, validate the live host again at settlement, and enqueue all
+still-valid owners in document order without scanning the document.
 
 No page-lifetime collection owns an element or scope. Components without owned
 lifecycle work remain DOM/WeakMap-owned and need no observer. A synchronous
 cleanup returned from `init()`, a listener/cleanup registered through the
-lifecycle context, or a pending `afterRender` callback enables one private,
-lazy, move-aware removal observer for lifecycle owners only. Structural
-removal, Morph replacement, and direct DOM removal dispose owned work exactly
-once; moving a host within the same document does not. The observer disconnects
-when the last lifecycle owner is released. Cleanup errors are reported while
-disposal continues.
+lifecycle context, a pending `afterRender` callback, a pending Promise
+observation, or a pending debounce enables one private, lazy, move-aware
+removal observer. Structural removal, Morph replacement, and direct DOM removal
+dispose owned work exactly once; moving a host within the same document does
+not. The observer disconnects when its last owner is released. Cleanup errors
+are reported while disposal continues.
 
 Explicit application references, such as a callback stored by another
 component, remain the application's responsibility and must be cleared when
-finished. A pending debounce retains only its compiled event state until the
-bounded timer settles; it does not retain the element or boundary store. The
-compile cache is capped at 256 sources. Loading the same runtime twice is a
+finished. A pending debounce holds its exact event element only until the
+bounded timer settles or the removal observer confirms a direct detach on the
+next microtask; that detach cancels even a 60-second timer. The compile cache is
+capped at 256 sources. Loading the same runtime twice is a
 no-op; a conflicting runtime fails before listeners are installed.
 
 Directive source, boundary kind, scope source, and component identity are
@@ -988,7 +1041,7 @@ unmount, or destroy methods.
   component definition containing only `{ open: false }`.
 - `examples/form.html`: `model` coercion, IME-safe text input, dynamic `class`,
   ordinary component methods, and invalid-model fail-closed behavior.
-- `examples/list.html`: template-only `if`, keyed `for`, add/remove/reorder by
+- `examples/list.html`: the template-fragment form of `if`, keyed `for`, add/remove/reorder by
   shallow array replacement, and retained DOM-local row state.
 - `examples/dialog.html`: an external `$dialog` command, an origin-preserving
   callback, and two independently dirty component boundaries.

@@ -35,6 +35,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 	if t == nil || tree == nil {
 		return nil, fmt.Errorf("render plan requires a tenant and route graph")
 	}
+	productionMinify := !AllowLocal
 	base := t.resolve()
 	snapshot, err := render.NewSnapshot(base)
 	if err != nil {
@@ -70,7 +71,10 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 				Source:  append([]byte(nil), component.JavaScript...),
 			}
 		}
-		plan.kitJSAssets, err = kitjavascript.NewDefaultAssetStore(tenantComponents...)
+		plan.kitJSAssets, err = kitjavascript.NewDefaultAssetStoreWithOptions(
+			kitjavascript.AssetStoreOptions{MinifyCore: productionMinify},
+			tenantComponents...,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("prepare KitJS asset store: %w", err)
 		}
@@ -83,7 +87,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			Path:          relative,
 			Notfound:      "notfound",
 			JitCSS:        true,
-			DefaultMinify: !AllowLocal,
+			DefaultMinify: productionMinify,
 			ThemeMode:     presentation.ThemeMode,
 			KitJSAssets:   plan.kitJSAssets,
 			Source:        snapshot,

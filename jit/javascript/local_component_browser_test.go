@@ -132,18 +132,19 @@ globalThis.__localTargetGraph = ` + stagedArtifactLiteral(target.Graph) + `;
   <button id="local-increment" type="button" data-kit-click="$test.increment()">Increment</button>
   <output id="local-output" data-kit-text="count">server</output>
 </section>
-<section id="missing" data-kit-component="missing" data-kit-local>
+<section id="missing" data-kit-component="missing">
   <output id="missing-output" data-kit-text="value">missing-ssr</output>
 </section>
 <section id="unknown" data-kit-component="unknown@1.0.0">
   <output id="unknown-output" data-kit-text="value">unknown-ssr</output>
 </section>
-<section id="managed-shadow" data-kit-component="managed" data-kit-local>
+<section id="managed-shadow" data-kit-component="managed">
   <output id="managed-shadow-output" data-kit-text="value">shadow-ssr</output>
 </section>
-<section id="versioned-local" data-kit-component="versioned-local" data-kit-local data-kit-version="1.0.0">
+<section id="versioned-local" data-kit-component="versioned-local@1.0.0">
   <output id="versioned-local-output" data-kit-text="value">versioned-ssr</output>
 </section>
+<div id="removed-local-marker" data-kit-local></div>
 </body></html>`
 }
 
@@ -255,8 +256,10 @@ document.addEventListener("DOMContentLoaded", function () {
       "unknown unmarked component did not remain graph-strict");
     assert(includes('client component "managed" conflicts with the installed graph'),
       "client host was allowed to shadow a managed component");
-    assert(includes("data-kit-local components cannot use data-kit-version"),
-      "versioned local component was not rejected");
+    assert(includes('component "versioned-local" is not present in the installed graph'),
+      "unknown managed component was not rejected");
+    assert(includes('unsupported directive in attribute "data-kit-local"'),
+      "removed data-kit-local marker was not rejected");
     assert(document.getElementById("missing-output").textContent.trim() === "missing-ssr" &&
       document.getElementById("unknown-output").textContent.trim() === "unknown-ssr" &&
       document.getElementById("managed-shadow-output").textContent.trim() === "shadow-ssr" &&

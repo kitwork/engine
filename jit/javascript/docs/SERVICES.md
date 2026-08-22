@@ -1,9 +1,9 @@
 # KitJS sealed services
 
 KitJS services are small, trusted platform primitives sealed into one Kit or
-Hydrate artifact. The current browser runtime is `0.9.0-next.12`; production
-uses `kit.0.9.0-next.12.<sha256>.js` or
-`hydrate.kit.0.9.0-next.12.<sha256>.js`. `kit.js` and `hydrate.kit.js` are
+Hydrate artifact. The current source-candidate browser runtime is
+`1.0.0-rc.1`; closed delivery uses `kit.1.0.0-rc.1.<sha256>.js` or
+`hydrate.kit.1.0.0-rc.1.<sha256>.js`. `kit.js` and `hydrate.kit.js` are
 development aliases. Services are not directives, components, a runtime
 package manager, or a generic native bridge.
 
@@ -38,7 +38,7 @@ application markup.
 
 ## Catalog
 
-The KitJS `0.9.0-next.12` closed-package catalog contains eleven services. Their
+The KitJS `1.0.0-rc.1` closed-package catalog contains eleven services. Their
 service contract versions are independent of the runtime version and are all
 currently `1.0.0`:
 
@@ -242,7 +242,7 @@ for example `-component-require app=storage=1.0.0`; they never publish a global
 HTML service locator. Service actions, component grants, and dependency edges
 all participate in the artifact identity.
 
-The output name includes runtime `0.9.0-next.12` and the full SHA-256 of the
+The output name includes runtime `1.0.0-rc.1` and the full SHA-256 of the
 exact bytes. Existing canonical files are never replaced, so older pages and
 open tabs can continue using their original closed graph.
 

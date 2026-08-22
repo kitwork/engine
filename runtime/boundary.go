@@ -19,14 +19,43 @@ func (vm *VM) currentInstruction() int {
 func (vm *VM) nativeValue(label string, call func() value.Value) (result value.Value) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			result = vm.diagnosticValue(
-				DiagnosticNativePanic,
-				fmt.Sprintf("Native panic in %s: %v", label, recovered),
-				vm.currentInstruction(),
-			)
+			result = vm.nativePanic(label, recovered)
 		}
 	}()
 	return call()
+}
+
+func (vm *VM) nativePanic(label string, recovered any) value.Value {
+	return vm.diagnosticValue(
+		DiagnosticNativePanic,
+		fmt.Sprintf("Native panic in %s: %v", label, recovered),
+		vm.currentInstruction(),
+	)
+}
+
+// nativeMethod keeps the hot INVOKE path free of a per-call closure and label
+// concatenation while preserving the same native-panic diagnostic boundary.
+func (vm *VM) nativeMethod(target value.Value, method string, args []value.Value) (result value.Value) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = vm.nativePanic("method "+method, recovered)
+		}
+	}()
+	return target.Invoke(method, args...)
+}
+
+func (vm *VM) nativeStandardMethod(
+	target value.Value,
+	method string,
+	standard value.Method,
+	args []value.Value,
+) (result value.Value) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = vm.nativePanic("method "+method, recovered)
+		}
+	}()
+	return standard(target, args...)
 }
 
 func (vm *VM) nativeAction(label string, call func()) value.Value {

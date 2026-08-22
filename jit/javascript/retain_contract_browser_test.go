@@ -140,7 +140,7 @@ __runStandaloneKitTest(async function () {
   var moved = parsedBody(
     '<div id="retain-parent-a">' +
       '<section data-test-host="removed" data-kit-retain="removed" data-kit-component="retain-one@1.0.0" data-kit-as="$removed"><span>remove moved</span></section>' +
-      '<section data-test-host="versioned" data-kit-retain="versioned" data-kit-component="retain-one" data-kit-version="1.0.0" data-kit-as="$versioned"><span>version moved</span></section>' +
+      '<section data-test-host="versioned" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-as="$versioned"><span>version moved</span></section>' +
     '</div>' +
     '<div id="retain-parent-b" data-layout="new">' +
       '<section data-test-host="secondary" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-as="$two" data-server="new-secondary"><span>secondary moved</span></section>' +
@@ -176,7 +176,6 @@ __runStandaloneKitTest(async function () {
 
   var recordedPrimaryScope = primaryScope;
   primary.setAttribute("data-kit-component", "retain-two@1.0.0");
-  primary.removeAttribute("data-kit-version");
   primary.setAttribute("data-kit-as", "$mutatedOne");
   var matchingMutation = parsedBody(
     '<section data-test-host="primary-mutated" data-kit-retain="primary" data-kit-component="retain-two@1.0.0" data-kit-as="$mutatedOne">' +
@@ -222,16 +221,16 @@ __runStandaloneKitTest(async function () {
     resetCalls++;
     return originalReset.apply(this, arguments);
   };
-  var valid = '<section data-kit-retain="safe" data-kit-component="retain-one" data-kit-version="1.0.0"></section>';
+  var valid = '<section data-kit-retain="safe" data-kit-component="retain-one@1.0.0"></section>';
   var invalidFixtures = [
-    { label: "empty", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain="" data-kit-component="retain-one" data-kit-version="1.0.0"></section></div>' },
-    { label: "whitespace", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain=" safe" data-kit-component="retain-one" data-kit-version="1.0.0"></section></div>' },
+    { label: "empty", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain="" data-kit-component="retain-one@1.0.0"></section></div>' },
+    { label: "whitespace", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain=" safe" data-kit-component="retain-one@1.0.0"></section></div>' },
     { label: "orphan", current: '<div>' + valid + '</div>', incoming: '<div><aside data-kit-retain="orphan"></aside></div>' },
-    { label: "duplicate incoming", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain="same" data-kit-component="retain-one" data-kit-version="1.0.0"></section><section data-kit-retain="same" data-kit-component="retain-two" data-kit-version="1.0.0"></section></div>' },
-    { label: "duplicate current", current: '<div><section data-kit-retain="same" data-kit-component="retain-one" data-kit-version="1.0.0"></section><section data-kit-retain="same" data-kit-component="retain-two" data-kit-version="1.0.0"></section></div>', incoming: '<div>' + valid + '</div>' },
-    { label: "template", current: '<div>' + valid + '</div>', incoming: '<div><template><section data-kit-retain="inside" data-kit-component="retain-one" data-kit-version="1.0.0"></section></template></div>' },
-    { label: "structural", current: '<div>' + valid + '</div>', incoming: '<div><template data-kit-if="true"><section data-kit-retain="inside" data-kit-component="retain-one" data-kit-version="1.0.0"></section></template></div>' },
-    { label: "nested", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain="outer" data-kit-component="retain-one" data-kit-version="1.0.0"><section data-kit-retain="inner" data-kit-component="retain-two" data-kit-version="1.0.0"></section></section></div>' }
+    { label: "duplicate incoming", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain="same" data-kit-component="retain-one@1.0.0"></section><section data-kit-retain="same" data-kit-component="retain-two@1.0.0"></section></div>' },
+    { label: "duplicate current", current: '<div><section data-kit-retain="same" data-kit-component="retain-one@1.0.0"></section><section data-kit-retain="same" data-kit-component="retain-two@1.0.0"></section></div>', incoming: '<div>' + valid + '</div>' },
+    { label: "template", current: '<div>' + valid + '</div>', incoming: '<div><template><section data-kit-retain="inside" data-kit-component="retain-one@1.0.0"></section></template></div>' },
+    { label: "structural", current: '<div>' + valid + '</div>', incoming: '<div><template data-kit-if="true"><section data-kit-retain="inside" data-kit-component="retain-one@1.0.0"></section></template></div>' },
+    { label: "nested", current: '<div>' + valid + '</div>', incoming: '<div><section data-kit-retain="outer" data-kit-component="retain-one@1.0.0"><section data-kit-retain="inner" data-kit-component="retain-two@1.0.0"></section></section></div>' }
   ];
   invalidFixtures.forEach(function (fixture) {
     var current = parsedBody(fixture.current).firstElementChild;
@@ -336,37 +335,37 @@ const retainBootDocument = `<!doctype html>
   </script>
   <script src=%q></script>
 </head><body>
-  <section data-test-boot="valid" data-kit-retain="valid" data-kit-component="retain-boot-valid" data-kit-version="1.0.0">
+  <section data-test-boot="valid" data-kit-retain="valid" data-kit-component="retain-boot-valid@1.0.0">
     <output id="retain-boot-valid-output" data-kit-text="label">server-valid</output>
   </section>
-  <section data-test-boot="empty" data-kit-retain="" data-kit-component="retain-boot-empty" data-kit-version="1.0.0">
+  <section data-test-boot="empty" data-kit-retain="" data-kit-component="retain-boot-empty@1.0.0">
     <output id="retain-boot-empty-output" data-kit-text="label">server-empty</output>
   </section>
-  <section data-test-boot="token" data-kit-retain="0invalid" data-kit-component="retain-boot-token" data-kit-version="1.0.0">
+  <section data-test-boot="token" data-kit-retain="0invalid" data-kit-component="retain-boot-token@1.0.0">
     <output id="retain-boot-token-output" data-kit-text="label">server-token</output>
   </section>
-  <section data-test-boot="duplicate-a" data-kit-retain="duplicate" data-kit-component="retain-boot-duplicate-a" data-kit-version="1.0.0">
+  <section data-test-boot="duplicate-a" data-kit-retain="duplicate" data-kit-component="retain-boot-duplicate-a@1.0.0">
     <output id="retain-boot-duplicate-a-output" data-kit-text="label">server-duplicate-a</output>
   </section>
-  <section data-test-boot="duplicate-b" data-kit-retain="duplicate" data-kit-component="retain-boot-duplicate-b" data-kit-version="1.0.0">
+  <section data-test-boot="duplicate-b" data-kit-retain="duplicate" data-kit-component="retain-boot-duplicate-b@1.0.0">
     <output id="retain-boot-duplicate-b-output" data-kit-text="label">server-duplicate-b</output>
   </section>
-  <section data-test-boot="nested-a" data-kit-retain="nested-a" data-kit-component="retain-boot-nested-a" data-kit-version="1.0.0">
+  <section data-test-boot="nested-a" data-kit-retain="nested-a" data-kit-component="retain-boot-nested-a@1.0.0">
     <output id="retain-boot-nested-a-output" data-kit-text="label">server-nested-a</output>
-    <section data-test-boot="nested-b" data-kit-retain="nested-b" data-kit-component="retain-boot-nested-b" data-kit-version="1.0.0">
+    <section data-test-boot="nested-b" data-kit-retain="nested-b" data-kit-component="retain-boot-nested-b@1.0.0">
       <output id="retain-boot-nested-b-output" data-kit-text="label">server-nested-b</output>
     </section>
   </section>
   <aside data-test-boot="orphan" data-kit-retain="orphan">orphan remains plain</aside>
   <template id="retain-boot-template">
-    <section data-kit-retain="template" data-kit-component="retain-boot-template" data-kit-version="1.0.0">
+    <section data-kit-retain="template" data-kit-component="retain-boot-template@1.0.0">
       <output data-kit-text="label">server-template</output>
     </section>
   </template>
-  <section data-test-boot="owner" data-kit-component="retain-boot-owner" data-kit-version="1.0.0">
+  <section data-test-boot="owner" data-kit-component="retain-boot-owner@1.0.0">
     <output id="retain-boot-owner-output" data-kit-text="label">server-owner</output>
     <template id="retain-boot-structural-template" data-kit-if="visible">
-      <section data-test-boot="structural" data-kit-retain="structural" data-kit-component="retain-boot-structural" data-kit-version="1.0.0">
+      <section data-test-boot="structural" data-kit-retain="structural" data-kit-component="retain-boot-structural@1.0.0">
         <output data-kit-text="label">server-structural</output>
       </section>
     </template>
@@ -431,25 +430,25 @@ func TestBrowserDriveRetainPreflightBeforeDocumentMutation(t *testing.T) {
 	contractSource := []byte(browserHarness + "\n" + retainDriveAssertions)
 	contractIntegrity := driveScriptIntegrity(contractSource)
 	invalidBodies := map[string]string{
-		"/retain-empty":      `<section data-kit-retain="" data-kit-component="retain-one" data-kit-version="1.0.0"></section>`,
-		"/retain-whitespace": `<section data-kit-retain=" one" data-kit-component="retain-one" data-kit-version="1.0.0"></section>`,
-		"/retain-invalid":    `<section data-kit-retain="0one" data-kit-component="retain-one" data-kit-version="1.0.0"></section>`,
+		"/retain-empty":      `<section data-kit-retain="" data-kit-component="retain-one@1.0.0"></section>`,
+		"/retain-whitespace": `<section data-kit-retain=" one" data-kit-component="retain-one@1.0.0"></section>`,
+		"/retain-invalid":    `<section data-kit-retain="0one" data-kit-component="retain-one@1.0.0"></section>`,
 		"/retain-orphan":     `<aside data-kit-retain="orphan">orphan poison</aside>`,
-		"/retain-duplicate": `<section data-kit-retain="same" data-kit-component="retain-one" data-kit-version="1.0.0"></section>
-<section data-kit-retain="same" data-kit-component="retain-two" data-kit-version="1.0.0"></section>`,
-		"/retain-template":   `<template><section data-kit-retain="inside" data-kit-component="retain-one" data-kit-version="1.0.0"></section></template>`,
-		"/retain-structural": `<template data-kit-if="true"><section data-kit-retain="inside" data-kit-component="retain-one" data-kit-version="1.0.0"></section></template>`,
-		"/retain-nested": `<section data-kit-retain="outer" data-kit-component="retain-one" data-kit-version="1.0.0">
-  <section data-kit-retain="inner" data-kit-component="retain-two" data-kit-version="1.0.0"></section>
+		"/retain-duplicate": `<section data-kit-retain="same" data-kit-component="retain-one@1.0.0"></section>
+<section data-kit-retain="same" data-kit-component="retain-two@1.0.0"></section>`,
+		"/retain-template":   `<template><section data-kit-retain="inside" data-kit-component="retain-one@1.0.0"></section></template>`,
+		"/retain-structural": `<template data-kit-if="true"><section data-kit-retain="inside" data-kit-component="retain-one@1.0.0"></section></template>`,
+		"/retain-nested": `<section data-kit-retain="outer" data-kit-component="retain-one@1.0.0">
+  <section data-kit-retain="inner" data-kit-component="retain-two@1.0.0"></section>
 </section>`,
-		"/retain-version": `<section data-kit-retain="one" data-kit-component="retain-one" data-kit-version="2.0.0"></section>`,
+		"/retain-version": `<section data-kit-retain="one" data-kit-component="retain-one@2.0.0"></section>`,
 	}
 	validCurrentBody := retainDriveHosts("Valid current poison", false)
 	identityBody := `<main id="retain-route">Identity committed</main>
-<section data-test-host="one-next" data-kit-retain="one" data-kit-component="retain-two" data-kit-version="1.0.0" data-kit-as="$one">
+<section data-test-host="one-next" data-kit-retain="one" data-kit-component="retain-two@1.0.0" data-kit-as="$one">
   <output id="retain-one-next-count" data-kit-text="count">fresh one</output>
 </section>
-<section data-test-host="two-next" data-kit-retain="two" data-kit-component="retain-two" data-kit-version="1.0.0" data-kit-as="$twoNext">
+<section data-test-host="two-next" data-kit-retain="two" data-kit-component="retain-two@1.0.0" data-kit-as="$twoNext">
   <output id="retain-two-next-count" data-kit-text="count">fresh two</output>
 </section>`
 
@@ -557,11 +556,11 @@ func retainDriveHosts(route string, controls bool) string {
 		button = `<button id="retain-drive-add" type="button" data-kit-click="increment()">increment</button>`
 	}
 	return fmt.Sprintf(`<main id="retain-route">%s</main>
-<section data-test-host="one" data-kit-retain="one" data-kit-component="retain-one" data-kit-version="1.0.0" data-kit-as="$one">
+<section data-test-host="one" data-kit-retain="one" data-kit-component="retain-one@1.0.0" data-kit-as="$one">
   %s
   <output id="retain-drive-count" data-kit-text="count">server one</output>
 </section>
-<section data-test-host="two" data-kit-retain="two" data-kit-component="retain-two" data-kit-version="1.0.0" data-kit-as="$two">
+<section data-test-host="two" data-kit-retain="two" data-kit-component="retain-two@1.0.0" data-kit-as="$two">
   <output data-kit-text="count">server two</output>
 </section>`, route, button)
 }
@@ -673,13 +672,12 @@ const retainDriveAssertions = `__runStandaloneKitTest(async function () {
     await rejectCurrent(label, function () { body.appendChild(container); }, function () { container.remove(); });
   }
   await rejectInsertedCurrent("template",
-    '<template><section data-kit-retain="inside" data-kit-component="retain-one" data-kit-version="1.0.0"></section></template>');
+    '<template><section data-kit-retain="inside" data-kit-component="retain-one@1.0.0"></section></template>');
   await rejectInsertedCurrent("structural",
-    '<template data-kit-if="true"><section data-kit-retain="inside" data-kit-component="retain-one" data-kit-version="1.0.0"></section></template>');
+    '<template data-kit-if="true"><section data-kit-retain="inside" data-kit-component="retain-one@1.0.0"></section></template>');
   var nested = document.createElement("section");
   nested.setAttribute("data-kit-retain", "nested");
-  nested.setAttribute("data-kit-component", "retain-two");
-  nested.setAttribute("data-kit-version", "1.0.0");
+  nested.setAttribute("data-kit-component", "retain-two@1.0.0");
   await rejectCurrent("nested", function () { one.appendChild(nested); }, function () { nested.remove(); });
 
   document.getElementById("retain-identity-link").click();
@@ -769,7 +767,7 @@ func retainGCDocument(assetPath, assetIntegrity, contractIntegrity string, initi
 	body := `<main id="retain-gc-route">Retained host removed</main>`
 	if initial {
 		title = "Retain GC"
-		body = `<section id="retain-gc-host" data-kit-retain="gc-host" data-kit-component="retain-gc" data-kit-version="1.0.0">
+		body = `<section id="retain-gc-host" data-kit-retain="gc-host" data-kit-component="retain-gc@1.0.0">
     <output data-kit-text="value">server</output>
   </section>
   <a id="retain-gc-next" href="/retain-gc-next">remove retained host</a>`
@@ -802,7 +800,7 @@ func retainGCExternalContract(t *testing.T, assetPath string) []byte {
 const retainGCInitialDocument = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Retain GC</title><script src=%q></script></head>
 <body>
-  <section id="retain-gc-host" data-kit-retain="gc-host" data-kit-component="retain-gc" data-kit-version="1.0.0">
+  <section id="retain-gc-host" data-kit-retain="gc-host" data-kit-component="retain-gc@1.0.0">
     <output data-kit-text="value">server</output>
   </section>
   <a id="retain-gc-next" href="/retain-gc-next">remove retained host</a>

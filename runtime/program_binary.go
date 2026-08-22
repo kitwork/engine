@@ -14,7 +14,6 @@ const (
 	// It is independent from BytecodeVersion so storage framing can evolve
 	// without claiming that opcode semantics changed.
 	ProgramEncodingVersion uint16 = 1
-	MaxProgramBinarySize          = 16 << 20
 )
 
 var programBinaryMagic = [4]byte{'K', 'W', 'P', 'B'}

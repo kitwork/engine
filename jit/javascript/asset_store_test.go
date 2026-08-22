@@ -17,7 +17,7 @@ func TestAssetStorePreservesStagedCASLifecycleAndDetachedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delivery, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`))
+	delivery, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar@2.0.0"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestAssetStorePreparedGenerationUsesRouteGraphsAndSharedBaseChunks(t *testi
 	}
 	defer store.Close()
 	scopeSource := []byte(`<html><main data-kit-scope="count: 0"></main></html>`)
-	progressSource := []byte(`<html><main data-kit-component="progress-bar" data-kit-version="2.0.0"></main></html>`)
+	progressSource := []byte(`<html><main data-kit-component="progress-bar@2.0.0"></main></html>`)
 	scope, err := ScanHTML(scopeSource)
 	if err != nil {
 		t.Fatal(err)
@@ -118,8 +118,8 @@ func TestAssetStoreBundlesOnlyComponentsSharedByEveryPreparedDocument(t *testing
 		t.Fatal(err)
 	}
 	defer store.Close()
-	homeSource := []byte(`<html><body data-kit-component="app" data-kit-version="1.1.0" data-kit-as="$app"><div data-kit-component="theme" data-kit-version="3.0.0"></div><main data-kit-component="dialog" data-kit-version="2.0.0"></main></body></html>`)
-	docsSource := []byte(`<html><body data-kit-component="app" data-kit-version="1.1.0" data-kit-as="$app"><div data-kit-component="theme" data-kit-version="3.0.0"></div><main data-kit-component="dropdown" data-kit-version="2.0.0"></main></body></html>`)
+	homeSource := []byte(`<html><body data-kit-component="app@1.1.0" data-kit-as="$app"><div data-kit-component="theme@3.0.0"></div><main data-kit-component="dialog@2.0.0"></main></body></html>`)
+	docsSource := []byte(`<html><body data-kit-component="app@1.1.0" data-kit-as="$app"><div data-kit-component="theme@3.0.0"></div><main data-kit-component="dropdown@2.0.0"></main></body></html>`)
 	home, err := ScanHTML(homeSource)
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +130,10 @@ func TestAssetStoreBundlesOnlyComponentsSharedByEveryPreparedDocument(t *testing
 	}
 	if err := store.PrepareGeneration([]ScanResult{home, docs}); err != nil {
 		t.Fatal(err)
+	}
+	materialized := store.generation.packageMaterializations
+	if materialized.components != 4 || materialized.bundles != 1 {
+		t.Fatalf("shared generation materializations = %+v, want four components and one bundle", materialized)
 	}
 	homeDelivery, err := store.ComposeHTML(homeSource)
 	if err != nil {
@@ -208,7 +212,7 @@ func TestAssetStoreRejectsGenerationReplacementWithoutRetainingCandidate(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	progress, err := ScanHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`))
+	progress, err := ScanHTML([]byte(`<main data-kit-component="progress-bar@2.0.0"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +242,7 @@ func TestAssetStoreConcurrentCompositionDeduplicatesChunks(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			delivery, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`))
+			delivery, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar@2.0.0"></main>`))
 			if err != nil {
 				errorsSeen <- err
 				return
@@ -278,7 +282,7 @@ func TestAssetStoreBoundsAreAtomicAndHashValidationIsClosed(t *testing.T) {
 	if _, err := store.ComposeHTML([]byte(`<main data-kit-scope="count: 0"></main>`)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`)); !errors.Is(err, ErrAssetCapacity) {
+	if _, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar@2.0.0"></main>`)); !errors.Is(err, ErrAssetCapacity) {
 		t.Fatalf("capacity error=%v", err)
 	}
 	if store.Len() != 2 {
@@ -297,7 +301,7 @@ func TestInjectDeliveryPreservesOrderedRoleAndHashTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	delivery, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`))
+	delivery, err := store.ComposeHTML([]byte(`<main data-kit-component="progress-bar@2.0.0"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}

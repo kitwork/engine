@@ -18,10 +18,11 @@
 package theme
 
 import (
-	htmlstd "html"
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
 // prepaint runs before paint: an explicit stored light/dark mode wins; missing, invalid, or
@@ -80,9 +81,8 @@ func Canonicalize(source string) string {
 // present in this particular document. The other forms keep the component adapter and historical
 // trusted-JavaScript spellings working.
 func usesTheme(source string) bool {
-	decoded := htmlstd.UnescapeString(source)
-	return componentValueIs(componentRe, decoded, "app", "theme") ||
-		attributeValueIs(actionRe, decoded, "theme") || apiRe.MatchString(decoded)
+	return componentValueIs(componentRe, source, "app", "theme") ||
+		attributeValueIs(actionRe, source, "theme") || apiRe.MatchString(source)
 }
 
 // componentValueIs accepts the client-owned unversioned spelling and the
@@ -119,7 +119,7 @@ func attributeValueIs(pattern *regexp.Regexp, source string, expected ...string)
 func matchedAttributeValue(match []string) string {
 	for index := 1; index < len(match); index++ {
 		if match[index] != "" {
-			return strings.TrimFunc(match[index], isECMAScriptSpace)
+			return strings.TrimFunc(htmlattr.Decode(match[index]), isECMAScriptSpace)
 		}
 	}
 	return ""

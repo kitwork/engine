@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const requestFormArtifactName = "hydrate.kit.0.9.0-next.12.f7b86e4c317e18003127ebb77e3f86e218a96d4133439cbaf696d93260be710c.js"
+const requestFormArtifactName = "hydrate.kit.1.0.0-rc.2.6a945301ff19ec85f0e5e3f3e18438a050af63a40ed45ec968a43bfa76014da2.js"
 
 var requestFormProgressHostRE = regexp.MustCompile(`(?is)<section\b[^>]*\bdata-kit-retain\s*=\s*"request-progress"[^>]*>`)
 
@@ -52,8 +52,8 @@ func TestRequestFormExampleContract(t *testing.T) {
 			t.Fatalf("request-form/%s must contain exactly one stable Hydrate artifact tag", name)
 		}
 		for _, required := range []string{
-			`data-kit-retain="request-progress"`, `data-kit-component="progress-bar"`,
-			`data-kit-version="2.0.0"`, `data-kit-show="visible"`, `role="progressbar"`, `max-w-8xl`,
+			`data-kit-retain="request-progress"`, `data-kit-component="progress-bar@2.0.0"`,
+			`data-kit-show="visible"`, `role="progressbar"`, `max-w-8xl`,
 			`class="pointer-events-none fixed inset-x-0 top-0 z-50 h-1"`,
 			`id="request-progress-label" class="sr-only"`,
 			`class="h-1 w-full overflow-hidden bg-slate-800"`,
@@ -66,7 +66,7 @@ func TestRequestFormExampleContract(t *testing.T) {
 		}
 		for _, forbidden := range []string{
 			"__SHA256__", "data-kit-app", "data-kit-hydrate", "data-kit-style", "<style", "<script type=\"module\"",
-			`data-kit-component="progress-bar@`, `data-kit-component="request-form@`, `data-kit-target`,
+			`data-kit-target`,
 		} {
 			if strings.Contains(strings.ToLower(source), strings.ToLower(forbidden)) {
 				t.Fatalf("request-form/%s contains forbidden construct %q", name, forbidden)
@@ -92,7 +92,7 @@ func TestRequestFormExampleContract(t *testing.T) {
 
 	index := string(readVanillaFile(t, "examples", "request-form", "index.html"))
 	for _, required := range []string{
-		`data-kit-component="request-form"`, `data-kit-version="1.0.0"`,
+		`data-kit-component="request-form@1.0.0"`,
 		`data-kit-submit:prevent="save()"`, `data-kit-model="name"`, `data-kit-model="email"`,
 		`id="request-profile-save"`, `id="request-profile-latest"`, `id="request-profile-fail"`,
 		`id="request-profile-cancel"`,

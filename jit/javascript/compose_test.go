@@ -47,12 +47,8 @@ func TestComposerClosesCurrentProgressBarPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := composer.ComposeHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if canonical.ContentHash != legacy.ContentHash || !bytes.Equal(canonical.JavaScript, legacy.JavaScript) {
-		t.Fatal("canonical and legacy progress-bar@2.0.0 pins resolved differently")
+	if _, err := composer.ComposeHTML([]byte(`<main data-kit-component="progress-bar" data-kit-version="2.0.0"></main>`)); !errors.Is(err, ErrUnsupportedAttribute) {
+		t.Fatalf("removed split progress-bar pin error = %v", err)
 	}
 	for _, marker := range [][]byte{
 		[]byte(`kit.service("progress"`),

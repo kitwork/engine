@@ -188,10 +188,11 @@ func TestBrowserStandaloneDriveInvalidInitialScriptTopologyDoesNotIntercept(t *t
   <meta charset="utf-8">
   <title>Invalid initial stable topology</title>
   <script defer src="/invalid-prelude.js" integrity="%s" crossorigin="anonymous"></script>
-  <script defer src="/invalid-hydrate.js"></script>
+  <script defer src="/invalid-hydrate.js" data-kit-drive="stable"></script>
   <script defer src="/invalid-contract.js" integrity="%s" crossorigin="anonymous"></script>
 </head>
 <body>
+  <script>globalThis.__invalidInitialInlineRan = true;</script>
   <main id="invalid-initial-route">Initial</main>
   <a id="invalid-initial-link" href="/invalid-initial-target">Target</a>
 </body>
@@ -234,6 +235,60 @@ func TestBrowserStandaloneDriveInvalidInitialScriptTopologyDoesNotIntercept(t *t
 	if got := nativeRequests.Load(); got != 1 {
 		t.Fatalf("invalid initial topology issued %d native requests, want one", got)
 	}
+}
+
+func TestBrowserStandaloneDriveDiagnosticRedactsScriptSource(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping standalone Drive diagnostic-redaction browser contract in short mode")
+	}
+	browser := findVanillaBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+
+	hydrateJS, err := SourceForProfile(ProfileHydrate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prelude := []byte(stableDriveInvalidPreludeSource)
+	authored := []byte(`globalThis.__diagnosticAuthoredRan = true;`)
+	contract := []byte(stableDriveDiagnosticRedactionContractSource)
+	document := fmt.Sprintf(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Drive diagnostic redaction</title>
+  <script defer src="/diagnostic-prelude.js" integrity="%s" crossorigin="anonymous"></script>
+  <script defer src="/diagnostic-hydrate.js" data-kit-drive="stable"></script>
+  <script defer src="/diagnostic-authored.js?access_token=kit-secret-query-7f3c#kit-secret-fragment-91ad"></script>
+  <script defer src="/diagnostic-contract.js" integrity="%s" crossorigin="anonymous"></script>
+</head>
+<body><main>Diagnostic redaction</main></body>
+</html>`, driveScriptIntegrity(prelude), driveScriptIntegrity(contract))
+
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/diagnostic-prelude.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(prelude)
+		case "/diagnostic-hydrate.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(hydrateJS)
+		case "/diagnostic-authored.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(authored)
+		case "/diagnostic-contract.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(contract)
+		case "/diagnostic-redaction":
+			writeHydrateHTML(response, document)
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	runVanillaBrowser(t, browser, server.URL+"/diagnostic-redaction")
 }
 
 func TestBrowserStagedDriveKeepsAuthoredStableScriptOutsideManagedLane(t *testing.T) {
@@ -440,12 +495,12 @@ func stagedAuthoredStableDocument(assembly StagedAssembly, title, route string, 
   <a id="staged-managed-downgrade-link" href="/staged-stable/managed-downgrade">Managed integrity downgrade</a>
 </nav>
 <main id="staged-stable-route">` + html.EscapeString(route) + `</main>
-<section id="staged-stable-base" data-kit-component="staged-stable-base" data-kit-version="1.0.0">
+<section id="staged-stable-base" data-kit-component="staged-stable-base@1.0.0">
   <button id="staged-stable-add" type="button" data-kit-click="count = count + 1">Add</button>
   <output id="staged-stable-value" data-kit-text="count">0</output>
 </section>`)
 	if includeExtra {
-		output.WriteString(`<section id="staged-stable-extra" data-kit-component="staged-stable-extra" data-kit-version="1.0.0">
+		output.WriteString(`<section id="staged-stable-extra" data-kit-component="staged-stable-extra@1.0.0">
   <output id="staged-stable-extra-value" data-kit-text="ready">server</output>
 </section>`)
 	}
@@ -582,6 +637,14 @@ __runStandaloneKitTest(async function () {
   });
   assert(disabledWarnings.length === 1,
     "invalid initial topology warning count was " + disabledWarnings.length + " instead of one");
+  var warning = disabledWarnings[0] || "";
+  assert(warning.indexOf("Cause: an executable inline script cannot survive Morph") >= 0,
+    "invalid initial topology warning omitted the precise cause: " + warning);
+  assert(warning.indexOf("Offending script: inline <script> in <body>") >= 0,
+    "invalid initial topology warning omitted the offending script: " + warning);
+  assert(warning.indexOf("Remedy: move its code to a same-origin external classic script in <head>") >= 0 &&
+    warning.indexOf("data-kit-drive=\"stable\"") >= 0,
+    "invalid initial topology warning omitted an actionable remedy: " + warning);
 
   var path = location.pathname + location.search + location.hash;
   var historyLength = history.length;
@@ -596,6 +659,23 @@ __runStandaloneKitTest(async function () {
     "204 native navigation mutated the invalid initial document");
   assert(document.getElementById("invalid-initial-route").textContent.trim() === "Initial",
     "invalid initial topology mutated the document");
+});`
+
+const stableDriveDiagnosticRedactionContractSource = browserHarness + `
+__runStandaloneKitTest(async function () {
+  var assert = __kitTestAssert;
+  var warnings = globalThis.__stableInvalidInitial.warnings.filter(function (message) {
+    return message.indexOf("KitJS Drive") >= 0 && message.indexOf("disabled") >= 0;
+  });
+  assert(warnings.length === 1, "diagnostic redaction warning count was " + warnings.length);
+  var warning = warnings[0] || "";
+  assert(warning.indexOf("Cause: the script has no stable identity") >= 0,
+    "diagnostic redaction warning omitted its cause: " + warning);
+  assert(warning.indexOf("Offending script: <script src=\"/diagnostic-authored.js?[redacted]#[redacted]\">") >= 0,
+    "diagnostic redaction warning lost its useful pathname: " + warning);
+  assert(warning.indexOf("kit-secret-query-7f3c") < 0 && warning.indexOf("kit-secret-fragment-91ad") < 0 &&
+    warning.indexOf("access_token") < 0,
+    "diagnostic warning exposed URL credentials: " + warning);
 });`
 
 const stagedAuthoredStableSource = `(function (global) {

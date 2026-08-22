@@ -220,8 +220,8 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 }
 
 // addComponentPackages overlays one detached tenant catalog on this composer.
-// Every name has exactly one version so an omitted data-kit-version resolves
-// deterministically, while an explicit matching exact version remains valid.
+// Every name has exactly one version so an authored name@exact-semver identity
+// resolves deterministically against the detached tenant catalog.
 func (catalog *deliveryCatalog) addComponentPackages(packages []ComponentPackage) error {
 	if catalog == nil {
 		return fmt.Errorf("%w: nil delivery catalog", ErrInvalidModule)
@@ -257,19 +257,49 @@ func (catalog *deliveryCatalog) addComponentPackages(packages []ComponentPackage
 }
 
 func (catalog *deliveryCatalog) component(name, version string) (catalogComponent, error) {
+	identity, err := catalog.componentIdentity(name, version)
+	if err != nil {
+		return catalogComponent{}, err
+	}
+	component := catalog.components[identity.Name][identity.Version]
+	component.requires = append([]ServiceVersion(nil), component.requires...)
+	component.source = append([]byte(nil), component.source...)
+	return component, nil
+}
+
+// componentIdentity resolves catalog defaults without detaching package
+// source. Generation preparation uses it to deduplicate repeated document
+// graphs before any potentially large tenant component bytes are copied.
+func (catalog *deliveryCatalog) componentIdentity(name, version string) (ComponentVersion, error) {
 	versions, exists := catalog.components[name]
 	if !exists {
-		return catalogComponent{}, fmt.Errorf("%w: %s", ErrModuleNotFound, name)
+		return ComponentVersion{}, fmt.Errorf("%w: %s", ErrModuleNotFound, name)
 	}
 	if version == "" {
 		version = catalog.componentDefault[name]
 	}
 	component, exists := versions[version]
 	if !exists {
-		return catalogComponent{}, fmt.Errorf("%w: %s@%s", ErrModuleNotFound, name, version)
+		return ComponentVersion{}, fmt.Errorf("%w: %s@%s", ErrModuleNotFound, name, version)
 	}
-	component.requires = append([]ServiceVersion(nil), component.requires...)
-	component.source = append([]byte(nil), component.source...)
+	return component.identity, nil
+}
+
+// componentView returns one immutable catalog entry without detaching its
+// package bytes. It is private to generation preparation, where exact package
+// identities are normalized and copied once into generation-local artifacts.
+func (catalog *deliveryCatalog) componentView(identity ComponentVersion) (catalogComponent, error) {
+	if catalog == nil {
+		return catalogComponent{}, fmt.Errorf("%w: nil delivery catalog", ErrInvalidModule)
+	}
+	versions, exists := catalog.components[identity.Name]
+	if !exists {
+		return catalogComponent{}, fmt.Errorf("%w: %s", ErrModuleNotFound, identity.Name)
+	}
+	component, exists := versions[identity.Version]
+	if !exists {
+		return catalogComponent{}, fmt.Errorf("%w: %s@%s", ErrModuleNotFound, identity.Name, identity.Version)
+	}
 	return component, nil
 }
 
@@ -281,5 +311,18 @@ func (catalog *deliveryCatalog) service(identity ServiceVersion) (catalogService
 	service.requires = append([]ServiceVersion(nil), service.requires...)
 	service.actions = append([]string(nil), service.actions...)
 	service.source = append([]byte(nil), service.source...)
+	return service, nil
+}
+
+// serviceView is the service equivalent of componentView. The returned slices
+// alias the immutable catalog and must never escape generation preparation.
+func (catalog *deliveryCatalog) serviceView(identity ServiceVersion) (catalogService, error) {
+	if catalog == nil {
+		return catalogService{}, fmt.Errorf("%w: nil delivery catalog", ErrInvalidModule)
+	}
+	service, exists := catalog.services[identity.Name]
+	if !exists || service.identity.Version != identity.Version {
+		return catalogService{}, fmt.Errorf("%w: required service %s@%s", ErrModuleNotFound, identity.Name, identity.Version)
+	}
 	return service, nil
 }

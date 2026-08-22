@@ -22,6 +22,15 @@ func TestCompileAuthoredAttributeUsesBrowserValue(t *testing.T) {
 	}
 }
 
+func TestAuthoredAttributeUsesAttributeContextAndHTMLPreprocessing(t *testing.T) {
+	if got := authoredAttribute("'&notit;'\r\n"); got != "'&notit;'\n" {
+		t.Fatalf("authoredAttribute ambiguous entity/newline = %q", got)
+	}
+	if got := authoredAttribute("'&notin;'"); got != "'∉'" {
+		t.Fatalf("authoredAttribute named entity = %q", got)
+	}
+}
+
 func TestPreRenderDecodesExpressionAndModelEntitiesOnce(t *testing.T) {
 	input := marker +
 		`<input data-kit-model="name" value="Tom &amp; Jerry">` +

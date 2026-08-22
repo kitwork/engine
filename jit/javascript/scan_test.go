@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-func TestScanComponentsReadsInlineAndLegacyExactVersions(t *testing.T) {
+func TestScanComponentsReadsInlineExactVersions(t *testing.T) {
 	t.Parallel()
 	source := []byte(`<!doctype html>
 <html data-kit-component="app@1.1.0" data-kit-as="$app">
-  <div DATA-KIT-AS='$theme' DATA-KIT-COMPONENT='theme' DATA-KIT-VERSION='2.0.0'></div>
+  <div DATA-KIT-AS='$theme' DATA-KIT-COMPONENT='theme@2.0.0'></div>
   <div data-kit-component="progress-bar@1.2.3-rc.1+build.7"></div>
   <x-panel data-kit-component=dialog></x-panel>
 </html>`)
@@ -61,6 +61,88 @@ func TestScanComponentsIgnoresCommentsAndRawText(t *testing.T) {
 	}
 }
 
+func TestScanHTMLTagNameStateKeepsScriptLikeCustomElementsLive(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		suffix []byte
+	}{
+		{name: "underscore", suffix: []byte("_")},
+		{name: "period", suffix: []byte(".")},
+		{name: "NUL", suffix: []byte{0}},
+		{name: "non-ASCII", suffix: []byte("é")},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			var source []byte
+			source = append(source, []byte("<script")...)
+			source = append(source, test.suffix...)
+			source = append(source, []byte(`><div data-kit-component="dialog@1.0.0"></div></script`)...)
+			source = append(source, test.suffix...)
+			source = append(source, []byte(`>
+<script>var sample = '<div data-kit-component="theme@2.0.0"></div>';</script>
+<DIV><span data-kit-component="toast@1.0.0"></span></DIV>`)...)
+
+			result, err := ScanHTML(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Components) != 2 || result.Components[0].Name != "dialog" ||
+				result.Components[1].Name != "toast" {
+				t.Fatalf("script-like custom tag scan = %#v, want live dialog and toast only", result.Components)
+			}
+		})
+	}
+
+	for _, suffix := range [][]byte{[]byte("_"), []byte("."), {0}, []byte("é")} {
+		source := append([]byte("<script"), suffix...)
+		source = append(source, []byte(` data-kitwork-jit="runtime"></script`)...)
+		source = append(source, suffix...)
+		source = append(source, '>')
+		if hasRuntimeMarkerAttribute(source) {
+			t.Errorf("script-like custom tag %q was mistaken for an engine runtime marker", source)
+		}
+	}
+	if !hasRuntimeMarkerAttribute([]byte(`<SCRIPT data-kitwork-jit="runtime"></SCRIPT>`)) {
+		t.Error("ordinary ASCII-case-insensitive script marker was not detected")
+	}
+}
+
+func TestScanHTMLAttributeNamesUseASCIIOnlyCaseFolding(t *testing.T) {
+	t.Parallel()
+	result, err := ScanHTML([]byte(`<div data-Kit-component="dialog@1.0.0" data-Kit-text="label"></div>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NeedsRuntime || len(result.Components) != 0 || len(result.LocalComponents) != 0 {
+		t.Fatalf("Unicode-lookalike attribute selected KitJS: %#v", result)
+	}
+	if hasRuntimeMarkerAttribute([]byte(`<script data-Kitwork-jit="runtime"></script>`)) {
+		t.Error("Unicode-lookalike attribute was mistaken for an engine runtime marker")
+	}
+}
+
+func TestScanHTMLRawTextEndTagAcceptsSlashDelimiter(t *testing.T) {
+	t.Parallel()
+	source := []byte(`<script>var sample = '<div data-kit-component="theme@2.0.0"></div>';</script/><div data-kit-component="dialog@1.0.0"></div>`)
+	result, err := ScanHTML(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Components) != 1 || result.Components[0].Name != "dialog" {
+		t.Fatalf("slash-delimited raw-text close scan = %#v, want live dialog only", result.Components)
+	}
+
+	closeStart, closeEnd, ok := deliveryRawTextClose(source, len(`<script>`), len(source), "script")
+	if !ok || string(source[closeStart:closeEnd]) != `</script/>` {
+		t.Fatalf("delivery raw-text close = (%d, %d, %t) %q, want </script/>",
+			closeStart, closeEnd, ok, source[closeStart:closeEnd])
+	}
+}
+
 func TestScanHTMLDetectsImplementedRuntimeDirectivesAndEvents(t *testing.T) {
 	t.Parallel()
 	tests := []string{
@@ -71,6 +153,7 @@ func TestScanHTMLDetectsImplementedRuntimeDirectivesAndEvents(t *testing.T) {
 		`<div data-kit-style="width: progress + '%'; opacity: open ? 1 : 0;"></div>`,
 		`<input data-kit-model="query">`,
 		`<section data-kit-scope="count: 0;"></section>`,
+		`<div data-kit-if="open"><p data-kit-text="label"></p></div>`,
 		`<template data-kit-if="open"><p data-kit-text="label"></p></template>`,
 		`<template data-kit-for="item, index of items" data-kit-key="item.id"><p data-kit-text="item.name"></p></template>`,
 		`<button data-kit-click="run()"></button>`,
@@ -96,10 +179,40 @@ func TestScanHTMLDetectsImplementedRuntimeDirectivesAndEvents(t *testing.T) {
 	}
 }
 
+func TestScanHTMLDirectIfKeepsClosedGraphAndExpressionValidation(t *testing.T) {
+	t.Parallel()
+	result, err := ScanHTML([]byte(`<main data-kit-scope="open: true">
+  <section data-kit-if="open" data-kit-component="dialog@1.0.0"></section>
+</main>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.NeedsRuntime || len(result.Components) != 1 ||
+		result.Components[0].Name != "dialog" || result.Components[0].Version != "1.0.0" {
+		t.Fatalf("direct-if graph scan = %#v, want exact dialog component", result)
+	}
+
+	if _, err := ScanHTML([]byte(`<main data-kit-scope="open: true"><div data-kit-if="open(">fallback</div></main>`)); !errors.Is(err, ErrInvalidExpressionUse) {
+		t.Fatalf("malformed direct-if error = %v, want ErrInvalidExpressionUse", err)
+	}
+}
+
+func TestScanHTMLRejectsRetainInDirectIfBranch(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{
+		`<main data-kit-scope="open: true"><section data-kit-if="open" data-kit-component="dialog@1.0.0" data-kit-retain="dialog"></section></main>`,
+		`<main data-kit-scope="open: true"><div data-kit-if="open"><section data-kit-component="dialog@1.0.0" data-kit-retain="dialog"></section></div></main>`,
+	} {
+		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidComponentUse) {
+			t.Errorf("ScanHTML(%q) error = %v, want ErrInvalidComponentUse", source, err)
+		}
+	}
+}
+
 func TestScanHTMLResolvesAuthoredServiceCommandsThroughAppAliasGrants(t *testing.T) {
 	t.Parallel()
 	source := []byte(`<button data-kit-click="$app.clipboard.writeText(code); $app.appearance.toggle(); $app.navigation.back()">Run</button>
-<main data-kit-component="app" data-kit-version="1.0.0" data-kit-as="$app"></main>`)
+<main data-kit-component="app@1.0.0" data-kit-as="$app"></main>`)
 	result, err := ScanHTML(source)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +225,7 @@ func TestScanHTMLResolvesAuthoredServiceCommandsThroughAppAliasGrants(t *testing
 func TestScanHTMLVersionsAppProgressCommandsAndLoaderBindings(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
-		`<html data-kit-component="app" data-kit-version="1.1.0" data-kit-as="$app"><button data-kit-click="$app.progress.start('load')"></button><div data-kit-show="$app.loader.visible"></div></html>`,
+		`<html data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.progress.start('load')"></button><div data-kit-show="$app.loader.visible"></div></html>`,
 		`<html data-kit-component="app@1.1.0" data-kit-as="$app"><div data-kit-style="width: $app.loader.value === null ? '12%' : $app.loader.value + '%';"></div></html>`,
 	} {
 		result, err := ScanHTML([]byte(source))
@@ -126,9 +239,9 @@ func TestScanHTMLVersionsAppProgressCommandsAndLoaderBindings(t *testing.T) {
 	}
 
 	for _, source := range []string{
-		`<html data-kit-component="app" data-kit-version="1.0.0" data-kit-as="$app"><button data-kit-click="$app.progress.start('load')"></button></html>`,
-		`<html data-kit-component="app" data-kit-version="1.0.0" data-kit-as="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
-		`<html data-kit-component="app" data-kit-version="1.2.0" data-kit-as="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
+		`<html data-kit-component="app@1.0.0" data-kit-as="$app"><button data-kit-click="$app.progress.start('load')"></button></html>`,
+		`<html data-kit-component="app@1.0.0" data-kit-as="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
+		`<html data-kit-component="app@1.2.0" data-kit-as="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
 	} {
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidExpressionUse) {
 			t.Errorf("ScanHTML(%q) error = %v, want ErrInvalidExpressionUse", source, err)
@@ -224,7 +337,6 @@ func TestScanHTMLRejectsUnsupportedReservedAttributes(t *testing.T) {
 		`<div data-kit-debounce="300"></div>`,
 		`<div data-kit-cloak></div>`,
 		`<div data-kit-ref="field"></div>`,
-		`<div data-kit-if="open"></div>`,
 		`<div data-kit-for="item of items"></div>`,
 		`<div data-kit-key="stable-row"></div>`,
 		`<template data-kit-if="open" data-kit-for="item of items"></template>`,
@@ -241,6 +353,8 @@ func TestScanHTMLRejectsUnsupportedReservedAttributes(t *testing.T) {
 		`<button data-kit-click:once:once="run()"></button>`,
 		`<input data-kit-input:debounce(10):debounce(20)="run()">`,
 		`<template data-kit-if="open"><script>globalThis.bad = true;</script></template>`,
+		`<div data-kit-if="open"><script>globalThis.bad = true;</script></div>`,
+		`<script data-kit-if="open">globalThis.bad = true;</script>`,
 		`<div data-kit-component:lazy="dialog"></div>`,
 		`<div data-kitwork-action="toggle"></div>`,
 		`<script data-kitwork-plan="authored"></script>`,
@@ -310,23 +424,23 @@ func TestScanHTMLStopsIgnoreAtImpliedHTMLClosures(t *testing.T) {
 	}{
 		{
 			name:   "paragraph",
-			source: `<p data-kit-ignore>ignored<div data-kit-component="progress-bar" data-kit-version="2.0.0"></div>`,
+			source: `<p data-kit-ignore>ignored<div data-kit-component="progress-bar@2.0.0"></div>`,
 		},
 		{
 			name:   "list item",
-			source: `<ul><li data-kit-ignore>ignored<li data-kit-component="progress-bar" data-kit-version="2.0.0">live</ul>`,
+			source: `<ul><li data-kit-ignore>ignored<li data-kit-component="progress-bar@2.0.0">live</ul>`,
 		},
 		{
 			name:   "option",
-			source: `<select><option data-kit-ignore>ignored<option data-kit-component="progress-bar" data-kit-version="2.0.0">live</select>`,
+			source: `<select><option data-kit-ignore>ignored<option data-kit-component="progress-bar@2.0.0">live</select>`,
 		},
 		{
 			name:   "table cell",
-			source: `<table><tbody><tr><td data-kit-ignore>ignored<td data-kit-component="progress-bar" data-kit-version="2.0.0">live</tr></tbody></table>`,
+			source: `<table><tbody><tr><td data-kit-ignore>ignored<td data-kit-component="progress-bar@2.0.0">live</tr></tbody></table>`,
 		},
 		{
 			name:   "table row",
-			source: `<table><tbody><tr data-kit-ignore><td>ignored<tr data-kit-component="progress-bar" data-kit-version="2.0.0"><td>live</tbody></table>`,
+			source: `<table><tbody><tr data-kit-ignore><td>ignored<tr data-kit-component="progress-bar@2.0.0"><td>live</tbody></table>`,
 		},
 	}
 	for _, test := range tests {
@@ -348,8 +462,8 @@ func TestScanHTMLStopsIgnoreAtImpliedHTMLClosures(t *testing.T) {
 func TestScanHTMLRejectsFosterParentedContentFromIgnoredTables(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
-		`<table data-kit-ignore><div data-kit-component="progress-bar" data-kit-version="2.0.0"></div></table>`,
-		`<table data-kit-ignore><div data-kit-component="progress-bar" data-kit-version="2.0.0"></div><tbody><tr><td data-kit-unknown></td></tr></tbody></table>`,
+		`<table data-kit-ignore><div data-kit-component="progress-bar@2.0.0"></div></table>`,
+		`<table data-kit-ignore><div data-kit-component="progress-bar@2.0.0"></div><tbody><tr><td data-kit-unknown></td></tr></tbody></table>`,
 	} {
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrUnsupportedAttribute) {
 			t.Fatalf("ScanHTML(%q) error = %v, want stable ErrUnsupportedAttribute", source, err)
@@ -377,7 +491,7 @@ func TestScanHTMLIgnoredFramesPreserveRawTextTemplateAndForeignBoundaries(t *tes
   <template><div data-kit-component="template-fake"></div></template>
   <svg><path data-kit-component="svg-fake"/><foreignObject><div data-kit-component="foreign-fake"></div></foreignObject></svg>
 </section>
-<div data-kit-component="progress-bar" data-kit-version="2.0.0"></div>`)
+<div data-kit-component="progress-bar@2.0.0"></div>`)
 	result, err := ScanHTML(source)
 	if err != nil {
 		t.Fatal(err)
@@ -438,11 +552,20 @@ func TestScanComponentsRejectsLegacyInlineAlias(t *testing.T) {
 	}
 }
 
-func TestScanComponentsRejectsFloatingConflictingOrInvalidVersionAndInvalidAlias(t *testing.T) {
+func TestScanComponentsRejectsRemovedVersionInvalidIdentityAndAlias(t *testing.T) {
 	t.Parallel()
-	tests := []string{
+	for _, source := range []string{
 		`<div data-kit-version="1.0.0"></div>`,
 		`<div data-kit-component="theme@2.0.0" data-kit-version="2.0.0"></div>`,
+		`<div data-kit-component="theme@2.0.0" data-kit-version="2.0.0" data-kit-version="2.0.0"></div>`,
+	} {
+		if _, err := ScanComponents([]byte(source)); !errors.Is(err, ErrUnsupportedAttribute) ||
+			!strings.Contains(err.Error(), "data-kit-version") {
+			t.Errorf("ScanComponents(%q) error = %v, want removed data-kit-version rejection", source, err)
+		}
+	}
+
+	tests := []string{
 		`<div data-kit-component="dialog@v1.0.0"></div>`,
 		`<div data-kit-component="dialog@latest"></div>`,
 		`<div data-kit-component="dialog@^1.0.0"></div>`,
@@ -450,8 +573,7 @@ func TestScanComponentsRejectsFloatingConflictingOrInvalidVersionAndInvalidAlias
 		`<div data-kit-component="dialog@1.0.0 "></div>`,
 		`<div data-kit-component="dialog@@1.0.0"></div>`,
 		`<div data-kit-component="theme@"></div>`,
-		`<div data-kit-component="theme" data-kit-version="v2.0.0"></div>`,
-		`<div data-kit-component="theme" data-kit-version="2.0.0" data-kit-version="2.0.0"></div>`,
+		`<div data-kit-component="theme@v2.0.0"></div>`,
 		`<div data-kit-component="theme" data-kit-as="theme"></div>`,
 		`<div data-kit-component="theme" data-kit-as="$theme.value"></div>`,
 		`<div data-kit-component="theme" data-kit-as="$_theme"></div>`,
@@ -478,19 +600,19 @@ func TestScanComponentsUsesECMAScriptWhitespaceForIdentity(t *testing.T) {
 		t.Fatalf("ECMAScript-trimmed inline identity = %#v", result.Components)
 	}
 
-	result, err = ScanHTML([]byte("<div data-kit-component=\"\u1680dialog\u2003\" data-kit-version=\"\ufeff1.0.0\u2029\" data-kit-as=\"\u00a0$dialog\u3000\"></div>"))
+	result, err = ScanHTML([]byte("<div data-kit-component=\"\u1680dialog@1.0.0\" data-kit-as=\"\u00a0$dialog\u3000\"></div>"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Components) != 1 || result.Components[0].Name != "dialog" ||
 		result.Components[0].Version != "1.0.0" || result.Components[0].Alias != "$dialog" {
-		t.Fatalf("ECMAScript-trimmed legacy identity = %#v", result.Components)
+		t.Fatalf("ECMAScript-trimmed inline identity = %#v", result.Components)
 	}
 
 	for _, source := range []string{
 		"<div data-kit-component=\"\u0085dialog@1.0.0\"></div>",
 		"<div data-kit-component=\"dialog@1.0.0\ufeff\"></div>",
-		"<div data-kit-component=\"dialog\" data-kit-version=\"\u00851.0.0\"></div>",
+		"<div data-kit-component=\"dialog@\u00851.0.0\"></div>",
 		"<div data-kit-component=\"dialog@1.0.0\" data-kit-as=\"\u0085$dialog\"></div>",
 	} {
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidComponentUse) {

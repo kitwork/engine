@@ -94,8 +94,34 @@ type Query struct {
 	debug bool
 }
 
+// ExecutionPlan is the storage-neutral part of a fluent query. SQL backends
+// render this state as SQL; embedded engines can execute the same conditions,
+// ordering and bounds directly without parsing generated SQL again.
+type ExecutionPlan struct {
+	Conditions []Condition
+	Orders     []OrderQuery
+	Limit      int
+	Offset     int
+	MaxLimit   int
+}
+
 func NewQuery(vm LambdaExecutor, db Executor) *Query {
 	return &Query{vm: vm, db: db}
+}
+
+// ExecutionPlan returns a caller-owned snapshot of the query AST accumulated
+// by the fluent API. It deliberately contains no executor or VM references.
+func (q *Query) ExecutionPlan() ExecutionPlan {
+	if q == nil {
+		return ExecutionPlan{}
+	}
+	return ExecutionPlan{
+		Conditions: append([]Condition(nil), q.conditions...),
+		Orders:     append([]OrderQuery(nil), q.orders...),
+		Limit:      q.limit,
+		Offset:     q.offset,
+		MaxLimit:   q.maxLimit,
+	}
 }
 
 // ==========================================

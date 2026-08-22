@@ -1,0 +1,2 @@
+# VM v2 archive sources are immutable byte evidence, including terminal blanks.
+compatibility/testdata/v2/sources/** -text -whitespace

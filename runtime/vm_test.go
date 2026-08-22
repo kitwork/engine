@@ -77,10 +77,14 @@ func TestVMStatsDescribeAndResetExecution(t *testing.T) {
 	if stats.FrameDepth != 1 || stats.PeakFrameDepth != 1 {
 		t.Fatalf("frame stats = %#v", stats)
 	}
+	if stats.StackDepth != 0 || stats.PeakStackDepth != 1 {
+		t.Fatalf("stack stats = %#v", stats)
+	}
 
 	vm.FastReset(program, nil)
 	stats = vm.Stats()
-	if stats.Instructions != 0 || stats.Energy != 0 || stats.StackDepth != 0 {
+	if stats.Instructions != 0 || stats.Energy != 0 ||
+		stats.StackDepth != 0 || stats.PeakStackDepth != 0 {
 		t.Fatalf("reset stats = %#v", stats)
 	}
 }

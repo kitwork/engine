@@ -215,10 +215,10 @@ func versionGraphGuardDocument(installed, different Artifact) string {
 <html lang="en">
 <head><meta charset="utf-8"><title>Component graph guard</title></head>
 <body>
-  <section data-kit-component="graph-guard-counter" data-kit-version="1.0.0">
+  <section data-kit-component="graph-guard-counter@1.0.0">
     <output id="graph-guard-output" data-kit-text="label">guard-server</output>
   </section>
-  <section data-kit-component="different-graph-counter" data-kit-version="1.0.0">
+  <section data-kit-component="different-graph-counter@1.0.0">
     <output id="different-graph-output" data-kit-text="label">different-server</output>
   </section>
   <script>
@@ -298,7 +298,7 @@ func versionBaseToSealedGraphGuardDocument(sealed Artifact) string {
     <button id="base-graph-add" type="button" data-kit-click="count = count + 1">Add</button>
     <output id="base-graph-output" data-kit-text="count">base-server</output>
   </section>
-  <section data-kit-component="graph-guard-counter" data-kit-version="1.0.0">
+  <section data-kit-component="graph-guard-counter@1.0.0">
     <output id="sealed-graph-output" data-kit-text="label">sealed-server</output>
   </section>
   <script>
@@ -385,7 +385,7 @@ func versionSealedToBaseGraphGuardDocument(sealed Artifact) string {
 <html lang="en">
 <head><meta charset="utf-8"><title>Sealed to base graph guard</title></head>
 <body>
-  <section data-kit-component="graph-guard-counter" data-kit-version="1.0.0">
+  <section data-kit-component="graph-guard-counter@1.0.0">
     <button id="sealed-base-add" type="button" data-kit-click="count = count + 1">Add</button>
     <output id="sealed-base-count" data-kit-text="count">count-server</output>
     <output id="sealed-base-label" data-kit-text="label">label-server</output>
@@ -535,10 +535,10 @@ globalThis.__versionPackageRuns = (globalThis.__versionPackageRuns || 0) + 1;
 func versionHandshakeDocument(artifact Artifact, invalidCases bool, label, version string) string {
 	extra := ""
 	if invalidCases {
-		extra = `<section data-kit-component="version-counter" data-kit-version="2.0.0">
+		extra = `<section data-kit-component="version-counter@2.0.0">
     <output id="version-mismatch" data-kit-text="label">mismatch-server</output>
   </section>
-  <section data-kit-component="version-counter" data-kit-version="v1.0.0">
+  <section data-kit-component="version-counter@v1.0.0">
     <output id="version-invalid" data-kit-text="label">invalid-server</output>
   </section>
   <section data-kit-component="version-counter@ 1.0.0">
@@ -570,15 +570,16 @@ func versionHandshakeDocument(artifact Artifact, invalidCases bool, label, versi
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
   await waitFor(function () {
-    return document.getElementById("version-exact").textContent.trim() === %q &&
-      document.getElementById("version-legacy").textContent.trim() === %q;
+    return document.getElementById("version-exact").textContent.trim() === %q;
   }, "valid component hosts did not mount");
+  assert(document.getElementById("version-removed").textContent.trim() === "removed-server",
+    "removed split version mounted");
   assert(Object.keys(globalThis.kit).join(",") === "version,component", "component graph expanded the public kit API");
   assert(globalThis.__versionFetchCalls === 0, "component version verification fetched a package");
   assert(globalThis.__versionPackageRuns === 1, "component package did not execute exactly once");
-  assert(globalThis.__versionInitCount === 2, "invalid component metadata ran init");
+  assert(globalThis.__versionInitCount === 1, "invalid component metadata ran init");
   %s
-});`, label, label, versionInvalidAssertions(invalidCases))
+});`, label, versionInvalidAssertions(invalidCases))
 	return fmt.Sprintf(`<!doctype html>
 <html lang="en">
 <head>
@@ -598,7 +599,7 @@ func versionHandshakeDocument(artifact Artifact, invalidCases bool, label, versi
     <output id="version-exact" data-kit-text="label">exact-server</output>
   </section>
   <section data-kit-component="version-counter" data-kit-version="%s">
-    <output id="version-legacy" data-kit-text="label">legacy-server</output>
+    <output id="version-removed" data-kit-text="label">removed-server</output>
   </section>
   %s
   <script src="/assets/%s"></script>
@@ -634,7 +635,7 @@ const versionLocalDocument = `<!doctype html>
     <output id="local-unversioned" data-kit-text="label">unversioned-server</output>
   </section>
   <section data-kit-component="local-version-counter" data-kit-version="1.0.0">
-    <output id="local-pinned" data-kit-text="label">pinned-server</output>
+    <output id="local-removed" data-kit-text="label">removed-server</output>
   </section>
   <script>
     globalThis.__versionFetchCalls = 0;
@@ -659,9 +660,9 @@ __runStandaloneKitTest(async function () {
   await waitFor(function () {
     return document.getElementById("local-unversioned").textContent.trim() === "local";
   }, "unversioned local component did not mount");
-  assert(document.getElementById("local-pinned").textContent.trim() === "pinned-server",
-    "pinned component mounted without an installed graph");
-  assert(globalThis.__versionInitCount === 1, "pinned component without a graph ran init");
+  assert(document.getElementById("local-removed").textContent.trim() === "removed-server",
+    "removed split version mounted as a direct component");
+  assert(globalThis.__versionInitCount === 1, "removed split version ran init");
   assert(globalThis.__versionFetchCalls === 0, "local version verification fetched a package");
   assert(Object.keys(globalThis.kit).join(",") === "version,component", "local runtime public API changed");
 });

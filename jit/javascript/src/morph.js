@@ -10,10 +10,9 @@
   var COMMENT = 8;
   var RETAIN = "data-kit-retain";
   var IGNORE = "data-kit-ignore";
+  var REJECTED_COMPONENT_VERSION = "data-kit-version";
   var COMPONENT_METADATA = {
-    "data-kit-component": true,
-    "data-kit-version": true,
-    "data-kit-local": true
+    "data-kit-component": true
   };
   var URL_ATTRIBUTES = {
     action: true,
@@ -157,6 +156,8 @@
   }
 
   function componentCompatible(current, incoming) {
+    if (current.hasAttribute(REJECTED_COMPONENT_VERSION) ||
+      incoming.hasAttribute(REJECTED_COMPONENT_VERSION)) return false;
     var currentHasComponent = current.hasAttribute("data-kit-component");
     var incomingHasComponent = incoming.hasAttribute("data-kit-component");
     var currentScope = current.getAttribute("data-kit-scope");
@@ -164,8 +165,7 @@
     if (!currentHasComponent && !incomingHasComponent) {
       if (currentScope === null && incomingScope === null) return true;
       return currentScope !== null && incomingScope !== null && currentScope === incomingScope &&
-        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as") &&
-        current.getAttribute("data-kit-version") === incoming.getAttribute("data-kit-version");
+        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as");
     }
     if (!currentHasComponent || !incomingHasComponent || typeof core.componentMetadata !== "function") return false;
     var currentRequest = core.componentMetadata(current, false);
@@ -466,6 +466,7 @@
     var context = retainContext(currentRoot, incoming);
     if (core.resetStructures) core.resetStructures(currentRoot);
     var result = morphNode(currentRoot, incoming, context);
+    if (core.prepareStructureTree) core.prepareStructureTree(result);
     if (core.prepareEventTree) core.prepareEventTree(result);
     restoreFocus(result, focus);
     invalidateBoundaries(result);
