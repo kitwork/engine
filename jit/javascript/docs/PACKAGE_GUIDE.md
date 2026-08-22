@@ -1,6 +1,6 @@
 # KitJS Package Documentation & Developer Guide
 
-> **Runtime Version:** `0.9.0-next.12`  
+> **Runtime Version:** `0.9.0-next.13`
 > **Package Architecture:** Standalone HTML-First Browser Runtime & Go JIT Staged Delivery  
 > **Profiles:** `kit.js` (Base Profile) & `hydrate.kit.js` (Hydrate Profile)  
 > **Security Model:** Zero-eval Closed AST Sandbox · Fail-Closed · Zero Runtime Dependencies
@@ -10,9 +10,9 @@
 ## 1. Tong quan ve Goi (Package Overview)
 
 **KitJS** la mot browser runtime cố tinh nhỏ, chủ quyền, HTML-first:
-- **Zero Virtual DOM:** Tác động trực tiếp lên Real DOM (Direct Mutation), không tốn RAM/CPU tạo cây VDOM.
-- **Zero `eval()` / Zero `new Function()`:** Ngôn ngữ biểu thức đóng (Closed Expression Language), an toàn tuyệt đối trước lỗ hổng XSS/RCE.
-- **Single Delegated Event Listener:** Toàn bộ sự kiện trên trang được lắng nghe qua 1 listener duy nhất ở `document`, 0% rò rỉ bộ nhớ (Memory Leak Free).
+- **Không dùng Virtual DOM:** Binding và directive cập nhật trực tiếp Real DOM, không tạo một cây VDOM trung gian.
+- **Không dùng `eval()` / `new Function()` cho authored expression:** Biểu thức được parse và evaluate bằng một ngôn ngữ đóng, fail-closed khi gặp cú pháp hoặc quyền không được hỗ trợ. Đây không phải cam kết rằng ứng dụng không thể có XSS hay lỗi logic.
+- **Delegated events theo loại:** Runtime cài một listener ở `document` cho mỗi event type được hỗ trợ và giải quyết action từ DOM đang kết nối. Trusted component có thể dùng `init(context).listen(...)` để gắn listener được dispose cùng boundary.
 - **Go JIT Staged Delivery:** Đóng gói và giao hàng theo nhu cầu trang web qua Go Engine (`router.jitjs()`) dưới dạng artifact content-addressed bất biến có mã SHA-256 và Subresource Integrity (SRI).
 
 ### Hai Profile Giao hang (Delivery Profiles)
@@ -20,7 +20,7 @@
 | Profile | File Mac dinh | Thuat toan / Tinh nang mở rộng | Nhu cau su dung |
 |---|---|---|---|
 | **Kit** | `kit.js` | Scope, component, expression parser, directives, events, dirty boundary scheduler. | Trang web tĩnh hoặc SPA mini cần tương tác local state. |
-| **Hydrate** | `hydrate.kit.js` | Bao gồm 100% Kit Profile + private Idiomorph MorphDOM & Drive navigation. | Trang web SSR/SPA cần chuyển trang không nháy (No White Flash) và giữ nguyên state/focus/scroll. |
+| **Hydrate** | `hydrate.kit.js` | Bao gồm toàn bộ Kit Profile cùng private Morph và Drive document continuity. | Link cùng origin và form GET đủ điều kiện có thể chuyển trang bằng Drive/Morph; trường hợp không tương thích quay về normal navigation. |
 
 > ⚠️ **Quy tắc bất biến:** Chỉ nhúng **1 trong 2 file** trên cùng một trang HTML. Không nạp song song cả hai file.
 
@@ -28,10 +28,10 @@
 
 ## 2. Public API Surface & Component Model
 
-Runtime chỉ công khai **duy nhất 1 frozen global object** trên `globalThis.kit`:
+Hai standalone profile chỉ công khai **một frozen global object** trên `globalThis.kit`:
 
 ```javascript
-kit.version                     // Return exact SemVer string (e.g. "0.9.0-next.12")
+kit.version                     // Return exact SemVer string (e.g. "0.9.0-next.13")
 kit.component(name, plainObject) // Register a plain-object component definition
 ```
 
@@ -86,19 +86,20 @@ KitJS sử dụng mô hình **Shallow Dirty-Bit Boundary Scheduler**:
 
 ---
 
-## 3. Master Reference: 13 Directives (`data-kit-*`)
+## 3. Directive Contract (`data-kit-*`)
 
 ### A. Component Boundary & Metadata
 
 | Directive | Dynamic Expression | Mô tả Contract |
 |---|---|---|
 | `data-kit-scope="..."` | State Map | Tạo một anonymous shallow store hoặc truyền state khởi tạo cho component trên cùng phần tử. Cú pháp: `count: 0; open: false;`. |
-| `data-kit-component="..."` | Component Name | Đăng ký một component host đã được định nghĩa qua `kit.component(name, ...)`. |
-| `data-kit-version="..."` | SemVer String | Tùy chọn xác thực phiên bản SemVer chính xác với sealed artifact manifest. |
+| `data-kit-component="name"` | Component Name | Tạo host cho component đăng ký trực tiếp bằng `kit.component(name, ...)`. |
+| `data-kit-component="name@exact-semver"` | Managed Identity | Khẳng định identity của managed closed-graph component; authored HTML không tự tải package. |
 | `data-kit-as="..."` | `$aliasName` | Gán một bí danh action-only cho Component Instance (ví dụ `data-kit-as="$theme"` $\rightarrow$ `$theme.toggle()`). |
-| `data-kit-alias="..."` | `$aliasName` | Gán một bí danh action-only cho DOM Element (ví dụ `data-kit-alias="$searchInput"` $\rightarrow$ `$searchInput.focus()`). |
-| `data-kit-retain="..."` | Retain Key | Trong Hydrate profile, giữ nguyên component host và live store hiện tại qua các nhịp Morph. Key là duy nhất và khác với HTML `id`. |
-| `data-kit-ignore` | Static Marker | Bỏ qua phần tử và toàn bộ cây con. Cả Kit scanner lẫn Hydrate Morph đều không đụng vào cây con này. |
+| `data-kit-retain="..."` | Retain Key | Trong Hydrate profile, giữ component host và live store khi phía incoming có cùng key cùng namespace, tag, component identity, version và alias. Key phải duy nhất; host không được lồng nhau hoặc nằm trong template/structural region. |
+| `data-kit-ignore` | Static Marker | Kit scanner không mount cây con. Morph chỉ giữ nguyên boundary khi cả node hiện tại và incoming tương ứng đều có marker; thêm/bỏ marker sẽ thay boundary, còn thiếu counterpart vẫn bị remove bình thường. |
+
+Dạng tách `data-kit-version` và marker rỗng `data-kit-local` chỉ là compatibility input deprecated trong dòng 0.9; markup mới phải dùng một trong hai dạng canonical của `data-kit-component` ở trên.
 
 ### B. State Bindings & Presentation
 
@@ -106,7 +107,7 @@ KitJS sử dụng mô hình **Shallow Dirty-Bit Boundary Scheduler**:
 |---|---|---|
 | `data-kit-text="..."` | Expression | Cập nhật an toàn qua `textContent`. |
 | `data-kit-show="..."` | Boolean Expression | Bật/tắt thuộc tính `hidden` của phần tử mà không xóa khỏi DOM. |
-| `data-kit-bind="..."` | `attr: expr;` | Gán các thuộc tính HTML an toàn (như `disabled`, `aria-expanded`, `href`). Bỏ qua các URL scheme nguy hiểm (`javascript:`, `data:`). |
+| `data-kit-bind="..."` | `attr: expr;` | Gán các thuộc tính cho phép như `disabled`, `aria-expanded`, `href`; URL-valued binding từ chối tiền tố `javascript:`, `vbscript:` và `data:text/html` sau khi loại bỏ các ký tự U+0000–U+0020. Các `data:` URL khác không bị cấm mặc định. |
 | `data-kit-class="..."` | Class Expression | Quản lý danh sách class động dựa trên điều kiện, giữ nguyên các class static có sẵn. |
 | `data-kit-style="..."` | `prop: expr;` | Quản lý các giá trị CSS liên tục an toàn (ví dụ: `width: progress + '%';`). Bị giới hạn 128 entries. |
 | `data-kit-model="..."` | Field Name | Binding 2 chiều cho form control (`<input>`, `<select>`, `<textarea>`). Chỉ nhận tên field top-level khớp `/^[A-Za-z_][A-Za-z0-9_]*$/`. |
@@ -115,12 +116,18 @@ KitJS sử dụng mô hình **Shallow Dirty-Bit Boundary Scheduler**:
 
 | Directive | Dynamic Expression | Mô tả Contract |
 |---|---|---|
-| `data-kit-if="..."` | Boolean Expression | Thêm hoặc xóa phần tử khỏi DOM dựa trên kết quả điều kiện. Dùng `<template data-kit-if="...">`. |
-| `data-kit-for="..."` | `item in list` | Lặp mảng dữ liệu. Khuyến khích dùng kèm `data-kit-key="item.id"` để giữ nguyên DOM identity khi danh sách thay đổi. |
+| `data-kit-if="..."` | Boolean Expression | Materialize một nhánh `<template>` khi biểu thức truthy. |
+| `data-kit-for="..."` | `item, index of items` | Reconcile các nhóm clone của `<template>`; dạng `item of items` cũng hợp lệ. |
+| `data-kit-key="..."` | Expression | Cung cấp identity string hoặc finite number duy nhất cho một row. |
 
-### D. Event Modifiers (11 Modifiers)
+### D. Event và modifier được hỗ trợ
 
-Event directive dùng cú pháp `data-kit-<event>[.modifier]="action()"`:
+Event directive dùng modifier phân tách bằng dấu hai chấm, ví dụ `data-kit-click:once="save()"`. Event set hiện tại là:
+
+```text
+click dblclick submit input change keydown keyup
+pointerdown pointerup focusin focusout
+```
 
 | Modifier | Hành vi Kỹ thuật |
 |---|---|
@@ -128,51 +135,55 @@ Event directive dùng cú pháp `data-kit-<event>[.modifier]="action()"`:
 | `:prevent` | Tự động gọi `event.preventDefault()`. |
 | `:stop` | Tự động gọi `event.stopPropagation()`. |
 | `:once` | Chỉ thực thi action 1 lần duy nhất rồi hủy binding. |
-| `:outside` | Chạy action khi nhấp chuột bên ngoài phần tử (Dùng cho Dropdown / Popover). |
-| `:enter` | Chỉ kích hoạt khi nhấn phím `Enter` (KeyCode 13). |
-| `:escape` | Chỉ kích hoạt khi nhấn phím `Escape` (KeyCode 27). |
-| `:window` | Lắng nghe sự kiện trên `window`. |
-| `:document` | Lắng nghe sự kiện trên `document`. |
-| `:debounce(ms)`| Hoãn thực thi action trong N mili-giây kể từ lần kích hoạt cuối. |
-| `:throttle(ms)`| Giới hạn tần suất thực thi action tối đa 1 lần trong mỗi N mili-giây. |
+| `:outside` | Chạy action khi event hợp lệ xảy ra bên ngoài phần tử; chỉ hỗ trợ `click`, `dblclick`, `pointerdown`, `pointerup` và `focusin`. |
+| `:enter` | Chỉ kích hoạt `keydown`/`keyup` khi phím là `Enter`. |
+| `:escape` | Chỉ kích hoạt `keydown`/`keyup` khi phím là `Escape`. |
+| `:debounce(ms)` | Hoãn action từ 1 đến 60.000 mili-giây kể từ event cuối. |
+
+Danh sách trong bảng trên là toàn bộ modifier public của contract hiện tại.
 
 ---
 
-## 4. Catalog: 10 Sealed Infrastructure Services (`kit.*`)
+## 4. Sealed Service Catalog
 
-Các service là những module hạ tầng độc lập được Go Engine đóng gói niêm phong vào file artifact:
+Standalone npm profiles chỉ có `kit.version` và `kit.component`; chúng không chứa service hoặc navigation object. Một staged closed artifact có thể chọn các namespace service dưới đây cho trusted component JavaScript:
 
-1. **`kit.drive`**: Động cơ SPA Navigation, Hover Prefetching, Link Interception & Idiomorph DOM Morphing.
-2. **`kit.storage`**: Adapter lưu trữ Async Key-Value an toàn (LocalStorage / IndexedDB / Chrome Extension Storage).
-3. **`kit.request`**: Client HTTP Request Engine tích hợp CSRF header, Timeout và Retry.
-4. **`kit.cookie`**: Adapter đọc/ghi Cookie an toàn.
-5. **`kit.clipboard`**: Helper sao chép và đọc dữ liệu Clipboard khép kín (`kit.clipboard.copy(text)`).
-6. **`kit.fullscreen`**: Động cơ quản lý chế độ Toàn màn hình (Fullscreen API).
-7. **`kit.network`**: Theo dõi trạng thái kết nối mạng Online/Offline (`kit.network.online`).
-8. **`kit.navigation`**: Trình quản lý lịch sử duyệt trang và URL query params.
-9. **`kit.share`**: Integration API cho Web Share Native của thiết bị di động.
-10. **`kit.announce`**: Service phát bản tin hỗ trợ bộ đọc màn hình Accessibility (ARIA Live Region Announcer).
+| Service | Public namespace members trong trusted JavaScript |
+|---|---|
+| `announce@1.0.0` | `say`, `polite`, `assertive`, `clear` |
+| `appearance@1.0.0` | `mode`, `resolved`, `snapshot`, `subscribe`, `set`, `toggle`, `system` |
+| `clipboard@1.0.0` | `writeText`, `readText` |
+| `cookie@1.0.0` | `get`, `set`, `remove`, `has` |
+| `fullscreen@1.0.0` | `request`, `exit`, `active` |
+| `navigation@1.0.0` | `back`, `forward`, `reload` |
+| `network@1.0.0` | `online`, `snapshot`, `subscribe` |
+| `progress@1.0.0` | `snapshot`, `subscribe`, `start`, `update`, `finish` |
+| `request@1.0.0` | `send`, `get`, `post`, `abort` |
+| `share@1.0.0` | `open`, `canShare` |
+| `storage@1.0.0` | `get`, `set`, `remove`, `has`, `clear` |
+
+Mỗi selected namespace được freeze và có một exact `version` không enumerable. Trusted JavaScript dùng noun-first API, ví dụ `kit.clipboard.writeText(text)`. Authored action không nhận raw `kit`; canonical `app@1.1.0` chỉ chiếu các lệnh được grant qua dạng tĩnh `$app.<service>.<method>(...)`, ví dụ `$app.clipboard.writeText(text)`. Morph và Drive là phần private của Hydrate và không thêm navigation control vào public API.
 
 ---
 
 ## 5. An toan & Rao chan Sandbox (Security Boundaries)
 
-KitJS được thiết kế với tư duy **Security by Construction (Bảo mật bằng Cấu trúc)**:
+Các ranh giới chính của authored expression là:
 
-- **Zero-Eval Sandbox:** Không bao giờ gọi `eval()`, `new Function()`, hay `setTimeout("string")`.
-- **Closed AST Parser:** Mọi biểu thức HTML chỉ được phân tích qua bộ parser đóng 2 pass (`parser.js` $\rightarrow$ `evaluator.js`).
-- **Danh sách Chặn Prototype Pollution (`BLOCKED` & `FORBIDDEN`):**
-  - Chặn triệt để: `constructor`, `prototype`, `__proto__`, `ownerDocument`, `defaultView`, `contentWindow`, `window`, `globalThis`, `top`, `parent`, `self`, `document`, `location`, `navigator`, `Function`, `eval`.
+- **Zero-Eval:** Authored source không chạy qua `eval()` hoặc `Function`.
+- **Closed expression language:** Parser/evaluator từ chối cú pháp không hỗ trợ, browser globals và các tên có thể thoát qua prototype chain.
 - **Execution Budget:**
   - Giới hạn tối đa **10.000 AST Node Visits** per evaluation.
   - Giới hạn tối đa **64 Call Depth** lồng nhau.
-- **Rollback Transaction:** Nếu một action phức tạp gặp lỗi ở giữa, toàn bộ gán state trước đó trong nhịp đó sẽ được **Rollback 100%**, giữ cho trạng thái ứng dụng luôn nhất quán.
+- **Action Transaction:** Các phép gán của authored action được stage và chỉ commit khi toàn bộ action đồng bộ thành công; action lỗi sẽ bỏ các staged assignment. Trusted component methods là JavaScript thông thường và nằm ngoài transaction này.
+
+Trusted component JavaScript vẫn có đầy đủ quyền JavaScript của trang và thuộc trusted computing base. `data-kit-ignore` là ownership/Morph boundary, không phải sanitizer hay security boundary.
 
 ---
 
 ## 6. Mo hinh Giao hang Go JIT Staged Delivery
 
-Trong hệ sinh thái Kitwork Engine, KitJS không nạp qua npm hay CDN công cộng, mà được giao hàng qua đường JIT Server:
+Trong staged mode của Kitwork Engine, runtime được giao qua JIT Server thay vì nạp standalone profile từ npm hoặc CDN:
 
 ```javascript
 // router.kitwork.js trong tenant site
@@ -191,10 +202,10 @@ Go Engine sẽ tự động:
 2. Phân tích đồ thị phụ thuộc (Dependency Graph) của các component và service.
 3. Đóng gói các script với chuẩn **Content-Addressed SHA-256 Hash**:
    ```html
-   <script data-kitwork-jit="runtime" src="/jit/<hash>.runtime.js" integrity="sha256-..." defer></script>
-   <script data-kitwork-jit="hydrate" src="/jit/<hash>.hydrate.js" integrity="sha256-..." defer></script>
-   <script data-kitwork-jit="graph" src="/jit/<hash>.graph.js" integrity="sha256-..." defer></script>
-   <script data-kitwork-jit="service" src="/jit/<hash>.progress.js" integrity="sha256-..." defer></script>
-   <script data-kitwork-jit="component" src="/jit/<hash>.counter.js" integrity="sha256-..." defer></script>
+   <script data-kitwork-jit="runtime" data-kitwork-hash="<hash>" src="/jit/<hash>.runtime.js" integrity="sha256-..." crossorigin="anonymous" defer></script>
+   <script data-kitwork-jit="hydrate" data-kitwork-hash="<hash>" src="/jit/<hash>.hydrate.js" integrity="sha256-..." crossorigin="anonymous" defer></script>
+   <script data-kitwork-jit="graph" data-kitwork-hash="<hash>" src="/jit/<hash>.graph.js" integrity="sha256-..." crossorigin="anonymous" defer></script>
+   <script data-kitwork-jit="service" data-kitwork-hash="<hash>" src="/jit/<hash>.progress.js" integrity="sha256-..." crossorigin="anonymous" defer></script>
+   <script data-kitwork-jit="component" data-kitwork-hash="<hash>" src="/jit/<hash>.counter.js" integrity="sha256-..." crossorigin="anonymous" defer></script>
    ```
-4. Bảo đảm thứ tự nạp thẻ `defer` chính xác 100%, có mã hóa kiểm tra toàn vẹn SRI (`integrity`), ngăn chặn mọi nguy cơ can thiệp mã nguồn trên đường truyền.
+4. Phát các classic script có `defer` theo thứ tự runtime → Hydrate → graph → services → components; URL content-addressed và SRI cho phép browser xác minh đúng bytes đã chuẩn bị.
