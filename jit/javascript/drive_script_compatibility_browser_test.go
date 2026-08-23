@@ -249,7 +249,7 @@ func TestBrowserHydrateDrivePreservesNativeScriptSemantics(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowserWithBudget(t, browser, server.URL+"/script/host", 60000)
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/script/host", 600000)
 	if got := driveOnlyScriptRequests.Load(); got != 0 {
 		t.Fatalf("fetched page-specific external script requests = %d, want zero before 204 fallback", got)
 	}

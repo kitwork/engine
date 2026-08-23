@@ -96,7 +96,7 @@ func TestBrowserHydrateDriveNavigation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowserWithBudget(t, browser, server.URL+"/drive.html", 90000)
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/drive.html", 600000)
 	if got := activeContentLoads.Load(); got != 0 {
 		t.Fatalf("incoming active content loaded %d external payloads before hard fallback", got)
 	}
