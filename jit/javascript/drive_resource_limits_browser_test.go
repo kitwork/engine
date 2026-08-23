@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
@@ -186,12 +185,12 @@ func runDriveResourceLimitBrowser(t *testing.T, browser, target string) {
 		"--metrics-recording-only",
 		"--no-first-run",
 		"--run-all-compositor-stages-before-draw",
-		"--user-data-dir=" + t.TempDir(),
+		"--user-data-dir=" + newHeadlessBrowserProfile(t),
 		"--virtual-time-budget=120000",
 		"--dump-dom",
 		target,
 	}
-	output, runErr := exec.CommandContext(ctx, browser, args...).CombinedOutput()
+	output, runErr := runHeadlessBrowserCommand(ctx, browser, args...)
 	if bytes.Contains(output, []byte(`data-kit-test="passed"`)) {
 		return
 	}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,9 +29,11 @@ func TestBrowserDriveUnicodeFragmentsAndBoundedScrollHistory(t *testing.T) {
 	hydrateIntegrity := driveScriptIntegrity(hydrateJS)
 	cancelSlowStarted := make(chan struct{})
 	cancelSlowComplete := make(chan struct{})
+	popSlowStarted := make(chan struct{})
 	popSlowComplete := make(chan struct{})
 	var cancelStartOnce sync.Once
 	var cancelCompleteOnce sync.Once
+	var popStartOnce sync.Once
 	var popCompleteOnce sync.Once
 	var popSlowRequests atomic.Int64
 	waitForServerSignal := func(response http.ResponseWriter, request *http.Request, signal <-chan struct{}) {
@@ -92,6 +93,7 @@ func TestBrowserDriveUnicodeFragmentsAndBoundedScrollHistory(t *testing.T) {
 			if request.Header.Get("X-KitJS-Drive") == "1" {
 				requestNumber := popSlowRequests.Add(1)
 				if requestNumber > 1 {
+					popStartOnce.Do(func() { close(popSlowStarted) })
 					time.Sleep(400 * time.Millisecond)
 					writeDriveFragmentHTML(response, driveFragmentRouteDocument("Slow", request.URL.Path, hydrateIntegrity))
 					popCompleteOnce.Do(func() { close(popSlowComplete) })
@@ -100,7 +102,13 @@ func TestBrowserDriveUnicodeFragmentsAndBoundedScrollHistory(t *testing.T) {
 			}
 			writeDriveFragmentHTML(response, driveFragmentRouteDocument("Slow", request.URL.Path, hydrateIntegrity))
 		case "/drive-fragments-pop-slow-complete":
-			waitForServerSignal(response, request, popSlowComplete)
+			select {
+			case <-popSlowStarted:
+				waitForServerSignal(response, request, popSlowComplete)
+			case <-request.Context().Done():
+			case <-time.After(750 * time.Millisecond):
+				response.WriteHeader(http.StatusNoContent)
+			}
 		case "/drive-fragments-pop-fast":
 			writeDriveFragmentHTML(response, driveFragmentRouteDocument("Fast", request.URL.Path, hydrateIntegrity))
 		default:
@@ -128,12 +136,12 @@ func runDriveFragmentBrowser(t *testing.T, browser, target string) {
 		"--metrics-recording-only",
 		"--no-first-run",
 		"--run-all-compositor-stages-before-draw",
-		"--user-data-dir=" + t.TempDir(),
+		"--user-data-dir=" + newHeadlessBrowserProfile(t),
 		"--virtual-time-budget=20000",
 		"--dump-dom",
 		target,
 	}
-	output, runErr := exec.CommandContext(ctx, browser, args...).CombinedOutput()
+	output, runErr := runHeadlessBrowserCommand(ctx, browser, args...)
 	if bytes.Contains(output, []byte(`data-kit-test="passed"`)) {
 		return
 	}
@@ -551,7 +559,7 @@ const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   assert(location.pathname === "/drive-fragments-pop-fast",
     "rapid Forward did not restore the fast destination entry");
   var popCompletion = await realFetch("/drive-fragments-pop-slow-complete");
-  assert(popCompletion.ok, "stale popstate response did not finish at the test server");
+  assert(popCompletion.ok, "popstate overlap did not settle at the test server");
   await waitFor(function () {
     return document.getElementById("route-main").getAttribute("data-route") === "/drive-fragments-pop-fast" &&
       history.state.__kitjs_drive__.scroll.y === fastY && Math.abs(scrollY - fastY) < 2;

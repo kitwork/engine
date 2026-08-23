@@ -37,6 +37,10 @@ jobs:
           node-version: "22"
 
       - name: Run verification gate
+        # Browser contracts are OS-independent and run in the Linux job. The
+        # Windows job owns the engine's native cross-platform verification.
+        env:
+          KITWORK_BROWSER_TESTS: ${{ runner.os == 'Windows' && 'off' || 'on' }}
         run: go run ./cmd/releasegate --mode verify --report .artifacts/verify.json --timeout 25m
 
       - name: Upload verification evidence
@@ -115,6 +119,8 @@ jobs:
         run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
 
       - name: Run release gate
+        env:
+          KITWORK_BROWSER_TESTS: ${{ runner.os == 'Windows' && 'off' || 'on' }}
         run: go run ./cmd/releasegate --mode release --report .artifacts/release.json --timeout 40m
 
       - name: Run synthetic lifecycle canary

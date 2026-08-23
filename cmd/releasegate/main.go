@@ -202,7 +202,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 			Command: []string{"go", "test", "./core", "-run", "TestEngineDiagnostics|TestEngineDiagnosticBundle|TestEngineLifecycleGauntlet", "-count=1"},
 		},
 		{Name: "Build", Command: []string{"go", "build", "./..."}},
-		{Name: "Full tests", Command: []string{"go", "test", "-count=1", "./..."}},
+		{Name: "Full tests", Command: []string{"go", "test", "-count=1", "-timeout=20m", "./..."}},
 		{Name: "Vet", Command: []string{"go", "vet", "./..."}},
 	}
 

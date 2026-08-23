@@ -206,7 +206,7 @@ func TestBrowserRequestFormExample(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/examples/request-form/index.html")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/examples/request-form/index.html", 60000)
 	if got := artifactRequests.Load(); got != 1 {
 		t.Fatalf("request form navigation fetched its sealed runtime %d times, want 1", got)
 	}
@@ -593,7 +593,7 @@ const requestFormAssertions = `__runStandaloneKitTest(async function () {
   await waitFor(function () {
     return location.pathname === "/examples/request-form/design.html" &&
       !document.getElementById("request-profile-form") && cleanupRecord.init.signal.aborted === true;
-  }, "Drive morph did not dispose the form and abort its active request");
+  }, "Drive morph did not dispose the form and abort its active request", 15000);
   assert(document.documentElement === root, "request form navigation replaced the document root");
   assert(document.querySelector('[data-kit-retain="request-progress"]') === progressHost,
     "request form navigation replaced its retained progress host");

@@ -91,6 +91,9 @@ func TestReleasePlanModes(t *testing.T) {
 			!containsArgument(step.Command, "^TestVMFaultGauntlet") {
 			t.Fatal("contract gate omitted deterministic VM fault and recovery coverage")
 		}
+		if step.Name == "Full tests" && !containsArgument(step.Command, "-timeout=20m") {
+			t.Fatal("full test gate omitted its explicit package timeout")
+		}
 	}
 	for name, found := range required {
 		if !found {

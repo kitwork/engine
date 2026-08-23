@@ -3,6 +3,7 @@ package javascript
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -381,12 +383,12 @@ func runVanillaBrowserWithBudget(t *testing.T, browser, target string, virtualTi
 		"--metrics-recording-only",
 		"--no-first-run",
 		"--run-all-compositor-stages-before-draw",
-		"--user-data-dir=" + t.TempDir(),
+		"--user-data-dir=" + newHeadlessBrowserProfile(t),
 		fmt.Sprintf("--virtual-time-budget=%d", virtualTimeBudgetMS),
 		"--dump-dom",
 		target,
 	}
-	output, runErr := exec.CommandContext(ctx, browser, args...).CombinedOutput()
+	output, runErr := runHeadlessBrowserCommand(ctx, browser, args...)
 	if bytes.Contains(output, []byte(`data-kit-test="passed"`)) {
 		return
 	}
@@ -399,7 +401,61 @@ func runVanillaBrowserWithBudget(t *testing.T, browser, target string, virtualTi
 	t.Fatalf("headless browser proof did not pass\n%s", boundedVanillaOutput(output))
 }
 
+func runHeadlessBrowserCommand(ctx context.Context, browser string, args ...string) ([]byte, error) {
+	args = append([]string{
+		"--disable-background-mode",
+		"--disable-breakpad",
+		"--disable-crashpad-for-testing",
+	}, args...)
+	command := exec.CommandContext(ctx, browser, args...)
+	command.WaitDelay = 5 * time.Second
+	if runtime.GOOS == "windows" {
+		command.Cancel = func() error {
+			if command.Process == nil {
+				return nil
+			}
+			if err := exec.Command("taskkill", "/PID", strconv.Itoa(command.Process.Pid), "/T", "/F").Run(); err == nil {
+				return nil
+			}
+			if err := command.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				return err
+			}
+			return nil
+		}
+	}
+	return command.CombinedOutput()
+}
+
+func newHeadlessBrowserProfile(t *testing.T) string {
+	t.Helper()
+	profile, err := os.MkdirTemp("", "kitwork-browser-*")
+	if err != nil {
+		t.Fatalf("create headless browser profile: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := removeHeadlessBrowserProfile(profile); err != nil {
+			t.Errorf("cleanup headless browser profile: %v", err)
+		}
+	})
+	return profile
+}
+
+func removeHeadlessBrowserProfile(profile string) error {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if err := os.RemoveAll(profile); err == nil {
+			return nil
+		} else if time.Now().After(deadline) {
+			return fmt.Errorf("remove headless browser profile %q: %w", profile, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func findVanillaBrowser() string {
+	if browserTestsDisabled() {
+		return ""
+	}
 	for _, name := range []string{"google-chrome", "chromium", "chromium-browser", "chrome", "msedge"} {
 		if path, err := exec.LookPath(name); err == nil {
 			return path
@@ -418,6 +474,22 @@ func findVanillaBrowser() string {
 		}
 	}
 	return ""
+}
+
+func browserTestsDisabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("KITWORK_BROWSER_TESTS"))) {
+	case "0", "false", "off":
+		return true
+	default:
+		return false
+	}
+}
+
+func TestFindVanillaBrowserHonorsDisabledMode(t *testing.T) {
+	t.Setenv("KITWORK_BROWSER_TESTS", "off")
+	if browser := findVanillaBrowser(); browser != "" {
+		t.Fatalf("disabled browser test mode resolved %q", browser)
+	}
 }
 
 func boundedVanillaOutput(output []byte) string {

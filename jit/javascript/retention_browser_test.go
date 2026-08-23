@@ -5,7 +5,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os/exec"
 	"testing"
 	"time"
 )
@@ -206,12 +205,12 @@ func runRetentionBrowser(t *testing.T, browser, target string) (string, []byte) 
 		"--no-first-run",
 		"--js-flags=--expose-gc",
 		"--run-all-compositor-stages-before-draw",
-		"--user-data-dir=" + t.TempDir(),
+		"--user-data-dir=" + newHeadlessBrowserProfile(t),
 		"--virtual-time-budget=10000",
 		"--dump-dom",
 		target,
 	}
-	output, runErr := exec.CommandContext(ctx, browser, args...).CombinedOutput()
+	output, runErr := runHeadlessBrowserCommand(ctx, browser, args...)
 	if bytes.Contains(output, []byte(`data-kit-retention-test="passed"`)) {
 		return "passed", output
 	}
