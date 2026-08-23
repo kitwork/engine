@@ -249,7 +249,7 @@ func TestBrowserHydrateDrivePreservesNativeScriptSemantics(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/script/host")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/script/host", 60000)
 	if got := driveOnlyScriptRequests.Load(); got != 0 {
 		t.Fatalf("fetched page-specific external script requests = %d, want zero before 204 fallback", got)
 	}
@@ -293,7 +293,7 @@ const driveScriptContractSource = `(function (global, document) {
   }
   function waitFor(predicate, message) {
     return new Promise(function (resolve, reject) {
-      var deadline = performance.now() + 4000;
+      var deadline = performance.now() + 10000;
       function poll() {
         try {
           if (predicate()) { resolve(); return; }

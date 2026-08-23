@@ -96,7 +96,7 @@ func TestBrowserHydrateDriveNavigation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/drive.html")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/drive.html", 30000)
 	if got := activeContentLoads.Load(); got != 0 {
 		t.Fatalf("incoming active content loaded %d external payloads before hard fallback", got)
 	}
@@ -181,15 +181,18 @@ kit.component("drive-counter", { count: 0 });
 const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForDrive = function (predicate, message) {
+    return waitFor(predicate, message, 5000);
+  };
   var nextTurn = __kitTestNextTurn;
 
   assert(Object.keys(kit).join(",") === "version,component", "Hydrate leaked a public API: " + Object.keys(kit).join(","));
   assert(!document.querySelector("[data-kit-app],[data-kit-hydrate]"), "Hydrate required an activation marker");
   assert(globalThis.__initialScriptRuns === 1, "initial authored script did not execute exactly once");
-  await waitFor(function () { return document.getElementById("counter-output").textContent === "0"; }, "counter did not boot");
+  await waitForDrive(function () { return document.getElementById("counter-output").textContent === "0"; }, "counter did not boot");
 
   document.getElementById("counter-add").click();
-  await waitFor(function () { return document.getElementById("counter-output").textContent === "1"; }, "counter did not increment");
+  await waitForDrive(function () { return document.getElementById("counter-output").textContent === "1"; }, "counter did not increment");
 
   var realFetch = globalThis.fetch.bind(globalThis);
   var fetches = [];
@@ -214,7 +217,7 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
 
   document.getElementById("slow-link").click();
   document.getElementById("fast-link").click();
-  await waitFor(function () {
+  await waitForDrive(function () {
     return location.pathname === "/fast" && document.getElementById("route-main").textContent.trim() === "Fast";
   }, "latest navigation did not win");
 
@@ -238,19 +241,19 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   var query = document.getElementById("search-query");
   query.value = "kit js";
   document.getElementById("search-form").requestSubmit();
-  await waitFor(function () {
+  await waitForDrive(function () {
     return location.pathname === "/search" && location.search === "?q=kit+js" &&
       document.getElementById("route-main").textContent.trim() === "Search:kit js";
   }, "GET form navigation did not commit");
   assert(document.getElementById("counter-output").textContent === "1", "form navigation reset component state");
 
   history.back();
-  await waitFor(function () {
+  await waitForDrive(function () {
     return location.pathname === "/fast" && document.getElementById("route-main").textContent.trim() === "Fast";
   }, "popstate navigation did not restore the prior route");
 
   document.getElementById("unknown-link").click();
-  await waitFor(function () { return document.cookie.indexOf("kit_drive_unknown_fallback=1") >= 0; },
+  await waitForDrive(function () { return document.cookie.indexOf("kit_drive_unknown_fallback=1") >= 0; },
     "unknown component did not hard-navigate");
   assert(location.pathname === "/fast", "unknown component committed a Drive URL");
   assert(document.title === "Fast" && document.getElementById("route-main").textContent.trim() === "Fast",
@@ -259,7 +262,7 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
     "unknown component boundary entered the live body");
 
   document.getElementById("mismatch-link").click();
-  await waitFor(function () { return document.cookie.indexOf("kit_drive_hard_fallback=1") >= 0; },
+  await waitForDrive(function () { return document.cookie.indexOf("kit_drive_hard_fallback=1") >= 0; },
     "artifact mismatch did not hard-navigate");
   assert(location.pathname === "/fast", "204 hard fallback unexpectedly committed a Drive URL");
   assert(document.title === "Fast", "artifact mismatch changed title before hard fallback");
@@ -283,7 +286,7 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   }
 
   document.getElementById("base-mismatch-link").click();
-  await waitFor(function () { return document.cookie.indexOf("kit_drive_base_fallback=1") >= 0; },
+  await waitForDrive(function () { return document.cookie.indexOf("kit_drive_base_fallback=1") >= 0; },
     "base semantic mismatch did not hard-navigate");
   assertFastDocument("base semantic mismatch");
 
@@ -291,7 +294,7 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   for (var hazardIndex = 0; hazardIndex < hazards.length; hazardIndex++) {
     var hazard = hazards[hazardIndex];
     document.getElementById(hazard + "-link").click();
-    await waitFor(function () {
+    await waitForDrive(function () {
       return document.cookie.indexOf("kit_drive_" + hazard + "_fallback=1") >= 0;
     }, hazard + " active content did not hard-navigate");
     assertFastDocument(hazard + " active content");

@@ -1,6 +1,7 @@
 package work
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -41,9 +42,19 @@ router.jitjs({
 				t.Fatalf("presentation = %#v", presentation)
 			}
 			component := presentation.JITComponents[0]
-			if component.Name != "counter" || component.Version != "1.0.0" ||
-				filepath.Clean(component.Filename) != filepath.Clean(filename) {
+			if component.Name != "counter" || component.Version != "1.0.0" {
 				t.Fatalf("manifest component = %#v", component)
+			}
+			declaredInfo, err := os.Stat(filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			preparedInfo, err := os.Stat(component.Filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !os.SameFile(declaredInfo, preparedInfo) {
+				t.Fatalf("manifest component file = %q, want identity of %q", component.Filename, filename)
 			}
 
 			tags, body := serveKitJSPage(t, tenant, "/")

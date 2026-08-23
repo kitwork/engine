@@ -102,8 +102,17 @@ func TestCheckpointIsIdempotent(t *testing.T) {
 	if !bytes.Equal(mainBefore, mainAfter) || !bytes.Equal(walBefore, walAfter) {
 		t.Fatal("idempotent checkpoint changed durable bytes")
 	}
-	if _, err := os.Stat(filepath.Join(path, "segments")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("legacy segment directory still exists: %v", err)
+	legacySegments := filepath.Join(path, "segments")
+	if _, err := os.Stat(legacySegments); err == nil {
+		t.Fatalf("legacy segment directory still exists: %s", legacySegments)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		// Unix reports ENOTDIR for a child below the published database file,
+		// while Windows commonly reports ErrNotExist. A regular parent proves
+		// the legacy directory cannot coexist on either platform.
+		info, parentErr := os.Stat(path)
+		if parentErr != nil || !info.Mode().IsRegular() {
+			t.Fatalf("inspect legacy segment directory: %v (database=%v, %v)", err, info, parentErr)
+		}
 	}
 }
 

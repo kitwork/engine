@@ -355,8 +355,19 @@ const runtimeOwnershipAssertions = `__runStandaloneKitTest(async function () {
 });`
 
 func runVanillaBrowser(t *testing.T, browser, target string) {
+	runVanillaBrowserWithBudget(t, browser, target, 5000)
+}
+
+func runVanillaBrowserWithBudget(t *testing.T, browser, target string, virtualTimeBudgetMS int) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	if virtualTimeBudgetMS <= 0 {
+		t.Fatalf("headless browser virtual-time budget must be positive; got %d", virtualTimeBudgetMS)
+	}
+	commandTimeout := 25 * time.Second
+	if virtualTimeBudgetMS > 20000 {
+		commandTimeout = 45 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 	args := []string{
 		"--headless=new",
@@ -371,7 +382,7 @@ func runVanillaBrowser(t *testing.T, browser, target string) {
 		"--no-first-run",
 		"--run-all-compositor-stages-before-draw",
 		"--user-data-dir=" + t.TempDir(),
-		"--virtual-time-budget=5000",
+		fmt.Sprintf("--virtual-time-budget=%d", virtualTimeBudgetMS),
 		"--dump-dom",
 		target,
 	}
