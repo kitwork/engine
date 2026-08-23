@@ -29,16 +29,21 @@ func TestBrowserDriveUnicodeFragmentsAndBoundedScrollHistory(t *testing.T) {
 	}
 	hydrateIntegrity := driveScriptIntegrity(hydrateJS)
 	cancelSlowStarted := make(chan struct{})
-	cancelSlowRelease := make(chan struct{})
 	cancelSlowComplete := make(chan struct{})
-	popSlowRelease := make(chan struct{})
 	popSlowComplete := make(chan struct{})
 	var cancelStartOnce sync.Once
-	var cancelReleaseOnce sync.Once
 	var cancelCompleteOnce sync.Once
-	var popReleaseOnce sync.Once
 	var popCompleteOnce sync.Once
 	var popSlowRequests atomic.Int64
+	waitForServerSignal := func(response http.ResponseWriter, request *http.Request, signal <-chan struct{}) {
+		select {
+		case <-signal:
+			response.WriteHeader(http.StatusNoContent)
+		case <-request.Context().Done():
+		case <-time.After(5 * time.Second):
+			http.Error(response, "browser proof signal timed out", http.StatusGatewayTimeout)
+		}
+	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
@@ -73,30 +78,21 @@ func TestBrowserDriveUnicodeFragmentsAndBoundedScrollHistory(t *testing.T) {
 		case "/drive-fragments-cancel-slow":
 			if request.Header.Get("X-KitJS-Drive") == "1" {
 				cancelStartOnce.Do(func() { close(cancelSlowStarted) })
-				<-cancelSlowRelease
+				time.Sleep(400 * time.Millisecond)
 			}
 			writeDriveFragmentHTML(response, driveFragmentRouteDocument("Slow", request.URL.Path, hydrateIntegrity))
 			if request.Header.Get("X-KitJS-Drive") == "1" {
 				cancelCompleteOnce.Do(func() { close(cancelSlowComplete) })
 			}
 		case "/drive-fragments-cancel-slow-started":
-			select {
-			case <-cancelSlowStarted:
-			case <-request.Context().Done():
-			}
-			response.WriteHeader(http.StatusNoContent)
-		case "/drive-fragments-cancel-slow-release":
-			cancelReleaseOnce.Do(func() { close(cancelSlowRelease) })
-			select {
-			case <-cancelSlowComplete:
-			case <-request.Context().Done():
-			}
-			response.WriteHeader(http.StatusNoContent)
+			waitForServerSignal(response, request, cancelSlowStarted)
+		case "/drive-fragments-cancel-slow-complete":
+			waitForServerSignal(response, request, cancelSlowComplete)
 		case "/drive-fragments-pop-slow":
 			if request.Header.Get("X-KitJS-Drive") == "1" {
 				requestNumber := popSlowRequests.Add(1)
 				if requestNumber > 1 {
-					<-popSlowRelease
+					time.Sleep(400 * time.Millisecond)
 					writeDriveFragmentHTML(response, driveFragmentRouteDocument("Slow", request.URL.Path, hydrateIntegrity))
 					popCompleteOnce.Do(func() { close(popSlowComplete) })
 					return
@@ -104,23 +100,14 @@ func TestBrowserDriveUnicodeFragmentsAndBoundedScrollHistory(t *testing.T) {
 			}
 			writeDriveFragmentHTML(response, driveFragmentRouteDocument("Slow", request.URL.Path, hydrateIntegrity))
 		case "/drive-fragments-pop-slow-complete":
-			popReleaseOnce.Do(func() { close(popSlowRelease) })
-			select {
-			case <-popSlowComplete:
-			case <-request.Context().Done():
-			}
-			response.WriteHeader(http.StatusNoContent)
+			waitForServerSignal(response, request, popSlowComplete)
 		case "/drive-fragments-pop-fast":
 			writeDriveFragmentHTML(response, driveFragmentRouteDocument("Fast", request.URL.Path, hydrateIntegrity))
 		default:
 			http.NotFound(response, request)
 		}
 	}))
-	defer func() {
-		cancelReleaseOnce.Do(func() { close(cancelSlowRelease) })
-		popReleaseOnce.Do(func() { close(popSlowRelease) })
-		server.Close()
-	}()
+	defer server.Close()
 
 	runDriveFragmentBrowser(t, browser, server.URL+"/drive-fragments")
 }
@@ -267,7 +254,7 @@ const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   var realFetch = globalThis.fetch.bind(globalThis);
   var driveFetches = [];
   var navigationEvents = [];
-  globalThis.addEventListener("kit:navigation", function (event) {
+  document.addEventListener("kit:navigation", function (event) {
     navigationEvents.push(event.detail);
   });
   globalThis.fetch = function (source, options) {
@@ -367,7 +354,8 @@ const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   document.getElementById("raw-unicode-link").dispatchEvent(cancelClick);
   assert(cancelClick.defaultPrevented,
     "same-document fragment click did not use the guarded native-assignment path during an active visit");
-  await realFetch("/drive-fragments-cancel-slow-release");
+  var cancelCompletion = await realFetch("/drive-fragments-cancel-slow-complete");
+  assert(cancelCompletion.ok, "cancelled Drive response did not finish at the test server");
   assert(location.pathname === "/drive-fragments" &&
     decodeURIComponent(location.hash.slice(1)) === "á" &&
     document.getElementById("route-main").getAttribute("data-route") === "/drive-fragments" &&
@@ -562,7 +550,8 @@ const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   await forwardPopstate;
   assert(location.pathname === "/drive-fragments-pop-fast",
     "rapid Forward did not restore the fast destination entry");
-  await realFetch("/drive-fragments-pop-slow-complete");
+  var popCompletion = await realFetch("/drive-fragments-pop-slow-complete");
+  assert(popCompletion.ok, "stale popstate response did not finish at the test server");
   await waitFor(function () {
     return document.getElementById("route-main").getAttribute("data-route") === "/drive-fragments-pop-fast" &&
       history.state.__kitjs_drive__.scroll.y === fastY && Math.abs(scrollY - fastY) < 2;

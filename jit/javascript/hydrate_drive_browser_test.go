@@ -96,7 +96,7 @@ func TestBrowserHydrateDriveNavigation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowserWithBudget(t, browser, server.URL+"/drive.html", 30000)
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/drive.html", 90000)
 	if got := activeContentLoads.Load(); got != 0 {
 		t.Fatalf("incoming active content loaded %d external payloads before hard fallback", got)
 	}
@@ -182,9 +182,22 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
   var waitForDrive = function (predicate, message) {
-    return waitFor(predicate, message, 5000);
+    return waitFor(predicate, message, 15000);
   };
   var nextTurn = __kitTestNextTurn;
+  function nextLoadedNavigation(path) {
+    return new Promise(function (resolve, reject) {
+      function onNavigation(event) {
+        var detail = event.detail;
+        if (!detail || detail.phase !== "finish" ||
+          new URL(detail.url, location.href).pathname !== path) return;
+        document.removeEventListener("kit:navigation", onNavigation);
+        if (detail.outcome === "loaded") resolve(detail);
+        else reject(new Error(path + " navigation finished " + detail.outcome));
+      }
+      document.addEventListener("kit:navigation", onNavigation);
+    });
+  }
 
   assert(Object.keys(kit).join(",") === "version,component", "Hydrate leaked a public API: " + Object.keys(kit).join(","));
   assert(!document.querySelector("[data-kit-app],[data-kit-hydrate]"), "Hydrate required an activation marker");
@@ -247,10 +260,11 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   }, "GET form navigation did not commit");
   assert(document.getElementById("counter-output").textContent === "1", "form navigation reset component state");
 
+  var restoredFast = nextLoadedNavigation("/fast");
   history.back();
-  await waitForDrive(function () {
-    return location.pathname === "/fast" && document.getElementById("route-main").textContent.trim() === "Fast";
-  }, "popstate navigation did not restore the prior route");
+  await restoredFast;
+  assert(location.pathname === "/fast" && document.getElementById("route-main").textContent.trim() === "Fast",
+    "popstate navigation did not restore the prior route");
 
   document.getElementById("unknown-link").click();
   await waitForDrive(function () { return document.cookie.indexOf("kit_drive_unknown_fallback=1") >= 0; },

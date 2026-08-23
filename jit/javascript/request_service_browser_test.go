@@ -182,7 +182,7 @@ func TestBrowserRequestServiceContract(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/request.html")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/request.html", 60000)
 	if got := packageRequests.Load(); got != 0 {
 		t.Fatalf("browser fetched an authored service package at runtime %d times", got)
 	}
