@@ -402,11 +402,13 @@ func runVanillaBrowserWithBudget(t *testing.T, browser, target string, virtualTi
 }
 
 func runHeadlessBrowserCommand(ctx context.Context, browser string, args ...string) ([]byte, error) {
-	args = append([]string{
-		"--disable-background-mode",
-		"--disable-breakpad",
-		"--disable-crashpad-for-testing",
-	}, args...)
+	if runtime.GOOS == "windows" {
+		args = append([]string{
+			"--disable-background-mode",
+			"--disable-breakpad",
+			"--disable-crashpad-for-testing",
+		}, args...)
+	}
 	command := exec.CommandContext(ctx, browser, args...)
 	if runtime.GOOS == "windows" {
 		command.WaitDelay = 5 * time.Second
