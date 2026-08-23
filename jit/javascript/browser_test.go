@@ -408,8 +408,8 @@ func runHeadlessBrowserCommand(ctx context.Context, browser string, args ...stri
 		"--disable-crashpad-for-testing",
 	}, args...)
 	command := exec.CommandContext(ctx, browser, args...)
-	command.WaitDelay = 5 * time.Second
 	if runtime.GOOS == "windows" {
+		command.WaitDelay = 5 * time.Second
 		command.Cancel = func() error {
 			if command.Process == nil {
 				return nil
