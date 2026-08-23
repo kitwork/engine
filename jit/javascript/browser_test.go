@@ -428,6 +428,9 @@ func runHeadlessBrowserCommand(ctx context.Context, browser string, args ...stri
 
 func newHeadlessBrowserProfile(t *testing.T) string {
 	t.Helper()
+	if runtime.GOOS != "windows" {
+		return t.TempDir()
+	}
 	profile, err := os.MkdirTemp("", "kitwork-browser-*")
 	if err != nil {
 		t.Fatalf("create headless browser profile: %v", err)
