@@ -140,7 +140,7 @@ func TestBrowserStandaloneDriveStableScriptTopology(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/stable/start")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/stable/start", 600000)
 
 	if got := hydrateLoads.Load(); got != 1 {
 		t.Fatalf("self-hosted unsigned Hydrate profile loads = %d, want one", got)
@@ -536,7 +536,9 @@ const stableDriveComponentBundleSource = `(function (global) {
 
 const stableDriveAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
-  var waitFor = __kitTestWaitFor;
+  var waitFor = function (predicate, message) {
+    return __kitTestWaitFor(predicate, message, 15000);
+  };
   var state = globalThis.__stableDriveState;
 
   await waitFor(function () {

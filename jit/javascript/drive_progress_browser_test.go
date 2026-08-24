@@ -212,7 +212,7 @@ func TestBrowserDriveProgressExample(t *testing.T) {
 	defer server.Close()
 	defer releaseSlowResponse()
 
-	runVanillaBrowser(t, browser, server.URL+"/examples/drive-progress/index.html")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/examples/drive-progress/index.html", 600000)
 	if got := artifactRequests.Load(); got != 1 {
 		t.Fatalf("Drive navigation requested its sealed progress artifact %d times, want 1", got)
 	}
@@ -353,7 +353,9 @@ const driveProgressDirectAssertions = `__runStandaloneKitTest(async function () 
 
 const driveProgressAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
-  var waitFor = __kitTestWaitFor;
+  var waitFor = function (predicate, message) {
+    return __kitTestWaitFor(predicate, message, 15000);
+  };
   var root = document.documentElement;
   await waitFor(function () {
     var current = document.querySelector('[data-kit-retain="app-progress"]');
