@@ -186,29 +186,38 @@ func TestCollectionSegmentCanaryIsAsyncAndSurvivesManagerRestart(t *testing.T) {
 	scope := newSegmentCanaryTestScope(t, root, db)
 	scope.providerEntered = make(chan struct{})
 	scope.providerRelease = make(chan struct{})
+	var releaseProviderOnce sync.Once
+	releaseProvider := func() {
+		releaseProviderOnce.Do(func() { close(scope.providerRelease) })
+	}
+	defer releaseProvider()
 	manager := NewManager(scope)
 	manager.EnableSegmentSearchCanary(true)
 	handle := openCollectionTestHandle(t, manager, "posts")
 
 	result := make(chan value.Value, 1)
 	go func() { result <- handle.Search(value.NewString("nguyen"), value.New(20)) }()
+	var served value.Value
 	select {
-	case served := <-result:
-		if served.K == value.Invalid {
-			close(scope.providerRelease)
-			t.Fatalf("serving search: %v", served.V)
+	case served = <-result:
+		select {
+		case <-scope.providerEntered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("shadow worker did not start")
 		}
-	case <-time.After(500 * time.Millisecond):
-		close(scope.providerRelease)
-		t.Fatal("serving search waited for the shadow provider")
-	}
-	select {
 	case <-scope.providerEntered:
-	case <-time.After(time.Second):
-		close(scope.providerRelease)
-		t.Fatal("shadow worker did not start")
+		select {
+		case served = <-result:
+		case <-time.After(5 * time.Second):
+			t.Fatal("serving search remained blocked after the shadow provider entered")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serving search and shadow worker did not make progress")
 	}
-	close(scope.providerRelease)
+	if served.K == value.Invalid {
+		t.Fatalf("serving search: %v", served.V)
+	}
+	releaseProvider()
 	waitForCollectionCanary(t, manager, 1)
 	stats := manager.SegmentSearchCanaryStats()
 	if !stats.Enabled || stats.Rebuilds != 1 || stats.Searches != 1 || stats.Matches != 1 ||
