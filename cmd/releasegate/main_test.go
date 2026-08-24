@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/compiler"
 	kitruntime "github.com/kitwork/engine/runtime"
 )
 
@@ -76,7 +77,7 @@ func TestReleasePlanModes(t *testing.T) {
 			}
 		}
 		if step.Name == "VM/compiler contracts" &&
-			!containsArgument(step.Command, "TestVMV2Contract|TestCompilerV2") {
+			!containsArgument(step.Command, "TestVMV2Contract|TestCompilerV3") {
 			t.Fatal("contract gate omitted cold-process compiler determinism")
 		}
 		if step.Name == "Language/inspector contracts" &&
@@ -109,10 +110,10 @@ func TestCompatibilityReportMatchesRuntime(t *testing.T) {
 	report := currentCompatibilityReport()
 	if report.BytecodeVersion != 2 ||
 		report.ProgramEncodingVersion != 1 ||
-		report.ArtifactVersion != 1 ||
-		report.CompilerSchemaVersion != 2 ||
+		report.ArtifactVersion != compiler.BytecodeArtifactVersion ||
+		report.CompilerSchemaVersion != compiler.CompilerSchemaVersion ||
 		report.InstructionSetChecksum == "" ||
-		report.CompilerFingerprint == "" ||
+		report.CompilerFingerprint != compiler.Fingerprint() ||
 		report.RuntimeLimits != kitruntime.Limits() {
 		t.Fatalf("compatibility report = %+v", report)
 	}

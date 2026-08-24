@@ -8,7 +8,7 @@ This backlog consolidates all confirmed, partially confirmed, and unconfirmed te
 
 | ID | Title | Priority | Category | Evidence Status | Affected Package / File | Complexity |
 |---|---|---|---|---|---|---|
-| **KIT-B01** | VM Interpreter Premature Abort on `Value{K: Invalid}` | **P0** | Correctness / API | **Confirmed** | `engine/runtime/interpreter.go`, `engine/work/safe_rescue_test.go` | High |
+| **KIT-B01** | Protected `.safe()` evaluation for `Value{K: Invalid}` | **P0** | Correctness / API | **Resolved** | `engine/compiler/compiler.go`, `engine/runtime/interpreter.go` | High |
 | **KIT-B02** | Lock Inversion Deadlock on `Engine.Close()` | **P0** | Concurrency / Deadlock | **Confirmed** | `engine/core/engine.go:Close`, `engine/work/tenant.go:Close` | Medium |
 | **KIT-B03** | Cast Method Shadowing in `value.Invoke` | **P1** | Correctness / API | **Confirmed** | `engine/value/methods.go:Invoke`, `engine/value/kind.go` | Medium |
 | **KIT-B04** | `FileCache` Key Generation Omits Indirect Relative Imports | **P1** | Correctness / Cache | **Confirmed** | `engine/compiler/cache.go`, `engine/compiler/bundler.go` | Medium |
@@ -22,22 +22,19 @@ This backlog consolidates all confirmed, partially confirmed, and unconfirmed te
 
 ## 2. Detailed Backlog Items
 
-### KIT-B01: VM Interpreter Premature Abort on `Value{K: Invalid}`
+### KIT-B01: Protected `.safe()` Evaluation for `Value{K: Invalid}`
 - **ID**: `KIT-B01`
 - **Title**: VM Interpreter Premature Abort on `Value{K: Invalid}` Stack Top
 - **Priority**: **P0**
 - **Category**: Correctness / API
-- **Evidence Status**: **Confirmed** (proven in [safe_rescue_test.go](file:///d:/project/kitwork/engine/work/safe_rescue_test.go#L15) and [result_vm_test.go](file:///d:/project/kitwork/engine/compiler/result_vm_test.go#L20)).
-- **Related File & Symbol**: `engine/runtime/interpreter.go:execute` ([interpreter.go:L360-L372](file:///d:/project/kitwork/engine/runtime/interpreter.go#L360-L372))
-- **Current Behavior**: The interpreter loop checks `vm.peek().K == value.Invalid` after every instruction step. When an instruction produces an `Invalid` value (e.g. `fail("boom")` or a DB query error), the interpreter halts immediately and returns an execution failure (HTTP 500) before reaching an `INVOKE("safe")` opcode.
-- **Desired Behavior**: Calling `.safe()` on a JS expression catches hard `Invalid` errors and returns a `SafeResult` (`{ ok: false, error: ... }`) without triggering an unhandled VM abort.
-- **Impact**: JS code cannot handle runtime errors safely using `.safe()`, causing unhandled 500 errors.
-- **Reproduction**: Run `TestSafeDoesNotYetRescueAHardFailure` in `engine/work/safe_rescue_test.go`.
-- **Tests Needed**: Unit test in `engine/work/safe_rescue_test.go` proving `fail("boom").safe()` yields `{ ok: false, error: "boom" }`.
+- **Evidence Status**: **Resolved** by compiler schema v3 and protected evaluator contracts.
+- **Related File & Symbol**: `compiler.Compiler.Compile`, `runtime.executeInvoke`, `runtime.safeEvaluationResult`.
+- **Current Behavior**: `X.safe()` evaluates `X` in a compiler-generated internal lambda. `RUNTIME_ERROR` becomes `{ ok: false, error: ... }`; fatal VM diagnostics remain fail-closed.
+- **Verification**: `TestSafeMethodRescuesVMRuntimeError`, `TestSafeEvaluationResultRescuesOnlyRuntimeErrors`, `TestSafeMethodSurvivesArtifactRoundTrip`, pooled determinism, and `TestSafeRescuesAHardFailure`.
 - **Complexity**: High
 - **Dependencies**: None
 - **Backward Compatibility Risk**: Low (enables intended `.safe()` behavior).
-- **Minimal Resolution**: Defer `Invalid` stack abort check to `COMMIT` boundaries, or compile `.safe()` to a protected evaluation opcode (`SAFE_EVAL`).
+- **Resolution**: Protected lambda lowering using existing `JUMP`, `PUSH`, `INVOKE`, and `RETURN`; VM v2 and its opcode table remain unchanged.
 
 ---
 

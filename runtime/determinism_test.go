@@ -194,6 +194,14 @@ var result = [1, 2, 3, 4]
 			maxEnergy: 100_000,
 		},
 		{
+			name: "safe-runtime-error",
+			source: `
+const check = [].reduce((total, item) => total + item).safe();
+var result = { ok: check.ok, error: check.error };
+`,
+			maxEnergy: 100_000,
+		},
+		{
 			name:   "native-panic",
 			source: `var result = explode();`,
 			globals: func() map[string]value.Value {

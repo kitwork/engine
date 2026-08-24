@@ -138,8 +138,7 @@ func TestEntityRefusesWhenTheAppHasNoIdentity(t *testing.T) {
 	withSharedDB(t)
 
 	res := tableAs("", "posts").List()
-	// Reported as an ATTACHED error, not a hard one: a hard failure stops the VM before .safe() on
-	// the same expression can run, which would leave the handler no way to respond.
+	// A known domain refusal remains attached so its code and clean message survive safe().
 	if !res.IsError {
 		t.Fatalf("an app with no identity got a clean result instead of an error: %v", res.V)
 	}
@@ -200,15 +199,13 @@ func TestSystemIsRefusedUntilPermissionsExist(t *testing.T) {
 // The handler this was built for, both ways round. A query that fails must leave the author in
 // control — status, shape and wording all theirs — rather than becoming a 500 the engine chose.
 func TestEntityFailureIsAnswerableByTheHandler(t *testing.T) {
-	// A failure reaches run() as K==Invalid from the query builder. Returned as-is it would be a
-	// HARD failure, and the VM stops the program the moment one lands on the stack — before .safe()
-	// on the same expression is reached. Attaching the error instead keeps the value ordinary, so
-	// it survives the call and .safe() can split it.
+	// A failure reaches run() as K==Invalid from the query builder. Attaching it at this domain
+	// boundary preserves DATABASE_ERROR instead of reducing it to a generic runtime error.
 	withSharedDB(t)
 	res := tableAs("acme", "no_such_table").List()
 
 	if res.K == value.Invalid {
-		t.Fatal("a failed query returned a hard error; .safe() on the same expression cannot run")
+		t.Fatal("a failed query returned a hard VM error instead of an attached domain error")
 	}
 	if !res.IsError {
 		t.Fatal("the failure was swallowed — a handler that forgets to check would read it as data")

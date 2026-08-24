@@ -171,10 +171,7 @@ func (vm *VM) buildDiagnostic(code DiagnosticCode, message string, ip int) *Diag
 		name := "<main>"
 		location := vm.currentLocation(frameIP)
 		if frame.Fn != nil {
-			name = frame.Fn.Name
-			if name == "" {
-				name = "<anonymous>"
-			}
+			name = lambdaDisplayName(frame.Fn)
 			if location.File == "" {
 				location.File = frame.Fn.SourceFile
 			}
@@ -203,4 +200,17 @@ func (vm *VM) buildDiagnostic(code DiagnosticCode, message string, ip int) *Diag
 		diagnostic.Function = top.Function
 	}
 	return diagnostic
+}
+
+func lambdaDisplayName(lambda *value.Lambda) string {
+	if lambda == nil {
+		return "<anonymous>"
+	}
+	if lambda.IsSafeEvaluator() {
+		return "<safe>"
+	}
+	if lambda.Name == "" {
+		return "<anonymous>"
+	}
+	return lambda.Name
 }

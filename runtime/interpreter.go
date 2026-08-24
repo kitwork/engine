@@ -604,6 +604,16 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	method := vm.pop().Text()
 
 	targetIndex := len(vm.Stack) - count - 1
+	if targetIndex >= frame.StackBase && count == 0 && method == "safe" {
+		target := vm.Stack[targetIndex]
+		if evaluator, ok := target.V.(*value.Lambda); ok && evaluator.IsSafeEvaluator() {
+			clear(vm.Stack[targetIndex:])
+			vm.Stack = vm.Stack[:targetIndex]
+			vm.push(safeEvaluationResult(vm.ExecuteLambda(evaluator, nil)))
+			return
+		}
+	}
+
 	if targetIndex >= frame.StackBase &&
 		count > 0 &&
 		isArrayCallbackMethod(method) {
@@ -698,6 +708,20 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	}
 
 	vm.push(vm.nativeMethod(target, method, args))
+}
+
+func safeEvaluationResult(result value.Value) value.Value {
+	if result.K != value.Invalid {
+		return result.Safe()
+	}
+
+	if diagnostic, ok := DiagnosticFrom(result); ok {
+		if diagnostic.Code != DiagnosticRuntimeError {
+			return result
+		}
+		result = value.Value{K: value.Invalid, V: diagnostic.Message}
+	}
+	return result.Safe()
 }
 
 func standardMethodUsesStackArgs(kind value.Kind) bool {

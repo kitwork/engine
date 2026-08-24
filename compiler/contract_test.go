@@ -2,11 +2,11 @@ package compiler
 
 import "testing"
 
-func TestCompilerV2GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 2 {
-		t.Fatalf("CompilerSchemaVersion = %d, want frozen schema v2", CompilerSchemaVersion)
+func TestCompilerV3GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 3 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v3", CompilerSchemaVersion)
 	}
-	const expectedFingerprint = "aa8250eda7fb056436c15a279e12f37a3e0b25d5597f3ad8059a6bfc120627e4"
+	const expectedFingerprint = "f0c6c9255af80f7d2109348a23f49281ca50935b9bb8e41cbcf4970d7fcd4c07"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
 	}
@@ -55,6 +55,11 @@ default:
 }
 `,
 			checksum: "7c13741c452fce0678e536786e4f550c4beb190c57a4e697c6d4a4782c12356a",
+		},
+		{
+			name:     "safe-evaluator",
+			source:   `var result = { answer: 42 }.safe().value.answer;`,
+			checksum: "668d4f58dc1d0cbfd3f7dee431dd6e2f1ef055842e60f4585c305984e55cc7d8",
 		},
 	}
 

@@ -8,7 +8,7 @@ This document identifies high-risk technical areas, potential bugs, resource lea
 
 ```mermaid
 graph LR
-    TR1[1. VM Opcode Hard Error Abort] --> |Impact: Cannot catch errors in JS| HighRisk1[Broken Error Handling]
+    TR1[1. Protected safe boundary] --> |Status: Resolved| HighRisk1[Explicit Error Handling]
     TR2[2. Closure Frame Scope Pinning] --> |Impact: Memory leak across request leases| HighRisk2[RAM Retention Leak]
     TR3[3. Map Key Shadowing in value.Invoke] --> |Impact: Built-in method overrides user data| HighRisk3[Data Corruption]
     TR4[4. FileCache Dependency Invalidation] --> |Impact: Stale imported module bytecode| HighRisk4[Cache Invalidation]
@@ -19,12 +19,11 @@ graph LR
 
 ## 2. Detailed Technical Risk Assessments
 
-### Risk 1: VM Interpreter Premature Abort on `Invalid` Value
-- **Severity**: **Critical** (Confirmed Bug)
-- **Location**: [engine/runtime/interpreter.go:L360-L372](file:///d:/project/kitwork/engine/runtime/interpreter.go#L360-L372)
-- **Trigger Condition**: Any opcode returning `Value{K: Invalid}` (e.g., failed database query, missing file, or `fail("msg")`).
-- **Impact**: The interpreter loop checks `vm.peek().K == value.Invalid` after every instruction and immediately exits with a runtime diagnostic. This prevents chained recovery calls like `db.query().safe()` or `fail().safe()` from executing, breaking script-level error handling.
-- **Proposed Fix**: Compile `.safe()` to a dedicated opcode (`SAFE_EVAL`) or defer the `Invalid` stack check to expression boundaries (`COMMIT`).
+### Risk 1: Protected `.safe()` Boundary
+- **Severity**: **Resolved; regression-sensitive**
+- **Location**: `compiler/compiler.go`, `runtime/interpreter.go`, `runtime/safe_evaluation_test.go`
+- **Current Contract**: The compiler wraps only the receiver of zero-argument `X.safe()` in an internal evaluator. Ordinary runtime failures are reshaped, while energy, cancellation, stack overflow, program mismatch and native panic remain fatal.
+- **Compatibility**: Compiler schema v3 invalidates stale cache artifacts; VM bytecode v2 and opcode slots are unchanged.
 
 ### Risk 2: Scope Memory Pinning in Escaped Closures
 - **Severity**: **High** (Confirmed Behavior requiring strict contract)

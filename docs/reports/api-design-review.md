@@ -8,7 +8,7 @@ This document evaluates the public and developer-facing APIs of the Kitwork Engi
 
 | API Area | Evaluation Criteria | Strengths | Weaknesses / Design Flaws | Recommendation |
 |---|---|---|---|---|
-| **Inline Error (`.safe()`)** | Ergonomics & Safety | Single unified return shape (`SafeResult`). No manual destructuring required. | Cannot be called on hard VM errors in JS due to interpreter abort behavior. | Fix VM interpreter to allow `.safe()` to execute on `Invalid` stack values. |
+| **Inline Error (`.safe()`)** | Ergonomics & Safety | Single unified return shape (`SafeResult`) with protected receiver evaluation. | Adds a bounded internal frame and compiler lowering for each call. | Keep fatal VM diagnostics outside the recoverable error channel. |
 | **Environment Config (`env`)** | Simplicity & Coercion | Auto-coerces numbers, booleans, and strings. Supports `env.require(key)`. | Uses `Proxy` to bypass cast method shadowing (`int`, `string`). Default-true booleans cannot use `\|\| true`. | Retain `Proxy`, document `env.require()` as preferred pattern for strict variables. |
 | **Query Builder (`entity().table()`)** | Readability & SQL Safety | Enforces parameterized queries and mandatory `where()` on `update()` / `delete()`. Auto-IN/LIKE detection. | Discrepancy between `first()` returning `null` vs `list()` returning empty array `[]`. | Preserve semantics; standardize return type documentation. |
 | **Response Context (`ctx`)** | Expressiveness | Fluent chaining (`ctx.status(201).json(...)`). | Dual behavior: calling `ctx.view()` sets a deferred view builder, while returning a map auto-renders JSON. | Keep current behavior; deprecate ambiguous legacy aliases (`ctx.render()`). |
@@ -27,7 +27,7 @@ This document evaluates the public and developer-facing APIs of the Kitwork Engi
   ```
 - **Design Assessment**:
   - **Pros**: `res.ok` boolean getter works cleanly without parens. `res.error` returns a readable error message string instead of a nested `{ code, message }` object, preventing double-nested JSON responses.
-  - **Cons**: As identified in the consistency audit, calling `.safe()` on expressions that produce a hard `Invalid` error (e.g. `fail("boom").safe()`) fails because the VM halts before `.safe()` is reached.
+  - **Boundary**: Hard application errors such as `fail("boom")` are recoverable. Energy exhaustion, cancellation, stack overflow, program mismatch and native panic are deliberately not recoverable through `.safe()`.
 
 ### 2.2 Environment Variables API: `env` Proxy & Coercion
 - **Current State**: `env` auto-coerces values:

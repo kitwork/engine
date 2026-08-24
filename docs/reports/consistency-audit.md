@@ -10,8 +10,8 @@ This document presents a systematic audit of code, documentation, comments, API 
 
 | Area | Stated in Docs / Comments | Actual Implementation | Impact & Location |
 |---|---|---|---|
-| **`.safe()` Error Rescue** | `navigation.go` and `result.go` state that `.safe()` rescues hard `Invalid` errors (e.g. DB failures, `fail("boom")`). | The VM dispatch loop ([interpreter.go](file:///d:/project/kitwork/engine/runtime/interpreter.go#L360-L372)) checks `peek().K == Invalid` after **every** instruction and immediately aborts frame execution before `INVOKE("safe")` can execute. | High. JS scripts cannot rescue hard errors using `.safe()`. Confirmed in [safe_rescue_test.go](file:///d:/project/kitwork/engine/work/safe_rescue_test.go) & [result_vm_test.go](file:///d:/project/kitwork/engine/compiler/result_vm_test.go). |
-| **Legacy `.result()` references** | Comments in [result_vm_test.go](file:///d:/project/kitwork/engine/compiler/result_vm_test.go#L5) claim `.result()` is tested. | `.result()` was removed in favor of `.safe()` ([result_test.go:L120](file:///d:/project/kitwork/engine/value/result_test.go#L120)). | Low documentation drift. |
+| **`.safe()` Error Rescue** | `navigation.go` and `result.go` state that `.safe()` rescues hard `Invalid` errors (e.g. DB failures, `fail("boom")`). | Compiler schema v3 lowers `X.safe()` to an internal protected evaluator. The VM rescues only `RUNTIME_ERROR`; energy, cancellation, stack, program and native-panic diagnostics remain fatal. | Resolved. Compiler, runtime, artifact round-trip, pooled determinism and HTTP contracts cover the boundary. |
+| **Legacy `.result()` references** | Earlier tests referred to both `.result()` and `.safe()`. | `.result()` is removed; current VM contracts cover only the single `SafeResult` shape. | Resolved. |
 | **3-Tier Architecture RFC** | [ARCHITECTURE.md](file:///d:/project/kitwork/engine/docs/ARCHITECTURE.md) describes route layout using `app/` subfolders and `index.kitwork.js`. | Production layout uses `apps/<identity>/<domain>/app/` with `router.kitwork.js` and `page.kitwork.html`. | Medium doc ambiguity. Header note added to `ARCHITECTURE.md`, but file remains misleading. |
 | **`Tenant` Ownership** | `Tenant` struct comments refer to `Tenant` as resource owner. | [STABILITY.md](file:///d:/project/kitwork/engine/docs/STABILITY.md) & [RUNTIME_ARCHITECTURE.md](file:///d:/project/kitwork/engine/docs/RUNTIME_ARCHITECTURE.md) confirm `Tenant` is now a compatibility facade; real ownership lies in `app.Runtime` and `site.Generation`. | Medium conceptual drift. |
 
@@ -20,9 +20,9 @@ This document presents a systematic audit of code, documentation, comments, API 
 ## 2. API & Behavioral Inconsistencies
 
 ### 2.1 Error Handling API Audit (`.safe()`, `.result()`, `.must()`)
-1. **`.safe()` Unreachability on Hard Error**:
-   - **Value Layer**: `Value{K: Invalid, V: "boom"}.Safe()` correctly produces `SafeResult{ ok: false, error: "boom" }`.
-   - **VM Layer**: `fail("boom").safe()` fails because `fail("boom")` pushes `Value{K: Invalid}` onto the VM stack. The interpreter loop checks top of stack after `CALL("fail")` and immediately halts execution, returning an execution diagnostic. `INVOKE("safe")` is never executed.
+1. **`.safe()` protected evaluation**:
+   - **Value Layer**: `Value{K: Invalid, V: "boom"}.Safe()` produces `SafeResult{ ok: false, error: "boom" }`.
+   - **VM Layer**: `fail("boom").safe()` now evaluates the receiver inside a compiler-generated protected lambda. Ordinary runtime errors become `SafeResult`; host and resource-boundary diagnostics still fail closed.
 2. **`.must()` Scope Asymmetry**:
    - `id.Generator.Must(length)` exists in Go backend code.
    - JS subset has no `.must()` method on DB queries or value wrappers. Calling `.must()` on a JS query builder fails as an unknown method.

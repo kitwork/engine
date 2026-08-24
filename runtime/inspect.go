@@ -158,13 +158,9 @@ func inspectEntryPoints(program *Program, constants []value.Value) []InspectedEn
 		if !ok || lambda == nil {
 			continue
 		}
-		name := lambda.Name
-		if name == "" {
-			name = "<anonymous>"
-		}
 		entries = append(entries, InspectedEntryPoint{
 			Address: lambda.Address,
-			Name:    name,
+			Name:    lambdaDisplayName(lambda),
 			Params:  append([]string(nil), lambda.Params...),
 			Source: InspectedSource{
 				File:   lambda.SourceFile,
@@ -197,13 +193,9 @@ func inspectConstants(constants []value.Value) []InspectedConstant {
 
 func constantPreview(constant value.Value) string {
 	if lambda, ok := constant.V.(*value.Lambda); ok && lambda != nil {
-		name := lambda.Name
-		if name == "" {
-			name = "<anonymous>"
-		}
 		return boundedPreview(fmt.Sprintf(
 			"%s(%s) @%d",
-			name,
+			lambdaDisplayName(lambda),
 			strings.Join(lambda.Params, ", "),
 			lambda.Address,
 		))

@@ -33,7 +33,7 @@ Focuses on fixing confirmed bugs, error propagation gaps, and concurrency risks.
 
 | Task ID | Task Description | Priority | Affected Package | Complexity | Dependencies | Completion Criteria |
 |---|---|---|---|---|---|---|
-| **1.1** | **Fix VM `.safe()` Execution on Hard Errors**: Enable `.safe()` to execute when stack top is `Value{K: Invalid}` instead of triggering an immediate VM abort. | P0 | `runtime/`, `compiler/`, `value/` | High | None | `TestSafeRescuesVMHardFailure` passes; JS code calling `fail().safe()` returns `{ ok: false, error: ... }`. |
+| **1.1 (Done)** | **Protected `.safe()` Evaluation**: Compiler schema v3 evaluates the receiver in an internal lambda and rescues only application runtime errors. | P0 | `runtime/`, `compiler/`, `value/` | High | None | Compiler/runtime/HTTP, artifact round-trip and pooled determinism contracts pass; VM v2 opcodes remain frozen. |
 | **1.2** | **Fix Lock Inversion in Host Shutdown**: Move `Tenant.Close()` calls outside `Engine.mu` lock inside `Engine.Close()`. | P0 | `core/` | Medium | None | `go test -race ./core` passes cleanly under high concurrent shutdown stress. |
 | **1.3** | **Fix Cast Method Shadowing in `value.Invoke`**: Check map property keys before calling built-in scalar cast methods (`int`, `string`, `json`). | P1 | `value/` | Medium | None | `userMap.Get("int")` returns map property value without executing scalar cast. |
 | **1.4** | **Fix `FileCache` Invalidation for Indirect Imports**: Hash SHA-256 fingerprints of all bundled relative native import files into cache key. | P1 | `compiler/`, `site/` | Medium | None | Editing `./lib/utils.js` changes bytecode cache key and triggers re-compilation. |

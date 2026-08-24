@@ -7,7 +7,7 @@
 3. **Zero-Allocation HTTP Hot Paths**: Reusable VM pools (`app.Pool`), FastReset recycling, pre-compiled filesystem route trees (`RouteTree`), and prepared view render plans (`RenderPlan`) achieve zero allocation on hot HTTP request paths.
 4. **Hierarchical Ownership Model**: Production runtime enforces a clear 4-tier hierarchy: `Host -> AppRuntime(identity) -> SiteRuntime(domain) -> Generation(version) -> RequestScope(HTTP request)`.
 5. **Native Import Bundler**: Built-in AST-level module bundler (`compiler.nativeBundle`) resolves relative imports and wraps files in IIFE module structures without requiring external build tools.
-6. **VM Interpreter `.safe()` Execution Gap**: A major discrepancy exists where `.safe()` is designed to catch hard `Invalid` errors at the `value` layer, but the VM interpreter's post-opcode `peek().K == Invalid` check aborts execution before `INVOKE("safe")` can be called.
+6. **Explicit `.safe()` Error Boundary**: Compiler schema v3 protects the receiver of `X.safe()` without changing VM v2 opcodes. Application runtime errors become `SafeResult`; energy, cancellation, stack, program and native-panic diagnostics remain fatal.
 7. **Cast Method Shadowing Hazard**: `value.Invoke` evaluates scalar cast methods (`int`, `string`, `json`, `len`) before map key lookup, requiring `Proxy` objects (e.g. `env`) to prevent map key shadowing.
 8. **App-Owned Background Architecture**: Cron schedulers, SQLite connection pools, and detached background tasks (`kitwork().go()`) are owned by `app.Runtime`, ensuring site generation reloads do not interrupt background work.
 9. **Zero-VM Static Asset Delivery**: Request paths serving static assets (`/public/` or `/assets/`) bypass the VM entirely, streaming files directly from disk via zero-copy `io.Copy`.
@@ -15,9 +15,9 @@
 
 ---
 
-## 2. Top 5 Critical Technical Risks
+## 2. Top 5 Technical Risks And Resolutions
 
-1. **Unreachable `.safe()` Error Rescue in VM**: Scripts calling `fail().safe()` or handling database query failures cannot catch hard errors in JS, resulting in unhandled 500 HTTP responses. ([technical-risks.md#risk-1](file:///C:/Users/huynh/.gemini/antigravity-ide/brain/74f48378-4ea7-4577-bb91-1aefb3f9689a/technical-risks.md))
+1. **Resolved `.safe()` Error Rescue**: Protected compiler lowering now makes hard application errors answerable while preserving fail-closed runtime limits. Regression coverage spans compiler, runtime, serialization, pooling and HTTP.
 2. **Potential Lock Inversion During Host Shutdown**: `Engine.Close()` holds the engine lock while calling `Tenant.Close()`, creating potential deadlock conditions under heavy concurrent request drains. ([technical-risks.md#risk-5](file:///C:/Users/huynh/.gemini/antigravity-ide/brain/74f48378-4ea7-4577-bb91-1aefb3f9689a/technical-risks.md))
 3. **Escaped Closure Memory Retention**: Escaping lambdas capturing local frame scopes (`frame.captured = true`) pin frame variable maps in memory as long as the lambda reference is alive. ([technical-risks.md#risk-2](file:///C:/Users/huynh/.gemini/antigravity-ide/brain/74f48378-4ea7-4577-bb91-1aefb3f9689a/technical-risks.md))
 4. **Cast Method Shadowing on Custom Maps**: Accessing map properties named `"int"` or `"string"` executes scalar cast methods instead of fetching property values. ([technical-risks.md#risk-3](file:///C:/Users/huynh/.gemini/antigravity-ide/brain/74f48378-4ea7-4577-bb91-1aefb3f9689a/technical-risks.md))
@@ -37,10 +37,10 @@
 
 ## 4. Top 10 Actionable Next Steps
 
-1. **Fix VM `.safe()` Execution Path**: Defer `Invalid` stack aborts to `COMMIT` or implement a dedicated opcode so JS code can catch hard errors using `.safe()`.
+1. **Preserve the `.safe()` Boundary**: Keep compiler schema v3 golden lowering, fatal-diagnostic exclusions, artifact round-trip and pooled execution in release gates.
 2. **Refactor Engine Shutdown Lock Bounds**: Move `Tenant.Close()` execution outside `Engine.mu` lock inside `Engine.Close()`.
 3. **Fix `value.Invoke` Key Shadowing**: Check map property existence prior to built-in scalar cast lookup.
-4. **Add P0/P1 Integration Tests**: Implement `TestSafeRescuesVMHardFailure` and `TestConcurrentTenantIsolationSoak`.
+4. **Add Remaining P1 Integration Tests**: Keep the completed `.safe()` contracts and expand concurrent tenant-isolation coverage.
 5. **Implement Indirect Import Cache Key Fingerprinting**: Expand `FileCache` to recursively hash nested imported module files.
 6. **Deprecate Legacy `.result()` and `ctx.render()`**: Remove outdated comments and align API documentation.
 7. **Reconcile `ARCHITECTURE.md` Documentation**: Update historical RFC docs to accurately reflect the production filesystem route tree (`router.kitwork.js`).

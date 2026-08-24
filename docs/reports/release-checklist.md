@@ -14,7 +14,7 @@ This document tracks the release readiness checklist for Kitwork Engine v1.0.0-R
 | **Fuzz Tests** | **Pass** | `compiler_fuzz_test.go`, `render_fuzz_test.go`. | Increase fuzz time to 1 hour in pre-release CI. | **No** | Guarantees parser and VM stability under unexpected inputs. |
 | **Benchmarks** | **Pass** | `work/bench_handler_test.go` allocation budgets pass. | Document baseline RPS and memory allocation numbers. | **No** | Assures zero-allocation request hot path. |
 | **Static Analysis** | **Pass** | `go vet ./...` passes without warnings. | Add `golangci-lint` configuration to repository root. | **No** | Ensures Go code cleanliness. |
-| **Error Handling** | **Partial (Gap)** | `runtime.Diagnostic` exposes structured location. | Resolve `KIT-B01` (.safe() execution gap in VM). | **Yes** | JS authors cannot catch errors with `.safe()`. |
+| **Error Handling** | **Pass** | Protected `.safe()` compiler/runtime/HTTP contracts and structured diagnostics. | Keep fatal-diagnostic and pooled-determinism tests in release gates. | **No** | Application errors are explicit without allowing scripts to swallow runtime resource failures. |
 | **Security** | **Pass** | Outbound HTTP SSRF guard, `.env` scrubbing. | Add `SECURITY.md` contact policy file. | **Yes** | Protects self-hosted servers from SSRF and secret leaks. |
 | **Tenant Isolation** | **Pass** | `retention_soak_test.go`, per-tenant DB & memory bounds. | Add concurrent multi-tenant soak test. | **Yes** | Prevents cross-tenant data leakage. |
 | **Scheduler Recovery** | **Pass** | `cron_persist.go`, SQLite job store locks. | Test SIGKILL recovery behavior during active job execution. | **No** | Ensures cron background task durability. |

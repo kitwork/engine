@@ -195,7 +195,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 		},
 		{
 			Name:    "VM/compiler contracts",
-			Command: []string{"go", "test", "./runtime", "./compiler", "-run", "TestVMV2Contract|TestCompilerV2", "-count=1"},
+			Command: []string{"go", "test", "./runtime", "./compiler", "-run", "TestVMV2Contract|TestCompilerV3", "-count=1"},
 		},
 		{
 			Name:    "Diagnostics/lifecycle",

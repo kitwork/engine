@@ -13,7 +13,7 @@ graph TD
     CurrentTests --> Fuzz[Fuzz Seeds: FuzzCompileVerifyExecute, FuzzVMDeterminism]
     CurrentTests --> Bench[Alloc Gates: TestHandlerCorpusAllocationBudgets]
     
-    MissingCoverage[Missing / Weak Coverage] --> SafeVM[VM .safe() Hard Failure Rescue]
+    Covered[Recently Covered] --> SafeVM[VM .safe() Hard Failure Rescue]
     MissingCoverage --> NestedCache[FileCache Indirect Dependency Graph Hash]
     MissingCoverage --> CronFail[Scheduler Recovery on Process Crash]
     MissingCoverage --> NativeLeak[Native Bridge Memory & Goroutine Leaks]
@@ -33,7 +33,7 @@ The table below prioritizes crucial test additions to close coverage gaps.
 
 | Priority | Test Name & Category | Component | Input Case | Expected Result | Target File to Add/Modify |
 |---|---|---|---|---|---|
-| **P0** | `TestSafeRescuesVMHardFailure` (VM Integration) | `runtime/` & `work/` | Script executing `fail("boom").safe()` or invalid DB query `.safe()`. | `.safe()` catches `Invalid` error and returns `{ ok: false, error: "boom" }` without HTTP 500 abort. | [engine/work/safe_rescue_test.go](file:///d:/project/kitwork/engine/work/safe_rescue_test.go) |
+| **Done** | Protected `.safe()` contracts | `compiler/`, `runtime/`, `work/` | Runtime error, fatal diagnostics, artifact round-trip, pooled reuse and HTTP route. | Ordinary failures are rescued; runtime resource and host failures remain fatal. | `result_vm_test.go`, `safe_evaluation_test.go`, `safe_rescue_test.go` |
 | **P0** | `TestFileCacheIndirectImportInvalidation` (Cache) | `compiler/` & `site/` | Modify nested imported dependency (`./lib/db.js`) without touching main `router.kitwork.js`. | Cache key changes, triggering source re-compilation instead of stale bytecode cache hit. | [engine/compiler/cache_test.go](file:///d:/project/kitwork/engine/compiler/cache_test.go) |
 | **P1** | `TestConcurrentTenantIsolationSoak` (Concurrency) | `core/` & `app/` | 100 concurrent goroutines executing requests across 10 distinct tenant identities. | Zero cross-tenant data leakage in VM pool, database connections, or request scope. | [engine/core/engine_soak_test.go](file:///d:/project/kitwork/engine/core/engine_soak_test.go) |
 | **P1** | `TestCronSchedulerCrashRecovery` (Resilience) | `work/` | Interrupt scheduler goroutine mid-job, then trigger restart. | Orphaned jobs marked failed; scheduled jobs resume without duplicate execution. | [engine/work/cron_persist_test.go](file:///d:/project/kitwork/engine/work/cron_persist_test.go) |

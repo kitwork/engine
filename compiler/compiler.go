@@ -665,6 +665,32 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(runtime.GET)
 
 	case *MethodCallExpression:
+		if n.Method.Value == "safe" && len(n.Arguments) == 0 {
+			location := c.getSourceLocation(n.Token.Source, n.Token.Position)
+			jumpOver := c.emit(runtime.JUMP, 0, 0)
+			startIP := len(c.instructions)
+			if err := c.Compile(n.Object); err != nil {
+				return err
+			}
+			c.emit(runtime.RETURN)
+			c.patchUint16(jumpOver+1, uint16(len(c.instructions)))
+
+			fn := value.NewSafeEvaluatorLambda(
+				startIP,
+				location.File,
+				location.Line,
+				location.Column,
+			)
+			fnIndex := c.addConstant(value.New(fn))
+			c.currentSource = n.Token.Source
+			c.currentPos = n.Token.Position
+			c.emit(runtime.PUSH, byte(fnIndex>>8), byte(fnIndex&0xFF))
+			methodIndex := c.addConstant(value.NewString("safe"))
+			c.emit(runtime.PUSH, byte(methodIndex>>8), byte(methodIndex&0xFF))
+			c.emit(runtime.INVOKE, 0)
+			return nil
+		}
+
 		c.Compile(n.Object)
 		for _, arg := range n.Arguments {
 			c.Compile(arg)

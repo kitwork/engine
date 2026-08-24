@@ -30,9 +30,13 @@ var owner = "loop";
 var result = 0;
 for (let i = 0; i < 20; i++) { result = result + i; }
 `,
+		`
+var owner = "safe";
+var result = [].reduce((total, item) => total + item).safe().error;
+`,
 	}
-	wantOwners := []string{"callbacks", "closure", "loop"}
-	wantResults := []string{"2,4,6", "42", "190"}
+	wantOwners := []string{"callbacks", "closure", "loop", "safe"}
+	wantResults := []string{"2,4,6", "42", "190", "reduce: empty array with no initial value"}
 	programs := make([]*compiler.Bytecode, len(sources))
 	fingerprints := make([]executionFingerprint, len(sources))
 	for index, source := range sources {
