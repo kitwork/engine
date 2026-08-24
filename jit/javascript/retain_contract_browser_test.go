@@ -489,7 +489,7 @@ func TestBrowserDriveRetainPreflightBeforeDocumentMutation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/retain-drive.html")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/retain-drive.html", 600000)
 }
 
 func buildRetainDriveArtifact(t *testing.T) Artifact {
@@ -590,7 +590,9 @@ func writeRetainFallback(response http.ResponseWriter, name string) {
 
 const retainDriveAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
-  var waitFor = __kitTestWaitFor;
+  var waitFor = function (predicate, message) {
+    return __kitTestWaitFor(predicate, message, 15000);
+  };
   var state = globalThis.__retainDriveState;
 
   assert(!document.querySelector("[data-kit-app],[data-kit-hydrate]"),

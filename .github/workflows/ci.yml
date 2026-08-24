@@ -50,6 +50,7 @@ jobs:
           name: verify-${{ runner.os }}
           path: .artifacts/verify.json
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
 
   runtime-hardening:
@@ -141,4 +142,5 @@ jobs:
           name: release-${{ runner.os }}
           path: .artifacts/
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14

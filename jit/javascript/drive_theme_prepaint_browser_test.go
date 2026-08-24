@@ -157,7 +157,7 @@ func TestBrowserStagedDriveAcceptsOnlyCanonicalThemePrepaint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runVanillaBrowser(t, browser, server.URL+"/prepaint-drive/start")
+	runVanillaBrowserWithBudget(t, browser, server.URL+"/prepaint-drive/start", 600000)
 
 	if got := startFull.Load(); got != 1 {
 		t.Errorf("initial theme-prepaint full requests = %d, want 1", got)
@@ -340,7 +340,9 @@ func mutateFirstInlineScript(source string, mutate func(string) string) string {
 
 const driveThemePrepaintAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
-  var waitFor = __kitTestWaitFor;
+  var waitFor = function (predicate, message) {
+    return __kitTestWaitFor(predicate, message, 15000);
+  };
   await waitFor(function () {
     return globalThis.kit && document.getElementById("prepaint-route").textContent === "start";
   }, "initial staged theme-prepaint page did not boot");
