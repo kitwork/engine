@@ -14,7 +14,7 @@ package value
 // SafeResult is what safe() hands back: the data, plus whether it arrived.
 //
 //	const check = database.entity().table("users").where("email", e).first().safe()
-//	if (!check.ok) return ctx.status(503).json({ message: check.error.message })
+//	if (!check.ok) return ctx.status(503).json({ message: check.error })
 //	return ctx.json(check.value)
 //
 // A STRUCT rather than a map, and that choice is what makes `.ok` read correctly without parens.
@@ -28,16 +28,16 @@ package value
 // naming one "ok" would shadow a column called ok in everyone's data — the way `error` already
 // shadows one called error on every map in the system.
 type SafeResult struct {
-	value Value
-	err   map[string]Value // {code, message}, or nil on success
+	value   Value
+	failure *Failure
 }
 
 // Ok reports that the call succeeded. Named for what a JS author reaches for by reflex: fetch()
 // responses have carried .ok for a decade.
-func (s *SafeResult) Ok() bool { return s.err == nil }
+func (s *SafeResult) Ok() bool { return s.failure == nil }
 
 // IsError is Ok's opposite, kept because the same name means the same thing on a bare error value.
-func (s *SafeResult) IsError() bool { return s.err != nil }
+func (s *SafeResult) IsError() bool { return s.failure != nil }
 
 // Value is the data — null on a hard failure, since there is none.
 func (s *SafeResult) Value() Value { return s.value }
@@ -54,61 +54,51 @@ func (s *SafeResult) Value() Value { return s.value }
 // It returns a Value rather than a string deliberately: a method named Error returning a string
 // would make this type satisfy Go's error interface, and it is a result, not an error.
 func (s *SafeResult) Error() Value {
-	if s.err == nil {
+	if s.failure == nil {
 		return Value{K: Nil}
 	}
-	if msg, ok := s.err["message"]; ok {
-		return msg
-	}
-	return New(s.err)
+	return New(s.failure.Message)
 }
 
 // Code is the machine-readable half, for a handler that branches on the kind of failure rather
 // than reporting it.
 func (s *SafeResult) Code() Value {
-	if s.err == nil {
+	if s.failure == nil {
 		return Value{K: Nil}
 	}
-	if code, ok := s.err["code"]; ok {
-		return code
-	}
-	return Value{K: Nil}
+	return New(s.failure.Code)
 }
 
 // Safe reshapes a value — successful, carrying an attached error, or an outright failure — into one
 // SafeResult, so a handler never has to know which of the three it was.
 func (v Value) Safe(_ ...Value) Value {
-	clean, rawErr, _ := splitInlineError(v)
-	out := &SafeResult{value: clean}
-	if m, ok := rawErr.(map[string]Value); ok {
-		out.err = m
-	}
-	return New(out)
+	clean, failure := splitInlineError(v)
+	return New(&SafeResult{value: clean, failure: failure})
 }
 
-// splitInlineError peels any error off v. Returns the clean data; the raw error (a map[string]Value
-// of {code, message}, or nil); and that error as a Value (a map, or null).
-func splitInlineError(v Value) (clean Value, rawErr any, errValue Value) {
-	errValue = Value{K: Nil}
-
+// splitInlineError peels the typed application failure off v and returns clean
+// data plus an immutable failure envelope.
+func splitInlineError(v Value) (clean Value, failure *Failure) {
 	// Hard failure: an Invalid value (e.g. db query error). Message is in .V; there is no data.
 	if v.K == Invalid {
+		if attached, ok := FailureFrom(v); ok {
+			return Value{K: Nil}, &attached
+		}
 		msg := "error"
 		if s, ok := v.V.(string); ok && s != "" {
 			msg = s
 		}
-		rawErr = map[string]Value{"code": New("ERROR"), "message": New(msg)}
-		return Value{K: Nil}, rawErr, New(rawErr)
+		fallback := NewFailure(DefaultFailureCode, msg)
+		return Value{K: Nil}, &fallback
 	}
 
 	// Safe*-style: the data carries an attached error inline.
-	if v.IsError && v.ErrorVal != nil {
-		rawErr = v.ErrorVal
-		errValue = New(v.ErrorVal)
+	if attached, ok := FailureFrom(v); ok {
+		failure = &attached
 	}
 
 	clean = v
 	clean.IsError = false
 	clean.ErrorVal = nil
-	return clean, rawErr, errValue
+	return clean, failure
 }

@@ -9,29 +9,30 @@ cannot silently reinterpret already compiled code or move a numeric opcode.
 - bytecode version: `2`;
 - Program binary envelope: `1`;
 - bytecode artifact envelope: `1`;
-- compiler schema: `2`;
+- compiler schema: `3`;
 - instruction-set checksum:
   `10872c964d1c5c284b8ec4fd1acc429e31568151dc03d17a77d1da76774c7e91`;
 - compiler fingerprint:
-  `aa8250eda7fb056436c15a279e12f37a3e0b25d5597f3ad8059a6bfc120627e4`.
+  `f0c6c9255af80f7d2109348a23f49281ca50935b9bb8e41cbcf4970d7fcd4c07`.
 
 `runtime.TestVMV2Contract` freezes every opcode number, including the retired
 `_RESERVED` slot, and the complete instruction metadata checksum.
-`compiler.TestCompilerV2GoldenContract` freezes representative arithmetic,
+`compiler.TestCompilerV3GoldenContract` freezes representative arithmetic,
 closure/callback, bounded-loop, and switch/fallthrough Programs and validates
 their artifact round trips. Compiler schema v2 added `switch`, `case`,
-`default`, and scoped `break` by lowering them to existing VM v2 instructions;
-it did not add or renumber an opcode.
-`compiler.TestCompilerV2ArtifactDeterminismAcrossColdProcesses` compiles the
+`default`, and scoped `break`; schema v3 added protected `.safe()` evaluation.
+Both lower to the existing VM v2 instruction set and neither added or
+renumbered an opcode.
+`compiler.TestCompilerV3ArtifactDeterminismAcrossColdProcesses` compiles the
 same corpus in six fresh OS processes and requires identical Program checksums,
 artifact hashes, source fingerprints, cache keys, and encoded sizes. This
 catches nondeterministic emitter behavior that one warm process can hide.
 `compatibility.TestVMV2CompatibilityArchive` does not compile source. It loads
-committed VM v2 Program binaries, verifies their source and binary hashes,
+committed pre-schema-v3 VM v2 Program binaries, verifies their source and binary hashes,
 decodes and verifies them, executes their recorded semantics, and requires a
 byte-identical re-encode. A second test repeats execution across reused and
 pooled VMs. Together these tests prove that today's runtime still understands
-Programs produced by the frozen compiler tuple.
+Programs produced before the current compiler schema.
 
 ## What is compatible
 

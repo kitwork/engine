@@ -248,11 +248,9 @@ func (d *Entities) run(fn func() value.Value) value.Value {
 
 // attachedError builds an empty result that reports a failure without halting the program.
 func attachedError(message string) value.Value {
-	out := value.New([]value.Value{})
-	out.IsError = true
-	out.ErrorVal = map[string]value.Value{
-		"code":    value.New("DATABASE_ERROR"),
-		"message": value.New(message),
-	}
-	return out
+	return value.WithFailure(
+		value.New([]value.Value{}),
+		"DATABASE_ERROR",
+		message,
+	)
 }

@@ -145,7 +145,7 @@ collects a local heap profile or diagnostic bundle.
 A release candidate is ready for controlled rollout only when:
 
 - the release gate passes on Windows and Linux for the same commit;
-- VM v2 and compiler v2 contract checks remain unchanged or have an explicit
+- VM v2 and current compiler-schema contract checks remain unchanged or have an explicit
   reviewed version migration;
 - the VM v2 compatibility archive, VM fault gauntlet, language conformance, and
   bytecode inspector contracts pass unchanged;

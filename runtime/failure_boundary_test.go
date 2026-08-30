@@ -259,10 +259,10 @@ func TestDeferFailureIsSuppressedByOriginalFailure(t *testing.T) {
 	vm := New(program)
 	vm.Globals["cleanupFail"] = value.NewFunc(func(...value.Value) value.Value {
 		cleanupCalls++
-		return value.Value{K: value.Invalid, V: "cleanup failed"}
+		return value.InvalidFailure("CLEANUP_FAILURE", "cleanup failed")
 	})
 	vm.Globals["bodyFail"] = value.NewFunc(func(...value.Value) value.Value {
-		return value.Value{K: value.Invalid, V: "body failed"}
+		return value.InvalidFailure("BODY_FAILURE", "body failed")
 	})
 
 	result := vm.Run()
@@ -273,11 +273,12 @@ func TestDeferFailureIsSuppressedByOriginalFailure(t *testing.T) {
 	if cleanupCalls != 1 {
 		t.Fatalf("cleanup calls = %d, want 1", cleanupCalls)
 	}
-	if diagnostic.Message != "body failed" {
-		t.Fatalf("primary message = %q, want body failed", diagnostic.Message)
+	if diagnostic.Message != "body failed" || diagnostic.CauseCode != "BODY_FAILURE" {
+		t.Fatalf("primary diagnostic = %#v", diagnostic)
 	}
 	if len(diagnostic.Suppressed) != 1 ||
-		diagnostic.Suppressed[0].Message != "cleanup failed" {
+		diagnostic.Suppressed[0].Message != "cleanup failed" ||
+		diagnostic.Suppressed[0].CauseCode != "CLEANUP_FAILURE" {
 		t.Fatalf("suppressed diagnostics = %#v", diagnostic.Suppressed)
 	}
 	if !strings.Contains(result.Text(), "suppressed: cleanup failed") {

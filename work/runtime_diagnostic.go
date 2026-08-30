@@ -73,6 +73,9 @@ func (t *Tenant) recordRuntimeFailure(
 			"stack_depth", len(diagnostic.Stack),
 			"suppressed", len(diagnostic.Suppressed),
 		)
+		if diagnostic.CauseCode != "" {
+			attributes = append(attributes, "cause_code", diagnostic.CauseCode)
+		}
 	} else {
 		attributes = append(
 			attributes,

@@ -49,3 +49,23 @@ func TestSafeEvaluationResultWrapsSuccessAndRawInvalid(t *testing.T) {
 		t.Fatalf("safe raw failure = %#v", rescued)
 	}
 }
+
+func TestSafeEvaluationResultPreservesApplicationCauseCode(t *testing.T) {
+	failure := diagnosticResult(&Diagnostic{
+		Code:      DiagnosticRuntimeError,
+		CauseCode: "KITDB_TRANSACTION_CONFLICT",
+		Message:   "transaction conflict",
+		IP:        -1,
+	})
+
+	result := safeEvaluationResult(failure)
+	if result.Get("ok").Truthy() {
+		t.Fatal("safe failure reported success")
+	}
+	if got := result.Get("code").String(); got != "KITDB_TRANSACTION_CONFLICT" {
+		t.Fatalf("safe code = %q", got)
+	}
+	if got := result.Get("error").String(); got != "transaction conflict" {
+		t.Fatalf("safe error = %q", got)
+	}
+}

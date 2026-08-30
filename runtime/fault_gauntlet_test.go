@@ -19,7 +19,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-const faultManifestSchemaVersion uint16 = 2
+const faultManifestSchemaVersion uint16 = 3
 
 const (
 	programCodeLengthOffset    = 40
@@ -51,6 +51,7 @@ type executionFault struct {
 	Name                string                 `json:"name"`
 	Scenario            string                 `json:"scenario"`
 	Diagnostic          runtime.DiagnosticCode `json:"diagnostic"`
+	CauseCode           string                 `json:"cause_code,omitempty"`
 	MinimumStackFrames  int                    `json:"minimum_stack_frames"`
 	ExpectedStackFrames int                    `json:"expected_stack_frames,omitempty"`
 }
@@ -76,6 +77,7 @@ type faultExecutionOutcome struct {
 
 type faultDiagnosticFingerprint struct {
 	Code       runtime.DiagnosticCode
+	CauseCode  string
 	Message    string
 	IP         int
 	File       string
@@ -409,6 +411,13 @@ func executionFaultSetup(t testing.TB, scenario string) faultExecutionSetup {
 				return value.Value{K: value.Invalid, V: "fault gauntlet runtime error"}
 			}),
 		}
+	case "runtime-error-with-cause":
+		setup.program = compileFaultProgram(t, `const result = fail();`)
+		setup.globals = map[string]value.Value{
+			"fail": value.NewFunc(func(...value.Value) value.Value {
+				return value.InvalidFailure("FAULT_CONFLICT", "fault gauntlet conflict")
+			}),
+		}
 	case "energy-limit":
 		setup.program = compileFaultProgram(t, faultLoopSource())
 		setup.maxEnergy = 25
@@ -478,6 +487,14 @@ func runExecutionFault(
 	if diagnostic.Code != expected.Diagnostic {
 		t.Fatalf("fault %q diagnostic = %s, want %s", expected.Name, diagnostic.Code, expected.Diagnostic)
 	}
+	if diagnostic.CauseCode != expected.CauseCode {
+		t.Fatalf(
+			"fault %q cause code = %q, want %q",
+			expected.Name,
+			diagnostic.CauseCode,
+			expected.CauseCode,
+		)
+	}
 	if diagnostic.Message == "" {
 		t.Fatalf("fault %q returned an empty diagnostic message", expected.Name)
 	}
@@ -515,14 +532,15 @@ func runExecutionFault(
 
 func fingerprintFaultDiagnostic(diagnostic *runtime.Diagnostic) faultDiagnosticFingerprint {
 	result := faultDiagnosticFingerprint{
-		Code:     diagnostic.Code,
-		Message:  diagnostic.Message,
-		IP:       diagnostic.IP,
-		File:     diagnostic.File,
-		Line:     diagnostic.Line,
-		Column:   diagnostic.Column,
-		Function: diagnostic.Function,
-		Stack:    append([]runtime.StackFrame(nil), diagnostic.Stack...),
+		Code:      diagnostic.Code,
+		CauseCode: diagnostic.CauseCode,
+		Message:   diagnostic.Message,
+		IP:        diagnostic.IP,
+		File:      diagnostic.File,
+		Line:      diagnostic.Line,
+		Column:    diagnostic.Column,
+		Function:  diagnostic.Function,
+		Stack:     append([]runtime.StackFrame(nil), diagnostic.Stack...),
 	}
 	for _, suppressed := range diagnostic.Suppressed {
 		result.Suppressed = append(result.Suppressed, fingerprintFaultDiagnostic(suppressed))
