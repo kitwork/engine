@@ -230,6 +230,13 @@ func finishExplainAnalyze(
 			)})
 			nextID++
 		}
+		if stats.SearchReaderCacheHits != 0 || stats.SearchReaderCacheMisses != 0 || stats.SearchReaderCacheBypasses != 0 {
+			rows = append(rows, []any{nextID, "search_reader_cache", fmt.Sprintf(
+				"hits=%d misses=%d bypasses=%d",
+				stats.SearchReaderCacheHits, stats.SearchReaderCacheMisses, stats.SearchReaderCacheBypasses,
+			)})
+			nextID++
+		}
 		if stats.RowsMaterialized != 0 || stats.MaterializationBytes != 0 || stats.MaterializationPeakBytes != 0 {
 			rows = append(rows, []any{nextID, "materialization actual", fmt.Sprintf(
 				"rows=%d direct_rows=%d retained_bytes=%d peak_bytes=%d",

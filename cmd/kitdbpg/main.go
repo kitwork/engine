@@ -40,6 +40,7 @@ func main() {
 	maximumSearchResults := flag.Int("max-search-results", 0, "maximum ranked rows returned by one SEARCH; default is min(max-result-rows, 10000)")
 	maximumSearchCandidates := flag.Int("max-search-candidates", relational.DefaultMaximumSearchCandidates, "maximum source candidates inspected by one filtered SEARCH")
 	searchForegroundWait := flag.Duration("search-foreground-wait", relational.DefaultSearchForegroundWait, "time a query waits for a projection build before retrying later")
+	searchReaderCacheBytes := flag.Int64("search-reader-cache-bytes", 0, "packed SEARCH reader memory retained per opened database; 0 disables residency")
 	maximumDiscoveredDatabases := flag.Int("max-discovered-databases", relational.DefaultMaximumDiscoveredDatabases, "maximum .kitdb files exposed by node discovery")
 	maximumOpenDatabases := flag.Int("max-open-databases", 64, "maximum lazily opened databases in node mode")
 	maximumPageCacheBytes := flag.Int64("max-page-cache-bytes", 256<<20, "fleet page-cache reservation ceiling in node mode")
@@ -49,6 +50,7 @@ func main() {
 	warmDatabases := flag.String("warm-databases", "", "comma-separated logical databases protected from idle LRU eviction")
 	maximumIdleProjectionDatabases := flag.Int("max-idle-projection-databases", 0, "maximum idle databases retaining KCOL/search readers; 0 selects a bounded default")
 	maximumIdleProjectionDirectoryBytes := flag.Int64("max-idle-projection-directory-bytes", 0, "maximum idle KCOL/search directory bytes; 0 derives a bound from the database limit")
+	maximumIdleProjectionReaderBytes := flag.Int64("max-idle-projection-reader-bytes", 0, "maximum retained projection reader bytes across idle databases; 0 selects a bounded default")
 	listen := flag.String("listen", "127.0.0.1:5433", "loopback TCP listen address")
 	logQueries := flag.Bool("log-queries", false, "log SQL text and parameter counts")
 	maxConnections := flag.Int("max-connections", 64, "maximum concurrent PostgreSQL connections")
@@ -89,6 +91,7 @@ func main() {
 			searchRoot: *searchRoot, maximumSearchResults: *maximumSearchResults,
 			maximumSearchCandidates:             *maximumSearchCandidates,
 			searchForegroundWait:                *searchForegroundWait,
+			searchReaderCacheBytes:              *searchReaderCacheBytes,
 			maximumDiscoveredDatabases:          *maximumDiscoveredDatabases,
 			maximumOpenDatabases:                *maximumOpenDatabases,
 			maximumPageCacheBytes:               *maximumPageCacheBytes,
@@ -98,6 +101,7 @@ func main() {
 			warmDatabases:                       splitDatabaseNames(*warmDatabases),
 			maximumIdleProjectionDatabases:      *maximumIdleProjectionDatabases,
 			maximumIdleProjectionDirectoryBytes: *maximumIdleProjectionDirectoryBytes,
+			maximumIdleProjectionReaderBytes:    *maximumIdleProjectionReaderBytes,
 			listen:                              *listen, logQueries: *logQueries,
 			maxConnections:                  *maxConnections,
 			maxConcurrentQueries:            *maxConcurrentQueries,
@@ -121,6 +125,7 @@ func main() {
 		MaximumSearchResults:    *maximumSearchResults,
 		MaximumSearchCandidates: *maximumSearchCandidates,
 		SearchForegroundWait:    *searchForegroundWait,
+		SearchReaderCacheBytes:  *searchReaderCacheBytes,
 		Kernel: kitdbengine.OpenOptions{
 			VerifyOnOpen:  *verifyOnOpen,
 			RetainHistory: *retainHistory,
@@ -185,6 +190,7 @@ type postgresNodeCommandOptions struct {
 	maximumSearchResults                int
 	maximumSearchCandidates             int
 	searchForegroundWait                time.Duration
+	searchReaderCacheBytes              int64
 	maximumDiscoveredDatabases          int
 	maximumOpenDatabases                int
 	maximumPageCacheBytes               int64
@@ -194,6 +200,7 @@ type postgresNodeCommandOptions struct {
 	warmDatabases                       []string
 	maximumIdleProjectionDatabases      int
 	maximumIdleProjectionDirectoryBytes int64
+	maximumIdleProjectionReaderBytes    int64
 	listen                              string
 	logQueries                          bool
 	maxConnections                      int
@@ -225,6 +232,7 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 		WarmProjectionOpenPolicy:            options.warmProjectionOpenPolicy,
 		MaximumIdleProjectionDatabases:      options.maximumIdleProjectionDatabases,
 		MaximumIdleProjectionDirectoryBytes: options.maximumIdleProjectionDirectoryBytes,
+		MaximumIdleProjectionReaderBytes:    options.maximumIdleProjectionReaderBytes,
 		ManagerLimits: kitdbnode.Limits{
 			MaxOpenDatabases:      options.maximumOpenDatabases,
 			MaxPageCacheBytes:     options.maximumPageCacheBytes,
@@ -240,6 +248,7 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 			MaximumSearchResults:    options.maximumSearchResults,
 			MaximumSearchCandidates: options.maximumSearchCandidates,
 			SearchForegroundWait:    options.searchForegroundWait,
+			SearchReaderCacheBytes:  options.searchReaderCacheBytes,
 			Kernel: kitdbengine.OpenOptions{
 				PageCacheBytes: options.databasePageCacheBytes,
 				VerifyOnOpen:   options.verifyOnOpen,

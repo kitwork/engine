@@ -50,6 +50,9 @@ type ExecutionStats struct {
 	ProjectionCacheHits       uint64
 	ProjectionCacheMisses     uint64
 	ProjectionCacheBypasses   uint64
+	SearchReaderCacheHits     uint64
+	SearchReaderCacheMisses   uint64
+	SearchReaderCacheBypasses uint64
 	Groups                    uint64
 	Fallback                  string
 }

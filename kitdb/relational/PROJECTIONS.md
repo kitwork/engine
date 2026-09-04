@@ -72,7 +72,10 @@ but does not yet form groups from metadata. Discarded partial KCOL work is not
 included in the final counters. `ProjectionCacheHits`,
 `ProjectionCacheMisses`, and `ProjectionCacheBypasses` distinguish a warm
 verified container lease from an open/directory-decode and from a directory
-that deliberately exceeds the residency bound.
+that deliberately exceeds the residency bound. Search execution additionally
+reports `SearchReaderCacheHits`, `SearchReaderCacheMisses`, and
+`SearchReaderCacheBypasses`; these refer to the native packed BM25 reader, not
+the outer `.search` container.
 Unchanged scalar/indexed paths currently omit these experimental statistics.
 
 To use a PostgreSQL client, set `KITDB_TOKEN` and run:
@@ -91,6 +94,8 @@ Go method on its already-owned Engine:
 ```go
 db, err := relational.OpenWithOptions(path, relational.Options{
     ExperimentalProjections: true,
+    // Explicit and per Engine. Zero keeps the default open/query/close path.
+    SearchReaderCacheBytes: 16 << 20,
 })
 // Handle err; close db after all requests drain.
 report, err := db.RefreshProjections(ctx)
@@ -103,8 +108,9 @@ report, err = db.RefreshAnalytics(ctx)
 canonical read snapshot and reports every analytics/search projection as
 `missing`, `stale`, `invalid`, or `ready` without refreshing it or scanning KROW.
 The report contains no host path. Analytics inspection reads the container
-directory and KCOL/chunk headers. Search inspection reads the packed manifest
-and each fixed-size segment header, but deliberately does not load sparse term
+directory and KCOL/chunk headers. Search inspection reads the packed manifest,
+each fixed-size segment header, and the eight-byte sparse-directory prefix
+needed to reserve reader memory. It deliberately does not load sparse term
 dictionaries or payloads. A `ready` preflight is therefore bounded admission
 evidence, not a substitute for an offline deep verification campaign.
 
@@ -610,25 +616,35 @@ go test ./kitdb/relational -run ^$ \
   is packed without tombstones. Builder segments use a soft 8 MiB accounting
   threshold and at most 25000 documents, not an 8 MiB heap guarantee.
   Dictionaries and norms still use the existing search reader caches. The
-  Engine-owned snapshot-reader cache shares the single container handle and
-  decoded manifest across concurrent exact-watermark queries; individual search
-  snapshots retain their own bounded segment readers. Native segment-count and
-  input-size limits still apply.
+  Engine-owned container cache shares one file handle and decoded manifest.
+  `SearchReaderCacheBytes` may additionally retain one immutable packed reader
+  per searched table, single-flighting concurrent first opens and sharing its
+  sparse dictionaries and lazy norm vectors. Zero is the default. A snapshot
+  whose conservative reservation does not fit bypasses residency and remains
+  queryable through open/query/close. Native segment-count and input-size limits
+  still apply.
 
 ### Multi-Database Residency and Mixed Workload
 
 The standalone PostgreSQL node can name a bounded set of warm databases and
-bound idle projection residency by both database count and serialized snapshot
-directory bytes. Warm means an open relational owner plus eligible bounded
-reader metadata, not prefetched KCOL/search payloads. Non-warm readers are
-closed oldest-first without deleting sidecars and reopen with the same exact
-watermark checks. Whole-engine LRU also skips configured warm databases.
+bound idle projection residency by database count, serialized snapshot
+directory bytes, and total reader-capacity bytes. Reader capacity is the outer
+directory plus the conservative packed-search reservation; actual deterministic
+reader residency is reported separately. Neither number includes transient
+query allocations, allocator overhead, file payload pages, or the operating
+system page cache. Warm means an open relational owner plus eligible bounded
+readers, not prefetched KCOL/search payloads. Non-warm readers are closed
+oldest-first without deleting sidecars and reopen with the same exact watermark
+checks. Whole-engine LRU also skips configured warm databases.
 When projections are enabled, a configured warm database defaults to
 `validate` admission on its first lazy open. This prevents a malformed sidecar
 from becoming a protected long-lived resident. Set
 `WarmProjectionOpenPolicy` (or `kitdbpg -warm-projection-open-policy`) explicitly
 to choose another policy; `Relational.ProjectionOpenPolicy` remains the policy
-for every database, warm or cold.
+for every database, warm or cold. `kitdbpg` exposes the per-database cache as
+`-search-reader-cache-bytes` and the fleet ceiling as
+`-max-idle-projection-reader-bytes`. Both are explicit resource policy, not a
+correctness requirement.
 
 The retained `BenchmarkPostgresNodeMixedWorkload` exercises the public pgwire
 path over eight independent files: four stable databases alternate primary-key
@@ -682,6 +698,27 @@ go test ./kitdb/relational -run '^$' \
 The cold case ran against the operating-system cache and is not an SSD latency
 claim. The result demonstrates removal of repeated file-open and JSON material-
 ization work; it does not make the KCOL data scan itself constant-time.
+
+A separate retained benchmark measures the packed BM25 reader through the
+standalone relational API. The deterministic fixture has 4,096 rows; setup,
+projection construction and the first query are excluded. Fifty queries per
+sample, three samples, on Windows/amd64, Go 1.26 and the same i7-11850H observed:
+
+```sh
+go test ./kitdb/relational -run '^$' \
+  -bench '^BenchmarkPackedSearchReaderCache$' -benchtime=50x -count=3 -benchmem
+```
+
+| Path | Observed time/op | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Open/query/close | 0.801-0.976 ms | about 372 KB | 981 |
+| Resident reader | 0.253-0.404 ms | about 112 KB | 864-865 |
+
+This shows that repeated reader construction was material for this fixture. It
+is not a 13-million-row result, a cold-storage result, or an RSS guarantee. The
+retained capacity intentionally includes all possible field-norm vectors and a
+full bounded multi-field frequency cache; reported current residency can be
+lower until queries populate those structures.
 
 The opt-in 13,773,074-row shopping canary also compared both paths inside one
 Engine for the documented `category = 4459` aggregate. Three small 3-iteration

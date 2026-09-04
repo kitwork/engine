@@ -56,8 +56,8 @@ func TestPackedSnapshotMatchesSegmentedSearch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if inspected.Generation != packed.Info().Generation || inspected.Segments != packed.Info().Segments ||
-		inspected.Documents != packed.Info().Documents || inspected.PhysicalDocuments != inspected.Documents ||
-		inspected.Bytes != int64(len(data)) {
+		inspected.Documents != packed.Info().Documents || inspected.Bytes != int64(len(data)) ||
+		inspected.ReaderCapacityBytes < packed.ResidentBytes() {
 		t.Fatalf("inspect = %+v, open = %+v", inspected, packed.Info())
 	}
 	if err := packed.Verify(ctx); err != nil {
@@ -84,6 +84,9 @@ func TestPackedSnapshotMatchesSegmentedSearch(t *testing.T) {
 				t.Fatal("packed pagination mismatch", err)
 			}
 		}
+	}
+	if resident := packed.ResidentBytes(); resident <= 0 || resident > inspected.ReaderCapacityBytes {
+		t.Fatalf("resident bytes = %d, capacity = %d", resident, inspected.ReaderCapacityBytes)
 	}
 	data[20] ^= 1
 	if _, err := OpenSnapshot(io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))), schema); err == nil {

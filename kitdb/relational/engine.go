@@ -44,6 +44,10 @@ type Options struct {
 	MaximumSearchResults    int
 	MaximumSearchCandidates int
 	SearchForegroundWait    time.Duration
+	// SearchReaderCacheBytes reserves process memory for immutable packed
+	// search readers. Zero disables reader residency; queries still work by
+	// opening and closing a bounded reader per execution.
+	SearchReaderCacheBytes int64
 	// ProjectionOpenPolicy optionally rejects invalid or non-ready immutable
 	// projection state before this Engine becomes visible to callers.
 	ProjectionOpenPolicy ProjectionOpenPolicy
@@ -68,6 +72,7 @@ type Engine struct {
 	maximumSearchResults    int
 	maximumSearchCandidates int
 	searchForegroundWait    time.Duration
+	searchReaderCacheBytes  int64
 	searchContext           context.Context
 	searchCancel            context.CancelFunc
 	searchMu                sync.Mutex
@@ -180,6 +185,14 @@ func normalizeRelationalBounds(options Options) (int, int, error) {
 	if policy != ProjectionOpenLazy && !options.ExperimentalProjections {
 		return 0, 0, fmt.Errorf("kitdb: projection open policy requires experimental projections")
 	}
+	if options.SearchReaderCacheBytes < 0 || options.SearchReaderCacheBytes > MaximumSearchReaderCacheBytes {
+		return 0, 0, fmt.Errorf(
+			"kitdb: search reader cache bytes must be between 0 and %d", MaximumSearchReaderCacheBytes,
+		)
+	}
+	if options.SearchReaderCacheBytes != 0 && !options.ExperimentalProjections {
+		return 0, 0, fmt.Errorf("kitdb: search reader cache requires experimental projections")
+	}
 	if options.ExperimentalProjections && options.SearchRoot != "" {
 		return 0, 0, fmt.Errorf("kitdb: experimental file projections cannot use a legacy search-root directory")
 	}
@@ -238,6 +251,7 @@ func newEngineWithDatabase(
 		maximumSearchResults:    searchConfiguration.maximumResults,
 		maximumSearchCandidates: searchConfiguration.maximumCandidates,
 		searchForegroundWait:    searchConfiguration.foregroundWait,
+		searchReaderCacheBytes:  options.SearchReaderCacheBytes,
 		searchContext:           searchContext, searchCancel: searchCancel,
 		searchStates: make(map[string]*relationalSearchState),
 	}

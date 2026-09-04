@@ -143,9 +143,21 @@ with a two-second minimum. Without either artifact variable, the canary skips.
 
 ## Next Gate
 
+The packed-search follow-up is now implemented in the standalone engine. Each
+Engine defaults to zero retained search-reader bytes, admits a packed reader
+only after a conservative capacity inspection, single-flights concurrent first
+opens, and falls back to open/query/close when the configured budget is too
+small. The PostgreSQL node accounts that reservation with container-directory
+bytes and evicts oldest non-warm idle readers under a separate fleet ceiling.
+Synthetic 4,096-row measurements and retained tests are documented in
+`kitdb/relational/PROJECTIONS.md`.
+
+This does not retroactively change the 13M search result above: that canary uses
+the legacy directory projection, and no equivalent 13M packed `.search` artifact
+was available for an honest rerun. The next evidence gate is therefore to build
+that artifact, record its inspected capacity versus measured RSS, and repeat the
+same mixed workload with one, several, and over-budget idle search databases.
+
 Before calling this production-ready, repeat on a controlled host with cold
 device/cache methodology, multiple workload mixes, cancellation and queue
-overflow, and enough samples for a real SLO-grade p99. The highest-value code
-follow-up is a unified packed search snapshot with node-accounted resident
-bytes, so legacy directory search and KCOL can share one explicit warm/evict
-policy without opening an unbounded reader per tenant.
+overflow, and enough samples for a real SLO-grade p99.

@@ -30,6 +30,7 @@ type Segment struct {
 	fieldStats []uint64
 	dictionary []dictionaryBlockIndex
 	norms      []normCache
+	normBytes  atomic.Int64
 	closed     atomic.Bool
 }
 
@@ -237,6 +238,7 @@ func (segment *Segment) fieldNorms(field uint16) ([]uint32, error) {
 		for index := range cache.data {
 			cache.data[index] = binary.LittleEndian.Uint32(encoded[index*4 : index*4+4])
 		}
+		segment.normBytes.Add(int64(len(cache.data)) * 4)
 	})
 	return cache.data, cache.err
 }

@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
+	"unsafe"
 
 	"github.com/kitwork/engine/internal/snapshotfile"
 )
@@ -16,6 +17,17 @@ type packedManifest struct {
 	Schema     [32]byte
 	Generation uint64
 	Lengths    []int64
+}
+
+// SnapshotInfo describes bounded admission metadata for one packed snapshot.
+// ReaderCapacityBytes is a conservative reservation for immutable reader
+// structures plus every field-norm vector, not file payload or query memory.
+type SnapshotInfo struct {
+	Generation          uint64
+	Segments            int
+	Documents           uint64
+	Bytes               int64
+	ReaderCapacityBytes int64
 }
 
 // WriteSnapshot packs a deletion-free immutable index. Segment bytes are not
@@ -68,21 +80,48 @@ func (index *Index) WriteSnapshot(ctx context.Context, output io.Writer) error {
 // OpenSnapshot borrows a single container handle. Queries read segments through
 // section readers, without extracting files. The caller owns input's lifetime.
 func OpenSnapshot(input *io.SectionReader, schema Schema) (*Index, error) {
+	return OpenSnapshotContext(context.Background(), input, schema)
+}
+
+// OpenSnapshotContext opens a packed snapshot while honoring cancellation
+// between its bounded immutable segments.
+func OpenSnapshotContext(ctx context.Context, input *io.SectionReader, schema Schema) (*Index, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("search: nil snapshot context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	manifest, offset, err := readPackedSnapshotManifest(input, schema)
 	if err != nil {
 		return nil, err
 	}
-	index := &Index{schema: schema, generation: manifest.Generation, fieldStats: make([]uint64, len(schema.fields))}
+	segments := len(manifest.Lengths)
+	index := &Index{
+		schema: schema, generation: manifest.Generation,
+		entries:    make([]manifestSegment, 0, segments),
+		segments:   make([]*Segment, 0, segments),
+		deletions:  make([]*deletedDocuments, 0, segments),
+		bases:      make([]uint64, 0, segments),
+		fieldStats: make([]uint64, len(schema.fields)),
+	}
 	for _, length := range manifest.Lengths {
+		if err := ctx.Err(); err != nil {
+			_ = index.Close()
+			return nil, err
+		}
 		if length < segmentHeaderSize || length > input.Size()-offset {
+			_ = index.Close()
 			return nil, corruptIndexf("invalid packed segment bounds")
 		}
 		segment, err := openSegmentReader("<packed>", io.NewSectionReader(input, offset, length), length, schema)
 		if err != nil {
+			_ = index.Close()
 			return nil, err
 		}
 		index.bases = append(index.bases, index.documents)
 		if index.documents > math.MaxUint64-uint64(segment.header.documentN) {
+			_ = index.Close()
 			return nil, corruptIndexf("packed document count overflow")
 		}
 		index.documents += uint64(segment.header.documentN)
@@ -91,6 +130,7 @@ func OpenSnapshot(input *io.SectionReader, schema Schema) (*Index, error) {
 		index.entries = append(index.entries, manifestSegment{documents: segment.header.documentN, bytes: uint64(length)})
 		for i, total := range segment.fieldStats {
 			if total > math.MaxUint64-index.fieldStats[i] {
+				_ = index.Close()
 				return nil, corruptIndexf("packed field statistics overflow")
 			}
 			index.fieldStats[i] += total
@@ -98,57 +138,114 @@ func OpenSnapshot(input *io.SectionReader, schema Schema) (*Index, error) {
 		offset += length
 	}
 	if offset != input.Size() {
+		_ = index.Close()
 		return nil, corruptIndexf("trailing packed bytes")
 	}
 	index.physical, index.bytes = index.documents, input.Size()
 	return index, nil
 }
 
-// InspectSnapshot validates the packed manifest and each fixed-size segment
-// header without loading sparse dictionaries or payloads. It is suitable for
-// cold database admission; OpenSnapshot and Verify remain the query/deep paths.
-func InspectSnapshot(ctx context.Context, input *io.SectionReader, schema Schema) (IndexInfo, error) {
+// InspectSnapshot validates the packed manifest, each fixed-size segment
+// header, and sparse-directory prefix without loading dictionary entries or
+// payloads. It is suitable for cold database admission; OpenSnapshot and Verify
+// remain the query/deep paths.
+func InspectSnapshot(ctx context.Context, input *io.SectionReader, schema Schema) (SnapshotInfo, error) {
 	if ctx == nil {
-		return IndexInfo{}, fmt.Errorf("search: nil snapshot context")
+		return SnapshotInfo{}, fmt.Errorf("search: nil snapshot context")
 	}
 	if err := ctx.Err(); err != nil {
-		return IndexInfo{}, err
+		return SnapshotInfo{}, err
 	}
 	manifest, offset, err := readPackedSnapshotManifest(input, schema)
 	if err != nil {
-		return IndexInfo{}, err
+		return SnapshotInfo{}, err
 	}
-	info := IndexInfo{Generation: manifest.Generation, Segments: len(manifest.Lengths), Bytes: input.Size()}
+	info := SnapshotInfo{Generation: manifest.Generation, Segments: len(manifest.Lengths), Bytes: input.Size()}
+	capacity := uint64(unsafe.Sizeof(Index{})) + uint64(len(schema.fields))*8 +
+		maximumMultiFrequencyReaderCapacity()
+	perSegment := uint64(unsafe.Sizeof(manifestSegment{})) +
+		2*uint64(unsafe.Sizeof((*Segment)(nil))) + 8
+	if uint64(len(manifest.Lengths)) > (math.MaxUint64-capacity)/perSegment {
+		return SnapshotInfo{}, corruptIndexf("packed reader capacity overflow")
+	}
+	capacity += uint64(len(manifest.Lengths)) * perSegment
 	for position, length := range manifest.Lengths {
 		if err := ctx.Err(); err != nil {
-			return IndexInfo{}, err
+			return SnapshotInfo{}, err
 		}
 		if length < segmentHeaderSize || length > input.Size()-offset {
-			return IndexInfo{}, corruptIndexf("invalid packed segment bounds")
+			return SnapshotInfo{}, corruptIndexf("invalid packed segment bounds")
 		}
 		section := io.NewSectionReader(input, offset, length)
 		var headerBytes [segmentHeaderSize]byte
 		if err := readAtFull(section, headerBytes[:], 0); err != nil {
-			return IndexInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
+			return SnapshotInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
 		}
 		header, err := parseSegmentHeader(headerBytes[:], length)
 		if err != nil {
-			return IndexInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
+			return SnapshotInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
 		}
 		if err := validateSegmentHeaderShape(header, schema); err != nil {
-			return IndexInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
+			return SnapshotInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
 		}
+		segmentCapacity, err := inspectSegmentReaderCapacity(section, header)
+		if err != nil {
+			return SnapshotInfo{}, fmt.Errorf("search: inspect packed segment %d: %w", position, err)
+		}
+		if capacity > math.MaxUint64-segmentCapacity {
+			return SnapshotInfo{}, corruptIndexf("packed reader capacity overflow")
+		}
+		capacity += segmentCapacity
 		if info.Documents > math.MaxUint64-uint64(header.documentN) {
-			return IndexInfo{}, corruptIndexf("packed document count overflow")
+			return SnapshotInfo{}, corruptIndexf("packed document count overflow")
 		}
 		info.Documents += uint64(header.documentN)
 		offset += length
 	}
 	if offset != input.Size() {
-		return IndexInfo{}, corruptIndexf("trailing packed bytes")
+		return SnapshotInfo{}, corruptIndexf("trailing packed bytes")
 	}
-	info.PhysicalDocuments = info.Documents
+	if capacity > math.MaxInt64 {
+		return SnapshotInfo{}, corruptIndexf("packed reader capacity exceeds platform range")
+	}
+	info.ReaderCapacityBytes = int64(capacity)
 	return info, nil
+}
+
+func maximumMultiFrequencyReaderCapacity() uint64 {
+	const maximumKeyBytes = maximumMultiFrequencyCacheTerm + maximumQueryFields*2 + 1
+	return maximumMultiFrequencyCacheEntries *
+		(uint64(unsafe.Sizeof("")) + 40 + maximumKeyBytes)
+}
+
+func inspectSegmentReaderCapacity(input io.ReaderAt, header segmentHeader) (uint64, error) {
+	indexSection := header.sections[sectionDictionaryIndex]
+	if indexSection.length < 8 {
+		return 0, corruptf("dictionary index is truncated")
+	}
+	var prefix [8]byte
+	if err := readAtFull(input, prefix[:], indexSection.offset); err != nil {
+		return 0, err
+	}
+	if string(prefix[:4]) != string(dictionaryIndexMagic[:]) {
+		return 0, corruptf("invalid dictionary index header")
+	}
+	count := uint64(binary.LittleEndian.Uint32(prefix[4:]))
+	if count > (indexSection.length-8)/20 {
+		return 0, corruptf("dictionary index count exceeds its section")
+	}
+	termBytes := indexSection.length - 8 - count*20
+	capacity := uint64(unsafe.Sizeof(Segment{})) + uint64(header.fieldN)*8 +
+		uint64(header.fieldN)*uint64(unsafe.Sizeof(normCache{})) + header.sections[sectionNorms].length
+	entryBytes := uint64(unsafe.Sizeof(dictionaryBlockIndex{}))
+	if count > (math.MaxUint64-capacity)/entryBytes {
+		return 0, corruptf("dictionary reader capacity overflow")
+	}
+	capacity += count * entryBytes
+	if capacity > math.MaxUint64-termBytes {
+		return 0, corruptf("dictionary reader capacity overflow")
+	}
+	return capacity + termBytes, nil
 }
 
 func readPackedSnapshotManifest(input *io.SectionReader, schema Schema) (packedManifest, int64, error) {

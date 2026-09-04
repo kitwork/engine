@@ -317,6 +317,81 @@ func TestPostgresNodeWarmDatabaseRetainsProjectionWhileIdleBudgetTrimsOthers(t *
 	}
 }
 
+func TestPostgresNodeBoundsIdleSearchReaderResidency(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"alpha", "beta"} {
+		createPostgresNodeSearchProjectionFixture(t, filepath.Join(root, name+".kitdb"), name)
+	}
+	node, err := OpenPostgresNode(PostgresNodeOptions{
+		Root: root, User: "kitdb", Password: "node-secret",
+		MaximumIdleProjectionDatabases:      2,
+		MaximumIdleProjectionDirectoryBytes: 8 << 20,
+		MaximumIdleProjectionReaderBytes:    4 << 20,
+		ManagerLimits: kitdbnode.Limits{
+			MaxOpenDatabases: 2, MaxPageCacheBytes: 2 << 20,
+			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 2,
+		},
+		Relational: Options{
+			ExperimentalProjections: true,
+			SearchReaderCacheBytes:  4 << 20,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.Close()
+	databases, err := node.discoverDatabases()
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryAndRelease := func(name string) {
+		t.Helper()
+		database, found := findPostgresNodeDatabase(databases, name)
+		if !found {
+			t.Fatalf("database %q was not discovered", name)
+		}
+		entry, err := node.acquireEngine(context.Background(), database)
+		if err != nil {
+			t.Fatalf("acquire %s: %v", name, err)
+		}
+		result, queryErr := entry.engine.Execute(
+			context.Background(),
+			`SELECT id, name, _score FROM products WHERE * SEARCH 'blue widget' LIMIT 5`,
+		)
+		releaseErr := node.releaseEngine(entry)
+		if err := errors.Join(queryErr, releaseErr); err != nil {
+			t.Fatalf("query/release %s: %v", name, err)
+		}
+		if result.Execution == nil || result.Execution.SearchReaderCacheMisses != 1 {
+			t.Fatalf("search execution %s = %+v", name, result.Execution)
+		}
+	}
+
+	queryAndRelease("alpha")
+	first := node.Stats()
+	if first.ProjectionSearchReaders != 1 || first.ProjectionReaderResidentBytes <= 0 ||
+		first.ProjectionReaderCapacityBytes < first.ProjectionReaderResidentBytes {
+		t.Fatalf("first search residency = %+v", first)
+	}
+	queryAndRelease("beta")
+	bounded := node.Stats()
+	if bounded.ProjectionSearchReaders != 1 || bounded.ProjectionCacheTrims != 1 ||
+		bounded.ProjectionReaderBytesTrimmed <= 0 ||
+		bounded.ProjectionReaderCapacityBytes > bounded.MaximumIdleProjectionReaderBytes {
+		t.Fatalf("bounded search residency = %+v", bounded)
+	}
+	node.mu.Lock()
+	alpha := node.engines["alpha"]
+	beta := node.engines["beta"]
+	node.mu.Unlock()
+	if alpha == nil || alpha.engine.ProjectionCacheStats().SearchReaders != 0 {
+		t.Fatalf("oldest idle search reader was retained: %+v", alpha)
+	}
+	if beta == nil || beta.engine.ProjectionCacheStats().SearchReaders != 1 {
+		t.Fatalf("newest idle search reader was trimmed: %+v", beta)
+	}
+}
+
 func TestPostgresNodeRejectsInvalidWarmProjectionPolicy(t *testing.T) {
 	root := t.TempDir()
 	createPostgresNodeProjectionFixture(t, filepath.Join(root, "alpha.kitdb"), "alpha")
@@ -342,6 +417,12 @@ func TestPostgresNodeRejectsInvalidWarmProjectionPolicy(t *testing.T) {
 			options := base
 			options.WarmDatabases = []string{"alpha"}
 			options.MaximumIdleProjectionDirectoryBytes = 1
+			return options
+		}(),
+		func() PostgresNodeOptions {
+			options := base
+			options.WarmDatabases = []string{"alpha"}
+			options.MaximumIdleProjectionReaderBytes = 1
 			return options
 		}(),
 	}
@@ -552,6 +633,32 @@ CREATE TABLE products (
 		t.Fatal(err)
 	}
 	if _, err := engine.RefreshAnalytics(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createPostgresNodeSearchProjectionFixture(t *testing.T, path, label string) {
+	t.Helper()
+	engine, err := OpenWithOptions(path, Options{ExperimentalProjections: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if _, err := engine.Execute(context.Background(), `
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL SEARCHABLE,
+    label TEXT NOT NULL
+)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(),
+		`INSERT INTO products (id,name,label) VALUES (1,'blue widget',$1),(2,'green widget',$1)`,
+		label,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.RefreshProjections(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }

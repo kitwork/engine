@@ -1689,8 +1689,10 @@ go run ./cmd/kitdbpg \
   -max-page-cache-bytes 268435456 \
   -database-page-cache-bytes 1048576 \
   -warm-databases products,events \
+  -search-reader-cache-bytes 67108864 \
   -max-idle-projection-databases 8 \
   -max-idle-projection-directory-bytes 33554432 \
+  -max-idle-projection-reader-bytes 268435456 \
   -max-concurrent-queries 8 \
   -max-concurrent-queries-per-database 4
 ```
@@ -1706,12 +1708,17 @@ non-recursive, and rejects symlinks and ambiguous suffixless names.
 `-warm-databases` is a process-local operating policy, never durable database
 metadata. It protects those idle relational owners from ordinary LRU eviction
 and lets their bounded KCOL/search readers remain reusable; it does not load a
-whole file or projection into RAM. Non-warm idle projection readers are trimmed
-oldest-first under both the database-count and serialized-directory-byte
-ceilings. Trimming closes only reusable readers: immutable `.analytics` and
-`.search` files remain complete and reopen on demand. `PostgresNode.Stats()`
-exposes path-free engine/session, warm residency, projection-entry/directory,
-trim, and underlying handle-manager counters.
+whole file or projection into RAM. Packed search-reader residency is disabled
+by default and becomes eligible only under the explicit per-database
+`-search-reader-cache-bytes` budget. A reader that cannot fit still executes
+through open/query/close. Non-warm idle projection readers are trimmed
+oldest-first under database-count, serialized-directory-byte, and total
+reader-capacity ceilings. Trimming closes only reusable readers: immutable
+`.analytics` and `.search` files remain complete and reopen on demand.
+`PostgresNode.Stats()` exposes path-free engine/session, warm residency,
+projection directory/search reader capacity and residency, trim, and underlying
+handle-manager counters. These accounting values exclude transient query
+allocations and the operating-system page cache.
 
 Ordinary PostgreSQL statements have a separate bounded admission scheduler from
 `COPY`. Defaults permit eight statements across a listener and four per

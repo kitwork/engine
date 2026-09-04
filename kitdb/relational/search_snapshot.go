@@ -3,8 +3,6 @@ package relational
 import (
 	"context"
 	"fmt"
-
-	"github.com/kitwork/engine/search"
 )
 
 // executePackedSearch is called with engine.mu held for lifetime safety. It
@@ -55,15 +53,15 @@ func (engine *Engine) executePackedSearch(
 	}
 	defer lease.close()
 	stats.observeProjectionCache(lease.access)
-	section, err := lease.file.Section(plan.schema.ID)
+	reader, err := lease.acquireSearchIndex(
+		ctx, plan.schema.ID, plan.projection, engine.searchReaderCacheBytes,
+	)
 	if err != nil {
 		return nil, stats, err
 	}
-	index, err := search.OpenSnapshot(section, plan.projection)
-	if err != nil {
-		return nil, stats, err
-	}
-	defer index.Close()
+	defer reader.close()
+	stats.observeSearchReaderCache(reader.access)
+	index := reader.index
 	if index.Info().Documents != lease.table.Rows {
 		return nil, stats, fmt.Errorf("kitdb: search snapshot row count mismatch")
 	}

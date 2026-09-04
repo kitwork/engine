@@ -152,6 +152,7 @@ func runQuery(ctx context.Context, args []string) (queryResult, error) {
 	maximumSearchResults := flags.Int("max-search-results", 0, "maximum SEARCH result rows; defaults from max-result-rows")
 	maximumSearchCandidates := flags.Int("max-search-candidates", relational.DefaultMaximumSearchCandidates, "maximum filtered SEARCH candidates")
 	searchForegroundWait := flags.Duration("search-foreground-wait", relational.DefaultSearchForegroundWait, "projection build foreground wait")
+	searchReaderCacheBytes := flags.Int64("search-reader-cache-bytes", 0, "packed SEARCH reader memory retained by this process; 0 disables residency")
 	if err := flags.Parse(args); err != nil {
 		return queryResult{}, err
 	}
@@ -180,6 +181,7 @@ func runQuery(ctx context.Context, args []string) (queryResult, error) {
 		MaximumSearchResults:    *maximumSearchResults,
 		MaximumSearchCandidates: *maximumSearchCandidates,
 		SearchForegroundWait:    *searchForegroundWait,
+		SearchReaderCacheBytes:  *searchReaderCacheBytes,
 	})
 	if err != nil {
 		return queryResult{}, err
@@ -275,6 +277,7 @@ func runServe(ctx context.Context, args []string) (serveResult, error) {
 	maximumSearchResults := flags.Int("max-search-results", 0, "maximum SEARCH result rows; defaults from max-result-rows")
 	maximumSearchCandidates := flags.Int("max-search-candidates", relational.DefaultMaximumSearchCandidates, "maximum filtered SEARCH candidates")
 	searchForegroundWait := flags.Duration("search-foreground-wait", relational.DefaultSearchForegroundWait, "projection build foreground wait")
+	searchReaderCacheBytes := flags.Int64("search-reader-cache-bytes", 0, "packed SEARCH reader memory retained by this server; 0 disables residency")
 	maxConnections := flags.Int("max-connections", 64, "maximum PostgreSQL connections")
 	idleTimeout := flags.Duration("idle-timeout", 30*time.Minute, "idle connection timeout")
 	queryTimeout := flags.Duration("query-timeout", 30*time.Second, "statement timeout")
@@ -303,6 +306,7 @@ func runServe(ctx context.Context, args []string) (serveResult, error) {
 		MaximumSearchResults:    *maximumSearchResults,
 		MaximumSearchCandidates: *maximumSearchCandidates,
 		SearchForegroundWait:    *searchForegroundWait,
+		SearchReaderCacheBytes:  *searchReaderCacheBytes,
 		Kernel:                  kitdb.OpenOptions{RetainHistory: *retainHistory, VerifyOnOpen: *verifyOnOpen},
 	})
 	if err != nil {

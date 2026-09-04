@@ -27,6 +27,8 @@ const (
 	MaximumIdleProjectionDatabases             = 4_096
 	DefaultMaximumIdleProjectionDirectoryBytes = int64(32 << 20)
 	MaximumIdleProjectionDirectoryBytes        = int64(1 << 40)
+	DefaultMaximumIdleProjectionReaderBytes    = int64(256 << 20)
+	MaximumIdleProjectionReaderBytes           = int64(1 << 40)
 )
 
 // PostgresNodeOptions configures one standalone PostgreSQL endpoint over the
@@ -48,19 +50,22 @@ type PostgresNodeOptions struct {
 	// first selected. The default is validate when projections are enabled, so
 	// corrupt sidecars cannot become long-lived node residents unnoticed.
 	WarmProjectionOpenPolicy ProjectionOpenPolicy
-	// MaximumIdleProjectionDatabases and MaximumIdleProjectionDirectoryBytes
-	// bound non-active KCOL/search reader metadata across the node. Zero values
-	// select defaults constrained by the database-handle budget.
+	// MaximumIdleProjectionDatabases, MaximumIdleProjectionDirectoryBytes,
+	// and MaximumIdleProjectionReaderBytes bound non-active KCOL/search readers
+	// across the node. Reader bytes include container directories plus reserved
+	// packed-search reader memory. Zero values select bounded defaults.
 	MaximumIdleProjectionDatabases      int
 	MaximumIdleProjectionDirectoryBytes int64
+	MaximumIdleProjectionReaderBytes    int64
 	ManagerLimits                       kitdbnode.Limits
 	Relational                          Options
 	Trace                               func(database, source string, parameterCount int)
 }
 
 // PostgresNodeStats is a path-free process-local view of relational ownership.
-// Projection bytes cover retained container directories, not payload pages or
-// operating-system page-cache residency.
+// Reader bytes cover retained container directories and deterministic search
+// reader structures. They exclude payload pages, transient query allocations,
+// allocator overhead, and operating-system page-cache residency.
 type PostgresNodeStats struct {
 	Closed                              bool
 	ManagedEngines                      int
@@ -75,10 +80,15 @@ type PostgresNodeStats struct {
 	ProjectionCacheEntries              int
 	ProjectionActiveLeases              int
 	ProjectionDirectoryBytes            int64
+	ProjectionSearchReaders             int
+	ProjectionReaderResidentBytes       int64
+	ProjectionReaderCapacityBytes       int64
 	ProjectionCacheTrims                uint64
 	ProjectionDirectoryBytesTrimmed     int64
+	ProjectionReaderBytesTrimmed        int64
 	MaximumIdleProjectionDatabases      int
 	MaximumIdleProjectionDirectoryBytes int64
+	MaximumIdleProjectionReaderBytes    int64
 	Manager                             kitdbnode.Stats
 }
 
@@ -97,6 +107,7 @@ type postgresNodeEngineEntry struct {
 	idle                     *list.Element
 	projectionEntries        int
 	projectionDirectoryBytes int64
+	projectionReaderBytes    int64
 	err                      error
 }
 
@@ -118,6 +129,7 @@ type PostgresNode struct {
 	warmProjectionOpenPolicy            ProjectionOpenPolicy
 	maximumIdleProjectionDatabases      int
 	maximumIdleProjectionDirectoryBytes int64
+	maximumIdleProjectionReaderBytes    int64
 	relational                          Options
 	maximumResults                      int
 	maximumMutations                    int
@@ -132,6 +144,7 @@ type PostgresNode struct {
 	closeErr                        error
 	projectionCacheTrims            uint64
 	projectionDirectoryBytesTrimmed int64
+	projectionReaderBytesTrimmed    int64
 }
 
 // OpenPostgresNode creates a metadata-only node. It does not open any .kitdb
@@ -219,12 +232,15 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		_ = manager.Close()
 		return nil, fmt.Errorf("kitdb postgres node: warm projection open policy requires experimental projections")
 	}
-	maximumIdleProjectionDatabases, maximumIdleProjectionDirectoryBytes, err :=
+	maximumIdleProjectionDatabases, maximumIdleProjectionDirectoryBytes,
+		maximumIdleProjectionReaderBytes, err :=
 		normalizePostgresNodeProjectionResidency(
 			options.MaximumIdleProjectionDatabases,
 			options.MaximumIdleProjectionDirectoryBytes,
+			options.MaximumIdleProjectionReaderBytes,
 			managerStats.MaxOpenDatabases,
 			len(warmDatabases),
+			options.Relational.SearchReaderCacheBytes,
 		)
 	if err != nil {
 		_ = manager.Close()
@@ -249,6 +265,7 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		warmProjectionOpenPolicy:            warmProjectionOpenPolicy,
 		maximumIdleProjectionDatabases:      maximumIdleProjectionDatabases,
 		maximumIdleProjectionDirectoryBytes: maximumIdleProjectionDirectoryBytes,
+		maximumIdleProjectionReaderBytes:    maximumIdleProjectionReaderBytes,
 		relational:                          options.Relational,
 		maximumResults:                      maximumResults, maximumMutations: maximumMutations,
 		trace:   options.Trace,
@@ -294,10 +311,12 @@ func normalizePostgresNodeWarmDatabases(names []string, maintenance string) (map
 
 func normalizePostgresNodeProjectionResidency(
 	maximumDatabases int,
-	maximumBytes int64,
+	maximumDirectoryBytes int64,
+	maximumReaderBytes int64,
 	maximumOpen int,
 	warmDatabases int,
-) (int, int64, error) {
+	searchReaderCacheBytes int64,
+) (int, int64, int64, error) {
 	explicitDatabases := maximumDatabases != 0
 	if maximumDatabases == 0 {
 		maximumDatabases = min(DefaultMaximumIdleProjectionDatabases, maximumOpen)
@@ -307,42 +326,66 @@ func normalizePostgresNodeProjectionResidency(
 	}
 	if maximumDatabases < 1 || maximumDatabases > MaximumIdleProjectionDatabases ||
 		maximumDatabases > maximumOpen {
-		return 0, 0, fmt.Errorf(
+		return 0, 0, 0, fmt.Errorf(
 			"kitdb postgres node: maximum idle projection databases must be between 1 and MaxOpenDatabases (up to %d)",
 			MaximumIdleProjectionDatabases,
 		)
 	}
 	if explicitDatabases && warmDatabases > maximumDatabases {
-		return 0, 0, fmt.Errorf(
+		return 0, 0, 0, fmt.Errorf(
 			"kitdb postgres node: %d warm databases exceed the idle projection database limit %d",
 			warmDatabases, maximumDatabases,
 		)
 	}
 
-	maximumPerEngine := int64(2 * maximumCachedProjectionDirectoryBytes)
-	minimumWarmBytes := int64(warmDatabases) * maximumPerEngine
-	if maximumBytes == 0 {
-		maximumBytes = min(
+	maximumDirectoryPerEngine := int64(2 * maximumCachedProjectionDirectoryBytes)
+	minimumWarmDirectoryBytes := int64(warmDatabases) * maximumDirectoryPerEngine
+	if maximumDirectoryBytes == 0 {
+		maximumDirectoryBytes = min(
 			DefaultMaximumIdleProjectionDirectoryBytes,
-			int64(maximumDatabases)*maximumPerEngine,
+			int64(maximumDatabases)*maximumDirectoryPerEngine,
 		)
-		if maximumBytes < minimumWarmBytes {
-			maximumBytes = minimumWarmBytes
+		if maximumDirectoryBytes < minimumWarmDirectoryBytes {
+			maximumDirectoryBytes = minimumWarmDirectoryBytes
 		}
 	}
-	if maximumBytes < 1 || maximumBytes > MaximumIdleProjectionDirectoryBytes {
-		return 0, 0, fmt.Errorf(
+	if maximumDirectoryBytes < 1 || maximumDirectoryBytes > MaximumIdleProjectionDirectoryBytes {
+		return 0, 0, 0, fmt.Errorf(
 			"kitdb postgres node: maximum idle projection directory bytes must be between 1 and %d",
 			MaximumIdleProjectionDirectoryBytes,
 		)
 	}
-	if maximumBytes < minimumWarmBytes {
-		return 0, 0, fmt.Errorf(
+	if maximumDirectoryBytes < minimumWarmDirectoryBytes {
+		return 0, 0, 0, fmt.Errorf(
 			"kitdb postgres node: warm databases require a projection directory budget of at least %d bytes",
-			minimumWarmBytes,
+			minimumWarmDirectoryBytes,
 		)
 	}
-	return maximumDatabases, maximumBytes, nil
+
+	maximumReaderPerEngine := maximumDirectoryPerEngine + searchReaderCacheBytes
+	minimumWarmReaderBytes := int64(warmDatabases) * maximumReaderPerEngine
+	if maximumReaderBytes == 0 {
+		maximumReaderBytes = min(
+			DefaultMaximumIdleProjectionReaderBytes,
+			int64(maximumDatabases)*maximumReaderPerEngine,
+		)
+		if maximumReaderBytes < minimumWarmReaderBytes {
+			maximumReaderBytes = minimumWarmReaderBytes
+		}
+	}
+	if maximumReaderBytes < 1 || maximumReaderBytes > MaximumIdleProjectionReaderBytes {
+		return 0, 0, 0, fmt.Errorf(
+			"kitdb postgres node: maximum idle projection reader bytes must be between 1 and %d",
+			MaximumIdleProjectionReaderBytes,
+		)
+	}
+	if maximumReaderBytes < minimumWarmReaderBytes {
+		return 0, 0, 0, fmt.Errorf(
+			"kitdb postgres node: warm databases require a projection reader budget of at least %d bytes",
+			minimumWarmReaderBytes,
+		)
+	}
+	return maximumDatabases, maximumDirectoryBytes, maximumReaderBytes, nil
 }
 
 // ServePostgres serves the node through the same bounded pgwire transport as a
@@ -699,6 +742,7 @@ func (node *PostgresNode) releaseEngine(entry *postgresNodeEngineEntry) error {
 		projection := entry.engine.ProjectionCacheStats()
 		entry.projectionEntries = projection.Entries
 		entry.projectionDirectoryBytes = projection.DirectoryBytes
+		entry.projectionReaderBytes = projection.DirectoryBytes + projection.SearchReaderCapacityBytes
 		entry.idle = node.idle.PushFront(entry)
 	}
 	trimErr := node.enforceIdleProjectionResidencyLocked()
@@ -732,6 +776,7 @@ func (node *PostgresNode) onlyWarmEnginesLocked() bool {
 func (node *PostgresNode) enforceIdleProjectionResidencyLocked() error {
 	var cachedDatabases int
 	var directoryBytes int64
+	var readerBytes int64
 	for element := node.idle.Front(); element != nil; element = element.Next() {
 		entry := element.Value.(*postgresNodeEngineEntry)
 		if entry.projectionEntries == 0 {
@@ -739,11 +784,13 @@ func (node *PostgresNode) enforceIdleProjectionResidencyLocked() error {
 		}
 		cachedDatabases++
 		directoryBytes += entry.projectionDirectoryBytes
+		readerBytes += entry.projectionReaderBytes
 	}
 
 	var result error
 	for cachedDatabases > node.maximumIdleProjectionDatabases ||
-		directoryBytes > node.maximumIdleProjectionDirectoryBytes {
+		directoryBytes > node.maximumIdleProjectionDirectoryBytes ||
+		readerBytes > node.maximumIdleProjectionReaderBytes {
 		var victim *postgresNodeEngineEntry
 		for element := node.idle.Back(); element != nil; element = element.Prev() {
 			candidate := element.Value.(*postgresNodeEngineEntry)
@@ -758,18 +805,24 @@ func (node *PostgresNode) enforceIdleProjectionResidencyLocked() error {
 			))
 		}
 		beforeEntries := victim.projectionEntries
-		beforeBytes := victim.projectionDirectoryBytes
+		beforeDirectoryBytes := victim.projectionDirectoryBytes
+		beforeReaderBytes := victim.projectionReaderBytes
 		trimmed, err := victim.engine.TrimProjectionCache()
 		if err != nil {
 			return errors.Join(result, err)
 		}
 		victim.projectionEntries = 0
 		victim.projectionDirectoryBytes = 0
+		victim.projectionReaderBytes = 0
 		cachedDatabases--
-		directoryBytes -= beforeBytes
+		directoryBytes -= beforeDirectoryBytes
+		readerBytes -= beforeReaderBytes
 		node.projectionCacheTrims++
 		node.projectionDirectoryBytesTrimmed += trimmed.DirectoryBytes
-		if trimmed.Entries != beforeEntries || trimmed.DirectoryBytes != beforeBytes {
+		trimmedReaderBytes := trimmed.DirectoryBytes + trimmed.SearchReaderCapacityBytes
+		node.projectionReaderBytesTrimmed += trimmedReaderBytes
+		if trimmed.Entries != beforeEntries || trimmed.DirectoryBytes != beforeDirectoryBytes ||
+			trimmedReaderBytes != beforeReaderBytes {
 			result = errors.Join(result, fmt.Errorf(
 				"kitdb postgres node: projection residency changed during idle trim",
 			))
@@ -807,8 +860,10 @@ func (node *PostgresNode) Stats() PostgresNodeStats {
 		ConfiguredWarmDatabases:             len(node.warmDatabases),
 		ProjectionCacheTrims:                node.projectionCacheTrims,
 		ProjectionDirectoryBytesTrimmed:     node.projectionDirectoryBytesTrimmed,
+		ProjectionReaderBytesTrimmed:        node.projectionReaderBytesTrimmed,
 		MaximumIdleProjectionDatabases:      node.maximumIdleProjectionDatabases,
 		MaximumIdleProjectionDirectoryBytes: node.maximumIdleProjectionDirectoryBytes,
+		MaximumIdleProjectionReaderBytes:    node.maximumIdleProjectionReaderBytes,
 	}
 	for _, entry := range node.engines {
 		engines = append(engines, engineSnapshot{
@@ -843,6 +898,9 @@ func (node *PostgresNode) Stats() PostgresNodeStats {
 		stats.ProjectionCacheEntries += projection.Entries
 		stats.ProjectionActiveLeases += projection.ActiveLeases
 		stats.ProjectionDirectoryBytes += projection.DirectoryBytes
+		stats.ProjectionSearchReaders += projection.SearchReaders
+		stats.ProjectionReaderResidentBytes += projection.DirectoryBytes + projection.SearchReaderResidentBytes
+		stats.ProjectionReaderCapacityBytes += projection.DirectoryBytes + projection.SearchReaderCapacityBytes
 	}
 	stats.Manager = node.manager.Stats()
 	return stats
