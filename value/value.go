@@ -16,7 +16,10 @@ type Value struct {
 	V any
 	K Kind
 
-	IsError  bool
+	IsError bool
+	// ErrorVal contains a Failure for application errors or a runtime-owned
+	// diagnostic for terminal VM failures. New host code should use
+	// WithFailure or InvalidFailure instead of assigning this field directly.
 	ErrorVal any
 	// Raw marks a string as ALREADY-safe trusted HTML: templates emit it verbatim without escaping,
 	// so an engine-produced value (e.g. serialized+escaped JSON-LD) needs no raw() in the template.

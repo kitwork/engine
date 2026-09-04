@@ -11,10 +11,11 @@ import "testing"
 
 // an error-carrying value: the data half plus an attached error
 func erroredRecord() Value {
-	v := New(map[string]Value{"id": New(7)})
-	v.IsError = true
-	v.ErrorVal = map[string]Value{"code": New("DATABASE_ERROR"), "message": New("boom")}
-	return v
+	return WithFailure(
+		New(map[string]Value{"id": New(7)}),
+		"DATABASE_ERROR",
+		"boom",
+	)
 }
 
 func TestSafeSplitsAnAttachedError(t *testing.T) {
@@ -63,6 +64,48 @@ func TestSafeRescuesAHardFailure(t *testing.T) {
 	}
 	if got := r.Get("error").String(); got != "database query error: boom" {
 		t.Errorf(".error = %q, want the Invalid .V", got)
+	}
+}
+
+func TestSafePreservesAnAttachedHardFailureCode(t *testing.T) {
+	bad := InvalidFailure("KITDB_TRANSACTION_CONFLICT", "transaction conflict")
+	result := bad.Safe()
+	if got := result.Get("code").String(); got != "KITDB_TRANSACTION_CONFLICT" {
+		t.Fatalf("safe code = %q", got)
+	}
+	if got := result.Get("error").String(); got != "transaction conflict" {
+		t.Fatalf("safe error = %q", got)
+	}
+}
+
+func TestSafeReadsLegacyFailureMapsDuringMigration(t *testing.T) {
+	legacy := New(map[string]Value{"id": New(7)})
+	legacy.IsError = true
+	legacy.ErrorVal = map[string]Value{
+		"code":    New("LEGACY_ERROR"),
+		"message": New("legacy failure"),
+	}
+
+	result := legacy.Safe()
+	if got := result.Get("code").String(); got != "LEGACY_ERROR" {
+		t.Fatalf("legacy safe code = %q", got)
+	}
+	if got := result.Get("error").String(); got != "legacy failure" {
+		t.Fatalf("legacy safe error = %q", got)
+	}
+}
+
+func TestFailureHelpersUseTypedEnvelope(t *testing.T) {
+	result := WithFailure(New(42), " CAPABILITY_ERROR ", "host failed")
+	failure, ok := FailureFrom(result)
+	if !ok {
+		t.Fatal("typed failure was not readable")
+	}
+	if failure.Code != "CAPABILITY_ERROR" || failure.Message != "host failed" {
+		t.Fatalf("typed failure = %#v", failure)
+	}
+	if _, ok := result.ErrorVal.(Failure); !ok {
+		t.Fatalf("failure payload type = %T, want value.Failure", result.ErrorVal)
 	}
 }
 
