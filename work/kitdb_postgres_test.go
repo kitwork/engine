@@ -1625,7 +1625,8 @@ VALUES ('disconnected', 'DISCONNECTED', 'Disconnect')`, nil); err != nil {
 		t.Fatalf("second Session.Close: %v", err)
 	}
 
-	timed := newSession(25 * time.Millisecond)
+	// Keep the test lifetime comfortably above one valid statement on a loaded Windows runner.
+	timed := newSession(500 * time.Millisecond)
 	if _, err := timed.Execute(ctx, "BEGIN", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -1633,7 +1634,7 @@ VALUES ('disconnected', 'DISCONNECTED', 'Disconnect')`, nil); err != nil {
 VALUES ('timed_out', 'TIMED-OUT', 'Timeout')`, nil); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for timed.TransactionStatus() != pgwire.TransactionFailed && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
