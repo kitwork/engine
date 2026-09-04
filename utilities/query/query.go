@@ -49,6 +49,24 @@ type Condition struct {
 	IsColumn bool   // TRUE if comparing column to column (e.g. user.id = order.id)
 }
 
+// PredicateKind identifies a node in a storage-neutral boolean expression.
+// SQL adapters use this tree when a flat Condition list cannot preserve
+// parentheses, NOT, or SQL operator precedence.
+type PredicateKind uint8
+
+const (
+	PredicateCondition PredicateKind = iota + 1
+	PredicateAnd
+	PredicateOr
+	PredicateNot
+)
+
+type Predicate struct {
+	Kind      PredicateKind
+	Condition Condition
+	Children  []Predicate
+}
+
 type OrderQuery struct {
 	Column    string
 	Direction string // "ASC" or "DESC"
@@ -80,6 +98,7 @@ type Query struct {
 	fields []string
 
 	conditions []Condition
+	predicate  *Predicate
 	joins      []JoinQuery
 	orders     []OrderQuery
 
@@ -99,6 +118,7 @@ type Query struct {
 // ordering and bounds directly without parsing generated SQL again.
 type ExecutionPlan struct {
 	Conditions []Condition
+	Predicate  *Predicate
 	Orders     []OrderQuery
 	Limit      int
 	Offset     int
@@ -115,13 +135,104 @@ func (q *Query) ExecutionPlan() ExecutionPlan {
 	if q == nil {
 		return ExecutionPlan{}
 	}
+	predicate := clonePredicate(q.predicate)
+	conditions := append([]Condition(nil), q.conditions...)
+	if predicate != nil {
+		if additional := predicateFromConditions(conditions); additional != nil {
+			predicate = &Predicate{
+				Kind: PredicateAnd, Children: []Predicate{*predicate, *additional},
+			}
+		}
+		conditions = nil
+		if conjunctive, ok := ConjunctiveConditions(predicate); ok {
+			conditions = conjunctive
+		}
+	}
 	return ExecutionPlan{
-		Conditions: append([]Condition(nil), q.conditions...),
+		Conditions: conditions,
+		Predicate:  predicate,
 		Orders:     append([]OrderQuery(nil), q.orders...),
 		Limit:      q.limit,
 		Offset:     q.offset,
 		MaxLimit:   q.maxLimit,
 	}
+}
+
+// WherePredicate installs a grouped execution predicate. It is used by
+// adapters that parse SQL into an AST instead of flattening boolean logic.
+func (q *Query) WherePredicate(predicate Predicate) *Query {
+	cloned := clonePredicate(&predicate)
+	q.predicate = cloned
+	return q
+}
+
+// ConjunctiveConditions returns index-safe leaves only when the complete tree
+// is a plain AND expression. OR and NOT must remain residual predicates.
+func ConjunctiveConditions(predicate *Predicate) ([]Condition, bool) {
+	if predicate == nil {
+		return nil, false
+	}
+	conditions := make([]Condition, 0, 4)
+	var walk func(Predicate) bool
+	walk = func(node Predicate) bool {
+		switch node.Kind {
+		case PredicateCondition:
+			condition := node.Condition
+			condition.Logic = "AND"
+			conditions = append(conditions, condition)
+			return true
+		case PredicateAnd:
+			if len(node.Children) < 2 {
+				return false
+			}
+			for _, child := range node.Children {
+				if !walk(child) {
+					return false
+				}
+			}
+			return true
+		default:
+			return false
+		}
+	}
+	if !walk(*predicate) {
+		return nil, false
+	}
+	return conditions, true
+}
+
+func clonePredicate(predicate *Predicate) *Predicate {
+	if predicate == nil {
+		return nil
+	}
+	cloned := *predicate
+	cloned.Children = make([]Predicate, len(predicate.Children))
+	for index := range predicate.Children {
+		child := clonePredicate(&predicate.Children[index])
+		cloned.Children[index] = *child
+	}
+	return &cloned
+}
+
+func predicateFromConditions(conditions []Condition) *Predicate {
+	if len(conditions) == 0 {
+		return nil
+	}
+	predicate := Predicate{Kind: PredicateCondition, Condition: conditions[0]}
+	for index := 1; index < len(conditions); index++ {
+		kind := PredicateAnd
+		if strings.EqualFold(strings.TrimSpace(conditions[index].Logic), "or") {
+			kind = PredicateOr
+		}
+		predicate = Predicate{
+			Kind: kind,
+			Children: []Predicate{
+				predicate,
+				{Kind: PredicateCondition, Condition: conditions[index]},
+			},
+		}
+	}
+	return &predicate
 }
 
 // ==========================================
