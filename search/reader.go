@@ -74,18 +74,12 @@ func openSegmentReader(path string, file io.ReaderAt, size int64, schema Schema)
 	if err != nil {
 		return nil, err
 	}
-	if header.schemaHash != schema.fingerprint {
-		return nil, ErrSchemaMismatch
-	}
-	if int(header.fieldN) != len(schema.fields) {
-		return nil, corruptf("segment has %d fields; schema has %d", header.fieldN, len(schema.fields))
+	if err := validateSegmentHeaderShape(header, schema); err != nil {
+		return nil, err
 	}
 
 	statsSection := header.sections[sectionFieldStats]
 	expectedStatsLength := uint64(header.fieldN) * 8
-	if statsSection.length != expectedStatsLength {
-		return nil, corruptf("field statistics length is %d; expected %d", statsSection.length, expectedStatsLength)
-	}
 	statsData, err := readCheckedSection(file, statsSection, expectedStatsLength)
 	if err != nil {
 		return nil, err
@@ -120,20 +114,39 @@ func openSegmentReader(path string, file io.ReaderAt, size int64, schema Schema)
 		return nil, corruptf("dictionary blocks do not cover their section")
 	}
 
-	normsLength, overflow := multiplyUint64(uint64(header.documentN), uint64(header.fieldN), 4)
-	if overflow || header.sections[sectionNorms].length != normsLength {
-		return nil, corruptf("norm section has invalid length")
-	}
-	offsetsLength, overflow := multiplyUint64(uint64(header.documentN)+1, 8)
-	if overflow || header.sections[sectionStoredOffsets].length != offsetsLength {
-		return nil, corruptf("stored offset section has invalid length")
-	}
-
 	segment := &Segment{
 		file: file, path: path, schema: schema, header: header,
 		fieldStats: fieldStats, dictionary: dictionary, norms: make([]normCache, header.fieldN),
 	}
 	return segment, nil
+}
+
+// validateSegmentHeaderShape performs the fixed-size validation shared by a
+// query reader and the bounded packed-snapshot inspector. It deliberately does
+// not read payload sections or allocate the sparse term dictionary.
+func validateSegmentHeaderShape(header segmentHeader, schema Schema) error {
+	if header.schemaHash != schema.fingerprint {
+		return ErrSchemaMismatch
+	}
+	if int(header.fieldN) != len(schema.fields) {
+		return corruptf("segment has %d fields; schema has %d", header.fieldN, len(schema.fields))
+	}
+
+	statsSection := header.sections[sectionFieldStats]
+	expectedStatsLength := uint64(header.fieldN) * 8
+	if statsSection.length != expectedStatsLength {
+		return corruptf("field statistics length is %d; expected %d", statsSection.length, expectedStatsLength)
+	}
+
+	normsLength, overflow := multiplyUint64(uint64(header.documentN), uint64(header.fieldN), 4)
+	if overflow || header.sections[sectionNorms].length != normsLength {
+		return corruptf("norm section has invalid length")
+	}
+	offsetsLength, overflow := multiplyUint64(uint64(header.documentN)+1, 8)
+	if overflow || header.sections[sectionStoredOffsets].length != offsetsLength {
+		return corruptf("stored offset section has invalid length")
+	}
+	return nil
 }
 
 // Info reports stable segment metadata.

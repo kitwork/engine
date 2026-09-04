@@ -394,6 +394,11 @@ An opt-in [file projection experiment](PROJECTIONS.md) adds one `.analytics`
 and one `.search` snapshot next to the source file, with typed RAM batches,
 transaction freshness checks and explicit refresh. It is not a change to the
 default storage layout or a claim of complete columnar SQL support.
+Standalone callers can inspect both files together with
+`Engine.PreflightProjections(ctx)` or `kitdb projections DATABASE`. Open-time
+policies `lazy`, `validate`, and `require-ready` let an embedded process or
+PostgreSQL node choose admission strictness without changing canonical KROW,
+WAL, recovery, or fallback behavior.
 
 Partition policy changes are catalog-only and do not rewrite KROW during DDL:
 

@@ -44,6 +44,10 @@ type PostgresNodeOptions struct {
 	// relational engine, page cache, and projection readers should survive LRU
 	// pressure. Names never become file paths or durable database metadata.
 	WarmDatabases []string
+	// WarmProjectionOpenPolicy applies only when a configured warm database is
+	// first selected. The default is validate when projections are enabled, so
+	// corrupt sidecars cannot become long-lived node residents unnoticed.
+	WarmProjectionOpenPolicy ProjectionOpenPolicy
 	// MaximumIdleProjectionDatabases and MaximumIdleProjectionDirectoryBytes
 	// bound non-active KCOL/search reader metadata across the node. Zero values
 	// select defaults constrained by the database-handle budget.
@@ -111,6 +115,7 @@ type PostgresNode struct {
 	databaseCacheBytes                  int64
 	databaseAcquireTimeout              time.Duration
 	warmDatabases                       map[string]struct{}
+	warmProjectionOpenPolicy            ProjectionOpenPolicy
 	maximumIdleProjectionDatabases      int
 	maximumIdleProjectionDirectoryBytes int64
 	relational                          Options
@@ -201,6 +206,19 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		_ = manager.Close()
 		return nil, err
 	}
+	warmProjectionOpenPolicy := options.WarmProjectionOpenPolicy
+	if warmProjectionOpenPolicy == ProjectionOpenDefault && options.Relational.ExperimentalProjections && len(warmDatabases) != 0 {
+		warmProjectionOpenPolicy = ProjectionOpenValidate
+	}
+	warmProjectionOpenPolicy, err = normalizeProjectionOpenPolicy(warmProjectionOpenPolicy)
+	if err != nil {
+		_ = manager.Close()
+		return nil, fmt.Errorf("kitdb postgres node: warm projection open policy: %w", err)
+	}
+	if warmProjectionOpenPolicy != ProjectionOpenLazy && !options.Relational.ExperimentalProjections {
+		_ = manager.Close()
+		return nil, fmt.Errorf("kitdb postgres node: warm projection open policy requires experimental projections")
+	}
 	maximumIdleProjectionDatabases, maximumIdleProjectionDirectoryBytes, err :=
 		normalizePostgresNodeProjectionResidency(
 			options.MaximumIdleProjectionDatabases,
@@ -228,6 +246,7 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		databaseCacheBytes:                  databaseCacheBytes,
 		databaseAcquireTimeout:              acquireTimeout,
 		warmDatabases:                       warmDatabases,
+		warmProjectionOpenPolicy:            warmProjectionOpenPolicy,
 		maximumIdleProjectionDatabases:      maximumIdleProjectionDatabases,
 		maximumIdleProjectionDirectoryBytes: maximumIdleProjectionDirectoryBytes,
 		relational:                          options.Relational,
@@ -618,8 +637,14 @@ func (node *PostgresNode) acquireEngine(
 			node.failEngineOpen(key, entry, err)
 			return nil, err
 		}
+		relationalOptions := node.relational
+		if warm {
+			relationalOptions.ProjectionOpenPolicy = stricterProjectionOpenPolicy(
+				relationalOptions.ProjectionOpenPolicy, node.warmProjectionOpenPolicy,
+			)
+		}
 		engine, err := newEngineWithDatabase(
-			lease.DB(), node.relational, node.maximumResults, node.maximumMutations, lease.Release,
+			ctx, lease.DB(), relationalOptions, node.maximumResults, node.maximumMutations, lease.Release,
 		)
 		if err != nil {
 			_ = lease.Release()

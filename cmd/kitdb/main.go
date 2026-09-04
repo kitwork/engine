@@ -109,6 +109,8 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		result, err = runQuery(ctx, args[1:])
 	case "refresh-projections":
 		result, err = runRefreshProjections(ctx, args[1:])
+	case "projections":
+		result, err = runProjectionStatus(ctx, args[1:])
 	case "serve":
 		result, err = runServe(ctx, args[1:])
 	case "verify":
@@ -138,6 +140,7 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 func runQuery(ctx context.Context, args []string) (queryResult, error) {
 	flags := newFlagSet("query")
 	projections := flags.Bool("experimental-projections", false, "read experimental .analytics/.search snapshot files; explicit refresh required")
+	projectionPolicySource := flags.String("projection-open-policy", "lazy", "projection admission: lazy, validate, or require-ready")
 	batch := flags.Bool("batch-aggregates", false, "try bounded typed batches for numeric aggregate scans")
 	create := flags.Bool("create", false, "create the database file when it does not exist")
 	readOnly := flags.Bool("readonly", false, "accept SELECT only")
@@ -155,6 +158,10 @@ func runQuery(ctx context.Context, args []string) (queryResult, error) {
 	if flags.NArg() < 2 {
 		return queryResult{}, fmt.Errorf("query requires DATABASE and SQL")
 	}
+	projectionPolicy, err := relational.ParseProjectionOpenPolicy(*projectionPolicySource)
+	if err != nil {
+		return queryResult{}, err
+	}
 	path, err := databasePath(flags.Arg(0), *create)
 	if err != nil {
 		return queryResult{}, err
@@ -165,9 +172,10 @@ func runQuery(ctx context.Context, args []string) (queryResult, error) {
 	if err := decoder.Decode(&parameters); err != nil {
 		return queryResult{}, fmt.Errorf("decode --params JSON array: %w", err)
 	}
-	database, err := relational.OpenWithOptions(path, relational.Options{
+	database, err := relational.OpenWithContext(ctx, path, relational.Options{
 		ExperimentalProjections: *projections, BatchAggregates: *batch,
-		MaximumResultRows: *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
+		ProjectionOpenPolicy: projectionPolicy,
+		MaximumResultRows:    *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
 		SearchRoot: *searchRoot, SearchNamespace: *searchNamespace,
 		MaximumSearchResults:    *maximumSearchResults,
 		MaximumSearchCandidates: *maximumSearchCandidates,
@@ -222,6 +230,23 @@ func runRefreshProjections(ctx context.Context, args []string) (relational.Proje
 	return report, errors.Join(refreshErr, database.Close())
 }
 
+func runProjectionStatus(ctx context.Context, args []string) (relational.ProjectionPreflightReport, error) {
+	path, err := oneDatabaseArgument("projections", args)
+	if err != nil {
+		return relational.ProjectionPreflightReport{}, err
+	}
+	database, err := relational.OpenWithContext(ctx, path, relational.Options{
+		ExperimentalProjections: true,
+		ProjectionOpenPolicy:    relational.ProjectionOpenLazy,
+		Kernel:                  kitdb.OpenOptions{PageCacheBytes: -1},
+	})
+	if err != nil {
+		return relational.ProjectionPreflightReport{}, err
+	}
+	report, statusErr := database.PreflightProjections(ctx)
+	return report, errors.Join(statusErr, database.Close())
+}
+
 func relationalStatementReadOnly(source string) (bool, error) {
 	envelope, err := kitdbsql.ParseEnvelope(source)
 	if err != nil {
@@ -233,6 +258,7 @@ func relationalStatementReadOnly(source string) (bool, error) {
 func runServe(ctx context.Context, args []string) (serveResult, error) {
 	flags := newFlagSet("serve")
 	projections := flags.Bool("experimental-projections", false, "read experimental .analytics/.search snapshot files; explicit refresh required")
+	projectionPolicySource := flags.String("projection-open-policy", "lazy", "projection admission: lazy, validate, or require-ready")
 	batch := flags.Bool("batch-aggregates", false, "try bounded typed batches for numeric aggregate scans")
 	create := flags.Bool("create", false, "create the database file when it does not exist")
 	databaseName := flags.String("database", "", "logical PostgreSQL database name")
@@ -261,13 +287,18 @@ func runServe(ctx context.Context, args []string) (serveResult, error) {
 	if strings.TrimSpace(*password) == "" {
 		return serveResult{}, fmt.Errorf("serve requires --password or KITDB_TOKEN")
 	}
+	projectionPolicy, err := relational.ParseProjectionOpenPolicy(*projectionPolicySource)
+	if err != nil {
+		return serveResult{}, err
+	}
 	path, err := databasePath(flags.Arg(0), *create)
 	if err != nil {
 		return serveResult{}, err
 	}
-	database, err := relational.OpenWithOptions(path, relational.Options{
+	database, err := relational.OpenWithContext(ctx, path, relational.Options{
 		ExperimentalProjections: *projections, BatchAggregates: *batch,
-		MaximumResultRows: *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
+		ProjectionOpenPolicy: projectionPolicy,
+		MaximumResultRows:    *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
 		SearchRoot: *searchRoot, SearchNamespace: *searchNamespace,
 		MaximumSearchResults:    *maximumSearchResults,
 		MaximumSearchCandidates: *maximumSearchCandidates,
@@ -512,6 +543,6 @@ func newFlagSet(name string) *flag.FlagSet {
 
 func usageError() error {
 	return fmt.Errorf(
-		"usage: kitdb <version|query|serve|refresh-projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
+		"usage: kitdb <version|query|serve|refresh-projections|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
 	)
 }

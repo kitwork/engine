@@ -31,6 +31,8 @@ func main() {
 	verifyOnOpen := flag.Bool("verify-on-open", false, "verify every active storage page before serving")
 	retainHistory := flag.Bool("retain-history", false, "retain checkpointed WAL history for recovery")
 	experimentalProjections := flag.Bool("experimental-projections", false, "enable exact-watermark analytics and search projection reads")
+	projectionOpenPolicySource := flag.String("projection-open-policy", "lazy", "projection admission for every opened database: lazy, validate, or require-ready")
+	warmProjectionOpenPolicySource := flag.String("warm-projection-open-policy", "", "projection admission for warm node databases; default is validate when projections are enabled")
 	maximumResultRows := flag.Int("max-result-rows", relational.DefaultMaximumResultRows, "maximum rows materialized by one query")
 	maximumMutationRows := flag.Int("max-mutation-rows", relational.DefaultMaximumMutationRows, "maximum rows changed by one UPDATE or DELETE")
 	searchRoot := flag.String("search-root", "", "search projection directory; defaults beside the KitDB file")
@@ -61,6 +63,14 @@ func main() {
 	if strings.TrimSpace(*password) == "" {
 		fatalf("password is required; pass -password or set KITDB_TOKEN")
 	}
+	projectionOpenPolicy, err := relational.ParseProjectionOpenPolicy(*projectionOpenPolicySource)
+	if err != nil {
+		fatalf("projection open policy: %v", err)
+	}
+	warmProjectionOpenPolicy, err := relational.ParseProjectionOpenPolicy(*warmProjectionOpenPolicySource)
+	if err != nil {
+		fatalf("warm projection open policy: %v", err)
+	}
 	if strings.TrimSpace(*root) != "" {
 		if strings.TrimSpace(*database) != "" {
 			fatalf("-database selects single-file mode and cannot be combined with -root")
@@ -72,8 +82,10 @@ func main() {
 			root: *root, maintenanceDatabase: *maintenanceDatabase,
 			user: *user, password: *password, readOnly: *readOnly,
 			verifyOnOpen: *verifyOnOpen, retainHistory: *retainHistory,
-			experimentalProjections: *experimentalProjections,
-			maximumResultRows:       *maximumResultRows, maximumMutationRows: *maximumMutationRows,
+			experimentalProjections:  *experimentalProjections,
+			projectionOpenPolicy:     projectionOpenPolicy,
+			warmProjectionOpenPolicy: warmProjectionOpenPolicy,
+			maximumResultRows:        *maximumResultRows, maximumMutationRows: *maximumMutationRows,
 			searchRoot: *searchRoot, maximumSearchResults: *maximumSearchResults,
 			maximumSearchCandidates:             *maximumSearchCandidates,
 			searchForegroundWait:                *searchForegroundWait,
@@ -103,6 +115,7 @@ func main() {
 	}
 	databaseEngine, err := relational.OpenWithOptions(absoluteFile, relational.Options{
 		ExperimentalProjections: *experimentalProjections,
+		ProjectionOpenPolicy:    projectionOpenPolicy,
 		MaximumResultRows:       *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
 		SearchRoot: *searchRoot, SearchNamespace: *searchNamespace,
 		MaximumSearchResults:    *maximumSearchResults,
@@ -164,6 +177,8 @@ type postgresNodeCommandOptions struct {
 	verifyOnOpen                        bool
 	retainHistory                       bool
 	experimentalProjections             bool
+	projectionOpenPolicy                relational.ProjectionOpenPolicy
+	warmProjectionOpenPolicy            relational.ProjectionOpenPolicy
 	maximumResultRows                   int
 	maximumMutationRows                 int
 	searchRoot                          string
@@ -207,6 +222,7 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 		ReadOnly: options.readOnly, MaximumDiscoveredDatabases: options.maximumDiscoveredDatabases,
 		DatabaseAcquireTimeout:              options.databaseAcquireTimeout,
 		WarmDatabases:                       options.warmDatabases,
+		WarmProjectionOpenPolicy:            options.warmProjectionOpenPolicy,
 		MaximumIdleProjectionDatabases:      options.maximumIdleProjectionDatabases,
 		MaximumIdleProjectionDirectoryBytes: options.maximumIdleProjectionDirectoryBytes,
 		ManagerLimits: kitdbnode.Limits{
@@ -217,6 +233,7 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 		},
 		Relational: relational.Options{
 			ExperimentalProjections: options.experimentalProjections,
+			ProjectionOpenPolicy:    options.projectionOpenPolicy,
 			MaximumResultRows:       options.maximumResultRows,
 			MaximumMutationRows:     options.maximumMutationRows,
 			SearchRoot:              options.searchRoot,

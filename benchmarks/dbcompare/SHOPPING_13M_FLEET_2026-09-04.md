@@ -38,6 +38,25 @@ and read 26,648,913,678 KROW bytes in about 28 seconds. It was excluded rather
 than mislabeled as KCOL. The verified partition copy completed the same
 category query through `kcol-batch` in 89.6 ms in a one-iteration preflight.
 
+## Projection Admission Follow-Up
+
+The standalone `kitdb projections DATABASE` command was subsequently measured
+against both 13,773,074-row artifacts. These are single warm-cache observations
+including process startup, database open, inspection and JSON output, not a
+latency distribution:
+
+| Artifact | Wall time | Analytics result | Search result |
+| --- | ---: | --- | --- |
+| `shopping_13m_partition.kitdb` | 310.0 ms | ready, 13,773,074 rows, 1,682 chunks | missing |
+| `shopping_13m_full.kitdb` | 231.4 ms | stale chunk-v2 layout | missing |
+
+The preflight read canonical catalog/layout metadata plus projection container
+and fixed headers; it did not open a KROW row cursor. Opening the stale artifact
+with `require-ready` was rejected in 223.6 ms, before the aggregate could enter
+the 26.65 GB KROW fallback. `validate` intentionally permits stale/missing
+projections because those states have a correct fallback; use `require-ready`
+when a service must fail admission rather than accept that fallback cost.
+
 ## Reader Warm-Up
 
 | Mode | Open | Reader cold | Direct warm p50/p99 | Heap before open | Heap after warm | RSS before open | RSS after warm |

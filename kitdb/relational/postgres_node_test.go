@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -552,6 +553,45 @@ CREATE TABLE products (
 	}
 	if _, err := engine.RefreshAnalytics(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPostgresNodeWarmDatabaseValidatesProjectionBeforeResidency(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "alpha.kitdb")
+	createPostgresNodeProjectionFixture(t, path, "alpha")
+	if err := os.WriteFile(path+".analytics", []byte("not a snapshot"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	node, err := OpenPostgresNode(PostgresNodeOptions{
+		Root: root, User: "kitdb", Password: "secret",
+		WarmDatabases: []string{"alpha"},
+		Relational:    Options{ExperimentalProjections: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer node.Close()
+	databases, err := node.discoverDatabases()
+	if err != nil {
+		t.Fatal(err)
+	}
+	database, found := findPostgresNodeDatabase(databases, "alpha")
+	if !found {
+		t.Fatal("alpha database was not discovered")
+	}
+	entry, err := node.acquireEngine(context.Background(), database)
+	if entry != nil {
+		_ = node.releaseEngine(entry)
+		t.Fatal("warm database retained an invalid projection")
+	}
+	var problem *ProjectionOpenError
+	if !errors.As(err, &problem) || problem.Policy != ProjectionOpenValidate ||
+		problem.Kind != "analytics" || problem.Status != "invalid" {
+		t.Fatalf("warm projection admission = %#v, %v", problem, err)
+	}
+	if stats := node.Stats(); stats.ManagedEngines != 0 || stats.Manager.ActiveLeases != 0 {
+		t.Fatalf("failed warm admission retained resources: %+v", stats)
 	}
 }
 

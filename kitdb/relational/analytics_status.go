@@ -16,25 +16,25 @@ import (
 // KCOL snapshot at an exact relational snapshot. It is observability, not a
 // second freshness authority: execution repeats the same watermark checks.
 type AnalyticsProjectionStatus struct {
-	Table              string
-	Status             string
-	Fresh              bool
-	Enabled            bool
-	Supported          bool
-	QueryPath          string
-	ExpectedLayout     string
-	PartitionStrategy  string
-	PartitionField     string
-	SourceTransaction  uint64
-	CurrentTransaction uint64
-	Rows               uint64
-	Chunks             int
-	ChunkVersion       int
-	SnapshotGeneration uint64
-	FileBytes          int64
-	LiveBytes          int64
-	ObsoleteBytes      int64
-	Reason             string
+	Table              string `json:"table"`
+	Status             string `json:"status"`
+	Fresh              bool   `json:"fresh"`
+	Enabled            bool   `json:"enabled"`
+	Supported          bool   `json:"supported"`
+	QueryPath          string `json:"query_path"`
+	ExpectedLayout     string `json:"expected_layout"`
+	PartitionStrategy  string `json:"partition_strategy,omitempty"`
+	PartitionField     string `json:"partition_field,omitempty"`
+	SourceTransaction  uint64 `json:"source_transaction"`
+	CurrentTransaction uint64 `json:"current_transaction"`
+	Rows               uint64 `json:"rows"`
+	Chunks             int    `json:"chunks"`
+	ChunkVersion       int    `json:"chunk_version"`
+	SnapshotGeneration uint64 `json:"snapshot_generation"`
+	FileBytes          int64  `json:"file_bytes"`
+	LiveBytes          int64  `json:"live_bytes"`
+	ObsoleteBytes      int64  `json:"obsolete_bytes"`
+	Reason             string `json:"reason,omitempty"`
 }
 
 var analyticsStatusColumns = []Column{

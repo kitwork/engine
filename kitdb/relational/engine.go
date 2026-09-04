@@ -44,6 +44,9 @@ type Options struct {
 	MaximumSearchResults    int
 	MaximumSearchCandidates int
 	SearchForegroundWait    time.Duration
+	// ProjectionOpenPolicy optionally rejects invalid or non-ready immutable
+	// projection state before this Engine becomes visible to callers.
+	ProjectionOpenPolicy ProjectionOpenPolicy
 }
 
 type Engine struct {
@@ -110,10 +113,20 @@ type Table struct {
 }
 
 func Open(path string) (*Engine, error) {
-	return OpenWithOptions(path, Options{})
+	return OpenWithContext(context.Background(), path, Options{})
 }
 
 func OpenWithOptions(path string, options Options) (*Engine, error) {
+	return OpenWithContext(context.Background(), path, options)
+}
+
+// OpenWithContext opens a standalone relational Engine and applies any
+// projection admission policy before publishing it to the caller. The kernel
+// remains the sole canonical durability owner.
+func OpenWithContext(ctx context.Context, path string, options Options) (*Engine, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("kitdb: open context is nil")
+	}
 	maximum, maximumMutations, err := normalizeRelationalBounds(options)
 	if err != nil {
 		return nil, err
@@ -122,7 +135,9 @@ func OpenWithOptions(path string, options Options) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	engine, err := newEngineWithDatabase(database, options, maximum, maximumMutations, database.Close)
+	engine, err := newEngineWithDatabase(
+		ctx, database, options, maximum, maximumMutations, database.Close,
+	)
 	if err != nil {
 		return nil, errors.Join(err, database.Close())
 	}
@@ -134,11 +149,21 @@ func OpenWithOptions(path string, options Options) (*Engine, error) {
 // closing the kernel handle. This is the direct embedded path used by hosts
 // that already own file lifecycle, leases and resource accounting.
 func Attach(database *kitdbengine.DB, options Options) (*Engine, error) {
+	return AttachWithContext(context.Background(), database, options)
+}
+
+// AttachWithContext creates a relational facade over a caller-owned kernel and
+// applies projection admission without taking ownership of the kernel handle.
+func AttachWithContext(ctx context.Context, database *kitdbengine.DB, options Options) (*Engine, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("kitdb: attach context is nil")
+	}
 	maximum, maximumMutations, err := normalizeRelationalBounds(options)
 	if err != nil {
 		return nil, err
 	}
 	return newEngineWithDatabase(
+		ctx,
 		database,
 		options,
 		maximum,
@@ -148,6 +173,13 @@ func Attach(database *kitdbengine.DB, options Options) (*Engine, error) {
 }
 
 func normalizeRelationalBounds(options Options) (int, int, error) {
+	policy, err := normalizeProjectionOpenPolicy(options.ProjectionOpenPolicy)
+	if err != nil {
+		return 0, 0, err
+	}
+	if policy != ProjectionOpenLazy && !options.ExperimentalProjections {
+		return 0, 0, fmt.Errorf("kitdb: projection open policy requires experimental projections")
+	}
 	if options.ExperimentalProjections && options.SearchRoot != "" {
 		return 0, 0, fmt.Errorf("kitdb: experimental file projections cannot use a legacy search-root directory")
 	}
@@ -171,12 +203,16 @@ func normalizeRelationalBounds(options Options) (int, int, error) {
 // newEngineWithDatabase binds the relational layer to an already-owned kernel
 // handle. closeDatabase transfers the caller's ownership into Engine.Close.
 func newEngineWithDatabase(
+	ctx context.Context,
 	database *kitdbengine.DB,
 	options Options,
 	maximum int,
 	maximumMutations int,
 	closeDatabase func() error,
 ) (*Engine, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("kitdb: managed database context is nil")
+	}
 	if database == nil {
 		return nil, fmt.Errorf("kitdb: managed database is nil")
 	}
@@ -190,7 +226,7 @@ func newEngineWithDatabase(
 		return nil, err
 	}
 	searchContext, searchCancel := context.WithCancel(context.Background())
-	return &Engine{
+	engine := &Engine{
 		projectionQueries:       make(chan struct{}, 2),
 		projectionBuilds:        make(chan struct{}, 1),
 		experimentalProjections: options.ExperimentalProjections,
@@ -204,7 +240,12 @@ func newEngineWithDatabase(
 		searchForegroundWait:    searchConfiguration.foregroundWait,
 		searchContext:           searchContext, searchCancel: searchCancel,
 		searchStates: make(map[string]*relationalSearchState),
-	}, nil
+	}
+	if err := engine.enforceProjectionOpenPolicy(ctx, options.ProjectionOpenPolicy); err != nil {
+		searchCancel()
+		return nil, fmt.Errorf("kitdb: projection preflight: %w", err)
+	}
+	return engine, nil
 }
 
 func (engine *Engine) Path() string {

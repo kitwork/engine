@@ -45,6 +45,8 @@ go run ./cmd/kitdb refresh-projections /path/to/test/data.kitdb
 
 go run ./cmd/kitdb refresh-projections --analytics-only /path/to/test/data.kitdb
 
+go run ./cmd/kitdb projections /path/to/test/data.kitdb
+
 go run ./cmd/kitdb query --batch-aggregates /path/to/test/data.kitdb \
   "SELECT SUM(price), AVG(rating), COUNT(*) FROM products WHERE price >= 25 AND price < 75 AND enabled = true"
 
@@ -96,6 +98,37 @@ report, err := db.RefreshProjections(ctx)
 // Or refresh columnar without creating, checking or replacing search storage.
 report, err = db.RefreshAnalytics(ctx)
 ```
+
+`PreflightProjections(ctx)` is the equivalent standalone Go API. It captures one
+canonical read snapshot and reports every analytics/search projection as
+`missing`, `stale`, `invalid`, or `ready` without refreshing it or scanning KROW.
+The report contains no host path. Analytics inspection reads the container
+directory and KCOL/chunk headers. Search inspection reads the packed manifest
+and each fixed-size segment header, but deliberately does not load sparse term
+dictionaries or payloads. A `ready` preflight is therefore bounded admission
+evidence, not a substitute for an offline deep verification campaign.
+
+Callers may apply the same check before an Engine becomes visible:
+
+```go
+db, err := relational.OpenWithContext(ctx, path, relational.Options{
+    ExperimentalProjections: true,
+    ProjectionOpenPolicy:    relational.ProjectionOpenValidate,
+})
+```
+
+The policies are:
+
+| Policy | Admission behavior |
+| --- | --- |
+| `lazy` | Do not inspect projections during open; query-time checks remain authoritative |
+| `validate` | Reject an existing structurally invalid sidecar; allow missing/stale state to use the safe KROW fallback |
+| `require-ready` | Require every supported analytics and search projection to be present and exact-watermark ready |
+
+Projection policy never changes KROW recovery, WAL publication or transaction
+durability. A rejected Engine releases its kernel handle. `kitdb query` and
+`kitdb serve` expose the policy as `--projection-open-policy`; it requires
+`--experimental-projections` for any mode stricter than `lazy`.
 
 Refresh is explicit and can be expensive. Ordinary `ANALYZE` does not start it.
 Text-compatible fields opt into dictionary projection through the independent
@@ -590,6 +623,12 @@ directory bytes. Warm means an open relational owner plus eligible bounded
 reader metadata, not prefetched KCOL/search payloads. Non-warm readers are
 closed oldest-first without deleting sidecars and reopen with the same exact
 watermark checks. Whole-engine LRU also skips configured warm databases.
+When projections are enabled, a configured warm database defaults to
+`validate` admission on its first lazy open. This prevents a malformed sidecar
+from becoming a protected long-lived resident. Set
+`WarmProjectionOpenPolicy` (or `kitdbpg -warm-projection-open-policy`) explicitly
+to choose another policy; `Relational.ProjectionOpenPolicy` remains the policy
+for every database, warm or cold.
 
 The retained `BenchmarkPostgresNodeMixedWorkload` exercises the public pgwire
 path over eight independent files: four stable databases alternate primary-key

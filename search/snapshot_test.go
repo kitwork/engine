@@ -51,6 +51,15 @@ func TestPackedSnapshotMatchesSegmentedSearch(t *testing.T) {
 	if packed.Info().Segments < 2 {
 		t.Fatal("expected multiple packed segments")
 	}
+	inspected, err := InspectSnapshot(ctx, io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))), schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspected.Generation != packed.Info().Generation || inspected.Segments != packed.Info().Segments ||
+		inspected.Documents != packed.Info().Documents || inspected.PhysicalDocuments != inspected.Documents ||
+		inspected.Bytes != int64(len(data)) {
+		t.Fatalf("inspect = %+v, open = %+v", inspected, packed.Info())
+	}
 	if err := packed.Verify(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -79,5 +88,20 @@ func TestPackedSnapshotMatchesSegmentedSearch(t *testing.T) {
 	data[20] ^= 1
 	if _, err := OpenSnapshot(io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))), schema); err == nil {
 		t.Fatal("corrupt packed manifest accepted")
+	}
+	if _, err := InspectSnapshot(ctx, io.NewSectionReader(bytes.NewReader(data), 0, int64(len(data))), schema); err == nil {
+		t.Fatal("inspect accepted corrupt packed manifest")
+	}
+}
+
+func TestInspectSnapshotHonorsCancellation(t *testing.T) {
+	schema, err := NewSchema(Text("name", VietnameseAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := InspectSnapshot(ctx, io.NewSectionReader(bytes.NewReader(nil), 0, 0), schema); err != context.Canceled {
+		t.Fatalf("InspectSnapshot cancellation = %v", err)
 	}
 }
