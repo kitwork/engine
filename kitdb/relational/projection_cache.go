@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/kitwork/engine/internal/snapshotfile"
@@ -54,6 +55,7 @@ type ProjectionCacheStats struct {
 	ActiveLeases              int
 	DirectoryBytes            int64
 	SearchReaders             int
+	SearchFileHandles         int
 	SearchReaderResidentBytes int64
 	SearchReaderCapacityBytes int64
 }
@@ -64,6 +66,7 @@ type ProjectionCacheTrim struct {
 	Entries                   int
 	DirectoryBytes            int64
 	SearchReaders             int
+	SearchFileHandles         int
 	SearchReaderResidentBytes int64
 	SearchReaderCapacityBytes int64
 }
@@ -181,6 +184,9 @@ func (cache *projectionReaderCache) stats() ProjectionCacheStats {
 		stats.Entries++
 		stats.ActiveLeases += entry.references
 		stats.DirectoryBytes += int64(entry.file.DirectoryBytes())
+		if entry.manifest.Kind == "search" {
+			stats.SearchFileHandles += entry.file.ReadHandles()
+		}
 		stats.SearchReaderCapacityBytes += entry.searchCapacityBytes
 		for _, reader := range entry.searchIndexes {
 			if reader.index == nil {
@@ -212,6 +218,7 @@ func (cache *projectionReaderCache) trim() (ProjectionCacheTrim, error) {
 		trimmed.Entries += stats.Entries
 		trimmed.DirectoryBytes += stats.DirectoryBytes
 		trimmed.SearchReaders += stats.SearchReaders
+		trimmed.SearchFileHandles += stats.SearchFileHandles
 		trimmed.SearchReaderResidentBytes += stats.SearchReaderResidentBytes
 		trimmed.SearchReaderCapacityBytes += stats.SearchReaderCapacityBytes
 		resources = append(resources, detachProjectionEntryResources(entry))
@@ -268,6 +275,9 @@ func projectionEntryCacheStats(entry *projectionCacheEntry) ProjectionCacheStats
 		DirectoryBytes:            int64(entry.file.DirectoryBytes()),
 		SearchReaderCapacityBytes: entry.searchCapacityBytes,
 	}
+	if entry.manifest.Kind == "search" {
+		stats.SearchFileHandles = entry.file.ReadHandles()
+	}
 	for _, reader := range entry.searchIndexes {
 		if reader.index == nil {
 			continue
@@ -278,8 +288,15 @@ func projectionEntryCacheStats(entry *projectionCacheEntry) ProjectionCacheStats
 	return stats
 }
 
-func loadProjection(path string) (*snapshotfile.Reader, projectionManifest, error) {
-	file, err := snapshotfile.Open(path)
+func loadProjection(path string, kind string) (*snapshotfile.Reader, projectionManifest, error) {
+	readHandles := 1
+	if kind == "search" && runtime.GOOS == "windows" {
+		// Go's Windows Pread serializes positioned reads per os.File. Two
+		// handles match this Engine's bounded two-query projection gate while
+		// retaining one shared immutable search metadata reader.
+		readHandles = 2
+	}
+	file, err := snapshotfile.OpenWithReadHandles(path, readHandles)
 	if err != nil {
 		return nil, projectionManifest{}, err
 	}
@@ -338,7 +355,7 @@ func (engine *Engine) acquireProjection(
 	}
 	cache.mu.Unlock()
 
-	file, manifest, err := loadProjection(path)
+	file, manifest, err := loadProjection(path, kind)
 	if err != nil {
 		return projectionLease{}, err
 	}

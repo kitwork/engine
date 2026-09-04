@@ -108,3 +108,90 @@ func TestInspectSnapshotHonorsCancellation(t *testing.T) {
 		t.Fatalf("InspectSnapshot cancellation = %v", err)
 	}
 }
+
+func TestManagerWriteSnapshotLeasesCommittedGeneration(t *testing.T) {
+	schema, err := NewSchema(Text("name", VietnameseAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(t.TempDir(), ManagerOptions{
+		DisableAutoCompact: true,
+		Writer:             WriterOptions{Segment: BuildOptions{MaxDocuments: 2}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	ctx := context.Background()
+	documents := []Document{
+		{ID: "shop/1", Fields: map[string]string{"name": "bàn phím logitech"}},
+		{ID: "shop/2", Fields: map[string]string{"name": "chuột logitech"}},
+		{ID: "shop/3", Fields: map[string]string{"name": "bàn phím cơ"}},
+	}
+	if _, err := manager.UpsertMany(ctx, "shop", schema, documents); err != nil {
+		t.Fatal(err)
+	}
+	want, err := manager.Search(ctx, "shop", schema, MatchQuery{
+		Fields: []string{"name"}, Text: "ban phim logitech",
+	}, SearchOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	info, err := manager.WriteSnapshot(ctx, "shop", schema, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Generation == 0 || info.Documents != uint64(len(documents)) || info.Deleted != 0 {
+		t.Fatalf("snapshot source = %+v", info)
+	}
+	packed, err := OpenSnapshot(
+		io.NewSectionReader(bytes.NewReader(output.Bytes()), 0, int64(output.Len())), schema,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer packed.Close()
+	got, err := packed.Search(ctx, MatchQuery{
+		Fields: []string{"name"}, Text: "ban phim logitech",
+	}, SearchOptions{Limit: 10})
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("packed hits = %+v, want %+v, err = %v", got, want, err)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := manager.WriteSnapshot(canceled, "shop", schema, &bytes.Buffer{}); err != context.Canceled {
+		t.Fatalf("canceled snapshot = %v", err)
+	}
+	if _, err := manager.WriteSnapshot(ctx, "missing", schema, &bytes.Buffer{}); err != ErrIndexNotFound {
+		t.Fatalf("missing snapshot = %v", err)
+	}
+	if _, err := manager.WriteSnapshot(ctx, "shop", schema, nil); err == nil {
+		t.Fatal("nil snapshot output accepted")
+	}
+}
+
+func TestManagerWriteSnapshotRejectsTombstones(t *testing.T) {
+	schema, err := NewSchema(Text("name", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewManager(t.TempDir(), ManagerOptions{DisableAutoCompact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	ctx := context.Background()
+	if _, err := manager.Add(ctx, "shop", schema, Document{
+		ID: "1", Fields: map[string]string{"name": "keyboard"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, _, err := manager.Delete(ctx, "shop", schema, "1"); err != nil || !deleted {
+		t.Fatalf("delete = %v, %v", deleted, err)
+	}
+	if _, err := manager.WriteSnapshot(ctx, "shop", schema, &bytes.Buffer{}); err == nil {
+		t.Fatal("snapshot accepted tombstones")
+	}
+}

@@ -369,13 +369,17 @@ func TestPostgresNodeBoundsIdleSearchReaderResidency(t *testing.T) {
 
 	queryAndRelease("alpha")
 	first := node.Stats()
-	if first.ProjectionSearchReaders != 1 || first.ProjectionReaderResidentBytes <= 0 ||
+	if first.ProjectionSearchReaders != 1 ||
+		first.ProjectionSearchFileHandles != expectedProjectionSearchReadHandles() ||
+		first.ProjectionReaderResidentBytes <= 0 ||
 		first.ProjectionReaderCapacityBytes < first.ProjectionReaderResidentBytes {
 		t.Fatalf("first search residency = %+v", first)
 	}
 	queryAndRelease("beta")
 	bounded := node.Stats()
-	if bounded.ProjectionSearchReaders != 1 || bounded.ProjectionCacheTrims != 1 ||
+	if bounded.ProjectionSearchReaders != 1 ||
+		bounded.ProjectionSearchFileHandles != expectedProjectionSearchReadHandles() ||
+		bounded.ProjectionCacheTrims != 1 ||
 		bounded.ProjectionReaderBytesTrimmed <= 0 ||
 		bounded.ProjectionReaderCapacityBytes > bounded.MaximumIdleProjectionReaderBytes {
 		t.Fatalf("bounded search residency = %+v", bounded)

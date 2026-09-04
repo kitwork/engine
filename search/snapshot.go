@@ -30,6 +30,41 @@ type SnapshotInfo struct {
 	ReaderCapacityBytes int64
 }
 
+// WriteSnapshot leases one immutable managed generation and streams it into
+// the packed read-only format. Concurrent commits may publish a newer
+// generation, but cannot change or close the leased source until this export
+// returns.
+func (manager *Manager) WriteSnapshot(
+	ctx context.Context,
+	key string,
+	schema Schema,
+	output io.Writer,
+) (IndexInfo, error) {
+	if ctx == nil || output == nil {
+		return IndexInfo{}, fmt.Errorf("search: nil snapshot context/output")
+	}
+	managed, releaseManaged, err := manager.managed(ctx, key, schema)
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	defer releaseManaged()
+	linked, releaseContext := linkContexts(ctx, manager.ctx, managed.ctx)
+	defer releaseContext()
+	snapshot, releaseSnapshot, err := managed.acquireSnapshot()
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	if snapshot == nil {
+		return IndexInfo{}, ErrIndexNotFound
+	}
+	defer releaseSnapshot()
+	info := snapshot.index.Info()
+	if err := snapshot.index.WriteSnapshot(linked, output); err != nil {
+		return IndexInfo{}, err
+	}
+	return info, nil
+}
+
 // WriteSnapshot packs a deletion-free immutable index. Segment bytes are not
 // re-encoded. This experimental read-only format is not an IndexWriter store.
 func (index *Index) WriteSnapshot(ctx context.Context, output io.Writer) error {

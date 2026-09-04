@@ -109,6 +109,8 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		result, err = runQuery(ctx, args[1:])
 	case "refresh-projections":
 		result, err = runRefreshProjections(ctx, args[1:])
+	case "pack-search":
+		result, err = runPackSearch(ctx, args[1:])
 	case "projections":
 		result, err = runProjectionStatus(ctx, args[1:])
 	case "serve":
@@ -230,6 +232,33 @@ func runRefreshProjections(ctx context.Context, args []string) (relational.Proje
 		report, refreshErr = database.RefreshProjections(ctx)
 	}
 	return report, errors.Join(refreshErr, database.Close())
+}
+
+func runPackSearch(ctx context.Context, args []string) (relational.SearchPackReport, error) {
+	flags := newFlagSet("pack-search")
+	searchRoot := flags.String("search-root", "", "legacy managed search directory")
+	searchNamespace := flags.String("search-namespace", "", "stable legacy search namespace")
+	if err := flags.Parse(args); err != nil {
+		return relational.SearchPackReport{}, err
+	}
+	if flags.NArg() != 1 {
+		return relational.SearchPackReport{}, fmt.Errorf("pack-search requires DATABASE")
+	}
+	path, err := existingDatabasePath(flags.Arg(0))
+	if err != nil {
+		return relational.SearchPackReport{}, err
+	}
+	database, err := relational.OpenWithContext(ctx, path, relational.Options{
+		ExperimentalProjections: true,
+		SearchRoot:              *searchRoot,
+		SearchNamespace:         *searchNamespace,
+		Kernel:                  kitdb.OpenOptions{PageCacheBytes: -1},
+	})
+	if err != nil {
+		return relational.SearchPackReport{}, err
+	}
+	report, packErr := database.PackSearchProjection(ctx)
+	return report, errors.Join(packErr, database.Close())
 }
 
 func runProjectionStatus(ctx context.Context, args []string) (relational.ProjectionPreflightReport, error) {
@@ -547,6 +576,6 @@ func newFlagSet(name string) *flag.FlagSet {
 
 func usageError() error {
 	return fmt.Errorf(
-		"usage: kitdb <version|query|serve|refresh-projections|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
+		"usage: kitdb <version|query|serve|refresh-projections|pack-search|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
 	)
 }

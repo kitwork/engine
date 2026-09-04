@@ -78,23 +78,24 @@ func stricterProjectionOpenPolicy(left, right ProjectionOpenPolicy) ProjectionOp
 // packed search snapshot. Legacy mutable search directories are deliberately
 // outside this exact-watermark projection contract.
 type SearchProjectionStatus struct {
-	Table              string `json:"table"`
-	Status             string `json:"status"`
-	Fresh              bool   `json:"fresh"`
-	Enabled            bool   `json:"enabled"`
-	Supported          bool   `json:"supported"`
-	QueryPath          string `json:"query_path"`
-	ExpectedLayout     string `json:"expected_layout"`
-	SourceTransaction  uint64 `json:"source_transaction"`
-	CurrentTransaction uint64 `json:"current_transaction"`
-	Documents          uint64 `json:"documents"`
-	Segments           int    `json:"segments"`
-	IndexGeneration    uint64 `json:"index_generation"`
-	SnapshotGeneration uint64 `json:"snapshot_generation"`
-	FileBytes          int64  `json:"file_bytes"`
-	LiveBytes          int64  `json:"live_bytes"`
-	ObsoleteBytes      int64  `json:"obsolete_bytes"`
-	Reason             string `json:"reason,omitempty"`
+	Table               string `json:"table"`
+	Status              string `json:"status"`
+	Fresh               bool   `json:"fresh"`
+	Enabled             bool   `json:"enabled"`
+	Supported           bool   `json:"supported"`
+	QueryPath           string `json:"query_path"`
+	ExpectedLayout      string `json:"expected_layout"`
+	SourceTransaction   uint64 `json:"source_transaction"`
+	CurrentTransaction  uint64 `json:"current_transaction"`
+	Documents           uint64 `json:"documents"`
+	Segments            int    `json:"segments"`
+	IndexGeneration     uint64 `json:"index_generation"`
+	ReaderCapacityBytes int64  `json:"reader_capacity_bytes"`
+	SnapshotGeneration  uint64 `json:"snapshot_generation"`
+	FileBytes           int64  `json:"file_bytes"`
+	LiveBytes           int64  `json:"live_bytes"`
+	ObsoleteBytes       int64  `json:"obsolete_bytes"`
+	Reason              string `json:"reason,omitempty"`
 }
 
 // ProjectionPreflightReport is one fixed-snapshot view of every supported
@@ -371,6 +372,7 @@ func (transaction *Transaction) searchProjectionStatus(
 	status.Documents = indexInfo.Documents
 	status.Segments = indexInfo.Segments
 	status.IndexGeneration = indexInfo.Generation
+	status.ReaderCapacityBytes = indexInfo.ReaderCapacityBytes
 	if indexInfo.Documents != tableStatus.Rows {
 		status.Status = "invalid"
 		status.Reason = "search snapshot row count does not match"

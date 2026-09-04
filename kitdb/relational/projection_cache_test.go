@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -90,7 +91,8 @@ func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 	}
 	resident := engine.ProjectionCacheStats()
 	if resident.Entries != 2 || resident.ActiveLeases != 0 || resident.DirectoryBytes <= 0 ||
-		resident.SearchReaders != 1 || resident.SearchReaderResidentBytes <= 0 ||
+		resident.SearchReaders != 1 || resident.SearchFileHandles != expectedProjectionSearchReadHandles() ||
+		resident.SearchReaderResidentBytes <= 0 ||
 		resident.SearchReaderCapacityBytes < resident.SearchReaderResidentBytes {
 		t.Fatalf("projection cache residency = %+v", resident)
 	}
@@ -100,6 +102,7 @@ func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 	}
 	if trimmed.Entries != resident.Entries || trimmed.DirectoryBytes != resident.DirectoryBytes ||
 		trimmed.SearchReaders != resident.SearchReaders ||
+		trimmed.SearchFileHandles != resident.SearchFileHandles ||
 		trimmed.SearchReaderResidentBytes != resident.SearchReaderResidentBytes ||
 		trimmed.SearchReaderCapacityBytes != resident.SearchReaderCapacityBytes {
 		t.Fatalf("projection cache trim = %+v, residency was %+v", trimmed, resident)
@@ -150,9 +153,19 @@ func TestSearchReaderCacheBypassesInsufficientBudget(t *testing.T) {
 		}
 	}
 	resident := engine.ProjectionCacheStats()
-	if resident.SearchReaders != 0 || resident.SearchReaderResidentBytes != 0 ||
+	if resident.SearchReaders != 0 ||
+		resident.SearchFileHandles != expectedProjectionSearchReadHandles() ||
+		resident.SearchReaderResidentBytes != 0 ||
 		resident.SearchReaderCapacityBytes != 0 {
 		t.Fatalf("insufficient budget retained a search reader: %+v", resident)
+	}
+	trimmed, err := engine.TrimProjectionCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trimmed.SearchReaders != 0 || trimmed.SearchFileHandles != resident.SearchFileHandles ||
+		engine.ProjectionCacheStats() != (ProjectionCacheStats{}) {
+		t.Fatalf("insufficient-budget trim = %+v", trimmed)
 	}
 }
 
@@ -202,7 +215,8 @@ func TestSearchReaderCacheSingleFlightsConcurrentOpen(t *testing.T) {
 	if misses != 1 || hits != workers-1 || bypasses != 0 {
 		t.Fatalf("concurrent search cache hits=%d misses=%d bypasses=%d", hits, misses, bypasses)
 	}
-	if resident := engine.ProjectionCacheStats(); resident.SearchReaders != 1 {
+	if resident := engine.ProjectionCacheStats(); resident.SearchReaders != 1 ||
+		resident.SearchFileHandles != expectedProjectionSearchReadHandles() {
 		t.Fatalf("concurrent search retained %+v", resident)
 	}
 }
@@ -385,4 +399,11 @@ func projectionCacheEntries(engine *Engine) int {
 	engine.projectionCache.mu.Lock()
 	defer engine.projectionCache.mu.Unlock()
 	return len(engine.projectionCache.entries)
+}
+
+func expectedProjectionSearchReadHandles() int {
+	if runtime.GOOS == "windows" {
+		return 2
+	}
+	return 1
 }

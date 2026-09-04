@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/relational"
 )
 
 type decodedResponse struct {
@@ -192,6 +193,41 @@ func TestOperatorQueryCreatesAndUsesStandaloneRelationalDatabase(t *testing.T) {
 		"query", "--readonly", path, `DELETE FROM products WHERE id = 1`,
 	}, &output); err == nil {
 		t.Fatal("read-only query accepted DELETE")
+	}
+}
+
+func TestOperatorPackSearchAdoptsStandaloneLegacyIndex(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "application", ".data")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "search.kitdb")
+	runAndDecode(t, "query", "--create", path,
+		`CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT SEARCHABLE)`)
+	runAndDecode(t, "query", path,
+		`INSERT INTO products VALUES (1, 'ban phim logitech'), (2, 'chuot logitech')`)
+	runAndDecode(t, "query", path,
+		`SELECT id FROM products WHERE * SEARCH 'logitech' LIMIT 10`)
+	response := runAndDecode(t, "pack-search", path)
+	if response.Command != "pack-search" {
+		t.Fatalf("pack command = %q", response.Command)
+	}
+	var report relational.SearchPackReport
+	if err := json.Unmarshal(response.Result, &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.SearchTables != 1 || report.SearchDocuments != 2 ||
+		report.CanonicalRowsScanned != 0 || report.SearchFileBytes == 0 {
+		t.Fatalf("pack report = %+v", report)
+	}
+	statusResponse := runAndDecode(t, "projections", path)
+	var status relational.ProjectionPreflightReport
+	if err := json.Unmarshal(statusResponse.Result, &status); err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Search) != 1 || status.Search[0].Status != "ready" ||
+		status.Search[0].ReaderCapacityBytes <= 0 {
+		t.Fatalf("projection status = %+v", status)
 	}
 }
 

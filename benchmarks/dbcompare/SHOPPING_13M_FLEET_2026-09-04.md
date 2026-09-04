@@ -48,7 +48,8 @@ latency distribution:
 | Artifact | Wall time | Analytics result | Search result |
 | --- | ---: | --- | --- |
 | `shopping_13m_partition.kitdb` | 310.0 ms | ready, 13,773,074 rows, 1,682 chunks | missing |
-| `shopping_13m_full.kitdb` | 231.4 ms | stale chunk-v2 layout | missing |
+| `shopping_13m_full.kitdb`, before pack | 231.4 ms | stale chunk-v2 layout | missing |
+| `shopping_13m_full.kitdb`, after pack | 261 ms | stale chunk-v2 layout | ready, 13,773,074 documents, 119 segments |
 
 The preflight read canonical catalog/layout metadata plus projection container
 and fixed headers; it did not open a KROW row cursor. Opening the stale artifact
@@ -63,6 +64,7 @@ when a service must fail admission rather than accept that fallback cost.
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | KCOL analytics | 194.9 ms | 113.8 ms | 100 / 100 ms | 0.51 MiB | 155.51 MiB | 10.10 MiB | 239.89 MiB |
 | BM25 search | 185.3 ms | 1,153.2 ms | 200 / 200 ms | 0.51 MiB | 386.24 MiB | 10.31 MiB | 491.10 MiB |
+| Packed BM25, two Windows handles | 129.8 ms | 956.5 ms | 200 / 200 ms | 0.47 MiB | 340.87 MiB | 10.04 MiB | 482.20 MiB |
 
 The search warm set is materially larger than the narrow analytics warm set.
 This is direct evidence that `warm: true` cannot be a fleet-wide default:
@@ -92,6 +94,65 @@ there were no rejections, wait timeouts or failed statements.
 The point-read p99 upper bound again moved from 3 to 5 ms. The mixed window
 accumulated 18.27 seconds of admission wait across 33,794 operations; there
 were no rejections, wait timeouts or failed statements.
+
+## Packed Search Follow-Up
+
+The exact legacy search generation was adopted into the immutable
+`shopping_13m_full.kitdb.search` file with the standalone `pack-search`
+command. The operation completed in 4 minutes 35 seconds and reported:
+
+- source transaction 33,793;
+- 13,773,074 documents across 119 immutable segments;
+- 10,006,262,527 source bytes and a 9,730,791,378-byte packed file;
+- zero canonical KROW rows scanned;
+- a sampled working set of at least 768.35 MiB during packing (not an exact
+  peak because the process was not continuously sampled).
+
+Preflight reserved 248,404,997 bytes (236.90 MiB) for deterministic packed
+reader structures. After the representative query warmed it, measured native
+reader residency was 192.39 MiB. Neither number includes the file payload,
+operating-system page cache, allocator overhead, or per-query working memory.
+
+### Single-Query Comparison
+
+Five benchmark processes with three timed iterations each produced these
+ranges. Both modes used the same canonical database and query limits.
+
+| Workload | Legacy directory | Packed file | Observation |
+| --- | ---: | ---: | --- |
+| name-only, 20 rows | 27.98-30.20 ms | 27.88-31.31 ms | equivalent in this sample |
+| all fields, 20 rows | 187.86-196.44 ms | 185.73-194.99 ms | equivalent in this sample |
+| all fields + merchant, 120 rows | 210.60-222.02 ms | 224.45-233.63 ms | packed was 6-11% slower |
+
+This does not justify a blanket claim that packed search is faster. Its first
+measured value is bounded ownership and one copyable file; latency still
+depends heavily on result hydration and selected fields.
+
+### Concurrent Windows Reads
+
+The first packed implementation shared one `os.File` handle among all 119
+section readers. Go 1.26's Windows positioned-read path serializes `ReadAt`
+calls per handle, so two admitted hot queries could not read segment payloads
+in parallel. Three 15-second mixed runs completed only 36-40 hot queries and
+all reported a 1,000 ms p50/p95/p99 histogram bucket.
+
+The retained implementation still owns one physical `.search` file and one
+decoded reader/cache, but gives its bounded two-query gate two verified handles
+to that file on Windows. Four independent mixed observations after this change
+were:
+
+| Run | Neighbor total qps | Hot count | Hot p50/p95/p99 | Neighbor read p99 | RSS peak |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 3,459.58 | 90 | 400 / 400 / 400 ms | 3 ms | 696.99 MiB |
+| 2 | 3,079.99 | 80 | 400 / 500 / 500 ms | 3 ms | 700.15 MiB |
+| 3 | 3,235.21 | 82 | 400 / 400 / 500 ms | 3 ms | 698.73 MiB |
+| 4 | 3,218.24 | 84 | 400 / 400 / 400 ms | 3 ms | 698.12 MiB |
+
+The same-code legacy rerun completed 78 hot queries at 400 / 750 / 750 ms and
+peaked at 750.87 MiB RSS. These warm-cache observations suggest that the
+packed layout now reaches at least comparable concurrent throughput while
+retaining less process working set. They do not prove an SLO or a universal
+advantage across hardware and operating systems.
 
 ## Interpretation
 
@@ -135,28 +196,31 @@ Remove-Item Env:KITDB_SHOPPING_BENCHMARK
 $env:KITDB_SHOPPING_SEARCH_BENCHMARK='D:\path\shopping_13m_full.kitdb'
 go test ./kitdb/relational `
   -run '^TestShoppingProductionFleetWorkload/search$' -count=1 -v -timeout 5m
+
+Remove-Item Env:KITDB_SHOPPING_SEARCH_BENCHMARK
+$env:KITDB_SHOPPING_PACKED_SEARCH_BENCHMARK='D:\path\shopping_13m_full.kitdb'
+go test ./kitdb/relational `
+  -run '^TestShoppingProductionFleetWorkload/packed-search$' -count=1 -v -timeout 5m
 ```
 
 `KITDB_SHOPPING_FLEET_DURATION` accepts 2 seconds through 10 minutes and
 defaults to 10 seconds. The neighbor-only baseline lasts half that duration,
-with a two-second minimum. Without either artifact variable, the canary skips.
+with a two-second minimum. Without any artifact variable, the canary skips.
 
 ## Next Gate
 
-The packed-search follow-up is now implemented in the standalone engine. Each
-Engine defaults to zero retained search-reader bytes, admits a packed reader
-only after a conservative capacity inspection, single-flights concurrent first
-opens, and falls back to open/query/close when the configured budget is too
-small. The PostgreSQL node accounts that reservation with container-directory
-bytes and evicts oldest non-warm idle readers under a separate fleet ceiling.
-Synthetic 4,096-row measurements and retained tests are documented in
-`kitdb/relational/PROJECTIONS.md`.
+The packed-search adoption and one-hot-tenant rerun are complete. Each Engine
+still defaults to zero retained search-reader bytes, admits a packed reader only
+after conservative capacity inspection, single-flights concurrent first opens,
+and falls back to open/query/close when the configured budget is too small. The
+PostgreSQL node accounts that reservation with container-directory bytes and
+evicts oldest non-warm idle readers under a separate fleet ceiling.
 
-This does not retroactively change the 13M search result above: that canary uses
-the legacy directory projection, and no equivalent 13M packed `.search` artifact
-was available for an honest rerun. The next evidence gate is therefore to build
-that artifact, record its inspected capacity versus measured RSS, and repeat the
-same mixed workload with one, several, and over-budget idle search databases.
+The next evidence gate is several independent packed search databases under one
+node, including over-budget idle eviction, cancellation during concurrent
+payload reads, and a Linux comparison where one file handle is not expected to
+serialize positioned reads. The 120-row hydration regression should also be
+profiled before changing the packed layout itself.
 
 Before calling this production-ready, repeat on a controlled host with cold
 device/cache methodology, multiple workload mixes, cancellation and queue

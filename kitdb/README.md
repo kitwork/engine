@@ -178,6 +178,7 @@ inspection typo cannot create an empty database.
 ```text
 go run ./cmd/kitdb inspect tenant.kitdb
 go run ./cmd/kitdb verify tenant.kitdb
+go run ./cmd/kitdb pack-search apps/shop/.data/shop.kitdb
 go run ./cmd/kitdb backup --pin backup/nightly tenant.kitdb anchor.kitdb
 go run ./cmd/kitdb restore anchor.kitdb restored.kitdb
 go run ./cmd/kitdb restore --transaction 42 --history tenant.kitdb.history anchor.kitdb restored-42.kitdb
@@ -188,6 +189,10 @@ go run ./cmd/kitdb restore-time --at 2026-08-27T14:30:00+07:00 tenant.kitdb reco
 anchor, checkpoints the source to seal history, and publishes the named durable
 pin before reporting success. `restore` never overwrites its destination. The
 CLI owns no alternate encoding, WAL, backup, or recovery implementation.
+`pack-search` is an explicit projection migration: it copies and verifies an
+exact-watermark, deletion-free managed search generation into the single-file
+read-only `<database>.search` layout without decoding canonical rows. It does
+not catch up, rebuild, delete, or reinterpret a stale legacy index.
 
 ## Concurrent commit coordinator
 

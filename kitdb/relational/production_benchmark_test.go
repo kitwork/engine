@@ -273,6 +273,31 @@ func BenchmarkShoppingProductionSearch(b *testing.B) {
 	if path == "" {
 		b.Skip("set KITDB_SHOPPING_SEARCH_BENCHMARK to a verified KitDB search copy")
 	}
+	benchmarkShoppingProductionSearch(b, path, Options{
+		MaximumResultRows:       1_000,
+		MaximumSearchResults:    1_000,
+		MaximumSearchCandidates: 1_000_000,
+	})
+}
+
+// BenchmarkShoppingProductionPackedSearch runs the identical workload through
+// the immutable single-file search projection and retains its reader between
+// iterations under an explicit capacity budget.
+func BenchmarkShoppingProductionPackedSearch(b *testing.B) {
+	path := os.Getenv("KITDB_SHOPPING_PACKED_SEARCH_BENCHMARK")
+	if path == "" {
+		b.Skip("set KITDB_SHOPPING_PACKED_SEARCH_BENCHMARK to a verified packed-search copy")
+	}
+	benchmarkShoppingProductionSearch(b, path, Options{
+		ExperimentalProjections: true,
+		SearchReaderCacheBytes:  256 << 20,
+		MaximumResultRows:       1_000,
+		MaximumSearchResults:    1_000,
+		MaximumSearchCandidates: 1_000_000,
+	})
+}
+
+func benchmarkShoppingProductionSearch(b *testing.B, path string, options Options) {
 	workloads := []struct {
 		name  string
 		query string
@@ -296,11 +321,7 @@ func BenchmarkShoppingProductionSearch(b *testing.B) {
 	}
 	for _, workload := range workloads {
 		b.Run(workload.name, func(b *testing.B) {
-			engine, err := OpenWithOptions(path, Options{
-				MaximumResultRows:       1_000,
-				MaximumSearchResults:    1_000,
-				MaximumSearchCandidates: 1_000_000,
-			})
+			engine, err := OpenWithOptions(path, options)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -314,12 +335,22 @@ func BenchmarkShoppingProductionSearch(b *testing.B) {
 			if err != nil || len(warm.Rows) != workload.rows {
 				b.Fatalf("warm search rows=%d error=%v", len(warm.Rows), err)
 			}
+			if options.ExperimentalProjections &&
+				(warm.Execution == nil || warm.Execution.Path != "search-snapshot") {
+				b.Fatalf("packed search path=%+v", warm.Execution)
+			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
 				if _, err := engine.Execute(ctx, workload.query); err != nil {
 					b.Fatal(err)
 				}
+			}
+			b.StopTimer()
+			cache := engine.ProjectionCacheStats()
+			if options.ExperimentalProjections {
+				b.ReportMetric(bytesToMiB(uint64(cache.SearchReaderResidentBytes)), "reader_resident_MiB")
+				b.ReportMetric(bytesToMiB(uint64(cache.SearchReaderCapacityBytes)), "reader_capacity_MiB")
 			}
 		})
 	}

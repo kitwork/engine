@@ -66,6 +66,20 @@ func TestShoppingProductionFleetWorkload(t *testing.T) {
 			query: `SELECT merchant, id, name, _score FROM shopping WHERE * SEARCH 'ban phim logitech' ORDER BY _score DESC LIMIT 20`,
 			rows:  20,
 		},
+		{
+			name: "packed-search",
+			path: strings.TrimSpace(os.Getenv("KITDB_SHOPPING_PACKED_SEARCH_BENCHMARK")),
+			options: Options{
+				ExperimentalProjections: true,
+				SearchReaderCacheBytes:  256 << 20,
+				MaximumResultRows:       1_000,
+				MaximumSearchResults:    1_000,
+				MaximumSearchCandidates: 1_000_000,
+			},
+			query:         `SELECT merchant, id, name, _score FROM shopping WHERE * SEARCH 'ban phim logitech' ORDER BY _score DESC LIMIT 20`,
+			executionPath: "search-snapshot",
+			rows:          20,
+		},
 	}
 	runs := 0
 	for _, mode := range modes {
@@ -78,7 +92,7 @@ func TestShoppingProductionFleetWorkload(t *testing.T) {
 		})
 	}
 	if runs == 0 {
-		t.Skip("set KITDB_SHOPPING_BENCHMARK and/or KITDB_SHOPPING_SEARCH_BENCHMARK")
+		t.Skip("set KITDB_SHOPPING_BENCHMARK, KITDB_SHOPPING_SEARCH_BENCHMARK, and/or KITDB_SHOPPING_PACKED_SEARCH_BENCHMARK")
 	}
 }
 
@@ -150,6 +164,7 @@ func runShoppingProductionFleetMode(t *testing.T, mode shoppingFleetMode, durati
 		directWarm.Observe(time.Since(started))
 	}
 	memoryAfterWarm := shoppingFleetMemoryPointNow()
+	projectionCache := hotEngine.ProjectionCacheStats()
 
 	authenticators := make(map[string]pgwire.Authenticator, shoppingFleetNeighbors+1)
 	hotAuthenticator, err := hotEngine.PostgresAuthenticator(PostgresOptions{
@@ -231,6 +246,15 @@ func runShoppingProductionFleetMode(t *testing.T, mode shoppingFleetMode, durati
 		bytesToMiB(memoryBeforeOpen.heap), bytesToMiB(memoryAfterWarm.heap),
 		optionalMiB(memoryBeforeOpen.rss), optionalMiB(memoryAfterWarm.rss),
 	)
+	if mode.executionPath == "search-snapshot" {
+		t.Logf(
+			"mode=%s search_readers=%d search_file_handles=%d search_resident_mib=%.2f search_capacity_mib=%.2f directory_mib=%.2f",
+			mode.name, projectionCache.SearchReaders, projectionCache.SearchFileHandles,
+			bytesToMiB(uint64(max(projectionCache.SearchReaderResidentBytes, 0))),
+			bytesToMiB(uint64(max(projectionCache.SearchReaderCapacityBytes, 0))),
+			bytesToMiB(uint64(max(projectionCache.DirectoryBytes, 0))),
+		)
+	}
 	logShoppingFleetWindow(t, mode.name, "baseline", baseline)
 	logShoppingFleetWindow(t, mode.name, "mixed", mixed)
 	if baseline.reads.total.Load() > 0 && mixed.reads.total.Load() > 0 {

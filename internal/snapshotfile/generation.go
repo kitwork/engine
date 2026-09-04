@@ -167,13 +167,13 @@ func validateGenerationDirectory(d directory, end int64) (int64, error) {
 }
 
 type extentReader struct {
-	file    *os.File
+	file    io.ReaderAt
 	extents []Extent
 	starts  []int64
 	size    int64
 }
 
-func newExtentReader(file *os.File, extents []Extent) *extentReader {
+func newExtentReader(file io.ReaderAt, extents []Extent) *extentReader {
 	r := &extentReader{file: file, extents: extents, starts: make([]int64, len(extents))}
 	for i, extent := range extents {
 		r.starts[i] = r.size

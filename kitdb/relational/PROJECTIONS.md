@@ -17,8 +17,13 @@ test/
 
 The sidecars contain entries for multiple tables. They are regular files,
 not directories disguised by an extension. The search file contains existing
-native segment bytes, opened using section readers over one container handle;
-queries do not extract an archive or open one OS handle per segment.
+native segment bytes, opened using section readers over one physical container
+file; queries do not extract an archive or open one OS handle per segment. On
+Windows, where Go serializes positioned reads on one `os.File`, the relational
+reader uses two bounded handles for that same immutable file to match its
+two-query admission gate. Other platforms retain one handle. Both paths share
+one decoded directory and one native search-reader cache; this is not a second
+copy of the projection or a tenant-facing tuning option.
 
 Search construction still uses a temporary `.search-build-*` directory for the
 existing bounded replacement writer and its identifier validation. It is
@@ -27,9 +32,14 @@ can leave unpublished temporary artifacts; automatic orphan cleanup is not
 implemented. Do not delete unfamiliar files as a cleanup shortcut.
 
 The existing mutable search-directory manager remains the default. Opt-in
-refresh refuses to replace a legacy `.search` directory or symlink. Use a new
-test database or an operator-controlled copy; there is no automatic migration
-or deletion of existing user indexes.
+refresh refuses to replace a legacy `.search` directory or symlink. There is
+no automatic migration or deletion of existing user indexes. An explicit
+offline `pack-search` operation can adopt an already-current, deletion-free
+legacy index without scanning or tokenizing KROW. It verifies the exact source
+transaction, database identity, schema, row generation/epoch and committed
+index generation before atomically publishing the packed file. Missing, stale,
+corrupt, or tombstoned input fails closed; use a normal legacy SEARCH catch-up
+or a full `refresh-projections` rebuild first.
 
 To compare with the mutable directory mode after creating a `.search` file,
 turn off the experimental option and set a different `--search-root` directory.
@@ -44,6 +54,8 @@ another process:
 go run ./cmd/kitdb refresh-projections /path/to/test/data.kitdb
 
 go run ./cmd/kitdb refresh-projections --analytics-only /path/to/test/data.kitdb
+
+go run ./cmd/kitdb pack-search /path/to/test/data.kitdb
 
 go run ./cmd/kitdb projections /path/to/test/data.kitdb
 
@@ -102,7 +114,19 @@ report, err := db.RefreshProjections(ctx)
 
 // Or refresh columnar without creating, checking or replacing search storage.
 report, err = db.RefreshAnalytics(ctx)
+
+// Or adopt the exact current mutable search generation without decoding KROW.
+packed, err := db.PackSearchProjection(ctx)
 ```
+
+`PackSearchProjection` is a migration bridge, not a second ongoing write path.
+The legacy search root must be distinct from `<database>.search`; databases in
+a `.data` directory already use the historical sibling `search/` root. Other
+layouts must pass a separate `SearchRoot` when building and packing the legacy
+index. Packing still reads and verifies every immutable source segment and
+copies its bytes, so it is bounded-memory but not zero-I/O. Its report exposes
+the source transaction, table/document/segment totals, source and destination
+bytes, and `CanonicalRowsScanned` (always zero).
 
 `PreflightProjections(ctx)` is the equivalent standalone Go API. It captures one
 canonical read snapshot and reports every analytics/search projection as
@@ -113,6 +137,15 @@ each fixed-size segment header, and the eight-byte sparse-directory prefix
 needed to reserve reader memory. It deliberately does not load sparse term
 dictionaries or payloads. A `ready` preflight is therefore bounded admission
 evidence, not a substitute for an offline deep verification campaign.
+`reader_capacity_bytes` is the conservative per-table reservation used by the
+packed reader cache; it excludes file payload, OS page cache, and per-query
+working memory.
+
+Process-local cache statistics separately expose native search readers and
+physical search file handles. This keeps the Windows concurrency adaptation
+observable without counting a second handle as a second resident reader or
+doubling its capacity reservation. Trimming or closing the projection cache
+drains leases and closes every handle before replacement/removal.
 
 Callers may apply the same check before an Engine becomes visible:
 

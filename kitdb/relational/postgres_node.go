@@ -81,6 +81,7 @@ type PostgresNodeStats struct {
 	ProjectionActiveLeases              int
 	ProjectionDirectoryBytes            int64
 	ProjectionSearchReaders             int
+	ProjectionSearchFileHandles         int
 	ProjectionReaderResidentBytes       int64
 	ProjectionReaderCapacityBytes       int64
 	ProjectionCacheTrims                uint64
@@ -899,6 +900,7 @@ func (node *PostgresNode) Stats() PostgresNodeStats {
 		stats.ProjectionActiveLeases += projection.ActiveLeases
 		stats.ProjectionDirectoryBytes += projection.DirectoryBytes
 		stats.ProjectionSearchReaders += projection.SearchReaders
+		stats.ProjectionSearchFileHandles += projection.SearchFileHandles
 		stats.ProjectionReaderResidentBytes += projection.DirectoryBytes + projection.SearchReaderResidentBytes
 		stats.ProjectionReaderCapacityBytes += projection.DirectoryBytes + projection.SearchReaderCapacityBytes
 	}
