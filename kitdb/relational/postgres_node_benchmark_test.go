@@ -177,9 +177,17 @@ var boundedLatencyBuckets = [...]time.Duration{
 	25 * time.Millisecond,
 	50 * time.Millisecond,
 	100 * time.Millisecond,
+	150 * time.Millisecond,
+	200 * time.Millisecond,
 	250 * time.Millisecond,
+	300 * time.Millisecond,
+	400 * time.Millisecond,
 	500 * time.Millisecond,
+	750 * time.Millisecond,
 	time.Second,
+	1500 * time.Millisecond,
+	2 * time.Second,
+	3 * time.Second,
 	5 * time.Second,
 }
 

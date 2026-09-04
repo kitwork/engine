@@ -908,6 +908,9 @@ See
 [`SHOPPING_13M_MEMORY_2026-09-04.md`](../../benchmarks/dbcompare/SHOPPING_13M_MEMORY_2026-09-04.md).
 See also
 [`TEXT_ANALYTICS_13M_2026-09-04.md`](../../benchmarks/dbcompare/TEXT_ANALYTICS_13M_2026-09-04.md).
+The bounded pgwire fleet follow-up, including warm projection RSS and
+noisy-neighbor tails, is recorded in
+[`SHOPPING_13M_FLEET_2026-09-04.md`](../../benchmarks/dbcompare/SHOPPING_13M_FLEET_2026-09-04.md).
 
 The [grouped batch follow-up](../../benchmarks/dbcompare/GROUP_BATCH_2026-08-31.md)
 records the supported GROUP BY workload separately from the historical ungrouped
