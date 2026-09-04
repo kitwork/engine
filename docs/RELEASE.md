@@ -31,6 +31,59 @@ plus the instruction-set checksum, compiler fingerprint, and detached runtime
 limit policy. It does not record tenant source, request bodies, URLs, or
 secrets.
 
+KitDB has narrower gates that qualify only its kernel, relational adapters, and
+operator commands. Their supported profile and exclusions are frozen in
+`kitdb/RELEASE_1_0.md`:
+
+```text
+go run ./cmd/releasegate --mode kitdb-verify \
+  --report .artifacts/kitdb-verify.json
+
+go run ./cmd/releasegate --mode kitdb-release \
+  --require-clean \
+  --timeout 90m \
+  --report .artifacts/kitdb-release.json
+```
+
+Every release report now records both the `kitdb/1` kernel profile and the
+Kitwork relational encoding profile. The complete engine release mode includes
+the KitDB release campaigns, so a Kitwork release cannot bypass KitDB race,
+hard-crash, canary-smoke, or replica-soak evidence. The required 24-hour
+storage canary command is documented in `kitdb/RELEASE_1_0.md`; the short gate
+does not replace it.
+
+Release qualification proves the engine build. A project database has its own
+admission gate: with its writer stopped, run `go run ./cmd/kitdb doctor
+<database>`. Admit a controlled rollout only when `controlled_ready` is true;
+require `stable_ready` for a general-availability deployment.
+
+Host-registered production policies are exercised by the KitDB node suite and
+race gate: restart must rediscover the same verified anchor without duplication,
+restore must match `kitdb-logical-digest/v1`, corrupted or over-capacity stores
+must fail closed, an optional publisher must return exact destination read-back
+evidence, and manager shutdown must release every lease and publisher call. The
+built-in directory publisher proves immutable bounded transfer semantics and
+restart idempotence, not that its configured path is physically off-host.
+Native object-store transport and notification delivery remain deployment
+responsibilities in `kitdb/PRODUCTION.md`.
+
+The verification plan also runs one composed KitDB database journey:
+
+```text
+struct()/ORM schema and CRUD -> Hrana transaction -> online index
+  -> close/reopen -> full verify -> backup anchor -> exact restore
+  -> catalog-hydrated ORM and Hrana query
+```
+
+Its separate `.artifacts/kitdb-database-gate.json` evidence records only the
+database identity, source/backup/restore transaction, backup SHA-256, row
+count, platform, and bounded step timings. A second focused gate runs reviewed
+WAL-tail, backup/restore, hard-process index recovery, and resumable-import
+WAL-before-acknowledgement tests. The clean
+journey therefore cannot be mistaken for crash-safety evidence, and neither
+step alone is a claim about dishonest storage hardware or unsupported network
+filesystems.
+
 The first gate loads the committed VM v2 compatibility archive without
 recompiling its sources and requires each historical Program to decode, verify,
 execute, and re-encode unchanged. The next gate runs the manifest-driven VM
@@ -145,12 +198,22 @@ collects a local heap profile or diagnostic bundle.
 A release candidate is ready for controlled rollout only when:
 
 - the release gate passes on Windows and Linux for the same commit;
-- VM v2 and compiler v2 contract checks remain unchanged or have an explicit
+- VM v2 and current compiler-schema contract checks remain unchanged or have an explicit
   reviewed version migration;
 - the VM v2 compatibility archive, VM fault gauntlet, language conformance, and
   bytecode inspector contracts pass unchanged;
 - runtime limit boundaries and the limit snapshot in release evidence match the
   reviewed policy;
+- the KitDB journey preserves one identity and exact transaction through
+  verify, backup, restore, ORM reopen, and authenticated Hrana query;
+- the focused KitDB recovery step passes its WAL-tail, backup/restore,
+  hard-process index publication, and resumable-import publication boundaries;
+- the compiled KitDB compatibility profile still matches the reviewed
+  `kitdb/1` contract, including durable format versions and hard transaction
+  limits;
+- the KitDB release campaign passes kernel and relational race coverage, ten
+  repetitions of replica/catalog/import/index hard-crash matrices, and the
+  seeded replica crash soak;
 - the synthetic canary has zero request failures and reports a healthy drain;
 - the deployment canary stays below its declared error-rate threshold;
 - diagnostics finish with zero active VM leases and zero in-flight requests;

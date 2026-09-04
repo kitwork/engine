@@ -109,6 +109,135 @@ func TestIndexUpdateDeleteAndSnapshotIsolation(t *testing.T) {
 	}
 }
 
+func TestIndexSearchAfterPreservesBM25OrderAcrossSegments(t *testing.T) {
+	schema, err := NewSchema(
+		Text("name", StandardAnalyzer(), Boost(3)),
+		Text("description", StandardAnalyzer()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	writer, err := NewIndexWriter(directory, schema, WriterOptions{
+		Segment: BuildOptions{MaxDocuments: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	for index, document := range []Document{
+		{ID: "a", Fields: map[string]string{"name": "alpha alpha", "description": "common"}},
+		{ID: "b", Fields: map[string]string{"name": "alpha", "description": "common common"}},
+		{ID: "c", Fields: map[string]string{"name": "alpha", "description": "common"}},
+		{ID: "d", Fields: map[string]string{"name": "common", "description": "alpha"}},
+		{ID: "e", Fields: map[string]string{"name": "alpha alpha alpha", "description": "common"}},
+		{ID: "f", Fields: map[string]string{"name": "alpha", "description": "common"}},
+		{ID: "g", Fields: map[string]string{"name": "alpha", "description": "common common common"}},
+	} {
+		if err := writer.Add(context.Background(), document); err != nil {
+			t.Fatalf("add document %d: %v", index, err)
+		}
+	}
+	if _, err := writer.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	index, err := OpenIndex(directory, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer index.Close()
+	query := MatchQuery{Fields: []string{"name", "description"}, Text: "alpha common"}
+	want, err := index.Search(context.Background(), query, SearchOptions{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []Hit
+	var after *SearchAfter
+	for {
+		page, err := index.Search(context.Background(), query, SearchOptions{Limit: 2, After: after})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		got = append(got, page...)
+		last := page[len(page)-1]
+		after = &SearchAfter{Score: last.Score, Ordinal: last.Ordinal}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("paged hits = %d, want %d", len(got), len(want))
+	}
+	for position := range want {
+		if got[position].ID != want[position].ID || got[position].Score != want[position].Score ||
+			got[position].Ordinal != want[position].Ordinal {
+			t.Fatalf("paged hit %d = %#v, want %#v", position, got[position], want[position])
+		}
+	}
+	if _, err := index.Search(context.Background(), MatchQuery{
+		Fields: []string{"name", "description"}, Text: "alpha", Operator: QueryAny,
+	}, SearchOptions{After: &SearchAfter{}}); err == nil {
+		t.Fatal("QueryAny SEARCH AFTER unexpectedly succeeded")
+	}
+}
+
+func TestIndexUpsertIsReplaySafe(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	writer, err := NewIndexWriter(directory, schema, WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+
+	if err := writer.Upsert(context.Background(), Document{
+		ID: "product/1", Fields: map[string]string{"text": "old keyboard"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := writer.Commit(context.Background()); err != nil || info.Documents != 1 {
+		t.Fatalf("initial upsert commit = %#v, %v", info, err)
+	}
+
+	updated := Document{ID: "product/1", Fields: map[string]string{"text": "new mechanical keyboard"}}
+	for replay := 0; replay < 2; replay++ {
+		if err := writer.Upsert(context.Background(), updated); err != nil {
+			t.Fatalf("upsert replay %d: %v", replay, err)
+		}
+		info, err := writer.Commit(context.Background())
+		if err != nil {
+			t.Fatalf("commit replay %d: %v", replay, err)
+		}
+		if info.Documents != 1 {
+			t.Fatalf("documents after replay %d = %d, want 1", replay, info.Documents)
+		}
+	}
+
+	index, err := OpenIndex(directory, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer index.Close()
+	if err := index.Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	oldHits, err := index.Search(context.Background(), MatchQuery{
+		Field: "text", Text: "old",
+	}, SearchOptions{})
+	if err != nil || len(oldHits) != 0 {
+		t.Fatalf("old hits after replay = %#v, %v", oldHits, err)
+	}
+	newHits, err := index.Search(context.Background(), MatchQuery{
+		Field: "text", Text: "mechanical keyboard",
+	}, SearchOptions{})
+	if err != nil || len(newHits) != 1 || newHits[0].ID != updated.ID {
+		t.Fatalf("new hits after replay = %#v, %v", newHits, err)
+	}
+}
+
 func TestIndexSearchAnyMergesSegments(t *testing.T) {
 	schema, err := NewSchema(Text("text", StandardAnalyzer()))
 	if err != nil {
@@ -911,6 +1040,107 @@ func TestIndexWriterStreamingReplacementPublishesWithBoundedPendingIDs(t *testin
 	defer current.Close()
 	if hits, err := current.Search(context.Background(), MatchQuery{Field: "text", Text: "replacement"}, SearchOptions{Limit: 20}); err != nil || len(hits) != 20 {
 		t.Fatalf("streaming replacement hits = %d, %v", len(hits), err)
+	}
+}
+
+func TestIndexWriterStreamingReplacementCompactsBeyondManifestSegmentLimit(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	writer, err := NewIndexWriter(directory, schema, WriterOptions{
+		Segment: BuildOptions{MaxDocuments: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+
+	replacement, err := writer.BeginReplacement()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Abort()
+	documentCount := manifestMaximumSegments + 44
+	for document := 0; document < documentCount; document++ {
+		if err := replacement.Add(context.Background(), Document{
+			ID: fmt.Sprintf("document-%03d", document),
+			Fields: map[string]string{
+				"text": fmt.Sprintf("common token-%03d", document),
+			},
+		}); err != nil {
+			t.Fatalf("add document %d: %v", document, err)
+		}
+	}
+	info, err := replacement.Commit(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Documents != uint64(documentCount) || info.Segments > replacementCompactionFinalTargetSegments {
+		t.Fatalf("compacted replacement info = %#v", info)
+	}
+
+	index, err := OpenIndex(directory, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer index.Close()
+	if err := index.Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := index.Search(context.Background(), MatchQuery{Field: "text", Text: "common"}, SearchOptions{Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 200 {
+		t.Fatalf("compacted replacement hits = %d, want 200", len(hits))
+	}
+	segments, err := filepath.Glob(filepath.Join(directory, "*.ks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != info.Segments {
+		t.Fatalf("segment artifacts = %d, manifest segments = %d", len(segments), info.Segments)
+	}
+}
+
+func TestIndexWriterStreamingReplacementDetectsDuplicateAfterPendingMerge(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewIndexWriter(t.TempDir(), schema, WriterOptions{
+		Segment: BuildOptions{MaxDocuments: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	replacement, err := writer.BeginReplacement()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replacement.Abort()
+	for _, document := range []Document{
+		{ID: "duplicate", Fields: map[string]string{"text": "first"}},
+		{ID: "duplicate", Fields: map[string]string{"text": "second"}},
+	} {
+		if err := replacement.Add(context.Background(), document); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := replacement.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.compactPendingReplacement(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.pending) != 1 {
+		t.Fatalf("pending segments after merge = %d", len(writer.pending))
+	}
+	if _, err := replacement.Commit(context.Background()); !errors.Is(err, ErrPendingDocument) {
+		t.Fatalf("merged duplicate commit error = %v", err)
 	}
 }
 

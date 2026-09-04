@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -21,7 +22,8 @@ type normCache struct {
 // Segment is a concurrent read-only view of one immutable segment file.
 // Close must run only after in-flight searches have drained.
 type Segment struct {
-	file       *os.File
+	file       io.ReaderAt
+	closer     io.Closer
 	path       string
 	schema     Schema
 	header     segmentHeader
@@ -54,11 +56,21 @@ func OpenSegment(path string, schema Schema) (*Segment, error) {
 	if !stat.Mode().IsRegular() || stat.Size() < segmentHeaderSize {
 		return nil, corruptf("segment is not a regular file or is too small")
 	}
+	segment, err := openSegmentReader(path, file, stat.Size(), schema)
+	if err != nil {
+		return nil, err
+	}
+	segment.closer = file
+	closeOnError = false
+	return segment, nil
+}
+
+func openSegmentReader(path string, file io.ReaderAt, size int64, schema Schema) (*Segment, error) {
 	headerBytes := make([]byte, segmentHeaderSize)
 	if err := readAtFull(file, headerBytes, 0); err != nil {
 		return nil, err
 	}
-	header, err := parseSegmentHeader(headerBytes, stat.Size())
+	header, err := parseSegmentHeader(headerBytes, size)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +133,6 @@ func OpenSegment(path string, schema Schema) (*Segment, error) {
 		file: file, path: path, schema: schema, header: header,
 		fieldStats: fieldStats, dictionary: dictionary, norms: make([]normCache, header.fieldN),
 	}
-	closeOnError = false
 	return segment, nil
 }
 
@@ -138,7 +149,10 @@ func (segment *Segment) Close() error {
 	if segment == nil || !segment.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	return segment.file.Close()
+	if segment.closer != nil {
+		return segment.closer.Close()
+	}
+	return nil
 }
 
 func (segment *Segment) ensureOpen() error {
@@ -253,6 +267,45 @@ func (segment *Segment) documentIdentifier(document uint32) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+func (segment *Segment) documentIdentifierHasPrefix(
+	document uint32,
+	prefix string,
+	buffer *[]byte,
+) (bool, error) {
+	if prefix == "" {
+		return true, nil
+	}
+	if err := segment.ensureOpen(); err != nil {
+		return false, err
+	}
+	if document >= segment.header.documentN {
+		return false, corruptf("document %d exceeds segment bounds", document)
+	}
+	section := segment.header.sections[sectionStoredOffsets]
+	var encoded [16]byte
+	if err := readAtFull(segment.file, encoded[:], section.offset+uint64(document)*8); err != nil {
+		return false, err
+	}
+	start := binary.LittleEndian.Uint64(encoded[:8])
+	end := binary.LittleEndian.Uint64(encoded[8:])
+	dataSection := segment.header.sections[sectionStoredData]
+	if start > end || end > dataSection.length || end-start > uint64(maxIntValue()) {
+		return false, corruptf("document %d has invalid stored offsets", document)
+	}
+	if end-start < uint64(len(prefix)) {
+		return false, nil
+	}
+	if cap(*buffer) < len(prefix) {
+		*buffer = make([]byte, len(prefix))
+	} else {
+		*buffer = (*buffer)[:len(prefix)]
+	}
+	if err := readAtFull(segment.file, *buffer, dataSection.offset+start); err != nil {
+		return false, err
+	}
+	return bytes.Equal(*buffer, []byte(prefix)), nil
 }
 
 // Verify reads every section, dictionary block, posting list, norm, and stored
@@ -384,7 +437,7 @@ func (segment *Segment) verifyNormTotals(ctx context.Context) error {
 	return nil
 }
 
-func verifySectionChecksum(ctx context.Context, file *os.File, section sectionDescriptor) error {
+func verifySectionChecksum(ctx context.Context, file io.ReaderAt, section sectionDescriptor) error {
 	hash := crc32.New(crcTable)
 	buffer := make([]byte, 64<<10)
 	remaining := section.length

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -69,6 +70,61 @@ func TestSegmentMultiFieldCrossFieldANDAndBoost(t *testing.T) {
 	if len(single) != 1 || len(multi) != 1 || single[0].ID != multi[0].ID ||
 		math.Abs(single[0].Score-multi[0].Score) > 1e-12 {
 		t.Fatalf("single-field compatibility = %#v, multi = %#v", single, multi)
+	}
+}
+
+func TestIndexMultiFieldIdentifierPrefixFiltersAcrossSegments(t *testing.T) {
+	schema, err := NewSchema(
+		Text("title", StandardAnalyzer()),
+		Text("body", StandardAnalyzer()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewIndexWriter(t.TempDir(), schema, WriterOptions{
+		Segment: BuildOptions{MaxDocuments: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close()
+	for _, document := range []Document{
+		{ID: "74696b69:0001", Fields: map[string]string{
+			"title": "highlands highlands coffee coffee", "body": "highlands coffee",
+		}},
+		{ID: "73686f706565:0001", Fields: map[string]string{
+			"title": "highlands", "body": "coffee",
+		}},
+		{ID: "74696b69:0002", Fields: map[string]string{
+			"title": "highlands highlands coffee coffee", "body": "highlands coffee",
+		}},
+		{ID: "73686f706565:0002", Fields: map[string]string{
+			"title": "highlands coffee",
+		}},
+	} {
+		if err := writer.Add(context.Background(), document); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := writer.Commit(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	index, err := OpenIndex(writer.directory, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer index.Close()
+
+	hits, err := index.Search(context.Background(), MatchQuery{
+		Fields: []string{"title", "body"}, Text: "highlands coffee",
+		IdentifierPrefix: "73686f706565:",
+	}, SearchOptions{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || !strings.HasPrefix(hits[0].ID, "73686f706565:") ||
+		!strings.HasPrefix(hits[1].ID, "73686f706565:") {
+		t.Fatalf("multi-segment identifier-prefixed hits = %#v", hits)
 	}
 }
 

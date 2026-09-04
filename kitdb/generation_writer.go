@@ -296,12 +296,13 @@ func prepareCompactedGeneration(path string, identity [16]byte, transaction uint
 	if err != nil {
 		return "", fmt.Errorf("kitdb: create compacted generation staging: %w", err)
 	}
-	stagingPath = file.Name()
+	temporaryPath := file.Name()
+	stagingPath = temporaryPath
 	ready := false
 	defer func() {
-		_ = file.Close()
+		closeErr := file.Close()
 		if !ready {
-			_ = os.Remove(stagingPath)
+			returnErr = errors.Join(returnErr, closeErr, os.Remove(temporaryPath))
 		}
 	}()
 	if err := file.Chmod(0o600); err != nil {
@@ -336,6 +337,28 @@ func prepareCompactedGeneration(path string, identity [16]byte, transaction uint
 		descriptors = append(descriptors, descriptor)
 	} else if err := segmentWriter.writer.Flush(); err != nil {
 		return "", fmt.Errorf("kitdb: flush empty compacted generation: %w", err)
+	}
+	if records == 0 && transaction == 0 {
+		if boundaryChecksum != 0 {
+			return "", fmt.Errorf("kitdb: empty compacted generation has a transaction checksum")
+		}
+		if err := file.Truncate(generationDataOffset); err != nil {
+			return "", fmt.Errorf("kitdb: truncate empty compacted generation: %w", err)
+		}
+		slot := encodeGenerationSlot(identity, generationSlot{
+			index: 0, manifestOffset: generationDataOffset, fileEnd: generationDataOffset,
+		})
+		if _, err := file.WriteAt(slot, generationSlotAOffset); err != nil {
+			return "", fmt.Errorf("kitdb: write empty compacted generation slot: %w", err)
+		}
+		if err := file.Sync(); err != nil {
+			return "", fmt.Errorf("kitdb: sync empty compacted generation staging: %w", err)
+		}
+		if err := file.Close(); err != nil {
+			return "", fmt.Errorf("kitdb: close empty compacted generation staging: %w", err)
+		}
+		ready = true
+		return stagingPath, nil
 	}
 	manifestOffset, err := file.Seek(0, io.SeekCurrent)
 	if err != nil {

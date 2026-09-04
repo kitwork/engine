@@ -16,6 +16,7 @@ import (
 	collectioncap "github.com/kitwork/engine/capabilities/collection"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/database"
+	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/search"
 	"github.com/kitwork/engine/site"
@@ -105,6 +106,11 @@ type Tenant struct {
 	collectionCanary  bool
 	collectionMetrics *collectioncap.SegmentSearchCanaryTelemetry
 
+	kitDBNodeMu      sync.Mutex
+	kitDBNodeManager *kitdbnode.Manager
+	kitDBNodeErr     error
+	kitDBNodeSet     bool
+
 	cacheLock sync.RWMutex
 	cache     map[string]*Responser
 
@@ -183,6 +189,32 @@ func (t *Tenant) SetSearchManager(manager *search.Manager, managerErr error) {
 	t.searchManagerSet = true
 }
 
+// SetKitDBNodeManager injects the host-owned fleet governor before Tenant.Run.
+// Standalone tenants that do not receive one retain an app-owned fallback.
+func (t *Tenant) SetKitDBNodeManager(manager *kitdbnode.Manager, managerErr error) {
+	if t == nil {
+		return
+	}
+	t.kitDBNodeMu.Lock()
+	defer t.kitDBNodeMu.Unlock()
+	if t.kitDBNodeSet {
+		return
+	}
+	t.kitDBNodeManager = manager
+	t.kitDBNodeErr = managerErr
+	t.kitDBNodeSet = true
+}
+
+func (t *Tenant) kitDBNode() (*kitdbnode.Manager, error, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	t.kitDBNodeMu.Lock()
+	manager, managerErr, configured := t.kitDBNodeManager, t.kitDBNodeErr, t.kitDBNodeSet
+	t.kitDBNodeMu.Unlock()
+	return manager, managerErr, configured
+}
+
 // SetCollectionSearchCanary configures the generation before capabilities are
 // resolved. Serving remains on the legacy collection index; only shadow work
 // is enabled.
@@ -252,7 +284,10 @@ func (t *Tenant) searchManagerFor() (*search.Manager, error) {
 		}
 		return t.searchManager, t.searchManagerErr
 	}
-	manager, err := search.NewManager(t.resolve(".data", "search"), search.ManagerOptions{})
+	manager, err := search.NewManager(t.resolve(".data", "search"), search.ManagerOptions{
+		ReplacementTimeout: 24 * time.Hour,
+		Writer:             search.WriterOptions{Segment: search.BuildOptions{SkipLongTerms: true}},
+	})
 	if err == nil {
 		t.searchManager = manager
 		t.ownsSearchManager = true

@@ -21,6 +21,80 @@ automated test on the production execution path.
 - Configured database connections are app-owned and shared by sibling sites.
   Site eviction and generation replacement must not close them; app shutdown
   closes every connection exactly once.
+- KitDB physical handle and page-cache admission is host-owned and bounded.
+  Every ORM operation must hold a node lease through its final transaction,
+  snapshot, and cursor use; idle LRU eviction must never close an active lease.
+  AppRuntime continues to own the per-file relational validation gate.
+- KitDB maintenance admission is host-owned, lazy, and bounded. Duplicate typed
+  jobs coalesce; only one job may run per database; cross-database concurrency,
+  queue cardinality, per-database retention, priority fairness, and execution
+  time all have explicit policies. A canceled ticket waiter must not cancel a
+  shared job. Engine shutdown stops admission, cancels queued/context-aware
+  work, drains workers, and releases every maintenance lease.
+- KitDB PostgreSQL COPY admission is server-owned and bounded before
+  `BeginCopyIn` can open a record transaction. Active and queued work is bounded
+  globally and per authenticated app/database key; queued keys receive weighted
+  fair service without bypass. Queue wait is covered by the COPY lifetime,
+  ordinary non-COPY queries do not acquire a slot, and atomic telemetry must
+  return active/queued ownership to zero after success, failure, timeout, abort,
+  or disconnect. Fairness is listener-local, not cross-listener fleet authority.
+- A multi-database KitDB maintenance job must reserve every touched canonical
+  path before it becomes runnable. No overlapping job may run on any reserved
+  path. Handles are acquired in canonical order, only one multi-database job
+  runs at once, and admission rejects an operation that cannot fit its complete
+  handle/page-cache set. Partial acquisition must release every acquired lease.
+- KitDB commit and WAL publication must never depend on maintenance success.
+  Soft checkpoint pressure may leave the request path; the hard threshold must
+  join or admit urgent checkpoint work and apply bounded backpressure rather
+  than bypassing the governor or allowing unbounded WAL growth.
+- Relational background progress must use the same canonical per-file gate as
+  foreground schema-aware writes. Row migration reloads `KRMS`; secondary-index
+  build and cleanup reload `KIBS`. One dispatch may commit only one bounded
+  chunk and may requeue only after durable progress. The node queue may
+  coalesce, stop, or disappear without becoming schema, generation, or cursor
+  authority.
+- A verified KitDB backup must never overwrite its destination. Retry may adopt
+  an existing anchor only after full-file verification, source-identity match,
+  a checkpoint sealing history through the anchor transaction, and durable
+  publication of the requested transaction/checksum pin. Failure after anchor
+  publication must return that verified partial result and remain retryable;
+  tenant code must not receive this host filesystem authority.
+- A registered KitDB production policy must reuse verified backup and restore,
+  never invent a scheduler durability record. Policies share one bounded
+  dispatcher and fixed worker pool; idle policies retain no lease or goroutine.
+  The next run is the earlier backup or restore deadline. Every named anchor is
+  fully verified, foreign or mixed identity evidence fails closed, restore is
+  proven by the canonical logical digest, and health remains path-free. An
+  optional host publisher may satisfy readiness only with an exact receipt
+  produced after destination read-back verification; upload acknowledgement is
+  insufficient. Publisher labels, directory discovery, retention, and
+  ownership are bounded, configuration remains process-local, and shutdown
+  drains any active publisher call with the policy workers.
+- A managed KitDB history prune must preserve the caller's exact `through`
+  boundary. Different boundaries never coalesce or widen one another; the
+  kernel's oldest durable pin and complete-segment rules remain authoritative.
+  `META` publishes before physical deletion, partial cleanup remains observable,
+  and retrying the same published boundary cleans retired prefix debris without
+  advancing it again. Tenant code must not receive this destructive authority.
+- Managed replica bootstrap is verified backup, not a second copy path. Catch-up
+  must reserve source and target, force the target handle into replica mode, and
+  preserve the kernel's identity/checksum/strict-next-transaction proofs. Target
+  progress commits through its ordinary WAL; partial progress and its cursor
+  remain observable after cancellation or failure, while the source pin moves
+  to the final boundary only after the complete fixed range arrives. Tenant code
+  must not receive this topology authority.
+- Replica wire and filesystem transport must remain outside target durability.
+  Final messages publish only from synced staging without overwrite; complete
+  decode precedes target mutation; ACK publication follows target WAL commit;
+  source pin publication precedes batch/ACK cleanup; and replay must never move
+  a pin backward. Mailbox counts, bytes, staging debris, and directory reads are
+  bounded, explicit, and host-owned. No transport worker may appear on the
+  request or commit path. A registered local replica controller must reuse
+  these exact maintenance stages, share one bounded worker pool across links,
+  retain no transaction bodies or durable cursor of its own, cap retry cadence,
+  and drain with the node manager. The subprocess matrix in
+  `kitdb/FAULT_LAB.md` must continue proving every durable stage boundary using
+  a fresh manager and empty process-local state.
 - Full-text search admission and open-index ownership are host-wide and
   bounded. Tenant generations borrow the host manager and must not close or
   duplicate it during reload; source projection rebuilds must stream rows and
@@ -48,6 +122,16 @@ Current enforcement:
 - `app.Runtime` owns database connections, detached work, and the scheduler.
   Compatibility tenants may adapt those resources but never close them unless
   they own and close the entire app runtime.
+- `core.Engine` injects one `kitdb/node.Manager` across app identities and
+  closes it only after tenant and app-runtime drain. The AppRuntime adapter
+  drains operation leases on close without closing that shared manager;
+  standalone tenants use and close an app-owned fallback.
+- The KitDB node manager reserves every path touched by maintenance. Source and
+  target databases use ordinary leases; backup destinations and filesystem
+  replica mailboxes are reservation-only, serialize conflicting jobs, and do
+  not consume handle or page-cache capacity. Managed replica publish, apply,
+  and acknowledge remain separate bounded jobs, retain no transaction bodies,
+  and recover across manager restart from protocol-owned files and cursors.
 - `core.Engine` injects one `search.Manager` into every tenant facade and closes
   it after tenant/app drain. Production database-search tests prove a site does
   not open a second manager, while standalone tenants own and close only their
@@ -282,7 +366,8 @@ finish before closing app resources.
 
 Site eviction and generation replacement do not cancel app-owned detached
 work. The app task group drains before scheduler and app capabilities close;
-database connections close last.
+app-owned database connections close last, then the host closes shared KitDB
+and search managers after all app runtimes drain.
 
 ## 5. Public API compatibility
 

@@ -2,8 +2,11 @@ package kitdb
 
 import (
 	"bytes"
+	"errors"
 	"sync"
 )
+
+var ErrTransactionConflict = errors.New("kitdb: transaction snapshot changed")
 
 type operationKind byte
 
@@ -58,15 +61,15 @@ func (tx *Tx) add(op operation) error {
 	if tx.done {
 		return ErrTransactionClosed
 	}
-	if err := tx.db.available(); err != nil {
-		return err
-	}
 	if len(tx.operations) >= maxOperations {
 		return ErrTransactionTooLarge
 	}
 	size := operationHeaderSize + len(op.key) + len(op.value)
 	if size > maxPayloadSize-tx.payloadSize {
 		return ErrTransactionTooLarge
+	}
+	if err := tx.db.reserveTransactionBytes(tx, size); err != nil {
+		return err
 	}
 	tx.operations = append(tx.operations, op)
 	tx.payloadSize += size
@@ -77,6 +80,17 @@ func (tx *Tx) add(op operation) error {
 // meaningful even with ErrDurabilityUncertain and can be inspected after the
 // database is reopened.
 func (tx *Tx) Commit() (uint64, error) {
+	return tx.commit(nil, false)
+}
+
+// CommitIfUnchanged checks the snapshot boundary inside the commit writer.
+// Only kernel-owned sequence value reservations are excluded from conflicts;
+// catalog changes and all caller-authored writes still invalidate the snapshot.
+func (tx *Tx) CommitIfUnchanged(snapshot uint64) (uint64, error) {
+	return tx.commit(&snapshot, false)
+}
+
+func (tx *Tx) commit(snapshot *uint64, sequenceOnly bool) (uint64, error) {
 	tx.mu.Lock()
 	if tx.done {
 		tx.mu.Unlock()
@@ -84,11 +98,12 @@ func (tx *Tx) Commit() (uint64, error) {
 	}
 	tx.done = true
 	operations := tx.operations
+	payloadSize := tx.payloadSize
 	tx.operations = nil
 	tx.mu.Unlock()
 
-	defer tx.db.finishTransaction(tx)
-	return tx.db.commit(operations)
+	defer tx.db.finishTransaction(tx, payloadSize)
+	return tx.db.submitCommit(&commitRequest{operations: operations, snapshot: snapshot, sequenceOnly: sequenceOnly})
 }
 
 // Rollback discards every uncommitted operation.
@@ -99,9 +114,10 @@ func (tx *Tx) Rollback() error {
 		return ErrTransactionClosed
 	}
 	tx.done = true
+	payloadSize := tx.payloadSize
 	tx.operations = nil
 	tx.mu.Unlock()
-	tx.db.finishTransaction(tx)
+	tx.db.finishTransaction(tx, payloadSize)
 	return nil
 }
 

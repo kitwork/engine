@@ -78,7 +78,7 @@ jobs:
         run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
 
       - name: Focused race gate
-        run: go test -race ./runtime ./compiler ./conformance ./compatibility ./core ./site ./app ./request ./work ./utilities/sse -run Test -count=1
+        run: go test -race ./runtime ./compiler ./conformance ./compatibility ./core ./site ./app ./request ./kitdb/... ./work ./utilities/sse -run Test -count=1
 
       - name: VM fault-injection gate
         run: go test ./runtime ./compiler ./core ./site ./app -run "(FaultGauntlet|Runtime(Limits|StructuralLimitBoundaries|EnergyBoundary|CallDepth)|Corrupt|Panic|Cancellation|Fallback|Drain|DrainsTasks)" -count=1
@@ -93,7 +93,7 @@ jobs:
     name: Release campaign (${{ matrix.os }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -122,7 +122,7 @@ jobs:
       - name: Run release gate
         env:
           KITWORK_BROWSER_TESTS: ${{ runner.os == 'Windows' && 'off' || 'on' }}
-        run: go run ./cmd/releasegate --mode release --report .artifacts/release.json --timeout 40m
+        run: go run ./cmd/releasegate --mode release --report .artifacts/release.json --timeout 90m
 
       - name: Run synthetic lifecycle canary
         run: go run ./cmd/canary --duration 2m --interval 25ms --workers 4 --reload-every 2s --report-every 30s --max-error-rate 0 --json .artifacts/canary.json --bundle .artifacts/canary.zip

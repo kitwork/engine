@@ -2,11 +2,60 @@ package kitdb
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
 )
+
+func TestSnapshotHistoryCursorSurvivesCloseAndLaterCommits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tenant.kitdb")
+	db, err := OpenWithOptions(path, OpenOptions{RetainHistory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	tx := mustBegin(t, db)
+	if err := tx.Put([]byte("product/1"), []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	want, err := db.CurrentCursor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := db.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot.HistoryCursor(); got != want {
+		t.Fatalf("snapshot cursor = %#v, want %#v", got, want)
+	}
+
+	tx = mustBegin(t, db)
+	if err := tx.Put([]byte("product/2"), []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshot.HistoryCursor(); got != want {
+		t.Fatalf("closed snapshot cursor = %#v, want %#v", got, want)
+	}
+	if _, err := db.SetHistoryPin(context.Background(), "projection/search", want); err != nil {
+		t.Fatalf("pin snapshot cursor: %v", err)
+	}
+}
 
 func TestSnapshotRemainsConsistentAcrossCommitAndCheckpoint(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tenant.kitdb")
@@ -155,6 +204,91 @@ func TestSnapshotCursorSeeksAndMergesBounds(t *testing.T) {
 	valueCopy[0] = 'X'
 	if bytes.Equal(keyCopy, cursor.Key()) || bytes.Equal(valueCopy, cursor.Value()) {
 		t.Fatal("cursor returned storage aliased to caller-owned bytes")
+	}
+}
+
+func TestSnapshotReverseCursorSeeksAndMergesGenerationsAndOverlay(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tenant.kitdb")
+	db := mustOpen(t, path)
+	defer db.Close()
+
+	tx := mustBegin(t, db)
+	for index := 0; index < 300; index++ {
+		key := fmt.Sprintf("item/%04d", index)
+		if err := tx.Put([]byte(key), []byte(fmt.Sprintf("base-%04d", index))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+
+	tx = mustBegin(t, db)
+	if err := tx.Put([]byte("item/0250"), []byte("segment-update")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Delete([]byte("item/0249")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Put([]byte("item/0249a"), []byte("segment-insert")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+
+	tx = mustBegin(t, db)
+	if err := tx.Put([]byte("item/0248"), []byte("overlay-update")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Delete([]byte("item/0247")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Put([]byte("item/0247a"), []byte("overlay-insert")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := db.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snapshot.Close()
+	cursor, err := snapshot.Cursor(RangeOptions{
+		Start: []byte("item/0245"), End: []byte("item/0252"),
+		Prefix: []byte("item/02"), Limit: 6, Reverse: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cursor.Close()
+	var keys, values []string
+	for cursor.Next() {
+		keys = append(keys, string(cursor.Key()))
+		values = append(values, string(cursor.Value()))
+	}
+	if err := cursor.Err(); err != nil {
+		t.Fatal(err)
+	}
+	wantKeys := []string{
+		"item/0251", "item/0250", "item/0249a", "item/0248", "item/0247a", "item/0246",
+	}
+	wantValues := []string{
+		"base-0251", "segment-update", "segment-insert", "overlay-update", "overlay-insert", "base-0246",
+	}
+	if fmt.Sprint(keys) != fmt.Sprint(wantKeys) {
+		t.Fatalf("reverse cursor keys = %v, want %v", keys, wantKeys)
+	}
+	if fmt.Sprint(values) != fmt.Sprint(wantValues) {
+		t.Fatalf("reverse cursor values = %v, want %v", values, wantValues)
 	}
 }
 

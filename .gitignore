@@ -20,6 +20,9 @@ config/smtp/mail.yaml
 *.exe
 *.test
 *.out
+*.bak
+
+.artifacts
 
 .tmp
 .gochche-*

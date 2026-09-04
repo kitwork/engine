@@ -11,10 +11,14 @@ import (
 )
 
 const (
-	defaultBM25K1         = 1.2
-	defaultBM25B          = 0.75
-	defaultSearchLimit    = 20
-	maximumSearchLimit    = 200
+	defaultBM25K1      = 1.2
+	defaultBM25B       = 0.75
+	defaultSearchLimit = 20
+	// MaximumSearchLimit is a hard allocation ceiling. Product-facing limits
+	// belong to the caller so one embedded engine can serve both small tenant
+	// queries and bounded export/search workloads without a hidden limit of 200.
+	MaximumSearchLimit    = 100_000
+	maximumSearchLimit    = MaximumSearchLimit
 	maximumQueryBytes     = 4 << 10
 	maximumQueryTerms     = 32
 	maximumQueryFields    = 32
@@ -35,12 +39,13 @@ const (
 // Set either Field for the optimized single-field path or Fields for
 // cross-field matching.
 type MatchQuery struct {
-	Field    string
-	Fields   []string
-	Text     string
-	Phrase   string
-	Prefix   string
-	Operator QueryOperator
+	Field            string
+	Fields           []string
+	Text             string
+	Phrase           string
+	Prefix           string
+	IdentifierPrefix string
+	Operator         QueryOperator
 }
 
 // SearchOptions control bounded Top-K collection and BM25 tuning.
@@ -48,6 +53,15 @@ type SearchOptions struct {
 	Limit int
 	K1    float64
 	B     float64
+	After *SearchAfter
+}
+
+// SearchAfter is an exclusive rank boundary. Scores sort descending and
+// Ordinal breaks equal-score ties ascending, matching Hit ordering exactly.
+// It is stable only while the caller keeps the same immutable index snapshot.
+type SearchAfter struct {
+	Score   float64
+	Ordinal uint64
 }
 
 func normalizeSearchOptions(options SearchOptions) (SearchOptions, error) {
@@ -68,6 +82,10 @@ func normalizeSearchOptions(options SearchOptions) (SearchOptions, error) {
 	}
 	if math.IsNaN(options.B) || math.IsInf(options.B, 0) || options.B < 0 || options.B > 1 {
 		return SearchOptions{}, fmt.Errorf("search: BM25 B must be between 0 and 1")
+	}
+	if options.After != nil && (math.IsNaN(options.After.Score) ||
+		math.IsInf(options.After.Score, 0) || options.After.Score < 0) {
+		return SearchOptions{}, fmt.Errorf("search: after score must be non-negative and finite")
 	}
 	return options, nil
 }
@@ -108,17 +126,24 @@ type scoreThreshold struct {
 }
 
 type preparedMatchQuery struct {
-	fieldID    uint16
-	field      Field
-	terms      []string
-	options    SearchOptions
-	blockMax   bool
-	statistics *blockMaxStatistics
+	fieldID          uint16
+	field            Field
+	terms            []string
+	identifierPrefix string
+	options          SearchOptions
+	blockMax         bool
+	statistics       *blockMaxStatistics
 }
 
 // Search executes a bounded implicit-AND BM25 query against this segment.
 func (segment *Segment) Search(ctx context.Context, query MatchQuery, options SearchOptions) ([]Hit, error) {
 	if err := segment.ensureOpen(); err != nil {
+		return nil, err
+	}
+	if err := validateIdentifierPrefix(query); err != nil {
+		return nil, err
+	}
+	if err := validateSearchAfterQuery(query, options); err != nil {
 		return nil, err
 	}
 	if query.Phrase != "" {
@@ -234,8 +259,24 @@ func prepareMatchQuery(ctx context.Context, schema Schema, query MatchQuery, opt
 		return preparedMatchQuery{}, err
 	}
 	return preparedMatchQuery{
-		fieldID: fieldID, field: field, terms: terms, options: normalized, blockMax: true,
+		fieldID: fieldID, field: field, terms: terms, identifierPrefix: query.IdentifierPrefix,
+		options: normalized, blockMax: true,
 	}, nil
+}
+
+func validateIdentifierPrefix(query MatchQuery) error {
+	if query.IdentifierPrefix == "" {
+		return nil
+	}
+	if !utf8.ValidString(query.IdentifierPrefix) || len(query.IdentifierPrefix) > defaultMaxIdentifier {
+		return fmt.Errorf(
+			"search: identifier prefix is invalid or exceeds %d bytes", defaultMaxIdentifier,
+		)
+	}
+	if query.Phrase != "" || query.Prefix != "" || query.Operator == QueryAny {
+		return fmt.Errorf("search: identifier prefix supports implicit-AND text queries only")
+	}
+	return nil
 }
 
 func (segment *Segment) searchPrepared(
@@ -335,6 +376,7 @@ func (segment *Segment) searchCandidatesWithScratch(
 	seed := queryTerms[0]
 	candidates := uint64(0)
 	leadBlocks := uint64(0)
+	var identifierBuffer []byte
 	for {
 		if leadBlocks&63 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -402,6 +444,18 @@ func (segment *Segment) searchCandidatesWithScratch(
 				score += bm25Score(float64(matchedFrequency), length, averageLength, term.idf, prepared.options.K1, prepared.options.B)
 			}
 			if matched {
+				matchesPrefix, err := segment.documentIdentifierHasPrefix(
+					document, prepared.identifierPrefix, &identifierBuffer,
+				)
+				if err != nil {
+					return nil, err
+				}
+				if !matchesPrefix {
+					continue
+				}
+				if !rankIsAfter(score, base+uint64(document), prepared.options.After) {
+					continue
+				}
 				if prepared.statistics != nil {
 					prepared.statistics.candidatesScored++
 				}
@@ -410,6 +464,21 @@ func (segment *Segment) searchCandidatesWithScratch(
 		}
 	}
 	return results, nil
+}
+
+func validateSearchAfterQuery(query MatchQuery, options SearchOptions) error {
+	if options.After == nil {
+		return nil
+	}
+	if query.Phrase != "" || query.Prefix != "" || query.Operator == QueryAny {
+		return fmt.Errorf("search: after supports implicit-AND text queries only")
+	}
+	return nil
+}
+
+func rankIsAfter(score float64, ordinal uint64, boundary *SearchAfter) bool {
+	return boundary == nil || score < boundary.Score ||
+		(score == boundary.Score && ordinal > boundary.Ordinal)
 }
 
 func maximumTermScore(record termRecord, idf, averageLength float64, options SearchOptions) float64 {

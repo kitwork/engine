@@ -20,6 +20,7 @@ const (
 	frameHeaderSize     = 32
 	frameTrailerSize    = 24
 	payloadPrefixSize   = 4
+	timedPayloadPrefixSize = payloadPrefixSize + 8
 	operationHeaderSize = 9
 
 	walFormatVersion   = 1
@@ -30,6 +31,8 @@ const (
 	maxPayloadSize = 64 << 20
 	maxOperations  = 1 << 18
 )
+
+const frameFlagCommittedAt uint32 = 1 << 0
 
 const (
 	walMagic    = "KITDBW02"
@@ -53,13 +56,14 @@ type walRecovery struct {
 	walEnd      int64
 	walChecksum uint32
 	walBaseTx   uint64
+	lastCommitTime int64
 }
 
 func databaseWALPath(databasePath string) string {
 	return databasePath + walSuffix
 }
 
-func openAndRecoverWAL(databasePath string, main *mainImage) (*walRecovery, error) {
+func openAndRecoverWAL(databasePath string, main *mainImage, history *historyState) (*walRecovery, error) {
 	path := databaseWALPath(databasePath)
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if errors.Is(err, os.ErrNotExist) {
@@ -95,7 +99,11 @@ func openAndRecoverWAL(databasePath string, main *mainImage) (*walRecovery, erro
 	}
 	overlay := make(map[string]rowMutation)
 
-	lastTx, validSize, walChecksum, truncated, err := replayWAL(
+	baseCommitTime := int64(0)
+	if history != nil && history.tailTx == header.baseTx {
+		baseCommitTime = history.tailCommitTime
+	}
+	lastTx, validSize, walChecksum, lastCommitTime, truncated, err := replayWAL(
 		file,
 		info.Size(),
 		overlay,
@@ -104,6 +112,7 @@ func openAndRecoverWAL(databasePath string, main *mainImage) (*walRecovery, erro
 		header.baseChecksum,
 		main.transaction,
 		main.boundaryChecksum,
+		baseCommitTime,
 	)
 	if err != nil {
 		return fail(err)
@@ -121,6 +130,27 @@ func openAndRecoverWAL(databasePath string, main *mainImage) (*walRecovery, erro
 	// recovery has proved the old WAL through that boundary, finish the
 	// rotation before admitting new commits.
 	if header.baseTx < main.transaction && lastTx == main.transaction {
+		if history != nil {
+			published, bytes, err := sealHistoryWAL(
+				history,
+				path,
+				main.identity,
+				validSize,
+				header.baseTx,
+				lastTx,
+				walChecksum,
+			)
+			if err != nil {
+				return fail(err)
+			}
+			if published {
+				history.segments++
+				history.bytes += bytes
+				history.tailTx = lastTx
+				history.tailChecksum = walChecksum
+				history.tailCommitTime = lastCommitTime
+			}
+		}
 		if err := file.Close(); err != nil {
 			return nil, fmt.Errorf("kitdb: close stale WAL: %w", err)
 		}
@@ -136,13 +166,32 @@ func openAndRecoverWAL(databasePath string, main *mainImage) (*walRecovery, erro
 		validSize = walHeaderSize
 		walChecksum = main.boundaryChecksum
 	}
+	if history != nil {
+		historyAtMain := history.tailTx == main.transaction && history.tailChecksum == main.boundaryChecksum
+		walBridgesMain := header.baseTx == history.tailTx &&
+			header.baseChecksum == history.tailChecksum &&
+			header.baseTx < main.transaction &&
+			lastTx > main.transaction
+		if !historyAtMain && !walBridgesMain {
+			return fail(errors.Join(
+				ErrHistoryGap,
+				fmt.Errorf(
+					"kitdb: retained history ends at transaction %d checksum %08x without a WAL bridge to main transaction %d checksum %08x",
+					history.tailTx,
+					history.tailChecksum,
+					main.transaction,
+					main.boundaryChecksum,
+				),
+			))
+		}
+	}
 	if _, err := file.Seek(0, io.SeekEnd); err != nil {
 		return fail(fmt.Errorf("kitdb: seek recovered WAL: %w", err))
 	}
 	return &walRecovery{
 		file: file, identity: main.identity, overlay: overlay,
 		lastTx: lastTx, walEnd: validSize, walChecksum: walChecksum,
-		walBaseTx: header.baseTx,
+		walBaseTx: header.baseTx, lastCommitTime: lastCommitTime,
 	}, nil
 }
 
@@ -327,13 +376,26 @@ func openWALForAppend(path string) (*os.File, error) {
 }
 
 func encodeFrame(transaction uint64, operations []operation) ([]byte, error) {
+	return encodeFrameAt(transaction, 0, operations)
+}
+
+func encodeFrameAt(transaction uint64, committedAt int64, operations []operation) ([]byte, error) {
 	if len(operations) == 0 {
 		return nil, ErrEmptyTransaction
 	}
 	if len(operations) > maxOperations {
 		return nil, ErrTransactionTooLarge
 	}
-	payloadSize := payloadPrefixSize
+	prefixSize := payloadPrefixSize
+	flags := uint32(0)
+	if committedAt != 0 {
+		if committedAt < 0 {
+			return nil, fmt.Errorf("kitdb: commit timestamp must be positive")
+		}
+		prefixSize = timedPayloadPrefixSize
+		flags = frameFlagCommittedAt
+	}
+	payloadSize := prefixSize
 	for _, op := range operations {
 		if err := validateOperation(op); err != nil {
 			return nil, err
@@ -349,12 +411,16 @@ func encodeFrame(transaction uint64, operations []operation) ([]byte, error) {
 	copy(frame[:8], frameMagic)
 	binary.LittleEndian.PutUint16(frame[8:10], frameFormatVersion)
 	binary.LittleEndian.PutUint16(frame[10:12], frameHeaderSize)
+	binary.LittleEndian.PutUint32(frame[12:16], flags)
 	binary.LittleEndian.PutUint64(frame[16:24], transaction)
 	binary.LittleEndian.PutUint64(frame[24:32], uint64(payloadSize))
 
 	position := frameHeaderSize
 	binary.LittleEndian.PutUint32(frame[position:position+4], uint32(len(operations)))
-	position += payloadPrefixSize
+	if committedAt != 0 {
+		binary.LittleEndian.PutUint64(frame[position+payloadPrefixSize:position+timedPayloadPrefixSize], uint64(committedAt))
+	}
+	position += prefixSize
 	for _, op := range operations {
 		frame[position] = byte(op.kind)
 		binary.LittleEndian.PutUint32(frame[position+1:position+5], uint32(len(op.key)))
@@ -376,147 +442,186 @@ func frameChecksum(frame []byte) uint32 {
 	return binary.LittleEndian.Uint32(frame[len(frame)-frameTrailerSize+16 : len(frame)-frameTrailerSize+20])
 }
 
-func replayWAL(file *os.File, size int64, overlay map[string]rowMutation, offset int64, baseTx uint64, baseChecksum uint32, mainTx uint64, mainChecksum uint32) (uint64, int64, uint32, bool, error) {
+func replayWAL(file *os.File, size int64, overlay map[string]rowMutation, offset int64, baseTx uint64, baseChecksum uint32, mainTx uint64, mainChecksum uint32, baseCommitTime int64) (uint64, int64, uint32, int64, bool, error) {
 	lastTx := baseTx
 	lastChecksum := baseChecksum
+	lastCommitTime := baseCommitTime
 	for offset < size {
 		remaining := size - offset
 		if remaining < frameHeaderSize {
 			if lastTx < mainTx {
-				return 0, 0, 0, false, corruptAt(offset, "WAL is truncated before main transaction %d", mainTx)
+				return 0, 0, 0, 0, false, corruptAt(offset, "WAL is truncated before main transaction %d", mainTx)
 			}
-			return lastTx, offset, lastChecksum, true, nil
+			return lastTx, offset, lastChecksum, lastCommitTime, true, nil
 		}
 
 		header := make([]byte, frameHeaderSize)
 		if err := readAt(file, header, offset); err != nil {
-			return 0, 0, 0, false, fmt.Errorf("kitdb: read frame header at %d: %w", offset, err)
+			return 0, 0, 0, 0, false, fmt.Errorf("kitdb: read frame header at %d: %w", offset, err)
 		}
-		transaction, payloadSize, err := decodeFrameHeader(offset, header, lastTx)
+		transaction, payloadSize, flags, err := decodeFrameHeader(offset, header, lastTx)
 		if err != nil {
-			return 0, 0, 0, false, err
+			return 0, 0, 0, 0, false, err
 		}
 		frameSize := int64(frameHeaderSize) + int64(payloadSize) + int64(frameTrailerSize)
 		if frameSize > remaining {
 			if lastTx < mainTx {
-				return 0, 0, 0, false, corruptAt(offset, "WAL frame is truncated before main transaction %d", mainTx)
+				return 0, 0, 0, 0, false, corruptAt(offset, "WAL frame is truncated before main transaction %d", mainTx)
 			}
-			return lastTx, offset, lastChecksum, true, nil
+			return lastTx, offset, lastChecksum, lastCommitTime, true, nil
 		}
 
 		body := make([]byte, int(payloadSize)+frameTrailerSize)
 		if err := readAt(file, body, offset+frameHeaderSize); err != nil {
-			return 0, 0, 0, false, fmt.Errorf("kitdb: read frame body at %d: %w", offset, err)
+			return 0, 0, 0, 0, false, fmt.Errorf("kitdb: read frame body at %d: %w", offset, err)
 		}
 		payload := body[:payloadSize]
 		trailer := body[payloadSize:]
 		if err := validateTrailer(offset, header, payload, trailer, transaction, uint32(frameSize)); err != nil {
-			return 0, 0, 0, false, err
+			return 0, 0, 0, 0, false, err
 		}
-		operations, err := decodePayload(payload)
+		operations, committedAt, err := decodeFramePayload(payload, flags)
 		if err != nil {
-			return 0, 0, 0, false, corruptAt(offset+frameHeaderSize, "invalid transaction payload: %v", err)
+			return 0, 0, 0, 0, false, corruptAt(offset+frameHeaderSize, "invalid transaction payload: %v", err)
+		}
+		if committedAt != 0 && lastCommitTime != 0 && committedAt <= lastCommitTime {
+			return 0, 0, 0, 0, false, corruptAt(offset+frameHeaderSize+payloadPrefixSize, "commit timestamp %d does not follow %d", committedAt, lastCommitTime)
 		}
 		lastChecksum = binary.LittleEndian.Uint32(trailer[16:20])
 		if transaction == mainTx && lastChecksum != mainChecksum {
-			return 0, 0, 0, false, corruptAt(offset, "WAL transaction %d does not match the main boundary checksum", transaction)
+			return 0, 0, 0, 0, false, corruptAt(offset, "WAL transaction %d does not match the main boundary checksum", transaction)
 		}
 		if transaction > mainTx {
 			applyOperations(overlay, operations)
 		}
 		lastTx = transaction
+		if committedAt != 0 {
+			lastCommitTime = committedAt
+		}
 		offset += frameSize
 	}
 	if lastTx < mainTx {
-		return 0, 0, 0, false, corruptAt(offset, "WAL ends at transaction %d before main transaction %d", lastTx, mainTx)
+		return 0, 0, 0, 0, false, corruptAt(offset, "WAL ends at transaction %d before main transaction %d", lastTx, mainTx)
 	}
-	return lastTx, offset, lastChecksum, false, nil
+	return lastTx, offset, lastChecksum, lastCommitTime, false, nil
 }
 
-func decodeFrameHeader(offset int64, header []byte, lastTx uint64) (uint64, uint64, error) {
+func decodeFrameHeader(offset int64, header []byte, lastTx uint64) (uint64, uint64, uint32, error) {
+	return decodeFrameHeaderFor(walFilename, offset, header, lastTx)
+}
+
+func decodeFrameHeaderFor(path string, offset int64, header []byte, lastTx uint64) (uint64, uint64, uint32, error) {
 	if string(header[:8]) != frameMagic {
-		return 0, 0, corruptAt(offset, "invalid transaction frame magic")
+		return 0, 0, 0, corruptFileAt(path, offset, "invalid transaction frame magic")
 	}
 	if version := binary.LittleEndian.Uint16(header[8:10]); version != frameFormatVersion {
-		return 0, 0, corruptAt(offset+8, "unsupported transaction frame version %d", version)
+		return 0, 0, 0, corruptFileAt(path, offset+8, "unsupported transaction frame version %d", version)
 	}
 	if size := binary.LittleEndian.Uint16(header[10:12]); size != frameHeaderSize {
-		return 0, 0, corruptAt(offset+10, "invalid transaction frame header size %d", size)
+		return 0, 0, 0, corruptFileAt(path, offset+10, "invalid transaction frame header size %d", size)
 	}
-	if flags := binary.LittleEndian.Uint32(header[12:16]); flags != 0 {
-		return 0, 0, corruptAt(offset+12, "unsupported transaction frame flags %d", flags)
+	flags := binary.LittleEndian.Uint32(header[12:16])
+	if flags & ^frameFlagCommittedAt != 0 {
+		return 0, 0, 0, corruptFileAt(path, offset+12, "unsupported transaction frame flags %d", flags)
 	}
 	transaction := binary.LittleEndian.Uint64(header[16:24])
 	if transaction != lastTx+1 || transaction == 0 {
-		return 0, 0, corruptAt(offset+16, "transaction ID %d does not follow %d", transaction, lastTx)
+		return 0, 0, 0, corruptFileAt(path, offset+16, "transaction ID %d does not follow %d", transaction, lastTx)
 	}
 	payloadSize := binary.LittleEndian.Uint64(header[24:32])
-	if payloadSize < payloadPrefixSize || payloadSize > maxPayloadSize {
-		return 0, 0, corruptAt(offset+24, "invalid transaction payload size %d", payloadSize)
+	minimumPayload := uint64(payloadPrefixSize)
+	if flags&frameFlagCommittedAt != 0 {
+		minimumPayload = timedPayloadPrefixSize
 	}
-	return transaction, payloadSize, nil
+	if payloadSize < minimumPayload || payloadSize > maxPayloadSize {
+		return 0, 0, 0, corruptFileAt(path, offset+24, "invalid transaction payload size %d", payloadSize)
+	}
+	return transaction, payloadSize, flags, nil
 }
 
 func validateTrailer(offset int64, header, payload, trailer []byte, transaction uint64, frameSize uint32) error {
+	return validateTrailerFor(walFilename, offset, header, payload, trailer, transaction, frameSize)
+}
+
+func validateTrailerFor(path string, offset int64, header, payload, trailer []byte, transaction uint64, frameSize uint32) error {
 	trailerOffset := offset + int64(len(header)) + int64(len(payload))
 	if string(trailer[:8]) != commitMagic {
-		return corruptAt(trailerOffset, "invalid commit marker")
+		return corruptFileAt(path, trailerOffset, "invalid commit marker")
 	}
 	if repeated := binary.LittleEndian.Uint64(trailer[8:16]); repeated != transaction {
-		return corruptAt(trailerOffset+8, "commit transaction ID %d does not match %d", repeated, transaction)
+		return corruptFileAt(path, trailerOffset+8, "commit transaction ID %d does not match %d", repeated, transaction)
 	}
 	if declared := binary.LittleEndian.Uint32(trailer[20:24]); declared != frameSize {
-		return corruptAt(trailerOffset+20, "declared frame size %d does not match %d", declared, frameSize)
+		return corruptFileAt(path, trailerOffset+20, "declared frame size %d does not match %d", declared, frameSize)
 	}
 	checksum := crc32.New(crc32cTable)
 	_, _ = checksum.Write(header)
 	_, _ = checksum.Write(payload)
 	if declared := binary.LittleEndian.Uint32(trailer[16:20]); declared != checksum.Sum32() {
-		return corruptAt(trailerOffset+16, "transaction checksum mismatch")
+		return corruptFileAt(path, trailerOffset+16, "transaction checksum mismatch")
 	}
 	return nil
 }
 
 func decodePayload(payload []byte) ([]operation, error) {
-	if len(payload) < payloadPrefixSize {
-		return nil, fmt.Errorf("missing operation count")
+	operations, _, err := decodeFramePayload(payload, 0)
+	return operations, err
+}
+
+func decodeFramePayload(payload []byte, flags uint32) ([]operation, int64, error) {
+	prefixSize := payloadPrefixSize
+	committedAt := int64(0)
+	if flags&^frameFlagCommittedAt != 0 {
+		return nil, 0, fmt.Errorf("unsupported transaction frame flags %d", flags)
+	}
+	if flags&frameFlagCommittedAt != 0 {
+		prefixSize = timedPayloadPrefixSize
+	}
+	if len(payload) < prefixSize {
+		return nil, 0, fmt.Errorf("missing operation count")
+	}
+	if flags&frameFlagCommittedAt != 0 {
+		committedAt = int64(binary.LittleEndian.Uint64(payload[payloadPrefixSize:timedPayloadPrefixSize]))
+		if committedAt <= 0 {
+			return nil, 0, fmt.Errorf("invalid commit timestamp %d", committedAt)
+		}
 	}
 	count := uint64(binary.LittleEndian.Uint32(payload[:4]))
 	if count == 0 {
-		return nil, fmt.Errorf("empty committed transaction")
+		return nil, 0, fmt.Errorf("empty committed transaction")
 	}
 	if count > maxOperations {
-		return nil, fmt.Errorf("operation count %d exceeds limit", count)
+		return nil, 0, fmt.Errorf("operation count %d exceeds limit", count)
 	}
 	minimumOperationSize := operationHeaderSize + 1
-	if count > uint64(len(payload)-payloadPrefixSize)/uint64(minimumOperationSize) {
-		return nil, fmt.Errorf("operation count %d cannot fit payload", count)
+	if count > uint64(len(payload)-prefixSize)/uint64(minimumOperationSize) {
+		return nil, 0, fmt.Errorf("operation count %d cannot fit payload", count)
 	}
 	operations := make([]operation, 0, int(count))
-	position := payloadPrefixSize
+	position := prefixSize
 	for index := uint64(0); index < count; index++ {
 		if len(payload)-position < operationHeaderSize {
-			return nil, fmt.Errorf("operation %d header is truncated", index)
+			return nil, 0, fmt.Errorf("operation %d header is truncated", index)
 		}
 		kind := operationKind(payload[position])
 		keySize := uint64(binary.LittleEndian.Uint32(payload[position+1 : position+5]))
 		valueSize := uint64(binary.LittleEndian.Uint32(payload[position+5 : position+9]))
 		position += operationHeaderSize
 		if keySize == 0 || keySize > maxKeySize {
-			return nil, fmt.Errorf("operation %d has invalid key size %d", index, keySize)
+			return nil, 0, fmt.Errorf("operation %d has invalid key size %d", index, keySize)
 		}
 		if valueSize > maxValueSize {
-			return nil, fmt.Errorf("operation %d has invalid value size %d", index, valueSize)
+			return nil, 0, fmt.Errorf("operation %d has invalid value size %d", index, valueSize)
 		}
 		if kind == operationDelete && valueSize != 0 {
-			return nil, fmt.Errorf("delete operation %d has a value", index)
+			return nil, 0, fmt.Errorf("delete operation %d has a value", index)
 		}
 		if kind != operationPut && kind != operationDelete {
-			return nil, fmt.Errorf("operation %d has unknown kind %d", index, kind)
+			return nil, 0, fmt.Errorf("operation %d has unknown kind %d", index, kind)
 		}
 		bodySize := keySize + valueSize
 		if bodySize > uint64(len(payload)-position) {
-			return nil, fmt.Errorf("operation %d body is truncated", index)
+			return nil, 0, fmt.Errorf("operation %d body is truncated", index)
 		}
 		keyEnd := position + int(keySize)
 		valueEnd := keyEnd + int(valueSize)
@@ -524,9 +629,9 @@ func decodePayload(payload []byte) ([]operation, error) {
 		position = valueEnd
 	}
 	if position != len(payload) {
-		return nil, fmt.Errorf("payload has %d trailing bytes", len(payload)-position)
+		return nil, 0, fmt.Errorf("payload has %d trailing bytes", len(payload)-position)
 	}
-	return operations, nil
+	return operations, committedAt, nil
 }
 
 func validateOperation(op operation) error {

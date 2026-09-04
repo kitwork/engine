@@ -13,6 +13,12 @@ func (index *Index) Search(ctx context.Context, query MatchQuery, options Search
 	if err := index.ensureOpen(); err != nil {
 		return nil, err
 	}
+	if err := validateIdentifierPrefix(query); err != nil {
+		return nil, err
+	}
+	if err := validateSearchAfterQuery(query, options); err != nil {
+		return nil, err
+	}
 	if query.Phrase != "" {
 		prepared, err := preparePhraseQuery(ctx, index.schema, query, options)
 		if err != nil {

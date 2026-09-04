@@ -49,6 +49,12 @@ func TestCommitListenerReceivesCommittedOperations(t *testing.T) {
 	if event.Transaction != transaction {
 		t.Fatalf("event transaction = %d, want %d", event.Transaction, transaction)
 	}
+	db.mu.RLock()
+	checksum := db.walChecksum
+	db.mu.RUnlock()
+	if event.Checksum != checksum {
+		t.Fatalf("event checksum = %08x, want %08x", event.Checksum, checksum)
+	}
 	if len(event.Operations) != 3 {
 		t.Fatalf("event operations = %d, want 3", len(event.Operations))
 	}

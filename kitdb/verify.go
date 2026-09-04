@@ -2,6 +2,7 @@ package kitdb
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,15 +12,37 @@ import (
 // checksummed during recovery and before becoming visible, so a successful
 // call verifies the complete durable state represented by this handle.
 func (db *DB) Verify() error {
+	return db.VerifyContext(context.Background())
+}
+
+// VerifyContext is the cancellable form of Verify for bounded node and CLI
+// maintenance. Cancellation never publishes or mutates durable state.
+func (db *DB) VerifyContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("kitdb: nil verification context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	if err := db.stateErrorLocked(); err != nil {
 		return err
 	}
-	return db.main.verify()
+	return db.main.verifyContext(ctx)
 }
 
 func (main *mainImage) verify() error {
+	return main.verifyContext(context.Background())
+}
+
+func (main *mainImage) verifyContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("kitdb: nil verification context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if main == nil || main.file == nil {
 		return ErrUnavailable
 	}
@@ -32,6 +55,9 @@ func (main *mainImage) verify() error {
 		if statErr == nil {
 			_, statErr = decodeMainSnapshot(main.path, file, info.Size())
 		}
+		if statErr == nil {
+			statErr = ctx.Err()
+		}
 		return errors.Join(statErr, file.Close())
 	}
 	if main.formatVersion == mainFormatVersion {
@@ -39,6 +65,9 @@ func (main *mainImage) verify() error {
 			var mutations uint64
 			var previousLastKey []byte
 			for blockIndex := segment.firstBlock; blockIndex < segment.firstBlock+segment.blockCount; blockIndex++ {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				page, err := main.readPage(blockIndex)
 				if err != nil {
 					return err
@@ -55,6 +84,9 @@ func (main *mainImage) verify() error {
 		}
 		iterator := main.iterator()
 		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			_, _, found, err := iterator.next()
 			if err != nil {
 				return err
@@ -67,6 +99,9 @@ func (main *mainImage) verify() error {
 	var records uint64
 	var previousLastKey []byte
 	for blockIndex := range main.blocks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		page, err := main.readPage(blockIndex)
 		if err != nil {
 			return err

@@ -12,9 +12,8 @@ import (
 )
 
 // Cửa 2: db.<table>.search(text).limit(n).list() over .searchable() columns. Runs on the pure-Go
-// immutable-segment sidecar while the turso/sqlite table stays the source of truth. This
-// exercises it on the sqlite schema engine (always compiled in); the turso engine takes the identical
-// path — only source() differs. Proves: Vietnamese diacritic-blind matching, implicit AND across terms,
+// immutable-segment sidecar while the SQLite table stays the source of truth. This exercises the
+// SQLite schema engine and proves Vietnamese diacritic-blind matching, implicit AND across terms,
 // and that .searchable({ weight: 3 }) ranks a title match above a body-only match.
 func TestSchemaTableSearchE2E(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-dbsearch-*")
@@ -132,5 +131,34 @@ func TestRenderSearchFragmentEscapesSourceHTML(t *testing.T) {
 	want := "&lt;script&gt;<b>cotton</b>&lt;/script&gt;"
 	if got != want {
 		t.Fatalf("rendered fragment = %q, want %q", got, want)
+	}
+}
+
+func TestSchemaTableSearchSkipsOversizedLexicalNoise(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "acme", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	noise := strings.Repeat("x", 300)
+	router := `import { router, database } from "kitwork";` + "\n" +
+		`const { sqlite, text } = database;` + "\n" +
+		`const db = sqlite("shop.db", { products: { id: text().key(), body: text().searchable() } });` + "\n" +
+		`router.get((ctx) => {` + "\n" +
+		`  db.products.create({ id: "p1", body: "useful ` + noise + ` searchable" });` + "\n" +
+		`  return ctx.json(db.products.search("useful").list());` + "\n" +
+		`});`
+	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(tmp, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer tenant.Close()
+	recorder := httptest.NewRecorder()
+	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"id":"p1"`) {
+		t.Fatalf("search with lexical noise: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

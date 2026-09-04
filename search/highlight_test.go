@@ -8,7 +8,7 @@ import (
 )
 
 func TestHighlightPreservesVietnameseSourceAndBoundsMemoryWindow(t *testing.T) {
-	text := "Mo dau, Nguy\u1ec5n dang viet ve Kitwork va Turso."
+	text := "Mo dau, Nguy\u1ec5n dang viet ve Kitwork va KitDB."
 	fragment, err := Highlight(
 		context.Background(), VietnameseAnalyzer(), text, "nguyen",
 		FragmentOptions{MaxTokens: 5, ContextTokens: 1},

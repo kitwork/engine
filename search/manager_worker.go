@@ -12,6 +12,7 @@ type mutationKind uint8
 const (
 	mutationAdd mutationKind = iota
 	mutationUpdate
+	mutationUpsert
 	mutationDelete
 	mutationBeginReplacement
 )
@@ -176,6 +177,9 @@ func (managed *managedIndex) processMutationBatch(batch []mutationRequest) (bool
 			result.applied = result.result.err == nil
 		case mutationUpdate:
 			result.result.err = managed.writer.Update(operationCtx, request.document)
+			result.applied = result.result.err == nil
+		case mutationUpsert:
+			result.result.err = managed.writer.Upsert(operationCtx, request.document)
 			result.applied = result.result.err == nil
 		case mutationDelete:
 			result.result.deleted, result.result.err = managed.writer.Delete(operationCtx, request.identifier)

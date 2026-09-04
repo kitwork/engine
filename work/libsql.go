@@ -68,17 +68,17 @@ func startStreamReaper() {
 	})
 }
 
-// libSQL / Hrana-over-HTTP server: Kitwork speaks Turso's transport protocol, so a libSQL client can
-// turso CLI, @libsql/client, Drizzle/Prisma libSQL adapters, a turso-compatible db manager — connects
-// to a tenant's database by URL + auth token, exactly like turso.io:
+// libSQL / Hrana-over-HTTP server: a libSQL client, @libsql/client, Drizzle/Prisma adapter, or
+// compatible database manager connects to a tenant database by URL + auth token:
 //
 //	client = createClient({ url: "http://localhost:8080", authToken: "<token>" })   // Host selects the tenant
 //	client = createClient({ url: "http://localhost:8080/kiturl.db", authToken: "..." }) // path selects the db file
 //
-// The db is exposed by declaring turso(...) or kitdb(...) with { token, access }. SQL backends run
+// The db is exposed by declaring sqlite(...) or kitdb(...) with { token, access }. SQL backends run
 // Hrana against one pinned connection. KitDB uses a deliberately bounded SQL-light adapter over its
 // Schema IR and ORM; it does not open the .kitdb file through SQLite. Multi-request transactions are
-// currently a SQL-backend feature and the KitDB profile rejects transaction-control SQL.
+// remain a SQL-backend feature. KitDB accepts transaction controls only when a
+// complete bounded BEGIN ... COMMIT/ROLLBACK sequence is inside one batch request.
 
 // ---- Hrana wire types (per HRANA_3_SPEC; v2 shares this JSON shape) ----
 
@@ -129,7 +129,7 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 	if !matched {
 		return false
 	}
-	// The db must be DECLARED served — turso("db", {schema}, { token, access }). Not served → fall
+	// The db must be DECLARED served — sqlite("db", {schema}, { token, access }). Not served → fall
 	// through to normal routing (the /v2,/v3 paths are only reserved for an exposed db).
 	dbName, cfg, served := resolveServe(t, pathDB)
 	if !served {
@@ -195,13 +195,8 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 				return true
 			}
 			stream.kitdb = cfg.database
-		} else {
-			var pool *sql.DB
-			if cfg.engine == "sqlite" {
-				pool = sqliteForRequest(t, dbName, scope).db()
-			} else {
-				pool = tursoForRequest(t, dbName, scope).db()
-			}
+		} else if cfg.engine == "sqlite" {
+			pool := sqliteForRequest(t, dbName, scope).db()
 			if pool == nil {
 				writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
 				return true
@@ -212,6 +207,9 @@ func (t *Tenant) serveLibSQLIf(w http.ResponseWriter, r *http.Request, scope *re
 				return true
 			}
 			stream.conn = conn
+		} else {
+			writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database engine unavailable"})
+			return true
 		}
 	}
 
@@ -543,7 +541,15 @@ func hranaOK(response map[string]any) map[string]any {
 }
 
 func hranaErr(message string) map[string]any {
-	return map[string]any{"type": "error", "error": map[string]any{"message": message}}
+	return hranaErrCode(message, "")
+}
+
+func hranaErrCode(message, code string) map[string]any {
+	payload := map[string]any{"message": message}
+	if code != "" {
+		payload["code"] = code
+	}
+	return map[string]any{"type": "error", "error": payload}
 }
 
 type errString string

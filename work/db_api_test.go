@@ -22,9 +22,9 @@ func TestDataAPIQueryOverHTTP(t *testing.T) {
 	}
 	// The db is DECLARED served in JS (token + access) — that is what turns the endpoint on, not a .env.
 	router := `import { router, database } from "kitwork";
-const { turso, kitid, text, int } = database;
+const { sqlite, kitid, text, int } = database;
 const links = { id: kitid().primaryKey(), code: text().notNull().unique(), clicks: int().default(0) };
-const db = turso("kiturl.db", { links: links }, { token: "secret-token-123", access: "readwrite" });
+const db = sqlite("kiturl.db", { links: links }, { token: "secret-token-123", access: "readwrite" });
 router.get((ctx) => {
   db.links.create({ code: "kitwork", clicks: 3 });
   return ctx.json({ ok: true });
@@ -34,6 +34,7 @@ router.get((ctx) => {
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ router.get((ctx) => {
 	}
 }
 
-// With no db declared served (no turso(..., { token })), the endpoint stays invisible (404).
+// With no database declared served, the endpoint stays invisible (404).
 func TestDataAPIDisabledWithoutToken(t *testing.T) {
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "test", "localhost")
@@ -104,6 +105,7 @@ router.get((ctx) => ctx.json({ ok: true }));`
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}

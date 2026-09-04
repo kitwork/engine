@@ -1,17 +1,81 @@
 package work
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	kitdbengine "github.com/kitwork/engine/kitdb"
 	"github.com/kitwork/engine/value"
 )
+
+func TestKitDBIncrementalMeanAvoidsFiniteDeltaOverflow(t *testing.T) {
+	mean := kitDBIncrementalMean(math.MaxFloat64, -math.MaxFloat64, 2)
+	if math.IsInf(mean, 0) || math.IsNaN(mean) || mean != 0 {
+		t.Fatalf("mean = %v, want 0", mean)
+	}
+}
+
+func TestKitDBSchemaTableSkipAndOffsetPagination(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { kitdb, struct, id, text, int } = database;
+const items = struct({ id: id(), title: text().notNull(), rank: int().notNull().index() });
+const db = kitdb("pagination.kitdb", { items });
+router.get((ctx) => {
+  db.items.create({ title: "one", rank: 1 });
+  db.items.create({ title: "two", rank: 2 });
+  db.items.create({ title: "three", rank: 3 });
+  db.items.create({ title: "four", rank: 4 });
+  db.items.create({ title: "five", rank: 5 });
+  const skipped = db.items.orderBy("rank", "asc").skip(2).limit(2).list();
+  const offset = db.items.orderBy("rank", "asc").offset(3).limit(2).list();
+  return ctx.json({
+    skippedLength: skipped.length,
+    skippedFirst: skipped[0].title,
+    skippedLast: skipped[1].title,
+    offsetLength: offset.length,
+    offsetFirst: offset[0].title,
+    offsetLast: offset[1].title
+  });
+});`
+	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tenant := NewTenant(root, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer tenant.Close()
+	recorder := httptest.NewRecorder()
+	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("route status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		`"skippedLength":2`, `"skippedFirst":"three"`, `"skippedLast":"four"`,
+		`"offsetLength":2`, `"offsetFirst":"four"`, `"offsetLast":"five"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("response does not contain %s: %s", expected, body)
+		}
+	}
+}
 
 func TestKitDBTenantEntryAndRuntimeLifecycle(t *testing.T) {
 	root := t.TempDir()
@@ -20,13 +84,13 @@ func TestKitDBTenantEntryAndRuntimeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int, enum, now, updated } = database;
+const { kitdb, struct, id, text, int, choice, now, updated } = database;
 const products = struct({
   id: id(),
   sku: text().notNull().unique().index(),
   title: text().notNull(),
   price: int().default(0),
-  status: enum("active", "disabled").default("active").index(),
+  status: choice("active", "disabled").default("active").index(),
   created_at: now(),
   updated_at: updated()
 });
@@ -85,17 +149,50 @@ router.get((ctx) => {
 		t.Fatalf("tenant KitDB file is downloadable over HTTP")
 	}
 
-	// Closing the owning app runtime must release the writer lock. A fresh VM
-	// then reads the same rows through the same struct/ORM contract.
+	// Closing the owning app runtime must release the writer lock. The core
+	// catalog remains independently inspectable without a Kitwork declaration.
 	tenant.Close()
+	stored, err := kitdbengine.Open(databasePath)
+	if err != nil {
+		t.Fatalf("inspect KitDB rows: %v", err)
+	}
+	snapshot, err := stored.Snapshot()
+	if err != nil {
+		_ = stored.Close()
+		t.Fatalf("snapshot KitDB rows: %v", err)
+	}
+	cursor, err := snapshot.Cursor(kitdbengine.RangeOptions{Prefix: []byte{kitDBRowNamespace}})
+	if err != nil {
+		_ = snapshot.Close()
+		_ = stored.Close()
+		t.Fatalf("scan KitDB rows: %v", err)
+	}
+	binaryRows := 0
+	for cursor.Next() {
+		binaryRows++
+		if !bytes.HasPrefix(cursor.Value(), kitDBRowMagic[:]) {
+			t.Errorf("stored ORM row %d is not a KROW binary payload", binaryRows)
+		}
+	}
+	if err := cursor.Err(); err != nil {
+		t.Errorf("scan KitDB rows: %v", err)
+	}
+	_ = cursor.Close()
+	_ = snapshot.Close()
+	if binaryRows != 2 {
+		t.Fatalf("stored binary row count = %d, want 2", binaryRows)
+	}
+	catalog, err := stored.Catalog()
+	if err != nil || len(catalog.Structs) != 1 || catalog.Structs[0].Name != "products" {
+		t.Fatalf("core catalog = %#v, %v", catalog, err)
+	}
+	_ = stored.Close()
+
+	// A fresh generation deliberately declares no struct. ORM and remote SQL
+	// both hydrate the durable definition from catalog.kitdb itself.
 	reopenRouter := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int, enum, now, updated } = database;
-const products = struct({
-  id: id(), sku: text().notNull().unique().index(), title: text().notNull(),
-  price: int().default(0), status: enum("active", "disabled").default("active").index(),
-  created_at: now(), updated_at: updated()
-});
-const db = kitdb("catalog.kitdb", { products });
+const { kitdb } = database;
+const db = kitdb("catalog.kitdb");
 router.get((ctx) => ctx.json({ title: db.products.where("sku", "=", "A").first().title, count: db.products.count() }));`
 	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(reopenRouter), 0o644); err != nil {
 		t.Fatal(err)
@@ -110,6 +207,20 @@ router.get((ctx) => ctx.json({ title: db.products.where("sku", "=", "A").first()
 	reopenedTenant.Serve(recorder, req)
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"title":"Alpha"`) || !strings.Contains(recorder.Body.String(), `"count":2`) {
 		t.Fatalf("ORM reopen status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	proxyValue := newDbProxy(reopenedTenant, nil, "kitdb", value.New("catalog.kitdb"))
+	proxy, ok := proxyValue.V.(*dbProxy)
+	if !ok {
+		t.Fatalf("catalog-only proxy = %#v", proxyValue)
+	}
+	name, definition, err := kitDBRemoteDefinition(proxy, "PRODUCTS")
+	if err != nil || name != "products" || definition == nil || len(definition.Fields) == 0 {
+		t.Fatalf("remote catalog hydration = %q, %#v, %v", name, definition, err)
+	}
+	for _, plan := range MigrationPlansFor(reopenedTenant) {
+		if plan.Engine == "kitdb" && plan.DB == "catalog.kitdb" && plan.Table == "products" {
+			t.Fatalf("catalog-only struct became desired migration state: %#v", plan)
+		}
 	}
 }
 
@@ -180,7 +291,7 @@ router.get((ctx) => {
 	}
 }
 
-func TestKitDBStructIsRequiredAndUnsupportedPoliciesAreRefused(t *testing.T) {
+func TestKitDBStructIsRequired(t *testing.T) {
 	tests := []struct {
 		name   string
 		router string
@@ -194,16 +305,6 @@ const items = { id: id(), name: text() };
 const db = kitdb("plain.kitdb", { items });
 router.get(() => db.items.count());`,
 			want: "must be declared with struct",
-		},
-		{
-			name: "unsupported cascade",
-			router: `import { router, database } from "kitwork";
-const { kitdb, struct, id, ref } = database;
-const parents = struct({ id: id() });
-const children = struct({ id: id(), parent_id: ref(parents.id, { onDelete: "cascade" }) });
-const db = kitdb("cascade.kitdb", { parents, children });
-router.get(() => db.parents.count());`,
-			want: "not implemented yet; constraint refused",
 		},
 	}
 	for _, test := range tests {
@@ -274,6 +375,199 @@ router.get((ctx) => {
 	for _, expected := range []string{`"sqlite":11`, `"kitdb":21`, `"sqliteCount":1`, `"kitdbCount":1`} {
 		if !strings.Contains(recorder.Body.String(), expected) {
 			t.Errorf("response does not contain %s: %s", expected, recorder.Body.String())
+		}
+	}
+}
+
+func TestKitDBAggregatesAndExplainMatchSQLite(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { sqlite, kitdb, struct, id, text, int, float } = database;
+const products = struct({
+  id: id(),
+  sku: text().notNull().unique(),
+  category: text().notNull().index(),
+  amount: int(),
+  rating: float()
+});
+const sql = sqlite("analytics.db", { products });
+const native = kitdb("analytics.kitdb", { products });
+router.get((ctx) => {
+  const rows = [
+    { id: "p1", sku: "A", category: "shirt", amount: 10, rating: 4.5 },
+    { id: "p2", sku: "B", category: "shirt", amount: 20, rating: 3.5 },
+    { id: "p3", sku: "C", category: "shoe", amount: null, rating: null }
+  ];
+  for (const row of rows) {
+    sql.products.create(row);
+    native.products.create(row);
+  }
+  const stats = (db) => ({
+    count: db.products.count("amount"),
+    sum: db.products.sum("amount"),
+    avg: db.products.avg("amount"),
+    min: db.products.min("amount"),
+    max: db.products.max("amount"),
+    minSku: db.products.min("sku"),
+    maxSku: db.products.max("sku")
+  });
+  return ctx.json({
+    sqlite: stats(sql),
+    kitdb: stats(native),
+    plans: {
+      primary: native.products.where("id", "=", "p1").explain(),
+      unique: native.products.where("sku", "=", "A").explain(),
+      index: native.products.where("category", "=", "shirt").explain(),
+      scan: native.products.where("amount", ">", 5).explain(),
+      sorted: native.products.where("category", "=", "shirt").orderBy("amount", "desc").limit(5).explain()
+    }
+  });
+});`
+	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(root, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer tenant.Close()
+	recorder := httptest.NewRecorder()
+	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("route status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	type aggregateStats struct {
+		Count  float64 `json:"count"`
+		Sum    float64 `json:"sum"`
+		Avg    float64 `json:"avg"`
+		Min    float64 `json:"min"`
+		Max    float64 `json:"max"`
+		MinSKU string  `json:"minSku"`
+		MaxSKU string  `json:"maxSku"`
+	}
+	type accessPlan struct {
+		Access         string   `json:"access"`
+		Index          *string  `json:"index"`
+		Fields         []string `json:"fields"`
+		ResidualFilter bool     `json:"residualFilter"`
+		Sort           string   `json:"sort"`
+		Limit          int      `json:"limit"`
+	}
+	var response struct {
+		SQLite aggregateStats        `json:"sqlite"`
+		KitDB  aggregateStats        `json:"kitdb"`
+		Plans  map[string]accessPlan `json:"plans"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(response.SQLite, response.KitDB) {
+		t.Fatalf("aggregate mismatch: sqlite=%#v kitdb=%#v", response.SQLite, response.KitDB)
+	}
+	if response.KitDB.Count != 2 || response.KitDB.Sum != 30 || response.KitDB.Avg != 15 ||
+		response.KitDB.Min != 10 || response.KitDB.Max != 20 ||
+		response.KitDB.MinSKU != "A" || response.KitDB.MaxSKU != "C" {
+		t.Fatalf("unexpected aggregate result: %#v", response.KitDB)
+	}
+	assertPlan := func(name, access, index string, fields ...string) {
+		t.Helper()
+		plan := response.Plans[name]
+		if plan.Access != access || plan.Index == nil || *plan.Index != index ||
+			!reflect.DeepEqual(plan.Fields, fields) || !plan.ResidualFilter {
+			t.Errorf("%s plan = %#v", name, plan)
+		}
+	}
+	assertPlan("primary", "primary", "PRIMARY", "id")
+	assertPlan("unique", "unique", "unique_products_sku", "sku")
+	assertPlan("index", "index", "idx_products_category", "category")
+	if scan := response.Plans["scan"]; scan.Access != "scan" || scan.Index != nil || !scan.ResidualFilter {
+		t.Errorf("scan plan = %#v", scan)
+	}
+	if sorted := response.Plans["sorted"]; sorted.Access != "index" || sorted.Sort != "memory" || sorted.Limit != 5 {
+		t.Errorf("sorted plan = %#v", sorted)
+	}
+}
+
+func TestKitDBAggregateStreamsPastListLimit(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { kitdb, struct, text, int } = database;
+const items = struct({ id: text().key(), amount: int() });
+const db = kitdb("aggregate-limit.kitdb", { items });
+router.get((ctx) => {
+  db.transaction((tx) => {
+    for (let i = 0; i < 130; i = i + 1) {
+      tx.items.create({ id: "item-" + i, amount: 1 });
+    }
+  });
+  return ctx.json({ count: db.items.count(), sum: db.items.sum("amount"), listed: db.items.list().length });
+});`
+	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(root, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer tenant.Close()
+	recorder := httptest.NewRecorder()
+	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), `"count":130`) ||
+		!strings.Contains(recorder.Body.String(), `"sum":130`) ||
+		!strings.Contains(recorder.Body.String(), `"listed":60`) {
+		t.Fatalf("aggregate/list bounds status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestKitDBTransactionConflictHasStableSafeCode(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { kitdb, struct, text } = database;
+const items = struct({ id: text().key(), value: text() });
+const db = kitdb("conflict-code.kitdb", { items });
+router.get((ctx) => {
+  const result = db.transaction((tx) => {
+    tx.items.create({ id: "stale", value: "must roll back" });
+    db.items.create({ id: "winner", value: "committed" });
+    return true;
+  }).safe();
+  return ctx.json({
+    ok: result.ok,
+    code: result.code,
+    count: db.items.count(),
+    stale: db.items.find("stale") !== null,
+    winner: db.items.find("winner") !== null
+  });
+});`
+	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(root, "localhost")
+	if err := tenant.Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer tenant.Close()
+	recorder := httptest.NewRecorder()
+	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	for _, expected := range []string{
+		`"ok":false`, `"code":"KITDB_TRANSACTION_CONFLICT"`, `"count":1`,
+		`"stale":false`, `"winner":true`,
+	} {
+		if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), expected) {
+			t.Fatalf("conflict safe status = %d, body = %s, want %s", recorder.Code, recorder.Body.String(), expected)
 		}
 	}
 }
@@ -353,6 +647,94 @@ func TestKitDBRelSafety(t *testing.T) {
 		if got := kitDBRel(input); got != want {
 			t.Errorf("kitDBRel(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestKitDBRecordTransactionCommitsRollsBackAndReopens(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, database } from "kitwork";
+const { kitdb, struct, id, text, choice, ref } = database;
+const users = struct({ id: id(), email: text().notNull().unique() });
+const orders = struct({
+  id: id(),
+  code: text().notNull().unique(),
+  user_id: ref(users.id).notNull(),
+  status: choice("pending", "paid").default("pending").index()
+});
+const db = kitdb("transactions.kitdb", { users, orders });
+router.get((ctx) => {
+  const action = ctx.query("action");
+  if (action === "commit") {
+    return ctx.json(db.transaction((tx) => {
+      const user = tx.users.create({ id: "user_1", email: "owner@example.com" });
+      tx.orders.create({ id: "order_1", code: "ORDER-1", user_id: user.id });
+      const seen = tx.orders.where("status", "=", "pending").count();
+      tx.orders.where("code", "=", "ORDER-1").update({ status: "paid" });
+      return { seen, status: tx.orders.find("order_1").status };
+    }));
+  }
+  if (action === "rollback") {
+    return ctx.json(db.transaction((tx) => {
+      tx.users.create({ id: "user_2", email: "rollback@example.com" });
+      tx.orders.create({ id: "order_2", code: "ORDER-1", user_id: "user_2" });
+      return { committed: true };
+    }));
+  }
+  return ctx.json({
+    users: db.users.count(),
+    orders: db.orders.count(),
+    paid: db.orders.where("status", "=", "paid").count(),
+    rolledBack: db.users.find("user_2") !== null
+  });
+});`
+	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(router), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	start := func() *Tenant {
+		t.Helper()
+		tenant := NewTenant(root, "localhost")
+		if err := tenant.Run(); err != nil {
+			t.Fatal(err)
+		}
+		return tenant
+	}
+	request := func(tenant *Tenant, path string) (int, string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)
+		recorder := httptest.NewRecorder()
+		tenant.Serve(recorder, req)
+		return recorder.Code, recorder.Body.String()
+	}
+
+	tenant := start()
+	code, body := request(tenant, "/?action=commit")
+	if code != http.StatusOK || !strings.Contains(body, `"seen":1`) || !strings.Contains(body, `"status":"paid"`) {
+		t.Fatalf("commit status = %d, body = %s", code, body)
+	}
+	code, body = request(tenant, "/?action=rollback")
+	if code != http.StatusInternalServerError || !strings.Contains(body, "must be unique") {
+		t.Fatalf("rollback status = %d, body = %s", code, body)
+	}
+	code, body = request(tenant, "/")
+	if code != http.StatusOK || !strings.Contains(body, `"users":1`) ||
+		!strings.Contains(body, `"orders":1`) || !strings.Contains(body, `"paid":1`) ||
+		!strings.Contains(body, `"rolledBack":false`) {
+		t.Fatalf("post-rollback state status = %d, body = %s", code, body)
+	}
+	tenant.Close()
+
+	reopened := start()
+	defer reopened.Close()
+	code, body = request(reopened, "/")
+	if code != http.StatusOK || !strings.Contains(body, `"users":1`) ||
+		!strings.Contains(body, `"orders":1`) || !strings.Contains(body, `"paid":1`) ||
+		!strings.Contains(body, `"rolledBack":false`) {
+		t.Fatalf("reopened transaction state status = %d, body = %s", code, body)
 	}
 }
 

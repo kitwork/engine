@@ -88,6 +88,35 @@ func (main *mainImage) get(key []byte) ([]byte, bool, error) {
 	return value, found, err
 }
 
+func (main *mainImage) getWithStats(key []byte, stats *CursorStats) ([]byte, bool, error) {
+	if stats == nil {
+		return main.get(key)
+	}
+	if main == nil || main.file == nil || len(main.blocks) == 0 {
+		return nil, false, nil
+	}
+	if main.formatVersion == mainFormatVersion {
+		for segmentIndex := len(main.segments) - 1; segmentIndex >= 0; segmentIndex-- {
+			segment := main.segments[segmentIndex]
+			value, found, deleted, err := main.getFromBlocksWithStats(
+				key, segment.firstBlock, segment.blockCount, stats,
+			)
+			if err != nil {
+				return nil, false, err
+			}
+			if found {
+				if deleted {
+					return nil, false, nil
+				}
+				return value, true, nil
+			}
+		}
+		return nil, false, nil
+	}
+	value, found, _, err := main.getFromBlocksWithStats(key, 0, len(main.blocks), stats)
+	return value, found, err
+}
+
 func (main *mainImage) getFromBlocks(key []byte, firstBlock, blockCount int) ([]byte, bool, bool, error) {
 	if blockCount == 0 {
 		return nil, false, false, nil
@@ -120,45 +149,133 @@ func (main *mainImage) getFromBlocks(key []byte, firstBlock, blockCount int) ([]
 	return bytes.Clone(row.value), true, row.deleted, nil
 }
 
-func (main *mainImage) readPage(blockIndex int) (*rowPage, error) {
-	if blockIndex < 0 || blockIndex >= len(main.blocks) {
-		return nil, fmt.Errorf("kitdb: main block %d is outside the sparse index", blockIndex)
+func (main *mainImage) getFromBlocksWithStats(
+	key []byte,
+	firstBlock, blockCount int,
+	stats *CursorStats,
+) ([]byte, bool, bool, error) {
+	if blockCount == 0 {
+		return nil, false, false, nil
 	}
-	block := main.blocks[blockIndex]
-	data := make([]byte, int(block.length))
-	if err := readAt(main.file, data, block.offset); err != nil {
-		return nil, fmt.Errorf("kitdb: read main block %d: %w", blockIndex, err)
+	block := sort.Search(blockCount, func(index int) bool {
+		return bytes.Compare(main.blocks[firstBlock+index].firstKey, key) > 0
+	}) - 1
+	if block < 0 {
+		return nil, false, false, nil
 	}
-	if main.formatVersion >= mainPagedFormatVersion {
-		actual := crc32.Checksum(data, crc32cTable)
-		if actual != block.checksum {
-			return nil, corruptFileAt(main.path, block.offset, "main page %d checksum mismatch", blockIndex)
-		}
+	block += firstBlock
+	directory := main.blocks[block]
+	if len(directory.lastKey) != 0 && bytes.Compare(key, directory.lastKey) > 0 {
+		return nil, false, false, nil
 	}
-	var page *rowPage
-	var err error
-	if block.mutations {
-		page, err = decodeMutationPage(main.path, blockIndex, block.offset, data, block.records)
+	stats.PageAccesses++
+	page, found := main.cache.get(block)
+	if found {
+		stats.PageCacheHits++
 	} else {
-		page, err = decodeRowPage(main.path, blockIndex, block.offset, data, block.records)
+		if main.cache.enabled() {
+			stats.PageCacheMisses++
+		} else {
+			stats.PageCacheBypasses++
+		}
+		decoded, err := main.readPage(block)
+		if err != nil {
+			return nil, false, false, err
+		}
+		stats.PagesRead++
+		stats.PageBytesRead += uint64(directory.length)
+		stats.PageRecordsDecoded += uint64(directory.records)
+		page = main.cache.addOrGet(decoded)
 	}
-	if err != nil {
+	position := sort.Search(len(page.rows), func(index int) bool {
+		return bytes.Compare(page.rows[index].key, key) >= 0
+	})
+	if position == len(page.rows) || !bytes.Equal(page.rows[position].key, key) {
+		return nil, false, false, nil
+	}
+	row := page.rows[position]
+	return bytes.Clone(row.value), true, row.deleted, nil
+}
+
+func (main *mainImage) readPage(blockIndex int) (*rowPage, error) {
+	page := &rowPage{}
+	if err := main.readPageInto(blockIndex, page); err != nil {
 		return nil, err
-	}
-	if len(page.rows) == 0 || !bytes.Equal(page.rows[0].key, block.firstKey) {
-		return nil, corruptFileAt(main.path, block.offset, "main page %d first key does not match its directory entry", blockIndex)
-	}
-	if len(block.lastKey) != 0 && !bytes.Equal(page.rows[len(page.rows)-1].key, block.lastKey) {
-		return nil, corruptFileAt(main.path, block.offset, "main page %d last key does not match its directory entry", blockIndex)
 	}
 	return page, nil
 }
 
+func (main *mainImage) readPageInto(blockIndex int, page *rowPage) error {
+	if blockIndex < 0 || blockIndex >= len(main.blocks) {
+		return fmt.Errorf("kitdb: main block %d is outside the sparse index", blockIndex)
+	}
+	if page == nil {
+		return fmt.Errorf("kitdb: main page target is nil")
+	}
+	block := main.blocks[blockIndex]
+	clear(page.rows)
+	rows := page.rows[:0]
+	data := page.data
+	if cap(data) < int(block.length) {
+		data = make([]byte, int(block.length))
+	} else {
+		data = data[:int(block.length)]
+	}
+	if err := readAt(main.file, data, block.offset); err != nil {
+		return fmt.Errorf("kitdb: read main block %d: %w", blockIndex, err)
+	}
+	if main.formatVersion >= mainPagedFormatVersion {
+		actual := crc32.Checksum(data, crc32cTable)
+		if actual != block.checksum {
+			return corruptFileAt(main.path, block.offset, "main page %d checksum mismatch", blockIndex)
+		}
+	}
+	var err error
+	if block.mutations {
+		rows, err = decodeMutationPageRows(main.path, block.offset, data, block.records, rows)
+	} else {
+		rows, err = decodeRowPageRows(main.path, block.offset, data, block.records, rows)
+	}
+	if err != nil {
+		return err
+	}
+	page.block = blockIndex
+	page.data = data
+	page.rows = rows
+	page.weight = int64(len(data)) + int64(cap(rows))*cachedRowOverhead
+	if len(page.rows) == 0 || !bytes.Equal(page.rows[0].key, block.firstKey) {
+		return corruptFileAt(main.path, block.offset, "main page %d first key does not match its directory entry", blockIndex)
+	}
+	if len(block.lastKey) != 0 && !bytes.Equal(page.rows[len(page.rows)-1].key, block.lastKey) {
+		return corruptFileAt(main.path, block.offset, "main page %d last key does not match its directory entry", blockIndex)
+	}
+	return nil
+}
+
 func decodeMutationPage(path string, blockIndex int, blockOffset int64, data []byte, records uint32) (*rowPage, error) {
+	rows, err := decodeMutationPageRows(path, blockOffset, data, records, nil)
+	if err != nil {
+		return nil, err
+	}
+	weight := int64(len(data)) + int64(cap(rows))*cachedRowOverhead
+	return &rowPage{block: blockIndex, data: data, rows: rows, weight: weight}, nil
+}
+
+func decodeMutationPageRows(
+	path string,
+	blockOffset int64,
+	data []byte,
+	records uint32,
+	rows []mainRow,
+) ([]mainRow, error) {
 	if records > mainIndexBlockRecords {
 		return nil, corruptFileAt(path, blockOffset, "main mutation page has %d records above limit %d", records, mainIndexBlockRecords)
 	}
-	rows := make([]mainRow, 0, records)
+	if cap(rows) < int(records) {
+		rows = make([]mainRow, 0, records)
+	} else {
+		rows = rows[:0]
+	}
 	position := 0
 	var previous []byte
 	for index := uint32(0); index < records; index++ {
@@ -195,15 +312,33 @@ func decodeMutationPage(path string, blockIndex int, blockOffset int64, data []b
 	if position != len(data) {
 		return nil, corruptFileAt(path, blockOffset+int64(position), "main mutation page has %d trailing bytes", len(data)-position)
 	}
+	return rows, nil
+}
+
+func decodeRowPage(path string, blockIndex int, blockOffset int64, data []byte, records uint32) (*rowPage, error) {
+	rows, err := decodeRowPageRows(path, blockOffset, data, records, nil)
+	if err != nil {
+		return nil, err
+	}
 	weight := int64(len(data)) + int64(cap(rows))*cachedRowOverhead
 	return &rowPage{block: blockIndex, data: data, rows: rows, weight: weight}, nil
 }
 
-func decodeRowPage(path string, blockIndex int, blockOffset int64, data []byte, records uint32) (*rowPage, error) {
+func decodeRowPageRows(
+	path string,
+	blockOffset int64,
+	data []byte,
+	records uint32,
+	rows []mainRow,
+) ([]mainRow, error) {
 	if records > mainIndexBlockRecords {
 		return nil, corruptFileAt(path, blockOffset, "main block has %d records above limit %d", records, mainIndexBlockRecords)
 	}
-	rows := make([]mainRow, 0, records)
+	if cap(rows) < int(records) {
+		rows = make([]mainRow, 0, records)
+	} else {
+		rows = rows[:0]
+	}
 	position := 0
 	var previous []byte
 	for index := uint32(0); index < records; index++ {
@@ -233,8 +368,7 @@ func decodeRowPage(path string, blockIndex int, blockOffset int64, data []byte, 
 	if position != len(data) {
 		return nil, corruptFileAt(path, blockOffset+int64(position), "main block has %d trailing bytes", len(data)-position)
 	}
-	weight := int64(len(data)) + int64(cap(rows))*cachedRowOverhead
-	return &rowPage{block: blockIndex, data: data, rows: rows, weight: weight}, nil
+	return rows, nil
 }
 
 func minBufferSize(length int64) int {

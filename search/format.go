@@ -7,7 +7,6 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
-	"os"
 )
 
 const (
@@ -140,7 +139,7 @@ func validateSections(header segmentHeader) error {
 	return nil
 }
 
-func readCheckedSection(file *os.File, section sectionDescriptor, maximum uint64) ([]byte, error) {
+func readCheckedSection(file io.ReaderAt, section sectionDescriptor, maximum uint64) ([]byte, error) {
 	if section.length > maximum || section.length > uint64(maxIntValue()) {
 		return nil, corruptf("section length %d exceeds limit %d", section.length, maximum)
 	}
@@ -154,7 +153,7 @@ func readCheckedSection(file *os.File, section sectionDescriptor, maximum uint64
 	return data, nil
 }
 
-func readAtFull(file *os.File, destination []byte, offset uint64) error {
+func readAtFull(file io.ReaderAt, destination []byte, offset uint64) error {
 	if offset > math.MaxInt64 {
 		return corruptf("file offset %d exceeds platform range", offset)
 	}

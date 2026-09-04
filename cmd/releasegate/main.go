@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/kitdb"
 	kitruntime "github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/work"
 )
 
-const releaseReportSchemaVersion = 1
+const releaseReportSchemaVersion = 2
 
 type gateStep struct {
 	Name    string
@@ -43,13 +45,15 @@ type stepResult struct {
 }
 
 type compatibilityReport struct {
-	BytecodeVersion        uint16                    `json:"bytecode_version"`
-	ProgramEncodingVersion uint16                    `json:"program_encoding_version"`
-	ArtifactVersion        uint16                    `json:"artifact_version"`
-	CompilerSchemaVersion  uint16                    `json:"compiler_schema_version"`
-	InstructionSetChecksum string                    `json:"instruction_set_checksum"`
-	CompilerFingerprint    string                    `json:"compiler_fingerprint"`
-	RuntimeLimits          kitruntime.LimitsSnapshot `json:"runtime_limits"`
+	BytecodeVersion        uint16                            `json:"bytecode_version"`
+	ProgramEncodingVersion uint16                            `json:"program_encoding_version"`
+	ArtifactVersion        uint16                            `json:"artifact_version"`
+	CompilerSchemaVersion  uint16                            `json:"compiler_schema_version"`
+	InstructionSetChecksum string                            `json:"instruction_set_checksum"`
+	CompilerFingerprint    string                            `json:"compiler_fingerprint"`
+	RuntimeLimits          kitruntime.LimitsSnapshot         `json:"runtime_limits"`
+	KitDBKernel            kitdb.CompatibilityProfile        `json:"kitdb_kernel"`
+	KitDBRelational        work.KitDBRelationalCompatibility `json:"kitdb_relational"`
 }
 
 type releaseReport struct {
@@ -181,6 +185,7 @@ func main() {
 
 func releasePlan(mode string) ([]gateStep, error) {
 	verify := []gateStep{
+		kitDBCompatibilityStep(),
 		{
 			Name:    "VM v2 compatibility archive",
 			Command: []string{"go", "test", "./compatibility", "-run", "^TestVMV2CompatibilityArchive", "-count=1"},
@@ -201,6 +206,20 @@ func releasePlan(mode string) ([]gateStep, error) {
 			Name:    "Diagnostics/lifecycle",
 			Command: []string{"go", "test", "./core", "-run", "TestEngineDiagnostics|TestEngineDiagnosticBundle|TestEngineLifecycleGauntlet", "-count=1"},
 		},
+		{
+			Name:    "KitDB database journey",
+			Command: []string{"go", "test", "./work", "-run", "^(TestKitDBDatabaseReleaseGate|TestKitDBPostgresCopyInWithLibPQIsAtomic)$", "-count=1", "-timeout=5m", "-v"},
+			Env:     map[string]string{"KITDB_RELEASE_REPORT": ".artifacts/kitdb-database-gate.json"},
+		},
+		{
+			Name: "KitDB durability/recovery",
+			Command: []string{
+				"go", "test", "./kitdb", "./work",
+				"-run", "^(TestRecoveryTruncatesEveryIncompleteTail|TestCheckpointRecoveryTruncatesIncompleteWALTail|TestBackupAnchorCapturesWALOverlayAndRemainsStandalone|TestRestoreToTransactionFromInsideHistorySegment|TestKitDBAdditiveIndexBuildSurvivesCrashAndInterleavedWrites|TestKitDBPhysicalIndexGenerationReplacesAndCleansAfterHardCrash|TestKitDBPostgresResumableImportHardCrashMatrix)$",
+				"-count=1", "-timeout=10m",
+			},
+		},
+		kitDBProjectionRecoveryStep(),
 		{Name: "Build", Command: []string{"go", "build", "./..."}},
 		{Name: "Full tests", Command: []string{"go", "test", "-count=1", "-timeout=20m", "./..."}},
 		{Name: "Vet", Command: []string{"go", "vet", "./..."}},
@@ -209,8 +228,13 @@ func releasePlan(mode string) ([]gateStep, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "verify":
 		return verify, nil
+	case "kitdb-verify":
+		return kitDBVerifyPlan(), nil
+	case "kitdb-release":
+		plan := kitDBVerifyPlan()
+		return append(plan, kitDBReleaseCampaigns()...), nil
 	case "release":
-		return append(verify,
+		plan := append(verify,
 			gateStep{
 				Name: "Focused race",
 				Command: []string{
@@ -260,9 +284,125 @@ func releasePlan(mode string) ([]gateStep, error) {
 					"KITWORK_CONTENTION_REPORT":   ".artifacts/cache-contention-campaign.json",
 				},
 			},
-		), nil
+		)
+		return append(plan, kitDBReleaseCampaigns()...), nil
 	default:
-		return nil, fmt.Errorf("unknown mode %q; use verify or release", mode)
+		return nil, fmt.Errorf(
+			"unknown mode %q; use verify, release, kitdb-verify, or kitdb-release",
+			mode,
+		)
+	}
+}
+
+func kitDBCompatibilityStep() gateStep {
+	return gateStep{
+		Name: "KitDB 1.x compatibility contract",
+		Command: []string{
+			"go", "test", "./kitdb", "./work", "./cmd/kitdb",
+			"-run", "^(TestKitDBV1CompatibilityProfile|TestKitDBV1FrozenMainFixture|TestKitDBV1RelationalCompatibilityProfile|TestOperatorVersionReportsKitDBV1Contract)$",
+			"-count=1",
+		},
+	}
+}
+
+func kitDBProjectionRecoveryStep() gateStep {
+	return gateStep{
+		Name: "KitDB projection recovery",
+		Command: []string{
+			"go", "test", "./kitdb/relational",
+			"-run", "^(TestColumnarIncrementalProcessExitDuringBuild|TestProjectionSnapshotFreshnessCorruptionAndCancellation|TestAnalyticsRefreshUpgradesBlockDirectoryWithoutRewritingKCOL)$",
+			"-count=1", "-timeout=10m",
+		},
+	}
+}
+
+func kitDBVerifyPlan() []gateStep {
+	return []gateStep{
+		kitDBCompatibilityStep(),
+		{
+			Name:    "KitDB kernel/node suite",
+			Command: []string{"go", "test", "./kitdb/...", "-count=1", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB relational suite",
+			Command: []string{"go", "test", "./work", "-count=1", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB operator suite",
+			Command: []string{"go", "test", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "-count=1"},
+		},
+		{
+			Name:    "KitDB command build",
+			Command: []string{"go", "build", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+		},
+		{
+			Name:    "KitDB static analysis",
+			Command: []string{"go", "vet", "./kitdb/...", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+		},
+		{
+			Name: "KitDB durability/recovery",
+			Command: []string{
+				"go", "test", "./kitdb", "./work",
+				"-run", "^(TestRecoveryTruncatesEveryIncompleteTail|TestCheckpointRecoveryTruncatesIncompleteWALTail|TestBackupAnchorCapturesWALOverlayAndRemainsStandalone|TestRestoreToTransactionFromInsideHistorySegment|TestKitDBAdditiveIndexBuildSurvivesCrashAndInterleavedWrites|TestKitDBPhysicalIndexGenerationReplacesAndCleansAfterHardCrash|TestKitDBPostgresResumableImportHardCrashMatrix)$",
+				"-count=1", "-timeout=10m",
+			},
+		},
+		kitDBProjectionRecoveryStep(),
+		{
+			Name:    "KitDB database journey",
+			Command: []string{"go", "test", "./work", "-run", "^(TestKitDBDatabaseReleaseGate|TestKitDBPostgresCopyInWithLibPQIsAtomic)$", "-count=1", "-timeout=5m", "-v"},
+			Env:     map[string]string{"KITDB_RELEASE_REPORT": ".artifacts/kitdb-database-gate.json"},
+		},
+	}
+}
+
+func kitDBReleaseCampaigns() []gateStep {
+	return []gateStep{
+		{
+			Name:    "KitDB kernel race",
+			Command: []string{"go", "test", "-race", "./kitdb/...", "-count=1", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB relational race",
+			Command: []string{"go", "test", "-race", "./work", "-run", "^TestKitDB", "-count=1", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB replica hard-crash matrix",
+			Command: []string{"go", "test", "./kitdb/node", "-run", "^TestReplicaFileLinkHardCrashMatrix$", "-count=10", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB catalog hard-crash matrix",
+			Command: []string{"go", "test", "./work", "-run", "^TestKitDBNodeCatalog(HardCrashMatrix|EmptyCreateHardCrashMatrix|RenameHardCrashMatrix)$", "-count=10", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB import hard-crash matrix",
+			Command: []string{"go", "test", "./work", "-run", "^TestKitDBPostgresResumableImportHardCrashMatrix$", "-count=10", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB index hard-crash matrix",
+			Command: []string{"go", "test", "./work", "-run", "^TestKitDB(AdditiveIndexBuildSurvivesCrashAndInterleavedWrites|PhysicalIndexGenerationReplacesAndCleansAfterHardCrash)$", "-count=10", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB analytics hard-crash matrix",
+			Command: []string{"go", "test", "./kitdb/relational", "-run", "^TestColumnarIncrementalProcessExitDuringBuild$", "-count=10", "-timeout=20m"},
+		},
+		{
+			Name: "KitDB canary smoke",
+			Command: []string{
+				"go", "run", "./cmd/kitdbcanary",
+				"--duration=5s", "--tenants=16", "--workers=8", "--max-open=4",
+				"--checkpoint-every=64", "--verify-every=256",
+				"--json=.artifacts/kitdb-canary-smoke.json", "--quiet",
+			},
+		},
+		{
+			Name:    "KitDB replica hard-crash soak",
+			Command: []string{"go", "test", "./kitdb/node", "-run", "^TestReplicaFileLinkHardCrashSoak$", "-count=1", "-timeout=30m", "-v"},
+			Env: map[string]string{
+				"KITDB_REPLICA_SOAK_ITERATIONS": "128",
+				"KITDB_REPLICA_SOAK_SEED":       "20260828",
+			},
+		},
 	}
 }
 
@@ -335,6 +475,8 @@ func currentCompatibilityReport() compatibilityReport {
 		InstructionSetChecksum: kitruntime.InstructionSetChecksum(),
 		CompilerFingerprint:    compiler.Fingerprint(),
 		RuntimeLimits:          kitruntime.Limits(),
+		KitDBKernel:            kitdb.CurrentCompatibility(),
+		KitDBRelational:        work.CurrentKitDBRelationalCompatibility(),
 	}
 }
 

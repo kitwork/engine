@@ -69,8 +69,9 @@ func TestTransactionLifecycleAndOperationOrder(t *testing.T) {
 	defer db.Close()
 
 	tx := mustBegin(t, db)
-	if _, err := db.Begin(); !errors.Is(err, ErrTransactionActive) {
-		t.Fatalf("second Begin error = %v, want ErrTransactionActive", err)
+	concurrent := mustBegin(t, db)
+	if err := concurrent.Put([]byte("concurrent"), []byte("prepared")); err != nil {
+		t.Fatal(err)
 	}
 	if err := tx.Put([]byte("a"), []byte("first")); err != nil {
 		t.Fatal(err)
@@ -87,8 +88,11 @@ func TestTransactionLifecycleAndOperationOrder(t *testing.T) {
 	if err := tx.Put([]byte("empty"), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Commit(); err != nil {
+	if transaction, err := tx.Commit(); err != nil || transaction != 1 {
 		t.Fatalf("commit: %v", err)
+	}
+	if transaction, err := concurrent.Commit(); err != nil || transaction != 2 {
+		t.Fatalf("concurrent commit = (%d, %v), want transaction 2", transaction, err)
 	}
 	if err := tx.Put([]byte("late"), []byte("value")); !errors.Is(err, ErrTransactionClosed) {
 		t.Fatalf("put after commit error = %v", err)
@@ -102,6 +106,9 @@ func TestTransactionLifecycleAndOperationOrder(t *testing.T) {
 	}
 	if got := requireValue(t, db, "empty"); len(got) != 0 {
 		t.Fatalf("empty value length = %d", len(got))
+	}
+	if got := requireValue(t, db, "concurrent"); string(got) != "prepared" {
+		t.Fatalf("concurrently prepared value = %q", got)
 	}
 
 	rollback := mustBegin(t, db)

@@ -73,8 +73,8 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 			d.sqlDB = conn
 			return d
 		}
-		if t := strings.ToLower(d.preset.Type); t == "sqlite" || t == "sqlite3" || t == "turso" {
-			// Local file backends (sqlite AND turso) need their parent .data/ folder to exist before
+		if t := strings.ToLower(d.preset.Type); t == "sqlite" || t == "sqlite3" {
+			// Local SQLite files need their parent .data/ folder to exist before
 			// the driver opens the file.
 			if dir := filepath.Dir(d.preset.Name); dir != "." && dir != "" {
 				_ = os.MkdirAll(dir, 0o755)

@@ -3,6 +3,7 @@ package kitdb
 import (
 	"bytes"
 	"fmt"
+	"time"
 )
 
 // CommitOperationKind describes one committed mutation.
@@ -20,9 +21,12 @@ type CommitOperation struct {
 	Value []byte
 }
 
-// CommitEvent is one committed transaction published to listeners.
+// CommitEvent is one committed transaction published to listeners. Checksum
+// identifies its exact durable WAL-frame boundary.
 type CommitEvent struct {
 	Transaction uint64
+	Checksum    uint32
+	CommittedAt time.Time
 	Operations  []CommitOperation
 }
 
@@ -36,10 +40,10 @@ func (db *DB) AddCommitListener(listener CommitListener) (func(), error) {
 		return nil, fmt.Errorf("kitdb: nil commit listener")
 	}
 	db.mu.RLock()
-	closed := db.closed
+	stateErr := db.stateErrorLocked()
 	db.mu.RUnlock()
-	if closed {
-		return nil, ErrClosed
+	if stateErr != nil {
+		return nil, stateErr
 	}
 	db.listenerMu.Lock()
 	defer db.listenerMu.Unlock()
@@ -56,18 +60,34 @@ func (db *DB) AddCommitListener(listener CommitListener) (func(), error) {
 	}, nil
 }
 
-func (db *DB) dispatchCommit(transaction uint64, operations []operation) {
+func (db *DB) dispatchCommit(transaction uint64, checksum uint32, committedAt int64, operations []operation) {
 	listeners := db.snapshotCommitListeners()
 	if len(listeners) == 0 {
 		return
 	}
 	event := CommitEvent{
 		Transaction: transaction,
+		Checksum:    checksum,
+		CommittedAt: commitTimeValue(committedAt),
 		Operations:  cloneCommitOperations(operations),
 	}
 	for _, listener := range listeners {
 		listener(event)
 	}
+}
+
+func commitTimeValue(unixNano int64) time.Time {
+	if unixNano <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, unixNano).UTC()
+}
+
+func commitTimeUnixNano(committedAt time.Time) int64 {
+	if committedAt.IsZero() {
+		return 0
+	}
+	return committedAt.UTC().UnixNano()
 }
 
 func (db *DB) snapshotCommitListeners() []CommitListener {

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	collectioncap "github.com/kitwork/engine/capabilities/collection"
 	"github.com/kitwork/engine/compiler"
 	dom "github.com/kitwork/engine/domain"
+	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	requestscope "github.com/kitwork/engine/request"
 	kitruntime "github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/search"
@@ -75,6 +77,8 @@ type Engine struct {
 	runtimeHealth    *work.RuntimeHealth
 	searchManager    *search.Manager
 	searchManagerErr error
+	kitDBNodeManager *kitdbnode.Manager
+	kitDBNodeErr     error
 	collectionCanary atomic.Bool
 	collectionStats  *collectioncap.SegmentSearchCanaryTelemetry
 	mu               sync.RWMutex
@@ -89,10 +93,17 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 	}
 	searchManager, searchManagerErr := search.NewManager(
 		filepath.Join(root, ".data", "search"),
-		search.ManagerOptions{},
+		search.ManagerOptions{
+			ReplacementTimeout: 24 * time.Hour,
+			Writer:             search.WriterOptions{Segment: search.BuildOptions{SkipLongTerms: true}},
+		},
 	)
 	if searchManagerErr != nil {
 		slog.Warn("Search manager failed to initialize", "error", searchManagerErr)
+	}
+	kitDBNodeManager, kitDBNodeErr := kitdbnode.NewManager(kitdbnode.Limits{})
+	if kitDBNodeErr != nil {
+		slog.Warn("KitDB node manager failed to initialize", "error", kitDBNodeErr)
 	}
 	e := &Engine{
 		startedAt:        time.Now(),
@@ -107,6 +118,8 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		runtimeHealth:    work.NewRuntimeHealth(),
 		searchManager:    searchManager,
 		searchManagerErr: searchManagerErr,
+		kitDBNodeManager: kitDBNodeManager,
+		kitDBNodeErr:     kitDBNodeErr,
 		collectionStats:  collectioncap.NewSegmentSearchCanaryTelemetry(),
 		idleTimeout:      10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
 		stopCleanup:      make(chan struct{}),
@@ -159,6 +172,7 @@ func (e *Engine) StartAppSchedulers() (started int) {
 
 		appTenant := work.NewAppTenantWithRuntime(e.root, identity, appRuntime)
 		appTenant.SetSearchManager(e.searchManager, e.searchManagerErr)
+		appTenant.SetKitDBNodeManager(e.kitDBNodeManager, e.kitDBNodeErr)
 		appTenant.SetCollectionSearchCanary(e.collectionCanary.Load())
 		appTenant.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 		appTenant.SetRuntimeHealth(e.runtimeHealth)
@@ -241,6 +255,33 @@ func (e *Engine) SetSearchManagerOptions(options search.ManagerOptions) error {
 	return nil
 }
 
+// SetKitDBNodeLimits replaces the default host-wide KitDB fleet owner during
+// boot. Configuration freezes once an app or site starts loading.
+func (e *Engine) SetKitDBNodeLimits(limits kitdbnode.Limits) error {
+	if e == nil {
+		return fmt.Errorf("engine is nil")
+	}
+	replacement, err := kitdbnode.NewManager(limits)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	if e.closed || len(e.cache) != 0 || len(e.appTenants) != 0 ||
+		len(e.appRuntimes) != 0 || len(e.appStarting) != 0 {
+		e.mu.Unlock()
+		_ = replacement.Close()
+		return fmt.Errorf("KitDB node limits must be set before loading apps or sites")
+	}
+	previous := e.kitDBNodeManager
+	e.kitDBNodeManager = replacement
+	e.kitDBNodeErr = nil
+	e.mu.Unlock()
+	if previous != nil {
+		return previous.Close()
+	}
+	return nil
+}
+
 // SetCollectionSearchCanary enables bounded shadow comparison during host
 // boot. The legacy collection engine remains the serving path. Configuration
 // is frozen once an app or site starts loading.
@@ -279,6 +320,212 @@ func (e *Engine) SearchStats() search.ManagerStats {
 	manager := e.searchManager
 	e.mu.RUnlock()
 	return manager.Stats()
+}
+
+// KitDBNodeStats returns bounded host-wide handle and page-cache ownership
+// counters without opening a database or inspecting tenant data.
+func (e *Engine) KitDBNodeStats() kitdbnode.Stats {
+	if e == nil {
+		return kitdbnode.Stats{}
+	}
+	e.mu.RLock()
+	manager := e.kitDBNodeManager
+	e.mu.RUnlock()
+	return manager.Stats()
+}
+
+// ScheduleKitDBBackup submits one host-trusted verified backup to the shared
+// KitDB node governor. Tenant code cannot call this filesystem-level API.
+func (e *Engine) ScheduleKitDBBackup(
+	ctx context.Context,
+	request kitdbnode.BackupRequest,
+) (*kitdbnode.MaintenanceTicket, error) {
+	if e == nil {
+		return nil, fmt.Errorf("engine is nil")
+	}
+	e.mu.RLock()
+	manager := e.kitDBNodeManager
+	e.mu.RUnlock()
+	if manager == nil {
+		return nil, fmt.Errorf("KitDB node manager is unavailable")
+	}
+	return manager.ScheduleBackup(ctx, request)
+}
+
+// RegisterKitDBProductionAnchorPublisher installs one host-trusted off-node or
+// transfer-spool adapter. Tenant code cannot receive this authority.
+func (e *Engine) RegisterKitDBProductionAnchorPublisher(
+	name string,
+	publisher kitdbnode.ProductionAnchorPublisher,
+) error {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return err
+	}
+	return manager.RegisterProductionAnchorPublisher(name, publisher)
+}
+
+// UnregisterKitDBProductionAnchorPublisher releases one unused host adapter.
+// Published anchors remain untouched.
+func (e *Engine) UnregisterKitDBProductionAnchorPublisher(name string) error {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return err
+	}
+	return manager.UnregisterProductionAnchorPublisher(name)
+}
+
+// KitDBProductionAnchorPublishers returns registered path-free labels.
+func (e *Engine) KitDBProductionAnchorPublishers() []string {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return nil
+	}
+	return manager.ProductionAnchorPublishers()
+}
+
+// RegisterKitDBProductionPolicy registers one host-trusted recurring backup,
+// publication, and restore policy on the shared node governor. Tenant code
+// cannot supply source, backup, or publisher authority.
+func (e *Engine) RegisterKitDBProductionPolicy(
+	config kitdbnode.ProductionPolicyConfig,
+) (kitdbnode.ProductionPolicyHealth, error) {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return kitdbnode.ProductionPolicyHealth{}, err
+	}
+	return manager.RegisterProductionPolicy(config)
+}
+
+// RunKitDBProductionPolicyOnce schedules or joins one host-trusted protection
+// cycle. Canceling ctx stops only this waiter.
+func (e *Engine) RunKitDBProductionPolicyOnce(
+	ctx context.Context,
+	name string,
+) (kitdbnode.ProductionPolicyCycle, error) {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return kitdbnode.ProductionPolicyCycle{}, err
+	}
+	return manager.RunProductionPolicyOnce(ctx, name)
+}
+
+// PauseKitDBProductionPolicy stops future automatic cycles without
+// interrupting a running durable stage.
+func (e *Engine) PauseKitDBProductionPolicy(
+	name string,
+) (kitdbnode.ProductionPolicyHealth, error) {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return kitdbnode.ProductionPolicyHealth{}, err
+	}
+	return manager.PauseProductionPolicy(name)
+}
+
+// ResumeKitDBProductionPolicy enables automatic reconciliation immediately.
+func (e *Engine) ResumeKitDBProductionPolicy(
+	name string,
+) (kitdbnode.ProductionPolicyHealth, error) {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return kitdbnode.ProductionPolicyHealth{}, err
+	}
+	return manager.ResumeProductionPolicy(name)
+}
+
+// WakeKitDBProductionPolicy makes one unpaused host policy eligible now.
+func (e *Engine) WakeKitDBProductionPolicy(name string) error {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return err
+	}
+	return manager.WakeProductionPolicy(name)
+}
+
+// UnregisterKitDBProductionPolicy releases one idle process-local policy.
+// Verified anchors and the durable source pin remain intact.
+func (e *Engine) UnregisterKitDBProductionPolicy(name string) error {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return err
+	}
+	return manager.UnregisterProductionPolicy(name)
+}
+
+// KitDBProductionPolicyHealth returns one named path-free health snapshot.
+func (e *Engine) KitDBProductionPolicyHealth(
+	name string,
+) (kitdbnode.ProductionPolicyHealth, error) {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return kitdbnode.ProductionPolicyHealth{}, err
+	}
+	return manager.ProductionPolicyHealth(name)
+}
+
+// KitDBProductionPolicies returns path-free health for registered host policies.
+func (e *Engine) KitDBProductionPolicies() []kitdbnode.ProductionPolicyHealth {
+	manager, err := e.kitDBProductionManager()
+	if err != nil {
+		return nil
+	}
+	return manager.ProductionPolicies()
+}
+
+func (e *Engine) kitDBProductionManager() (*kitdbnode.Manager, error) {
+	if e == nil {
+		return nil, fmt.Errorf("engine is nil")
+	}
+	e.mu.RLock()
+	manager := e.kitDBNodeManager
+	managerErr := e.kitDBNodeErr
+	closed := e.closed
+	e.mu.RUnlock()
+	if managerErr != nil {
+		return nil, managerErr
+	}
+	if closed || manager == nil {
+		return nil, kitdbnode.ErrClosed
+	}
+	return manager, nil
+}
+
+// ScheduleKitDBHistoryPrune submits one host-trusted retained-history advance
+// to the shared KitDB node governor. Tenant code cannot call this destructive
+// filesystem-level API.
+func (e *Engine) ScheduleKitDBHistoryPrune(
+	ctx context.Context,
+	request kitdbnode.HistoryPruneRequest,
+) (*kitdbnode.MaintenanceTicket, error) {
+	if e == nil {
+		return nil, fmt.Errorf("engine is nil")
+	}
+	e.mu.RLock()
+	manager := e.kitDBNodeManager
+	e.mu.RUnlock()
+	if manager == nil {
+		return nil, fmt.Errorf("KitDB node manager is unavailable")
+	}
+	return manager.ScheduleHistoryPrune(ctx, request)
+}
+
+// ScheduleKitDBReplicaCatchUp submits one host-trusted source-to-target replay
+// to the shared KitDB node governor. Both database paths remain reserved for the
+// operation and tenant code cannot call this topology-level API.
+func (e *Engine) ScheduleKitDBReplicaCatchUp(
+	ctx context.Context,
+	request kitdbnode.ReplicaCatchUpRequest,
+) (*kitdbnode.MaintenanceTicket, error) {
+	if e == nil {
+		return nil, fmt.Errorf("engine is nil")
+	}
+	e.mu.RLock()
+	manager := e.kitDBNodeManager
+	e.mu.RUnlock()
+	if manager == nil {
+		return nil, fmt.Errorf("KitDB node manager is unavailable")
+	}
+	return manager.ScheduleReplicaCatchUp(ctx, request)
 }
 
 // Health returns bounded process-local runtime and lifecycle aggregates without
@@ -378,6 +625,7 @@ func (e *Engine) prepareTenantCandidate(
 		generation,
 	)
 	candidate.SetSearchManager(e.searchManager, e.searchManagerErr)
+	candidate.SetKitDBNodeManager(e.kitDBNodeManager, e.kitDBNodeErr)
 	candidate.SetCollectionSearchCanary(e.collectionCanary.Load())
 	candidate.SetCollectionSearchCanaryTelemetry(e.collectionStats)
 	candidate.SetRuntimeHealth(e.runtimeHealth)
@@ -516,6 +764,11 @@ func (e *Engine) Close() {
 		if e.searchManager != nil {
 			if err := e.searchManager.Close(); err != nil {
 				slog.Warn("Search manager failed to close cleanly", "error", err)
+			}
+		}
+		if e.kitDBNodeManager != nil {
+			if err := e.kitDBNodeManager.Close(); err != nil {
+				slog.Warn("KitDB node manager failed to close cleanly", "error", err)
 			}
 		}
 	})

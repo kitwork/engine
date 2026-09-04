@@ -10,11 +10,22 @@ import (
 	"unsafe"
 )
 
-const moveFileWriteThrough = 0x8
+const (
+	moveFileReplaceExisting = 0x1
+	moveFileWriteThrough    = 0x8
+)
 
 var moveFileExW = syscall.NewLazyDLL("kernel32.dll").NewProc("MoveFileExW")
 
 func publishFile(oldPath, newPath string) error {
+	return moveFile(oldPath, newPath, moveFileWriteThrough)
+}
+
+func replaceFile(oldPath, newPath string) error {
+	return moveFile(oldPath, newPath, moveFileReplaceExisting|moveFileWriteThrough)
+}
+
+func moveFile(oldPath, newPath string, flags uintptr) error {
 	oldName, err := windowsExtendedPath(oldPath)
 	if err != nil {
 		return err
@@ -34,7 +45,7 @@ func publishFile(oldPath, newPath string) error {
 	result, _, callErr := moveFileExW.Call(
 		uintptr(unsafe.Pointer(oldPointer)),
 		uintptr(unsafe.Pointer(newPointer)),
-		moveFileWriteThrough,
+		flags,
 	)
 	if result != 0 {
 		return nil

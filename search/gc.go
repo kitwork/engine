@@ -111,16 +111,63 @@ func (writer *IndexWriter) GarbageCollect(
 	if err != nil {
 		return info, err
 	}
+	if err := removeGarbageCandidates(ctx, writer.directory, candidates, &info); err != nil {
+		return info, err
+	}
+	return info, nil
+}
+
+// reclaimUnpublishedArtifacts removes immutable files that no manifest can
+// reach. The caller holds the directory writer lock, so this is safe even when
+// the first replacement stopped before publishing generation one.
+func (writer *IndexWriter) reclaimUnpublishedArtifacts(ctx context.Context) (GarbageCollectInfo, error) {
+	if err := writer.ensureOpen(); err != nil {
+		return GarbageCollectInfo{}, err
+	}
+	if ctx == nil {
+		return GarbageCollectInfo{}, fmt.Errorf("search: garbage collection context is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return GarbageCollectInfo{}, err
+	}
+	if writer.replacement != nil || writer.hasPendingChanges() {
+		return GarbageCollectInfo{}, ErrPendingChanges
+	}
+	retained := make(map[string]struct{}, len(writer.committed.segments)*3)
+	for _, segment := range writer.committed.segments {
+		for _, name := range []string{segment.name, segment.identifierName, segment.deletionName} {
+			if name != "" {
+				retained[name] = struct{}{}
+			}
+		}
+	}
+	candidates, err := collectGarbageCandidates(writer.directory, retained)
+	if err != nil {
+		return GarbageCollectInfo{}, err
+	}
+	info := GarbageCollectInfo{}
+	if err := removeGarbageCandidates(ctx, writer.directory, candidates, &info); err != nil {
+		return info, err
+	}
+	return info, nil
+}
+
+func removeGarbageCandidates(
+	ctx context.Context,
+	directory string,
+	candidates []garbageCandidate,
+	info *GarbageCollectInfo,
+) error {
 	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
-			return info, err
+			return err
 		}
-		path := filepath.Join(writer.directory, candidate.name)
+		path := filepath.Join(directory, candidate.name)
 		if err := os.Remove(path); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return info, err
+			return err
 		}
 		info.ReclaimedBytes = addReclaimedBytes(info.ReclaimedBytes, candidate.bytes)
 		switch candidate.kind {
@@ -133,11 +180,11 @@ func (writer *IndexWriter) GarbageCollect(
 		}
 	}
 	if len(candidates) != 0 {
-		if err := syncDirectory(writer.directory); err != nil {
-			return info, err
+		if err := syncDirectory(directory); err != nil {
+			return err
 		}
 	}
-	return info, nil
+	return nil
 }
 
 func readAllManifests(directory string) ([]indexManifest, error) {
@@ -229,7 +276,8 @@ func collectGarbageCandidates(directory string, retained map[string]struct{}) ([
 func garbageArtifactKind(name string) (garbageKind, bool) {
 	if temporaryBase, temporary := splitTemporaryArtifactName(name); temporary {
 		if validArtifactFilename(temporaryBase, ".ks") || validArtifactFilename(temporaryBase, ".ki") ||
-			validArtifactFilename(temporaryBase, ".kd") || parseManifestFilenameValid(temporaryBase) {
+			validArtifactFilename(temporaryBase, ".kd") || parseManifestFilenameValid(temporaryBase) ||
+			temporaryBase == managedCheckpointFilename {
 			return garbageTemporary, true
 		}
 		return 0, false

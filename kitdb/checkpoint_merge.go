@@ -53,20 +53,46 @@ type logicalRowIterator struct {
 	hasMain     bool
 	initialized bool
 	pendingErr  error
+	reverse     bool
 }
 
 func newLogicalRowIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalRowIterator {
+	return newDirectionalLogicalRowIterator(main, overlay, start, false)
+}
+
+func newReverseLogicalRowIterator(main *mainImage, overlay map[string]rowMutation, end []byte) *logicalRowIterator {
+	return newDirectionalLogicalRowIterator(main, overlay, end, true)
+}
+
+func newDirectionalLogicalRowIterator(
+	main *mainImage,
+	overlay map[string]rowMutation,
+	bound []byte,
+	reverse bool,
+) *logicalRowIterator {
 	keys := make([]string, 0, len(overlay))
+	boundKey := string(bound)
 	for key := range overlay {
+		if len(bound) != 0 {
+			if reverse && key >= boundKey {
+				continue
+			}
+			if !reverse && key < boundKey {
+				continue
+			}
+		}
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	change := 0
-	if len(start) != 0 {
-		change = sort.SearchStrings(keys, string(start))
+	if reverse {
+		sort.Sort(sort.Reverse(sort.StringSlice(keys)))
+	}
+	mainIterator := main.iteratorFrom(bound)
+	if reverse {
+		mainIterator = main.reverseIteratorFrom(bound)
 	}
 	return &logicalRowIterator{
-		main: main.iteratorFrom(start), overlay: overlay, keys: keys, change: change,
+		main: mainIterator, overlay: overlay, keys: keys, reverse: reverse,
 	}
 }
 
@@ -102,13 +128,13 @@ func (iterator *logicalRowIterator) next() ([]byte, []byte, bool, error) {
 
 		changeKey := []byte(iterator.keys[iterator.change])
 		switch comparison := bytes.Compare(iterator.mainKey, changeKey); {
-		case comparison < 0:
+		case comparison < 0 && !iterator.reverse, comparison > 0 && iterator.reverse:
 			key, value := iterator.mainKey, iterator.mainValue
 			if err := iterator.advanceMain(); err != nil {
 				iterator.pendingErr = err
 			}
 			return key, value, true, nil
-		case comparison > 0:
+		case comparison > 0 && !iterator.reverse, comparison < 0 && iterator.reverse:
 			mutation := iterator.overlay[iterator.keys[iterator.change]]
 			iterator.change++
 			if !mutation.deleted {
@@ -131,6 +157,15 @@ func (iterator *logicalRowIterator) next() ([]byte, []byte, bool, error) {
 		}
 	}
 	return nil, nil, false, nil
+}
+
+func (iterator *logicalRowIterator) stats() CursorStats {
+	if iterator == nil {
+		return CursorStats{}
+	}
+	stats := iterator.main.stats()
+	stats.OverlayEntriesVisited += uint64(iterator.change)
+	return stats
 }
 
 func (iterator *logicalRowIterator) advanceMain() error {

@@ -99,6 +99,251 @@ func TestManagerBatchesMutationsAndPersists(t *testing.T) {
 	}
 }
 
+func TestManagerBatchesReplaySafeProjectionMutations(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	manager, err := NewManager(directory, ManagerOptions{
+		MutationQueueSize: 32, MutationBatchSize: 16, MutationBatchDelay: 100 * time.Millisecond,
+		DisableAutoCompact: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	documents := []Document{
+		{ID: "product/1", Fields: map[string]string{"text": "old keyboard"}},
+		{ID: "product/2", Fields: map[string]string{"text": "wireless mouse"}},
+		{ID: "product/3", Fields: map[string]string{"text": "usb headset"}},
+	}
+	if info, err := manager.UpsertMany(context.Background(), "tenant", schema, documents); err != nil || info.Documents != 3 {
+		_ = manager.Close()
+		t.Fatalf("initial upsert batch = %#v, %v", info, err)
+	}
+	if commits := manager.Stats().Commits; commits != 1 {
+		_ = manager.Close()
+		t.Fatalf("initial batch commits = %d, want 1", commits)
+	}
+
+	replayed := []Document{
+		{ID: "product/1", Fields: map[string]string{"text": "mechanical keyboard"}},
+		{ID: "product/2", Fields: map[string]string{"text": "silent mouse"}},
+		{ID: "product/4", Fields: map[string]string{"text": "web camera"}},
+	}
+	for replay := 0; replay < 2; replay++ {
+		info, err := manager.UpsertMany(context.Background(), "tenant", schema, replayed)
+		if err != nil || info.Documents != 4 {
+			_ = manager.Close()
+			t.Fatalf("upsert replay %d = %#v, %v", replay, info, err)
+		}
+	}
+	if commits := manager.Stats().Commits; commits != 3 {
+		_ = manager.Close()
+		t.Fatalf("commits after replay = %d, want 3", commits)
+	}
+	if info, err := manager.Mutate(context.Background(), "tenant", schema, MutationBatch{
+		Upserts: []Document{{ID: "product/4", Fields: map[string]string{"text": "better web camera"}}},
+		Deletes: []string{"product/3", "missing"},
+	}); err != nil || info.Documents != 3 {
+		_ = manager.Close()
+		t.Fatalf("mixed mutation batch = %#v, %v", info, err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewManager(directory, ManagerOptions{DisableAutoCompact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	for query, want := range map[string]string{
+		"mechanical": "product/1",
+		"silent":     "product/2",
+		"camera":     "product/4",
+	} {
+		hits, err := reopened.Search(context.Background(), "tenant", schema,
+			MatchQuery{Field: "text", Text: query}, SearchOptions{})
+		if err != nil || len(hits) != 1 || hits[0].ID != want {
+			t.Fatalf("reopened query %q = %#v, %v", query, hits, err)
+		}
+	}
+	for _, query := range []string{"old", "wireless", "headset"} {
+		hits, err := reopened.Search(context.Background(), "tenant", schema,
+			MatchQuery{Field: "text", Text: query}, SearchOptions{})
+		if err != nil || len(hits) != 0 {
+			t.Fatalf("stale query %q = %#v, %v", query, hits, err)
+		}
+	}
+}
+
+func TestManagerProjectionCheckpointPersistsAndReplaces(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	manager, err := NewManager(directory, ManagerOptions{DisableAutoCompact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.WriteCheckpoint(context.Background(), "tenant", schema, []byte("before-index")); !errors.Is(err, ErrIndexNotFound) {
+		_ = manager.Close()
+		t.Fatalf("checkpoint without generation = %v, want ErrIndexNotFound", err)
+	}
+	if _, err := manager.Add(context.Background(), "tenant", schema, Document{
+		ID: "doc", Fields: map[string]string{"text": "durable"},
+	}); err != nil {
+		_ = manager.Close()
+		t.Fatal(err)
+	}
+	for _, payload := range [][]byte{[]byte("source-tx-1"), []byte("source-tx-2")} {
+		if err := manager.WriteCheckpoint(context.Background(), "tenant", schema, payload); err != nil {
+			_ = manager.Close()
+			t.Fatal(err)
+		}
+	}
+	checkpoint, err := manager.ReadCheckpoint(context.Background(), "tenant", schema)
+	if err != nil || string(checkpoint) != "source-tx-2" {
+		_ = manager.Close()
+		t.Fatalf("live checkpoint = %q, %v", checkpoint, err)
+	}
+	checkpoint[0] = 'X'
+	again, err := manager.ReadCheckpoint(context.Background(), "tenant", schema)
+	if err != nil || string(again) != "source-tx-2" {
+		_ = manager.Close()
+		t.Fatalf("checkpoint alias = %q, %v", again, err)
+	}
+	if err := manager.Close(); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(
+		managedIndexDirectory(directory, "tenant"),
+		managedCheckpointFilename+".tmp-0011223344556677",
+	)
+	if err := os.WriteFile(orphan, []byte("unpublished"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewManager(directory, ManagerOptions{DisableAutoCompact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	checkpoint, err = reopened.ReadCheckpoint(context.Background(), "tenant", schema)
+	if err != nil || string(checkpoint) != "source-tx-2" {
+		t.Fatalf("reopened checkpoint = %q, %v", checkpoint, err)
+	}
+	if _, err := os.Stat(orphan); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan checkpoint staging remains: %v", err)
+	}
+}
+
+func TestManagerOpenReclaimsUnpublishedArtifacts(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	directory := managedIndexDirectory(root, "tenant")
+	writer, err := NewIndexWriter(directory, schema, WriterOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Add(context.Background(), Document{
+		ID: "published", Fields: map[string]string{"text": "durable document"},
+	}); err != nil {
+		_ = writer.Close()
+		t.Fatal(err)
+	}
+	committed, err := writer.Commit(context.Background())
+	if err != nil {
+		_ = writer.Close()
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	orphans := make([]string, 0, 2)
+	for _, suffix := range []string{".ks", ".ki"} {
+		name, err := newArtifactFilename("segment", committed.Generation+1, suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte("unpublished"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		orphans = append(orphans, path)
+	}
+
+	manager, err := NewManager(root, ManagerOptions{DisableAutoCompact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	hits, err := manager.Search(context.Background(), "tenant", schema,
+		MatchQuery{Field: "text", Text: "durable"}, SearchOptions{})
+	if err != nil || len(hits) != 1 || hits[0].ID != "published" {
+		t.Fatalf("search after orphan recovery = %#v, %v", hits, err)
+	}
+	for _, path := range orphans {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("unpublished artifact %q remains: %v", filepath.Base(path), err)
+		}
+	}
+}
+
+func TestManagerOpenReclaimsInitialUnpublishedArtifacts(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	directory := managedIndexDirectory(root, "tenant")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orphans := make([]string, 0, 2)
+	for _, suffix := range []string{".ks", ".ki"} {
+		name, err := newArtifactFilename("segment", 1, suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte("unpublished"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		orphans = append(orphans, path)
+	}
+
+	manager, err := NewManager(root, ManagerOptions{DisableAutoCompact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	hits, err := manager.Search(context.Background(), "tenant", schema,
+		MatchQuery{Field: "text", Text: "anything"}, SearchOptions{})
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("empty search after initial orphan recovery = %#v, %v", hits, err)
+	}
+	for _, path := range orphans {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("initial unpublished artifact %q remains: %v", filepath.Base(path), err)
+		}
+	}
+	manifests, err := filepath.Glob(filepath.Join(directory, "*.km"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifests) != 0 {
+		t.Fatalf("initial orphan recovery published manifests: %#v", manifests)
+	}
+}
+
 func TestManagerSnapshotLeaseControlsGenerationGC(t *testing.T) {
 	schema, err := NewSchema(Text("text", StandardAnalyzer()))
 	if err != nil {

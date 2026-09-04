@@ -2,6 +2,7 @@ package kitdb
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"hash/crc32"
 	"testing"
@@ -72,6 +73,52 @@ func FuzzDecodeMutationPageNeverPanics(f *testing.F) {
 		}
 		if len(page.rows) != int(records) || page.weight < int64(len(data)) {
 			t.Fatalf("mutation decoder returned invalid page: records=%d rows=%d weight=%d data=%d", records, len(page.rows), page.weight, len(data))
+		}
+	})
+}
+
+func FuzzReadReplicaBatchMessageNeverPanics(f *testing.F) {
+	batch := replicaWireBatchForTest(f)
+	var encoded bytes.Buffer
+	if _, err := WriteReplicaBatchMessage(context.Background(), &encoded, batch); err != nil {
+		f.Fatalf("WriteReplicaBatchMessage seed: %v", err)
+	}
+	f.Add(encoded.Bytes())
+	f.Add([]byte{})
+	f.Add([]byte(replicaBatchMessageMagic))
+
+	f.Fuzz(func(t *testing.T, message []byte) {
+		decoded, err := ReadReplicaBatchMessage(
+			context.Background(),
+			bytes.NewReader(message),
+			ReplicaBatchLimits{MaxTransactions: 16, MaxBytes: 1 << 20},
+		)
+		if err != nil {
+			return
+		}
+		if err := validateReplicaBatchEnvelope(decoded); err != nil {
+			t.Fatalf("wire decoder accepted invalid batch: %v", err)
+		}
+	})
+}
+
+func FuzzReadReplicaAcknowledgementMessageNeverPanics(f *testing.F) {
+	acknowledgement := replicaAcknowledgement(replicaWireBatchForTest(f))
+	var encoded bytes.Buffer
+	if _, err := WriteReplicaAcknowledgementMessage(context.Background(), &encoded, acknowledgement); err != nil {
+		f.Fatalf("WriteReplicaAcknowledgementMessage seed: %v", err)
+	}
+	f.Add(encoded.Bytes())
+	f.Add([]byte{})
+	f.Add([]byte(replicaAckMessageMagic))
+
+	f.Fuzz(func(t *testing.T, message []byte) {
+		decoded, err := ReadReplicaAcknowledgementMessage(context.Background(), bytes.NewReader(message))
+		if err != nil {
+			return
+		}
+		if err := validateReplicaAcknowledgement(decoded); err != nil {
+			t.Fatalf("wire decoder accepted invalid acknowledgement: %v", err)
 		}
 	})
 }

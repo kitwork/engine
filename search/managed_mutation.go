@@ -22,7 +22,7 @@ func (managed *managedIndex) mutationPayloadBytes(ctx context.Context, request m
 		}
 		return int64(len(request.identifier)) + managedMutationBaseOverhead, nil
 	}
-	if request.kind != mutationAdd && request.kind != mutationUpdate {
+	if request.kind != mutationAdd && request.kind != mutationUpdate && request.kind != mutationUpsert {
 		return 0, fmt.Errorf("search: unknown managed mutation")
 	}
 	document := request.document

@@ -22,21 +22,22 @@ type WriterOptions struct {
 // change through immutable generation manifests. It is not safe for concurrent
 // use, and only one process may write an index directory at a time.
 type IndexWriter struct {
-	directory      string
-	schema         Schema
-	segmentOptions BuildOptions
-	builder        *Builder
-	committed      indexManifest
-	snapshot       *Index
-	identifier     map[int]*identifierIndex
-	pending        []manifestSegment
-	pendingDeletes map[int]map[uint32]struct{}
-	pendingIDs     map[string]struct{}
-	replacement    *Replacement
-	lock           *writerLock
-	fault          writerFaultInjector
-	directorySync  func(string) error
-	closed         bool
+	directory       string
+	schema          Schema
+	segmentOptions  BuildOptions
+	builder         *Builder
+	committed       indexManifest
+	snapshot        *Index
+	identifier      map[int]*identifierIndex
+	pending         []manifestSegment
+	pendingObsolete []manifestSegment
+	pendingDeletes  map[int]map[uint32]struct{}
+	pendingIDs      map[string]struct{}
+	replacement     *Replacement
+	lock            *writerLock
+	fault           writerFaultInjector
+	directorySync   func(string) error
+	closed          bool
 }
 
 // NewIndexWriter creates or resumes an immutable-generation index directory.
@@ -244,6 +245,35 @@ func (writer *IndexWriter) Update(ctx context.Context, document Document) error 
 	return nil
 }
 
+// Upsert adds a missing document or replaces every live committed occurrence
+// in the next snapshot. Replaying the same source mutation is therefore safe:
+// the new document and any tombstones become visible in one Commit.
+func (writer *IndexWriter) Upsert(ctx context.Context, document Document) error {
+	if err := writer.ensureOpen(); err != nil {
+		return err
+	}
+	if writer.replacement != nil {
+		return ErrReplacementActive
+	}
+	if ctx == nil {
+		return fmt.Errorf("search: upsert context is nil")
+	}
+	if _, pending := writer.pendingIDs[document.ID]; pending {
+		return ErrPendingDocument
+	}
+	locations, err := writer.findCommittedDocuments(ctx, document.ID)
+	if err != nil {
+		return err
+	}
+	if err := writer.Add(ctx, document); err != nil {
+		return err
+	}
+	if len(locations) != 0 {
+		writer.stageDeletions(locations)
+	}
+	return nil
+}
+
 // Delete tombstones every live committed occurrence of identifier in the next
 // snapshot. It reports false when the identifier is not currently live.
 func (writer *IndexWriter) Delete(ctx context.Context, identifier string) (bool, error) {
@@ -386,6 +416,11 @@ func (writer *IndexWriter) flush(ctx context.Context) error {
 	if writer.builder.DocumentCount() == 0 {
 		return nil
 	}
+	if writer.replacement != nil && len(writer.pending) >= replacementCompactionTriggerSegments-1 {
+		if err := writer.compactPendingReplacement(ctx, replacementCompactionIngestTargetSegments); err != nil {
+			return err
+		}
+	}
 	if writer.pendingSegmentCount() >= manifestMaximumSegments {
 		return ErrTooManySegments
 	}
@@ -446,6 +481,9 @@ func (writer *IndexWriter) commit(ctx context.Context) (IndexInfo, error) {
 		return IndexInfo{}, err
 	}
 	if writer.replacement != nil {
+		if err := writer.compactPendingReplacement(ctx, replacementCompactionFinalTargetSegments); err != nil {
+			return IndexInfo{}, err
+		}
 		if err := writer.validatePendingIdentifiers(ctx); err != nil {
 			return IndexInfo{}, err
 		}
@@ -514,6 +552,7 @@ func (writer *IndexWriter) commit(ctx context.Context) (IndexInfo, error) {
 	writer.pendingDeletes = make(map[int]map[uint32]struct{})
 	writer.pendingIDs = make(map[string]struct{})
 	writer.finishReplacement()
+	_ = writer.cleanupObsoletePendingArtifacts()
 	keepDeletions = true
 	if previous != nil {
 		_ = previous.Close()
@@ -526,6 +565,7 @@ func (writer *IndexWriter) abortReplacement() error {
 	removeErr := writer.removePendingArtifacts()
 	builder, builderErr := NewBuilder(writer.schema, writer.segmentOptions)
 	writer.pending = nil
+	writer.pendingObsolete = nil
 	writer.pendingDeletes = make(map[int]map[uint32]struct{})
 	writer.pendingIDs = make(map[string]struct{})
 	writer.finishReplacement()
@@ -536,8 +576,15 @@ func (writer *IndexWriter) abortReplacement() error {
 }
 
 func (writer *IndexWriter) removePendingArtifacts() error {
+	segments := make([]manifestSegment, 0, len(writer.pending)+len(writer.pendingObsolete))
+	segments = append(segments, writer.pending...)
+	segments = append(segments, writer.pendingObsolete...)
+	return writer.removeSegmentArtifacts(segments)
+}
+
+func (writer *IndexWriter) removeSegmentArtifacts(segments []manifestSegment) error {
 	var removeErrors []error
-	for _, segment := range writer.pending {
+	for _, segment := range segments {
 		for _, name := range []string{segment.name, segment.identifierName, segment.deletionName} {
 			if name == "" {
 				continue
@@ -654,6 +701,7 @@ func (writer *IndexWriter) Close() error {
 		removeErrors = append(removeErrors, err)
 	}
 	writer.pending = nil
+	writer.pendingObsolete = nil
 	writer.pendingDeletes = nil
 	writer.pendingIDs = nil
 	writer.finishReplacement()

@@ -22,7 +22,7 @@ import (
 //	{ "db": "app.db", "sql": "select code, clicks from links where clicks > ?", "args": [0] }
 //	→ { "rows": [ { "code": "kitwork", "clicks": 3 }, ... ] }
 //
-// Safety: OFF unless the db is declared served — turso("db", {schema}, { token }) (no serve → 404,
+// Safety: OFF unless the db is declared served — sqlite("db", {schema}, { token }) (no serve → 404,
 // nothing exposed). Read-only — only SELECT/WITH is accepted, and stacked statements are rejected — so
 // a leaked token cannot mutate or drop data here (writes go through the libSQL endpoint under an
 // access:"readwrite" serve).
@@ -75,11 +75,12 @@ func (t *Tenant) serveDataAPIIf(w http.ResponseWriter, r *http.Request, scope *r
 		writeDataJSON(w, http.StatusOK, map[string]any{"rows": kitDBRemoteResultMaps(result)})
 		return true
 	}
-
-	conn := tursoForRequest(t, dbName, scope).db()
-	if cfg.engine == "sqlite" {
-		conn = sqliteForRequest(t, dbName, scope).db()
+	if cfg.engine != "sqlite" {
+		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database engine unavailable"})
+		return true
 	}
+
+	conn := sqliteForRequest(t, dbName, scope).db()
 	if conn == nil {
 		writeDataJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
 		return true

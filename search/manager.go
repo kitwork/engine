@@ -528,6 +528,97 @@ func (manager *Manager) Update(ctx context.Context, key string, schema Schema, d
 	return response.info, err
 }
 
+// Upsert durably adds a missing document or replaces its live committed value.
+// It is safe to replay after a projection-watermark crash window.
+func (manager *Manager) Upsert(ctx context.Context, key string, schema Schema, document Document) (IndexInfo, error) {
+	managed, releaseManaged, err := manager.managed(ctx, key, schema)
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	defer releaseManaged()
+	response, err := managed.submit(ctx, mutationRequest{kind: mutationUpsert, document: document})
+	return response.info, err
+}
+
+// UpsertMany admits documents together so the managed writer can commit them
+// in bounded batches. Every document identifier must be distinct in one call.
+func (manager *Manager) UpsertMany(
+	ctx context.Context,
+	key string,
+	schema Schema,
+	documents []Document,
+) (IndexInfo, error) {
+	if len(documents) == 0 {
+		return manager.currentInfo(ctx, key, schema)
+	}
+	requests := make([]mutationRequest, len(documents))
+	identifiers := make(map[string]struct{}, len(documents))
+	for index, document := range documents {
+		if _, duplicate := identifiers[document.ID]; duplicate {
+			return IndexInfo{}, fmt.Errorf("search: duplicate document identifier %q in upsert batch", document.ID)
+		}
+		identifiers[document.ID] = struct{}{}
+		requests[index] = mutationRequest{kind: mutationUpsert, document: document}
+	}
+	managed, releaseManaged, err := manager.managed(ctx, key, schema)
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	defer releaseManaged()
+	responses, err := managed.submitMany(ctx, requests)
+	if len(responses) == 0 {
+		return IndexInfo{}, err
+	}
+	return responses[len(responses)-1].info, err
+}
+
+// MutationBatch is one replay-safe projection change set. Upserts and deletes
+// share the same writer admission window and each identifier may occur once.
+type MutationBatch struct {
+	Upserts []Document
+	Deletes []string
+}
+
+// Mutate applies a mixed projection change set through bounded writer batches.
+// The returned snapshot includes every successfully committed request.
+func (manager *Manager) Mutate(
+	ctx context.Context,
+	key string,
+	schema Schema,
+	batch MutationBatch,
+) (IndexInfo, error) {
+	count := len(batch.Upserts) + len(batch.Deletes)
+	if count == 0 {
+		return manager.currentInfo(ctx, key, schema)
+	}
+	requests := make([]mutationRequest, 0, count)
+	identifiers := make(map[string]struct{}, count)
+	for _, document := range batch.Upserts {
+		if _, duplicate := identifiers[document.ID]; duplicate {
+			return IndexInfo{}, fmt.Errorf("search: duplicate document identifier %q in mutation batch", document.ID)
+		}
+		identifiers[document.ID] = struct{}{}
+		requests = append(requests, mutationRequest{kind: mutationUpsert, document: document})
+	}
+	for _, identifier := range batch.Deletes {
+		if _, duplicate := identifiers[identifier]; duplicate {
+			return IndexInfo{}, fmt.Errorf("search: duplicate document identifier %q in mutation batch", identifier)
+		}
+		identifiers[identifier] = struct{}{}
+		requests = append(requests, mutationRequest{kind: mutationDelete, identifier: identifier})
+	}
+	managed, releaseManaged, err := manager.managed(ctx, key, schema)
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	defer releaseManaged()
+	responses, err := managed.submitMany(ctx, requests)
+	if len(responses) == 0 {
+		return IndexInfo{}, err
+	}
+	return responses[len(responses)-1].info, err
+}
+
 // Delete durably tombstones a live committed identifier.
 func (manager *Manager) Delete(ctx context.Context, key string, schema Schema, identifier string) (bool, IndexInfo, error) {
 	managed, releaseManaged, err := manager.managed(ctx, key, schema)
@@ -537,6 +628,47 @@ func (manager *Manager) Delete(ctx context.Context, key string, schema Schema, i
 	defer releaseManaged()
 	response, err := managed.submit(ctx, mutationRequest{kind: mutationDelete, identifier: identifier})
 	return response.deleted, response.info, err
+}
+
+// DeleteMany durably tombstones distinct identifiers in bounded writer batches.
+// Missing identifiers are idempotent no-ops.
+func (manager *Manager) DeleteMany(
+	ctx context.Context,
+	key string,
+	schema Schema,
+	identifiers []string,
+) (IndexInfo, error) {
+	if len(identifiers) == 0 {
+		return manager.currentInfo(ctx, key, schema)
+	}
+	requests := make([]mutationRequest, len(identifiers))
+	seen := make(map[string]struct{}, len(identifiers))
+	for index, identifier := range identifiers {
+		if _, duplicate := seen[identifier]; duplicate {
+			return IndexInfo{}, fmt.Errorf("search: duplicate document identifier %q in delete batch", identifier)
+		}
+		seen[identifier] = struct{}{}
+		requests[index] = mutationRequest{kind: mutationDelete, identifier: identifier}
+	}
+	managed, releaseManaged, err := manager.managed(ctx, key, schema)
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	defer releaseManaged()
+	responses, err := managed.submitMany(ctx, requests)
+	if len(responses) == 0 {
+		return IndexInfo{}, err
+	}
+	return responses[len(responses)-1].info, err
+}
+
+func (manager *Manager) currentInfo(ctx context.Context, key string, schema Schema) (IndexInfo, error) {
+	managed, releaseManaged, err := manager.managed(ctx, key, schema)
+	if err != nil {
+		return IndexInfo{}, err
+	}
+	defer releaseManaged()
+	return managed.currentInfo(), nil
 }
 
 // BeginReplacement starts a bounded streaming rebuild for one tenant. Search

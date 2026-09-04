@@ -34,6 +34,7 @@ type BuildOptions struct {
 	MaxIdentifierBytes  int
 	MaxTermBytes        int
 	MaxTokensPerField   int
+	SkipLongTerms       bool
 }
 
 func normalizeBuildOptions(options BuildOptions) (BuildOptions, error) {
@@ -167,6 +168,9 @@ func (builder *Builder) AddContext(ctx context.Context, document Document) error
 				return false
 			}
 			if len(token.Term) > builder.options.MaxTermBytes {
+				if builder.options.SkipLongTerms {
+					return true
+				}
 				tokenErr = fmt.Errorf("search: analyzer %q emitted a term exceeding %d bytes", field.Analyzer.Identifier(), builder.options.MaxTermBytes)
 				return false
 			}

@@ -5,8 +5,66 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func BenchmarkConcurrentDurableCommits(b *testing.B) {
+	b.Run("one_transaction_per_sync", func(b *testing.B) {
+		benchmarkConcurrentDurableCommits(b, 1, 0)
+	})
+	b.Run("group_commit", func(b *testing.B) {
+		benchmarkConcurrentDurableCommits(b, 64, 200*time.Microsecond)
+	})
+}
+
+func benchmarkConcurrentDurableCommits(b *testing.B, maxBatch int, delay time.Duration) {
+	db, err := OpenWithOptions(filepath.Join(b.TempDir(), "tenant.kitdb"), OpenOptions{
+		CommitQueueSize:  256,
+		MaxCommitBatch:   maxBatch,
+		GroupCommitDelay: delay,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	value := bytes.Repeat([]byte{'v'}, 128)
+	var sequence atomic.Uint64
+	b.SetParallelism(4)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(parallel *testing.PB) {
+		key := make([]byte, 8)
+		for parallel.Next() {
+			binary.BigEndian.PutUint64(key, sequence.Add(1))
+			transaction, err := db.Begin()
+			if err == nil {
+				err = transaction.Put(key, value)
+			}
+			if err == nil {
+				_, err = transaction.Commit()
+			} else if transaction != nil {
+				_ = transaction.Rollback()
+			}
+			if err != nil {
+				b.Errorf("durable commit: %v", err)
+				return
+			}
+		}
+	})
+	b.StopTimer()
+	stats, err := db.Stats()
+	if err != nil {
+		b.Fatal(err)
+	}
+	if stats.CommitSyncs != 0 {
+		b.ReportMetric(float64(stats.CommittedTransactions)/float64(stats.CommitSyncs), "tx/sync")
+	}
+	b.ReportMetric(float64(stats.LargestCommitBatch), "max-batch")
+	if err := db.Close(); err != nil {
+		b.Fatal(err)
+	}
+}
 
 func BenchmarkPointLookup100K(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "tenant.kitdb")

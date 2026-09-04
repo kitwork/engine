@@ -14,6 +14,40 @@ import (
 func (db *DB) Checkpoint() (uint64, error) {
 	db.commitMu.Lock()
 	defer db.commitMu.Unlock()
+	return db.checkpointLocked()
+}
+
+// checkpointCursor fixes one exact source boundary while commitMu still
+// excludes a later commit or checkpoint from changing the visible cursor.
+func (db *DB) checkpointCursor() (HistoryCursor, error) {
+	db.commitMu.Lock()
+	defer db.commitMu.Unlock()
+
+	transaction, err := db.checkpointLocked()
+	if err != nil {
+		return HistoryCursor{}, err
+	}
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	if err := db.stateErrorLocked(); err != nil {
+		return HistoryCursor{}, err
+	}
+	if db.lastTx != transaction {
+		return HistoryCursor{}, fmt.Errorf(
+			"kitdb: checkpoint cursor transaction changed from %d to %d",
+			transaction,
+			db.lastTx,
+		)
+	}
+	return HistoryCursor{
+		DatabaseID:  db.ID(),
+		Transaction: transaction,
+		Checksum:    db.walChecksum,
+	}, nil
+}
+
+// checkpointLocked requires commitMu.
+func (db *DB) checkpointLocked() (uint64, error) {
 
 	db.mu.RLock()
 	if err := db.stateErrorLocked(); err != nil {
@@ -22,8 +56,10 @@ func (db *DB) Checkpoint() (uint64, error) {
 	}
 	transaction := db.lastTx
 	boundaryChecksum := db.walChecksum
+	lastCommitTime := db.lastCommitTime
 	checkpointTransaction := db.checkpointTx
 	walBaseTransaction := db.walBaseTx
+	walEnd := db.walEnd
 	identity := db.identity
 	main := db.main
 	overlay := db.overlay
@@ -89,7 +125,21 @@ func (db *DB) Checkpoint() (uint64, error) {
 	if walBaseTransaction == transaction {
 		return transaction, nil
 	}
-	return transaction, db.rotateWALLocked(transaction, boundaryChecksum)
+	db.historyMu.Lock()
+	sealErr := db.sealHistoryLocked(walEnd, walBaseTransaction, transaction, boundaryChecksum, lastCommitTime)
+	db.historyMu.Unlock()
+	if sealErr != nil {
+		db.markUnavailable(sealErr)
+		return transaction, errors.Join(ErrUnavailable, sealErr)
+	}
+	if err := db.rotateWALLocked(transaction, boundaryChecksum); err != nil {
+		if db.history != nil {
+			db.markUnavailable(err)
+			return transaction, errors.Join(ErrUnavailable, err)
+		}
+		return transaction, err
+	}
+	return transaction, nil
 }
 
 func countMergedRecords(main *mainImage, overlay map[string]rowMutation) (uint64, error) {

@@ -54,6 +54,7 @@ type managedIndex struct {
 	statusMu            sync.Mutex
 	lastMaintenanceErr  error
 	lastMaintenanceTime time.Time
+	checkpointMu        sync.Mutex
 
 	closeOnce sync.Once
 	closeErr  error
@@ -73,6 +74,19 @@ func openManagedIndex(manager *Manager, key string, schema Schema) (*managedInde
 	if err != nil {
 		_ = writer.Close()
 		return nil, err
+	}
+	if current != nil {
+		// A process can stop after immutable segment publication but before the
+		// manifest commit. No reader can reference those files, so reclaim them
+		// while this manager holds the directory's sole writer lock.
+		if _, err := writer.GarbageCollect(manager.ctx, GarbageCollectOptions{}); err != nil {
+			_ = current.Close()
+			_ = writer.Close()
+			return nil, fmt.Errorf("search: reclaim unpublished artifacts: %w", err)
+		}
+	} else if _, err := writer.reclaimUnpublishedArtifacts(manager.ctx); err != nil {
+		_ = writer.Close()
+		return nil, fmt.Errorf("search: reclaim unpublished artifacts: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	managed := &managedIndex{
@@ -227,43 +241,83 @@ func (managed *managedIndex) refreshSnapshot() (IndexInfo, error) {
 }
 
 func (managed *managedIndex) submit(ctx context.Context, request mutationRequest) (mutationResponse, error) {
+	response, err := managed.admit(ctx, request)
+	if err != nil {
+		return mutationResponse{}, err
+	}
+	result := <-response
+	return result, result.err
+}
+
+// submitMany admits every request before waiting, allowing the single writer
+// to gather distinct identities into bounded durable batches. An admission or
+// mutation failure never abandons already accepted responses; callers can
+// safely replay the source batch because projection upserts/deletes are
+// idempotent.
+func (managed *managedIndex) submitMany(
+	ctx context.Context,
+	requests []mutationRequest,
+) ([]mutationResponse, error) {
+	responses := make([]<-chan mutationResponse, 0, len(requests))
+	var resultErr error
+	for _, request := range requests {
+		response, err := managed.admit(ctx, request)
+		if err != nil {
+			resultErr = errors.Join(resultErr, err)
+			break
+		}
+		responses = append(responses, response)
+	}
+	results := make([]mutationResponse, 0, len(responses))
+	for _, response := range responses {
+		result := <-response
+		results = append(results, result)
+		resultErr = errors.Join(resultErr, result.err)
+	}
+	return results, resultErr
+}
+
+func (managed *managedIndex) admit(
+	ctx context.Context,
+	request mutationRequest,
+) (<-chan mutationResponse, error) {
 	if managed == nil {
-		return mutationResponse{}, ErrClosed
+		return nil, ErrClosed
 	}
 	if ctx == nil {
-		return mutationResponse{}, fmt.Errorf("search: mutation context is nil")
+		return nil, fmt.Errorf("search: mutation context is nil")
 	}
 	if err := ctx.Err(); err != nil {
-		return mutationResponse{}, err
+		return nil, err
 	}
 	managed.admission.RLock()
 	accepting := managed.accepting
 	replacing := managed.replacement != nil
 	managed.admission.RUnlock()
 	if !accepting {
-		return mutationResponse{}, ErrClosed
+		return nil, ErrClosed
 	}
 	if replacing {
-		return mutationResponse{}, ErrReplacementActive
+		return nil, ErrReplacementActive
 	}
 	managed.failureMu.Lock()
 	failure := managed.failure
 	managed.failureMu.Unlock()
 	if failure != nil {
-		return mutationResponse{}, failure
+		return nil, failure
 	}
 	reservedBytes, err := managed.mutationPayloadBytes(ctx, request)
 	if err != nil {
-		return mutationResponse{}, err
+		return nil, err
 	}
 	admissionCtx, releaseAdmission := linkContexts(ctx, managed.ctx, managed.manager.ctx)
 	defer releaseAdmission()
 	if err := managed.mutationBytes.acquire(admissionCtx, reservedBytes); err != nil {
-		return mutationResponse{}, managed.admissionError(ctx, err)
+		return nil, managed.admissionError(ctx, err)
 	}
 	if err := managed.manager.mutationBytes.acquire(admissionCtx, reservedBytes); err != nil {
 		managed.mutationBytes.release(reservedBytes)
-		return mutationResponse{}, managed.admissionError(ctx, err)
+		return nil, managed.admissionError(ctx, err)
 	}
 	managed.pendingMutationBytes.Add(reservedBytes)
 	managed.manager.pendingMutationBytes.Add(reservedBytes)
@@ -275,25 +329,25 @@ func (managed *managedIndex) submit(ctx context.Context, request mutationRequest
 	}()
 	request, err = managed.cloneMutation(admissionCtx, request)
 	if err != nil {
-		return mutationResponse{}, managed.admissionError(ctx, err)
+		return nil, managed.admissionError(ctx, err)
 	}
 	request.reservedBytes = reservedBytes
 	request.response = make(chan mutationResponse, 1)
 	managed.admission.RLock()
 	if !managed.accepting {
 		managed.admission.RUnlock()
-		return mutationResponse{}, ErrClosed
+		return nil, ErrClosed
 	}
 	if managed.replacement != nil {
 		managed.admission.RUnlock()
-		return mutationResponse{}, ErrReplacementActive
+		return nil, ErrReplacementActive
 	}
 	managed.failureMu.Lock()
 	failure = managed.failure
 	managed.failureMu.Unlock()
 	if failure != nil {
 		managed.admission.RUnlock()
-		return mutationResponse{}, failure
+		return nil, failure
 	}
 	managed.manager.queuedMutations.Add(1)
 	managed.queuedMutations.Add(1)
@@ -312,13 +366,12 @@ func (managed *managedIndex) submit(ctx context.Context, request mutationRequest
 		managed.queuedMutations.Add(-1)
 		managed.pendingMutations.Add(-1)
 		if err := ctx.Err(); err != nil {
-			return mutationResponse{}, err
+			return nil, err
 		}
-		return mutationResponse{}, ErrClosed
+		return nil, ErrClosed
 	}
 	releaseBudget = false
-	response := <-request.response
-	return response, response.err
+	return request.response, nil
 }
 
 func (managed *managedIndex) stats() ManagedIndexStats {

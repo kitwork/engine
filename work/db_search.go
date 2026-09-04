@@ -14,7 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	kitdbengine "github.com/kitwork/engine/kitdb"
 	"github.com/kitwork/engine/search"
 	"github.com/kitwork/engine/value"
 )
@@ -24,12 +26,24 @@ const (
 	searchSnippetTokens  = 18
 	searchSnippetContext = 4
 	searchMaximumLimit   = 200
+	searchForegroundWait = 2 * time.Second
 )
+
+var errKitDBSearchProjectionBuilding = errors.New("search projection is building in the background")
 
 type searchIndexState struct {
 	setupMu       sync.Mutex
 	revisionReady bool
 	rebuild       chan struct{}
+
+	kitDBBuildMu sync.Mutex
+	kitDBBuild   *kitDBSearchBuild
+}
+
+type kitDBSearchBuild struct {
+	signature string
+	done      chan struct{}
+	err       error
 }
 
 type searchColumn struct {
@@ -97,20 +111,37 @@ func (t *SchemaTable) runSearch() value.Value {
 	if t.scope != nil {
 		ctx = t.scope.Context()
 	}
-	source := t.source().db()
-	if source == nil {
-		return value.Value{K: value.Invalid, V: "db: search: database unavailable"}
-	}
 	manager, err := t.tenant.searchManagerFor()
 	if err != nil || manager == nil {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search manager: %v", err)}
 	}
-	schema, fields, err := newSearchSchema(columns)
+	schema, allFields, err := newSearchSchema(columns)
 	if err != nil {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search schema: %v", err)}
 	}
+	fields, snippetColumns, err := t.selectedSearchColumns(columns, allFields)
+	if err != nil {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: %v", err)}
+	}
 	indexKey := t.searchIndexKey(schema)
 	state := t.tenant.searchIndexState(indexKey)
+	if t.engine == "kitdb" {
+		if t.transaction != nil {
+			return value.Value{K: value.Invalid, V: "db: KitDB search is unavailable inside a record transaction"}
+		}
+		hits, err := t.searchFreshKitDBSnapshot(
+			ctx, manager, state, indexKey, schema, fields, primaryKey, columns, limit,
+		)
+		if err != nil {
+			return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: %v", err)}
+		}
+		t.searchHitCount = len(hits)
+		return t.hydrateKitDBSearchHits(ctx, hits, primaryKey, snippetColumns)
+	}
+	source := t.source().db()
+	if source == nil {
+		return value.Value{K: value.Invalid, V: "db: search: database unavailable"}
+	}
 	if err := t.ensureSearchRevision(ctx, source, state); err != nil {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search revision: %v", err)}
 	}
@@ -118,7 +149,222 @@ func (t *SchemaTable) runSearch() value.Value {
 	if err != nil {
 		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: %v", err)}
 	}
-	return t.hydrateSearchHits(ctx, hits, primaryKey, columns)
+	t.searchHitCount = len(hits)
+	return t.hydrateSearchHits(ctx, hits, primaryKey, snippetColumns)
+}
+
+func (t *SchemaTable) selectedSearchColumns(
+	columns []searchColumn,
+	allFields []string,
+) ([]string, []searchColumn, error) {
+	if len(t.searchFields) == 0 {
+		return allFields, columns, nil
+	}
+	byName := make(map[string]searchColumn, len(columns))
+	for _, column := range columns {
+		byName[column.name] = column
+	}
+	fields := make([]string, 0, len(t.searchFields))
+	selected := make([]searchColumn, 0, len(t.searchFields))
+	seen := make(map[string]struct{}, len(t.searchFields))
+	for _, field := range t.searchFields {
+		column, exists := byName[field]
+		if !exists {
+			return nil, nil, fmt.Errorf("field %q is not searchable", field)
+		}
+		if _, duplicate := seen[field]; duplicate {
+			return nil, nil, fmt.Errorf("duplicate search field %q", field)
+		}
+		seen[field] = struct{}{}
+		fields = append(fields, field)
+		selected = append(selected, column)
+	}
+	return fields, selected, nil
+}
+
+func (t *SchemaTable) searchFreshKitDBSnapshot(
+	ctx context.Context,
+	manager *search.Manager,
+	state *searchIndexState,
+	indexKey string,
+	schema search.Schema,
+	fields []string,
+	primaryKey string,
+	columns []searchColumn,
+	limit int,
+) ([]search.Hit, error) {
+	query := search.MatchQuery{
+		Fields: fields, Text: t.searchText, IdentifierPrefix: t.searchIdentifierPrefix,
+	}
+	options := search.SearchOptions{Limit: limit}
+	background := *t
+	background.scope = nil
+	background.transaction = nil
+	background.referential = nil
+	background.q = nil
+	background.searchText = ""
+	background.searchFields = nil
+	background.searchIdentifierPrefix = ""
+
+	for attempt := 0; attempt < 3; attempt++ {
+		current, err := t.readCurrentKitDBSearchCursor()
+		if err != nil {
+			return nil, err
+		}
+		fresh, err := t.kitDBSearchProjectionFresh(ctx, manager, indexKey, schema, current)
+		if err != nil {
+			return nil, err
+		}
+		if fresh {
+			return manager.Search(ctx, indexKey, schema, query, options)
+		}
+
+		// A KitDB projection belongs to the node, not to the SQL statement
+		// that first discovers it is stale. Forget only a completed worker;
+		// concurrent callers continue sharing the active one.
+		state.forgetCompletedKitDBSearchBuild()
+		signature := kitDBSearchCursorSignature(current) + fmt.Sprintf(
+			":%d:%d", t.rowGeneration, t.rowEpoch,
+		)
+		build := state.ensureKitDBSearchBuild(signature, func() error {
+			return background.synchronizeKitDBSearchProjection(
+				context.Background(), manager, indexKey, schema, primaryKey, columns,
+			)
+		})
+		if err := waitKitDBSearchBuild(ctx, build, searchForegroundWait); err != nil {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("search projection could not reach a stable source boundary; retry")
+}
+
+// ensureKitDBSearchBuild coalesces every request for one index behind a
+// process-owned replacement. A failed or superseded completed build can be
+// replaced by the next request; a successful build remains reusable until the
+// source signature changes.
+func (state *searchIndexState) ensureKitDBSearchBuild(
+	signature string,
+	run func() error,
+) *kitDBSearchBuild {
+	state.kitDBBuildMu.Lock()
+	if existing := state.kitDBBuild; existing != nil {
+		select {
+		case <-existing.done:
+			if existing.err == nil && existing.signature == signature {
+				state.kitDBBuildMu.Unlock()
+				return existing
+			}
+		default:
+			state.kitDBBuildMu.Unlock()
+			return existing
+		}
+	}
+	build := &kitDBSearchBuild{signature: signature, done: make(chan struct{})}
+	state.kitDBBuild = build
+	state.kitDBBuildMu.Unlock()
+
+	go func() {
+		err := run()
+		state.kitDBBuildMu.Lock()
+		build.err = err
+		close(build.done)
+		state.kitDBBuildMu.Unlock()
+	}()
+	return build
+}
+
+func (state *searchIndexState) forgetCompletedKitDBSearchBuild() {
+	state.kitDBBuildMu.Lock()
+	defer state.kitDBBuildMu.Unlock()
+	if state.kitDBBuild == nil {
+		return
+	}
+	select {
+	case <-state.kitDBBuild.done:
+		state.kitDBBuild = nil
+	default:
+	}
+}
+
+func waitKitDBSearchBuild(
+	ctx context.Context,
+	build *kitDBSearchBuild,
+	foregroundWait time.Duration,
+) error {
+	if foregroundWait <= 0 {
+		select {
+		case <-build.done:
+			return build.err
+		case <-ctx.Done():
+			return fmt.Errorf("search projection continues building in the background: %w", ctx.Err())
+		}
+	}
+	timer := time.NewTimer(foregroundWait)
+	defer timer.Stop()
+	select {
+	case <-build.done:
+		return build.err
+	case <-ctx.Done():
+		return fmt.Errorf("search projection continues building in the background: %w", ctx.Err())
+	case <-timer.C:
+		return fmt.Errorf("%w for source %s; retry later", errKitDBSearchProjectionBuilding, build.signature)
+	}
+}
+
+func (t *SchemaTable) currentKitDBSearchSignature(database *kitdbengine.DB) (string, error) {
+	transaction, err := database.LastTransaction()
+	if err != nil {
+		return "", err
+	}
+	contentRevision, revisionFound, err := loadKitDBContentRevision(
+		database, t.definition,
+	)
+	if err != nil {
+		return "", err
+	}
+	if revisionFound {
+		return "r:" + strconv.FormatUint(contentRevision, 10), nil
+	}
+	statistics, found, dirty, err := loadKitDBStatistics(database, t.definition)
+	if err != nil {
+		return "", err
+	}
+	if found && !dirty && statistics != nil && statistics.StructID == t.definition.ID {
+		// ANALYZE records the exact source snapshot it inspected. Its own
+		// metadata commit and catalog-only changes cannot make the table's
+		// search projection stale when this boundary is still current.
+		transaction = statistics.AnalyzedTransaction
+	}
+	return "t:" + strconv.FormatUint(transaction, 10), nil
+}
+
+func kitDBSearchSignaturesMatch(stored, current string) bool {
+	if stored == current {
+		return true
+	}
+	if !strings.HasPrefix(current, "t:") {
+		return false
+	}
+	legacyTransaction, _, legacy := strings.Cut(stored, ":")
+	return legacy && legacyTransaction == strings.TrimPrefix(current, "t:")
+}
+
+func (t *SchemaTable) kitDBSearchProjectionTags(
+	columns []searchColumn,
+) (map[uint32]struct{}, error) {
+	names := make([]string, 0, len(columns))
+	for _, column := range columns {
+		names = append(names, column.name)
+	}
+	tags := make(map[uint32]struct{}, len(names))
+	for _, name := range names {
+		fieldIndex, found := t.definition.byName[name]
+		if !found {
+			return nil, fmt.Errorf("search projection has no field %q", name)
+		}
+		tags[t.definition.Fields[fieldIndex].Tag] = struct{}{}
+	}
+	return tags, nil
 }
 
 func newSearchSchema(columns []searchColumn) (search.Schema, []string, error) {
@@ -135,7 +381,20 @@ func newSearchSchema(columns []searchColumn) (search.Schema, []string, error) {
 
 func (t *SchemaTable) searchIndexKey(schema search.Schema) string {
 	fingerprint := schema.Fingerprint()
-	digest := sha256.Sum256([]byte(t.searchScopeKey() + "|" + hex.EncodeToString(fingerprint[:])))
+	scope := t.searchScopeKey() + "|" + hex.EncodeToString(fingerprint[:])
+	if primary := t.definition.primaryFields(); len(primary) > 1 {
+		identities := make([]string, len(primary))
+		for index, field := range primary {
+			identities[index] = field.ID
+		}
+		scope += "|composite-primary:" + strings.Join(identities, ",")
+	} else if t.engine == "kitdb" {
+		// Scalar KitDB indexes created before v2 used a textual primary-key
+		// identifier. The logical row-key encoding is stable across key kinds and
+		// makes history deletes directly replayable, so isolate the new layout.
+		scope += "|kitdb-row-key-identifiers:v2"
+	}
+	digest := sha256.Sum256([]byte(scope))
 	return "db-" + hex.EncodeToString(digest[:])
 }
 
@@ -372,13 +631,25 @@ func (t *SchemaTable) readStoredSearchSignature(indexKey string) (string, error)
 	if err != nil {
 		return "", err
 	}
+	return decodeStoredSearchSignature(data)
+}
+
+func decodeStoredSearchSignature(data []byte) (string, error) {
 	if len(data) > searchSignatureLimit {
 		return "", fmt.Errorf("search signature exceeds %d bytes", searchSignatureLimit)
 	}
-	return string(data), nil
+	signature := strings.TrimSuffix(string(data), "\n")
+	signature = strings.TrimSuffix(signature, "\r")
+	if signature == "" || strings.TrimSpace(signature) != signature {
+		return "", fmt.Errorf("search signature is invalid")
+	}
+	return signature, nil
 }
 
 func (t *SchemaTable) writeStoredSearchSignature(indexKey string, signature string) error {
+	if t.engine == "kitdb" {
+		signature = t.proveKitDBSearchSignature(signature)
+	}
 	if len(signature) == 0 || len(signature) > searchSignatureLimit {
 		return fmt.Errorf("search signature is invalid")
 	}
@@ -445,6 +716,100 @@ func (t *SchemaTable) hydrateSearchHits(
 		result = append(result, row)
 	}
 	return value.New(result)
+}
+
+func (t *SchemaTable) hydrateKitDBSearchHits(
+	ctx context.Context,
+	hits []search.Hit,
+	primaryKey string,
+	columns []searchColumn,
+) value.Value {
+	if len(hits) == 0 {
+		return value.New([]any{})
+	}
+	if t.columns[primaryKey] == nil || len(t.definition.primaryFields()) == 0 {
+		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: no primary field %q", primaryKey)}
+	}
+	managed, err := t.kitDBManaged()
+	if err != nil {
+		return kitDBError(err)
+	}
+	defer managed.Release()
+	managed.writeMu.RLock()
+	if err := validateKitDBIndexLayoutEpoch(managed.database, t.definition, t.indexEpoch); err != nil {
+		managed.writeMu.RUnlock()
+		return kitDBError(err)
+	}
+	if err := validateKitDBRowLayoutEpoch(managed.database, t.definition, t.rowEpoch); err != nil {
+		managed.writeMu.RUnlock()
+		return kitDBError(err)
+	}
+	snapshot, err := managed.database.Snapshot()
+	managed.writeMu.RUnlock()
+	if err != nil {
+		return kitDBError(err)
+	}
+	defer snapshot.Close()
+
+	result := make([]value.Value, 0, len(hits))
+	for position, hit := range hits {
+		if position&31 == 0 {
+			if err := ctx.Err(); err != nil {
+				return kitDBError(err)
+			}
+		}
+		rowKey, err := t.kitDBSearchRowKey(hit.ID)
+		if err != nil {
+			return kitDBError(err)
+		}
+		encoded, found, err := t.getKitDBRow(snapshot, rowKey)
+		if err != nil {
+			return kitDBError(err)
+		}
+		if !found {
+			continue
+		}
+		decoded, err := decodeKitDBRow(t.definition, encoded)
+		if err != nil {
+			return kitDBError(err)
+		}
+		row := value.New(cloneKitDBRow(decoded.values))
+		coerceResult(t.columns, row)
+		fields := row.Map()
+		snippet, err := bestSearchSnippet(ctx, fields, columns, t.searchText)
+		if err != nil {
+			return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search snippet: %v", err)}
+		}
+		fields["_score"] = value.New(hit.Score)
+		fields["_snippet"] = value.New(snippet)
+		result = append(result, row)
+	}
+	return value.New(result)
+}
+
+func parseKitDBSearchIdentifier(kind, identifier string) (value.Value, error) {
+	switch kind {
+	case "integer", "smallint", "int32", "serial", "year", "month", "day":
+		number, err := strconv.ParseInt(identifier, 10, 64)
+		if err != nil {
+			return value.Value{}, err
+		}
+		return value.New(number), nil
+	case "float":
+		number, err := strconv.ParseFloat(identifier, 64)
+		if err != nil {
+			return value.Value{}, err
+		}
+		return value.New(number), nil
+	case "bool":
+		flag, err := strconv.ParseBool(identifier)
+		if err != nil {
+			return value.Value{}, err
+		}
+		return coerceWrite(kind, value.New(flag)), nil
+	default:
+		return value.New(identifier), nil
+	}
 }
 
 func bestSearchSnippet(

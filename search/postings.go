@@ -6,7 +6,6 @@ import (
 	"hash/crc32"
 	"io"
 	"math"
-	"os"
 	"sort"
 )
 
@@ -144,7 +143,7 @@ func postingBlockHeaderBytes(version uint32) (int, error) {
 }
 
 type postingIterator struct {
-	file              *os.File
+	file              io.ReaderAt
 	version           uint32
 	headerSize        uint64
 	position          uint64
@@ -172,7 +171,7 @@ type postingIterator struct {
 }
 
 func newPostingIterator(
-	file *os.File,
+	file io.ReaderAt,
 	version uint32,
 	record termRecord,
 	documentCount uint32,
@@ -188,7 +187,7 @@ func newPostingIterator(
 
 func resetPostingIterator(
 	iterator *postingIterator,
-	file *os.File,
+	file io.ReaderAt,
 	version uint32,
 	record termRecord,
 	documentCount uint32,

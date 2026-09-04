@@ -148,6 +148,54 @@ func TestSegmentSearchAnyMatchesEitherTerm(t *testing.T) {
 	}
 }
 
+func TestSegmentSearchIdentifierPrefixFiltersBeforeTopK(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := buildTestSegment(t, schema, []Document{
+		{ID: "74696b69:0001", Fields: map[string]string{"text": "common common common"}},
+		{ID: "74696b69:0002", Fields: map[string]string{"text": "common common common"}},
+		{ID: "73686f706565:0001", Fields: map[string]string{"text": "common"}},
+		{ID: "73686f706565:0002", Fields: map[string]string{"text": "common"}},
+	})
+	defer segment.Close()
+
+	hits, err := segment.Search(context.Background(), MatchQuery{
+		Field: "text", Text: "common", IdentifierPrefix: "73686f706565:",
+	}, SearchOptions{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 2 || hits[0].ID != "73686f706565:0001" || hits[1].ID != "73686f706565:0002" {
+		t.Fatalf("identifier-prefixed hits = %#v", hits)
+	}
+}
+
+func TestSearchIdentifierPrefixValidation(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := buildTestSegment(t, schema, []Document{{
+		ID: "tenant:1", Fields: map[string]string{"text": "alpha beta"},
+	}})
+	defer segment.Close()
+
+	queries := []MatchQuery{
+		{Field: "text", Text: "alpha", IdentifierPrefix: string([]byte{0xff})},
+		{Field: "text", Text: "alpha", IdentifierPrefix: strings.Repeat("x", defaultMaxIdentifier+1)},
+		{Field: "text", Phrase: "alpha beta", IdentifierPrefix: "tenant:"},
+		{Field: "text", Prefix: "alp", IdentifierPrefix: "tenant:"},
+		{Field: "text", Text: "alpha beta", IdentifierPrefix: "tenant:", Operator: QueryAny},
+	}
+	for _, query := range queries {
+		if _, err := segment.Search(context.Background(), query, SearchOptions{}); err == nil {
+			t.Fatalf("unsupported identifier-prefix query succeeded: %#v", query)
+		}
+	}
+}
+
 func TestSegmentMultiFieldSearchAnyMatchesEitherField(t *testing.T) {
 	schema, err := NewSchema(
 		Text("title", StandardAnalyzer()),
@@ -887,6 +935,52 @@ func TestBuilderRejectsAtomicallyAndSignalsFlush(t *testing.T) {
 	}
 	if builder.DocumentCount() != before {
 		t.Fatalf("document count changed after rejected documents")
+	}
+}
+
+func TestBuilderCanSkipLongLexicalNoise(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	strict, err := NewBuilder(schema, BuildOptions{MaxTermBytes: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	document := Document{ID: "product", Fields: map[string]string{
+		"text": "useful abcdefghijklmnop searchable",
+	}}
+	if err := strict.Add(document); err == nil {
+		t.Fatal("strict builder accepted an oversized term")
+	}
+
+	bounded, err := NewBuilder(schema, BuildOptions{MaxTermBytes: 8, SkipLongTerms: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bounded.Add(document); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "bounded.ks")
+	if _, err := bounded.Write(context.Background(), path); err != nil {
+		t.Fatal(err)
+	}
+	segment, err := OpenSegment(path, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer segment.Close()
+	hits, err := segment.Search(
+		context.Background(), MatchQuery{Field: "text", Text: "useful"}, SearchOptions{},
+	)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("search useful: hits=%d err=%v", len(hits), err)
+	}
+	hits, err = segment.Search(
+		context.Background(), MatchQuery{Field: "text", Text: "abcdefghijklmnop"}, SearchOptions{},
+	)
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("search skipped term: hits=%d err=%v", len(hits), err)
 	}
 }
 

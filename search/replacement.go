@@ -122,7 +122,7 @@ func (writer *IndexWriter) finishReplacement() {
 // sidecars. It detects exact duplicate identifiers across immutable segments
 // without retaining a set proportional to the document count.
 func (writer *IndexWriter) validatePendingIdentifiers(ctx context.Context) (returnErr error) {
-	if len(writer.pending) < 2 {
+	if len(writer.pending) == 0 {
 		return nil
 	}
 	if ctx == nil {

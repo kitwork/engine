@@ -225,7 +225,7 @@ drain. Hot reload therefore cannot multiply managers or reset process-wide CPU,
 queue, and replacement limits. Standalone `work.NewTenant` tests lazily own one
 local fallback manager and close it with that tenant.
 
-The Turso/SQLite table remains the source of truth. The adapter installs three
+The SQLite table remains the source of truth. The adapter installs three
 small database triggers per searchable table and increments a durable revision
 inside the same insert/update/delete transaction. Freshness checks are `O(1)`;
 they do not scan `count(*)` or total text length on every query. A stale
@@ -239,6 +239,52 @@ segments live below the host manager root under SHA-256-derived index paths.
 Result identifiers are hydrated in one bounded `IN` query, reordered by rank,
 and highlighted through `Highlight`; the Kitwork adapter HTML-escapes source
 text before adding `<b>` presentation markup.
+
+KitDB uses the same public `.searchable()` and `.search()` vocabulary, but reads
+the kernel directly rather than routing a bulk rebuild through SQL-light. The
+standalone relational engine owns a durable source watermark for each searchable
+struct. A matching watermark reopens the existing immutable projection after
+restart. When retained history covers later source transactions, the owner
+replays complete row mutations and advances the watermark only after the search
+commit succeeds. A missing or incompatible projection is rebuilt by streaming
+one fixed row snapshot; source rows are never retained as one tenant-sized Go
+slice. The projection is derived data and the KitDB rowstore remains the source
+of truth.
+
+The Kitwork fluent adapter still has its own correctness-first freshness path:
+it binds a replacement to the database transaction and catalog revision, then
+hydrates ranked identifiers through one KitDB snapshot. Search is refused
+inside an explicit record transaction on both paths because source/projection
+snapshot semantics have not been defined for that boundary.
+
+KitDB SQL-light and the local PostgreSQL protocol share one ranked-search plan:
+
+```sql
+SELECT id, name, _score, _snippet
+FROM products
+WHERE (name, brand, description) SEARCH $1
+  AND stock > 0
+ORDER BY _score DESC
+LIMIT 20;
+```
+
+`field SEARCH text` selects one searchable field, `(field, ...) SEARCH text`
+selects an explicit set, and `* SEARCH text` uses every `.searchable()` field.
+The shorter `SEARCH text` remains a compatibility alias for the all-field form.
+`LIKE` keeps its ordinary row-pattern semantics. SQL V1 accepts one SEARCH
+predicate connected to residual row filters only by `AND`; ranking remains
+`_score DESC`. `_score`, `_snippet`, and `_cursor` are virtual result columns.
+`LIMIT n AFTER cursor` resumes strictly after the prior score/ordinal boundary;
+the checksummed cursor is rejected after a source transaction, projection
+generation, schema, query, or residual-predicate change.
+
+Residual filters consume ranked hits in bounded pages until the requested page
+is complete or the configured candidate budget is exhausted. The standalone
+defaults are 10,000 returned search rows and 50,000 inspected candidates, with
+hard ceilings of 100,000 and 1,000,000 respectively. Exhaustion fails explicitly
+instead of silently returning an incomplete page. JOIN, GROUP BY, DISTINCT,
+aggregate projections, arbitrary ordering, and SEARCH inside an explicit
+transaction are not yet part of this search profile.
 
 ## Kitwork collection canary
 

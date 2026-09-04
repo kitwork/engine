@@ -7,3 +7,7 @@ import "os"
 func publishFile(oldPath, newPath string) error {
 	return os.Rename(oldPath, newPath)
 }
+
+func replaceFile(oldPath, newPath string) error {
+	return os.Rename(oldPath, newPath)
+}

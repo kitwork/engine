@@ -15,10 +15,11 @@ const (
 )
 
 type preparedMultiMatchQuery struct {
-	fieldIDs []uint16
-	fields   []Field
-	terms    []string
-	options  SearchOptions
+	fieldIDs         []uint16
+	fields           []Field
+	terms            []string
+	identifierPrefix string
+	options          SearchOptions
 }
 
 type multiFieldTermRecord struct {
@@ -68,9 +69,10 @@ func prepareMultiMatchQuery(
 	}
 
 	prepared := preparedMultiMatchQuery{
-		fieldIDs: make([]uint16, 0, len(query.Fields)),
-		fields:   make([]Field, 0, len(query.Fields)),
-		options:  normalized,
+		fieldIDs:         make([]uint16, 0, len(query.Fields)),
+		fields:           make([]Field, 0, len(query.Fields)),
+		identifierPrefix: query.IdentifierPrefix,
+		options:          normalized,
 	}
 	seen := make(map[string]struct{}, len(query.Fields))
 	analyzerID := ""
@@ -471,6 +473,7 @@ func (segment *Segment) searchMultiCandidates(
 	results := make(candidateHeap, 0, prepared.options.Limit)
 	seed := &cursors[0]
 	target := uint32(0)
+	var identifierBuffer []byte
 	for candidates := uint64(0); ; candidates++ {
 		if candidates&255 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -518,6 +521,26 @@ func (segment *Segment) searchMultiCandidates(
 				score += termScore
 			}
 			if matched {
+				matchesPrefix, err := segment.documentIdentifierHasPrefix(
+					document, prepared.identifierPrefix, &identifierBuffer,
+				)
+				if err != nil {
+					return nil, err
+				}
+				if !matchesPrefix {
+					if document == math.MaxUint32 {
+						return results, nil
+					}
+					target = document + 1
+					continue
+				}
+				if !rankIsAfter(score, base+uint64(document), prepared.options.After) {
+					if document == math.MaxUint32 {
+						return results, nil
+					}
+					target = document + 1
+					continue
+				}
 				collectCandidate(&results, rankedCandidate{document: document, score: score}, prepared.options.Limit)
 			}
 		}

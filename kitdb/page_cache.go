@@ -39,6 +39,10 @@ func newRowPageCache(maximum int64) *rowPageCache {
 	return &rowPageCache{maximum: maximum, byBlock: make(map[int]*list.Element)}
 }
 
+func (cache *rowPageCache) enabled() bool {
+	return cache != nil && cache.maximum > 0
+}
+
 func (cache *rowPageCache) get(block int) (*rowPage, bool) {
 	if cache == nil || cache.maximum == 0 {
 		return nil, false

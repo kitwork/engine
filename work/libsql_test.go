@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// servedTenant boots a tenant that DECLARES a served db in JS — turso(db, {schema}, { token, access }).
+// servedTenant boots a tenant that DECLARES a served SQLite db in JS.
 // That declaration (run during tenant.Run) is what enables the libSQL and /_db endpoints; there is no
 // .env magic. The declared `seed` table just turns exposure on — a client can create other tables.
 func servedTenant(t *testing.T, dbName, token, access string) *Tenant {
@@ -22,13 +22,14 @@ func servedTenant(t *testing.T, dbName, token, access string) *Tenant {
 		t.Fatal(err)
 	}
 	router := fmt.Sprintf(`import { router, database } from "kitwork";
-const { turso, kitid } = database;
-export const db = turso(%q, { seed: { id: kitid().primaryKey() } }, { token: %q, access: %q });
+const { sqlite, kitid } = database;
+export const db = sqlite(%q, { seed: { id: kitid().primaryKey() } }, { token: %q, access: %q });
 router.get((ctx) => ctx.json({ ok: true }));`, dbName, token, access)
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
+	t.Cleanup(tenant.Close)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -36,8 +37,8 @@ router.get((ctx) => ctx.json({ ok: true }));`, dbName, token, access)
 }
 
 // Drive the endpoint with the exact Hrana pipeline JSON a libSQL client sends, and verify the response
-// envelope + typed value encoding (integer as a STRING, text as text). This is what turso's own clients
-// and db managers speak.
+// envelope + typed value encoding (integer as a STRING, text as text), as libSQL clients and database
+// managers expect.
 func TestLibSQLHranaPipeline(t *testing.T) {
 	tenant := servedTenant(t, "app.db", "tok-abc", "readwrite")
 
@@ -269,7 +270,7 @@ func TestLibSQLWriteWithWantRowsReportsAffected(t *testing.T) {
 func TestLibSQLReadonlyRefusesWrites(t *testing.T) {
 	tenant := servedTenant(t, "app.db", "ro", "readonly")
 	pipe := func(sql string, wantRows bool) *httptest.ResponseRecorder {
-		body := fmt.Sprintf(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":%q,"want_rows":%v}}]}`, sql, wantRows)
+		body := fmt.Sprintf(`{"baton":null,"requests":[{"type":"execute","stmt":{"sql":%q,"want_rows":%v}},{"type":"close"}]}`, sql, wantRows)
 		req := httptest.NewRequest(http.MethodPost, "http://localhost/v2/pipeline", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", "Bearer ro")
 		rec := httptest.NewRecorder()
