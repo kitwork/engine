@@ -116,10 +116,8 @@ func main() {
 	}
 	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stopSignals()
-	ctx, cancel := context.WithTimeout(signalContext, config.Duration)
-	defer cancel()
 
-	report, err := executeCanary(ctx, config)
+	report, err := executeCanary(signalContext, config)
 	if reportErr := writeCanaryReport(config.Report, report); reportErr != nil && err == nil {
 		err = reportErr
 	}
@@ -276,10 +274,20 @@ func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, erro
 	}
 
 	var workloadErr error
+	workloadTimer := time.NewTimer(config.Duration)
 	select {
 	case <-ctx.Done():
+		workloadErr = ctx.Err()
+		cancelWork()
+	case <-workloadTimer.C:
 		cancelWork()
 	case workloadErr = <-failures:
+	}
+	if !workloadTimer.Stop() {
+		select {
+		case <-workloadTimer.C:
+		default:
+		}
 	}
 	workers.Wait()
 	cancelWork()

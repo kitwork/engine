@@ -21,7 +21,7 @@ func TestKitDBCanaryCompletesBoundedJourney(t *testing.T) {
 		HistoryBytes:    1 << 20,
 		Seed:            20260828,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), config.Duration)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	report, err := executeCanary(ctx, config)
 	if err != nil {
