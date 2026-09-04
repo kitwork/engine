@@ -3,10 +3,10 @@ package collection
 import "database/sql"
 
 // SearchIndex is the exported surface over the hand-written BM25 full-text engine, so a caller OUTSIDE
-// this capability — the schema-DSL turso tables (db.table.search) — reuses ONE engine instead of a
+// this capability — schema-aware tables using db.table.search — reuses ONE engine instead of a
 // second copy. "One engine, two doors": the collection door indexes Markdown documents, the schema door
-// indexes rows of a turso table, both landing in the same fts_term/fts_doc/fts_stat tables of whatever
-// modernc SQLite database the caller passes (a sidecar file, never the turso file). The internals
+// indexes rows of a SQLite table, both landing in the same fts_term/fts_doc/fts_stat tables of whatever
+// modernc SQLite database the caller passes. The internals
 // (tokenizer, Vietnamese folding, posting encoding, BM25) stay unexported; this is the stable seam.
 type SearchIndex struct{ inner *ftsIndex }
 

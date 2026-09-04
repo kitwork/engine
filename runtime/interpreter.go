@@ -365,9 +365,18 @@ func (vm *VM) execute(floor int) value.Value {
 			if _, structured := DiagnosticFrom(invalid); structured {
 				return vm.exitFailure(floor, invalid)
 			}
+			message := invalid.String()
+			failure, hasFailure := value.FailureFrom(invalid)
+			if hasFailure {
+				message = failure.Message
+			}
+			diagnostic := vm.buildDiagnostic(DiagnosticRuntimeError, message, opIP)
+			if hasFailure {
+				diagnostic.CauseCode = failure.Code
+			}
 			return vm.exitFailure(
 				floor,
-				vm.diagnosticValue(DiagnosticRuntimeError, invalid.String(), opIP),
+				diagnosticResult(diagnostic),
 			)
 		}
 	}
@@ -718,6 +727,12 @@ func safeEvaluationResult(result value.Value) value.Value {
 	if diagnostic, ok := DiagnosticFrom(result); ok {
 		if diagnostic.Code != DiagnosticRuntimeError {
 			return result
+		}
+		if diagnostic.CauseCode != "" {
+			return value.InvalidFailure(
+				diagnostic.CauseCode,
+				diagnostic.Message,
+			).Safe()
 		}
 		result = value.Value{K: value.Invalid, V: diagnostic.Message}
 	}

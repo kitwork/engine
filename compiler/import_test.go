@@ -14,9 +14,9 @@ func TestNativeImportLowering(t *testing.T) {
 		{`import { router, log } from "kitwork";`, `const { router, log } = kitwork();`},
 		// Named imports now honor the subpath too (previously dropped it): a subpath specifier
 		// destructures from that sub-module, matching default-import behavior. This is what makes
-		// `import { turso, kitid } from "kitwork/database"` resolve to the `database` namespace.
+		// `import { sqlite, kitid } from "kitwork/database"` resolves to the `database` namespace.
 		{`import { router } from "kitwork/router";`, `const { router } = kitwork().router;`},
-		{`import { turso, kitid } from "kitwork/database";`, `const { turso, kitid } = kitwork().database;`},
+		{`import { sqlite, kitid } from "kitwork/database";`, `const { sqlite, kitid } = kitwork().database;`},
 		{`import http from "kitwork/http";`, `const http = kitwork().http;`},
 		{`export const x = 5;`, `const x = 5;`},
 	}

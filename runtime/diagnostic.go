@@ -35,6 +35,7 @@ type StackFrame struct {
 // Diagnostic is the structured form of a runtime failure.
 type Diagnostic struct {
 	Code       DiagnosticCode
+	CauseCode  string
 	Message    string
 	IP         int
 	File       string

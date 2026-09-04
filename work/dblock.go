@@ -14,7 +14,7 @@ import (
 
 // Single-instance guard for local file databases.
 //
-// A turso (or sqlite) file database is SINGLE-PROCESS: its write-ahead log is not shared across
+// A SQLite file database is SINGLE-PROCESS: its write-ahead log is not shared across
 // separate OS processes the way one might expect, so two kitwork instances opening the same file
 // silently diverge — a row written by one is invisible to the other ("created a link, reloaded, it's
 // gone"), and worse, a migration/rebuild running in that split-brain state can wipe existing rows.
@@ -24,7 +24,7 @@ import (
 // stale-lock problem.
 //
 // Scope: this stops a second kitwork PROCESS. It cannot stop an external SQLite tool from opening the
-// raw .db directly (turso itself must be able to open that file, so we cannot lock it exclusively) —
+// raw .db directly (SQLite itself must be able to open that file, so we cannot lock it exclusively) —
 // opening the live file with a db manager while the server runs remains unsafe by its own nature.
 
 var (
@@ -41,14 +41,14 @@ func lockFilePath(dbPath string) string {
 	return filepath.Join(os.TempDir(), "kitwork-dblock-"+hex.EncodeToString(sum[:8])+".lock")
 }
 
-// lockableDBPath returns the absolute file path for a single-process file backend (sqlite/turso) that
+// lockableDBPath returns the absolute file path for a single-process SQLite backend that
 // should be guarded, and false for :memory: or network backends (postgres/mysql) that need no lock.
 func lockableDBPath(config *database.Config) (string, bool) {
 	if config == nil {
 		return "", false
 	}
 	kind := strings.ToLower(config.Type)
-	if kind != "sqlite" && kind != "sqlite3" && kind != "turso" {
+	if kind != "sqlite" && kind != "sqlite3" {
 		return "", false
 	}
 	path := config.Name
@@ -76,7 +76,7 @@ func acquireDBLock(dbPath string) error {
 	handle, err := lockFile(lockFilePath(dbPath))
 	if err != nil {
 		return fmt.Errorf(
-			"database %q is already open by another process — turso/sqlite file databases are single-process; "+
+			"database %q is already open by another process — SQLite file databases are single-process; "+
 				"stop the other kitwork instance (and close any db tool holding the file), then retry",
 			filepath.Base(dbPath),
 		)

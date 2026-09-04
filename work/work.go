@@ -160,7 +160,7 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if t.serveDataAPIIf(w, r, requestScope) {
 		return
 	}
-	// /v2/pipeline, /v3/pipeline — libSQL/Hrana wire protocol, so turso clients connect by URL + token.
+	// /v2/pipeline, /v3/pipeline — libSQL/Hrana wire protocol for URL + token database clients.
 	if t.serveLibSQLIf(w, r, requestScope) {
 		return
 	}

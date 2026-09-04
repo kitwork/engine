@@ -22,13 +22,22 @@ func assertAllocationBudget(
 	source string,
 	maximum float64,
 ) {
+	assertAllocationBudgetWithGlobals(t, source, nil, maximum)
+}
+
+func assertAllocationBudgetWithGlobals(
+	t *testing.T,
+	source string,
+	globals map[string]value.Value,
+	maximum float64,
+) {
 	t.Helper()
 	program := allocationProgram(t, source)
 	vm := runtime.New(program)
 	vm.MaxEnergy = 10_000_000
 
 	allocations := testing.AllocsPerRun(100, func() {
-		vm.FastReset(program, nil)
+		vm.FastReset(program, globals)
 		benchmarkResult = vm.Run()
 	})
 	if benchmarkResult.K == value.Invalid {
@@ -71,5 +80,25 @@ var total = items
 	.filter((item) => item > 10)
 	.reduce((sum, item) => sum + item, 0);
 `, 25)
+	})
+
+	t.Run("safe-success", func(t *testing.T) {
+		assertAllocationBudget(t, `
+const check = { answer: 42 }.safe();
+var result = check.value.answer;
+`, 12)
+	})
+
+	t.Run("safe-application-failure", func(t *testing.T) {
+		assertAllocationBudgetWithGlobals(
+			t,
+			`const result = failHost().safe().code;`,
+			map[string]value.Value{
+				"failHost": value.NewFunc(func(...value.Value) value.Value {
+					return value.InvalidFailure("ALLOCATION_FAILURE", "allocation failure")
+				}),
+			},
+			30,
+		)
 	})
 }

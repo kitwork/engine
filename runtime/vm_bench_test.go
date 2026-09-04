@@ -22,12 +22,20 @@ func compileBenchmarkProgram(b *testing.B, source string) *runtime.Program {
 }
 
 func benchmarkRun(b *testing.B, source string) {
+	benchmarkRunWithGlobals(b, source, nil)
+}
+
+func benchmarkRunWithGlobals(
+	b *testing.B,
+	source string,
+	globals map[string]value.Value,
+) {
 	b.Helper()
 	program := compileBenchmarkProgram(b, source)
 	vm := runtime.New(program)
 	vm.MaxEnergy = 10_000_000
 
-	vm.FastReset(program, nil)
+	vm.FastReset(program, globals)
 	benchmarkResult = vm.Run()
 	if benchmarkResult.K == value.Invalid {
 		b.Fatal(benchmarkResult.Text())
@@ -37,7 +45,7 @@ func benchmarkRun(b *testing.B, source string) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		vm.FastReset(program, nil)
+		vm.FastReset(program, globals)
 		benchmarkResult = vm.Run()
 		if benchmarkResult.K == value.Invalid {
 			b.Fatal(benchmarkResult.Text())
@@ -74,6 +82,25 @@ var total = items
 	.filter((item) => item > 10)
 	.reduce((sum, item) => sum + item, 0);
 `)
+}
+
+func BenchmarkVMSafeSuccess(b *testing.B) {
+	benchmarkRun(b, `
+const check = { answer: 42 }.safe();
+var result = check.value.answer;
+`)
+}
+
+func BenchmarkVMSafeApplicationFailure(b *testing.B) {
+	benchmarkRunWithGlobals(
+		b,
+		`const result = failHost().safe().code;`,
+		map[string]value.Value{
+			"failHost": value.NewFunc(func(...value.Value) value.Value {
+				return value.InvalidFailure("BENCHMARK_FAILURE", "benchmark failure")
+			}),
+		},
+	)
 }
 
 func BenchmarkVMFastReset(b *testing.B) {

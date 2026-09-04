@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,7 +33,7 @@ func TestSchemaDbTenantEntry(t *testing.T) {
 	}
 
 	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { turso, kitid, text, int, datetime } = database;` + "\n" +
+		`const { sqlite, kitid, text, int, datetime } = database;` + "\n" +
 		`const vouchers = {` + "\n" +
 		`  id: kitid().primaryKey(),` + "\n" +
 		`  code: text().notNull().unique(),` + "\n" +
@@ -41,7 +42,7 @@ func TestSchemaDbTenantEntry(t *testing.T) {
 		`  status: text().default("active"),` + "\n" +
 		`  created_at: datetime().defaultNow()` + "\n" +
 		`};` + "\n" +
-		`const db = turso("app.db", { vouchers: vouchers });` + "\n" +
+		`const db = sqlite("app.db", { vouchers: vouchers });` + "\n" +
 		`router.get((ctx) => {` + "\n" +
 		`  db.vouchers.create({ code: "HD169K40", title: "Giam 40K", discount: 40000 });` + "\n" +
 		`  const found = db.vouchers.where("code", "=", "HD169K40").first();` + "\n" +
@@ -58,6 +59,7 @@ func TestSchemaDbTenantEntry(t *testing.T) {
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +456,7 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	}
 }
 
-// The type vocabulary end to end through a real tenant VM: bool/array/json/enum + auto now()/year().
+// The type vocabulary end to end through a real tenant VM: bool/array/json/choice + auto now()/year().
 // Proves COERCION both ways — writes store 0/1 and JSON strings, reads come back as booleans/objects.
 func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 	tmp, err := os.MkdirTemp("", "kitwork-types-*")
@@ -468,20 +470,20 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 	}
 
 	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { turso, id, text, int, float, bool, enum, now, year, jsonb, array } = database;` + "\n" +
+		`const { sqlite, id, text, int, float, bool, choice, now, year, jsonb, array } = database;` + "\n" +
 		`const items = {` + "\n" +
 		`  id: id(),` + "\n" +
 		`  name: text().notNull(),` + "\n" +
 		`  active: bool().default(true),` + "\n" +
 		`  count: int().default(0),` + "\n" +
 		`  rating: float().default(4.5),` + "\n" +
-		`  status: enum("draft", "published").default("draft"),` + "\n" +
+		`  status: choice("draft", "published").default("draft"),` + "\n" +
 		`  tags: array().default([]),` + "\n" +
 		`  meta: jsonb().default({}),` + "\n" +
 		`  created: now(),` + "\n" +
 		`  fy: year()` + "\n" +
 		`};` + "\n" +
-		`const db = turso("app.db", { items });` + "\n" +
+		`const db = sqlite("app.db", { items });` + "\n" +
 		`router.get((ctx) => {` + "\n" +
 		`  db.items.create({ name: "A", active: false, tags: ["x","y"], meta: { k: 1 }, status: "published" });` + "\n" +
 		`  const row = db.items.where("name", "=", "A").first();` + "\n" +
@@ -500,6 +502,7 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +518,7 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 		`"active":false`:       "bool read-coercion (stored 0/1) failed",
 		`"tagsLen":2`:          "array read-coercion (JSON string → array) failed",
 		`"metaK":1`:            "json read-coercion (JSON string → object) failed",
-		`"status":"published"`: "enum value round-trip failed",
+		`"status":"published"`: "choice value round-trip failed",
 		`"fy":2026`:            "year() did not auto-fill the current year",
 		`"hasCreated":true`:    "now() did not auto-fill a timestamp",
 		`"hasId":true`:         "id() did not generate a kitid",
@@ -527,22 +530,64 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 	}
 }
 
-// Enum validation happens at write time (engine-agnostic, no CHECK constraint): a value outside the set
+// Choice validation happens at write time (engine-agnostic, no CHECK constraint): a value outside the set
 // is rejected with a clear message.
-func TestSchemaEnumRejectsInvalid(t *testing.T) {
+func TestSchemaChoiceRejectsInvalid(t *testing.T) {
 	columns := map[string]*ColumnSpec{
 		"status": {kind: "enum", enumVals: []string{"draft", "published"}},
 	}
 	_, errMsg := fillRow(columns, map[string]value.Value{"status": value.New("bogus")})
 	if errMsg == "" {
-		t.Fatal("invalid enum value was accepted")
+		t.Fatal("invalid choice value was accepted")
 	}
 	if !strings.Contains(errMsg, "status") || !strings.Contains(errMsg, "bogus") {
-		t.Errorf("enum error should name the column and value, got: %q", errMsg)
+		t.Errorf("choice error should name the column and value, got: %q", errMsg)
+	}
+	if _, errMsg := fillRow(columns, map[string]value.Value{"status": value.New(1)}); !strings.Contains(errMsg, "string or null") {
+		t.Fatalf("numeric choice write = %q, want a type error", errMsg)
+	}
+	if _, errMsg := fillRow(columns, map[string]value.Value{"status": value.NewNull()}); errMsg != "" {
+		t.Fatalf("nullable choice rejected null: %q", errMsg)
 	}
 	// A valid value passes.
 	if _, errMsg := fillRow(columns, map[string]value.Value{"status": value.New("draft")}); errMsg != "" {
-		t.Errorf("valid enum value rejected: %q", errMsg)
+		t.Errorf("valid choice value rejected: %q", errMsg)
+	}
+}
+
+func TestChoiceDeclarationRejectsInvalidValues(t *testing.T) {
+	database := &Database{}
+	tests := []struct {
+		name string
+		args []value.Value
+		want string
+	}{
+		{name: "empty", want: "at least one"},
+		{name: "non string", args: []value.Value{value.New(1)}, want: "must be a string"},
+		{name: "blank", args: []value.Value{value.New(" ")}, want: "cannot be empty"},
+		{name: "duplicate", args: []value.Value{value.New("active"), value.New("active")}, want: "more than once"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			built := database.Choice().Call("choice", test.args...)
+			spec, ok := built.V.(*ColumnSpec)
+			if !ok || spec == nil {
+				t.Fatalf("choice() returned %T", built.V)
+			}
+			err := validateSchema(map[string]*ColumnSpec{"status": spec})
+			if err == nil || !strings.Contains(err.Error(), test.want) || !strings.Contains(err.Error(), "status") {
+				t.Fatalf("validateSchema() = %v, want field-scoped %q error", err, test.want)
+			}
+		})
+	}
+
+	built := database.Choice().Call("choice", value.New("active"), value.New("disabled"))
+	spec, ok := built.V.(*ColumnSpec)
+	if !ok || spec == nil || spec.kind != "enum" || !reflect.DeepEqual(spec.enumVals, []string{"active", "disabled"}) {
+		t.Fatalf("choice() compatibility spec = %#v", spec)
+	}
+	if err := validateSchema(map[string]*ColumnSpec{"status": spec}); err != nil {
+		t.Fatalf("valid choice declaration: %v", err)
 	}
 }
 
@@ -555,14 +600,15 @@ func TestMigrationPlansForPreviewsSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { turso, kitid, text } = database;` + "\n" +
+		`const { sqlite, kitid, text } = database;` + "\n" +
 		`const vouchers = { id: kitid().primaryKey(), code: text() };` + "\n" +
-		`const db = turso("app.db", { vouchers });` + "\n" +
+		`const db = sqlite("app.db", { vouchers });` + "\n" +
 		`router.get((ctx) => ctx.json({ ok: 1 }));`
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "planhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +616,7 @@ func TestMigrationPlansForPreviewsSchema(t *testing.T) {
 	plans := MigrationPlansFor(tenant)
 	var vouchers *TablePlan
 	for i := range plans {
-		if plans[i].Table == "vouchers" && plans[i].Engine == "turso" {
+		if plans[i].Table == "vouchers" && plans[i].Engine == "sqlite" {
 			vouchers = &plans[i]
 		}
 	}
@@ -669,7 +715,7 @@ func TestSchemaTableWritePathThroughVM(t *testing.T) {
 	}
 
 	router := `import { router, database } from "kitwork";
-const { turso, kitid, text, int, datetime } = database;
+const { sqlite, kitid, text, int, datetime } = database;
 const links = {
   id: kitid().primaryKey(),
   code: text().notNull().unique(),
@@ -677,7 +723,7 @@ const links = {
   clicks: int().default(0),
   created_at: datetime().defaultNow()
 };
-const db = turso("app.db", { links: links });
+const db = sqlite("app.db", { links: links });
 router.get((ctx) => {
   db.links.create({ code: "kitwork", original_url: "https://github.com/kitwork", clicks: 0 });
   db.links.create({ code: "gone", original_url: "https://x.example", clicks: 0 });
@@ -699,6 +745,7 @@ router.get((ctx) => {
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -729,9 +776,9 @@ router.get((ctx) => {
 // "succeeding".
 func TestMigrateReturnsErrorOnFailure(t *testing.T) {
 	path := filepath.ToSlash(filepath.Join(t.TempDir(), "m.db"))
-	db, err := sql.Open("turso", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		t.Skipf("turso driver not available: %v", err)
+		t.Skipf("sqlite driver not available: %v", err)
 	}
 	if err := db.Ping(); err != nil {
 		t.Fatal(err)
@@ -769,21 +816,22 @@ func TestSchemaMigrationFailureSurfacesToHandler(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, ".data"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Poison the db file: turso cannot open garbage, so the connection (and migration) fails.
+	// Poison the db file: SQLite cannot open garbage, so the connection (and migration) fails.
 	if err := os.WriteFile(filepath.Join(dir, ".data", "app.db"), []byte("this is not a sqlite database"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	router := `import { router, database } from "kitwork";
-const { turso, kitid, text } = database;
+const { sqlite, kitid, text } = database;
 const notes = { id: kitid().primaryKey(), body: text() };
-const db = turso("app.db", { notes: notes });
+const db = sqlite("app.db", { notes: notes });
 router.get((ctx) => ctx.json({ n: db.notes.count() }));`
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -813,7 +861,7 @@ func TestSchemaNowOnUpdateAutoTouch(t *testing.T) {
 	// updated_at to the year 2000 explicitly (caller-provided value must win — touch skips it), then
 	// do a normal update that never mentions updated_at. Auto-touch must move it OFF 2000 to now().
 	router := `import { router, database } from "kitwork";
-const { turso, kitid, text, int, now } = database;
+const { sqlite, kitid, text, int, now } = database;
 const posts = {
   id: kitid().primaryKey(),
   title: text(),
@@ -821,7 +869,7 @@ const posts = {
   created_at: now(),
   updated_at: now().onUpdate()
 };
-const db = turso("app.db", { posts: posts });
+const db = sqlite("app.db", { posts: posts });
 router.get((ctx) => {
   const created = db.posts.create({ title: "hello" });
   // 1) explicit updated_at → caller wins, touch must NOT override it.
@@ -843,6 +891,7 @@ router.get((ctx) => {
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -878,15 +927,15 @@ router.get((ctx) => {
 }
 
 // A schema migration must flush its DDL out of the write-ahead log into the MAIN database file, so a
-// separate turso process/instance opening the same file sees the new columns instead of "no such
+// separate SQLite process/instance opening the same file sees the new columns instead of "no such
 // column". This pins that: after migrate() adds a column, the -wal file is truncated (the checkpoint
 // ran). Without checkpointWAL the ALTER frames sit in a growing WAL and the fix is undone.
 func TestMigrationCheckpointsWALToMainFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.ToSlash(filepath.Join(dir, "c.db"))
-	db, err := sql.Open("turso", path)
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)")
 	if err != nil {
-		t.Skipf("turso driver not available: %v", err)
+		t.Skipf("sqlite driver not available: %v", err)
 	}
 	defer db.Close()
 	if err := db.Ping(); err != nil {
@@ -944,14 +993,15 @@ func TestSchemaColumnDeclarationOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := `import { router, database } from "kitwork";
-const { turso, kitid, text } = database;
+const { sqlite, kitid, text } = database;
 const things = { id: kitid().primaryKey(), zebra: text(), apple: text(), mango: text() };
-const db = turso("app.db", { things: things }, { token: "tok", access: "readwrite" });
+const db = sqlite("app.db", { things: things }, { token: "tok", access: "readwrite" });
 router.get((ctx) => { db.things.create({ zebra: "z", apple: "a", mango: "m" }); return ctx.json({ ok: true }); });`
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -1147,19 +1197,20 @@ func TestSchemaIndexThroughVM(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := `import { router, database } from "kitwork";
-const { turso, kitid, text } = database;
+const { sqlite, kitid, text } = database;
 const links = {
   id: kitid().primaryKey(),
   slug: text().index(),
   code: text().notNull().index("status_code"),
   status: text().default("active").index("status_code"),
 };
-const db = turso("app.db", { links: links }, { token: "tok", access: "readwrite" });
+const db = sqlite("app.db", { links: links }, { token: "tok", access: "readwrite" });
 router.get((ctx) => { db.links.create({ slug: "s", code: "c", status: "active" }); return ctx.json({ ok: true }); });`
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -1220,8 +1271,8 @@ func TestSchemaIndexPartialFilter(t *testing.T) {
 	}
 }
 
-// An enum default that is not one of the enum values is rejected at migrate, not silently written.
-func TestSchemaEnumDefaultValidated(t *testing.T) {
+// A choice default must be null or one of the declared string values.
+func TestSchemaChoiceDefaultValidated(t *testing.T) {
 	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "e.db")))
 	if err != nil {
 		t.Fatal(err)
@@ -1232,7 +1283,7 @@ func TestSchemaEnumDefaultValidated(t *testing.T) {
 		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New("archived"), seq: 2},
 	}
 	if err := migrate(db, "t", bad, false, false); err == nil {
-		t.Error("an enum default outside the enum values must be rejected")
+		t.Error("a choice default outside the declared values must be rejected")
 	} else if !strings.Contains(err.Error(), "archived") {
 		t.Errorf("error should name the bad default, got: %v", err)
 	}
@@ -1241,11 +1292,18 @@ func TestSchemaEnumDefaultValidated(t *testing.T) {
 		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New("active"), seq: 2},
 	}
 	if err := migrate(db, "t2", good, false, false); err != nil {
-		t.Errorf("a valid enum default should be accepted: %v", err)
+		t.Errorf("a valid choice default should be accepted: %v", err)
+	}
+	badType := map[string]*ColumnSpec{
+		"id":     {kind: "kitid", primary: true, seq: 1},
+		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New(1), seq: 2},
+	}
+	if err := migrate(db, "t3", badType, false, false); err == nil || !strings.Contains(err.Error(), "string or null") {
+		t.Fatalf("numeric choice default = %v, want a type error", err)
 	}
 }
 
-// ref() foreign keys end to end on turso: the DDL carries REFERENCES … ON DELETE CASCADE, the FK is
+// ref() foreign keys end to end on SQLite: the DDL carries REFERENCES … ON DELETE CASCADE, the FK is
 // enforced, a delete cascades, and — critically — a ref to a kitid does NOT auto-generate a random id
 // (the FK column keeps the value it was given).
 func TestSchemaRefForeignKey(t *testing.T) {
@@ -1255,14 +1313,14 @@ func TestSchemaRefForeignKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := `import { router, database } from "kitwork";
-const { turso, id, text, ref } = database;
+const { sqlite, id, text, ref } = database;
 const users = { id: id(), email: text().notNull().unique() };
 const links = {
   id: id(),
   user_id: ref(users.id, { onDelete: "cascade" }).notNull(),
   code: text().notNull().unique(),
 };
-const db = turso("app.db", { users, links }, { token: "tok", access: "readwrite" });
+const db = sqlite("app.db", { users, links }, { token: "tok", access: "readwrite" });
 router.get((ctx) => {
   const u = db.users.create({ email: "a@b.c" });
   const ln = db.links.create({ user_id: u.id, code: "x" });
@@ -1272,6 +1330,7 @@ router.get((ctx) => {
 		t.Fatal(err)
 	}
 	tenant := NewTenant(tmp, "localhost")
+	defer tenant.Close()
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -1326,6 +1385,7 @@ func TestSchemaRefValidation(t *testing.T) {
 		{"non-pk target", &fkRef{target: &ColumnSpec{kind: "text"}, table: "users", column: "name"}, nil, "not a primary key or unique"},
 		{"type mismatch", &fkRef{target: pk, table: "users", column: "id"}, &ColumnSpec{kind: "integer"}, "does not match"},
 		{"setNull on notNull", &fkRef{target: pk, table: "users", column: "id", onDelete: "setNull"}, &ColumnSpec{kind: "text", notNull: true}, "setNull"},
+		{"update setNull on notNull", &fkRef{target: pk, table: "users", column: "id", onUpdate: "set null"}, &ColumnSpec{kind: "text", notNull: true}, "setNull"},
 		{"unresolved", &fkRef{target: pk}, &ColumnSpec{kind: "text"}, "could not be resolved"},
 	}
 	for _, c := range cases {
@@ -1343,6 +1403,19 @@ func TestSchemaRefValidation(t *testing.T) {
 			t.Errorf("%s: expected a validation error", c.name)
 		} else if !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: error %q should contain %q", c.name, err.Error(), c.want)
+		}
+	}
+}
+
+func TestPlainKindForPreservesExactIntegerKeyCodec(t *testing.T) {
+	for source, want := range map[string]string{
+		"smallint": "smallint",
+		"int32":    "int32",
+		"bigint":   "bigint",
+		"serial":   "integer",
+	} {
+		if got := plainKindFor(source); got != want {
+			t.Fatalf("plainKindFor(%q) = %q, want %q", source, got, want)
 		}
 	}
 }

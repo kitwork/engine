@@ -39,6 +39,7 @@ type variableFingerprint struct {
 
 type diagnosticFingerprint struct {
 	Code       runtime.DiagnosticCode
+	CauseCode  string
 	Message    string
 	IP         int
 	File       string
@@ -56,6 +57,7 @@ type determinismFixture struct {
 	context    func() context.Context
 	maxEnergy  uint64
 	diagnostic runtime.DiagnosticCode
+	causeCode  string
 }
 
 func compileDeterminismProgram(t testing.TB, source string) *runtime.Program {
@@ -133,14 +135,15 @@ func fingerprintDiagnostic(diagnostic *runtime.Diagnostic) *diagnosticFingerprin
 		return nil
 	}
 	fingerprint := &diagnosticFingerprint{
-		Code:     diagnostic.Code,
-		Message:  diagnostic.Message,
-		IP:       diagnostic.IP,
-		File:     diagnostic.File,
-		Line:     diagnostic.Line,
-		Column:   diagnostic.Column,
-		Function: diagnostic.Function,
-		Stack:    append([]runtime.StackFrame(nil), diagnostic.Stack...),
+		Code:      diagnostic.Code,
+		CauseCode: diagnostic.CauseCode,
+		Message:   diagnostic.Message,
+		IP:        diagnostic.IP,
+		File:      diagnostic.File,
+		Line:      diagnostic.Line,
+		Column:    diagnostic.Column,
+		Function:  diagnostic.Function,
+		Stack:     append([]runtime.StackFrame(nil), diagnostic.Stack...),
 	}
 	for _, suppressed := range diagnostic.Suppressed {
 		fingerprint.Suppressed = append(
@@ -199,6 +202,35 @@ var result = [1, 2, 3, 4]
 const check = [].reduce((total, item) => total + item).safe();
 var result = { ok: check.ok, error: check.error };
 `,
+			maxEnergy: 100_000,
+		},
+		{
+			name:   "runtime-error-with-cause",
+			source: `var result = failHost();`,
+			globals: func() map[string]value.Value {
+				return map[string]value.Value{
+					"failHost": value.NewFunc(func(...value.Value) value.Value {
+						return value.InvalidFailure("HOST_CONFLICT", "host conflict")
+					}),
+				}
+			},
+			maxEnergy:  100_000,
+			diagnostic: runtime.DiagnosticRuntimeError,
+			causeCode:  "HOST_CONFLICT",
+		},
+		{
+			name: "safe-runtime-error-with-cause",
+			source: `
+const check = failHost().safe();
+var result = { ok: check.ok, code: check.code, error: check.error };
+`,
+			globals: func() map[string]value.Value {
+				return map[string]value.Value{
+					"failHost": value.NewFunc(func(...value.Value) value.Value {
+						return value.InvalidFailure("HOST_CONFLICT", "host conflict")
+					}),
+				}
+			},
 			maxEnergy: 100_000,
 		},
 		{
@@ -289,11 +321,13 @@ var previousResult = [1, 2].map((number) => add(number));
 			)
 			if fixture.diagnostic != "" {
 				if baseline.Diagnostic == nil ||
-					baseline.Diagnostic.Code != fixture.diagnostic {
+					baseline.Diagnostic.Code != fixture.diagnostic ||
+					baseline.Diagnostic.CauseCode != fixture.causeCode {
 					t.Fatalf(
-						"diagnostic = %#v, want %s",
+						"diagnostic = %#v, want %s/%s",
 						baseline.Diagnostic,
 						fixture.diagnostic,
+						fixture.causeCode,
 					)
 				}
 			}

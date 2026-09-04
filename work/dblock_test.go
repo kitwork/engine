@@ -64,11 +64,9 @@ func TestLockableDBPathClassification(t *testing.T) {
 		config *database.Config
 		want   bool
 	}{
-		{"turso file", &database.Config{Type: "turso", Name: "app.db"}, true},
 		{"sqlite file", &database.Config{Type: "sqlite", Name: "data/app.db"}, true},
 		{"sqlite memory", &database.Config{Type: "sqlite", Name: ":memory:"}, false},
 		{"postgres", &database.Config{Type: "postgres", Name: "kitwork", Host: "db"}, false},
-		{"empty", &database.Config{Type: "turso"}, false},
 	}
 	for _, c := range cases {
 		if _, ok := lockableDBPath(c.config); ok != c.want {

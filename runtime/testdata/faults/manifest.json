@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "decoder": [
     {
       "name": "invalid-magic",
@@ -107,6 +107,13 @@
       "name": "runtime-error",
       "scenario": "runtime-error",
       "diagnostic": "RUNTIME_ERROR",
+      "minimum_stack_frames": 1
+    },
+    {
+      "name": "runtime-error-with-cause",
+      "scenario": "runtime-error-with-cause",
+      "diagnostic": "RUNTIME_ERROR",
+      "cause_code": "FAULT_CONFLICT",
       "minimum_stack_frames": 1
     },
     {
