@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -214,6 +215,294 @@ func TestPostgresNodeEvictsIdleEngineAndReleasesFileLocks(t *testing.T) {
 	}
 }
 
+func TestPostgresNodeWarmDatabaseRetainsProjectionWhileIdleBudgetTrimsOthers(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		createPostgresNodeProjectionFixture(t, filepath.Join(root, name+".kitdb"), name)
+	}
+
+	node, err := OpenPostgresNode(PostgresNodeOptions{
+		Root: root, User: "kitdb", Password: "node-secret",
+		WarmDatabases:                       []string{"alpha.kitdb"},
+		MaximumIdleProjectionDatabases:      1,
+		MaximumIdleProjectionDirectoryBytes: 8 << 20,
+		DatabaseAcquireTimeout:              50 * time.Millisecond,
+		ManagerLimits: kitdbnode.Limits{
+			MaxOpenDatabases: 2, MaxPageCacheBytes: 2 << 20,
+			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 2,
+		},
+		Relational: Options{
+			ExperimentalProjections: true,
+			Kernel:                  kitdbengine.OpenOptions{RetainHistory: true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, stopServer := startPostgresNodeTestServer(t, node)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	queryAndClose := func(database string) {
+		t.Helper()
+		client := openPostgresNodeTestClient(t, address, database, "node-secret")
+		var total int64
+		if err := client.QueryRowContext(ctx,
+			`SELECT SUM(price) FROM products WHERE bucket = 1`).Scan(&total); err != nil {
+			t.Fatalf("query %s: %v", database, err)
+		}
+		if total != 40 {
+			t.Fatalf("query %s total = %d, want 40", database, total)
+		}
+		if err := client.Close(); err != nil {
+			t.Fatalf("close %s: %v", database, err)
+		}
+		waitForPostgresNode(t, func() bool {
+			node.mu.Lock()
+			defer node.mu.Unlock()
+			entry := node.engines[database]
+			return entry != nil && entry.sessions == 0
+		})
+	}
+
+	queryAndClose("alpha")
+	warm := node.Stats()
+	if warm.WarmIdleEngines != 1 || warm.ProjectionCachedEngines != 1 ||
+		warm.ProjectionCacheEntries != 1 || warm.ProjectionDirectoryBytes <= 0 {
+		t.Fatalf("warm alpha stats = %+v", warm)
+	}
+
+	queryAndClose("beta")
+	bounded := node.Stats()
+	if bounded.ManagedEngines != 2 || bounded.IdleEngines != 2 ||
+		bounded.ProjectionCachedEngines != 1 || bounded.ProjectionCacheEntries != 1 ||
+		bounded.ProjectionCacheTrims != 1 || bounded.ProjectionDirectoryBytesTrimmed <= 0 {
+		t.Fatalf("bounded idle projection stats = %+v", bounded)
+	}
+	node.mu.Lock()
+	alpha := node.engines["alpha"]
+	beta := node.engines["beta"]
+	node.mu.Unlock()
+	if alpha == nil || !alpha.warm || alpha.engine.ProjectionCacheStats().Entries != 1 {
+		t.Fatalf("warm alpha entry = %+v", alpha)
+	}
+	if beta == nil || beta.warm || beta.engine.ProjectionCacheStats().Entries != 0 {
+		t.Fatalf("cooled beta entry = %+v", beta)
+	}
+
+	queryAndClose("gamma")
+	afterEviction := node.Stats()
+	if afterEviction.ManagedEngines != 2 || afterEviction.WarmIdleEngines != 1 ||
+		afterEviction.ProjectionCachedEngines != 1 || afterEviction.ProjectionCacheTrims != 2 {
+		t.Fatalf("warm eviction stats = %+v", afterEviction)
+	}
+	node.mu.Lock()
+	_, alphaPresent := node.engines["alpha"]
+	_, betaPresent := node.engines["beta"]
+	_, gammaPresent := node.engines["gamma"]
+	node.mu.Unlock()
+	if !alphaPresent || betaPresent || !gammaPresent {
+		t.Fatalf("engine residency alpha=%t beta=%t gamma=%t", alphaPresent, betaPresent, gammaPresent)
+	}
+
+	stopServer()
+	if err := node.Close(); err != nil {
+		t.Fatal(err)
+	}
+	closed := node.Stats()
+	if !closed.Closed || closed.ManagedEngines != 0 || closed.ProjectionCacheEntries != 0 ||
+		closed.Manager.ActiveLeases != 0 {
+		t.Fatalf("closed node stats = %+v", closed)
+	}
+}
+
+func TestPostgresNodeRejectsInvalidWarmProjectionPolicy(t *testing.T) {
+	root := t.TempDir()
+	createPostgresNodeProjectionFixture(t, filepath.Join(root, "alpha.kitdb"), "alpha")
+	base := PostgresNodeOptions{
+		Root: root, User: "kitdb", Password: "node-secret",
+		ManagerLimits: kitdbnode.Limits{
+			MaxOpenDatabases: 1, MaxPageCacheBytes: 1 << 20,
+			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 1,
+		},
+	}
+	tests := []PostgresNodeOptions{
+		func() PostgresNodeOptions {
+			options := base
+			options.WarmDatabases = []string{"missing"}
+			return options
+		}(),
+		func() PostgresNodeOptions {
+			options := base
+			options.WarmDatabases = []string{"alpha", "alpha.kitdb"}
+			return options
+		}(),
+		func() PostgresNodeOptions {
+			options := base
+			options.WarmDatabases = []string{"alpha"}
+			options.MaximumIdleProjectionDirectoryBytes = 1
+			return options
+		}(),
+	}
+	for index, options := range tests {
+		if node, err := OpenPostgresNode(options); err == nil {
+			_ = node.Close()
+			t.Fatalf("invalid warm policy %d succeeded", index)
+		}
+	}
+}
+
+func TestPostgresNodeWarmCapacityFailsWithoutWaiting(t *testing.T) {
+	root := t.TempDir()
+	createPostgresNodeFixture(t, filepath.Join(root, "alpha.kitdb"), "rows", "alpha")
+	createPostgresNodeFixture(t, filepath.Join(root, "beta.kitdb"), "rows", "beta")
+	node, err := OpenPostgresNode(PostgresNodeOptions{
+		Root: root, User: "kitdb", Password: "node-secret",
+		WarmDatabases:          []string{"alpha"},
+		DatabaseAcquireTimeout: 5 * time.Second,
+		ManagerLimits: kitdbnode.Limits{
+			MaxOpenDatabases: 1, MaxPageCacheBytes: 1 << 20,
+			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, stopServer := startPostgresNodeTestServer(t, node)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	alpha := openPostgresNodeTestClient(t, address, "alpha", "node-secret")
+	if err := alpha.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForPostgresNode(t, func() bool { return node.Stats().WarmIdleEngines == 1 })
+
+	started := time.Now()
+	beta := openPostgresNodeRawClient(address, "beta", "node-secret")
+	err = beta.PingContext(ctx)
+	_ = beta.Close()
+	if postgresNodeSQLState(err) != "53300" {
+		t.Fatalf("warm capacity error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("warm capacity waited %v despite having no evictable engine", elapsed)
+	}
+
+	stopServer()
+	if err := node.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPostgresNodeMixedWorkloadIsBounded(t *testing.T) {
+	const (
+		databaseCount         = 8
+		projectedCount        = 4
+		rowsPerDatabase       = 512
+		operationsPerDatabase = 24
+	)
+	root := t.TempDir()
+	for database := 0; database < databaseCount; database++ {
+		createPostgresNodeMixedFixture(
+			t,
+			filepath.Join(root, fmt.Sprintf("tenant%d.kitdb", database)),
+			database < projectedCount,
+			rowsPerDatabase,
+		)
+	}
+
+	queryMetrics := &pgwire.QueryMetrics{}
+	node, err := OpenPostgresNode(PostgresNodeOptions{
+		Root: root, User: "kitdb", Password: "node-secret",
+		WarmDatabases:                  []string{"tenant0", "tenant1"},
+		MaximumIdleProjectionDatabases: 2,
+		DatabaseAcquireTimeout:         time.Second,
+		ManagerLimits: kitdbnode.Limits{
+			MaxOpenDatabases: databaseCount, MaxPageCacheBytes: databaseCount << 20,
+			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 2,
+		},
+		Relational: Options{ExperimentalProjections: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	address, stopServer := startPostgresNodeTestServerWithOptions(t, node, PostgresServerOptions{
+		MaxConnections:             databaseCount,
+		MaxConcurrentQueries:       3,
+		MaxConcurrentQueriesPerKey: 1,
+		MaxQueuedQueries:           databaseCount,
+		MaxQueuedQueriesPerKey:     2,
+		IdleTimeout:                time.Minute,
+		QueryTimeout:               10 * time.Second,
+		QueryMetrics:               queryMetrics,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	clients := make([]*sql.DB, databaseCount)
+	for database := range clients {
+		clients[database] = openPostgresNodeTestClient(
+			t, address, fmt.Sprintf("tenant%d", database), "node-secret",
+		)
+	}
+	baseline := queryMetrics.Snapshot()
+
+	start := make(chan struct{})
+	errorsFound := make(chan error, databaseCount)
+	var workers sync.WaitGroup
+	for database, client := range clients {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			for operation := 0; operation < operationsPerDatabase; operation++ {
+				if err := runPostgresNodeMixedOperation(
+					ctx, client, database < projectedCount, database, operation,
+					rowsPerDatabase, mixedFixtureActiveTotal(rowsPerDatabase),
+				); err != nil {
+					errorsFound <- err
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errorsFound)
+	for err := range errorsFound {
+		t.Error(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal(ctx.Err())
+	}
+	snapshot := queryMetrics.Snapshot()
+	expectedQueries := uint64(databaseCount * operationsPerDatabase)
+	if snapshot.Active != 0 || snapshot.Queued != 0 || snapshot.Peak > 3 ||
+		snapshot.Acquired-baseline.Acquired != expectedQueries ||
+		snapshot.Completed-baseline.Completed != expectedQueries ||
+		snapshot.Failed != baseline.Failed || snapshot.Rejected != baseline.Rejected ||
+		snapshot.WaitTimeouts != baseline.WaitTimeouts {
+		t.Fatalf("mixed query metrics baseline=%+v final=%+v", baseline, snapshot)
+	}
+
+	for _, client := range clients {
+		if err := client.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitForPostgresNode(t, func() bool { return node.Stats().Sessions == 0 })
+	stats := node.Stats()
+	if stats.ProjectionCachedEngines != 2 || stats.ProjectionCacheEntries != 4 ||
+		stats.WarmIdleEngines != 2 || stats.ProjectionCacheTrims < 2 ||
+		stats.Manager.ActiveLeases != databaseCount {
+		t.Fatalf("mixed node residency = %+v", stats)
+	}
+
+	stopServer()
+	if err := node.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func createPostgresNodeFixture(t *testing.T, path, table, value string) {
 	t.Helper()
 	engine, err := Open(path)
@@ -236,7 +525,189 @@ CREATE TABLE %s (
 	}
 }
 
+func createPostgresNodeProjectionFixture(t *testing.T, path, label string) {
+	t.Helper()
+	engine, err := OpenWithOptions(path, Options{
+		ExperimentalProjections: true,
+		Kernel:                  kitdbengine.OpenOptions{RetainHistory: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if _, err := engine.Execute(context.Background(), `
+CREATE TABLE products (
+    id INTEGER PRIMARY KEY,
+    bucket INTEGER NOT NULL,
+    price INTEGER NOT NULL,
+    label TEXT NOT NULL
+)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.Execute(context.Background(),
+		`INSERT INTO products (id,bucket,price,label) VALUES (1,1,10,$1),(2,2,20,$1),(3,1,30,$1)`,
+		label,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.RefreshAnalytics(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createPostgresNodeMixedFixture(t testing.TB, path string, projected bool, rows int) {
+	t.Helper()
+	engine, err := OpenWithOptions(path, Options{ExperimentalProjections: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	if _, err := engine.Execute(context.Background(), `
+CREATE TABLE events (
+    tenant_id INTEGER NOT NULL,
+    id INTEGER NOT NULL,
+    label TEXT NOT NULL SEARCHABLE WEIGHT 3,
+    amount INTEGER NOT NULL,
+    active BOOLEAN NOT NULL,
+    PRIMARY KEY (tenant_id, id)
+)`); err != nil {
+		t.Fatal(err)
+	}
+	for start := 0; start < rows; start += 128 {
+		var source strings.Builder
+		source.WriteString("INSERT INTO events (tenant_id,id,label,amount,active) VALUES ")
+		for row := start; row < min(start+128, rows); row++ {
+			if row != start {
+				source.WriteByte(',')
+			}
+			fmt.Fprintf(
+				&source, "(1,%d,'blue widget %d',%d,%t)",
+				row, row%17, row%100, row%2 == 0,
+			)
+		}
+		if _, err := engine.Execute(context.Background(), source.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := engine.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+	if projected {
+		if _, err := engine.RefreshProjections(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func mixedFixtureActiveTotal(rows int) int64 {
+	var total int64
+	for row := 0; row < rows; row += 2 {
+		total += int64(row % 100)
+	}
+	return total
+}
+
+func runPostgresNodeMixedOperation(
+	ctx context.Context,
+	client *sql.DB,
+	projected bool,
+	database int,
+	operation int,
+	rowsPerDatabase int,
+	expectedActiveTotal int64,
+) error {
+	id := operation % rowsPerDatabase
+	if projected {
+		switch operation % 3 {
+		case 0:
+			var label string
+			if err := client.QueryRowContext(ctx,
+				`SELECT label FROM events WHERE tenant_id = 1 AND id = $1`, id,
+			).Scan(&label); err != nil {
+				return fmt.Errorf("tenant%d point read: %w", database, err)
+			}
+			if label == "" {
+				return fmt.Errorf("tenant%d point read returned an empty label", database)
+			}
+		case 1:
+			var total int64
+			if err := client.QueryRowContext(ctx,
+				`SELECT SUM(amount) FROM events WHERE active = true`,
+			).Scan(&total); err != nil {
+				return fmt.Errorf("tenant%d aggregate: %w", database, err)
+			}
+			if total != expectedActiveTotal {
+				return fmt.Errorf("tenant%d aggregate total=%d, want %d", database, total, expectedActiveTotal)
+			}
+		case 2:
+			rows, err := client.QueryContext(ctx,
+				`SELECT id, _score FROM events WHERE * SEARCH 'blue widget' ORDER BY _score DESC LIMIT 5`,
+			)
+			if err != nil {
+				return fmt.Errorf("tenant%d search: %w", database, err)
+			}
+			count := 0
+			for rows.Next() {
+				var resultID int64
+				var score float64
+				if err := rows.Scan(&resultID, &score); err != nil {
+					_ = rows.Close()
+					return fmt.Errorf("tenant%d search row: %w", database, err)
+				}
+				count++
+			}
+			iterationErr := rows.Err()
+			closeErr := rows.Close()
+			if iterationErr != nil {
+				return fmt.Errorf("tenant%d search iteration: %w", database, iterationErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("tenant%d search close: %w", database, closeErr)
+			}
+			if count != 5 {
+				return fmt.Errorf("tenant%d search count=%d, want 5", database, count)
+			}
+		}
+		return nil
+	}
+
+	if operation%2 == 0 {
+		var amount int64
+		if err := client.QueryRowContext(ctx,
+			`SELECT amount FROM events WHERE tenant_id = 1 AND id = $1`, id,
+		).Scan(&amount); err != nil {
+			return fmt.Errorf("tenant%d OLTP read: %w", database, err)
+		}
+		return nil
+	}
+	result, err := client.ExecContext(ctx,
+		`UPDATE events SET amount = $1 WHERE tenant_id = 1 AND id = $2`,
+		operation+database, id,
+	)
+	if err != nil {
+		return fmt.Errorf("tenant%d OLTP update: %w", database, err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("tenant%d OLTP affected rows: %w", database, err)
+	}
+	if affected != 1 {
+		return fmt.Errorf("tenant%d OLTP affected=%d, want 1", database, affected)
+	}
+	return nil
+}
+
 func startPostgresNodeTestServer(t *testing.T, node *PostgresNode) (string, func()) {
+	return startPostgresNodeTestServerWithOptions(t, node, PostgresServerOptions{
+		MaxConnections: 16, IdleTimeout: time.Minute, QueryTimeout: 5 * time.Second,
+	})
+}
+
+func startPostgresNodeTestServerWithOptions(
+	t testing.TB,
+	node *PostgresNode,
+	options PostgresServerOptions,
+) (string, func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -245,9 +716,7 @@ func startPostgresNodeTestServer(t *testing.T, node *PostgresNode) (string, func
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- node.ServePostgres(ctx, listener, PostgresServerOptions{
-			MaxConnections: 16, IdleTimeout: time.Minute, QueryTimeout: 5 * time.Second,
-		})
+		done <- node.ServePostgres(ctx, listener, options)
 	}()
 	var once sync.Once
 	stop := func() {
@@ -267,7 +736,7 @@ func startPostgresNodeTestServer(t *testing.T, node *PostgresNode) (string, func
 	return listener.Addr().String(), stop
 }
 
-func openPostgresNodeTestClient(t *testing.T, address, database, password string) *sql.DB {
+func openPostgresNodeTestClient(t testing.TB, address, database, password string) *sql.DB {
 	t.Helper()
 	client := openPostgresNodeRawClient(address, database, password)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

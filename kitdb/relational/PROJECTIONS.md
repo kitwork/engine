@@ -561,7 +561,10 @@ go test ./kitdb/relational -run ^$ \
   The snapshot directory is capped at 8 MiB/16384 entries, with at most 1 MiB
   of raw optional partition block-directory entries. Two experimental
   scans are admitted per Engine; further scans wait with context cancellation.
-  This is not a node-wide/fleet governor or a hard process RSS budget.
+  Embedded callers still need a host governor and this is not a hard process
+  RSS budget. The standalone PostgreSQL listener now adds a separate fair,
+  bounded statement scheduler across databases before execution reaches the
+  per-Engine projection gate.
 - Group state grows with distinct groups, not all input rows. The configured
   result/group limit (default 10000, ceiling 100000) still applies before HAVING
   or LIMIT. Batch grouping also enforces a 16 MiB accounted state budget for
@@ -578,6 +581,47 @@ go test ./kitdb/relational -run ^$ \
   decoded manifest across concurrent exact-watermark queries; individual search
   snapshots retain their own bounded segment readers. Native segment-count and
   input-size limits still apply.
+
+### Multi-Database Residency and Mixed Workload
+
+The standalone PostgreSQL node can name a bounded set of warm databases and
+bound idle projection residency by both database count and serialized snapshot
+directory bytes. Warm means an open relational owner plus eligible bounded
+reader metadata, not prefetched KCOL/search payloads. Non-warm readers are
+closed oldest-first without deleting sidecars and reopen with the same exact
+watermark checks. Whole-engine LRU also skips configured warm databases.
+
+The retained `BenchmarkPostgresNodeMixedWorkload` exercises the public pgwire
+path over eight independent files: four stable databases alternate primary-key
+reads, KCOL aggregates and BM25 search; four mutable databases alternate
+primary-key reads and WAL-backed updates. Each fixture has 4,096 rows. Query
+admission is six listener-wide and two per database, with bounded queues. On
+Windows/amd64, Go 1.26, an i7-11850H and warm operating-system cache, three
+5,000-operation runs on 2026-09-04 observed:
+
+```sh
+go test ./kitdb/relational -run '^$' \
+  -bench '^BenchmarkPostgresNodeMixedWorkload$' \
+  -benchtime=5000x -count=3 -benchmem
+```
+
+| Measurement | Observed range |
+| --- | ---: |
+| Average | 196600-204260 ns/op |
+| Throughput | 4896-5087 statements/s |
+| Point read p95 / p99 | 5 ms / 6 ms |
+| KCOL aggregate p95 / p99 | 5-6 ms / 6-8 ms |
+| BM25 search p95 / p99 | 8 ms / 8-10 ms |
+| KROW update p95 / p99 | 5-6 ms / 6-8 ms |
+| Allocation | 133952-134077 B/op, 590 allocs/op |
+| Admission peak / queue peak | 6 / 10 |
+
+Setup, projection construction and connection establishment are excluded;
+SQL planning, pgwire encoding/decoding, KROW/KCOL/search execution and commits
+are included. Percentiles are bounded-histogram bucket upper bounds, include
+admission wait, and consume constant benchmark memory. This is a repeatable
+mixed-throughput baseline, not a cold-cache, 13-million-row, power-loss,
+SQLite, or PostgreSQL comparison.
 
 ### Projection Reader Cache Measurement
 

@@ -55,12 +55,176 @@ func TestCopyAdmissionIsBoundedAndMeasured(t *testing.T) {
 	}
 }
 
-func TestCopyAdmissionDefaultsFitConnectionBudget(t *testing.T) {
+func TestAdmissionDefaultsFitConnectionBudget(t *testing.T) {
 	server := (Server{MaxConnections: 4}).withDefaults()
-	if server.MaxConcurrentCopies != 2 || server.MaxConcurrentCopiesPerKey != 1 ||
+	if server.MaxConcurrentQueries != 4 || server.MaxConcurrentQueriesPerKey != 4 ||
+		server.MaxQueuedQueries != 4 || server.MaxQueuedQueriesPerKey != 4 || server.QueryMetrics == nil ||
+		server.MaxConcurrentCopies != 2 || server.MaxConcurrentCopiesPerKey != 1 ||
 		server.MaxQueuedCopies != 4 || server.MaxQueuedCopiesPerKey != 4 || server.CopyMetrics == nil {
-		t.Fatalf("COPY admission defaults = %#v", server)
+		t.Fatalf("admission defaults = %#v", server)
 	}
+}
+
+func TestQueryAdmissionBoundsExecutionPerKey(t *testing.T) {
+	metrics := &QueryMetrics{}
+	server := (Server{
+		MaxConnections: 4, MaxConcurrentQueries: 2,
+		MaxConcurrentQueriesPerKey: 1,
+		MaxQueuedQueries:           4,
+		MaxQueuedQueriesPerKey:     2,
+		QueryTimeout:               2 * time.Second,
+		QueryMetrics:               metrics,
+	}).withDefaults()
+	runtime := &serverRuntime{server: server}
+	runtime.queryAdmission = newCopyAdmissionScheduler(
+		server.MaxConcurrentQueries,
+		server.MaxConcurrentQueriesPerKey,
+		server.MaxQueuedQueries,
+		server.MaxQueuedQueriesPerKey,
+		&metrics.admission,
+	)
+
+	started := make(chan string, 3)
+	completed := make(chan admissionQueryResult, 3)
+	run := func(label, key string, release <-chan struct{}) {
+		wire := &wireConnection{
+			runtime: runtime,
+			session: &blockingQuerySession{
+				key: key, label: label, started: started, release: release,
+			},
+			cancel: &cancelSlot{},
+		}
+		_, err := wire.runQuery(context.Background(), "SELECT 1", nil)
+		completed <- admissionQueryResult{label: label, err: err}
+	}
+	releaseA1 := make(chan struct{})
+	releaseA2 := make(chan struct{})
+	releaseB := make(chan struct{})
+	go run("a1", "tenant/a", releaseA1)
+	waitForQueryStart(t, started, "a1")
+	go run("a2", "tenant/a", releaseA2)
+	waitForQueryQueue(t, metrics, 1)
+	go run("b", "tenant/b", releaseB)
+	waitForQueryStart(t, started, "b")
+
+	snapshot := metrics.Snapshot()
+	if snapshot.Active != 2 || snapshot.Peak != 2 || snapshot.Queued != 1 ||
+		snapshot.PeakQueued != 1 || snapshot.Acquired != 2 {
+		t.Fatalf("active query metrics = %#v", snapshot)
+	}
+	close(releaseB)
+	waitForQueryResult(t, completed, "b")
+	select {
+	case label := <-started:
+		t.Fatalf("same-key query started while first remained active: %s", label)
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(releaseA1)
+	waitForQueryStart(t, started, "a2")
+	close(releaseA2)
+	waitForQueryResults(t, completed, "a1", "a2")
+
+	snapshot = metrics.Snapshot()
+	if snapshot.Active != 0 || snapshot.Queued != 0 || snapshot.Peak != 2 ||
+		snapshot.PeakQueued != 1 || snapshot.Acquired != 3 ||
+		snapshot.Completed != 3 || snapshot.Failed != 0 || snapshot.WaitNanoseconds == 0 {
+		t.Fatalf("completed query metrics = %#v", snapshot)
+	}
+}
+
+type blockingQuerySession struct {
+	key     string
+	label   string
+	started chan<- string
+	release <-chan struct{}
+}
+
+type admissionQueryResult struct {
+	label string
+	err   error
+}
+
+func (session *blockingQuerySession) QueryAdmission() QueryAdmission {
+	return QueryAdmission{Key: session.key, Weight: 1}
+}
+
+func (session *blockingQuerySession) Execute(
+	ctx context.Context,
+	_ string,
+	_ []Parameter,
+) (Result, error) {
+	select {
+	case session.started <- session.label:
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	}
+	select {
+	case <-session.release:
+		return Result{CommandTag: "SELECT 1"}, nil
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	}
+}
+
+func (session *blockingQuerySession) Close() error { return nil }
+
+func waitForQueryStart(t *testing.T, started <-chan string, want string) {
+	t.Helper()
+	select {
+	case got := <-started:
+		if got != want {
+			t.Fatalf("query start = %q, want %q", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("query %q did not start", want)
+	}
+}
+
+func waitForQueryResult(t *testing.T, completed <-chan admissionQueryResult, want string) {
+	t.Helper()
+	select {
+	case result := <-completed:
+		if result.label != want || result.err != nil {
+			t.Fatalf("query result = %+v, want label %q without error", result, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("query %q did not complete", want)
+	}
+}
+
+func waitForQueryResults(t *testing.T, completed <-chan admissionQueryResult, wants ...string) {
+	t.Helper()
+	remaining := make(map[string]struct{}, len(wants))
+	for _, want := range wants {
+		remaining[want] = struct{}{}
+	}
+	deadline := time.After(time.Second)
+	for len(remaining) != 0 {
+		select {
+		case result := <-completed:
+			if result.err != nil {
+				t.Fatalf("query %q failed: %v", result.label, result.err)
+			}
+			if _, found := remaining[result.label]; !found {
+				t.Fatalf("unexpected query result %q", result.label)
+			}
+			delete(remaining, result.label)
+		case <-deadline:
+			t.Fatalf("queries did not complete: %v", remaining)
+		}
+	}
+}
+
+func waitForQueryQueue(t *testing.T, metrics *QueryMetrics, queued int64) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if metrics.Snapshot().Queued == queued {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("query queue = %d, want %d", metrics.Snapshot().Queued, queued)
 }
 
 func TestCopyAdmissionIsFairAcrossKeys(t *testing.T) {

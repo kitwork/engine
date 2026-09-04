@@ -19,10 +19,14 @@ import (
 )
 
 const (
-	DefaultMaximumDiscoveredDatabases = 4_096
-	MaximumDiscoveredDatabases        = 100_000
-	DefaultDatabaseAcquireTimeout     = 10 * time.Second
-	MaximumDatabaseAcquireTimeout     = 10 * time.Minute
+	DefaultMaximumDiscoveredDatabases          = 4_096
+	MaximumDiscoveredDatabases                 = 100_000
+	DefaultDatabaseAcquireTimeout              = 10 * time.Second
+	MaximumDatabaseAcquireTimeout              = 10 * time.Minute
+	DefaultMaximumIdleProjectionDatabases      = 8
+	MaximumIdleProjectionDatabases             = 4_096
+	DefaultMaximumIdleProjectionDirectoryBytes = int64(32 << 20)
+	MaximumIdleProjectionDirectoryBytes        = int64(1 << 40)
 )
 
 // PostgresNodeOptions configures one standalone PostgreSQL endpoint over the
@@ -36,9 +40,42 @@ type PostgresNodeOptions struct {
 	ReadOnly                   bool
 	MaximumDiscoveredDatabases int
 	DatabaseAcquireTimeout     time.Duration
-	ManagerLimits              kitdbnode.Limits
-	Relational                 Options
-	Trace                      func(database, source string, parameterCount int)
+	// WarmDatabases names a bounded set of logical databases whose idle
+	// relational engine, page cache, and projection readers should survive LRU
+	// pressure. Names never become file paths or durable database metadata.
+	WarmDatabases []string
+	// MaximumIdleProjectionDatabases and MaximumIdleProjectionDirectoryBytes
+	// bound non-active KCOL/search reader metadata across the node. Zero values
+	// select defaults constrained by the database-handle budget.
+	MaximumIdleProjectionDatabases      int
+	MaximumIdleProjectionDirectoryBytes int64
+	ManagerLimits                       kitdbnode.Limits
+	Relational                          Options
+	Trace                               func(database, source string, parameterCount int)
+}
+
+// PostgresNodeStats is a path-free process-local view of relational ownership.
+// Projection bytes cover retained container directories, not payload pages or
+// operating-system page-cache residency.
+type PostgresNodeStats struct {
+	Closed                              bool
+	ManagedEngines                      int
+	OpeningEngines                      int
+	ActiveEngines                       int
+	IdleEngines                         int
+	ConfiguredWarmDatabases             int
+	WarmEngines                         int
+	WarmIdleEngines                     int
+	Sessions                            int
+	ProjectionCachedEngines             int
+	ProjectionCacheEntries              int
+	ProjectionActiveLeases              int
+	ProjectionDirectoryBytes            int64
+	ProjectionCacheTrims                uint64
+	ProjectionDirectoryBytesTrimmed     int64
+	MaximumIdleProjectionDatabases      int
+	MaximumIdleProjectionDirectoryBytes int64
+	Manager                             kitdbnode.Stats
 }
 
 type postgresNodeDatabase struct {
@@ -47,41 +84,49 @@ type postgresNodeDatabase struct {
 }
 
 type postgresNodeEngineEntry struct {
-	database postgresNodeDatabase
-	engine   *Engine
-	ready    chan struct{}
-	opening  bool
-	sessions int
-	idle     *list.Element
-	err      error
+	database                 postgresNodeDatabase
+	engine                   *Engine
+	ready                    chan struct{}
+	opening                  bool
+	warm                     bool
+	sessions                 int
+	idle                     *list.Element
+	projectionEntries        int
+	projectionDirectoryBytes int64
+	err                      error
 }
 
 // PostgresNode owns bounded, lazily opened relational engines for one database
 // directory. It is independent from Kitwork Tenant, VM, routing and app state.
 type PostgresNode struct {
-	root                   string
-	maintenanceDatabase    string
-	user                   string
-	password               string
-	readOnly               bool
-	maximumDiscovered      int
-	manager                *kitdbnode.Manager
-	managerMaximumOpen     int
-	managerMaximumCache    int64
-	databaseCacheBytes     int64
-	databaseAcquireTimeout time.Duration
-	relational             Options
-	maximumResults         int
-	maximumMutations       int
-	trace                  func(database, source string, parameterCount int)
+	root                                string
+	maintenanceDatabase                 string
+	user                                string
+	password                            string
+	readOnly                            bool
+	maximumDiscovered                   int
+	manager                             *kitdbnode.Manager
+	managerMaximumOpen                  int
+	managerMaximumCache                 int64
+	databaseCacheBytes                  int64
+	databaseAcquireTimeout              time.Duration
+	warmDatabases                       map[string]struct{}
+	maximumIdleProjectionDatabases      int
+	maximumIdleProjectionDirectoryBytes int64
+	relational                          Options
+	maximumResults                      int
+	maximumMutations                    int
+	trace                               func(database, source string, parameterCount int)
 
-	mu        sync.Mutex
-	engines   map[string]*postgresNodeEngineEntry
-	idle      list.List
-	notify    chan struct{}
-	closed    bool
-	closeDone chan struct{}
-	closeErr  error
+	mu                              sync.Mutex
+	engines                         map[string]*postgresNodeEngineEntry
+	idle                            list.List
+	notify                          chan struct{}
+	closed                          bool
+	closeDone                       chan struct{}
+	closeErr                        error
+	projectionCacheTrims            uint64
+	projectionDirectoryBytesTrimmed int64
 }
 
 // OpenPostgresNode creates a metadata-only node. It does not open any .kitdb
@@ -151,6 +196,22 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		return nil, err
 	}
 	managerStats := manager.Stats()
+	warmDatabases, err := normalizePostgresNodeWarmDatabases(options.WarmDatabases, maintenance)
+	if err != nil {
+		_ = manager.Close()
+		return nil, err
+	}
+	maximumIdleProjectionDatabases, maximumIdleProjectionDirectoryBytes, err :=
+		normalizePostgresNodeProjectionResidency(
+			options.MaximumIdleProjectionDatabases,
+			options.MaximumIdleProjectionDirectoryBytes,
+			managerStats.MaxOpenDatabases,
+			len(warmDatabases),
+		)
+	if err != nil {
+		_ = manager.Close()
+		return nil, err
+	}
 	databaseCacheBytes := options.Relational.Kernel.PageCacheBytes
 	switch {
 	case databaseCacheBytes == 0:
@@ -162,21 +223,107 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		root: absoluteRoot, maintenanceDatabase: maintenance,
 		user: user, password: options.Password, readOnly: options.ReadOnly,
 		maximumDiscovered: maximumDiscovered, manager: manager,
-		managerMaximumOpen:     managerStats.MaxOpenDatabases,
-		managerMaximumCache:    managerStats.MaxPageCacheBytes,
-		databaseCacheBytes:     databaseCacheBytes,
-		databaseAcquireTimeout: acquireTimeout,
-		relational:             options.Relational,
-		maximumResults:         maximumResults, maximumMutations: maximumMutations,
+		managerMaximumOpen:                  managerStats.MaxOpenDatabases,
+		managerMaximumCache:                 managerStats.MaxPageCacheBytes,
+		databaseCacheBytes:                  databaseCacheBytes,
+		databaseAcquireTimeout:              acquireTimeout,
+		warmDatabases:                       warmDatabases,
+		maximumIdleProjectionDatabases:      maximumIdleProjectionDatabases,
+		maximumIdleProjectionDirectoryBytes: maximumIdleProjectionDirectoryBytes,
+		relational:                          options.Relational,
+		maximumResults:                      maximumResults, maximumMutations: maximumMutations,
 		trace:   options.Trace,
 		engines: make(map[string]*postgresNodeEngineEntry),
 		notify:  make(chan struct{}), closeDone: make(chan struct{}),
 	}
-	if _, err := node.discoverDatabases(); err != nil {
+	databases, err := node.discoverDatabases()
+	if err != nil {
 		_ = manager.Close()
 		return nil, err
 	}
+	available := make(map[string]struct{}, len(databases))
+	for _, database := range databases {
+		available[strings.ToLower(database.name)] = struct{}{}
+	}
+	for name := range warmDatabases {
+		if _, found := available[name]; !found {
+			_ = manager.Close()
+			return nil, fmt.Errorf("kitdb postgres node: warm database %q does not exist", name)
+		}
+	}
 	return node, nil
+}
+
+func normalizePostgresNodeWarmDatabases(names []string, maintenance string) (map[string]struct{}, error) {
+	result := make(map[string]struct{}, len(names))
+	for _, source := range names {
+		name := postgresLogicalDatabaseName(source)
+		if err := validatePostgresLogicalDatabaseName(name); err != nil {
+			return nil, fmt.Errorf("kitdb postgres node: warm database: %w", err)
+		}
+		if strings.EqualFold(name, maintenance) {
+			return nil, fmt.Errorf("kitdb postgres node: maintenance database %q cannot be warmed", name)
+		}
+		key := strings.ToLower(name)
+		if _, duplicate := result[key]; duplicate {
+			return nil, fmt.Errorf("kitdb postgres node: warm database %q is repeated", name)
+		}
+		result[key] = struct{}{}
+	}
+	return result, nil
+}
+
+func normalizePostgresNodeProjectionResidency(
+	maximumDatabases int,
+	maximumBytes int64,
+	maximumOpen int,
+	warmDatabases int,
+) (int, int64, error) {
+	explicitDatabases := maximumDatabases != 0
+	if maximumDatabases == 0 {
+		maximumDatabases = min(DefaultMaximumIdleProjectionDatabases, maximumOpen)
+		if warmDatabases > maximumDatabases {
+			maximumDatabases = warmDatabases
+		}
+	}
+	if maximumDatabases < 1 || maximumDatabases > MaximumIdleProjectionDatabases ||
+		maximumDatabases > maximumOpen {
+		return 0, 0, fmt.Errorf(
+			"kitdb postgres node: maximum idle projection databases must be between 1 and MaxOpenDatabases (up to %d)",
+			MaximumIdleProjectionDatabases,
+		)
+	}
+	if explicitDatabases && warmDatabases > maximumDatabases {
+		return 0, 0, fmt.Errorf(
+			"kitdb postgres node: %d warm databases exceed the idle projection database limit %d",
+			warmDatabases, maximumDatabases,
+		)
+	}
+
+	maximumPerEngine := int64(2 * maximumCachedProjectionDirectoryBytes)
+	minimumWarmBytes := int64(warmDatabases) * maximumPerEngine
+	if maximumBytes == 0 {
+		maximumBytes = min(
+			DefaultMaximumIdleProjectionDirectoryBytes,
+			int64(maximumDatabases)*maximumPerEngine,
+		)
+		if maximumBytes < minimumWarmBytes {
+			maximumBytes = minimumWarmBytes
+		}
+	}
+	if maximumBytes < 1 || maximumBytes > MaximumIdleProjectionDirectoryBytes {
+		return 0, 0, fmt.Errorf(
+			"kitdb postgres node: maximum idle projection directory bytes must be between 1 and %d",
+			MaximumIdleProjectionDirectoryBytes,
+		)
+	}
+	if maximumBytes < minimumWarmBytes {
+		return 0, 0, fmt.Errorf(
+			"kitdb postgres node: warm databases require a projection directory budget of at least %d bytes",
+			minimumWarmBytes,
+		)
+	}
+	return maximumDatabases, maximumBytes, nil
 }
 
 // ServePostgres serves the node through the same bounded pgwire transport as a
@@ -190,18 +337,23 @@ func (node *PostgresNode) ServePostgres(
 		return fmt.Errorf("kitdb postgres node: node is nil")
 	}
 	return (pgwire.Server{
-		Authenticator:             node,
-		MaxConnections:            options.MaxConnections,
-		MaxConcurrentCopies:       options.MaxConcurrentCopies,
-		MaxConcurrentCopiesPerKey: options.MaxConcurrentCopiesPerKey,
-		MaxQueuedCopies:           options.MaxQueuedCopies,
-		MaxQueuedCopiesPerKey:     options.MaxQueuedCopiesPerKey,
-		MaxMessageBytes:           options.MaxMessageBytes,
-		MaxCopyBytes:              options.MaxCopyBytes,
-		IdleTimeout:               options.IdleTimeout,
-		QueryTimeout:              options.QueryTimeout,
-		CopyTimeout:               options.CopyTimeout,
-		CopyMetrics:               options.CopyMetrics,
+		Authenticator:              node,
+		MaxConnections:             options.MaxConnections,
+		MaxConcurrentQueries:       options.MaxConcurrentQueries,
+		MaxConcurrentQueriesPerKey: options.MaxConcurrentQueriesPerKey,
+		MaxQueuedQueries:           options.MaxQueuedQueries,
+		MaxQueuedQueriesPerKey:     options.MaxQueuedQueriesPerKey,
+		MaxConcurrentCopies:        options.MaxConcurrentCopies,
+		MaxConcurrentCopiesPerKey:  options.MaxConcurrentCopiesPerKey,
+		MaxQueuedCopies:            options.MaxQueuedCopies,
+		MaxQueuedCopiesPerKey:      options.MaxQueuedCopiesPerKey,
+		MaxMessageBytes:            options.MaxMessageBytes,
+		MaxCopyBytes:               options.MaxCopyBytes,
+		IdleTimeout:                options.IdleTimeout,
+		QueryTimeout:               options.QueryTimeout,
+		CopyTimeout:                options.CopyTimeout,
+		QueryMetrics:               options.QueryMetrics,
+		CopyMetrics:                options.CopyMetrics,
 	}).Serve(ctx, listener)
 }
 
@@ -263,7 +415,7 @@ func (node *PostgresNode) Authenticate(
 	defer cancel()
 	entry, err := node.acquireEngine(acquireContext, database)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, kitdbnode.ErrWarmCapacity) {
 			return nil, pgwire.NewError("53300", "KitDB database capacity is busy; retry the connection")
 		}
 		return nil, pgwire.NewError("55000", err.Error())
@@ -430,6 +582,10 @@ func (node *PostgresNode) acquireEngine(
 		if atCapacity {
 			victim := node.oldestIdleLocked()
 			if victim == nil {
+				if node.onlyWarmEnginesLocked() {
+					node.mu.Unlock()
+					return nil, kitdbnode.ErrWarmCapacity
+				}
 				notify := node.notify
 				node.mu.Unlock()
 				select {
@@ -449,8 +605,10 @@ func (node *PostgresNode) acquireEngine(
 			continue
 		}
 
+		_, warm := node.warmDatabases[key]
 		entry := &postgresNodeEngineEntry{
-			database: database, ready: make(chan struct{}), opening: true, sessions: 1,
+			database: database, ready: make(chan struct{}), opening: true,
+			warm: warm, sessions: 1,
 		}
 		node.engines[key] = entry
 		node.mu.Unlock()
@@ -506,25 +664,93 @@ func (node *PostgresNode) releaseEngine(entry *postgresNodeEngineEntry) error {
 		return nil
 	}
 	node.mu.Lock()
-	defer node.mu.Unlock()
 	current := node.engines[strings.ToLower(entry.database.name)]
 	if current != entry || entry.sessions == 0 {
+		node.mu.Unlock()
 		return nil
 	}
 	entry.sessions--
 	if entry.sessions == 0 && !entry.opening {
+		projection := entry.engine.ProjectionCacheStats()
+		entry.projectionEntries = projection.Entries
+		entry.projectionDirectoryBytes = projection.DirectoryBytes
 		entry.idle = node.idle.PushFront(entry)
 	}
+	trimErr := node.enforceIdleProjectionResidencyLocked()
 	node.signalLocked()
-	return nil
+	node.mu.Unlock()
+	return trimErr
 }
 
 func (node *PostgresNode) oldestIdleLocked() *postgresNodeEngineEntry {
-	oldest := node.idle.Back()
-	if oldest == nil {
-		return nil
+	for element := node.idle.Back(); element != nil; element = element.Prev() {
+		entry := element.Value.(*postgresNodeEngineEntry)
+		if !entry.warm {
+			return entry
+		}
 	}
-	return oldest.Value.(*postgresNodeEngineEntry)
+	return nil
+}
+
+func (node *PostgresNode) onlyWarmEnginesLocked() bool {
+	if len(node.engines) == 0 {
+		return false
+	}
+	for _, entry := range node.engines {
+		if !entry.warm {
+			return false
+		}
+	}
+	return true
+}
+
+func (node *PostgresNode) enforceIdleProjectionResidencyLocked() error {
+	var cachedDatabases int
+	var directoryBytes int64
+	for element := node.idle.Front(); element != nil; element = element.Next() {
+		entry := element.Value.(*postgresNodeEngineEntry)
+		if entry.projectionEntries == 0 {
+			continue
+		}
+		cachedDatabases++
+		directoryBytes += entry.projectionDirectoryBytes
+	}
+
+	var result error
+	for cachedDatabases > node.maximumIdleProjectionDatabases ||
+		directoryBytes > node.maximumIdleProjectionDirectoryBytes {
+		var victim *postgresNodeEngineEntry
+		for element := node.idle.Back(); element != nil; element = element.Prev() {
+			candidate := element.Value.(*postgresNodeEngineEntry)
+			if !candidate.warm && candidate.projectionEntries != 0 {
+				victim = candidate
+				break
+			}
+		}
+		if victim == nil {
+			return errors.Join(result, fmt.Errorf(
+				"kitdb postgres node: warm projection readers exceed the configured idle budget",
+			))
+		}
+		beforeEntries := victim.projectionEntries
+		beforeBytes := victim.projectionDirectoryBytes
+		trimmed, err := victim.engine.TrimProjectionCache()
+		if err != nil {
+			return errors.Join(result, err)
+		}
+		victim.projectionEntries = 0
+		victim.projectionDirectoryBytes = 0
+		cachedDatabases--
+		directoryBytes -= beforeBytes
+		node.projectionCacheTrims++
+		node.projectionDirectoryBytesTrimmed += trimmed.DirectoryBytes
+		if trimmed.Entries != beforeEntries || trimmed.DirectoryBytes != beforeBytes {
+			result = errors.Join(result, fmt.Errorf(
+				"kitdb postgres node: projection residency changed during idle trim",
+			))
+		}
+	}
+	return result
 }
 
 func (node *PostgresNode) removeIdleLocked(entry *postgresNodeEngineEntry) {
@@ -533,6 +759,68 @@ func (node *PostgresNode) removeIdleLocked(entry *postgresNodeEngineEntry) {
 	}
 	node.idle.Remove(entry.idle)
 	entry.idle = nil
+}
+
+// Stats returns bounded process-local node ownership without exposing database
+// paths or logical names. Active engines may change immediately after the
+// snapshot; each projection cache is inspected under its own lock.
+func (node *PostgresNode) Stats() PostgresNodeStats {
+	if node == nil {
+		return PostgresNodeStats{Closed: true}
+	}
+	type engineSnapshot struct {
+		engine   *Engine
+		opening  bool
+		warm     bool
+		sessions int
+	}
+	node.mu.Lock()
+	engines := make([]engineSnapshot, 0, len(node.engines))
+	stats := PostgresNodeStats{
+		Closed:                              node.closed,
+		ManagedEngines:                      len(node.engines),
+		ConfiguredWarmDatabases:             len(node.warmDatabases),
+		ProjectionCacheTrims:                node.projectionCacheTrims,
+		ProjectionDirectoryBytesTrimmed:     node.projectionDirectoryBytesTrimmed,
+		MaximumIdleProjectionDatabases:      node.maximumIdleProjectionDatabases,
+		MaximumIdleProjectionDirectoryBytes: node.maximumIdleProjectionDirectoryBytes,
+	}
+	for _, entry := range node.engines {
+		engines = append(engines, engineSnapshot{
+			engine: entry.engine, opening: entry.opening,
+			warm: entry.warm, sessions: entry.sessions,
+		})
+		stats.Sessions += entry.sessions
+		if entry.opening {
+			stats.OpeningEngines++
+		} else if entry.sessions == 0 {
+			stats.IdleEngines++
+		} else {
+			stats.ActiveEngines++
+		}
+		if entry.warm {
+			stats.WarmEngines++
+			if !entry.opening && entry.sessions == 0 {
+				stats.WarmIdleEngines++
+			}
+		}
+	}
+	node.mu.Unlock()
+
+	for _, entry := range engines {
+		if entry.opening || entry.engine == nil {
+			continue
+		}
+		projection := entry.engine.ProjectionCacheStats()
+		if projection.Entries != 0 {
+			stats.ProjectionCachedEngines++
+		}
+		stats.ProjectionCacheEntries += projection.Entries
+		stats.ProjectionActiveLeases += projection.ActiveLeases
+		stats.ProjectionDirectoryBytes += projection.DirectoryBytes
+	}
+	stats.Manager = node.manager.Stats()
+	return stats
 }
 
 func (node *PostgresNode) signalLocked() {

@@ -31,17 +31,22 @@ type PostgresOptions struct {
 
 type PostgresServerOptions struct {
 	PostgresOptions
-	MaxConnections            int
-	MaxConcurrentCopies       int
-	MaxConcurrentCopiesPerKey int
-	MaxQueuedCopies           int
-	MaxQueuedCopiesPerKey     int
-	MaxMessageBytes           int
-	MaxCopyBytes              int64
-	IdleTimeout               time.Duration
-	QueryTimeout              time.Duration
-	CopyTimeout               time.Duration
-	CopyMetrics               *pgwire.CopyMetrics
+	MaxConcurrentQueries       int
+	MaxConcurrentQueriesPerKey int
+	MaxQueuedQueries           int
+	MaxQueuedQueriesPerKey     int
+	MaxConnections             int
+	MaxConcurrentCopies        int
+	MaxConcurrentCopiesPerKey  int
+	MaxQueuedCopies            int
+	MaxQueuedCopiesPerKey      int
+	MaxMessageBytes            int
+	MaxCopyBytes               int64
+	IdleTimeout                time.Duration
+	QueryTimeout               time.Duration
+	CopyTimeout                time.Duration
+	QueryMetrics               *pgwire.QueryMetrics
+	CopyMetrics                *pgwire.CopyMetrics
 }
 
 type postgresAuthenticator struct {
@@ -109,18 +114,23 @@ func (engine *Engine) ServePostgres(
 		return err
 	}
 	return (pgwire.Server{
-		Authenticator:             authenticator,
-		MaxConnections:            options.MaxConnections,
-		MaxConcurrentCopies:       options.MaxConcurrentCopies,
-		MaxConcurrentCopiesPerKey: options.MaxConcurrentCopiesPerKey,
-		MaxQueuedCopies:           options.MaxQueuedCopies,
-		MaxQueuedCopiesPerKey:     options.MaxQueuedCopiesPerKey,
-		MaxMessageBytes:           options.MaxMessageBytes,
-		MaxCopyBytes:              options.MaxCopyBytes,
-		IdleTimeout:               options.IdleTimeout,
-		QueryTimeout:              options.QueryTimeout,
-		CopyTimeout:               options.CopyTimeout,
-		CopyMetrics:               options.CopyMetrics,
+		Authenticator:              authenticator,
+		MaxConnections:             options.MaxConnections,
+		MaxConcurrentQueries:       options.MaxConcurrentQueries,
+		MaxConcurrentQueriesPerKey: options.MaxConcurrentQueriesPerKey,
+		MaxQueuedQueries:           options.MaxQueuedQueries,
+		MaxQueuedQueriesPerKey:     options.MaxQueuedQueriesPerKey,
+		MaxConcurrentCopies:        options.MaxConcurrentCopies,
+		MaxConcurrentCopiesPerKey:  options.MaxConcurrentCopiesPerKey,
+		MaxQueuedCopies:            options.MaxQueuedCopies,
+		MaxQueuedCopiesPerKey:      options.MaxQueuedCopiesPerKey,
+		MaxMessageBytes:            options.MaxMessageBytes,
+		MaxCopyBytes:               options.MaxCopyBytes,
+		IdleTimeout:                options.IdleTimeout,
+		QueryTimeout:               options.QueryTimeout,
+		CopyTimeout:                options.CopyTimeout,
+		QueryMetrics:               options.QueryMetrics,
+		CopyMetrics:                options.CopyMetrics,
 	}).Serve(ctx, listener)
 }
 
@@ -190,6 +200,10 @@ func (session *postgresSession) TransactionStatus() byte {
 
 func (session *postgresSession) CopyAdmission() pgwire.CopyAdmission {
 	return pgwire.CopyAdmission{Key: session.authenticator.database, Weight: 1}
+}
+
+func (session *postgresSession) QueryAdmission() pgwire.QueryAdmission {
+	return pgwire.QueryAdmission{Key: session.authenticator.database, Weight: 1}
 }
 
 func (session *postgresSession) Describe(

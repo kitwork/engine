@@ -83,6 +83,30 @@ func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 		analyticsStillWarm.Execution.ProjectionCacheMisses != 0 {
 		t.Fatalf("search publication invalidated analytics cache = %+v", analyticsStillWarm.Execution)
 	}
+	resident := engine.ProjectionCacheStats()
+	if resident.Entries != 2 || resident.ActiveLeases != 0 || resident.DirectoryBytes <= 0 {
+		t.Fatalf("projection cache residency = %+v", resident)
+	}
+	trimmed, err := engine.TrimProjectionCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trimmed.Entries != resident.Entries || trimmed.DirectoryBytes != resident.DirectoryBytes {
+		t.Fatalf("projection cache trim = %+v, residency was %+v", trimmed, resident)
+	}
+	if afterTrim := engine.ProjectionCacheStats(); afterTrim != (ProjectionCacheStats{}) {
+		t.Fatalf("projection cache after trim = %+v", afterTrim)
+	}
+	analyticsAfterTrim := projectionExecute(t, engine, aggregate)
+	if analyticsAfterTrim.Execution == nil || analyticsAfterTrim.Execution.Path != "kcol-batch" ||
+		analyticsAfterTrim.Execution.ProjectionCacheMisses != 1 {
+		t.Fatalf("analytics access after trim = %+v", analyticsAfterTrim.Execution)
+	}
+	searchAfterTrim := projectionExecute(t, engine, searchQuery)
+	if searchAfterTrim.Execution == nil || searchAfterTrim.Execution.Path != "search-snapshot" ||
+		searchAfterTrim.Execution.ProjectionCacheMisses != 1 {
+		t.Fatalf("search access after trim = %+v", searchAfterTrim.Execution)
+	}
 
 	analyticsPath := engine.Path() + ".analytics"
 	searchPath := engine.Path() + ".search"

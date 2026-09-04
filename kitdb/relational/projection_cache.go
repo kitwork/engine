@@ -31,6 +31,22 @@ type projectionCacheEntry struct {
 	retired    bool
 }
 
+// ProjectionCacheStats reports only process-local reader residency. Directory
+// bytes cover the decoded snapshot-file directory retained by the reader, not
+// KCOL/search payload pages or operating-system page-cache residency.
+type ProjectionCacheStats struct {
+	Entries        int
+	ActiveLeases   int
+	DirectoryBytes int64
+}
+
+// ProjectionCacheTrim reports reader metadata released by an explicit trim.
+// Projection files remain complete, immutable, and reusable on the next query.
+type ProjectionCacheTrim struct {
+	Entries        int
+	DirectoryBytes int64
+}
+
 type projectionReaderCache struct {
 	mu      sync.Mutex
 	entries map[string]*projectionCacheEntry
@@ -127,6 +143,52 @@ func (cache *projectionReaderCache) close() error {
 		result = errors.Join(result, file.Close())
 	}
 	return result
+}
+
+func (cache *projectionReaderCache) stats() ProjectionCacheStats {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	var stats ProjectionCacheStats
+	for _, entry := range cache.entries {
+		if entry == nil || entry.retired || entry.file == nil {
+			continue
+		}
+		stats.Entries++
+		stats.ActiveLeases += entry.references
+		stats.DirectoryBytes += int64(entry.file.DirectoryBytes())
+	}
+	return stats
+}
+
+func (cache *projectionReaderCache) trim() (ProjectionCacheTrim, error) {
+	cache.mu.Lock()
+	for kind, entry := range cache.entries {
+		if entry.references != 0 {
+			cache.mu.Unlock()
+			return ProjectionCacheTrim{}, fmt.Errorf(
+				"kitdb: %s projection cache readers did not drain", kind,
+			)
+		}
+	}
+	files := make([]*snapshotfile.Reader, 0, len(cache.entries))
+	var trimmed ProjectionCacheTrim
+	for kind, entry := range cache.entries {
+		delete(cache.entries, kind)
+		entry.retired = true
+		if entry.file != nil {
+			trimmed.Entries++
+			trimmed.DirectoryBytes += int64(entry.file.DirectoryBytes())
+			files = append(files, entry.file)
+			entry.file = nil
+		}
+	}
+	cache.mu.Unlock()
+
+	var result error
+	for _, file := range files {
+		result = errors.Join(result, file.Close())
+	}
+	return trimmed, result
 }
 
 func loadProjection(path string) (*snapshotfile.Reader, projectionManifest, error) {
@@ -261,6 +323,29 @@ func (engine *Engine) publishProjection(
 		return err
 	}
 	return publisher.Publish(ctx, manifest)
+}
+
+// ProjectionCacheStats returns the bounded readers currently retained by this
+// relational engine. It performs no projection I/O and does not open a missing
+// snapshot.
+func (engine *Engine) ProjectionCacheStats() ProjectionCacheStats {
+	if engine == nil {
+		return ProjectionCacheStats{}
+	}
+	return engine.projectionCache.stats()
+}
+
+// TrimProjectionCache releases every warm projection reader without changing
+// canonical KROW data or projection files. The publication gate waits for
+// active projection queries, so a successful trim cannot invalidate an
+// in-flight reader.
+func (engine *Engine) TrimProjectionCache() (ProjectionCacheTrim, error) {
+	if engine == nil {
+		return ProjectionCacheTrim{}, fmt.Errorf("kitdb: projection engine is nil")
+	}
+	engine.projectionMu.Lock()
+	defer engine.projectionMu.Unlock()
+	return engine.projectionCache.trim()
 }
 
 func (stats *ExecutionStats) observeProjectionCache(access projectionCacheAccess) {
