@@ -26,7 +26,7 @@ import (
 
 const modulePath = "github.com/kitwork/engine"
 
-var commands = []string{"kitdb", "kitdbpg", "kitdbimport", "kitdbcanary"}
+var commands = []string{"kitdb", "kitdbpg", "kitdbcanary"}
 var rcVersion = regexp.MustCompile(`^v1\.0\.0-rc\.[1-9][0-9]*$`)
 
 type artifact struct {
@@ -190,9 +190,7 @@ func buildTarget(ctx context.Context, root, output, version, commit, target stri
 			return artifact{}, fmt.Errorf("%s lacks CGO_ENABLED=0 build evidence", filename)
 		}
 		for _, dep := range info.Deps {
-			if dep.Path != "github.com/lib/pq" || dep.Replace != nil {
-				return artifact{}, fmt.Errorf("unreviewed binary dependency %s", dep.Path)
-			}
+			return artifact{}, fmt.Errorf("standalone RC binary has external dependency %s", dep.Path)
 		}
 		report.GoVersion = info.GoVersion
 		if target == runtime.GOOS+"/"+runtime.GOARCH {
@@ -219,7 +217,7 @@ func buildTarget(ctx context.Context, root, output, version, commit, target stri
 			return artifact{}, err
 		}
 	}
-	if err := copyDependencyLicenses(ctx, root, directory); err != nil {
+	if err := copyGoLicense(ctx, root, directory); err != nil {
 		return artifact{}, err
 	}
 	entries, err := os.ReadDir(directory)
@@ -271,7 +269,7 @@ func verifyVersion(data []byte, command, version, commit string) error {
 }
 
 func allowedPackage(path string) bool {
-	for _, prefix := range []string{modulePath + "/kitdb", modulePath + "/search", "github.com/lib/pq"} {
+	for _, prefix := range []string{modulePath + "/kitdb", modulePath + "/search"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
@@ -342,25 +340,8 @@ func buildEnvironment(base []string, overlay map[string]string) []string {
 	return result
 }
 
-func copyDependencyLicenses(ctx context.Context, root, directory string) error {
-	data, err := run(ctx, root, map[string]string{"GOWORK": "off", "GOFLAGS": "-mod=readonly"}, "go", "list", "-m", "-json", "github.com/lib/pq")
-	if err != nil {
-		return err
-	}
-	var dependency struct {
-		Dir     string
-		Replace any
-	}
-	if err := json.Unmarshal(data, &dependency); err != nil {
-		return err
-	}
-	if dependency.Dir == "" || dependency.Replace != nil {
-		return fmt.Errorf("lib/pq license source is not canonical")
-	}
-	if err := copyFile(filepath.Join(dependency.Dir, "LICENSE.md"), filepath.Join(directory, "LICENSE-libpq.md")); err != nil {
-		return err
-	}
-	data, err = run(ctx, root, nil, "go", "env", "GOROOT")
+func copyGoLicense(ctx context.Context, root, directory string) error {
+	data, err := run(ctx, root, nil, "go", "env", "GOROOT")
 	if err != nil {
 		return err
 	}

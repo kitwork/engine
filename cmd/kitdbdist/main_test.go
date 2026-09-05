@@ -43,7 +43,10 @@ func TestDistributionRejectsKitworkRuntimeDependencies(t *testing.T) {
 			t.Fatalf("accepted %s", name)
 		}
 	}
-	for _, name := range []string{modulePath + "/kitdb/relational", modulePath + "/search", modulePath + "/internal/snapshotfile", "github.com/lib/pq/oid"} {
+	if allowedPackage("github.com/lib/pq") || allowedPackage(modulePath+"/cmd/kitdbimport") {
+		t.Fatal("RC admitted the importer before standalone COPY/KIMP support")
+	}
+	for _, name := range []string{modulePath + "/kitdb/relational", modulePath + "/search", modulePath + "/internal/snapshotfile"} {
 		if !allowedPackage(name) {
 			t.Fatalf("rejected %s", name)
 		}
@@ -185,21 +188,22 @@ func TestKitDBDistributionNativeJourney(t *testing.T) {
 	}
 	query("CREATE TABLE products (id BIGINT PRIMARY KEY, name TEXT NOT NULL SEARCHABLE, price BIGINT NOT NULL)")
 	query("INSERT INTO products (id, name, price) VALUES (1, 'keyboard logitech', 100), (2, 'mouse', 50)")
-	var aggregate struct{ Rows [][]int64 }
+	// NUMERIC aggregates use exact decimal strings; do not round through float64.
+	var aggregate struct{ Rows [][]json.Number }
 	if err := json.Unmarshal(query("SELECT COUNT(*), SUM(price) FROM products"), &aggregate); err != nil {
 		t.Fatal(err)
 	}
-	if len(aggregate.Rows) != 1 || len(aggregate.Rows[0]) != 2 || aggregate.Rows[0][0] != 2 || aggregate.Rows[0][1] != 150 {
+	if len(aggregate.Rows) != 1 || len(aggregate.Rows[0]) != 2 || aggregate.Rows[0][0] != "2" || aggregate.Rows[0][1] != "150" {
 		t.Fatalf("aggregate: %+v", aggregate)
 	}
-	var hits struct{ Rows [][]int64 }
+	var hits struct{ Rows [][]json.Number }
 	if err := json.Unmarshal(query("SELECT id FROM products WHERE * SEARCH 'keyboard logitech' LIMIT 10"), &hits); err != nil {
 		t.Fatal(err)
 	}
-	if len(hits.Rows) != 1 || len(hits.Rows[0]) != 1 || hits.Rows[0][0] != 1 {
+	if len(hits.Rows) != 1 || len(hits.Rows[0]) != 1 || hits.Rows[0][0] != "1" {
 		t.Fatalf("search: %+v", hits)
 	}
-	exercisePostgresBinary(t, ctx, root, database, binary("kitdbpg"), binary("kitdbimport"))
+	exercisePostgresBinary(t, ctx, root, database, binary("kitdbpg"))
 	data, err = run(ctx, root, nil, binary("kitdb"), "doctor", database)
 	if err != nil {
 		t.Fatal(err)
@@ -236,10 +240,10 @@ func TestKitDBDistributionNativeJourney(t *testing.T) {
 		t.Fatalf("canary: %+v", canary)
 	}
 	hash := sha256.Sum256(data)
-	t.Logf("native bundle %s commit=%s passed SQL/search/pgwire/import/doctor/canary, canary sha256=%s", report.Version, report.Commit, hex.EncodeToString(hash[:]))
+	t.Logf("native bundle %s commit=%s passed SQL/search/pgwire/doctor/canary, canary sha256=%s", report.Version, report.Commit, hex.EncodeToString(hash[:]))
 }
 
-func exercisePostgresBinary(t *testing.T, ctx context.Context, root, database, server, importer string) {
+func exercisePostgresBinary(t *testing.T, ctx context.Context, root, database, server string) {
 	t.Helper()
 	command := exec.CommandContext(ctx, server, "-file", database, "-database", "products", "-listen", "127.0.0.1:0")
 	command.Dir = root
@@ -295,15 +299,13 @@ func exercisePostgresBinary(t *testing.T, ctx context.Context, root, database, s
 	if err := client.QueryRowContext(ctx, "SELECT COUNT(*) FROM products").Scan(&count); err != nil || count != 2 {
 		t.Fatalf("rollback count=%d err=%v", count, err)
 	}
-	file := filepath.Join(root, "import.csv")
-	if err := os.WriteFile(file, []byte("id,name,price\n3,imported,25\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run(ctx, root, nil, importer, "-url", endpoint, "-file", file, "-format", "csv", "-table", "products", "-header", "-id", "distribution-fixture"); err != nil {
-		t.Fatal(err)
+	// Standalone COPY is deliberately not part of this RC profile. A rejected
+	// operation must leave the connection usable and the committed rows intact.
+	if _, err := client.ExecContext(ctx, "COPY products FROM STDIN"); err == nil {
+		t.Fatal("standalone COPY unexpectedly accepted without qualified support")
 	}
 	var total int64
-	if err := client.QueryRowContext(ctx, "SELECT SUM(price) FROM products").Scan(&total); err != nil || total != 175 {
-		t.Fatalf("import total=%d err=%v", total, err)
+	if err := client.QueryRowContext(ctx, "SELECT SUM(price) FROM products").Scan(&total); err != nil || total != 150 {
+		t.Fatalf("post-rejection total=%d err=%v", total, err)
 	}
 }

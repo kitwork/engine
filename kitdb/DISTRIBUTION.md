@@ -16,14 +16,14 @@ The output directory must not exist. The builder produces Windows/amd64 and
 Linux/amd64 directories and ZIP archives plus `SHA256SUMS`. Use
 `--targets linux/amd64` or `--targets windows/amd64` for one platform.
 
-Each archive contains `kitdb`, `kitdbpg`, `kitdbimport`, `kitdbcanary`, operator
+Each archive contains `kitdb`, `kitdbpg`, `kitdbcanary`, operator
 documentation, license texts, and `manifest.json`. The manifest records the
 full commit, candidate version, toolchain, kernel compatibility, platform, and
 SHA-256/size of every bundled file except itself. The archive checksum covers
 the manifest too. Builds use `CGO_ENABLED=0`, `-trimpath`, and amd64 baseline v1.
 Distribution dependency checks reject Kitwork VM/host packages and unreviewed
-external dependencies. Only the optional importer requires the existing
-`lib/pq` dependency; its license is included alongside the Go license.
+external dependencies. The delivered binaries use the Go standard library and
+the reviewed KitDB/search packages only. The Go license is included.
 
 Only reviewed files are copied; application data, `.env`, logs and profiling
 artifacts are excluded. The source tree is checked before and after packaging.
@@ -75,10 +75,26 @@ bundle, then run:
 go test ./cmd/kitdbdist -run '^TestKitDBDistributionNativeJourney$' -count=1 -v -timeout 5m
 ```
 
-This verifies file checksums and all four binary identities, then exercises
-standalone SQL, search, PostgreSQL-protocol transactions, a CSV import, an
+This verifies file checksums and all three binary identities, then exercises
+standalone SQL, search, PostgreSQL-protocol transactions, an
 independent doctor backup/restore drill, and a short storage canary using the
 actual executables in a disposable database directory.
+
+### Standalone Import Gap
+
+`kitdbimport` is **not included** in these bundles. Its resumable CSV/JSONL
+protocol requires COPY plus `PRAGMA import_status/import_cancel/import_forget`
+and atomic KIMP checkpoints. These currently belong to the Kitwork adapter;
+`kitdb/relational` does not implement them. The first native distribution
+journey confirmed that the importer fails against `kitdbpg` at `import_status`.
+Building the importer successfully does not establish standalone compatibility.
+
+Port and qualify that integration, including disconnect/retry/schema-change
+and crash atomicity, before offering standalone resumable bulk import. Do not
+pull the Kitwork VM/host into the bundle to hide this gap. Until then, use the
+documented SQL transaction/INSERT interface for application writes; the RC
+does not claim a ready-to-use bulk migration tool. The native journey also
+checks that unsupported COPY fails without damaging rows or the connection.
 
 Run the long canary binary on the intended storage filesystem:
 

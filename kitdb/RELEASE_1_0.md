@@ -89,6 +89,9 @@ KitDB 1.0 does not claim:
   distributed consensus, automatic failover, or synchronous cross-region
   durability;
 - general PostgreSQL or SQLite SQL compatibility;
+- standalone COPY/resumable CSV/JSONL import. The existing `kitdbimport` tool
+  requires the Kitwork adapter's KIMP/COPY integration and is excluded from
+  the standalone RC bundle until that path is ported and qualified;
 - public-network PostgreSQL service operation. The current adapter is loopback
   only and intentionally has no TLS or SCRAM;
 - savepoints, deferred constraints, unbounded queries/migrations/imports, or
@@ -133,7 +136,7 @@ soak.
 Run the long storage canary on the intended deployment filesystem:
 
 ```text
-go run ./cmd/kitdbcanary \
+kitdbcanary \
   --root /qualified/local/filesystem/kitdb-canary \
   --duration 24h \
   --tenants 128 \
