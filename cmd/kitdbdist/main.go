@@ -149,7 +149,7 @@ func buildTarget(ctx context.Context, root, output, version, commit, target stri
 		"GOFLAGS": "", "GOWORK": "off", "GOEXPERIMENT": "",
 	}
 	link := "-X " + modulePath + "/kitdb/buildinfo.version=" + version + " -X " + modulePath + "/kitdb/buildinfo.commit=" + commit
-	packages := []string{"list", "-mod=readonly", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}{{end}}"}
+	packages := []string{"list", "-mod=readonly", "-buildvcs=false", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}{{end}}"}
 	for _, command := range commands {
 		packages = append(packages, "./cmd/"+command)
 	}
