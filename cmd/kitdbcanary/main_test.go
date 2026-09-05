@@ -28,6 +28,8 @@ func TestKitDBCanaryCompletesBoundedJourney(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !report.Success || report.Contract.Contract != "kitdb/1" ||
+		!report.WorkloadCompleted || report.WorkloadMS < config.Duration.Milliseconds() ||
+		report.RequestedWorkloadMS != config.Duration.Milliseconds() || report.Build.Version == "" ||
 		report.Commits < uint64(config.Tenants) ||
 		report.Backups != uint64(config.Tenants) ||
 		report.Restores != uint64(config.Tenants) ||
@@ -49,6 +51,17 @@ func TestKitDBCanaryCompletesBoundedJourney(t *testing.T) {
 	}
 	if !decoded.Success || decoded.Commits != report.Commits || decoded.Contract != report.Contract {
 		t.Fatalf("decoded report = %#v", decoded)
+	}
+}
+
+func TestKitDBCanaryCancellationCannotQualifyFullWorkload(t *testing.T) {
+	config := canaryConfig{Duration: time.Hour, Interval: time.Millisecond, Tenants: 2, Workers: 1, MaxOpen: 1,
+		Keyspace: 16, CheckpointEvery: 8, VerifyEvery: 32, HistoryBytes: 1 << 20}
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	report, err := executeCanary(ctx, config)
+	if err == nil || report.Success || report.WorkloadCompleted || report.WorkloadMS >= config.Duration.Milliseconds() {
+		t.Fatalf("canceled canary qualified: %+v err=%v", report, err)
 	}
 }
 

@@ -1,0 +1,67 @@
+name: KitDB RC qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Candidate version (v1.0.0-rc.N)
+        required: true
+        default: v1.0.0-rc.1
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Native RC (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: linux/amd64
+            suffix: linux-amd64
+          - runner: windows-latest
+            target: windows/amd64
+            suffix: windows-amd64
+    env:
+      KITDB_RC_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.0"
+          cache: true
+      - name: Enable Windows race toolchain
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+      - name: Qualify clean source commit
+        run: go run ./cmd/releasegate --mode kitdb-release --require-clean --timeout 90m --report .artifacts/kitdb-release.json
+      - name: Package native binaries
+        shell: pwsh
+        run: go run ./cmd/kitdbdist --version $env:KITDB_RC_VERSION --targets '${{ matrix.target }}' --output .artifacts/kitdb-dist
+      - name: Test packaged binaries
+        shell: pwsh
+        run: |
+          $env:KITDB_DIST_DIRECTORY = Join-Path (Get-Location) ".artifacts/kitdb-dist/kitdb-$($env:KITDB_RC_VERSION)-${{ matrix.suffix }}"
+          go test ./cmd/kitdbdist -run '^TestKitDBDistributionNativeJourney$' -count=1 -json -timeout 5m > .artifacts/kitdb-native-journey.jsonl
+          $result = $LASTEXITCODE
+          Get-Content .artifacts/kitdb-native-journey.jsonl
+          exit $result
+      - name: Upload candidate and evidence for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitdb-rc-${{ matrix.suffix }}
+          path: |
+            .artifacts/kitdb-release.json
+            .artifacts/kitdb-canary-smoke.json
+            .artifacts/kitdb-native-journey.jsonl
+            .artifacts/kitdb-dist/*.zip
+            .artifacts/kitdb-dist/SHA256SUMS
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 30

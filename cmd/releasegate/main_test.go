@@ -192,6 +192,12 @@ func TestReleasePlanModes(t *testing.T) {
 	if !ok || !containsArgument(staticAnalysis.Command, "./search") {
 		t.Fatal("KitDB static analysis omitted the standalone search engine")
 	}
+	for _, name := range []string{"KitDB operator suite", "KitDB command build", "KitDB static analysis"} {
+		step, ok := findStep(kitDBVerify, name)
+		if !ok || !containsArgument(step.Command, "./cmd/kitdbdist") {
+			t.Fatalf("%s omitted distribution tooling", name)
+		}
+	}
 	if _, err := releasePlan("unknown"); err == nil {
 		t.Fatal("unknown release mode was accepted")
 	}

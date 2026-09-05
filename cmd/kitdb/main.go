@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/buildinfo"
 	"github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/relational"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
@@ -98,7 +99,10 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		if len(args) != 1 {
 			return fmt.Errorf("version accepts no arguments")
 		}
-		result = kitdb.CurrentCompatibility()
+		result = struct {
+			kitdb.CompatibilityProfile
+			Build buildinfo.Info `json:"build"`
+		}{kitdb.CurrentCompatibility(), buildinfo.Current()}
 	case "doctor":
 		result, err = runDoctor(ctx, args[1:])
 	case "inspect":

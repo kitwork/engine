@@ -9,10 +9,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kitwork/engine/kitdb/buildinfo"
 	"github.com/kitwork/engine/kitdb/pgimport"
 )
 
 func main() {
+	version := flag.Bool("version", false, "print binary build information and exit")
 	var (
 		action      = flag.String("action", "import", "action: import, status, verify, cancel, or forget")
 		urlValue    = flag.String("url", "", "KitDB PostgreSQL URL (sslmode=disable on the local profile)")
@@ -32,6 +34,10 @@ func main() {
 		confirm     = flag.String("confirm-forget", "", "repeat the import ID to authorize forgetting a terminal checkpoint")
 	)
 	flag.Parse()
+	if *version {
+		printJSON(buildinfo.Current())
+		return
+	}
 
 	delimiterRunes := []rune(*delimiter)
 	if len(delimiterRunes) != 1 {

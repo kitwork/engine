@@ -11,6 +11,10 @@ This contract deliberately makes a narrow production claim. It does not use a
 The operator procedure implementing this claim lives in
 [PRODUCTION.md](PRODUCTION.md).
 
+Candidate binary packaging, build identity and native executable checks are
+documented in [DISTRIBUTION.md](DISTRIBUTION.md). Packaging is separate from
+the platform and deployment qualification below.
+
 ## Supported profile
 
 KitDB 1.0 supports:
@@ -142,6 +146,11 @@ The canary reuses a bounded keyspace, bounds retained history, exercises node
 handle eviction, checkpoint and verification, and finishes by creating,
 verifying, restoring, reopening, and comparing every tenant against its exact
 committed model. The report contains no database path, key, or value.
+
+Use the packaged `kitdbcanary` for candidate evidence. Its `build.commit` must
+match the platform reports; `workload_completed` and `success` must both be
+true. Require at least 86,400,000 in `requested_workload_ms` and `workload_ms`.
+Total `duration_ms` includes setup and restore and is insufficient by itself.
 
 ## Promotion checklist
 

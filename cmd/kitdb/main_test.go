@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/buildinfo"
 	"github.com/kitwork/engine/kitdb/relational"
 )
 
@@ -32,6 +33,15 @@ func TestOperatorVersionReportsKitDBV1Contract(t *testing.T) {
 	if profile != kitdb.CurrentCompatibility() ||
 		profile.ReleaseTarget != "1.0.0" || profile.Stability != "release-candidate" {
 		t.Fatalf("version profile = %#v", profile)
+	}
+	var identity struct {
+		Build buildinfo.Info
+	}
+	if err := json.Unmarshal(response.Result, &identity); err != nil {
+		t.Fatal(err)
+	}
+	if identity.Build.Version == "" || identity.Build.GoVersion == "" || identity.Build.OS == "" || identity.Build.Arch == "" {
+		t.Fatalf("version lacks build provenance: %+v", identity)
 	}
 
 	var output bytes.Buffer

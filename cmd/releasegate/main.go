@@ -333,15 +333,15 @@ func kitDBVerifyPlan() []gateStep {
 		},
 		{
 			Name:    "KitDB operator suite",
-			Command: []string{"go", "test", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "-count=1"},
+			Command: []string{"go", "test", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist", "-count=1"},
 		},
 		{
 			Name:    "KitDB command build",
-			Command: []string{"go", "build", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+			Command: []string{"go", "build", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist"},
 		},
 		{
 			Name:    "KitDB static analysis",
-			Command: []string{"go", "vet", "./kitdb/...", "./search", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+			Command: []string{"go", "vet", "./kitdb/...", "./search", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist"},
 		},
 		{
 			Name: "KitDB durability/recovery",

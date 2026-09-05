@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -16,11 +17,13 @@ import (
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/buildinfo"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/relational"
 )
 
 func main() {
+	version := flag.Bool("version", false, "print binary build information and exit")
 	file := flag.String("file", "app.kitdb", "KitDB file to open or create")
 	root := flag.String("root", "", "serve every non-hidden .kitdb file immediately below this directory")
 	database := flag.String("database", "", "logical PostgreSQL database name; defaults to the file name")
@@ -61,6 +64,12 @@ func main() {
 	idleTimeout := flag.Duration("idle-timeout", 30*time.Minute, "maximum idle PostgreSQL connection lifetime")
 	queryTimeout := flag.Duration("query-timeout", 30*time.Second, "maximum lifetime of one PostgreSQL statement")
 	flag.Parse()
+	if *version {
+		if err := json.NewEncoder(os.Stdout).Encode(buildinfo.Current()); err != nil {
+			fatalf("version: %v", err)
+		}
+		return
+	}
 
 	if strings.TrimSpace(*password) == "" {
 		fatalf("password is required; pass -password or set KITDB_TOKEN")
