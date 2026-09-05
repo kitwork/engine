@@ -313,13 +313,14 @@ func (segment *Segment) multiFieldAverageLengths(
 }
 
 type multiPostingUnion struct {
+	work      postingWork
 	iterators []postingIterator
 	document  uint32
 	current   bool
 }
 
 func newMultiPostingUnion(ctx context.Context, segment *Segment, records []multiFieldTermRecord) (multiPostingUnion, error) {
-	union := multiPostingUnion{iterators: make([]postingIterator, len(records))}
+	union := multiPostingUnion{work: postingWorkFromContext(ctx), iterators: make([]postingIterator, len(records))}
 	for position, record := range records {
 		if err := resetPostingIterator(
 			&union.iterators[position], ctx, segment.file, segment.header.version, record.record,
@@ -332,6 +333,7 @@ func newMultiPostingUnion(ctx context.Context, segment *Segment, records []multi
 }
 
 func (union *multiPostingUnion) Advance(target uint32) (bool, error) {
+	union.work.add(workUnionAdvances, 1)
 	minimum := uint32(math.MaxUint32)
 	found := false
 	for position := range union.iterators {
@@ -360,6 +362,7 @@ func (segment *Segment) liveMultiDocumentFrequency(
 	records []multiFieldTermRecord,
 	deleted *deletedDocuments,
 ) (uint32, error) {
+	ctx = frequencyWorkContext(ctx)
 	union, err := newMultiPostingUnion(ctx, segment, records)
 	if err != nil {
 		return 0, err
@@ -425,6 +428,7 @@ func newMultiTermCursor(
 }
 
 func (cursor *multiTermCursor) score(document uint32, options SearchOptions) (float64, error) {
+	cursor.union.work.add(workMultiTermScores, 1)
 	score := 0.0
 	for position := range cursor.union.iterators {
 		iterator := &cursor.union.iterators[position]
@@ -441,6 +445,7 @@ func (cursor *multiTermCursor) score(document uint32, options SearchOptions) (fl
 		if average <= 0 || length == 0 {
 			return 0, corruptf("multi-field norm statistic is invalid")
 		}
+		cursor.union.work.add(workMultiFieldScores, 1)
 		score += bm25Score(
 			float64(frequency), float64(length), average, cursor.idf, options.K1, options.B,
 		) * cursor.fields[record.fieldIndex].Boost
@@ -503,6 +508,7 @@ func (segment *Segment) searchMultiCandidates(
 			return results, nil
 		}
 		document := seed.union.document
+		seed.union.work.add(workMultiCandidates, 1)
 		if !deleted.Contains(document) {
 			score, err := seed.score(document, prepared.options)
 			if err != nil {
@@ -519,6 +525,8 @@ func (segment *Segment) searchMultiCandidates(
 					return results, nil
 				}
 				if cursor.union.document != document {
+					seed.union.work.add(workMultiMismatches, 1)
+					seed.union.work.add(workMultiMismatchDistance, uint64(cursor.union.document-document))
 					matched = false
 					break
 				}
@@ -529,11 +537,13 @@ func (segment *Segment) searchMultiCandidates(
 				score += termScore
 			}
 			if matched {
+				seed.union.work.add(workMultiMatches, 1)
 				ordinal := base + uint64(document)
 				candidate := rankedCandidate{document: document, score: score}
 				if !rankIsAfter(score, ordinal, prepared.options.After) ||
 					(externalThreshold.full && scoreCannotCompete(score, ordinal, externalThreshold)) ||
 					!candidateCanCompete(results, candidate, prepared.options.Limit) {
+					seed.union.work.add(workMultiRankRejected, 1)
 					if document == math.MaxUint32 {
 						return results, nil
 					}
@@ -545,6 +555,7 @@ func (segment *Segment) searchMultiCandidates(
 					return nil, err
 				}
 				if !matchesPrefix {
+					seed.union.work.add(workMultiPrefixRejected, 1)
 					if document == math.MaxUint32 {
 						return results, nil
 					}
@@ -552,6 +563,7 @@ func (segment *Segment) searchMultiCandidates(
 					continue
 				}
 				collectCandidate(&results, candidate, prepared.options.Limit)
+				seed.union.work.add(workMultiCollected, 1)
 			}
 		}
 		if document == math.MaxUint32 {

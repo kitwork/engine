@@ -54,6 +54,9 @@ type boundRelationalSearchPlan struct {
 	offset             int
 	afterText          string
 	queryFingerprint   [sha256.Size]byte
+	countStar          bool
+	aggregate          *kitdbsql.SelectStatement
+	parameters         []any
 }
 
 type relationalSearchCursor struct {
@@ -97,9 +100,6 @@ func validateRelationalSearchShape(
 	}
 	if plan.Distinct {
 		return nil, nil, nil, fmt.Errorf("kitdb SQL: SEARCH does not support DISTINCT yet")
-	}
-	if len(plan.GroupBy) != 0 || plan.Having != nil {
-		return nil, nil, nil, fmt.Errorf("kitdb SQL: SEARCH does not support GROUP BY or HAVING yet")
 	}
 	for _, field := range schema.Fields {
 		switch strings.ToLower(field.Name) {
@@ -157,6 +157,17 @@ func bindRelationalSearchProjections(
 	schema kitdbsql.Schema,
 	plan *kitdbsql.SelectStatement,
 ) ([]relationalSearchProjection, error) {
+	if selectHasAggregates(plan) {
+		columns, err := describeSearchAggregate(schema, plan)
+		if err != nil {
+			return nil, err
+		}
+		projections := make([]relationalSearchProjection, len(columns))
+		for i, column := range columns {
+			projections[i].column = column
+		}
+		return projections, nil
+	}
 	result := make([]relationalSearchProjection, 0, len(plan.Projection))
 	for _, projection := range plan.Projection {
 		if projection.Aggregate != "" || projection.Count || projection.Expression != nil {
@@ -208,6 +219,10 @@ func bindRelationalSearchProjections(
 }
 
 func validateRelationalSearchOrder(plan *kitdbsql.SelectStatement) error {
+	if selectHasAggregates(plan) {
+		// describeSearchAggregate validates ordering against aggregate outputs.
+		return nil
+	}
 	if len(plan.Order) == 0 {
 		return nil
 	}
@@ -269,17 +284,22 @@ func (engine *Engine) bindRelationalSearchPlan(
 	if err != nil {
 		return boundRelationalSearchPlan{}, err
 	}
+	countStar := selectSearchCountStar(plan)
+	aggregate := selectHasAggregates(plan)
 	limit := defaultRelationalSearchLimit
+	if aggregate {
+		limit = engine.maximumResultRows
+	}
 	if plan.HasLimit {
 		limit = plan.Limit
 	}
-	if limit > engine.maximumSearchResults {
+	if !aggregate && limit > engine.maximumSearchResults {
 		return boundRelationalSearchPlan{}, fmt.Errorf(
 			"kitdb SQL: SEARCH LIMIT %d exceeds this server's search result limit of %d",
 			limit, engine.maximumSearchResults,
 		)
 	}
-	if plan.Offset > engine.maximumSearchCandidates-limit {
+	if !aggregate && plan.Offset > engine.maximumSearchCandidates-limit {
 		return boundRelationalSearchPlan{}, fmt.Errorf(
 			"kitdb SQL: SEARCH LIMIT plus OFFSET exceeds this server's candidate budget of %d",
 			engine.maximumSearchCandidates,
@@ -326,6 +346,23 @@ func (engine *Engine) bindRelationalSearchPlan(
 		predicate: predicate, query: query, identifierPrefix: identifierPrefix,
 		prefixCoversFilter: prefixCoversFilter,
 		limit:              limit, offset: plan.Offset, afterText: afterText,
+		countStar: countStar,
+	}
+	if aggregate {
+		bound.aggregate, bound.parameters = plan, parameters
+		if plan.Having != nil {
+			output := make([]Column, len(resultProjection))
+			for i, projection := range resultProjection {
+				output[i] = projection.column
+			}
+			havingSchema, err := aggregateOutputSchema(output)
+			if err != nil {
+				return boundRelationalSearchPlan{}, err
+			}
+			if _, err := bindPredicate(havingSchema, plan.Having, parameters); err != nil {
+				return boundRelationalSearchPlan{}, err
+			}
+		}
 	}
 	bound.queryFingerprint, err = relationalSearchQueryFingerprint(bound)
 	return bound, err
@@ -398,7 +435,20 @@ func (engine *Engine) executeSearchSelect(
 	for index, projection := range bound.resultProjection {
 		result.Columns[index] = projection.column
 	}
-	if bound.limit == 0 || strings.TrimSpace(bound.query) == "" {
+	if bound.aggregate != nil && (bound.limit == 0 || strings.TrimSpace(bound.query) == "") {
+		rows, err := engine.collectRelationalSearchAggregate(ctx, emptyRelationalSearchCount, nil, bound, searchprojection.Watermark{}, nil)
+		if err != nil {
+			return Result{}, err
+		}
+		result.Rows, result.CommandTag = rows, fmt.Sprintf("SELECT %d", len(rows))
+		return result, nil
+	}
+	if bound.limit == 0 || bound.countStar && bound.offset > 0 || strings.TrimSpace(bound.query) == "" {
+		if bound.countStar {
+			result.Rows = relationalSearchCountRows(bound, 0)
+			result.CommandTag = fmt.Sprintf("SELECT %d", len(result.Rows))
+			return result, nil
+		}
 		result.CommandTag = "SELECT 0"
 		return result, nil
 	}
@@ -479,6 +529,21 @@ func (engine *Engine) executeStableRelationalSearch(
 	)
 	if err != nil {
 		return nil, false, err
+	}
+	var counted [][]any
+	if plan.aggregate != nil {
+		counted, err = engine.collectRelationalSearchAggregate(ctx,
+			func(ctx context.Context, query search.MatchQuery, accept func(string) (bool, error)) (uint64, error) {
+				return manager.Count(ctx, plan.indexKey, plan.projection, query, accept)
+			}, snapshot, plan, watermark, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		afterInfo, err := manager.Info(ctx, plan.indexKey, plan.projection)
+		if err != nil || afterInfo.Generation != before.Generation {
+			return nil, false, err
+		}
+		return counted, true, nil
 	}
 	qualified, err := engine.collectRelationalSearchRows(
 		ctx, func(ctx context.Context, query search.MatchQuery, options search.SearchOptions) ([]search.Hit, error) {
@@ -776,9 +841,25 @@ func (engine *Engine) executeSearchExplain(
 	if bound.afterText != "" {
 		detail += " search_after=true"
 	}
+	operation := "ranked search"
+	if bound.countStar {
+		operation = "search count"
+		detail = fmt.Sprintf("table=%s projection=search fields=(%s) aggregate=count(*) traversal=all-live-matches ranking=false top_k=false row_filter=%t",
+			schema.Name, strings.Join(bound.fields, ","), bound.predicate != nil && !bound.prefixCoversFilter)
+		if engine.experimentalProjections {
+			detail += " storage=single-file-snapshot refresh=explicit"
+		}
+	} else if bound.aggregate != nil {
+		operation = "search aggregate"
+		detail = fmt.Sprintf("table=%s projection=search traversal=all-live-matches ranking=false top_k=false hydration=projected-KROW group_limit=%d group_memory_budget=%d",
+			schema.Name, engine.maximumResultRows, maximumMaterializedBytes)
+		if engine.experimentalProjections {
+			detail += " storage=single-file-snapshot refresh=explicit"
+		}
+	}
 	return Result{
 		Columns: explainColumns(),
-		Rows:    [][]any{{int64(0), "ranked search", detail}}, CommandTag: "EXPLAIN",
+		Rows:    [][]any{{int64(0), operation, detail}}, CommandTag: "EXPLAIN",
 	}, nil
 }
 

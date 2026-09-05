@@ -30,8 +30,12 @@ type joinColumn struct {
 }
 
 type boundJoin struct {
-	kind        string
-	target      int
+	kind       string
+	target     int
+	equalities []boundJoinEquality
+}
+
+type boundJoinEquality struct {
 	targetField kitdbsql.Field
 	value       joinColumn
 }
@@ -74,11 +78,15 @@ func describeJoinSelect(catalog kitdbengine.CatalogSnapshot, plan *kitdbsql.Sele
 	if err != nil {
 		return nil, err
 	}
-	if selectHasAggregates(plan) || len(plan.GroupBy) != 0 {
-		return nil, fmt.Errorf("kitdb SQL: aggregates over JOIN are not enabled yet")
-	}
 	if _, err := bindJoins(sources, plan.Joins); err != nil {
 		return nil, err
+	}
+	if selectHasAggregates(plan) {
+		aggregate, err := bindJoinAggregate(sources, plan)
+		if err != nil {
+			return nil, err
+		}
+		return aggregate.columns, nil
 	}
 	columns, _, err := bindJoinProjection(sources, plan.Projection)
 	if err != nil {
@@ -102,9 +110,6 @@ func (transaction *Transaction) executeJoinSelect(
 	observe bool,
 	working *materializationWorkingSet,
 ) (Result, error) {
-	if selectHasAggregates(plan) || len(plan.GroupBy) != 0 {
-		return Result{}, fmt.Errorf("kitdb SQL: aggregates over JOIN are not enabled yet")
-	}
 	sources, err := bindJoinSources(transaction.catalog, plan)
 	if err != nil {
 		return Result{}, err
@@ -113,7 +118,24 @@ func (transaction *Transaction) executeJoinSelect(
 	if err != nil {
 		return Result{}, err
 	}
-	columns, projection, err := bindJoinProjection(sources, plan.Projection)
+	var columns []Column
+	var projection []joinColumn
+	var aggregate *joinAggregate
+	var stream *aggregateStream
+	if selectHasAggregates(plan) {
+		aggregate, err = bindJoinAggregate(sources, plan)
+		if err != nil {
+			return Result{}, err
+		}
+		columns = aggregate.columns
+		if working == nil {
+			working = newMaterializationWorkingSet(newMaterializationBudget(transaction.engine.maximumResultRows))
+			defer working.close()
+		}
+		stream, err = newAggregateStream(aggregate.fields, aggregate.bindings, transaction.engine.maximumResultRows, working)
+	} else {
+		columns, projection, err = bindJoinProjection(sources, plan.Projection)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -125,9 +147,12 @@ func (transaction *Transaction) executeJoinSelect(
 	if err != nil {
 		return Result{}, err
 	}
-	orders, err := bindJoinOrders(sources, columns, plan.Order)
-	if err != nil {
-		return Result{}, err
+	var orders []joinOrder
+	if aggregate == nil {
+		orders, err = bindJoinOrders(sources, columns, plan.Order)
+		if err != nil {
+			return Result{}, err
+		}
 	}
 	limit := transaction.engine.maximumResultRows
 	if plan.HasLimit {
@@ -161,6 +186,9 @@ func (transaction *Transaction) executeJoinSelect(
 	stats := rowAccessExecutionStats(access, observe)
 	if stats != nil {
 		stats.Path = "nested-loop-join"
+		if aggregate != nil {
+			stats.Path = "nested-loop-join-aggregate"
+		}
 	}
 	ordered := len(orders) != 0
 	outputs := make([]joinOutputRow, 0, min(limit, 256))
@@ -177,7 +205,7 @@ func (transaction *Transaction) executeJoinSelect(
 				maximumJoinInputRows,
 			)
 		}
-		if matched&255 == 0 {
+		if sourceRows == 1 || sourceRows&255 == 0 {
 			if err := ctx.Err(); err != nil {
 				return false, err
 			}
@@ -221,6 +249,9 @@ func (transaction *Transaction) executeJoinSelect(
 			}
 		}
 		for _, environment := range environments {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
 			if !matchesJoinConditions(environment, conditions) {
 				continue
 			}
@@ -233,6 +264,12 @@ func (transaction *Transaction) executeJoinSelect(
 			}
 			if stats != nil {
 				stats.RowsMatched++
+			}
+			if aggregate != nil {
+				if err := aggregate.add(stream, environment); err != nil {
+					return false, err
+				}
+				continue
 			}
 			values := projectJoinEnvironment(environment, projection)
 			if plan.Distinct {
@@ -281,6 +318,13 @@ func (transaction *Transaction) executeJoinSelect(
 	})
 	if err != nil {
 		return Result{}, err
+	}
+	if aggregate != nil {
+		result, err := stream.finish(ctx, columns, aggregate.plan, parameters, stats)
+		if stats != nil {
+			stats.MaterializationPeakBytes = uint64(working.budget.peakBytes)
+		}
+		return result, err
 	}
 	if overflow {
 		return Result{}, fmt.Errorf(
@@ -359,31 +403,39 @@ func bindJoinSources(catalog kitdbengine.CatalogSnapshot, plan *kitdbsql.SelectS
 func bindJoins(sources []joinSource, plans []kitdbsql.Join) ([]boundJoin, error) {
 	result := make([]boundJoin, len(plans))
 	for index, plan := range plans {
-		left, err := resolveJoinColumn(sources, plan.Left)
-		if err != nil {
-			return nil, err
+		if len(plan.And) >= kitdbsql.MaximumJoinEqualities {
+			return nil, fmt.Errorf("kitdb SQL: JOIN ON exceeds %d equalities", kitdbsql.MaximumJoinEqualities)
 		}
-		right, err := resolveJoinColumn(sources, plan.Right)
-		if err != nil {
-			return nil, err
-		}
-		target := index + 1
-		binding := boundJoin{kind: plan.Kind, target: target}
-		switch {
-		case left.source == target && right.source < target:
-			binding.targetField, binding.value = left.field, right
-		case right.source == target && left.source < target:
-			binding.targetField, binding.value = right.field, left
-		default:
-			return nil, fmt.Errorf(
-				"kitdb SQL: JOIN %q must connect its table to an earlier source", sources[target].alias,
-			)
-		}
-		leftType, _ := kitdbsql.LookupKind(binding.targetField.Kind)
-		rightType, _ := kitdbsql.LookupKind(binding.value.field.Kind)
-		if leftType.Family != rightType.Family ||
-			!exactUUIDFieldsCompatible(binding.targetField, binding.value.field) {
-			return nil, fmt.Errorf("kitdb SQL: JOIN fields %q and %q have incompatible types", plan.Left, plan.Right)
+		binding := boundJoin{kind: plan.Kind, target: index + 1}
+		equalities := append([]kitdbsql.JoinEquality{{Left: plan.Left, Right: plan.Right}}, plan.And...)
+		for _, equality := range equalities {
+			left, err := resolveJoinColumn(sources, equality.Left)
+			if err != nil {
+				return nil, err
+			}
+			right, err := resolveJoinColumn(sources, equality.Right)
+			if err != nil {
+				return nil, err
+			}
+			target := index + 1
+			pair := boundJoinEquality{}
+			switch {
+			case left.source == target && right.source < target:
+				pair.targetField, pair.value = left.field, right
+			case right.source == target && left.source < target:
+				pair.targetField, pair.value = right.field, left
+			default:
+				return nil, fmt.Errorf(
+					"kitdb SQL: JOIN %q must connect its table to an earlier source", sources[target].alias,
+				)
+			}
+			leftType, _ := kitdbsql.LookupKind(pair.targetField.Kind)
+			rightType, _ := kitdbsql.LookupKind(pair.value.field.Kind)
+			if leftType.Family != rightType.Family ||
+				!exactUUIDFieldsCompatible(pair.targetField, pair.value.field) {
+				return nil, fmt.Errorf("kitdb SQL: JOIN fields %q and %q have incompatible types", equality.Left, equality.Right)
+			}
+			binding.equalities = append(binding.equalities, pair)
 		}
 		result[index] = binding
 	}
@@ -781,26 +833,41 @@ func (transaction *Transaction) expandJoin(
 	candidatePairs *int,
 	working *materializationWorkingSet,
 ) ([]joinEnvironment, error) {
-	value := joinEnvironmentValue(environment, join.value)
 	matches := make([]map[string]any, 0, 1)
-	if value != nil {
-		coerced, err := coerceField(join.targetField, value)
+	conditions := make([]boundCondition, 0, len(join.equalities))
+	for _, equality := range join.equalities {
+		value := joinEnvironmentValue(environment, equality.value)
+		if value == nil {
+			conditions = nil
+			break
+		}
+		coerced, err := coerceField(equality.targetField, value)
 		if err != nil {
 			return nil, err
 		}
-		condition := boundCondition{field: join.targetField, operator: "=", value: coerced}
+		// Lookup encoding must not turn a rounded/truncated value into an
+		// equality match. Compare temporal values at full stored precision.
+		comparisonField := equality.targetField
+		comparisonField.TimePrecision = nil
+		if compareFieldValues(comparisonField, value, coerced) != 0 {
+			conditions = nil
+			break
+		}
+		conditions = append(conditions, boundCondition{field: equality.targetField, operator: "=", value: coerced})
+	}
+	if len(conditions) != 0 {
 		generation, err := activeRowGeneration(transaction, sources[join.target].schema)
 		if err != nil {
 			return nil, err
 		}
-		access, err := transaction.planRowAccess(sources[join.target].schema, generation, []boundCondition{condition}, nil)
+		access, err := transaction.planRowAccess(sources[join.target].schema, generation, conditions, nil)
 		if err != nil {
 			return nil, err
 		}
 		if access.kind == rowAccessScan {
 			return nil, fmt.Errorf(
 				"kitdb SQL: JOIN target %q field %q requires a primary, unique, or leading index",
-				sources[join.target].alias, join.targetField.Name,
+				sources[join.target].alias, conditions[0].field.Name,
 			)
 		}
 		visited := 0
@@ -815,7 +882,7 @@ func (transaction *Transaction) expandJoin(
 				(*candidatePairs)++
 			}
 			visited++
-			if visited&255 == 0 {
+			if visited == 1 || visited&255 == 0 {
 				if err := ctx.Err(); err != nil {
 					return false, err
 				}
@@ -824,7 +891,7 @@ func (transaction *Transaction) expandJoin(
 			if err != nil {
 				return false, err
 			}
-			if matchesAll(decoded.values, []boundCondition{condition}) {
+			if matchesAll(decoded.values, conditions) {
 				if working != nil {
 					if _, err := working.reserveMap(decoded.values, "JOIN target rows"); err != nil {
 						return false, err

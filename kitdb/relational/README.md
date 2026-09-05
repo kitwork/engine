@@ -62,6 +62,14 @@ binding may attach snapshot-local function metadata to its expression nodes.
 `Checkpoint`, `Close`, and a later `Open` use the ordinary KitDB durability and
 recovery path. `Describe` returns SELECT result metadata without reading rows.
 
+Arithmetic parameters with a numeric expression on the other side, such as
+`total + $1` or `$1 - total`, infer that expression's numeric kind. This also
+handles untyped text-format PostgreSQL parameters without guessing from their
+contents. Invalid integers, overflow and fractional-to-integer assignments
+fail rather than truncate. Use an explicit cast for ambiguous `$1 + $2`,
+numeric text columns, or a different desired result kind. This is contextual
+expression binding, not full PostgreSQL parameter-type inference.
+
 ## PostgreSQL Wire
 
 Set a local password and run the direct-file server:
@@ -183,10 +191,65 @@ checksummed and bound to the exact source transaction, index generation, search
 schema, query, and residual predicate, so stale or replayed-in-another-query
 cursors fail closed.
 
-The initial profile accepts only `_score DESC`, one SEARCH joined to residual
-filters by `AND`, and autocommit execution. SEARCH does not yet compose with an
-explicit transaction, JOIN, GROUP BY/HAVING, DISTINCT, aggregate projections,
-phrase/prefix search-after, or arbitrary ordering.
+Scalar `COUNT(*)` traverses all live text matches without BM25 scoring, Top-K
+collection, or materializing a list of matching rows:
+
+```sql
+SELECT COUNT(*) AS total
+FROM products
+WHERE * SEARCH $1 AND merchant = $2;
+```
+
+This count is exact for one validated source/projection snapshot, not an
+estimate or a count of the default result page. SQL `LIMIT`/`OFFSET` apply to
+the single output row. Ranked-result/candidate ceilings do not truncate count
+input; the statement timeout and search admission controls still apply. A
+residual predicate reads only its required KROW fields, one match at a time.
+Without a residual predicate, count uses postings (and identifiers if a prefix
+filter needs them), not KROW hydration or the `.analytics` sidecar. Both packed
+and managed search projections support this path; a stale packed projection
+still fails closed until an explicit refresh. `EXPLAIN` reports `search count`,
+`traversal=all-live-matches`, and `top_k=false`.
+
+The initial profile accepts ranked `_score DESC`, one SEARCH joined to residual
+filters by `AND`, and autocommit execution. Field-based `COUNT(field)`, `SUM`,
+`AVG`, `MIN`, `MAX`, and single/multi-field `GROUP BY` also operate over all
+matching rows, without ranking or a Top-K input limit:
+
+```sql
+SELECT merchant, COUNT(*) AS total, SUM(price) AS total_price,
+       AVG(price) AS average_price, MIN(price) AS lowest_price,
+       MAX(price) AS highest_price
+FROM products
+WHERE * SEARCH $1 AND price >= $2
+GROUP BY merchant
+HAVING total >= $3
+ORDER BY total DESC, merchant
+LIMIT 20;
+```
+
+Only required KROW fields are decoded from the same pinned source snapshot.
+This is a search-postings plus projected-row aggregate path, not an automatic
+`.analytics`/KCOL plan. It shares the ordinary row-scan aggregate accumulator,
+including exact integer/decimal arithmetic and SQL NULL behavior. Scalar empty
+input produces one row (`COUNT` zero, other aggregates NULL); grouped empty
+input produces no rows. `HAVING` uses projected fields/aliases as in ordinary
+KitDB aggregate SQL. Ordering and LIMIT/OFFSET are applied after aggregation.
+
+Group cardinality is bounded by the server's `max-result-rows`; the accounted
+group/input-row/output working set is bounded by the 32 MiB query-memory budget
+(with the existing additional exact-decimal state bound). This is an executor
+budget, not a whole-process RSS cap. Budget exhaustion or cancellation returns
+an error, never a partial aggregate; this path does not yet spill to disk.
+`EXPLAIN` reports `search aggregate`, `hydration=projected-KROW`, `top_k=false`,
+and group budgets; packed `EXPLAIN ANALYZE` additionally reports matched/scanned
+rows, groups and accounted peak bytes.
+
+SEARCH does not yet compose with explicit transactions, JOIN, DISTINCT,
+WITH/derived-table materialization, aggregate argument expressions, or
+phrase/prefix search-after. Aggregate queries accept ordering by projected
+fields/aliases but reject ranking columns (`_score`, `_snippet`, `_cursor`) and
+`AFTER`. Ranked row queries still require `_score DESC` when ordered.
 
 ## Current SQL Contract
 
@@ -224,7 +287,8 @@ The bounded standalone profile supports:
   execution-backed `EXPLAIN ANALYZE`;
 - durable weighted searchable fields, ranked single/multi/all-field SEARCH,
   `_score`/`_snippet`/`_cursor`, bounded residual filtering, and exact
-  search-after pagination;
+  search-after pagination, plus streaming field aggregates and bounded
+  GROUP BY/HAVING over all matches;
 - exact canonical `DECIMAL` and constrained `NUMERIC(p,s)` storage, equality,
   uniqueness, ordering, checks, casts, arithmetic, pure SQL functions, and
   `SUM`/`AVG`/`MIN`/`MAX`, without routing exact values through `float64`;
@@ -571,13 +635,47 @@ JOIN whose source or target is a materialized relation fail explicitly. CTE
 bodies may still use supported physical-table JOINs, aggregates, expressions,
 and `UNION ALL`.
 
-An indexed JOIN chain may add at most seven tables. Every added table must join
-one equality field to an earlier source and must expose that target field as a
-primary, unique, or leading ordinary index; execution refuses a repeated target
-full scan. One query is capped at 10,000 base-source rows, 20,000 candidate
-pairs, 64 projected columns, eight ordering fields, and the configured result
-budget. This remains an index nested-loop strategy, not a claim that KitDB has
-a cost-based hash/merge join optimizer.
+An indexed JOIN chain may add at most seven tables. Each ON clause accepts up
+to 32 column equalities joined by AND, with bounded parentheses. Each equality
+connects the added table to an earlier source. All non-NULL equality values
+participate in ordinary access planning: a complete composite primary/unique
+key uses a point lookup; a leading secondary-index prefix narrows candidates.
+Every equality remains a residual check, including repeated target fields.
+Lookup coercion cannot create matches by rounding decimal/time values or
+truncating significant text. Ambiguous aggregate output ordering requires
+distinct aliases rather than silently selecting the first output column.
+Execution refuses a repeated target full scan. One query is capped at 10,000
+base-source rows, 20,000 candidate pairs, 64 projected columns, eight ordering
+fields, and the configured result budget. This remains an index nested-loop
+strategy, not a claim that KitDB has a cost-based hash/merge join optimizer.
+
+Physical-table INNER/LEFT JOINs support COUNT(*), COUNT(field), SUM, AVG, MIN,
+MAX, field-based GROUP BY and alias-aware HAVING. Joined matches stream into
+the same exact integer/decimal/NULL accumulator as ordinary row aggregates.
+They are not truncated to the output page: HAVING, projected-field/alias
+ordering, LIMIT and OFFSET run after aggregation. LEFT JOIN contributes one
+NULL-extended row when ON has no match; COUNT(*) includes it and COUNT(target)
+does not. All sources use one transaction snapshot plus its own writes.
+
+```sql
+SELECT p.merchant, COUNT(*) AS clicks, SUM(p.price) AS value
+FROM events e
+JOIN products p ON p.merchant = e.merchant AND p.id = e.product_id
+WHERE e.id >= 100
+GROUP BY p.merchant
+HAVING clicks >= 2
+ORDER BY clicks DESC
+LIMIT 20;
+```
+
+This path retains group states and per-source JOIN scratch under a 32 MiB
+accounted working budget, also shared with CTE materialization when nested.
+Group count is bounded by the server result-row ceiling, independently of
+LIMIT. No spill or partial totals: memory/input/candidate/group exhaustion
+returns an error. EXPLAIN describes runtime indexed lookup and post-aggregate
+paging; EXPLAIN ANALYZE reports nested-loop-join-aggregate, matched rows,
+groups, index/point work and accounted peak bytes (not process RSS). JOIN
+aggregates currently hydrate KROW, not KCOL, and do not combine with SEARCH.
 
 The standalone profile does not claim PostgreSQL parity. Primary-key updates,
 savepoints exposed through SQL, deferred constraints, recursive/correlated

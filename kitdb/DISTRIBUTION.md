@@ -80,6 +80,25 @@ standalone SQL, search, PostgreSQL-protocol transactions, an
 independent doctor backup/restore drill, and a short storage canary using the
 actual executables in a disposable database directory.
 
+The `mixed-application` subtest adds two concurrent transaction writers and
+three readers (snapshot totals, composite-key JOIN, and SEARCH aggregates).
+Its independent order model checks every retained row and the transactionally
+maintained revenue counter. A barrier makes readers run while both writers
+have uncommitted changes. It kills the native server with another transaction
+open, checks acknowledged data after restart, restores a verified backup to a
+different database, and performs timestamp recovery after deliberate UPDATE
+and DELETE damage. Only explicit `40001` transaction conflicts are retried;
+transport errors at COMMIT are not assumed safe to retry. The two existing
+SEARCH stable-boundary retry errors are separately retried with a 32-attempt
+ceiling and reported in the test log, not counted as uninterrupted availability.
+Other SEARCH errors fail immediately. This is bounded
+application and process-crash evidence, not power-loss or long-soak evidence.
+
+During development, `KITDB_APPLICATION_BINARY_DIRECTORY` can point to freshly
+built `kitdb` and `kitdbpg` executables for
+`go test ./cmd/kitdbdist -run '^TestKitDBApplicationNativeJourney$' -count=1 -v`.
+That opt-in does not validate a distribution manifest or qualify a release.
+
 ### Standalone Import Gap
 
 `kitdbimport` is **not included** in these bundles. Its resumable CSV/JSONL

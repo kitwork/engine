@@ -66,6 +66,14 @@ func (engine *Engine) executePackedSearch(
 		return nil, stats, fmt.Errorf("kitdb: search snapshot row count mismatch")
 	}
 	watermark := relationalSearchWatermark(engine.database.ID(), plan.schema, relationalSearchSource{cursor: snapshot.HistoryCursor(), generation: generation, epoch: epoch})
+	if plan.aggregate != nil {
+		stats.Path = "search-aggregate-snapshot"
+		if plan.countStar {
+			stats.Path = "search-count-snapshot"
+		}
+		rows, err := engine.collectRelationalSearchAggregate(ctx, index.Count, snapshot, plan, watermark, stats)
+		return rows, stats, err
+	}
 	after, err := decodeAndValidateRelationalSearchCursor(plan.afterText, watermark, index.Info().Generation, plan.projection.Fingerprint(), plan.queryFingerprint)
 	if err != nil {
 		return nil, stats, err

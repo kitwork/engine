@@ -10,6 +10,7 @@ const (
 	MaximumDDLColumns        = 512
 	MaximumInsertRows        = 10_000
 	MaximumSelectJoins       = 7
+	MaximumJoinEqualities    = 32
 	MaximumSetOperations     = 15
 	MaximumCommonTables      = 16
 	MaximumQueryNesting      = 8
@@ -304,6 +305,13 @@ type Join struct {
 	Kind  string
 	Table string
 	Alias string
+	Left  string
+	Right string
+	And   []JoinEquality
+}
+
+// JoinEquality extends the first Left/Right equality without changing old plans.
+type JoinEquality struct {
 	Left  string
 	Right string
 }
@@ -2891,18 +2899,47 @@ func (parser *statementParser) parseJoins() ([]Join, error) {
 		if err := parser.cursor.ExpectKeyword("on"); err != nil {
 			return nil, err
 		}
-		left, err := parser.columnReference()
-		if err != nil {
+		var equalities []JoinEquality
+		if err := parser.parseJoinEqualities(0, &equalities); err != nil {
 			return nil, err
 		}
-		if err := parser.cursor.ExpectSymbol("="); err != nil {
-			return nil, fmt.Errorf("kitdb SQL: JOIN currently requires an equality predicate: %w", err)
+		joins = append(joins, Join{Kind: kind, Table: table, Alias: alias,
+			Left: equalities[0].Left, Right: equalities[0].Right, And: equalities[1:]})
+	}
+}
+
+func (parser *statementParser) parseJoinEqualities(depth int, equalities *[]JoinEquality) error {
+	if depth > MaximumQueryNesting {
+		return fmt.Errorf("kitdb SQL: JOIN ON exceeds %d nesting levels", MaximumQueryNesting)
+	}
+	for {
+		if parser.cursor.AcceptSymbol("(") {
+			if err := parser.parseJoinEqualities(depth+1, equalities); err != nil {
+				return err
+			}
+			if err := parser.cursor.ExpectSymbol(")"); err != nil {
+				return err
+			}
+		} else {
+			if len(*equalities) >= MaximumJoinEqualities {
+				return fmt.Errorf("kitdb SQL: JOIN ON exceeds %d equalities", MaximumJoinEqualities)
+			}
+			left, err := parser.columnReference()
+			if err != nil {
+				return err
+			}
+			if err := parser.cursor.ExpectSymbol("="); err != nil {
+				return fmt.Errorf("kitdb SQL: JOIN requires column equalities joined by AND: %w", err)
+			}
+			right, err := parser.columnReference()
+			if err != nil {
+				return err
+			}
+			*equalities = append(*equalities, JoinEquality{Left: left, Right: right})
 		}
-		right, err := parser.columnReference()
-		if err != nil {
-			return nil, err
+		if !parser.cursor.AcceptKeyword("and") {
+			return nil
 		}
-		joins = append(joins, Join{Kind: kind, Table: table, Alias: alias, Left: left, Right: right})
 	}
 }
 

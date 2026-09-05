@@ -222,6 +222,12 @@ func scalarExpressionKind(
 			if err != nil {
 				return "", nil, err
 			}
+			if arithmeticParameter(&expression.Arguments[0]) && isNumericExpressionKind(right) {
+				left = right
+			}
+			if arithmeticParameter(&expression.Arguments[1]) && isNumericExpressionKind(left) {
+				right = left
+			}
 			if result, temporal := temporalArithmeticResultKind(expression.Operator, left, right); temporal {
 				if result == "" {
 					return "", nil, fmt.Errorf(

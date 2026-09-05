@@ -2,6 +2,8 @@ package relational
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -297,12 +299,14 @@ func BenchmarkShoppingProductionPackedSearch(b *testing.B) {
 	})
 }
 
-func benchmarkShoppingProductionSearch(b *testing.B, path string, options Options) {
-	workloads := []struct {
-		name  string
-		query string
-		rows  int
-	}{
+type shoppingSearchWorkload struct {
+	name  string
+	query string
+	rows  int
+}
+
+func shoppingSearchWorkloads() []shoppingSearchWorkload {
+	return []shoppingSearchWorkload{
 		{
 			name:  "name-20",
 			query: `SELECT merchant, id, name, _score FROM shopping WHERE name SEARCH 'ban phim logitech' ORDER BY _score DESC LIMIT 20`,
@@ -318,14 +322,38 @@ func benchmarkShoppingProductionSearch(b *testing.B, path string, options Option
 			query: `SELECT merchant, id, name, _score FROM shopping WHERE * SEARCH 'ban phim logitech' AND merchant = 'shopee' ORDER BY _score DESC LIMIT 120`,
 			rows:  120,
 		},
+		{
+			name:  "coffee-20",
+			query: `SELECT merchant, id, name, _score FROM shopping WHERE * SEARCH 'highlands coffee' ORDER BY _score DESC LIMIT 20`,
+			rows:  20,
+		},
+		{
+			name:  "coffee-merchant-120",
+			query: `SELECT merchant, id, name, _score FROM shopping WHERE * SEARCH 'highlands coffee' AND merchant = 'shopee' ORDER BY _score DESC LIMIT 120`,
+			rows:  120,
+		},
+		{
+			name:  "common-20",
+			query: `SELECT merchant, id, name, _score FROM shopping WHERE * SEARCH 'coffee' ORDER BY _score DESC LIMIT 20`,
+			rows:  20,
+		},
 	}
-	for _, workload := range workloads {
+}
+
+func benchmarkShoppingProductionSearch(b *testing.B, path string, options Options) {
+	// Forbid commits to the retained source. Queries use its existing projection.
+	options.Kernel.Replica = true
+	for _, workload := range shoppingSearchWorkloads() {
 		b.Run(workload.name, func(b *testing.B) {
 			engine, err := OpenWithOptions(path, options)
 			if err != nil {
 				b.Fatal(err)
 			}
 			defer engine.Close()
+			transaction, err := engine.database.LastTransaction()
+			if err != nil {
+				b.Fatal(err)
+			}
 			ctx := context.Background()
 			explained, err := engine.Execute(ctx, "EXPLAIN "+workload.query)
 			if err != nil || !resultContainsOperation(explained, "ranked search") {
@@ -339,14 +367,24 @@ func benchmarkShoppingProductionSearch(b *testing.B, path string, options Option
 				(warm.Execution == nil || warm.Execution.Path != "search-snapshot") {
 				b.Fatalf("packed search path=%+v", warm.Execution)
 			}
+			digest := shoppingSearchDigest(b, warm)
+			b.Logf("source_transaction=%d rows=%d result_sha256=%x", transaction, len(warm.Rows), digest)
+			last := warm
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if _, err := engine.Execute(ctx, workload.query); err != nil {
+				last, err = engine.Execute(ctx, workload.query)
+				if err != nil {
 					b.Fatal(err)
 				}
 			}
 			b.StopTimer()
+			if shoppingSearchDigest(b, last) != digest {
+				b.Fatal("ranked results changed during benchmark")
+			}
+			if after, err := engine.database.LastTransaction(); err != nil || after != transaction {
+				b.Fatalf("source transaction changed: %d err=%v", after, err)
+			}
 			cache := engine.ProjectionCacheStats()
 			if options.ExperimentalProjections {
 				b.ReportMetric(bytesToMiB(uint64(cache.SearchReaderResidentBytes)), "reader_resident_MiB")
@@ -354,6 +392,15 @@ func benchmarkShoppingProductionSearch(b *testing.B, path string, options Option
 			}
 		})
 	}
+}
+
+func shoppingSearchDigest(b testing.TB, result Result) [sha256.Size]byte {
+	b.Helper()
+	encoded, err := json.Marshal(result.Rows)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return sha256.Sum256(encoded)
 }
 
 func resultContainsOperation(result Result, operation string) bool {
