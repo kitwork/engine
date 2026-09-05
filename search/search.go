@@ -351,7 +351,7 @@ func (segment *Segment) searchCandidatesWithScratch(
 	for index, record := range records {
 		iterator := &scratch.iterators[index]
 		if err := resetPostingIterator(
-			iterator, segment.file, segment.header.version, record,
+			iterator, ctx, segment.file, segment.header.version, record,
 			segment.header.documentN, segment.header.sections[sectionPostings], false,
 		); err != nil {
 			return nil, err

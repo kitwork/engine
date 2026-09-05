@@ -319,16 +319,17 @@ func TestPostgresNodeWarmDatabaseRetainsProjectionWhileIdleBudgetTrimsOthers(t *
 
 func TestPostgresNodeBoundsIdleSearchReaderResidency(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"alpha", "beta"} {
+	for _, name := range []string{"alpha", "beta", "gamma", "delta"} {
 		createPostgresNodeSearchProjectionFixture(t, filepath.Join(root, name+".kitdb"), name)
 	}
 	node, err := OpenPostgresNode(PostgresNodeOptions{
 		Root: root, User: "kitdb", Password: "node-secret",
+		WarmDatabases:                       []string{"alpha"},
 		MaximumIdleProjectionDatabases:      2,
 		MaximumIdleProjectionDirectoryBytes: 8 << 20,
-		MaximumIdleProjectionReaderBytes:    4 << 20,
+		MaximumIdleProjectionReaderBytes:    64 << 20,
 		ManagerLimits: kitdbnode.Limits{
-			MaxOpenDatabases: 2, MaxPageCacheBytes: 2 << 20,
+			MaxOpenDatabases: 4, MaxPageCacheBytes: 4 << 20,
 			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 2,
 		},
 		Relational: Options{
@@ -376,10 +377,19 @@ func TestPostgresNodeBoundsIdleSearchReaderResidency(t *testing.T) {
 		t.Fatalf("first search residency = %+v", first)
 	}
 	queryAndRelease("beta")
+	second := node.Stats()
+	if second.ProjectionSearchReaders != 2 ||
+		second.ProjectionSearchFileHandles != 2*expectedProjectionSearchReadHandles() ||
+		second.ProjectionCacheTrims != 0 {
+		t.Fatalf("two-database search residency = %+v", second)
+	}
+	queryAndRelease("gamma")
+	queryAndRelease("delta")
 	bounded := node.Stats()
-	if bounded.ProjectionSearchReaders != 1 ||
-		bounded.ProjectionSearchFileHandles != expectedProjectionSearchReadHandles() ||
-		bounded.ProjectionCacheTrims != 1 ||
+	if bounded.ManagedEngines != 4 || bounded.IdleEngines != 4 ||
+		bounded.WarmIdleEngines != 1 || bounded.ProjectionSearchReaders != 2 ||
+		bounded.ProjectionSearchFileHandles != 2*expectedProjectionSearchReadHandles() ||
+		bounded.ProjectionCacheTrims != 2 ||
 		bounded.ProjectionReaderBytesTrimmed <= 0 ||
 		bounded.ProjectionReaderCapacityBytes > bounded.MaximumIdleProjectionReaderBytes {
 		t.Fatalf("bounded search residency = %+v", bounded)
@@ -387,12 +397,18 @@ func TestPostgresNodeBoundsIdleSearchReaderResidency(t *testing.T) {
 	node.mu.Lock()
 	alpha := node.engines["alpha"]
 	beta := node.engines["beta"]
+	gamma := node.engines["gamma"]
+	delta := node.engines["delta"]
 	node.mu.Unlock()
-	if alpha == nil || alpha.engine.ProjectionCacheStats().SearchReaders != 0 {
-		t.Fatalf("oldest idle search reader was retained: %+v", alpha)
+	if alpha == nil || !alpha.warm || alpha.engine.ProjectionCacheStats().SearchReaders != 1 {
+		t.Fatalf("warm search reader was trimmed: %+v", alpha)
 	}
-	if beta == nil || beta.engine.ProjectionCacheStats().SearchReaders != 1 {
-		t.Fatalf("newest idle search reader was trimmed: %+v", beta)
+	if beta == nil || beta.engine.ProjectionCacheStats().SearchReaders != 0 ||
+		gamma == nil || gamma.engine.ProjectionCacheStats().SearchReaders != 0 {
+		t.Fatalf("old idle search readers survived: beta=%+v gamma=%+v", beta, gamma)
+	}
+	if delta == nil || delta.engine.ProjectionCacheStats().SearchReaders != 1 {
+		t.Fatalf("newest idle search reader was trimmed: %+v", delta)
 	}
 }
 

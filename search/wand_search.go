@@ -33,7 +33,7 @@ func (items wandCursorList) Less(i, j int) bool {
 }
 func (items wandCursorList) Swap(i, j int) { items[i], items[j] = items[j], items[i] }
 
-func newWANDCursor(segment *Segment, clause disjunctiveClause, options SearchOptions, order int) (*wandCursor, bool, error) {
+func newWANDCursor(ctx context.Context, segment *Segment, clause disjunctiveClause, options SearchOptions, order int) (*wandCursor, bool, error) {
 	cursor := &wandCursor{
 		fieldID:       clause.fieldID,
 		field:         clause.field,
@@ -43,7 +43,7 @@ func newWANDCursor(segment *Segment, clause disjunctiveClause, options SearchOpt
 		order:         order,
 	}
 	if err := resetPostingIterator(
-		&cursor.iterator, segment.file, segment.header.version, clause.record,
+		&cursor.iterator, ctx, segment.file, segment.header.version, clause.record,
 		segment.header.documentN, segment.header.sections[sectionPostings], false,
 	); err != nil {
 		return nil, false, err
@@ -108,7 +108,7 @@ func (segment *Segment) searchDisjunctiveWAND(
 
 	cursors := make(wandCursorList, 0, len(clauses))
 	for index, clause := range clauses {
-		cursor, ok, err := newWANDCursor(segment, clause, options, index)
+		cursor, ok, err := newWANDCursor(ctx, segment, clause, options, index)
 		if err != nil {
 			return nil, err
 		}

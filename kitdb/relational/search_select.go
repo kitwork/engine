@@ -520,6 +520,8 @@ func (engine *Engine) collectRelationalSearchRows(
 ) ([]relationalSearchRow, error) {
 	needed := plan.offset + plan.limit
 	qualified := make([]relationalSearchRow, 0, needed)
+	decoder := newProjectedRowDecoder(plan.schema, relationalSearchDecodeTags(plan))
+	needsSnippet := relationalSearchProjectionNeeds(plan.resultProjection, "_snippet")
 	scanned := 0
 	exhausted := false
 	currentAfter := after
@@ -571,7 +573,7 @@ func (engine *Engine) collectRelationalSearchRows(
 			if !found {
 				return nil, fmt.Errorf("kitdb: search projection references a missing source row")
 			}
-			decoded, err := decodeRow(plan.schema, encoded)
+			decoded, err := decoder.decode(encoded)
 			if err != nil {
 				return nil, err
 			}
@@ -583,7 +585,7 @@ func (engine *Engine) collectRelationalSearchRows(
 				continue
 			}
 			snippet := ""
-			if relationalSearchProjectionNeeds(plan.resultProjection, "_snippet") {
+			if needsSnippet {
 				snippet, err = bestRelationalSearchSnippet(
 					ctx, decoded.values, plan.snippetColumns, plan.query,
 				)
@@ -613,6 +615,26 @@ func (engine *Engine) collectRelationalSearchRows(
 		)
 	}
 	return qualified, nil
+}
+
+// relationalSearchDecodeTags keeps search hydration proportional to the SQL
+// result and residual predicate. KROW's complete envelope and checksum are
+// still validated; unused field payloads are not materialized.
+func relationalSearchDecodeTags(plan boundRelationalSearchPlan) map[uint32]struct{} {
+	fields := make([]string, 0, len(plan.resultProjection)+len(plan.snippetColumns))
+	for _, projection := range plan.resultProjection {
+		switch projection.field {
+		case "_score", "_snippet", "_cursor":
+		default:
+			fields = append(fields, projection.field)
+		}
+	}
+	if relationalSearchProjectionNeeds(plan.resultProjection, "_snippet") {
+		for _, column := range plan.snippetColumns {
+			fields = append(fields, column.field.Name)
+		}
+	}
+	return selectDecodeTags(plan.schema, nil, plan.predicate, fields)
 }
 
 func relationalSearchProjectionNeeds(

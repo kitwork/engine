@@ -367,7 +367,7 @@ func (segment *Segment) Verify(ctx context.Context) error {
 			}
 			expectedPostingsOffset += record.postingsLength
 			iterator, iteratorErr := newPostingIterator(
-				segment.file, segment.header.version, record, segment.header.documentN,
+				ctx, segment.file, segment.header.version, record, segment.header.documentN,
 				segment.header.sections[sectionPostings], false,
 			)
 			if iteratorErr != nil {

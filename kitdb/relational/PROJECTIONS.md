@@ -682,10 +682,12 @@ correctness requirement.
 The retained `BenchmarkPostgresNodeMixedWorkload` exercises the public pgwire
 path over eight independent files: four stable databases alternate primary-key
 reads, KCOL aggregates and BM25 search; four mutable databases alternate
-primary-key reads and WAL-backed updates. Each fixture has 4,096 rows. Query
+primary-key reads and WAL-backed updates. Each fixture has 4,096 rows. The four
+stable databases retain four independent packed readers (eight verified file
+handles on Windows) under an explicit per-database reader budget. Query
 admission is six listener-wide and two per database, with bounded queues. On
 Windows/amd64, Go 1.26, an i7-11850H and warm operating-system cache, three
-5,000-operation runs on 2026-09-04 observed:
+5,000-operation runs on 2026-09-05 observed:
 
 ```sh
 go test ./kitdb/relational -run '^$' \
@@ -695,14 +697,16 @@ go test ./kitdb/relational -run '^$' \
 
 | Measurement | Observed range |
 | --- | ---: |
-| Average | 196600-204260 ns/op |
-| Throughput | 4896-5087 statements/s |
-| Point read p95 / p99 | 5 ms / 6 ms |
-| KCOL aggregate p95 / p99 | 5-6 ms / 6-8 ms |
-| BM25 search p95 / p99 | 8 ms / 8-10 ms |
-| KROW update p95 / p99 | 5-6 ms / 6-8 ms |
-| Allocation | 133952-134077 B/op, 590 allocs/op |
+| Average | 124306-138124 ns/op |
+| Throughput | 7238-8044 statements/s |
+| Point read p95 / p99 | 3-4 ms / 4-5 ms |
+| KCOL aggregate p95 / p99 | 4 ms / 4-5 ms |
+| BM25 search p95 / p99 | 4 ms / 4-5 ms |
+| KROW update p95 / p99 | 4 ms / 5-8 ms |
+| Allocation | 90292-90380 B/op, 561-562 allocs/op |
 | Admission peak / queue peak | 6 / 10 |
+| Packed search readers / Windows handles | 4 / 8 |
+| Conservative reader capacity | 9.962 MiB |
 
 Setup, projection construction and connection establishment are excluded;
 SQL planning, pgwire encoding/decoding, KROW/KCOL/search execution and commits
@@ -710,6 +714,12 @@ are included. Percentiles are bounded-histogram bucket upper bounds, include
 admission wait, and consume constant benchmark memory. This is a repeatable
 mixed-throughput baseline, not a cold-cache, 13-million-row, power-loss,
 SQLite, or PostgreSQL comparison.
+
+The deterministic node lifecycle test separately opens four independent
+packed-search databases, protects one warm database, and permits only two idle
+projection owners. It verifies that the warm reader and newest cold reader
+survive while the two older cold readers are closed oldest-first. This proves
+bounded ownership; it is not a latency benchmark.
 
 ### Projection Reader Cache Measurement
 

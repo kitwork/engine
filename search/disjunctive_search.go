@@ -48,6 +48,7 @@ func (items *disjunctiveCursorHeap) Pop() any {
 }
 
 func newDisjunctiveCursor(
+	ctx context.Context,
 	segment *Segment,
 	clause disjunctiveClause,
 	order int,
@@ -60,7 +61,7 @@ func newDisjunctiveCursor(
 		order:         order,
 	}
 	if err := resetPostingIterator(
-		&cursor.iterator, segment.file, segment.header.version, clause.record,
+		&cursor.iterator, ctx, segment.file, segment.header.version, clause.record,
 		segment.header.documentN, segment.header.sections[sectionPostings], false,
 	); err != nil {
 		return nil, false, err
@@ -125,7 +126,7 @@ func (segment *Segment) searchDisjunctive(
 
 	cursors := make(disjunctiveCursorHeap, 0, len(clauses))
 	for index, clause := range clauses {
-		cursor, ok, err := newDisjunctiveCursor(segment, clause, index)
+		cursor, ok, err := newDisjunctiveCursor(ctx, segment, clause, index)
 		if err != nil {
 			return nil, err
 		}

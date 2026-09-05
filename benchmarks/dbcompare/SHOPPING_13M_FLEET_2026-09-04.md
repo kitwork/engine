@@ -128,6 +128,39 @@ This does not justify a blanket claim that packed search is faster. Its first
 measured value is bounded ownership and one copyable file; latency still
 depends heavily on result hydration and selected fields.
 
+### Bounded Posting Read-Ahead
+
+A CPU profile of the packed 120-row query showed 71.99% of samples in the
+Windows positioned-read syscall path. Search was issuing a small `ReadAt` for
+each posting header and another for its adjacent payload. KROW hydration was
+not the bottleneck: only about 30-40 ms of CPU samples across 20 complete
+queries were attributed to row decoding.
+
+The retained reader now gives each active posting iterator one bounded 4 KiB
+read-ahead window. It checks cancellation before and after each physical read;
+an in-progress operating-system call cannot be preempted, but a canceled
+payload is not decoded or published. This is transient query memory and is not
+included in persistent reader residency. A projected KROW decoder is also
+constructed once per SQL query and materializes only result, residual-filter,
+and requested-snippet fields while still validating the complete KROW envelope
+and checksum.
+
+Three 20-operation samples on the same artifact and host observed:
+
+| Workload | Before | After 4 KiB read-ahead | Change |
+| --- | ---: | ---: | ---: |
+| name-only, 20 rows | 27.88-31.31 ms | 11.30-12.17 ms | about 57-64% lower |
+| all fields, 20 rows | 185.73-194.99 ms | 74.21-80.31 ms | about 57-62% lower |
+| all fields + merchant, 120 rows | 224.45-233.63 ms | 110.25-111.36 ms | about 51-53% lower |
+
+For the 120-row case, allocations fell from 79,810 to 74,016-74,020 per
+operation. Allocated bytes increased from about 8.66 MB to 9.02 MB because the
+bounded read windows trade transient memory bandwidth for fewer Windows
+syscalls. Measurements with 2 KiB used about 8.07 MB but took 126.62-128.82 ms;
+8 KiB used about 10.66 MB and took 103.45-107.33 ms. The retained 4 KiB choice
+is the measured latency/resource compromise rather than the fastest isolated
+setting.
+
 ### Concurrent Windows Reads
 
 The first packed implementation shared one `os.File` handle among all 119
@@ -153,6 +186,21 @@ peaked at 750.87 MiB RSS. These warm-cache observations suggest that the
 packed layout now reaches at least comparable concurrent throughput while
 retaining less process working set. They do not prove an SLO or a universal
 advantage across hardware and operating systems.
+
+After bounded posting read-ahead, three additional 15-second packed-search
+observations completed 103, 266, and 258 hot queries. Their hot p50/p99 buckets
+were respectively 300/500 ms, 150/150 ms, and 150/150 ms; RSS peaks were
+750.20, 697.84, and 738.43 MiB. The wide range is direct evidence of host load,
+GC and page-cache sensitivity, so these samples are not collapsed into one
+headline throughput claim.
+
+The synthetic public-pgwire mixed benchmark also exercised eight independent
+KitDB files at once, including four retained packed readers. Three 5,000-query
+runs reported 7,238-8,044 statements/s, exactly four readers/eight Windows
+handles, 9.962 MiB conservative reader capacity, and a six-query admission
+peak. A deterministic four-database lifecycle test then limited idle residency
+to two owners and proved that the protected warm reader plus newest cold reader
+survive while the two older readers are closed.
 
 ## Interpretation
 
@@ -209,18 +257,19 @@ with a two-second minimum. Without any artifact variable, the canary skips.
 
 ## Next Gate
 
-The packed-search adoption and one-hot-tenant rerun are complete. Each Engine
+The packed-search adoption, bounded posting reads, cancellation boundary and
+multi-database ownership gate are complete. Each Engine
 still defaults to zero retained search-reader bytes, admits a packed reader only
 after conservative capacity inspection, single-flights concurrent first opens,
 and falls back to open/query/close when the configured budget is too small. The
 PostgreSQL node accounts that reservation with container-directory bytes and
 evicts oldest non-warm idle readers under a separate fleet ceiling.
 
-The next evidence gate is several independent packed search databases under one
-node, including over-budget idle eviction, cancellation during concurrent
-payload reads, and a Linux comparison where one file handle is not expected to
-serialize positioned reads. The 120-row hydration regression should also be
-profiled before changing the packed layout itself.
+The next evidence gate is a Linux comparison where one file handle is not
+expected to serialize positioned reads, followed by controlled cold-device
+measurements. The profile says multi-field posting traversal, not 120-row KROW
+hydration, is now the remaining dominant path; any deeper format or WAND change
+must target that evidence and preserve exact ranking.
 
 Before calling this production-ready, repeat on a controlled host with cold
 device/cache methodology, multiple workload mixes, cancellation and queue

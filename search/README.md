@@ -17,6 +17,9 @@ Segment V2 provides:
   minimum field-norm bounds;
 - independently protected posting headers and payloads plus section CRC32C;
 - lazy `ReadAt` access to dictionary blocks, postings, and stored identifiers;
+- a per-posting-iterator 4 KiB read-ahead window that coalesces adjacent block
+  headers/payloads without creating a shared unbounded cache, with context
+  checks immediately before and after physical reads;
 - exact implicit-AND BM25 search seeded from the rarest term;
 - exact disjunctive OR search through `MatchQuery.Operator == QueryAny` across
   the selected field or fields, using bounded WAND pruning once Top-K is full;
@@ -514,6 +517,12 @@ bounded asynchronous canary described above.
   every query term across the union of selected fields and keeps per-field
   norms and boosts. Phrase is available through `MatchQuery.Phrase`; fuzzy,
   range, and facets remain future milestones.
+- Posting read-ahead is transient query memory, not reader residency. One
+  iterator owns at most one 4 KiB window; the hard 32-field and 32-term limits
+  therefore cap these windows at 4 MiB per active segment query before posting
+  payload buffers. Cancellation cannot preempt an operating-system `ReadAt`
+  already in progress, but is returned before decoding or publishing that
+  completed payload.
 - Search admission bounds goroutines owned by the manager, but the surrounding
   HTTP server must still set request deadlines, connection limits, and rate
   limits. `ErrSearchOverloaded` is a retry/backpressure signal, not permission

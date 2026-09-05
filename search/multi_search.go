@@ -312,11 +312,11 @@ type multiPostingUnion struct {
 	current   bool
 }
 
-func newMultiPostingUnion(segment *Segment, records []multiFieldTermRecord) (multiPostingUnion, error) {
+func newMultiPostingUnion(ctx context.Context, segment *Segment, records []multiFieldTermRecord) (multiPostingUnion, error) {
 	union := multiPostingUnion{iterators: make([]postingIterator, len(records))}
 	for position, record := range records {
 		if err := resetPostingIterator(
-			&union.iterators[position], segment.file, segment.header.version, record.record,
+			&union.iterators[position], ctx, segment.file, segment.header.version, record.record,
 			segment.header.documentN, segment.header.sections[sectionPostings], false,
 		); err != nil {
 			return multiPostingUnion{}, err
@@ -354,7 +354,7 @@ func (segment *Segment) liveMultiDocumentFrequency(
 	records []multiFieldTermRecord,
 	deleted *deletedDocuments,
 ) (uint32, error) {
-	union, err := newMultiPostingUnion(segment, records)
+	union, err := newMultiPostingUnion(ctx, segment, records)
 	if err != nil {
 		return 0, err
 	}
@@ -393,13 +393,14 @@ type multiTermCursor struct {
 }
 
 func newMultiTermCursor(
+	ctx context.Context,
 	segment *Segment,
 	prepared preparedMultiMatchQuery,
 	records multiTermRecords,
 	idf float64,
 	averages []float64,
 ) (multiTermCursor, error) {
-	union, err := newMultiPostingUnion(segment, records.fields)
+	union, err := newMultiPostingUnion(ctx, segment, records.fields)
 	if err != nil {
 		return multiTermCursor{}, err
 	}
@@ -456,7 +457,7 @@ func (segment *Segment) searchMultiCandidates(
 	}
 	cursors := make([]multiTermCursor, len(records))
 	for position := range records {
-		cursor, err := newMultiTermCursor(segment, prepared, records[position], idfs[position], averages)
+		cursor, err := newMultiTermCursor(ctx, segment, prepared, records[position], idfs[position], averages)
 		if err != nil {
 			return nil, err
 		}

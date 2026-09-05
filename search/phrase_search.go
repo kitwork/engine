@@ -299,7 +299,7 @@ func (segment *Segment) searchPhraseField(
 	seedIndex := 0
 	for index, record := range records {
 		iterator, err := newPostingIterator(
-			segment.file, segment.header.version, record, segment.header.documentN,
+			ctx, segment.file, segment.header.version, record, segment.header.documentN,
 			segment.header.sections[sectionPostings], true,
 		)
 		if err != nil {

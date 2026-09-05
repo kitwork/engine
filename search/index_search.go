@@ -196,7 +196,7 @@ func liveDocumentFrequency(
 		return record.documentFreq, nil
 	}
 	iterator, err := newPostingIterator(
-		segment.file, segment.header.version, record, segment.header.documentN,
+		ctx, segment.file, segment.header.version, record, segment.header.documentN,
 		segment.header.sections[sectionPostings], false,
 	)
 	if err != nil {

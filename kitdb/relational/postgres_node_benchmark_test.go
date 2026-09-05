@@ -43,7 +43,10 @@ func BenchmarkPostgresNodeMixedWorkload(b *testing.B) {
 			MaxOpenDatabases: databaseCount, MaxPageCacheBytes: databaseCount << 20,
 			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 2,
 		},
-		Relational: Options{ExperimentalProjections: true},
+		Relational: Options{
+			ExperimentalProjections: true,
+			SearchReaderCacheBytes:  16 << 20,
+		},
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -132,7 +135,11 @@ func BenchmarkPostgresNodeMixedWorkload(b *testing.B) {
 	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "queries/s")
 	b.ReportMetric(float64(snapshot.Peak), "query_peak")
 	b.ReportMetric(float64(snapshot.PeakQueued), "queue_peak")
-	b.ReportMetric(float64(node.Stats().ProjectionDirectoryBytes)/(1<<20), "projection_MiB")
+	nodeStats := node.Stats()
+	b.ReportMetric(float64(nodeStats.ProjectionDirectoryBytes)/(1<<20), "projection_MiB")
+	b.ReportMetric(float64(nodeStats.ProjectionSearchReaders), "search_readers")
+	b.ReportMetric(float64(nodeStats.ProjectionSearchFileHandles), "search_handles")
+	b.ReportMetric(float64(nodeStats.ProjectionReaderCapacityBytes)/(1<<20), "reader_capacity_MiB")
 	for kind, name := range []string{"point", "aggregate", "search", "update"} {
 		b.ReportMetric(latencies[kind].Quantile(0.95), name+"_p95_us")
 		b.ReportMetric(latencies[kind].Quantile(0.99), name+"_p99_us")

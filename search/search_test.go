@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -839,7 +840,9 @@ func TestBlockMaxChecksCancellationWhilePruning(t *testing.T) {
 	}
 	statistics := blockMaxStatistics{}
 	prepared.statistics = &statistics
-	ctx := &cancelAfterChecksContext{Context: context.Background(), after: 4, done: make(chan struct{})}
+	// Posting read-ahead now checks the context on both sides of physical I/O,
+	// so leave enough checks to enter the pruning loop before cancellation.
+	ctx := &cancelAfterChecksContext{Context: context.Background(), after: 20, done: make(chan struct{})}
 	if _, err := segment.searchMatch(ctx, prepared); !errors.Is(err, context.Canceled) {
 		t.Fatalf("pruning cancellation error = %v", err)
 	}
@@ -1107,6 +1110,73 @@ func TestCanceledAndConcurrentSearch(t *testing.T) {
 	close(errorsFound)
 	for err := range errorsFound {
 		t.Fatal(err)
+	}
+}
+
+type cancelOnRangeReaderAt struct {
+	reader    *bytes.Reader
+	cancel    context.CancelFunc
+	target    int64
+	armed     bool
+	triggered bool
+	reads     int
+}
+
+func (reader *cancelOnRangeReaderAt) ReadAt(destination []byte, offset int64) (int, error) {
+	read, err := reader.reader.ReadAt(destination, offset)
+	reader.reads++
+	if reader.armed && !reader.triggered && offset <= reader.target &&
+		reader.target < offset+int64(read) {
+		reader.triggered = true
+		reader.cancel()
+	}
+	return read, err
+}
+
+func TestPostingReadAheadHonorsCancellationAfterPayloadRead(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := buildSingleFieldSegment(t, schema, []string{
+		"alpha beta", "alpha gamma", "alpha delta", "alpha epsilon",
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader := &cancelOnRangeReaderAt{reader: bytes.NewReader(data), cancel: cancel}
+	segment, err := openSegmentReader("<cancel-payload>", reader, int64(len(data)), schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, found, err := segment.lookupTerm(0, "alpha")
+	if err != nil || !found {
+		t.Fatalf("lookup alpha: found=%t err=%v", found, err)
+	}
+	iterator, err := newPostingIterator(
+		ctx, segment.file, segment.header.version, record, segment.header.documentN,
+		segment.header.sections[sectionPostings], false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.target = int64(record.postingsOffset + iterator.headerSize)
+	reader.armed = true
+	readsBefore := reader.reads
+	if _, err := iterator.Next(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("posting payload cancellation = %v", err)
+	}
+	if !reader.triggered {
+		t.Fatal("posting payload read did not trigger cancellation")
+	}
+	if reads := reader.reads - readsBefore; reads != 1 {
+		t.Fatalf("header and small payload used %d physical reads, want 1", reads)
+	}
+	if _, _, current := iterator.Current(); current {
+		t.Fatal("canceled payload was published as the current posting")
 	}
 }
 
