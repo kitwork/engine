@@ -324,6 +324,10 @@ func kitDBVerifyPlan() []gateStep {
 			Command: []string{"go", "test", "./kitdb/...", "-count=1", "-timeout=20m"},
 		},
 		{
+			Name:    "KitDB search suite",
+			Command: []string{"go", "test", "./search", "-count=1", "-timeout=20m"},
+		},
+		{
 			Name:    "KitDB relational suite",
 			Command: []string{"go", "test", "./work", "-count=1", "-timeout=20m"},
 		},
@@ -337,7 +341,7 @@ func kitDBVerifyPlan() []gateStep {
 		},
 		{
 			Name:    "KitDB static analysis",
-			Command: []string{"go", "vet", "./kitdb/...", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+			Command: []string{"go", "vet", "./kitdb/...", "./search", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
 		},
 		{
 			Name: "KitDB durability/recovery",
@@ -361,6 +365,10 @@ func kitDBReleaseCampaigns() []gateStep {
 		{
 			Name:    "KitDB kernel race",
 			Command: []string{"go", "test", "-race", "./kitdb/...", "-count=1", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB search race",
+			Command: []string{"go", "test", "-race", "./search", "-count=1", "-timeout=20m"},
 		},
 		{
 			Name:    "KitDB relational race",

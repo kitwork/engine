@@ -53,6 +53,7 @@ func TestReleasePlanModes(t *testing.T) {
 		"Restart/recovery campaign":         false,
 		"Concurrent cache campaign":         false,
 		"KitDB kernel race":                 false,
+		"KitDB search race":                 false,
 		"KitDB relational race":             false,
 		"KitDB replica hard-crash matrix":   false,
 		"KitDB catalog hard-crash matrix":   false,
@@ -97,6 +98,10 @@ func TestReleasePlanModes(t *testing.T) {
 			(!containsArgument(step.Command, "./kitdb/relational") ||
 				!containsArgument(step.Command, "^(TestColumnarIncrementalProcessExitDuringBuild|TestProjectionSnapshotFreshnessCorruptionAndCancellation|TestAnalyticsRefreshUpgradesBlockDirectoryWithoutRewritingKCOL)$")) {
 			t.Fatal("KitDB projection recovery gate omitted publication, corruption, or metadata-upgrade evidence")
+		}
+		if step.Name == "KitDB search race" &&
+			(!containsArgument(step.Command, "-race") || !containsArgument(step.Command, "./search")) {
+			t.Fatal("KitDB search race omitted race detection or the standalone search engine")
 		}
 		if step.Name == "KitDB 1.x compatibility contract" &&
 			!containsArgument(step.Command, "^(TestKitDBV1CompatibilityProfile|TestKitDBV1FrozenMainFixture|TestKitDBV1RelationalCompatibilityProfile|TestOperatorVersionReportsKitDBV1Contract)$") {
@@ -170,12 +175,22 @@ func TestReleasePlanModes(t *testing.T) {
 		name string
 	}{
 		{kitDBVerify, "KitDB projection recovery"},
+		{kitDBVerify, "KitDB search suite"},
 		{kitDBRelease, "KitDB projection recovery"},
+		{kitDBRelease, "KitDB search race"},
 		{kitDBRelease, "KitDB analytics hard-crash matrix"},
 	} {
 		if !containsStep(expectation.plan, expectation.name) {
 			t.Fatalf("KitDB plan omitted %s", expectation.name)
 		}
+	}
+	searchSuite, ok := findStep(kitDBVerify, "KitDB search suite")
+	if !ok || !containsArgument(searchSuite.Command, "./search") {
+		t.Fatal("KitDB search suite omitted the standalone search engine")
+	}
+	staticAnalysis, ok := findStep(kitDBVerify, "KitDB static analysis")
+	if !ok || !containsArgument(staticAnalysis.Command, "./search") {
+		t.Fatal("KitDB static analysis omitted the standalone search engine")
 	}
 	if _, err := releasePlan("unknown"); err == nil {
 		t.Fatal("unknown release mode was accepted")
@@ -207,12 +222,17 @@ func containsArgument(arguments []string, expected string) bool {
 }
 
 func containsStep(steps []gateStep, expected string) bool {
+	_, ok := findStep(steps, expected)
+	return ok
+}
+
+func findStep(steps []gateStep, expected string) (gateStep, bool) {
 	for _, step := range steps {
 		if step.Name == expected {
-			return true
+			return step, true
 		}
 	}
-	return false
+	return gateStep{}, false
 }
 
 func TestDryRunStepShape(t *testing.T) {

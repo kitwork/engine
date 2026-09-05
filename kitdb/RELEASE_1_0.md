@@ -118,11 +118,13 @@ go run ./cmd/releasegate --mode kitdb-release \
   --timeout 90m
 ```
 
-The release gate includes full kernel/node/relational/operator tests, build,
-vet, compatibility checks, database journey and durability oracles, explicit
-analytics publication/corruption/upgrade recovery, race detector coverage, ten
-repetitions of replica/catalog/import/index/analytics hard-crash matrices, a
-multi-tenant canary smoke, and a seeded 128-iteration replica crash soak.
+The release gate includes full kernel/node/relational/operator tests, the
+standalone pure-Go search suite, build, vet, compatibility checks, database
+journey and durability oracles, explicit analytics
+publication/corruption/upgrade recovery, kernel/search/relational race detector
+coverage, ten repetitions of replica/catalog/import/index/analytics hard-crash
+matrices, a multi-tenant canary smoke, and a seeded 128-iteration replica crash
+soak.
 
 Run the long storage canary on the intended deployment filesystem:
 
