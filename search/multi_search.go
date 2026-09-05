@@ -33,6 +33,10 @@ type multiTermRecords struct {
 	documentFrequency uint32
 }
 
+type multiSearchScratch struct {
+	identifier documentIdentifierPrefixReader
+}
+
 type multiFrequencyCache struct {
 	mu      sync.Mutex
 	entries map[string]uint64
@@ -123,8 +127,9 @@ func (segment *Segment) searchMultiMatch(
 	if err != nil {
 		return nil, err
 	}
+	var scratch multiSearchScratch
 	candidates, err := segment.searchMultiCandidates(
-		ctx, prepared, records, idfs, averages, nil, 0, scoreThreshold{},
+		ctx, prepared, records, idfs, averages, nil, &scratch, 0, scoreThreshold{},
 	)
 	if err != nil {
 		return nil, err
@@ -191,6 +196,7 @@ func (index *Index) searchMultiMatch(
 	}
 
 	results := make(indexCandidateHeap, 0, prepared.options.Limit)
+	var scratch multiSearchScratch
 	for position, records := range recordsBySegment {
 		if records == nil {
 			continue
@@ -205,7 +211,7 @@ func (index *Index) searchMultiMatch(
 			}
 		}
 		candidates, err := index.segments[position].searchMultiCandidates(
-			ctx, prepared, records, idfs, averages, index.deletions[position],
+			ctx, prepared, records, idfs, averages, index.deletions[position], &scratch,
 			index.bases[position], threshold,
 		)
 		if err != nil {
@@ -449,6 +455,7 @@ func (segment *Segment) searchMultiCandidates(
 	idfs []float64,
 	averages []float64,
 	deleted *deletedDocuments,
+	scratch *multiSearchScratch,
 	base uint64,
 	externalThreshold scoreThreshold,
 ) (candidateHeap, error) {
@@ -474,7 +481,7 @@ func (segment *Segment) searchMultiCandidates(
 	results := make(candidateHeap, 0, prepared.options.Limit)
 	seed := &cursors[0]
 	target := uint32(0)
-	var identifierBuffer []byte
+	scratch.identifier.reset(ctx, segment)
 	for candidates := uint64(0); ; candidates++ {
 		if candidates&255 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -522,9 +529,18 @@ func (segment *Segment) searchMultiCandidates(
 				score += termScore
 			}
 			if matched {
-				matchesPrefix, err := segment.documentIdentifierHasPrefix(
-					document, prepared.identifierPrefix, &identifierBuffer,
-				)
+				ordinal := base + uint64(document)
+				candidate := rankedCandidate{document: document, score: score}
+				if !rankIsAfter(score, ordinal, prepared.options.After) ||
+					(externalThreshold.full && scoreCannotCompete(score, ordinal, externalThreshold)) ||
+					!candidateCanCompete(results, candidate, prepared.options.Limit) {
+					if document == math.MaxUint32 {
+						return results, nil
+					}
+					target = document + 1
+					continue
+				}
+				matchesPrefix, err := scratch.identifier.hasPrefix(document, prepared.identifierPrefix)
 				if err != nil {
 					return nil, err
 				}
@@ -535,14 +551,7 @@ func (segment *Segment) searchMultiCandidates(
 					target = document + 1
 					continue
 				}
-				if !rankIsAfter(score, base+uint64(document), prepared.options.After) {
-					if document == math.MaxUint32 {
-						return results, nil
-					}
-					target = document + 1
-					continue
-				}
-				collectCandidate(&results, rankedCandidate{document: document, score: score}, prepared.options.Limit)
+				collectCandidate(&results, candidate, prepared.options.Limit)
 			}
 		}
 		if document == math.MaxUint32 {

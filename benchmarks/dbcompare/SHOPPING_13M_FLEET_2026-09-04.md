@@ -161,6 +161,35 @@ syscalls. Measurements with 2 KiB used about 8.07 MB but took 126.62-128.82 ms;
 is the measured latency/resource compromise rather than the fastest isolated
 setting.
 
+### Top-K Identifier Gating
+
+A follow-up profile found that document-identifier prefix checks still
+accounted for 28.78% of sampled CPU in the 120-row merchant query. Each exact
+BM25 match was reading its stored identifier before the engine knew whether the
+candidate could enter the already-full Top-K heap.
+
+The retained path now applies the exact `SEARCH AFTER`, index-wide threshold,
+and local Top-K threshold before touching stored identifier bytes. This does
+not approximate ranking: an identifier prefix is only a boolean filter and
+cannot increase a candidate score. Offset and identifier bytes use two
+query-local 4 KiB read-ahead windows with cancellation checks around physical
+I/O. Posting iterators also retain their bounded payload buffers when reset
+inside the same query instead of reallocating them for each segment.
+
+Three 30-operation samples on the same 13,773,074-row packed artifact observed
+101.921-103.925 ms for all-fields plus merchant, 8,904,277-8,905,405 B/op, and
+66,098-66,100 allocs/op. The preceding retained path measured 110.25-111.36 ms
+and 74,016-74,020 allocations, so this sample reduced latency by about 6-9%
+and allocations by about 10.7%. A 100-operation CPU profile attributed 3.65%
+of samples to identifier-prefix work after the change. These are warm Windows
+observations, not a cold-device or cross-platform claim.
+
+An exact multi-field Block-Max prototype was also tested and removed. On this
+artifact, enabled and disabled samples overlapped: all-fields measured
+82.3-84.4 ms versus 79.6-86.0 ms, and the merchant query measured 88.0-91.2 ms
+versus 89.0-90.6 ms. The real workload did not justify another pruning
+mechanism; multi-field posting traversal remains the next evidence-led target.
+
 ### Concurrent Windows Reads
 
 The first packed implementation shared one `os.File` handle among all 119

@@ -107,9 +107,10 @@ type queryTerm struct {
 }
 
 type segmentSearchScratch struct {
-	iterators []postingIterator
-	terms     []queryTerm
-	results   candidateHeap
+	iterators  []postingIterator
+	terms      []queryTerm
+	results    candidateHeap
+	identifier documentIdentifierPrefixReader
 }
 
 type blockMaxStatistics struct {
@@ -376,7 +377,7 @@ func (segment *Segment) searchCandidatesWithScratch(
 	seed := queryTerms[0]
 	candidates := uint64(0)
 	leadBlocks := uint64(0)
-	var identifierBuffer []byte
+	scratch.identifier.reset(ctx, segment)
 	for {
 		if leadBlocks&63 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -444,22 +445,24 @@ func (segment *Segment) searchCandidatesWithScratch(
 				score += bm25Score(float64(matchedFrequency), length, averageLength, term.idf, prepared.options.K1, prepared.options.B)
 			}
 			if matched {
-				matchesPrefix, err := segment.documentIdentifierHasPrefix(
-					document, prepared.identifierPrefix, &identifierBuffer,
-				)
+				score *= prepared.field.Boost
+				if prepared.statistics != nil {
+					prepared.statistics.candidatesScored++
+				}
+				ordinal := base + uint64(document)
+				if !rankIsAfter(score, ordinal, prepared.options.After) ||
+					(externalThreshold.full && scoreCannotCompete(score, ordinal, externalThreshold)) ||
+					!candidateCanCompete(results, rankedCandidate{document: document, score: score}, prepared.options.Limit) {
+					continue
+				}
+				matchesPrefix, err := scratch.identifier.hasPrefix(document, prepared.identifierPrefix)
 				if err != nil {
 					return nil, err
 				}
 				if !matchesPrefix {
 					continue
 				}
-				if !rankIsAfter(score, base+uint64(document), prepared.options.After) {
-					continue
-				}
-				if prepared.statistics != nil {
-					prepared.statistics.candidatesScored++
-				}
-				collectCandidate(&results, rankedCandidate{document: document, score: score * prepared.field.Boost}, prepared.options.Limit)
+				collectCandidate(&results, rankedCandidate{document: document, score: score}, prepared.options.Limit)
 			}
 		}
 	}
@@ -600,15 +603,24 @@ func (items *candidateHeap) Pop() any {
 }
 
 func collectCandidate(results *candidateHeap, candidate rankedCandidate, limit int) {
+	if !candidateCanCompete(*results, candidate, limit) {
+		return
+	}
 	if results.Len() < limit {
 		heap.Push(results, candidate)
 		return
 	}
-	worst := (*results)[0]
-	if candidate.score > worst.score || (candidate.score == worst.score && candidate.document < worst.document) {
-		(*results)[0] = candidate
-		heap.Fix(results, 0)
+	(*results)[0] = candidate
+	heap.Fix(results, 0)
+}
+
+func candidateCanCompete(results candidateHeap, candidate rankedCandidate, limit int) bool {
+	if len(results) < limit {
+		return true
 	}
+	worst := results[0]
+	return candidate.score > worst.score ||
+		(candidate.score == worst.score && candidate.document < worst.document)
 }
 
 func (segment *Segment) materializeHits(candidates candidateHeap, base uint64) ([]Hit, error) {

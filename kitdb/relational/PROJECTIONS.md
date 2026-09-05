@@ -648,6 +648,10 @@ go test ./kitdb/relational -run ^$ \
   candidate/result budgets, snippets and cursor validation. A fresh replacement
   is packed without tombstones. Builder segments use a soft 8 MiB accounting
   threshold and at most 25000 documents, not an 8 MiB heap guarantee.
+- Exact score, cursor and Top-K thresholds run before optional identifier-prefix
+  I/O because a prefix filter cannot improve rank. Stored identifier offsets
+  and bytes use two bounded query-local 4 KiB windows that are reused across
+  immutable segments and are not charged as resident reader memory.
   Dictionaries and norms still use the existing search reader caches. The
   Engine-owned container cache shares one file handle and decoded manifest.
   `SearchReaderCacheBytes` may additionally retain one immutable packed reader

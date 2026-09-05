@@ -237,10 +237,10 @@ func resetPostingIterator(
 	iterator.blockCount = 0
 	iterator.blockIndex = -1
 	iterator.hasCurrent = false
-	iterator.payload = nil
-	iterator.positions = nil
+	iterator.payload = iterator.payload[:0]
+	iterator.positions = iterator.positions[:0]
 	iterator.norms = nil
-	iterator.readAhead = nil
+	iterator.readAhead = iterator.readAhead[:0]
 	iterator.readOffset = 0
 	return nil
 }

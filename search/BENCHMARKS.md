@@ -189,6 +189,12 @@ Wall-clock values can vary. Default tests therefore enforce result equality
 against exhaustive scoring and deterministic decoded/pruned work bounds rather
 than asserting machine-dependent durations.
 
+This retained Block-Max path is the optimized single-field `Field` path. An
+exact multi-field extension was prototyped against the 13,773,074-row shopping
+artifact and then removed because enabled and disabled latency ranges
+overlapped. Synthetic pruning alone is not an adoption gate; a format or
+algorithm change must also improve the representative KitDB workload.
+
 ```text
 go test ./search -run '^$' -bench '^BenchmarkBlockMaxConjunctive$' -benchmem -benchtime=1s
 ```
