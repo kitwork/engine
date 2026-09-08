@@ -777,7 +777,7 @@ func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute, work *
 	}
 
 	for _, attribute := range attributes {
-		if err := validateReservedAttribute(attribute); err != nil {
+		if err := validateReservedAttribute(tag.name, attribute); err != nil {
 			return scannedTag{}, err
 		}
 		switch attribute.name {
@@ -861,8 +861,27 @@ func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute, work *
 	return tag, nil
 }
 
-func validateReservedAttribute(attribute rawScannedAttribute) error {
+func validateReservedAttribute(tagName string, attribute rawScannedAttribute) error {
 	name := attribute.name
+
+	// data-kitwork-highlight names a code block's language for jit/highlight. It
+	// is server-only — the pass consumes it while rendering and the browser never
+	// acts on it — so it is declared where the work happens.
+	if name == "data-kitwork-highlight" {
+		return nil
+	}
+
+	// data-kitwork-jit is the SLOT marker: an empty tag an author places to pin
+	// where the engine writes its own output, which jit/theme has documented
+	// since it shipped. Only the staged DELIVERY roles are forgeable, and
+	// reservedDeliveryMarker already draws exactly that line for the injection
+	// guard, so ask it rather than keeping a second, blunter copy here.
+	if name == "data-kitwork-jit" {
+		if reservedDeliveryMarker(tagName, name, attribute.value, attribute.hasValue) {
+			return fmt.Errorf("%w at byte %d: %q belongs to the engine-emitted namespace", ErrUnsupportedAttribute, attribute.offset, name)
+		}
+		return nil
+	}
 	if strings.HasPrefix(name, "data-kitwork-") {
 		return fmt.Errorf("%w at byte %d: %q belongs to the engine-emitted namespace", ErrUnsupportedAttribute, attribute.offset, name)
 	}
@@ -877,7 +896,7 @@ func validateReservedAttribute(attribute rawScannedAttribute) error {
 	case "click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout":
 		return validateEventModifiers(attribute, base, parts[1:])
 	case "text", "show", "class", "bind", "style", "model", "scope", "component",
-		"as", "retain", "drive", "ignore", "if", "for", "key":
+		"as", "retain", "drive", "ignore", "if", "for", "key", "highlight":
 		if len(parts) != 1 {
 			return fmt.Errorf("%w at byte %d: %q only permits modifiers on event attributes", ErrUnsupportedAttribute, attribute.offset, name)
 		}

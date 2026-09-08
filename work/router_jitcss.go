@@ -18,6 +18,15 @@ import (
 //	    darkMode: ['class', '[data-theme="dark"]'],   // parent selector for dark:
 //	    theme: { extend: { colors: { brand: { DEFAULT: '#f82244' } }, keyframes: {...} } },
 //	})
+// Css is the current name for the design-token config. The JIT prefix described
+// the engine's mechanism, not the author's intent: from a site's side this is
+// simply where its colours, fonts and utilities are declared.
+//
+//	router.css({ theme: { extend: { colors: { brand: "#f82244" } } } })
+//
+// Jitcss stays as a deprecated alias so existing sites keep working.
+func (f *FolderRouter) Css(cfg value.Value) *FolderRouter { return f.Jitcss(cfg) }
+
 func (f *FolderRouter) Jitcss(cfg value.Value) *FolderRouter {
 	if config := buildJitcssConfig(cfg); config != nil {
 		f.tenant.presentation().SetJITConfig(config)

@@ -54,6 +54,14 @@ type Config struct {
 	// DarkSelector is the PARENT selector the dark: variant scopes under. Empty = ".dark". Set it
 	// to e.g. `[data-theme="dark"]` via router.jitcss({ darkMode: ['class', '[data-theme="dark"]'] }).
 	DarkSelector string
+
+	// HighlightTheme and HighlightPalette carry router.highlight() down to colour
+	// resolution, so terminal-* resolves per site instead of from one global
+	// default. Theme names a preset; Palette holds the per-role overrides a site
+	// passed as a map. Both sit BELOW Colors: a token spelled out in router.css()
+	// still wins, keeping "the config is the last word" true.
+	HighlightTheme   string
+	HighlightPalette map[string]string
 }
 
 var DefaultConfig = Config{

@@ -9,11 +9,13 @@ import (
 
 	jitcss "github.com/kitwork/engine/jit/css"
 	fonts "github.com/kitwork/engine/jit/fonts"
+	jithighlight "github.com/kitwork/engine/jit/highlight"
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 	icons "github.com/kitwork/engine/jit/icons"
 	kitjavascript "github.com/kitwork/engine/jit/javascript"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
+	jitmanifest "github.com/kitwork/engine/jit/manifest"
 	material "github.com/kitwork/engine/jit/material"
 	theme "github.com/kitwork/engine/jit/theme"
 	"github.com/kitwork/engine/utilities/minifier"
@@ -23,22 +25,25 @@ import (
 // Config is everything the render engine needs — no *Tenant, no HTTP. Build a render with New(),
 // then Bind(data) for a page or HTML(tmpl, data) for a raw string template (e.g. an email).
 type Config struct {
-	Base          string                    // template root — the anchor every path resolves against
-	JitConfig     *jitcss.Config            // JIT-CSS config (brand colors, keyframes…); nil = defaults
-	Directory     string                    // sub-root under Base (tree uses "."; legacy used "views"/"app")
-	Path          string                    // the folder whose page/index/slots resolve, walked up
-	Page          string                    // explicit page override (usually "" — derived from Path)
-	Index         string                    // explicit shell filename override
-	Notfound      string                    // notfound filename (default "notfound")
-	NotfoundMode  bool                      // render the notfound page for {{ @page }}
-	JitCSS        bool                      // inline the minimal JIT CSS for the page's classes
-	Global        value.Value               // data merged into every render
-	Minify        []string                  // explicit minify content types
-	MinifySet     bool                      // whether Minify was set explicitly
-	DefaultMinify bool                      // minify when not set explicitly (caller passes !AllowLocal)
-	ThemeMode     string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
-	KitJSAssets   *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
-	Source        Source                    // immutable template source; nil reads the live filesystem
+	Base             string                    // template root — the anchor every path resolves against
+	JitConfig        *jitcss.Config            // JIT-CSS config (brand colors, keyframes…); nil = defaults
+	Directory        string                    // sub-root under Base (tree uses "."; legacy used "views"/"app")
+	Path             string                    // the folder whose page/index/slots resolve, walked up
+	Page             string                    // explicit page override (usually "" — derived from Path)
+	Index            string                    // explicit shell filename override
+	Notfound         string                    // notfound filename (default "notfound")
+	NotfoundMode     bool                      // render the notfound page for {{ @page }}
+	JitCSS           bool                      // inline the minimal JIT CSS for the page's classes
+	Global           value.Value               // data merged into every render
+	Minify           []string                  // explicit minify content types
+	MinifySet        bool                      // whether Minify was set explicitly
+	DefaultMinify    bool                      // minify when not set explicitly (caller passes !AllowLocal)
+	ThemeMode        string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
+	HighlightTheme   string                    // site-wide palette for highlighted code blocks (router.highlight)
+	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
+	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
+	KitJSAssets      *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
+	Source           Source                    // immutable template source; nil reads the live filesystem
 }
 
 func New(c Config) *Render {
@@ -47,8 +52,11 @@ func New(c Config) *Render {
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
 		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode,
-		kitJSAssets: c.KitJSAssets,
-		source:      c.Source,
+		highlightTheme:   c.HighlightTheme,
+		manifestPath:     c.ManifestPath,
+		highlightPalette: c.HighlightPalette,
+		kitJSAssets:      c.KitJSAssets,
+		source:           c.Source,
 	}
 }
 
@@ -62,12 +70,15 @@ type Render struct {
 	layout               Layout
 	global               value.Value // Dữ liệu dùng chung cho mọi bản render
 	notfound             string
-	notfoundMode         bool     // render the notfound page for {{ @page }}
-	jitCSS               bool     // inject server-side Tailwind/utility CSS for the page's classes
-	minify               []string // content types to minify on the final HTML output
-	minifySet            bool     // whether minify was set explicitly (else default by environment)
-	defaultMinify        bool     // minify default when not explicit (injected — replaces AllowLocal)
-	themeMode            string   // theme pre-paint mode (see Config.ThemeMode)
+	notfoundMode         bool              // render the notfound page for {{ @page }}
+	jitCSS               bool              // inject server-side Tailwind/utility CSS for the page's classes
+	minify               []string          // content types to minify on the final HTML output
+	minifySet            bool              // whether minify was set explicitly (else default by environment)
+	defaultMinify        bool              // minify default when not explicit (injected — replaces AllowLocal)
+	themeMode            string            // theme pre-paint mode (see Config.ThemeMode)
+	highlightTheme       string            // site-wide palette for highlighted code blocks
+	manifestPath         string            // router.manifest() output path, linked from <head>
+	highlightPalette     map[string]string // per-role class overrides for the highlight pass
 	kitJSAssets          *kitjavascript.AssetStore
 	source               Source // immutable generation snapshot; nil = live filesystem
 	program              *node
@@ -281,6 +292,19 @@ func (r *Render) tmpl(data any) string {
 // it once while building the immutable generation; live or dynamic-attribute
 // renders retain the exact request-time behavior.
 func (r *Render) applyStaticPresentation(out string) string {
+	// JIT highlight: fill author-declared code slots
+	// (<code data-kitwork-highlight="go">). It MUST run before the JIT CSS pass:
+	// it introduces colour classes, and that pass generates CSS for exactly the
+	// classes present in the document. A page with no slot costs one substring
+	// search. router.highlight("tokyonight") picks the palette.
+	out = jithighlight.Render(out, r.highlightTheme, r.highlightPalette)
+
+	// Link the web app manifest. Unlike every other pass this one reaches into
+	// <head>, because a manifest with no <link> does nothing — an author-placed
+	// <link data-kitwork-jit="manifest"> is filled in place, otherwise the link
+	// is injected. A site that declared no manifest is untouched.
+	out = jitmanifest.Render(out, r.manifestPath)
+
 	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
 	// cache theo tập class nên gần như miễn phí sau lần đầu.

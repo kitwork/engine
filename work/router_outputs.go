@@ -87,6 +87,19 @@ func (t *Tenant) executeGeneratedOutput(
 		response := ctx.Type(publishing.RobotsMediaType)
 		response.Header("ETag", publishing.ETag(document))
 		response.Send(value.New(document))
+	case "llms":
+		document := publishing.Llms(data, base)
+		response := ctx.Type(publishing.LlmsMediaType)
+		response.Header("ETag", publishing.ETag(document))
+		response.Send(value.New(document))
+	case "manifest":
+		document, err := publishing.Manifest(data, base)
+		if err != nil {
+			return err
+		}
+		response := ctx.Type(publishing.ManifestMediaType)
+		response.Header("ETag", publishing.ETag(document))
+		response.Send(value.New(document))
 	default:
 		return fmt.Errorf("unknown generated output %q", method.outputKind)
 	}

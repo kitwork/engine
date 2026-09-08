@@ -83,6 +83,11 @@ func GenerateJITCached(html string, cfg *Config) string {
 	if cfg != nil {
 		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Colors)))
 		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Animations)))
+		// The highlight theme changes what terminal-* resolves to, so it has to be
+		// part of the key. Without it two sites with the same class set would share
+		// one cache entry and the second would be served the first site's palette.
+		_, _ = h.Write([]byte(cfg.HighlightTheme))
+		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.HighlightPalette)))
 	}
 	sig := h.Sum64()
 	if v, ok := jitCache.Load(sig); ok {
