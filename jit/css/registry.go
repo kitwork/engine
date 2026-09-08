@@ -32,6 +32,13 @@ var Registry = []Pattern{
 	{`^(bg|text|border|ring|outline|decoration|accent)-([a-z]+)-(\d+)(?:/(\d+|\[.+?\]))?$`, "tw-color-shade"},
 	{`^(bg|text|border|ring|outline|decoration|accent)-([a-z][a-z-]*)(?:/(\d+|\[.+?\]))?$`, "tw-color-base"},
 	{`^(bg|text|border|decoration|accent)-\[(#[0-9a-fA-F]+)\](?:/(\d+))?$`, "tw-color-arbitrary"},
+	// bg-[…] that is NOT a colour. Tailwind resolves this class by inspecting the
+	// value — url() and the gradient functions are images, a colour is a colour —
+	// and only the colour half existed, so a gradient produced no rule at all.
+	// Listed after the hex rule so colours are still claimed there first; the
+	// handler answers only shapes it can type with certainty and returns nothing
+	// for the rest, which is what they already got.
+	{`^bg-\[(.+)\]$`, "tw-bg-arbitrary"},
 	// gradients
 	{`^bg-gradient-to-(t|b|l|r|tl|tr|bl|br)$`, "tw-gradient-dir"},
 	{`^(from|via|to)-([a-z]+)-(\d+)$`, "tw-gradient-stop"},
