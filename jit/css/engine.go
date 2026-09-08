@@ -753,6 +753,22 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return fmt.Sprintf("%s: rgba(%s, %.2f);", prop, color, float64(mustInt(alpha))/100.0)
 		}
 		return fmt.Sprintf("%s: rgb(%s);", prop, color)
+	case "tw-bg-arbitrary":
+		value := unescapeArbitrary(m[1])
+		switch {
+		case strings.HasPrefix(value, "url(") || isGradientValue(value):
+			return "background-image: " + value + ";"
+		case strings.HasPrefix(value, "image:"), strings.HasPrefix(value, "url:"):
+			return "background-image: " + value[strings.Index(value, ":")+1:] + ";"
+		case strings.HasPrefix(value, "length:"), strings.HasPrefix(value, "size:"):
+			return "background-size: " + value[strings.Index(value, ":")+1:] + ";"
+		case strings.HasPrefix(value, "position:"):
+			return "background-position: " + value[len("position:"):] + ";"
+		}
+		// Anything else is ambiguous — a bare length could be a size or a
+		// position, a bare word could be either too. Guessing would silently
+		// paint the wrong property, so it stays unclaimed, exactly as before.
+		return ""
 	case "tw-color-arbitrary":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",

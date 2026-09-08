@@ -183,3 +183,35 @@ func twColor(colorName, shade string, cfg *Config) string {
 
 	return ""
 }
+
+// unescapeArbitrary applies Tailwind's spacing rule to the INSIDE of an
+// arbitrary value: an underscore stands for a space, and a backslash-escaped
+// underscore for a literal one — which a url() path may well contain.
+func unescapeArbitrary(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		switch {
+		case value[i] == '\\' && i+1 < len(value) && value[i+1] == '_':
+			b.WriteByte('_')
+			i++
+		case value[i] == '_':
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(value[i])
+		}
+	}
+	return b.String()
+}
+
+// isGradientValue reports whether an arbitrary background value opens with one
+// of the CSS gradient functions, including a multi-layer list — the first layer
+// decides, since every layer of a background-image list is an image.
+func isGradientValue(value string) bool {
+	for _, fn := range [...]string{"linear-gradient(", "radial-gradient(", "conic-gradient(",
+		"repeating-linear-gradient(", "repeating-radial-gradient(", "repeating-conic-gradient("} {
+		if strings.HasPrefix(value, fn) {
+			return true
+		}
+	}
+	return false
+}
