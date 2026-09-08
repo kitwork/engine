@@ -276,7 +276,7 @@ __runStandaloneKitTest(async function () {
   assert(cookie.version === "1.0.0" && cookieVersion && cookieVersion.enumerable === false &&
     cookieVersion.writable === false && cookieVersion.configurable === false,
     "cookie exact version was not hidden and immutable");
-  assert(Object.keys(network).join(",") === "online,snapshot,subscribe",
+  assert(Object.keys(network).join(",") === "online,snapshot,subscribe,status",
     "network members were " + Object.keys(network).join(","));
   assert(Object.keys(cookie).join(",") === "get,set,remove,has",
     "cookie members were " + Object.keys(cookie).join(","));
@@ -297,6 +297,8 @@ __runStandaloneKitTest(async function () {
   assert(initial === network.snapshot() && Object.isFrozen(initial) &&
     Object.keys(initial).join(",") === "online" && initial.online === true && network.online === true,
     "network initial snapshot was not stable, frozen, or online");
+  assert(await network.status() === initial,
+    "browser network.status did not resolve the current frozen snapshot");
 
   var first = [];
   var second = [];

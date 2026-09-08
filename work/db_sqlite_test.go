@@ -1,12 +1,15 @@
 package work
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kitwork/engine/value"
 )
 
 // The sqlite entry end to end through a real tenant VM: import { sqlite } resolves to the tenant's
@@ -99,5 +102,133 @@ func TestSqliteRelSafety(t *testing.T) {
 		if got := sqliteRel(in); got != want {
 			t.Errorf("sqliteRel(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestSQLiteReadQueryExecutesOneBoundedSelect(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(site, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(root, "localhost")
+	defer tenant.Close()
+	db := sqliteFor(tenant, "read-query.db")
+	if result := db.Exec("CREATE TABLE records (id INTEGER PRIMARY KEY, label TEXT, payload BLOB)"); result.K == value.Invalid {
+		t.Fatal(result.String())
+	}
+	for index := 1; index <= sqliteReadQueryMaxRows+5; index++ {
+		if result := db.Exec(
+			"INSERT INTO records (id, label, payload) VALUES (?, ?, ?)",
+			value.New(index), value.New(fmt.Sprintf("row-%03d", index)), value.New([]byte{byte(index)}),
+		); result.K == value.Invalid {
+			t.Fatalf("seed row %d: %s", index, result.String())
+		}
+	}
+
+	result := db.ReadQuery(value.New("/* inspector */ SELECT id AS duplicate, label AS duplicate, payload, ';' AS marker FROM records ORDER BY id;"))
+	payload, ok := result.Interface().(map[string]any)
+	if !ok || payload["ok"] != true {
+		t.Fatalf("read query failed: %#v", result.Interface())
+	}
+	columns, ok := payload["columns"].([]any)
+	if !ok || len(columns) != 4 {
+		t.Fatalf("columns = %#v", payload["columns"])
+	}
+	firstColumn := columns[0].(map[string]any)
+	secondColumn := columns[1].(map[string]any)
+	if firstColumn["name"] != "duplicate" || secondColumn["name"] != "duplicate" {
+		t.Fatalf("duplicate aliases/order were not preserved: %#v", columns)
+	}
+	rows, ok := payload["rows"].([]any)
+	if !ok || len(rows) != sqliteReadQueryMaxRows || payload["truncated"] != true {
+		t.Fatalf("rows/truncated = %T %d %#v", payload["rows"], len(rows), payload["truncated"])
+	}
+	firstRow := rows[0].([]any)
+	if firstRow[0] != float64(1) || firstRow[1] != "row-001" || firstRow[3] != ";" {
+		t.Fatalf("first row = %#v", firstRow)
+	}
+	blob, ok := firstRow[2].(map[string]any)
+	if !ok || blob["type"] != "blob" || blob["base64"] != "AQ==" || blob["bytes"] != float64(1) {
+		t.Fatalf("blob cell = %#v", firstRow[2])
+	}
+
+	// query_only is connection-local and must be reset before the pooled connection is reused.
+	if inserted := db.Exec("INSERT INTO records (id, label) VALUES (?, ?)", value.New(1000), value.New("after-read")); inserted.K == value.Invalid {
+		t.Fatalf("query_only was not reset: %s", inserted.String())
+	}
+}
+
+func TestSQLiteReadQueryRejectsWritesStacksAndOtherSQLiteSurfaces(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(site, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(root, "localhost")
+	defer tenant.Close()
+	db := sqliteFor(tenant, "read-query-policy.db")
+	db.Exec("CREATE TABLE records (id INTEGER PRIMARY KEY, label TEXT)")
+	db.Exec("INSERT INTO records (id, label) VALUES (?, ?)", value.New(1), value.New("kept"))
+
+	for _, statement := range []string{
+		"INSERT INTO records (id, label) VALUES (2, 'blocked')",
+		"UPDATE records SET label = 'blocked' WHERE id = 1",
+		"DELETE FROM records",
+		"DROP TABLE records",
+		"PRAGMA table_info(records)",
+		"ATTACH DATABASE 'other.db' AS other",
+		"WITH changed AS (SELECT 1) SELECT * FROM changed",
+		"EXPLAIN SELECT * FROM records",
+		"SELECT * FROM records; DELETE FROM records",
+		"SELECT * FROM records; -- hidden tail\nUPDATE records SET label = 'blocked'",
+		"SELECTED FROM records",
+		"SELECT 'unterminated",
+		"SELECT load_extension('outside')",
+		"SELECT readfile('outside')",
+		"SELECT `writefile`('outside', 'blocked')",
+	} {
+		result := db.ReadQuery(value.New(statement)).Interface().(map[string]any)
+		if result["ok"] != false || result["code"] != "READ_ONLY_REQUIRED" {
+			t.Errorf("statement %q returned %#v", statement, result)
+		}
+	}
+
+	count := db.ReadQuery(value.New("SELECT count(*) AS count, max(label) AS label FROM records")).Interface().(map[string]any)
+	if count["ok"] != true {
+		t.Fatalf("verification SELECT failed: %#v", count)
+	}
+	row := count["rows"].([]any)[0].([]any)
+	if row[0] != float64(1) || row[1] != "kept" {
+		t.Fatalf("read-only policy allowed mutation: %#v", row)
+	}
+	if result := db.ReadQuery(value.New(map[string]any{"type": "string"})).Interface().(map[string]any); result["code"] != "INVALID_QUERY" {
+		t.Fatalf("non-string SQL payload = %#v", result)
+	}
+}
+
+func TestSQLiteReadQueryReturnsStableBoundErrors(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "test", "localhost")
+	if err := os.MkdirAll(site, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tenant := NewTenant(root, "localhost")
+	defer tenant.Close()
+	db := sqliteFor(tenant, "read-query-errors.db")
+
+	tooLong := "SELECT '" + strings.Repeat("x", sqliteReadQueryMaxSQLBytes) + "'"
+	if result := db.ReadQuery(value.New(tooLong)).Interface().(map[string]any); result["code"] != "QUERY_TOO_LARGE" {
+		t.Fatalf("oversized SQL = %#v", result)
+	}
+	if result := db.ReadQuery(value.New("SELECT missing FROM nowhere")).Interface().(map[string]any); result["code"] != "SQL_ERROR" {
+		t.Fatalf("SQL error = %#v", result)
+	}
+	columns := make([]string, sqliteReadQueryMaxColumns+1)
+	for index := range columns {
+		columns[index] = fmt.Sprintf("%d AS c%d", index, index)
+	}
+	if result := db.ReadQuery(value.New("SELECT " + strings.Join(columns, ", "))).Interface().(map[string]any); result["code"] != "RESULT_TOO_LARGE" {
+		t.Fatalf("column bound = %#v", result)
 	}
 }

@@ -88,7 +88,7 @@ func (t *Tenant) serveTree(
 
 	// savMethod (set once a cacheable method resolves) makes finalize persist the response.
 	var savMethod *FolderMethod
-	savKey := cacheKey(r)
+	var savKey string
 
 	// finalize renders any deferred view builder (ctx.view/bind/…), saves it if the method opted
 	// into caching, then writes the response.
@@ -212,19 +212,24 @@ func (t *Tenant) serveTree(
 		}
 	}
 
-	// Response cache (.cache RAM / .persist disk) — serve a hit with no VM, no render.
-	if body, ct, status, headers, ok := t.cachedResponse(method, savKey); ok {
-		if t.runtimeHealth != nil {
-			t.runtimeHealth.RecordResponseCache(true)
-		}
-		serveCached(w, r, body, ct, status, headers)
-		return
-	}
+	// Response cache (.cache RAM / .persist disk). Invalid or disallowed projected query values
+	// execute normally but never read or write a cache entry.
 	if method.cacheExpiry != nil || method.persistExpiry != nil {
+		key, cacheable := cacheKey(r, method)
+		if cacheable {
+			savKey = key
+			if body, ct, status, headers, ok := t.cachedResponse(method, savKey); ok {
+				if t.runtimeHealth != nil {
+					t.runtimeHealth.RecordResponseCache(true)
+				}
+				serveCached(w, r, reqRouter.response, body, ct, status, headers)
+				return
+			}
+			savMethod = method // finalize will save the fresh response
+		}
 		if t.runtimeHealth != nil {
 			t.runtimeHealth.RecordResponseCache(false)
 		}
-		savMethod = method // finalize will save the fresh response
 	}
 
 	// Method-level guards run after all folder guards, in order.

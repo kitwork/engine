@@ -9,11 +9,13 @@ import (
 
 	jitcss "github.com/kitwork/engine/jit/css"
 	fonts "github.com/kitwork/engine/jit/fonts"
+	jithighlight "github.com/kitwork/engine/jit/highlight"
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 	icons "github.com/kitwork/engine/jit/icons"
 	kitjavascript "github.com/kitwork/engine/jit/javascript"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
+	jitmanifest "github.com/kitwork/engine/jit/manifest"
 	material "github.com/kitwork/engine/jit/material"
 	theme "github.com/kitwork/engine/jit/theme"
 	"github.com/kitwork/engine/utilities/minifier"
@@ -23,22 +25,25 @@ import (
 // Config is everything the render engine needs — no *Tenant, no HTTP. Build a render with New(),
 // then Bind(data) for a page or HTML(tmpl, data) for a raw string template (e.g. an email).
 type Config struct {
-	Base          string                    // template root — the anchor every path resolves against
-	JitConfig     *jitcss.Config            // JIT-CSS config (brand colors, keyframes…); nil = defaults
-	Directory     string                    // sub-root under Base (tree uses "."; legacy used "views"/"app")
-	Path          string                    // the folder whose page/index/slots resolve, walked up
-	Page          string                    // explicit page override (usually "" — derived from Path)
-	Index         string                    // explicit shell filename override
-	Notfound      string                    // notfound filename (default "notfound")
-	NotfoundMode  bool                      // render the notfound page for {{ @page }}
-	JitCSS        bool                      // inline the minimal JIT CSS for the page's classes
-	Global        value.Value               // data merged into every render
-	Minify        []string                  // explicit minify content types
-	MinifySet     bool                      // whether Minify was set explicitly
-	DefaultMinify bool                      // minify when not set explicitly (caller passes !AllowLocal)
-	ThemeMode     string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
-	KitJSAssets   *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
-	Source        Source                    // immutable template source; nil reads the live filesystem
+	Base             string                    // template root — the anchor every path resolves against
+	JitConfig        *jitcss.Config            // JIT-CSS config (brand colors, keyframes…); nil = defaults
+	Directory        string                    // sub-root under Base (tree uses "."; legacy used "views"/"app")
+	Path             string                    // the folder whose page/index/slots resolve, walked up
+	Page             string                    // explicit page override (usually "" — derived from Path)
+	Index            string                    // explicit shell filename override
+	Notfound         string                    // notfound filename (default "notfound")
+	NotfoundMode     bool                      // render the notfound page for {{ @page }}
+	JitCSS           bool                      // inline the minimal JIT CSS for the page's classes
+	Global           value.Value               // data merged into every render
+	Minify           []string                  // explicit minify content types
+	MinifySet        bool                      // whether Minify was set explicitly
+	DefaultMinify    bool                      // minify when not set explicitly (caller passes !AllowLocal)
+	ThemeMode        string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
+	HighlightTheme   string                    // folder-scoped default for {{ src.highlight() }} (router.highlight)
+	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
+	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
+	KitJSAssets      *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
+	Source           Source                    // immutable template source; nil reads the live filesystem
 }
 
 func New(c Config) *Render {
@@ -47,8 +52,11 @@ func New(c Config) *Render {
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
 		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode,
-		kitJSAssets: c.KitJSAssets,
-		source:      c.Source,
+		highlightTheme:   c.HighlightTheme,
+		manifestPath:     c.ManifestPath,
+		highlightPalette: c.HighlightPalette,
+		kitJSAssets:      c.KitJSAssets,
+		source:           c.Source,
 	}
 }
 
@@ -62,12 +70,15 @@ type Render struct {
 	layout               Layout
 	global               value.Value // Dữ liệu dùng chung cho mọi bản render
 	notfound             string
-	notfoundMode         bool     // render the notfound page for {{ @page }}
-	jitCSS               bool     // inject server-side Tailwind/utility CSS for the page's classes
-	minify               []string // content types to minify on the final HTML output
-	minifySet            bool     // whether minify was set explicitly (else default by environment)
-	defaultMinify        bool     // minify default when not explicit (injected — replaces AllowLocal)
-	themeMode            string   // theme pre-paint mode (see Config.ThemeMode)
+	notfoundMode         bool              // render the notfound page for {{ @page }}
+	jitCSS               bool              // inject server-side Tailwind/utility CSS for the page's classes
+	minify               []string          // content types to minify on the final HTML output
+	minifySet            bool              // whether minify was set explicitly (else default by environment)
+	defaultMinify        bool              // minify default when not explicit (injected — replaces AllowLocal)
+	themeMode            string            // theme pre-paint mode (see Config.ThemeMode)
+	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
+	manifestPath         string            // router.manifest() output path, linked from <head>
+	highlightPalette     map[string]string // per-role class overrides for the highlight pass
 	kitJSAssets          *kitjavascript.AssetStore
 	source               Source // immutable generation snapshot; nil = live filesystem
 	program              *node
@@ -254,6 +265,13 @@ func (r *Render) tmpl(data any) string {
 		}
 	}
 
+	// Folder-scoped default for a bare {{ src.highlight() }}. A page/site may still
+	// override per call with {{ src.highlight("mono") }}; unset falls back to the
+	// engine default palette. It rides the scope, so it stays per-render/tenant.
+	if r.highlightTheme != "" {
+		scope["$highlight"] = value.New(r.highlightTheme)
+	}
+
 	// Parse và Eval một lần duy nhất cho toàn bộ cây mẫu
 	out := eval(program, data, scope)
 	if !presentationPrepared {
@@ -281,6 +299,19 @@ func (r *Render) tmpl(data any) string {
 // it once while building the immutable generation; live or dynamic-attribute
 // renders retain the exact request-time behavior.
 func (r *Render) applyStaticPresentation(out string) string {
+	// 2. JIT highlight: fill author-declared code slots
+	// (<code data-kitwork-highlight="go">). It MUST run before the JIT CSS pass:
+	// it introduces color classes, and that pass generates CSS for exactly the
+	// classes present in the document. A page with no slot costs one substring
+	// search. router.highlight("tokyo-night") picks the palette.
+	out = jithighlight.Render(out, r.highlightTheme, r.highlightPalette)
+
+	// Link the web app manifest. Unlike every other pass this one reaches into
+	// <head>, because a manifest with no <link> does nothing — an author-placed
+	// <link data-kitwork-jit="manifest"> is filled in place, otherwise the link
+	// is injected. A site that declared no manifest is untouched.
+	out = jitmanifest.Render(out, r.manifestPath)
+
 	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
 	// cache theo tập class nên gần như miễn phí sau lần đầu.
@@ -485,9 +516,9 @@ func classifyKitJSTemplateToken(content string) kitJSTemplateTokenKind {
 	fields := strings.Fields(content)
 	command := fields[0]
 	switch command {
-	case "if", "else", "elseif", "end", "for", "let":
+	case "if", "else", "elseif", "end", "for", "let", "capture":
 		return kitJSTemplateControl
-	case "include", "layout":
+	case "layout":
 		return kitJSTemplateFragment
 	}
 	if strings.HasPrefix(command, "@") || kitJSTemplateRawCall(content) {
@@ -1001,7 +1032,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					sb.WriteString(fmt.Sprintf("<!-- Missing: %v -->", base+".kitwork.html"))
 				}
 
-			case "include", "layout":
+			case "layout":
 				if len(parts) < 2 {
 					sb.WriteString(t)
 					continue
@@ -1171,6 +1202,7 @@ const (
 	nodeRange
 	nodeLet
 	nodePartial
+	nodeCapture
 )
 
 type node struct {
@@ -1300,13 +1332,27 @@ func parse(tokens []string) *node {
 
 			case "let":
 				if len(parts) >= 4 && parts[2] == "=" {
+					// The right-hand side is everything after the first '=', so a
+					// string literal with spaces (e.g. a lead paragraph) survives
+					// intact instead of being truncated to its first token.
+					rhs := strings.TrimSpace(content[strings.Index(content, "=")+1:])
 					n := &node{
 						typ:    nodeLet,
 						keyVar: parts[1],
-						val:    parts[3],
-						expr:   compileExpression(parts[3]),
+						val:    rhs,
+						expr:   compileExpression(rhs),
 					}
 					addChild(current, n)
+				}
+
+			case "capture":
+				// {{ capture name }} ... {{ end }} renders the inner markup live
+				// AND binds `name` to that region's exact source text, so a code
+				// panel can echo `{{ name }}` (HTML-escaped) with no drift.
+				if len(parts) >= 2 {
+					n := &node{typ: nodeCapture, keyVar: parts[1]}
+					addChild(current, n)
+					stack = append(stack, n)
 				}
 
 			case "else":
@@ -1314,7 +1360,7 @@ func parse(tokens []string) *node {
 					current.parsingElse = true
 				}
 
-			case "include", "layout":
+			case "layout":
 				if len(parts) > 1 {
 					n := &node{typ: nodePartial, val: strings.Trim(parts[1], `"'`)}
 					addChild(current, n)
@@ -1390,6 +1436,55 @@ func addChild(parent, child *node) {
 	} else {
 		parent.children = append(parent.children, child)
 	}
+}
+
+// reconstructSource rebuilds the authored template source of a capture region.
+// Demo markup is static text, so this is the exact authored HTML; interpolation
+// and control nodes are re-emitted in their `{{ ... }}` form for completeness.
+func reconstructSource(nodes []*node) string {
+	var b strings.Builder
+	for _, child := range nodes {
+		switch child.typ {
+		case nodeText:
+			b.WriteString(child.val)
+		case nodeVar:
+			b.WriteString("{{ ")
+			b.WriteString(child.val)
+			b.WriteString(" }}")
+		default:
+			b.WriteString(reconstructSource(child.children))
+		}
+	}
+	return b.String()
+}
+
+// dedentSource trims blank edge lines and removes the common leading indentation
+// so a captured region prints cleanly regardless of its nesting in the template.
+func dedentSource(source string) string {
+	source = strings.Trim(source, "\r\n")
+	lines := strings.Split(source, "\n")
+	indent := -1
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == "" {
+			continue
+		}
+		lead := len(line) - len(trimmed)
+		if indent < 0 || lead < indent {
+			indent = lead
+		}
+	}
+	if indent <= 0 {
+		return source
+	}
+	for i, line := range lines {
+		if len(line) >= indent {
+			lines[i] = line[indent:]
+		} else {
+			lines[i] = strings.TrimLeft(line, " \t")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func indexOf(parts []string, target string) int {
@@ -1524,6 +1619,13 @@ func evalInto(
 	case nodeLet:
 		val := resolveExpression(n.expr, data, scope)
 		scope.set(n.keyVar, val)
+
+	case nodeCapture:
+		// Bind the region's exact authored source (dedented) so a later
+		// `{{ name }}` prints it HTML-escaped, then render the region live so
+		// the JIT presentation pass scans the demo like any other markup.
+		scope.set(n.keyVar, value.New(dedentSource(reconstructSource(n.children))))
+		renderChildrenInto(n.children, data, scope, output)
 
 	case nodePartial:
 		viewDir := ""

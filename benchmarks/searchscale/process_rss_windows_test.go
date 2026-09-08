@@ -1,4 +1,4 @@
-//go:build (bleve_scale || turso_scale) && windows
+//go:build bleve_scale && windows
 
 package searchscale
 

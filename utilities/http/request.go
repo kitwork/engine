@@ -32,6 +32,7 @@ func newRequest(h *HTTP, method, url string, body value.Value) value.Value {
 
 func (r *Request) Retry(n int) *Request              { r.h = r.h.Retry(n); return r }
 func (r *Request) Timeout(ms int) *Request           { r.h = r.h.Timeout(ms); return r }
+func (r *Request) MaxBytes(n int) *Request           { r.h = r.h.MaxBytes(n); return r }
 func (r *Request) Header(k, v string) *Request       { r.h = r.h.Header(k, v); return r }
 func (r *Request) Cache(a ...value.Value) *Request   { r.h = r.h.Cache(a...); return r }
 func (r *Request) Persist(a ...value.Value) *Request { r.h = r.h.Persist(a...); return r }

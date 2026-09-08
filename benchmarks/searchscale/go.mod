@@ -5,9 +5,7 @@ go 1.26
 require (
 	github.com/blevesearch/bleve/v2 v2.6.0
 	github.com/blevesearch/bleve_index_api v1.3.11
-	github.com/tursodatabase/turso-go-platform-libs v0.7.2
 	golang.org/x/sys v0.42.0
-	turso.tech/database/tursogo v0.7.2
 )
 
 require (
@@ -30,7 +28,6 @@ require (
 	github.com/blevesearch/zapx/v15 v15.4.3 // indirect
 	github.com/blevesearch/zapx/v16 v16.3.4 // indirect
 	github.com/blevesearch/zapx/v17 v17.1.2 // indirect
-	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/json-iterator/go v0.0.0-20171115153421-f7279a603ede // indirect
 	github.com/mschoch/smat v0.2.0 // indirect

@@ -138,6 +138,13 @@ func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) Chec
 		)
 		tenant.MaxEnergy = maxEnergy
 		report.Sites++
+
+		// A malformed design token cannot fail at runtime — the browser drops the
+		// declaration in silence — so this is the only place it can be caught.
+		for _, issue := range checkColorTokenFormat(filepath.Dir(target.file)) {
+			issue.Identity, issue.Domain = target.identity, target.domain
+			report.Issues = append(report.Issues, issue)
+		}
 		if err := tenant.Run(); err != nil {
 			report.Issues = append(report.Issues, CheckIssue{
 				Stage: "prepare", Identity: target.identity,

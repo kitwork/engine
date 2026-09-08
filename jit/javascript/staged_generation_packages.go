@@ -177,7 +177,7 @@ func (cache *stagedGenerationPackageCache) prepareService(identity ServiceVersio
 		Requires: service.requires,
 		Actions:  service.actions,
 		Source:   service.source,
-	})
+	}, true)
 	if err != nil {
 		return stagedPreparedServicePackage{}, err
 	}
@@ -387,7 +387,7 @@ func (cache *stagedGenerationPackageCache) build(
 	if err := validateDocumentOwners(components, services); err != nil {
 		return StagedAssembly{}, err
 	}
-	requirements, err = normalizeComponentServiceRequirements(requirements, components, services)
+	requirements, err = normalizeComponentServiceRequirements(requirements, components, services, true)
 	if err != nil {
 		return StagedAssembly{}, err
 	}

@@ -13,7 +13,7 @@ import (
 	jittheme "github.com/kitwork/engine/jit/theme"
 )
 
-const appearanceService100SHA256 = "5ca23562929a4c632ebe5dc04635026421323280e9259b4f801adb110a79ad49"
+const appearanceService100SHA256 = "b5242d1f257a98a42b1868669b2db013e74386ffd41f0f878395b41fd1dfaa08"
 
 func TestAppearanceServiceSourceIsClosedDocumentCapability(t *testing.T) {
 	source := readVanillaFile(t, "service", "appearance", "1.0.0.js")
@@ -32,6 +32,7 @@ func TestAppearanceServiceSourceIsClosedDocumentCapability(t *testing.T) {
 		[]byte(`global.matchMedia(mediaQuery)`),
 		[]byte(`root.style.colorScheme = resolved`),
 		[]byte(`global.addEventListener("storage", storageChange)`),
+		[]byte(`nativeHost.call("appearance.setResolved", { resolved: resolved })`),
 		[]byte(`if (attached) return`),
 		[]byte(`Object.freeze({ mode: mode, resolved: resolved })`),
 	} {
@@ -43,6 +44,8 @@ func TestAppearanceServiceSourceIsClosedDocumentCapability(t *testing.T) {
 		[]byte(`kit.component(`), []byte(`kit.storage`), []byte(`"kit:theme"`),
 		[]byte(`sessionStorage`), []byte(`fetch(`), []byte(`XMLHttpRequest`),
 		[]byte(`querySelector(`), []byte(`createElement(`), []byte(`innerHTML`),
+		[]byte(`window.chrome`), []byte(`window.webkit`), []byte(`window.__kitworkHost`),
+		[]byte(`postMessage(`), []byte(`kit.bridge`), []byte(`kit.native`),
 	} {
 		if bytes.Contains(source, forbidden) {
 			t.Fatalf("appearance source contains forbidden coupling %q", forbidden)

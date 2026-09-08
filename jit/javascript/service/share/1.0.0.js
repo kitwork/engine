@@ -10,6 +10,24 @@ var MAX_TEXT_LENGTH = 64 * 1024;
 var MAX_URL_LENGTH = 4096;
 var MAX_FILES = 16;
 var MAX_FILE_BYTES = 256 * 1024 * 1024;
+var stringCharCodeAt = Function.prototype.call.bind(String.prototype.charCodeAt);
+var stringIndexOf = Function.prototype.call.bind(String.prototype.indexOf);
+var URLConstructor = global.URL;
+var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
+var nativeHost = assembly && assembly.nativeHost;
+
+function wellFormedText(value) {
+  for (var index = 0; index < value.length; index++) {
+    var unit = stringCharCodeAt(value, index);
+    if (unit >= 0xD800 && unit <= 0xDBFF) {
+      if (index + 1 >= value.length) return false;
+      var next = stringCharCodeAt(value, index + 1);
+      if (next < 0xDC00 || next > 0xDFFF) return false;
+      index++;
+    } else if (unit >= 0xDC00 && unit <= 0xDFFF) return false;
+  }
+  return true;
+}
 
 function plainSnapshot(value) {
   var prototype = value && Object.getPrototypeOf(value);
@@ -32,22 +50,28 @@ function plainSnapshot(value) {
 function optionalText(value, name, maximum) {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new TypeError("Share " + name + " must be a string");
-  if (value.length > maximum) {
-    throw new TypeError("Share " + name + " exceeds its maximum length");
+  if (value.length > maximum || stringIndexOf(value, "\0") >= 0 || !wellFormedText(value)) {
+    throw new TypeError("Share " + name + " must be well-formed, NUL-free text within its maximum length");
   }
   return value;
 }
 
 function shareURL(value) {
-  if (typeof value !== "string" || !value) throw new TypeError("Share url must be a non-empty string");
+  if (typeof value !== "string" || !value || stringIndexOf(value, "\0") >= 0 || !wellFormedText(value)) {
+    throw new TypeError("Share url must be a well-formed, NUL-free string");
+  }
   var url;
-  try { url = new global.URL(value, global.location && global.location.href); }
+  try { url = new URLConstructor(value, global.location && global.location.href); }
+  catch (_) { throw new TypeError("Share url is invalid"); }
+  var href;
+  try { href = url.href; }
   catch (_) { throw new TypeError("Share url is invalid"); }
   if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password ||
-    url.href.length > MAX_URL_LENGTH) {
+    typeof href !== "string" || href.length > MAX_URL_LENGTH ||
+    stringIndexOf(href, "\0") >= 0 || !wellFormedText(href)) {
     throw new TypeError("Share url must be an HTTP(S) URL up to 4096 characters without credentials");
   }
-  return url.href;
+  return href;
 }
 
 function shareFiles(value) {
@@ -98,9 +122,15 @@ function payload(input) {
 }
 
 function nativeErrorCode(value) {
+  var code = "";
   var name = "";
-  try { name = value && typeof value.name === "string" ? value.name : ""; }
+  try {
+    code = value && typeof value.code === "string" ? value.code : "";
+    name = value && typeof value.name === "string" ? value.name : "";
+  }
   catch (_) { /* An untrusted adapter error never escapes normalization. */ }
+  if (code === "DENIED" || code === "CANCELLED" || code === "UNAVAILABLE" ||
+    code === "TIMEOUT" || code === "OVERLOADED") return code;
   if (name === "NotAllowedError" || name === "SecurityError") return "DENIED";
   if (name === "AbortError") return "CANCELLED";
   if (name === "NotFoundError" || name === "NotSupportedError") return "UNAVAILABLE";
@@ -112,6 +142,8 @@ function shareError(code) {
     UNAVAILABLE: "Sharing is unavailable",
     DENIED: "Sharing permission was denied",
     CANCELLED: "Sharing was cancelled",
+    TIMEOUT: "Sharing timed out",
+    OVERLOADED: "Sharing is busy",
     FAILED: "Sharing failed"
   };
   var error = new Error(messages[code]);
@@ -150,7 +182,9 @@ function nativeCapability(data) {
 }
 
 function canShare(input) {
-  var selected = nativeCapability(payload(input));
+  var data = payload(input);
+  if (nativeHost) return !(data.files && data.files.length);
+  var selected = nativeCapability(data);
   return !selected.error && selected.supported === true;
 }
 
@@ -181,6 +215,24 @@ function fallback(data) {
 
 function open(input) {
   var data = payload(input);
+  if (nativeHost) {
+    if (data.files && data.files.length) return Promise.reject(shareError("UNAVAILABLE"));
+    var params = {};
+    if (data.title !== undefined) params.title = data.title;
+    if (data.text !== undefined) params.text = data.text;
+    if (data.url !== undefined) params.url = data.url;
+    try {
+      return Promise.resolve(nativeHost.call("share.open", params)).then(
+        function (value) {
+          if (typeof value !== "boolean") throw shareError("FAILED");
+          return value;
+        },
+        function (error) { throw shareError(nativeErrorCode(error)); }
+      );
+    } catch (error) {
+      return Promise.reject(shareError(nativeErrorCode(error)));
+    }
+  }
   var selected = nativeCapability(data);
   if (selected.error) return Promise.reject(selected.error);
   if (!selected.supported) return fallback(data);

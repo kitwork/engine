@@ -16,8 +16,30 @@ import (
 )
 
 type completedServiceContract struct {
-	service Service
-	members []string
+	service    Service
+	members    []string
+	stagedOnly bool
+}
+
+func TestExpressionNamespacePolicyCoversDeliveryCatalog(t *testing.T) {
+	catalog, err := loadDeliveryCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, versions := range catalog.services {
+		_, authored := authoredServiceActions[name]
+		_, sealed := sealedExpressionServiceNames[name]
+		if authored == sealed {
+			t.Fatalf("service namespace %q must be classified exactly once: authored=%v sealed=%v", name, authored, sealed)
+		}
+		service, exists := versions["1.0.0"]
+		if !exists {
+			t.Fatalf("service namespace %q has no 1.0.0 policy anchor", name)
+		}
+		if authored != (len(service.actions) > 0) {
+			t.Fatalf("service namespace %q policy/actions drifted: authored=%v actions=%#v", name, authored, service.actions)
+		}
+	}
 }
 
 func TestCompletedServiceCatalogPackagesAndDependencies(t *testing.T) {
@@ -26,6 +48,16 @@ func TestCompletedServiceCatalogPackagesAndDependencies(t *testing.T) {
 	for index, contract := range catalog {
 		wantIdentities[index] = contract.service.Name + "@" + contract.service.Version
 	}
+	wantIdentities = append(
+		wantIdentities,
+		"deepLinks@1.1.0",
+		"files@1.0.0", "files@1.1.0", "files@1.2.0",
+		"notifications@1.1.0", "notifications@1.2.0",
+		"studioDatabase@1.1.0",
+		"studioSqlite@1.1.0",
+		"network@1.1.0", "files@1.4.0", "camera@1.1.0", "media@1.1.0",
+	)
+	sort.Strings(wantIdentities)
 
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -61,10 +93,29 @@ func TestCompletedServiceCatalogPackagesAndDependencies(t *testing.T) {
 				versions = append(versions, strings.TrimSuffix(entry.Name(), ".js"))
 			}
 		}
-		if len(versions) != 1 {
-			t.Fatalf("service package %q JS versions = %v, want exactly [1.0.0]", directory.Name(), versions)
+		wantVersions := []string{"1.0.0"}
+		if directory.Name() == "files" {
+			wantVersions = append(wantVersions, "1.1.0", "1.2.0", "1.3.0", "1.4.0")
 		}
-		gotIdentities = append(gotIdentities, directory.Name()+"@"+versions[0])
+		if directory.Name() == "network" || directory.Name() == "camera" || directory.Name() == "media" {
+			wantVersions = append(wantVersions, "1.1.0")
+		}
+		if directory.Name() == "notifications" {
+			wantVersions = append(wantVersions, "1.1.0", "1.2.0")
+		}
+		if directory.Name() == "deepLinks" {
+			wantVersions = append(wantVersions, "1.1.0")
+		}
+		if directory.Name() == "studioDatabase" || directory.Name() == "studioSqlite" {
+			wantVersions = append(wantVersions, "1.1.0")
+		}
+		sort.Strings(versions)
+		if strings.Join(versions, ",") != strings.Join(wantVersions, ",") {
+			t.Fatalf("service package %q JS versions = %v, want %v", directory.Name(), versions, wantVersions)
+		}
+		for _, version := range versions {
+			gotIdentities = append(gotIdentities, directory.Name()+"@"+version)
+		}
 	}
 	sort.Strings(gotIdentities)
 	if strings.Join(gotIdentities, ",") != strings.Join(wantIdentities, ",") {
@@ -72,8 +123,14 @@ func TestCompletedServiceCatalogPackagesAndDependencies(t *testing.T) {
 	}
 
 	wantRequires := map[string]string{
-		"request": "progress@1.0.0",
-		"share":   "clipboard@1.0.0",
+		"biometric":   "capabilities@1.0.0",
+		"geolocation": "capabilities@1.0.0",
+		"nfc":         "capabilities@1.0.0",
+		"camera":      "capabilities@1.0.0,files@1.3.0",
+		"media":       "files@1.3.0",
+		"qr":          "capabilities@1.0.0",
+		"request":     "progress@1.0.0",
+		"share":       "clipboard@1.0.0",
 	}
 	for _, contract := range catalog {
 		got := make([]string, len(contract.service.Requires))
@@ -90,7 +147,7 @@ func TestCompletedServiceCatalogPackagesAndDependencies(t *testing.T) {
 
 func TestCompletedServiceCatalogFullBuildIsDeterministic(t *testing.T) {
 	catalog := completedServiceCatalog(t)
-	forward := catalogServices(catalog)
+	forward := catalogServices(standaloneServiceCatalog(catalog))
 	reverse := append([]Service(nil), forward...)
 	for left, right := 0, len(reverse)-1; left < right; left, right = left+1, right-1 {
 		reverse[left], reverse[right] = reverse[right], reverse[left]
@@ -112,6 +169,13 @@ func TestCompletedServiceCatalogFullBuildIsDeterministic(t *testing.T) {
 				t.Fatalf("%s full service catalog changed identity with discovery order", profile)
 			}
 			for _, contract := range catalog {
+				if contract.stagedOnly {
+					if bytes.Contains(left.Bytes(), contract.service.Source) {
+						t.Fatalf("%s monolithic catalog unexpectedly contains staged-only %s@%s",
+							profile, contract.service.Name, contract.service.Version)
+					}
+					continue
+				}
 				if got := bytes.Count(left.Bytes(), contract.service.Source); got != 1 {
 					t.Fatalf("%s full catalog contains %s@%s source %d times, want 1",
 						profile, contract.service.Name, contract.service.Version, got)
@@ -137,12 +201,24 @@ func TestCompletedServiceCatalogOnlySelectedPackagesAreSealed(t *testing.T) {
 				included[dependency.Name] = true
 				services = append(services, byName[dependency.Name])
 			}
-			artifact, err := Build(BuildOptions{Profile: ProfileKit, Services: services})
-			if err != nil {
-				t.Fatal(err)
+			var artifactSource []byte
+			if selected.stagedOnly {
+				assembly, err := BuildStaged(StagedBuildOptions{Profile: ProfileKit, Services: services})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, artifact := range assembly.Artifacts() {
+					artifactSource = append(artifactSource, artifact.Bytes()...)
+				}
+			} else {
+				artifact, err := Build(BuildOptions{Profile: ProfileKit, Services: services})
+				if err != nil {
+					t.Fatal(err)
+				}
+				artifactSource = artifact.Bytes()
 			}
 			for _, contract := range catalog {
-				got := bytes.Count(artifact.Bytes(), contract.service.Source)
+				got := bytes.Count(artifactSource, contract.service.Source)
 				if included[contract.service.Name] && got != 1 {
 					t.Fatalf("%s selection contains required %s source %d times, want 1",
 						selected.service.Name, contract.service.Name, got)
@@ -166,14 +242,15 @@ func TestBrowserCompletedServiceCatalogPublicSurface(t *testing.T) {
 	}
 
 	catalog := completedServiceCatalog(t)
+	standaloneCatalog := standaloneServiceCatalog(catalog)
 	artifact, err := Build(BuildOptions{
 		Profile:  ProfileKit,
-		Services: catalogServices(catalog),
+		Services: catalogServices(standaloneCatalog),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	page := completedServiceCatalogDocument(t, "/assets/"+artifact.Name(), catalog)
+	page := completedServiceCatalogDocument(t, "/assets/"+artifact.Name(), standaloneCatalog)
 	packagePaths := make(map[string]bool, len(catalog)*3)
 	for _, contract := range catalog {
 		name := contract.service.Name
@@ -210,15 +287,59 @@ func completedServiceCatalog(t *testing.T) []completedServiceContract {
 	return []completedServiceContract{
 		{service: platformServicePackage(t, "announce"), members: []string{"assertive", "clear", "polite", "say"}},
 		{service: appearanceServicePackage(t), members: []string{"mode", "resolved", "set", "snapshot", "subscribe", "system", "toggle"}},
+		{service: commonNativeServicePackage(t, "biometric"), members: []string{"authenticate", "available", "status"}, stagedOnly: true},
+		{service: commonNativeServicePackage(t, "geolocation"), members: []string{"available", "getCurrentPosition", "permission"}, stagedOnly: true},
+		{service: commonNativeServicePackage(t, "nfc"), members: []string{"available", "scan", "status"}, stagedOnly: true},
+		{service: Service{
+			Name: "camera", Version: "1.0.0",
+			Requires: []ServiceVersion{{Name: "capabilities", Version: "1.0.0"}, {Name: "files", Version: "1.3.0"}},
+			Source:   readVanillaFile(t, "service", "camera", "1.0.0.js"),
+		}, members: []string{"available", "capture"}, stagedOnly: true},
+		{service: mobileServicePackage(t, "capabilities"), members: []string{"supports"}, stagedOnly: true},
 		{service: clipboardServicePackage(t), members: []string{"readText", "writeText"}},
 		{service: cookieServicePackage(t), members: []string{"get", "has", "remove", "set"}},
+		{service: deepLinksServicePackage(t), members: []string{"snapshot", "subscribe"}},
+		{service: mobileServicePackage(t, "device"), members: []string{"info", "vibrate"}, stagedOnly: true},
+		{service: mobileServiceVersionPackage(t, "files", "1.3.0"), members: []string{"export", "importBlob", "pick", "release", "share", "stat", "toBlob"}, stagedOnly: true},
 		{service: platformServicePackage(t, "fullscreen"), members: []string{"active", "exit", "request"}},
+		{service: lifecycleServicePackage(t), members: []string{"snapshot", "subscribe"}},
+		{service: Service{
+			Name: "media", Version: "1.0.0",
+			Requires: []ServiceVersion{{Name: "files", Version: "1.3.0"}},
+			Source:   readVanillaFile(t, "service", "media", "1.0.0.js"),
+		}, members: []string{"pickImage"}, stagedOnly: true},
 		{service: platformServicePackage(t, "navigation"), members: []string{"back", "forward", "reload"}},
-		{service: networkServicePackage(t), members: []string{"online", "snapshot", "subscribe"}},
+		{service: networkServicePackage(t), members: []string{"online", "snapshot", "status", "subscribe"}},
+		{service: notificationServicePackage(t), members: []string{"permission", "requestPermission", "show"}},
 		{service: progressServicePackage(t), members: []string{"finish", "snapshot", "start", "subscribe", "update"}},
+		{service: Service{
+			Name: "qr", Version: "1.0.0",
+			Requires: []ServiceVersion{{Name: "capabilities", Version: "1.0.0"}},
+			Source:   readVanillaFile(t, "service", "qr", "1.0.0.js"),
+		}, members: []string{"available", "scan"}, stagedOnly: true},
 		{service: requestServicePackage(t), members: []string{"abort", "get", "post", "send"}},
+		{service: mobileServicePackage(t, "secureStorage"), members: []string{"get", "remove", "set"}, stagedOnly: true},
 		{service: shareServicePackage(t), members: []string{"canShare", "open"}},
+		{service: mobileServicePackage(t, "shell"), members: []string{"open"}, stagedOnly: true},
 		{service: storageServicePackage(t), members: []string{"clear", "get", "has", "remove", "set"}},
+		{service: mobileServicePackage(t, "studioDatabase"), members: []string{"catalog", "close", "open", "query", "tablePage"}, stagedOnly: true},
+		{service: mobileServicePackage(t, "studioSqlite"), members: []string{"catalog", "close", "open", "query", "tablePage"}, stagedOnly: true},
+		{service: mobileServicePackage(t, "studioState"), members: []string{"appendHistory", "clearHistory", "deleteConnection", "deleteSavedQuery", "loadSnapshot", "updatePreference", "upsertConnection", "upsertSavedQuery"}, stagedOnly: true},
+		{service: mobileServicePackage(t, "wakeLock"), members: []string{"request"}},
+		{service: platformServicePackage(t, "window"), members: []string{"close", "drag", "maximize", "minimize", "restore"}, stagedOnly: true},
+	}
+}
+
+func mobileServicePackage(t *testing.T, name string) Service {
+	t.Helper()
+	return mobileServiceVersionPackage(t, name, "1.0.0")
+}
+
+func mobileServiceVersionPackage(t *testing.T, name, version string) Service {
+	t.Helper()
+	return Service{
+		Name: name, Version: version,
+		Source: readVanillaFile(t, "service", name, version+".js"),
 	}
 }
 
@@ -228,6 +349,16 @@ func catalogServices(catalog []completedServiceContract) []Service {
 		services[index] = contract.service
 	}
 	return services
+}
+
+func standaloneServiceCatalog(catalog []completedServiceContract) []completedServiceContract {
+	output := make([]completedServiceContract, 0, len(catalog))
+	for _, contract := range catalog {
+		if !contract.stagedOnly {
+			output = append(output, contract)
+		}
+	}
+	return output
 }
 
 func completedServiceCatalogDocument(t *testing.T, assetPath string, catalog []completedServiceContract) string {

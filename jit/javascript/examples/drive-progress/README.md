@@ -44,7 +44,7 @@ From `engine/`, reproduce it with:
 go run ./jit/javascript/cmd/assemble -profile hydrate -service progress=1.0.0=jit/javascript/service/progress/1.0.0.js -component progress-bar=2.0.0 -component-require progress-bar=progress=1.0.0 -script progress-bar=jit/javascript/component/progress-bar/2.0.0.js -canonical-dir jit/javascript/examples/drive-progress
 ```
 
-The checked `../kitjs.examples.cb95d3a46e8563f61a36a45167e067f1a1c3e74dbfc504a175358b23802dc881.css`
+The checked `../kitjs.examples.2cc06093e15bd04f5862bc9c6a24b24bec0b8f94f2fee3cb2d6dcf66de045bc6.css`
 is generated from the literal Tailwind
 utilities in this demo and the preferences demo by Kitwork's JIT CSS engine. It
 contains no hand-written rules, CDN dependency, or runtime class generator:

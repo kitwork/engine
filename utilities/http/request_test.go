@@ -111,6 +111,7 @@ func TestRequestModifiersBeforeAndAfterVerbAreEquivalent(t *testing.T) {
 	before := base.
 		Retry(3).
 		Timeout(5000).
+		MaxBytes(4096).
 		Header("X-Test", "before").
 		Cache(value.New("5m")).
 		Persist(value.New("1h")).
@@ -122,12 +123,14 @@ func TestRequestModifiersBeforeAndAfterVerbAreEquivalent(t *testing.T) {
 		V.(*Request).
 		Retry(3).
 		Timeout(5000).
+		MaxBytes(4096).
 		Header("X-Test", "before").
 		Cache(value.New("5m")).
 		Persist(value.New("1h"))
 
 	if before.h.retry != after.h.retry ||
 		before.h.timeout != after.h.timeout ||
+		before.h.maxBytes != after.h.maxBytes ||
 		before.h.headers["X-Test"] != after.h.headers["X-Test"] ||
 		before.h.cacheOn != after.h.cacheOn ||
 		before.h.cacheTTL != after.h.cacheTTL ||
@@ -135,9 +138,28 @@ func TestRequestModifiersBeforeAndAfterVerbAreEquivalent(t *testing.T) {
 		before.h.persistTTL != after.h.persistTTL {
 		t.Fatalf("request plans differ: before=%+v after=%+v", before.h, after.h)
 	}
-	if base.retry != 0 || base.timeout != 0 || len(base.headers) != 0 ||
+	if base.retry != 0 || base.timeout != 0 || base.maxBytes != 0 || len(base.headers) != 0 ||
 		base.cacheOn || base.persistOn {
 		t.Fatalf("builder was mutated by a derived chain: %+v", base)
+	}
+}
+
+func TestRequestMaxBytesRejectsOversizedResponse(t *testing.T) {
+	prev := IsLocalAllowed
+	IsLocalAllowed = func() bool { return true }
+	defer func() { IsLocalAllowed = prev }()
+
+	srv := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		_, _ = w.Write([]byte("0123456789"))
+	}))
+	defer srv.Close()
+
+	request := NewClient(nil, nil).MaxBytes(5).Get(srv.URL).V.(*Request)
+	if request.Status() != 0 {
+		t.Fatalf("status = %d, want 0 for oversized response", request.Status())
+	}
+	if request.Error() != "http: response body exceeds max bytes" {
+		t.Fatalf("error = %q", request.Error())
 	}
 }
 

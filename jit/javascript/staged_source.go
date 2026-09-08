@@ -193,12 +193,9 @@ func stagedGraphSource(
 	_, _ = output.WriteString("    return;\n  }\n")
 	_, _ = output.Write(profileMarker)
 	if len(services) > 0 {
-		serviceRuntime, readErr := sources.ReadFile("src/service.js")
+		serviceRuntime, readErr := stagedServiceRuntimeSource()
 		if readErr != nil {
-			return nil, fmt.Errorf("kitjs: read src/service.js: %w", readErr)
-		}
-		if validationErr := validateRuntimeFragment("src/service.js", serviceRuntime); validationErr != nil {
-			return nil, validationErr
+			return nil, readErr
 		}
 		_, _ = output.Write(serviceRuntime)
 	}
@@ -491,6 +488,7 @@ func writeStagedDeliveryContract(
 	_, _ = output.WriteString(`    var packageAssets = Object.create(null);
     var packageIndexes = Object.create(null);
     var loadedPackages = Object.create(null);
+    var nativeServiceBoundaryClosed = false;
     function packageKey(role, name, version) { return role + "\u0000" + name + "\u0000" + version; }
     assets.forEach(function (asset, index) {
       if (asset.role !== "service" && asset.role !== "component" && asset.role !== "components") return;
@@ -499,6 +497,37 @@ func writeStagedDeliveryContract(
       packageAssets[key] = asset;
       packageIndexes[key] = index;
     });
+    var closeNativeServiceBoundary = function () {
+      if (nativeServiceBoundaryClosed) return;
+      if (Object.prototype.hasOwnProperty.call(core, "nativeHost") && !delete core.nativeHost) {
+        throw new Error("KitJS: native service transport could not be removed");
+      }
+      if (Object.prototype.hasOwnProperty.call(core, "nativeFiles") && !delete core.nativeFiles) {
+        throw new Error("KitJS: native file transport could not be removed");
+      }
+      if ("nativeHost" in core) {
+        throw new Error("KitJS: native service transport remained reachable");
+      }
+      if ("nativeFiles" in core) {
+        throw new Error("KitJS: native file transport remained reachable");
+      }
+      nativeServiceBoundaryClosed = true;
+    };
+    var sealServicesBeforeTenantPackage = function () {
+      closeNativeServiceBoundary();
+      Object.keys(packageAssets).forEach(function (key) {
+        if (packageAssets[key].role === "service" && loadedPackages[key] !== true) {
+          throw new Error("KitJS: tenant component loaded before every managed service");
+        }
+      });
+      if (core.packageError) throw core.packageError;
+      if (core.serviceRegistry && core.servicesSealed !== true) {
+        if (typeof core.sealServices !== "function") {
+          throw new Error("KitJS: service graph sealer is unavailable");
+        }
+        core.sealServices();
+      }
+    };
     Object.defineProperty(core, "assertStagedPackage", { value: function (script, role, name, version) {
       var key = packageKey(role, name, version);
       var asset = packageAssets[key];
@@ -506,6 +535,9 @@ func writeStagedDeliveryContract(
         throw new Error("KitJS: staged package tag does not match the sealed delivery");
       }
       assertScript(script, asset);
+      if (role === "component" || role === "components") {
+        sealServicesBeforeTenantPackage();
+      }
       loadedPackages[key] = true;
       if (typeof core.queueStagedFinalize === "function") core.queueStagedFinalize();
     } });
@@ -617,19 +649,18 @@ func writeStagedGraphInstall(output *bytes.Buffer) {
       }
       core.graphValidated = true;
     } else {
-      if (typeof core.installComponentGraph !== "function") {
-        throw new Error("KitJS: component graph installer is unavailable");
+      if (typeof core.installComponentGraph !== "function" ||
+        typeof core.installStagedDelivery !== "function" ||
+        typeof core.withNativeServiceValidation !== "function") {
+        throw new Error("KitJS: staged native service graph installer is unavailable");
       }
-      core.installComponentGraph(graph);
-      if (!core.kit || core.kit.version !== core.version || core.kit.component !== core.component) {
-        throw new Error("KitJS: package facade is unavailable");
-      }
-    }
-    if (!core.reuse) {
-      if (typeof core.installStagedDelivery !== "function") {
-        throw new Error("KitJS: staged delivery installer is unavailable");
-      }
-      delivery = core.installStagedDelivery(delivery);
+      delivery = core.withNativeServiceValidation(function () {
+        core.installComponentGraph(graph);
+        if (!core.kit || core.kit.version !== core.version || core.kit.component !== core.component) {
+          throw new Error("KitJS: package facade is unavailable");
+        }
+        return core.installStagedDelivery(delivery);
+      });
     }
   } catch (error) {
     delete document[ASSEMBLY];
@@ -648,6 +679,7 @@ func writeStagedFinalizer(output *bytes.Buffer, bootSource []byte) {
     try {
       if (core.packageError) throw core.packageError;
       core.validateStagedDelivery();
+      closeNativeServiceBoundary();
       if (!core.reuse && core.serviceRegistry && core.servicesSealed !== true) {
         if (typeof core.sealServices !== "function") {
           throw new Error("KitJS: service graph sealer is unavailable");

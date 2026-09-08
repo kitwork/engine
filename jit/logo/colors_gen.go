@@ -3108,7 +3108,6 @@ var brandColor = map[string]string{
 	"turborepo":                    "#FF1E56",
 	"turbosquid":                   "#FF8135",
 	"turkishairlines":              "#C70A0C",
-	"turso":                        "#4FF8D2",
 	"tuta":                         "#850122",
 	"tuxedocomputers":              "#000000",
 	"tv4play":                      "#E0001C",

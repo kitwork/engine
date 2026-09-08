@@ -18,6 +18,7 @@ func TestPlatformServicePackagesStaticContract(t *testing.T) {
 		{name: "announce", members: []string{"say: say", "polite: polite", "assertive: assertive", "clear: clear"}},
 		{name: "fullscreen", members: []string{"request: request", "exit: exit", "active: active"}},
 		{name: "navigation", members: []string{"back: back", "forward: forward", "reload: reload"}},
+		{name: "window", members: []string{"drag: drag", "isMaximized: isMaximized", "minimize: minimize", "maximize: maximize", "restore: restore", "close: close"}},
 	}
 
 	for _, test := range tests {

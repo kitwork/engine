@@ -84,7 +84,7 @@ func TestComposerFailsClosedForUnsupportedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, unsupported := range []string{"counter", "combobox", "tab"} {
+	for _, unsupported := range []string{"counter", "unsupported", "tab"} {
 		_, err := composer.ComposeHTML([]byte(`<main data-kit-component="` + unsupported + `@1.0.0"></main>`))
 		if !errors.Is(err, ErrModuleNotFound) {
 			t.Fatalf("unsupported component %q error=%v", unsupported, err)

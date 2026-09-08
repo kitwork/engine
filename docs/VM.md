@@ -93,6 +93,27 @@ argument slice because host code may retain it.
 objects and arrays cannot become unhashable Go map keys or panic the
 interpreter.
 
+## Application failure boundary
+
+Host capabilities represent expected application failures with the bounded
+`value.Failure` envelope: one stable `Code` and one human-readable `Message`.
+They construct it through `value.WithFailure` when partial data remains useful
+or `value.InvalidFailure` when execution cannot continue. New capability code
+must not attach arbitrary maps directly to `Value.ErrorVal`.
+
+When an unhandled application failure crosses the interpreter boundary, the VM
+creates a `RUNTIME_ERROR` diagnostic and preserves the application code in
+`Diagnostic.CauseCode`. The diagnostic code continues to describe what the VM
+did; the cause code describes what the host capability reported. `.safe()` may
+rescue only `RUNTIME_ERROR` and exposes the preserved cause as `check.code`.
+Energy exhaustion, cancellation, stack overflow, Program mismatch, VM stop,
+and native panic remain terminal and cannot be hidden by `.safe()`.
+
+The failure envelope changes neither VM v2 opcodes nor Program encoding.
+Legacy `{code, message}` error maps remain readable during migration, but all
+engine producers use the typed form. Determinism and fault-gauntlet fingerprints
+include `CauseCode` so a reused or pooled VM cannot silently lose or inherit it.
+
 ## Observability
 
 `VM.Stats()` exposes a post-execution snapshot:
@@ -174,7 +195,7 @@ than this pure language corpus.
 ## Frozen VM compatibility archive
 
 `compatibility/testdata/v2` stores representative Program binaries produced by
-the frozen VM v2/compiler v2 tuple. Unlike compiler `.kwbc` cache entries, these
+the pre-schema-v3 VM v2/compiler v2 tuple. Unlike compiler `.kwbc` cache entries, these
 `.kwpb` files contain the Program envelope only and are committed exclusively
 as internal test evidence. Normal archive tests never compile their adjacent
 sources.
@@ -205,8 +226,9 @@ go test ./runtime -run ^TestVMFaultGauntlet -count=1
 
 The gauntlet covers framing and size corruption, invalid constants and control
 flow, unsupported opcodes, missing or stopped execution, native panic, runtime
-errors, cancellation, energy exhaustion, stack overflow, and cross-Program
-lambda rejection. Its stack-overflow fixture freezes the exact call-depth
+errors with and without application cause codes, cancellation, energy
+exhaustion, stack overflow, and cross-Program lambda rejection. Its
+stack-overflow fixture freezes the exact call-depth
 ceiling. A new decoder, verifier, or execution-failure boundary is incomplete
 until it has a manifest case and recovery proof here.
 
@@ -280,6 +302,8 @@ Allocation regression tests enforce these workload-level budgets:
 - arithmetic dispatch: zero allocations;
 - 100 internal lambda calls: at most 6 allocations;
 - map/filter/reduce callback chain: at most 25 allocations;
+- protected `.safe()` success: at most 12 allocations;
+- typed application-failure rescue: at most 30 allocations;
 - 128-item script array growth: at most 24 allocations;
 - 64-node script object chain: at most 160 allocations;
 - two 16 KiB native buffers: at most 24 allocations;
@@ -341,7 +365,8 @@ go run ./cmd/releasegate --mode release --require-clean --report .artifacts/rele
 ```
 
 The full 24 to 72 hour canary and rollout criteria are documented in
-`docs/RELEASE.md`.
+`docs/RELEASE.md`. The current candidate evidence and its remaining promotion
+conditions are recorded in `docs/VM_V2_QUALIFICATION.md`.
 
 A VM change is complete only after:
 

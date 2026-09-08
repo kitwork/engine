@@ -22,9 +22,9 @@ func TestPreparedRenderUsesImmutableTemplateSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("index.kitwork.html", `<html><body>{{ @page }}</body></html>`)
-	write("page.kitwork.html", `<main>v1 {{ include shared/note }}</main>`)
-	write("shared/note.html", `<span>{{ message }}</span>`)
+	write("index.kitwork.html", `<html><body>{{ @header }}{{ @page }}</body></html>`)
+	write("page.kitwork.html", `<main>v1</main>`)
+	write("header.kitwork.html", `<span>{{ message }}</span>`)
 
 	snapshot, err := NewSnapshot(root)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestPreparedRenderUsesImmutableTemplateSnapshot(t *testing.T) {
 	}
 
 	write("page.kitwork.html", `<main>v2</main>`)
-	write("shared/note.html", `<span>changed</span>`)
+	write("header.kitwork.html", `<span>changed</span>`)
 	for i := 0; i < 32; i++ {
 		if output := prepared.Bind(data).String(); !strings.Contains(output, "v1") ||
 			strings.Contains(output, "v2") || strings.Contains(output, "changed") {

@@ -120,6 +120,41 @@ func twUnit(s string) string {
 	return s
 }
 
+// derivedRungs are the role suffixes a flat design token can grow on demand. They mirror the
+// vocabulary palette() produces, so `sage: "#def7ec"` alone still answers bg-sage-soft.
+var derivedRungs = map[string]bool{"deep": true, "soft": true, "wash": true, "on": true}
+
+// deriveRung grows a role rung from a token declared as a single flat colour, using the same OKLCH
+// maths as palette(). It deliberately refuses Tailwind's own families: `blue` already ships eleven
+// hand-tuned shades, so a derived `blue-soft` would be a second way to say nearly the same thing.
+// A rung the site spells out explicitly is found earlier and always wins over this.
+func deriveRung(colorName string, colors map[string]Color) (string, bool) {
+	i := strings.LastIndexByte(colorName, '-')
+	if i <= 0 {
+		return "", false
+	}
+	base, rung := colorName[:i], colorName[i+1:]
+	if !derivedRungs[rung] {
+		return "", false
+	}
+	if _, isPalette := TwPalette[base]; isPalette {
+		return "", false
+	}
+	seed, ok := colors[base]
+	if !ok {
+		return "", false
+	}
+	hex, ok := Palette(seed.HexString())[rung]
+	if !ok {
+		return "", false
+	}
+	r, g, b, ok := parseHexRGB(hex)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("%d, %d, %d", int(r), int(g), int(b)), true
+}
+
 // twColor resolves a Tailwind color to an "R, G, B" string (or hex for arbitrary /
 // transparent passthrough). Lookup order: arbitrary [..] → base keywords → the
 // Tailwind v3 palette (family-shade, see twpalette.go) → the custom Colors map.
@@ -149,19 +184,38 @@ func twColor(colorName, shade string, cfg *Config) string {
 		}
 	}
 
-	// Custom design-system colors (brand, kitwork, primary, …) — shade ignored.
-	colors := Colors
-	if cfg != nil {
-		colors = cfg.Colors
-	}
-	if rgb, ok := colors[colorName]; ok {
-		return rgb.String()
+	// Custom design-system tokens are named by ROLE (brand, brand-soft, ink), never numbered, so a
+	// numeric shade on one is always a mistake. This used to ignore the shade and fall through to the
+	// plain token, which meant bg-brand-100, bg-brand-500 and bg-brand-900 all silently painted the
+	// same colour — and lost the themeable var() form on the way, since only the unshaded path emits
+	// it. Tailwind generates nothing for a shade you never defined; do the same, so a wrong class
+	// shows up as "no style" instead of a plausible-looking wrong colour.
+	if shade == "" {
+		colors := Colors
+		if cfg != nil {
+			colors = cfg.Colors
+		}
+		if rgb, ok := colors[colorName]; ok {
+			return rgb.String()
+		}
+		// Not spelled out — grow the rung from the flat token it belongs to.
+		if rgb, ok := deriveRung(colorName, colors); ok {
+			return rgb
+		}
 	}
 
 	// Brand-logo colours: brand-<slug> (text-brand-github, bg-brand-stripe, …) resolve to the
 	// official hex registered by jit/logo. Returns a #hex; the callers handle the '#' path.
 	if hex, ok := brandHex(colorName); ok {
 		return hex
+	}
+
+	// Code-surface colours: terminal, terminal-bar, terminal-keyword … resolve
+	// through router.highlight(). Returned as a triplet, not a hex, so
+	// colorCSSValue can wrap it in var() like any configured token — otherwise a
+	// [data-theme] block could re-skin every colour on the site except these.
+	if color, ok := highlightColor(colorName, cfg); ok {
+		return color.String()
 	}
 
 	// Tailwind family without an explicit shade → default to the 500 shade (Tailwind's
@@ -173,4 +227,46 @@ func twColor(colorName, shade string, cfg *Config) string {
 	}
 
 	return ""
+}
+
+// colorCSSValue resolves a Tailwind-style color to a finished CSS color value, mirroring the
+// tw-color-base / tw-color-shade handlers so utilities beyond bg/text/border/ring (e.g. divide-*)
+// share one behavior: a config design token (no shade) resolves through var(--color-<token>,
+// <triplet>) so a [data-theme] block can re-skin it; palette family+shade stays baked; an optional
+// alpha ("40" or "[.4]") yields rgba(); a hex passes through (8-digit when alpha given). Returns ""
+// for an unknown color so callers can bail and let other patterns try.
+func colorCSSValue(name, shade, alpha string, cfg *Config) string {
+	color := twColor(name, shade, cfg)
+	if color == "" {
+		return ""
+	}
+	if color == "transparent" || color == "currentColor" {
+		return color
+	}
+	if color[0] == '#' {
+		if alpha != "" && isNumeric(alpha) {
+			return fmt.Sprintf("%s%02x", color, mustInt(alpha)*255/100)
+		}
+		return color
+	}
+	// "r, g, b" triplet. A named design token (no shade) resolves through its CSS var so themes can
+	// override it; the literal triplet stays as the var() fallback (default render is unchanged).
+	expr := color
+	if shade == "" {
+		colors := Colors
+		if cfg != nil && cfg.Colors != nil {
+			colors = cfg.Colors
+		}
+		_, configured := colors[name]
+		if configured || highlightRegistered(name, cfg) {
+			expr = "var(--color-" + name + ", " + color + ")"
+		}
+	}
+	if alpha != "" {
+		if strings.HasPrefix(alpha, "[") && strings.HasSuffix(alpha, "]") {
+			return fmt.Sprintf("rgba(%s, %s)", expr, alpha[1:len(alpha)-1])
+		}
+		return fmt.Sprintf("rgba(%s, %.2f)", expr, float64(mustInt(alpha))/100.0)
+	}
+	return fmt.Sprintf("rgb(%s)", expr)
 }

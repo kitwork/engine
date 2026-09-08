@@ -49,6 +49,7 @@
     "location.current",
     "device.info",
     "device.vibrate",
+    "network.status",
     "ai.chat",
     "ai.transcribe",
     "auth.login",

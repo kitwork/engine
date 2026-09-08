@@ -6,6 +6,8 @@ var listeners = new Set();
 var deliveries = [];
 var delivering = false;
 var attached = false;
+var assembly = global.document && global.document[Symbol.for("kitjs:assembly")];
+var nativeHost = assembly && assembly.nativeHost;
 
 function readOnline() {
   try {
@@ -136,6 +138,54 @@ function subscribe(listener) {
   };
 }
 
+function errorCode(value) {
+  var code = "";
+  try { code = value && typeof value.code === "string" ? value.code : ""; }
+  catch (_) { /* Raw host errors never escape this namespace. */ }
+  if (code === "DENIED" || code === "CANCELLED" || code === "UNAVAILABLE" ||
+    code === "TIMEOUT" || code === "OVERLOADED") return code;
+  return "FAILED";
+}
+
+function networkError(code) {
+  var messages = {
+    DENIED: "Network status permission was denied",
+    CANCELLED: "Network status query was cancelled",
+    UNAVAILABLE: "Network status is unavailable",
+    TIMEOUT: "Network status query timed out",
+    OVERLOADED: "Network status is busy",
+    FAILED: "Network status query failed"
+  };
+  var error = new Error(messages[code] || messages.FAILED);
+  Object.defineProperties(error, {
+    name: { value: "KitNetworkError" },
+    code: { value: code || "FAILED", enumerable: true },
+    operation: { value: "status", enumerable: true }
+  });
+  return Object.freeze(error);
+}
+
+function status() {
+  if (arguments.length !== 0) throw new TypeError("network.status does not accept parameters");
+  if (!nativeHost) return Promise.resolve(snapshot());
+  try {
+    return Promise.resolve(nativeHost.call("network.status", {})).then(
+      function (value) {
+        var prototype = value && Object.getPrototypeOf(value);
+        if (!value || prototype !== Object.prototype && prototype !== null ||
+          Object.getOwnPropertySymbols(value).length || Object.keys(value).join(",") !== "online" ||
+          typeof value.online !== "boolean") {
+          throw networkError("FAILED");
+        }
+        return publish(value.online);
+      },
+      function (error) { throw networkError(errorCode(error)); }
+    );
+  } catch (error) {
+    return Promise.reject(networkError(errorCode(error)));
+  }
+}
+
 var namespace = Object.create(null);
 Object.defineProperty(namespace, "online", {
   enumerable: true,
@@ -143,6 +193,7 @@ Object.defineProperty(namespace, "online", {
 });
 namespace.snapshot = snapshot;
 namespace.subscribe = subscribe;
+namespace.status = status;
 
 kit.service("network", namespace);
 })(globalThis, kit);

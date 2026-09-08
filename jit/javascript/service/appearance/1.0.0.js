@@ -11,6 +11,9 @@ var attached = false;
 var root = document.documentElement;
 var storage = storageOf();
 var media = mediaOf();
+var assembly = document[Symbol.for("kitjs:assembly")];
+var nativeHost = assembly && assembly.nativeHost;
+var nativeResolved = null;
 var current = null;
 
 function report(error) {
@@ -77,6 +80,23 @@ function applyRoot(resolved) {
   } catch (_) { /* Appearance state remains usable in restricted documents. */ }
 }
 
+// Native chrome follows only the resolved light/dark value. The private staged host transport is
+// captured by the runtime and never becomes part of the public appearance namespace. Synchronizing
+// the shell is best-effort: browser appearance remains authoritative if a host is absent or old.
+function syncNative(resolved) {
+  if (!nativeHost || nativeResolved === resolved) return;
+  nativeResolved = resolved;
+  function failed() {
+    if (nativeResolved === resolved) nativeResolved = null;
+  }
+  try {
+    Promise.resolve(nativeHost.call("appearance.setResolved", { resolved: resolved })).then(
+      function (result) { if (result !== true) failed(); },
+      failed
+    );
+  } catch (_) { failed(); }
+}
+
 function deliver(subscription, value) {
   if (!subscription.listener) return;
   try { subscription.listener(value); }
@@ -88,6 +108,7 @@ function publish(mode, persist) {
   var resolved = resolvedMode(mode);
   applyRoot(resolved);
   if (persist) saveMode(mode);
+  syncNative(resolved);
   if (current && current.mode === mode && current.resolved === resolved) return current;
 
   current = freeze(mode, resolved);

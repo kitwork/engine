@@ -27,12 +27,14 @@ const (
 	expressionMultiply
 	expressionDivide
 	expressionModulo
+	expressionMethod
 )
 
 type expression struct {
 	kind  expressionKind
 	value value.Value
 	parts []string
+	args  []*expression
 
 	left  *expression
 	right *expression
@@ -202,6 +204,24 @@ func compileExpression(raw string) *expression {
 		}
 	}
 
+	// Method call: <receiver>.<name>(<args>). The receiver compiles recursively,
+	// so chains like src.highlight().upper() resolve left-to-right. This is the
+	// single mechanism for value methods — no pipe/filter DSL.
+	if open := matchFinalParen(source); open > 0 {
+		head := source[:open]
+		if dot := strings.LastIndex(head, "."); dot > 0 {
+			name := head[dot+1:]
+			if isIdentifier(name) {
+				return &expression{
+					kind:  expressionMethod,
+					left:  compileExpression(head[:dot]),
+					parts: []string{name},
+					args:  compileArgs(source[open+1 : len(source)-1]),
+				}
+			}
+		}
+	}
+
 	if source == "." {
 		return &expression{
 			kind:  expressionPath,
@@ -212,6 +232,105 @@ func compileExpression(raw string) *expression {
 		kind:  expressionPath,
 		parts: strings.Split(source, "."),
 	}
+}
+
+// matchFinalParen returns the index of the '(' that pairs with the final ')' of
+// source, or -1 when source does not end in a balanced call. Quotes and escapes
+// are respected so parentheses inside string arguments do not confuse matching.
+func matchFinalParen(source string) int {
+	if source == "" || source[len(source)-1] != ')' {
+		return -1
+	}
+	var stack []int
+	inDouble, inSingle := false, false
+	for i := 0; i < len(source); i++ {
+		char := source[i]
+		if char == '\\' && i+1 < len(source) {
+			i++
+			continue
+		}
+		if char == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if char == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if inDouble || inSingle {
+			continue
+		}
+		if char == '(' {
+			stack = append(stack, i)
+		} else if char == ')' {
+			if len(stack) == 0 {
+				return -1
+			}
+			open := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if i == len(source)-1 {
+				return open
+			}
+		}
+	}
+	return -1
+}
+
+func isIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		char := name[i]
+		switch {
+		case char == '_', char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z':
+		case char >= '0' && char <= '9' && i > 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func compileArgs(raw string) []*expression {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var args []*expression
+	depth := 0
+	inDouble, inSingle := false, false
+	start := 0
+	for i := 0; i < len(raw); i++ {
+		char := raw[i]
+		if char == '\\' && i+1 < len(raw) {
+			i++
+			continue
+		}
+		if char == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if char == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if inDouble || inSingle {
+			continue
+		}
+		switch char {
+		case '(', '[':
+			depth++
+		case ')', ']':
+			depth--
+		case ',':
+			if depth == 0 {
+				args = append(args, compileExpression(raw[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return append(args, compileExpression(raw[start:]))
 }
 
 func resolveExpression(
@@ -251,6 +370,21 @@ func resolveExpression(
 		return left
 	case expressionPath:
 		return resolvePath(compiled.parts, data, scope)
+	case expressionMethod:
+		receiver := resolveExpression(compiled.left, data, scope)
+		args := make([]value.Value, len(compiled.args))
+		for index, argument := range compiled.args {
+			args[index] = resolveExpression(argument, data, scope)
+		}
+		// A bare highlight()/highlightScript() adopts the folder-scoped $highlight
+		// default (set by router.highlight) so HTML and JS panels share one theme;
+		// an explicit argument always wins.
+		if len(args) == 0 && (compiled.parts[0] == "highlight" || compiled.parts[0] == "highlightScript") {
+			if theme, ok := scope.get("$highlight"); ok && !theme.IsBlank() {
+				args = append(args, theme)
+			}
+		}
+		return receiver.Invoke(compiled.parts[0], args...)
 	}
 
 	left := resolveExpression(compiled.left, data, scope)

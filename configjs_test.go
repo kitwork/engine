@@ -429,3 +429,63 @@ func TestManifestStyle_DesktopOnlyHasNoWebSurface(t *testing.T) {
 		t.Errorf("error should explain the missing WEB surface, got: %v", err)
 	}
 }
+
+func TestReadMobileManifestV1(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.title("Pocket Notes").icon("assets/app-icon.svg").mobile({
+  version: 1,
+  id: "org.kitwork.notes",
+  versionName: "1.2.3",
+  versionCode: 12,
+  start: { domain: "notes.kitwork.localhost", path: "/notes" },
+  orientation: "portrait",
+  theme: { mode: "dark", color: "#112233" },
+  permissions: ["clipboard.writeText", "device.info"]
+});`)
+
+	raw, err := ReadManifest(file)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if _, ok := raw["mobile"].(map[string]interface{}); !ok {
+		t.Fatalf("raw mobile block = %#v", raw["mobile"])
+	}
+
+	mobile, err := ReadMobileManifest(file)
+	if err != nil {
+		t.Fatalf("ReadMobileManifest: %v", err)
+	}
+	if !mobile.Declared || mobile.Legacy || mobile.ID != "org.kitwork.notes" || mobile.Title != "Pocket Notes" || mobile.Icon != "assets/app-icon.svg" {
+		t.Fatalf("mobile identity = %#v", mobile)
+	}
+	if mobile.Start.Domain != "notes.kitwork.localhost" || mobile.Start.Path != "/notes" || mobile.VersionName != "1.2.3" || mobile.VersionCode != 12 {
+		t.Fatalf("mobile start/version = %#v", mobile)
+	}
+	if mobile.Orientation != "portrait" || mobile.Theme.Mode != "dark" || mobile.Theme.Color != "#112233" || len(mobile.Permissions) != 2 {
+		t.Fatalf("mobile presentation/permissions = %#v", mobile)
+	}
+}
+
+func TestReadMobileManifestKeepsLegacyDeclaration(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork"; app.title("Legacy").mobile(true);`)
+
+	raw, err := ReadManifest(file)
+	if err != nil {
+		t.Fatalf("ReadManifest legacy: %v", err)
+	}
+	if raw["mobile"] != true {
+		t.Fatalf("raw legacy mobile = %#v, want true", raw["mobile"])
+	}
+	mobile, err := ReadMobileManifest(file)
+	if err != nil {
+		t.Fatalf("ReadMobileManifest legacy: %v", err)
+	}
+	if !mobile.Declared || !mobile.Legacy || mobile.Version != 0 || mobile.Title != "Legacy" {
+		t.Fatalf("legacy mobile = %#v", mobile)
+	}
+
+	_, err = evalConfigJS(file)
+	if err == nil || !strings.Contains(err.Error(), "no web surface") || !strings.Contains(err.Error(), "app.mobile()") {
+		t.Fatalf("mobile-only cloud error = %v", err)
+	}
+}

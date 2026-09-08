@@ -88,7 +88,7 @@ progress-bar@2.0.0 -----------------> progress@1.0.0
 ```
 
 The checked
-`../kitjs.examples.cb95d3a46e8563f61a36a45167e067f1a1c3e74dbfc504a175358b23802dc881.css`
+`../kitjs.examples.2cc06093e15bd04f5862bc9c6a24b24bec0b8f94f2fee3cb2d6dcf66de045bc6.css`
 is generated only from literal Tailwind utilities across the current service
 demos; it contains no hand-written rule or runtime class generator. From
 `engine/`, reproduce it with:

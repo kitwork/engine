@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/manifest"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
@@ -129,7 +130,8 @@ func (b *ServerBuilder) Web(args ...value.Value) *ServerBuilder {
 	return b
 }
 
-// Mobile declares the MOBILE surface (iOS/Android shell). Captured for the future gomobile build; the
+// Mobile declares the MOBILE surface (iOS/Android shell). The raw value stays untouched for legacy
+// compatibility; native build tools opt into versioned validation through ReadMobileManifest. The
 // cloud host and desktop shell ignore it.
 func (b *ServerBuilder) Mobile(v value.Value) *ServerBuilder {
 	b.config["mobile"] = v
@@ -406,6 +408,22 @@ func ReadManifest(manifestPath string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("manifest decode: %w", err)
 	}
 	return raw, nil
+}
+
+// ReadMobileManifest evaluates an executable app manifest and resolves its
+// versioned mobile surface. ReadManifest remains the raw compatibility API;
+// strict versioned mobile validation does not alter cloud boot or legacy/unversioned
+// app.mobile declarations.
+func ReadMobileManifest(manifestPath string) (manifest.Mobile, error) {
+	raw, err := ReadManifest(manifestPath)
+	if err != nil {
+		return manifest.Mobile{}, err
+	}
+	mobile, err := manifest.Parse(raw)
+	if err != nil {
+		return manifest.Mobile{}, fmt.Errorf("mobile manifest: %w", err)
+	}
+	return mobile, nil
 }
 
 // evalServerBuilder compiles + runs a bootstrap (server.kitwork.js) in the minimal setup VM (only the

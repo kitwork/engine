@@ -81,16 +81,19 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 	}
 	configFor := func(relative string) render.Config {
 		return render.Config{
-			Base:          base,
-			JitConfig:     presentation.JITConfig,
-			Directory:     ".",
-			Path:          relative,
-			Notfound:      "notfound",
-			JitCSS:        true,
-			DefaultMinify: productionMinify,
-			ThemeMode:     presentation.ThemeMode,
-			KitJSAssets:   plan.kitJSAssets,
-			Source:        snapshot,
+			Base:             base,
+			JitConfig:        presentation.JITConfig,
+			Directory:        ".",
+			Path:             relative,
+			Notfound:         "notfound",
+			JitCSS:           true,
+			DefaultMinify:    productionMinify,
+			ThemeMode:        presentation.ThemeMode,
+			HighlightTheme:   presentation.HighlightTheme,
+			ManifestPath:     presentation.ManifestPath,
+			HighlightPalette: presentation.HighlightPalette,
+			KitJSAssets:      plan.kitJSAssets,
+			Source:           snapshot,
 		}
 	}
 	if plan.kitJSAssets != nil {

@@ -13,8 +13,9 @@ import (
 )
 
 type HTTP struct {
-	timeout time.Duration
-	headers map[string]string
+	timeout  time.Duration
+	headers  map[string]string
+	maxBytes int64
 
 	// Outbound caching (see store.go): tiers injected per tenant; flags set by .cache()/.persist().
 	cacheStore   ResponseStore
@@ -38,6 +39,21 @@ func (h *HTTP) Header(key, val string) *HTTP {
 		next.headers = make(map[string]string)
 	}
 	next.headers[key] = val
+	return next
+}
+
+// MaxBytes bounds the decoded response body. A zero value keeps the historical
+// unbounded behavior for callers that have not opted into a limit.
+func (h *HTTP) MaxBytes(n int) *HTTP {
+	next := h.clone()
+	if n < 0 {
+		n = 0
+	}
+	const hardMax = 64 << 20
+	if n > hardMax {
+		n = hardMax
+	}
+	next.maxBytes = int64(n)
 	return next
 }
 
@@ -170,7 +186,17 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 	}
 	defer resp.Body.Close()
 
-	resBody, _ := io.ReadAll(resp.Body)
+	responseReader := io.Reader(resp.Body)
+	if h.maxBytes > 0 {
+		responseReader = io.LimitReader(resp.Body, h.maxBytes+1)
+	}
+	resBody, readErr := io.ReadAll(responseReader)
+	if readErr != nil {
+		return value.New(Response{Status: 0, Error: readErr.Error()})
+	}
+	if h.maxBytes > 0 && int64(len(resBody)) > h.maxBytes {
+		return value.New(Response{Status: 0, Error: "http: response body exceeds max bytes"})
+	}
 	// Keep the upstream's media type: a cached/proxied copy must replay under the ORIGINAL type.
 	// Fall back to sniffing the bytes when the server sent none (stdlib, no dependency).
 	contentType := resp.Header.Get("Content-Type")

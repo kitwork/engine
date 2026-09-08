@@ -121,6 +121,11 @@
   };
   kit.service("device", device);
 
+  var network = {
+    status: function () { return call("network.status"); }
+  };
+  kit.service("network", network);
+
   var ai = {
     chat: function (options) { return call("ai.chat", options); },
     transcribe: function (path) { return call("ai.transcribe", { path: path }); }

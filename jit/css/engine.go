@@ -36,9 +36,8 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 		sts = cfg.States
 	}
 
-	for _, reg := range Registry {
-		re := regexp.MustCompile(reg.Reg)
-		if m := re.FindStringSubmatch(core); len(m) > 0 {
+	for i, reg := range Registry {
+		if m := registryRe(i, reg.Reg).FindStringSubmatch(core); len(m) > 0 {
 			css := buildProp(reg.Type, m, neg, cfg)
 			if css == "" {
 				continue
@@ -59,7 +58,7 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 			}
 
 			// space-*/divide-* target the gaps BETWEEN children, not the element itself.
-			if reg.Type == "tw-space" || reg.Type == "tw-divide" || reg.Type == "tw-divide-width" || reg.Type == "tw-divide-color" {
+			if reg.Type == "tw-space" || reg.Type == "tw-divide" || reg.Type == "tw-divide-width" || reg.Type == "tw-divide-shade" || reg.Type == "tw-divide-base" || reg.Type == "tw-divide-style" || reg.Type == "tw-divide-arb" {
 				sel += " > :not([hidden]) ~ :not([hidden])"
 			}
 			// animate-on-hover pauses DESCENDANTS' animations (the :hover-runs counterpart rule is
@@ -96,6 +95,21 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 					}
 					continue
 				}
+				// Named group/peer: `.group\\/item:hover &` targets one specific marked ancestor
+				// (for peer, a marked earlier sibling) instead of the nearest unnamed one.
+				if i := strings.IndexByte(v, 47); i >= 0 && (strings.HasPrefix(v, "group-") || strings.HasPrefix(v, "peer-")) {
+					kind := "group"
+					if strings.HasPrefix(v, "peer-") {
+						kind = "peer"
+					}
+					marker := "." + kind + "\\/" + v[i+1:] + ":" + v[len(kind)+1:i]
+					if kind == "peer" {
+						ampPattern = marker + " ~ &"
+					} else {
+						ampPattern = marker + " &"
+					}
+					continue
+				}
 				if st, ok := sts[v]; ok {
 					if strings.Contains(st, "&") {
 						ampPattern = st
@@ -124,6 +138,11 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 // dataVariantRe matches an arbitrary data-attribute variant prefix: `data-[state=x]:`,
 // `data-[open]:`, or the `group-` form. The bracket body is turned into a `[data-…]` selector.
 var dataVariantRe = regexp.MustCompile(`^(?:group-)?data-\[[^\]]*\]:`)
+
+// namedVariantRe matches a NAMED group/peer variant: `group-hover/item:`, `peer-checked/row:`.
+// Tailwind lets groups nest by naming them, so a child can react to one PARTICULAR marked ancestor
+// instead of the nearest `.group`. Unmatched, the whole class silently produced no CSS.
+var namedVariantRe = regexp.MustCompile(`^(group|peer)-([a-z-]+)/([A-Za-z0-9_-]+):`)
 
 // Support stacked variants: desktop:hover:bg-red
 func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
@@ -168,6 +187,15 @@ func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
 		// (the shadcn pattern) instead of a hand-written <style> block.
 		if !found {
 			if m := dataVariantRe.FindString(core); m != "" {
+				variants = append(variants, strings.TrimSuffix(m, ":"))
+				core = core[len(m):]
+				found = true
+			}
+		}
+
+		// Named group/peer prefix: group-hover/item:, peer-checked/row:
+		if !found {
+			if m := namedVariantRe.FindString(core); m != "" {
 				variants = append(variants, strings.TrimSuffix(m, ":"))
 				core = core[len(m):]
 				found = true
@@ -600,12 +628,17 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		return "letter-spacing: " + named[v] + ";"
 	case "tw-font-family":
-		fams := map[string]string{
-			"sans":  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-			"serif": "ui-serif, Georgia, Cambria, serif",
-			"mono":  "ui-monospace, SFMono-Regular, Menlo, monospace",
+		// The site's own theme.fontFamily wins; the three built-ins are the fallback for a config
+		// that never declared any. An unknown key returns "" so the class falls through to
+		// font-weight (font-bold) or to jit/fonts, which owns the vendored `font-<slug>` families.
+		fams := DefaultConfig.FontFamily
+		if cfg != nil && cfg.FontFamily != nil {
+			fams = cfg.FontFamily
 		}
-		return "font-family: " + fams[m[2]] + ";"
+		if stack, ok := fams[m[2]]; ok {
+			return "font-family: " + stack + ";"
+		}
+		return ""
 	case "tw-arbitrary-prop":
 		body := strings.ReplaceAll(m[1], "_", " ")
 		parts := strings.SplitN(body, ":", 2)
@@ -698,8 +731,9 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-color-shade":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",
-			"ring": "box-shadow", "outline": "outline-color",
+			"ring": "--tw-ring-color", "outline": "outline-color",
 			"decoration": "text-decoration-color", "accent": "accent-color",
+			"fill": "fill", "stroke": "stroke",
 		}
 		prop := propMap[m[1]]
 		color := twColor(m[2], m[3], cfg)
@@ -725,8 +759,9 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-color-base":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",
-			"ring": "box-shadow", "outline": "outline-color",
+			"ring": "--tw-ring-color", "outline": "outline-color",
 			"decoration": "text-decoration-color", "accent": "accent-color",
+			"fill": "fill", "stroke": "stroke",
 		}
 		prop := propMap[m[1]]
 		color := twColor(m[2], "", cfg)
@@ -746,21 +781,53 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return fmt.Sprintf("%s: %s;", prop, color)
 		}
 
+		// Themeable design tokens (anything named in the config palette — brand, canvas, paper, ink,
+		// ink-soft, brand-soft, success, …) resolve through a CSS variable, so a `[data-theme]` block
+		// can redefine `--color-<token>` and re-skin the whole page. The literal triplet stays as the
+		// var() fallback, so the default render is byte-for-byte the same and existing sites are
+		// unaffected. Tailwind-palette colours (lime-500) and brand-logo hexes are not tokens, so they
+		// stay baked. `color` here is the "r, g, b" triplet.
+		colors := Colors
+		if cfg != nil && cfg.Colors != nil {
+			colors = cfg.Colors
+		}
+		colorExpr := color
+		// Registered code-surface tokens are themeable too, so they take the same
+		// var() form. Without this they would be the one family on a site that a
+		// [data-theme] block cannot re-skin.
+		_, configured := colors[m[2]]
+		if configured || highlightRegistered(m[2], cfg) {
+			colorExpr = "var(--color-" + m[2] + ", " + color + ")"
+		}
+
 		if alpha != "" {
 			if strings.HasPrefix(alpha, "[") && strings.HasSuffix(alpha, "]") {
-				return fmt.Sprintf("%s: rgba(%s, %s);", prop, color, alpha[1:len(alpha)-1])
+				return fmt.Sprintf("%s: rgba(%s, %s);", prop, colorExpr, alpha[1:len(alpha)-1])
 			}
-			return fmt.Sprintf("%s: rgba(%s, %.2f);", prop, color, float64(mustInt(alpha))/100.0)
+			return fmt.Sprintf("%s: rgba(%s, %.2f);", prop, colorExpr, float64(mustInt(alpha))/100.0)
 		}
-		return fmt.Sprintf("%s: rgb(%s);", prop, color)
+		return fmt.Sprintf("%s: rgb(%s);", prop, colorExpr)
 	case "tw-color-arbitrary":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",
 			"decoration": "text-decoration-color", "accent": "accent-color",
+			"fill": "fill", "stroke": "stroke", "outline": "outline-color",
+			"caret": "caret-color", "placeholder": "color",
+			// ring and shadow colour a composed box-shadow, so they set the variable the chain
+			// reads instead of writing box-shadow themselves.
+			"ring": "--tw-ring-color", "shadow": "--tw-shadow-color",
 		}
-		prop := propMap[m[1]]
+		prop, known := propMap[m[1]]
+		if !known {
+			return ""
+		}
 		hex := m[2]
-		if len(m) > 3 && m[3] != "" { // bg-[#fff]/80 → 8-digit hex with alpha
+		if len(m) > 3 && m[3] != "" {
+			// bg-[#fff]/80 → an 8-digit hex; bg-[#fff]/[0.02] carries the fraction directly, which
+			// a percentage cannot express (0.02 rounds to 5/255 either way, but 0.005 does not).
+			if strings.HasPrefix(m[3], "[") {
+				return fmt.Sprintf("%s: %s%02x;", prop, hex, int(parseFraction(unarb(m[3]))*255+0.5))
+			}
 			return fmt.Sprintf("%s: %s%02x;", prop, hex, mustInt(m[3])*255/100)
 		}
 		return fmt.Sprintf("%s: %s;", prop, hex)
@@ -768,15 +835,26 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		dirs := map[string]string{"t": "to top", "b": "to bottom", "l": "to left", "r": "to right",
 			"tl": "to top left", "tr": "to top right", "bl": "to bottom left", "br": "to bottom right"}
 		return fmt.Sprintf("background-image: linear-gradient(%s, var(--tw-gradient-stops));", dirs[m[1]])
-	case "tw-gradient-stop": // from/via/to-<family>-<shade>
-		col := twColor(m[2], m[3], cfg)
-		return gradientStop(m[1], rgbWrap(col))
-	case "tw-gradient-stop-base": // from/via/to-<named color>
-		col := twColor(m[2], "", cfg)
-		if col == "" {
+	case "tw-gradient-stop": // from/via/to-<family>-<shade>[/alpha]
+		alpha := ""
+		if len(m) > 4 {
+			alpha = m[4]
+		}
+		v := colorCSSValue(m[2], m[3], alpha, cfg)
+		if v == "" {
 			return ""
 		}
-		return gradientStop(m[1], rgbWrap(col))
+		return gradientStop(m[1], v)
+	case "tw-gradient-stop-base": // from/via/to-<named colour>[/alpha]
+		alpha := ""
+		if len(m) > 3 {
+			alpha = m[3]
+		}
+		v := colorCSSValue(m[2], "", alpha, cfg)
+		if v == "" {
+			return ""
+		}
+		return gradientStop(m[1], v)
 	case "tw-gradient-stop-arb": // from/via/to-[#hex]
 		return gradientStop(m[1], m[2])
 	case "tw-bg-clip":
@@ -804,12 +882,63 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return "border-left-width: " + m[2] + "px;"
 		}
 		return "border-top-width: " + m[2] + "px;"
-	case "tw-divide-color":
-		col := twColor(m[1], m[2], cfg)
-		if col == "" {
+	case "tw-divide-shade": // divide-<family>-<shade>[/alpha] → border-color between children
+		v := colorCSSValue(m[1], m[2], m[3], cfg)
+		if v == "" {
 			return ""
 		}
-		return "border-color: " + rgbWrap(col) + ";"
+		return "border-color: " + v + ";"
+	case "tw-divide-base": // divide-<token>[/alpha] → themeable border-color between children
+		v := colorCSSValue(m[1], "", m[2], cfg)
+		if v == "" {
+			return ""
+		}
+		return "border-color: " + v + ";"
+	case "tw-ring-width": // ring / ring-<n> — a real box-shadow built from the ring variables
+		width := "3"
+		if len(m) > 1 && m[1] != "" {
+			width = m[1]
+		}
+		return "--tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(" + width +
+			"px + var(--tw-ring-offset-width)) var(--tw-ring-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);"
+	case "tw-ring-inset":
+		return "--tw-ring-inset: inset;"
+	case "tw-ring-offset-width":
+		return "--tw-ring-offset-width: " + m[1] + "px; --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 " +
+			m[1] + "px var(--tw-ring-offset-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);"
+	case "tw-ring-offset-shade":
+		v := colorCSSValue(m[1], m[2], m[3], cfg)
+		if v == "" {
+			return ""
+		}
+		return "--tw-ring-offset-color: " + v + ";"
+	case "tw-ring-offset-base":
+		v := colorCSSValue(m[1], "", m[2], cfg)
+		if v == "" {
+			return ""
+		}
+		return "--tw-ring-offset-color: " + v + ";"
+	case "tw-stroke-width": // SVG stroke thickness — stroke-2 / stroke-[1.5]
+		return "stroke-width: " + m[1] + ";"
+	case "tw-border-side-shade", "tw-border-side-base": // border-t-<colour>[/alpha]
+		var v string
+		if t == "tw-border-side-shade" {
+			v = colorCSSValue(m[2], m[3], m[4], cfg)
+		} else {
+			v = colorCSSValue(m[2], "", m[3], cfg)
+		}
+		if v == "" {
+			return ""
+		}
+		switch m[1] {
+		case "x":
+			return "border-left-color: " + v + "; border-right-color: " + v + ";"
+		case "y":
+			return "border-top-color: " + v + "; border-bottom-color: " + v + ";"
+		}
+		return "border-" + map[string]string{"t": "top", "b": "bottom", "l": "left", "r": "right"}[m[1]] + "-color: " + v + ";"
+	case "tw-border-style":
+		return "border-style: " + m[1] + ";"
 	case "tw-outline":
 		return "outline-style: solid;"
 	case "tw-outline-none":
@@ -817,6 +946,12 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-outline-width":
 		return "outline-width: " + m[1] + "px;"
 	case "tw-outline-offset":
+		if strings.HasPrefix(m[1], "[") {
+			return "outline-offset: " + unarb(m[1]) + ";"
+		}
+		if m[0][0] == '-' {
+			return "outline-offset: -" + m[1] + "px;"
+		}
 		return "outline-offset: " + m[1] + "px;"
 	case "tw-scroll":
 		prop := map[byte]string{'m': "scroll-margin", 'p': "scroll-padding"}[m[1][0]]
@@ -918,9 +1053,8 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-flex":
 		val := m[2]
 		if val == "row" || val == "col" || val == "row-reverse" || val == "col-reverse" {
-			if val == "col" {
-				val = "column"
-			}
+			// CSS spells it `column`; Tailwind abbreviates it in both the plain and the -reverse form.
+			val = strings.Replace(val, "col", "column", 1)
 			return "flex-direction: " + val + ";"
 		}
 		if val == "wrap" || val == "nowrap" || val == "wrap-reverse" {
@@ -945,6 +1079,15 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if val == "start" || val == "end" {
 			val = "flex-" + val
 		}
+		if val == "between" || val == "around" || val == "evenly" {
+			val = "space-" + val
+		}
+		return fmt.Sprintf("%s: %s;", prop, val)
+	case "tw-place":
+		// place-items / place-content / place-self. Grid box-alignment takes `start`/`end`
+		// directly (not flex-start), while distributed values become space-*.
+		prop := "place-" + m[1]
+		val := m[2]
 		if val == "between" || val == "around" || val == "evenly" {
 			val = "space-" + val
 		}
@@ -985,19 +1128,43 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-shadow":
 		val := m[2]
 		sh := map[string]string{
-			"sm":    "0 1px 2px 0 rgb(0 0 0 / 0.05)",
-			"":      "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
-			"md":    "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-			"lg":    "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
-			"xl":    "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
-			"2xl":   "0 25px 50px -12px rgb(0 0 0 / 0.25)",
-			"inner": "inset 0 2px 4px 0 rgb(0 0 0 / 0.05)",
+			"sm":    "0 1px 2px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))",
+			"":      "0 1px 3px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
+			"md":    "0 4px 6px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 2px 4px -2px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
+			"lg":    "0 10px 15px -3px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 4px 6px -4px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
+			"xl":    "0 20px 25px -5px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 8px 10px -6px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
+			"2xl":   "0 25px 50px -12px var(--tw-shadow-color, rgb(0 0 0 / 0.25))",
+			"inner": "inset 0 2px 4px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))",
 			"none":  "0 0 #0000",
 		}
-		if s, ok := sh[val]; ok {
-			return "box-shadow: " + s + ";"
+		v, ok := sh[val]
+		if !ok {
+			levels := DefaultConfig.ShadowLevels
+			if cfg != nil && cfg.ShadowLevels != nil {
+				levels = cfg.ShadowLevels
+			}
+			if custom, declared := levels[val]; declared {
+				v = custom
+			} else {
+				return "" // not a size and not a theme key — let shadow-<colour> have it
+			}
 		}
-		return "box-shadow: " + sh[""] + ";"
+		// Compose rather than assign: an element carrying both `shadow-md` and `ring-1` would
+		// otherwise keep only whichever rule the stylesheet emitted last.
+		return "--tw-shadow: " + v + "; box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);"
+	case "tw-shadow-color-shade", "tw-shadow-color-base": // shadow-<colour>[/alpha]
+		var v string
+		if t == "tw-shadow-color-shade" {
+			v = colorCSSValue(m[1], m[2], m[3], cfg)
+		} else {
+			v = colorCSSValue(m[1], "", m[2], cfg)
+		}
+		if v == "" {
+			return ""
+		}
+		// Only the variable: the geometry stays with shadow-<size>, so `shadow-md shadow-brand/25`
+		// keeps the md offsets and merely recolours them.
+		return "--tw-shadow-color: " + v + ";"
 	case "tw-overflow":
 		prop := m[1]
 		val := m[2]
@@ -1128,6 +1295,8 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-aspect":
 		ratios := map[string]string{"video": "16 / 9", "square": "1 / 1", "auto": "auto"}
 		return "aspect-ratio: " + ratios[m[1]] + ";"
+	case "tw-aspect-fraction":
+		return "aspect-ratio: " + m[1] + " / " + m[2] + ";"
 	case "tw-aspect-arb":
 		return "aspect-ratio: " + strings.ReplaceAll(m[1], "_", " ") + ";"
 	case "tw-object":
@@ -1211,5 +1380,5 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-animate-onhover":
 		return "animation-play-state: paused;"
 	}
-	return ""
+	return buildPropV3(t, m, cfg)
 }

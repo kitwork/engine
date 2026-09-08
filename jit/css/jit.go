@@ -83,6 +83,11 @@ func GenerateJITCached(html string, cfg *Config) string {
 	if cfg != nil {
 		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Colors)))
 		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Animations)))
+		// The highlight theme changes what terminal-* resolves to, so it has to be
+		// part of the key. Without it two sites with the same class set would share
+		// one cache entry and the second would be served the first site's palette.
+		_, _ = h.Write([]byte(cfg.HighlightTheme))
+		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.HighlightPalette)))
 	}
 	sig := h.Sum64()
 	if v, ok := jitCache.Load(sig); ok {
@@ -112,11 +117,55 @@ func buildJITCSS(classes []string, cfg *Config) string {
 	// the hex for a plain colour, the "r, g, b" triplet for alpha, as in rgba(var(--…-rgb), .12).
 	brand := BrandColor(cfg)
 	b.WriteString(":root { --kitwork-brand: " + brand.HexString() + "; --kitwork-brand-rgb: " + brand.String() + "; }\n")
+	// Themeable design tokens as CSS variables — each holds the "r, g, b" triplet the colour
+	// utilities read via var(--color-<token>, <triplet-fallback>). A `[data-theme]` block redefining
+	// any of these re-skins the whole page without touching a single class. Only tokens named in the
+	// palette are emitted (Tailwind-palette shades and brand-logo hexes are not tokens).
+	{
+		tokenColors := Colors
+		if cfg != nil && cfg.Colors != nil {
+			tokenColors = cfg.Colors
+		}
+		tokenKeys := make([]string, 0, len(tokenColors))
+		for k := range tokenColors {
+			tokenKeys = append(tokenKeys, k)
+		}
+		sort.Strings(tokenKeys)
+		b.WriteString(":root {")
+		for _, k := range tokenKeys {
+			b.WriteString(" --color-" + k + ": " + tokenColors[k].String() + ";")
+		}
+		b.WriteString(" }\n")
+	}
 	b.WriteString("*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor; }\n")
+	// Ring defaults. `ring-*` composes its box-shadow out of these variables, and `shadow-*` composes
+	// through the same chain, so the two can sit on one element instead of overwriting each other.
+	// Every variable must have a value here: a box-shadow referencing an undefined var is invalid and
+	// the browser drops the whole declaration — which is exactly how ring silently rendered nothing.
+	b.WriteString("*, ::before, ::after { --tw-ring-inset: ; --tw-shadow-color: initial; --tw-ring-offset-width: 0px; --tw-ring-offset-color: #fff; --tw-ring-color: rgb(59 130 246 / 0.5); --tw-ring-offset-shadow: 0 0 #0000; --tw-ring-shadow: 0 0 #0000; --tw-shadow: 0 0 #0000; }\n")
+	// Filter / backdrop-filter / font-variant-numeric compose the same way: each utility fills one
+	// slot and restates the chain, so `blur-sm grayscale` keeps both. An empty custom property
+	// contributes nothing to the chain, which is what makes the unset slots free.
+	b.WriteString("*, ::before, ::after { --tw-blur: ; --tw-brightness: ; --tw-contrast: ; --tw-grayscale: ; --tw-hue-rotate: ; --tw-invert: ; --tw-saturate: ; --tw-sepia: ; --tw-drop-shadow: ; --tw-backdrop-blur: ; --tw-backdrop-brightness: ; --tw-backdrop-contrast: ; --tw-backdrop-grayscale: ; --tw-backdrop-hue-rotate: ; --tw-backdrop-invert: ; --tw-backdrop-opacity: ; --tw-backdrop-saturate: ; --tw-backdrop-sepia: ; --tw-ordinal: ; --tw-slashed-zero: ; --tw-numeric-figure: ; --tw-numeric-spacing: ; --tw-numeric-fraction: ; --tw-scroll-snap-strictness: proximity; --tw-border-spacing-x: 0; --tw-border-spacing-y: 0; --tw-divide-x-reverse: 0; --tw-divide-y-reverse: 0; --tw-space-x-reverse: 0; --tw-space-y-reverse: 0; --tw-content: \"\"; }\n")
 	b.WriteString("html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }\n")
 	b.WriteString("body { margin: 0; line-height: inherit; }\n")
 	b.WriteString("a { color: inherit; text-decoration: inherit; }\n")
+	// Lists otherwise keep the UA's ~40px left padding and bullet markers, which pushes list-group /
+	// menu / nav items in from the container edge (and offsets their dividers) — a common "why is my
+	// <ul> indented" surprise. Reset them; utilities restore markers/padding when a real list wants them.
+	b.WriteString("ol, ul, menu { list-style: none; margin: 0; padding: 0; }\n")
+	// Headings and other block text otherwise keep the UA's em-based margins — and those GROW as the
+	// heading gets smaller (h6 is 2.33em top+bottom vs h1's 0.67em), so a bare <h4>/<h5>/<h6> ends up
+	// with a *bigger* vertical gap than <h1>. Mirror Tailwind Preflight: zero the margin (spacing
+	// utilities add it back), but keep the UA font-size/weight so a bare small heading is still small.
+	b.WriteString("blockquote, dl, dd, h1, h2, h3, h4, h5, h6, hr, figure, p, pre { margin: 0; }\n")
 	b.WriteString("button, input, optgroup, select, textarea { font: inherit; color: inherit; margin: 0; padding: 0; }\n")
+	// Buttons otherwise inherit the browser's native chrome (a gray `buttonface` background plus
+	// default appearance), which shows through on any <button> a bg-* utility does not paint and
+	// nudges its icon/text off-centre. Mirror Tailwind Preflight: strip the background and appearance
+	// (utilities keep winning by specificity), and make buttons show a pointer.
+	b.WriteString("button, [type=button], [type=reset], [type=submit] { -webkit-appearance: button; background-color: transparent; background-image: none; }\n")
+	b.WriteString("button, [role=button] { cursor: pointer; }\n")
 	b.WriteString("img, svg, video, canvas, audio, iframe, embed, object { display: block; vertical-align: middle; }\n")
 	// The `hidden` attribute must always win — otherwise any element with an explicit display (e.g. an
 	// icon's display:inline-block, or flex/grid utilities) overrides the UA `[hidden]{display:none}`

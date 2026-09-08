@@ -40,7 +40,7 @@ func TestProfileManifestsAreCompleteAndOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	optional := map[string]bool{"src/service.js": true}
+	optional := map[string]bool{"src/native-host.js": true, "src/service.js": true}
 	kitOnly := map[string]bool{"src/profile-kit.js": true}
 	if len(entries) != len(hydrateFragments)+len(optional)+len(kitOnly) {
 		t.Fatalf("embedded fragment count = %d, hydrate manifest + optional/kit-only count = %d",

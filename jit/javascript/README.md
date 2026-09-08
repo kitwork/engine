@@ -366,24 +366,46 @@ hosts, or visible presentation. Version selection happens in Go/build:
 ```text
 request@1.0.0 -> progress@1.0.0
 share@1.0.0   -> clipboard@1.0.0
+camera@1.0.0  -> capabilities@1.0.0 + files@1.3.0
+media@1.0.0   -> files@1.3.0
+qr@1.0.0      -> capabilities@1.0.0
 ```
 
 The complete KitJS `1.0.0-rc.2` source-candidate catalog currently contains
-eleven exact packages:
+twenty-six service names and thirty exact versioned packages. The native-only packages are available only through
+Kitwork staged delivery and are never selected into a generic standalone build:
 
 | Service | Public surface | Purpose |
 |---|---|---|
 | `announce@1.0.0` | `say`, `polite`, `assertive`, `clear` | Bounded ARIA live announcements |
 | `appearance@1.0.0` | `mode`, `resolved`, `snapshot`, `subscribe`, `set`, `toggle`, `system` | Document light/dark/system ownership |
+| `camera@1.0.0` | `available`, `capture` | User-mediated native photo capture to an opaque `FileRef` (staged only) |
+| `capabilities@1.0.0` | `supports` | Native capability negotiation (staged only) |
 | `clipboard@1.0.0` | `writeText`, `readText` | Text clipboard access with normalized errors |
 | `cookie@1.0.0` | `get`, `set`, `remove`, `has` | Bounded script-readable cookies |
+| `deepLinks@1.0.0` | `snapshot`, `subscribe` | Latest-wins normalized same-app link receipt through a v7 native grant |
+| `deepLinks@1.1.0` | `snapshot`, `subscribe` | Exact `1.0.0` surface with the stricter v8 canonical-route grammar |
+| `device@1.0.0` | `info`, `vibrate` | Native device metadata and bounded vibration (staged only) |
+| `files@1.0.0` | `importBlob`, `stat`, `toBlob`, `share`, `release` | Opaque native file transfer and lifecycle (staged only) |
+| `files@1.1.0` | `pick`, `importBlob`, `stat`, `toBlob`, `share`, `release` | User-mediated single-file selection plus the `1.0.0` opaque transfer contract (staged only) |
+| `files@1.2.0` | `pick`, `importBlob`, `stat`, `toBlob`, `share`, `export`, `release` | Foreground document export through a private asynchronous native operation (staged only) |
+| `files@1.3.0` | `pick`, `importBlob`, `stat`, `toBlob`, `share`, `export`, `release` | Exact `1.2.0` surface plus private camera-to-`FileRef` adoption (staged only) |
 | `fullscreen@1.0.0` | `request`, `exit`, `active` | Fullscreen browser capability |
+| `lifecycle@1.0.0` | `snapshot`, `subscribe` | Frozen `active`, `inactive`, or `background` browser lifecycle state |
+| `media@1.0.0` | `pickImage` | Image-only convenience selection through exact `files@1.3.0` (staged only) |
 | `navigation@1.0.0` | `back`, `forward`, `reload` | Browser history traversal and reload |
 | `network@1.0.0` | `online`, `snapshot`, `subscribe` | Browser-reported connectivity state |
+| `notifications@1.0.0` | `permission`, `requestPermission`, `show` | Bounded immediate local notifications with native and browser providers |
+| `notifications@1.1.0` | `permission`, `requestPermission`, `show` | Exact `1.0.0` surface plus an optional canonical native tap route |
 | `progress@1.0.0` | `snapshot`, `subscribe`, `start`, `update`, `finish` | Latest-visible operation progress |
+| `qr@1.0.0` | `available`, `scan` | User-mediated native QR scanning to bounded text (staged only) |
 | `request@1.0.0` | `send`, `get`, `post`, `abort` | Same-origin bounded requests |
+| `secureStorage@1.0.0` | `get`, `set`, `remove` | Native protected key/value storage (staged only) |
 | `share@1.0.0` | `open`, `canShare` | Native share with clipboard fallback |
+| `shell@1.0.0` | `open` | Native external-URL handoff (staged only) |
 | `storage@1.0.0` | `get`, `set`, `remove`, `has`, `clear` | Namespaced JSON persistence |
+| `wakeLock@1.0.0` | `request` | Lifecycle-bound screen wake lock with native and browser providers |
+| `window@1.0.0` | `minimize`, `maximize`, `restore`, `close`, `drag`, `isMaximized` | Frameless native window controls (staged only) |
 
 The table describes availability, not default payload. An artifact includes and
 publishes only services selected by its exact graph. Every selected namespace
@@ -431,9 +453,115 @@ storage changes between tabs. Its getters and snapshots are read-only; its
 subscription cleanup is idempotent. It owns no application markup and does not
 mutate `meta[name=theme-color]`.
 
+`files@1.0.0` returns only an opaque frozen `FileRef` snapshot containing
+`name`, canonical lowercase `type`, `size`, and lowercase `sha256`. Its
+24-byte native handle stays in a private `WeakMap`; neither the handle nor a
+dispatcher is published on `kit`, the namespace, or authored HTML. A Blob
+import is capped at 256 MiB. Android sends one private `KWF1` binary frame of at
+most 256 KiB and waits for the next-sequence ACK before sending another; iOS
+uploads an `application/octet-stream` Blob to the native same-origin URL before
+the shared control plane commits it. `toBlob()` reads bounded base64 chunks and
+caps in-memory materialization at 32 MiB. Abort always attempts pending-import
+cleanup plus authoritative release as soon as a native handle exists, including
+delayed-begin and commit cancellation races. A failed public `release()` keeps
+the reference retryable.
+
+`files@1.1.0` preserves that contract and adds `pick({ accept, signal,
+onProgress })`. One transient hidden single-file control may be active at a
+time. Its bounded lowercase MIME/extension filter is advisory; cancellation
+resolves `null`, while abort and transport failures use the same normalized
+file error codes. The selected browser `File` immediately enters the existing
+`importBlob()` path, so authored code receives a `FileRef`, never a native URI,
+path, or reusable picker grant. The platform chooser is user-mediated and does
+not wait inside the synchronous native bridge.
+
+`files@1.2.0` preserves both earlier contracts and adds `export(ref)`. The
+platform stages the referenced file before `beginExport` returns, then the
+sealed service polls a private 32-character operation identity until the
+monotonic state becomes `completed`, `cancelled`, or `failed`. Public code sees
+only `true`, `false`, or a normalized `KitFilesError`; it receives no operation
+identity, vault handle, path, or document URI. A ten-minute waiter timeout does
+not claim to cancel or roll back an OS action, and terminal cleanup is
+acknowledged best-effort through the private host.
+
+`files@1.3.0` keeps the exact `1.2.0` public surface and adds only a private,
+single-use adoption seam for `camera@1.0.0`. `camera.capture({ facing,
+signal })` accepts `user` or `environment`, returns an ordinary opaque
+`FileRef`, resolves native cancellation as `null`, and exposes no operation
+identity or raw capture metadata. Only one capture may be active. Abort,
+deadline, malformed envelopes, and terminal outcomes all close the private
+operation; release acknowledgement is best effort after the public outcome is
+known.
+
+`media@1.0.0` is a convenience boundary over exact `files@1.3.0`:
+`pickImage({ signal })` fixes the advisory picker filter to `image/*` and
+returns the same `FileRef` or `null`. It requests no native capability beyond
+the existing `files.import` path. Because picker filters are advisory, a
+selected reference whose canonical MIME type is not `image/*` is released
+before the frozen `KitMediaError` with code `UNSUPPORTED` is returned; cleanup
+failure is reported generically and never publishes the reference.
+
+`qr@1.0.0` negotiates `qr.scan`, then owns a private asynchronous
+`beginScan`/`pollScan`/`releaseScan` operation. `scan({ signal })` returns one
+well-formed non-empty string of at most 4096 UTF-8 bytes or `null` for native
+cancellation. Only one scan may be active. Polling is bounded to 2400 attempts
+at 250 ms and a ten-minute deadline; abort, timeout, terminal failure, and
+malformed native envelopes all trigger private cleanup. Public failures are
+frozen `KitQRError` values with stable codes and no raw host message.
+
+`notifications@1.0.0` exposes only the current permission state, an explicit
+permission request, and one immediate local notification. Titles are limited
+to 256 UTF-16 units, bodies to 4096, and optional tags to a 128-byte safe ASCII
+identifier. Native builds require the versioned `notifications.show` manifest
+grant; older manifests cannot query, prompt, or post. Push delivery, schedules,
+actions, custom sounds, tokens, and raw notification-center handles are not in
+the v1 surface. Each native handler owns its limiter for that handler instance's
+lifecycle: at least one second between posts and no more than 20 posts in any
+rolling five-minute window. The browser provider deliberately relies on the
+browser/OS notification policy instead of duplicating that native quota. A tag
+is namespaced to the current native app and replaces that app's earlier local
+notification with the same tag; untagged notifications are independent. `show`
+never opens a permission prompt: callers explicitly inspect and request first.
+A browser permission refusal and a missing native manifest grant report
+`DENIED`; a platform-handler rejection after native dispatch is currently
+redacted to `FAILED` by the generic native seam.
+
+`notifications@1.1.0` keeps that method set and adds only an optional `path`
+field to `show()`. The value must already be a canonical, origin-free ASCII
+route of at most 2048 bytes; malformed escapes, encoded unreserved characters,
+encoded separators, traversal, controls, and ambiguous empty query or fragment
+forms are rejected through eight decode layers. A native host may attach that
+route only when a v8 manifest requests `notifications.show`, `notifications.tap`, and
+`deepLinks.receive` and the live handler supports all three. A resulting route enters the
+versioned `deepLinks` latest-wins inbox selected by the component graph and emits only its generic
+no-payload wake event. There is deliberately no notification-tap listener, source marker, or
+navigation API, so receiving a matching route alone does not prove a physical notification tap or
+its source. Browser delivery with `path` reports `UNAVAILABLE` instead of silently dropping the
+route; path-free browser notifications retain the `1.0.0` behavior.
+
+`lifecycle@1.0.0` is informational and grants no authority. It lazily owns browser
+visibility/focus/page lifecycle listeners while subscribed, immediately delivers one frozen snapshot,
+deduplicates state, and releases every listener after the final unsubscribe.
+
+`deepLinks@1.0.0` never receives a raw external URL and never navigates by itself. `snapshot()` returns
+`null` outside a native host or the native latest `{ id, path }`; `subscribe()` re-queries on lifecycle
+resume and the host's constant no-payload `kitwork:deep-link` wake event. Every subscriber deduplicates
+by opaque ID. A newer wake invalidates an in-flight result before delivery, so stale links cannot
+overtake the latest snapshot. The route is bounded to 2048 canonical ASCII URI bytes and may contain
+query/fragment; custom-scheme data is unauthenticated and must not contain secrets.
+
+`deepLinks@1.1.0` preserves that API and lifecycle behavior while matching the v8 notification-route
+validator more strictly: raw URI reserved delimiters that are outside the canonical route grammar and
+more than one raw fragment delimiter are rejected in addition to every `1.0.0` guard. The immutable
+`1.0.0` bytes and semantics remain available to existing exact component graphs.
+
+The trusted native-host wrapper maps private wire codes `BRIDGE_BUSY`,
+`BRIDGE_TIMEOUT`, and `BRIDGE_UNAVAILABLE` to stable `OVERLOADED`, `TIMEOUT`,
+and `UNAVAILABLE` service-facing codes while discarding raw host messages.
+
 The versioned service API is also the portability boundary. A browser profile
 may implement `request@1.0.0` with `fetch`, while a future desktop or mobile
-profile may provide the same four methods through a native transport. The
+profile may provide the same sealed namespace contract through a native transport. The
 selected implementation is still sealed at build time; HTML never receives a
 generic bridge or runtime service locator.
 
@@ -520,27 +648,37 @@ release:
 | Component | Canonical exact version | State and purpose | Service dependency |
 | --- | --- | --- | --- |
 | `accordion` | `1.0.0` | single or multiple disclosure state | none |
-| `app` | `1.1.0` | application identity, authored service-command facade, and loader view-model | `announce`, `appearance`, `clipboard`, `cookie`, `fullscreen`, `navigation`, `progress`, `share`, `storage` at `1.0.0` |
+| `app` | `1.1.0` (default), exact opt-ins through `1.10.0` | application identity, authored service-command facade, and loader view-model | `1.2.0` selects `files@1.1.0`; `1.3.0` selects `files@1.2.0`; `1.4.0` adds camera/files@1.3.0; `1.5.0` media/QR; `1.6.0` wake lock; `1.7.0` notifications; `1.8.0` lifecycle/deep links; `1.9.0` selects `notifications@1.1.0`; `1.10.0` selects `deepLinks@1.1.0` |
 | `alert` | `1.0.0` | persistent message, tone, and dismissal | none |
+| `capability-lab` | `1.0.0` (default), exact opt-ins through `1.2.0` | native capability probe and result view-model; `1.2.0` arms only after notification show succeeds and reports a later matching route without claiming tap provenance | staged capability graph; `1.1.0` selects `notifications@1.1.0`; `1.2.0` also selects `deepLinks@1.1.0` |
 | `carousel` | `1.0.0` | ordered, wrapping slide selection | none |
+| `collapse` | `1.0.0` | single guarded disclosure state | none |
+| `combobox` | `1.0.0` | filtered option list with active-index and selection state | none |
+| `copy` | `1.0.0` | transient copied flag with one self-resetting timer | `clipboard@1.0.0` |
+| `desktop-titlebar` | `1.0.0` | frameless-window drag and minimize/maximize/restore/close controller | staged native `window@1.0.0` |
 | `dialog` | `1.0.0` | small overlay-state controller; enhanced `2.0.0` is an exact-pin opt-in | none |
 | `drawer` | `1.0.0` | edge-surface open and side state | none |
 | `dropdown` | `1.0.0` | small disclosure/selection controller; enhanced `2.0.0` is an exact-pin opt-in | none |
+| `otp` | `1.0.0` | segmented numeric code entry across owned slot inputs | none |
 | `pagination` | `1.0.0` | bounded one-based page operations | none |
 | `popover` | `1.0.0` | disclosure state and placement preference | none |
 | `progress-bar` | `2.0.0` | navigation/request progress presentation | `progress@1.0.0` |
+| `rating` | `1.0.0` | bounded star value with hover preview and fill projection | none |
 | `shortcut` | `1.0.0` | exact `mod+k` activation for one clickable host | none |
+| `slider` | `1.0.0` | bounded value with step, page, and percent projection | none |
+| `stepper` | `1.0.0` | bounded numeric value with guarded increment and decrement | none |
 | `switch` | `1.0.0` | guarded binary setting state | none |
 | `tabs` | `1.0.0` | small ordered-selection controller; enhanced `2.0.0` is an exact-pin opt-in | none |
+| `tags` | `1.0.0` | deduplicated tag collection with a draft field and count bound | none |
 | `theme` | `3.0.0` | reactive adapter for light, dark, or system mode | `appearance@1.0.0` |
 | `toast` | `1.0.0` | one explicit timer-free status message | none |
 | `tooltip` | `1.0.0` | supplementary description visibility | none |
 
-Except for `app`, `progress-bar`, `shortcut`, and `theme`, the listed canonical stateful packages
-deliberately contain only data and methods. They install no DOM listeners,
+Except for `app`, `capability-lab`, `copy`, `desktop-titlebar`, `otp`, `progress-bar`, `shortcut`, and `theme`, the listed canonical
+stateful packages deliberately contain only data and methods. They install no DOM listeners,
 retain no element references, and do not create portals, position surfaces,
 move or trap focus, make a background inert, or schedule hidden timers. The
-`app@1.1.0` keeps exact graph-granted services virtual while subscribing once
+`app@1.1.0` through `app@1.10.0` keep exact graph-granted services virtual while subscribing once
 to `progress@1.0.0` and replacing its frozen `{ visible, value }` loader
 snapshot. `progress-bar@2.0.0` remains the standalone presentation adapter for
 an application without App. `theme@3.0.0` subscribes to `appearance@1.0.0`,
@@ -551,6 +689,15 @@ service remains the one document-lifetime owner. The immutable empty
 the literal `data-shortcut="mod+k"` contract, and delegates activation to the
 host's native `click()` behavior. It owns no navigation, focus target, state,
 methods, service, or browser-global API.
+`copy@1.0.0` consumes `clipboard@1.0.0`, delegates the write, and owns only a
+transient `copied` flag reset by one lifecycle-bound timer. `otp@1.0.0` owns
+input, keydown, and paste listeners over its `[data-otp-slot]` children to
+assemble a numeric `value`, moving focus between slots and distributing a paste;
+both dispose their owned listeners and timers with the boundary.
+`desktop-titlebar@1.0.0` owns lifecycle-bound mouse listeners on its
+`[data-titlebar-drag]` host, excludes `[data-titlebar-no-drag]` controls, and
+delegates only to the sealed staged `window@1.0.0` service. Direct authored
+`kit.window` and `$app.window` calls remain unavailable.
 Semantic HTML and authored directives own every other presentation policy.
 
 Legacy `theme@2.0.0` remains available as an exact standalone pin for an
@@ -759,8 +906,12 @@ Navigation is enabled only by choosing `hydrate.kit.js`; no authored marker
 silently changes the profile.
 
 The generic Kit and Hydrate base files do not install `$app`, services, action
-grants, or a component manifest. A sealed artifact may include the canonical
-`app@1.1.0` package and mount it under the exact alias:
+grants, or a component manifest. A sealed artifact may include the default
+`app@1.1.0` package, exact-pin `app@1.2.0` when `files.pick()` is required, or
+exact-pin `app@1.3.0` when foreground `files.export()` is required,
+exact-pin `app@1.4.0` for `camera.capture()`, or exact-pin `app@1.5.0` for
+`media.pickImage()` and `qr.scan()` in trusted component JavaScript,
+and mount it under the exact alias:
 
 ```html
 <html

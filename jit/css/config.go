@@ -45,15 +45,27 @@ type Config struct {
 	MediaQueries map[string]string
 	States       map[string]string
 	ShadowLevels map[string]string
-	Scale        []int
-	AlphaScales  []int
-	Opacities    []int // 0-100 scale
-	ZIndices     []int // 0, 10, 20...
-	Animations   map[string]string
-	Keyframes    map[string]string
+	// FontFamily holds theme.fontFamily. A site declares its typefaces there and then writes
+	// font-sans / font-display; without this the declaration was read, stored nowhere, and
+	// font-sans silently rendered a hard-coded system stack instead of the chosen face.
+	FontFamily  map[string]string
+	Scale       []int
+	AlphaScales []int
+	Opacities   []int // 0-100 scale
+	ZIndices    []int // 0, 10, 20...
+	Animations  map[string]string
+	Keyframes   map[string]string
 	// DarkSelector is the PARENT selector the dark: variant scopes under. Empty = ".dark". Set it
 	// to e.g. `[data-theme="dark"]` via router.jitcss({ darkMode: ['class', '[data-theme="dark"]'] }).
 	DarkSelector string
+
+	// HighlightTheme and HighlightPalette carry router.highlight() down to colour
+	// resolution, so terminal-* resolves per site instead of from one global
+	// default. Theme names a preset; Palette holds the per-role overrides a site
+	// passed as a map. Both sit BELOW Colors: a token spelled out in router.css()
+	// still wins, keeping "the config is the last word" true.
+	HighlightTheme   string
+	HighlightPalette map[string]string
 }
 
 var DefaultConfig = Config{
@@ -106,6 +118,10 @@ var DefaultConfig = Config{
 		"lg":  "@media (min-width: 1024px)",
 		"xl":  "@media (min-width: 1280px)",
 		"2xl": "@media (min-width: 1536px)",
+		// Respect the reader's motion preference — an accessibility requirement, not a nicety.
+		"motion-safe":   "@media (prefers-reduced-motion: no-preference)",
+		"motion-reduce": "@media (prefers-reduced-motion: reduce)",
+		"print":         "@media print",
 		// Tailwind max-* breakpoints (max-width, 0.02px below the next min).
 		"max-sm":  "@media (max-width: 639.98px)",
 		"max-md":  "@media (max-width: 767.98px)",
@@ -115,22 +131,75 @@ var DefaultConfig = Config{
 	},
 
 	States: map[string]string{
-		"hover":         "hover",
-		"group-hover":   ".group:hover &",
-		"focus":         "focus",
-		"focus-visible": "focus-visible",
-		"focus-within":  "focus-within",
-		"active":        "active",
-		"disabled":      "disabled",
-		"visited":       "visited",
-		"first":         "first-child",
-		"last":          "last-child",
-		"selection":     "&::selection",
-		"backdrop":      "&::backdrop",
-		"before":        "&::before",
-		"after":         "&::after",
+		"hover":                  "hover",
+		"group-hover":            ".group:hover &",
+		"group-focus-within":     ".group:focus-within &",
+		"focus":                  "focus",
+		"focus-visible":          "focus-visible",
+		"focus-within":           "focus-within",
+		"active":                 "active",
+		"disabled":               "disabled",
+		"checked":                "checked",
+		"peer-checked":           ".peer:checked ~ &",
+		"peer-focus":             ".peer:focus ~ &",
+		"peer-focus-visible":     ".peer:focus-visible ~ &",
+		"peer-disabled":          ".peer:disabled ~ &",
+		"visited":                "visited",
+		"first":                  "first-child",
+		"last":                   "last-child",
+		"selection":              "&::selection",
+		"placeholder":            "&::placeholder",
+		"backdrop":               "&::backdrop",
+		"scrollbar":              "&::-webkit-scrollbar",
+		"scrollbar-button-start": "&::-webkit-scrollbar-button:vertical:decrement",
+		"scrollbar-thumb":        "&::-webkit-scrollbar-thumb",
+		"scrollbar-track":        "&::-webkit-scrollbar-track",
+		"before":                 "&::before",
+		"after":                  "&::after",
+		// Form / structural states. `open` is an attribute, not a pseudo-class, so it uses the "&"
+		// form; the group and peer variants of it follow the same shape as group-hover.
+		"open":                   "&[open]",
+		"group-open":             ".group[open] &",
+		"peer-open":              ".peer[open] ~ &",
+		"group-focus":            ".group:focus &",
+		"group-active":           ".group:active &",
+		"group-disabled":         ".group:disabled &",
+		"peer-hover":             ".peer:hover ~ &",
+		"peer-invalid":           ".peer:invalid ~ &",
+		"peer-required":          ".peer:required ~ &",
+		"peer-placeholder-shown": ".peer:placeholder-shown ~ &",
+		"enabled":                "enabled",
+		"required":               "required",
+		"optional":               "optional",
+		"valid":                  "valid",
+		"invalid":                "invalid",
+		"in-range":               "in-range",
+		"out-of-range":           "out-of-range",
+		"read-only":              "read-only",
+		"indeterminate":          "indeterminate",
+		"placeholder-shown":      "placeholder-shown",
+		"autofill":               "autofill",
+		"default":                "default",
+		"target":                 "target",
+		"empty":                  "empty",
+		"odd":                    "nth-child(odd)",
+		"even":                   "nth-child(even)",
+		"first-of-type":          "first-of-type",
+		"last-of-type":           "last-of-type",
+		"only":                   "only-child",
+		"only-of-type":           "only-of-type",
+		"file":                   "&::file-selector-button",
+		"marker":                 "&::marker",
+		"first-line":             "&::first-line",
+		"first-letter":           "&::first-letter",
 		// dark: handled specially in ResolveCore (scopes selector under .dark).
 		"dark": "dark",
+	},
+
+	FontFamily: map[string]string{
+		"sans":  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+		"serif": "ui-serif, Georgia, Cambria, serif",
+		"mono":  "ui-monospace, SFMono-Regular, Menlo, monospace",
 	},
 
 	ShadowLevels: map[string]string{

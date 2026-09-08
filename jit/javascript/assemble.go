@@ -265,6 +265,10 @@ var reservedServiceNames = map[string]bool{
 	"service":   true,
 }
 
+func blockedServiceName(name string, allowWindow bool) bool {
+	return blockedComponentNames[name] && !(allowWindow && name == "window")
+}
+
 // Build creates one closed component graph and its immutable browser
 // artifact. The manifest and named scripts are sorted by identity, so caller
 // map or discovery order cannot change the result.
@@ -281,14 +285,14 @@ func Build(options BuildOptions) (Artifact, error) {
 	if err != nil {
 		return Artifact{}, err
 	}
-	services, err := normalizeServices(options.Services)
+	services, err := normalizeServices(options.Services, false)
 	if err != nil {
 		return Artifact{}, err
 	}
 	if err := validateDocumentOwners(components, services); err != nil {
 		return Artifact{}, err
 	}
-	componentRequires, err := normalizeComponentServiceRequirements(options.ComponentRequires, components, services)
+	componentRequires, err := normalizeComponentServiceRequirements(options.ComponentRequires, components, services, false)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -299,11 +303,8 @@ func Build(options BuildOptions) (Artifact, error) {
 
 	var serviceRuntime []byte
 	if len(services) > 0 {
-		serviceRuntime, err = sources.ReadFile("src/service.js")
+		serviceRuntime, err = standaloneServiceRuntimeSource()
 		if err != nil {
-			return Artifact{}, fmt.Errorf("kitjs: read src/service.js: %w", err)
-		}
-		if err := validateRuntimeFragment("src/service.js", serviceRuntime); err != nil {
 			return Artifact{}, err
 		}
 	}
@@ -418,7 +419,7 @@ func normalizeComponents(input []ComponentVersion) ([]ComponentVersion, error) {
 	return components, nil
 }
 
-func normalizeComponentServiceRequirements(input []ComponentServiceRequirement, components []ComponentVersion, services []Service) ([]ComponentServiceRequirement, error) {
+func normalizeComponentServiceRequirements(input []ComponentServiceRequirement, components []ComponentVersion, services []Service, allowWindow bool) ([]ComponentServiceRequirement, error) {
 	componentVersions := make(map[string]string, len(components))
 	for _, component := range components {
 		componentVersions[component.Name] = component.Version
@@ -434,7 +435,7 @@ func normalizeComponentServiceRequirements(input []ComponentServiceRequirement, 
 		if !componentExists {
 			return nil, fmt.Errorf("kitjs: service dependency owner component %q is missing", requirement.Component)
 		}
-		if !validServiceVersion(requirement.Service) {
+		if !validServiceVersion(requirement.Service, allowWindow) {
 			return nil, fmt.Errorf("kitjs: component %s@%s has invalid service dependency %s@%s",
 				requirement.Component, componentVersion, requirement.Service.Name, requirement.Service.Version)
 		}
@@ -466,9 +467,9 @@ func normalizeComponentServiceRequirements(input []ComponentServiceRequirement, 
 	return requirements, nil
 }
 
-func validServiceVersion(service ServiceVersion) bool {
+func validServiceVersion(service ServiceVersion, allowWindow bool) bool {
 	return serviceNamePattern.MatchString(service.Name) &&
-		!blockedComponentNames[service.Name] &&
+		!blockedServiceName(service.Name, allowWindow) &&
 		!reservedServiceNames[service.Name] &&
 		exactSemVer(service.Version)
 }
@@ -476,14 +477,14 @@ func validServiceVersion(service ServiceVersion) bool {
 // normalizeServices copies, validates, and deterministically topologically
 // orders a closed service graph. Dependencies always precede their owner; ties
 // between independent services are resolved by service name.
-func normalizeServices(input []Service) ([]Service, error) {
+func normalizeServices(input []Service, allowWindow bool) ([]Service, error) {
 	byName := make(map[string]Service, len(input))
 	names := make([]string, 0, len(input))
 	for _, service := range input {
 		if _, exists := byName[service.Name]; exists {
 			return nil, fmt.Errorf("kitjs: duplicate service %q in graph", service.Name)
 		}
-		normalized, err := normalizeServiceDefinition(service)
+		normalized, err := normalizeServiceDefinition(service, allowWindow)
 		if err != nil {
 			return nil, err
 		}
@@ -550,9 +551,9 @@ func normalizeServices(input []Service) ([]Service, error) {
 // requiring its dependency closure to be present. normalizeServices performs
 // the closed-graph validation and ordering; generation preparation uses this
 // smaller seam to cache each immutable service package exactly once.
-func normalizeServiceDefinition(service Service) (Service, error) {
+func normalizeServiceDefinition(service Service, allowWindow bool) (Service, error) {
 	identity := ServiceVersion{Name: service.Name, Version: service.Version}
-	if !serviceNamePattern.MatchString(service.Name) || blockedComponentNames[service.Name] || reservedServiceNames[service.Name] {
+	if !serviceNamePattern.MatchString(service.Name) || blockedServiceName(service.Name, allowWindow) || reservedServiceNames[service.Name] {
 		return Service{}, fmt.Errorf("kitjs: invalid service name %q", service.Name)
 	}
 	if !exactSemVer(service.Version) {
@@ -565,7 +566,7 @@ func normalizeServiceDefinition(service Service) (Service, error) {
 	requires := make([]ServiceVersion, len(service.Requires))
 	seenRequires := make(map[string]ServiceVersion, len(service.Requires))
 	for index, dependency := range service.Requires {
-		if !validServiceVersion(dependency) {
+		if !validServiceVersion(dependency, allowWindow) {
 			return Service{}, fmt.Errorf("kitjs: service %s@%s has invalid dependency %s@%s",
 				identity.Name, identity.Version, dependency.Name, dependency.Version)
 		}

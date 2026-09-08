@@ -158,12 +158,8 @@ func expressionServiceName(name string) bool {
 	if _, exists := authoredServiceActions[name]; exists {
 		return true
 	}
-	switch name {
-	case "network", "progress", "request":
-		return true
-	default:
-		return false
-	}
+	_, exists := sealedExpressionServiceNames[name]
+	return exists
 }
 
 func validateExpression(authored, mode string) error {

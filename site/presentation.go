@@ -45,13 +45,16 @@ type JITComponentSource struct {
 // PresentationSnapshot is the immutable presentation state consumed by one
 // request. Slices, maps, and the JIT config are detached from the builder.
 type PresentationSnapshot struct {
-	JITConfig     *jitcss.Config
-	FaviconFile   string
-	AssetMounts   []AssetMount
-	ThemeMode     string
-	KitJS         bool
-	JITComponents []JITComponentSource
-	Frozen        bool
+	JITConfig        *jitcss.Config
+	FaviconFile      string
+	AssetMounts      []AssetMount
+	ThemeMode        string
+	HighlightTheme   string
+	HighlightPalette map[string]string
+	ManifestPath     string
+	KitJS            bool
+	JITComponents    []JITComponentSource
+	Frozen           bool
 }
 
 // Presentation collects site-wide declarations while a generation is being
@@ -64,6 +67,9 @@ type Presentation struct {
 	faviconFile       string
 	assetMounts       []AssetMount
 	themeMode         string
+	highlightTheme    string
+	highlightPalette  map[string]string
+	manifestPath      string
 	kitJS             bool
 	jitComponents     []JITComponentSource
 	jitComponentBytes int
@@ -138,6 +144,62 @@ func (p *Presentation) SetThemeMode(mode string) bool {
 		return false
 	}
 	p.themeMode = mode
+	return true
+}
+
+// SetHighlightPalette records the per-role overrides from
+// router.highlight({ keyword: … }). They sit between the named theme and the
+// site's own router.css() declarations.
+func (p *Presentation) SetHighlightPalette(palette map[string]string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	if len(palette) == 0 {
+		p.highlightPalette = nil
+		return true
+	}
+	copied := make(map[string]string, len(palette))
+	for role, hex := range palette {
+		copied[role] = hex
+	}
+	p.highlightPalette = copied
+	return true
+}
+
+// SetManifestPath records where router.manifest() publishes, so the render pass
+// can link it from <head>. Empty means the site declared no manifest and no
+// link is injected — a link to a path that 404s is worse than no link.
+func (p *Presentation) SetManifestPath(path string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	p.manifestPath = path
+	return true
+}
+
+// SetHighlightTheme pins the default palette for a bare {{ src.highlight() }}
+// across the site generation (router.highlight). A page may still override per
+// call with {{ src.highlight("mono") }}.
+func (p *Presentation) SetHighlightTheme(theme string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	p.highlightTheme = theme
 	return true
 }
 
@@ -248,14 +310,30 @@ func (p *Presentation) Snapshot() PresentationSnapshot {
 }
 
 func (p *Presentation) snapshotLocked() PresentationSnapshot {
+	// router.highlight() rides the JIT config so colour resolution can see it.
+	// Stamping it here rather than at call time means router.css() and
+	// router.highlight() can be written in either order without one erasing the
+	// other — buildJitcssConfig rebuilds from defaults every time it runs.
+	jitConfig := cloneJITConfig(p.jitConfig)
+	if jitConfig == nil && (p.highlightTheme != "" || len(p.highlightPalette) > 0) {
+		jitConfig = cloneJITConfig(&jitcss.DefaultConfig)
+	}
+	if jitConfig != nil {
+		jitConfig.HighlightTheme = p.highlightTheme
+		jitConfig.HighlightPalette = p.highlightPalette
+	}
+
 	return PresentationSnapshot{
-		JITConfig:     cloneJITConfig(p.jitConfig),
-		FaviconFile:   p.faviconFile,
-		AssetMounts:   append([]AssetMount(nil), p.assetMounts...),
-		ThemeMode:     p.themeMode,
-		KitJS:         p.kitJS,
-		JITComponents: cloneJITComponentSources(p.jitComponents),
-		Frozen:        p.frozen,
+		JITConfig:        jitConfig,
+		FaviconFile:      p.faviconFile,
+		AssetMounts:      append([]AssetMount(nil), p.assetMounts...),
+		ThemeMode:        p.themeMode,
+		HighlightTheme:   p.highlightTheme,
+		HighlightPalette: p.highlightPalette,
+		ManifestPath:     p.manifestPath,
+		KitJS:            p.kitJS,
+		JITComponents:    cloneJITComponentSources(p.jitComponents),
+		Frozen:           p.frozen,
 	}
 }
 

@@ -1,7 +1,7 @@
 # Kitwork search scale benchmarks
 
-This isolated module compares Kitwork's segment/index engines, record-per-term engine, Bleve, and
-Turso's Tantivy-backed FTS without adding their dependencies to the production engine module.
+This isolated module compares Kitwork's segment/index engines, record-per-term engine, and Bleve
+without adding benchmark dependencies to the production engine module.
 
 ## Workload
 
@@ -11,30 +11,6 @@ Turso's Tantivy-backed FTS without adding their dependencies to the production e
 - Implicit AND semantics for every query term
 - Vietnamese diacritic folding, so `ao` matches `áo`
 - Windows AMD64, Go 1.26, 21 measured samples after warmup
-
-Turso's default tokenizer does not fold Vietnamese diacritics. Its benchmark therefore stores
-Kitwork-normalized `search_title` and `search_body` projections and normalizes the query before
-passing it to Tantivy.
-
-## Turso native build
-
-The platform DLL shipped by `turso-go-platform-libs v0.7.2` does not include the FTS Cargo feature.
-Build the ABI-compatible DLL from the same Turso tag:
-
-```powershell
-$source = "$env:TEMP\kitwork-turso-fts-v0.7.2"
-git clone --depth 1 --branch v0.7.2 https://github.com/tursodatabase/turso.git $source
-git -C $source apply D:\project\kitwork\engine\benchmarks\searchscale\turso-v0.7.2-fts.patch
-cargo build --manifest-path "$source\Cargo.toml" --profile lib-release --package turso_sync_sdk_kit --features fts
-```
-
-Run the Turso benchmark:
-
-```powershell
-go test -tags turso_scale -run "^TestTursoScale$" -count=1 -v -timeout 40m -args `
-  -kitwork-turso-library="$source\target\lib-release\turso_sync_sdk_kit.dll" `
-  -kitwork-turso-sizes=1000000 -kitwork-turso-samples=21
-```
 
 Run Bleve from this module:
 
@@ -78,7 +54,6 @@ All latency values are hot-cache P50 milliseconds.
 
 | Engine | Build | Persisted size | Peak build RSS | RSS after build | Exact SKU | 1 common term | 2 terms | 4 terms | Unaccented 5 terms |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Turso + Tantivy | 126.54 s | 1232.37 MiB | 1799.29 MiB | 115.28 MiB | 0.713 | 2.148 | 4.643 | 7.176 | 8.081 |
 | Kitwork Index V1, 10 segments | 37.17 s | 192.67 MiB | 205.27 MiB | 59.74 MiB | 0.059 | 7.545 | 30.593 | 64.603 | 66.005 |
 | Kitwork Segment V1 | 42.60 s | 192.64 MiB | 1308.63 MiB | 912.43 MiB | 0.014 | 8.272 | 34.769 | 55.288 | 61.041 |
 | Bleve | 35.75 s | 580.32 MiB | 483.82 MiB | 35.97 MiB | 0.028 | 18.464 | 44.696 | 84.183 | 97.643 |
@@ -86,13 +61,10 @@ All latency values are hot-cache P50 milliseconds.
 
 The storage and build columns are not perfectly equivalent:
 
-- Turso includes the relational rows, normalized projections, and Tantivy index in one database.
 - Bleve stores its search index and stored display fields; a separate source database is not counted.
 - Segment V1 and Index V1 store their search index and external identifiers, but not the title/body
-  display projection. Their size is therefore not directly comparable to Bleve or Turso.
+  display projection. Their size is therefore not directly comparable to Bleve.
 - The custom benchmark stores the search projection; its Markdown or relational source is not counted.
-- Turso's total includes 63.45 seconds inserting rows, 35.20 seconds creating the FTS index, and
-  27.89 seconds running `OPTIMIZE INDEX`.
 - The custom RSS result is measured after rebuilding in the same process. Go retained much of the
   rebuild address space; a query-only process would likely report a lower resident set.
 - Segment V1 has the same-process RSS caveat. Its hot queries allocated 5.74-31.35 KiB per

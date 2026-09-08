@@ -115,6 +115,9 @@ window.location = global.location;
   if (typeof kit.window.restore !== "function" || typeof kit.capabilities.supports !== "function") {
     throw new Error("window/capabilities namespaces missing");
   }
+  if (typeof kit.network.status !== "function") {
+    throw new Error("network namespace missing");
+  }
   if (typeof kit.toggleTheme !== "function" || typeof kit.minimize !== "function") {
     throw new Error("trusted-JavaScript compatibility aliases missing");
   }
@@ -179,8 +182,15 @@ window.location = global.location;
       calls.push({ action: action, params: params });
       if (action === "clipboard.readText") return "native clipboard";
       if (action === "camera.capture") return Promise.resolve("native://photo");
+      if (action === "secureStorage.get") return Promise.resolve("stored value");
+      if (action === "device.info") {
+        return Promise.resolve({ platform: "android", osVersion: "16", model: "Pixel" });
+      }
+      if (action === "network.status") return Promise.resolve({ online: true });
       if (action === "capabilities.supports") {
-        return Promise.resolve(params.id === "camera.capture" || params.id === "window.minimize");
+        return Promise.resolve(
+          params.id === "camera.capture" || params.id === "window.minimize" || params.id === "network.status"
+        );
       }
       return Promise.resolve(true);
     }
@@ -207,6 +217,29 @@ window.location = global.location;
     throw new Error("host lifecycle transport changed");
   }
 
+  await kit.secureStorage.set("note", "private");
+  if (await kit.secureStorage.get("note") !== "stored value") {
+    throw new Error("secureStorage.get result mismatch");
+  }
+  await kit.secureStorage.remove("note");
+  var deviceInfo = await kit.device.info();
+  if (!deviceInfo || deviceInfo.platform !== "android") {
+    throw new Error("device.info result mismatch");
+  }
+  await kit.device.vibrate([10, 20]);
+  await kit.shell.open("https://example.test/");
+  if (!calls.some(function (entry) {
+    return entry.action === "secureStorage.set" && entry.params.key === "note" && entry.params.value === "private";
+  }) || !calls.some(function (entry) {
+    return entry.action === "secureStorage.remove" && entry.params.key === "note";
+  }) || !calls.some(function (entry) {
+    return entry.action === "device.vibrate" && entry.params.pattern[1] === 20;
+  }) || !calls.some(function (entry) {
+    return entry.action === "shell.open" && entry.params.url === "https://example.test/";
+  })) {
+    throw new Error("native service parameter contract mismatch");
+  }
+
   var capture = kit.camera.capture({ facingMode: "user" });
   if (!capture || typeof capture.then !== "function") {
     throw new Error("camera.capture is not Promise-based");
@@ -222,6 +255,15 @@ window.location = global.location;
   }
   if (await kit.capabilities.supports("window.minimize") !== true) {
     throw new Error("native window capability probe mismatch");
+  }
+  if (await kit.capabilities.supports("network.status") !== true) {
+    throw new Error("native network capability probe mismatch");
+  }
+  var networkStatus = await kit.network.status();
+  if (!networkStatus || networkStatus.online !== true || !calls.some(function (entry) {
+    return entry.action === "network.status";
+  })) {
+    throw new Error("native network.status contract mismatch");
   }
   var callsBeforeRuntimeOwnedProbe = calls.length;
   if (await kit.capabilities.supports("theme.toggle") !== true ||

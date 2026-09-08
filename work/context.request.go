@@ -407,6 +407,36 @@ func (r *Request) JSON() value.Value {
 	return value.New(data)
 }
 
+// JSONLimit decodes one request body without buffering more than the caller's explicit ceiling.
+// Unlike JSON, it consumes the body once and does not restore it; bounded API routes should parse
+// exactly once and pass the resulting value onward. The host ceiling prevents tenant code from
+// accidentally turning this optional guard back into an unbounded allocation.
+func (r *Request) JSONLimit(limit int) value.Value {
+	const hostLimit = 1 << 20
+	if limit <= 0 || limit > hostLimit {
+		return value.Value{K: value.Invalid, V: "json body limit must be between 1 byte and 1 MiB"}
+	}
+	req := r.request()
+	if req == nil || req.Body == nil {
+		return value.Value{K: value.Invalid, V: "request body is empty"}
+	}
+	if req.ContentLength > int64(limit) {
+		return value.Value{K: value.Invalid, V: "request body exceeds its limit"}
+	}
+	body, err := io.ReadAll(io.LimitReader(req.Body, int64(limit)+1))
+	if err != nil {
+		return value.Value{K: value.Invalid, V: "request body could not be read"}
+	}
+	if len(body) > limit {
+		return value.Value{K: value.Invalid, V: "request body exceeds its limit"}
+	}
+	var data any
+	if len(body) == 0 || json.Unmarshal(body, &data) != nil {
+		return value.Value{K: value.Invalid, V: "request body must be valid JSON"}
+	}
+	return value.New(data)
+}
+
 func (r *Request) FormValue(key string) value.Value {
 	req := r.request()
 	if req == nil {

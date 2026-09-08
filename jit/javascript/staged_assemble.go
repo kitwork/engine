@@ -171,7 +171,7 @@ func buildStaged(options StagedBuildOptions, preparedCore *stagedCoreArtifacts) 
 	for index, component := range components {
 		componentVersions[index] = component.identity
 	}
-	services, err := normalizeServices(options.Services)
+	services, err := normalizeServices(options.Services, true)
 	if err != nil {
 		return StagedAssembly{}, err
 	}
@@ -183,7 +183,7 @@ func buildStaged(options StagedBuildOptions, preparedCore *stagedCoreArtifacts) 
 	if err := validateDocumentOwners(componentVersions, services); err != nil {
 		return StagedAssembly{}, err
 	}
-	requirements, err := normalizeComponentServiceRequirements(options.ComponentRequires, componentVersions, services)
+	requirements, err := normalizeComponentServiceRequirements(options.ComponentRequires, componentVersions, services, true)
 	if err != nil {
 		return StagedAssembly{}, err
 	}
@@ -473,6 +473,10 @@ func stagedRuntimeSource() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	source, err = appendNativeHostRuntime(source)
+	if err != nil {
+		return nil, err
+	}
 	return append(source, stagedRuntimeWatchdog...), nil
 }
 
@@ -529,9 +533,9 @@ func stagedGraphKey(profile Profile, runtime JITArtifact, hydrate *JITArtifact, 
 		writeHashFrame(hash, source)
 	}
 	if len(services) > 0 {
-		serviceRuntime, err := sources.ReadFile("src/service.js")
+		serviceRuntime, err := stagedServiceRuntimeSource()
 		if err != nil {
-			return "", fmt.Errorf("kitjs: read src/service.js: %w", err)
+			return "", err
 		}
 		writeHashFrame(hash, []byte("src/service.js"))
 		writeHashFrame(hash, serviceRuntime)

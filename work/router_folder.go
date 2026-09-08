@@ -69,9 +69,11 @@ type FolderMethod struct {
 	// Response caching + rate limiting (see cache/persist/ratelimit helper packages). The expiry
 	// resolvers accept a rolling duration OR a wall-clock boundary ("nextday 03:00", "weekly", …),
 	// evaluated at save time; nil = that tier is off.
-	cacheExpiry   func(time.Time) time.Duration // .cache(): RAM
-	persistExpiry func(time.Time) time.Duration // .persist(): disk <tenant>/.persist
-	limits        []methodLimit                 // .limit(...): rate-limit rules
+	cacheExpiry    func(time.Time) time.Duration // .cache(): RAM
+	persistExpiry  func(time.Time) time.Duration // .persist(): disk <tenant>/.persist
+	cacheKeyPolicy *responseCacheKeyPolicy       // nil keeps the historical full-query key
+	cacheKeyErr    error                         // surfaced while the route generation is built
+	limits         []methodLimit                 // .limit(...): rate-limit rules
 }
 
 // methodLimit is one rate-limit rule: at most Rate hits per Per window, keyed by Dim ("ip"|"user").
@@ -125,8 +127,11 @@ func (m *FolderMethod) View(args ...value.Value) *FolderMethod {
 //	router.get(...).cache("5m")             // rolling 5 minutes
 //	router.get(...).cache("nextday 03:00")  // until 03:00 tomorrow (aligns to a data refresh)
 //	router.get(...).cache("weekly")         // until next Monday 00:00
+//	router.get(...).cache("5m", "page")     // key only by the page query parameter
+//	router.get(...).cache("5m", { page: true, category: ["new", "click"] })
 func (m *FolderMethod) Cache(args ...value.Value) *FolderMethod {
 	m.cacheExpiry = expiryOf(args...)
+	m.configureResponseCacheKey(args...)
 	return m
 }
 
@@ -136,8 +141,10 @@ func (m *FolderMethod) Cache(args ...value.Value) *FolderMethod {
 //
 //	router.get(...).persist()               // forever
 //	router.get(...).persist("nextday 03:00")
+//	router.get(...).persist("1d", ["page", "category"])
 func (m *FolderMethod) Persist(args ...value.Value) *FolderMethod {
 	m.persistExpiry = expiryOf(args...)
+	m.configureResponseCacheKey(args...)
 	return m
 }
 
@@ -310,6 +317,18 @@ func (f *FolderRouter) output(kind, defaultPath string, args ...value.Value) *Fo
 	m := &FolderMethod{method: "GET", outputKind: kind, outputData: value.New(map[string]value.Value{})}
 	outputPath := defaultPath
 	if len(args) > 0 {
+		// BOOLEAN mode: the short way to say "yes, the default". true generates
+		// with defaults; false declares nothing at all, so the path stays a 404
+		// rather than serving an empty document.
+		if args[0].K == value.Bool {
+			if args[0].N == 0 {
+				return m
+			}
+			outputPath = "/" + strings.TrimPrefix(path.Clean("/"+outputPath), "/")
+			m.outputPath = outputPath
+			f.outputs[outputPath] = m
+			return m
+		}
 		if args[0].IsString() { // FILE mode: serve the disk file at the canonical URL (Zero-VM static)
 			m.outputPath = "/" + strings.TrimPrefix(path.Clean("/"+defaultPath), "/")
 			if disk := cleanAssetPrefix(args[0].Text()); disk != "" {
@@ -380,6 +399,54 @@ func (f *FolderRouter) Sitemap(args ...value.Value) *FolderMethod {
 // is a different concern: use meta({ robots: "noindex" }) for a <meta name="robots"> tag.
 func (f *FolderRouter) Robots(args ...value.Value) *FolderMethod {
 	return f.output("robots", "/robots.txt", args...)
+}
+
+// Llms declares the site's /llms.txt — the plain-Markdown map of a site that
+// language models read instead of crawling HTML. Same argument shapes as
+// robots/sitemap: a STRING serves that disk file, a MAP generates one, true
+// generates the defaults.
+//
+//	router.llms("./llms.txt")
+//	router.llms({ title: "Kitwork", summary: "…", sections: [...] })
+//
+// The longer companion document is the same output at another path, so it needs
+// no second method:
+//
+//	router.llms({ path: "/llms-full.txt", title: "Kitwork", sections: [...] })
+func (f *FolderRouter) Llms(args ...value.Value) *FolderMethod {
+	return f.output("llms", "/llms.txt", args...)
+}
+
+// LlmsFull declares the companion /llms-full.txt — the expanded document, for a
+// reader that wants the whole map rather than the index. Same argument shapes.
+// It is a separate method rather than a path option because the two documents
+// have different canonical paths, and a convention is only discoverable if it
+// has a name.
+//
+//	router.llmsFull(true)
+//	router.llmsFull("./llms-full.txt")
+//	router.llmsFull({ title: "Kitwork", sections: [...] })
+func (f *FolderRouter) LlmsFull(args ...value.Value) *FolderMethod {
+	return f.output("llms", "/llms-full.txt", args...)
+}
+
+// Manifest declares the site's /manifest.json — the web app manifest a browser
+// reads to install the site. Same argument shapes as robots/sitemap: a STRING
+// serves that disk file, a MAP generates one, true generates defaults.
+//
+//	router.manifest(true)
+//	router.manifest({ name: "Kitwork", theme: "#f7f7f8", icon: "/assets/logo.png" })
+//	router.manifest("./manifest.json")
+//
+// Unlike the others this one must also be LINKED from <head> to have any
+// effect; jit/manifest fills a <link data-kitwork-jit="manifest"> marker where
+// the author placed one, and injects the link when none is present.
+func (f *FolderRouter) Manifest(args ...value.Value) *FolderMethod {
+	method := f.output("manifest", "/manifest.json", args...)
+	if method != nil && method.outputPath != "" {
+		f.tenant.presentation().SetManifestPath(method.outputPath)
+	}
+	return method
 }
 
 // Guard registers folder-level before-hooks (auth/prepare) that run IN ORDER for this folder and
@@ -466,6 +533,22 @@ func (f *FolderRouter) Assets(args ...value.Value) *FolderRouter {
 			f.assetErr = err
 		}
 	}
+	// BOOLEAN mode: assets(true) mounts the conventional folder without naming
+	// it. Only a folder that exists on disk is mounted, so the shorthand never
+	// leaves a dead mount behind; "_assets" is accepted because publicAssetURL
+	// already maps a private folder onto the clean public /assets URL.
+	if len(args) == 1 && args[0].K == value.Bool {
+		if args[0].N == 0 {
+			return f
+		}
+		for _, candidate := range [...]string{"assets", "_assets"} {
+			full := filepath.Join(f.node.diskPath(), candidate)
+			if info, err := os.Stat(full); err == nil && info.IsDir() {
+				add(publicAssetURL(candidate), candidate)
+			}
+		}
+		return f
+	}
 	if len(args) == 2 { // alias form: (publicURLGlob, diskDir) — explicit, taken as-is
 		add(args[0].Text(), args[1].Text())
 		return f
@@ -522,6 +605,38 @@ func (f *FolderRouter) Jittheme(args ...value.Value) *FolderRouter {
 
 // JitTheme is the camelCase alias (.jitTheme).
 func (f *FolderRouter) JitTheme(args ...value.Value) *FolderRouter { return f.Jittheme(args...) }
+
+// Highlight pins the site-wide default palette for a bare {{ src.highlight() }}
+// in views — e.g. router.highlight("classic"). A page may still override per
+// call with {{ src.highlight("mono") }}; the built-in default is used otherwise.
+func (f *FolderRouter) Highlight(args ...value.Value) *FolderRouter {
+	if len(args) == 0 {
+		return f
+	}
+	// STRING: pick a named theme — router.highlight("tokyo-night").
+	if args[0].IsString() {
+		f.tenant.presentation().SetHighlightTheme(args[0].String())
+		return f
+	}
+	// MAP: a theme plus per-role tweaks, or tweaks alone on the default theme —
+	// router.highlight({ theme: "tokyo-night", keyword: "#ff0000" }). Keeping the
+	// overrides HERE rather than in router.css() means one call owns the whole
+	// appearance of a code block, and the theme name is never written twice.
+	if args[0].IsMap() {
+		palette := map[string]string{}
+		for role, entry := range args[0].Map() {
+			if role == "theme" {
+				f.tenant.presentation().SetHighlightTheme(entry.String())
+				continue
+			}
+			if entry.K == value.String {
+				palette[role] = entry.Text()
+			}
+		}
+		f.tenant.presentation().SetHighlightPalette(palette)
+	}
+	return f
+}
 
 // Meta shorthands at the node-declaration level — same set as the ViewBuilder, so a static page
 // can set its own title in one line (router.title("...")) without a handler, and it still
@@ -618,6 +733,10 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 		if err := runFolderRouter(t, n, bc); err != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("initialize router %s: %w", relative, err)
+		}
+		if err := fr.responseCacheConfigurationError(); err != nil {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			return fmt.Errorf("router %s: %w", relative, err)
 		}
 		if fr.assetErr != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))

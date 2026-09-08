@@ -76,6 +76,10 @@ func (h *HTTPAdapter) Timeout(ms int) *HTTPAdapter {
 	return &HTTPAdapter{scope: h.scope, client: h.client.Timeout(ms)}
 }
 
+func (h *HTTPAdapter) MaxBytes(n int) *HTTPAdapter {
+	return &HTTPAdapter{scope: h.scope, client: h.client.MaxBytes(n)}
+}
+
 func (h *HTTPAdapter) Header(key, val string) *HTTPAdapter {
 	return &HTTPAdapter{scope: h.scope, client: h.client.Header(key, val)}
 }

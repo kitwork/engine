@@ -20,6 +20,7 @@ func TestClipboardSharePackageStaticContract(t *testing.T) {
 			name: "clipboard",
 			required: []string{
 				`writeText: writeText`, `readText: readText`,
+				`nativeHost.call("clipboard." + operation, params)`,
 				`name: { value: "KitClipboardError" }`,
 				`UNAVAILABLE`, `DENIED`, `CANCELLED`, `FAILED`,
 			},
@@ -29,6 +30,7 @@ func TestClipboardSharePackageStaticContract(t *testing.T) {
 			name: "share",
 			required: []string{
 				`open: open`, `canShare: canShare`, `kit.clipboard.writeText(`,
+				`nativeHost.call("share.open", params)`,
 				`name: { value: "KitShareError" }`,
 				`UNAVAILABLE`, `DENIED`, `CANCELLED`, `FAILED`,
 			},
@@ -55,10 +57,12 @@ func TestClipboardSharePackageStaticContract(t *testing.T) {
 					t.Fatalf("%s@1.0.0 lost %q", test.name, required)
 				}
 			}
-			for _, forbidden := range append(test.forbidden,
+			forbidden := append([]string(nil), test.forbidden...)
+			forbidden = append(forbidden,
 				`global.kit`, `globalThis.kit`, `window.kit`, `kit.component(`,
 				`document.addEventListener`, `fetch(`, `XMLHttpRequest`, `bridge`,
-				`service conflict`, `core.`, `Symbol.for("kitjs:`) {
+				`service conflict`, `core.`)
+			for _, forbidden := range forbidden {
 				if bytes.Contains(source, []byte(forbidden)) {
 					t.Fatalf("%s@1.0.0 contains forbidden coupling %q", test.name, forbidden)
 				}
@@ -312,6 +316,9 @@ const clipboardShareServiceAssertions = `__runStandaloneKitTest(async function (
 
   await typeError(function () { return clipboard.writeText(7); }, "non-string clipboard input");
   await typeError(function () { return clipboard.writeText("x".repeat(1048577)); }, "oversized clipboard input");
+  await typeError(function () { return clipboard.writeText("\uD800"); }, "isolated high-surrogate clipboard input");
+  await typeError(function () { return clipboard.writeText("\uDC00"); }, "isolated low-surrogate clipboard input");
+  await typeError(function () { return clipboard.writeText("before\0after"); }, "NUL clipboard input");
   assert(globalThis.__clipboardCalls.length === 0, "invalid clipboard input reached the adapter");
 
   globalThis.__clipboardMode = "success";
@@ -344,6 +351,9 @@ const clipboardShareServiceAssertions = `__runStandaloneKitTest(async function (
   globalThis.__clipboardRead = "x".repeat(1048577);
   normalized(await rejected(function () { return clipboard.readText(); }),
     "KitClipboardError", "FAILED", "readText");
+  globalThis.__clipboardRead = "\uD800";
+  normalized(await rejected(function () { return clipboard.readText(); }),
+    "KitClipboardError", "FAILED", "readText");
   globalThis.__clipboardRead = "paste-value";
 
   await typeError(function () { return share.open(null); }, "null share input");
@@ -353,7 +363,15 @@ const clipboardShareServiceAssertions = `__runStandaloneKitTest(async function (
   await typeError(function () { return share.open(accessor); }, "share accessor");
   await typeError(function () { return share.open({ title: "x".repeat(513) }); }, "oversized share title");
   await typeError(function () { return share.open({ text: "x".repeat(65537) }); }, "oversized share text");
+  await typeError(function () { return share.open({ title: "\uD800" }); }, "isolated surrogate share title");
+  await typeError(function () { return share.open({ text: "\uDC00" }); }, "isolated surrogate share text");
+  await typeError(function () { return share.open({ title: "before\0after" }); }, "NUL share title");
+  await typeError(function () { return share.open({ text: "before\0after" }); }, "NUL share text");
+  await typeError(function () { return share.open({ url: "https://example.test/\uD800" }); }, "isolated surrogate share URL");
+  await typeError(function () { return share.open({ url: "https://example.test/before\0after" }); }, "NUL share URL");
   await typeError(function () { return share.open("data:text/plain,secret"); }, "unsafe share URL");
+  assert(globalThis.__shareCalls.length === 0 && globalThis.__canShareCalls.length === 0,
+    "invalid share text reached a browser sharing adapter");
 
   globalThis.__shareMethod = function (data) {
     globalThis.__shareCalls.push({ data: data, receiver: this === navigator });

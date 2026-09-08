@@ -18,6 +18,15 @@ import (
 //	    darkMode: ['class', '[data-theme="dark"]'],   // parent selector for dark:
 //	    theme: { extend: { colors: { brand: { DEFAULT: '#f82244' } }, keyframes: {...} } },
 //	})
+// Css is the current name for the design-token config. The JIT prefix described
+// the engine's mechanism, not the author's intent: from a site's side this is
+// simply where its colours, fonts and utilities are declared.
+//
+//	router.css({ theme: { extend: { colors: { brand: "#f82244" } } } })
+//
+// Jitcss stays as a deprecated alias so existing sites keep working.
+func (f *FolderRouter) Css(cfg value.Value) *FolderRouter { return f.Jitcss(cfg) }
+
 func (f *FolderRouter) Jitcss(cfg value.Value) *FolderRouter {
 	if config := buildJitcssConfig(cfg); config != nil {
 		f.tenant.presentation().SetJITConfig(config)
@@ -42,6 +51,7 @@ func buildJitcssConfig(cfg value.Value) *jitcss.Config {
 		ZIndices:     append([]int(nil), jitcss.DefaultConfig.ZIndices...),
 		Animations:   make(map[string]string),
 		Keyframes:    make(map[string]string),
+		FontFamily:   make(map[string]string),
 	}
 	for k, v := range jitcss.DefaultConfig.Colors {
 		config.Colors[k] = v
@@ -54,6 +64,9 @@ func buildJitcssConfig(cfg value.Value) *jitcss.Config {
 	}
 	for k, v := range jitcss.DefaultConfig.ShadowLevels {
 		config.ShadowLevels[k] = v
+	}
+	for k, v := range jitcss.DefaultConfig.FontFamily {
+		config.FontFamily[k] = v
 	}
 
 	m := cfg.Map()
@@ -103,6 +116,24 @@ func parseTheme(config *jitcss.Config, m map[string]value.Value) {
 			}
 		}
 	}
+	if ffVal, ok := m["fontFamily"]; ok && ffVal.IsMap() {
+		for name, v := range ffVal.Map() {
+			var parts []string
+			switch {
+			case v.K == value.Array:
+				for _, e := range v.Array() {
+					if e.IsString() {
+						parts = append(parts, quoteFamily(e.String()))
+					}
+				}
+			case v.IsString():
+				parts = append(parts, quoteFamily(v.String()))
+			}
+			if len(parts) > 0 {
+				config.FontFamily[name] = strings.Join(parts, ", ")
+			}
+		}
+	}
 	if shadowVal, ok := m["boxShadow"]; ok && shadowVal.IsMap() {
 		for name, v := range shadowVal.Map() {
 			if v.IsString() {
@@ -148,4 +179,13 @@ func buildKeyframeCSS(stagesMap map[string]value.Value) string {
 		sb.WriteString("\t}\n")
 	}
 	return sb.String()
+}
+
+// quoteFamily quotes a family name that contains spaces, as CSS requires: Plus Jakarta Sans is
+// only a valid font-family value written as "Plus Jakarta Sans".
+func quoteFamily(name string) string {
+	if strings.ContainsAny(name, " ") && !strings.HasPrefix(name, "'") && !strings.HasPrefix(name, "\"") {
+		return "'" + name + "'"
+	}
+	return name
 }

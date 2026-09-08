@@ -44,12 +44,15 @@ func (c *Context) Error(v value.Value) {
 func (c *Context) Params(key string) value.Value { return c.request.Params(key) }
 func (c *Context) Query(key string) value.Value  { return c.request.Query(key) }
 
-func (c *Context) Path() value.Value           { return c.request.Path() }
-func (c *Context) Method() value.Value         { return c.request.Method() }
-func (c *Context) Host() value.Value           { return c.request.Host() }
-func (c *Context) IP() value.Value             { return c.request.IP() }
-func (c *Context) Body() value.Value           { return c.request.Body() }
-func (c *Context) JSONBody() value.Value       { return c.request.JSON() }
+func (c *Context) Path() value.Value     { return c.request.Path() }
+func (c *Context) Method() value.Value   { return c.request.Method() }
+func (c *Context) Host() value.Value     { return c.request.Host() }
+func (c *Context) IP() value.Value       { return c.request.IP() }
+func (c *Context) Body() value.Value     { return c.request.Body() }
+func (c *Context) JSONBody() value.Value { return c.request.JSON() }
+func (c *Context) JSONBodyLimit(limit int) value.Value {
+	return c.request.JSONLimit(limit)
+}
 func (c *Context) Header(k string) value.Value { return c.request.Header(k) }
 func (c *Context) Headers() value.Value        { return c.request.Headers() }
 func (c *Context) UserAgent() value.Value      { return c.request.UserAgent() }

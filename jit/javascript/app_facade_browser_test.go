@@ -33,6 +33,40 @@ func TestCanonicalAppClosesOnlyAuthoredServiceGraph(t *testing.T) {
 	}
 }
 
+func TestApp110SelectsSealedMobileServicesWithoutAuthoredActions(t *testing.T) {
+	composer, err := NewDefaultComposer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := composer.ComposeStandalone([]ComponentRef{{Name: "app", Version: "1.1.0"}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"capabilities", "device", "files", "network", "secureStorage", "shell"} {
+		if !bytes.Contains(bundle.JavaScript, []byte(`services["`+name+`"] = "1.0.0";`)) {
+			t.Errorf("app@1.1.0 graph omitted sealed %s@1.0.0", name)
+		}
+		if !bytes.Contains(bundle.JavaScript, []byte(`grants["app"]["`+name+`"] = "1.0.0";`)) {
+			t.Errorf("app@1.1.0 graph omitted sealed %s dependency", name)
+		}
+		if bytes.Contains(bundle.JavaScript, []byte(`actions["`+name+`"]["`)) {
+			t.Errorf("sealed %s escaped into the authored action manifest", name)
+		}
+		if appGrantsAuthoredService("1.1.0", name) {
+			t.Errorf("sealed %s escaped into scanner authored policy", name)
+		}
+	}
+	for _, expression := range []string{
+		`<main data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.device.info()"></button></main>`,
+		`<main data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.files.release(value)"></button></main>`,
+		`<main data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.secureStorage.get('key')"></button></main>`,
+	} {
+		if _, err := composer.ComposeHTML([]byte(expression)); err == nil {
+			t.Fatalf("authored HTML gained a sealed mobile service through %s", expression)
+		}
+	}
+}
+
 func TestAppFacadeGraphAndActionsAffectArtifactIdentity(t *testing.T) {
 	storage := storageServicePackage(t)
 	storage.Actions = []string{"set"}

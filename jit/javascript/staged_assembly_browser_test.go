@@ -203,7 +203,7 @@ func TestStagedComponentTransactionBrowserContract(t *testing.T) {
 		Services:   []Service{storage},
 		Components: []ComponentPackage{
 			{Name: "app", Version: "1.0.0", Source: appSource},
-			{Name: "beta", Version: "1.0.0", Source: []byte("; globalThis.__betaInstallerRuns = (globalThis.__betaInstallerRuns || 0) + 1;\nglobalThis.__betaCapturedKit = kit;\nglobalThis.__betaGraphAtInstall = kit[Symbol.for(\"kitjs:graph\")].artifact;\nkit.component(\"beta\", { value: \"beta\" });\n")},
+			{Name: "beta", Version: "1.0.0", Source: []byte("; globalThis.__betaInstallerRuns = (globalThis.__betaInstallerRuns || 0) + 1;\nglobalThis.__betaCapturedKit = kit;\nglobalThis.__betaGraphAtInstall = kit[Symbol.for(\"kitjs:graph\")].artifact;\nglobalThis.__betaAssemblyAtInstall = document[Symbol.for(\"kitjs:assembly\")];\nglobalThis.__betaRawHostAtInstall = document[Symbol.for(\"kitwork:native:host:v1\")];\nglobalThis.__betaDispatcherAtInstall = globalThis.__betaAssemblyAtInstall && globalThis.__betaAssemblyAtInstall.nativeHost;\nkit.component(\"beta\", { value: \"beta\" });\n")},
 		},
 		ComponentRequires: []ComponentServiceRequirement{
 			{Component: "app", Service: ServiceVersion{Name: "storage", Version: "1.0.0"}},
@@ -388,6 +388,10 @@ document.addEventListener("DOMContentLoaded", function () {
     assert(globalThis.__betaCapturedKit === globalThis.kit &&
       globalThis.__betaGraphAtInstall === expectedGraph.hash,
       "component closure did not receive canonical kit with the target graph");
+    assert(globalThis.__betaAssemblyAtInstall === undefined &&
+      globalThis.__betaRawHostAtInstall === undefined &&
+      globalThis.__betaDispatcherAtInstall === undefined,
+      "handoff tenant installer captured a private native dispatcher");
     assert(rollback() === true && rollback() === false, "rollback is not idempotent");
     assert(globalThis.kit[GRAPH] === originalGraph && core.delivery === originalDelivery &&
       core.registry.has("alpha") && !core.registry.has("beta") && core.compiled.has("before-handoff"),
