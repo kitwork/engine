@@ -164,6 +164,15 @@ func twColor(colorName, shade string, cfg *Config) string {
 		return hex
 	}
 
+	// Code-surface colours: terminal, terminal-bar, terminal-keyword … resolve
+	// through router.highlight(). They are answered HERE, below Colors, so a
+	// token spelled out in router.css() still wins — the config stays the last
+	// word — and above the Tailwind families, so `terminal` is never mistaken
+	// for one.
+	if color, ok := highlightColor(colorName, cfg); ok {
+		return color.String()
+	}
+
 	// Tailwind family without an explicit shade → default to the 500 shade (Tailwind's
 	// behavior for `bg-blue` etc., though v3 usually requires a shade).
 	if fam, ok := TwPalette[colorName]; ok {

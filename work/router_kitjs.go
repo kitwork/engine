@@ -16,6 +16,17 @@ import (
 //	router.jitjs(true)
 //	router.jitjs(false)
 //	router.jitjs({ components: { counter: { version: "1.0.0", source: "./components/counter.js" } } })
+// Javascript is the current name for staged client delivery. The house rule is
+// no abbreviations, and "js" is one — where "css" is the language's own name,
+// not a shortening of anything. Jitjs stays as a deprecated alias so existing
+// sites keep working.
+//
+//	router.javascript()
+//	router.javascript({ components: { counter: { version: "1.0.0", source: "./components/counter.js" } } })
+func (f *FolderRouter) Javascript(args ...value.Value) (*FolderRouter, error) {
+	return f.Jitjs(args...)
+}
+
 func (f *FolderRouter) Jitjs(args ...value.Value) (*FolderRouter, error) {
 	if len(args) > 1 {
 		return f, fmt.Errorf("router.jitjs expects zero arguments or one boolean or options object")
