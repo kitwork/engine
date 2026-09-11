@@ -31,7 +31,7 @@ var Registry = []Pattern{
 	{`^(w|h|max-w|min-w|max-h|min-h)-([\d.]+|full|screen|auto|fit|min|max|\d+/\d+|\[.+?\]|[a-z0-9-]+)$`, "tw-sizing"},
 	// ring-* must come before the colour patterns: `ring-offset-canvas` would otherwise be read as the
 	// colour "offset-canvas". Width/inset/offset compose a box-shadow from CSS variables; the colour
-	// forms below only set --tw-ring-color, never box-shadow directly.
+	// forms below only set --kitwork-ring-color, never box-shadow directly.
 	{`^ring$`, "tw-ring-width"},
 	{`^ring-(\d+)$`, "tw-ring-width"},
 	{`^ring-inset$`, "tw-ring-inset"},
@@ -102,8 +102,9 @@ var Registry = []Pattern{
 	{"^caret-([a-z][a-z-]*)$", "tw-caret-base"},
 	{`^placeholder-([a-z]+)-(\d+)(?:/(\d+|\[.+?\]))?$`, "tw-placeholder-shade"},
 	{`^placeholder-([a-z][a-z-]*)(?:/(\d+|\[.+?\]))?$`, "tw-placeholder-base"},
-	// Filters compose through --tw-* variables exactly as Tailwind does, so `blur-sm grayscale`
-	// keeps both instead of the second `filter:` declaration silently replacing the first.
+	// Filters compose through --kitwork-* variables the way Tailwind composes through its own, so
+	// `blur-sm grayscale` keeps both instead of the second `filter:` declaration silently replacing
+	// the first.
 	{"^filter$", "tw-filter"},
 	{"^filter-none$", "tw-filter-none"},
 	{"^(grayscale|invert|sepia)(?:-(0))?$", "tw-filter-toggle"},
@@ -118,6 +119,13 @@ var Registry = []Pattern{
 	{`^(bg|text|border|ring|outline|decoration|accent|fill|stroke)-([a-z]+)-(\d+)(?:/(\d+|\[.+?\]))?$`, "tw-color-shade"},
 	{`^(bg|text|border|ring|outline|decoration|accent|fill|stroke)-([a-z][a-z-]*)(?:/(\d+|\[.+?\]))?$`, "tw-color-base"},
 	{`^(bg|text|border|decoration|accent|ring|outline|divide|fill|stroke|caret|placeholder|shadow)-\[(#[0-9a-fA-F]+)\](?:/(\d+|\[[\d.]+\]))?$`, "tw-color-arbitrary"},
+	// bg-[…] that is NOT a colour. Tailwind resolves this class by inspecting the
+	// value — url() and the gradient functions are images, a colour is a colour —
+	// and only the colour half existed, so a gradient produced no rule at all.
+	// Listed after the hex rule so colours are still claimed there first; the
+	// handler answers only shapes it can type with certainty and returns nothing
+	// for the rest, which is what they already got.
+	{`^bg-\[(.+)\]$`, "tw-bg-arbitrary"},
 	// gradients
 	{`^bg-gradient-to-(t|b|l|r|tl|tr|bl|br)$`, "tw-gradient-dir"},
 	{`^(from|via|to)-([a-z]+)-(\d+)(?:/(\d+|\[.+?\]))?$`, "tw-gradient-stop"},

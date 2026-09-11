@@ -43,11 +43,11 @@ func rgbWrap(col string) string {
 func gradientStop(pos, color string) string {
 	switch pos {
 	case "from":
-		return fmt.Sprintf("--tw-gradient-from: %s; --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, transparent);", color)
+		return fmt.Sprintf("--kitwork-gradient-from: %s; --kitwork-gradient-stops: var(--kitwork-gradient-from), var(--kitwork-gradient-to, transparent);", color)
 	case "via":
-		return fmt.Sprintf("--tw-gradient-stops: var(--tw-gradient-from), %s, var(--tw-gradient-to, transparent);", color)
+		return fmt.Sprintf("--kitwork-gradient-stops: var(--kitwork-gradient-from), %s, var(--kitwork-gradient-to, transparent);", color)
 	case "to":
-		return fmt.Sprintf("--tw-gradient-to: %s;", color)
+		return fmt.Sprintf("--kitwork-gradient-to: %s;", color)
 	}
 	return ""
 }
@@ -269,4 +269,36 @@ func colorCSSValue(name, shade, alpha string, cfg *Config) string {
 		return fmt.Sprintf("rgba(%s, %.2f)", expr, float64(mustInt(alpha))/100.0)
 	}
 	return fmt.Sprintf("rgb(%s)", expr)
+}
+
+// unescapeArbitrary applies Tailwind's spacing rule to the INSIDE of an
+// arbitrary value: an underscore stands for a space, and `\_` for a literal
+// underscore — which a url() path may well contain.
+func unescapeArbitrary(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		switch {
+		case value[i] == '\\' && i+1 < len(value) && value[i+1] == '_':
+			b.WriteByte('_')
+			i++
+		case value[i] == '_':
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(value[i])
+		}
+	}
+	return b.String()
+}
+
+// isGradientValue reports whether an arbitrary background value opens with one
+// of the CSS gradient functions, including a multi-layer list — the first layer
+// decides, since every layer of a background-image list is an image.
+func isGradientValue(value string) bool {
+	for _, fn := range [...]string{"linear-gradient(", "radial-gradient(", "conic-gradient(",
+		"repeating-linear-gradient(", "repeating-radial-gradient(", "repeating-conic-gradient("} {
+		if strings.HasPrefix(value, fn) {
+			return true
+		}
+	}
+	return false
 }

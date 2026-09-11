@@ -39,7 +39,7 @@ func TestThemeKeysAreActuallyUsed(t *testing.T) {
 	// shadow-<colour> must still work: the size pattern now matches the same shape, so it has to
 	// step aside for a name it does not own.
 	cfg.Colors = map[string]Color{"brand": Hex("#635bff")}
-	if css, _, _ := ResolveCore("shadow-brand", &cfg); !strings.Contains(css, "--tw-shadow-color") {
+	if css, _, _ := ResolveCore("shadow-brand", &cfg); !strings.Contains(css, "--kitwork-shadow-color") {
 		t.Errorf("shadow-brand → %q, want a shadow colour", css)
 	}
 }
@@ -51,8 +51,8 @@ func TestArbitraryColourReach(t *testing.T) {
 	cfg := DefaultConfig
 	for _, c := range []struct{ cls, want string }{
 		{"outline-[#e8173a]", "outline-color: #e8173a;"},
-		{"ring-[#e8173a]", "--tw-ring-color: #e8173a;"},
-		{"shadow-[#e8173a]/20", "--tw-shadow-color: #e8173a33;"},
+		{"ring-[#e8173a]", "--kitwork-ring-color: #e8173a;"},
+		{"shadow-[#e8173a]/20", "--kitwork-shadow-color: #e8173a33;"},
 		{"stroke-[#365047]", "stroke: #365047;"},
 		{"fill-[#365047]", "fill: #365047;"},
 		{"bg-[#e8173a]/[0.02]", "background-color: #e8173a05;"},

@@ -26,8 +26,8 @@ func TestV3UtilitiesEmitTheRightDeclaration(t *testing.T) {
 		{"resize-y", "resize: vertical;"},
 		{"resize-none", "resize: none;"},
 		{"scroll-smooth", "scroll-behavior: smooth;"},
-		{"snap-x", "scroll-snap-type: x var(--tw-scroll-snap-strictness);"},
-		{"snap-mandatory", "--tw-scroll-snap-strictness: mandatory;"},
+		{"snap-x", "scroll-snap-type: x var(--kitwork-scroll-snap-strictness);"},
+		{"snap-mandatory", "--kitwork-scroll-snap-strictness: mandatory;"},
 		{"snap-start", "scroll-snap-align: start;"},
 		{"flex-col-reverse", "flex-direction: column-reverse;"},
 		{"flex-wrap-reverse", "flex-wrap: wrap-reverse;"},
@@ -56,7 +56,7 @@ func TestV3UtilitiesEmitTheRightDeclaration(t *testing.T) {
 		{"hyphens-auto", "hyphens: auto;"},
 		{"isolation-auto", "isolation: auto;"},
 		{"divide-dashed", "border-style: dashed;"},
-		{"space-x-reverse", "--tw-space-x-reverse: 1;"},
+		{"space-x-reverse", "--kitwork-space-x-reverse: 1;"},
 	}
 	cfg := DefaultConfig
 	for _, c := range cases {
@@ -73,13 +73,13 @@ func TestV3UtilitiesEmitTheRightDeclaration(t *testing.T) {
 func TestFiltersComposeInsteadOfOverwriting(t *testing.T) {
 	cfg := DefaultConfig
 	for _, c := range []struct{ cls, slot string }{
-		{"grayscale", "--tw-grayscale: grayscale(100%)"},
-		{"grayscale-0", "--tw-grayscale: grayscale(0)"},
-		{"invert", "--tw-invert: invert(100%)"},
-		{"saturate-150", "--tw-saturate: saturate(1.5)"},
-		{"brightness-110", "--tw-brightness: brightness(1.1)"},
-		{"hue-rotate-15", "--tw-hue-rotate: hue-rotate(15deg)"},
-		{"drop-shadow-sm", "--tw-drop-shadow: drop-shadow(0 1px 1px rgb(0 0 0 / 0.05))"},
+		{"grayscale", "--kitwork-grayscale: grayscale(100%)"},
+		{"grayscale-0", "--kitwork-grayscale: grayscale(0)"},
+		{"invert", "--kitwork-invert: invert(100%)"},
+		{"saturate-150", "--kitwork-saturate: saturate(1.5)"},
+		{"brightness-110", "--kitwork-brightness: brightness(1.1)"},
+		{"hue-rotate-15", "--kitwork-hue-rotate: hue-rotate(15deg)"},
+		{"drop-shadow-sm", "--kitwork-drop-shadow: drop-shadow(0 1px 1px rgb(0 0 0 / 0.05))"},
 	} {
 		css, _, _ := ResolveCore(c.cls, &cfg)
 		if !strings.Contains(css, c.slot) {

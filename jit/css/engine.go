@@ -693,10 +693,11 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if neg {
 			val = "-" + val
 		}
+		slot := "--kitwork-translate-y"
 		if m[2] == "x" {
-			return "transform: translateX(" + val + ");"
+			slot = "--kitwork-translate-x"
 		}
-		return "transform: translateY(" + val + ");"
+		return slot + ": " + val + "; transform: " + transformChain + ";"
 	case "tw-sizing":
 		propMap := map[string]string{"w": "width", "h": "height", "max-w": "max-width", "min-w": "min-width", "max-h": "max-height", "min-h": "min-height"}
 		prop := propMap[m[1]]
@@ -731,7 +732,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-color-shade":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",
-			"ring": "--tw-ring-color", "outline": "outline-color",
+			"ring": "--kitwork-ring-color", "outline": "outline-color",
 			"decoration": "text-decoration-color", "accent": "accent-color",
 			"fill": "fill", "stroke": "stroke",
 		}
@@ -759,7 +760,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-color-base":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",
-			"ring": "--tw-ring-color", "outline": "outline-color",
+			"ring": "--kitwork-ring-color", "outline": "outline-color",
 			"decoration": "text-decoration-color", "accent": "accent-color",
 			"fill": "fill", "stroke": "stroke",
 		}
@@ -807,6 +808,22 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return fmt.Sprintf("%s: rgba(%s, %.2f);", prop, colorExpr, float64(mustInt(alpha))/100.0)
 		}
 		return fmt.Sprintf("%s: rgb(%s);", prop, colorExpr)
+	case "tw-bg-arbitrary":
+		value := unescapeArbitrary(m[1])
+		switch {
+		case strings.HasPrefix(value, "url(") || isGradientValue(value):
+			return "background-image: " + value + ";"
+		case strings.HasPrefix(value, "image:"), strings.HasPrefix(value, "url:"):
+			return "background-image: " + value[strings.Index(value, ":")+1:] + ";"
+		case strings.HasPrefix(value, "length:"), strings.HasPrefix(value, "size:"):
+			return "background-size: " + value[strings.Index(value, ":")+1:] + ";"
+		case strings.HasPrefix(value, "position:"):
+			return "background-position: " + value[len("position:"):] + ";"
+		}
+		// Anything else is ambiguous — a bare length could be a size or a
+		// position, a bare word could be either too. Guessing would silently
+		// paint the wrong property, so it stays unclaimed, exactly as before.
+		return ""
 	case "tw-color-arbitrary":
 		propMap := map[string]string{
 			"bg": "background-color", "text": "color", "border": "border-color",
@@ -815,7 +832,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			"caret": "caret-color", "placeholder": "color",
 			// ring and shadow colour a composed box-shadow, so they set the variable the chain
 			// reads instead of writing box-shadow themselves.
-			"ring": "--tw-ring-color", "shadow": "--tw-shadow-color",
+			"ring": "--kitwork-ring-color", "shadow": "--kitwork-shadow-color",
 		}
 		prop, known := propMap[m[1]]
 		if !known {
@@ -834,7 +851,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-gradient-dir":
 		dirs := map[string]string{"t": "to top", "b": "to bottom", "l": "to left", "r": "to right",
 			"tl": "to top left", "tr": "to top right", "bl": "to bottom left", "br": "to bottom right"}
-		return fmt.Sprintf("background-image: linear-gradient(%s, var(--tw-gradient-stops));", dirs[m[1]])
+		return fmt.Sprintf("background-image: linear-gradient(%s, var(--kitwork-gradient-stops));", dirs[m[1]])
 	case "tw-gradient-stop": // from/via/to-<family>-<shade>[/alpha]
 		alpha := ""
 		if len(m) > 4 {
@@ -899,25 +916,25 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if len(m) > 1 && m[1] != "" {
 			width = m[1]
 		}
-		return "--tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(" + width +
-			"px + var(--tw-ring-offset-width)) var(--tw-ring-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);"
+		return "--kitwork-ring-shadow: var(--kitwork-ring-inset) 0 0 0 calc(" + width +
+			"px + var(--kitwork-ring-offset-width)) var(--kitwork-ring-color); box-shadow: var(--kitwork-ring-offset-shadow), var(--kitwork-ring-shadow), var(--kitwork-shadow);"
 	case "tw-ring-inset":
-		return "--tw-ring-inset: inset;"
+		return "--kitwork-ring-inset: inset;"
 	case "tw-ring-offset-width":
-		return "--tw-ring-offset-width: " + m[1] + "px; --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 " +
-			m[1] + "px var(--tw-ring-offset-color); box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);"
+		return "--kitwork-ring-offset-width: " + m[1] + "px; --kitwork-ring-offset-shadow: var(--kitwork-ring-inset) 0 0 0 " +
+			m[1] + "px var(--kitwork-ring-offset-color); box-shadow: var(--kitwork-ring-offset-shadow), var(--kitwork-ring-shadow), var(--kitwork-shadow);"
 	case "tw-ring-offset-shade":
 		v := colorCSSValue(m[1], m[2], m[3], cfg)
 		if v == "" {
 			return ""
 		}
-		return "--tw-ring-offset-color: " + v + ";"
+		return "--kitwork-ring-offset-color: " + v + ";"
 	case "tw-ring-offset-base":
 		v := colorCSSValue(m[1], "", m[2], cfg)
 		if v == "" {
 			return ""
 		}
-		return "--tw-ring-offset-color: " + v + ";"
+		return "--kitwork-ring-offset-color: " + v + ";"
 	case "tw-stroke-width": // SVG stroke thickness — stroke-2 / stroke-[1.5]
 		return "stroke-width: " + m[1] + ";"
 	case "tw-border-side-shade", "tw-border-side-base": // border-t-<colour>[/alpha]
@@ -949,7 +966,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if strings.HasPrefix(m[1], "[") {
 			return "outline-offset: " + unarb(m[1]) + ";"
 		}
-		if m[0][0] == '-' {
+		if neg {
 			return "outline-offset: -" + m[1] + "px;"
 		}
 		return "outline-offset: " + m[1] + "px;"
@@ -1103,7 +1120,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-inset", "tw-inset-neg":
 		prop := m[1]
 		val := twUnit(m[2])
-		if m[0][0] == '-' {
+		if neg {
 			val = "-" + val
 		}
 		if prop == "inset" {
@@ -1121,20 +1138,20 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
 			val = val[1 : len(val)-1]
 		}
-		if m[0][0] == '-' {
+		if neg {
 			val = "-" + val
 		}
 		return "z-index: " + val + ";"
 	case "tw-shadow":
 		val := m[2]
 		sh := map[string]string{
-			"sm":    "0 1px 2px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))",
-			"":      "0 1px 3px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
-			"md":    "0 4px 6px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 2px 4px -2px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
-			"lg":    "0 10px 15px -3px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 4px 6px -4px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
-			"xl":    "0 20px 25px -5px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 8px 10px -6px var(--tw-shadow-color, rgb(0 0 0 / 0.1))",
-			"2xl":   "0 25px 50px -12px var(--tw-shadow-color, rgb(0 0 0 / 0.25))",
-			"inner": "inset 0 2px 4px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05))",
+			"sm":    "0 1px 2px 0 var(--kitwork-shadow-color, rgb(0 0 0 / 0.05))",
+			"":      "0 1px 3px 0 var(--kitwork-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1))",
+			"md":    "0 4px 6px -1px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1)), 0 2px 4px -2px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1))",
+			"lg":    "0 10px 15px -3px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1)), 0 4px 6px -4px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1))",
+			"xl":    "0 20px 25px -5px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1)), 0 8px 10px -6px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1))",
+			"2xl":   "0 25px 50px -12px var(--kitwork-shadow-color, rgb(0 0 0 / 0.25))",
+			"inner": "inset 0 2px 4px 0 var(--kitwork-shadow-color, rgb(0 0 0 / 0.05))",
 			"none":  "0 0 #0000",
 		}
 		v, ok := sh[val]
@@ -1151,7 +1168,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		// Compose rather than assign: an element carrying both `shadow-md` and `ring-1` would
 		// otherwise keep only whichever rule the stylesheet emitted last.
-		return "--tw-shadow: " + v + "; box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);"
+		return "--kitwork-shadow: " + v + "; box-shadow: var(--kitwork-ring-offset-shadow), var(--kitwork-ring-shadow), var(--kitwork-shadow);"
 	case "tw-shadow-color-shade", "tw-shadow-color-base": // shadow-<colour>[/alpha]
 		var v string
 		if t == "tw-shadow-color-shade" {
@@ -1164,7 +1181,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		}
 		// Only the variable: the geometry stays with shadow-<size>, so `shadow-md shadow-brand/25`
 		// keeps the md offsets and merely recolours them.
-		return "--tw-shadow-color: " + v + ";"
+		return "--kitwork-shadow-color: " + v + ";"
 	case "tw-overflow":
 		prop := m[1]
 		val := m[2]
@@ -1266,15 +1283,16 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if neg {
 			v = "-" + v
 		}
-		return "transform: rotate(" + v + ");"
+		return "--kitwork-rotate: " + v + "; transform: " + transformChain + ";"
 	case "tw-scale":
-		return "transform: scale(" + scaleVal(m[2], neg) + ");"
+		v := scaleVal(m[2], neg)
+		return "--kitwork-scale-x: " + v + "; --kitwork-scale-y: " + v + "; transform: " + transformChain + ";"
 	case "tw-scale-axis":
-		ax := "X"
+		slot := "--kitwork-scale-x"
 		if m[2] == "y" {
-			ax = "Y"
+			slot = "--kitwork-scale-y"
 		}
-		return "transform: scale" + ax + "(" + scaleVal(m[3], neg) + ");"
+		return slot + ": " + scaleVal(m[3], neg) + "; transform: " + transformChain + ";"
 	case "tw-skew":
 		v := m[3]
 		if strings.HasPrefix(v, "[") {
@@ -1285,11 +1303,11 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		if neg {
 			v = "-" + v
 		}
-		ax := "X"
+		slot := "--kitwork-skew-x"
 		if m[2] == "y" {
-			ax = "Y"
+			slot = "--kitwork-skew-y"
 		}
-		return "transform: skew" + ax + "(" + v + ");"
+		return slot + ": " + v + "; transform: " + transformChain + ";"
 	case "tw-origin":
 		return "transform-origin: " + strings.ReplaceAll(m[1], "-", " ") + ";"
 	case "tw-aspect":
@@ -1380,5 +1398,5 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-animate-onhover":
 		return "animation-play-state: paused;"
 	}
-	return buildPropV3(t, m, cfg)
+	return buildPropV3(t, m, neg, cfg)
 }

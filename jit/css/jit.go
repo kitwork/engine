@@ -136,17 +136,45 @@ func buildJITCSS(classes []string, cfg *Config) string {
 			b.WriteString(" --color-" + k + ": " + tokenColors[k].String() + ";")
 		}
 		b.WriteString(" }\n")
+
+		// A token declared as `{ DEFAULT: …, dark: … }` already flattens to `canvas` and
+		// `canvas-dark`, but nothing ever connected the two: a site had to write `dark:bg-canvas-dark`
+		// on every element by hand, and any element that forgot stayed light. Emitting the dark rung
+		// as an override of the SAME variable makes one declaration re-skin the whole page — which is
+		// what the variable indirection above was for. Only tokens that actually declare a dark rung
+		// appear here, so a site with one committed palette pays nothing.
+		darkKeys := make([]string, 0, len(tokenKeys))
+		for _, k := range tokenKeys {
+			if !strings.HasSuffix(k, "-dark") {
+				continue
+			}
+			base := strings.TrimSuffix(k, "-dark")
+			if _, ok := tokenColors[base]; ok {
+				darkKeys = append(darkKeys, base)
+			}
+		}
+		if len(darkKeys) > 0 {
+			selector := ".dark"
+			if cfg != nil && cfg.DarkSelector != "" {
+				selector = cfg.DarkSelector
+			}
+			b.WriteString(selector + " {")
+			for _, base := range darkKeys {
+				b.WriteString(" --color-" + base + ": " + tokenColors[base+"-dark"].String() + ";")
+			}
+			b.WriteString(" }\n")
+		}
 	}
 	b.WriteString("*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor; }\n")
 	// Ring defaults. `ring-*` composes its box-shadow out of these variables, and `shadow-*` composes
 	// through the same chain, so the two can sit on one element instead of overwriting each other.
 	// Every variable must have a value here: a box-shadow referencing an undefined var is invalid and
 	// the browser drops the whole declaration — which is exactly how ring silently rendered nothing.
-	b.WriteString("*, ::before, ::after { --tw-ring-inset: ; --tw-shadow-color: initial; --tw-ring-offset-width: 0px; --tw-ring-offset-color: #fff; --tw-ring-color: rgb(59 130 246 / 0.5); --tw-ring-offset-shadow: 0 0 #0000; --tw-ring-shadow: 0 0 #0000; --tw-shadow: 0 0 #0000; }\n")
+	b.WriteString("*, ::before, ::after { --kitwork-ring-inset: ; --kitwork-shadow-color: initial; --kitwork-ring-offset-width: 0px; --kitwork-ring-offset-color: #fff; --kitwork-ring-color: rgb(59 130 246 / 0.5); --kitwork-ring-offset-shadow: 0 0 #0000; --kitwork-ring-shadow: 0 0 #0000; --kitwork-shadow: 0 0 #0000; }\n")
 	// Filter / backdrop-filter / font-variant-numeric compose the same way: each utility fills one
 	// slot and restates the chain, so `blur-sm grayscale` keeps both. An empty custom property
 	// contributes nothing to the chain, which is what makes the unset slots free.
-	b.WriteString("*, ::before, ::after { --tw-blur: ; --tw-brightness: ; --tw-contrast: ; --tw-grayscale: ; --tw-hue-rotate: ; --tw-invert: ; --tw-saturate: ; --tw-sepia: ; --tw-drop-shadow: ; --tw-backdrop-blur: ; --tw-backdrop-brightness: ; --tw-backdrop-contrast: ; --tw-backdrop-grayscale: ; --tw-backdrop-hue-rotate: ; --tw-backdrop-invert: ; --tw-backdrop-opacity: ; --tw-backdrop-saturate: ; --tw-backdrop-sepia: ; --tw-ordinal: ; --tw-slashed-zero: ; --tw-numeric-figure: ; --tw-numeric-spacing: ; --tw-numeric-fraction: ; --tw-scroll-snap-strictness: proximity; --tw-border-spacing-x: 0; --tw-border-spacing-y: 0; --tw-divide-x-reverse: 0; --tw-divide-y-reverse: 0; --tw-space-x-reverse: 0; --tw-space-y-reverse: 0; --tw-content: \"\"; }\n")
+	b.WriteString("*, ::before, ::after { --kitwork-blur: ; --kitwork-brightness: ; --kitwork-contrast: ; --kitwork-grayscale: ; --kitwork-hue-rotate: ; --kitwork-invert: ; --kitwork-saturate: ; --kitwork-sepia: ; --kitwork-drop-shadow: ; --kitwork-backdrop-blur: ; --kitwork-backdrop-brightness: ; --kitwork-backdrop-contrast: ; --kitwork-backdrop-grayscale: ; --kitwork-backdrop-hue-rotate: ; --kitwork-backdrop-invert: ; --kitwork-backdrop-opacity: ; --kitwork-backdrop-saturate: ; --kitwork-backdrop-sepia: ; --kitwork-ordinal: ; --kitwork-slashed-zero: ; --kitwork-numeric-figure: ; --kitwork-numeric-spacing: ; --kitwork-numeric-fraction: ; --kitwork-translate-x: 0; --kitwork-translate-y: 0; --kitwork-rotate: 0; --kitwork-skew-x: 0; --kitwork-skew-y: 0; --kitwork-scale-x: 1; --kitwork-scale-y: 1; --kitwork-scroll-snap-strictness: proximity; --kitwork-border-spacing-x: 0; --kitwork-border-spacing-y: 0; --kitwork-divide-x-reverse: 0; --kitwork-divide-y-reverse: 0; --kitwork-space-x-reverse: 0; --kitwork-space-y-reverse: 0; --kitwork-content: \"\"; }\n")
 	b.WriteString("html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }\n")
 	b.WriteString("body { margin: 0; line-height: inherit; }\n")
 	b.WriteString("a { color: inherit; text-decoration: inherit; }\n")

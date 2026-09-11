@@ -10,10 +10,24 @@ import (
 // one element. A plain `filter: grayscale(100%)` would silently replace the `filter: blur(4px)` a
 // `blur-sm` next to it emitted, so each utility fills its own slot and then restates the whole chain.
 // The empty defaults live in Preflight; an unset slot contributes nothing.
+//
+// The slots are named `--kitwork-*`, not `--tw-*`. They were `--tw-*` for as long as this file was
+// modelled on Tailwind's implementation, which meant the largest set of custom properties a Kitwork
+// page shipped carried another product's name, next to the `--color-*` tokens this engine did name
+// itself. They are private plumbing — no markup, config or client script reads them, only the code
+// in this package — so the name is ours to choose, and choosing it also removes a real collision:
+// a page that loads a Tailwind build alongside jitcss had two engines writing `--tw-shadow` on `*`.
 const (
-	filterChain   = "var(--tw-blur) var(--tw-brightness) var(--tw-contrast) var(--tw-grayscale) var(--tw-hue-rotate) var(--tw-invert) var(--tw-saturate) var(--tw-sepia) var(--tw-drop-shadow)"
-	backdropChain = "var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)"
-	numericChain  = "var(--tw-ordinal) var(--tw-slashed-zero) var(--tw-numeric-figure) var(--tw-numeric-spacing) var(--tw-numeric-fraction)"
+	filterChain   = "var(--kitwork-blur) var(--kitwork-brightness) var(--kitwork-contrast) var(--kitwork-grayscale) var(--kitwork-hue-rotate) var(--kitwork-invert) var(--kitwork-saturate) var(--kitwork-sepia) var(--kitwork-drop-shadow)"
+	backdropChain = "var(--kitwork-backdrop-blur) var(--kitwork-backdrop-brightness) var(--kitwork-backdrop-contrast) var(--kitwork-backdrop-grayscale) var(--kitwork-backdrop-hue-rotate) var(--kitwork-backdrop-invert) var(--kitwork-backdrop-opacity) var(--kitwork-backdrop-saturate) var(--kitwork-backdrop-sepia)"
+	numericChain  = "var(--kitwork-ordinal) var(--kitwork-slashed-zero) var(--kitwork-numeric-figure) var(--kitwork-numeric-spacing) var(--kitwork-numeric-fraction)"
+	// translate/rotate/scale/skew each used to emit a bare `transform:`, so two of them on one
+	// element meant the second rule simply replaced the first — `hover:-translate-y-1
+	// hover:-rotate-2` lifted without tilting, silently. Each now fills its own slot and restates
+	// the whole chain. Unlike the filter chain these slots cannot be empty: a transform function
+	// given an empty var is invalid and the browser drops the declaration, so Preflight seeds
+	// 0 / 1.
+	transformChain = "translate(var(--kitwork-translate-x), var(--kitwork-translate-y)) rotate(var(--kitwork-rotate)) skewX(var(--kitwork-skew-x)) skewY(var(--kitwork-skew-y)) scaleX(var(--kitwork-scale-x)) scaleY(var(--kitwork-scale-y))"
 )
 
 // pctOrArb turns a Tailwind percentage scale value (150) into a CSS one (1.5); an arbitrary value
@@ -50,7 +64,7 @@ func parseFraction(s string) float64 {
 // rest. They were found by resolving every class token the repo's sites actually use against the
 // engine and listing the ones that produced no CSS at all: the class was written, looked right, and
 // did nothing. buildProp falls through to here so the original switch stays readable.
-func buildPropV3(t string, m []string, cfg *Config) string {
+func buildPropV3(t string, m []string, neg bool, cfg *Config) string {
 	switch t {
 	case "tw-visibility":
 		if m[1] == "invisible" {
@@ -94,9 +108,9 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 		if m[1] == "none" {
 			return "scroll-snap-type: none;"
 		}
-		return fmt.Sprintf("scroll-snap-type: %s var(--tw-scroll-snap-strictness);", m[1])
+		return fmt.Sprintf("scroll-snap-type: %s var(--kitwork-scroll-snap-strictness);", m[1])
 	case "tw-snap-strictness":
-		return "--tw-scroll-snap-strictness: " + m[1] + ";"
+		return "--kitwork-scroll-snap-strictness: " + m[1] + ";"
 	case "tw-snap-align":
 		if m[1] == "align-none" {
 			return "scroll-snap-align: none;"
@@ -109,10 +123,10 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 			return "font-variant-numeric: normal;"
 		}
 		slot := map[string]string{
-			"ordinal": "--tw-ordinal", "slashed-zero": "--tw-slashed-zero",
-			"lining-nums": "--tw-numeric-figure", "oldstyle-nums": "--tw-numeric-figure",
-			"proportional-nums": "--tw-numeric-spacing", "tabular-nums": "--tw-numeric-spacing",
-			"diagonal-fractions": "--tw-numeric-fraction", "stacked-fractions": "--tw-numeric-fraction",
+			"ordinal": "--kitwork-ordinal", "slashed-zero": "--kitwork-slashed-zero",
+			"lining-nums": "--kitwork-numeric-figure", "oldstyle-nums": "--kitwork-numeric-figure",
+			"proportional-nums": "--kitwork-numeric-spacing", "tabular-nums": "--kitwork-numeric-spacing",
+			"diagonal-fractions": "--kitwork-numeric-fraction", "stacked-fractions": "--kitwork-numeric-fraction",
 		}[m[1]]
 		return fmt.Sprintf("%s: %s; font-variant-numeric: %s;", slot, m[1], numericChain)
 	case "tw-float":
@@ -125,13 +139,13 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 		return "border-collapse: " + m[1] + ";"
 	case "tw-border-spacing":
 		v := twUnit(m[1])
-		return fmt.Sprintf("--tw-border-spacing-x: %[1]s; --tw-border-spacing-y: %[1]s; border-spacing: %[1]s %[1]s;", v)
+		return fmt.Sprintf("--kitwork-border-spacing-x: %[1]s; --kitwork-border-spacing-y: %[1]s; border-spacing: %[1]s %[1]s;", v)
 	case "tw-border-spacing-axis":
 		v := twUnit(m[2])
 		if m[1] == "x" {
-			return fmt.Sprintf("--tw-border-spacing-x: %s; border-spacing: %s var(--tw-border-spacing-y);", v, v)
+			return fmt.Sprintf("--kitwork-border-spacing-x: %s; border-spacing: %s var(--kitwork-border-spacing-y);", v, v)
 		}
-		return fmt.Sprintf("--tw-border-spacing-y: %s; border-spacing: var(--tw-border-spacing-x) %s;", v, v)
+		return fmt.Sprintf("--kitwork-border-spacing-y: %s; border-spacing: var(--kitwork-border-spacing-x) %s;", v, v)
 	case "tw-caption":
 		return "caption-side: " + m[1] + ";"
 	case "tw-text-overflow":
@@ -189,7 +203,7 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 		return "will-change: " + m[1] + ";"
 	case "tw-indent":
 		v := twUnit(m[1])
-		if m[0][0] == '-' {
+		if neg {
 			v = "-" + v
 		}
 		return "text-indent: " + v + ";"
@@ -226,11 +240,11 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 	case "tw-divide-style":
 		return "border-style: " + m[1] + ";"
 	case "tw-content-arb":
-		return "--tw-content: " + unarb(m[1]) + "; content: var(--tw-content);"
+		return "--kitwork-content: " + unarb(m[1]) + "; content: var(--kitwork-content);"
 	case "tw-content-none":
-		return "--tw-content: none; content: none;"
+		return "--kitwork-content: none; content: none;"
 	case "tw-reverse":
-		return fmt.Sprintf("--tw-%s-%s-reverse: 1;", m[1], m[2])
+		return fmt.Sprintf("--kitwork-%s-%s-reverse: 1;", m[1], m[2])
 	case "tw-caret-shade", "tw-caret-base":
 		shade, alpha := "", ""
 		if t == "tw-caret-shade" {
@@ -258,11 +272,11 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 		if m[2] == "0" {
 			v = m[1] + "(0)"
 		}
-		return fmt.Sprintf("--tw-%s: %s; filter: %s;", m[1], v, filterChain)
+		return fmt.Sprintf("--kitwork-%s: %s; filter: %s;", m[1], v, filterChain)
 	case "tw-filter-pct":
-		return fmt.Sprintf("--tw-%s: %s(%s); filter: %s;", m[1], m[1], pctOrArb(m[2]), filterChain)
+		return fmt.Sprintf("--kitwork-%s: %s(%s); filter: %s;", m[1], m[1], pctOrArb(m[2]), filterChain)
 	case "tw-filter-hue":
-		return fmt.Sprintf("--tw-hue-rotate: hue-rotate(%s); filter: %s;", degOrArb(m[2], m[0][0] == '-'), filterChain)
+		return fmt.Sprintf("--kitwork-hue-rotate: hue-rotate(%s); filter: %s;", degOrArb(m[2], neg), filterChain)
 	case "tw-drop-shadow":
 		sizes := map[string]string{
 			"":     "drop-shadow(0 1px 2px rgb(0 0 0 / 0.1)) drop-shadow(0 1px 1px rgb(0 0 0 / 0.06))",
@@ -277,17 +291,17 @@ func buildPropV3(t string, m []string, cfg *Config) string {
 		if !ok {
 			v = "drop-shadow(" + unarb(m[1]) + ")"
 		}
-		return fmt.Sprintf("--tw-drop-shadow: %s; filter: %s;", v, filterChain)
+		return fmt.Sprintf("--kitwork-drop-shadow: %s; filter: %s;", v, filterChain)
 	case "tw-backdrop-toggle":
 		v := m[1] + "(100%)"
 		if m[2] == "0" {
 			v = m[1] + "(0)"
 		}
-		return fmt.Sprintf("--tw-backdrop-%s: %s; -webkit-backdrop-filter: %[3]s; backdrop-filter: %[3]s;", m[1], v, backdropChain)
+		return fmt.Sprintf("--kitwork-backdrop-%s: %s; -webkit-backdrop-filter: %[3]s; backdrop-filter: %[3]s;", m[1], v, backdropChain)
 	case "tw-backdrop-pct":
-		return fmt.Sprintf("--tw-backdrop-%s: %s(%s); -webkit-backdrop-filter: %[4]s; backdrop-filter: %[4]s;", m[1], m[1], pctOrArb(m[2]), backdropChain)
+		return fmt.Sprintf("--kitwork-backdrop-%s: %s(%s); -webkit-backdrop-filter: %[4]s; backdrop-filter: %[4]s;", m[1], m[1], pctOrArb(m[2]), backdropChain)
 	case "tw-backdrop-hue":
-		return fmt.Sprintf("--tw-backdrop-hue-rotate: hue-rotate(%s); -webkit-backdrop-filter: %[2]s; backdrop-filter: %[2]s;", degOrArb(m[2], m[0][0] == '-'), backdropChain)
+		return fmt.Sprintf("--kitwork-backdrop-hue-rotate: hue-rotate(%s); -webkit-backdrop-filter: %[2]s; backdrop-filter: %[2]s;", degOrArb(m[2], neg), backdropChain)
 	case "tw-backdrop-filter":
 		return "-webkit-backdrop-filter: " + backdropChain + "; backdrop-filter: " + backdropChain + ";"
 	case "tw-backdrop-filter-none":

@@ -44,7 +44,7 @@ func TestGradientStopShadeWithAlpha(t *testing.T) {
 func TestColouredShadow(t *testing.T) {
 	cfg := catchupCfg()
 	css, _, _ := ResolveCore("shadow-brand/25", &cfg)
-	if !strings.Contains(css, "--tw-shadow-color:") {
+	if !strings.Contains(css, "--kitwork-shadow-color:") {
 		t.Errorf("shadow-brand/25 should set the shadow colour variable, got %q", css)
 	}
 	if strings.Contains(css, "box-shadow:") {
@@ -56,11 +56,11 @@ func TestColouredShadow(t *testing.T) {
 
 	// The size still carries the geometry, and reads the colour variable so the pair composes.
 	size, _, _ := ResolveCore("shadow-md", &cfg)
-	if !strings.Contains(size, "var(--tw-shadow-color") {
+	if !strings.Contains(size, "var(--kitwork-shadow-color") {
 		t.Errorf("shadow-md must read the colour variable so shadow-<colour> can override it: %q", size)
 	}
 	// CONTROL: `md` must be read as a SIZE, not as a colour named "md".
-	if strings.Contains(size, "--tw-shadow-color:") {
+	if strings.Contains(size, "--kitwork-shadow-color:") {
 		t.Errorf("shadow-md was parsed as a colour: %q", size)
 	}
 }
@@ -68,7 +68,7 @@ func TestColouredShadow(t *testing.T) {
 // An ancestor's shadow colour must not inherit into children that never asked for it.
 func TestShadowColourDoesNotInherit(t *testing.T) {
 	css := GenerateJITCached(`<div class="shadow-md">x</div>`, nil)
-	if !strings.Contains(css, "--tw-shadow-color: initial") {
-		t.Error("Preflight must reset --tw-shadow-color, or a coloured shadow leaks to descendants")
+	if !strings.Contains(css, "--kitwork-shadow-color: initial") {
+		t.Error("Preflight must reset --kitwork-shadow-color, or a coloured shadow leaks to descendants")
 	}
 }
