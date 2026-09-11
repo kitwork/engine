@@ -7,11 +7,14 @@ import (
 
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/logger"
+	"github.com/kitwork/engine/work"
 )
 
 type Config struct {
 	Port             int               `json:"port" yaml:"port"`
 	Root             string            `json:"root" yaml:"root"`
+	RootExplicit     bool              `json:"-" yaml:"-"`
+	RootLayout       work.RootLayout   `json:"-" yaml:"-"`
 	Databases        []database.Config `json:"database" yaml:"database"`
 	Domains          []string          `json:"domains" yaml:"domains"`
 	Canonical        string            `json:"canonical" yaml:"canonical"` // "apex" | "www" | "" (off)
@@ -61,9 +64,15 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		cfg.Port = coerceInt(val, 8080)
 	}
 	if val, ok := raw["root"]; ok {
-		if s, ok := val.(string); ok {
-			cfg.Root = s
+		s, ok := val.(string)
+		if !ok {
+			return nil, fmt.Errorf("root must be a string")
 		}
+		if s == "" {
+			return nil, fmt.Errorf("root cannot be empty")
+		}
+		cfg.Root = s
+		cfg.RootExplicit = true
 	}
 	if val, ok := raw["max_energy"]; ok {
 		cfg.MaxEnergy = coerceUint64(val, 10000000)

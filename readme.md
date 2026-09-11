@@ -91,8 +91,8 @@ Host / Engine (Process)
 ### Resource Isolation & Lifecycle Boundaries
 
 - **Host Engine:** Owns listeners, AutoSSL/TLS, signal handling, shared VM pool, and app registry.
-- **App Runtime (`app.Runtime`):** One per tenant identity (`apps/<identity>`). Manages database connections, background tasks (`go(fn)`), cron schedules, and `LifetimeApp` capabilities.
-- **Site Runtime (`site.Runtime`):** One per domain (`apps/<identity>/<domain>`). Maintains persistent response stores, rate limits, and long-lived SSE channels across reloads.
+- **App Runtime (`app.Runtime`):** One per `app/` root or tenant identity (`apps/<identity>`). Manages database connections, background tasks (`go(fn)`), cron schedules, and `LifetimeApp` capabilities.
+- **Site Runtime (`site.Runtime`):** One per domain. In a multi-domain app, sibling `app/<domain>` sites share the root App Runtime; in multi-tenant mode, sites live at `apps/<identity>/<domain>`.
 - **Generation (`site.Generation`):** An immutable, monotonic version snapshot of a site. Owns compiled route bytecode, parsed render plans, `.env` snapshots, and `LifetimeSite` capabilities. Requests pin a generation for their entire lifecycle.
 - **Request Scope (`request.Scope`):** Created per HTTP request. Manages cancellation context, authentication claims, `LifetimeRequest` capability instances, and temporary VM leases.
 - **VM Lease:** Reclaimed stack VMs allocated from `sync.Pool`. VMs carry zero app or site state between requests (`ResetForPool` / `FastReset`).
@@ -281,7 +281,7 @@ server.run().catch((err) => console.log("Host boot error:", err));
 | Method | Type | Description |
 | :--- | :--- | :--- |
 | `.port(number)` | `Number \| String` | Sets host HTTP listening port (default: `8080`). |
-| `.root(path)` | `String` | Root directory containing tenant apps (default: `"apps"`). |
+| `.root(path)` | `String` | Selects `app/` (one app) or `apps/` (multiple tenant identities). When omitted, Kitwork detects the one that exists. |
 | `.hostname(domain)` | `String` | Primary host cluster domain. |
 | `.hotReload(bool)` | `Boolean` | Enables filesystem watcher & instant bytecode replacement. |
 | `.allowLocal(bool)` | `Boolean` | Bypasses ACME/AutoSSL certificate acquisition for offline local dev. |
@@ -293,11 +293,32 @@ server.run().catch((err) => console.log("Host boot error:", err));
 | `.logger(opts)` | `Object` | Configures structured logging: `{ level, format, logfile }`. |
 | `.run(port?)` | `Promise` | Evaluates server manifest and starts network listeners. |
 
+With `allowLocal: true`, a production-shaped local URL resolves without a
+hosts-file entry: `kitwork.io.localhost:8080` serves the `kitwork.io` site.
+Plain `localhost:8080` serves the configured `.hostname(...)`. Existing exact
+`*.localhost` site folders remain compatible, while production keeps exact
+hostname routing and never strips the `.localhost` suffix. Local authorities
+also stay local instead of applying production domain redirects.
+
+The root folder is a contract, not a database-dependent heuristic:
+
+```text
+app/router.kitwork.js                  one app, one site
+app/<domain>/router.kitwork.js         one app, multiple domain sites
+apps/<identity>/<domain>/router.kitwork.js
+                                        multiple isolated tenant apps
+```
+
+All domains under `app/` share one App Runtime and its `_cron/`, `_queue/`,
+`_core/`, and `.data/` resources. Under `apps/`, the identity directory owns
+those resources. If `.root(...)` is omitted and both `app/` and `apps/` exist,
+startup fails with an explicit ambiguity error instead of selecting one.
+
 ---
 
 ## 🚦 Routing, Lifecycle & Parameter Injection
 
-Tenant routes are declared inside `router.kitwork.js` files located within app domain folders (`apps/<identity>/<domain>/router.kitwork.js`).
+Routes are declared in `router.kitwork.js` under the selected app or domain root.
 
 ### Request Handler Injection
 
@@ -455,7 +476,7 @@ Kitwork features built-in Just-In-Time (JIT) presentation compilers that generat
 | **Stack Sentinel** | Execution depth hard-capped at 64 call frames; prevents host goroutine stack overflow. |
 | **SSRF Shield** | Outbound `http` requests block loopback (`127.0.0.1`), private RFC1918 IPs, and AWS metadata endpoints. |
 | **SQL Safety** | Parameterized queries enforced; `.update()` and `.delete()` without `.where()` fail strictly. |
-| **Environment Isolation** | Tenant VMs can only read keys defined in their local `apps/<identity>/<domain>/.env`. |
+| **Environment Isolation** | VMs read only the `.env` inside their resolved `app/`, `app/<domain>`, or `apps/<identity>/<domain>` site root. |
 | **Rate Limiting** | Host-level & tenant-level token bucket rate limiters per IP, User, Browser fingerprint, or endpoint. |
 
 ---

@@ -39,10 +39,14 @@ var cronNodeID = id.Entity()
 
 // appID is the scheduler partition key: the tenant's IDENTITY (the `identity` column of entity) — the
 // "app". Every domain of an app shares one _cron set and one partition, so crons are keyed by identity,
-// not by domain. Single-tenant (flat/sites) layouts have no identity, so they fall back to the domain.
+// not by domain. A root app uses the stable logical identity "app"; legacy flat/sites layouts fall
+// back to the domain.
 func (t *Tenant) appID() string {
 	if t.entity.Identity != "" {
 		return t.entity.Identity
+	}
+	if t.config != nil && t.config.layout.IsSingleApp() {
+		return RootAppIdentity
 	}
 	return t.entity.Domain
 }

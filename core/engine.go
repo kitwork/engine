@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,10 +61,12 @@ func (c *cachedTenant) isExpired(now time.Time, timeout time.Duration) bool {
 type Engine struct {
 	startedAt        time.Time
 	root             string
+	rootLayout       work.RootLayout
 	maxEnergy        uint64
 	hotReload        bool
 	Hostname         string
 	cache            map[string]*cachedTenant
+	localHosts       map[string]string
 	appRuntimes      map[string]*app.Runtime
 	appTenants       map[string]*work.Tenant // identity → app runtime that owns that identity's _cron scheduler
 	appStarting      map[string]struct{}
@@ -112,6 +113,7 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		hotReload:        hotReload,
 		Hostname:         hostname,
 		cache:            make(map[string]*cachedTenant),
+		localHosts:       make(map[string]string),
 		appRuntimes:      make(map[string]*app.Runtime),
 		appTenants:       make(map[string]*work.Tenant),
 		appStarting:      make(map[string]struct{}),
@@ -136,10 +138,17 @@ func appRuntimeKey(identity, domain string) string {
 	return "site:" + domain
 }
 
+func (e *Engine) appRuntimeKey(identity, domain string) string {
+	if e.rootLayout.IsSingleApp() {
+		return "root-app"
+	}
+	return appRuntimeKey(identity, domain)
+}
+
 // appRuntimeLocked returns the host-owned application runtime. The caller must
 // hold e.mu for writing so runtime creation remains a singleton per key.
 func (e *Engine) appRuntimeLocked(identity, domain string) *app.Runtime {
-	key := appRuntimeKey(identity, domain)
+	key := e.appRuntimeKey(identity, domain)
 	if current := e.appRuntimes[key]; current != nil {
 		return current
 	}
@@ -148,13 +157,26 @@ func (e *Engine) appRuntimeLocked(identity, domain string) *app.Runtime {
 	return current
 }
 
-// StartAppSchedulers boots one app runtime per identity that has a non-empty _cron/, EAGERLY at startup.
-// Each app-tenant loads apps/<identity>/_cron and starts a single scheduler for the app — so crons run
-// without waiting for a domain to be hit (routing is lazy) and without one dispatcher per domain. This
-// is the deliberate exception to "no prewarm": a scheduler cannot wait for a request. Call once after
-// the system DB is wired (so the shared-Postgres backend is chosen). Idempotent per identity.
+// StartAppSchedulers eagerly boots one scheduler owner for each app that has
+// _cron/ or _queue/ sources. A root app loads those sources from app/ once;
+// multi-tenant mode loads them once per apps/<identity>. Routing remains lazy,
+// but background clocks cannot wait for a domain request. Call after the system
+// DB is wired so a configured shared backend is selected.
 func (e *Engine) StartAppSchedulers() (started int) {
-	for _, identity := range work.DiscoverAppIdentities(e.root) {
+	identities := work.DiscoverAppIdentities(e.root)
+	switch e.rootLayout {
+	case work.RootLayoutSingle:
+		if !work.HasAppBackgroundSources(e.root, "") {
+			return 0
+		}
+		identities = []string{work.RootAppIdentity}
+	case work.RootLayoutMultiDomain:
+		if !work.HasAppBackgroundSources(e.root, "") {
+			return 0
+		}
+		identities = []string{work.RootAppIdentity}
+	}
+	for _, identity := range identities {
 		e.mu.Lock()
 		if e.closed {
 			e.mu.Unlock()
@@ -170,7 +192,12 @@ func (e *Engine) StartAppSchedulers() (started int) {
 		appRuntime := e.appRuntimeLocked(identity, "")
 		e.mu.Unlock()
 
-		appTenant := work.NewAppTenantWithRuntime(e.root, identity, appRuntime)
+		appTenant := work.NewAppTenantWithRuntimeLayout(
+			e.root,
+			identity,
+			e.rootLayout,
+			appRuntime,
+		)
 		appTenant.SetSearchManager(e.searchManager, e.searchManagerErr)
 		appTenant.SetKitDBNodeManager(e.kitDBNodeManager, e.kitDBNodeErr)
 		appTenant.SetCollectionSearchCanary(e.collectionCanary.Load())
@@ -212,6 +239,21 @@ func (e *Engine) StartAppSchedulers() (started int) {
 // lúc boot, trước khi phục vụ request; nil = tắt.
 func (e *Engine) SetRateLimit(rl *RateLimiter) {
 	e.rateLimiter = rl
+}
+
+// SetRootLayout freezes the root-to-site mapping selected during host boot.
+// Direct embedders that do not call it retain the historical Auto resolver.
+func (e *Engine) SetRootLayout(layout work.RootLayout) error {
+	if !layout.Valid() {
+		return fmt.Errorf("invalid root layout %d", layout)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || len(e.cache) != 0 || len(e.appTenants) != 0 || len(e.appRuntimes) != 0 {
+		return fmt.Errorf("root layout must be set before loading apps or sites")
+	}
+	e.rootLayout = layout
+	return nil
 }
 
 func (e *Engine) SetAuthorizer(authorizer Authorizer) {
@@ -617,9 +659,10 @@ func (e *Engine) prepareTenantCandidate(
 			return nil, setError
 		}
 	}
-	candidate = work.NewTenantWithRuntime(
+	candidate = work.NewTenantWithRuntimeLayout(
 		e.root,
 		hostname,
+		e.rootLayout,
 		appRuntime,
 		siteRuntime,
 		generation,
@@ -750,6 +793,7 @@ func (e *Engine) Close() {
 			apps = append(apps, appRuntime)
 		}
 		e.cache = make(map[string]*cachedTenant)
+		e.localHosts = make(map[string]string)
 		e.appTenants = make(map[string]*work.Tenant)
 		e.appRuntimes = make(map[string]*app.Runtime)
 		e.appStarting = make(map[string]struct{})
@@ -884,7 +928,10 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 		return cached.current(), nil
 	}
 
-	identity := work.ResolveIdentity(e.root, hostname)
+	identity, err := work.ResolveIdentityForLayout(e.root, hostname, e.rootLayout)
+	if err != nil {
+		return nil, err
+	}
 	appRuntime := e.appRuntimeLocked(identity, hostname)
 	siteRuntime, err := appRuntime.Site(e.root, hostname)
 	if err != nil {
@@ -931,6 +978,22 @@ func (e *Engine) Prewarm() (warmed int, failed int) {
 // và lấy thư mục nào chứa marker của tenant — root router (router.kitwork.js). Không còn gì
 // liên quan tới app.kitwork.js: cây filesystem là mô hình duy nhất.
 func (e *Engine) discoverTenants() []string {
+	switch e.rootLayout {
+	case work.RootLayoutSingle:
+		domain := e.Hostname
+		if domain == "" {
+			domain = "localhost"
+		}
+		if info, err := os.Stat(filepath.Join(e.root, work.RouterFileName)); err == nil && !info.IsDir() {
+			return []string{domain}
+		}
+		return nil
+	case work.RootLayoutMultiDomain:
+		return work.DiscoverFlatSites(e.root)
+	case work.RootLayoutMultiTenant:
+		return work.DiscoverTenantDomains(e.root)
+	}
+
 	var domains []string
 	entries, err := os.ReadDir(e.root)
 	if err != nil {
@@ -991,12 +1054,14 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	domain := strings.Split(r.Host, ":")[0]
-	if (domain == "localhost" || domain == "127.0.0.1") && e.Hostname != "" {
-		domain = e.Hostname
+	resolvedHost, err := e.resolveRequestHost(r.Host, work.AllowLocal)
+	if err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
 	}
+	domain := resolvedHost.Domain
 
-	// 2. Domain redirects on the EFFECTIVE domain (after localhost→Hostname mapping),
+	// 2. Domain redirects on the EFFECTIVE domain (after local host resolution),
 	// and BEFORE tenant resolution — a redirect-only domain has no tenant folder.
 	// Order: static config (canonical www↔apex + map) then the system-DB `redirect_to`
 	// column (cached). http→https itself is forced by the :80 ACME fallback.
@@ -1004,9 +1069,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.TLS != nil {
 		scheme = "https"
 	}
-	if target, ok := dom.Target(scheme, domain, r.URL.Path, r.URL.RawQuery, false); ok {
-		http.Redirect(w, r, target, http.StatusMovedPermanently)
-		return
+	if !(work.AllowLocal && resolvedHost.Local) {
+		if target, ok := dom.Target(scheme, domain, r.URL.Path, r.URL.RawQuery, false); ok {
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
 	}
 	if !work.AllowLocal {
 		if to := dom.DBRedirectTarget(domain); to != "" && to != domain {
@@ -1020,9 +1087,11 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	e.runtimeHealth.RecordResolve(time.Since(resolveStarted))
 
 	if err != nil {
+		e.forgetLocalHostResolution(resolvedHost)
 		http.Error(w, err.Error(), 404)
 		return
 	}
+	e.rememberLocalHostResolution(resolvedHost)
 
 	e.mu.RLock()
 	authorizer := e.authorizer

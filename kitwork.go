@@ -90,23 +90,19 @@ func Run(configFile ...string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to process configuration: %w", err)
 	}
-
-	// apps/ is the modern root name (an app = a folder); deployments created before the rename still
-	// have tenants/. When the configured apps/ is missing but the legacy folder exists, follow it —
-	// an old server keeps booting untouched, no config edit required.
-	if cfg.Root == "apps" {
-		if _, err := os.Stat(cfg.Root); os.IsNotExist(err) {
-			if _, err := os.Stat("tenants"); err == nil {
-				fmt.Println("Root apps/ not found — using legacy tenants/ folder")
-				cfg.Root = "tenants"
-			}
-		}
+	if err := resolveRootConfig(cfg); err != nil {
+		return fmt.Errorf("resolve app root: %w", err)
 	}
 
 	// Initialize structured logger
 	logger.InitLogger(cfg.Logger)
 
-	slog.Info("Kitwork Engine starting...", "port", cfg.Port, "root", cfg.Root)
+	slog.Info(
+		"Kitwork Engine starting...",
+		"port", cfg.Port,
+		"root", cfg.Root,
+		"layout", cfg.RootLayout.String(),
+	)
 
 	var systemConnected bool
 	for i := range cfg.Databases {
@@ -117,7 +113,7 @@ func Run(configFile ...string) (err error) {
 		}
 		database.Configs[alias] = dbCfg
 
-		if dbCfg.Alias == "system" {
+		if strings.EqualFold(strings.TrimSpace(dbCfg.Alias), "system") {
 			dbConn, err := dbCfg.Connect()
 			if err != nil {
 				return fmt.Errorf("failed to connect to system database: %w", err)
@@ -148,18 +144,30 @@ func Run(configFile ...string) (err error) {
 	}
 
 	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
-	domain.Allows = cfg.Domains
-	// Single-tenant sites/ convention: every folder under <root>/sites/ is a domain AutoSSL should
-	// serve, with no identity and no DB. Enable the live HostPolicy folder check, and seed the
-	// whitelist from the sites present at boot (the live check also covers ones added later).
-	switch cfg.Root {
-	case "", "./", "../", "/", ".", "..":
-		// standalone: no sites/ root
-	default:
+	domain.Allows = append([]string(nil), cfg.Domains...)
+	domain.SitesDir = ""
+	switch cfg.RootLayout {
+	case work.RootLayoutSingle:
+		if cfg.Hostname != "" {
+			domain.Allows = append(domain.Allows, cfg.Hostname)
+		}
+	case work.RootLayoutMultiDomain:
+		domain.SitesDir = cfg.Root
+		if sites := work.DiscoverFlatSites(cfg.Root); len(sites) > 0 {
+			domain.Allows = append(domain.Allows, sites...)
+			slog.Info("Multi-site domains discovered", "count", len(sites), "dir", domain.SitesDir)
+		}
+	case work.RootLayoutMultiTenant:
+		if sites := work.DiscoverTenantDomains(cfg.Root); len(sites) > 0 {
+			domain.Allows = append(domain.Allows, sites...)
+			slog.Info("Multi-tenant domains discovered", "count", len(sites), "root", cfg.Root)
+		}
+	case work.RootLayoutAuto:
+		// Compatibility mode for explicitly configured legacy roots.
 		domain.SitesDir = filepath.Join(cfg.Root, work.SitesDirName)
 		if sites := work.DiscoverSites(cfg.Root); len(sites) > 0 {
 			domain.Allows = append(domain.Allows, sites...)
-			slog.Info("Single-tenant sites discovered", "count", len(sites), "dir", domain.SitesDir)
+			slog.Info("Legacy sites discovered", "count", len(sites), "dir", domain.SitesDir)
 		}
 	}
 	domain.Configure(cfg.Canonical, cfg.Redirects)
@@ -167,6 +175,9 @@ func Run(configFile ...string) (err error) {
 	// Initialize and run the engine
 	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
 	defer handler.Close()
+	if err := handler.SetRootLayout(cfg.RootLayout); err != nil {
+		return fmt.Errorf("configure app root layout: %w", err)
+	}
 	if directory := bytecodeCacheDirectory(cfg); directory != "" {
 		handler.SetBytecodeCache(directory)
 	}
@@ -279,7 +290,12 @@ func Check(configFile ...string) (core.CheckReport, error) {
 		database.Configs[alias] = dbConfig
 	}
 	work.AllowLocal = cfg.AllowLocal
-	return core.Check(cfg.Root, cfg.MaxEnergy, bytecodeCacheDirectory(cfg)), nil
+	return core.CheckWithLayout(
+		cfg.Root,
+		cfg.MaxEnergy,
+		cfg.RootLayout,
+		bytecodeCacheDirectory(cfg),
+	), nil
 }
 
 // ProfileReport is the static bytecode report returned by Profile.
@@ -358,12 +374,8 @@ func commandConfig(configFile ...string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to process configuration: %w", err)
 	}
-	if cfg.Root == "apps" {
-		if _, statErr := os.Stat(cfg.Root); os.IsNotExist(statErr) {
-			if _, legacyErr := os.Stat("tenants"); legacyErr == nil {
-				cfg.Root = "tenants"
-			}
-		}
+	if err := resolveRootConfig(cfg); err != nil {
+		return nil, fmt.Errorf("resolve app root: %w", err)
 	}
 	return cfg, nil
 }
@@ -380,11 +392,7 @@ func printBanner(cfg *Config, isLocalhost bool) {
 		return fmt.Sprintf("  %s▸%s %s%-7s%s ", red, reset, dim, name, reset)
 	}
 
-	mode, root := "Multi-Tenant", cfg.Root
-	switch cfg.Root {
-	case "", "./", "../", "/", ".", "..":
-		mode, root = "Standalone", "."
-	}
+	mode, root := rootLayoutLabel(cfg.RootLayout), cfg.Root
 
 	fmt.Println("\n" + red + `█   █ █████ █████ █   █  ███  ████  █   █
 █  █    █     █   █   █ █   █ █   █ █  █
@@ -416,4 +424,17 @@ func printBanner(cfg *Config, isLocalhost bool) {
 		}
 	}
 	fmt.Println()
+}
+
+func rootLayoutLabel(layout work.RootLayout) string {
+	switch layout {
+	case work.RootLayoutSingle:
+		return "Single App"
+	case work.RootLayoutMultiDomain:
+		return "Multi-Domain App"
+	case work.RootLayoutMultiTenant:
+		return "Multi-Tenant"
+	default:
+		return "Legacy Auto"
+	}
 }

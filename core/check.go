@@ -62,10 +62,26 @@ type checkTarget struct {
 // path, then retires it without activation. It opens no listener and starts no
 // cron scheduler.
 func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) CheckReport {
+	return CheckWithLayout(
+		root,
+		maxEnergy,
+		work.RootLayoutAuto,
+		bytecodeCacheDirectory...,
+	)
+}
+
+// CheckWithLayout prepares only the source shape selected by host bootstrap.
+// Check remains the compatibility entrypoint for direct engine users.
+func CheckWithLayout(
+	root string,
+	maxEnergy uint64,
+	layout work.RootLayout,
+	bytecodeCacheDirectory ...string,
+) CheckReport {
 	if maxEnergy == 0 {
 		maxEnergy = kitruntime.Limits().DefaultMaxEnergy
 	}
-	targets, discoveryErr := discoverCheckTargets(root)
+	targets, discoveryErr := discoverCheckTargets(root, layout)
 	report := CheckReport{}
 	if discoveryErr != nil {
 		report.Issues = append(report.Issues, CheckIssue{
@@ -78,14 +94,22 @@ func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) Chec
 
 	runtimes := make(map[string]*app.Runtime)
 	appKey := func(identity, domain string) string {
+		if layout.IsSingleApp() {
+			return "root-app"
+		}
 		if identity != "" {
 			return "app:" + identity
 		}
 		return "site:" + domain
 	}
 	identities := make(map[string]struct{})
-	for _, identity := range work.DiscoverAppIdentities(root) {
-		identities[identity] = struct{}{}
+	switch layout {
+	case work.RootLayoutSingle, work.RootLayoutMultiDomain:
+		identities[work.RootAppIdentity] = struct{}{}
+	default:
+		for _, identity := range work.DiscoverAppIdentities(root) {
+			identities[identity] = struct{}{}
+		}
 	}
 
 	for _, target := range targets {
@@ -129,9 +153,10 @@ func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) Chec
 			}
 		}
 
-		tenant := work.NewTenantWithRuntime(
+		tenant := work.NewTenantWithRuntimeLayout(
 			root,
 			target.domain,
+			layout,
 			appRuntime,
 			siteRuntime,
 			generation,
@@ -170,13 +195,17 @@ func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) Chec
 			runtimes[key] = app.NewRuntime(identity)
 			report.Apps++
 		}
-		for _, issue := range work.CheckCronFiles(root, identity) {
+		sourceIdentity := identity
+		if layout.IsSingleApp() {
+			sourceIdentity = ""
+		}
+		for _, issue := range work.CheckCronFiles(root, sourceIdentity) {
 			report.Issues = append(report.Issues, CheckIssue{
 				Stage: "cron compile", Identity: identity,
 				File: issue.File, Err: issue.Err,
 			})
 		}
-		for _, issue := range work.CheckQueueFiles(root, identity) {
+		for _, issue := range work.CheckQueueFiles(root, sourceIdentity) {
 			report.Issues = append(report.Issues, CheckIssue{
 				Stage: "queue compile", Identity: identity,
 				File: issue.File, Err: issue.Err,
@@ -228,7 +257,39 @@ func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) Chec
 	return report
 }
 
-func discoverCheckTargets(root string) ([]checkTarget, error) {
+func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarget, error) {
+	layout := work.RootLayoutAuto
+	if len(layouts) > 0 {
+		layout = layouts[0]
+	}
+	if layout == work.RootLayoutSingle {
+		var targets []checkTarget
+		file := filepath.Join(root, work.RouterFileName)
+		if info, err := os.Stat(file); err == nil && !info.IsDir() {
+			targets = append(targets, checkTarget{
+				identity: work.RootAppIdentity,
+				domain:   "localhost",
+				file:     file,
+			})
+		}
+		return targets, nil
+	}
+	if layout == work.RootLayoutMultiTenant {
+		sites, err := work.DiscoverTenantSites(root)
+		if err != nil {
+			return nil, err
+		}
+		targets := make([]checkTarget, 0, len(sites))
+		for _, site := range sites {
+			targets = append(targets, checkTarget{
+				identity: site.Identity,
+				domain:   site.Domain,
+				file:     filepath.Join(site.Directory, work.RouterFileName),
+			})
+		}
+		return targets, nil
+	}
+
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
@@ -252,6 +313,10 @@ func discoverCheckTargets(root string) ([]checkTarget, error) {
 		}
 		name := entry.Name()
 		first := filepath.Join(root, name)
+		if layout == work.RootLayoutMultiDomain {
+			add(work.RootAppIdentity, name, first)
+			continue
+		}
 		if name == work.SitesDirName {
 			children, readErr := os.ReadDir(first)
 			if readErr != nil {

@@ -20,10 +20,11 @@ func (t *Tenant) preparePathBoundaries() error {
 
 // insideAppRoot reports whether an ALREADY-RESOLVED path stays inside this tenant's app.
 //
-// The boundary is the IDENTITY root (apps/<identity>/), not the domain folder, because
-// STABILITY.md §1 scopes isolation to the app's identity: sibling domains of the same app and
-// identity-level shares such as _core/ are legitimately reachable, while another app's files are
-// never reachable. Single-tenant layouts have no identity, so the domain folder is the boundary.
+// The boundary is app/ or apps/<identity>/, not a domain folder, because
+// STABILITY.md section 1 scopes isolation to the app: sibling domains and
+// app-level shares such as _core/ are legitimately reachable, while another
+// app's files are never reachable. Legacy layouts retain their resolved
+// compatibility boundary.
 func (t *Tenant) insideAppRoot(resolved string) bool {
 	if t == nil || resolved == "" {
 		return false

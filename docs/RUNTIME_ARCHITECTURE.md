@@ -32,9 +32,24 @@ Host / Engine
 
 ## Filesystem
 
+One app with routes directly at its root:
+
 ```text
-apps/<identity>/
+app/
   _cron/
+  _queue/
+  _core/
+  .data/
+  router.kitwork.js
+  page.kitwork.html
+```
+
+One app with multiple domain-scoped sites:
+
+```text
+app/
+  _cron/
+  _queue/
   _core/
   .data/
   <domain>/
@@ -42,7 +57,54 @@ apps/<identity>/
     page.kitwork.html
 ```
 
-The identity folder is the app boundary. A domain folder is the site boundary.
+Multiple tenant apps:
+
+```text
+apps/<identity>/
+  _cron/
+  _queue/
+  _core/
+  .data/
+  <domain>/
+    router.kitwork.js
+    page.kitwork.html
+```
+
+`app/` is always one app boundary. Its root router selects the direct layout;
+otherwise direct children with root routers are domain boundaries and share one
+AppRuntime. `apps/` always reserves its first directory level for tenant
+identities and its second for domains. The presence of a system database does
+not change either filesystem contract.
+
+When `.root(...)` is omitted, host bootstrap inspects `app/` and `apps/`. It
+selects the only directory present, and rejects the configuration as ambiguous
+when both exist. Explicit `.root("app")` or `.root("apps")` resolves that
+ambiguity. A multi-tenant request prefers the system domain registry when it is
+connected and can resolve an unregistered domain from one unique
+`apps/<identity>/<domain>` source during local or database-free operation.
+
+## Request host resolution
+
+The host normalizes and validates the HTTP Host authority before tenant lookup.
+The browser-visible authority and the canonical site domain are deliberately
+separate: routing, the site-runtime registry, and tenant caches use the
+canonical domain without rewriting `request.Host`.
+
+With local development enabled:
+
+- `localhost`, IPv4 loopback, and IPv6 loopback resolve to the configured
+  primary hostname when one is present;
+- `<domain>.localhost` resolves to `<domain>`, so
+  `kitwork.io.localhost:8080` runs the same `kitwork.io` SiteRuntime;
+- an existing exact `*.localhost` site source has precedence for compatibility;
+- a single label such as `kitwork.localhost` remains literal until an explicit
+  username/alias registry owns that mapping.
+
+Production does not decode the `.localhost` suffix. Malformed authorities are
+rejected before redirect or tenant resolution, and aliases cannot create a
+second runtime or cache owner for one canonical domain. A local authority also
+skips production canonical/domain redirects, so local development cannot be
+redirected accidentally to the public site.
 
 ## Current migration status
 

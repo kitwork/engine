@@ -415,35 +415,47 @@ type Responser struct {
 
 func (t *Tenant) resolve(paths ...string) string {
 	if t.config.base == "" {
-		switch t.config.root {
-		case "", "./", "../", "/", ".", "..":
-			t.config.base = "."
-		default:
-			if t.entity.Identity != "" {
-				t.config.base = filepath.Join(t.config.root, t.entity.Identity, t.entity.Domain)
-			} else {
-				// No identity (single-tenant). Resolve in priority order: the sites/ convention
-				// (root/sites/<domain>), the test layout (root/test/<domain>), then a flat
-				// root/<domain>. Default to flat when none has a root router yet (preserves the
-				// pre-existing behaviour for brand-new tenants).
-				flatPath := filepath.Join(t.config.root, t.entity.Domain)
-				t.config.base = flatPath
-				for _, cand := range []string{
-					filepath.Join(t.config.root, SitesDirName, t.entity.Domain),
-					filepath.Join(t.config.root, "test", t.entity.Domain),
-				} {
-					if _, err := os.Stat(filepath.Join(cand, RouterFileName)); err == nil {
-						t.config.base = cand
-						break
-					}
-				}
-			}
-		}
+		t.config.base = t.resolveBase()
 	}
 	if len(paths) == 0 {
 		return t.config.base
 	}
 	return filepath.Join(append([]string{t.config.base}, paths...)...)
+}
+
+func (t *Tenant) resolveBase() string {
+	root := t.config.root
+	if root == "" {
+		root = "."
+	}
+	switch t.config.layout {
+	case RootLayoutSingle:
+		return root
+	case RootLayoutMultiDomain:
+		return filepath.Join(root, t.entity.Domain)
+	case RootLayoutMultiTenant:
+		return filepath.Join(root, t.entity.Identity, t.entity.Domain)
+	}
+
+	// Historical mixed-layout resolution is retained only for direct users of
+	// work.NewTenant/core.New that have not selected an explicit root layout.
+	switch root {
+	case "./", "../", "/", ".", "..":
+		return "."
+	}
+	if t.entity.Identity != "" {
+		return filepath.Join(root, t.entity.Identity, t.entity.Domain)
+	}
+	flatPath := filepath.Join(root, t.entity.Domain)
+	for _, candidate := range []string{
+		filepath.Join(root, SitesDirName, t.entity.Domain),
+		filepath.Join(root, "test", t.entity.Domain),
+	} {
+		if _, err := os.Stat(filepath.Join(candidate, RouterFileName)); err == nil {
+			return candidate
+		}
+	}
+	return flatPath
 }
 
 // capabilities.Scope interface implementation:
@@ -453,11 +465,13 @@ func (t *Tenant) ResolvePath(paths ...string) string { return t.resolve(paths...
 func (t *Tenant) DB(name string) *sql.DB             { return sqliteFor(t, name).db() }
 func (t *Tenant) RAMStore() httphelper.ResponseStore { return t.fetchRAM() }
 
-// resolveApp resolves a path at the IDENTITY (app) level — apps/<identity>/… — which every domain of
-// the app shares. This is where app-wide infrastructure lives: `_cron` (one schedule set per app),
-// `.data` (the app's scheduler DB), `_core` (shared services). Single-tenant (flat/sites) layouts have
-// no identity layer, so it falls back to the domain level.
+// resolveApp resolves app-wide infrastructure. Root apps own it directly under
+// app/; tenant apps own it under apps/<identity>/. Every domain of that app
+// shares `_cron`, `_queue`, `.data`, and `_core` from this boundary.
 func (t *Tenant) resolveApp(paths ...string) string {
+	if t.config.layout.IsSingleApp() {
+		return filepath.Join(append([]string{t.config.root}, paths...)...)
+	}
 	if t.entity != nil && t.entity.Identity != "" && t.config.root != "" {
 		return filepath.Join(append([]string{t.config.root, t.entity.Identity}, paths...)...)
 	}
@@ -600,9 +614,18 @@ func NewAppTenant(root, identity string) *Tenant {
 }
 
 func NewAppTenantWithRuntime(root, identity string, appRuntime *app.Runtime) *Tenant {
+	return NewAppTenantWithRuntimeLayout(root, identity, RootLayoutAuto, appRuntime)
+}
+
+func NewAppTenantWithRuntimeLayout(
+	root,
+	identity string,
+	layout RootLayout,
+	appRuntime *app.Runtime,
+) *Tenant {
 	return &Tenant{
 		AppScope: AppScope{
-			config: &Config{root: root},
+			config: &Config{root: root, layout: layout},
 			entity: &Entity{Identity: identity, Domain: ""},
 		},
 		SiteScope:  SiteScope{},
@@ -622,19 +645,32 @@ func DiscoverAppIdentities(root string) []string {
 		if !e.IsDir() || e.Name() == SitesDirName || e.Name() == "test" {
 			continue
 		}
-		cronDir := filepath.Join(root, e.Name(), "_cron")
-		files, err := os.ReadDir(cronDir)
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if !f.IsDir() && strings.HasSuffix(f.Name(), ".kitwork.js") {
-				ids = append(ids, e.Name())
-				break
-			}
+		if HasAppBackgroundSources(root, e.Name()) {
+			ids = append(ids, e.Name())
 		}
 	}
 	return ids
+}
+
+// HasAppBackgroundSources reports whether an app scope owns at least one cron
+// or queue entrypoint. It does not compile or execute source.
+func HasAppBackgroundSources(root, identity string) bool {
+	appRoot := root
+	if identity != "" {
+		appRoot = filepath.Join(root, identity)
+	}
+	for _, directory := range []string{"_cron", "_queue"} {
+		files, err := os.ReadDir(filepath.Join(appRoot, directory))
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".kitwork.js") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DiscoverLegacySites reports domain folders that still have the removed flat
@@ -693,6 +729,24 @@ func NewTenantWithRuntime(
 	siteRuntime *site.Runtime,
 	generations ...*site.Generation,
 ) *Tenant {
+	return NewTenantWithRuntimeLayout(
+		root,
+		domain,
+		RootLayoutAuto,
+		appRuntime,
+		siteRuntime,
+		generations...,
+	)
+}
+
+func NewTenantWithRuntimeLayout(
+	root,
+	domain string,
+	layout RootLayout,
+	appRuntime *app.Runtime,
+	siteRuntime *site.Runtime,
+	generations ...*site.Generation,
+) *Tenant {
 	identity := ""
 	if appRuntime != nil {
 		identity = appRuntime.ID()
@@ -705,7 +759,7 @@ func NewTenantWithRuntime(
 	}
 	return &Tenant{
 		AppScope: AppScope{
-			config: &Config{root: root},
+			config: &Config{root: root, layout: layout},
 			entity: &Entity{Identity: identity, Domain: domain},
 		},
 		SiteScope:   SiteScope{},
@@ -718,13 +772,84 @@ func NewTenantWithRuntime(
 }
 
 func ResolveIdentity(root, domain string) string {
+	identity, _ := ResolveIdentityForLayout(root, domain, RootLayoutAuto)
+	return identity
+}
+
+// ResolveIdentityForLayout maps a domain to its physical apps/<identity>
+// owner. app/ layouts have no identity directory. A multi-tenant host prefers
+// its system registry when connected and otherwise resolves the identity from
+// the declared filesystem shape.
+func ResolveIdentityForLayout(root, domain string, layout RootLayout) (string, error) {
+	switch layout {
+	case RootLayoutSingle, RootLayoutMultiDomain:
+		return RootAppIdentity, nil
+	case RootLayoutMultiTenant:
+		if domain == "" {
+			return "", nil
+		}
+		if database.System != nil {
+			identity, err := database.IdentitySystem(domain)
+			if err == nil {
+				identity = strings.TrimSpace(identity)
+				if !validAppIdentity(identity) {
+					return "", fmt.Errorf(
+						"domain %q has invalid system identity %q",
+						domain,
+						identity,
+					)
+				}
+				return identity, nil
+			}
+			if err != sql.ErrNoRows {
+				return "", fmt.Errorf("resolve identity for domain %q: %w", domain, err)
+			}
+		}
+		return findUniqueIdentity(root, domain)
+	}
 	if domain == "" {
-		return ""
+		return "", nil
 	}
 	if dbIdentity, err := database.IdentitySystem(domain); err == nil && dbIdentity != "" {
-		return dbIdentity
+		return dbIdentity, nil
 	}
-	return findIdentity(root, domain)
+	return findIdentity(root, domain), nil
+}
+
+func validAppIdentity(identity string) bool {
+	if identity == "" || identity == "." || identity == ".." ||
+		identity == SitesDirName || identity == "test" ||
+		strings.HasPrefix(identity, ".") || strings.HasPrefix(identity, "_") ||
+		strings.ContainsAny(identity, `/\:`) {
+		return false
+	}
+	return filepath.Base(identity) == identity
+}
+
+func findUniqueIdentity(root, domain string) (string, error) {
+	sites, err := DiscoverTenantSites(root)
+	if err != nil {
+		return "", fmt.Errorf("read multi-tenant root: %w", err)
+	}
+	identity := ""
+	for _, site := range sites {
+		if site.Domain != domain {
+			continue
+		}
+		if identity != "" {
+			return "", fmt.Errorf(
+				"domain %q exists under multiple app identities (%q and %q)",
+				domain,
+				identity,
+				site.Identity,
+			)
+		}
+		identity = site.Identity
+	}
+	if identity == "" {
+		return "", fmt.Errorf("domain %q was not found under apps/<identity>", domain)
+	}
+	return identity, nil
 }
 
 func findIdentity(root, domain string) string {

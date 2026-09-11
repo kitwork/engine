@@ -28,6 +28,7 @@ type Config struct {
 	root     string
 	base     string
 	multiple bool
+	layout   RootLayout
 }
 
 func (t *Tenant) Kitwork(vals ...value.Value) *KitWork { return &KitWork{tenant: t} }
