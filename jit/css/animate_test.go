@@ -8,7 +8,7 @@ import (
 func TestResolveAnimate(t *testing.T) {
 	cases := map[string][]string{
 		"up":       {"animation-name:animate--up", "var(--animate-duration)", "animation-fill-mode:both"},
-		"zoom-out": {"animation-name:animate--zoom-out-enter"}, // class≠keyframe name
+		"zoom-out": {"animation-name:animate--zoom-out", "calc(var(--animate-duration) * 2)"}, // animate.css's exit
 		"spin":     {"animation:animate--spin 1s linear infinite;"},
 		"spin-ccw": {"animate--spin 1s linear infinite reverse"},
 		"wave":     {"animate--wave", "transform-origin:70% 70%", "display:inline-block"},

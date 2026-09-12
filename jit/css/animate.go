@@ -5,33 +5,54 @@ import (
 	"strings"
 )
 
-// animate.go — the JIT animation catalog, vendored from the hand-written animate.css library
-// (Pure CSS Animation Library, MIT). It is the animation counterpart to jiticons/jitfonts: the whole
-// library lives here, but a page ships ONLY the @keyframes it actually uses (see UsedKeyframes).
+// animate.go — jit animate: the whole animation library lives here, but a page ships ONLY the
+// @keyframes it actually uses (see UsedKeyframes). Two families share one utility surface,
+// `animate-<name>`, resolved by the tw-animate case in buildProp via resolveAnimate:
 //
-// Utility surface — `animate-<name>`, resolved by the tw-animate case in buildProp via resolveAnimate:
-//
-//	run-once (entrance/attention/exit): up down left right fade zoom-in zoom-out flip-x flip-y
-//	    roll-in shake wobble heartbeat jello rubber tada fade-out out-up out-down out-left out-right
-//	    zoom-out-exit  — consume the shared --animate-* vars so modifiers COMPOSE regardless of class
-//	    order (custom properties cascade per-element), with fill:both so the final frame sticks.
-//	loop (infinite): spin spin-ccw pulse bounce float ping blink wave — each ships its own timing.
+//	Kitwork's short set — subtle, product-UI motion at 16px / 0.5s with a spring curve:
+//	    run-once: up down left right fade flip-x flip-y heartbeat rubber out-up out-down out-left
+//	    out-right — consume the shared --animate-* vars so modifiers COMPOSE regardless of
+//	    class order (custom properties cascade per-element), with fill:both so the final frame sticks.
+//	    loop (infinite): spin spin-ccw pulse bounce float ping blink wave — each ships its own timing.
+//	    spin, ping, pulse and bounce are Tailwind's names and carry Tailwind's exact motion.
+//	animate.css — the library, vendored whole by vendor_animate.py into animate_catalog_gen.go
+//	    (96 animations: fade-in-up, bounce-in, zoom-out, tada, hinge, …; upstream camelCase → kebab).
+//	    They run at animate.css's pace — twice --animate-duration, so 1s by default — and with the
+//	    browser's `ease` unless a modifier says otherwise, so they look like animate.style.
 //	modifiers: faster fast slow slower · ease-linear ease-in ease-out ease-bounce ease-spring ·
 //	    delay-1..8 · infinite repeat-2 repeat-3 paused running. Duration/easing/delay set the VAR
-//	    (order-independent); iteration/play-state set the property.
+//	    (order-independent) and reach both families; iteration/play-state set the property.
+//	stagger: animate-<run-once>-<N> == that animation with delay step N, for either family.
 //
 // Extend like Tailwind: router.jitcss({ theme:{ extend:{ animation, keyframes } } }) still wins —
 // cfg.Animations is consulted first in tw-animate, and cfg.Keyframes are emitted by UsedKeyframes.
 
+// animateEntry is one vendored animation: its group, its @keyframes block (renamed animate--<name>),
+// the duration factor its upstream class rule applies ("" for 1), and the extra declarations that
+// rule carries beyond animation-name (transform-origin, backface-visibility, a timing function).
+type animateEntry struct {
+	group  string
+	frames string
+	factor string
+	extra  string
+}
+
+// AnimationGroup is one section of the vendored library, in animate.style's order — for galleries.
+type AnimationGroup struct {
+	Name       string
+	Animations []string
+}
+
+// VendoredAnimations returns the animate.css library by group, for docs and galleries.
+func VendoredAnimations() []AnimationGroup { return animateVendoredGroups }
+
 // animateOnce maps a run-once utility name → its @keyframes name.
 var animateOnce = map[string]string{
 	"up": "animate--up", "down": "animate--down", "left": "animate--left", "right": "animate--right",
-	"fade": "animate--fade", "zoom-in": "animate--zoom-in", "zoom-out": "animate--zoom-out-enter",
-	"flip-x": "animate--flip-x", "flip-y": "animate--flip-y", "roll-in": "animate--roll-in",
-	"shake": "animate--shake", "wobble": "animate--wobble", "heartbeat": "animate--heartbeat",
-	"jello": "animate--jello", "rubber": "animate--rubber", "tada": "animate--tada",
-	"fade-out": "animate--fade-out", "out-up": "animate--out-up", "out-down": "animate--out-down",
-	"out-left": "animate--out-left", "out-right": "animate--out-right", "zoom-out-exit": "animate--zoom-out-exit",
+	"fade": "animate--fade", "flip-x": "animate--flip-x", "flip-y": "animate--flip-y",
+	"heartbeat": "animate--heartbeat", "rubber": "animate--rubber",
+	"out-up": "animate--out-up", "out-down": "animate--out-down", "out-left": "animate--out-left",
+	"out-right": "animate--out-right",
 }
 
 // animateLoop maps a loop utility name → its full `animation` shorthand (own timing + infinite).
@@ -71,40 +92,70 @@ var animateDuration = map[string]string{
 // animateFrames holds every @keyframes block, keyed by its @-name. UsedKeyframes emits only the ones
 // a page references. Minified transcription of the animate.css library.
 var animateFrames = map[string]string{
-	"animate--up":             "@keyframes animate--up{from{opacity:0;transform:translateY(var(--animate-distance))}to{opacity:1;transform:translateY(0)}}",
-	"animate--down":           "@keyframes animate--down{from{opacity:0;transform:translateY(calc(-1 * var(--animate-distance)))}to{opacity:1;transform:translateY(0)}}",
-	"animate--left":           "@keyframes animate--left{from{opacity:0;transform:translateX(calc(var(--animate-distance) + 4px))}to{opacity:1;transform:translateX(0)}}",
-	"animate--right":          "@keyframes animate--right{from{opacity:0;transform:translateX(calc(-1 * var(--animate-distance) - 4px))}to{opacity:1;transform:translateX(0)}}",
-	"animate--fade":           "@keyframes animate--fade{from{opacity:0}to{opacity:1}}",
-	"animate--zoom-in":        "@keyframes animate--zoom-in{from{opacity:0;transform:scale(0.88)}to{opacity:1;transform:scale(1)}}",
-	"animate--zoom-out-enter": "@keyframes animate--zoom-out-enter{from{opacity:0;transform:scale(1.12)}to{opacity:1;transform:scale(1)}}",
-	"animate--flip-x":         "@keyframes animate--flip-x{from{opacity:0;transform:perspective(400px) rotateX(-80deg)}60%{opacity:1;transform:perspective(400px) rotateX(10deg)}80%{transform:perspective(400px) rotateX(-5deg)}to{transform:perspective(400px) rotateX(0deg)}}",
-	"animate--flip-y":         "@keyframes animate--flip-y{from{opacity:0;transform:perspective(400px) rotateY(-80deg)}60%{opacity:1;transform:perspective(400px) rotateY(10deg)}80%{transform:perspective(400px) rotateY(-5deg)}to{transform:perspective(400px) rotateY(0deg)}}",
-	"animate--roll-in":        "@keyframes animate--roll-in{from{opacity:0;transform:translateX(-100%) rotate(-120deg)}to{opacity:1;transform:translateX(0) rotate(0deg)}}",
-	"animate--shake":          "@keyframes animate--shake{0%,100%{transform:translateX(0)}10%,30%,50%,70%,90%{transform:translateX(-8px)}20%,40%,60%,80%{transform:translateX(8px)}}",
-	"animate--wobble":         "@keyframes animate--wobble{0%{transform:translateX(0)}15%{transform:translateX(-20px) rotate(-5deg)}30%{transform:translateX(15px) rotate(4deg)}45%{transform:translateX(-10px) rotate(-3deg)}60%{transform:translateX(7px) rotate(2deg)}75%{transform:translateX(-4px) rotate(-1deg)}to{transform:translateX(0)}}",
-	"animate--heartbeat":      "@keyframes animate--heartbeat{0%,100%{transform:scale(1)}14%{transform:scale(1.15)}28%{transform:scale(1)}42%{transform:scale(1.15)}70%{transform:scale(1)}}",
-	"animate--jello":          "@keyframes animate--jello{0%,11%,100%{transform:skewX(0deg) skewY(0deg)}22%{transform:skewX(-12deg) skewY(-12deg)}33%{transform:skewX(10deg) skewY(10deg)}44%{transform:skewX(-6deg) skewY(-6deg)}55%{transform:skewX(4deg) skewY(4deg)}66%{transform:skewX(-2deg) skewY(-2deg)}77%{transform:skewX(1deg) skewY(1deg)}88%{transform:skewX(-0.5deg) skewY(-0.5deg)}}",
-	"animate--rubber":         "@keyframes animate--rubber{0%{transform:scaleX(1) scaleY(1)}30%{transform:scaleX(1.3) scaleY(0.75)}40%{transform:scaleX(0.75) scaleY(1.25)}50%{transform:scaleX(1.15) scaleY(0.85)}65%{transform:scaleX(0.95) scaleY(1.05)}75%{transform:scaleX(1.05) scaleY(0.95)}to{transform:scaleX(1) scaleY(1)}}",
-	"animate--tada":           "@keyframes animate--tada{0%,100%{transform:scale(1) rotate(0deg)}10%,20%{transform:scale(0.9) rotate(-3deg)}30%,50%,70%,90%{transform:scale(1.1) rotate(3deg)}40%,60%,80%{transform:scale(1.1) rotate(-3deg)}}",
-	"animate--fade-out":       "@keyframes animate--fade-out{from{opacity:1}to{opacity:0}}",
-	"animate--out-up":         "@keyframes animate--out-up{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(calc(-1 * var(--animate-distance)))}}",
-	"animate--out-down":       "@keyframes animate--out-down{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(var(--animate-distance))}}",
-	"animate--out-left":       "@keyframes animate--out-left{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(-24px)}}",
-	"animate--out-right":      "@keyframes animate--out-right{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(24px)}}",
-	"animate--zoom-out-exit":  "@keyframes animate--zoom-out-exit{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(0.88)}}",
-	"animate--spin":           "@keyframes animate--spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}",
-	"animate--pulse":          "@keyframes animate--pulse{50%{opacity:.5}}",
-	"animate--bounce":         "@keyframes animate--bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}",
-	"animate--float":          "@keyframes animate--float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}",
-	"animate--ping":           "@keyframes animate--ping{75%,100%{transform:scale(2);opacity:0}}",
-	"animate--blink":          "@keyframes animate--blink{0%,100%{opacity:1}50%{opacity:0}}",
-	"animate--wave":           "@keyframes animate--wave{0%{transform:rotate(0deg)}15%{transform:rotate(14deg)}30%{transform:rotate(-8deg)}40%{transform:rotate(14deg)}50%{transform:rotate(-4deg)}60%{transform:rotate(10deg)}70%{transform:rotate(0deg)}100%{transform:rotate(0deg)}}",
+	"animate--up":        "@keyframes animate--up{from{opacity:0;transform:translateY(var(--animate-distance))}to{opacity:1;transform:translateY(0)}}",
+	"animate--down":      "@keyframes animate--down{from{opacity:0;transform:translateY(calc(-1 * var(--animate-distance)))}to{opacity:1;transform:translateY(0)}}",
+	"animate--left":      "@keyframes animate--left{from{opacity:0;transform:translateX(calc(var(--animate-distance) + 4px))}to{opacity:1;transform:translateX(0)}}",
+	"animate--right":     "@keyframes animate--right{from{opacity:0;transform:translateX(calc(-1 * var(--animate-distance) - 4px))}to{opacity:1;transform:translateX(0)}}",
+	"animate--fade":      "@keyframes animate--fade{from{opacity:0}to{opacity:1}}",
+	"animate--flip-x":    "@keyframes animate--flip-x{from{opacity:0;transform:perspective(400px) rotateX(-80deg)}60%{opacity:1;transform:perspective(400px) rotateX(10deg)}80%{transform:perspective(400px) rotateX(-5deg)}to{transform:perspective(400px) rotateX(0deg)}}",
+	"animate--flip-y":    "@keyframes animate--flip-y{from{opacity:0;transform:perspective(400px) rotateY(-80deg)}60%{opacity:1;transform:perspective(400px) rotateY(10deg)}80%{transform:perspective(400px) rotateY(-5deg)}to{transform:perspective(400px) rotateY(0deg)}}",
+	"animate--heartbeat": "@keyframes animate--heartbeat{0%,100%{transform:scale(1)}14%{transform:scale(1.15)}28%{transform:scale(1)}42%{transform:scale(1.15)}70%{transform:scale(1)}}",
+	"animate--rubber":    "@keyframes animate--rubber{0%{transform:scaleX(1) scaleY(1)}30%{transform:scaleX(1.3) scaleY(0.75)}40%{transform:scaleX(0.75) scaleY(1.25)}50%{transform:scaleX(1.15) scaleY(0.85)}65%{transform:scaleX(0.95) scaleY(1.05)}75%{transform:scaleX(1.05) scaleY(0.95)}to{transform:scaleX(1) scaleY(1)}}",
+	"animate--out-up":    "@keyframes animate--out-up{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(calc(-1 * var(--animate-distance)))}}",
+	"animate--out-down":  "@keyframes animate--out-down{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(var(--animate-distance))}}",
+	"animate--out-left":  "@keyframes animate--out-left{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(-24px)}}",
+	"animate--out-right": "@keyframes animate--out-right{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(24px)}}",
+	"animate--spin":      "@keyframes animate--spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}",
+	"animate--pulse":     "@keyframes animate--pulse{50%{opacity:.5}}",
+	"animate--bounce":    "@keyframes animate--bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}",
+	"animate--float":     "@keyframes animate--float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}",
+	"animate--ping":      "@keyframes animate--ping{75%,100%{transform:scale(2);opacity:0}}",
+	"animate--blink":     "@keyframes animate--blink{0%,100%{opacity:1}50%{opacity:0}}",
+	"animate--wave":      "@keyframes animate--wave{0%{transform:rotate(0deg)}15%{transform:rotate(14deg)}30%{transform:rotate(-8deg)}40%{transform:rotate(14deg)}50%{transform:rotate(-4deg)}60%{transform:rotate(10deg)}70%{transform:rotate(0deg)}100%{transform:rotate(0deg)}}",
 }
 
 // animateRootVars are the library defaults; the run-once utilities read them via var(), so modifiers
-// (which rewrite the vars on the element) compose regardless of class order.
-const animateRootVars = ":root{--animate-duration:0.5s;--animate-delay:0s;--animate-easing:cubic-bezier(0.22, 1, 0.36, 1);--animate-distance:16px}"
+// (which rewrite the vars on the element) compose regardless of class order. Easing has no root
+// value on purpose: each family falls back to its own curve (spring for the short set, `ease` for
+// animate.css) and an ease-* modifier overrides both by setting --animate-easing on the element.
+const animateRootVars = ":root{--animate-duration:0.5s;--animate-delay:0s;--animate-distance:16px}"
+
+const (
+	animateShortEasing    = "var(--animate-easing, cubic-bezier(0.22, 1, 0.36, 1))"
+	animateVendoredEasing = "var(--animate-easing, ease)"
+)
+
+// runOnce is the body of a run-once utility: keyframe + the shared vars, fill:both so the final
+// frame sticks. delay is the var by default, or a stagger step; the vendored family passes its own
+// duration and easing plus the extra declarations its upstream class rule carries.
+func runOnce(kf, duration, easing, delay, extra string) string {
+	css := "animation-name:" + kf + ";animation-duration:" + duration + ";" +
+		"animation-timing-function:" + easing + ";animation-delay:" + delay + ";animation-fill-mode:both;"
+	if extra != "" {
+		css += extra + ";"
+	}
+	return css
+}
+
+// vendoredDuration is animate.css's pace: twice --animate-duration (1s by default, upstream's
+// default) times the per-animation factor its class rule applies (hinge ×2, bounceIn ×0.75, …).
+func vendoredDuration(e animateEntry) string {
+	if e.factor == "" {
+		return "calc(var(--animate-duration) * 2)"
+	}
+	return "calc(var(--animate-duration) * 2 * " + e.factor + ")"
+}
+
+// runOnceFor resolves a run-once base name from either family with the given delay, or "".
+func runOnceFor(base, delay string) string {
+	if kf, ok := animateOnce[base]; ok {
+		return runOnce(kf, "var(--animate-duration)", animateShortEasing, delay, "")
+	}
+	if e, ok := animateVendored[base]; ok {
+		return runOnce("animate--"+base, vendoredDuration(e), animateVendoredEasing, delay, e.extra)
+	}
+	return ""
+}
 
 // animateReducedMotion honours the OS setting: near-instant, single-run — the accessible default
 // (matches the library's own @media guard). Content still ends in its final frame (fill:both).
@@ -112,9 +163,8 @@ const animateReducedMotion = `@media (prefers-reduced-motion:reduce){[class*="an
 
 // resolveAnimate returns the CSS body for an `animate-<name>` utility, or "" if unknown.
 func resolveAnimate(name string) string {
-	if kf, ok := animateOnce[name]; ok {
-		return "animation-name:" + kf + ";animation-duration:var(--animate-duration);" +
-			"animation-timing-function:var(--animate-easing);animation-delay:var(--animate-delay);animation-fill-mode:both;"
+	if css := runOnceFor(name, "var(--animate-delay)"); css != "" {
+		return css
 	}
 	if sh, ok := animateLoop[name]; ok {
 		css := "animation:" + sh + ";"
@@ -156,11 +206,8 @@ func resolveAnimate(name string) string {
 	// (self-contained, so `animate-up-3` works alone or alongside `animate-up`). Enables list
 	// stagger: each item a higher N. Only valid for a known run-once base + delay 1..8.
 	if i := strings.LastIndex(name, "-"); i > 0 {
-		if kf, ok := animateOnce[name[:i]]; ok {
-			if d, ok := animateDelay["delay-"+name[i+1:]]; ok {
-				return "animation-name:" + kf + ";animation-duration:var(--animate-duration);" +
-					"animation-timing-function:var(--animate-easing);animation-delay:" + d + ";animation-fill-mode:both;"
-			}
+		if d, ok := animateDelay["delay-"+name[i+1:]]; ok {
+			return runOnceFor(name[:i], d)
 		}
 	}
 	return ""
@@ -179,6 +226,11 @@ func UsedKeyframes(css string, cfg *Config) string {
 	var names []string
 	for kf := range animateFrames {
 		if referenced(css, kf) {
+			names = append(names, kf)
+		}
+	}
+	for name := range animateVendored {
+		if kf := "animate--" + name; referenced(css, kf) {
 			names = append(names, kf)
 		}
 	}
@@ -204,7 +256,11 @@ func UsedKeyframes(css string, cfg *Config) string {
 	if len(names) > 0 || len(extra) > 0 {
 		b.WriteString(animateRootVars)
 		for _, kf := range names {
-			b.WriteString(animateFrames[kf])
+			if frames, ok := animateFrames[kf]; ok {
+				b.WriteString(frames)
+			} else {
+				b.WriteString(animateVendored[strings.TrimPrefix(kf, "animate--")].frames)
+			}
 		}
 		for _, name := range extra {
 			b.WriteString("@keyframes " + name + "{" + cfg.Keyframes[name] + "}")
