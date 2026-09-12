@@ -13,6 +13,10 @@
 // Two sources feed the set: a small built-in/brand set defined below (always present), and the full
 // Tabler Icons set (MIT) dropped into ./tabler/*.svg and embedded at build time. Built-in names win,
 // so brand icons stay stable; Tabler fills in everything else.
+//
+// Tabler ships two styles and both are here: the outline set at ./tabler/<name>.svg is `icon-<name>`,
+// the filled set at ./tabler/filled/<name>.svg is `icon-<name>-fill`. Same mask technique — a mask
+// only reads alpha — the filled wrapper just paints `fill` instead of `stroke` (see dataURI).
 package icons
 
 import (
@@ -32,8 +36,9 @@ var set = map[string]string{
 	"mesh": `<path d="M12 12V5.5M12 12 6 18M12 12 18 18"/><circle cx="12" cy="5" r="2"/><circle cx="5.5" cy="18.2" r="2"/><circle cx="18.5" cy="18.2" r="2"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/>`,
 }
 
-// tablerFS holds the vendored Tabler Icons (MIT) outline SVGs. Drop the files into ./tabler/ and
-// rebuild; `all:` keeps the directory embeddable even before any .svg is added (only .gitkeep).
+// tablerFS holds the vendored Tabler Icons (MIT): outline SVGs in ./tabler/, filled ones in
+// ./tabler/filled/. Drop the files in and rebuild; `all:` keeps the directory embeddable even before
+// any .svg is added (only .gitkeep).
 //
 //go:embed all:tabler
 var tablerFS embed.FS
@@ -42,9 +47,18 @@ var tablerFS embed.FS
 // at most once — no preloading 5,800 files at startup.
 var tablerCache sync.Map
 
+// fillSuffix marks the filled style: `icon-cloud-fill` is tabler/filled/cloud.svg. No outline icon
+// name ends in "-fill" (checked against the 5k set), so the suffix never shadows a real name.
+const fillSuffix = "-fill"
+
+// filled reports whether name asks for the filled style — and so for the fill wrapper in dataURI.
+// A built-in whose name happens to end in -fill would get the fill wrapper too; author it filled.
+func filled(name string) bool { return strings.HasSuffix(name, fillSuffix) }
+
 // lookup resolves an icon name → its inner SVG. Built-in/brand icons win; otherwise it lazily
-// reads tabler/<name>.svg from the embed and caches the result. name is a validated slug
-// ([a-z0-9-]) — see scan/nameRe — so it can never escape the embedded directory.
+// reads tabler/<name>.svg (or tabler/filled/<name>.svg for a -fill name) from the embed and caches
+// the result. name is a validated slug ([a-z0-9-]) — see scan/nameRe — so it can never escape the
+// embedded directory.
 func lookup(name string) (string, bool) {
 	if inner, ok := set[name]; ok {
 		return inner, true
@@ -54,12 +68,20 @@ func lookup(name string) (string, bool) {
 		return s, s != ""
 	}
 	inner := ""
-	if data, err := tablerFS.ReadFile("tabler/" + name + ".svg"); err == nil {
+	path := "tabler/" + name + ".svg"
+	if base, ok := strings.CutSuffix(name, fillSuffix); ok {
+		path = "tabler/filled/" + base + ".svg"
+	}
+	if data, err := tablerFS.ReadFile(path); err == nil {
 		inner = svgInner(string(data))
 	}
 	tablerCache.Store(name, inner)
 	return inner, inner != ""
 }
+
+// spacerRe matches Tabler's invisible 24x24 bounding-box path in either of the attribute orders
+// its generators emit (`fill="none"/>` in outline files, `fill="none" />` in filled ones).
+var spacerRe = regexp.MustCompile(`<path[^>]* d="M0 0h24v24H0z"[^>]*/>`)
 
 // svgInner pulls the drawable content out of a full Tabler <svg>…</svg> file (dropping the outer
 // <svg> wrapper and Tabler's invisible 24×24 bounding-box spacer path). Tabler files open with an
@@ -80,7 +102,7 @@ func svgInner(svg string) string {
 		return ""
 	}
 	inner := svg[open:j]
-	inner = strings.ReplaceAll(inner, `<path stroke="none" d="M0 0h24v24H0z" fill="none"/>`, "")
+	inner = spacerRe.ReplaceAllString(inner, "")
 	return strings.TrimSpace(inner)
 }
 
@@ -97,12 +119,16 @@ func Names() []string {
 			out = append(out, n)
 		}
 	}
-	if entries, err := tablerFS.ReadDir("tabler"); err == nil {
+	for _, dir := range []struct{ path, suffix string }{{"tabler", ""}, {"tabler/filled", fillSuffix}} {
+		entries, err := tablerFS.ReadDir(dir.path)
+		if err != nil {
+			continue
+		}
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".svg") {
 				continue
 			}
-			n := strings.TrimSuffix(e.Name(), ".svg")
+			n := strings.TrimSuffix(e.Name(), ".svg") + dir.suffix
 			if !seen[n] {
 				seen[n] = true
 				out = append(out, n)
@@ -149,12 +175,16 @@ var uriEncode = strings.NewReplacer(
 )
 
 // dataURI wraps inner SVG content in a standalone <svg> and returns a CSS url("data:…") for it.
-// stroke is baked to #000 because a mask only reads alpha (#000 = fully opaque); the visible colour
-// comes from background:currentColor on the element. currentColor inside the data-URI won't resolve
-// (it's an isolated image), so it's pinned to #000 too.
-func dataURI(inner string) string {
-	svg := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="` +
-		strokeWidth + `" stroke-linecap="round" stroke-linejoin="round">` + inner + `</svg>`
+// stroke (or, for the filled style, fill) is baked to #000 because a mask only reads alpha (#000 =
+// fully opaque); the visible colour comes from background:currentColor on the element. currentColor
+// inside the data-URI won't resolve (it's an isolated image), so it's pinned to #000 too.
+func dataURI(inner string, fill bool) string {
+	wrap := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="` +
+		strokeWidth + `" stroke-linecap="round" stroke-linejoin="round">`
+	if fill {
+		wrap = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#000" stroke="none">`
+	}
+	svg := wrap + inner + `</svg>`
 	svg = strings.ReplaceAll(svg, "currentColor", "#000")
 	svg = strings.ReplaceAll(svg, `"`, `'`)      // single quotes so the data-URI fits in url("…")
 	svg = strings.Join(strings.Fields(svg), " ") // collapse whitespace/newlines
@@ -200,7 +230,7 @@ func CSS(names []string) string {
 	b.WriteString(`){display:inline-block;width:1em;height:1em;vertical-align:-.125em;flex:none;` +
 		`background:currentColor;-webkit-mask:var(--i) center/contain no-repeat;mask:var(--i) center/contain no-repeat}`)
 	for _, it := range list {
-		b.WriteString("." + classPrefix + it.name + "{--i:" + dataURI(it.inner) + "}")
+		b.WriteString("." + classPrefix + it.name + "{--i:" + dataURI(it.inner, filled(it.name)) + "}")
 	}
 	return b.String()
 }

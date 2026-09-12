@@ -57,6 +57,55 @@ func TestTablerVendored(t *testing.T) {
 	}
 }
 
+func TestTablerFilled(t *testing.T) {
+	// The filled set lives in ./tabler/filled and answers to the -fill suffix. Skip, don't fail,
+	// on a build that ships only the outline set.
+	if !Has("cloud-fill") {
+		t.Skip("Tabler filled set not vendored (./tabler/filled has no svgs)")
+	}
+	for _, n := range []string{"cloud-fill", "star-fill", "heart-fill", "bell-fill"} {
+		if !Has(n) {
+			t.Errorf("expected vendored filled icon %q", n)
+		}
+	}
+	// A -fill name that has no filled file is a miss, not a fallback to the outline drawing.
+	if Has("arrow-right-fill") {
+		t.Errorf("arrow-right has no filled variant; -fill must not fall back to the outline file")
+	}
+	// The filled wrapper paints fill, not stroke — and never bakes a stroke-width.
+	css := CSS([]string{"cloud-fill"})
+	if !strings.Contains(css, "fill='%23000' stroke='none'") {
+		t.Errorf("filled icon should use the fill wrapper, got: %s", css)
+	}
+	if strings.Contains(css, "stroke-width") {
+		t.Errorf("filled icon must not carry a stroke-width: %s", css)
+	}
+	// Control: the outline drawing of the same icon keeps the stroke wrapper.
+	if out := CSS([]string{"cloud"}); !strings.Contains(out, "stroke-width='1.75'") || strings.Contains(out, "stroke='none'") {
+		t.Errorf("outline icon should keep the stroke wrapper, got: %s", out)
+	}
+	// The spacer path is stripped from filled files too (their generator writes it with a space).
+	inner, _ := lookup("cloud-fill")
+	if strings.Contains(inner, "M0 0h24v24H0z") {
+		t.Errorf("spacer path left in filled icon: %q", inner)
+	}
+	// Both styles are scanned from markup and listed in Names.
+	if got := scan(`<i class="icon-cloud icon-cloud-fill"></i>`); len(got) != 2 {
+		t.Errorf("scan should pick up both styles, got %v", got)
+	}
+	names := Names()
+	hasFill := false
+	for _, n := range names {
+		if n == "cloud-fill" {
+			hasFill = true
+			break
+		}
+	}
+	if !hasFill {
+		t.Errorf("Names should list the filled set with its suffix")
+	}
+}
+
 func TestCSSGeneratesMaskRules(t *testing.T) {
 	css := CSS([]string{"shield-check", "lock", "definitely-not-an-icon"})
 
