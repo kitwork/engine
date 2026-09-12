@@ -35,13 +35,15 @@ var animateOnce = map[string]string{
 }
 
 // animateLoop maps a loop utility name → its full `animation` shorthand (own timing + infinite).
+// spin, ping, pulse and bounce are Tailwind's names and carry Tailwind's exact values (shorthand and
+// keyframes) — an existing name must keep its meaning; the rest are ours.
 var animateLoop = map[string]string{
 	"spin":     "animate--spin 1s linear infinite",
 	"spin-ccw": "animate--spin 1s linear infinite reverse",
-	"pulse":    "animate--pulse 2s ease-in-out infinite",
+	"pulse":    "animate--pulse 2s cubic-bezier(0.4,0,0.6,1) infinite",
 	"bounce":   "animate--bounce 1s infinite",
 	"float":    "animate--float 3.5s ease-in-out infinite",
-	"ping":     "animate--ping 1.4s cubic-bezier(0,0,0.2,1) infinite",
+	"ping":     "animate--ping 1s cubic-bezier(0,0,0.2,1) infinite",
 	"blink":    "animate--blink 1.2s step-start infinite",
 	"wave":     "animate--wave 2.5s ease-in-out infinite",
 }
@@ -92,8 +94,8 @@ var animateFrames = map[string]string{
 	"animate--out-right":      "@keyframes animate--out-right{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(24px)}}",
 	"animate--zoom-out-exit":  "@keyframes animate--zoom-out-exit{from{opacity:1;transform:scale(1)}to{opacity:0;transform:scale(0.88)}}",
 	"animate--spin":           "@keyframes animate--spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}",
-	"animate--pulse":          "@keyframes animate--pulse{0%,100%{opacity:1}50%{opacity:0.35}}",
-	"animate--bounce":         "@keyframes animate--bounce{0%,100%{transform:translateY(0);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:translateY(-18px);animation-timing-function:cubic-bezier(0,0,0.2,1)}}",
+	"animate--pulse":          "@keyframes animate--pulse{50%{opacity:.5}}",
+	"animate--bounce":         "@keyframes animate--bounce{0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(0.8,0,1,1)}50%{transform:none;animation-timing-function:cubic-bezier(0,0,0.2,1)}}",
 	"animate--float":          "@keyframes animate--float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}",
 	"animate--ping":           "@keyframes animate--ping{75%,100%{transform:scale(2);opacity:0}}",
 	"animate--blink":          "@keyframes animate--blink{0%,100%{opacity:1}50%{opacity:0}}",
