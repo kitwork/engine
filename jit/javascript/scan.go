@@ -1985,6 +1985,14 @@ func hasRuntimeMarkerAttribute(source []byte) bool {
 			for index < end && !attributeNameDelimiter(source[index]) {
 				index++
 			}
+			if attributeStart == index {
+				// A delimiter where a name should be — a stray `>` or `/` inside a tag whose
+				// quotes do not balance (an authored `class="…` with no closing quote drags
+				// the quote state across the rest of the document). Without this step the
+				// loop re-read the same byte forever and the host never answered a request.
+				index++
+				continue
+			}
 			attributeName := asciiLowerAttributeName(source[attributeStart:index])
 			index = skipHTMLSpace(source, index)
 			if index >= end || source[index] != '=' {
