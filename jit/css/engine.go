@@ -768,6 +768,19 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		color := twColor(m[2], "", cfg)
 		alpha := m[3]
 
+		// The keyword colours Tailwind ships for every colour utility. `none` is only meaningful
+		// for the SVG pair — `fill-none` / `stroke-none` — and it matters there: an SVG shape with
+		// no fill rule paints BLACK, which a dark page hides and a light page shows as a disc.
+		switch m[2] {
+		case "current":
+			return fmt.Sprintf("%s: currentColor;", prop)
+		case "inherit":
+			return fmt.Sprintf("%s: inherit;", prop)
+		case "none":
+			if m[1] == "fill" || m[1] == "stroke" {
+				return fmt.Sprintf("%s: none;", prop)
+			}
+		}
 		if color == "" {
 			return "" // unknown color name → let other patterns try
 		}
