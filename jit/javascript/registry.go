@@ -304,6 +304,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			"progress-bar":     "2.0.0",
 			"rating":           "1.0.0",
 			"rotator":          "1.0.0",
+			"scrolled":         "1.0.0",
 			"shortcut":         "1.0.0",
 			"slider":           "1.0.0",
 			"stepper":          "1.0.0",
@@ -424,7 +425,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 		"accordion", "alert", "carousel", "dialog", "drawer", "dropdown",
 		"pagination", "popover", "shortcut", "switch", "tabs", "toast", "tooltip",
 		"stepper", "slider", "rating", "tags", "collapse", "combobox", "otp",
-		"rotator",
+		"rotator", "scrolled",
 	} {
 		path := "component/" + name + "/1.0.0.js"
 		source, err := embeddedDeliveryPackages.ReadFile(path)
