@@ -81,6 +81,19 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 					mediaQuery = mq // last (innermost) media query wins
 					continue
 				}
+				// supports-[…]: wraps the rule in @supports. A bare property name probes the
+				// property (Tailwind's form: `prop: var(--x)` is valid syntax for any known
+				// property); a `prop:value` pair is the condition as written, underscores as spaces.
+				if strings.HasPrefix(v, "supports-[") && strings.HasSuffix(v, "]") {
+					cond := strings.ReplaceAll(v[len("supports-["):len(v)-1], "_", " ")
+					if i := strings.IndexByte(cond, ':'); i < 0 {
+						cond += ": var(--kitwork-supports)"
+					} else if i+1 < len(cond) && cond[i+1] != ' ' {
+						cond = cond[:i+1] + " " + cond[i+1:] // prop:value → prop: value
+					}
+					mediaQuery = "@supports (" + cond + ")"
+					continue
+				}
 				// data-[state=x] / data-[open] / group-data-[state=x]: element or .group ancestor attr.
 				if strings.HasPrefix(v, "data-[") || strings.HasPrefix(v, "group-data-[") {
 					inner := v[strings.IndexByte(v, '[')+1 : len(v)-1]
@@ -189,6 +202,16 @@ func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
 			if m := dataVariantRe.FindString(core); m != "" {
 				variants = append(variants, strings.TrimSuffix(m, ":"))
 				core = core[len(m):]
+				found = true
+			}
+		}
+
+		// Feature-query variant: supports-[backdrop-filter]: / supports-[display:grid]:. The bracket
+		// may hold a colon and parentheses, so it is matched to its own "]:" rather than by regex.
+		if !found && strings.HasPrefix(core, "supports-[") {
+			if end := strings.Index(core, "]:"); end > 0 {
+				variants = append(variants, core[:end+1])
+				core = core[end+2:]
 				found = true
 			}
 		}
