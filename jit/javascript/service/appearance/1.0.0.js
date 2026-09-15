@@ -69,6 +69,9 @@ function freeze(mode, resolved) {
   return Object.freeze({ mode: mode, resolved: resolved });
 }
 
+// The resolved mode lands twice on <html>, exactly as the pre-paint left it: the `dark` class for
+// darkMode: ['class'] sites, and data-theme="light|dark" — the attribute router.themes() modes are
+// scoped under, so a site can select on it and later add a mode without a class per mode.
 function applyRoot(resolved) {
   if (!root) return;
   if (root.classList) {
@@ -76,6 +79,7 @@ function applyRoot(resolved) {
     else root.classList.remove("dark");
   }
   try {
+    if (root.setAttribute) root.setAttribute("data-theme", resolved);
     if (root.style) root.style.colorScheme = resolved;
   } catch (_) { /* Appearance state remains usable in restricted documents. */ }
 }

@@ -13,7 +13,7 @@ import (
 	jittheme "github.com/kitwork/engine/jit/theme"
 )
 
-const appearanceService100SHA256 = "b5242d1f257a98a42b1868669b2db013e74386ffd41f0f878395b41fd1dfaa08"
+const appearanceService100SHA256 = "ca18401ad8b50d37cfffdb5524d69374c8e2762d1ec915d586905b82bd0058b5"
 
 func TestAppearanceServiceSourceIsClosedDocumentCapability(t *testing.T) {
 	source := readVanillaFile(t, "service", "appearance", "1.0.0.js")
@@ -31,6 +31,7 @@ func TestAppearanceServiceSourceIsClosedDocumentCapability(t *testing.T) {
 		[]byte(`document.documentElement`),
 		[]byte(`global.matchMedia(mediaQuery)`),
 		[]byte(`root.style.colorScheme = resolved`),
+		[]byte(`root.setAttribute("data-theme", resolved)`),
 		[]byte(`global.addEventListener("storage", storageChange)`),
 		[]byte(`nativeHost.call("appearance.setResolved", { resolved: resolved })`),
 		[]byte(`if (attached) return`),
@@ -200,7 +201,8 @@ func appearancePrepaintPage(assetPath string, stored *string, mediaDark, storage
 </script><script data-kitwork-jit="theme"></script><script>
 globalThis.__appearancePrepaint = {
   dark: document.documentElement.classList.contains("dark"),
-  colorScheme: document.documentElement.style.colorScheme
+  colorScheme: document.documentElement.style.colorScheme,
+  dataTheme: document.documentElement.getAttribute("data-theme")
 };
 </script><script src=%q></script></head><body><script>
 %s
@@ -215,6 +217,8 @@ __runStandaloneKitTest(async function () {
     "prepaint dark class did not resolve " + expectedResolved);
   assert(before.colorScheme === expectedResolved,
     "prepaint color-scheme was " + before.colorScheme + ", want " + expectedResolved);
+  assert(before.dataTheme === expectedResolved,
+    "prepaint data-theme was " + before.dataTheme + ", want " + expectedResolved);
   assert(current.mode === expectedMode && current.resolved === expectedResolved,
     "appearance resolved " + current.mode + "/" + current.resolved +
       ", want " + expectedMode + "/" + expectedResolved);
@@ -293,6 +297,8 @@ __runStandaloneKitTest(async function () {
       label + " did not own the root dark class");
     assert(document.documentElement.style.colorScheme === resolved,
       label + " color-scheme was " + document.documentElement.style.colorScheme);
+    assert(document.documentElement.getAttribute("data-theme") === resolved,
+      label + " did not own data-theme (" + document.documentElement.getAttribute("data-theme") + ")");
     return value;
   }
 

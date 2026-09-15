@@ -27,11 +27,15 @@ import (
 
 // prepaint runs before paint: an explicit stored light/dark mode wins; missing, invalid, or
 // "system" follows the OS preference. Storage failures must not skip matchMedia. Kept inline and
-// synchronous on purpose: a deferred runtime cannot prevent the flash.
+// synchronous on purpose: a deferred runtime cannot prevent the flash. The resolved mode lands
+// twice on <html>: the `dark` class (Tailwind's darkMode: ['class'], every existing site) and
+// data-theme="light|dark" — the attribute is the selector router.themes() modes are scoped under,
+// so a site may write darkMode: ['class', '[data-theme="dark"]'] and later add a mode without a
+// class per mode.
 const prepaintBody = `(function(){var r=document.documentElement,c=r.classList,m="system";` +
 	`try{var t=localStorage.getItem("theme");t=t&&t.toLowerCase();if(t==="light"||t==="dark"||t==="system")m=t}catch(e){}` +
 	`if(m==="system"){try{m=typeof matchMedia==="function"&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){m="light"}}` +
-	`if(m==="dark")c.add("dark");else c.remove("dark");try{r.style.colorScheme=m}catch(e){}})();`
+	`if(m==="dark")c.add("dark");else c.remove("dark");try{r.setAttribute("data-theme",m);r.style.colorScheme=m}catch(e){}})();`
 
 const prepaint = `<script data-kitwork-jit="theme">` + prepaintBody + `</script>`
 

@@ -5691,7 +5691,7 @@
   var DRIVE_DOCUMENT_NODE_LIMIT = 100000;
   var DRIVE_DOCUMENT_DEPTH_LIMIT = 256;
   var NAVIGATION_EVENT = "kit:navigation";
-  var THEME_PREPAINT_SOURCE = '(function(){var r=document.documentElement,c=r.classList,m="system";try{var t=localStorage.getItem("theme");t=t&&t.toLowerCase();if(t==="light"||t==="dark"||t==="system")m=t}catch(e){}if(m==="system"){try{m=typeof matchMedia==="function"&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){m="light"}}if(m==="dark")c.add("dark");else c.remove("dark");try{r.style.colorScheme=m}catch(e){}})();';
+  var THEME_PREPAINT_SOURCE = '(function(){var r=document.documentElement,c=r.classList,m="system";try{var t=localStorage.getItem("theme");t=t&&t.toLowerCase();if(t==="light"||t==="dark"||t==="system")m=t}catch(e){}if(m==="system"){try{m=typeof matchMedia==="function"&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){m="light"}}if(m==="dark")c.add("dark");else c.remove("dark");try{r.setAttribute("data-theme",m);r.style.colorScheme=m}catch(e){}})();';
   var handoffGraphs = new Map();
   var engineHandoffScripts = new WeakSet();
   var liveStagedScripts = null;
