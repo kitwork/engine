@@ -156,7 +156,7 @@
   kit.cleanup = cleanup;
 
   // ---- expressions: source → IR (same grammar as engine/jit/hydrate/compile.go) ----
-  var PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
+  var PREC = { "||": 1, "&&": 2, "==": 3, "!=": 3, "===": 3, "!==": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6 };
 
   function lex(s) {
     var out = [], i = 0, n = s.length;
@@ -182,6 +182,8 @@
         out.push({ t: "id", v: s.slice(i, m) }); i = m; continue;
       }
       var two = s.slice(i, i + 2);
+      var three = s.slice(i, i + 3); // longest match first: `===` must not lex as `==` + `=`
+      if (three === "===" || three === "!==") { out.push({ t: "op", v: three }); i += 3; continue; }
       if (two === "==" || two === "!=" || two === ">=" || two === "<=" || two === "&&" || two === "||" || two === "=>") { out.push({ t: "op", v: two }); i += 2; continue; }
       if ("+-*/%<>!?:().,={}[];".indexOf(c) >= 0) { out.push({ t: "op", v: c }); i++; continue; }
       throw new Error("hydrate: unexpected character '" + c + "'");
@@ -428,6 +430,7 @@
       case "+": return l + r; case "-": return l - r; case "*": return l * r; case "/": return l / r; case "%": return l % r;
       case ">": return l > r; case "<": return l < r; case ">=": return l >= r; case "<=": return l <= r;
       case "==": return l == r; case "!=": return l != r;
+      case "===": return l === r; case "!==": return l !== r;
     }
     throw new Error("hydrate: unknown op '" + op + "'");
   }

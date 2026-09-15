@@ -7,7 +7,8 @@
 //
 //	["#", literal]            literal (number | string | bool | null)
 //	["$", "name"]            variable read from scope ("$" itself = the PAGE scope object)
-//	[op, left, right]        binary: + - * / % > < >= <= == != && ||
+//	[op, left, right]        binary: + - * / % > < >= <= == != === !== && ||
+//	                         (== and != coerce like JavaScript; === and !== are strict)
 //	["u!", e] / ["u-", e]    unary not / negate
 //	["?", c, a, b]           ternary c ? a : b
 //	["=", "name", value]     assignment to a scope variable (lexical: owner scope, else nearest)
@@ -94,6 +95,14 @@ func lex(s string) ([]tok, error) {
 			out = append(out, tok{"id", s[i:j]})
 			i = j
 		default:
+			// Longest match first: `===` must not lex as `==` + `=`.
+			if i+2 < n {
+				if three := s[i : i+3]; three == "===" || three == "!==" {
+					out = append(out, tok{"op", three})
+					i += 3
+					continue
+				}
+			}
 			if i+1 < n {
 				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" {
 					out = append(out, tok{"op", two})
@@ -113,7 +122,7 @@ func lex(s string) ([]tok, error) {
 }
 
 var precedence = map[string]int{
-	"||": 1, "&&": 2, "==": 3, "!=": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6,
+	"||": 1, "&&": 2, "==": 3, "!=": 3, "===": 3, "!==": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6,
 }
 
 type parser struct {

@@ -267,6 +267,10 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		return looseEq(l, r), nil
 	case "!=":
 		return !looseEq(l, r), nil
+	case "===":
+		return strictEq(l, r), nil
+	case "!==":
+		return !strictEq(l, r), nil
 	}
 	return nil, errors.New("hydrate: unknown op '" + op + "'")
 }
@@ -349,6 +353,34 @@ func toStr(v any) string {
 
 // looseEq is JS == for the value kinds IR carries: same-type compares directly; mixed kinds fall
 // back to numeric coercion (so "" == 0, "6" == 6 — the JS results).
+// strictEq is JavaScript's ===: equal only when the kinds match and the values match — no
+// coercion, so 1 === '1' is false where 1 == '1' is true. Numbers compare by value whatever Go
+// type carried them (a JSON scope decodes to float64, a literal may be int).
+func strictEq(l, r any) bool {
+	switch lv := l.(type) {
+	case nil:
+		return r == nil
+	case string:
+		rv, ok := r.(string)
+		return ok && lv == rv
+	case bool:
+		rv, ok := r.(bool)
+		return ok && lv == rv
+	}
+	if isNumber(l) && isNumber(r) {
+		return num(l) == num(r)
+	}
+	return false
+}
+
+func isNumber(v any) bool {
+	switch v.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	}
+	return false
+}
+
 func looseEq(l, r any) bool {
 	if ls, ok := l.(string); ok {
 		if rs, ok := r.(string); ok {

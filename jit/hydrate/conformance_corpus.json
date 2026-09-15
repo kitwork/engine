@@ -1,6 +1,11 @@
 [
   { "name": "arith-precedence",      "src": "1 + 2 * 3",                                                  "scope": {},                      "want": 7 },
   { "name": "comparison-and-logic",  "src": "2 + 3 > 4 && 1 < 2",                                         "scope": {},                      "want": true },
+  { "name": "strict-eq-string",      "src": "mode === 'dark'",                                            "scope": { "mode": "dark" },      "want": true },
+  { "name": "strict-ne-string",      "src": "mode !== 'dark'",                                            "scope": { "mode": "light" },     "want": true },
+  { "name": "strict-eq-no-coercion", "src": "n === '1'",                                                  "scope": { "n": 1 },              "want": false },
+  { "name": "loose-eq-coerces",      "src": "n == '1'",                                                   "scope": { "n": 1 },              "want": true },
+  { "name": "strict-eq-in-ternary",  "src": "mode === 'dark' ? 'sun' : 'moon'",                           "scope": { "mode": "dark" },      "want": "sun" },
   { "name": "logic-short-circuit",   "src": "a && b",                                                    "scope": { "a": false, "b": true }, "want": false },
   { "name": "logic-or-returns-operand","src": "a || b",                                                  "scope": { "a": 0, "b": "x" },      "want": "x" },
   { "name": "ternary-true",          "src": "n > 3 ? 'hi' : 'lo'",                                        "scope": { "n": 5 },              "want": "hi" },
