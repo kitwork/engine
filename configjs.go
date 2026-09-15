@@ -57,11 +57,32 @@ func loadReferencedConfig(path string) (map[string]interface{}, error) {
 // a command: the TOOL (cloud host, desktop shell, future CLI) reads the manifest and decides what to
 // start. Legacy `server.run(port)` still works and counts as declaring the web surface.
 type ServerBuilder struct {
-	config map[string]value.Value
-	ran    bool // legacy server.run() was called
-	hasWeb bool // a WEB surface is declared (app.web(...) or legacy server.run/port)
-	path   string
-	err    string
+	config  map[string]value.Value
+	ran     bool // legacy server.run() was called
+	hasWeb  bool // a WEB surface is declared (app.web(...) or legacy server.run/port)
+	path    string
+	err     string
+	unknown []string // manifest methods the chain called that this engine does not have
+}
+
+// MissingMember is called for a manifest method this engine does not have — app.postgresql() on a
+// build that predates it, a typo, a method from a newer engine. The chain must not break: the name
+// is recorded and the builder itself is returned, so app.web() after it still lands and the boot
+// prints one line naming the method instead of "declares no surface", which pointed at the wrong
+// line entirely.
+func (b *ServerBuilder) MissingMember(name string) value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		b.unknown = append(b.unknown, name)
+		return value.New(b)
+	})
+}
+
+// unknownMethodWarning names the manifest methods the chain called that this engine does not have.
+func (b *ServerBuilder) unknownMethodWarning() string {
+	if len(b.unknown) == 0 {
+		return ""
+	}
+	return "app." + strings.Join(b.unknown, "(), app.") + "() is not a method of this engine's manifest — ignored; everything else on the chain still applies"
 }
 
 func NewServerBuilder() *ServerBuilder {
@@ -216,6 +237,54 @@ func (b *ServerBuilder) Database(v value.Value) *ServerBuilder {
 	return b
 }
 
+// The manifest declares a database by KIND, the way it declares a surface by kind:
+//
+//	app.postgresql("system", { host, port, user, password, name, sslmode })
+//	app.mysql("shop", { host, port, user, password, name })
+//	app.sqlite("app", "./.data/app.db")          // a string is the file; ":memory:" works too
+//	app.sqlite("cache", { name: ":memory:", max_open: 1 })
+//
+// Each is the typed door into the same databases entry app.database({ type, … }) builds — the
+// kind fixes `type` (over anything in the options), the alias comes first because it is the
+// connection's name, and an omitted alias is "default" as in the flat form. Nothing downstream
+// changes: parseDatabases and database.Config read the entry as they always have.
+func (b *ServerBuilder) Postgresql(args ...value.Value) *ServerBuilder {
+	return b.databaseOfKind("postgres", args...)
+}
+
+func (b *ServerBuilder) Mysql(args ...value.Value) *ServerBuilder {
+	return b.databaseOfKind("mysql", args...)
+}
+
+func (b *ServerBuilder) Sqlite(args ...value.Value) *ServerBuilder {
+	return b.databaseOfKind("sqlite", args...)
+}
+
+// databaseOfKind builds one entry from (alias?, options | file) and appends it.
+func (b *ServerBuilder) databaseOfKind(kind string, args ...value.Value) *ServerBuilder {
+	entry := map[string]value.Value{}
+	rest := args
+	if len(rest) > 0 && rest[0].K == value.String {
+		entry["alias"] = rest[0]
+		rest = rest[1:]
+	}
+	if len(rest) > 0 {
+		switch {
+		case rest[0].IsMap():
+			for k, v := range rest[0].Map() {
+				entry[k] = v
+			}
+		case rest[0].K == value.String && kind == "sqlite":
+			entry["name"] = rest[0] // app.sqlite("app", "./.data/app.db")
+		}
+	}
+	if _, ok := entry["alias"]; !ok {
+		entry["alias"] = value.New("default")
+	}
+	entry["type"] = value.New(kind)
+	return b.Database(value.New(entry))
+}
+
 func (b *ServerBuilder) Logger(v value.Value) *ServerBuilder {
 	b.config["logger"] = v
 	return b
@@ -331,6 +400,9 @@ func evalConfigJS(file string) (map[string]interface{}, error) {
 	builder, err := evalServerBuilder(file)
 	if err != nil {
 		return nil, err
+	}
+	if warning := builder.unknownMethodWarning(); warning != "" {
+		fmt.Printf("[app] %s: %s\n", filepath.Base(file), warning)
 	}
 	if builder.err != "" {
 		return nil, fmt.Errorf("config validation error: %s", builder.err)
