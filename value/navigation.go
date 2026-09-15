@@ -125,6 +125,12 @@ func (v Value) Set(key string, val Value) {
 	}
 }
 
+// MissingMember lets a native object answer for a member it does not have — to record an error
+// naming it, to keep a fluent chain alive, or both. Get consults it after reflection finds nothing.
+type MissingMember interface {
+	MissingMember(name string) Value
+}
+
 func (v Value) Get(key string) Value {
 	if v.K == Invalid {
 		// An errored value (a failed db query, fail("…") / new Error("…")) is K==Invalid carrying its
@@ -180,6 +186,13 @@ func (v Value) Get(key string) Value {
 		res := v.reflect(key)
 		if res.K != Nil {
 			return res
+		}
+		// A native object may answer for members it does not have. Without this a missing method
+		// reads as nil, the call on nil yields nil, and everything chained after it is dropped
+		// without a word — a router declaring `.themes()` on an engine that has not shipped it
+		// lost its client runtime and design tokens silently.
+		if m, ok := v.V.(MissingMember); ok {
+			return m.MissingMember(key)
 		}
 	}
 

@@ -275,6 +275,29 @@ type FolderRouter struct {
 	jsonld   []value.Value          // router.jsonld() nodes — inherited down the chain, accumulated
 	limits   []methodLimit          // router.ratelimit() rules — this folder AND every descendant
 	assetErr error                  // first fatal .assets() conflict, surfaced as a generation error
+	unknown  []string               // methods the chain called that this engine does not have
+}
+
+// MissingMember is called for a member the folder router does not have. The chain must not break
+// — every declaration after the unknown call still lands — and the boot must not stay quiet: the
+// name is recorded and compileFolder prints it, so a `.themes()` written against an engine that
+// has not shipped it, or a typo, is one visible line naming the method instead of a site that
+// silently lost whatever came after. A warning, not a refusal: with the chain intact the only
+// thing ignored is that one declaration, and a router written ahead of its engine should still
+// serve.
+func (f *FolderRouter) MissingMember(name string) value.Value {
+	return value.NewFunc(func(args ...value.Value) value.Value {
+		f.unknown = append(f.unknown, name)
+		return value.New(f)
+	})
+}
+
+// unknownMethodWarning names the methods the chain called that this engine does not have.
+func (f *FolderRouter) unknownMethodWarning() string {
+	if len(f.unknown) == 0 {
+		return ""
+	}
+	return "router." + strings.Join(f.unknown, "(), router.") + "() is not a method of this engine's router — ignored; everything else on the chain still applies"
 }
 
 func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
@@ -741,6 +764,10 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 		if fr.assetErr != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("router %s: %w", relative, fr.assetErr)
+		}
+		if warning := fr.unknownMethodWarning(); warning != "" {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			fmt.Printf("[router] %s: %s\n", relative, warning)
 		}
 	}
 	return nil
