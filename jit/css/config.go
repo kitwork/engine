@@ -58,6 +58,11 @@ type Config struct {
 	// DarkSelector is the PARENT selector the dark: variant scopes under. Empty = ".dark". Set it
 	// to e.g. `[data-theme="dark"]` via router.jitcss({ darkMode: ['class', '[data-theme="dark"]'] }).
 	DarkSelector string
+	// Themes holds the appearance modes derived by router.themes() — mode → token → value — kept
+	// OUT of Colors on purpose: a mode is a block of variables under a selector, not a colour, so no
+	// `bg-canvas-midnight` utility is ever minted from it. A hand-written `<token>-<mode>` rung in
+	// Colors still wins over the derived value (see themes.go).
+	Themes map[string]map[string]Color
 
 	// HighlightTheme and HighlightPalette carry router.highlight() down to colour
 	// resolution, so terminal-* resolves per site instead of from one global

@@ -137,33 +137,12 @@ func buildJITCSS(classes []string, cfg *Config) string {
 		}
 		b.WriteString(" }\n")
 
-		// A token declared as `{ DEFAULT: …, dark: … }` already flattens to `canvas` and
-		// `canvas-dark`, but nothing ever connected the two: a site had to write `dark:bg-canvas-dark`
-		// on every element by hand, and any element that forgot stayed light. Emitting the dark rung
-		// as an override of the SAME variable makes one declaration re-skin the whole page — which is
-		// what the variable indirection above was for. Only tokens that actually declare a dark rung
-		// appear here, so a site with one committed palette pays nothing.
-		darkKeys := make([]string, 0, len(tokenKeys))
-		for _, k := range tokenKeys {
-			if !strings.HasSuffix(k, "-dark") {
-				continue
-			}
-			base := strings.TrimSuffix(k, "-dark")
-			if _, ok := tokenColors[base]; ok {
-				darkKeys = append(darkKeys, base)
-			}
-		}
-		if len(darkKeys) > 0 {
-			selector := ".dark"
-			if cfg != nil && cfg.DarkSelector != "" {
-				selector = cfg.DarkSelector
-			}
-			b.WriteString(selector + " {")
-			for _, base := range darkKeys {
-				b.WriteString(" --color-" + base + ": " + tokenColors[base+"-dark"].String() + ";")
-			}
-			b.WriteString(" }\n")
-		}
+		// A token declared as `{ DEFAULT: …, dark: … }` flattens to `canvas` and `canvas-dark`; the
+		// dark rung is emitted as an override of the SAME variable, so one declaration re-skins the
+		// whole page — which is what the variable indirection above was for. router.themes() adds
+		// derived modes the same way (themes.go); hand-written rungs win. A site with one committed
+		// palette pays nothing here.
+		b.WriteString(themeBlocks(cfg, tokenColors, tokenKeys))
 	}
 	b.WriteString("*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor; }\n")
 	// Ring defaults. `ring-*` composes its box-shadow out of these variables, and `shadow-*` composes

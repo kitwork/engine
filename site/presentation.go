@@ -49,6 +49,7 @@ type PresentationSnapshot struct {
 	FaviconFile      string
 	AssetMounts      []AssetMount
 	ThemeMode        string
+	Themes           []string // appearance modes router.themes() asked the engine to derive
 	HighlightTheme   string
 	HighlightPalette map[string]string
 	ManifestPath     string
@@ -67,6 +68,7 @@ type Presentation struct {
 	faviconFile       string
 	assetMounts       []AssetMount
 	themeMode         string
+	themes            []string
 	highlightTheme    string
 	highlightPalette  map[string]string
 	manifestPath      string
@@ -144,6 +146,26 @@ func (p *Presentation) SetThemeMode(mode string) bool {
 		return false
 	}
 	p.themeMode = mode
+	return true
+}
+
+// SetThemes records the appearance modes router.themes() asked for. Like highlight, the modes ride
+// the JIT config at snapshot time, so router.css() and router.themes() may be written in either
+// order. Declaring a theme also turns the pre-paint on unless the site said router.jittheme(false):
+// a dark skin that flashes light on load is not a dark skin.
+func (p *Presentation) SetThemes(modes []string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	p.themes = append([]string(nil), modes...)
+	if p.themeMode == "" && len(modes) > 0 {
+		p.themeMode = "force"
+	}
 	return true
 }
 
@@ -318,9 +340,15 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 	if jitConfig == nil && (p.highlightTheme != "" || len(p.highlightPalette) > 0) {
 		jitConfig = cloneJITConfig(&jitcss.DefaultConfig)
 	}
+	if jitConfig == nil && len(p.themes) > 0 {
+		jitConfig = cloneJITConfig(&jitcss.DefaultConfig)
+	}
 	if jitConfig != nil {
 		jitConfig.HighlightTheme = p.highlightTheme
 		jitConfig.HighlightPalette = p.highlightPalette
+		// router.themes(): derive each mode's block from the tokens router.css() declared. The
+		// warnings for a mode the engine cannot derive were already printed by the router.
+		jitcss.DeriveThemes(jitConfig, p.themes...)
 	}
 
 	return PresentationSnapshot{
@@ -328,6 +356,7 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 		FaviconFile:      p.faviconFile,
 		AssetMounts:      append([]AssetMount(nil), p.assetMounts...),
 		ThemeMode:        p.themeMode,
+		Themes:           append([]string(nil), p.themes...),
 		HighlightTheme:   p.highlightTheme,
 		HighlightPalette: p.highlightPalette,
 		ManifestPath:     p.manifestPath,
@@ -372,6 +401,12 @@ func cloneJITConfig(config *jitcss.Config) *jitcss.Config {
 	clone.ZIndices = append([]int(nil), config.ZIndices...)
 	clone.Animations = cloneMap(config.Animations)
 	clone.Keyframes = cloneMap(config.Keyframes)
+	if config.Themes != nil {
+		clone.Themes = make(map[string]map[string]jitcss.Color, len(config.Themes))
+		for mode, colors := range config.Themes {
+			clone.Themes[mode] = cloneMap(colors)
+		}
+	}
 	return &clone
 }
 

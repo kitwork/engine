@@ -90,11 +90,11 @@ func TestRouterUnknownMethodKeepsTheChainAlive(t *testing.T) {
 	fr := &FolderRouter{methods: map[string]*FolderMethod{}, outputs: map[string]*FolderMethod{}, meta: map[string]value.Value{}}
 	router := value.New(fr)
 
-	missing := router.Get("themes")
+	missing := router.Get("nosuchmethod")
 	if missing.K != value.Func {
 		t.Fatalf("an unknown member must resolve to a callable that records it, got kind %v", missing.K)
 	}
-	next := missing.Call("themes", value.New(map[string]value.Value{"dark": value.New(true)}))
+	next := missing.Call("nosuchmethod", value.New(map[string]value.Value{"dark": value.New(true)}))
 	if next.V != fr {
 		t.Fatalf("the unknown call must return the router itself so the chain continues, got %#v", next.V)
 	}
@@ -102,7 +102,7 @@ func TestRouterUnknownMethodKeepsTheChainAlive(t *testing.T) {
 	if fr.meta["title"].Text() != "After" {
 		t.Fatalf("a declaration after the unknown call was lost: %v", fr.meta)
 	}
-	if got := fr.unknownMethodWarning(); !strings.Contains(got, "router.themes()") {
+	if got := fr.unknownMethodWarning(); !strings.Contains(got, "router.nosuchmethod()") {
 		t.Fatalf("the warning must name the method: %q", got)
 	}
 }
