@@ -5,17 +5,24 @@ import (
 	"testing"
 )
 
-// The manifest declares a database by KIND — app.postgresql(), app.sqlite(), app.mysql() — the way
-// it declares a surface by kind (app.web(), app.desktop()). Each is the typed door into the same
-// databases entry app.database({ type, … }) builds, so parseDatabases and every consumer stay as
-// they are; the kind fixes `type`, the alias comes first because it is the connection's name.
-func TestAppDatabaseByKind(t *testing.T) {
-	file := writeServerJS(t, `import { app, env } from "kitwork";
+// The manifest OFFERS surfaces and CONSUMES connections, and names both by kind:
+//
+//	surfaces     app.web()  app.desktop()  app.mobile()  app.database(path, options)   ← KitDB
+//	connections  app.connect()  app.postgresql()  app.mysql()  app.sqlite()  app.redis()
+//
+// This is the RC branch's manifest layer, carried over verbatim so the two builds agree on every
+// shape and every refusal: alias first and required, then a URL or an options object; the kind
+// fixes `type`, and options that contradict it are an error, not a silent override.
+func TestAppConnectionsByKind(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
 app
   .postgresql("system", { host: "db.internal", port: 5432, user: "kit", password: "pw", name: "kitwork", sslmode: "disable" })
+  .postgresql("replica", "postgres://kit:pw@replica.internal:5432/kitwork?sslmode=disable")
   .sqlite("app", "./.data/app.db")
   .sqlite("cache", { name: ":memory:", max_open: 1 })
   .mysql("legacy", { host: "127.0.0.1", port: 3306, user: "root", password: "", name: "shop" })
+  .connect("events", { type: "postgres", host: "h", name: "n" })
+  .connect("analytics", "postgresql://a:b@c/d")
   .web({ port: 8080 });`)
 
 	raw, err := evalConfigJS(file)
@@ -23,14 +30,17 @@ app
 		t.Fatalf("evalConfigJS: %v", err)
 	}
 	dbs, _ := raw["databases"].([]interface{})
-	if len(dbs) != 4 {
-		t.Fatalf("databases len = %d, want 4: %v", len(dbs), raw["databases"])
+	if len(dbs) != 7 {
+		t.Fatalf("databases len = %d, want 7: %v", len(dbs), raw["databases"])
 	}
 	want := []map[string]interface{}{
-		{"alias": "system", "type": "postgres", "host": "db.internal", "port": 5432.0, "user": "kit", "password": "pw", "name": "kitwork", "sslmode": "disable"},
+		{"alias": "system", "type": "postgres", "host": "db.internal", "port": 5432.0, "name": "kitwork"},
+		{"alias": "replica", "type": "postgres", "url": "postgres://kit:pw@replica.internal:5432/kitwork?sslmode=disable"},
 		{"alias": "app", "type": "sqlite", "name": "./.data/app.db"},
 		{"alias": "cache", "type": "sqlite", "name": ":memory:", "max_open": 1.0},
-		{"alias": "legacy", "type": "mysql", "host": "127.0.0.1", "port": 3306.0, "user": "root", "password": "", "name": "shop"},
+		{"alias": "legacy", "type": "mysql", "host": "127.0.0.1", "port": 3306.0},
+		{"alias": "events", "type": "postgres", "host": "h"},
+		{"alias": "analytics", "type": "postgres", "url": "postgresql://a:b@c/d"},
 	}
 	for i, w := range want {
 		got := dbs[i].(map[string]interface{})
@@ -40,49 +50,62 @@ app
 			}
 		}
 	}
-	// The whole list must still parse into database.Config through the ordinary path.
 	cfg, err := ParseConfig(raw)
 	if err != nil {
 		t.Fatalf("ParseConfig: %v", err)
 	}
-	if len(cfg.Databases) != 4 || cfg.Databases[0].Alias != "system" || cfg.Databases[0].Type != "postgres" ||
-		cfg.Databases[1].Type != "sqlite" || cfg.Databases[1].Name != "./.data/app.db" || cfg.Databases[3].Port != 3306 {
-		t.Fatalf("ParseConfig lost a typed database: %+v", cfg.Databases)
+	if len(cfg.Databases) != 7 || cfg.Databases[1].URL == "" {
+		t.Fatalf("ParseConfig lost a typed connection: %+v", cfg.Databases)
+	}
+	if dsn := cfg.Databases[1].DSN(); dsn != "postgres://kit:pw@replica.internal:5432/kitwork?sslmode=disable" {
+		t.Fatalf("a URL connection must use the URL as its DSN, got %q", dsn)
 	}
 }
 
-// Alias may be omitted — the flat form named "default" — and the typed kind wins over a `type` key
-// smuggled into the options, so app.sqlite() can never open Postgres.
-func TestAppDatabaseByKindDefaults(t *testing.T) {
+// Refusals, each one a validation error naming the method — never a silent nothing.
+func TestAppConnectionRefusals(t *testing.T) {
+	for name, manifest := range map[string]string{
+		"missing alias":          `app.postgresql({ host: "h" }).web({ port: 8080 });`,
+		"contradicting type":     `app.sqlite("x", { name: "a.db", type: "postgres" }).web({ port: 8080 });`,
+		"url scheme vs kind":     `app.mysql("x", "postgres://a@b/c").web({ port: 8080 });`,
+		"connect without a kind": `app.connect("x", { host: "h" }).web({ port: 8080 });`,
+		"empty path":             `app.database("").web({ port: 8080 });`,
+	} {
+		file := writeServerJS(t, "import { app } from \"kitwork\";\n"+manifest)
+		_, err := evalConfigJS(file)
+		if err == nil || !strings.Contains(err.Error(), "app.") {
+			t.Errorf("%s: want a validation error naming the method, got %v", name, err)
+		}
+	}
+	// Two connections under one alias would shadow each other at database.connect("alias").
 	file := writeServerJS(t, `import { app } from "kitwork";
-app.sqlite({ name: "data.db", type: "postgres" }).postgresql({ host: "h", name: "n" }).web({ port: 8080 });`)
+app.sqlite("main", "a.db").sqlite("main", "b.db").web({ port: 8080 });`)
 	raw, err := evalConfigJS(file)
 	if err != nil {
-		t.Fatalf("evalConfigJS: %v", err)
+		t.Fatal(err)
 	}
-	dbs, _ := raw["databases"].([]interface{})
-	if len(dbs) != 2 {
-		t.Fatalf("databases len = %d, want 2", len(dbs))
-	}
-	d0, d1 := dbs[0].(map[string]interface{}), dbs[1].(map[string]interface{})
-	if d0["type"] != "sqlite" || d0["alias"] != "default" {
-		t.Errorf("sqlite entry = %v", d0)
-	}
-	if d1["type"] != "postgres" || d1["alias"] != "default" {
-		t.Errorf("postgresql entry = %v", d1)
+	if _, err := ParseConfig(raw); err == nil || !strings.Contains(err.Error(), `"main"`) {
+		t.Fatalf("duplicate alias must be refused by name, got %v", err)
 	}
 }
 
-// CONTROL: app.database({ … }) — the untyped form every existing manifest uses — is unchanged and
-// composes with the typed ones in one list.
-func TestAppDatabaseUntypedStillWorks(t *testing.T) {
+// app.database(path, options) is the DATABASE surface — the app OFFERS KitDB — so a manifest with
+// only it is complete, like a desktop-only one. This build carries the declaration as data
+// (owned_databases); the RC runtime serves it. The untyped app.database({ type, … }) connection
+// object every existing manifest uses keeps working, in the same list as the typed ones.
+func TestAppDatabaseSurfaceAndUntypedConnection(t *testing.T) {
 	file := writeServerJS(t, `import { app } from "kitwork";
-app.database({ alias: "system", type: "postgres", host: "h", port: 5432, user: "u", password: "p", name: "n" })
-   .sqlite("local", "x.db")
-   .web({ port: 8080 });`)
+app
+  .database("./.database/", { memory: "64mb", concurrency: 2, warm: ["demo"] })
+  .database({ alias: "system", type: "postgres", host: "h", port: 5432, user: "u", password: "p", name: "n" })
+  .sqlite("local", "x.db");`)
 	raw, err := evalConfigJS(file)
 	if err != nil {
-		t.Fatalf("evalConfigJS: %v", err)
+		t.Fatalf("a database-only manifest declares a surface: %v", err)
+	}
+	owned, _ := raw["owned_databases"].([]interface{})
+	if len(owned) != 1 || owned[0].(map[string]interface{})["path"] != "./.database/" || owned[0].(map[string]interface{})["memory"] != "64mb" {
+		t.Fatalf("owned_databases = %v", raw["owned_databases"])
 	}
 	dbs, _ := raw["databases"].([]interface{})
 	if len(dbs) != 2 || dbs[0].(map[string]interface{})["alias"] != "system" || dbs[1].(map[string]interface{})["alias"] != "local" {

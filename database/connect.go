@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Alias    string `json:"alias" yaml:"alias"` // system, default, analytics, ...
 	Type     string `json:"type" yaml:"type"`   // postgres, mysql, sqlite
+	URL      string `json:"url" yaml:"url"`     // a full DSN/URL from app.connect(alias, "postgres://…"); wins over the fields
 	User     string `json:"user" yaml:"user"`
 	Password string `json:"password" yaml:"password"`
 	Name     string `json:"name" yaml:"name"`
@@ -77,6 +78,9 @@ func (d *Config) DSN() string {
 
 func (d *Config) BuildDSN() (string, error) {
 	dbType := strings.ToLower(d.Type)
+	if source := strings.TrimSpace(d.URL); source != "" {
+		return source, nil
+	}
 	switch dbType {
 	case "postgres", "postgresql":
 		sslMode := d.SSLMode

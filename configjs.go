@@ -63,6 +63,10 @@ type ServerBuilder struct {
 	path    string
 	err     string
 	unknown []string // manifest methods the chain called that this engine does not have
+	// hasDatabase: an owned KitDB root is declared with app.database(path, options) — the DATABASE
+	// surface (the app offers a database, as app.web offers HTTP). This build has no KitDB runtime
+	// to serve it; the declaration is data the tool reads, exactly like app.desktop on the cloud host.
+	hasDatabase bool
 }
 
 // MissingMember is called for a manifest method this engine does not have — app.postgresql() on a
@@ -227,7 +231,40 @@ func (b *ServerBuilder) Databases(v value.Value) *ServerBuilder {
 	return b
 }
 
-func (b *ServerBuilder) Database(v value.Value) *ServerBuilder {
+func (b *ServerBuilder) Database(values ...value.Value) *ServerBuilder {
+	if len(values) == 0 || len(values) > 2 {
+		b.err = "app.database expects a connection object or (path, options)"
+		return b
+	}
+	if values[0].K == value.String {
+		if strings.TrimSpace(values[0].Text()) == "" {
+			b.err = "app.database path cannot be empty"
+			return b
+		}
+		options := map[string]value.Value{"path": values[0]}
+		if len(values) == 2 {
+			if !values[1].IsMap() {
+				b.err = "app.database options must be an object"
+				return b
+			}
+			for key, item := range values[1].Map() {
+				options[key] = item
+			}
+		}
+		var current []value.Value
+		if configured, ok := b.config["owned_databases"]; ok && configured.K == value.Array {
+			current = *configured.V.(*[]value.Value)
+		}
+		current = append(current, value.New(options))
+		b.config["owned_databases"] = value.Value{K: value.Array, V: &current}
+		b.hasDatabase = true
+		return b
+	}
+	if len(values) != 1 {
+		b.err = "app.database(path, options) requires a string path"
+		return b
+	}
+	v := values[0]
 	var current []value.Value
 	if d, ok := b.config["databases"]; ok && d.K == value.Array {
 		current = *d.V.(*[]value.Value)
@@ -237,52 +274,157 @@ func (b *ServerBuilder) Database(v value.Value) *ServerBuilder {
 	return b
 }
 
-// The manifest declares a database by KIND, the way it declares a surface by kind:
-//
-//	app.postgresql("system", { host, port, user, password, name, sslmode })
-//	app.mysql("shop", { host, port, user, password, name })
-//	app.sqlite("app", "./.data/app.db")          // a string is the file; ":memory:" works too
-//	app.sqlite("cache", { name: ":memory:", max_open: 1 })
-//
-// Each is the typed door into the same databases entry app.database({ type, … }) builds — the
-// kind fixes `type` (over anything in the options), the alias comes first because it is the
-// connection's name, and an omitted alias is "default" as in the flat form. Nothing downstream
-// changes: parseDatabases and database.Config read the entry as they always have.
-func (b *ServerBuilder) Postgresql(args ...value.Value) *ServerBuilder {
-	return b.databaseOfKind("postgres", args...)
+// Connect declares an external connector. A URL supplies its driver through
+// the scheme; an options object must declare type or driver explicitly.
+func (b *ServerBuilder) Connect(values ...value.Value) *ServerBuilder {
+	return b.addExternalConnection("", "app.connect", values...)
 }
 
-func (b *ServerBuilder) Mysql(args ...value.Value) *ServerBuilder {
-	return b.databaseOfKind("mysql", args...)
+// Postgresql declares an external PostgreSQL connection.
+func (b *ServerBuilder) Postgresql(values ...value.Value) *ServerBuilder {
+	return b.addExternalConnection("postgres", "app.postgresql", values...)
 }
 
-func (b *ServerBuilder) Sqlite(args ...value.Value) *ServerBuilder {
-	return b.databaseOfKind("sqlite", args...)
+// Mysql declares an external MySQL connection.
+func (b *ServerBuilder) Mysql(values ...value.Value) *ServerBuilder {
+	return b.addExternalConnection("mysql", "app.mysql", values...)
 }
 
-// databaseOfKind builds one entry from (alias?, options | file) and appends it.
-func (b *ServerBuilder) databaseOfKind(kind string, args ...value.Value) *ServerBuilder {
-	entry := map[string]value.Value{}
-	rest := args
-	if len(rest) > 0 && rest[0].K == value.String {
-		entry["alias"] = rest[0]
-		rest = rest[1:]
+// Sqlite declares a host-owned SQLite compatibility connection.
+func (b *ServerBuilder) Sqlite(values ...value.Value) *ServerBuilder {
+	return b.addExternalConnection("sqlite", "app.sqlite", values...)
+}
+
+// Redis declares an external Redis connection. Runtime availability depends
+// on the distribution registering a Redis connector.
+func (b *ServerBuilder) Redis(values ...value.Value) *ServerBuilder {
+	return b.addExternalConnection("redis", "app.redis", values...)
+}
+
+func (b *ServerBuilder) addExternalConnection(provider, method string, values ...value.Value) *ServerBuilder {
+	if len(values) != 2 || values[0].K != value.String {
+		b.err = method + " expects (alias, urlOrOptions)"
+		return b
 	}
-	if len(rest) > 0 {
-		switch {
-		case rest[0].IsMap():
-			for k, v := range rest[0].Map() {
-				entry[k] = v
-			}
-		case rest[0].K == value.String && kind == "sqlite":
-			entry["name"] = rest[0] // app.sqlite("app", "./.data/app.db")
+	alias := strings.TrimSpace(values[0].Text())
+	if alias == "" {
+		b.err = method + " alias cannot be empty"
+		return b
+	}
+	connection := map[string]value.Value{"alias": value.New(alias)}
+	source := values[1]
+	switch {
+	case source.K == value.String:
+		text := strings.TrimSpace(source.Text())
+		if text == "" {
+			b.err = method + " URL or path cannot be empty"
+			return b
 		}
+		if provider == "sqlite" {
+			connection["name"] = value.New(text)
+		} else {
+			connection["url"] = value.New(text)
+			detected, err := connectionTypeFromURL(text)
+			if err != nil {
+				b.err = method + ": " + err.Error()
+				return b
+			}
+			if provider == "" {
+				provider = detected
+			} else if detected != provider {
+				b.err = method + " URL scheme does not match its provider"
+				return b
+			}
+		}
+	case source.IsMap():
+		for key, item := range source.Map() {
+			connection[key] = item
+		}
+		if configured, found := connection["alias"]; found && (configured.K != value.String || strings.TrimSpace(configured.Text()) != alias) {
+			b.err = method + " options cannot replace its alias"
+			return b
+		}
+		connection["alias"] = value.New(alias)
+		configuredProvider := ""
+		for _, key := range []string{"type", "driver"} {
+			if item, found := connection[key]; found {
+				if item.K != value.String || strings.TrimSpace(item.Text()) == "" {
+					b.err = method + " " + key + " must be a non-empty string"
+					return b
+				}
+				configuredProvider = canonicalConnectionType(item.Text())
+				break
+			}
+		}
+		urlProvider := ""
+		if item, found := connection["url"]; found {
+			if item.K != value.String || strings.TrimSpace(item.Text()) == "" {
+				b.err = method + " url must be a non-empty string"
+				return b
+			}
+			var err error
+			urlProvider, err = connectionTypeFromURL(item.Text())
+			if err != nil {
+				b.err = method + ": " + err.Error()
+				return b
+			}
+		}
+		if provider == "" {
+			provider = configuredProvider
+			if provider == "" {
+				provider = urlProvider
+			}
+			if provider == "" {
+				b.err = method + " options require type, driver, or url"
+				return b
+			}
+		} else if configuredProvider != "" && configuredProvider != provider {
+			b.err = method + " options cannot replace its provider"
+			return b
+		}
+		if urlProvider != "" && urlProvider != provider {
+			b.err = method + " URL scheme does not match its provider"
+			return b
+		}
+	default:
+		b.err = method + " URL or options must be a string or object"
+		return b
 	}
-	if _, ok := entry["alias"]; !ok {
-		entry["alias"] = value.New("default")
+	provider = canonicalConnectionType(provider)
+	connection["type"] = value.New(provider)
+	delete(connection, "driver")
+	var current []value.Value
+	if configured, ok := b.config["databases"]; ok && configured.K == value.Array {
+		current = *configured.V.(*[]value.Value)
 	}
-	entry["type"] = value.New(kind)
-	return b.Database(value.New(entry))
+	current = append(current, value.New(connection))
+	b.config["databases"] = value.Value{K: value.Array, V: &current}
+	return b
+}
+
+func connectionTypeFromURL(source string) (string, error) {
+	separator := strings.Index(source, "://")
+	if separator < 1 {
+		return "", fmt.Errorf("URL must include a connector scheme")
+	}
+	provider := canonicalConnectionType(source[:separator])
+	if provider == "" {
+		return "", fmt.Errorf("URL connector scheme cannot be empty")
+	}
+	return provider, nil
+}
+
+func canonicalConnectionType(source string) string {
+	switch provider := strings.ToLower(strings.TrimSpace(source)); provider {
+	case "postgresql", "postgres":
+		return "postgres"
+	case "sqlite3", "sqlite":
+		return "sqlite"
+	case "rediss", "redis":
+		return "redis"
+	default:
+		return provider
+	}
 }
 
 func (b *ServerBuilder) Logger(v value.Value) *ServerBuilder {
@@ -407,7 +549,7 @@ func evalConfigJS(file string) (map[string]interface{}, error) {
 	if builder.err != "" {
 		return nil, fmt.Errorf("config validation error: %s", builder.err)
 	}
-	if !builder.hasWeb {
+	if !builder.hasWeb && !builder.hasDatabase {
 		return nil, noWebSurfaceErr(builder, file)
 	}
 	return builderToMap(builder, file)

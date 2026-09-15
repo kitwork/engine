@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kitwork/engine/database"
@@ -230,10 +231,31 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := validateDatabaseAliases(dbs); err != nil {
+			return nil, err
+		}
 		cfg.Databases = dbs
 	}
 
 	return cfg, nil
+}
+
+// validateDatabaseAliases refuses two connections under one name: the second would silently shadow
+// the first at database.connect("alias").
+func validateDatabaseAliases(configs []database.Config) error {
+	seen := make(map[string]struct{}, len(configs))
+	for _, config := range configs {
+		alias := strings.TrimSpace(config.Alias)
+		if alias == "" {
+			alias = "default"
+		}
+		key := strings.ToLower(alias)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("database connection alias %q is declared more than once", alias)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func coerceIntErr(val interface{}) (int, error) {
