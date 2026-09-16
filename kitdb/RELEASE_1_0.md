@@ -127,11 +127,22 @@ go run ./cmd/releasegate --mode kitdb-release \
 
 The release gate includes full kernel/node/relational/operator tests, the
 standalone pure-Go search suite, build, vet, compatibility checks, database
-journey and durability oracles, explicit analytics
+journey and durability oracles, the mandatory standalone commerce journey, explicit analytics
 publication/corruption/upgrade recovery, kernel/search/relational race detector
-coverage, ten repetitions of replica/catalog/import/index/analytics hard-crash
+coverage, ten repetitions of commerce/replica/catalog/import/index/analytics hard-crash
 matrices, a multi-tenant canary smoke, and a seeded 128-iteration replica crash
 soak.
+
+The commerce gate builds fresh `CGO_ENABLED=0` native `kitdb`/`kitdbpg`
+executables from the current checkout, checks their standalone dependency
+allowlist, and cannot skip through a missing binary-directory environment
+variable. It exercises products/orders/order_items/audit, DOMAIN/FUNCTION/
+TRIGGER/SEQUENCE, exact money, late failures and rollback, a forced process
+termination with staged audit writes, independent backup restore and timestamp
+recovery of data and catalog objects. See [DISTRIBUTION.md](DISTRIBUTION.md).
+Its bounded `.artifacts/kitdb-commerce-gate.json` includes platform, binary
+digests, passed phases and success, not source paths or credentials. This is
+one development gate, not a clean-commit packaged-candidate qualification.
 
 Run the long storage canary on the intended deployment filesystem:
 

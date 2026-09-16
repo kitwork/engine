@@ -99,6 +99,47 @@ built `kitdb` and `kitdbpg` executables for
 `go test ./cmd/kitdbdist -run '^TestKitDBApplicationNativeJourney$' -count=1 -v`.
 That opt-in does not validate a distribution manifest or qualify a release.
 
+### Standalone Commerce Gate
+
+```sh
+go test ./cmd/kitdbdist -run '^TestKitDBCommerceNativeJourney$' -count=1 -v -timeout 5m
+```
+
+This test always builds the current checkout's native `kitdb` and `kitdbpg`
+with CGO disabled and the standalone dependency allowlist enforced. It starts
+only disposable databases on dynamically allocated loopback ports, never an
+existing application server. Both development/release gate plans require it;
+the release campaign repeats it ten times. `KITDB_COMMERCE_REPORT` optionally
+writes its bounded JSON evidence at a path relative to the module root. The
+gate supplies `.artifacts/kitdb-commerce-gate.json`; repeated runs rely on the
+enclosing gate result instead of overwriting that file with a last-run result.
+
+The `commerce-objects` subtest of `TestKitDBDistributionNativeJourney` runs the
+same scenario against the checksum-verified delivered binaries, not a rebuild:
+
+- Four related tables: products, orders, order_items and audit. Named sequence,
+  a nonnegative-money domain, pure SQL functions, and transactional triggers.
+- INSERT/UPDATE expressions and RETURNING, compound item keys, unique order
+  references, foreign keys, stock checks, and exact NUMERIC cents beyond 2^53.
+- A final domain, trigger, RETURNING, FK or duplicate-key failure must roll
+  back the order, lines, stock changes and earlier audit actions. PostgreSQL
+  requires ROLLBACK after the failed transaction; sequence gaps are expected.
+- An independent integer-cent model compares every business field and audit
+  event, maintained counts, a secondary-index predicate and JOIN aggregates.
+  Readers on another connection must not see an open transaction's writes.
+- Kill the actual native server before client rollback, require an abnormal
+  exit, then recover acknowledged commits without the pending order/audit.
+- Verify and restore a backup into a different, writable database. Restore to
+  a timestamp before bulk UPDATE/DELETE, trigger removal and function-body
+  replacement, then create another order to prove recovered objects execute.
+  The deliberately damaged source stays damaged; recovery does not rewrite it.
+
+The fixture uses the currently supported CHECK comparison/OR profile rather
+than implying general CHECK expression support (CHECK IN is not enabled by
+this test). This is a bounded correctness drill, not a throughput benchmark,
+multi-tenant soak or physical power-loss qualification. It does not promote
+the development DOMAIN/TRIGGER profile or a dirty checkout to stable 1.0.
+
 ### Standalone Import Gap
 
 `kitdbimport` is **not included** in these bundles. Its resumable CSV/JSONL

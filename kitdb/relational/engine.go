@@ -51,6 +51,7 @@ type Options struct {
 	// ProjectionOpenPolicy optionally rejects invalid or non-ready immutable
 	// projection state before this Engine becomes visible to callers.
 	ProjectionOpenPolicy ProjectionOpenPolicy
+	QueryCache           QueryCacheOptions
 }
 
 type Engine struct {
@@ -79,6 +80,7 @@ type Engine struct {
 	searchManager           *search.Manager
 	searchStates            map[string]*relationalSearchState
 	closed                  bool
+	queryCache              *queryResultCache
 }
 
 type Column struct {
@@ -136,6 +138,11 @@ func OpenWithContext(ctx context.Context, path string, options Options) (*Engine
 	if err != nil {
 		return nil, err
 	}
+	cacheOptions, err := normalizeQueryCacheOptions(options.QueryCache)
+	if err != nil {
+		return nil, err
+	}
+	options.QueryCache = cacheOptions
 	database, err := kitdbengine.OpenWithOptions(path, options.Kernel)
 	if err != nil {
 		return nil, err
@@ -167,6 +174,11 @@ func AttachWithContext(ctx context.Context, database *kitdbengine.DB, options Op
 	if err != nil {
 		return nil, err
 	}
+	cacheOptions, err := normalizeQueryCacheOptions(options.QueryCache)
+	if err != nil {
+		return nil, err
+	}
+	options.QueryCache = cacheOptions
 	return newEngineWithDatabase(
 		ctx,
 		database,
@@ -254,6 +266,7 @@ func newEngineWithDatabase(
 		searchReaderCacheBytes:  options.SearchReaderCacheBytes,
 		searchContext:           searchContext, searchCancel: searchCancel,
 		searchStates: make(map[string]*relationalSearchState),
+		queryCache:   newQueryResultCache(options.QueryCache),
 	}
 	if err := engine.enforceProjectionOpenPolicy(ctx, options.ProjectionOpenPolicy); err != nil {
 		searchCancel()
@@ -307,6 +320,8 @@ func (engine *Engine) Describe(ctx context.Context, source string) ([]Column, er
 		return nil, err
 	}
 	switch statement.Kind {
+	case kitdbsql.StatementSavepoint:
+		return nil, nil
 	case kitdbsql.StatementSelect:
 		return describeSelectFromCatalog(catalog, statement.Select, nil)
 	case kitdbsql.StatementExplain:
@@ -341,8 +356,7 @@ func (engine *Engine) describeReturningLocked(
 	if err != nil {
 		return nil, err
 	}
-	columns, _, err := bindProjection(schema, returning)
-	return columns, err
+	return describeScalarExpressionSelect(schema, &kitdbsql.SelectStatement{Projection: returning})
 }
 
 func (engine *Engine) Close() error {
@@ -425,6 +439,15 @@ func (engine *Engine) Execute(ctx context.Context, source string, parameters ...
 	return engine.executeWithSequences(ctx, source, parameters, nil, false)
 }
 
+// QueryCacheStats reports bounded result-cache residency and activity without
+// exposing SQL text, parameters, database paths or row values.
+func (engine *Engine) QueryCacheStats() QueryCacheStats {
+	if engine == nil {
+		return QueryCacheStats{}
+	}
+	return engine.queryCache.stats()
+}
+
 // ExecutePlan binds and runs a typed statement without rendering or parsing
 // SQL text. A frontend must provide a fresh plan for each concurrent call;
 // binding may attach snapshot-local function metadata to expression nodes.
@@ -447,7 +470,36 @@ func (engine *Engine) executeWithSequences(ctx context.Context, source string, p
 	if err != nil {
 		return Result{}, err
 	}
-	return engine.executePreparedPlanWithSequences(ctx, &statement, parameters, sequences, readOnly)
+	duration := engine.queryCache.duration(&statement)
+	if duration <= 0 {
+		if engine.queryCache != nil && statement.Kind == kitdbsql.StatementSelect {
+			engine.queryCache.bypasses.Add(1)
+		}
+		return engine.executePreparedPlanWithSequences(ctx, &statement, parameters, sequences, readOnly)
+	}
+	before, err := engine.database.LastTransaction()
+	if err != nil {
+		return Result{}, err
+	}
+	key := queryResultCacheKey(source, parameters)
+	now := time.Now()
+	if result, found := engine.queryCache.get(key, before, now); found {
+		return result, nil
+	}
+	result, executeErr := engine.executePreparedPlanWithSequences(ctx, &statement, parameters, sequences, readOnly)
+	if executeErr != nil {
+		return Result{}, executeErr
+	}
+	after, err := engine.database.LastTransaction()
+	if err != nil {
+		return Result{}, err
+	}
+	if before == after {
+		engine.queryCache.put(key, after, now.Add(duration), result)
+	} else {
+		engine.queryCache.bypasses.Add(1)
+	}
+	return result, nil
 }
 
 func (engine *Engine) executePlanWithSequences(
@@ -499,6 +551,12 @@ func (engine *Engine) executePreparedPlanWithSequences(
 	}
 	switch statement.Kind {
 	case kitdbsql.StatementCreate:
+		if statement.CreateTrigger != nil {
+			return engine.executeTriggerDDL(ctx, statement.CreateTrigger, nil)
+		}
+		if statement.CreateDomain != nil {
+			return engine.executeDomainDDL(ctx, statement.CreateDomain, nil)
+		}
 		if statement.CreateFunction != nil {
 			return engine.executeFunctionDDL(ctx, statement.CreateFunction, nil)
 		}
@@ -507,6 +565,12 @@ func (engine *Engine) executePreparedPlanWithSequences(
 		}
 		return engine.executeCreateIndex(ctx, statement.CreateIndex)
 	case kitdbsql.StatementDrop:
+		if statement.DropTrigger != nil {
+			return engine.executeTriggerDDL(ctx, nil, statement.DropTrigger)
+		}
+		if statement.DropDomain != nil {
+			return engine.executeDomainDDL(ctx, nil, statement.DropDomain)
+		}
 		if statement.DropFunction != nil {
 			return engine.executeFunctionDDL(ctx, nil, statement.DropFunction)
 		}
@@ -579,6 +643,8 @@ func (engine *Engine) executePreparedPlanWithSequences(
 		result, executeErr := transaction.executeParsed(ctx, statement, parameters)
 		_ = transaction.Rollback()
 		return result, executeErr
+	case kitdbsql.StatementSavepoint:
+		return Result{}, errSavepointTransaction
 	case kitdbsql.StatementInsert, kitdbsql.StatementUpdate, kitdbsql.StatementDelete:
 		if sequences == nil {
 			sequences = &sequenceSession{}
@@ -685,6 +751,13 @@ func (transaction *Transaction) executeInsert(ctx context.Context, plan *kitdbsq
 	if err := transaction.ready(); err != nil {
 		return Result{}, err
 	}
+	count, _, err := validateInsertShape(plan)
+	if err != nil {
+		return Result{}, err
+	}
+	if len(plan.Returning) != 0 && count > transaction.engine.maximumResultRows {
+		return Result{}, fmt.Errorf("kitdb SQL: RETURNING exceeds this server's result limit of %d", transaction.engine.maximumResultRows)
+	}
 	schema, err := transaction.schema(plan.Table)
 	if err != nil {
 		return Result{}, err
@@ -701,12 +774,29 @@ func (transaction *Transaction) executeInsert(ctx context.Context, plan *kitdbsq
 			"kitdb: standalone writes to migrated row generation %d are not enabled yet", generation,
 		)
 	}
+	returning, err := bindScalarProjections(schema, plan.Returning, parameters)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := validateConflict(schema, plan.Conflict, parameters); err != nil {
+		return Result{}, err
+	}
 	rows, err := transaction.bindInsertRows(ctx, schema, plan, parameters)
 	if err != nil {
 		return Result{}, err
 	}
+	if len(plan.Returning) != 0 && len(rows) > transaction.engine.maximumResultRows {
+		return Result{}, fmt.Errorf("kitdb SQL: RETURNING exceeds this server's result limit of %d", transaction.engine.maximumResultRows)
+	}
+	if plan.Conflict != nil {
+		return transaction.executeUpsert(ctx, schema, rows, plan.Conflict, parameters, returning)
+	}
+	return transaction.insertBoundRows(ctx, schema, rows, returning)
+}
+
+func (transaction *Transaction) insertBoundRows(ctx context.Context, schema kitdbsql.Schema, rows []map[string]any, returning []boundScalarProjection) (Result, error) {
 	if len(rows) == 0 {
-		return Result{}, fmt.Errorf("kitdb SQL: INSERT has no rows")
+		return mutationResult(ctx, "INSERT 0", nil, returning)
 	}
 	staged := make(map[string]struct{}, len(rows)*2)
 	for index, row := range rows {
@@ -768,9 +858,12 @@ func (transaction *Transaction) executeInsert(ctx context.Context, plan *kitdbsq
 			}
 		}
 	}
-	for index, row := range rows {
-		if err := transaction.validateRowForeignKeys(schema, row); err != nil {
-			return Result{}, fmt.Errorf("kitdb SQL: INSERT row %d: %w", index+1, err)
+	deferred := deferRowEffects(ctx, schema, "insert", len(rows), func(i int) (map[string]any, map[string]any) { return nil, rows[i] })
+	if !deferred {
+		for index, row := range rows {
+			if err := transaction.validateRowForeignKeys(schema, row); err != nil {
+				return Result{}, fmt.Errorf("kitdb SQL: INSERT row %d: %w", index+1, err)
+			}
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -779,19 +872,14 @@ func (transaction *Transaction) executeInsert(ctx context.Context, plan *kitdbsq
 	if err := adjustTableCount(transaction, schema, int64(len(rows))); err != nil {
 		return Result{}, err
 	}
-	result := Result{Affected: int64(len(rows)), CommandTag: fmt.Sprintf("INSERT 0 %d", len(rows))}
-	if len(plan.Returning) != 0 {
-		columns, names, err := bindProjection(schema, plan.Returning)
-		if err != nil {
+	if !deferred {
+		if err := transaction.fireAfterTriggers(ctx, schema, "insert", len(rows), func(i int) (map[string]any, map[string]any) {
+			return nil, rows[i]
+		}); err != nil {
 			return Result{}, err
 		}
-		result.Columns = columns
-		result.Rows = make([][]any, len(rows))
-		for index, row := range rows {
-			result.Rows[index] = projectRow(schema, row, names)
-		}
 	}
-	return result, nil
+	return mutationResult(ctx, "INSERT 0", rows, returning)
 }
 
 func (engine *Engine) schemaLocked(requested string) (kitdbsql.Schema, error) {
@@ -829,7 +917,7 @@ func standaloneWriteSupported(schema kitdbsql.Schema) error {
 			normalizeReferentialAction(constraint.OnDelete),
 			normalizeReferentialAction(constraint.OnUpdate),
 		} {
-			if action != "no action" && action != "restrict" {
+			if action != "no action" && action != "restrict" && action != "cascade" && action != "set null" && action != "set default" {
 				return fmt.Errorf(
 					"kitdb: table %q foreign key %q uses unsupported action %q",
 					schema.Name, constraint.Name, action,
@@ -841,15 +929,35 @@ func standaloneWriteSupported(schema kitdbsql.Schema) error {
 }
 
 func (transaction *Transaction) bindInsertRows(ctx context.Context, schema kitdbsql.Schema, plan *kitdbsql.InsertStatement, parameters []any) ([]map[string]any, error) {
-	if plan == nil {
-		return nil, fmt.Errorf("kitdb SQL: invalid INSERT plan")
+	count, width, err := validateInsertShape(plan)
+	if err != nil {
+		return nil, err
+	}
+	var selected Result
+	if plan.Select != nil {
+		// Buffer a bounded, fixed-snapshot source before staging any target row.
+		// Always supply a working budget, even for a plain SELECT without a CTE.
+		budget := newMaterializationBudget(min(transaction.engine.maximumResultRows, kitdbsql.MaximumInsertRows))
+		working := newMaterializationWorkingSet(budget)
+		defer working.close()
+		selected, err = transaction.executeSelectInScope(ctx, plan.Select, parameters, false, nil, budget, working)
+		if err != nil {
+			return nil, err
+		}
+		count, width = len(selected.Rows), len(selected.Columns)
+		if count > kitdbsql.MaximumInsertRows {
+			return nil, fmt.Errorf("kitdb SQL: INSERT SELECT exceeds %d rows", kitdbsql.MaximumInsertRows)
+		}
+		if len(plan.Columns) != 0 && width != len(plan.Columns) {
+			return nil, fmt.Errorf("kitdb SQL: INSERT SELECT has %d columns but target has %d", width, len(plan.Columns))
+		}
 	}
 	columns := append([]string(nil), plan.Columns...)
-	if len(columns) == 0 && len(plan.Rows) != 0 {
-		if len(plan.Rows[0]) != len(schema.Fields) {
+	if len(columns) == 0 && plan.DefaultRows == 0 {
+		if width != len(schema.Fields) {
 			return nil, fmt.Errorf(
 				"kitdb SQL: INSERT row has %d values but table %q has %d fields",
-				len(plan.Rows[0]), schema.Name, len(schema.Fields),
+				width, schema.Name, len(schema.Fields),
 			)
 		}
 		columns = make([]string, len(schema.Fields))
@@ -871,10 +979,6 @@ func (transaction *Transaction) bindInsertRows(ctx context.Context, schema kitdb
 		}
 		seen[name], fields[index] = true, field
 	}
-	count := len(plan.Rows)
-	if plan.DefaultRows != 0 {
-		count = plan.DefaultRows
-	}
 	rows := make([]map[string]any, 0, count)
 	now := time.Now().UTC()
 	for rowIndex := 0; rowIndex < count; rowIndex++ {
@@ -883,9 +987,17 @@ func (transaction *Transaction) bindInsertRows(ctx context.Context, schema kitdb
 		}
 		provided := make(map[string]any, len(canonical))
 		if plan.DefaultRows == 0 {
-			for columnIndex, literal := range plan.Rows[rowIndex] {
+			for columnIndex := range canonical {
+				var expression kitdbsql.ExpressionPlan
+				if plan.Select != nil {
+					expression = kitdbsql.ExpressionPlan{Kind: "literal", Literal: kitdbsql.Literal{Kind: kitdbsql.LiteralParameter, Parameter: 1}}
+				} else if len(plan.Values) != 0 {
+					expression = plan.Values[rowIndex][columnIndex]
+				} else {
+					expression = kitdbsql.ExpressionPlan{Kind: "literal", Literal: plan.Rows[rowIndex][columnIndex]}
+				}
 				field := fields[columnIndex]
-				if literal.Kind == kitdbsql.LiteralDefault {
+				if expression.Kind == "literal" && expression.Literal.Kind == kitdbsql.LiteralDefault {
 					continue
 				}
 				if field.Sequence != nil && (field.Sequence.Mode == "always" || field.Sequence.Mode == "by_default") {
@@ -896,7 +1008,13 @@ func (transaction *Transaction) bindInsertRows(ctx context.Context, schema kitdb
 						return nil, fmt.Errorf("kitdb SQL: GENERATED ALWAYS field %q requires DEFAULT or OVERRIDING SYSTEM VALUE", field.Name)
 					}
 				}
-				item, err := resolveLiteral(literal, parameters)
+				var item any
+				var err error
+				if plan.Select != nil {
+					item = selected.Rows[rowIndex][columnIndex]
+				} else {
+					item, err = evaluateInsertValue(&expression, parameters, now)
+				}
 				if err != nil {
 					return nil, fmt.Errorf("kitdb SQL: INSERT row %d: %w", rowIndex+1, err)
 				}

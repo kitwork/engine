@@ -136,6 +136,13 @@ func Lex(source string) ([]Token, error) {
 			}
 			continue
 		}
+		if strings.HasPrefix(source[offset:], "::") {
+			if err := appendToken(TokenSymbol, "::", offset, offset+2); err != nil {
+				return nil, err
+			}
+			offset += 2
+			continue
+		}
 		if r == '?' || r == ':' || r == '@' || r == '$' {
 			start := offset
 			offset += size

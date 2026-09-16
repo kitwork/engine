@@ -52,6 +52,15 @@ type Database struct {
 
 func (d *Database) Connection() *Database {
 	if d.sqlDB == nil {
+		connection, err := database.ResolveOwned("default")
+		if err != nil {
+			fmt.Printf("[DB] Failed to resolve default database: %v\n", err)
+			return d
+		}
+		if connection != nil {
+			d.sqlDB = connection
+			return d
+		}
 		if config, ok := database.Configs["default"]; ok {
 			d.sqlDB = d.tenant.lookupDatabase(&config)
 		}
@@ -106,7 +115,12 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 		alias = "default"
 	}
 
-	if dbCfg, ok := database.Configs[alias]; ok {
+	connection, resolveErr := database.ResolveOwned(alias)
+	if resolveErr != nil {
+		fmt.Printf("[DB] Failed to resolve database '%s': %v\n", alias, resolveErr)
+	} else if connection != nil {
+		d.sqlDB = connection
+	} else if dbCfg, ok := database.Configs[alias]; ok {
 		if dbConn := d.tenant.lookupDatabase(&dbCfg); dbConn != nil {
 			d.sqlDB = dbConn
 		} else {

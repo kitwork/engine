@@ -2,6 +2,7 @@ package sql
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -47,16 +48,16 @@ func TestDecodeSchemaFailsClosedOnUnknownType(t *testing.T) {
 }
 
 func TestDecodeSchemaRejectsFutureVersion(t *testing.T) {
-	definition := []byte(`{
-		"version":9,
+	definition := []byte(fmt.Sprintf(`{
+		"version":%d,
 		"id":"struct-products",
 		"name":"products",
 		"hash":"schema-hash",
 		"nextFieldTag":2,
 		"fields":[{"id":"field-id","tag":1,"name":"id","position":0,"kind":"kitid"}]
-	}`)
+	}`, CurrentSchemaVersion+1))
 	_, err := DecodeSchema(definition)
-	if err == nil || !strings.Contains(err.Error(), "schema version 9 is unsupported") {
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("schema version %d is unsupported", CurrentSchemaVersion+1)) {
 		t.Fatalf("DecodeSchema error = %v", err)
 	}
 }

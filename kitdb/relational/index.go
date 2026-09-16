@@ -594,6 +594,28 @@ func (transaction *Transaction) walkAccessRows(
 	access rowAccess,
 	visit func(key, encoded []byte) (bool, error),
 ) error {
+	return transaction.walkAccessRowsAdmitted(access, nil, visit)
+}
+
+// Admission accounts index entries as well as hydrated rows. Ordinary reads
+// keep the nil fast path; bounded integrity probes must not hide index work.
+func (transaction *Transaction) walkAccessRowsAdmitted(
+	access rowAccess,
+	admit func(key, value []byte) error,
+	visit func(key, encoded []byte) (bool, error),
+) error {
+	get := func(key []byte) ([]byte, bool, error) {
+		if admit != nil {
+			if err := admit(key, nil); err != nil {
+				return nil, false, err
+			}
+		}
+		value, found, err := transaction.Get(key)
+		if err == nil && admit != nil {
+			err = admit(nil, value)
+		}
+		return value, found, err
+	}
 	resolveRowKey := func(logical []byte) ([]byte, error) {
 		if access.rowGeneration == 0 {
 			return logical, nil
@@ -602,14 +624,14 @@ func (transaction *Transaction) walkAccessRows(
 	}
 	switch access.kind {
 	case rowAccessPrimary:
-		encoded, found, err := transaction.Get(access.lookup)
+		encoded, found, err := get(access.lookup)
 		if err != nil || !found {
 			return err
 		}
 		_, err = visit(access.lookup, encoded)
 		return err
 	case rowAccessUnique:
-		rowKey, found, err := transaction.Get(access.lookup)
+		rowKey, found, err := get(access.lookup)
 		if err != nil || !found {
 			return err
 		}
@@ -617,25 +639,38 @@ func (transaction *Transaction) walkAccessRows(
 		if err != nil {
 			return err
 		}
-		encoded, found, err := transaction.Get(rowKey)
+		encoded, found, err := get(rowKey)
 		if err != nil || !found {
 			return err
 		}
 		_, err = visit(rowKey, encoded)
 		return err
 	case rowAccessSecondary:
-		return transaction.Scan(access.options, func(_, logicalRowKey []byte) (bool, error) {
+		return transaction.Scan(access.options, func(indexKey, logicalRowKey []byte) (bool, error) {
+			if admit != nil {
+				if err := admit(indexKey, logicalRowKey); err != nil {
+					return false, err
+				}
+			}
 			rowKey, err := resolveRowKey(logicalRowKey)
 			if err != nil {
 				return false, err
 			}
-			encoded, found, err := transaction.Get(rowKey)
+			encoded, found, err := get(rowKey)
 			if err != nil || !found {
 				return false, err
 			}
 			return visit(rowKey, encoded)
 		})
 	default:
+		if admit != nil {
+			return transaction.Scan(access.options, func(key, value []byte) (bool, error) {
+				if err := admit(key, value); err != nil {
+					return false, err
+				}
+				return visit(key, value)
+			})
+		}
 		return transaction.Scan(access.options, visit)
 	}
 }

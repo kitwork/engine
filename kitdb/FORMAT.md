@@ -16,6 +16,44 @@ rather than a main-file or WAL field.
 
 ## Files
 
+### Domain catalog extension (development)
+
+Domains use reserved catalog keys `0x01 || 'D' || 16-byte domain ID`. Values
+are version-1 UTF-8 JSON definitions bounded to 64 KiB, with `version`, `id`,
+`name`, `hash` and a logical `column` specification. The kernel admits at most
+1024 domains inside the existing shared catalog byte budget. Definitions are
+immutable, included in catalog revisions, and copied into snapshots. Final
+catalog graph validation rejects missing/changed domain references.
+
+The relational frontend owns definition hashing and constraint binding.
+Tables with domain columns use schema version 9, retain domain ID/name/hash,
+and contain the immutable checks bound to stable field tags. The main v3,
+KROW and WAL envelopes do not change. Old readers lacking domain catalog
+support must reject, not silently ignore, this metadata. No per-domain files
+are introduced. See the standalone relational README for the admitted SQL
+profile and downgrade limitations.
+
+### Trigger catalog extension (development)
+
+Triggers use `0x01 || 'T' || 16-byte trigger ID`. A version-1 UTF-8 JSON
+definition includes `version`, `id`, `name`, `hash`, `sourceStruct`,
+`targetStruct`, `sourceFields`, `targetFields`, `event`, optional `when`,
+and `values`. The kernel validates the dependency header and limits (64 KiB,
+1024 definitions/database, 32/source table, at most 64 source and 32 target
+field tags). Names are scoped to the source table, definitions are immutable,
+and the final catalog graph must contain all referenced tables/field tags
+and no table-action cycles. Public snapshots detach all owned slices.
+
+The standalone relational frontend validates the bounded expression AST and
+SHA-256 definition hash. References use stable table IDs/field tags; generated
+`old_<tag>`/`new_<tag>` variables survive column renames. Every action goes
+through the normal transactional INSERT path. WAL records the resulting
+writes, never a deferred instruction to rerun a trigger during recovery.
+Trigger records participate in the catalog revision only when nonempty,
+preserving the revision format for databases without triggers. Existing main
+v3/KROW/WAL envelopes do not change; no extra files are introduced. Readers
+without this catalog extension must reject it, not ignore trigger semantics.
+
 For `Open("tenant.kitdb")`, the storage set is:
 
 ```text

@@ -220,6 +220,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 			},
 		},
 		kitDBProjectionRecoveryStep(),
+		kitDBCommerceJourneyStep(),
 		{Name: "Build", Command: []string{"go", "build", "./..."}},
 		{Name: "Full tests", Command: []string{"go", "test", "-count=1", "-timeout=20m", "./..."}},
 		{Name: "Vet", Command: []string{"go", "vet", "./..."}},
@@ -316,6 +317,14 @@ func kitDBProjectionRecoveryStep() gateStep {
 	}
 }
 
+func kitDBCommerceJourneyStep() gateStep {
+	return gateStep{
+		Name:    "KitDB standalone commerce journey",
+		Command: []string{"go", "test", "./cmd/kitdbdist", "-run", "^TestKitDBCommerceNativeJourney$", "-count=1", "-timeout=5m", "-v"},
+		Env:     map[string]string{"KITDB_COMMERCE_REPORT": ".artifacts/kitdb-commerce-gate.json", "CGO_ENABLED": "0"},
+	}
+}
+
 func kitDBVerifyPlan() []gateStep {
 	return []gateStep{
 		kitDBCompatibilityStep(),
@@ -352,6 +361,7 @@ func kitDBVerifyPlan() []gateStep {
 			},
 		},
 		kitDBProjectionRecoveryStep(),
+		kitDBCommerceJourneyStep(),
 		{
 			Name:    "KitDB database journey",
 			Command: []string{"go", "test", "./work", "-run", "^(TestKitDBDatabaseReleaseGate|TestKitDBPostgresCopyInWithLibPQIsAtomic)$", "-count=1", "-timeout=5m", "-v"},
@@ -362,6 +372,13 @@ func kitDBVerifyPlan() []gateStep {
 
 func kitDBReleaseCampaigns() []gateStep {
 	return []gateStep{
+		{
+			Name:    "KitDB commerce hard-crash matrix",
+			Command: []string{"go", "test", "./cmd/kitdbdist", "-run", "^TestKitDBCommerceNativeJourney$", "-count=10", "-timeout=20m", "-v"},
+			// The enclosing gate records all repetitions; do not overwrite the
+			// single-run JSON with only the last iteration's outcome.
+			Env: map[string]string{"KITDB_COMMERCE_REPORT": "", "CGO_ENABLED": "0"},
+		},
 		{
 			Name:    "KitDB kernel race",
 			Command: []string{"go", "test", "-race", "./kitdb/...", "-count=1", "-timeout=20m"},

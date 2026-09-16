@@ -21,6 +21,7 @@ import (
 
 	"github.com/kitwork/engine/kitdb"
 	"github.com/kitwork/engine/kitdb/buildinfo"
+	"github.com/kitwork/engine/kitdb/managed"
 	"github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/relational"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
@@ -95,6 +96,31 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 	var result any
 	var err error
 	switch command {
+	case "init-root":
+		if len(args) != 2 {
+			return fmt.Errorf("init-root requires ROOT")
+		}
+		result, err = managed.Init(args[1])
+	case "register-database":
+		if len(args) != 4 {
+			return fmt.Errorf("register-database requires ROOT NAME DIRECTORY (existing ROOT/DIRECTORY/data.kitdb)")
+		}
+		var root *managed.Root
+		root, err = managed.Open(args[1])
+		if err == nil {
+			result, err = root.Register(args[2], args[3])
+			err = errors.Join(err, root.Close())
+		}
+	case "root-catalog":
+		if len(args) != 2 {
+			return fmt.Errorf("root-catalog requires ROOT (offline)")
+		}
+		var root *managed.Root
+		root, err = managed.Open(args[1])
+		if err == nil {
+			result = root.Catalog()
+			err = root.Close()
+		}
 	case "version":
 		if len(args) != 1 {
 			return fmt.Errorf("version accepts no arguments")
@@ -580,6 +606,6 @@ func newFlagSet(name string) *flag.FlagSet {
 
 func usageError() error {
 	return fmt.Errorf(
-		"usage: kitdb <version|query|serve|refresh-projections|pack-search|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
+		"usage: kitdb <version|init-root|register-database|root-catalog|query|serve|refresh-projections|pack-search|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
 	)
 }

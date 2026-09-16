@@ -242,6 +242,9 @@ func TestKitDBDistributionNativeJourney(t *testing.T) {
 	hash := sha256.Sum256(data)
 	t.Logf("native bundle %s commit=%s passed SQL/search/pgwire/doctor/canary, canary sha256=%s", report.Version, report.Commit, hex.EncodeToString(hash[:]))
 	t.Run("mixed-application", func(t *testing.T) { exerciseApplicationBinaries(t, binary) })
+	t.Run("commerce-objects", func(t *testing.T) {
+		exerciseCommerceBinaries(t, binary, &commerceEvidence{})
+	})
 }
 
 func exercisePostgresBinary(t *testing.T, ctx context.Context, root, database, server string) {

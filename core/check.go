@@ -39,6 +39,8 @@ func (i CheckIssue) Error() string {
 
 // CheckReport contains every issue found during one preflight pass.
 type CheckReport struct {
+	Root       string
+	Layout     string
 	Apps       int
 	Sites      int
 	Valid      int
@@ -62,11 +64,14 @@ type checkTarget struct {
 // path, then retires it without activation. It opens no listener and starts no
 // cron scheduler.
 func Check(root string, maxEnergy uint64, bytecodeCacheDirectory ...string) CheckReport {
+	report := CheckReport{
+		Root:   root,
+		Layout: "auto",
+	}
 	if maxEnergy == 0 {
 		maxEnergy = kitruntime.Limits().DefaultMaxEnergy
 	}
 	targets, discoveryErr := discoverCheckTargets(root)
-	report := CheckReport{}
 	if discoveryErr != nil {
 		report.Issues = append(report.Issues, CheckIssue{
 			Stage: "discover",

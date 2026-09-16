@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kitwork/engine/database"
@@ -10,22 +11,23 @@ import (
 )
 
 type Config struct {
-	Port             int               `json:"port" yaml:"port"`
-	Root             string            `json:"root" yaml:"root"`
-	Databases        []database.Config `json:"database" yaml:"database"`
-	Domains          []string          `json:"domains" yaml:"domains"`
-	Canonical        string            `json:"canonical" yaml:"canonical"` // "apex" | "www" | "" (off)
-	Redirects        map[string]string `json:"redirects" yaml:"redirects"` // host → target host or full URL
-	MaxEnergy        uint64            `json:"max_energy" yaml:"max_energy"`
-	HotReload        bool              `json:"hot_reload" yaml:"hot_reload"`
-	BytecodeCache    bool              `json:"bytecode_cache" yaml:"bytecode_cache"`
-	BytecodeCacheDir string            `json:"bytecode_cache_dir" yaml:"bytecode_cache_dir"`
-	Hostname         string            `json:"hostname" yaml:"hostname"`
-	AllowLocal       bool              `json:"allow_local" yaml:"allow_local"`
-	TrustProxy       bool              `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
-	Logger           logger.Config     `json:"logger" yaml:"logger"`
-	RateLimit        *RateLimitConfig  `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
-	Search           SearchConfig      `json:"search" yaml:"search"`
+	Port             int                 `json:"port" yaml:"port"`
+	Root             string              `json:"root" yaml:"root"`
+	Databases        []database.Config   `json:"database" yaml:"database"`
+	Domains          []string            `json:"domains" yaml:"domains"`
+	Canonical        string              `json:"canonical" yaml:"canonical"` // "apex" | "www" | "" (off)
+	Redirects        map[string]string   `json:"redirects" yaml:"redirects"` // host → target host or full URL
+	MaxEnergy        uint64              `json:"max_energy" yaml:"max_energy"`
+	HotReload        bool                `json:"hot_reload" yaml:"hot_reload"`
+	BytecodeCache    bool                `json:"bytecode_cache" yaml:"bytecode_cache"`
+	BytecodeCacheDir string              `json:"bytecode_cache_dir" yaml:"bytecode_cache_dir"`
+	Hostname         string              `json:"hostname" yaml:"hostname"`
+	AllowLocal       bool                `json:"allow_local" yaml:"allow_local"`
+	TrustProxy       bool                `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
+	Logger           logger.Config       `json:"logger" yaml:"logger"`
+	RateLimit        *RateLimitConfig    `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
+	Search           SearchConfig        `json:"search" yaml:"search"`
+	AppDatabases     []AppDatabaseConfig `json:"-" yaml:"-"`
 }
 
 // SearchConfig controls host-owned search rollout. CollectionCanary is
@@ -221,10 +223,36 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := validateDatabaseAliases(dbs); err != nil {
+			return nil, err
+		}
 		cfg.Databases = dbs
+	}
+	if value, ok := raw["owned_databases"]; ok {
+		owned, err := parseAppDatabaseConfigs(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.AppDatabases = owned
 	}
 
 	return cfg, nil
+}
+
+func validateDatabaseAliases(configs []database.Config) error {
+	seen := make(map[string]struct{}, len(configs))
+	for _, config := range configs {
+		alias := strings.TrimSpace(config.Alias)
+		if alias == "" {
+			alias = "default"
+		}
+		key := strings.ToLower(alias)
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("database connection alias %q is declared more than once", alias)
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
 }
 
 func coerceIntErr(val interface{}) (int, error) {

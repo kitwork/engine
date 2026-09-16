@@ -2,7 +2,6 @@ package relational
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -205,10 +204,7 @@ func (transaction *Transaction) validateRowForeignKeys(schema kitdbsql.Schema, r
 			return err
 		}
 		if !exists {
-			return fmt.Errorf(
-				"kitdb: table %q foreign key %q references a missing %s key",
-				schema.Name, constraint.Name, target.Name,
-			)
+			return fmt.Errorf("%w: table %q foreign key %q references a missing %s key", ErrForeignKeyViolation, schema.Name, constraint.Name, target.Name)
 		}
 	}
 	return nil
@@ -310,103 +306,6 @@ func (transaction *Transaction) foreignTargetExists(
 		return false, err
 	}
 	_, found, err := transaction.Get(key)
-	return found, err
-}
-
-func (transaction *Transaction) validateDeleteReferences(
-	ctx context.Context,
-	target kitdbsql.Schema,
-	records []mutationRecord,
-) error {
-	deleting := make(map[string]struct{}, len(records))
-	for _, record := range records {
-		deleting[string(record.key)] = struct{}{}
-	}
-	for _, entry := range transaction.catalog.Structs {
-		child, err := decodeCatalogSchema(entry.Definition)
-		if err != nil {
-			return err
-		}
-		for _, constraint := range relationalForeignConstraints(child) {
-			if constraint.TargetStructID != "" && constraint.TargetStructID != target.ID &&
-				!strings.EqualFold(constraint.TargetStruct, target.Name) {
-				continue
-			}
-			if constraint.TargetStructID == "" && !strings.EqualFold(constraint.TargetStruct, target.Name) {
-				continue
-			}
-			localFields, _, targetFields, err := transaction.bindForeignConstraint(child, constraint)
-			if err != nil {
-				return err
-			}
-			for _, record := range records {
-				conditions := make([]boundCondition, len(localFields))
-				for index, localField := range localFields {
-					value, err := foreignComparableValue(
-						targetFields[index], localField, record.decoded.values[targetFields[index].Name],
-					)
-					if err != nil {
-						return err
-					}
-					conditions[index] = boundCondition{
-						field: localField, operator: "=", value: value,
-					}
-				}
-				referenced, err := transaction.foreignReferenceExists(ctx, child, conditions, deleting, child.ID == target.ID)
-				if err != nil {
-					return err
-				}
-				if referenced {
-					return fmt.Errorf(
-						"kitdb: DELETE from %q violates foreign key %q on table %q",
-						target.Name, constraint.Name, child.Name,
-					)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func (transaction *Transaction) foreignReferenceExists(
-	ctx context.Context,
-	child kitdbsql.Schema,
-	conditions []boundCondition,
-	deleting map[string]struct{},
-	sameTable bool,
-) (bool, error) {
-	generation, err := activeRowGeneration(transaction, child)
-	if err != nil {
-		return false, err
-	}
-	access, err := transaction.planRowAccess(child, generation, conditions, nil)
-	if err != nil {
-		return false, err
-	}
-	found := false
-	visited := 0
-	err = transaction.walkAccessRows(access, func(key, encoded []byte) (bool, error) {
-		visited++
-		if visited&255 == 0 {
-			if err := ctx.Err(); err != nil {
-				return false, err
-			}
-		}
-		if sameTable {
-			if _, removed := deleting[string(key)]; removed {
-				return false, nil
-			}
-		}
-		decoded, err := decodeRow(child, encoded)
-		if err != nil {
-			return false, err
-		}
-		if matchesAll(decoded.values, conditions) {
-			found = true
-			return true, nil
-		}
-		return false, nil
-	})
 	return found, err
 }
 

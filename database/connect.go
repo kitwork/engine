@@ -6,11 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "github.com/kitwork/engine/kitdb/kitsql"
 )
 
 type Config struct {
 	Alias    string `json:"alias" yaml:"alias"` // system, default, analytics, ...
-	Type     string `json:"type" yaml:"type"`   // postgres, mysql, sqlite
+	Type     string `json:"type" yaml:"type"`   // postgres, kitsql, mysql, sqlite
+	URL      string `json:"url" yaml:"url"`
 	User     string `json:"user" yaml:"user"`
 	Password string `json:"password" yaml:"password"`
 	Name     string `json:"name" yaml:"name"`
@@ -36,6 +39,12 @@ func (d *Config) Connect() (*sql.DB, error) {
 	driver := strings.ToLower(d.Type)
 	if driver == "sqlite3" {
 		driver = "sqlite"
+	}
+	if !sqlDriverRegistered(driver) {
+		return nil, fmt.Errorf(
+			"database connector %q is not linked in this Kitwork distribution",
+			driver,
+		)
 	}
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
@@ -70,6 +79,15 @@ func (d *Config) Connect() (*sql.DB, error) {
 	return db, nil
 }
 
+func sqlDriverRegistered(name string) bool {
+	for _, registered := range sql.Drivers() {
+		if registered == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Config) DSN() string {
 	dsn, _ := d.BuildDSN()
 	return dsn
@@ -77,6 +95,9 @@ func (d *Config) DSN() string {
 
 func (d *Config) BuildDSN() (string, error) {
 	dbType := strings.ToLower(d.Type)
+	if source := strings.TrimSpace(d.URL); source != "" {
+		return source, nil
+	}
 	switch dbType {
 	case "postgres", "postgresql":
 		sslMode := d.SSLMode

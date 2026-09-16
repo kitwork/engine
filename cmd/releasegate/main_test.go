@@ -42,6 +42,8 @@ func TestReleasePlanModes(t *testing.T) {
 		"VM fault gauntlet":                 false,
 		"Language/inspector contracts":      false,
 		"KitDB database journey":            false,
+		"KitDB standalone commerce journey": false,
+		"KitDB commerce hard-crash matrix":  false,
 		"KitDB durability/recovery":         false,
 		"KitDB projection recovery":         false,
 		"Focused race":                      false,
@@ -85,6 +87,14 @@ func TestReleasePlanModes(t *testing.T) {
 			if !containsArgument(step.Command, "^(TestKitDBDatabaseReleaseGate|TestKitDBPostgresCopyInWithLibPQIsAtomic)$") {
 				t.Fatal("KitDB database journey omitted the composed frontend-to-restore oracle")
 			}
+		}
+		if step.Name == "KitDB standalone commerce journey" {
+			assertCommerceGate(t, step)
+		}
+		if step.Name == "KitDB commerce hard-crash matrix" &&
+			(!containsArgument(step.Command, "^TestKitDBCommerceNativeJourney$") ||
+				step.Env["CGO_ENABLED"] != "0" || step.Env["KITDB_COMMERCE_REPORT"] != "") {
+			t.Fatal("commerce campaign omitted native coverage or overwrites single-run evidence")
 		}
 		if step.Name == "KitDB durability/recovery" {
 			if !containsArgument(step.Command, "./kitdb") || !containsArgument(step.Command, "./work") {
@@ -176,6 +186,9 @@ func TestReleasePlanModes(t *testing.T) {
 	}{
 		{kitDBVerify, "KitDB projection recovery"},
 		{kitDBVerify, "KitDB search suite"},
+		{kitDBVerify, "KitDB standalone commerce journey"},
+		{kitDBRelease, "KitDB standalone commerce journey"},
+		{kitDBRelease, "KitDB commerce hard-crash matrix"},
 		{kitDBRelease, "KitDB projection recovery"},
 		{kitDBRelease, "KitDB search race"},
 		{kitDBRelease, "KitDB analytics hard-crash matrix"},
@@ -200,6 +213,30 @@ func TestReleasePlanModes(t *testing.T) {
 	}
 	if _, err := releasePlan("unknown"); err == nil {
 		t.Fatal("unknown release mode was accepted")
+	}
+}
+
+func assertCommerceGate(t *testing.T, step gateStep) {
+	t.Helper()
+	if !containsArgument(step.Command, "./cmd/kitdbdist") ||
+		!containsArgument(step.Command, "^TestKitDBCommerceNativeJourney$") ||
+		!containsArgument(step.Command, "-count=1") || !containsArgument(step.Command, "-timeout=5m") ||
+		step.Env["KITDB_COMMERCE_REPORT"] != ".artifacts/kitdb-commerce-gate.json" || step.Env["CGO_ENABLED"] != "0" {
+		t.Fatalf("incomplete standalone commerce gate: %+v", step)
+	}
+}
+
+func TestKitDBCommerceGateCannotBeOmitted(t *testing.T) {
+	for _, mode := range []string{"verify", "release", "kitdb-verify", "kitdb-release"} {
+		plan, err := releasePlan(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		step, found := findStep(plan, "KitDB standalone commerce journey")
+		if !found {
+			t.Fatalf("%s omitted commerce journey", mode)
+		}
+		assertCommerceGate(t, step)
 	}
 }
 

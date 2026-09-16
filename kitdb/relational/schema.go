@@ -17,6 +17,11 @@ func schemaFromCreate(
 	if plan == nil || plan.Name == "" || len(plan.Columns) == 0 {
 		return kitdbsql.Schema{}, nil, fmt.Errorf("kitdb: invalid CREATE TABLE plan")
 	}
+	resolved, domains, err := resolveCreateDomains(plan, catalog)
+	if err != nil {
+		return kitdbsql.Schema{}, nil, err
+	}
+	plan = &resolved
 	schema := kitdbsql.Schema{
 		Version: kitdbsql.SchemaVersion2,
 		ID:      kitdbsql.StableSchemaID("struct", plan.Name),
@@ -32,6 +37,7 @@ func schemaFromCreate(
 	}
 	for position, column := range plan.Columns {
 		field := kitdbsql.Field{
+			Domain:        domains[column.Name],
 			ID:            kitdbsql.StableSchemaID("field", schema.ID+":"+column.Name),
 			Tag:           uint32(position + 1),
 			Name:          column.Name,
@@ -49,6 +55,9 @@ func schemaFromCreate(
 			Analytics:     column.Analytics,
 			Enum:          append([]string(nil), column.Choices...),
 			Default:       json.RawMessage("null"),
+		}
+		if field.Domain != nil {
+			schema.Version = kitdbsql.SchemaVersion9
 		}
 		if field.Precision != 0 && schema.Version < kitdbsql.SchemaVersion4 {
 			schema.Version = kitdbsql.SchemaVersion4
@@ -138,7 +147,9 @@ func schemaFromCreate(
 		if !found {
 			return kitdbsql.Schema{}, nil, fmt.Errorf("kitdb: partition field %q disappeared", plan.Partition.Field)
 		}
-		schema.Version = kitdbsql.SchemaVersion8
+		if schema.Version < kitdbsql.SchemaVersion8 {
+			schema.Version = kitdbsql.SchemaVersion8
+		}
 		schema.Partition = &kitdbsql.Partition{
 			Version: kitdbsql.PartitionVersion1, Field: field.Tag, Strategy: plan.Partition.Strategy,
 		}

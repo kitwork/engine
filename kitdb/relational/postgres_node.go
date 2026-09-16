@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"crypto/subtle"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/kitdb/managed"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/pgwire"
 )
@@ -32,8 +34,8 @@ const (
 )
 
 // PostgresNodeOptions configures one standalone PostgreSQL endpoint over the
-// non-hidden .kitdb files immediately below Root. Files are discovered without
-// opening them; selected databases are opened lazily through ManagerLimits.
+// Root. A .catalog database selects managed folder mode; otherwise legacy flat
+// discovery is retained. User databases open lazily through ManagerLimits.
 type PostgresNodeOptions struct {
 	Root                       string
 	MaintenanceDatabase        string
@@ -94,8 +96,9 @@ type PostgresNodeStats struct {
 }
 
 type postgresNodeDatabase struct {
-	name string
-	path string
+	name       string
+	path       string
+	registered *managed.Database
 }
 
 type postgresNodeEngineEntry struct {
@@ -122,6 +125,7 @@ type PostgresNode struct {
 	readOnly                            bool
 	maximumDiscovered                   int
 	manager                             *kitdbnode.Manager
+	catalog                             *managed.Root
 	managerMaximumOpen                  int
 	managerMaximumCache                 int64
 	databaseCacheBytes                  int64
@@ -148,8 +152,8 @@ type PostgresNode struct {
 	projectionReaderBytesTrimmed    int64
 }
 
-// OpenPostgresNode creates a metadata-only node. It does not open any .kitdb
-// file until an authenticated session selects that logical database.
+// OpenPostgresNode opens only .catalog in managed mode. User database handles
+// remain lazy. A managed node holds the catalog's exclusive lock until Close.
 func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 	root := strings.TrimSpace(options.Root)
 	if root == "" {
@@ -273,9 +277,21 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 		engines: make(map[string]*postgresNodeEngineEntry),
 		notify:  make(chan struct{}), closeDone: make(chan struct{}),
 	}
-	databases, err := node.discoverDatabases()
+	managedRoot, err := managed.Present(absoluteRoot)
 	if err != nil {
 		_ = manager.Close()
+		return nil, err
+	}
+	if managedRoot {
+		node.catalog, err = managed.Open(absoluteRoot)
+		if err != nil {
+			_ = manager.Close()
+			return nil, err
+		}
+	}
+	databases, err := node.discoverDatabases()
+	if err != nil {
+		_ = node.Close()
 		return nil, err
 	}
 	available := make(map[string]struct{}, len(databases))
@@ -284,7 +300,7 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 	}
 	for name := range warmDatabases {
 		if _, found := available[name]; !found {
-			_ = manager.Close()
+			_ = node.Close()
 			return nil, fmt.Errorf("kitdb postgres node: warm database %q does not exist", name)
 		}
 	}
@@ -438,6 +454,31 @@ func (node *PostgresNode) Databases() ([]string, error) {
 	return result, nil
 }
 
+// OpenNativeDatabase returns a lazy database/sql pool for one database owned
+// by this node. Each physical connection acquires an ordinary node engine
+// lease and releases it when database/sql retires that connection.
+func (node *PostgresNode) OpenNativeDatabase(name string) (*sql.DB, error) {
+	if node == nil {
+		return nil, fmt.Errorf("kitdb native node: node is nil")
+	}
+	name = postgresLogicalDatabaseName(name)
+	if err := validatePostgresLogicalDatabaseName(name); err != nil {
+		return nil, fmt.Errorf("kitdb native node: %w", err)
+	}
+	if strings.EqualFold(name, node.maintenanceDatabase) {
+		return nil, fmt.Errorf("kitdb native node: maintenance database %q has no user structs", name)
+	}
+	databases, err := node.discoverDatabases()
+	if err != nil {
+		return nil, err
+	}
+	database, found := findPostgresNodeDatabase(databases, name)
+	if !found {
+		return nil, fmt.Errorf("kitdb native node: database %q does not exist", name)
+	}
+	return sql.OpenDB(nativeNodeSQLConnector{node: node, database: database.name}), nil
+}
+
 func (node *PostgresNode) Authenticate(
 	ctx context.Context,
 	startup pgwire.Startup,
@@ -507,6 +548,24 @@ func (node *PostgresNode) discoverDatabases() ([]postgresNodeDatabase, error) {
 	node.mu.Unlock()
 	if closed {
 		return nil, fmt.Errorf("kitdb postgres node: node is closed")
+	}
+	if node.catalog != nil {
+		catalog := node.catalog.Catalog()
+		if len(catalog.Databases) > node.maximumDiscovered {
+			return nil, fmt.Errorf("kitdb postgres node: registered database count exceeds %d", node.maximumDiscovered)
+		}
+		result := make([]postgresNodeDatabase, 0, len(catalog.Databases))
+		for _, database := range catalog.Databases {
+			if strings.EqualFold(database.Name, node.maintenanceDatabase) {
+				return nil, fmt.Errorf("kitdb postgres node: registered database %q conflicts with maintenance database", database.Name)
+			}
+			result = append(result, postgresNodeDatabase{
+				name:       database.Name,
+				path:       filepath.Join(node.root, database.Directory, "data.kitdb"),
+				registered: &database,
+			})
+		}
+		return result, nil
 	}
 	entries, err := os.ReadDir(node.root)
 	if err != nil {
@@ -595,6 +654,13 @@ func (node *PostgresNode) acquireEngine(
 	ctx context.Context,
 	database postgresNodeDatabase,
 ) (*postgresNodeEngineEntry, error) {
+	if database.registered != nil {
+		path, err := node.catalog.DatabasePath(*database.registered)
+		if err != nil {
+			return nil, err
+		}
+		database.path = path
+	}
 	key := strings.ToLower(database.name)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -678,6 +744,13 @@ func (node *PostgresNode) acquireEngine(
 
 		lease, err := node.manager.Acquire(ctx, database.path, node.relational.Kernel)
 		if err != nil {
+			node.failEngineOpen(key, entry, err)
+			return nil, err
+		}
+		if database.registered != nil && lease.DB().ID() != database.registered.DatabaseID {
+			err := fmt.Errorf("kitdb postgres node: database %q identity does not match .catalog", database.name)
+			_ = lease.Release()
+			_ = node.trimManagerIdle()
 			node.failEngineOpen(key, entry, err)
 			return nil, err
 		}
@@ -966,6 +1039,9 @@ func (node *PostgresNode) Close() error {
 		closeErr = errors.Join(closeErr, engine.Close())
 	}
 	closeErr = errors.Join(closeErr, node.manager.Close())
+	if node.catalog != nil {
+		closeErr = errors.Join(closeErr, node.catalog.Close())
+	}
 	node.mu.Lock()
 	node.closeErr = closeErr
 	close(node.closeDone)

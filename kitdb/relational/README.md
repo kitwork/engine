@@ -135,6 +135,64 @@ for every discovered database, refuses symlinks and nested discovery, and does
 not implement SQL database creation or deletion. It is loopback cleartext only.
 Exactly one process may own the served files.
 
+### Managed root folders (development profile)
+
+An explicit `.catalog/data.kitdb` catalog opts a root into managed discovery.
+This is independent of Kitwork and does not change the main/WAL format:
+
+```text
+.kitdb/
+  .catalog/data.kitdb     root catalog (its own WAL and writer lock)
+  shop/data.kitdb         user database, schemas remain inside the file
+  clicks/data.kitdb       another independent database
+```
+
+Roots created before the catalog rename may still open a lone legacy
+`.system/data.kitdb`. New roots always create `.catalog`; a root containing
+both names is rejected because catalog authority would be ambiguous.
+
+Create/register databases while the root server is stopped:
+
+```text
+kitdb init-root .kitdb
+kitdb query --create .kitdb/shop/data.kitdb "CREATE TABLE products (id BIGINT PRIMARY KEY, name TEXT)"
+kitdb register-database .kitdb shop shop
+kitdb root-catalog .kitdb
+kitdbpg -root .kitdb -listen 127.0.0.1:5434
+```
+
+Set `KITDB_TOKEN` before starting `kitdbpg`. Connect to `shop` (or
+`shop.kitdb`) to query `products`, or to the virtual maintenance database
+`kitdb` to list `pg_database`. `.catalog` is not itself remotely exposed.
+
+Only registered databases are served. Flat files and unregistered folders are
+ignored in managed mode. Names map to safe immediate directory basenames and
+stable kernel identities; lazy opening verifies the identity before handing
+out an engine. Missing/invalid files fail instead of deliberately recreating
+an empty database. Startup never falls back to flat discovery when `.catalog`
+is present but damaged. It does not search parent directories for `.catalog`.
+
+The root holds one additional kernel handle with a 256 KiB page-cache budget,
+outside the user-database manager limits; catalog size is capped at 1 MiB and
+4,096 entries. The catalog snapshot is loaded once, not scanned per query.
+`init-root` refuses an existing `.catalog`, even after an interrupted init.
+Registration only adopts an already-created, closed database, publishes one
+ordinary WAL transaction, and is retry-idempotent for identical entries. An
+uncertain registration must be recovered by reopening before another attempt.
+Server ownership blocks offline catalog edits. This is not yet online SQL
+CREATE/RENAME/DROP DATABASE, resumable filesystem creation or a global tenant
+catalog. No files are renamed, moved, overwritten or removed by registration.
+
+Authentication still uses the listener's process-local credential, not durable
+users/roles in `.catalog`. Resource policy remains command-line/Go options.
+Direct-file embedded opening still works without any root catalog and relies
+on host filesystem permissions, not server authentication. Local filesystem
+ownership is trusted: do not move/replace files under a running server. These
+path checks are not protection against an administrator racing filesystem
+changes. Backup still coordinates each database snapshot; copying a live root
+is not an atomic multi-database backup. This development feature is not covered
+by the previously packaged RC2 qualification.
+
 ## Ranked Search
 
 Searchability is durable Schema IR, not an application-only hint:
@@ -262,9 +320,9 @@ The bounded standalone profile supports:
 - PostgreSQL-familiar and KitDB-native scalar types, `CHOICE`, defaults,
   not-null, immediate `CHECK`, and immediate foreign keys with
   `RESTRICT`/`NO ACTION` semantics;
-- atomic multi-row `INSERT`, expression-based `UPDATE`, guarded `DELETE`, bound
+- atomic multi-row `INSERT ... VALUES` expressions, expression-based `UPDATE`, guarded `DELETE`, bound
   `$N` or `?` parameters, constraint/index maintenance, statement savepoints,
-  `RETURNING`, unknown-tag preservation, and explicit mutation ceilings;
+  scalar `RETURNING`, unknown-tag preservation, and explicit mutation ceilings;
 - embedded fixed-snapshot transactions with read-your-writes, rollback and
   optimistic conflict detection; PostgreSQL `BEGIN`/`COMMIT`/`ROLLBACK` maps to
   the same transaction path;
@@ -379,9 +437,157 @@ per block, so its I/O fields add no extra read. Embedded callers retain the type
 `detail` rows. These timings describe one bounded execution, not a benchmark.
 Plain `EXPLAIN` never executes rows.
 
+## Domains (Development Profile)
+
+Domains are reusable scalar constraints owned by this database, not Kitwork
+runtime objects. Standalone SQL, PostgreSQL wire, and `ExecutePlan` share the
+same catalog binding and data-write validation:
+
+```sql
+CREATE DOMAIN nonnegative_amount AS NUMERIC(12,2)
+DEFAULT 0 NOT NULL CHECK (VALUE >= 0);
+
+CREATE TABLE invoices (
+  id SERIAL PRIMARY KEY,
+  total nonnegative_amount
+);
+
+INSERT INTO invoices DEFAULT VALUES;
+INSERT INTO invoices (total) VALUES (12.25);
+-- Fails atomically; neither row is added:
+INSERT INTO invoices (total) VALUES (20), (-1);
+
+SELECT domain_name, data_type FROM information_schema.domains;
+SELECT column_name, domain_name FROM information_schema.columns
+WHERE table_name = 'invoices';
+-- DROP DOMAIN nonnegative_amount is rejected while invoices depends on it.
+```
+
+- Base types: TEXT, VARCHAR/CHAR with length, UUID, SMALLINT/INTEGER/BIGINT,
+  NUMERIC with precision/scale, DOUBLE PRECISION and BOOLEAN. Domain definitions
+  persist logical type kinds, not in-process type IDs or wire metadata.
+- Literal DEFAULT, NOT NULL and at most 16 named/unnamed CHECK constraints.
+  CHECK uses only VALUE, literals, comparisons, AND/OR/NOT and NULL tests;
+  TRUE/UNKNOWN pass and FALSE rejects. Bounds are 256 expression nodes/depth 24
+  per CHECK, 64 KiB per domain and 1024 domains within the shared catalog budget.
+- Column defaults override domain defaults. A column cannot relax domain NOT
+  NULL. This profile checks constraints on stored INSERT/UPDATE values; it does
+  not implement PostgreSQL's general domain casts or domain-typed expressions.
+- Definitions are immutable. CREATE TABLE binds checks to stable field tags,
+  with domain ID/name/hash retained in schema version 9. Normal DML requires no
+  per-row domain lookup. Field rename preserves checks. DROP DOMAIN [IF EXISTS]
+  [RESTRICT] rejects live table dependencies, including through the kernel API.
+- Names are unqualified, case-insensitive ASCII identifiers, at most 128
+  bytes. Built-in type names cannot be shadowed.
+- DDL is autocommit-only. ADD COLUMN with domains, ALTER DOMAIN, DROP CASCADE,
+  domain-over-domain, qualified domain names, sequence defaults on domain
+  columns, UDF CHECKs, expressions as defaults and per-domain privileges are
+  not supported. Existing DROP COLUMN restrictions on dependent checks apply.
+- Introspection includes `information_schema.domains`, column domain metadata,
+  `pg_type` domain/base identities and `pg_attribute.atttypid`. Query values use
+  the base-type wire encoding. This is bounded discovery, not full pg_catalog.
+
+No KROW/main-file/WAL envelope change or new sidecar is required. The new domain
+catalog key and schema version 9 require a domain-aware reader; do not downgrade
+a file containing domains. Existing schemas are not upgraded merely by opening
+them. Tests cover multi-row failure, transaction rollback, native savepoints,
+wire aborted transactions, WAL reopen, checkpoint, abrupt process exit,
+verified backup and read-only admission. Named SQL savepoints have their own
+native and wire tests below. This change is not a new release qualification.
+
+Syntax reference: [PostgreSQL CREATE DOMAIN](https://www.postgresql.org/docs/current/sql-createdomain.html).
+The narrower implementation boundaries above take precedence over that full
+PostgreSQL reference.
+
+## Transactional Triggers (Development Profile)
+
+KitDB's first trigger profile has one inline SQL INSERT action for audit/event
+rows. This is **KitDB syntax**, not PostgreSQL's `EXECUTE FUNCTION` or PL/pgSQL:
+
+```sql
+CREATE TABLE products (id INTEGER PRIMARY KEY, price NUMERIC(12,2));
+CREATE TABLE product_audit (
+  id SERIAL PRIMARY KEY, product_id INTEGER,
+  old_price NUMERIC(12,2), new_price NUMERIC(12,2)
+);
+CREATE TRIGGER audit_price AFTER UPDATE ON products
+FOR EACH ROW WHEN (OLD.price <> NEW.price)
+INSERT INTO product_audit (product_id, old_price, new_price)
+VALUES (NEW.id, OLD.price, NEW.price);
+
+INSERT INTO products (id, price) VALUES (1, 100);
+UPDATE products SET price = 120 WHERE id = 1;
+SELECT * FROM product_audit;
+SELECT trigger_name, action_statement FROM information_schema.triggers;
+DROP TRIGGER audit_price ON products;
+```
+
+- AFTER INSERT/UPDATE/DELETE, FOR EACH ROW, optional boolean WHEN. OLD is
+  unavailable on INSERT, NEW on DELETE. FALSE/NULL skips an action; expression
+  errors fail the statement. AFTER actions run after all source rows and
+  indexes have been staged, **before COMMIT**, not as background callbacks.
+- The source and all trigger actions share the same transaction/write-set.
+  Target INSERT uses ordinary defaults/identity, coercion, domain/NOT NULL,
+  CHECK/unique/FK checks and index/count maintenance. Any failure rolls back
+  the entire source statement, including earlier trigger actions. Native
+  savepoints and whole-transaction rollback include those actions. PostgreSQL
+  wire sessions retain their existing failed-transaction behavior.
+- Triggers run in name order for each row; row visitation order without an
+  explicit ordering guarantee must not be relied upon. Source affected-row
+  counts and RETURNING exclude action rows. Sequence values can have gaps
+  after rollback or optimistic retry, just as ordinary generated IDs do.
+- Action expressions use OLD/NEW scalar fields, literals, arithmetic,
+  comparisons and the reviewed pure built-ins. One target, explicit columns,
+  one VALUES tuple; DEFAULT is allowed. No stored-function calls, table reads,
+  host callbacks, network/filesystem, clocks or randomness in expressions.
+  Ordinary target column defaults keep their existing behavior. Large-object,
+  JSON/array/vector field expressions are outside this scalar profile.
+- Bounds: 1024 triggers/database, 32/source table, 64 KiB/definition, 32 action
+  columns, 256 total expression nodes, depth 24 per expression, and 1 MiB text
+  operands/results. Each root DML statement has at most 10,000 evaluations
+  (including skipped WHEN) and 8 nested trigger levels. Existing transaction
+  operation/byte limits also apply. These are not hard CPU-time guarantees.
+- All table-action dependency cycles are rejected at catalog publication,
+  conservatively even if event types or WHEN could prevent recursion. Chain
+  depth and evaluation budgets are also enforced at runtime.
+- Definitions bind source/target table IDs and stable field tags. Rename
+  preserves behavior; dropping referenced columns/target tables is rejected.
+  Dropping a source table removes its owned triggers atomically. Definitions
+  are immutable: `DROP TRIGGER [IF EXISTS] name ON table [RESTRICT]` then create
+  again to change one. DDL is autocommit-only and respects read-only admission.
+- Discovery exposes `information_schema.triggers`, basic `pg_trigger`
+  identity/type fields, and `pg_get_triggerdef` as described below. `tgfoid=0`
+  intentionally does not invent a PostgreSQL trigger-returning routine.
+  Complete manager compatibility and per-trigger privileges are not claimed.
+- BEFORE/INSTEAD OF, UPDATE OF, multiple events/actions, statement/deferred
+  triggers, UPDATE/DELETE actions and procedural bodies remain unsupported.
+
+Definitions and generated row changes use the ordinary catalog/WAL/checkpoint
+and backup path. Recovery replays **stored writes**, not trigger execution;
+it does not emit the audit row a second time. No new sidecar or main-file/WAL
+envelope is introduced. Trigger catalog records require a trigger-aware
+reader; do not downgrade files containing them.
+
+This feature belongs to the standalone `kitdb/relational` API (SQL and typed
+Go plans), also used by its PostgreSQL listener. Raw kernel KV writes and
+other adapters/importers are not SQL trigger entry points. Existing Kitwork
+adapter behavior is not silently changed. Search/analytics refresh is not an
+inline trigger effect.
+
+Verification covers failed multi-row mutations/cascades, target constraints,
+native rollback/savepoints, optimistic conflict, concurrent writers, bounds,
+WAL/checkpoint reopen, hard process exit, verified backup, read-only admission
+and PostgreSQL wire/catalog behavior:
+`go test ./kitdb ./kitdb/sql ./kitdb/relational -run Trigger -count=1`.
+This is a bounded development feature, not a new 1.0 release qualification.
+
+Semantic reference: [PostgreSQL trigger behavior](https://www.postgresql.org/docs/current/trigger-definition.html).
+The KitDB syntax and narrower boundaries above take precedence.
+
 ## Pure SQL Functions
 
-This is a bounded standalone feature, not a PL/pgSQL runtime or trigger engine:
+These are bounded standalone scalar functions, not a PL/pgSQL runtime or
+trigger-returning routines:
 
 ```sql
 CREATE FUNCTION normalize_sku(s TEXT)
@@ -419,7 +625,8 @@ The first profile has these explicit boundaries:
   the shared catalog byte budget. Bodies have at most 256 expression nodes and
   depth 24; a statement has at most 64 user-function call sites and a function
   at most 16 named parameters.
-- TEXT, legacy INTEGER, full signed BIGINT, DOUBLE PRECISION and BOOLEAN
+- TEXT, UUID, SMALLINT/INTEGER, legacy INTEGER, full signed BIGINT, NUMERIC,
+  DOUBLE PRECISION and BOOLEAN
   signatures. Existing catalog kind `integer` retains its admission range of
   `[-(2^53-1), 2^53-1]`. Newly declared BIGINT/INT8 uses distinct kind `bigint`;
   an old function signature is not silently rewritten by a parser upgrade.
@@ -435,22 +642,357 @@ The first profile has these explicit boundaries:
 - One case-insensitive, unqualified name per database, no overloading.
   Replacement must keep parameter names/types and return type unchanged;
   built-in and compatibility names cannot be shadowed.
-- Calls work in single-table scalar SELECT, WHERE, ORDER BY, UPDATE assignments
-  and DELETE predicates. INSERT expressions, RETURNING expressions, JOIN,
+- Calls work in single-table scalar SELECT, WHERE, ORDER BY, INSERT VALUES,
+  UPDATE assignments, DELETE predicates, and INSERT/UPDATE/DELETE RETURNING. JOIN,
   aggregate/HAVING/SEARCH composition, DEFAULT/CHECK/generated expressions,
   qualified function names, procedural bodies and triggers are not promoted.
 - PostgreSQL discovery exposes stored functions through the supported columns
-  of `information_schema.routines` and `pg_catalog.pg_proc`. This does not
-  claim complete routine introspection or a separate function permission model;
-  DDL follows the connection's existing read-only/write authorization.
+  of `information_schema.routines` and `pg_catalog.pg_proc`, including
+  `routine_definition`/`prosrc`. The wire facade supports
+  `pg_get_functiondef`, `pg_get_function_arguments`,
+  `pg_get_function_identity_arguments`, and `pg_get_function_result` with an
+  OID literal/parameter or catalog column, with or without FROM pg_proc.
+  Definitions are reconstructed as KitDB `LANGUAGE SQL RETURN` statements,
+  not PL/pgSQL or preserved original formatting. Unsupported helper argument
+  expressions are rejected, never mistaken for an OID result. Unknown/NULL
+  OIDs return NULL. Catalog parameter binding covers these function queries.
+- Function discovery supports bounded searched `CASE` classification (up to
+  16 `WHEN` branches, boolean catalog fields or text equality, text/NULL
+  results) with first-match and SQL NULL semantics. The legacy return-type
+  check accepts built-in `regtype` identities, including the trigger
+  pseudo-type; it does not enable trigger-returning functions. Regression
+  tests execute TablePlus's compact modern and legacy listing queries over
+  populated catalogs and PostgreSQL wire, rather than simplified empty probes.
+- The single-role PostgreSQL facade reports the connection identity through
+  `proowner`/`pg_get_userbyid`; it is not a persisted per-function ownership or
+  privilege system. Complete arbitrary catalog SQL, regprocedure casts and
+  function permission introspection are not claimed. DDL follows the
+  connection's existing read-only/write authorization.
 
 Catalog function records extend the logical metadata format. Older builds
 without the function catalog decoder reject that catalog; do not downgrade a
 file containing functions. No main-file/WAL envelope change or extra sidecar
 is introduced. Kitwork's older SQL/ORM adapter has not gained a function API.
 
+### Expressions In Writes
+
+The standalone native API, typed plans and PostgreSQL wire share the same
+scalar binder/evaluator for writes; Kitwork is not required:
+
+```sql
+CREATE FUNCTION normalized(s TEXT) RETURNS TEXT
+LANGUAGE SQL RETURN upper(trim(s));
+CREATE TABLE example_items (
+  id SERIAL PRIMARY KEY, name TEXT, price NUMERIC(20,2), quantity INTEGER DEFAULT 1
+);
+INSERT INTO example_items (name, price, quantity)
+VALUES (normalized(' keyboard '), 19.95 * 2, DEFAULT)
+RETURNING id, normalized(name) AS name, price * quantity AS total;
+UPDATE example_items SET price = price + 1
+WHERE id = 1 RETURNING id, price * quantity AS total;
+DELETE FROM example_items WHERE id = 1 RETURNING *, normalized(name) AS label;
+```
+
+- VALUES accepts supported scalar expressions, bound parameters, casts and
+  stored scalar calls. It has no target-row scope. `DEFAULT` is a standalone
+  value, not an operand or function argument; `DEFAULT VALUES` still works.
+- RETURNING sees new rows for INSERT/UPDATE and old rows for DELETE. It supports
+  `*`, fields, aliases and scalar expressions, not aggregates or subqueries.
+  Empty UPDATE/DELETE results retain their result-column metadata without
+  evaluating expressions for nonexistent rows.
+- Type/domain/constraint checks still run on stored values. NUMERIC arithmetic
+  uses the existing exact decimal implementation, not a float64 intermediate.
+- A VALUES, trigger or RETURNING error rolls back the complete statement,
+  including staged index/count changes and trigger actions. No partial
+  RETURNING rows are delivered. Native transaction savepoints preserve earlier
+  successful statements; a failed PostgreSQL transaction requires ROLLBACK.
+  Sequence allocations are not rolled back and may leave gaps.
+- INSERT retains the 10,000-row ceiling; all RETURNING results obey the
+  configured result-row limit. The 64 stored-function call-site limit covers
+  VALUES and RETURNING together, not each row separately. Expressions retain
+  the 256-node/depth-24 bounds, including typed plans.
+- Typed `InsertStatement.Rows` remains the literal-only API; `Values` holds
+  `[][]ExpressionPlan` instead. Supply only one of Rows, Values or DefaultRows.
+  As for other typed plans, use a fresh plan for concurrent calls.
+- Procedural functions, stored-function trigger actions, and arbitrary
+  expression defaults remain unsupported. INSERT SELECT and ON CONFLICT are
+  specified separately below.
+
+## Composable Inserts And SQL Savepoints
+
+The standalone Go/SQL engine and PostgreSQL listener share these paths:
+
+```sql
+INSERT INTO archived (id, label, amount)
+SELECT id, upper(label), amount FROM items WHERE id < 100
+ON CONFLICT (id) DO UPDATE SET amount = excluded.amount
+WHERE archived.amount <> excluded.amount
+RETURNING id, amount;
+
+BEGIN;
+SAVEPOINT before_change;
+UPDATE items SET amount = amount + 1;
+ROLLBACK TO SAVEPOINT before_change;
+RELEASE SAVEPOINT before_change;
+COMMIT;
+```
+
+- INSERT's SELECT source uses the same transaction snapshot and prior writes.
+  It is fully buffered before any target row is staged, including self-inserts.
+  A zero-row source succeeds with `INSERT 0 0` and RETURNING metadata intact.
+  Supported SELECT expressions, aggregates, joins, UNION ALL and nested sources
+  retain their existing restrictions. A CTE can appear as `INSERT INTO dst
+  WITH ... SELECT ...`; leading `WITH ... INSERT` is not accepted yet.
+- At most 10,000 input rows are accepted. The SELECT path accounts a 32 MiB
+  working budget and retains existing server/result/materialization ceilings.
+  Exceeding a bound fails the entire statement; rows are not silently truncated.
+  An explicit SELECT LIMIT intentionally limits the source. This is bounded
+  transactional copying, not an unbounded bulk-import implementation.
+- ON CONFLICT accepts primary/unique column tuples (including composites,
+  irrespective of column order). DO NOTHING may omit the tuple to handle all
+  primary/unique conflicts. DO UPDATE requires a tuple and supports SET,
+  DEFAULT, an optional WHERE, old target fields and `excluded.field` values.
+  Scalar SQL functions and parameters compose with those expressions.
+- DO UPDATE cannot modify primary fields or affect the same target row twice
+  in one statement. Unrelated uniqueness errors, CHECK/NOT NULL failures and
+  FK violations remain errors. NULL unique values keep the existing distinct
+  semantics. Index maintenance, table counts, FK validation and INSERT/UPDATE
+  AFTER triggers share the ordinary mutation paths; batch FK checks and AFTER
+  effects run after input staging, including forward self-references.
+  Ordinary UPDATE, DELETE and upsert use bounded reverse-FK checks against
+  the final staged rows, rather than refusing every referenced-field change.
+  See "Reverse Foreign Keys" below for supported actions and check budgets.
+- RETURNING includes only inserted/updated rows, not DO NOTHING or false/NULL
+  WHERE candidates. A late expression, trigger or constraint failure rolls back
+  all row/index/count/audit changes from that statement. Autocommit retains the
+  bounded optimistic retry path; explicit transactions can fail with 40001 and
+  require a whole-transaction retry. No row-locking or PostgreSQL isolation
+  equivalence is claimed.
+- SAVEPOINT, ROLLBACK [WORK|TRANSACTION] TO [SAVEPOINT], and RELEASE [SAVEPOINT]
+  work inside an explicit native Transaction or PostgreSQL data transaction,
+  including read-only transactions. There are at most 64 live savepoints with
+  128-byte names. Unquoted names fold to lowercase; quoted names preserve case.
+  Duplicate names shadow older points. ROLLBACK TO keeps its target and removes
+  later points; RELEASE removes its target and later points, exposing an older
+  duplicate. The wire path permits ROLLBACK TO after a statement error and then
+  resumes the transaction; missing points use 3B001, no transaction uses 25P01,
+  and a repeated DO UPDATE target uses 21000.
+- Savepoints are transaction-local RAM state, never independent durable commits.
+  Sequence reservations are not rewound. Engine.Execute without a transaction
+  rejects savepoints; the virtual maintenance database does not emulate them.
+  Conflict expressions/partial-index inference, ON CONSTRAINT, insert target
+  aliases, exclusion constraints, general UPDATE primary-key changes and SEARCH
+  sources remain outside this slice. No disk-format or WAL migration is needed.
+
+Evidence: `write_composition_test.go`, `write_composition_wire_test.go` and
+`sql/write_composition_test.go` cover exact decimals, self-copy, keys, triggers,
+late failure rollback, prepared recovery from an aborted transaction, source
+bounds, optimistic conflicts, and process-exit/reopen. These are correctness
+tests, not production latency or physical power-loss certification.
+
+## Reverse Foreign Keys
+
+The standalone engine checks incoming foreign keys after the statement's rows
+and indexes have been staged, before its AFTER triggers. UPDATE and upsert can
+change a referenced non-primary unique key when no surviving child uses the
+old tuple. DELETE checks surviving child rows rather than just schema metadata.
+An unchanged tuple needs no child probe; MATCH SIMPLE tuples containing NULL
+do not reference a parent. Composite keys retain their field order and exact
+integer, decimal and character comparisons. Parent values that cannot exist
+in a narrower child type must not become false matches through rounding.
+
+- Immediate NO ACTION permits replacement of an old unique tuple by another
+  parent row in the same batch. RESTRICT rejects changing a referenced old
+  tuple even if another parent row acquires that tuple. Both inspect surviving
+  children, so self-referencing batches can remove or reassign their own child
+  links. There is no deferred, commit-time constraint mode.
+- Child probes reuse primary, unique and ready ordinary secondary indexes.
+  A partial index is not assumed to cover all possible references. If no
+  suitable index exists, the engine scans the child rows within the budget.
+  It does not silently create a child index or skip validation.
+- One statement shares a ledger across all its reverse checks, including
+  upsert rows: at most 100,000 bindings/tuple probes, 100,000 candidate entry
+  visits/point reads and 32 MiB of candidate key/value bytes. Repeated visits
+  count again; secondary entries and hydrated rows both count. This bounds
+  reverse-probe work, not total process RSS or the storage page cache.
+- A foreign-key violation is SQLSTATE 23503; exhaustion is 54000 with a hint
+  to index referencing columns or reduce the mutation batch. Neither publishes
+  a partial mutation. Rows, indexes, counts, trigger effects and RETURNING
+  failures retain statement rollback and named-savepoint recovery.
+- Independent transactions use the existing optimistic commit check: a child
+  INSERT and parent mutation validated from the same old snapshot cannot both
+  commit. The stale transaction fails with 40001 and must be retried as a whole.
+
+General primary-key UPDATE, deferred constraints
+and PostgreSQL row-locking equivalence are still outside this profile. No
+physical format, WAL or application-schema migration is needed.
+
+Evidence: `reverse_reference_test.go` and `reverse_reference_wire_test.go` cover
+indexed/unindexed access, composite/nullable/narrow keys, self-reference,
+statement and savepoint rollback, triggers, repeated upsert probes, interleaved
+writers, catalog rename, prepared wire errors and hard process-exit/reopen.
+
+```text
+go test ./kitdb/relational -run ReverseForeignKey -count=10
+```
+
+### Cascading Actions (Development Profile)
+
+CREATE TABLE accepts ON DELETE CASCADE, ON UPDATE CASCADE and ON DELETE/UPDATE
+SET NULL or SET DEFAULT on inline or named/composite foreign keys. For example:
+
+```sql
+CREATE TABLE customers (id INTEGER PRIMARY KEY, code TEXT UNIQUE);
+CREATE TABLE orders (
+  id INTEGER PRIMARY KEY,
+  customer_code TEXT REFERENCES customers(code)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+CREATE INDEX orders_customer ON orders(customer_code);
+```
+
+These are standalone SQL/Go operations, not a Kitwork ORM callback. The engine
+captures matching child rows for an entire wave before changing any of them,
+then groups updates by table through the ordinary mutation pipeline. This
+preserves multi-row unique-key swaps and prevents a later probe from matching
+children just moved by an earlier probe. Cascades can extend across several
+tables; an already staged deletion is invisible to the next wave, so cyclic
+deletes terminate and duplicate delete paths fire one row event.
+
+- Every derived mutation keeps CHECK, NOT NULL, domain/type, unique and index
+  validation. SET NULL applies to the full FK tuple and still fails on a NOT
+  NULL field. Narrow child types cannot silently round a new parent key.
+- SET DEFAULT uses each child field's existing insert-default resolver:
+  column literals, inherited domain defaults, clock and sequence/identity
+  defaults. A column default overrides its inherited domain default. Ordinary
+  nullable fields without a default become NULL; NOT NULL still rejects NULL.
+  All resulting values must reference a surviving parent (unless MATCH SIMPLE
+  excludes the tuple). An unchanged default is still validated and fires the
+  ordinary child UPDATE event; it cannot leave a reference to a deleted key.
+- Defaults are evaluated once per child field per wave, even when multiple
+  matching foreign keys reach that field. Clock defaults share the UTC time
+  captured on the statement's first SET DEFAULT action; this is not PostgreSQL
+  transaction-start time. Sequence reservations remain consumed after a failed
+  statement, savepoint rollback or transaction rollback. A child rejected by
+  the row-action budget does not reserve its defaults.
+- After all waves, reverse RESTRICT/immediate NO ACTION and outgoing FKs are
+  checked against surviving final images. AFTER triggers receive each actual
+  mutation's OLD/NEW images, including child changes, through the existing
+  trigger budget. A trigger cannot recreate an orphan. This is bounded
+  statement-final validation, not PostgreSQL's exact internal trigger order
+  or DEFERRABLE constraint semantics.
+- The existing statement probe/entry/byte ledger also charges cascades. At
+  most 64 waves (including the originating changes) and the server's
+  `maximumMutationRows` additional child mutations (default 10,000) are allowed.
+  A row changed in another wave counts again; duplicate intents in one wave
+  merge. The transaction's physical-operation/byte ceiling also still applies.
+  Exhaustion fails the entire statement with 54000, never a partial cascade.
+  SET DEFAULT also charges each evaluated field's encoded literal and retained
+  value against the shared 32 MiB byte budget. Memoized same-wave defaults are
+  not charged again. This is conservative accounting of action work, not a
+  guarantee about total process RSS or transient decoder allocations.
+- Cascaded updates may change non-primary unique keys, including composites.
+  Changing a child primary field is refused. GENERATED ALWAYS fields only
+  permit SET DEFAULT to obtain a new value from their identity sequence, not
+  copied CASCADE values or SET NULL assignments. Conflicting
+  multi-path assignments, an update cycle assigning different values to the
+  same child field, or paths both deleting and updating one child fail closed
+  with 0A000. Migrated nonzero child row generations remain unsupported for
+  standalone writes. These boundaries are not silently approximated.
+- Command row counts and RETURNING describe only the directly requested rows,
+  not the number of cascade/trigger writes. RETURNING uses the direct mutation
+  image; a self-referential AFTER action can subsequently change that row.
+  Late RETURNING errors, child errors, cancellation and optimistic conflicts
+  preserve statement/savepoint/transaction rollback. Sequence reservations
+  retain their existing non-transactional allocation semantics.
+
+Selective SET NULL/SET DEFAULT column lists, primary-key UPDATE and deferred
+constraints are not enabled by this milestone. No disk-format/WAL migration,
+background worker or new runtime dependency is introduced.
+
+Evidence: `referential_action_test.go`, `referential_action_wire_test.go`,
+`referential_default_test.go`, `referential_default_wire_test.go` and
+`sql/referential_action_test.go` cover native SQL and prepared PostgreSQL
+requests, narrow/exact/composite keys, key swaps, self-reference, diamond
+deletes, late failure rollback, 64-wave boundary, row budgets, rename,
+independent model checks, conflicting writers and process-exit/reopen. Default
+tests additionally cover inherited/overridden domains, exact decimals, clock,
+identity/sequence allocation across duplicate paths, NULL/NOT NULL, failed
+default references, and a concurrent deletion of the fallback parent.
+
+```text
+go test ./kitdb/sql ./kitdb/relational -run 'ReferentialAction|ReferentialDefault|ReverseForeignKey' -count=10
+```
+
+Regression command: `go test ./kitdb/sql ./kitdb/relational -run 'InsertExpression|MutationExpression' -count=1`.
+
 Verification: `go test ./kitdb/sql ./kitdb/relational ./kitdb -run
 'TestSQLFunction|TestParseSQLFunction|TestCatalogFunction' -count=1`.
+
+## Object Definition Discovery (Development Profile)
+
+The standalone PostgreSQL listener reconstructs definitions from its captured
+catalog, without scanning table rows, allocating sequence values, executing
+triggers, or introducing a new durable metadata format:
+
+```sql
+SELECT tgname, pg_get_triggerdef(oid, true) AS definition
+FROM pg_catalog.pg_trigger;
+
+SELECT typname, kitdb_get_domaindef(oid) AS definition
+FROM pg_catalog.pg_type WHERE typtype = 'd';
+
+SELECT c.relname, s.seqstart, s.seqincrement, s.seqcache,
+       kitdb_get_sequencedef(s.seqrelid) AS definition
+FROM pg_catalog.pg_sequence s
+JOIN pg_catalog.pg_class c ON c.oid = s.seqrelid
+WHERE c.relname = 'invoice_ids';
+
+SELECT conname, conrelid, contypid, pg_get_constraintdef(oid) AS definition
+FROM pg_catalog.pg_constraint;
+```
+
+- `pg_get_triggerdef(oid [, pretty])` returns executable KitDB inline-action
+  `CREATE TRIGGER`, not PostgreSQL `EXECUTE FUNCTION`. Source/target column
+  names are resolved by stable tags, including after rename. Both boolean
+  pretty flags currently return the same deterministic formatting.
+- `pg_get_constraintdef(oid [, pretty])` reconstructs supported primary,
+  unique, foreign-key and CHECK constraints. Domain CHECKs have `conrelid=0`
+  and the domain's `contypid`, and are also exposed through
+  `information_schema.domain_constraints` and `check_constraints`. Domain
+  constraints are not duplicated into the table-constraint listing.
+- `kitdb_get_domaindef` and `kitdb_get_sequencedef` are **KitDB extensions**,
+  not PostgreSQL built-ins. They return standalone CREATE statements with
+  type modifiers, defaults/checks, or sequence bounds/increment/cache/cycle.
+  An owned SERIAL/IDENTITY sequence is explicitly rejected by the latter:
+  recreating it as an unowned sequence would silently lose its dependency.
+- Sequence DDL describes the original start, not the current counter or
+  reserved lease. This is definition discovery, not a schema/data dump or
+  backup facility. Use verified backup/restore to preserve counters, column
+  ownership and the rest of the database together. `pg_sequence` retains its
+  definition-only profile; `pg_sequences.last_value` is not implemented.
+- Helpers accept an OID literal, bound parameter or supported catalog column.
+  Missing/NULL OIDs return NULL; malformed arguments and ambiguous OIDs fail
+  explicitly. A NULL pretty argument returns NULL. Catalog reads use the
+  transaction snapshot and existing connection authorization, never a new
+  per-object role system. Parameter binding now covers all recognized catalog
+  queries, including domains, sequences and triggers.
+- These helpers belong to the PostgreSQL catalog facade. Native Go SQL DDL
+  and typed plans still own creation/execution; no Kitwork host dependency is
+  introduced. Arbitrary catalog joins, aggregate-based DDL generators,
+  `format_type`, `pg_get_expr`, procedural bodies and full manager parity are
+  not implied by this profile.
+
+Tests recreate definitions in a fresh database, compare behavior, verify
+renames and dependency rejection, kill a writer with an uncommitted trigger
+action, reopen/checkpoint, restore an independently verified anchor, and
+exercise parameterized discovery over PostgreSQL wire in read-only sessions.
+Recovery replays stored writes, not trigger bodies. No new 1.0 qualification
+is claimed: `go test ./kitdb/relational -run TestObjectDefinition -count=1`.
+
+Reference semantics: [PostgreSQL definition helpers](https://www.postgresql.org/docs/16/functions-info.html)
+and [domain constraint identities](https://www.postgresql.org/docs/16/catalog-pg-constraint.html).
+KitDB-specific syntax and limits above take precedence.
 
 ## Remaining Boundaries
 
@@ -678,8 +1220,9 @@ groups, index/point work and accounted peak bytes (not process RSS). JOIN
 aggregates currently hydrate KROW, not KCOL, and do not combine with SEARCH.
 
 The standalone profile does not claim PostgreSQL parity. Primary-key updates,
-savepoints exposed through SQL, deferred constraints, recursive/correlated
-subqueries, cascading foreign-key actions, duplicate-eliminating or non-union
+deferred constraints, recursive/correlated
+subqueries, referential actions outside the bounded profile above,
+duplicate-eliminating or non-union
 set operations, window functions,
 non-equality/right/full/cross joins, hash/merge join planning, aggregate
 expressions over joins,

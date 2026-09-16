@@ -73,7 +73,7 @@ func builtinScalarFunction(name string) bool {
 }
 
 func validateFunction(name string, definition *kitdbsql.FunctionDefinition) error {
-	if name == "" || len(name) > 128 || name != strings.ToLower(name) || builtinScalarFunction(name) {
+	if name == "" || len(name) > 128 || name != strings.ToLower(name) || builtinScalarFunction(name) || functionCatalogHelper(name) {
 		return fmt.Errorf("kitdb SQL: invalid or reserved function name %q", name)
 	}
 	switch name {
@@ -385,14 +385,14 @@ func (engine *Engine) executeFunctionDDL(ctx context.Context, create *kitdbsql.C
 // Mutating a function later cannot change an already-running transaction.
 func resolveStatementFunctions(statement *kitdbsql.ParsedStatement, catalog kitdbengine.CatalogSnapshot) error {
 	loaded := make(map[string]*storedFunction)
-	var visit func(*kitdbsql.ExpressionPlan) error
+	var walk func(*kitdbsql.ExpressionPlan) error
 	count := 0
-	visit = func(node *kitdbsql.ExpressionPlan) error {
+	walk = func(node *kitdbsql.ExpressionPlan) error {
 		if node == nil {
 			return nil
 		}
 		for i := range node.Arguments {
-			if err := visit(&node.Arguments[i]); err != nil {
+			if err := walk(&node.Arguments[i]); err != nil {
 				return err
 			}
 		}
@@ -426,6 +426,15 @@ func resolveStatementFunctions(statement *kitdbsql.ParsedStatement, catalog kitd
 		}
 		node.Function = &definition.FunctionDefinition
 		return nil
+	}
+	visit := func(node *kitdbsql.ExpressionPlan) error {
+		if node == nil {
+			return nil
+		}
+		if err := node.Validate(); err != nil {
+			return err
+		}
+		return walk(node)
 	}
 	selectPlan := statement.Select
 	if statement.Explain != nil {
@@ -474,6 +483,42 @@ func resolveStatementFunctions(statement *kitdbsql.ParsedStatement, catalog kitd
 	if err := visitSelect(selectPlan); err != nil {
 		return err
 	}
+	visitReturning := func(projections []kitdbsql.Projection) error {
+		for i := range projections {
+			if err := visit(projections[i].Expression); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if plan := statement.Insert; plan != nil {
+		if _, _, err := validateInsertShape(plan); err != nil {
+			return err
+		}
+		if err := visitSelect(plan.Select); err != nil {
+			return err
+		}
+		if conflict := plan.Conflict; conflict != nil {
+			for i := range conflict.Assignments {
+				if err := visit(conflict.Assignments[i].Expression); err != nil {
+					return err
+				}
+			}
+			if err := visit(conflict.Predicate); err != nil {
+				return err
+			}
+		}
+		for i := range plan.Values {
+			for j := range plan.Values[i] {
+				if err := visit(&plan.Values[i][j]); err != nil {
+					return err
+				}
+			}
+		}
+		if err := visitReturning(plan.Returning); err != nil {
+			return err
+		}
+	}
 	if plan := statement.Update; plan != nil {
 		for i := range plan.Assignments {
 			if err := visit(plan.Assignments[i].Expression); err != nil {
@@ -483,9 +528,15 @@ func resolveStatementFunctions(statement *kitdbsql.ParsedStatement, catalog kitd
 		if err := visit(plan.Predicate); err != nil {
 			return err
 		}
+		if err := visitReturning(plan.Returning); err != nil {
+			return err
+		}
 	}
 	if plan := statement.Delete; plan != nil {
 		if err := visit(plan.Predicate); err != nil {
+			return err
+		}
+		if err := visitReturning(plan.Returning); err != nil {
 			return err
 		}
 	}

@@ -25,10 +25,13 @@ type postgresCatalogRelation struct {
 }
 
 type postgresCatalogSnapshot struct {
+	user      string
 	database  string
 	databases []string
 	relations []postgresCatalogRelation
 	functions []*storedFunction
+	domains   []*storedDomain
+	triggers  []*storedTrigger
 	sequences []kitdbengine.Sequence
 }
 
@@ -39,12 +42,14 @@ type postgresCatalogColumn struct {
 }
 
 type postgresCatalogDataset struct {
-	columns  map[string]postgresCatalogColumn
-	defaults []string
-	rows     []map[string]any
+	functionCatalog *postgresCatalogSnapshot
+	columns         map[string]postgresCatalogColumn
+	defaults        []string
+	rows            []map[string]any
 }
 
 type postgresCatalogProjection struct {
+	evaluate func(map[string]any) (any, error)
 	name     string
 	source   string
 	constant *string
@@ -94,6 +99,20 @@ func (engine *Engine) postgresCatalogSnapshot(database string) (postgresCatalogS
 		}
 		result.functions = append(result.functions, definition)
 	}
+	for _, entry := range catalog.Domains {
+		definition, err := decodeStoredDomain(entry)
+		if err != nil {
+			return postgresCatalogSnapshot{}, err
+		}
+		result.domains = append(result.domains, definition)
+	}
+	for _, entry := range catalog.Triggers {
+		definition, err := decodeStoredTrigger(entry)
+		if err != nil {
+			return postgresCatalogSnapshot{}, err
+		}
+		result.triggers = append(result.triggers, definition)
+	}
 	for _, entry := range catalog.Structs {
 		schema, err := decodeCatalogSchema(entry.Definition)
 		if err != nil {
@@ -132,6 +151,20 @@ func (transaction *Transaction) postgresCatalogSnapshot(database string) (postgr
 			return postgresCatalogSnapshot{}, err
 		}
 		result.functions = append(result.functions, definition)
+	}
+	for _, entry := range transaction.catalog.Domains {
+		definition, err := decodeStoredDomain(entry)
+		if err != nil {
+			return postgresCatalogSnapshot{}, err
+		}
+		result.domains = append(result.domains, definition)
+	}
+	for _, entry := range transaction.catalog.Triggers {
+		definition, err := decodeStoredTrigger(entry)
+		if err != nil {
+			return postgresCatalogSnapshot{}, err
+		}
+		result.triggers = append(result.triggers, definition)
 	}
 	for _, entry := range transaction.catalog.Structs {
 		schema, err := decodeCatalogSchema(entry.Definition)
@@ -177,6 +210,22 @@ func executePostgresCatalogQuery(source string, catalog postgresCatalogSnapshot)
 	for rowIndex, row := range dataset.rows {
 		rows[rowIndex] = make([]pgwire.Field, len(projections))
 		for columnIndex, projection := range projections {
+			if projection.evaluate != nil {
+				value, err := projection.evaluate(row)
+				if err != nil {
+					return pgwire.Result{}, true, err
+				}
+				if value == nil {
+					rows[rowIndex][columnIndex] = pgwire.Field{Null: true}
+					continue
+				}
+				field, err := postgresCatalogProjectionField(value, projection.cast)
+				if err != nil {
+					return pgwire.Result{}, true, pgwire.NewError("22P02", err.Error())
+				}
+				rows[rowIndex][columnIndex] = field
+				continue
+			}
 			if projection.constant != nil {
 				field, err := postgresCatalogProjectionField(*projection.constant, projection.cast)
 				if err != nil {
@@ -208,11 +257,16 @@ func executePostgresCatalogQuery(source string, catalog postgresCatalogSnapshot)
 }
 
 func isPostgresCatalogQuery(source string) bool {
+	if _, ok := scalarFunctionCatalogSelect(source); ok {
+		return true
+	}
 	normalized := normalizePostgresCatalogSQL(source)
 	for _, relation := range []string{
 		"information_schema.tables", "information_schema.columns",
 		"information_schema.table_constraints", "information_schema.key_column_usage",
 		"information_schema.routines", "information_schema.schemata",
+		"information_schema.domains", "information_schema.domain_constraints", "information_schema.check_constraints",
+		"information_schema.triggers", "pg_catalog.pg_trigger", "pg_trigger",
 		"pg_catalog.pg_tables", "pg_tables", "pg_catalog.pg_indexes", "pg_indexes",
 		"pg_catalog.pg_class", "pg_class", "pg_catalog.pg_namespace", "pg_namespace",
 		"pg_catalog.pg_attribute", "pg_attribute", "pg_catalog.pg_index", "pg_index",
@@ -229,8 +283,25 @@ func isPostgresCatalogQuery(source string) bool {
 }
 
 func postgresCatalogDatasetFor(source string, catalog postgresCatalogSnapshot) (postgresCatalogDataset, bool, error) {
+	if _, ok := scalarFunctionCatalogSelect(source); ok {
+		dataset := newPostgresCatalogDataset(nil)
+		dataset.functionCatalog = &catalog
+		dataset.rows = []map[string]any{{}}
+		return dataset, true, nil
+	}
 	normalized := normalizePostgresCatalogSQL(source)
 	switch {
+	case containsPostgresRelation(normalized, "information_schema.check_constraints"):
+		dataset, err := informationSchemaChecks(catalog, containsPostgresRelation(normalized, "information_schema.domain_constraints"))
+		return dataset, true, err
+	case containsPostgresRelation(normalized, "information_schema.domain_constraints"):
+		return informationSchemaDomainConstraints(catalog), true, nil
+	case containsPostgresRelation(normalized, "information_schema.triggers"):
+		return informationSchemaTriggers(catalog), true, nil
+	case containsPostgresRelation(normalized, "pg_catalog.pg_trigger") || containsPostgresRelation(normalized, "pg_trigger"):
+		return postgresTriggers(catalog), true, nil
+	case containsPostgresRelation(normalized, "information_schema.domains"):
+		return informationSchemaDomains(catalog), true, nil
 	case containsPostgresRelation(normalized, "information_schema.sequences"):
 		return informationSchemaSequences(catalog), true, nil
 	case containsPostgresRelation(normalized, "pg_catalog.pg_sequence") || containsPostgresRelation(normalized, "pg_sequence"):
@@ -256,8 +327,6 @@ func postgresCatalogDatasetFor(source string, catalog postgresCatalogSnapshot) (
 		return postgresIndexes(catalog), true, nil
 	case containsPostgresRelation(normalized, "pg_catalog.pg_class") || containsPostgresRelation(normalized, "pg_class"):
 		return postgresClasses(catalog), true, nil
-	case containsPostgresRelation(normalized, "pg_catalog.pg_namespace") || containsPostgresRelation(normalized, "pg_namespace"):
-		return postgresNamespaces(), true, nil
 	case containsPostgresRelation(normalized, "pg_catalog.pg_attribute") || containsPostgresRelation(normalized, "pg_attribute"):
 		return postgresAttributes(catalog), true, nil
 	case containsPostgresRelation(normalized, "pg_catalog.pg_index") || containsPostgresRelation(normalized, "pg_index"):
@@ -274,7 +343,11 @@ func postgresCatalogDatasetFor(source string, catalog postgresCatalogSnapshot) (
 			textCatalogColumn("enumlabel"), float4CatalogColumn("enumsortorder"),
 		}), true, nil
 	case containsPostgresRelation(normalized, "pg_catalog.pg_type") || containsPostgresRelation(normalized, "pg_type"):
-		return postgresTypes(), true, nil
+		return postgresTypesWithDomains(catalog), true, nil
+	// Namespace is commonly joined to a more specific catalog. It must not
+	// replace function/type/index records with synthetic namespace rows.
+	case containsPostgresRelation(normalized, "pg_catalog.pg_namespace") || containsPostgresRelation(normalized, "pg_namespace"):
+		return postgresNamespaces(), true, nil
 	default:
 		return postgresCatalogDataset{}, false, nil
 	}
@@ -304,6 +377,7 @@ func informationSchemaColumns(catalog postgresCatalogSnapshot) postgresCatalogDa
 		int8CatalogColumn("ordinal_position"), textCatalogColumn("column_default"),
 		textCatalogColumn("is_nullable"), textCatalogColumn("data_type"),
 		textCatalogColumn("udt_schema"), textCatalogColumn("udt_name"),
+		textCatalogColumn("domain_catalog"), textCatalogColumn("domain_schema"), textCatalogColumn("domain_name"),
 		int8CatalogColumn("character_maximum_length"), int8CatalogColumn("numeric_precision"),
 		int8CatalogColumn("numeric_scale"), int8CatalogColumn("datetime_precision"),
 		textCatalogColumn("is_identity"), textCatalogColumn("identity_generation"),
@@ -325,6 +399,9 @@ func informationSchemaColumns(catalog postgresCatalogSnapshot) postgresCatalogDa
 				"column_default": postgresColumnDefault(field), "is_nullable": postgresYesNo(!field.NotNull),
 				"data_type": postgres.DataType, "udt_schema": "pg_catalog", "udt_name": postgres.UDTName,
 				"is_identity": "NO", "identity_generation": nil,
+			}
+			if field.Domain != nil {
+				row["domain_catalog"], row["domain_schema"], row["domain_name"] = catalog.database, "public", field.Domain.Name
 			}
 			switch typeInfo.ID {
 			case kitdbsql.TypeSmallInt:
@@ -453,8 +530,9 @@ func postgresClasses(catalog postgresCatalogSnapshot) postgresCatalogDataset {
 		[]string{"oid", "relname", "relnamespace", "relkind", "reltuples", "relpages"},
 		oidCatalogColumn("oid"), textCatalogColumn("relname"), oidCatalogColumn("relnamespace"),
 		textCatalogColumn("relkind"), float4CatalogColumn("reltuples"), int8CatalogColumn("relpages"),
-		boolCatalogColumn("relhasindex"), boolCatalogColumn("relrowsecurity"), textCatalogColumn("nspname"),
+		boolCatalogColumn("relhasindex"), boolCatalogColumn("relrowsecurity"), textCatalogColumn("nspname"), oidCatalogColumn("relowner"),
 	)
+	dataset.functionCatalog = &catalog
 	for _, sequence := range catalog.sequences {
 		dataset.rows = append(dataset.rows, map[string]any{
 			"oid": postgresCatalogOID("sequence", sequence.ID), "relname": sequence.Name,
@@ -481,6 +559,9 @@ func postgresClasses(catalog postgresCatalogSnapshot) postgresCatalogDataset {
 				"relhasindex": false, "relrowsecurity": false, "nspname": "public",
 			})
 		}
+	}
+	for _, row := range dataset.rows {
+		row["relowner"] = postgresCatalogOID("role", catalog.user)
 	}
 	return dataset
 }
@@ -578,9 +659,13 @@ func postgresAttributes(catalog postgresCatalogSnapshot) postgresCatalogDataset 
 				continue
 			}
 			postgres, _ := postgresCatalogTypeForField(field)
+			typeOID := postgres.OID
+			if field.Domain != nil {
+				typeOID = postgresCatalogOID("domain", field.Domain.ID)
+			}
 			dataset.rows = append(dataset.rows, map[string]any{
 				"attrelid": postgresCatalogOID("table", relation.schema.ID), "attname": field.Name,
-				"atttypid": postgres.OID, "attnum": int64(field.Position + 1),
+				"atttypid": typeOID, "attnum": int64(field.Position + 1),
 				"attnotnull": field.NotNull, "attisdropped": false, "attlen": int64(postgres.Size),
 				"atttypmod": int64(postgresFieldTypeModifier(field)), "attidentity": fieldIdentityMode(field), "atthasdef": postgresColumnDefault(field) != nil,
 			})
@@ -632,8 +717,10 @@ func postgresConstraints(catalog postgresCatalogSnapshot) postgresCatalogDataset
 		[]string{"oid", "conname", "contype", "connamespace", "conrelid", "confrelid", "conkey"},
 		oidCatalogColumn("oid"), textCatalogColumn("conname"), textCatalogColumn("contype"),
 		oidCatalogColumn("connamespace"), oidCatalogColumn("conrelid"), oidCatalogColumn("confrelid"),
-		textCatalogColumn("conkey"), boolCatalogColumn("convalidated"),
+		textCatalogColumn("conkey"), boolCatalogColumn("convalidated"), oidCatalogColumn("contypid"),
+		textCatalogColumn("nspname"), textCatalogColumn("relname"), boolCatalogColumn("condeferrable"), boolCatalogColumn("condeferred"),
 	)
+	dataset.functionCatalog = &catalog
 	for _, relation := range catalog.relations {
 		for _, constraint := range catalogConstraintsFor(catalog, relation) {
 			positions := make([]string, len(constraint.fields))
@@ -644,6 +731,17 @@ func postgresConstraints(catalog postgresCatalogSnapshot) postgresCatalogDataset
 				"oid": constraint.constraint, "conname": constraint.name, "contype": constraint.kind,
 				"connamespace": postgresPublicNamespaceOID, "conrelid": constraint.tableOID,
 				"confrelid": constraint.targetOID, "conkey": strings.Join(positions, " "), "convalidated": true,
+				"contypid": uint32(0), "nspname": "public", "relname": relation.schema.Name, "condeferrable": false, "condeferred": false,
+			})
+		}
+	}
+	for _, domain := range catalog.domains {
+		for i := range domain.Column.Checks {
+			dataset.rows = append(dataset.rows, map[string]any{
+				"oid": domainCheckOID(domain, i), "conname": domainCheckName(domain, i), "contype": "c",
+				"connamespace": postgresPublicNamespaceOID, "conrelid": uint32(0), "confrelid": uint32(0),
+				"contypid": postgresCatalogOID("domain", domain.ID), "convalidated": true, "nspname": "public",
+				"condeferrable": false, "condeferred": false,
 			})
 		}
 	}
@@ -931,6 +1029,17 @@ func projectPostgresCatalog(source string, dataset postgresCatalogDataset) ([]po
 	result := make([]postgresCatalogProjection, 0, len(parts))
 	for _, part := range parts {
 		expression, alias := splitPostgresCatalogAlias(part)
+		if projection, handled, err := compileFunctionCatalogProjection(expression, dataset); handled {
+			if err != nil {
+				return nil, false, err
+			}
+			if alias != "" {
+				projection.name = alias
+				projection.column.Name = alias
+			}
+			result = append(result, projection)
+			continue
+		}
 		if expression == "*" || strings.HasSuffix(strings.TrimSpace(expression), ".*") {
 			for _, name := range dataset.defaults {
 				column := dataset.columns[name]
@@ -1002,18 +1111,29 @@ func filterPostgresCatalogRows(source string, dataset *postgresCatalogDataset) {
 	if dataset == nil || len(dataset.rows) == 0 {
 		return
 	}
+	source = postgresCatalogWhereClause(source)
 	filterNames := make([]string, 0, len(dataset.columns))
 	for name := range dataset.columns {
 		filterNames = append(filterNames, name)
 	}
 	sort.Strings(filterNames)
 	filters := make(map[string]string)
+	exclusions := make(map[string][]string)
 	for _, name := range filterNames {
+		// Equality with NULL is UNKNOWN, not an absent filter. In particular,
+		// a bound NULL function OID must not disclose every definition.
+		if regexp.MustCompile(`(?i)(?:[a-z_][a-z0-9_]*\s*\.\s*)?"?` + regexp.QuoteMeta(name) + `"?\s*=\s*null\b`).MatchString(source) {
+			dataset.rows = nil
+			return
+		}
 		if value, found := postgresCatalogEquality(source, name); found {
 			filters[name] = value
 		}
+		if values := postgresCatalogInequalities(source, name); len(values) != 0 {
+			exclusions[name] = values
+		}
 	}
-	if len(filters) == 0 {
+	if len(filters) == 0 && len(exclusions) == 0 {
 		return
 	}
 	rows := dataset.rows[:0]
@@ -1026,11 +1146,89 @@ func filterPostgresCatalogRows(source string, dataset *postgresCatalogDataset) {
 				break
 			}
 		}
+		for name, excluded := range exclusions {
+			value, exists := row[name]
+			if !exists || value == nil {
+				matches = false
+				break
+			}
+			for _, expected := range excluded {
+				if fmt.Sprint(value) == expected {
+					matches = false
+					break
+				}
+			}
+		}
 		if matches {
 			rows = append(rows, row)
 		}
 	}
 	dataset.rows = rows
+}
+
+// Restrict the compatibility filter to the first SELECT's WHERE. Comparisons
+// inside projected CASE expressions or a later UNION branch are not filters
+// on this dataset. Full arbitrary catalog SQL remains outside this adapter.
+func postgresCatalogWhereClause(source string) string {
+	lower := strings.ToLower(source)
+	start := strings.Index(lower, "select")
+	if start < 0 {
+		return ""
+	}
+	where, depth := -1, 0
+	quote := byte(0)
+	for index := start + len("select"); index < len(source); index++ {
+		ch := source[index]
+		if quote != 0 {
+			if ch == quote {
+				if index+1 < len(source) && source[index+1] == quote {
+					index++
+				} else {
+					quote = 0
+				}
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		if ch == '(' {
+			depth++
+			continue
+		}
+		if ch == ')' && depth > 0 {
+			depth--
+			continue
+		}
+		if depth != 0 {
+			continue
+		}
+		if ch == ')' || hasPostgresCatalogWordAt(lower, index, "union") ||
+			hasPostgresCatalogWordAt(lower, index, "order") || hasPostgresCatalogWordAt(lower, index, "limit") {
+			if where >= 0 {
+				return source[where:index]
+			}
+			return ""
+		}
+		if where < 0 && hasPostgresCatalogWordAt(lower, index, "where") {
+			where = index + len("where")
+		}
+	}
+	if where >= 0 {
+		return source[where:]
+	}
+	return ""
+}
+
+func postgresCatalogInequalities(source, name string) []string {
+	pattern := `(?i)(?:[a-z_][a-z0-9_]*\s*\.\s*)?"?` + regexp.QuoteMeta(name) + `"?\s*(?:<>|!=)\s*'((?:''|[^'])*)'`
+	matches := regexp.MustCompile(pattern).FindAllStringSubmatch(source, -1)
+	values := make([]string, 0, len(matches))
+	for _, match := range matches {
+		values = append(values, strings.ReplaceAll(match[1], "''", "'"))
+	}
+	return values
 }
 
 func postgresCatalogEquality(source, name string) (string, bool) {
@@ -1095,7 +1293,7 @@ func postgresCatalogSelectList(source string) (string, bool) {
 			}
 		}
 	}
-	return "", false
+	return scalarFunctionCatalogSelect(source)
 }
 
 func splitPostgresCatalogList(source string) []string {

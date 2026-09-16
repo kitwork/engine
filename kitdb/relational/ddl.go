@@ -52,6 +52,11 @@ func (engine *Engine) executeDropTable(ctx context.Context, plan *kitdbsql.DropT
 		}
 		return Result{}, fmt.Errorf("kitdb SQL: no such table: %s", plan.Name)
 	}
+	for _, trigger := range catalog.Triggers {
+		if trigger.TargetStruct == schema.ID && trigger.SourceStruct != schema.ID {
+			return Result{}, fmt.Errorf("kitdb SQL: cannot drop table %q: trigger %q writes to it", schema.Name, trigger.Name)
+		}
+	}
 	for _, entry := range catalog.Structs {
 		candidate, err := decodeCatalogSchema(entry.Definition)
 		if err != nil {
@@ -76,6 +81,14 @@ func (engine *Engine) executeDropTable(ctx context.Context, plan *kitdbsql.DropT
 	if err := transaction.DeleteStruct(schema.ID); err != nil {
 		_ = transaction.Rollback()
 		return Result{}, err
+	}
+	for _, trigger := range catalog.Triggers {
+		if trigger.SourceStruct == schema.ID {
+			if err := transaction.DeleteTrigger(trigger.ID); err != nil {
+				_ = transaction.Rollback()
+				return Result{}, err
+			}
+		}
 	}
 	if err := stageRemovedOwnedSequences(transaction, catalog, map[string]*alterSchemaState{schema.ID: nil}); err != nil {
 		_ = transaction.Rollback()

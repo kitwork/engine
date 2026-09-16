@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/kitwork/engine/database"
 )
 
 func writeServerJS(t *testing.T, src string) string {
@@ -285,6 +288,176 @@ server.port(8080)
 	}
 }
 
+func TestAppDatabaseOwnsKitDBWithFlatOptions(t *testing.T) {
+	file := writeServerJS(t, `
+import { app, env } from "kitwork";
+app.database("./data.kitdb", {
+  alias: "shop",
+  host: "127.0.0.1",
+  port: 55432,
+  user: "kitdb",
+  password: env.require("APP_DATABASE_PASSWORD"),
+  kitsql: true,
+  memory: "256mb",
+  concurrency: 6,
+  warm: true,
+  cache: { select: "2m", search: "30s", analytics: "5m", memory: "32mb" },
+}).web(8080);
+`)
+	t.Setenv("APP_DATABASE_PASSWORD", "manifest-secret")
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := raw["databases"]; found {
+		t.Fatal("owned KitDB was confused with an external database connection")
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.AppDatabases) != 1 {
+		t.Fatalf("owned databases = %d, want 1", len(cfg.AppDatabases))
+	}
+	database := cfg.AppDatabases[0]
+	if database.Alias != "shop" || database.Path != "./data.kitdb" || database.Host != "127.0.0.1" ||
+		database.Port != 55432 || database.User != "kitdb" || database.Password != "manifest-secret" || !database.KitSQL {
+		t.Fatalf("database identity = %+v", database)
+	}
+	if database.MemoryBytes != 256<<20 || database.Concurrency != 6 || !database.Warm {
+		t.Fatalf("database resources = %+v", database)
+	}
+	if database.Cache.Select != 2*time.Minute || database.Cache.Search != 30*time.Second ||
+		database.Cache.Analytics != 5*time.Minute || database.Cache.MaximumBytes != 32<<20 {
+		t.Fatalf("database cache = %+v", database.Cache)
+	}
+}
+
+func TestAppDatabaseKitSQLRequiresPassword(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.database("./data.kitdb", { kitsql: true }).web(8080);`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseConfig(raw); err == nil || !strings.Contains(err.Error(), "password is required") {
+		t.Fatalf("ParseConfig error = %v", err)
+	}
+}
+
+func TestAppDatabaseCacheDurationAppliesToEverySafeReadClass(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.database("./data.kitdb", { cache: "1m" }).web(8080);`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := cfg.AppDatabases[0].Cache
+	if cache.Select != time.Minute || cache.Search != time.Minute || cache.Analytics != time.Minute {
+		t.Fatalf("database cache = %+v", cache)
+	}
+}
+
+func TestAppDatabaseKeepsExternalConnectionDeclarationCompatible(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.database({ alias: "system", type: "postgres", host: "db.internal" }).web(8080);`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Databases) != 1 || cfg.Databases[0].Alias != "system" || len(cfg.AppDatabases) != 0 {
+		t.Fatalf("external=%+v owned=%+v", cfg.Databases, cfg.AppDatabases)
+	}
+}
+
+func TestAppExternalConnectorMethodsNormalizeToOneRegistry(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app
+  .database("./native.kitdb", { alias: "native" })
+  .postgresql("system", "postgresql://kitwork:secret@db.internal/app")
+  .mysql("legacy", { host: "mysql.internal", port: 3306, user: "reader", name: "archive" })
+  .sqlite("local", "./local.sqlite")
+  .redis("cache", "rediss://cache.internal:6380")
+  .connect("remote-kitdb", "kitsql://kitdb:secret@kitdb.internal/shop")
+  .connect("warehouse", { driver: "postgresql", host: "warehouse.internal", name: "events" })
+  .web(8080);`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.AppDatabases) != 1 || cfg.AppDatabases[0].Alias != "native" {
+		t.Fatalf("owned databases = %+v", cfg.AppDatabases)
+	}
+	if len(cfg.Databases) != 6 {
+		t.Fatalf("external databases = %+v", cfg.Databases)
+	}
+	byAlias := make(map[string]database.Config, len(cfg.Databases))
+	for _, connection := range cfg.Databases {
+		byAlias[connection.Alias] = connection
+	}
+	if got := byAlias["system"]; got.Type != "postgres" || got.URL != "postgresql://kitwork:secret@db.internal/app" {
+		t.Fatalf("postgresql = %+v", got)
+	}
+	if got := byAlias["legacy"]; got.Type != "mysql" || got.Host != "mysql.internal" || got.Port != 3306 {
+		t.Fatalf("mysql = %+v", got)
+	}
+	if got := byAlias["local"]; got.Type != "sqlite" || got.Name != "./local.sqlite" {
+		t.Fatalf("sqlite = %+v", got)
+	}
+	if got := byAlias["cache"]; got.Type != "redis" || got.URL != "rediss://cache.internal:6380" {
+		t.Fatalf("redis = %+v", got)
+	}
+	if got := byAlias["remote-kitdb"]; got.Type != "kitsql" || got.URL != "kitsql://kitdb:secret@kitdb.internal/shop" {
+		t.Fatalf("kitsql = %+v", got)
+	}
+	if got := byAlias["warehouse"]; got.Type != "postgres" || got.Host != "warehouse.internal" {
+		t.Fatalf("generic connection = %+v", got)
+	}
+}
+
+func TestAppConnectRejectsAmbiguousOrInvalidDescriptors(t *testing.T) {
+	tests := []string{
+		`app.connect("system", "db.internal").web(8080);`,
+		`app.connect("system", { host: "db.internal" }).web(8080);`,
+		`app.postgresql("system", { type: "mysql" }).web(8080);`,
+		`app.postgresql("system", "mysql://db.internal/app").web(8080);`,
+		`app.sqlite("", "./local.sqlite").web(8080);`,
+	}
+	for _, source := range tests {
+		file := writeServerJS(t, `import { app } from "kitwork"; `+source)
+		if _, err := evalConfigJS(file); err == nil {
+			t.Fatalf("accepted invalid connector: %s", source)
+		}
+	}
+}
+
+func TestAppExternalConnectorAliasesMustBeUnique(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app
+  .postgresql("system", "postgresql://db.internal/app")
+  .sqlite("SYSTEM", "./local.sqlite")
+  .web(8080);`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseConfig(raw); err == nil || !strings.Contains(err.Error(), "declared more than once") {
+		t.Fatalf("ParseConfig() error = %v, want duplicate alias rejection", err)
+	}
+}
+
 // Fluent builder must support string-to-numeric coercion and shorthand run arguments.
 func TestEvalConfigJS_MultiStyle(t *testing.T) {
 	// Style 1: String port coercion in .port()
@@ -427,5 +600,18 @@ func TestManifestStyle_DesktopOnlyHasNoWebSurface(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no web surface") {
 		t.Errorf("error should explain the missing WEB surface, got: %v", err)
+	}
+}
+
+func TestManifestStyle_DatabaseOnlyIsRunnable(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `
+import { app } from "kitwork";
+app.database("./data.kitdb", { port: 5445, user: "kitdb", password: "secret" });`))
+	if err != nil {
+		t.Fatalf("database-only manifest should satisfy the host: %v", err)
+	}
+	databases, ok := raw["owned_databases"].([]interface{})
+	if !ok || len(databases) != 1 {
+		t.Fatalf("owned databases = %#v", raw["owned_databases"])
 	}
 }

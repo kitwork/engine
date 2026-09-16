@@ -243,15 +243,25 @@ func describePragma(plan *kitdbsql.PragmaStatement) ([]Column, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("kitdb SQL: invalid PRAGMA plan")
 	}
-	if plan.Name != "analytics_status" {
+	switch plan.Name {
+	case "analytics_status":
+		return append([]Column(nil), analyticsStatusColumns...), nil
+	case "cache_status":
+		if plan.Argument != "" {
+			return nil, fmt.Errorf("kitdb SQL: PRAGMA cache_status does not accept an argument")
+		}
+		return append([]Column(nil), queryCacheStatusColumns...), nil
+	default:
 		return nil, fmt.Errorf("kitdb SQL: unsupported PRAGMA %q", plan.Name)
 	}
-	return append([]Column(nil), analyticsStatusColumns...), nil
 }
 
 func (transaction *Transaction) executePragma(ctx context.Context, plan *kitdbsql.PragmaStatement) (Result, error) {
 	if _, err := describePragma(plan); err != nil {
 		return Result{}, err
+	}
+	if plan.Name == "cache_status" {
+		return transaction.executeQueryCacheStatus(), nil
 	}
 	status, err := transaction.analyticsStatus(ctx, plan.Argument)
 	if err != nil {

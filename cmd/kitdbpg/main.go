@@ -25,7 +25,7 @@ import (
 func main() {
 	version := flag.Bool("version", false, "print binary build information and exit")
 	file := flag.String("file", "app.kitdb", "KitDB file to open or create")
-	root := flag.String("root", "", "serve every non-hidden .kitdb file immediately below this directory")
+	root := flag.String("root", "", "serve the .catalog database in this root, or legacy immediate .kitdb files when no catalog is present")
 	database := flag.String("database", "", "logical PostgreSQL database name; defaults to the file name")
 	maintenanceDatabase := flag.String("maintenance-database", "kitdb", "logical maintenance database used by node mode")
 	user := flag.String("user", "kitdb", "PostgreSQL login user")

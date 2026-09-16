@@ -28,6 +28,7 @@ type ProfileProgram struct {
 // ProfileReport aggregates immutable Program profiles from one apps root.
 type ProfileReport struct {
 	Root                   string                  `json:"root"`
+	Layout                 string                  `json:"layout"`
 	BytecodeVersion        uint16                  `json:"bytecode_version"`
 	ProgramEncodingVersion uint16                  `json:"program_encoding_version"`
 	ArtifactVersion        uint16                  `json:"artifact_version"`
@@ -57,6 +58,7 @@ func (r ProfileReport) OK() bool {
 func Profile(root string) ProfileReport {
 	report := ProfileReport{
 		Root:                   root,
+		Layout:                 "auto",
 		BytecodeVersion:        runtime.BytecodeVersion,
 		ProgramEncodingVersion: runtime.ProgramEncodingVersion,
 		ArtifactVersion:        compiler.BytecodeArtifactVersion,
