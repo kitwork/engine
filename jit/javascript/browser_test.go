@@ -173,13 +173,20 @@ const browserHarness = `(function () {
     return Promise.resolve(document.cookie.split("; ").some(function (pair) { return pair.indexOf(name + "=") === 0; }));
   }
 
-  // Resolves like the pending promise, but keeps a probe request in flight until it settles;
-  // the store read is a bare renderer-to-browser round trip, and with nothing pending virtual
-  // time leaps to the next timer — or to the end of the budget — the moment the page goes idle.
-  function anchored(pending) {
+  // Resolves like the pending promise, but keeps a probe request in flight until it settles.
+  // For anything answered from outside the renderer — a cookie-store read, the popstate that
+  // history.back() produces — a bare await leaves nothing pending, and virtual time leaps to
+  // the next timer, or to the end of the budget, the moment the page goes idle. Bounded by the
+  // same probe count as waitFor's grace, so a promise that never settles still names itself.
+  function anchored(pending, message) {
     var settled = false;
+    var remaining = probeGrace;
     pending.then(function () { settled = true; }, function () { settled = true; });
-    function spin() { return settled ? Promise.resolve() : networkTick().then(spin); }
+    function spin() {
+      if (settled) return Promise.resolve();
+      if (remaining-- <= 0) throw new Error(message || "anchored promise did not settle");
+      return networkTick().then(spin);
+    }
     return spin().then(function () { return pending; });
   }
 
@@ -188,7 +195,7 @@ const browserHarness = `(function () {
     var delay = typeof interval === "number" && interval >= 0 ? interval : 8;
     var deadline = performance.now() + duration;
     function attempt() {
-      return anchored(hasCookie(name)).then(function (present) {
+      return anchored(hasCookie(name), "cookie store read for " + name + " did not answer").then(function (present) {
         if (present) return;
         if (performance.now() >= deadline) throw new Error(message + " (cookie " + name + " never reached the store)");
         return new Promise(function (resolve) { setTimeout(resolve, delay); }).then(attempt);
@@ -244,6 +251,7 @@ const browserHarness = `(function () {
   globalThis.__kitTestAssert = assert;
   globalThis.__kitTestWaitFor = waitFor;
   globalThis.__kitTestWaitForCookie = waitForCookie;
+  globalThis.__kitTestAnchored = anchored;
   globalThis.__kitTestNextTurn = nextTurn;
   globalThis.__kitTestPublicContract = assertPublicContract;
 })();`

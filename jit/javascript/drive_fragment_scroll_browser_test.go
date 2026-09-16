@@ -258,6 +258,7 @@ const driveFragmentContractSource = `
 const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var anchored = __kitTestAnchored;
   var delay = function (milliseconds) { return new Promise(function (resolve) { setTimeout(resolve, milliseconds); }); };
   var realFetch = globalThis.fetch.bind(globalThis);
   var driveFetches = [];
@@ -405,17 +406,22 @@ const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   var forwardY = scrollY;
   var popFetchStart = driveFetches.length;
   history.back();
-  await delay(300);
-  assert(!location.hash && Math.abs(scrollY - backY) < 2,
-    "Back did not restore the exact saved scroll position: hash=" + location.hash + " y=" + scrollY +
-      " expected=" + backY + " state=" + JSON.stringify(history.state));
+  // A traversal's popstate comes back from the browser process; a virtual delay gives it no
+  // real time, so wait on what it must produce.
+  await waitFor(function () { return !location.hash && Math.abs(scrollY - backY) < 2; },
+    "Back did not restore the exact saved scroll position").catch(function (error) {
+      throw new Error(error.message + ": hash=" + location.hash + " y=" + scrollY +
+        " expected=" + backY + " state=" + JSON.stringify(history.state));
+    });
   assert(driveFetches.length === popFetchStart,
     "same-document Back traversal issued a Drive fetch");
   history.forward();
-  await delay(300);
-  assert(decodeURIComponent(location.hash.slice(1)) === "á" && Math.abs(scrollY - forwardY) < 2,
-    "Forward did not restore the exact saved fragment position: hash=" + location.hash + " y=" + scrollY +
+  await waitFor(function () {
+    return decodeURIComponent(location.hash.slice(1)) === "á" && Math.abs(scrollY - forwardY) < 2;
+  }, "Forward did not restore the exact saved fragment position").catch(function (error) {
+    throw new Error(error.message + ": hash=" + location.hash + " y=" + scrollY +
       " expected=" + forwardY + " state=" + JSON.stringify(history.state));
+  });
   assert(driveFetches.length === popFetchStart,
     "same-document Forward traversal issued a Drive fetch");
   history.replaceState(history.state, "", "/drive-fragments");
@@ -550,12 +556,12 @@ const driveFragmentAssertions = `__runStandaloneKitTest(async function () {
   var rapidFetchStart = driveFetches.length;
   var backPopstate = nextPopstate();
   history.back();
-  await backPopstate;
+  await anchored(backPopstate, "rapid Back produced no popstate");
   assert(location.pathname === "/drive-fragments-pop-slow",
     "rapid Back did not select the slow destination entry");
   var forwardPopstate = nextPopstate();
   history.forward();
-  await forwardPopstate;
+  await anchored(forwardPopstate, "rapid Forward produced no popstate");
   assert(location.pathname === "/drive-fragments-pop-fast",
     "rapid Forward did not restore the fast destination entry");
   var popCompletion = await realFetch("/drive-fragments-pop-slow-complete");
