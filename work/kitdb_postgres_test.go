@@ -1803,26 +1803,32 @@ func queryKitDBPostgresStrings(
 	return values
 }
 
-// dropKitDBPostgresDatabase drops a database whose last client has just closed. lib/pq's Close
-// sends Terminate and returns without waiting for the server to read it, so a DROP DATABASE that
-// follows on another connection can still find that session registered and get PostgreSQL's own
-// 55006 — the same race a real server has, and the client's to absorb. Only that error is
-// retried, for a bounded window; anything else is the test's failure.
-func dropKitDBPostgresDatabase(t *testing.T, ctx context.Context, maintenance *sql.DB, name string) {
+// execKitDBPostgresAfterClose runs a statement that needs a database's sessions gone — DROP
+// DATABASE, ALTER DATABASE … RENAME — right after that database's last client closed. lib/pq's
+// Close sends Terminate and returns without waiting for the server to read it, so the statement
+// can still find that session registered and get PostgreSQL's own 55006 — the same race a real
+// server has, and the client's to absorb. Only that error is retried, for a bounded window;
+// anything else is the test's failure.
+func execKitDBPostgresAfterClose(t *testing.T, ctx context.Context, maintenance *sql.DB, statement string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		_, err := maintenance.ExecContext(ctx, `DROP DATABASE `+name)
+		_, err := maintenance.ExecContext(ctx, statement)
 		if err == nil {
 			return
 		}
 		var postgresErr *pq.Error
 		if !errors.As(err, &postgresErr) || postgresErr.Code != "55006" ||
 			!strings.Contains(postgresErr.Message, "other session") || time.Now().After(deadline) {
-			t.Fatalf("DROP DATABASE %s: %v", name, err)
+			t.Fatalf("%s: %v", statement, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func dropKitDBPostgresDatabase(t *testing.T, ctx context.Context, maintenance *sql.DB, name string) {
+	t.Helper()
+	execKitDBPostgresAfterClose(t, ctx, maintenance, `DROP DATABASE `+name)
 }
 
 func openKitDBPostgresTestClient(t *testing.T, address, password string) *sql.DB {

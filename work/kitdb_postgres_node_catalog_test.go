@@ -781,9 +781,7 @@ router.get(() => 1);`
 			t.Fatalf("source rename error = %T %v", err, err)
 		}
 	}
-	if _, err := maintenance.ExecContext(ctx, `ALTER DATABASE shop RENAME TO warehouse`); err != nil {
-		t.Fatalf("ALTER DATABASE: %v", err)
-	}
+	execKitDBPostgresAfterClose(t, ctx, maintenance, `ALTER DATABASE shop RENAME TO warehouse`)
 	for _, client := range []*sql.DB{maintenance, observer} {
 		names := queryKitDBPostgresStrings(
 			t, ctx, client, `SELECT datname FROM pg_catalog.pg_database ORDER BY datname`,
