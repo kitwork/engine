@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -65,10 +66,23 @@ func (d *Config) Connect() (*sql.DB, error) {
 	case dbType == "sqlite" || dbType == "sqlite3":
 		fmt.Printf("Successfully connected to SQLite database: %s\n", dsn)
 	default:
-		fmt.Printf("Successfully connected to database (%s) at %s:%d (DB: %s)\n", d.Type, d.Host, d.Port, d.Name)
+		fmt.Printf("Successfully connected to database (%s) at %s\n", d.Type, d.Endpoint())
 	}
 
 	return db, nil
+}
+
+// Endpoint describes where a connection points, for logs and the boot banner — never with the
+// password. A URL connection has no Host/Port/Name fields to print (they live inside the URL), so
+// without this it showed as ":0 (DB: )" exactly when someone was checking that it had connected.
+func (d *Config) Endpoint() string {
+	if source := strings.TrimSpace(d.URL); source != "" {
+		if parsed, err := url.Parse(source); err == nil && parsed.Host != "" {
+			return parsed.Host + strings.TrimSuffix(parsed.Path, "/") + " (url)"
+		}
+		return "(url)"
+	}
+	return fmt.Sprintf("%s:%d (DB: %s)", d.Host, d.Port, d.Name)
 }
 
 func (d *Config) DSN() string {

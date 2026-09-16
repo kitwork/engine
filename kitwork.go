@@ -420,7 +420,7 @@ func printBanner(cfg *Config, isLocalhost bool) {
 			}
 			fmt.Printf("%ssqlite · %s %s(%s)%s\n", label("db"), name, dim, alias, reset)
 		} else {
-			fmt.Printf("%s%s · %s:%d %s(%s)%s\n", label("db"), db.Type, db.Host, db.Port, dim, alias, reset)
+			fmt.Printf("%s%s · %s %s(%s)%s\n", label("db"), db.Type, db.Endpoint(), dim, alias, reset)
 		}
 	}
 	fmt.Println()
