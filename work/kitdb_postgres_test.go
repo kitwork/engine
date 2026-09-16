@@ -90,7 +90,11 @@ router.get(() => db.products.count());`
 
 	database := openKitDBPostgresTestClient(t, listener.Addr().String(), "postgres-secret")
 	defer database.Close()
-	queryCtx, queryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// One context rides every statement of this journey — over a hundred of them. It guards
+	// against a hang, not a pace: under -race on a loaded Windows runner the journey crossed
+	// five seconds at its hundredth statement and the server cancelled that COMMIT (57014).
+	// The server's own QueryTimeout still bounds each statement.
+	queryCtx, queryCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer queryCancel()
 	if err := database.PingContext(queryCtx); err != nil {
 		t.Fatalf("PostgreSQL Ping: %v", err)
@@ -1194,7 +1198,7 @@ router.get(() => ({ shop: shop.products.count(), analytics: analytics.events.cou
 		}
 	}()
 
-	queryCtx, queryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	queryCtx, queryCancel := context.WithTimeout(context.Background(), 60*time.Second) // a hang guard, as above
 	defer queryCancel()
 	maintenance := openKitDBPostgresDatabaseTestClient(
 		t, listener.Addr().String(), "kitdb", "shared-secret",
