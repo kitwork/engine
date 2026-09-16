@@ -1,6 +1,7 @@
 package work
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,22 +37,53 @@ func DiscoverSites(root string) []string {
 	return domains
 }
 
-// DiscoverFlatSites lists a single app's domain folders:
-// app/<domain>/router.kitwork.js.
-func DiscoverFlatSites(root string) []string {
+// AppSiteSource is one domain-scoped site owned by a root app.
+type AppSiteSource struct {
+	Domain    string
+	Directory string
+}
+
+// DiscoverAppSites walks only the declared app/<domain> level. Hidden and
+// app-infrastructure directories can never become domain sites.
+func DiscoverAppSites(root string) ([]AppSiteSource, error) {
 	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var sites []AppSiteSource
+	for _, entry := range entries {
+		if !entry.IsDir() || reservedRootEntry(entry.Name()) {
+			continue
+		}
+		directory := filepath.Join(root, entry.Name())
+		marker, statErr := os.Stat(filepath.Join(directory, RouterFileName))
+		if os.IsNotExist(statErr) {
+			continue
+		}
+		if statErr != nil {
+			return nil, fmt.Errorf("inspect app site %q: %w", entry.Name(), statErr)
+		}
+		if marker.IsDir() {
+			continue
+		}
+		sites = append(sites, AppSiteSource{
+			Domain:    entry.Name(),
+			Directory: directory,
+		})
+	}
+	return sites, nil
+}
+
+// DiscoverFlatSites is the compatibility list form used by TLS and prewarm.
+// Call DiscoverAppSites when discovery errors must be reported.
+func DiscoverFlatSites(root string) []string {
+	sites, err := DiscoverAppSites(root)
 	if err != nil {
 		return nil
 	}
-	var domains []string
-	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") ||
-			strings.HasPrefix(entry.Name(), "_") {
-			continue
-		}
-		if info, err := os.Stat(filepath.Join(root, entry.Name(), RouterFileName)); err == nil && !info.IsDir() {
-			domains = append(domains, entry.Name())
-		}
+	domains := make([]string, 0, len(sites))
+	for _, site := range sites {
+		domains = append(domains, site.Domain)
 	}
 	return domains
 }
@@ -72,15 +104,33 @@ func DiscoverTenantSites(root string) ([]TenantSiteSource, error) {
 	if err != nil {
 		return nil, err
 	}
+	if misplaced, inspectErr := regularRouterMarker(root); inspectErr != nil {
+		return nil, inspectErr
+	} else if misplaced {
+		return nil, fmt.Errorf(
+			"multi-tenant router %q is two levels too shallow; expected apps/<identity>/<domain>/%s",
+			filepath.Join(root, RouterFileName),
+			RouterFileName,
+		)
+	}
 	var sites []TenantSiteSource
 	for _, identity := range identities {
 		if !identity.IsDir() || reservedRootEntry(identity.Name()) {
 			continue
 		}
 		identityRoot := filepath.Join(root, identity.Name())
+		if misplaced, inspectErr := regularRouterMarker(identityRoot); inspectErr != nil {
+			return nil, inspectErr
+		} else if misplaced {
+			return nil, fmt.Errorf(
+				"multi-tenant router %q is one level too shallow; expected apps/<identity>/<domain>/%s",
+				filepath.Join(identityRoot, RouterFileName),
+				RouterFileName,
+			)
+		}
 		domains, readErr := os.ReadDir(identityRoot)
 		if readErr != nil {
-			continue
+			return nil, fmt.Errorf("read app identity %q: %w", identity.Name(), readErr)
 		}
 		for _, domain := range domains {
 			if !domain.IsDir() || reservedRootEntry(domain.Name()) {
@@ -88,7 +138,18 @@ func DiscoverTenantSites(root string) ([]TenantSiteSource, error) {
 			}
 			directory := filepath.Join(identityRoot, domain.Name())
 			marker, statErr := os.Stat(filepath.Join(directory, RouterFileName))
-			if statErr != nil || marker.IsDir() {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			if statErr != nil {
+				return nil, fmt.Errorf(
+					"inspect site %q for app identity %q: %w",
+					domain.Name(),
+					identity.Name(),
+					statErr,
+				)
+			}
+			if marker.IsDir() {
 				continue
 			}
 			sites = append(sites, TenantSiteSource{
@@ -123,4 +184,16 @@ func DiscoverTenantDomains(root string) []string {
 func reservedRootEntry(name string) bool {
 	return name == SitesDirName || name == "test" ||
 		strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
+}
+
+func regularRouterMarker(root string) (bool, error) {
+	marker := filepath.Join(root, RouterFileName)
+	info, err := os.Stat(marker)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect router marker %q: %w", marker, err)
+	}
+	return !info.IsDir(), nil
 }

@@ -28,6 +28,7 @@ type ProfileProgram struct {
 // ProfileReport aggregates immutable Program profiles from one apps root.
 type ProfileReport struct {
 	Root                   string                  `json:"root"`
+	Layout                 string                  `json:"layout"`
 	BytecodeVersion        uint16                  `json:"bytecode_version"`
 	ProgramEncodingVersion uint16                  `json:"program_encoding_version"`
 	ArtifactVersion        uint16                  `json:"artifact_version"`
@@ -55,8 +56,16 @@ func (r ProfileReport) OK() bool {
 // Profile discovers executable source entrypoints and compiles each through
 // the native bundler. It does not execute tenant code or start app resources.
 func Profile(root string) ProfileReport {
+	return ProfileWithLayout(root, work.RootLayoutAuto)
+}
+
+// ProfileWithLayout profiles only entrypoints that can execute under the
+// filesystem contract selected by host bootstrap. Profile retains the legacy
+// mixed-root walk for direct engine users.
+func ProfileWithLayout(root string, layout work.RootLayout) ProfileReport {
 	report := ProfileReport{
 		Root:                   root,
+		Layout:                 layout.String(),
 		BytecodeVersion:        runtime.BytecodeVersion,
 		ProgramEncodingVersion: runtime.ProgramEncodingVersion,
 		ArtifactVersion:        compiler.BytecodeArtifactVersion,
@@ -64,7 +73,7 @@ func Profile(root string) ProfileReport {
 		CompilerFingerprint:    compiler.Fingerprint(),
 		InstructionSetChecksum: runtime.InstructionSetChecksum(),
 	}
-	files, err := profileEntrypoints(root)
+	files, err := profileEntrypoints(root, layout)
 	if err != nil {
 		report.Issues = append(report.Issues, ProfileIssue{
 			File:    root,
@@ -150,7 +159,146 @@ func Profile(root string) ProfileReport {
 	return report
 }
 
-func profileEntrypoints(root string) ([]string, error) {
+func profileEntrypoints(root string, layout work.RootLayout) ([]string, error) {
+	if layout == work.RootLayoutAuto {
+		return profileLegacyEntrypoints(root)
+	}
+	if !layout.Valid() {
+		return nil, &os.PathError{Op: "profile root layout", Path: root, Err: fs.ErrInvalid}
+	}
+	if _, err := os.ReadDir(root); err != nil {
+		return nil, err
+	}
+
+	var files []string
+	addApp := func(appRoot string) error {
+		background, err := profileAppEntrypoints(appRoot)
+		if err != nil {
+			return err
+		}
+		files = append(files, background...)
+		return nil
+	}
+	addSite := func(siteRoot string) error {
+		routes, err := profileRouteEntrypoints(siteRoot)
+		if err != nil {
+			return err
+		}
+		files = append(files, routes...)
+		return nil
+	}
+
+	switch layout {
+	case work.RootLayoutSingle:
+		if err := addApp(root); err != nil {
+			return nil, err
+		}
+		if err := addSite(root); err != nil {
+			return nil, err
+		}
+	case work.RootLayoutMultiDomain:
+		if err := addApp(root); err != nil {
+			return nil, err
+		}
+		sites, err := work.DiscoverAppSites(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, site := range sites {
+			if err := addSite(site.Directory); err != nil {
+				return nil, err
+			}
+		}
+	case work.RootLayoutMultiTenant:
+		sites, err := work.DiscoverTenantSites(root)
+		if err != nil {
+			return nil, err
+		}
+		for _, identity := range work.DiscoverAppIdentities(root) {
+			if err := addApp(filepath.Join(root, identity)); err != nil {
+				return nil, err
+			}
+		}
+		for _, site := range sites {
+			if err := addSite(site.Directory); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	sort.Strings(files)
+	return compactProfileEntrypoints(files), nil
+}
+
+func profileRouteEntrypoints(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path == root {
+				return nil
+			}
+			name := entry.Name()
+			if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+
+		name := entry.Name()
+		if name == work.RouterFileName {
+			files = append(files, path)
+		}
+		return nil
+	})
+	sort.Strings(files)
+	return files, err
+}
+
+func profileAppEntrypoints(root string) ([]string, error) {
+	var files []string
+	for _, folder := range []string{"_cron", "_queue"} {
+		directory := filepath.Join(root, folder)
+		entries, err := os.ReadDir(directory)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 ||
+				!strings.HasSuffix(strings.ToLower(entry.Name()), ".kitwork.js") {
+				continue
+			}
+			files = append(files, filepath.Join(directory, entry.Name()))
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func compactProfileEntrypoints(files []string) []string {
+	if len(files) < 2 {
+		return files
+	}
+	write := 1
+	for read := 1; read < len(files); read++ {
+		if files[read] == files[write-1] {
+			continue
+		}
+		files[write] = files[read]
+		write++
+	}
+	return files[:write]
+}
+
+func profileLegacyEntrypoints(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

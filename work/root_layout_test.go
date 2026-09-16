@@ -173,6 +173,53 @@ func TestDiscoverTenantSitesUsesOnlyIdentityDomainShape(t *testing.T) {
 	}
 }
 
+func TestDiscoverAppSitesIgnoresInfrastructureAndNestedIdentities(t *testing.T) {
+	root := t.TempDir()
+	writeTenantLayoutMarker(t, filepath.Join(root, "one.example"))
+	writeTenantLayoutMarker(t, filepath.Join(root, "_core"))
+	writeTenantLayoutMarker(t, filepath.Join(root, "identity", "nested.example"))
+
+	sites, err := DiscoverAppSites(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sites) != 1 || sites[0].Domain != "one.example" ||
+		sites[0].Directory != filepath.Join(root, "one.example") {
+		t.Fatalf("discovered app sites = %+v", sites)
+	}
+	domains := DiscoverFlatSites(root)
+	if len(domains) != 1 || domains[0] != "one.example" {
+		t.Fatalf("discovered app domains = %v", domains)
+	}
+}
+
+func TestDiscoverTenantSitesRejectsRoutersAboveTheDomainLevel(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		directory func(string) string
+		want      string
+	}{
+		{
+			name:      "root",
+			directory: func(root string) string { return root },
+			want:      "two levels too shallow",
+		},
+		{
+			name:      "identity",
+			directory: func(root string) string { return filepath.Join(root, "identity") },
+			want:      "one level too shallow",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTenantLayoutMarker(t, test.directory(root))
+			if _, err := DiscoverTenantSites(root); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("misplaced router error = %v", err)
+			}
+		})
+	}
+}
+
 func writeTenantLayoutMarker(t testing.TB, directory string) {
 	t.Helper()
 	if err := os.MkdirAll(directory, 0o755); err != nil {

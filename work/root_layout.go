@@ -1,5 +1,10 @@
 package work
 
+import (
+	"fmt"
+	"os"
+)
+
 // RootLayout defines how a configured source root maps a request domain to a
 // site directory. Auto preserves the historical mixed-layout resolver for
 // embedders that construct core.Engine or Tenant directly.
@@ -38,4 +43,25 @@ func (layout RootLayout) IsSingleApp() bool {
 
 func (layout RootLayout) Valid() bool {
 	return layout >= RootLayoutAuto && layout <= RootLayoutMultiTenant
+}
+
+// ValidateRootLayout proves that the selected root can be read and does not
+// contain an executable marker at a level forbidden by its layout.
+func ValidateRootLayout(root string, layout RootLayout) error {
+	if !layout.Valid() {
+		return fmt.Errorf("invalid root layout %d", layout)
+	}
+	var err error
+	switch layout {
+	case RootLayoutSingle:
+		_, err = os.ReadDir(root)
+	case RootLayoutMultiDomain:
+		_, err = DiscoverAppSites(root)
+	case RootLayoutMultiTenant:
+		_, err = DiscoverTenantSites(root)
+	}
+	if err != nil {
+		return fmt.Errorf("invalid %s root %q: %w", layout, root, err)
+	}
+	return nil
 }

@@ -39,7 +39,7 @@ func resolveRootConfigAt(cfg *Config, base string) error {
 		}
 		cfg.Root = cleanConfiguredRoot(root)
 		cfg.RootLayout = rootLayoutForPath(root)
-		return nil
+		return validateResolvedRoot(cfg.Root, cfg.RootLayout)
 	}
 
 	appRoot := filepath.Join(base, "app")
@@ -64,7 +64,7 @@ func resolveRootConfigAt(cfg *Config, base string) error {
 		}
 		return fmt.Errorf("no app root found: create app/ for one app, create apps/ for multiple tenants, or declare app.root(...)")
 	}
-	return nil
+	return validateResolvedRoot(cfg.Root, cfg.RootLayout)
 }
 
 func rootLayoutForPath(root string) work.RootLayout {
@@ -105,4 +105,8 @@ func cleanConfiguredRoot(root string) string {
 func directoryExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func validateResolvedRoot(root string, layout work.RootLayout) error {
+	return work.ValidateRootLayout(root, layout)
 }

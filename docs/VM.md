@@ -171,6 +171,12 @@ when bundled into an executable Program. Its output also records the bytecode,
 program encoding, artifact, and compiler schema versions plus compiler and
 instruction fingerprints. Every counted Program has passed the complete
 artifact encode, decode, verification, and deterministic re-encode gate.
+The host command profiles the resolved root layout: direct `app/` routes,
+domain sites under `app/<domain>`, or tenant sites under
+`apps/<identity>/<domain>`. App-level `_cron` and `_queue` sources are included
+once at their owning app boundary; legacy trees are not counted and misplaced
+multi-tenant root routers are reported as layout errors.
+Direct Go callers can use `ProfileWithLayout` for the same strict behavior.
 
 ## Language conformance corpus
 

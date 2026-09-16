@@ -515,6 +515,10 @@ go run . inspect apps/<identity>/<domain>/router.kitwork.js
 go run . inspect apps/<identity>/<domain>/router.kitwork.js --json
 ```
 
+`check` and `profile` use the same resolved `app/` or `apps/` layout as the
+running host. Their reports therefore include only executable sites and each
+app's own `_cron`/`_queue` sources, and the JSON profile records that layout.
+
 The language conformance corpus independently verifies accepted behavior,
 structured diagnostics, and rejected syntax across artifact, fresh, reused,
 and pooled VM boundaries:

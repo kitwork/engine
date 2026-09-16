@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kitwork/engine/work"
 )
 
 func TestCheckAggregatesSiteAndCronFailuresWithoutStartingRuntime(t *testing.T) {
@@ -73,5 +75,49 @@ router.get((ctx) => ctx.json(missing));`,
 	}
 	if _, err := os.Stat(filepath.Join(root, "identity-a", ".data", "scheduler.db")); !os.IsNotExist(err) {
 		t.Fatal("preflight started or persisted the cron scheduler")
+	}
+}
+
+func TestCheckWithLayoutUsesMultiDomainDiscoveryContract(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "one.example")
+	private := filepath.Join(root, "_core")
+	for _, directory := range []string{site, private} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	valid := `import { router } from "kitwork";
+router.get(() => "ok");`
+	if err := os.WriteFile(filepath.Join(site, work.RouterFileName), []byte(valid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(private, work.RouterFileName),
+		[]byte(`const broken = ;`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	report := CheckWithLayout(root, 100_000, work.RootLayoutMultiDomain)
+	if report.Root != root || report.Layout != "multi-domain" {
+		t.Fatalf("check root metadata = %q (%s), want %q (multi-domain)", report.Root, report.Layout, root)
+	}
+	if !report.OK() {
+		for _, issue := range report.Issues {
+			t.Log(issue.Error())
+		}
+		t.Fatalf("check issues = %d", len(report.Issues))
+	}
+	if report.Apps != 1 || report.Sites != 1 || report.Valid != 1 {
+		t.Fatalf("check report = %+v, want one app and one valid site", report)
+	}
+	if report.Programs != 1 || report.Compatible != 1 {
+		t.Fatalf(
+			"compatibility = %d/%d, want 1/1",
+			report.Compatible,
+			report.Programs,
+		)
 	}
 }

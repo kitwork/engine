@@ -39,6 +39,8 @@ func (i CheckIssue) Error() string {
 
 // CheckReport contains every issue found during one preflight pass.
 type CheckReport struct {
+	Root       string
+	Layout     string
 	Apps       int
 	Sites      int
 	Valid      int
@@ -78,11 +80,14 @@ func CheckWithLayout(
 	layout work.RootLayout,
 	bytecodeCacheDirectory ...string,
 ) CheckReport {
+	report := CheckReport{
+		Root:   root,
+		Layout: layout.String(),
+	}
 	if maxEnergy == 0 {
 		maxEnergy = kitruntime.Limits().DefaultMaxEnergy
 	}
 	targets, discoveryErr := discoverCheckTargets(root, layout)
-	report := CheckReport{}
 	if discoveryErr != nil {
 		report.Issues = append(report.Issues, CheckIssue{
 			Stage: "discover",
@@ -213,7 +218,7 @@ func CheckWithLayout(
 		}
 	}
 
-	files, entrypointErr := profileEntrypoints(root)
+	files, entrypointErr := profileEntrypoints(root, layout)
 	if entrypointErr != nil {
 		report.Issues = append(report.Issues, CheckIssue{
 			Stage: "compatibility discovery",
@@ -265,11 +270,33 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 	if layout == work.RootLayoutSingle {
 		var targets []checkTarget
 		file := filepath.Join(root, work.RouterFileName)
-		if info, err := os.Stat(file); err == nil && !info.IsDir() {
+		info, err := os.Stat(file)
+		if os.IsNotExist(err) {
+			return targets, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
 			targets = append(targets, checkTarget{
 				identity: work.RootAppIdentity,
 				domain:   "localhost",
 				file:     file,
+			})
+		}
+		return targets, nil
+	}
+	if layout == work.RootLayoutMultiDomain {
+		sites, err := work.DiscoverAppSites(root)
+		if err != nil {
+			return nil, err
+		}
+		targets := make([]checkTarget, 0, len(sites))
+		for _, site := range sites {
+			targets = append(targets, checkTarget{
+				identity: work.RootAppIdentity,
+				domain:   site.Domain,
+				file:     filepath.Join(site.Directory, work.RouterFileName),
 			})
 		}
 		return targets, nil
@@ -313,10 +340,6 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 		}
 		name := entry.Name()
 		first := filepath.Join(root, name)
-		if layout == work.RootLayoutMultiDomain {
-			add(work.RootAppIdentity, name, first)
-			continue
-		}
 		if name == work.SitesDirName {
 			children, readErr := os.ReadDir(first)
 			if readErr != nil {

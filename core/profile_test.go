@@ -3,10 +3,12 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/work"
 )
 
 func TestProfileCompilesOnlyExecutableEntrypoints(t *testing.T) {
@@ -74,5 +76,103 @@ router.get((ctx) => ctx.text("about"));
 		if program.File == "identity/site/_core/ignored.kitwork.js" {
 			t.Fatal("helper module was profiled as an executable entrypoint")
 		}
+	}
+}
+
+func TestProfileWithLayoutProfilesOnlyExecutableRootShape(t *testing.T) {
+	t.Run("single app", func(t *testing.T) {
+		root := t.TempDir()
+		writeProfileSource(t, root, work.RouterFileName, profileRouterSource("home"))
+		writeProfileSource(t, root, "about/router.kitwork.js", profileRouterSource("about"))
+		writeProfileSource(t, root, "_cron/pulse.kitwork.js", `const pulse = () => 1;`)
+		writeProfileSource(t, root, "_core/router.kitwork.js", profileRouterSource("private"))
+
+		report := ProfileWithLayout(root, work.RootLayoutSingle)
+		assertProfileFiles(t, report, []string{
+			"_cron/pulse.kitwork.js",
+			"about/router.kitwork.js",
+			"router.kitwork.js",
+		})
+	})
+
+	t.Run("multi domain app", func(t *testing.T) {
+		root := t.TempDir()
+		writeProfileSource(t, root, "_queue/mail.kitwork.js", `const mail = () => 1;`)
+		writeProfileSource(t, root, "one.example/router.kitwork.js", profileRouterSource("one"))
+		writeProfileSource(t, root, "one.example/about/router.kitwork.js", profileRouterSource("about"))
+		writeProfileSource(t, root, "identity/nested.example/router.kitwork.js", profileRouterSource("nested"))
+		writeProfileSource(t, root, "sites/legacy.example/router.kitwork.js", profileRouterSource("legacy"))
+
+		report := ProfileWithLayout(root, work.RootLayoutMultiDomain)
+		assertProfileFiles(t, report, []string{
+			"_queue/mail.kitwork.js",
+			"one.example/about/router.kitwork.js",
+			"one.example/router.kitwork.js",
+		})
+	})
+
+	t.Run("multi tenant", func(t *testing.T) {
+		root := t.TempDir()
+		writeProfileSource(t, root, "first/_cron/pulse.kitwork.js", `const pulse = () => 1;`)
+		writeProfileSource(t, root, "first/one.example/router.kitwork.js", profileRouterSource("one"))
+		writeProfileSource(t, root, "first/one.example/about/router.kitwork.js", profileRouterSource("about"))
+		writeProfileSource(t, root, "second/two.example/router.kitwork.js", profileRouterSource("two"))
+		writeProfileSource(t, root, "sites/legacy.example/router.kitwork.js", profileRouterSource("legacy"))
+
+		report := ProfileWithLayout(root, work.RootLayoutMultiTenant)
+		assertProfileFiles(t, report, []string{
+			"first/_cron/pulse.kitwork.js",
+			"first/one.example/about/router.kitwork.js",
+			"first/one.example/router.kitwork.js",
+			"second/two.example/router.kitwork.js",
+		})
+	})
+}
+
+func writeProfileSource(t testing.TB, root, relative, source string) {
+	t.Helper()
+	file := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func profileRouterSource(body string) string {
+	return `import { router } from "kitwork";
+router.get(() => "` + body + `");`
+}
+
+func assertProfileFiles(t testing.TB, report ProfileReport, want []string) {
+	t.Helper()
+	if !report.OK() {
+		t.Fatalf("profile issues = %#v", report.Issues)
+	}
+	if report.Layout == "" {
+		t.Fatal("profile did not expose its root layout")
+	}
+	got := make([]string, 0, len(report.Programs))
+	for _, program := range report.Programs {
+		got = append(got, program.File)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("profile files = %v, want %v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("profile files = %v, want %v", got, want)
+		}
+	}
+	if report.Entrypoints != len(want) || report.ProgramCount != len(want) {
+		t.Fatalf(
+			"profile counts = %d entrypoints / %d programs, want %d",
+			report.Entrypoints,
+			report.ProgramCount,
+			len(want),
+		)
 	}
 }

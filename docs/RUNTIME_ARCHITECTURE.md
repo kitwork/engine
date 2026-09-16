@@ -83,6 +83,14 @@ ambiguity. A multi-tenant request prefers the system domain registry when it is
 connected and can resolve an unregistered domain from one unique
 `apps/<identity>/<domain>` source during local or database-free operation.
 
+Host startup, TLS discovery, preflight `check`, static VM `profile`, prewarm,
+and first-request resolution all consume this same selected layout. A
+multi-domain app never treats `_core` as a domain, and a multi-tenant host never
+treats the compatibility `sites/` tree or a router at the identity level as an
+executable site. A router placed above the domain level in `apps/` is rejected
+at bootstrap with the expected path shape instead of becoming a request-time
+404.
+
 ## Request host resolution
 
 The host normalizes and validates the HTTP Host authority before tenant lookup.

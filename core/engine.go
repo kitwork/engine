@@ -247,6 +247,9 @@ func (e *Engine) SetRootLayout(layout work.RootLayout) error {
 	if !layout.Valid() {
 		return fmt.Errorf("invalid root layout %d", layout)
 	}
+	if err := work.ValidateRootLayout(e.root, layout); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed || len(e.cache) != 0 || len(e.appTenants) != 0 || len(e.appRuntimes) != 0 {

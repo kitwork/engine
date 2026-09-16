@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
+	"github.com/kitwork/engine/id"
 	kitruntime "github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/work"
 )
 
 // Version Constants
@@ -57,20 +59,26 @@ func PrintVersion() {
 
 // CreateTenantScaffold scaffolds a new tenant application folder structure.
 func CreateTenantScaffold(appsRoot, domain string) (string, error) {
-	cleanDomain := strings.TrimSpace(strings.ToLower(domain))
-	cleanDomain = strings.TrimPrefix(cleanDomain, "http://")
-	cleanDomain = strings.TrimPrefix(cleanDomain, "https://")
-	cleanDomain = strings.TrimSuffix(cleanDomain, "/")
+	return createTenantScaffold(appsRoot, id.Entity(), domain)
+}
 
-	if cleanDomain == "" {
-		return "", fmt.Errorf("domain name cannot be empty")
+func createTenantScaffold(appsRoot, identity, domain string) (string, error) {
+	cleanDomain, err := normalizeScaffoldDomain(domain)
+	if err != nil {
+		return "", err
+	}
+	if !validScaffoldIdentity(identity) {
+		return "", fmt.Errorf("invalid tenant identity %q", identity)
 	}
 
 	if appsRoot == "" {
 		appsRoot = "apps"
 	}
+	if err := ensureTenantDomainAvailable(appsRoot, cleanDomain); err != nil {
+		return "", err
+	}
 
-	targetDir := filepath.Join(appsRoot, cleanDomain)
+	targetDir := filepath.Join(appsRoot, identity, cleanDomain)
 
 	if _, err := os.Stat(targetDir); err == nil {
 		return "", fmt.Errorf("tenant directory already exists: %s", targetDir)
@@ -216,4 +224,69 @@ router.get((ctx) => {
 	}
 
 	return targetDir, nil
+}
+
+func normalizeScaffoldDomain(domain string) (string, error) {
+	clean := strings.ToLower(strings.TrimSpace(domain))
+	clean = strings.TrimPrefix(clean, "http://")
+	clean = strings.TrimPrefix(clean, "https://")
+	clean = strings.TrimRight(clean, "/")
+	clean = strings.TrimSuffix(clean, ".")
+	if clean == "" {
+		return "", fmt.Errorf("domain name cannot be empty")
+	}
+	if !strings.Contains(clean, ".") || len(clean) > 253 ||
+		strings.ContainsAny(clean, "/\\?#@:\x00\r\n\t ") {
+		return "", fmt.Errorf("invalid domain name %q", domain)
+	}
+	for _, label := range strings.Split(clean, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", fmt.Errorf("invalid domain name %q", domain)
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+				return "", fmt.Errorf("invalid domain name %q", domain)
+			}
+		}
+	}
+	return clean, nil
+}
+
+func validScaffoldIdentity(identity string) bool {
+	if len(identity) != 36 {
+		return false
+	}
+	for _, char := range identity {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func ensureTenantDomainAvailable(appsRoot, domain string) error {
+	info, err := os.Stat(appsRoot)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect apps root: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("apps root is not a directory: %s", appsRoot)
+	}
+	sites, err := work.DiscoverTenantSites(appsRoot)
+	if err != nil {
+		return fmt.Errorf("inspect existing tenant sites: %w", err)
+	}
+	for _, site := range sites {
+		if strings.EqualFold(site.Domain, domain) {
+			return fmt.Errorf(
+				"domain %q already exists under tenant identity %q",
+				domain,
+				site.Identity,
+			)
+		}
+	}
+	return nil
 }

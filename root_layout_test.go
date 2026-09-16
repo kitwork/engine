@@ -158,6 +158,19 @@ func TestParseConfigTracksWhetherRootWasDeclared(t *testing.T) {
 	}
 }
 
+func TestResolveRootConfigRejectsMultiTenantRouterAtIdentityLevel(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "apps")
+	writeRootMarker(t, filepath.Join(root, "example.com"))
+
+	cfg := &Config{Root: root, RootExplicit: true}
+	err := resolveRootConfigAt(cfg, base)
+	if err == nil || !strings.Contains(err.Error(), "one level too shallow") ||
+		!strings.Contains(err.Error(), "apps/<identity>/<domain>") {
+		t.Fatalf("invalid multi-tenant root error = %v", err)
+	}
+}
+
 func writeRootMarker(t testing.TB, directory string) {
 	t.Helper()
 	if err := os.MkdirAll(directory, 0o755); err != nil {

@@ -308,7 +308,7 @@ func Profile(configFile ...string) (core.ProfileReport, error) {
 	if err != nil {
 		return core.ProfileReport{}, err
 	}
-	return core.Profile(cfg.Root), nil
+	return core.ProfileWithLayout(cfg.Root, cfg.RootLayout), nil
 }
 
 func bytecodeCacheDirectory(cfg *Config) string {
