@@ -307,7 +307,7 @@ const driveScriptContractSource = `(function (global, document) {
   // Mirrors the shared harness: the native-navigation cookie is read through the Cookie Store
   // API, not document.cookie, whose renderer-side cache can lag the store; and the read is
   // anchored by a same-origin probe request, the only thing that holds virtual time still.
-  var nativeFetch = typeof global.fetch === "function" ? global.fetch.bind(global) : null;
+  var probeSerial = 0;
   function waitForCookie(name, message) {
     var deadline = performance.now() + 10000;
     function has() {
@@ -317,9 +317,11 @@ const driveScriptContractSource = `(function (global, document) {
       return Promise.resolve(document.cookie.split("; ").some(function (pair) { return pair.indexOf(name + "=") === 0; }));
     }
     function tick() {
-      if (!nativeFetch) return Promise.resolve();
-      return nativeFetch("/__kit-test-cookie-probe", { cache: "no-store", credentials: "omit" })
-        .then(function () {}, function () {});
+      return new Promise(function (resolve) {
+        var image = new Image();
+        image.onload = image.onerror = function () { resolve(); };
+        image.src = "/__kit-test-probe?" + (probeSerial++);
+      });
     }
     function anchored(pending) {
       var settled = false;

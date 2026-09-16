@@ -108,15 +108,45 @@ const browserHarness = `(function () {
     if (!condition) throw new Error(message);
   }
 
+  // Under --virtual-time-budget a timer costs no real time: the clock jumps to the next timer
+  // as soon as the page is idle, and only a pending network request holds it still. So the
+  // timeout below is a count of idle polls, not a duration, and it says nothing about events
+  // that arrive from outside the renderer — a streamed body chunk, a cookie-change
+  // notification, a browser-process reply. When the virtual budget runs out, the wait spends
+  // a bounded number of same-origin probe requests, each a real round trip through the network
+  // service, before it calls the condition missing. A wait that succeeds never gets here.
+  // Calibration: a first body chunk held back 400ms after its headers (the request-form
+  // fixture's shape, which lost a ubuntu run) needs about 1000 probes locally; 200 was short.
+  var probeGrace = 1000;
+
+  // The probe is an image load, not a fetch: fixtures replace globalThis.fetch to record or
+  // fail Drive's requests — one installs its spy before this harness even runs — and the probe
+  // must be invisible to them. An Image object loads without joining the document, every
+  // fixture server answers an unknown path with 404, and the error event fires only after the
+  // round trip. The serial defeats the memory cache.
+  var probeSerial = 0;
+  function networkTick() {
+    return new Promise(function (resolve) {
+      var image = new Image();
+      image.onload = image.onerror = function () { resolve(); };
+      image.src = "/__kit-test-probe?" + (probeSerial++);
+    });
+  }
+
   function waitFor(predicate, message, timeout, interval) {
     return new Promise(function (resolve, reject) {
       var duration = typeof timeout === "number" && timeout > 0 ? timeout : 2000;
       var delay = typeof interval === "number" && interval >= 0 ? interval : 8;
       var deadline = performance.now() + duration;
+      var grace = probeGrace;
       function poll() {
         try {
           if (predicate()) { resolve(); return; }
-          if (performance.now() >= deadline) { reject(new Error(message)); return; }
+          if (performance.now() >= deadline) {
+            if (grace-- <= 0) { reject(new Error(message)); return; }
+            networkTick().then(poll);
+            return;
+          }
           setTimeout(poll, delay);
         } catch (error) { reject(error); }
       }
@@ -128,22 +158,14 @@ const browserHarness = `(function () {
     return new Promise(function (resolve) { setTimeout(resolve, 0); });
   }
 
-  // A native navigation proves itself with a cookie its response sets. Two things make that
-  // wait different from every other waitFor under --virtual-time-budget:
-  //   1. document.cookie is answered from a renderer-side cache keyed on a shared-memory version
-  //      that the network service bumps from a posted task, after the response that stored the
-  //      cookie was delivered. Polling it costs no real time, so a 2000ms virtual budget can
-  //      burn before that task lands — the "did not hard-navigate" failures the ubuntu runner
-  //      produced in four of seven runs, on a different fixture each time, while every run
-  //      elsewhere passed. The Cookie Store API reads the store itself; loopback origins are
-  //      secure contexts, so it is present in every fixture.
-  //   2. Virtual time only holds still while a network request is pending. The store read is
-  //      a bare renderer-to-browser round trip, so it is anchored by same-origin probe requests
-  //      (a 404 is fine) for as long as it is in flight.
-  // The probe uses the fetch the page was born with: fixtures replace globalThis.fetch to
-  // record or fail Drive's requests, and the probe must be invisible to them.
-  var nativeFetch = typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : null;
-
+  // A native navigation proves itself with a cookie its response sets. document.cookie is not
+  // where to wait for it: Chromium answers that getter from a renderer-side cache keyed on a
+  // shared-memory version that the network service bumps from a posted task, after the response
+  // that stored the cookie was delivered. Polling it costs no real time, so a 2000ms virtual
+  // budget burned before that task landed — the "did not hard-navigate" failures the ubuntu
+  // runner produced in four of seven runs, on a different fixture each time, while every run
+  // elsewhere passed. The Cookie Store API reads the store itself; loopback origins are secure
+  // contexts, so it is present in every fixture.
   function hasCookie(name) {
     if (globalThis.cookieStore && typeof globalThis.cookieStore.get === "function") {
       return globalThis.cookieStore.get(name).then(function (cookie) { return cookie !== null && cookie !== undefined; });
@@ -151,15 +173,9 @@ const browserHarness = `(function () {
     return Promise.resolve(document.cookie.split("; ").some(function (pair) { return pair.indexOf(name + "=") === 0; }));
   }
 
-  function networkTick() {
-    if (!nativeFetch) return Promise.resolve();
-    return nativeFetch("/__kit-test-cookie-probe", { cache: "no-store", credentials: "omit" })
-      .then(function () {}, function () {});
-  }
-
   // Resolves like the pending promise, but keeps a probe request in flight until it settles;
-  // with nothing pending, virtual time leaps to the next timer — or to the end of the budget —
-  // the moment the page goes idle.
+  // the store read is a bare renderer-to-browser round trip, and with nothing pending virtual
+  // time leaps to the next timer — or to the end of the budget — the moment the page goes idle.
   function anchored(pending) {
     var settled = false;
     pending.then(function () { settled = true; }, function () { settled = true; });
