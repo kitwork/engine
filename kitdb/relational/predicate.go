@@ -81,6 +81,9 @@ func bindPredicateAt(
 		}
 	}
 	if result.kind == "binary" && len(result.arguments) == 2 {
+		if err := coerceArithmeticParameters(schema, plan, result.arguments); err != nil {
+			return nil, err
+		}
 		if err := coercePredicatePair(result.operator, result.arguments[0], result.arguments[1]); err != nil {
 			return nil, err
 		}
@@ -123,6 +126,45 @@ func bindPredicateAt(
 		}
 	}
 	return result, nil
+}
+
+func arithmeticParameter(plan *kitdbsql.CheckPlan) bool {
+	return plan.Kind == "literal" && plan.Literal.Kind == kitdbsql.LiteralParameter
+}
+
+func coerceArithmeticParameters(schema kitdbsql.Schema, plan *kitdbsql.CheckPlan, arguments []*boundPredicate) error {
+	switch plan.Operator {
+	case "+", "-", "*", "/", "%":
+	default:
+		return nil
+	}
+	for index := range plan.Arguments {
+		parameter := arguments[index]
+		if !arithmeticParameter(&plan.Arguments[index]) || parameter.literal == nil {
+			continue
+		}
+		// Untyped wire parameters arrive as text. Infer only from the other
+		// numeric expression, never from digits in a text field or SQL literal.
+		if _, text := parameter.literal.(string); !text {
+			continue
+		}
+		kind, field, err := scalarExpressionKind(schema, &plan.Arguments[1-index])
+		if err != nil || !isNumericExpressionKind(kind) {
+			continue
+		}
+		if field == nil {
+			field = &kitdbsql.Field{Kind: kind}
+		}
+		value, err := coerceField(*field, parameter.literal)
+		if err != nil {
+			return err
+		}
+		parameter.literal = readField(*field, value)
+		if isDecimalExpressionKind(kind) {
+			parameter.literal = exactDecimal(value.(string))
+		}
+	}
+	return nil
 }
 
 func coerceDecimalExpressionPair(operator string, left, right *boundPredicate) error {

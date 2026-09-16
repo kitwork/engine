@@ -309,7 +309,7 @@ func TestParseStandaloneAlterColumnAnalytics(t *testing.T) {
 func TestStandaloneParserRejectsUnimplementedAndKeylessDDL(t *testing.T) {
 	for _, source := range []string{
 		`CREATE TABLE products (title TEXT)`,
-		`CREATE TABLE products (id INTEGER PRIMARY KEY, owner INTEGER REFERENCES users(id) ON DELETE CASCADE)`,
+		`CREATE TABLE products (id INTEGER PRIMARY KEY, owner INTEGER REFERENCES users(id) DEFERRABLE INITIALLY DEFERRED)`,
 	} {
 		if _, err := ParseStatement(source); err == nil {
 			t.Fatalf("ParseStatement(%q) unexpectedly succeeded", source)

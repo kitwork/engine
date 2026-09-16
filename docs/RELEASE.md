@@ -47,10 +47,10 @@ go run ./cmd/releasegate --mode kitdb-release \
 
 Every release report now records both the `kitdb/1` kernel profile and the
 Kitwork relational encoding profile. The complete engine release mode includes
-the KitDB release campaigns, so a Kitwork release cannot bypass KitDB race,
-hard-crash, canary-smoke, or replica-soak evidence. The required 24-hour
-storage canary command is documented in `kitdb/RELEASE_1_0.md`; the short gate
-does not replace it.
+the KitDB release campaigns, so a Kitwork release cannot bypass the standalone
+pure-Go search suite, kernel/search/relational race, hard-crash, canary-smoke,
+or replica-soak evidence. The required 24-hour storage canary command is
+documented in `kitdb/RELEASE_1_0.md`; the short gate does not replace it.
 
 Release qualification proves the engine build. A project database has its own
 admission gate: with its writer stopped, run `go run ./cmd/kitdb doctor

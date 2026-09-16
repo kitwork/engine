@@ -21,6 +21,7 @@ const (
 	StatementAnalyze
 	StatementReindex
 	StatementPragma
+	StatementSavepoint
 )
 
 func (kind StatementKind) String() string {
@@ -47,6 +48,8 @@ func (kind StatementKind) String() string {
 		return "reindex"
 	case StatementPragma:
 		return "pragma"
+	case StatementSavepoint:
+		return "savepoint"
 	default:
 		return "unknown"
 	}
@@ -125,6 +128,18 @@ func ParseEnvelope(source string) (StatementEnvelope, error) {
 		kind = StatementReindex
 	case "pragma":
 		kind = StatementPragma
+	case "savepoint", "release":
+		kind = StatementSavepoint
+	case "rollback":
+		// Full ROLLBACK remains connection-owned; classify only ROLLBACK TO.
+		at := cursor.Position()
+		if at < len(tokens) && (strings.EqualFold(tokens[at].Text, "work") || strings.EqualFold(tokens[at].Text, "transaction")) {
+			at++
+		}
+		if at >= len(tokens) || !strings.EqualFold(tokens[at].Text, "to") {
+			return StatementEnvelope{}, unsupportedStatementError()
+		}
+		kind = StatementSavepoint
 	default:
 		return StatementEnvelope{}, unsupportedStatementError()
 	}

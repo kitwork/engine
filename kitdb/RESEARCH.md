@@ -141,15 +141,20 @@ Implemented controls include:
 - a global-per-manager open-handle and reserved page-cache budget;
 - a least-recently-used idle list plus explicit `TrimIdle`;
 - bounded concurrent opens and context-cancelable admission waits; and
-- fleet lifecycle and reservation counters that inspect no tenant data.
+- fleet lifecycle and reservation counters that inspect no tenant data;
+- PostgreSQL-listener query admission bounded globally and per authenticated
+  database, with a finite queue, weighted fairness and atomic metrics; and
+- explicit warm database policy plus count/byte-bounded idle KCOL/search reader
+  residency, LRU cooling and path-free observability.
 
 Remaining controls include:
 
 - host-wide file-descriptor and total-memory accounting across managers;
 - measured per-database memory beyond page-cache reservations;
-- memory and payload admission limits;
+- measured resident-memory and payload admission beyond conservative directory
+  and page-cache ceilings;
 - background checkpoint, compaction, projection, and backup I/O budgets;
-- tenant fairness and noisy-neighbor policy;
+- fairness across independent listeners/processes and CPU/I/O rate policy;
 - idle-time policy and bounded maintenance scheduling; and
 - observable projection/replica lag and background queue depth.
 

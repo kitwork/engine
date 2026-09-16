@@ -33,6 +33,10 @@ type multiTermRecords struct {
 	documentFrequency uint32
 }
 
+type multiSearchScratch struct {
+	identifier documentIdentifierPrefixReader
+}
+
 type multiFrequencyCache struct {
 	mu      sync.Mutex
 	entries map[string]uint64
@@ -123,8 +127,9 @@ func (segment *Segment) searchMultiMatch(
 	if err != nil {
 		return nil, err
 	}
+	var scratch multiSearchScratch
 	candidates, err := segment.searchMultiCandidates(
-		ctx, prepared, records, idfs, averages, nil, 0, scoreThreshold{},
+		ctx, prepared, records, idfs, averages, nil, &scratch, 0, scoreThreshold{},
 	)
 	if err != nil {
 		return nil, err
@@ -191,6 +196,7 @@ func (index *Index) searchMultiMatch(
 	}
 
 	results := make(indexCandidateHeap, 0, prepared.options.Limit)
+	var scratch multiSearchScratch
 	for position, records := range recordsBySegment {
 		if records == nil {
 			continue
@@ -205,7 +211,7 @@ func (index *Index) searchMultiMatch(
 			}
 		}
 		candidates, err := index.segments[position].searchMultiCandidates(
-			ctx, prepared, records, idfs, averages, index.deletions[position],
+			ctx, prepared, records, idfs, averages, index.deletions[position], &scratch,
 			index.bases[position], threshold,
 		)
 		if err != nil {
@@ -307,16 +313,17 @@ func (segment *Segment) multiFieldAverageLengths(
 }
 
 type multiPostingUnion struct {
+	work      postingWork
 	iterators []postingIterator
 	document  uint32
 	current   bool
 }
 
-func newMultiPostingUnion(segment *Segment, records []multiFieldTermRecord) (multiPostingUnion, error) {
-	union := multiPostingUnion{iterators: make([]postingIterator, len(records))}
+func newMultiPostingUnion(ctx context.Context, segment *Segment, records []multiFieldTermRecord) (multiPostingUnion, error) {
+	union := multiPostingUnion{work: postingWorkFromContext(ctx), iterators: make([]postingIterator, len(records))}
 	for position, record := range records {
 		if err := resetPostingIterator(
-			&union.iterators[position], segment.file, segment.header.version, record.record,
+			&union.iterators[position], ctx, segment.file, segment.header.version, record.record,
 			segment.header.documentN, segment.header.sections[sectionPostings], false,
 		); err != nil {
 			return multiPostingUnion{}, err
@@ -326,6 +333,7 @@ func newMultiPostingUnion(segment *Segment, records []multiFieldTermRecord) (mul
 }
 
 func (union *multiPostingUnion) Advance(target uint32) (bool, error) {
+	union.work.add(workUnionAdvances, 1)
 	minimum := uint32(math.MaxUint32)
 	found := false
 	for position := range union.iterators {
@@ -354,7 +362,8 @@ func (segment *Segment) liveMultiDocumentFrequency(
 	records []multiFieldTermRecord,
 	deleted *deletedDocuments,
 ) (uint32, error) {
-	union, err := newMultiPostingUnion(segment, records)
+	ctx = frequencyWorkContext(ctx)
+	union, err := newMultiPostingUnion(ctx, segment, records)
 	if err != nil {
 		return 0, err
 	}
@@ -393,13 +402,14 @@ type multiTermCursor struct {
 }
 
 func newMultiTermCursor(
+	ctx context.Context,
 	segment *Segment,
 	prepared preparedMultiMatchQuery,
 	records multiTermRecords,
 	idf float64,
 	averages []float64,
 ) (multiTermCursor, error) {
-	union, err := newMultiPostingUnion(segment, records.fields)
+	union, err := newMultiPostingUnion(ctx, segment, records.fields)
 	if err != nil {
 		return multiTermCursor{}, err
 	}
@@ -418,6 +428,7 @@ func newMultiTermCursor(
 }
 
 func (cursor *multiTermCursor) score(document uint32, options SearchOptions) (float64, error) {
+	cursor.union.work.add(workMultiTermScores, 1)
 	score := 0.0
 	for position := range cursor.union.iterators {
 		iterator := &cursor.union.iterators[position]
@@ -434,6 +445,7 @@ func (cursor *multiTermCursor) score(document uint32, options SearchOptions) (fl
 		if average <= 0 || length == 0 {
 			return 0, corruptf("multi-field norm statistic is invalid")
 		}
+		cursor.union.work.add(workMultiFieldScores, 1)
 		score += bm25Score(
 			float64(frequency), float64(length), average, cursor.idf, options.K1, options.B,
 		) * cursor.fields[record.fieldIndex].Boost
@@ -448,6 +460,7 @@ func (segment *Segment) searchMultiCandidates(
 	idfs []float64,
 	averages []float64,
 	deleted *deletedDocuments,
+	scratch *multiSearchScratch,
 	base uint64,
 	externalThreshold scoreThreshold,
 ) (candidateHeap, error) {
@@ -456,7 +469,7 @@ func (segment *Segment) searchMultiCandidates(
 	}
 	cursors := make([]multiTermCursor, len(records))
 	for position := range records {
-		cursor, err := newMultiTermCursor(segment, prepared, records[position], idfs[position], averages)
+		cursor, err := newMultiTermCursor(ctx, segment, prepared, records[position], idfs[position], averages)
 		if err != nil {
 			return nil, err
 		}
@@ -473,7 +486,7 @@ func (segment *Segment) searchMultiCandidates(
 	results := make(candidateHeap, 0, prepared.options.Limit)
 	seed := &cursors[0]
 	target := uint32(0)
-	var identifierBuffer []byte
+	scratch.identifier.reset(ctx, segment)
 	for candidates := uint64(0); ; candidates++ {
 		if candidates&255 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -495,6 +508,7 @@ func (segment *Segment) searchMultiCandidates(
 			return results, nil
 		}
 		document := seed.union.document
+		seed.union.work.add(workMultiCandidates, 1)
 		if !deleted.Contains(document) {
 			score, err := seed.score(document, prepared.options)
 			if err != nil {
@@ -511,6 +525,8 @@ func (segment *Segment) searchMultiCandidates(
 					return results, nil
 				}
 				if cursor.union.document != document {
+					seed.union.work.add(workMultiMismatches, 1)
+					seed.union.work.add(workMultiMismatchDistance, uint64(cursor.union.document-document))
 					matched = false
 					break
 				}
@@ -521,27 +537,33 @@ func (segment *Segment) searchMultiCandidates(
 				score += termScore
 			}
 			if matched {
-				matchesPrefix, err := segment.documentIdentifierHasPrefix(
-					document, prepared.identifierPrefix, &identifierBuffer,
-				)
+				seed.union.work.add(workMultiMatches, 1)
+				ordinal := base + uint64(document)
+				candidate := rankedCandidate{document: document, score: score}
+				if !rankIsAfter(score, ordinal, prepared.options.After) ||
+					(externalThreshold.full && scoreCannotCompete(score, ordinal, externalThreshold)) ||
+					!candidateCanCompete(results, candidate, prepared.options.Limit) {
+					seed.union.work.add(workMultiRankRejected, 1)
+					if document == math.MaxUint32 {
+						return results, nil
+					}
+					target = document + 1
+					continue
+				}
+				matchesPrefix, err := scratch.identifier.hasPrefix(document, prepared.identifierPrefix)
 				if err != nil {
 					return nil, err
 				}
 				if !matchesPrefix {
+					seed.union.work.add(workMultiPrefixRejected, 1)
 					if document == math.MaxUint32 {
 						return results, nil
 					}
 					target = document + 1
 					continue
 				}
-				if !rankIsAfter(score, base+uint64(document), prepared.options.After) {
-					if document == math.MaxUint32 {
-						return results, nil
-					}
-					target = document + 1
-					continue
-				}
-				collectCandidate(&results, rankedCandidate{document: document, score: score}, prepared.options.Limit)
+				collectCandidate(&results, candidate, prepared.options.Limit)
+				seed.union.work.add(workMultiCollected, 1)
 			}
 		}
 		if document == math.MaxUint32 {

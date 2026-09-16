@@ -178,6 +178,7 @@ inspection typo cannot create an empty database.
 ```text
 go run ./cmd/kitdb inspect tenant.kitdb
 go run ./cmd/kitdb verify tenant.kitdb
+go run ./cmd/kitdb pack-search apps/shop/.data/shop.kitdb
 go run ./cmd/kitdb backup --pin backup/nightly tenant.kitdb anchor.kitdb
 go run ./cmd/kitdb restore anchor.kitdb restored.kitdb
 go run ./cmd/kitdb restore --transaction 42 --history tenant.kitdb.history anchor.kitdb restored-42.kitdb
@@ -188,6 +189,10 @@ go run ./cmd/kitdb restore-time --at 2026-08-27T14:30:00+07:00 tenant.kitdb reco
 anchor, checkpoints the source to seal history, and publishes the named durable
 pin before reporting success. `restore` never overwrites its destination. The
 CLI owns no alternate encoding, WAL, backup, or recovery implementation.
+`pack-search` is an explicit projection migration: it copies and verifies an
+exact-watermark, deletion-free managed search generation into the single-file
+read-only `<database>.search` layout without decoding canonical rows. It does
+not catch up, rebuild, delete, or reinterpret a stale legacy index.
 
 ## Concurrent commit coordinator
 
@@ -1684,9 +1689,17 @@ go run ./cmd/kitdbpg \
   -root ./databases \
   -maintenance-database kitdb \
   -listen 127.0.0.1:5433 \
+  -experimental-projections \
   -max-open-databases 64 \
   -max-page-cache-bytes 268435456 \
-  -database-page-cache-bytes 1048576
+  -database-page-cache-bytes 1048576 \
+  -warm-databases products,events \
+  -search-reader-cache-bytes 67108864 \
+  -max-idle-projection-databases 8 \
+  -max-idle-projection-directory-bytes 33554432 \
+  -max-idle-projection-reader-bytes 268435456 \
+  -max-concurrent-queries 8 \
+  -max-concurrent-queries-per-database 4
 ```
 
 The virtual read-only `kitdb` database exposes the discovery snapshot through
@@ -1696,6 +1709,34 @@ not switch databases inside an existing connection. Files are opened lazily,
 same-database sessions share one relational/search owner, and idle owners are
 LRU-evicted within the node limits. Directory discovery is dynamic but bounded,
 non-recursive, and rejects symlinks and ambiguous suffixless names.
+
+`-warm-databases` is a process-local operating policy, never durable database
+metadata. It protects those idle relational owners from ordinary LRU eviction
+and lets their bounded KCOL/search readers remain reusable; it does not load a
+whole file or projection into RAM. Packed search-reader residency is disabled
+by default and becomes eligible only under the explicit per-database
+`-search-reader-cache-bytes` budget. A reader that cannot fit still executes
+through open/query/close. Non-warm idle projection readers are trimmed
+oldest-first under database-count, serialized-directory-byte, and total
+reader-capacity ceilings. Trimming closes only reusable readers: immutable
+`.analytics` and `.search` files remain complete and reopen on demand.
+`PostgresNode.Stats()` exposes path-free engine/session, warm residency,
+projection directory/search reader capacity and residency, trim, and underlying
+handle-manager counters. These accounting values exclude transient query
+allocations and the operating-system page cache.
+
+Ordinary PostgreSQL statements have a separate bounded admission scheduler from
+`COPY`. Defaults permit eight statements across a listener and four per
+authenticated database, further clamped by `-max-connections`; both waiting
+queues are bounded. Queued databases use weighted virtual runtime, so one busy
+database cannot immediately reclaim every released slot ahead of an unserved
+database. Queue wait is part of `-query-timeout`. A caller embedding `pgwire`
+may retain `QueryMetrics` to inspect active/queued peaks and completion,
+failure, timeout, rejection, and wait counters. This fairness boundary is one
+listener/process, not coordination among independent KitDB servers.
+If warm owners alone exhaust the handle/page-cache capacity, a connection to a
+different database fails immediately with SQLSTATE `53300` instead of waiting
+for a slot that cannot become evictable.
 
 This standalone node is deliberately smaller than the Kitwork-hosted catalog:
 one endpoint credential grants access to all discovered files, and maintenance
@@ -1932,8 +1973,10 @@ statement can own an arbitrary file. A record is capped at 4 MiB, encoded COPY
 input defaults to 64 MiB, and the existing transaction ceiling remains 100,000
 physical mutations or 32 MiB of overlay. COPY lifetime defaults to 30 minutes;
 an explicit transaction's shorter lifetime also applies. A Kitwork host that
-exposes this richer adapter must configure copy bytes, copy/transaction timeout,
-and concurrent-copy bounds explicitly. Admission defaults to two streams across the listener,
+exposes this richer adapter must configure query/COPY concurrency and queue
+bounds, COPY bytes, and query/COPY/transaction timeouts explicitly. Ordinary
+statement admission uses the database-scoped fair scheduler described above.
+COPY admission defaults to two streams across the listener,
 one active stream per authenticated app/database key, 64 queued streams across
 the listener, and eight queued streams per database. Admission happens before COPY opens its KitDB
 transaction. Queued keys use bounded weighted virtual runtime; Kitwork sessions

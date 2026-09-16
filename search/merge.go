@@ -482,7 +482,7 @@ func writeMergedPostingList(
 			return postingListInfo{}, 0, err
 		}
 		iterator, err := newPostingIterator(
-			source.segment.file, source.segment.header.version, cursor.record, source.segment.header.documentN,
+			ctx, source.segment.file, source.segment.header.version, cursor.record, source.segment.header.documentN,
 			source.segment.header.sections[sectionPostings], includePositions && source.segment.header.version >= segmentVersion,
 		)
 		if err != nil {

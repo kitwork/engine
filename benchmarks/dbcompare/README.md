@@ -201,6 +201,9 @@ See [the grouped batch follow-up](GROUP_BATCH_2026-08-31.md) for grouped analyti
 See [the 13M dictionary text follow-up](TEXT_ANALYTICS_13M_2026-09-04.md) for
 the separate opt-in real-data KitDB paths and remote read-only PostgreSQL
 baseline; those measurements are not produced by this synthetic runner.
+See [the 13M fleet workload](SHOPPING_13M_FLEET_2026-09-04.md) for the separate
+pgwire admission, warm-residency and noisy-neighbor canary using one large
+read-only database beside mutable disposable tenants.
 
 ## Not Measured
 

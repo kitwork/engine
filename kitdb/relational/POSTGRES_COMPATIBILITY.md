@@ -69,6 +69,51 @@ grouped aggregates/HAVING, metadata, text/binary wire values, migration mapping,
 WAL reopen and the complete KitDB package suite. This is not a claim of every
 PostgreSQL NUMERIC coercion or result-typmod rule.
 
+## Transactional Write Composition
+
+The standalone development profile now accepts bounded INSERT SELECT and
+ON CONFLICT (primary/unique columns) DO NOTHING / DO UPDATE, plus named SQL
+SAVEPOINT / ROLLBACK TO / RELEASE in data transactions. The authoritative
+limits and unsupported forms are in README's "Composable Inserts And SQL
+Savepoints" section. RETURNING, counts, indexes and trigger effects remain
+statement-atomic. Wire tests cover prepared statements and recovery after
+25P02 through ROLLBACK TO, with 3B001/25P01/21000 for the new error boundaries.
+Optimistic transaction conflicts remain 40001; this is not PostgreSQL's full
+locking/isolation model or a new stable-release qualification.
+
+## Bounded Reverse Foreign Keys
+
+UPDATE, DELETE and upsert validate incoming foreign keys against the final
+statement overlay. Unreferenced non-primary unique keys can change; actual
+surviving references enforce RESTRICT and immediate NO ACTION. Composite keys,
+MATCH SIMPLE NULLs, exact/narrow type comparisons and self-referencing batches
+share the ordinary index and transaction paths. Suitable child indexes are
+reused, not created automatically; a statement-wide check budget bounds fallback
+scans and repeated upsert probes. README's "Reverse Foreign Keys" section is
+authoritative for limits and unsupported actions.
+
+Wire errors use 23503 for FK violations, 54000 for check-budget exhaustion and
+the existing 40001 for optimistic commit conflicts. Tests cover rollback,
+prepared statements, late triggers/RETURNING failure, both commit orders of a
+parent-delete/child-insert conflict, rename and process-exit recovery. This does
+not add primary-key UPDATE, deferred constraints or PostgreSQL's full
+constraint timing/locking model. There is no physical-format migration.
+
+CASCADE and full-tuple SET NULL/SET DEFAULT are executable for supported standalone
+rows, through bounded wave-based child mutation rather than recursive SQL or
+Kitwork callbacks. Unique-key update swaps are staged per table; deleted rows
+disappear from later waves. Child constraints/indexes/triggers use the same
+transaction, and any failure rolls back the whole originating statement.
+Limits, unsupported multi-path/update-cycle cases and 0A000/54000 boundaries
+are in README's "Cascading Actions" section. SET DEFAULT reuses the resolved
+child defaults, including domain inheritance and sequences, and validates even
+an unchanged value against the final parent set. Sequence allocations are not
+rolled back; defaults share one evaluation per child field per wave and clock
+defaults share the first action's UTC time, not transaction-start time.
+Selective SET NULL/SET DEFAULT column lists remain rejected. Syntax/behavior reference:
+[PostgreSQL foreign keys](https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-FK),
+not a claim of identical internal trigger scheduling or isolation.
+
 ## Exact Temporal Milestone
 
 Schema IR v5 distinguishes `DATE`, `TIME(p)`, `TIMESTAMP(p)`,

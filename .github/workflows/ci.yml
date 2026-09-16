@@ -78,7 +78,7 @@ jobs:
         run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
 
       - name: Focused race gate
-        run: go test -race ./runtime ./compiler ./conformance ./compatibility ./core ./site ./app ./request ./kitdb/... ./work ./utilities/sse -run Test -count=1
+        run: go test -race ./runtime ./compiler ./conformance ./compatibility ./core ./site ./app ./request ./kitdb/... ./search ./work ./utilities/sse -run Test -count=1
 
       - name: VM fault-injection gate
         run: go test ./runtime ./compiler ./core ./site ./app -run "(FaultGauntlet|Runtime(Limits|StructuralLimitBoundaries|EnergyBoundary|CallDepth)|Corrupt|Panic|Cancellation|Fallback|Drain|DrainsTasks)" -count=1

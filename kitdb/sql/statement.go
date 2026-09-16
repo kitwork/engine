@@ -10,6 +10,7 @@ const (
 	MaximumDDLColumns        = 512
 	MaximumInsertRows        = 10_000
 	MaximumSelectJoins       = 7
+	MaximumJoinEqualities    = 32
 	MaximumSetOperations     = 15
 	MaximumCommonTables      = 16
 	MaximumQueryNesting      = 8
@@ -46,6 +47,11 @@ type Literal struct {
 }
 
 type ParsedStatement struct {
+	Savepoint      *SavepointStatement
+	CreateTrigger  *CreateTriggerStatement
+	DropTrigger    *DropTriggerStatement
+	CreateDomain   *CreateDomainStatement
+	DropDomain     *DropDomainStatement
 	CreateSequence *CreateSequenceStatement
 	DropSequence   *DropSequenceStatement
 	AlterSequence  *AlterSequenceStatement
@@ -147,6 +153,7 @@ type PartitionDefinition struct {
 }
 
 type ColumnDefinition struct {
+	DomainName    string
 	SequenceName  string
 	SequenceMode  string
 	SequenceCache int64
@@ -192,7 +199,7 @@ type CheckDefinition struct {
 }
 
 // ExpressionPlan is the bounded, storage-neutral syntax tree shared by WHERE,
-// HAVING, scalar projections, UPDATE assignments and CREATE TABLE checks.
+// HAVING, scalar projections, INSERT values, UPDATE assignments and table checks.
 // Durable checks replace Field names with stable field tags before publication.
 type ExpressionPlan struct {
 	Kind          string
@@ -209,17 +216,36 @@ type ExpressionPlan struct {
 	Function *FunctionDefinition `json:"-"`
 }
 
+// Validate checks the same structural bounds as parsed SQL. Embedded callers
+// can construct plans directly, but cannot bypass expression size/depth limits.
+func (expression ExpressionPlan) Validate() error {
+	return validateExpressionPlan(expression)
+}
+
 // CheckPlan preserves the original parser-facing name while callers move to
 // the general expression terminology. It is an alias, not a second IR.
 type CheckPlan = ExpressionPlan
 
 type InsertStatement struct {
-	Overriding  string
-	Table       string
-	Columns     []string
-	Rows        [][]Literal
+	Overriding string
+	Table      string
+	Columns    []string
+	Rows       [][]Literal
+	// Values carries expressions instead of Rows; callers must supply only one.
+	// Literal-only SQL keeps Rows for existing embedded/import callers.
+	Values      [][]ExpressionPlan
+	Select      *SelectStatement
+	Conflict    *ConflictClause
 	DefaultRows int
 	Returning   []Projection
+}
+
+// ConflictClause arbitrates a primary/unique column tuple, not an arbitrary index expression.
+type ConflictClause struct {
+	Columns     []string
+	Nothing     bool
+	Assignments []Assignment
+	Predicate   *ExpressionPlan
 }
 
 type SelectStatement struct {
@@ -306,6 +332,13 @@ type Join struct {
 	Alias string
 	Left  string
 	Right string
+	And   []JoinEquality
+}
+
+// JoinEquality extends the first Left/Right equality without changing old plans.
+type JoinEquality struct {
+	Left  string
+	Right string
 }
 
 type Condition struct {
@@ -347,6 +380,32 @@ func ParseStatement(source string) (ParsedStatement, error) {
 	parser := statementParser{cursor: cursor, nextParameter: 1}
 	statement := ParsedStatement{Kind: envelope.Kind, ExplainAnalyze: envelope.ExplainAnalyze}
 	switch envelope.Kind {
+	case StatementSavepoint:
+		action := strings.ToLower(envelope.Tokens[0].Text)
+		if action == "rollback" {
+			if !cursor.AcceptKeyword("work") {
+				cursor.AcceptKeyword("transaction")
+			}
+			if err = cursor.ExpectKeyword("to"); err != nil {
+				return ParsedStatement{}, err
+			}
+		}
+		if action != "savepoint" {
+			cursor.AcceptKeyword("savepoint")
+		}
+		token := cursor.Peek()
+		name, nameErr := parser.identifier()
+		if nameErr != nil {
+			return ParsedStatement{}, nameErr
+		}
+		trimmed := strings.TrimSpace(source)
+		if trimmed[token.Start] != '"' && trimmed[token.Start] != '`' && trimmed[token.Start] != '[' {
+			name = strings.ToLower(name)
+		}
+		if len(name) > 128 {
+			return ParsedStatement{}, fmt.Errorf("kitdb SQL: savepoint name exceeds 128 bytes")
+		}
+		statement.Savepoint = &SavepointStatement{Action: action, Name: name}
 	case StatementCreate:
 		replace := false
 		if cursor.AcceptKeyword("or") {
@@ -357,6 +416,16 @@ func ParseStatement(source string) (ParsedStatement, error) {
 		}
 		unique := cursor.AcceptKeyword("unique")
 		switch {
+		case cursor.AcceptKeyword("trigger"):
+			if unique || replace {
+				return ParsedStatement{}, fmt.Errorf("kitdb SQL: TRIGGER does not support UNIQUE or OR REPLACE")
+			}
+			statement.CreateTrigger, err = parser.parseCreateTrigger()
+		case cursor.AcceptKeyword("domain"):
+			if unique || replace {
+				return ParsedStatement{}, fmt.Errorf("kitdb SQL: DOMAIN does not support UNIQUE or OR REPLACE")
+			}
+			statement.CreateDomain, err = parser.parseCreateDomain()
 		case cursor.AcceptKeyword("sequence"):
 			if unique || replace {
 				return ParsedStatement{}, fmt.Errorf("kitdb SQL: sequence does not support UNIQUE or OR REPLACE")
@@ -382,6 +451,10 @@ func ParseStatement(source string) (ParsedStatement, error) {
 		}
 	case StatementDrop:
 		switch {
+		case cursor.AcceptKeyword("trigger"):
+			statement.DropTrigger, err = parser.parseDropTrigger()
+		case cursor.AcceptKeyword("domain"):
+			statement.DropDomain, err = parser.parseDropDomain()
 		case cursor.AcceptKeyword("sequence"):
 			statement.DropSequence, err = parser.parseDropSequence()
 		case cursor.AcceptKeyword("function"):
@@ -446,6 +519,10 @@ func (parser *statementParser) parsePragma() (*PragmaStatement, error) {
 		return nil, err
 	}
 	plan := &PragmaStatement{Name: strings.ToLower(name)}
+	if plan.Name == "cache_status" && (parser.cursor.Peek().Kind == TokenEOF ||
+		(parser.cursor.Peek().Kind == TokenSymbol && parser.cursor.Peek().Text == ";")) {
+		return plan, nil
+	}
 	if err := parser.cursor.ExpectSymbol("("); err != nil {
 		return nil, fmt.Errorf("kitdb SQL: PRAGMA %s requires one table argument: %w", plan.Name, err)
 	}
@@ -857,6 +934,7 @@ func (parser *statementParser) parseColumn() (ColumnDefinition, error) {
 	var typeInfo Type
 	var choices []string
 	var modifiers columnTypeModifiers
+	var domainName string
 	switch {
 	case parser.cursor.AcceptKeyword("smallserial"), parser.cursor.AcceptKeyword("serial2"):
 		typeInfo, _ = LookupKind("smallint")
@@ -866,13 +944,22 @@ func (parser *statementParser) parseColumn() (ColumnDefinition, error) {
 		typeInfo, _ = LookupKind("bigint")
 	default:
 		serial = false
-		typeInfo, choices, modifiers, err = parser.columnType()
+		if token := parser.cursor.Peek(); token.Kind == TokenIdentifier {
+			if _, known := ResolveName(strings.ToLower(token.Text)); !known && !strings.EqualFold(token.Text, "double") && !strings.EqualFold(token.Text, "character") {
+				domainName, err = parser.domainIdentifier()
+			} else {
+				typeInfo, choices, modifiers, err = parser.columnType()
+			}
+		} else {
+			typeInfo, choices, modifiers, err = parser.columnType()
+		}
 	}
 	if err != nil {
 		return ColumnDefinition{}, fmt.Errorf("kitdb SQL: column %q: %w", name, err)
 	}
 	column := ColumnDefinition{
-		Name: name, Type: typeInfo, Choices: choices,
+		DomainName: domainName,
+		Name:       name, Type: typeInfo, Choices: choices,
 		Precision: modifiers.Precision, Scale: modifiers.Scale,
 		TimePrecision: modifiers.TimePrecision, TextLength: modifiers.TextLength,
 	}
@@ -949,7 +1036,7 @@ func (parser *statementParser) parseColumn() (ColumnDefinition, error) {
 			if column.Searchable {
 				return ColumnDefinition{}, fmt.Errorf("kitdb SQL: column %q repeats SEARCHABLE", name)
 			}
-			if column.Type.Family != FamilyText && column.Type.Family != FamilyIdentifier &&
+			if column.DomainName == "" && column.Type.Family != FamilyText && column.Type.Family != FamilyIdentifier &&
 				column.Type.Family != FamilyChoice {
 				return ColumnDefinition{}, fmt.Errorf(
 					"kitdb SQL: column %q SEARCHABLE requires a text-compatible type", name,
@@ -970,6 +1057,10 @@ func (parser *statementParser) parseColumn() (ColumnDefinition, error) {
 		case parser.cursor.AcceptKeyword("analytics"):
 			if column.Analytics {
 				return ColumnDefinition{}, fmt.Errorf("kitdb SQL: column %q repeats ANALYTICS", name)
+			}
+			if column.DomainName != "" {
+				column.Analytics = true
+				continue
 			}
 			switch column.Type.Family {
 			case FamilyInteger, FamilySystem, FamilyFloat, FamilyBoolean, FamilyText, FamilyIdentifier, FamilyChoice:
@@ -1410,7 +1501,7 @@ func normalizeCreateTable(plan *CreateTableStatement) error {
 		if !found {
 			return fmt.Errorf("kitdb SQL: PARTITION BY references missing column %q", plan.Partition.Field)
 		}
-		if column.Type.Family != FamilyInteger {
+		if column.DomainName == "" && column.Type.Family != FamilyInteger {
 			return fmt.Errorf("kitdb SQL: PARTITION BY %s requires an integer field", strings.ToUpper(plan.Partition.Strategy))
 		}
 		plan.Partition.Field = column.Name
@@ -1483,10 +1574,10 @@ func normalizeCreateTable(plan *CreateTableStatement) error {
 		if foreign.OnUpdate == "" {
 			foreign.OnUpdate = "no action"
 		}
-		if foreign.OnDelete != "no action" && foreign.OnDelete != "restrict" {
+		if foreign.OnDelete != "no action" && foreign.OnDelete != "restrict" && foreign.OnDelete != "cascade" && foreign.OnDelete != "set null" && foreign.OnDelete != "set default" {
 			return fmt.Errorf("kitdb SQL: ON DELETE %s is parsed but not safely executable yet", strings.ToUpper(foreign.OnDelete))
 		}
-		if foreign.OnUpdate != "no action" && foreign.OnUpdate != "restrict" {
+		if foreign.OnUpdate != "no action" && foreign.OnUpdate != "restrict" && foreign.OnUpdate != "cascade" && foreign.OnUpdate != "set null" && foreign.OnUpdate != "set default" {
 			return fmt.Errorf("kitdb SQL: ON UPDATE %s is parsed but not safely executable yet", strings.ToUpper(foreign.OnUpdate))
 		}
 		if foreign.Name != "" {
@@ -1561,31 +1652,42 @@ func (parser *statementParser) parseInsert() (*InsertStatement, error) {
 			return nil, err
 		}
 		plan.DefaultRows = 1
+	} else if parser.cursor.AcceptKeyword("select") {
+		plan.Select, err = parser.parseSelect()
+		if err != nil {
+			return nil, err
+		}
+	} else if parser.cursor.AcceptKeyword("with") {
+		plan.Select, err = parser.parseWithSelect()
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		if err := parser.cursor.ExpectKeyword("values"); err != nil {
 			return nil, err
 		}
+		literalOnly := true
 		for {
-			if len(plan.Rows) >= MaximumInsertRows {
+			if len(plan.Values) >= MaximumInsertRows {
 				return nil, fmt.Errorf("kitdb SQL: INSERT exceeds %d rows", MaximumInsertRows)
 			}
 			if err := parser.cursor.ExpectSymbol("("); err != nil {
 				return nil, err
 			}
-			row := make([]Literal, 0, len(plan.Columns))
+			row := make([]ExpressionPlan, 0, len(plan.Columns))
 			if parser.cursor.AcceptSymbol(")") {
 				return nil, fmt.Errorf("kitdb SQL: INSERT row cannot be empty")
 			}
 			for {
-				literal := Literal{Kind: LiteralDefault}
-				var err error
+				expression := &ExpressionPlan{Kind: "literal", Literal: Literal{Kind: LiteralDefault}}
 				if !parser.cursor.AcceptKeyword("default") {
-					literal, err = parser.literal(true)
+					expression, err = parser.parseExpression()
 				}
 				if err != nil {
 					return nil, err
 				}
-				row = append(row, literal)
+				literalOnly = literalOnly && expression.Kind == "literal"
+				row = append(row, *expression)
 				if parser.cursor.AcceptSymbol(")") {
 					break
 				}
@@ -1596,13 +1698,32 @@ func (parser *statementParser) parseInsert() (*InsertStatement, error) {
 			if len(plan.Columns) != 0 && len(row) != len(plan.Columns) {
 				return nil, fmt.Errorf("kitdb SQL: INSERT has %d columns but row has %d values", len(plan.Columns), len(row))
 			}
-			if len(plan.Rows) != 0 && len(row) != len(plan.Rows[0]) {
+			if len(plan.Values) != 0 && len(row) != len(plan.Values[0]) {
 				return nil, fmt.Errorf("kitdb SQL: INSERT rows have different value counts")
 			}
-			plan.Rows = append(plan.Rows, row)
+			plan.Values = append(plan.Values, row)
 			if !parser.cursor.AcceptSymbol(",") {
 				break
 			}
+		}
+		if literalOnly {
+			plan.Rows = make([][]Literal, len(plan.Values))
+			for i, row := range plan.Values {
+				plan.Rows[i] = make([]Literal, len(row))
+				for j := range row {
+					plan.Rows[i][j] = row[j].Literal
+				}
+			}
+			plan.Values = nil
+		}
+	}
+	if parser.cursor.AcceptKeyword("on") {
+		if err := parser.cursor.ExpectKeyword("conflict"); err != nil {
+			return nil, err
+		}
+		plan.Conflict, err = parser.parseConflict()
+		if err != nil {
+			return nil, err
 		}
 	}
 	if parser.cursor.AcceptKeyword("returning") {
@@ -1902,6 +2023,28 @@ func (parser *statementParser) parseUpdate() (*UpdateStatement, error) {
 		return nil, err
 	}
 	plan := &UpdateStatement{Table: table}
+	plan.Assignments, err = parser.parseAssignments()
+	if err != nil {
+		return nil, err
+	}
+	if parser.cursor.AcceptKeyword("where") {
+		plan.Predicate, err = parser.parsePredicate()
+		if err != nil {
+			return nil, err
+		}
+		plan.Conditions = plannerConditions(*plan.Predicate)
+	}
+	if parser.cursor.AcceptKeyword("returning") {
+		plan.Returning, err = parser.projections(false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return plan, nil
+}
+
+func (parser *statementParser) parseAssignments() ([]Assignment, error) {
+	var assignments []Assignment
 	seen := make(map[string]struct{})
 	for {
 		column, err := parser.columnReference()
@@ -1927,25 +2070,50 @@ func (parser *statementParser) parseUpdate() (*UpdateStatement, error) {
 				assignment.Value = expression.Literal
 			}
 		}
-		plan.Assignments = append(plan.Assignments, assignment)
+		assignments = append(assignments, assignment)
 		if !parser.cursor.AcceptSymbol(",") {
 			break
 		}
 	}
+	return assignments, nil
+}
+
+func (parser *statementParser) parseConflict() (*ConflictClause, error) {
+	plan := &ConflictClause{}
+	var err error
+	if parser.cursor.AcceptSymbol("(") {
+		plan.Columns, err = parser.identifierListAfterOpen()
+		if err != nil {
+			return nil, err
+		}
+		if len(plan.Columns) == 0 || duplicateIdentifier(plan.Columns) != "" {
+			return nil, fmt.Errorf("kitdb SQL: invalid ON CONFLICT columns")
+		}
+	}
+	if err := parser.cursor.ExpectKeyword("do"); err != nil {
+		return nil, err
+	}
+	if parser.cursor.AcceptKeyword("nothing") {
+		plan.Nothing = true
+		return plan, nil
+	}
+	if len(plan.Columns) == 0 {
+		return nil, fmt.Errorf("kitdb SQL: ON CONFLICT DO UPDATE requires columns")
+	}
+	if err := parser.cursor.ExpectKeyword("update"); err != nil {
+		return nil, err
+	}
+	if err := parser.cursor.ExpectKeyword("set"); err != nil {
+		return nil, err
+	}
+	plan.Assignments, err = parser.parseAssignments()
+	if err != nil {
+		return nil, err
+	}
 	if parser.cursor.AcceptKeyword("where") {
 		plan.Predicate, err = parser.parsePredicate()
-		if err != nil {
-			return nil, err
-		}
-		plan.Conditions = plannerConditions(*plan.Predicate)
 	}
-	if parser.cursor.AcceptKeyword("returning") {
-		plan.Returning, err = parser.projections(false)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return plan, nil
+	return plan, err
 }
 
 func (parser *statementParser) parseDelete() (*DeleteStatement, error) {
@@ -2891,24 +3059,53 @@ func (parser *statementParser) parseJoins() ([]Join, error) {
 		if err := parser.cursor.ExpectKeyword("on"); err != nil {
 			return nil, err
 		}
-		left, err := parser.columnReference()
-		if err != nil {
+		var equalities []JoinEquality
+		if err := parser.parseJoinEqualities(0, &equalities); err != nil {
 			return nil, err
 		}
-		if err := parser.cursor.ExpectSymbol("="); err != nil {
-			return nil, fmt.Errorf("kitdb SQL: JOIN currently requires an equality predicate: %w", err)
+		joins = append(joins, Join{Kind: kind, Table: table, Alias: alias,
+			Left: equalities[0].Left, Right: equalities[0].Right, And: equalities[1:]})
+	}
+}
+
+func (parser *statementParser) parseJoinEqualities(depth int, equalities *[]JoinEquality) error {
+	if depth > MaximumQueryNesting {
+		return fmt.Errorf("kitdb SQL: JOIN ON exceeds %d nesting levels", MaximumQueryNesting)
+	}
+	for {
+		if parser.cursor.AcceptSymbol("(") {
+			if err := parser.parseJoinEqualities(depth+1, equalities); err != nil {
+				return err
+			}
+			if err := parser.cursor.ExpectSymbol(")"); err != nil {
+				return err
+			}
+		} else {
+			if len(*equalities) >= MaximumJoinEqualities {
+				return fmt.Errorf("kitdb SQL: JOIN ON exceeds %d equalities", MaximumJoinEqualities)
+			}
+			left, err := parser.columnReference()
+			if err != nil {
+				return err
+			}
+			if err := parser.cursor.ExpectSymbol("="); err != nil {
+				return fmt.Errorf("kitdb SQL: JOIN requires column equalities joined by AND: %w", err)
+			}
+			right, err := parser.columnReference()
+			if err != nil {
+				return err
+			}
+			*equalities = append(*equalities, JoinEquality{Left: left, Right: right})
 		}
-		right, err := parser.columnReference()
-		if err != nil {
-			return nil, err
+		if !parser.cursor.AcceptKeyword("and") {
+			return nil
 		}
-		joins = append(joins, Join{Kind: kind, Table: table, Alias: alias, Left: left, Right: right})
 	}
 }
 
 func selectClauseKeyword(word string) bool {
 	switch strings.ToLower(word) {
-	case "from", "join", "inner", "left", "right", "full", "cross", "where", "group", "having", "order", "limit", "offset", "union", "for", "on", "with":
+	case "from", "join", "inner", "left", "right", "full", "cross", "where", "group", "having", "order", "limit", "offset", "union", "for", "on", "with", "returning":
 		return true
 	default:
 		return false

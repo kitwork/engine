@@ -145,6 +145,7 @@ func (w *Writer) Close() error {
 
 type Reader struct {
 	file           *os.File
+	readPool       *readHandlePool
 	directory      directory
 	directoryBytes int
 	entries        map[string]Entry
@@ -153,6 +154,17 @@ type Reader struct {
 }
 
 func Open(path string) (*Reader, error) {
+	return OpenWithReadHandles(path, 1)
+}
+
+// OpenWithReadHandles opens one snapshot while allowing bounded concurrent
+// ReadAt calls to use independent operating-system handles. This matters on
+// platforms whose positioned reads are serialized per handle. All handles are
+// verified to reference the same file before any section is returned.
+func OpenWithReadHandles(path string, handles int) (*Reader, error) {
+	if handles < 1 || handles > maximumReadHandles {
+		return nil, fmt.Errorf("snapshot: read handles must be between 1 and %d", maximumReadHandles)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -160,8 +172,41 @@ func Open(path string) (*Reader, error) {
 	r, err := open(file)
 	if err != nil {
 		_ = file.Close()
+		return nil, err
 	}
-	return r, err
+	if handles == 1 {
+		return r, nil
+	}
+	files := make([]*os.File, 1, handles)
+	files[0] = file
+	base, err := file.Stat()
+	if err != nil {
+		_ = r.Close()
+		return nil, err
+	}
+	for len(files) < handles {
+		candidate, openErr := os.Open(path)
+		if openErr != nil {
+			closeReadHandles(files)
+			return nil, openErr
+		}
+		stat, statErr := candidate.Stat()
+		if statErr != nil || !os.SameFile(base, stat) {
+			_ = candidate.Close()
+			closeReadHandles(files)
+			if statErr != nil {
+				return nil, statErr
+			}
+			return nil, fmt.Errorf("snapshot: file changed while opening read handles")
+		}
+		files = append(files, candidate)
+	}
+	pool := newReadHandlePool(files)
+	r.readPool = pool
+	for _, section := range r.sections {
+		section.file = pool
+	}
+	return r, nil
 }
 
 func open(file *os.File) (*Reader, error) {
@@ -237,14 +282,40 @@ func (r *Reader) Section(name string) (*io.SectionReader, error) {
 	}
 	if r.generation != nil {
 		if len(entry.Extents) == 1 {
-			return io.NewSectionReader(r.file, entry.Extents[0].Offset, entry.Length), nil
+			return io.NewSectionReader(r.readerAt(), entry.Extents[0].Offset, entry.Length), nil
 		}
 		return io.NewSectionReader(r.sections[name], 0, entry.Length), nil
 	}
-	return io.NewSectionReader(r.file, entry.Offset, entry.Length), nil
+	return io.NewSectionReader(r.readerAt(), entry.Offset, entry.Length), nil
 }
 
-func (r *Reader) Close() error { return r.file.Close() }
+// ReadHandles reports the bounded number of handles backing section reads.
+func (r *Reader) ReadHandles() int {
+	if r == nil {
+		return 0
+	}
+	if r.readPool != nil {
+		return len(r.readPool.files)
+	}
+	return 1
+}
+
+func (r *Reader) readerAt() io.ReaderAt {
+	if r.readPool != nil {
+		return r.readPool
+	}
+	return r.file
+}
+
+func (r *Reader) Close() error {
+	if r == nil {
+		return nil
+	}
+	if r.readPool != nil {
+		return r.readPool.Close()
+	}
+	return r.file.Close()
+}
 
 type contextReader struct {
 	ctx    context.Context

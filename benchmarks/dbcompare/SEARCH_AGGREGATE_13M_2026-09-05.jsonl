@@ -1,0 +1,16 @@
+{"elapsed_ms":78.146,"query":"SELECT merchant, COUNT(*) AS total, SUM(price) AS total_price, AVG(price) AS average_price, MIN(price) AS lowest_price, MAX(price) AS highest_price, COUNT(price) AS priced FROM shopping WHERE * SEARCH 'highlands coffee' GROUP BY merchant ORDER BY total DESC, merchant","rows":[["shopee",259,64236747,248018.3281853282,3000,4500000,259],["tiki",118,46014100,389950,38000,4425000,118],["lazada",1,1000,1000,1000,1000,1]],"run":1}
+{"elapsed_ms":35.551,"query":"SELECT merchant, COUNT(*) AS total, SUM(price) AS total_price, AVG(price) AS average_price, MIN(price) AS lowest_price, MAX(price) AS highest_price, COUNT(price) AS priced FROM shopping WHERE * SEARCH 'highlands coffee' GROUP BY merchant ORDER BY total DESC, merchant","rows":[["shopee",259,64236747,248018.3281853282,3000,4500000,259],["tiki",118,46014100,389950,38000,4425000,118],["lazada",1,1000,1000,1000,1000,1]],"run":2}
+{"elapsed_ms":29.283,"query":"SELECT merchant, COUNT(*) AS total, SUM(price) AS total_price, AVG(price) AS average_price, MIN(price) AS lowest_price, MAX(price) AS highest_price, COUNT(price) AS priced FROM shopping WHERE * SEARCH 'highlands coffee' GROUP BY merchant ORDER BY total DESC, merchant","rows":[["shopee",259,64236747,248018.3281853282,3000,4500000,259],["tiki",118,46014100,389950,38000,4425000,118],["lazada",1,1000,1000,1000,1000,1]],"run":3}
+{"count_sum_avg_min_max_match_reference":true,"groups":3,"reference_rows":378}
+{"explain":[0,"search aggregate","table=shopping projection=search traversal=all-live-matches ranking=false top_k=false hydration=projected-KROW group_limit=10000 group_memory_budget=33554432 storage=single-file-snapshot refresh=explicit"]}
+{"explain":[1,"actual","path=search-aggregate-snapshot loops=1 result_rows=2 planning_ns=below-clock-resolution execution_ns=25635500"]}
+{"explain":[2,"projection_cache","hits=1 misses=0 bypasses=0"]}
+{"explain":[3,"search_reader_cache","hits=1 misses=0 bypasses=0"]}
+{"explain":[4,"materialization actual","rows=0 direct_rows=0 retained_bytes=0 peak_bytes=2953"]}
+{"explain":[5,"search aggregate rows","hydrated=378 matched=378 groups=3 point_lookups=378"]}
+{"count":378,"elapsed_ms":10.196,"query":"SELECT COUNT(*) FROM shopping WHERE * SEARCH 'highlands coffee'"}
+{"count":378,"elapsed_ms":8.751,"query":"SELECT COUNT(*) FROM shopping WHERE * SEARCH 'highlands coffee'"}
+{"count":378,"elapsed_ms":7.625,"query":"SELECT COUNT(*) FROM shopping WHERE * SEARCH 'highlands coffee' LIMIT 1"}
+{"count":259,"elapsed_ms":10.734,"query":"SELECT COUNT(*) FROM shopping WHERE * SEARCH 'highlands coffee' AND merchant = 'shopee'"}
+{"count":239,"elapsed_ms":28.77,"query":"SELECT COUNT(*) FROM shopping WHERE * SEARCH 'highlands coffee' AND price \u003e 100000"}
+{"count":378,"elapsed_ms":29.549,"matches_exact_count":true,"pages":1,"query":"exhaust_ranked_reference"}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
@@ -69,6 +68,10 @@ func (transaction *Transaction) executeUpdate(
 	if err != nil {
 		return Result{}, err
 	}
+	returning, err := bindScalarProjections(schema, plan.Returning, parameters)
+	if err != nil {
+		return Result{}, err
+	}
 	records, err := transaction.findMutationRecords(ctx, schema, generation, conditions, predicate)
 	if err != nil {
 		return Result{}, err
@@ -79,9 +82,17 @@ func (transaction *Transaction) executeUpdate(
 		)
 	}
 	if len(records) == 0 {
-		return Result{CommandTag: "UPDATE 0"}, nil
+		return mutationResult(ctx, "UPDATE", nil, returning)
 	}
+	return transaction.updateBoundRecords(ctx, schema, records, assignments, returning)
+}
 
+func (transaction *Transaction) updateBoundRecords(ctx context.Context, schema kitdbsql.Schema, records []mutationRecord, assignments []boundAssignment, returning []boundScalarProjection) (Result, error) {
+	return transaction.updateAssignedRecords(ctx, schema, records, func(int) []boundAssignment { return assignments }, returning)
+}
+
+func (transaction *Transaction) updateAssignedRecords(ctx context.Context, schema kitdbsql.Schema, records []mutationRecord, assignments func(int) []boundAssignment, returning []boundScalarProjection) (Result, error) {
+	ctx, effects, owned := ownRowEffects(ctx)
 	now := time.Now().UTC()
 	prepared := make([]preparedUpdate, 0, len(records))
 	oldUnique := make(map[string][]byte)
@@ -108,7 +119,7 @@ func (transaction *Transaction) executeUpdate(
 			oldIndexes[string(entry.key)] = entry.key
 		}
 		row := cloneRow(record.decoded.values)
-		for _, assignment := range assignments {
+		for _, assignment := range assignments(index) {
 			var item any
 			var err error
 			if assignment.defaultValue {
@@ -213,8 +224,11 @@ func (transaction *Transaction) executeUpdate(
 			}
 		}
 	}
-	for _, update := range prepared {
-		if err := transaction.validateRowForeignKeys(schema, update.row); err != nil {
+	deferRowEffects(ctx, schema, "update", len(prepared), func(i int) (map[string]any, map[string]any) {
+		return prepared[i].record.decoded.values, prepared[i].row
+	})
+	if owned {
+		if err := effects.apply(ctx, transaction); err != nil {
 			return Result{}, err
 		}
 	}
@@ -225,7 +239,7 @@ func (transaction *Transaction) executeUpdate(
 	for index, update := range prepared {
 		rows[index] = update.row
 	}
-	return mutationResult("UPDATE", rows, plan.Returning, schema)
+	return mutationResult(ctx, "UPDATE", rows, returning)
 }
 
 func (transaction *Transaction) executeDelete(
@@ -263,6 +277,10 @@ func (transaction *Transaction) executeDelete(
 	if err != nil {
 		return Result{}, err
 	}
+	returning, err := bindScalarProjections(schema, plan.Returning, parameters)
+	if err != nil {
+		return Result{}, err
+	}
 	records, err := transaction.findMutationRecords(ctx, schema, generation, conditions, predicate)
 	if err != nil {
 		return Result{}, err
@@ -273,12 +291,13 @@ func (transaction *Transaction) executeDelete(
 		)
 	}
 	if len(records) == 0 {
-		return Result{CommandTag: "DELETE 0"}, nil
+		return mutationResult(ctx, "DELETE", nil, returning)
 	}
-	if err := transaction.validateDeleteReferences(ctx, schema, records); err != nil {
-		return Result{}, err
-	}
+	return transaction.deleteBoundRecords(ctx, schema, records, returning)
+}
 
+func (transaction *Transaction) deleteBoundRecords(ctx context.Context, schema kitdbsql.Schema, records []mutationRecord, returning []boundScalarProjection) (Result, error) {
+	ctx, effects, owned := ownRowEffects(ctx)
 	unique := make(map[string][]byte)
 	indexes := make(map[string][]byte)
 	for index, record := range records {
@@ -320,6 +339,14 @@ func (transaction *Transaction) executeDelete(
 	if err := adjustTableCount(transaction, schema, -int64(len(records))); err != nil {
 		return Result{}, err
 	}
+	deferRowEffects(ctx, schema, "delete", len(records), func(i int) (map[string]any, map[string]any) {
+		return records[i].decoded.values, nil
+	})
+	if owned {
+		if err := effects.apply(ctx, transaction); err != nil {
+			return Result{}, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -327,7 +354,7 @@ func (transaction *Transaction) executeDelete(
 	for index, record := range records {
 		rows[index] = record.decoded.values
 	}
-	return mutationResult("DELETE", rows, plan.Returning, schema)
+	return mutationResult(ctx, "DELETE", rows, returning)
 }
 
 func bindAssignments(
@@ -415,32 +442,6 @@ func (transaction *Transaction) findMutationRecords(
 	return records, nil
 }
 
-func (transaction *Transaction) standaloneDeleteSupported(target kitdbsql.Schema) error {
-	for _, entry := range transaction.catalog.Structs {
-		schema, err := decodeCatalogSchema(entry.Definition)
-		if err != nil {
-			return err
-		}
-		for _, field := range schema.Fields {
-			if field.Reference != nil && strings.EqualFold(field.Reference.Struct, target.Name) {
-				return fmt.Errorf(
-					"kitdb: standalone DELETE from %q is disabled because %q references it",
-					target.Name, schema.Name,
-				)
-			}
-		}
-		for _, constraint := range schema.ForeignConstraints {
-			if constraint.TargetStructID == target.ID || strings.EqualFold(constraint.TargetStruct, target.Name) {
-				return fmt.Errorf(
-					"kitdb: standalone DELETE from %q is disabled because %q references it",
-					target.Name, schema.Name,
-				)
-			}
-		}
-	}
-	return nil
-}
-
 func validateRequiredFields(schema kitdbsql.Schema, row map[string]any) error {
 	for _, field := range schema.Fields {
 		if item, found := row[field.Name]; field.NotNull && (!found || item == nil) {
@@ -473,23 +474,36 @@ func sortedMutationKeys(keys map[string][]byte) [][]byte {
 }
 
 func mutationResult(
+	ctx context.Context,
 	command string,
 	rows []map[string]any,
-	returning []kitdbsql.Projection,
-	schema kitdbsql.Schema,
+	returning []boundScalarProjection,
 ) (Result, error) {
 	result := Result{Affected: int64(len(rows)), CommandTag: fmt.Sprintf("%s %d", command, len(rows))}
 	if len(returning) == 0 {
 		return result, nil
 	}
-	columns, names, err := bindProjection(schema, returning)
-	if err != nil {
-		return Result{}, err
+	result.Columns = make([]Column, len(returning))
+	for i := range returning {
+		result.Columns[i] = returning[i].column
 	}
-	result.Columns = columns
 	result.Rows = make([][]any, len(rows))
 	for index, row := range rows {
-		result.Rows[index] = projectRow(schema, row, names)
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		values := make([]any, len(returning))
+		for i, projection := range returning {
+			value, err := evaluateBoundPredicate(row, projection.expression)
+			if err == nil {
+				value, err = coerceScalarExpressionValue(projection.column.Kind, value)
+			}
+			if err != nil {
+				return Result{}, fmt.Errorf("kitdb SQL: RETURNING row %d projection %d: %w", index+1, i+1, err)
+			}
+			values[i] = value
+		}
+		result.Rows[index] = values
 	}
 	return result, nil
 }

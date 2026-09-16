@@ -95,6 +95,22 @@ type Session interface {
 	Close() error
 }
 
+// QueryAdmission identifies one host-trusted scheduling partition. Sessions
+// with the same key share a concurrency quota; Weight changes their relative
+// service rate only after they are queued. A host must keep the key and weight
+// stable for the lifetime of a session.
+type QueryAdmission struct {
+	Key    string
+	Weight int
+}
+
+// QueryAdmissionSession optionally partitions ordinary statement admission by
+// authenticated tenant/database identity. Other sessions share one bounded
+// default key.
+type QueryAdmissionSession interface {
+	QueryAdmission() QueryAdmission
+}
+
 // DescribeSession is an optional metadata-only extension. Implementations can
 // describe a prepared read without executing it with synthetic NULL values.
 // This avoids an accidental table scan merely because a PostgreSQL client asks

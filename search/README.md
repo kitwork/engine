@@ -17,6 +17,11 @@ Segment V2 provides:
   minimum field-norm bounds;
 - independently protected posting headers and payloads plus section CRC32C;
 - lazy `ReadAt` access to dictionary blocks, postings, and stored identifiers;
+- a per-posting-iterator 4 KiB read-ahead window that coalesces adjacent block
+  headers/payloads without creating a shared unbounded cache, with context
+  checks immediately before and after physical reads;
+- two query-local 4 KiB read-ahead windows for monotonically accessed stored
+  identifier offsets and bytes, reused across immutable segments;
 - exact implicit-AND BM25 search seeded from the rarest term;
 - exact disjunctive OR search through `MatchQuery.Operator == QueryAny` across
   the selected field or fields, using bounded WAND pruning once Top-K is full;
@@ -31,7 +36,9 @@ Segment V2 provides:
 - segment-level MaxScore pruning, so a populated global heap can reject a
   complete later segment before loading its norms or posting iterators;
 - bounded multi-field union-frequency caching plus safe MaxScore early exit;
-- bounded Top-K collection without sorting every match;
+- bounded Top-K collection without sorting every match; exact score and cursor
+  thresholds reject losing candidates before an optional identifier-prefix
+  read because that filter cannot improve rank;
 - presentation-neutral highlighting that preserves source spelling and returns
   bounded byte ranges instead of injecting HTML;
 - context cancellation, full verification, fuzz seeds, and concurrent-reader tests.
@@ -514,6 +521,15 @@ bounded asynchronous canary described above.
   every query term across the union of selected fields and keeps per-field
   norms and boosts. Phrase is available through `MatchQuery.Phrase`; fuzzy,
   range, and facets remain future milestones.
+- Posting read-ahead is transient query memory, not reader residency. One
+  iterator owns at most one 4 KiB window; the hard 32-field and 32-term limits
+  therefore cap these windows at 4 MiB per active segment query before posting
+  payload buffers. Cancellation cannot preempt an operating-system `ReadAt`
+  already in progress, but is returned before decoding or publishing that
+  completed payload.
+- Identifier-prefix filtering owns two additional query-local 4 KiB windows.
+  They are invalidated and reused between segments, never retained by the
+  immutable reader, and obey the same before/after-I/O cancellation boundary.
 - Search admission bounds goroutines owned by the manager, but the surrounding
   HTTP server must still set request deadlines, connection limits, and rate
   limits. `ErrSearchOverloaded` is a retry/backpressure signal, not permission

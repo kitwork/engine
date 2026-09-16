@@ -42,6 +42,8 @@ type CatalogSnapshot struct {
 	Revision    string
 	Structs     []CatalogStruct
 	Functions   []CatalogFunction
+	Domains     []CatalogDomain
+	Triggers    []CatalogTrigger
 	Sequences   []Sequence
 }
 
@@ -60,6 +62,10 @@ type catalogState struct {
 	revision      string
 	functions     map[string]CatalogFunction
 	functionNames map[string]string
+	domains       map[string]CatalogDomain
+	domainNames   map[string]string
+	triggers      map[string]CatalogTrigger
+	triggerNames  map[string]string
 	sequences     map[string]Sequence
 	sequenceNames map[string]string
 }
@@ -70,6 +76,10 @@ func newCatalogState() catalogState {
 		byName:        make(map[string]string),
 		functions:     make(map[string]CatalogFunction),
 		functionNames: make(map[string]string),
+		domains:       make(map[string]CatalogDomain),
+		domainNames:   make(map[string]string),
+		triggers:      make(map[string]CatalogTrigger),
+		triggerNames:  make(map[string]string),
 		sequences:     make(map[string]Sequence),
 		sequenceNames: make(map[string]string),
 	}
@@ -93,6 +103,12 @@ func loadCatalogState(main *mainImage, overlay map[string]rowMutation) (catalogS
 		}
 	}
 	if err := state.validateSequenceReferences(); err != nil {
+		return catalogState{}, errors.Join(ErrCorrupt, err)
+	}
+	if err := state.validateDomainReferences(); err != nil {
+		return catalogState{}, errors.Join(ErrCorrupt, err)
+	}
+	if err := state.validateTriggerReferences(); err != nil {
 		return catalogState{}, errors.Join(ErrCorrupt, err)
 	}
 	state.refreshRevision()
@@ -298,7 +314,23 @@ func (state catalogState) snapshot(transaction uint64) CatalogSnapshot {
 		sequences = append(sequences, entry)
 	}
 	sort.Slice(sequences, func(i, j int) bool { return sequences[i].Name < sequences[j].Name })
-	return CatalogSnapshot{Transaction: transaction, Revision: state.revision, Structs: entries, Functions: functions, Sequences: sequences}
+	domains := make([]CatalogDomain, 0, len(state.domains))
+	for _, entry := range state.domains {
+		entry.Definition = bytes.Clone(entry.Definition)
+		domains = append(domains, entry)
+	}
+	sort.Slice(domains, func(i, j int) bool { return domains[i].Name < domains[j].Name })
+	triggers := make([]CatalogTrigger, 0, len(state.triggers))
+	for _, entry := range state.triggers {
+		triggers = append(triggers, cloneCatalogTrigger(entry))
+	}
+	sort.Slice(triggers, func(i, j int) bool {
+		if triggers[i].SourceStruct != triggers[j].SourceStruct {
+			return triggers[i].SourceStruct < triggers[j].SourceStruct
+		}
+		return triggers[i].Name < triggers[j].Name
+	})
+	return CatalogSnapshot{Transaction: transaction, Revision: state.revision, Structs: entries, Functions: functions, Domains: domains, Triggers: triggers, Sequences: sequences}
 }
 
 func (state catalogState) clone() catalogState {
@@ -308,11 +340,27 @@ func (state catalogState) clone() catalogState {
 		bytes:  state.bytes, revision: state.revision,
 		functions:     make(map[string]CatalogFunction, len(state.functions)),
 		functionNames: make(map[string]string, len(state.functionNames)),
+		domains:       make(map[string]CatalogDomain, len(state.domains)),
+		domainNames:   make(map[string]string, len(state.domainNames)),
+		triggers:      make(map[string]CatalogTrigger, len(state.triggers)),
+		triggerNames:  make(map[string]string, len(state.triggerNames)),
 		sequences:     make(map[string]Sequence, len(state.sequences)),
 		sequenceNames: make(map[string]string, len(state.sequenceNames)),
 	}
 	for id, entry := range state.functions {
 		cloned.functions[id] = entry
+	}
+	for id, entry := range state.domains {
+		cloned.domains[id] = entry
+	}
+	for id, entry := range state.triggers {
+		cloned.triggers[id] = entry
+	}
+	for name, id := range state.triggerNames {
+		cloned.triggerNames[name] = id
+	}
+	for name, id := range state.domainNames {
+		cloned.domainNames[name] = id
 	}
 	for id, entry := range state.sequences {
 		cloned.sequences[id] = entry
@@ -333,6 +381,12 @@ func (state catalogState) clone() catalogState {
 }
 
 func (state *catalogState) put(key, definition []byte) error {
+	if isCatalogTriggerKey(key) {
+		return state.putTrigger(key, definition)
+	}
+	if isCatalogDomainKey(key) {
+		return state.putDomain(key, definition)
+	}
 	if isCatalogSequenceKey(key) {
 		return state.putSequence(key, definition)
 	}
@@ -377,6 +431,24 @@ func (state *catalogState) put(key, definition []byte) error {
 }
 
 func (state *catalogState) delete(key []byte) error {
+	if isCatalogTriggerKey(key) {
+		id := hex.EncodeToString(key[2:])
+		if entry, found := state.triggers[id]; found {
+			delete(state.triggers, id)
+			delete(state.triggerNames, entry.SourceStruct+":"+entry.Name)
+			state.bytes -= len(entry.Definition)
+		}
+		return nil
+	}
+	if isCatalogDomainKey(key) {
+		id := hex.EncodeToString(key[2:])
+		if entry, found := state.domains[id]; found {
+			delete(state.domains, id)
+			delete(state.domainNames, entry.Name)
+			state.bytes -= len(entry.Definition)
+		}
+		return nil
+	}
 	if isCatalogSequenceKey(key) {
 		id := hex.EncodeToString(key[2:])
 		if entry, found := state.sequences[id]; found {
@@ -442,6 +514,12 @@ func (state catalogState) applyOperations(operations []operation) (catalogState,
 	if err := next.validateSequenceReferences(); err != nil {
 		return catalogState{}, err
 	}
+	if err := next.validateDomainReferences(); err != nil {
+		return catalogState{}, err
+	}
+	if err := next.validateTriggerReferences(); err != nil {
+		return catalogState{}, err
+	}
 	next.refreshRevision()
 	return next, nil
 }
@@ -501,6 +579,38 @@ func (state *catalogState) refreshRevision() {
 			binary.BigEndian.PutUint64(size[:], uint64(len(definition)))
 			_, _ = digest.Write(size[:])
 			_, _ = digest.Write(definition)
+		}
+		state.revision = hex.EncodeToString(digest.Sum(nil))
+	}
+	if len(state.domains) != 0 {
+		ids = ids[:0]
+		for id := range state.domains {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		_, _ = digest.Write([]byte("\x00domains\x00"))
+		for _, id := range ids {
+			entry := state.domains[id]
+			_, _ = digest.Write([]byte(id))
+			binary.BigEndian.PutUint64(size[:], uint64(len(entry.Definition)))
+			_, _ = digest.Write(size[:])
+			_, _ = digest.Write(entry.Definition)
+		}
+		state.revision = hex.EncodeToString(digest.Sum(nil))
+	}
+	if len(state.triggers) != 0 {
+		ids = ids[:0]
+		for id := range state.triggers {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		_, _ = digest.Write([]byte("\x00triggers\x00"))
+		for _, id := range ids {
+			entry := state.triggers[id]
+			_, _ = digest.Write([]byte(id))
+			binary.BigEndian.PutUint64(size[:], uint64(len(entry.Definition)))
+			_, _ = digest.Write(size[:])
+			_, _ = digest.Write(entry.Definition)
 		}
 		state.revision = hex.EncodeToString(digest.Sum(nil))
 	}

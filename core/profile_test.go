@@ -41,6 +41,9 @@ router.get((ctx) => ctx.text("about"));
 	write("test/ignored/router.kitwork.js", `const ignored = 1;`)
 
 	report := Profile(root)
+	if report.Root != root || report.Layout != "auto" {
+		t.Fatalf("profile source = %q (%s), want %q (auto)", report.Root, report.Layout, root)
+	}
 	if report.Entrypoints != 5 {
 		t.Fatalf("entrypoints = %d, want 5", report.Entrypoints)
 	}

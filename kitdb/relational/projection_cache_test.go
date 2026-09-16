@@ -5,6 +5,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/kitwork/engine/internal/snapshotfile"
@@ -14,6 +16,7 @@ import (
 
 func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 	engine := projectionTestDatabase(t, 128)
+	engine.searchReaderCacheBytes = 16 << 20
 	ctx := context.Background()
 	if _, err := engine.RefreshProjections(ctx); err != nil {
 		t.Fatal(err)
@@ -34,12 +37,14 @@ func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 	searchQuery := `SELECT id, name, _score FROM products WHERE * SEARCH 'blue widget' LIMIT 5`
 	searchFirst := projectionExecute(t, engine, searchQuery)
 	if searchFirst.Execution == nil || searchFirst.Execution.Path != "search-snapshot" ||
-		searchFirst.Execution.ProjectionCacheMisses != 1 || searchFirst.Execution.ProjectionCacheHits != 0 {
+		searchFirst.Execution.ProjectionCacheMisses != 1 || searchFirst.Execution.ProjectionCacheHits != 0 ||
+		searchFirst.Execution.SearchReaderCacheMisses != 1 || searchFirst.Execution.SearchReaderCacheHits != 0 {
 		t.Fatalf("first search cache access = %+v", searchFirst.Execution)
 	}
 	searchSecond := projectionExecute(t, engine, searchQuery)
 	if searchSecond.Execution == nil || searchSecond.Execution.ProjectionCacheHits != 1 ||
-		searchSecond.Execution.ProjectionCacheMisses != 0 {
+		searchSecond.Execution.ProjectionCacheMisses != 0 ||
+		searchSecond.Execution.SearchReaderCacheHits != 1 || searchSecond.Execution.SearchReaderCacheMisses != 0 {
 		t.Fatalf("warm search cache access = %+v", searchSecond.Execution)
 	}
 	if got := projectionCacheEntries(engine); got != 2 {
@@ -70,18 +75,51 @@ func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 	}
 	searchAfterPublish := projectionExecute(t, engine, searchQuery)
 	if searchAfterPublish.Execution == nil || searchAfterPublish.Execution.Path != "search-snapshot" ||
-		searchAfterPublish.Execution.ProjectionCacheMisses != 1 || searchAfterPublish.Execution.ProjectionCacheHits != 0 {
+		searchAfterPublish.Execution.ProjectionCacheMisses != 1 || searchAfterPublish.Execution.ProjectionCacheHits != 0 ||
+		searchAfterPublish.Execution.SearchReaderCacheMisses != 1 {
 		t.Fatalf("first search access after publication = %+v", searchAfterPublish.Execution)
 	}
 	searchWarmAgain := projectionExecute(t, engine, searchQuery)
 	if searchWarmAgain.Execution == nil || searchWarmAgain.Execution.ProjectionCacheHits != 1 ||
-		searchWarmAgain.Execution.ProjectionCacheMisses != 0 {
+		searchWarmAgain.Execution.ProjectionCacheMisses != 0 || searchWarmAgain.Execution.SearchReaderCacheHits != 1 {
 		t.Fatalf("warm search access after publication = %+v", searchWarmAgain.Execution)
 	}
 	analyticsStillWarm := projectionExecute(t, engine, aggregate)
 	if analyticsStillWarm.Execution == nil || analyticsStillWarm.Execution.ProjectionCacheHits != 1 ||
 		analyticsStillWarm.Execution.ProjectionCacheMisses != 0 {
 		t.Fatalf("search publication invalidated analytics cache = %+v", analyticsStillWarm.Execution)
+	}
+	resident := engine.ProjectionCacheStats()
+	if resident.Entries != 2 || resident.ActiveLeases != 0 || resident.DirectoryBytes <= 0 ||
+		resident.SearchReaders != 1 || resident.SearchFileHandles != expectedProjectionSearchReadHandles() ||
+		resident.SearchReaderResidentBytes <= 0 ||
+		resident.SearchReaderCapacityBytes < resident.SearchReaderResidentBytes {
+		t.Fatalf("projection cache residency = %+v", resident)
+	}
+	trimmed, err := engine.TrimProjectionCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trimmed.Entries != resident.Entries || trimmed.DirectoryBytes != resident.DirectoryBytes ||
+		trimmed.SearchReaders != resident.SearchReaders ||
+		trimmed.SearchFileHandles != resident.SearchFileHandles ||
+		trimmed.SearchReaderResidentBytes != resident.SearchReaderResidentBytes ||
+		trimmed.SearchReaderCapacityBytes != resident.SearchReaderCapacityBytes {
+		t.Fatalf("projection cache trim = %+v, residency was %+v", trimmed, resident)
+	}
+	if afterTrim := engine.ProjectionCacheStats(); afterTrim != (ProjectionCacheStats{}) {
+		t.Fatalf("projection cache after trim = %+v", afterTrim)
+	}
+	analyticsAfterTrim := projectionExecute(t, engine, aggregate)
+	if analyticsAfterTrim.Execution == nil || analyticsAfterTrim.Execution.Path != "kcol-batch" ||
+		analyticsAfterTrim.Execution.ProjectionCacheMisses != 1 {
+		t.Fatalf("analytics access after trim = %+v", analyticsAfterTrim.Execution)
+	}
+	searchAfterTrim := projectionExecute(t, engine, searchQuery)
+	if searchAfterTrim.Execution == nil || searchAfterTrim.Execution.Path != "search-snapshot" ||
+		searchAfterTrim.Execution.ProjectionCacheMisses != 1 ||
+		searchAfterTrim.Execution.SearchReaderCacheMisses != 1 {
+		t.Fatalf("search access after trim = %+v", searchAfterTrim.Execution)
 	}
 
 	analyticsPath := engine.Path() + ".analytics"
@@ -97,6 +135,104 @@ func TestProjectionReaderCacheHitsAndInvalidatesAtPublication(t *testing.T) {
 		if err := os.Remove(path); err != nil {
 			t.Fatalf("remove closed projection %s: %v", path, err)
 		}
+	}
+}
+
+func TestSearchReaderCacheBypassesInsufficientBudget(t *testing.T) {
+	engine := projectionTestDatabase(t, 64)
+	engine.searchReaderCacheBytes = 1
+	if _, err := engine.RefreshProjections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	query := `SELECT id, name, _score FROM products WHERE * SEARCH 'blue widget' LIMIT 5`
+	for attempt := range 2 {
+		result := projectionExecute(t, engine, query)
+		if result.Execution == nil || result.Execution.SearchReaderCacheMisses != 1 ||
+			result.Execution.SearchReaderCacheBypasses != 1 || result.Execution.SearchReaderCacheHits != 0 {
+			t.Fatalf("uncached search %d = %+v", attempt, result.Execution)
+		}
+	}
+	resident := engine.ProjectionCacheStats()
+	if resident.SearchReaders != 0 ||
+		resident.SearchFileHandles != expectedProjectionSearchReadHandles() ||
+		resident.SearchReaderResidentBytes != 0 ||
+		resident.SearchReaderCapacityBytes != 0 {
+		t.Fatalf("insufficient budget retained a search reader: %+v", resident)
+	}
+	trimmed, err := engine.TrimProjectionCache()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trimmed.SearchReaders != 0 || trimmed.SearchFileHandles != resident.SearchFileHandles ||
+		engine.ProjectionCacheStats() != (ProjectionCacheStats{}) {
+		t.Fatalf("insufficient-budget trim = %+v", trimmed)
+	}
+}
+
+func TestSearchReaderCacheSingleFlightsConcurrentOpen(t *testing.T) {
+	engine := projectionTestDatabase(t, 256)
+	engine.searchReaderCacheBytes = 16 << 20
+	if _, err := engine.RefreshProjections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	const workers = 8
+	start := make(chan struct{})
+	results := make(chan Result, workers)
+	errors := make(chan error, workers)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			result, err := engine.Execute(
+				context.Background(),
+				`SELECT id, name, _score FROM products WHERE * SEARCH 'blue widget' LIMIT 5`,
+			)
+			if err != nil {
+				errors <- err
+				return
+			}
+			results <- result
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
+	}
+	var hits, misses, bypasses uint64
+	for result := range results {
+		if result.Execution == nil {
+			t.Fatal("concurrent search omitted execution stats")
+		}
+		hits += result.Execution.SearchReaderCacheHits
+		misses += result.Execution.SearchReaderCacheMisses
+		bypasses += result.Execution.SearchReaderCacheBypasses
+	}
+	if misses != 1 || hits != workers-1 || bypasses != 0 {
+		t.Fatalf("concurrent search cache hits=%d misses=%d bypasses=%d", hits, misses, bypasses)
+	}
+	if resident := engine.ProjectionCacheStats(); resident.SearchReaders != 1 ||
+		resident.SearchFileHandles != expectedProjectionSearchReadHandles() {
+		t.Fatalf("concurrent search retained %+v", resident)
+	}
+}
+
+func TestSearchReaderCacheOptionsAreExplicitAndBounded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.kitdb")
+	if engine, err := OpenWithOptions(path, Options{SearchReaderCacheBytes: 1}); err == nil {
+		_ = engine.Close()
+		t.Fatal("search reader cache succeeded without experimental projections")
+	}
+	if engine, err := OpenWithOptions(path, Options{
+		ExperimentalProjections: true,
+		SearchReaderCacheBytes:  MaximumSearchReaderCacheBytes + 1,
+	}); err == nil {
+		_ = engine.Close()
+		t.Fatal("oversized search reader cache succeeded")
 	}
 }
 
@@ -230,8 +366,44 @@ func BenchmarkProjectionReaderCache(b *testing.B) {
 	})
 }
 
+func BenchmarkPackedSearchReaderCache(b *testing.B) {
+	for _, benchmark := range []struct {
+		name   string
+		budget int64
+	}{
+		{name: "uncached", budget: 0},
+		{name: "resident", budget: 16 << 20},
+	} {
+		b.Run(benchmark.name, func(b *testing.B) {
+			engine := projectionTestDatabase(b, 4096)
+			engine.searchReaderCacheBytes = benchmark.budget
+			if _, err := engine.RefreshProjections(context.Background()); err != nil {
+				b.Fatal(err)
+			}
+			query := `SELECT id, name, _score FROM products WHERE * SEARCH 'blue widget' LIMIT 20`
+			if _, err := engine.Execute(context.Background(), query); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := engine.Execute(context.Background(), query); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func projectionCacheEntries(engine *Engine) int {
 	engine.projectionCache.mu.Lock()
 	defer engine.projectionCache.mu.Unlock()
 	return len(engine.projectionCache.entries)
+}
+
+func expectedProjectionSearchReadHandles() int {
+	if runtime.GOOS == "windows" {
+		return 2
+	}
+	return 1
 }

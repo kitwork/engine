@@ -46,13 +46,16 @@ func postgresSequences(catalog postgresCatalogSnapshot) postgresCatalogDataset {
 		[]string{"seqrelid", "seqtypid", "seqstart", "seqincrement", "seqmax", "seqmin", "seqcache", "seqcycle"},
 		oidCatalogColumn("seqrelid"), oidCatalogColumn("seqtypid"), int8CatalogColumn("seqstart"), int8CatalogColumn("seqincrement"),
 		int8CatalogColumn("seqmax"), int8CatalogColumn("seqmin"), int8CatalogColumn("seqcache"), boolCatalogColumn("seqcycle"),
+		textCatalogColumn("relname"), textCatalogColumn("nspname"), oidCatalogColumn("relnamespace"), oidCatalogColumn("relowner"),
 	)
+	dataset.functionCatalog = &catalog
 	for _, sequence := range catalog.sequences {
 		postgres, _ := sequencePostgresType(sequence.DataTypeName())
 		dataset.rows = append(dataset.rows, map[string]any{
 			"seqrelid": postgresCatalogOID("sequence", sequence.ID), "seqtypid": postgres.OID,
 			"seqstart": sequence.Start, "seqincrement": sequence.Increment, "seqmax": sequence.Maximum,
 			"seqmin": sequence.Minimum, "seqcache": sequence.CacheSize(), "seqcycle": sequence.Cycle,
+			"relname": sequence.Name, "nspname": "public", "relnamespace": postgresPublicNamespaceOID, "relowner": postgresCatalogOID("role", catalog.user),
 		})
 	}
 	return dataset

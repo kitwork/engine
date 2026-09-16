@@ -19,6 +19,24 @@ type normCache struct {
 	err  error
 }
 
+const identifierReadAheadBytes = 4 << 10
+
+type sectionReadAhead struct {
+	data   []byte
+	offset uint64
+	valid  bool
+}
+
+// documentIdentifierPrefixReader keeps the two monotonically accessed stored
+// sections query-local. It avoids one positioned read for every candidate
+// without retaining document identifiers in the immutable segment reader.
+type documentIdentifierPrefixReader struct {
+	ctx     context.Context
+	segment *Segment
+	offsets sectionReadAhead
+	data    sectionReadAhead
+}
+
 // Segment is a concurrent read-only view of one immutable segment file.
 // Close must run only after in-flight searches have drained.
 type Segment struct {
@@ -30,6 +48,7 @@ type Segment struct {
 	fieldStats []uint64
 	dictionary []dictionaryBlockIndex
 	norms      []normCache
+	normBytes  atomic.Int64
 	closed     atomic.Bool
 }
 
@@ -74,18 +93,12 @@ func openSegmentReader(path string, file io.ReaderAt, size int64, schema Schema)
 	if err != nil {
 		return nil, err
 	}
-	if header.schemaHash != schema.fingerprint {
-		return nil, ErrSchemaMismatch
-	}
-	if int(header.fieldN) != len(schema.fields) {
-		return nil, corruptf("segment has %d fields; schema has %d", header.fieldN, len(schema.fields))
+	if err := validateSegmentHeaderShape(header, schema); err != nil {
+		return nil, err
 	}
 
 	statsSection := header.sections[sectionFieldStats]
 	expectedStatsLength := uint64(header.fieldN) * 8
-	if statsSection.length != expectedStatsLength {
-		return nil, corruptf("field statistics length is %d; expected %d", statsSection.length, expectedStatsLength)
-	}
 	statsData, err := readCheckedSection(file, statsSection, expectedStatsLength)
 	if err != nil {
 		return nil, err
@@ -120,20 +133,39 @@ func openSegmentReader(path string, file io.ReaderAt, size int64, schema Schema)
 		return nil, corruptf("dictionary blocks do not cover their section")
 	}
 
-	normsLength, overflow := multiplyUint64(uint64(header.documentN), uint64(header.fieldN), 4)
-	if overflow || header.sections[sectionNorms].length != normsLength {
-		return nil, corruptf("norm section has invalid length")
-	}
-	offsetsLength, overflow := multiplyUint64(uint64(header.documentN)+1, 8)
-	if overflow || header.sections[sectionStoredOffsets].length != offsetsLength {
-		return nil, corruptf("stored offset section has invalid length")
-	}
-
 	segment := &Segment{
 		file: file, path: path, schema: schema, header: header,
 		fieldStats: fieldStats, dictionary: dictionary, norms: make([]normCache, header.fieldN),
 	}
 	return segment, nil
+}
+
+// validateSegmentHeaderShape performs the fixed-size validation shared by a
+// query reader and the bounded packed-snapshot inspector. It deliberately does
+// not read payload sections or allocate the sparse term dictionary.
+func validateSegmentHeaderShape(header segmentHeader, schema Schema) error {
+	if header.schemaHash != schema.fingerprint {
+		return ErrSchemaMismatch
+	}
+	if int(header.fieldN) != len(schema.fields) {
+		return corruptf("segment has %d fields; schema has %d", header.fieldN, len(schema.fields))
+	}
+
+	statsSection := header.sections[sectionFieldStats]
+	expectedStatsLength := uint64(header.fieldN) * 8
+	if statsSection.length != expectedStatsLength {
+		return corruptf("field statistics length is %d; expected %d", statsSection.length, expectedStatsLength)
+	}
+
+	normsLength, overflow := multiplyUint64(uint64(header.documentN), uint64(header.fieldN), 4)
+	if overflow || header.sections[sectionNorms].length != normsLength {
+		return corruptf("norm section has invalid length")
+	}
+	offsetsLength, overflow := multiplyUint64(uint64(header.documentN)+1, 8)
+	if overflow || header.sections[sectionStoredOffsets].length != offsetsLength {
+		return corruptf("stored offset section has invalid length")
+	}
+	return nil
 }
 
 // Info reports stable segment metadata.
@@ -224,6 +256,7 @@ func (segment *Segment) fieldNorms(field uint16) ([]uint32, error) {
 		for index := range cache.data {
 			cache.data[index] = binary.LittleEndian.Uint32(encoded[index*4 : index*4+4])
 		}
+		segment.normBytes.Add(int64(len(cache.data)) * 4)
 	})
 	return cache.data, cache.err
 }
@@ -269,23 +302,50 @@ func (segment *Segment) documentIdentifier(document uint32) (string, error) {
 	return string(data), nil
 }
 
-func (segment *Segment) documentIdentifierHasPrefix(
-	document uint32,
-	prefix string,
-	buffer *[]byte,
-) (bool, error) {
+func newDocumentIdentifierPrefixReader(
+	ctx context.Context,
+	segment *Segment,
+) documentIdentifierPrefixReader {
+	reader := documentIdentifierPrefixReader{}
+	reader.reset(ctx, segment)
+	return reader
+}
+
+func (reader *documentIdentifierPrefixReader) reset(ctx context.Context, segment *Segment) {
+	reader.ctx = ctx
+	reader.segment = segment
+	reader.offsets.reset()
+	reader.data.reset()
+}
+
+func (reader *sectionReadAhead) reset() {
+	reader.data = reader.data[:0]
+	reader.offset = 0
+	reader.valid = false
+}
+
+func (reader *documentIdentifierPrefixReader) hasPrefix(document uint32, prefix string) (bool, error) {
 	if prefix == "" {
 		return true, nil
 	}
+	if reader == nil || reader.ctx == nil || reader.segment == nil {
+		return false, fmt.Errorf("search: invalid identifier prefix reader")
+	}
+	segment := reader.segment
 	if err := segment.ensureOpen(); err != nil {
+		return false, err
+	}
+	if err := reader.ctx.Err(); err != nil {
 		return false, err
 	}
 	if document >= segment.header.documentN {
 		return false, corruptf("document %d exceeds segment bounds", document)
 	}
-	section := segment.header.sections[sectionStoredOffsets]
-	var encoded [16]byte
-	if err := readAtFull(segment.file, encoded[:], section.offset+uint64(document)*8); err != nil {
+	offsetSection := segment.header.sections[sectionStoredOffsets]
+	encoded, err := reader.offsets.read(
+		reader.ctx, segment.file, offsetSection, uint64(document)*8, 16,
+	)
+	if err != nil {
 		return false, err
 	}
 	start := binary.LittleEndian.Uint64(encoded[:8])
@@ -297,15 +357,61 @@ func (segment *Segment) documentIdentifierHasPrefix(
 	if end-start < uint64(len(prefix)) {
 		return false, nil
 	}
-	if cap(*buffer) < len(prefix) {
-		*buffer = make([]byte, len(prefix))
-	} else {
-		*buffer = (*buffer)[:len(prefix)]
-	}
-	if err := readAtFull(segment.file, *buffer, dataSection.offset+start); err != nil {
+	data, err := reader.data.read(reader.ctx, segment.file, dataSection, start, uint64(len(prefix)))
+	if err != nil {
 		return false, err
 	}
-	return bytes.Equal(*buffer, []byte(prefix)), nil
+	return bytes.Equal(data, []byte(prefix)), nil
+}
+
+func (reader *sectionReadAhead) read(
+	ctx context.Context,
+	file io.ReaderAt,
+	section sectionDescriptor,
+	offset uint64,
+	length uint64,
+) ([]byte, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("search: query context is nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if length == 0 {
+		return nil, nil
+	}
+	if offset > section.length || length > section.length-offset || length > uint64(maxIntValue()) {
+		return nil, corruptf("read-ahead range exceeds its section")
+	}
+	if reader.valid && offset >= reader.offset {
+		relative := offset - reader.offset
+		if relative <= uint64(len(reader.data)) && length <= uint64(len(reader.data))-relative {
+			return reader.data[relative : relative+length], nil
+		}
+	}
+	remaining := section.length - offset
+	window := min(uint64(identifierReadAheadBytes), remaining)
+	if window < length {
+		window = length
+	}
+	if window > uint64(maxIntValue()) {
+		return nil, corruptf("read-ahead window exceeds platform range")
+	}
+	if cap(reader.data) < int(window) {
+		reader.data = make([]byte, int(window))
+	} else {
+		reader.data = reader.data[:int(window)]
+	}
+	reader.valid = false
+	if err := readAtFull(file, reader.data, section.offset+offset); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	reader.offset = offset
+	reader.valid = true
+	return reader.data[:length], nil
 }
 
 // Verify reads every section, dictionary block, posting list, norm, and stored
@@ -352,7 +458,7 @@ func (segment *Segment) Verify(ctx context.Context) error {
 			}
 			expectedPostingsOffset += record.postingsLength
 			iterator, iteratorErr := newPostingIterator(
-				segment.file, segment.header.version, record, segment.header.documentN,
+				ctx, segment.file, segment.header.version, record, segment.header.documentN,
 				segment.header.sections[sectionPostings], false,
 			)
 			if iteratorErr != nil {

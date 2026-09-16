@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/kitwork/engine/internal/snapshotfile"
 	kitdbengine "github.com/kitwork/engine/kitdb"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
+	"github.com/kitwork/engine/search"
 )
 
 // A relational Engine owns at most one warm reader per projection kind. The
@@ -17,6 +19,10 @@ import (
 // are opened per query.
 const maximumCachedProjectionDirectoryBytes = 2 << 20
 
+// MaximumSearchReaderCacheBytes is the per-Engine ceiling for deterministic
+// packed-search reader memory reservations.
+const MaximumSearchReaderCacheBytes = int64(8 << 30)
+
 type projectionCacheAccess struct {
 	hit    bool
 	miss   bool
@@ -24,11 +30,45 @@ type projectionCacheAccess struct {
 }
 
 type projectionCacheEntry struct {
-	path       string
-	file       *snapshotfile.Reader
-	manifest   projectionManifest
-	references int
-	retired    bool
+	path                string
+	file                *snapshotfile.Reader
+	manifest            projectionManifest
+	searchIndexes       map[string]*projectionSearchIndex
+	searchCapacityBytes int64
+	references          int
+	retired             bool
+}
+
+type projectionSearchIndex struct {
+	ready    chan struct{}
+	index    *search.Index
+	capacity int64
+	err      error
+	bypass   bool
+}
+
+// ProjectionCacheStats reports only process-local reader residency. Directory
+// bytes cover the decoded snapshot-file directory retained by the reader, not
+// KCOL/search payload pages or operating-system page-cache residency.
+type ProjectionCacheStats struct {
+	Entries                   int
+	ActiveLeases              int
+	DirectoryBytes            int64
+	SearchReaders             int
+	SearchFileHandles         int
+	SearchReaderResidentBytes int64
+	SearchReaderCapacityBytes int64
+}
+
+// ProjectionCacheTrim reports reader metadata released by an explicit trim.
+// Projection files remain complete, immutable, and reusable on the next query.
+type ProjectionCacheTrim struct {
+	Entries                   int
+	DirectoryBytes            int64
+	SearchReaders             int
+	SearchFileHandles         int
+	SearchReaderResidentBytes int64
+	SearchReaderCapacityBytes int64
 }
 
 type projectionReaderCache struct {
@@ -42,6 +82,21 @@ type projectionLease struct {
 	file   *snapshotfile.Reader
 	table  projectionTable
 	access projectionCacheAccess
+}
+
+type projectionSearchLease struct {
+	index  *search.Index
+	access projectionCacheAccess
+	cached bool
+}
+
+func (lease *projectionSearchLease) close() error {
+	if lease == nil || lease.index == nil || lease.cached {
+		return nil
+	}
+	index := lease.index
+	lease.index = nil
+	return index.Close()
 }
 
 func (lease *projectionLease) close() error {
@@ -72,16 +127,12 @@ func (cache *projectionReaderCache) release(entry *projectionCacheEntry) error {
 		return fmt.Errorf("kitdb: projection cache lease underflow")
 	}
 	entry.references--
-	var file *snapshotfile.Reader
+	var resources projectionEntryResources
 	if entry.retired && entry.references == 0 {
-		file = entry.file
-		entry.file = nil
+		resources = detachProjectionEntryResources(entry)
 	}
 	cache.mu.Unlock()
-	if file != nil {
-		return file.Close()
-	}
-	return nil
+	return resources.close()
 }
 
 func (cache *projectionReaderCache) invalidate(kind string) error {
@@ -97,18 +148,14 @@ func (cache *projectionReaderCache) invalidate(kind string) error {
 	}
 	delete(cache.entries, kind)
 	entry.retired = true
-	file := entry.file
-	entry.file = nil
+	resources := detachProjectionEntryResources(entry)
 	cache.mu.Unlock()
-	if file != nil {
-		return file.Close()
-	}
-	return nil
+	return resources.close()
 }
 
 func (cache *projectionReaderCache) close() error {
 	cache.mu.Lock()
-	var files []*snapshotfile.Reader
+	var resources []projectionEntryResources
 	var result error
 	for kind, entry := range cache.entries {
 		if entry.references != 0 {
@@ -117,20 +164,139 @@ func (cache *projectionReaderCache) close() error {
 		}
 		delete(cache.entries, kind)
 		entry.retired = true
-		if entry.file != nil {
-			files = append(files, entry.file)
-			entry.file = nil
-		}
+		resources = append(resources, detachProjectionEntryResources(entry))
 	}
 	cache.mu.Unlock()
-	for _, file := range files {
-		result = errors.Join(result, file.Close())
+	for _, resource := range resources {
+		result = errors.Join(result, resource.close())
 	}
 	return result
 }
 
-func loadProjection(path string) (*snapshotfile.Reader, projectionManifest, error) {
-	file, err := snapshotfile.Open(path)
+func (cache *projectionReaderCache) stats() ProjectionCacheStats {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	var stats ProjectionCacheStats
+	for _, entry := range cache.entries {
+		if entry == nil || entry.retired || entry.file == nil {
+			continue
+		}
+		stats.Entries++
+		stats.ActiveLeases += entry.references
+		stats.DirectoryBytes += int64(entry.file.DirectoryBytes())
+		if entry.manifest.Kind == "search" {
+			stats.SearchFileHandles += entry.file.ReadHandles()
+		}
+		stats.SearchReaderCapacityBytes += entry.searchCapacityBytes
+		for _, reader := range entry.searchIndexes {
+			if reader.index == nil {
+				continue
+			}
+			stats.SearchReaders++
+			stats.SearchReaderResidentBytes += reader.index.ResidentBytes()
+		}
+	}
+	return stats
+}
+
+func (cache *projectionReaderCache) trim() (ProjectionCacheTrim, error) {
+	cache.mu.Lock()
+	for kind, entry := range cache.entries {
+		if entry.references != 0 {
+			cache.mu.Unlock()
+			return ProjectionCacheTrim{}, fmt.Errorf(
+				"kitdb: %s projection cache readers did not drain", kind,
+			)
+		}
+	}
+	resources := make([]projectionEntryResources, 0, len(cache.entries))
+	var trimmed ProjectionCacheTrim
+	for kind, entry := range cache.entries {
+		delete(cache.entries, kind)
+		stats := projectionEntryCacheStats(entry)
+		entry.retired = true
+		trimmed.Entries += stats.Entries
+		trimmed.DirectoryBytes += stats.DirectoryBytes
+		trimmed.SearchReaders += stats.SearchReaders
+		trimmed.SearchFileHandles += stats.SearchFileHandles
+		trimmed.SearchReaderResidentBytes += stats.SearchReaderResidentBytes
+		trimmed.SearchReaderCapacityBytes += stats.SearchReaderCapacityBytes
+		resources = append(resources, detachProjectionEntryResources(entry))
+	}
+	cache.mu.Unlock()
+
+	var result error
+	for _, resource := range resources {
+		result = errors.Join(result, resource.close())
+	}
+	return trimmed, result
+}
+
+type projectionEntryResources struct {
+	file    *snapshotfile.Reader
+	indexes []*search.Index
+}
+
+func detachProjectionEntryResources(entry *projectionCacheEntry) projectionEntryResources {
+	if entry == nil {
+		return projectionEntryResources{}
+	}
+	resources := projectionEntryResources{file: entry.file}
+	entry.file = nil
+	for _, reader := range entry.searchIndexes {
+		if reader.index != nil {
+			resources.indexes = append(resources.indexes, reader.index)
+			reader.index = nil
+		}
+	}
+	entry.searchIndexes = nil
+	entry.searchCapacityBytes = 0
+	return resources
+}
+
+func (resources projectionEntryResources) close() error {
+	var result error
+	for _, index := range resources.indexes {
+		result = errors.Join(result, index.Close())
+	}
+	if resources.file != nil {
+		result = errors.Join(result, resources.file.Close())
+	}
+	return result
+}
+
+func projectionEntryCacheStats(entry *projectionCacheEntry) ProjectionCacheStats {
+	if entry == nil || entry.retired || entry.file == nil {
+		return ProjectionCacheStats{}
+	}
+	stats := ProjectionCacheStats{
+		Entries:                   1,
+		ActiveLeases:              entry.references,
+		DirectoryBytes:            int64(entry.file.DirectoryBytes()),
+		SearchReaderCapacityBytes: entry.searchCapacityBytes,
+	}
+	if entry.manifest.Kind == "search" {
+		stats.SearchFileHandles = entry.file.ReadHandles()
+	}
+	for _, reader := range entry.searchIndexes {
+		if reader.index == nil {
+			continue
+		}
+		stats.SearchReaders++
+		stats.SearchReaderResidentBytes += reader.index.ResidentBytes()
+	}
+	return stats
+}
+
+func loadProjection(path string, kind string) (*snapshotfile.Reader, projectionManifest, error) {
+	readHandles := 1
+	if kind == "search" && runtime.GOOS == "windows" {
+		// Go's Windows Pread serializes positioned reads per os.File. Two
+		// handles match this Engine's bounded two-query projection gate while
+		// retaining one shared immutable search metadata reader.
+		readHandles = 2
+	}
+	file, err := snapshotfile.OpenWithReadHandles(path, readHandles)
 	if err != nil {
 		return nil, projectionManifest{}, err
 	}
@@ -189,7 +355,7 @@ func (engine *Engine) acquireProjection(
 	}
 	cache.mu.Unlock()
 
-	file, manifest, err := loadProjection(path)
+	file, manifest, err := loadProjection(path, kind)
 	if err != nil {
 		return projectionLease{}, err
 	}
@@ -224,22 +390,159 @@ func (engine *Engine) acquireProjection(
 		cache.entries = make(map[string]*projectionCacheEntry, 2)
 	}
 	cache.entries[kind] = candidate
-	var retired *snapshotfile.Reader
+	var retired projectionEntryResources
 	if entry != nil {
 		entry.retired = true
 		if entry.references == 0 {
-			retired = entry.file
-			entry.file = nil
+			retired = detachProjectionEntryResources(entry)
 		}
 	}
 	cache.mu.Unlock()
-	if retired != nil {
-		if closeErr := retired.Close(); closeErr != nil {
-			_ = cache.release(candidate)
-			return projectionLease{}, closeErr
-		}
+	if closeErr := retired.close(); closeErr != nil {
+		_ = cache.release(candidate)
+		return projectionLease{}, closeErr
 	}
 	return projectionLease{cache: cache, entry: candidate, file: file, table: table, access: access}, nil
+}
+
+// acquireSearchIndex optionally retains one immutable reader per table. The
+// caller's parent projection lease keeps the borrowed container alive.
+func (lease *projectionLease) acquireSearchIndex(
+	ctx context.Context,
+	table string,
+	schema search.Schema,
+	maximumBytes int64,
+) (projectionSearchLease, error) {
+	if lease == nil || lease.file == nil || ctx == nil {
+		return projectionSearchLease{}, fmt.Errorf("kitdb: invalid search projection lease/context")
+	}
+	if err := ctx.Err(); err != nil {
+		return projectionSearchLease{}, err
+	}
+	if lease.entry == nil || lease.cache == nil || maximumBytes == 0 {
+		return lease.openUncachedSearchIndex(ctx, table, schema)
+	}
+
+	cache, entry := lease.cache, lease.entry
+	cache.mu.Lock()
+	if entry.retired || entry.file == nil {
+		cache.mu.Unlock()
+		return projectionSearchLease{}, fmt.Errorf("kitdb: search projection cache entry is retired")
+	}
+	if loading := entry.searchIndexes[table]; loading != nil {
+		ready := loading.ready
+		cache.mu.Unlock()
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return projectionSearchLease{}, ctx.Err()
+		}
+		if loading.bypass {
+			return lease.openUncachedSearchIndex(ctx, table, schema)
+		}
+		if loading.err != nil {
+			return projectionSearchLease{}, loading.err
+		}
+		if loading.index == nil {
+			return projectionSearchLease{}, fmt.Errorf("kitdb: search projection reader completed without an index")
+		}
+		return projectionSearchLease{
+			index: loading.index, cached: true, access: projectionCacheAccess{hit: true},
+		}, nil
+	}
+	if entry.searchIndexes == nil {
+		entry.searchIndexes = make(map[string]*projectionSearchIndex)
+	}
+	loading := &projectionSearchIndex{ready: make(chan struct{})}
+	entry.searchIndexes[table] = loading
+	cache.mu.Unlock()
+
+	section, err := lease.file.Section(table)
+	if err != nil {
+		lease.failSearchIndexLoad(table, loading, err, false)
+		return projectionSearchLease{}, err
+	}
+	info, err := search.InspectSnapshot(ctx, section, schema)
+	if err != nil {
+		lease.failSearchIndexLoad(table, loading, err, false)
+		return projectionSearchLease{}, err
+	}
+
+	cache.mu.Lock()
+	remaining := maximumBytes - entry.searchCapacityBytes
+	bypass := info.ReaderCapacityBytes <= 0 || info.ReaderCapacityBytes > remaining
+	if bypass {
+		delete(entry.searchIndexes, table)
+		loading.bypass = true
+		close(loading.ready)
+		cache.mu.Unlock()
+		return lease.openUncachedSearchIndex(ctx, table, schema)
+	}
+	entry.searchCapacityBytes += info.ReaderCapacityBytes
+	loading.capacity = info.ReaderCapacityBytes
+	cache.mu.Unlock()
+
+	index, err := search.OpenSnapshotContext(ctx, section, schema)
+	if err != nil {
+		lease.failSearchIndexLoad(table, loading, err, true)
+		return projectionSearchLease{}, err
+	}
+	if resident := index.ResidentBytes(); resident > info.ReaderCapacityBytes {
+		_ = index.Close()
+		err = fmt.Errorf(
+			"kitdb: search reader residency %d exceeds its reservation %d",
+			resident, info.ReaderCapacityBytes,
+		)
+		lease.failSearchIndexLoad(table, loading, err, true)
+		return projectionSearchLease{}, err
+	}
+	cache.mu.Lock()
+	loading.index = index
+	close(loading.ready)
+	cache.mu.Unlock()
+	return projectionSearchLease{
+		index: index, cached: true, access: projectionCacheAccess{miss: true},
+	}, nil
+}
+
+func (lease *projectionLease) failSearchIndexLoad(
+	table string,
+	loading *projectionSearchIndex,
+	err error,
+	releaseCapacity bool,
+) {
+	cache, entry := lease.cache, lease.entry
+	cache.mu.Lock()
+	if entry.searchIndexes[table] == loading {
+		delete(entry.searchIndexes, table)
+		if releaseCapacity {
+			entry.searchCapacityBytes -= loading.capacity
+			if entry.searchCapacityBytes < 0 {
+				entry.searchCapacityBytes = 0
+			}
+		}
+	}
+	loading.err = err
+	close(loading.ready)
+	cache.mu.Unlock()
+}
+
+func (lease *projectionLease) openUncachedSearchIndex(
+	ctx context.Context,
+	table string,
+	schema search.Schema,
+) (projectionSearchLease, error) {
+	section, err := lease.file.Section(table)
+	if err != nil {
+		return projectionSearchLease{}, err
+	}
+	index, err := search.OpenSnapshotContext(ctx, section, schema)
+	if err != nil {
+		return projectionSearchLease{}, err
+	}
+	return projectionSearchLease{
+		index: index, access: projectionCacheAccess{miss: true, bypass: true},
+	}, nil
 }
 
 type projectionPublisher interface {
@@ -263,6 +566,29 @@ func (engine *Engine) publishProjection(
 	return publisher.Publish(ctx, manifest)
 }
 
+// ProjectionCacheStats returns the bounded readers currently retained by this
+// relational engine. It performs no projection I/O and does not open a missing
+// snapshot.
+func (engine *Engine) ProjectionCacheStats() ProjectionCacheStats {
+	if engine == nil {
+		return ProjectionCacheStats{}
+	}
+	return engine.projectionCache.stats()
+}
+
+// TrimProjectionCache releases every warm projection reader without changing
+// canonical KROW data or projection files. The publication gate waits for
+// active projection queries, so a successful trim cannot invalidate an
+// in-flight reader.
+func (engine *Engine) TrimProjectionCache() (ProjectionCacheTrim, error) {
+	if engine == nil {
+		return ProjectionCacheTrim{}, fmt.Errorf("kitdb: projection engine is nil")
+	}
+	engine.projectionMu.Lock()
+	defer engine.projectionMu.Unlock()
+	return engine.projectionCache.trim()
+}
+
 func (stats *ExecutionStats) observeProjectionCache(access projectionCacheAccess) {
 	if stats == nil {
 		return
@@ -275,5 +601,20 @@ func (stats *ExecutionStats) observeProjectionCache(access projectionCacheAccess
 	}
 	if access.bypass {
 		stats.ProjectionCacheBypasses++
+	}
+}
+
+func (stats *ExecutionStats) observeSearchReaderCache(access projectionCacheAccess) {
+	if stats == nil {
+		return
+	}
+	if access.hit {
+		stats.SearchReaderCacheHits++
+	}
+	if access.miss {
+		stats.SearchReaderCacheMisses++
+	}
+	if access.bypass {
+		stats.SearchReaderCacheBypasses++
 	}
 }

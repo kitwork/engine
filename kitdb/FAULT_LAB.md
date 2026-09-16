@@ -18,6 +18,56 @@ second supervisor-specific cursor matrix.
 
 ## Hard-crash matrix
 
+`go test ./kitdb/relational -run '^TestWriteCompositionConflictAndRecovery$'
+-count=10` additionally exits a child process without defers after committed
+INSERT SELECT/upsert operations and an uncommitted savepoint transaction.
+Reopen must contain only the acknowledged source and audit rows. It also
+checks that a stale optimistic upsert cannot overwrite a newer commit. This
+is process-exit evidence, not a new power-loss or fsync-boundary matrix.
+
+`go test ./kitdb/relational -run '^TestReverseForeignKeyRecovery$' -count=10`
+exits after acknowledged unreferenced-parent UPDATE/DELETE, a rejected
+referenced-parent DELETE, and staged but uncommitted child/parent deletions.
+Reopen must retain the referenced parent and child, preserve acknowledged
+changes, and still enforce the FK. Separate interleaved-transaction tests require
+the second commit to fail for competing child INSERT and parent DELETE in both
+commit orders. These reuse the existing kernel's recovery and conflict rules;
+they are not an additional physical power-loss certification.
+
+`go test ./kitdb/relational -run '^TestReferentialActionConflictAndRecovery$'
+-count=10` extends this oracle to acknowledged CASCADE UPDATE/DELETE, including
+child index/count changes, and an uncommitted cascaded deletion at hard exit.
+The reopened file must preserve only the acknowledged parent/child images.
+Both commit orders of a competing child INSERT and cascading parent DELETE
+must still reject the stale writer. Row/wave ceilings and late child/trigger
+failures are checked separately against full statement rollback.
+
+`go test ./kitdb/relational -run '^TestReferentialDefaultRecovery$' -count=10`
+exits after acknowledged parent UPDATE/DELETE with SET DEFAULT child actions,
+index maintenance and AFTER UPDATE audit writes, followed by an uncommitted
+parent DELETE. Reopen must preserve only acknowledged parent/child/audit images
+and still reject deleting their fallback parent. Renaming the referenced table
+and column must preserve the action. Separate tests cover concurrent deletion
+of the fallback parent in both commit orders, sequence gaps after rollback,
+child constraint failures and PostgreSQL savepoint recovery. This adds no WAL
+format or new power-loss certification.
+
+The standalone commerce drill additionally exercises a real `kitdbpg` process
+with `products`, `orders`, `order_items` and trigger-owned audit writes:
+
+```text
+go test ./cmd/kitdbdist -run '^TestKitDBCommerceNativeJourney$' -count=10 -timeout 20m
+```
+
+It verifies previously acknowledged orders, stages another complete order and
+audit transaction, kills the server before closing that transaction's client,
+requires abnormal process exit, and reopens the same file in a new process.
+Every row, monetary value and audit event is compared with an independent
+model. Verified backup/restore and timestamp recovery then exercise restored
+domain/function/trigger/sequence behavior. This is application-boundary crash
+evidence, not injection inside fsync/checkpoint publication or hardware
+power-loss coverage; the lower-level matrices below remain required.
+
 Run the deterministic matrix from `engine/`:
 
 ```text

@@ -17,7 +17,8 @@ const (
 	SchemaVersion6       = 6
 	SchemaVersion7       = 7
 	SchemaVersion8       = 8
-	CurrentSchemaVersion = SchemaVersion8
+	SchemaVersion9       = 9
+	CurrentSchemaVersion = SchemaVersion9
 )
 
 // Schema is KitDB's storage-neutral catalog contract. Frontends may keep richer
@@ -37,6 +38,7 @@ type Schema struct {
 }
 
 type Field struct {
+	Domain        *DomainReference `json:"domain,omitempty"`
 	Sequence      *SequenceDefault `json:"sequence,omitempty"`
 	ID            string           `json:"id"`
 	Tag           uint32           `json:"tag"`
@@ -63,6 +65,14 @@ type Field struct {
 	Searchable    bool             `json:"searchable,omitempty"`
 	SearchWeight  int              `json:"searchWeight,omitempty"`
 	Analytics     bool             `json:"analytics,omitempty"`
+}
+
+// DomainReference preserves catalog identity after its immutable constraints
+// have been bound to this table's stable field tags.
+type DomainReference struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Hash string `json:"hash"`
 }
 
 // SequenceDefault binds by immutable sequence identity, never by a mutable
@@ -305,6 +315,13 @@ func (schema Schema) Validate() error {
 	for _, field := range schema.Fields {
 		if field.ID == "" || field.Name == "" {
 			return fmt.Errorf("schema %q has a field with incomplete identity", schema.Name)
+		}
+		if field.Domain != nil {
+			id, err := hex.DecodeString(field.Domain.ID)
+			if schema.Version < SchemaVersion9 || err != nil || len(id) != 16 || field.Domain.ID != strings.ToLower(field.Domain.ID) ||
+				field.Domain.Name == "" || field.Domain.Hash == "" {
+				return fmt.Errorf("schema %q field %q has an invalid domain reference", schema.Name, field.Name)
+			}
 		}
 		if previous := ids[field.ID]; previous != "" {
 			return fmt.Errorf("schema %q fields %q and %q share id %q", schema.Name, previous, field.Name, field.ID)

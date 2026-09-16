@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
@@ -16,6 +17,7 @@ const (
 	postingBlockHeaderCRC     = 28
 	postingBlockFlagPositions = 1 << 0
 	postingBlockPayloadMax    = math.MaxUint32
+	postingReadAheadBytes     = 4 << 10
 )
 
 type posting struct {
@@ -143,6 +145,8 @@ func postingBlockHeaderBytes(version uint32) (int, error) {
 }
 
 type postingIterator struct {
+	work              postingWork
+	ctx               context.Context
 	file              io.ReaderAt
 	version           uint32
 	headerSize        uint64
@@ -168,9 +172,12 @@ type postingIterator struct {
 	payload     []byte
 	positions   [][]uint32
 	norms       []uint32
+	readAhead   []byte
+	readOffset  uint64
 }
 
 func newPostingIterator(
+	ctx context.Context,
 	file io.ReaderAt,
 	version uint32,
 	record termRecord,
@@ -179,7 +186,7 @@ func newPostingIterator(
 	wantPositions bool,
 ) (*postingIterator, error) {
 	iterator := &postingIterator{}
-	if err := resetPostingIterator(iterator, file, version, record, documentCount, postingsSection, wantPositions); err != nil {
+	if err := resetPostingIterator(iterator, ctx, file, version, record, documentCount, postingsSection, wantPositions); err != nil {
 		return nil, err
 	}
 	return iterator, nil
@@ -187,6 +194,7 @@ func newPostingIterator(
 
 func resetPostingIterator(
 	iterator *postingIterator,
+	ctx context.Context,
 	file io.ReaderAt,
 	version uint32,
 	record termRecord,
@@ -194,6 +202,9 @@ func resetPostingIterator(
 	postingsSection sectionDescriptor,
 	wantPositions bool,
 ) error {
+	if ctx == nil {
+		return fmt.Errorf("search: query context is nil")
+	}
 	if record.documentFreq == 0 || record.documentFreq > documentCount {
 		return corruptf("posting document frequency %d exceeds segment size %d", record.documentFreq, documentCount)
 	}
@@ -208,6 +219,9 @@ func resetPostingIterator(
 	if record.postingsOffset < postingsSection.offset || record.postingsOffset > sectionEnd || record.postingsLength > sectionEnd-record.postingsOffset {
 		return corruptf("posting list exceeds postings section")
 	}
+	iterator.ctx = ctx
+	iterator.work = postingWorkFromContext(ctx)
+	iterator.work.add(workPostingLists, 1)
 	iterator.file = file
 	iterator.version = version
 	iterator.headerSize = uint64(headerSize)
@@ -226,9 +240,62 @@ func resetPostingIterator(
 	iterator.blockCount = 0
 	iterator.blockIndex = -1
 	iterator.hasCurrent = false
-	iterator.payload = nil
-	iterator.positions = nil
+	iterator.payload = iterator.payload[:0]
+	iterator.positions = iterator.positions[:0]
 	iterator.norms = nil
+	iterator.readAhead = iterator.readAhead[:0]
+	iterator.readOffset = 0
+	return nil
+}
+
+// readAt keeps the small, sequential posting header/payload reads inside one
+// bounded window. It also observes cancellation at physical I/O boundaries.
+// An operating-system ReadAt already in progress cannot be preempted safely;
+// cancellation is returned as soon as that bounded read completes.
+func (iterator *postingIterator) readAt(destination []byte, offset uint64) error {
+	if err := iterator.ctx.Err(); err != nil {
+		return err
+	}
+	if len(destination) == 0 {
+		return nil
+	}
+	iterator.work.add(workReadRequests, 1)
+	iterator.work.add(workRequestedBytes, uint64(len(destination)))
+	if offset >= iterator.readOffset {
+		relative := offset - iterator.readOffset
+		if relative <= uint64(len(iterator.readAhead)) &&
+			uint64(len(destination)) <= uint64(len(iterator.readAhead))-relative {
+			copy(destination, iterator.readAhead[relative:relative+uint64(len(destination))])
+			iterator.work.add(workReadAheadHits, 1)
+			return iterator.ctx.Err()
+		}
+	}
+	if offset > iterator.end || uint64(len(destination)) > iterator.end-offset {
+		return corruptf("posting read exceeds its list")
+	}
+	remaining := iterator.end - offset
+	window := min(uint64(postingReadAheadBytes), remaining)
+	if window < uint64(len(destination)) {
+		window = uint64(len(destination))
+	}
+	if window > uint64(maxIntValue()) {
+		return corruptf("posting read window exceeds platform range")
+	}
+	if cap(iterator.readAhead) < int(window) {
+		iterator.readAhead = make([]byte, int(window))
+	} else {
+		iterator.readAhead = iterator.readAhead[:int(window)]
+	}
+	iterator.readOffset = offset
+	iterator.work.add(workReaderCalls, 1)
+	iterator.work.add(workReaderBytes, window)
+	if err := readAtFull(iterator.file, iterator.readAhead, offset); err != nil {
+		return err
+	}
+	if err := iterator.ctx.Err(); err != nil {
+		return err
+	}
+	copy(destination, iterator.readAhead[:len(destination)])
 	return nil
 }
 
@@ -247,6 +314,7 @@ func (iterator *postingIterator) CurrentPositions() []uint32 {
 }
 
 func (iterator *postingIterator) Next() (bool, error) {
+	iterator.work.add(workNextCalls, 1)
 	if iterator.hasCurrent && iterator.blockIndex+1 < iterator.blockCount {
 		iterator.blockIndex++
 		return true, nil
@@ -279,6 +347,7 @@ func (iterator *postingIterator) decodeNextBlock(header postingBlockHeader) (boo
 }
 
 func (iterator *postingIterator) skipNextBlock(header postingBlockHeader) error {
+	iterator.work.add(workSkippedScoreBlocks, 1)
 	iterator.hasCurrent = false
 	iterator.consumeBlockHeader(header)
 	iterator.position += iterator.headerSize + uint64(header.payloadLength)
@@ -289,13 +358,16 @@ func (iterator *postingIterator) skipNextBlock(header postingBlockHeader) error 
 }
 
 func (iterator *postingIterator) Advance(target uint32) (bool, error) {
+	iterator.work.add(workAdvanceCalls, 1)
 	if iterator.hasCurrent {
 		if iterator.documents[iterator.blockIndex] >= target {
+			iterator.work.add(workAdvanceCurrent, 1)
 			return true, nil
 		}
 		remaining := iterator.documents[iterator.blockIndex+1 : iterator.blockCount]
 		offset := sort.Search(len(remaining), func(index int) bool { return remaining[index] >= target })
 		if offset < len(remaining) {
+			iterator.work.add(workAdvanceInBlock, 1)
 			iterator.blockIndex += offset + 1
 			return true, nil
 		}
@@ -308,6 +380,7 @@ func (iterator *postingIterator) Advance(target uint32) (bool, error) {
 			return false, err
 		}
 		if header.lastDocument < target {
+			iterator.work.add(workSkippedTargetBlocks, 1)
 			iterator.consumeBlockHeader(header)
 			iterator.position += iterator.headerSize + uint64(header.payloadLength)
 			continue
@@ -343,7 +416,7 @@ func (iterator *postingIterator) readBlockHeader() (postingBlockHeader, error) {
 		return postingBlockHeader{}, corruptf("posting block header is truncated")
 	}
 	encoded := iterator.headerBytes[:iterator.headerSize]
-	if err := readAtFull(iterator.file, encoded, iterator.position); err != nil {
+	if err := iterator.readAt(encoded, iterator.position); err != nil {
 		return postingBlockHeader{}, err
 	}
 	header := postingBlockHeader{
@@ -390,6 +463,7 @@ func (iterator *postingIterator) readBlockHeader() (postingBlockHeader, error) {
 	if iterator.seen+uint32(header.count) > iterator.documentFrequency {
 		return postingBlockHeader{}, corruptf("posting list contains too many documents")
 	}
+	iterator.work.add(workHeaders, 1)
 	return header, nil
 }
 
@@ -400,7 +474,7 @@ func (iterator *postingIterator) decodeBlock(header postingBlockHeader) (int, er
 		iterator.payload = iterator.payload[:header.payloadLength]
 	}
 	payload := iterator.payload
-	if err := readAtFull(iterator.file, payload, iterator.position+iterator.headerSize); err != nil {
+	if err := iterator.readAt(payload, iterator.position+iterator.headerSize); err != nil {
 		return 0, err
 	}
 	if got := crc32.Checksum(payload, crcTable); got != header.payloadCRC {
@@ -428,11 +502,13 @@ func (iterator *postingIterator) decodeBlock(header postingBlockHeader) (int, er
 	}
 	for index := 0; index < int(header.count); index++ {
 		gap, read := binary.Uvarint(remaining)
+		iterator.work.varint(read, false)
 		if read <= 0 {
 			return 0, corruptf("posting document gap is malformed")
 		}
 		remaining = remaining[read:]
 		frequency, read := binary.Uvarint(remaining)
+		iterator.work.varint(read, false)
 		if read <= 0 || frequency == 0 || frequency > math.MaxUint32 {
 			return 0, corruptf("posting term frequency is malformed")
 		}
@@ -446,9 +522,17 @@ func (iterator *postingIterator) decodeBlock(header postingBlockHeader) (int, er
 			}
 			previous += uint32(gap)
 		}
+		if previous > header.lastDocument {
+			return 0, corruptf("posting document exceeds block bounds")
+		}
 		iterator.documents[index] = previous
 		iterator.frequencies[index] = uint32(frequency)
 		if hasPositions {
+			// Every position needs at least one byte. Reject impossible counts
+			// before allocating from an untrusted frequency.
+			if frequency > uint64(len(remaining)) {
+				return 0, corruptf("posting position count exceeds payload")
+			}
 			if wantPositions {
 				if cap(iterator.positions[index]) < int(frequency) {
 					iterator.positions[index] = make([]uint32, 0, int(frequency))
@@ -459,6 +543,7 @@ func (iterator *postingIterator) decodeBlock(header postingBlockHeader) (int, er
 			previousPosition := uint32(0)
 			for positionIndex := 0; positionIndex < int(frequency); positionIndex++ {
 				gap, read := binary.Uvarint(remaining)
+				iterator.work.varint(read, true)
 				if read <= 0 {
 					return 0, corruptf("posting position gap is malformed")
 				}
@@ -495,6 +580,9 @@ func (iterator *postingIterator) decodeBlock(header postingBlockHeader) (int, er
 		return 0, corruptf("posting block payload does not match its header")
 	}
 	iterator.blockCount = int(header.count)
+	iterator.work.add(workDecodedBlocks, 1)
+	iterator.work.add(workDecodedPostings, uint64(header.count))
+	iterator.work.add(workDecodedPayloadBytes, uint64(header.payloadLength))
 	iterator.consumeBlockHeader(header)
 	iterator.position += iterator.headerSize + uint64(header.payloadLength)
 	return iterator.blockCount, nil

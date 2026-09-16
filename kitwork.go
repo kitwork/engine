@@ -67,7 +67,7 @@ func Run(configFile ...string) (err error) {
 	// DISPATCH THEO MANIFEST: khai báo là DỮ LIỆU, lệnh mới quyết định chạy gì. Không có web
 	// surface thì cloud host không có gì để phục vụ — nếu app khai desktop/mobile thì đó là
 	// hợp lệ (chạy shell tương ứng), không phải lỗi.
-	if !builder.hasWeb {
+	if !builder.hasWeb && !builder.hasDatabase {
 		if _, hasDesktop := builder.config["desktop"]; hasDesktop {
 			fmt.Printf("%s khai báo app.desktop() nhưng không có web surface — không có gì để phục vụ.\n"+
 				"→ Chạy `kitwork-desktop` cho app desktop, hoặc thêm `app.web({ port: env.PORT || 8080 })` để phục vụ HTTP.\n", file)
@@ -84,7 +84,13 @@ func Run(configFile ...string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
-	fmt.Printf("Loaded configuration from %s (app.web)\n", file)
+	surface := "app.database"
+	if builder.hasWeb && builder.hasDatabase {
+		surface = "app.web + app.database"
+	} else if builder.hasWeb {
+		surface = "app.web"
+	}
+	fmt.Printf("Loaded configuration from %s (%s)\n", file, surface)
 
 	cfg, err := ParseConfig(raw)
 	if err != nil {
@@ -92,6 +98,23 @@ func Run(configFile ...string) (err error) {
 	}
 	if err := resolveRootConfig(cfg); err != nil {
 		return fmt.Errorf("resolve app root: %w", err)
+	}
+	// An owned KitDB root is declared relative to the manifest, and kitsql needs the web surface.
+	manifestDirectory, err := filepath.Abs(filepath.Dir(file))
+	if err != nil {
+		return fmt.Errorf("resolve manifest directory: %w", err)
+	}
+	for index := range cfg.AppDatabases {
+		if !filepath.IsAbs(cfg.AppDatabases[index].Path) {
+			cfg.AppDatabases[index].Path = filepath.Join(manifestDirectory, cfg.AppDatabases[index].Path)
+		}
+	}
+	if !builder.hasWeb {
+		for _, configured := range cfg.AppDatabases {
+			if configured.KitSQL {
+				return fmt.Errorf("app.database %q: kitsql requires an app.web surface", configured.Path)
+			}
+		}
 	}
 
 	// Initialize structured logger
@@ -130,6 +153,36 @@ func Run(configFile ...string) (err error) {
 
 	if !systemConnected {
 		fmt.Println("System Database is not provided")
+	}
+
+	appDatabaseContext, cancelAppDatabases := context.WithCancel(context.Background())
+	appDatabaseRuntimes, appDatabaseErrors, err := startAppDatabaseRuntimes(appDatabaseContext, cfg.AppDatabases)
+	if err != nil {
+		cancelAppDatabases()
+		return err
+	}
+	closeAppDatabases := func() error {
+		cancelAppDatabases()
+		var closeErr error
+		for index := len(appDatabaseRuntimes) - 1; index >= 0; index-- {
+			closeErr = errors.Join(closeErr, appDatabaseRuntimes[index].Close())
+		}
+		return closeErr
+	}
+	defer closeAppDatabases()
+
+	if !builder.hasWeb {
+		printBanner(cfg, host.IsLocalhost(), false)
+		signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stopSignals()
+		select {
+		case <-signalCtx.Done():
+			slog.Info("Shutdown signal received")
+		case runErr := <-appDatabaseErrors:
+			slog.Error("KitDB server stopped", "error", runErr)
+			return runErr
+		}
+		return closeAppDatabases()
 	}
 
 	// Pass global settings to the work package
@@ -219,7 +272,16 @@ func Run(configFile ...string) (err error) {
 	// site measured 174 KB uncompressed — and while the render costs microseconds, shipping those
 	// bytes costs hundreds of milliseconds. The middleware leaves live streams, already-compressed
 	// formats and tiny bodies alone; see utilities/compress.
-	srvHandler := compress.Middleware(handler)
+	var baseHandler http.Handler = handler
+	baseHandler, err = newAppDatabaseKitSQLHandler(
+		appDatabaseRuntimes,
+		baseHandler,
+		cfg.AllowLocal || host.IsLocalhost(),
+	)
+	if err != nil {
+		return fmt.Errorf("configure KitSQL endpoint: %w", err)
+	}
+	srvHandler := compress.Middleware(baseHandler)
 	var servers []*http.Server
 	serverErrors := make(chan error, 2)
 	if !host.IsLocalhost() && !cfg.AllowLocal {
@@ -236,7 +298,7 @@ func Run(configFile ...string) (err error) {
 		}()
 	}
 
-	printBanner(cfg, host.IsLocalhost())
+	printBanner(cfg, host.IsLocalhost(), true)
 
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
@@ -258,6 +320,8 @@ func Run(configFile ...string) (err error) {
 		if !errors.Is(runErr, http.ErrServerClosed) {
 			slog.Error("HTTP server stopped", "error", runErr)
 		}
+	case runErr = <-appDatabaseErrors:
+		slog.Error("KitDB server stopped", "error", runErr)
 	}
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
@@ -266,6 +330,9 @@ func Run(configFile ...string) (err error) {
 		if err := server.Shutdown(shutdownCtx); err != nil && runErr == nil {
 			runErr = err
 		}
+	}
+	if err := closeAppDatabases(); err != nil && runErr == nil {
+		runErr = err
 	}
 
 	if errors.Is(runErr, http.ErrServerClosed) {
@@ -359,7 +426,7 @@ func commandConfig(configFile ...string) (*Config, error) {
 			builder.err,
 		)
 	}
-	if !builder.hasWeb {
+	if !builder.hasWeb && !builder.hasDatabase {
 		return nil, fmt.Errorf(
 			"failed to evaluate config %s: %w",
 			file,
@@ -382,7 +449,7 @@ func commandConfig(configFile ...string) (*Config, error) {
 
 // printBanner renders the Kitwork startup banner: a brand-red "KITWORK" wordmark
 // plus honest runtime facts (mode, listen address, TLS, databases). No fake metrics.
-func printBanner(cfg *Config, isLocalhost bool) {
+func printBanner(cfg *Config, isLocalhost, hasWeb bool) {
 	const (
 		red   = "\033[38;2;248;34;68m" // brand red #f82244
 		dim   = "\033[2m"
@@ -402,11 +469,13 @@ func printBanner(cfg *Config, isLocalhost bool) {
 	fmt.Println(dim + "  sovereign logic engine\n" + reset)
 
 	fmt.Printf("%s%s  %sroot:%s %s\n", label("mode"), mode, dim, reset, root)
-	fmt.Printf("%shttp://localhost:%d\n", label("listen"), cfg.Port)
-	if cfg.AllowLocal || isLocalhost {
-		fmt.Printf("%s%sdisabled (local dev)%s\n", label("tls"), dim, reset)
-	} else {
-		fmt.Printf("%sAutoSSL · :443\n", label("tls"))
+	if hasWeb {
+		fmt.Printf("%shttp://localhost:%d\n", label("listen"), cfg.Port)
+		if cfg.AllowLocal || isLocalhost {
+			fmt.Printf("%s%sdisabled (local dev)%s\n", label("tls"), dim, reset)
+		} else {
+			fmt.Printf("%sAutoSSL · :443\n", label("tls"))
+		}
 	}
 	for _, db := range cfg.Databases {
 		alias := db.Alias
@@ -422,6 +491,16 @@ func printBanner(cfg *Config, isLocalhost bool) {
 		} else {
 			fmt.Printf("%s%s · %s %s(%s)%s\n", label("db"), db.Type, db.Endpoint(), dim, alias, reset)
 		}
+	}
+	for _, db := range cfg.AppDatabases {
+		modes := []string{"native"}
+		if db.KitSQL {
+			modes = append(modes, "kitsql")
+		}
+		if db.Port != 0 {
+			modes = append(modes, fmt.Sprintf("postgresql:%d", db.Port))
+		}
+		fmt.Printf("%skitdb · %s %s(%s)%s\n", label("db"), db.Path, dim, strings.Join(modes, ", "), reset)
 	}
 	fmt.Println()
 }

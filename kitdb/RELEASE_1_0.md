@@ -11,6 +11,10 @@ This contract deliberately makes a narrow production claim. It does not use a
 The operator procedure implementing this claim lives in
 [PRODUCTION.md](PRODUCTION.md).
 
+Candidate binary packaging, build identity and native executable checks are
+documented in [DISTRIBUTION.md](DISTRIBUTION.md). Packaging is separate from
+the platform and deployment qualification below.
+
 ## Supported profile
 
 KitDB 1.0 supports:
@@ -85,6 +89,9 @@ KitDB 1.0 does not claim:
   distributed consensus, automatic failover, or synchronous cross-region
   durability;
 - general PostgreSQL or SQLite SQL compatibility;
+- standalone COPY/resumable CSV/JSONL import. The existing `kitdbimport` tool
+  requires the Kitwork adapter's KIMP/COPY integration and is excluded from
+  the standalone RC bundle until that path is ported and qualified;
 - public-network PostgreSQL service operation. The current adapter is loopback
   only and intentionally has no TLS or SCRAM;
 - savepoints, deferred constraints, unbounded queries/migrations/imports, or
@@ -118,16 +125,29 @@ go run ./cmd/releasegate --mode kitdb-release \
   --timeout 90m
 ```
 
-The release gate includes full kernel/node/relational/operator tests, build,
-vet, compatibility checks, database journey and durability oracles, explicit
-analytics publication/corruption/upgrade recovery, race detector coverage, ten
-repetitions of replica/catalog/import/index/analytics hard-crash matrices, a
-multi-tenant canary smoke, and a seeded 128-iteration replica crash soak.
+The release gate includes full kernel/node/relational/operator tests, the
+standalone pure-Go search suite, build, vet, compatibility checks, database
+journey and durability oracles, the mandatory standalone commerce journey, explicit analytics
+publication/corruption/upgrade recovery, kernel/search/relational race detector
+coverage, ten repetitions of commerce/replica/catalog/import/index/analytics hard-crash
+matrices, a multi-tenant canary smoke, and a seeded 128-iteration replica crash
+soak.
+
+The commerce gate builds fresh `CGO_ENABLED=0` native `kitdb`/`kitdbpg`
+executables from the current checkout, checks their standalone dependency
+allowlist, and cannot skip through a missing binary-directory environment
+variable. It exercises products/orders/order_items/audit, DOMAIN/FUNCTION/
+TRIGGER/SEQUENCE, exact money, late failures and rollback, a forced process
+termination with staged audit writes, independent backup restore and timestamp
+recovery of data and catalog objects. See [DISTRIBUTION.md](DISTRIBUTION.md).
+Its bounded `.artifacts/kitdb-commerce-gate.json` includes platform, binary
+digests, passed phases and success, not source paths or credentials. This is
+one development gate, not a clean-commit packaged-candidate qualification.
 
 Run the long storage canary on the intended deployment filesystem:
 
 ```text
-go run ./cmd/kitdbcanary \
+kitdbcanary \
   --root /qualified/local/filesystem/kitdb-canary \
   --duration 24h \
   --tenants 128 \
@@ -140,6 +160,11 @@ The canary reuses a bounded keyspace, bounds retained history, exercises node
 handle eviction, checkpoint and verification, and finishes by creating,
 verifying, restoring, reopening, and comparing every tenant against its exact
 committed model. The report contains no database path, key, or value.
+
+Use the packaged `kitdbcanary` for candidate evidence. Its `build.commit` must
+match the platform reports; `workload_completed` and `success` must both be
+true. Require at least 86,400,000 in `requested_workload_ms` and `workload_ms`.
+Total `duration_ms` includes setup and restore and is insufficient by itself.
 
 ## Promotion checklist
 

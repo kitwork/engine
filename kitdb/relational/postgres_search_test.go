@@ -114,4 +114,51 @@ func TestStandalonePostgresWireSearchAndCursor(t *testing.T) {
 	if merchant == "" || id == 0 {
 		t.Fatalf("wire SEARCH second page = %q/%d", merchant, id)
 	}
+	var total int64
+	if err := database.QueryRow(`SELECT COUNT(*) FROM products WHERE * SEARCH 'ban phim logitech' LIMIT 1`).Scan(&total); err != nil || total != 3 {
+		t.Fatalf("wire SEARCH count = %d, %v", total, err)
+	}
+	statement, err := database.Prepare(`SELECT COUNT(*) AS total FROM products WHERE * SEARCH $1 AND merchant = $2`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer statement.Close()
+	if err := statement.QueryRow("ban phim logitech", "shopee").Scan(&total); err != nil || total != 2 {
+		t.Fatalf("prepared wire SEARCH count = %d, %v", total, err)
+	}
+	groups, err := database.Query(`SELECT merchant, COUNT(*) AS total, SUM(id) AS id_sum, AVG(id) AS id_average, MIN(id), MAX(id)
+		FROM products WHERE * SEARCH 'ban phim logitech' GROUP BY merchant ORDER BY merchant`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupRows := 0
+	for groups.Next() {
+		var name, average string
+		var count, sum, low, high int64
+		if err := groups.Scan(&name, &count, &sum, &average, &low, &high); err != nil {
+			groups.Close()
+			t.Fatal(err)
+		}
+		if name == "shopee" && (count != 2 || sum != 3 || average != "1.5" || low != 1 || high != 2) {
+			groups.Close()
+			t.Fatalf("wire aggregates: %s %d %d %s %d %d", name, count, sum, average, low, high)
+		}
+		groupRows++
+	}
+	if err := groups.Err(); err != nil {
+		groups.Close()
+		t.Fatal(err)
+	}
+	groups.Close()
+	if groupRows != 2 {
+		t.Fatalf("wire aggregate groups=%d", groupRows)
+	}
+	groupStatement, err := database.Prepare(`SELECT merchant, COUNT(*) AS total FROM products WHERE * SEARCH $1 GROUP BY merchant HAVING total >= $2 ORDER BY merchant`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer groupStatement.Close()
+	if err := groupStatement.QueryRow("ban phim logitech", 2).Scan(&merchant, &total); err != nil || merchant != "shopee" || total != 2 {
+		t.Fatalf("prepared wire groups: %q %d %v", merchant, total, err)
+	}
 }

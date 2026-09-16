@@ -31,17 +31,22 @@ type PostgresOptions struct {
 
 type PostgresServerOptions struct {
 	PostgresOptions
-	MaxConnections            int
-	MaxConcurrentCopies       int
-	MaxConcurrentCopiesPerKey int
-	MaxQueuedCopies           int
-	MaxQueuedCopiesPerKey     int
-	MaxMessageBytes           int
-	MaxCopyBytes              int64
-	IdleTimeout               time.Duration
-	QueryTimeout              time.Duration
-	CopyTimeout               time.Duration
-	CopyMetrics               *pgwire.CopyMetrics
+	MaxConcurrentQueries       int
+	MaxConcurrentQueriesPerKey int
+	MaxQueuedQueries           int
+	MaxQueuedQueriesPerKey     int
+	MaxConnections             int
+	MaxConcurrentCopies        int
+	MaxConcurrentCopiesPerKey  int
+	MaxQueuedCopies            int
+	MaxQueuedCopiesPerKey      int
+	MaxMessageBytes            int
+	MaxCopyBytes               int64
+	IdleTimeout                time.Duration
+	QueryTimeout               time.Duration
+	CopyTimeout                time.Duration
+	QueryMetrics               *pgwire.QueryMetrics
+	CopyMetrics                *pgwire.CopyMetrics
 }
 
 type postgresAuthenticator struct {
@@ -109,18 +114,23 @@ func (engine *Engine) ServePostgres(
 		return err
 	}
 	return (pgwire.Server{
-		Authenticator:             authenticator,
-		MaxConnections:            options.MaxConnections,
-		MaxConcurrentCopies:       options.MaxConcurrentCopies,
-		MaxConcurrentCopiesPerKey: options.MaxConcurrentCopiesPerKey,
-		MaxQueuedCopies:           options.MaxQueuedCopies,
-		MaxQueuedCopiesPerKey:     options.MaxQueuedCopiesPerKey,
-		MaxMessageBytes:           options.MaxMessageBytes,
-		MaxCopyBytes:              options.MaxCopyBytes,
-		IdleTimeout:               options.IdleTimeout,
-		QueryTimeout:              options.QueryTimeout,
-		CopyTimeout:               options.CopyTimeout,
-		CopyMetrics:               options.CopyMetrics,
+		Authenticator:              authenticator,
+		MaxConnections:             options.MaxConnections,
+		MaxConcurrentQueries:       options.MaxConcurrentQueries,
+		MaxConcurrentQueriesPerKey: options.MaxConcurrentQueriesPerKey,
+		MaxQueuedQueries:           options.MaxQueuedQueries,
+		MaxQueuedQueriesPerKey:     options.MaxQueuedQueriesPerKey,
+		MaxConcurrentCopies:        options.MaxConcurrentCopies,
+		MaxConcurrentCopiesPerKey:  options.MaxConcurrentCopiesPerKey,
+		MaxQueuedCopies:            options.MaxQueuedCopies,
+		MaxQueuedCopiesPerKey:      options.MaxQueuedCopiesPerKey,
+		MaxMessageBytes:            options.MaxMessageBytes,
+		MaxCopyBytes:               options.MaxCopyBytes,
+		IdleTimeout:                options.IdleTimeout,
+		QueryTimeout:               options.QueryTimeout,
+		CopyTimeout:                options.CopyTimeout,
+		QueryMetrics:               options.QueryMetrics,
+		CopyMetrics:                options.CopyMetrics,
 	}).Serve(ctx, listener)
 }
 
@@ -192,6 +202,10 @@ func (session *postgresSession) CopyAdmission() pgwire.CopyAdmission {
 	return pgwire.CopyAdmission{Key: session.authenticator.database, Weight: 1}
 }
 
+func (session *postgresSession) QueryAdmission() pgwire.QueryAdmission {
+	return pgwire.QueryAdmission{Key: session.authenticator.database, Weight: 1}
+}
+
 func (session *postgresSession) Describe(
 	ctx context.Context,
 	source string,
@@ -203,6 +217,10 @@ func (session *postgresSession) Describe(
 	}
 	if session.maintenance {
 		return session.describeMaintenance(source, parameters)
+	}
+	if isSavepointSQL(source) {
+		_, err := kitdbsql.ParseStatement(source)
+		return nil, postgresError(err)
 	}
 	session.mu.Lock()
 	transaction := session.transaction
@@ -218,7 +236,7 @@ func (session *postgresSession) Describe(
 			}
 			return append([]pgwire.Column(nil), result.Columns...), nil
 		}
-		if result, handled, err := session.catalogQueryForTransaction(transaction, source); handled {
+		if result, handled, err := session.catalogQueryForTransaction(transaction, source, parameters, true); handled {
 			if err != nil {
 				return nil, err
 			}
@@ -240,7 +258,7 @@ func (session *postgresSession) Describe(
 		}
 		return append([]pgwire.Column(nil), result.Columns...), nil
 	}
-	if result, handled, err := session.catalogQuery(source); handled {
+	if result, handled, err := session.catalogQuery(source, parameters, true); handled {
 		if err != nil {
 			return nil, err
 		}
@@ -291,7 +309,7 @@ func (session *postgresSession) Execute(
 	if result, handled, err := session.compatibilityQuery(source); handled {
 		return result, err
 	}
-	if result, handled, err := session.catalogQuery(source); handled {
+	if result, handled, err := session.catalogQuery(source, parameters, false); handled {
 		return result, err
 	}
 	bound, err := postgresParameters(parameters)
@@ -318,6 +336,33 @@ func (session *postgresSession) transactionExecute(
 	parameters []pgwire.Parameter,
 ) (pgwire.Result, bool, error) {
 	normalized := normalizePostgresSQL(source)
+	if isSavepointSQL(source) {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		statement, err := kitdbsql.ParseStatement(source)
+		if err != nil || len(parameters) != 0 {
+			if session.transaction != nil {
+				session.failed = true
+			}
+			if err == nil {
+				err = pgwire.NewError("42601", "savepoints do not accept parameters")
+			}
+			return pgwire.Result{}, true, postgresError(err)
+		}
+		if session.transaction == nil {
+			return pgwire.Result{}, true, postgresError(errSavepointTransaction)
+		}
+		if session.failed && statement.Savepoint.Action != "rollback" {
+			return pgwire.Result{}, true, pgwire.NewError("25P02", "current KitDB transaction is aborted; issue ROLLBACK TO SAVEPOINT or ROLLBACK")
+		}
+		result, err := session.transaction.executeParsed(ctx, statement, nil)
+		if err != nil {
+			session.failed = true
+		} else if statement.Savepoint.Action == "rollback" {
+			session.failed = false
+		}
+		return postgresResult(result), true, postgresError(err)
+	}
 	if begin, readOnly, err := parsePostgresBegin(normalized); begin {
 		if err != nil {
 			return pgwire.Result{}, true, err
@@ -404,7 +449,7 @@ func (session *postgresSession) transactionExecute(
 		}
 		return result, true, err
 	}
-	if result, handled, err := session.catalogQueryForTransaction(transaction, source); handled {
+	if result, handled, err := session.catalogQueryForTransaction(transaction, source, parameters, false); handled {
 		if err != nil {
 			session.failed = true
 		}
@@ -522,7 +567,7 @@ func (session *postgresSession) compatibilityQuery(source string) (pgwire.Result
 	return pgwire.Result{}, false, nil
 }
 
-func (session *postgresSession) catalogQuery(source string) (pgwire.Result, bool, error) {
+func (session *postgresSession) catalogQuery(source string, parameters []pgwire.Parameter, describe bool) (pgwire.Result, bool, error) {
 	if !isPostgresCatalogQuery(source) {
 		return pgwire.Result{}, false, nil
 	}
@@ -533,12 +578,19 @@ func (session *postgresSession) catalogQuery(source string) (pgwire.Result, bool
 	if err := session.attachNodeDatabases(&catalog); err != nil {
 		return pgwire.Result{}, true, err
 	}
+	catalog.user = session.authenticator.user
+	source, err = bindFunctionCatalogParameters(source, parameters, describe)
+	if err != nil {
+		return pgwire.Result{}, true, err
+	}
 	return executePostgresCatalogQuery(source, catalog)
 }
 
 func (session *postgresSession) catalogQueryForTransaction(
 	transaction *Transaction,
 	source string,
+	parameters []pgwire.Parameter,
+	describe bool,
 ) (pgwire.Result, bool, error) {
 	if !isPostgresCatalogQuery(source) {
 		return pgwire.Result{}, false, nil
@@ -548,6 +600,11 @@ func (session *postgresSession) catalogQueryForTransaction(
 		return pgwire.Result{}, true, postgresError(err)
 	}
 	if err := session.attachNodeDatabases(&catalog); err != nil {
+		return pgwire.Result{}, true, err
+	}
+	catalog.user = session.authenticator.user
+	source, err = bindFunctionCatalogParameters(source, parameters, describe)
+	if err != nil {
 		return pgwire.Result{}, true, err
 	}
 	return executePostgresCatalogQuery(source, catalog)
@@ -975,6 +1032,18 @@ func postgresError(err error) error {
 	lower := strings.ToLower(err.Error())
 	code := "XX000"
 	switch {
+	case errors.Is(err, ErrReferentialActionUnsupported):
+		code = "0A000"
+	case errors.Is(err, ErrForeignKeyViolation):
+		code = "23503"
+	case errors.Is(err, ErrForeignKeyCheckLimit):
+		code = "54000"
+	case errors.Is(err, errSavepointMissing):
+		code = "3B001"
+	case errors.Is(err, errSavepointTransaction):
+		code = "25P01"
+	case errors.Is(err, errUpsertCardinality):
+		code = "21000"
 	case errors.Is(err, ErrTransactionConflict):
 		code = "40001"
 	case errors.Is(err, kitdbengine.ErrSequenceNotFound):

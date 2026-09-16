@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -16,13 +17,15 @@ import (
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/buildinfo"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/relational"
 )
 
 func main() {
+	version := flag.Bool("version", false, "print binary build information and exit")
 	file := flag.String("file", "app.kitdb", "KitDB file to open or create")
-	root := flag.String("root", "", "serve every non-hidden .kitdb file immediately below this directory")
+	root := flag.String("root", "", "serve the .catalog database in this root, or legacy immediate .kitdb files when no catalog is present")
 	database := flag.String("database", "", "logical PostgreSQL database name; defaults to the file name")
 	maintenanceDatabase := flag.String("maintenance-database", "kitdb", "logical maintenance database used by node mode")
 	user := flag.String("user", "kitdb", "PostgreSQL login user")
@@ -30,6 +33,9 @@ func main() {
 	readOnly := flag.Bool("readonly", false, "reject SQL writes")
 	verifyOnOpen := flag.Bool("verify-on-open", false, "verify every active storage page before serving")
 	retainHistory := flag.Bool("retain-history", false, "retain checkpointed WAL history for recovery")
+	experimentalProjections := flag.Bool("experimental-projections", false, "enable exact-watermark analytics and search projection reads")
+	projectionOpenPolicySource := flag.String("projection-open-policy", "lazy", "projection admission for every opened database: lazy, validate, or require-ready")
+	warmProjectionOpenPolicySource := flag.String("warm-projection-open-policy", "", "projection admission for warm node databases; default is validate when projections are enabled")
 	maximumResultRows := flag.Int("max-result-rows", relational.DefaultMaximumResultRows, "maximum rows materialized by one query")
 	maximumMutationRows := flag.Int("max-mutation-rows", relational.DefaultMaximumMutationRows, "maximum rows changed by one UPDATE or DELETE")
 	searchRoot := flag.String("search-root", "", "search projection directory; defaults beside the KitDB file")
@@ -37,21 +43,44 @@ func main() {
 	maximumSearchResults := flag.Int("max-search-results", 0, "maximum ranked rows returned by one SEARCH; default is min(max-result-rows, 10000)")
 	maximumSearchCandidates := flag.Int("max-search-candidates", relational.DefaultMaximumSearchCandidates, "maximum source candidates inspected by one filtered SEARCH")
 	searchForegroundWait := flag.Duration("search-foreground-wait", relational.DefaultSearchForegroundWait, "time a query waits for a projection build before retrying later")
+	searchReaderCacheBytes := flag.Int64("search-reader-cache-bytes", 0, "packed SEARCH reader memory retained per opened database; 0 disables residency")
 	maximumDiscoveredDatabases := flag.Int("max-discovered-databases", relational.DefaultMaximumDiscoveredDatabases, "maximum .kitdb files exposed by node discovery")
 	maximumOpenDatabases := flag.Int("max-open-databases", 64, "maximum lazily opened databases in node mode")
 	maximumPageCacheBytes := flag.Int64("max-page-cache-bytes", 256<<20, "fleet page-cache reservation ceiling in node mode")
 	databasePageCacheBytes := flag.Int64("database-page-cache-bytes", 1<<20, "page-cache reservation for each opened database in node mode")
 	maximumConcurrentOpens := flag.Int("max-concurrent-opens", 4, "maximum concurrent database opens in node mode")
 	databaseAcquireTimeout := flag.Duration("database-acquire-timeout", relational.DefaultDatabaseAcquireTimeout, "maximum wait for a busy database slot in node mode")
+	warmDatabases := flag.String("warm-databases", "", "comma-separated logical databases protected from idle LRU eviction")
+	maximumIdleProjectionDatabases := flag.Int("max-idle-projection-databases", 0, "maximum idle databases retaining KCOL/search readers; 0 selects a bounded default")
+	maximumIdleProjectionDirectoryBytes := flag.Int64("max-idle-projection-directory-bytes", 0, "maximum idle KCOL/search directory bytes; 0 derives a bound from the database limit")
+	maximumIdleProjectionReaderBytes := flag.Int64("max-idle-projection-reader-bytes", 0, "maximum retained projection reader bytes across idle databases; 0 selects a bounded default")
 	listen := flag.String("listen", "127.0.0.1:5433", "loopback TCP listen address")
 	logQueries := flag.Bool("log-queries", false, "log SQL text and parameter counts")
 	maxConnections := flag.Int("max-connections", 64, "maximum concurrent PostgreSQL connections")
+	maxConcurrentQueries := flag.Int("max-concurrent-queries", 0, "maximum queries executing across the listener; 0 selects a bounded default")
+	maxConcurrentQueriesPerDatabase := flag.Int("max-concurrent-queries-per-database", 0, "maximum queries executing for one database; 0 selects a bounded default")
+	maxQueuedQueries := flag.Int("max-queued-queries", 0, "maximum queries waiting for execution; 0 selects a bounded default")
+	maxQueuedQueriesPerDatabase := flag.Int("max-queued-queries-per-database", 0, "maximum queued queries for one database; 0 selects a bounded default")
 	idleTimeout := flag.Duration("idle-timeout", 30*time.Minute, "maximum idle PostgreSQL connection lifetime")
 	queryTimeout := flag.Duration("query-timeout", 30*time.Second, "maximum lifetime of one PostgreSQL statement")
 	flag.Parse()
+	if *version {
+		if err := json.NewEncoder(os.Stdout).Encode(buildinfo.Current()); err != nil {
+			fatalf("version: %v", err)
+		}
+		return
+	}
 
 	if strings.TrimSpace(*password) == "" {
 		fatalf("password is required; pass -password or set KITDB_TOKEN")
+	}
+	projectionOpenPolicy, err := relational.ParseProjectionOpenPolicy(*projectionOpenPolicySource)
+	if err != nil {
+		fatalf("projection open policy: %v", err)
+	}
+	warmProjectionOpenPolicy, err := relational.ParseProjectionOpenPolicy(*warmProjectionOpenPolicySource)
+	if err != nil {
+		fatalf("warm projection open policy: %v", err)
 	}
 	if strings.TrimSpace(*root) != "" {
 		if strings.TrimSpace(*database) != "" {
@@ -64,19 +93,32 @@ func main() {
 			root: *root, maintenanceDatabase: *maintenanceDatabase,
 			user: *user, password: *password, readOnly: *readOnly,
 			verifyOnOpen: *verifyOnOpen, retainHistory: *retainHistory,
-			maximumResultRows: *maximumResultRows, maximumMutationRows: *maximumMutationRows,
+			experimentalProjections:  *experimentalProjections,
+			projectionOpenPolicy:     projectionOpenPolicy,
+			warmProjectionOpenPolicy: warmProjectionOpenPolicy,
+			maximumResultRows:        *maximumResultRows, maximumMutationRows: *maximumMutationRows,
 			searchRoot: *searchRoot, maximumSearchResults: *maximumSearchResults,
-			maximumSearchCandidates:    *maximumSearchCandidates,
-			searchForegroundWait:       *searchForegroundWait,
-			maximumDiscoveredDatabases: *maximumDiscoveredDatabases,
-			maximumOpenDatabases:       *maximumOpenDatabases,
-			maximumPageCacheBytes:      *maximumPageCacheBytes,
-			databasePageCacheBytes:     *databasePageCacheBytes,
-			maximumConcurrentOpens:     *maximumConcurrentOpens,
-			databaseAcquireTimeout:     *databaseAcquireTimeout,
-			listen:                     *listen, logQueries: *logQueries,
-			maxConnections: *maxConnections, idleTimeout: *idleTimeout,
-			queryTimeout: *queryTimeout,
+			maximumSearchCandidates:             *maximumSearchCandidates,
+			searchForegroundWait:                *searchForegroundWait,
+			searchReaderCacheBytes:              *searchReaderCacheBytes,
+			maximumDiscoveredDatabases:          *maximumDiscoveredDatabases,
+			maximumOpenDatabases:                *maximumOpenDatabases,
+			maximumPageCacheBytes:               *maximumPageCacheBytes,
+			databasePageCacheBytes:              *databasePageCacheBytes,
+			maximumConcurrentOpens:              *maximumConcurrentOpens,
+			databaseAcquireTimeout:              *databaseAcquireTimeout,
+			warmDatabases:                       splitDatabaseNames(*warmDatabases),
+			maximumIdleProjectionDatabases:      *maximumIdleProjectionDatabases,
+			maximumIdleProjectionDirectoryBytes: *maximumIdleProjectionDirectoryBytes,
+			maximumIdleProjectionReaderBytes:    *maximumIdleProjectionReaderBytes,
+			listen:                              *listen, logQueries: *logQueries,
+			maxConnections:                  *maxConnections,
+			maxConcurrentQueries:            *maxConcurrentQueries,
+			maxConcurrentQueriesPerDatabase: *maxConcurrentQueriesPerDatabase,
+			maxQueuedQueries:                *maxQueuedQueries,
+			maxQueuedQueriesPerDatabase:     *maxQueuedQueriesPerDatabase,
+			idleTimeout:                     *idleTimeout,
+			queryTimeout:                    *queryTimeout,
 		})
 		return
 	}
@@ -85,11 +127,14 @@ func main() {
 		fatalf("resolve database file: %v", err)
 	}
 	databaseEngine, err := relational.OpenWithOptions(absoluteFile, relational.Options{
-		MaximumResultRows: *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
+		ExperimentalProjections: *experimentalProjections,
+		ProjectionOpenPolicy:    projectionOpenPolicy,
+		MaximumResultRows:       *maximumResultRows, MaximumMutationRows: *maximumMutationRows,
 		SearchRoot: *searchRoot, SearchNamespace: *searchNamespace,
 		MaximumSearchResults:    *maximumSearchResults,
 		MaximumSearchCandidates: *maximumSearchCandidates,
 		SearchForegroundWait:    *searchForegroundWait,
+		SearchReaderCacheBytes:  *searchReaderCacheBytes,
 		Kernel: kitdbengine.OpenOptions{
 			VerifyOnOpen:  *verifyOnOpen,
 			RetainHistory: *retainHistory,
@@ -125,39 +170,55 @@ func main() {
 			Database: logicalName, User: *user, Password: *password,
 			ReadOnly: *readOnly, Trace: trace,
 		},
-		MaxConnections: *maxConnections,
-		IdleTimeout:    *idleTimeout,
-		QueryTimeout:   *queryTimeout,
+		MaxConnections:             *maxConnections,
+		MaxConcurrentQueries:       *maxConcurrentQueries,
+		MaxConcurrentQueriesPerKey: *maxConcurrentQueriesPerDatabase,
+		MaxQueuedQueries:           *maxQueuedQueries,
+		MaxQueuedQueriesPerKey:     *maxQueuedQueriesPerDatabase,
+		IdleTimeout:                *idleTimeout,
+		QueryTimeout:               *queryTimeout,
 	}); err != nil {
 		fatalf("serve: %v", err)
 	}
 }
 
 type postgresNodeCommandOptions struct {
-	root                       string
-	maintenanceDatabase        string
-	user                       string
-	password                   string
-	readOnly                   bool
-	verifyOnOpen               bool
-	retainHistory              bool
-	maximumResultRows          int
-	maximumMutationRows        int
-	searchRoot                 string
-	maximumSearchResults       int
-	maximumSearchCandidates    int
-	searchForegroundWait       time.Duration
-	maximumDiscoveredDatabases int
-	maximumOpenDatabases       int
-	maximumPageCacheBytes      int64
-	databasePageCacheBytes     int64
-	maximumConcurrentOpens     int
-	databaseAcquireTimeout     time.Duration
-	listen                     string
-	logQueries                 bool
-	maxConnections             int
-	idleTimeout                time.Duration
-	queryTimeout               time.Duration
+	root                                string
+	maintenanceDatabase                 string
+	user                                string
+	password                            string
+	readOnly                            bool
+	verifyOnOpen                        bool
+	retainHistory                       bool
+	experimentalProjections             bool
+	projectionOpenPolicy                relational.ProjectionOpenPolicy
+	warmProjectionOpenPolicy            relational.ProjectionOpenPolicy
+	maximumResultRows                   int
+	maximumMutationRows                 int
+	searchRoot                          string
+	maximumSearchResults                int
+	maximumSearchCandidates             int
+	searchForegroundWait                time.Duration
+	searchReaderCacheBytes              int64
+	maximumDiscoveredDatabases          int
+	maximumOpenDatabases                int
+	maximumPageCacheBytes               int64
+	databasePageCacheBytes              int64
+	maximumConcurrentOpens              int
+	databaseAcquireTimeout              time.Duration
+	warmDatabases                       []string
+	maximumIdleProjectionDatabases      int
+	maximumIdleProjectionDirectoryBytes int64
+	maximumIdleProjectionReaderBytes    int64
+	listen                              string
+	logQueries                          bool
+	maxConnections                      int
+	maxConcurrentQueries                int
+	maxConcurrentQueriesPerDatabase     int
+	maxQueuedQueries                    int
+	maxQueuedQueriesPerDatabase         int
+	idleTimeout                         time.Duration
+	queryTimeout                        time.Duration
 }
 
 func runPostgresNode(options postgresNodeCommandOptions) {
@@ -175,7 +236,12 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 		Root: absoluteRoot, MaintenanceDatabase: options.maintenanceDatabase,
 		User: options.user, Password: options.password,
 		ReadOnly: options.readOnly, MaximumDiscoveredDatabases: options.maximumDiscoveredDatabases,
-		DatabaseAcquireTimeout: options.databaseAcquireTimeout,
+		DatabaseAcquireTimeout:              options.databaseAcquireTimeout,
+		WarmDatabases:                       options.warmDatabases,
+		WarmProjectionOpenPolicy:            options.warmProjectionOpenPolicy,
+		MaximumIdleProjectionDatabases:      options.maximumIdleProjectionDatabases,
+		MaximumIdleProjectionDirectoryBytes: options.maximumIdleProjectionDirectoryBytes,
+		MaximumIdleProjectionReaderBytes:    options.maximumIdleProjectionReaderBytes,
 		ManagerLimits: kitdbnode.Limits{
 			MaxOpenDatabases:      options.maximumOpenDatabases,
 			MaxPageCacheBytes:     options.maximumPageCacheBytes,
@@ -183,12 +249,15 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 			MaxConcurrentOpens:    options.maximumConcurrentOpens,
 		},
 		Relational: relational.Options{
+			ExperimentalProjections: options.experimentalProjections,
+			ProjectionOpenPolicy:    options.projectionOpenPolicy,
 			MaximumResultRows:       options.maximumResultRows,
 			MaximumMutationRows:     options.maximumMutationRows,
 			SearchRoot:              options.searchRoot,
 			MaximumSearchResults:    options.maximumSearchResults,
 			MaximumSearchCandidates: options.maximumSearchCandidates,
 			SearchForegroundWait:    options.searchForegroundWait,
+			SearchReaderCacheBytes:  options.searchReaderCacheBytes,
 			Kernel: kitdbengine.OpenOptions{
 				PageCacheBytes: options.databasePageCacheBytes,
 				VerifyOnOpen:   options.verifyOnOpen,
@@ -219,12 +288,27 @@ func runPostgresNode(options postgresNodeCommandOptions) {
 	)
 	fmt.Println("local cleartext profile: connect with sslmode=disable")
 	if err := node.ServePostgres(ctx, listener, relational.PostgresServerOptions{
-		MaxConnections: options.maxConnections,
-		IdleTimeout:    options.idleTimeout,
-		QueryTimeout:   options.queryTimeout,
+		MaxConnections:             options.maxConnections,
+		MaxConcurrentQueries:       options.maxConcurrentQueries,
+		MaxConcurrentQueriesPerKey: options.maxConcurrentQueriesPerDatabase,
+		MaxQueuedQueries:           options.maxQueuedQueries,
+		MaxQueuedQueriesPerKey:     options.maxQueuedQueriesPerDatabase,
+		IdleTimeout:                options.idleTimeout,
+		QueryTimeout:               options.queryTimeout,
 	}); err != nil {
 		fatalf("serve node: %v", err)
 	}
+}
+
+func splitDatabaseNames(source string) []string {
+	parts := strings.Split(source, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if name := strings.TrimSpace(part); name != "" {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 func fatalf(format string, arguments ...any) {

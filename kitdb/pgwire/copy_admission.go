@@ -70,21 +70,35 @@ func copyAdmissionFor(session Session) CopyAdmission {
 	if provider, ok := session.(CopyAdmissionSession); ok {
 		admission = provider.CopyAdmission()
 	}
-	admission.Key = strings.TrimSpace(admission.Key)
-	if admission.Key == "" {
-		admission.Key = "default"
-	}
-	if len(admission.Key) > copyAdmissionKeyLimit {
-		digest := sha256.Sum256([]byte(admission.Key))
-		admission.Key = "sha256:" + hex.EncodeToString(digest[:])
-	}
-	if admission.Weight < 1 {
-		admission.Weight = 1
-	}
-	if admission.Weight > copyAdmissionMaxWeight {
-		admission.Weight = copyAdmissionMaxWeight
-	}
+	admission.Key, admission.Weight = normalizeAdmission(admission.Key, admission.Weight)
 	return admission
+}
+
+func queryAdmissionFor(session Session) QueryAdmission {
+	admission := QueryAdmission{Key: "default", Weight: 1}
+	if provider, ok := session.(QueryAdmissionSession); ok {
+		admission = provider.QueryAdmission()
+	}
+	admission.Key, admission.Weight = normalizeAdmission(admission.Key, admission.Weight)
+	return admission
+}
+
+func normalizeAdmission(key string, weight int) (string, int) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		key = "default"
+	}
+	if len(key) > copyAdmissionKeyLimit {
+		digest := sha256.Sum256([]byte(key))
+		key = "sha256:" + hex.EncodeToString(digest[:])
+	}
+	if weight < 1 {
+		weight = 1
+	}
+	if weight > copyAdmissionMaxWeight {
+		weight = copyAdmissionMaxWeight
+	}
+	return key, weight
 }
 
 func (scheduler *copyAdmissionScheduler) acquire(

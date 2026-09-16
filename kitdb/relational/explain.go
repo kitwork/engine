@@ -40,6 +40,9 @@ func (transaction *Transaction) executeExplain(
 	if plan.Search != nil {
 		return Result{}, fmt.Errorf("kitdb SQL: EXPLAIN SEARCH requires the engine autocommit path")
 	}
+	if len(plan.Joins) != 0 {
+		return transaction.executeJoinExplain(plan, parameters)
+	}
 	if plan.Table == "" {
 		return Result{
 			Columns:    explainColumns(),
@@ -230,6 +233,13 @@ func finishExplainAnalyze(
 			)})
 			nextID++
 		}
+		if stats.SearchReaderCacheHits != 0 || stats.SearchReaderCacheMisses != 0 || stats.SearchReaderCacheBypasses != 0 {
+			rows = append(rows, []any{nextID, "search_reader_cache", fmt.Sprintf(
+				"hits=%d misses=%d bypasses=%d",
+				stats.SearchReaderCacheHits, stats.SearchReaderCacheMisses, stats.SearchReaderCacheBypasses,
+			)})
+			nextID++
+		}
 		if stats.RowsMaterialized != 0 || stats.MaterializationBytes != 0 || stats.MaterializationPeakBytes != 0 {
 			rows = append(rows, []any{nextID, "materialization actual", fmt.Sprintf(
 				"rows=%d direct_rows=%d retained_bytes=%d peak_bytes=%d",
@@ -239,11 +249,17 @@ func finishExplainAnalyze(
 			nextID++
 		}
 		switch {
+		case stats.Path == "search-aggregate-snapshot":
+			rows = append(rows, []any{nextID, "search aggregate rows", fmt.Sprintf(
+				"hydrated=%d matched=%d groups=%d point_lookups=%d",
+				stats.RowsScanned, stats.RowsMatched, stats.Groups, stats.PointLookups,
+			)})
+			nextID++
 		case rowAccessStatsPath(stats.Path):
 			rowDetail := fmt.Sprintf(
 				"scanned=%d matched=%d", stats.RowsScanned, stats.RowsMatched,
 			)
-			if stats.Path == "index-only-group" || stats.Path == "index-only-aggregate" {
+			if stats.Path == "index-only-group" || stats.Path == "index-only-aggregate" || stats.Path == "nested-loop-join-aggregate" {
 				rowDetail += fmt.Sprintf(" groups=%d", stats.Groups)
 			}
 			rows = append(rows,
@@ -335,7 +351,7 @@ func finishExplainAnalyze(
 
 func rowAccessStatsPath(path string) bool {
 	switch path {
-	case "sequential-scan", "primary-lookup", "unique-lookup", "index-scan", "index-only-group", "index-only-aggregate", "nested-loop-join":
+	case "sequential-scan", "primary-lookup", "unique-lookup", "index-scan", "index-only-group", "index-only-aggregate", "nested-loop-join", "nested-loop-join-aggregate":
 		return true
 	default:
 		return false

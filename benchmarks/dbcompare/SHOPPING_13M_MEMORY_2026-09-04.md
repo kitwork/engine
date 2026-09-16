@@ -5,6 +5,10 @@ retained shopping artifact. It is evidence for deciding whether buffered SQL
 needs disk spill now. It is not a PostgreSQL comparison, a cold-device trace,
 or a p95/p99 production claim.
 
+The later [fleet workload](SHOPPING_13M_FLEET_2026-09-04.md) adds bounded
+pgwire concurrency, warm RSS and noisy-neighbor p50/p95/p99. Keep its method
+and claims separate from the serial measurements in this report.
+
 The later [dictionary text KCOL experiment](TEXT_ANALYTICS_13M_2026-09-04.md)
 adds `merchant` as one narrow analytical field and records exact PostgreSQL
 result parity plus scalar/KROW-batch/KCOL measurements.

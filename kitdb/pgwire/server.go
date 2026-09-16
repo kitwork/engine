@@ -22,18 +22,22 @@ import (
 )
 
 const (
-	defaultMaxConnections      = 64
-	defaultMaxConcurrentCopies = 2
-	defaultMaxCopiesPerKey     = 1
-	defaultMaxQueuedCopies     = 64
-	defaultMaxQueuedPerKey     = 8
-	defaultMaxMessageBytes     = 1 << 20
-	defaultIdleTimeout         = 5 * time.Minute
-	defaultQueryTimeout        = 30 * time.Second
-	defaultCopyTimeout         = 30 * time.Minute
-	defaultWriteTimeout        = 10 * time.Second
-	defaultMaxCopyBytes        = int64(64 << 20)
-	maxStartupBytes            = 64 << 10
+	defaultMaxConnections         = 64
+	defaultMaxConcurrentQueries   = 8
+	defaultMaxQueriesPerKey       = 4
+	defaultMaxQueuedQueries       = 64
+	defaultMaxQueuedQueriesPerKey = 16
+	defaultMaxConcurrentCopies    = 2
+	defaultMaxCopiesPerKey        = 1
+	defaultMaxQueuedCopies        = 64
+	defaultMaxQueuedPerKey        = 8
+	defaultMaxMessageBytes        = 1 << 20
+	defaultIdleTimeout            = 5 * time.Minute
+	defaultQueryTimeout           = 30 * time.Second
+	defaultCopyTimeout            = 30 * time.Minute
+	defaultWriteTimeout           = 10 * time.Second
+	defaultMaxCopyBytes           = int64(64 << 20)
+	maxStartupBytes               = 64 << 10
 )
 
 var errTerminateConnection = errors.New("pgwire: terminate connection")
@@ -42,27 +46,70 @@ var errTerminateConnection = errors.New("pgwire: terminate connection")
 // supports cleartext password exchange on loopback only. TLS and SCRAM belong
 // in a later network-facing profile.
 type Server struct {
-	Authenticator             Authenticator
-	MaxConnections            int
-	MaxConcurrentCopies       int
-	MaxConcurrentCopiesPerKey int
-	MaxQueuedCopies           int
-	MaxQueuedCopiesPerKey     int
-	MaxMessageBytes           int
-	MaxCopyBytes              int64
-	IdleTimeout               time.Duration
-	QueryTimeout              time.Duration
-	CopyTimeout               time.Duration
-	WriteTimeout              time.Duration
-	CopyMetrics               *CopyMetrics
+	Authenticator              Authenticator
+	MaxConnections             int
+	MaxConcurrentQueries       int
+	MaxConcurrentQueriesPerKey int
+	MaxQueuedQueries           int
+	MaxQueuedQueriesPerKey     int
+	MaxConcurrentCopies        int
+	MaxConcurrentCopiesPerKey  int
+	MaxQueuedCopies            int
+	MaxQueuedCopiesPerKey      int
+	MaxMessageBytes            int
+	MaxCopyBytes               int64
+	IdleTimeout                time.Duration
+	QueryTimeout               time.Duration
+	CopyTimeout                time.Duration
+	WriteTimeout               time.Duration
+	QueryMetrics               *QueryMetrics
+	CopyMetrics                *CopyMetrics
 }
 
 type serverRuntime struct {
-	server        Server
-	connections   sync.Map
-	cancels       sync.Map
-	nextPID       atomic.Uint32
-	copyAdmission *copyAdmissionScheduler
+	server         Server
+	connections    sync.Map
+	cancels        sync.Map
+	nextPID        atomic.Uint32
+	queryAdmission *copyAdmissionScheduler
+	copyAdmission  *copyAdmissionScheduler
+}
+
+// QuerySnapshot is a race-free point-in-time view of server-wide statement
+// admission. It measures execution after parsing/binding and before result
+// encoding to the client.
+type QuerySnapshot struct {
+	Active          int64
+	Peak            int64
+	Queued          int64
+	PeakQueued      int64
+	Acquired        uint64
+	Completed       uint64
+	Failed          uint64
+	WaitTimeouts    uint64
+	Rejected        uint64
+	WaitNanoseconds uint64
+}
+
+// QueryMetrics is optional shared telemetry for one Server. Its zero value is
+// ready for concurrent use. Admission deliberately reuses the proven fair
+// scheduler used by COPY while exposing query-specific metrics.
+type QueryMetrics struct {
+	admission CopyMetrics
+}
+
+func (metrics *QueryMetrics) Snapshot() QuerySnapshot {
+	if metrics == nil {
+		return QuerySnapshot{}
+	}
+	snapshot := metrics.admission.Snapshot()
+	return QuerySnapshot{
+		Active: snapshot.Active, Peak: snapshot.Peak,
+		Queued: snapshot.Queued, PeakQueued: snapshot.PeakQueued,
+		Acquired: snapshot.Acquired, Completed: snapshot.Completed,
+		Failed: snapshot.Failed, WaitTimeouts: snapshot.WaitTimeouts,
+		Rejected: snapshot.Rejected, WaitNanoseconds: snapshot.WaitNanoseconds,
+	}
 }
 
 // CopySnapshot is a race-free point-in-time view of server-wide COPY
@@ -145,6 +192,30 @@ func (server Server) withDefaults() Server {
 	if server.MaxConnections <= 0 {
 		server.MaxConnections = defaultMaxConnections
 	}
+	if server.MaxConcurrentQueries <= 0 {
+		server.MaxConcurrentQueries = defaultMaxConcurrentQueries
+	}
+	if server.MaxConcurrentQueries > server.MaxConnections {
+		server.MaxConcurrentQueries = server.MaxConnections
+	}
+	if server.MaxConcurrentQueriesPerKey <= 0 {
+		server.MaxConcurrentQueriesPerKey = defaultMaxQueriesPerKey
+	}
+	if server.MaxConcurrentQueriesPerKey > server.MaxConcurrentQueries {
+		server.MaxConcurrentQueriesPerKey = server.MaxConcurrentQueries
+	}
+	if server.MaxQueuedQueries <= 0 {
+		server.MaxQueuedQueries = defaultMaxQueuedQueries
+	}
+	if server.MaxQueuedQueries > server.MaxConnections {
+		server.MaxQueuedQueries = server.MaxConnections
+	}
+	if server.MaxQueuedQueriesPerKey <= 0 {
+		server.MaxQueuedQueriesPerKey = defaultMaxQueuedQueriesPerKey
+	}
+	if server.MaxQueuedQueriesPerKey > server.MaxQueuedQueries {
+		server.MaxQueuedQueriesPerKey = server.MaxQueuedQueries
+	}
 	if server.MaxConcurrentCopies <= 0 {
 		server.MaxConcurrentCopies = defaultMaxConcurrentCopies
 	}
@@ -190,6 +261,9 @@ func (server Server) withDefaults() Server {
 	if server.CopyMetrics == nil {
 		server.CopyMetrics = &CopyMetrics{}
 	}
+	if server.QueryMetrics == nil {
+		server.QueryMetrics = &QueryMetrics{}
+	}
 	return server
 }
 
@@ -208,6 +282,13 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 
 	runtime := &serverRuntime{server: server}
+	runtime.queryAdmission = newCopyAdmissionScheduler(
+		server.MaxConcurrentQueries,
+		server.MaxConcurrentQueriesPerKey,
+		server.MaxQueuedQueries,
+		server.MaxQueuedQueriesPerKey,
+		&server.QueryMetrics.admission,
+	)
 	runtime.copyAdmission = newCopyAdmissionScheduler(
 		server.MaxConcurrentCopies,
 		server.MaxConcurrentCopiesPerKey,
@@ -970,17 +1051,34 @@ func (wire *wireConnection) emptyBody(body []byte) error {
 	return nil
 }
 
-func (wire *wireConnection) runQuery(parent context.Context, query string, parameters []Parameter) (Result, error) {
+func (wire *wireConnection) runQuery(
+	parent context.Context,
+	query string,
+	parameters []Parameter,
+) (result Result, resultErr error) {
 	ctx, cancel := context.WithTimeout(parent, wire.runtime.server.QueryTimeout)
 	wire.cancel.set(cancel)
 	defer wire.cancel.clear()
 	defer cancel()
 
-	result, err := wire.session.Execute(ctx, query, parameters)
-	if ctx.Err() != nil {
-		return Result{}, NewError("57014", "KitDB query canceled or timed out")
+	admission := queryAdmissionFor(wire.session)
+	release, err := wire.runtime.queryAdmission.acquire(ctx, CopyAdmission(admission))
+	if err != nil {
+		if errors.Is(err, errCopyAdmissionQueueFull) {
+			return Result{}, NewError("53300", "KitDB query admission queue is full")
+		}
+		return Result{}, NewError("57014", "KitDB query admission canceled or timed out")
 	}
-	return result, err
+	defer func() {
+		release(0, true, resultErr)
+	}()
+
+	result, resultErr = wire.session.Execute(ctx, query, parameters)
+	if ctx.Err() != nil {
+		resultErr = NewError("57014", "KitDB query canceled or timed out")
+		return Result{}, resultErr
+	}
+	return result, resultErr
 }
 
 func (metrics *CopyMetrics) recordCopyAcquire(wait time.Duration) {

@@ -47,6 +47,9 @@ router.get((ctx) => ctx.json(missing));`,
 	)
 
 	report := Check(root, 100_000)
+	if report.Root != root || report.Layout != "auto" {
+		t.Fatalf("check source = %q (%s), want %q (auto)", report.Root, report.Layout, root)
+	}
 	if report.Sites != 3 || report.Valid != 1 {
 		t.Fatalf("report = %+v, want 3 sites and 1 valid", report)
 	}

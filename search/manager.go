@@ -426,6 +426,33 @@ func (manager *Manager) Search(
 	query MatchQuery,
 	options SearchOptions,
 ) (hits []Hit, searchErr error) {
+	return manager.runSearch(ctx, key, schema, func(ctx context.Context, managed *managedIndex) ([]Hit, error) {
+		return managed.searchSnapshot(ctx, query, options)
+	})
+}
+
+// Count shares Search's admission, cancellation, health and snapshot ownership.
+func (manager *Manager) Count(ctx context.Context, key string, schema Schema, query MatchQuery, accept func(string) (bool, error)) (uint64, error) {
+	var count uint64
+	_, err := manager.runSearch(ctx, key, schema, func(ctx context.Context, managed *managedIndex) ([]Hit, error) {
+		snapshot, release, err := managed.acquireSnapshot()
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+		if snapshot == nil {
+			return nil, nil
+		}
+		count, err = snapshot.index.Count(ctx, query, accept)
+		return nil, err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (manager *Manager) runSearch(ctx context.Context, key string, schema Schema, run func(context.Context, *managedIndex) ([]Hit, error)) (hits []Hit, searchErr error) {
 	if manager == nil {
 		return nil, ErrClosed
 	}
@@ -503,7 +530,7 @@ func (manager *Manager) Search(
 		manager.searchHealth.executionFinished(elapsed)
 		<-manager.searchSlots
 	}()
-	return managed.searchSnapshot(linked, query, options)
+	return run(linked, managed)
 }
 
 // Add durably appends a document in a bounded per-index batch.

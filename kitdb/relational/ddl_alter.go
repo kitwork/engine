@@ -144,6 +144,9 @@ func alterAddColumn(schema *kitdbsql.Schema, column *kitdbsql.ColumnDefinition) 
 	if schema == nil || column == nil || column.Name == "" {
 		return fmt.Errorf("kitdb SQL: invalid ADD COLUMN")
 	}
+	if column.DomainName != "" {
+		return fmt.Errorf("kitdb SQL: ADD COLUMN with a domain requires validating existing rows; use CREATE TABLE for domain columns in this profile")
+	}
 	if _, _, found := schema.FieldByName(column.Name); found {
 		return fmt.Errorf("kitdb SQL: table %q already has field or alias %q", schema.Name, column.Name)
 	}

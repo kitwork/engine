@@ -57,6 +57,7 @@ type Transaction struct {
 	sequences *sequenceSession
 
 	operations []transactionOperation
+	savepoints []namedSavepoint
 	overlay    map[string]transactionMutation
 	bytes      int
 	done       bool
@@ -184,6 +185,9 @@ func (transaction *Transaction) Describe(ctx context.Context, source string) ([]
 	if err := transaction.ready(); err != nil {
 		return nil, err
 	}
+	if statement.Kind == kitdbsql.StatementSavepoint {
+		return nil, nil
+	}
 	if statement.Kind == kitdbsql.StatementPragma {
 		return describePragma(statement.Pragma)
 	}
@@ -217,8 +221,7 @@ func (transaction *Transaction) describeReturning(table string, returning []kitd
 	if err != nil {
 		return nil, err
 	}
-	columns, _, err := bindProjection(schema, returning)
-	return columns, err
+	return describeScalarExpressionSelect(schema, &kitdbsql.SelectStatement{Projection: returning})
 }
 
 func (transaction *Transaction) tables() ([]Table, error) {
@@ -251,6 +254,12 @@ func (transaction *Transaction) executeParsed(
 	if err := transaction.ready(); err != nil {
 		return Result{}, err
 	}
+	if statement.Kind == kitdbsql.StatementSavepoint {
+		if len(parameters) != 0 {
+			return Result{}, fmt.Errorf("kitdb SQL: savepoints do not accept parameters")
+		}
+		return transaction.executeSavepoint(statement.Savepoint)
+	}
 	if transaction.readOnly && !standaloneStatementReadOnly(statement.Kind) {
 		return Result{}, fmt.Errorf("kitdb: transaction is read-only")
 	}
@@ -271,6 +280,12 @@ func (transaction *Transaction) executeParsed(
 	}
 	write := statement.Kind == kitdbsql.StatementInsert || statement.Kind == kitdbsql.StatementUpdate ||
 		statement.Kind == kitdbsql.StatementDelete
+	if write {
+		ctx = context.WithValue(ctx, foreignKeyCheckKey{}, &foreignKeyChecks{})
+	}
+	if write && len(transaction.catalog.Triggers) != 0 {
+		ctx = context.WithValue(ctx, triggerExecutionKey{}, &triggerExecution{bound: make(map[string][]*boundTrigger)})
+	}
 	var savepoint Savepoint
 	if write {
 		var err error
@@ -371,6 +386,10 @@ func (transaction *Transaction) RollbackTo(savepoint Savepoint) error {
 	}
 	transaction.mu.Lock()
 	defer transaction.mu.Unlock()
+	return transaction.rollbackToLocked(savepoint)
+}
+
+func (transaction *Transaction) rollbackToLocked(savepoint Savepoint) error {
 	if transaction.done {
 		return fmt.Errorf("kitdb: relational transaction is closed")
 	}
@@ -380,6 +399,9 @@ func (transaction *Transaction) RollbackTo(savepoint Savepoint) error {
 	}
 	transaction.operations = transaction.operations[:savepoint.operations]
 	transaction.bytes = savepoint.bytes
+	for len(transaction.savepoints) > 0 && transaction.savepoints[len(transaction.savepoints)-1].point.operations > savepoint.operations {
+		transaction.savepoints = transaction.savepoints[:len(transaction.savepoints)-1]
+	}
 	transaction.rebuildOverlayLocked()
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"math"
 	"path/filepath"
 	"sync/atomic"
+	"unsafe"
 )
 
 // IndexInfo describes one committed immutable index snapshot.
@@ -164,6 +165,60 @@ func (index *Index) Info() IndexInfo {
 		Segments: len(index.segments), Documents: index.documents,
 		PhysicalDocuments: index.physical, Deleted: index.deleted, Bytes: index.bytes,
 	}
+}
+
+// ResidentBytes reports deterministic process-owned reader memory: immutable
+// sparse dictionaries, reader arrays, loaded norm vectors, and the bounded
+// multi-field frequency cache. It excludes transient query allocations, Go
+// allocator overhead, file mappings and the operating-system page cache.
+func (index *Index) ResidentBytes() int64 {
+	if index == nil {
+		return 0
+	}
+	bytes := int64(unsafe.Sizeof(*index))
+	bytes = residentAdd(bytes, int64(cap(index.entries))*int64(unsafe.Sizeof(manifestSegment{})))
+	bytes = residentAdd(bytes, int64(cap(index.segments))*int64(unsafe.Sizeof((*Segment)(nil))))
+	bytes = residentAdd(bytes, int64(cap(index.deletions))*int64(unsafe.Sizeof((*deletedDocuments)(nil))))
+	bytes = residentAdd(bytes, int64(cap(index.bases))*8)
+	bytes = residentAdd(bytes, int64(cap(index.fieldStats))*8)
+	for _, entry := range index.entries {
+		bytes = residentAdd(bytes, int64(len(entry.name)+len(entry.identifierName)+len(entry.deletionName)))
+	}
+	for _, segment := range index.segments {
+		bytes = residentAdd(bytes, segment.residentBytes())
+	}
+	index.multiFreq.mu.Lock()
+	bytes = residentAdd(bytes, int64(cap(index.multiFreq.order))*int64(unsafe.Sizeof("")))
+	bytes = residentAdd(bytes, int64(len(index.multiFreq.entries))*40)
+	for _, key := range index.multiFreq.order {
+		bytes = residentAdd(bytes, int64(len(key)))
+	}
+	index.multiFreq.mu.Unlock()
+	return bytes
+}
+
+func (segment *Segment) residentBytes() int64 {
+	if segment == nil {
+		return 0
+	}
+	bytes := int64(unsafe.Sizeof(*segment))
+	bytes = residentAdd(bytes, int64(cap(segment.fieldStats))*8)
+	bytes = residentAdd(bytes, int64(cap(segment.dictionary))*int64(unsafe.Sizeof(dictionaryBlockIndex{})))
+	bytes = residentAdd(bytes, int64(cap(segment.norms))*int64(unsafe.Sizeof(normCache{})))
+	for _, block := range segment.dictionary {
+		bytes = residentAdd(bytes, int64(len(block.firstTerm)))
+	}
+	return residentAdd(bytes, segment.normBytes.Load())
+}
+
+func residentAdd(current, additional int64) int64 {
+	if additional <= 0 {
+		return current
+	}
+	if current > math.MaxInt64-additional {
+		return math.MaxInt64
+	}
+	return current + additional
 }
 
 func (index *Index) ensureOpen() error {

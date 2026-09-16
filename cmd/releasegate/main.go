@@ -220,6 +220,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 			},
 		},
 		kitDBProjectionRecoveryStep(),
+		kitDBCommerceJourneyStep(),
 		{Name: "Build", Command: []string{"go", "build", "./..."}},
 		{Name: "Full tests", Command: []string{"go", "test", "-count=1", "-timeout=20m", "./..."}},
 		{Name: "Vet", Command: []string{"go", "vet", "./..."}},
@@ -316,6 +317,14 @@ func kitDBProjectionRecoveryStep() gateStep {
 	}
 }
 
+func kitDBCommerceJourneyStep() gateStep {
+	return gateStep{
+		Name:    "KitDB standalone commerce journey",
+		Command: []string{"go", "test", "./cmd/kitdbdist", "-run", "^TestKitDBCommerceNativeJourney$", "-count=1", "-timeout=5m", "-v"},
+		Env:     map[string]string{"KITDB_COMMERCE_REPORT": ".artifacts/kitdb-commerce-gate.json", "CGO_ENABLED": "0"},
+	}
+}
+
 func kitDBVerifyPlan() []gateStep {
 	return []gateStep{
 		kitDBCompatibilityStep(),
@@ -324,20 +333,24 @@ func kitDBVerifyPlan() []gateStep {
 			Command: []string{"go", "test", "./kitdb/...", "-count=1", "-timeout=20m"},
 		},
 		{
+			Name:    "KitDB search suite",
+			Command: []string{"go", "test", "./search", "-count=1", "-timeout=20m"},
+		},
+		{
 			Name:    "KitDB relational suite",
 			Command: []string{"go", "test", "./work", "-count=1", "-timeout=20m"},
 		},
 		{
 			Name:    "KitDB operator suite",
-			Command: []string{"go", "test", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "-count=1"},
+			Command: []string{"go", "test", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist", "-count=1"},
 		},
 		{
 			Name:    "KitDB command build",
-			Command: []string{"go", "build", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+			Command: []string{"go", "build", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist"},
 		},
 		{
 			Name:    "KitDB static analysis",
-			Command: []string{"go", "vet", "./kitdb/...", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg"},
+			Command: []string{"go", "vet", "./kitdb/...", "./search", "./work", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist"},
 		},
 		{
 			Name: "KitDB durability/recovery",
@@ -348,6 +361,7 @@ func kitDBVerifyPlan() []gateStep {
 			},
 		},
 		kitDBProjectionRecoveryStep(),
+		kitDBCommerceJourneyStep(),
 		{
 			Name:    "KitDB database journey",
 			Command: []string{"go", "test", "./work", "-run", "^(TestKitDBDatabaseReleaseGate|TestKitDBPostgresCopyInWithLibPQIsAtomic)$", "-count=1", "-timeout=5m", "-v"},
@@ -359,8 +373,19 @@ func kitDBVerifyPlan() []gateStep {
 func kitDBReleaseCampaigns() []gateStep {
 	return []gateStep{
 		{
+			Name:    "KitDB commerce hard-crash matrix",
+			Command: []string{"go", "test", "./cmd/kitdbdist", "-run", "^TestKitDBCommerceNativeJourney$", "-count=10", "-timeout=20m", "-v"},
+			// The enclosing gate records all repetitions; do not overwrite the
+			// single-run JSON with only the last iteration's outcome.
+			Env: map[string]string{"KITDB_COMMERCE_REPORT": "", "CGO_ENABLED": "0"},
+		},
+		{
 			Name:    "KitDB kernel race",
 			Command: []string{"go", "test", "-race", "./kitdb/...", "-count=1", "-timeout=20m"},
+		},
+		{
+			Name:    "KitDB search race",
+			Command: []string{"go", "test", "-race", "./search", "-count=1", "-timeout=20m"},
 		},
 		{
 			Name:    "KitDB relational race",

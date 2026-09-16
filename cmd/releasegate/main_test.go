@@ -42,6 +42,8 @@ func TestReleasePlanModes(t *testing.T) {
 		"VM fault gauntlet":                 false,
 		"Language/inspector contracts":      false,
 		"KitDB database journey":            false,
+		"KitDB standalone commerce journey": false,
+		"KitDB commerce hard-crash matrix":  false,
 		"KitDB durability/recovery":         false,
 		"KitDB projection recovery":         false,
 		"Focused race":                      false,
@@ -53,6 +55,7 @@ func TestReleasePlanModes(t *testing.T) {
 		"Restart/recovery campaign":         false,
 		"Concurrent cache campaign":         false,
 		"KitDB kernel race":                 false,
+		"KitDB search race":                 false,
 		"KitDB relational race":             false,
 		"KitDB replica hard-crash matrix":   false,
 		"KitDB catalog hard-crash matrix":   false,
@@ -85,6 +88,14 @@ func TestReleasePlanModes(t *testing.T) {
 				t.Fatal("KitDB database journey omitted the composed frontend-to-restore oracle")
 			}
 		}
+		if step.Name == "KitDB standalone commerce journey" {
+			assertCommerceGate(t, step)
+		}
+		if step.Name == "KitDB commerce hard-crash matrix" &&
+			(!containsArgument(step.Command, "^TestKitDBCommerceNativeJourney$") ||
+				step.Env["CGO_ENABLED"] != "0" || step.Env["KITDB_COMMERCE_REPORT"] != "") {
+			t.Fatal("commerce campaign omitted native coverage or overwrites single-run evidence")
+		}
 		if step.Name == "KitDB durability/recovery" {
 			if !containsArgument(step.Command, "./kitdb") || !containsArgument(step.Command, "./work") {
 				t.Fatal("KitDB recovery gate omitted kernel or relational crash evidence")
@@ -97,6 +108,10 @@ func TestReleasePlanModes(t *testing.T) {
 			(!containsArgument(step.Command, "./kitdb/relational") ||
 				!containsArgument(step.Command, "^(TestColumnarIncrementalProcessExitDuringBuild|TestProjectionSnapshotFreshnessCorruptionAndCancellation|TestAnalyticsRefreshUpgradesBlockDirectoryWithoutRewritingKCOL)$")) {
 			t.Fatal("KitDB projection recovery gate omitted publication, corruption, or metadata-upgrade evidence")
+		}
+		if step.Name == "KitDB search race" &&
+			(!containsArgument(step.Command, "-race") || !containsArgument(step.Command, "./search")) {
+			t.Fatal("KitDB search race omitted race detection or the standalone search engine")
 		}
 		if step.Name == "KitDB 1.x compatibility contract" &&
 			!containsArgument(step.Command, "^(TestKitDBV1CompatibilityProfile|TestKitDBV1FrozenMainFixture|TestKitDBV1RelationalCompatibilityProfile|TestOperatorVersionReportsKitDBV1Contract)$") {
@@ -170,15 +185,58 @@ func TestReleasePlanModes(t *testing.T) {
 		name string
 	}{
 		{kitDBVerify, "KitDB projection recovery"},
+		{kitDBVerify, "KitDB search suite"},
+		{kitDBVerify, "KitDB standalone commerce journey"},
+		{kitDBRelease, "KitDB standalone commerce journey"},
+		{kitDBRelease, "KitDB commerce hard-crash matrix"},
 		{kitDBRelease, "KitDB projection recovery"},
+		{kitDBRelease, "KitDB search race"},
 		{kitDBRelease, "KitDB analytics hard-crash matrix"},
 	} {
 		if !containsStep(expectation.plan, expectation.name) {
 			t.Fatalf("KitDB plan omitted %s", expectation.name)
 		}
 	}
+	searchSuite, ok := findStep(kitDBVerify, "KitDB search suite")
+	if !ok || !containsArgument(searchSuite.Command, "./search") {
+		t.Fatal("KitDB search suite omitted the standalone search engine")
+	}
+	staticAnalysis, ok := findStep(kitDBVerify, "KitDB static analysis")
+	if !ok || !containsArgument(staticAnalysis.Command, "./search") {
+		t.Fatal("KitDB static analysis omitted the standalone search engine")
+	}
+	for _, name := range []string{"KitDB operator suite", "KitDB command build", "KitDB static analysis"} {
+		step, ok := findStep(kitDBVerify, name)
+		if !ok || !containsArgument(step.Command, "./cmd/kitdbdist") {
+			t.Fatalf("%s omitted distribution tooling", name)
+		}
+	}
 	if _, err := releasePlan("unknown"); err == nil {
 		t.Fatal("unknown release mode was accepted")
+	}
+}
+
+func assertCommerceGate(t *testing.T, step gateStep) {
+	t.Helper()
+	if !containsArgument(step.Command, "./cmd/kitdbdist") ||
+		!containsArgument(step.Command, "^TestKitDBCommerceNativeJourney$") ||
+		!containsArgument(step.Command, "-count=1") || !containsArgument(step.Command, "-timeout=5m") ||
+		step.Env["KITDB_COMMERCE_REPORT"] != ".artifacts/kitdb-commerce-gate.json" || step.Env["CGO_ENABLED"] != "0" {
+		t.Fatalf("incomplete standalone commerce gate: %+v", step)
+	}
+}
+
+func TestKitDBCommerceGateCannotBeOmitted(t *testing.T) {
+	for _, mode := range []string{"verify", "release", "kitdb-verify", "kitdb-release"} {
+		plan, err := releasePlan(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		step, found := findStep(plan, "KitDB standalone commerce journey")
+		if !found {
+			t.Fatalf("%s omitted commerce journey", mode)
+		}
+		assertCommerceGate(t, step)
 	}
 }
 
@@ -207,12 +265,17 @@ func containsArgument(arguments []string, expected string) bool {
 }
 
 func containsStep(steps []gateStep, expected string) bool {
+	_, ok := findStep(steps, expected)
+	return ok
+}
+
+func findStep(steps []gateStep, expected string) (gateStep, bool) {
 	for _, step := range steps {
 		if step.Name == expected {
-			return true
+			return step, true
 		}
 	}
-	return false
+	return gateStep{}, false
 }
 
 func TestDryRunStepShape(t *testing.T) {

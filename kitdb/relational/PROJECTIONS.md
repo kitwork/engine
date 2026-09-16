@@ -17,8 +17,13 @@ test/
 
 The sidecars contain entries for multiple tables. They are regular files,
 not directories disguised by an extension. The search file contains existing
-native segment bytes, opened using section readers over one container handle;
-queries do not extract an archive or open one OS handle per segment.
+native segment bytes, opened using section readers over one physical container
+file; queries do not extract an archive or open one OS handle per segment. On
+Windows, where Go serializes positioned reads on one `os.File`, the relational
+reader uses two bounded handles for that same immutable file to match its
+two-query admission gate. Other platforms retain one handle. Both paths share
+one decoded directory and one native search-reader cache; this is not a second
+copy of the projection or a tenant-facing tuning option.
 
 Search construction still uses a temporary `.search-build-*` directory for the
 existing bounded replacement writer and its identifier validation. It is
@@ -27,9 +32,14 @@ can leave unpublished temporary artifacts; automatic orphan cleanup is not
 implemented. Do not delete unfamiliar files as a cleanup shortcut.
 
 The existing mutable search-directory manager remains the default. Opt-in
-refresh refuses to replace a legacy `.search` directory or symlink. Use a new
-test database or an operator-controlled copy; there is no automatic migration
-or deletion of existing user indexes.
+refresh refuses to replace a legacy `.search` directory or symlink. There is
+no automatic migration or deletion of existing user indexes. An explicit
+offline `pack-search` operation can adopt an already-current, deletion-free
+legacy index without scanning or tokenizing KROW. It verifies the exact source
+transaction, database identity, schema, row generation/epoch and committed
+index generation before atomically publishing the packed file. Missing, stale,
+corrupt, or tombstoned input fails closed; use a normal legacy SEARCH catch-up
+or a full `refresh-projections` rebuild first.
 
 To compare with the mutable directory mode after creating a `.search` file,
 turn off the experimental option and set a different `--search-root` directory.
@@ -44,6 +54,10 @@ another process:
 go run ./cmd/kitdb refresh-projections /path/to/test/data.kitdb
 
 go run ./cmd/kitdb refresh-projections --analytics-only /path/to/test/data.kitdb
+
+go run ./cmd/kitdb pack-search /path/to/test/data.kitdb
+
+go run ./cmd/kitdb projections /path/to/test/data.kitdb
 
 go run ./cmd/kitdb query --batch-aggregates /path/to/test/data.kitdb \
   "SELECT SUM(price), AVG(rating), COUNT(*) FROM products WHERE price >= 25 AND price < 75 AND enabled = true"
@@ -70,7 +84,10 @@ but does not yet form groups from metadata. Discarded partial KCOL work is not
 included in the final counters. `ProjectionCacheHits`,
 `ProjectionCacheMisses`, and `ProjectionCacheBypasses` distinguish a warm
 verified container lease from an open/directory-decode and from a directory
-that deliberately exceeds the residency bound.
+that deliberately exceeds the residency bound. Search execution additionally
+reports `SearchReaderCacheHits`, `SearchReaderCacheMisses`, and
+`SearchReaderCacheBypasses`; these refer to the native packed BM25 reader, not
+the outer `.search` container.
 Unchanged scalar/indexed paths currently omit these experimental statistics.
 
 To use a PostgreSQL client, set `KITDB_TOKEN` and run:
@@ -89,13 +106,68 @@ Go method on its already-owned Engine:
 ```go
 db, err := relational.OpenWithOptions(path, relational.Options{
     ExperimentalProjections: true,
+    // Explicit and per Engine. Zero keeps the default open/query/close path.
+    SearchReaderCacheBytes: 16 << 20,
 })
 // Handle err; close db after all requests drain.
 report, err := db.RefreshProjections(ctx)
 
 // Or refresh columnar without creating, checking or replacing search storage.
 report, err = db.RefreshAnalytics(ctx)
+
+// Or adopt the exact current mutable search generation without decoding KROW.
+packed, err := db.PackSearchProjection(ctx)
 ```
+
+`PackSearchProjection` is a migration bridge, not a second ongoing write path.
+The legacy search root must be distinct from `<database>.search`; databases in
+a `.data` directory already use the historical sibling `search/` root. Other
+layouts must pass a separate `SearchRoot` when building and packing the legacy
+index. Packing still reads and verifies every immutable source segment and
+copies its bytes, so it is bounded-memory but not zero-I/O. Its report exposes
+the source transaction, table/document/segment totals, source and destination
+bytes, and `CanonicalRowsScanned` (always zero).
+
+`PreflightProjections(ctx)` is the equivalent standalone Go API. It captures one
+canonical read snapshot and reports every analytics/search projection as
+`missing`, `stale`, `invalid`, or `ready` without refreshing it or scanning KROW.
+The report contains no host path. Analytics inspection reads the container
+directory and KCOL/chunk headers. Search inspection reads the packed manifest,
+each fixed-size segment header, and the eight-byte sparse-directory prefix
+needed to reserve reader memory. It deliberately does not load sparse term
+dictionaries or payloads. A `ready` preflight is therefore bounded admission
+evidence, not a substitute for an offline deep verification campaign.
+`reader_capacity_bytes` is the conservative per-table reservation used by the
+packed reader cache; it excludes file payload, OS page cache, and per-query
+working memory.
+
+Process-local cache statistics separately expose native search readers and
+physical search file handles. This keeps the Windows concurrency adaptation
+observable without counting a second handle as a second resident reader or
+doubling its capacity reservation. Trimming or closing the projection cache
+drains leases and closes every handle before replacement/removal.
+
+Callers may apply the same check before an Engine becomes visible:
+
+```go
+db, err := relational.OpenWithContext(ctx, path, relational.Options{
+    ExperimentalProjections: true,
+    ProjectionOpenPolicy:    relational.ProjectionOpenValidate,
+})
+```
+
+The policies are:
+
+| Policy | Admission behavior |
+| --- | --- |
+| `lazy` | Do not inspect projections during open; query-time checks remain authoritative |
+| `validate` | Reject an existing structurally invalid sidecar; allow missing/stale state to use the safe KROW fallback |
+| `require-ready` | Require every supported analytics and search projection to be present and exact-watermark ready |
+
+Projection policy never changes KROW recovery, WAL publication or transaction
+durability. A rejected Engine releases its kernel handle. `kitdb query` and
+`kitdb serve` expose the policy as `--projection-open-policy`; it requires
+`--experimental-projections` for any mode stricter than `lazy`.
 
 Refresh is explicit and can be expensive. Ordinary `ANALYZE` does not start it.
 Text-compatible fields opt into dictionary projection through the independent
@@ -561,7 +633,10 @@ go test ./kitdb/relational -run ^$ \
   The snapshot directory is capped at 8 MiB/16384 entries, with at most 1 MiB
   of raw optional partition block-directory entries. Two experimental
   scans are admitted per Engine; further scans wait with context cancellation.
-  This is not a node-wide/fleet governor or a hard process RSS budget.
+  Embedded callers still need a host governor and this is not a hard process
+  RSS budget. The standalone PostgreSQL listener now adds a separate fair,
+  bounded statement scheduler across databases before execution reaches the
+  per-Engine projection gate.
 - Group state grows with distinct groups, not all input rows. The configured
   result/group limit (default 10000, ceiling 100000) still applies before HAVING
   or LIMIT. Batch grouping also enforces a 16 MiB accounted state budget for
@@ -573,11 +648,82 @@ go test ./kitdb/relational -run ^$ \
   candidate/result budgets, snippets and cursor validation. A fresh replacement
   is packed without tombstones. Builder segments use a soft 8 MiB accounting
   threshold and at most 25000 documents, not an 8 MiB heap guarantee.
+- Exact score, cursor and Top-K thresholds run before optional identifier-prefix
+  I/O because a prefix filter cannot improve rank. Stored identifier offsets
+  and bytes use two bounded query-local 4 KiB windows that are reused across
+  immutable segments and are not charged as resident reader memory.
   Dictionaries and norms still use the existing search reader caches. The
-  Engine-owned snapshot-reader cache shares the single container handle and
-  decoded manifest across concurrent exact-watermark queries; individual search
-  snapshots retain their own bounded segment readers. Native segment-count and
-  input-size limits still apply.
+  Engine-owned container cache shares one file handle and decoded manifest.
+  `SearchReaderCacheBytes` may additionally retain one immutable packed reader
+  per searched table, single-flighting concurrent first opens and sharing its
+  sparse dictionaries and lazy norm vectors. Zero is the default. A snapshot
+  whose conservative reservation does not fit bypasses residency and remains
+  queryable through open/query/close. Native segment-count and input-size limits
+  still apply.
+
+### Multi-Database Residency and Mixed Workload
+
+The standalone PostgreSQL node can name a bounded set of warm databases and
+bound idle projection residency by database count, serialized snapshot
+directory bytes, and total reader-capacity bytes. Reader capacity is the outer
+directory plus the conservative packed-search reservation; actual deterministic
+reader residency is reported separately. Neither number includes transient
+query allocations, allocator overhead, file payload pages, or the operating
+system page cache. Warm means an open relational owner plus eligible bounded
+readers, not prefetched KCOL/search payloads. Non-warm readers are closed
+oldest-first without deleting sidecars and reopen with the same exact watermark
+checks. Whole-engine LRU also skips configured warm databases.
+When projections are enabled, a configured warm database defaults to
+`validate` admission on its first lazy open. This prevents a malformed sidecar
+from becoming a protected long-lived resident. Set
+`WarmProjectionOpenPolicy` (or `kitdbpg -warm-projection-open-policy`) explicitly
+to choose another policy; `Relational.ProjectionOpenPolicy` remains the policy
+for every database, warm or cold. `kitdbpg` exposes the per-database cache as
+`-search-reader-cache-bytes` and the fleet ceiling as
+`-max-idle-projection-reader-bytes`. Both are explicit resource policy, not a
+correctness requirement.
+
+The retained `BenchmarkPostgresNodeMixedWorkload` exercises the public pgwire
+path over eight independent files: four stable databases alternate primary-key
+reads, KCOL aggregates and BM25 search; four mutable databases alternate
+primary-key reads and WAL-backed updates. Each fixture has 4,096 rows. The four
+stable databases retain four independent packed readers (eight verified file
+handles on Windows) under an explicit per-database reader budget. Query
+admission is six listener-wide and two per database, with bounded queues. On
+Windows/amd64, Go 1.26, an i7-11850H and warm operating-system cache, three
+5,000-operation runs on 2026-09-05 observed:
+
+```sh
+go test ./kitdb/relational -run '^$' \
+  -bench '^BenchmarkPostgresNodeMixedWorkload$' \
+  -benchtime=5000x -count=3 -benchmem
+```
+
+| Measurement | Observed range |
+| --- | ---: |
+| Average | 124306-138124 ns/op |
+| Throughput | 7238-8044 statements/s |
+| Point read p95 / p99 | 3-4 ms / 4-5 ms |
+| KCOL aggregate p95 / p99 | 4 ms / 4-5 ms |
+| BM25 search p95 / p99 | 4 ms / 4-5 ms |
+| KROW update p95 / p99 | 4 ms / 5-8 ms |
+| Allocation | 90292-90380 B/op, 561-562 allocs/op |
+| Admission peak / queue peak | 6 / 10 |
+| Packed search readers / Windows handles | 4 / 8 |
+| Conservative reader capacity | 9.962 MiB |
+
+Setup, projection construction and connection establishment are excluded;
+SQL planning, pgwire encoding/decoding, KROW/KCOL/search execution and commits
+are included. Percentiles are bounded-histogram bucket upper bounds, include
+admission wait, and consume constant benchmark memory. This is a repeatable
+mixed-throughput baseline, not a cold-cache, 13-million-row, power-loss,
+SQLite, or PostgreSQL comparison.
+
+The deterministic node lifecycle test separately opens four independent
+packed-search databases, protects one warm database, and permits only two idle
+projection owners. It verifies that the warm reader and newest cold reader
+survive while the two older cold readers are closed oldest-first. This proves
+bounded ownership; it is not a latency benchmark.
 
 ### Projection Reader Cache Measurement
 
@@ -599,6 +745,27 @@ go test ./kitdb/relational -run '^$' \
 The cold case ran against the operating-system cache and is not an SSD latency
 claim. The result demonstrates removal of repeated file-open and JSON material-
 ization work; it does not make the KCOL data scan itself constant-time.
+
+A separate retained benchmark measures the packed BM25 reader through the
+standalone relational API. The deterministic fixture has 4,096 rows; setup,
+projection construction and the first query are excluded. Fifty queries per
+sample, three samples, on Windows/amd64, Go 1.26 and the same i7-11850H observed:
+
+```sh
+go test ./kitdb/relational -run '^$' \
+  -bench '^BenchmarkPackedSearchReaderCache$' -benchtime=50x -count=3 -benchmem
+```
+
+| Path | Observed time/op | Bytes/op | Allocs/op |
+| --- | ---: | ---: | ---: |
+| Open/query/close | 0.801-0.976 ms | about 372 KB | 981 |
+| Resident reader | 0.253-0.404 ms | about 112 KB | 864-865 |
+
+This shows that repeated reader construction was material for this fixture. It
+is not a 13-million-row result, a cold-storage result, or an RSS guarantee. The
+retained capacity intentionally includes all possible field-norm vectors and a
+full bounded multi-field frequency cache; reported current residency can be
+lower until queries populate those structures.
 
 The opt-in 13,773,074-row shopping canary also compared both paths inside one
 Engine for the documented `category = 4459` aggregate. Three small 3-iteration
@@ -864,6 +1031,9 @@ See
 [`SHOPPING_13M_MEMORY_2026-09-04.md`](../../benchmarks/dbcompare/SHOPPING_13M_MEMORY_2026-09-04.md).
 See also
 [`TEXT_ANALYTICS_13M_2026-09-04.md`](../../benchmarks/dbcompare/TEXT_ANALYTICS_13M_2026-09-04.md).
+The bounded pgwire fleet follow-up, including warm projection RSS and
+noisy-neighbor tails, is recorded in
+[`SHOPPING_13M_FLEET_2026-09-04.md`](../../benchmarks/dbcompare/SHOPPING_13M_FLEET_2026-09-04.md).
 
 The [grouped batch follow-up](../../benchmarks/dbcompare/GROUP_BATCH_2026-08-31.md)
 records the supported GROUP BY workload separately from the historical ungrouped

@@ -1,11 +1,26 @@
 package work
 
 import (
+	"database/sql"
 	"testing"
 
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/value"
 )
+
+func TestConnectBorrowsHostOwnedNativeDatabase(t *testing.T) {
+	connection := &sql.DB{}
+	unregister, err := database.RegisterOwned("native-shop", connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(unregister)
+
+	handle := (&Database{tenant: &Tenant{}}).Connect(value.New("native-shop"))
+	if handle.sqlDB != connection {
+		t.Fatalf("native connection = %p, want %p", handle.sqlDB, connection)
+	}
+}
 
 func TestMissingDefaultDatabaseDoesNotCreateImplicitSQLite(t *testing.T) {
 	previous := database.Configs

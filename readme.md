@@ -287,7 +287,12 @@ server.run().catch((err) => console.log("Host boot error:", err));
 | `.allowLocal(bool)` | `Boolean` | Bypasses ACME/AutoSSL certificate acquisition for offline local dev. |
 | `.trustProxy(bool)` | `Boolean` | Trust `X-Forwarded-For` and `X-Real-IP` HTTP headers from reverse proxies. |
 | `.rateLimit(opts)` | `Object` | Sets global host rate limits: `{ rate, ip, browser, user, period }`. |
-| `.database(opts)` | `Object` | Registers system or app database connection pool configuration. |
+| `.database(path, opts?)` | `String, Object?` | Opens a KitDB file/root owned by this runtime. |
+| `.postgresql(alias, source)` | `String, String \| Object` | Declares an external PostgreSQL connection. |
+| `.mysql(alias, source)` | `String, String \| Object` | Declares an external MySQL connection when its driver is linked. |
+| `.sqlite(alias, source)` | `String, String \| Object` | Declares a local SQLite compatibility connection. |
+| `.redis(alias, source)` | `String, String \| Object` | Declares Redis when its runtime connector is linked. |
+| `.connect(alias, source)` | `String, String \| Object` | Declares a generic external connector by URL scheme, type, or driver. |
 | `.canonical(mode)` | `String` | Configures auto-redirects: `"apex"` (www ➔ apex) or `"www"` (apex ➔ www). |
 | `.redirects(map)` | `Object` | Static domain redirect mapping: `{ "old.com": "new.com" }`. |
 | `.logger(opts)` | `Object` | Configures structured logging: `{ level, format, logfile }`. |
@@ -313,6 +318,97 @@ All domains under `app/` share one App Runtime and its `_cron/`, `_queue/`,
 `_core/`, and `.data/` resources. Under `apps/`, the identity directory owns
 those resources. If `.root(...)` is omitted and both `app/` and `apps/` exist,
 startup fails with an explicit ambiguity error instead of selecting one.
+
+### Host-Owned KitDB
+
+Kitwork can own a standalone KitDB file or managed database directory in the
+same process as its web, desktop, and mobile surfaces. The options remain flat:
+
+```javascript
+import { app, env } from "kitwork"
+
+app.database("./data.kitdb", {
+  alias: "shop",
+  host: "127.0.0.1",
+  port: 5445,
+  user: "kitdb",
+  password: env.DB_PASSWORD,
+  kitsql: true,
+  memory: "128mb",
+  concurrency: 6,
+  warm: true,
+  cache: {
+    select: "2m",
+    search: "30s",
+    analytics: "5m",
+    memory: "16mb",
+  },
+})
+```
+
+Omit `port` for native in-process access only, then use
+`database.connect("shop")` from Kitwork code. Omitting `alias` publishes a
+single file as `default`, so plain `database` calls use it automatically. A
+positive `port` exposes the same independent KitDB engine through its
+PostgreSQL-compatible listener while internal calls still take the native
+path. `kitsql: true` exposes `/_kitsql/v1/query` on the existing Kitwork web
+listener; it requires `password` and `app.web(...)`. Local HTTP is accepted
+only on loopback, while remote KitSQL requires HTTPS. All three surfaces use
+one owned engine and one transaction history; they do not create database
+copies. `cache: "1m"` applies one duration to select, search, and analytics;
+the object form assigns separate policies. Cache entries are bounded and tied
+to the latest committed KitDB transaction, so a write invalidates old results.
+Use `PRAGMA cache_status` through any SQL client to inspect cache residency,
+hits, misses, bypasses, and evictions. `app.database(...)` may run by itself;
+without `app.web(...)`, Kitwork starts no HTTP router, scheduler, TLS, or web
+listener.
+External resources use provider-specific declarations or the generic connector:
+
+```javascript
+app.postgresql("system", env.POSTGRESQL_URL)
+app.sqlite("legacy", "./legacy.sqlite")
+app.connect("remote-kitdb", env.KITSQL_URL)
+app.connect("warehouse", {
+  driver: "postgresql",
+  host: env.WAREHOUSE_HOST,
+  name: "events",
+})
+```
+
+`app.mysql(...)` and `app.redis(...)` share the same manifest registry, but a
+distribution must link their runtime connector before use. The existing
+`.database({ alias, type, ... })` form remains compatibility syntax.
+
+The three KitDB access paths are deliberately separate:
+
+- Native `app.database(...)` is the zero-network path for the owning process.
+- `kitsql://user:password@host/database` is KitDB's first-party remote protocol.
+- `postgresql://...` is the compatibility path for PostgreSQL tools and drivers.
+
+KitSQL v1 carries typed values over HTTPS and integrates with Go's
+`database/sql`. Each request is one atomic SQL execution. Session transactions
+across multiple requests are intentionally not claimed by v1; use native or
+PostgreSQL compatibility when a client needs `BEGIN`/`COMMIT` today. See
+`kitdb/KITSQL.md` for the protocol contract and limits.
+
+A managed root exposes each registered database by its logical name:
+
+```javascript
+app.database("./.kitdb/", {
+  memory: "256mb",
+  concurrency: 6,
+  warm: ["shop"],
+})
+
+const shop = database.connect("shop")
+```
+
+Managed-root connections are lazy and use the same node leases as the
+PostgreSQL listener. A cold database releases its active session after the
+query; the bounded node may retain its engine as idle or evict it under LRU
+pressure. Two roots exposing the same logical name fail as ambiguous. The
+virtual maintenance database is not exposed to application code. New managed
+roots store their authoritative database catalog in `.catalog/data.kitdb`.
 
 ---
 

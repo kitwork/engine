@@ -322,24 +322,9 @@ func (transaction *Transaction) executeAggregateSelect(
 		}
 	}
 	stats := rowAccessExecutionStats(access, observe)
-	groups := make(map[string]*aggregateGroup)
-	order := make([]string, 0)
-	decimalStates := 0
-	for _, binding := range bindings {
-		if exactDecimalAggregate(binding.field, binding.function) {
-			decimalStates++
-		}
-	}
-	if len(groupFields) == 0 {
-		if working != nil {
-			if err := working.reserve(
-				aggregateGroupWorkingBytes("", nil, nil, bindings, false), "GROUP BY state",
-			); err != nil {
-				return Result{}, err
-			}
-		}
-		groups[""] = &aggregateGroup{values: make(map[string]any), states: make([]aggregateState, len(bindings))}
-		order = append(order, "")
+	stream, err := newAggregateStream(groupFields, bindings, transaction.engine.maximumResultRows, working)
+	if err != nil {
+		return Result{}, err
 	}
 	visited := 0
 	err = transaction.walkAccessRowsObserved(access, stats, func(_, encoded []byte) (bool, error) {
@@ -366,83 +351,12 @@ func (transaction *Transaction) executeAggregateSelect(
 		if stats != nil {
 			stats.RowsMatched++
 		}
-		key, err := aggregateGroupKey(decoded.values, groupFields)
-		if err != nil {
-			return false, err
-		}
-		group := groups[key]
-		if group == nil {
-			if len(groups) >= transaction.engine.maximumResultRows {
-				return false, fmt.Errorf(
-					"kitdb SQL: GROUP BY exceeds this server's %d-group limit",
-					transaction.engine.maximumResultRows,
-				)
-			}
-			if decimalStates != 0 && len(groups) >= maximumDecimalGroupStateBytes/(decimalStates*(maximumDecimalText+128)) {
-				return false, fmt.Errorf(
-					"kitdb SQL: decimal GROUP BY exceeds the %d-byte exact aggregate state budget",
-					maximumDecimalGroupStateBytes,
-				)
-			}
-			if working != nil {
-				if err := working.reserve(
-					aggregateGroupWorkingBytes(key, decoded.values, groupFields, bindings, false), "GROUP BY state",
-				); err != nil {
-					return false, err
-				}
-			}
-			group = &aggregateGroup{
-				values: aggregateGroupValues(decoded.values, groupFields),
-				states: make([]aggregateState, len(bindings)),
-			}
-			groups[key] = group
-			order = append(order, key)
-		}
-		for index, binding := range bindings {
-			if binding.function == "" {
-				continue
-			}
-			var value any
-			if binding.field != nil {
-				value = decoded.values[binding.field.Name]
-			}
-			if err := updateAggregateStateAccounted(
-				working, &group.states[index], binding.function, value, binding.field, binding.field == nil,
-			); err != nil {
-				return false, err
-			}
-		}
-		return false, nil
+		return false, stream.add(decoded.values)
 	})
 	if err != nil {
 		return Result{}, err
 	}
-	rows := make([][]any, 0, len(order))
-	for _, key := range order {
-		group := groups[key]
-		row := make([]any, len(plan.Projection))
-		for index, projection := range plan.Projection {
-			binding := bindings[index]
-			if binding.function == "" {
-				_, field, _ := schema.FieldByName(unqualifiedColumn(projection.Name))
-				row[index] = readField(field, group.values[field.Name])
-				continue
-			}
-			value, err := aggregateStateValue(group.states[index], binding.function, binding.field)
-			if err != nil {
-				return Result{}, err
-			}
-			row[index] = value
-		}
-		if err := working.reserveRow(row, "GROUP BY result rows"); err != nil {
-			return Result{}, err
-		}
-		rows = append(rows, row)
-	}
-	if stats != nil {
-		stats.Groups = uint64(len(groups))
-	}
-	return finishAggregateRows(ctx, rows, columns, plan, parameters, stats, working)
+	return stream.finish(ctx, columns, plan, parameters, stats)
 }
 
 // Both scalar and batch grouping share SQL-level post-aggregation semantics.

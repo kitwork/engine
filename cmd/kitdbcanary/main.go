@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/buildinfo"
 	"github.com/kitwork/engine/kitdb/node"
 )
 
@@ -50,29 +51,33 @@ type latencySummary struct {
 }
 
 type canaryReport struct {
-	SchemaVersion int                        `json:"schema_version"`
-	Contract      kitdb.CompatibilityProfile `json:"contract"`
-	StartedAt     time.Time                  `json:"started_at"`
-	FinishedAt    time.Time                  `json:"finished_at"`
-	DurationMS    int64                      `json:"duration_ms"`
-	GoVersion     string                     `json:"go_version"`
-	OS            string                     `json:"os"`
-	Arch          string                     `json:"arch"`
-	Seed          int64                      `json:"seed"`
-	Tenants       int                        `json:"tenants"`
-	Workers       int                        `json:"workers"`
-	MaxOpen       int                        `json:"max_open"`
-	Keyspace      uint64                     `json:"keyspace"`
-	Operations    uint64                     `json:"operations"`
-	Commits       uint64                     `json:"commits"`
-	Checkpoints   uint64                     `json:"checkpoints"`
-	Verifications uint64                     `json:"verifications"`
-	Backups       uint64                     `json:"backups"`
-	Restores      uint64                     `json:"restores"`
-	Latency       latencySummary             `json:"commit_latency"`
-	Node          node.Stats                 `json:"node"`
-	Success       bool                       `json:"success"`
-	Failure       string                     `json:"failure,omitempty"`
+	SchemaVersion       int                        `json:"schema_version"`
+	Build               buildinfo.Info             `json:"build"`
+	RequestedWorkloadMS int64                      `json:"requested_workload_ms"`
+	WorkloadMS          int64                      `json:"workload_ms"`
+	WorkloadCompleted   bool                       `json:"workload_completed"`
+	Contract            kitdb.CompatibilityProfile `json:"contract"`
+	StartedAt           time.Time                  `json:"started_at"`
+	FinishedAt          time.Time                  `json:"finished_at"`
+	DurationMS          int64                      `json:"duration_ms"`
+	GoVersion           string                     `json:"go_version"`
+	OS                  string                     `json:"os"`
+	Arch                string                     `json:"arch"`
+	Seed                int64                      `json:"seed"`
+	Tenants             int                        `json:"tenants"`
+	Workers             int                        `json:"workers"`
+	MaxOpen             int                        `json:"max_open"`
+	Keyspace            uint64                     `json:"keyspace"`
+	Operations          uint64                     `json:"operations"`
+	Commits             uint64                     `json:"commits"`
+	Checkpoints         uint64                     `json:"checkpoints"`
+	Verifications       uint64                     `json:"verifications"`
+	Backups             uint64                     `json:"backups"`
+	Restores            uint64                     `json:"restores"`
+	Latency             latencySummary             `json:"commit_latency"`
+	Node                node.Stats                 `json:"node"`
+	Success             bool                       `json:"success"`
+	Failure             string                     `json:"failure,omitempty"`
 }
 
 type modelValue struct {
@@ -94,6 +99,7 @@ type latencyHistogram struct {
 }
 
 func main() {
+	version := flag.Bool("version", false, "print binary build information and exit")
 	config := canaryConfig{}
 	flag.StringVar(&config.Root, "root", "", "parent directory for canary files; empty uses a temporary directory")
 	flag.StringVar(&config.Report, "json", "", "optional final JSON report path")
@@ -109,6 +115,13 @@ func main() {
 	flag.Int64Var(&config.Seed, "seed", 1, "deterministic tenant-selection seed")
 	flag.BoolVar(&config.Quiet, "quiet", false, "suppress the final human-readable summary")
 	flag.Parse()
+	if *version {
+		if err := json.NewEncoder(os.Stdout).Encode(buildinfo.Current()); err != nil {
+			fmt.Fprintln(os.Stderr, "kitdbcanary:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := config.validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "kitdbcanary:", err)
@@ -162,17 +175,19 @@ func (config canaryConfig) validate() error {
 func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, error) {
 	startedAt := time.Now().UTC()
 	report := canaryReport{
-		SchemaVersion: canaryReportSchemaVersion,
-		Contract:      kitdb.CurrentCompatibility(),
-		StartedAt:     startedAt,
-		GoVersion:     runtime.Version(),
-		OS:            runtime.GOOS,
-		Arch:          runtime.GOARCH,
-		Seed:          config.Seed,
-		Tenants:       config.Tenants,
-		Workers:       config.Workers,
-		MaxOpen:       config.MaxOpen,
-		Keyspace:      config.Keyspace,
+		SchemaVersion:       canaryReportSchemaVersion,
+		Build:               buildinfo.Current(),
+		RequestedWorkloadMS: config.Duration.Milliseconds(),
+		Contract:            kitdb.CurrentCompatibility(),
+		StartedAt:           startedAt,
+		GoVersion:           runtime.Version(),
+		OS:                  runtime.GOOS,
+		Arch:                runtime.GOARCH,
+		Seed:                config.Seed,
+		Tenants:             config.Tenants,
+		Workers:             config.Workers,
+		MaxOpen:             config.MaxOpen,
+		Keyspace:            config.Keyspace,
 	}
 	if ctx == nil {
 		return finishCanaryReport(report, startedAt, nil, fmt.Errorf("nil canary context"))
@@ -219,6 +234,7 @@ func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, erro
 	var verifications atomic.Uint64
 	var latency latencyHistogram
 	workContext, cancelWork := context.WithCancel(ctx)
+	defer cancelWork()
 	failures := make(chan error, 1)
 	fail := func(err error) {
 		if err == nil {
@@ -241,6 +257,7 @@ func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, erro
 		}
 	}
 
+	workloadStartedAt := time.Now()
 	var workers sync.WaitGroup
 	workers.Add(config.Workers)
 	for worker := range config.Workers {
@@ -253,7 +270,7 @@ func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, erro
 					workContext, manager, options, tenants[index], index, config,
 					&operations, &commits, &checkpoints, &verifications, &latency,
 				); err != nil {
-					if workContext.Err() == nil {
+					if workContext.Err() == nil || (!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)) {
 						fail(fmt.Errorf("worker %d tenant %d: %w", worker, index, err))
 					}
 					return
@@ -280,6 +297,7 @@ func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, erro
 		workloadErr = ctx.Err()
 		cancelWork()
 	case <-workloadTimer.C:
+		report.WorkloadCompleted = true
 		cancelWork()
 	case workloadErr = <-failures:
 	}
@@ -290,6 +308,18 @@ func executeCanary(ctx context.Context, config canaryConfig) (canaryReport, erro
 		}
 	}
 	workers.Wait()
+	report.WorkloadMS = time.Since(workloadStartedAt).Milliseconds()
+	if err := ctx.Err(); err != nil {
+		report.WorkloadCompleted = false
+		workloadErr = errors.Join(workloadErr, err)
+	}
+	// A worker can fail concurrently with timer expiry. Draining after Wait
+	// prevents a successful final restore from masking that workload failure.
+	select {
+	case failure := <-failures:
+		workloadErr = errors.Join(workloadErr, failure)
+	default:
+	}
 	cancelWork()
 	report.Operations = operations.Load()
 	report.Commits = commits.Load()

@@ -1,6 +1,7 @@
 package search
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -839,7 +840,9 @@ func TestBlockMaxChecksCancellationWhilePruning(t *testing.T) {
 	}
 	statistics := blockMaxStatistics{}
 	prepared.statistics = &statistics
-	ctx := &cancelAfterChecksContext{Context: context.Background(), after: 4, done: make(chan struct{})}
+	// Posting read-ahead now checks the context on both sides of physical I/O,
+	// so leave enough checks to enter the pruning loop before cancellation.
+	ctx := &cancelAfterChecksContext{Context: context.Background(), after: 20, done: make(chan struct{})}
 	if _, err := segment.searchMatch(ctx, prepared); !errors.Is(err, context.Canceled) {
 		t.Fatalf("pruning cancellation error = %v", err)
 	}
@@ -1107,6 +1110,260 @@ func TestCanceledAndConcurrentSearch(t *testing.T) {
 	close(errorsFound)
 	for err := range errorsFound {
 		t.Fatal(err)
+	}
+}
+
+type cancelOnRangeReaderAt struct {
+	reader    *bytes.Reader
+	cancel    context.CancelFunc
+	target    int64
+	armed     bool
+	triggered bool
+	reads     int
+}
+
+type countingReaderAt struct {
+	reader interface {
+		ReadAt([]byte, int64) (int, error)
+	}
+	reads int
+	bytes int
+}
+
+type countedReadRange struct {
+	start uint64
+	end   uint64
+}
+
+type rangeCountingReaderAt struct {
+	reader interface {
+		ReadAt([]byte, int64) (int, error)
+	}
+	ranges []countedReadRange
+	reads  int
+}
+
+func (reader *rangeCountingReaderAt) ReadAt(destination []byte, offset int64) (int, error) {
+	read, err := reader.reader.ReadAt(destination, offset)
+	if offset >= 0 && read > 0 {
+		start := uint64(offset)
+		end := start + uint64(read)
+		for _, current := range reader.ranges {
+			if start < current.end && end > current.start {
+				reader.reads++
+				break
+			}
+		}
+	}
+	return read, err
+}
+
+func (reader *countingReaderAt) ReadAt(destination []byte, offset int64) (int, error) {
+	read, err := reader.reader.ReadAt(destination, offset)
+	reader.reads++
+	reader.bytes += read
+	return read, err
+}
+
+func (reader *cancelOnRangeReaderAt) ReadAt(destination []byte, offset int64) (int, error) {
+	read, err := reader.reader.ReadAt(destination, offset)
+	reader.reads++
+	if reader.armed && !reader.triggered && offset <= reader.target &&
+		reader.target < offset+int64(read) {
+		reader.triggered = true
+		reader.cancel()
+	}
+	return read, err
+}
+
+func TestPostingReadAheadHonorsCancellationAfterPayloadRead(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := buildSingleFieldSegment(t, schema, []string{
+		"alpha beta", "alpha gamma", "alpha delta", "alpha epsilon",
+	})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader := &cancelOnRangeReaderAt{reader: bytes.NewReader(data), cancel: cancel}
+	segment, err := openSegmentReader("<cancel-payload>", reader, int64(len(data)), schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, found, err := segment.lookupTerm(0, "alpha")
+	if err != nil || !found {
+		t.Fatalf("lookup alpha: found=%t err=%v", found, err)
+	}
+	iterator, err := newPostingIterator(
+		ctx, segment.file, segment.header.version, record, segment.header.documentN,
+		segment.header.sections[sectionPostings], false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader.target = int64(record.postingsOffset + iterator.headerSize)
+	reader.armed = true
+	readsBefore := reader.reads
+	if _, err := iterator.Next(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("posting payload cancellation = %v", err)
+	}
+	if !reader.triggered {
+		t.Fatal("posting payload read did not trigger cancellation")
+	}
+	if reads := reader.reads - readsBefore; reads != 1 {
+		t.Fatalf("header and small payload used %d physical reads, want 1", reads)
+	}
+	if _, _, current := iterator.Current(); current {
+		t.Fatal("canceled payload was published as the current posting")
+	}
+}
+
+func TestIdentifierPrefixReadAheadCoalescesSequentialCandidates(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	documents := make([]Document, 512)
+	for index := range documents {
+		documents[index] = Document{
+			ID: fmt.Sprintf("shopee/%06d", index),
+			Fields: map[string]string{
+				"text": "keyboard",
+			},
+		}
+	}
+	segment := buildTestSegment(t, schema, documents)
+	defer segment.Close()
+	counted := &countingReaderAt{reader: segment.file}
+	segment.file = counted
+	reader := newDocumentIdentifierPrefixReader(context.Background(), segment)
+	for document := range uint32(len(documents)) {
+		matched, err := reader.hasPrefix(document, "shopee/")
+		if err != nil || !matched {
+			t.Fatalf("document %d prefix: matched=%t err=%v", document, matched, err)
+		}
+	}
+	if counted.reads > 6 {
+		t.Fatalf("identifier prefix used %d physical reads for %d candidates, want at most 6", counted.reads, len(documents))
+	}
+	if counted.bytes > 6*identifierReadAheadBytes {
+		t.Fatalf("identifier prefix read %d bytes, want at most %d", counted.bytes, 6*identifierReadAheadBytes)
+	}
+}
+
+func TestIdentifierPrefixReadAheadHonorsCancellationAfterPhysicalRead(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := buildSingleFieldSegment(t, schema, []string{"keyboard"})
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	wrapped := &cancelOnRangeReaderAt{reader: bytes.NewReader(data), cancel: cancel}
+	segment, err := openSegmentReader(path, wrapped, int64(len(data)), schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer segment.Close()
+	wrapped.target = int64(segment.header.sections[sectionStoredOffsets].offset)
+	wrapped.armed = true
+	reader := newDocumentIdentifierPrefixReader(ctx, segment)
+	matched, err := reader.hasPrefix(0, "doc-")
+	if !errors.Is(err, context.Canceled) || matched {
+		t.Fatalf("identifier cancellation: matched=%t err=%v", matched, err)
+	}
+	if !wrapped.triggered {
+		t.Fatal("identifier offset read did not trigger cancellation")
+	}
+}
+
+func TestMultiFieldTopKChecksIdentifierOnlyForCompetitiveCandidates(t *testing.T) {
+	schema, err := NewSchema(
+		Text("title", StandardAnalyzer(), Boost(3)),
+		Text("body", StandardAnalyzer()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	documents := make([]Document, 512)
+	padding := strings.Repeat("x", 512)
+	for index := range documents {
+		title := "alpha"
+		body := "beta"
+		if index < 10 {
+			title = strings.Repeat("alpha ", 8)
+			body = strings.Repeat("beta ", 8)
+		}
+		documents[index] = Document{
+			ID: fmt.Sprintf("shopee/%06d/%s", index, padding),
+			Fields: map[string]string{
+				"title": title,
+				"body":  body,
+			},
+		}
+	}
+	segment := buildTestSegment(t, schema, documents)
+	defer segment.Close()
+	offsets := segment.header.sections[sectionStoredOffsets]
+	data := segment.header.sections[sectionStoredData]
+	counted := &rangeCountingReaderAt{
+		reader: segment.file,
+		ranges: []countedReadRange{
+			{start: offsets.offset, end: offsets.offset + offsets.length},
+			{start: data.offset, end: data.offset + data.length},
+		},
+	}
+	segment.file = counted
+	hits, err := segment.Search(context.Background(), MatchQuery{
+		Fields: []string{"title", "body"}, Text: "alpha beta", IdentifierPrefix: "shopee/",
+	}, SearchOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 10 {
+		t.Fatalf("hits = %d, want 10", len(hits))
+	}
+	for position, hit := range hits {
+		want := fmt.Sprintf("shopee/%06d/", position)
+		if !strings.HasPrefix(hit.ID, want) {
+			t.Fatalf("hit %d = %q, want prefix %q", position, hit.ID, want)
+		}
+	}
+	if counted.reads > 30 {
+		t.Fatalf("Top-K identifier path used %d stored reads, want at most 30", counted.reads)
+	}
+}
+
+func TestBoostedSingleFieldSearchAfterDoesNotRepeatBoundary(t *testing.T) {
+	schema, err := NewSchema(Text("text", StandardAnalyzer(), Boost(4)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	segment := buildTestSegment(t, schema, []Document{
+		{ID: "first", Fields: map[string]string{"text": "alpha alpha"}},
+		{ID: "second", Fields: map[string]string{"text": "alpha"}},
+	})
+	defer segment.Close()
+	query := MatchQuery{Field: "text", Text: "alpha"}
+	first, err := segment.Search(context.Background(), query, SearchOptions{Limit: 1})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first page = %#v, err=%v", first, err)
+	}
+	boundary := &SearchAfter{Score: first[0].Score, Ordinal: first[0].Ordinal}
+	second, err := segment.Search(context.Background(), query, SearchOptions{Limit: 1, After: boundary})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second page = %#v, err=%v", second, err)
+	}
+	if second[0].ID == first[0].ID {
+		t.Fatalf("SEARCH AFTER repeated boundary hit %q", first[0].ID)
 	}
 }
 
