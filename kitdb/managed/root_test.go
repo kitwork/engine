@@ -56,7 +56,14 @@ func TestRootRegistrationRecoveryAndOwnership(t *testing.T) {
 	if !reflect.DeepEqual(reopened.Catalog().Databases, []Database{registered}) {
 		t.Fatalf("recovered catalog = %+v", reopened.Catalog())
 	}
-	if got, err := reopened.DatabasePath(registered); err != nil || got != filepath.Join(path, "physical", "data.kitdb") {
+	// Open canonicalises the root (Abs + EvalSymlinks). On a GitHub Windows runner t.TempDir() comes
+	// back in 8.3 form — C:/Users/RUNNER~1/… — and the canonical path is the long form, so the
+	// expectation must be canonicalised the same way or the comparison fails only in CI.
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.DatabasePath(registered); err != nil || got != filepath.Join(canonical, "physical", "data.kitdb") {
 		t.Fatalf("database path = %q, %v", got, err)
 	}
 	if _, err := reopened.DatabasePath(Database{Name: "unregistered", Directory: "physical"}); err == nil {
