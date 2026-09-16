@@ -239,9 +239,7 @@ AS OF TIMESTAMP '2026-08-27T14:30:00+07:00'`); err == nil {
 		`SELECT datname FROM pg_catalog.pg_database ORDER BY datname`); containsString(names, "plain") {
 		t.Fatalf("dropped catalog-only attachment remains in pg_database: %v", names)
 	}
-	if _, err := maintenance.ExecContext(ctx, `DROP DATABASE products_recovered`); err != nil {
-		t.Fatalf("DROP DATABASE recovered fork: %v", err)
-	}
+	dropKitDBPostgresDatabase(t, ctx, maintenance, "products_recovered")
 	if names := queryKitDBPostgresStrings(t, ctx, maintenance,
 		`SELECT datname FROM pg_catalog.pg_database ORDER BY datname`); containsString(names, "products_recovered") {
 		t.Fatalf("dropped database remains in pg_database: %v", names)

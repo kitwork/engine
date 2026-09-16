@@ -1803,6 +1803,28 @@ func queryKitDBPostgresStrings(
 	return values
 }
 
+// dropKitDBPostgresDatabase drops a database whose last client has just closed. lib/pq's Close
+// sends Terminate and returns without waiting for the server to read it, so a DROP DATABASE that
+// follows on another connection can still find that session registered and get PostgreSQL's own
+// 55006 — the same race a real server has, and the client's to absorb. Only that error is
+// retried, for a bounded window; anything else is the test's failure.
+func dropKitDBPostgresDatabase(t *testing.T, ctx context.Context, maintenance *sql.DB, name string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, err := maintenance.ExecContext(ctx, `DROP DATABASE `+name)
+		if err == nil {
+			return
+		}
+		var postgresErr *pq.Error
+		if !errors.As(err, &postgresErr) || postgresErr.Code != "55006" ||
+			!strings.Contains(postgresErr.Message, "other session") || time.Now().After(deadline) {
+			t.Fatalf("DROP DATABASE %s: %v", name, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 func openKitDBPostgresTestClient(t *testing.T, address, password string) *sql.DB {
 	return openKitDBPostgresDatabaseTestClient(t, address, "postgres", password)
 }

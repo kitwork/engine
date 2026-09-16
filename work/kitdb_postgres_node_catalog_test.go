@@ -702,9 +702,7 @@ SELECT title, price, status FROM inventory WHERE id = 'item-1'`).Scan(
 		t.Fatal(err)
 	}
 	maintenance = openKitDBPostgresDatabaseTestClient(t, second.addr, "kitdb", "create-secret")
-	if _, err := maintenance.ExecContext(ctx, `DROP DATABASE shop`); err != nil {
-		t.Fatalf("DROP DATABASE: %v", err)
-	}
+	dropKitDBPostgresDatabase(t, ctx, maintenance, "shop")
 	if err := maintenance.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -866,9 +864,7 @@ router.get(() => 1);`
 		t.Fatal(err)
 	}
 	maintenance = openKitDBPostgresDatabaseTestClient(t, second.addr, "kitdb", "rename-secret")
-	if _, err := maintenance.ExecContext(ctx, `DROP DATABASE warehouse`); err != nil {
-		t.Fatalf("drop renamed database: %v", err)
-	}
+	dropKitDBPostgresDatabase(t, ctx, maintenance, "warehouse")
 	if err := maintenance.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1034,9 +1030,7 @@ router.get(() => db.products.count());`
 	if err := recovered.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := maintenance.ExecContext(ctx, `DROP DATABASE restart_recovered`); err != nil {
-		t.Fatal(err)
-	}
+	dropKitDBPostgresDatabase(t, ctx, maintenance, "restart_recovered")
 	if err := maintenance.Close(); err != nil {
 		t.Fatal(err)
 	}
