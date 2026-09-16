@@ -356,6 +356,7 @@ const driveProgressAssertions = `__runStandaloneKitTest(async function () {
   var waitFor = function (predicate, message) {
     return __kitTestWaitFor(predicate, message, 15000);
   };
+  var waitForCookie = __kitTestWaitForCookie;
   var root = document.documentElement;
   await waitFor(function () {
     var current = document.querySelector('[data-kit-retain="app-progress"]');
@@ -400,9 +401,9 @@ const driveProgressAssertions = `__runStandaloneKitTest(async function () {
     "loaded finish did not become determinate 100");
 
   document.getElementById("drive-progress-error").click();
+  await waitForCookie("drive_progress_error_fallback", "real Drive fetch failure did not hard-navigate", 15000);
   await waitFor(function () {
-    return document.cookie.indexOf("drive_progress_error_fallback=1") >= 0 &&
-      host.hidden === true && bar.getAttribute("aria-busy") === "false";
+    return host.hidden === true && bar.getAttribute("aria-busy") === "false";
   }, "real Drive fetch failure did not reach progress");
   assert(globalThis.__progressOwnedClears >= 1, "new navigation did not clear the loaded hide timer");
   await new Promise(function (resolve) { setTimeout(resolve, 350); });

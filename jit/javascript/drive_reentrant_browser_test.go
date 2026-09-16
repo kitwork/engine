@@ -320,6 +320,7 @@ const driveReentrantContractSource = `(function (global, document) {
 __runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   var nextTurn = __kitTestNextTurn;
   function signature(event) {
     return event.phase + ":" + event.path + (event.outcome ? ":" + event.outcome : "");
@@ -376,9 +377,7 @@ __runStandaloneKitTest(async function () {
   globalThis.__driveAtomicEvents = [];
   globalThis.__driveAtomicArmFallback = true;
   document.getElementById("to-fallback").click();
-  await waitFor(function () {
-    return document.cookie.indexOf("drive_atomic_fallback=1") >= 0;
-  }, "incompatible page did not hard-navigate");
+  await waitForCookie("drive_atomic_fallback", "incompatible page did not hard-navigate");
   await nextTurn();
   assert(signatures() === "start:/fallback,finish:/fallback:fallback",
     "terminal fallback leaked a queued visit: " + signatures());

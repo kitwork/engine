@@ -539,6 +539,7 @@ const stableDriveAssertions = `__runStandaloneKitTest(async function () {
   var waitFor = function (predicate, message) {
     return __kitTestWaitFor(predicate, message, 15000);
   };
+  var waitForCookie = __kitTestWaitForCookie;
   var state = globalThis.__stableDriveState;
 
   await waitFor(function () {
@@ -570,13 +571,13 @@ const stableDriveAssertions = `__runStandaloneKitTest(async function () {
   assert(history.length === historyLength + 1, "exact stable Morph did not push one history entry");
 
   async function expectFallback(name, label) {
-    var cookie = "kit_stable_" + name.replace(/-/g, "_") + "=1";
+    var cookie = "kit_stable_" + name.replace(/-/g, "_");
     var title = document.title;
     var path = location.pathname + location.search + location.hash;
     var historyCount = history.length;
     var route = document.getElementById("stable-route-label").textContent.trim();
     document.getElementById("stable-" + name + "-link").click();
-    await waitFor(function () { return document.cookie.indexOf(cookie) >= 0; }, label + " did not fall back natively");
+    await waitForCookie(cookie, label + " did not fall back natively", 15000);
     assert(document.title === title && location.pathname + location.search + location.hash === path,
       label + " mutated title or URL before fallback");
     assert(history.length === historyCount && document.getElementById("stable-route-label").textContent.trim() === route,
@@ -633,6 +634,7 @@ const stableDriveInvalidContractSource = browserHarness + `
 __runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   var state = globalThis.__stableInvalidInitial;
   var disabledWarnings = state.warnings.filter(function (message) {
     return message.indexOf("KitJS Drive") >= 0 && message.indexOf("disabled") >= 0;
@@ -651,9 +653,7 @@ __runStandaloneKitTest(async function () {
   var path = location.pathname + location.search + location.hash;
   var historyLength = history.length;
   document.getElementById("invalid-initial-link").click();
-  await waitFor(function () {
-    return document.cookie.indexOf("kit_stable_invalid_initial=1") >= 0;
-  }, "invalid initial topology did not permit native navigation");
+  await waitForCookie("kit_stable_invalid_initial", "invalid initial topology did not permit native navigation");
   assert(state.fetches.filter(function (source) {
     return new URL(source, location.href).pathname === "/invalid-initial-target";
   }).length === 0, "invalid initial topology intercepted the link with fetch");
@@ -697,6 +697,7 @@ const stagedAuthoredStableSource = `(function (global) {
 __runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   var state = globalThis.__stagedAuthoredStable;
 
   await waitFor(function () {
@@ -735,8 +736,7 @@ __runStandaloneKitTest(async function () {
     var historyLength = history.length;
     var bodyHTML = document.body.innerHTML;
     document.getElementById(link).click();
-    await waitFor(function () { return document.cookie.indexOf(cookie + "=1") >= 0; },
-      label + " did not fall back natively");
+    await waitForCookie(cookie, label + " did not fall back natively");
     assert(document.title === title && location.pathname === path && history.length === historyLength,
       label + " mutated title, URL, or history before fallback");
     assert(document.documentElement === root && document.body === body && document.body.innerHTML === bodyHTML,

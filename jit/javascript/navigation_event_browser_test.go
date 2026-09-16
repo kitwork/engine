@@ -162,6 +162,7 @@ const navigationEventRecorder = `(function () {
 const navigationEventLifecycleAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   var nextTurn = __kitTestNextTurn;
   var state = globalThis.__navigationContract;
   var realFetch = globalThis.fetch.bind(globalThis);
@@ -249,22 +250,19 @@ const navigationEventLifecycleAssertions = `__runStandaloneKitTest(async functio
   var stable = snapshot();
   var fallback = await start("event-fallback", "/event-fallback");
   await expectFinish(fallback, "fallback", "non-HTML response did not finish as fallback");
-  await waitFor(function () { return document.cookie.indexOf("kit_navigation_fallback=1") >= 0; },
-    "non-HTML response did not hard-navigate after fallback");
+  await waitForCookie("kit_navigation_fallback", "non-HTML response did not hard-navigate after fallback");
   unchanged(stable, "non-HTML fallback");
 
   stable = snapshot();
   var asyncError = await start("event-error-async", "/event-error-async");
   await expectFinish(asyncError, "error", "rejected fetch did not finish as error");
-  await waitFor(function () { return document.cookie.indexOf("kit_navigation_async_error=1") >= 0; },
-    "rejected fetch did not hard-navigate after error");
+  await waitForCookie("kit_navigation_async_error", "rejected fetch did not hard-navigate after error");
   unchanged(stable, "rejected fetch");
 
   stable = snapshot();
   var syncError = await start("event-error-sync", "/event-error-sync");
   await expectFinish(syncError, "error", "synchronous fetch throw did not finish as error");
-  await waitFor(function () { return document.cookie.indexOf("kit_navigation_sync_error=1") >= 0; },
-    "synchronous fetch throw did not hard-navigate after error");
+  await waitForCookie("kit_navigation_sync_error", "synchronous fetch throw did not hard-navigate after error");
   unchanged(stable, "synchronous fetch throw");
   await nextTurn();
 

@@ -593,6 +593,7 @@ const retainDriveAssertions = `__runStandaloneKitTest(async function () {
   var waitFor = function (predicate, message) {
     return __kitTestWaitFor(predicate, message, 15000);
   };
+  var waitForCookie = __kitTestWaitForCookie;
   var state = globalThis.__retainDriveState;
 
   assert(!document.querySelector("[data-kit-app],[data-kit-hydrate]"),
@@ -624,8 +625,7 @@ const retainDriveAssertions = `__runStandaloneKitTest(async function () {
       historyState: JSON.stringify(history.state)
     };
     document.getElementById("retain-" + label + "-link").click();
-    await waitFor(function () { return document.cookie.indexOf("kit_retain_" + cookie + "=1") >= 0; },
-      label + " retain metadata did not hard-fallback");
+    await waitForCookie("kit_retain_" + cookie, label + " retain metadata did not hard-fallback", 15000);
     assert(document.documentElement === root && document.body === body,
       label + " retain failure replaced a document root");
     assert(location.pathname === before.path && document.title === before.title && root.lang === before.lang,

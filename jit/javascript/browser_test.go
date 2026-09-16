@@ -128,6 +128,59 @@ const browserHarness = `(function () {
     return new Promise(function (resolve) { setTimeout(resolve, 0); });
   }
 
+  // A native navigation proves itself with a cookie its response sets. Two things make that
+  // wait different from every other waitFor under --virtual-time-budget:
+  //   1. document.cookie is answered from a renderer-side cache keyed on a shared-memory version
+  //      that the network service bumps from a posted task, after the response that stored the
+  //      cookie was delivered. Polling it costs no real time, so a 2000ms virtual budget can
+  //      burn before that task lands — the "did not hard-navigate" failures the ubuntu runner
+  //      produced in four of seven runs, on a different fixture each time, while every run
+  //      elsewhere passed. The Cookie Store API reads the store itself; loopback origins are
+  //      secure contexts, so it is present in every fixture.
+  //   2. Virtual time only holds still while a network request is pending. The store read is
+  //      a bare renderer-to-browser round trip, so it is anchored by same-origin probe requests
+  //      (a 404 is fine) for as long as it is in flight.
+  // The probe uses the fetch the page was born with: fixtures replace globalThis.fetch to
+  // record or fail Drive's requests, and the probe must be invisible to them.
+  var nativeFetch = typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : null;
+
+  function hasCookie(name) {
+    if (globalThis.cookieStore && typeof globalThis.cookieStore.get === "function") {
+      return globalThis.cookieStore.get(name).then(function (cookie) { return cookie !== null && cookie !== undefined; });
+    }
+    return Promise.resolve(document.cookie.split("; ").some(function (pair) { return pair.indexOf(name + "=") === 0; }));
+  }
+
+  function networkTick() {
+    if (!nativeFetch) return Promise.resolve();
+    return nativeFetch("/__kit-test-cookie-probe", { cache: "no-store", credentials: "omit" })
+      .then(function () {}, function () {});
+  }
+
+  // Resolves like the pending promise, but keeps a probe request in flight until it settles;
+  // with nothing pending, virtual time leaps to the next timer — or to the end of the budget —
+  // the moment the page goes idle.
+  function anchored(pending) {
+    var settled = false;
+    pending.then(function () { settled = true; }, function () { settled = true; });
+    function spin() { return settled ? Promise.resolve() : networkTick().then(spin); }
+    return spin().then(function () { return pending; });
+  }
+
+  function waitForCookie(name, message, timeout, interval) {
+    var duration = typeof timeout === "number" && timeout > 0 ? timeout : 2000;
+    var delay = typeof interval === "number" && interval >= 0 ? interval : 8;
+    var deadline = performance.now() + duration;
+    function attempt() {
+      return anchored(hasCookie(name)).then(function (present) {
+        if (present) return;
+        if (performance.now() >= deadline) throw new Error(message + " (cookie " + name + " never reached the store)");
+        return new Promise(function (resolve) { setTimeout(resolve, delay); }).then(attempt);
+      });
+    }
+    return attempt();
+  }
+
   function assertPublicContract() {
     assert(globalThis.kit && typeof globalThis.kit === "object", "global kit object missing");
     assert(Object.keys(globalThis.kit).join(",") === "version,component", "public kit keys were " + Object.keys(globalThis.kit).join(","));
@@ -169,6 +222,7 @@ const browserHarness = `(function () {
   globalThis.__runStandaloneKitTest = run;
   globalThis.__kitTestAssert = assert;
   globalThis.__kitTestWaitFor = waitFor;
+  globalThis.__kitTestWaitForCookie = waitForCookie;
   globalThis.__kitTestNextTurn = nextTurn;
   globalThis.__kitTestPublicContract = assertPublicContract;
 })();`

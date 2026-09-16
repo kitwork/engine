@@ -169,6 +169,7 @@ const driveRootContractSource = browserHarness + `
 const driveRootBoundaryAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   await waitFor(function () {
     return document.getElementById("drive-root-count").textContent.trim() === "0";
   }, "document-root app did not mount");
@@ -194,8 +195,7 @@ const driveRootBoundaryAssertions = `__runStandaloneKitTest(async function () {
 
   async function rejects(id, cookie) {
     document.getElementById(id).click();
-    await waitFor(function () { return document.cookie.indexOf(cookie + "=1") >= 0; },
-      id + " did not hard-navigate");
+    await waitForCookie(cookie, id + " did not hard-navigate");
     assert(document.documentElement === root, id + " replaced the root before fallback");
     assert(location.pathname === "/drive-root-same", id + " committed a rejected URL");
     assert(document.title === "Root accepted" &&

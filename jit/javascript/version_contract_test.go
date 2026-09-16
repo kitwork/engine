@@ -697,6 +697,7 @@ func versionDriveInitialDocument(assetPath, contractIntegrity string) string {
 const versionDriveAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   await waitFor(function () { return document.getElementById("drive-version-output").textContent.trim() === "0"; },
     "Drive version component did not boot");
   document.getElementById("drive-version-add").click();
@@ -712,8 +713,7 @@ const versionDriveAssertions = `__runStandaloneKitTest(async function () {
   };
 
   document.getElementById("drive-version-mismatch-link").click();
-  await waitFor(function () { return document.cookie.indexOf("kit_version_mismatch_fallback=1") >= 0; },
-    "mismatched pin did not hard-navigate");
+  await waitForCookie("kit_version_mismatch_fallback", "mismatched pin did not hard-navigate");
   assert(document.documentElement === root, "Drive replaced the document before mismatched-pin fallback");
   assert(location.pathname === "/drive-version.html", "Drive committed a mismatched-pin URL");
   assert(document.title === "Version initial", "Drive changed title before mismatched-pin fallback");
@@ -726,8 +726,7 @@ const versionDriveAssertions = `__runStandaloneKitTest(async function () {
   assert(globalThis.__versionIncomingScript === 1, "Drive reran a fetched script before fallback");
 
   document.getElementById("drive-version-unknown-link").click();
-  await waitFor(function () { return document.cookie.indexOf("kit_version_unknown_fallback=1") >= 0; },
-    "unknown manifest component did not hard-navigate");
+  await waitForCookie("kit_version_unknown_fallback", "unknown manifest component did not hard-navigate");
   assert(document.documentElement === root, "Drive replaced the document before unknown-component fallback");
   assert(location.pathname === "/drive-version.html", "Drive committed an unknown-component URL");
   assert(document.title === "Version initial" &&

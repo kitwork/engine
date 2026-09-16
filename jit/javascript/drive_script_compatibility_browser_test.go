@@ -304,6 +304,38 @@ const driveScriptContractSource = `(function (global, document) {
       poll();
     });
   }
+  // Mirrors the shared harness: the native-navigation cookie is read through the Cookie Store
+  // API, not document.cookie, whose renderer-side cache can lag the store; and the read is
+  // anchored by a same-origin probe request, the only thing that holds virtual time still.
+  var nativeFetch = typeof global.fetch === "function" ? global.fetch.bind(global) : null;
+  function waitForCookie(name, message) {
+    var deadline = performance.now() + 10000;
+    function has() {
+      if (global.cookieStore && typeof global.cookieStore.get === "function") {
+        return global.cookieStore.get(name).then(function (cookie) { return cookie !== null && cookie !== undefined; });
+      }
+      return Promise.resolve(document.cookie.split("; ").some(function (pair) { return pair.indexOf(name + "=") === 0; }));
+    }
+    function tick() {
+      if (!nativeFetch) return Promise.resolve();
+      return nativeFetch("/__kit-test-cookie-probe", { cache: "no-store", credentials: "omit" })
+        .then(function () {}, function () {});
+    }
+    function anchored(pending) {
+      var settled = false;
+      pending.then(function () { settled = true; }, function () { settled = true; });
+      function spin() { return settled ? Promise.resolve() : tick().then(spin); }
+      return spin().then(function () { return pending; });
+    }
+    function attempt() {
+      return anchored(has()).then(function (present) {
+        if (present) return;
+        if (performance.now() >= deadline) throw new Error(message + " (cookie " + name + " never reached the store)");
+        return new Promise(function (resolve) { setTimeout(resolve, 8); }).then(attempt);
+      });
+    }
+    return attempt();
+  }
   function ready(run) {
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", run, { once: true });
     else run();
@@ -332,9 +364,7 @@ const driveScriptContractSource = `(function (global, document) {
           var unsignedPath = location.pathname;
           var unsignedHistoryLength = history.length;
           document.getElementById("unsigned-current-link").click();
-          waitFor(function () {
-            return document.cookie.indexOf("drive_unsigned_current_fallback=1") >= 0;
-          }, "unsigned current Hydrate profile did not hard-navigate").then(function () {
+          waitForCookie("drive_unsigned_current_fallback", "unsigned current Hydrate profile did not hard-navigate").then(function () {
             assert(document.title === unsignedTitle &&
               document.getElementById("script-route").textContent.trim() === unsignedRoute &&
               location.pathname === unsignedPath && history.length === unsignedHistoryLength,
@@ -375,7 +405,7 @@ const driveScriptContractSource = `(function (global, document) {
           var path = location.pathname + location.search + location.hash;
           var historyLength = history.length;
           document.getElementById(link).click();
-          await waitFor(function () { return document.cookie.indexOf(cookie + "=1") >= 0; }, label + " did not hard navigate");
+          await waitForCookie(cookie, label + " did not hard navigate");
           assert(document.title === title && document.getElementById("script-route").textContent.trim() === route,
             label + " mutated title or body before fallback");
           assert(location.pathname + location.search + location.hash === path && history.length === historyLength,

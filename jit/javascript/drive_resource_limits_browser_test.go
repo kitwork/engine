@@ -382,7 +382,7 @@ const driveResourceLimitAssertions = `
     await expectLoaded("depth-exact", "depth-256", "the exact depth-256 document");
 
     async function expectFallback(name, label) {
-      var cookie = "kit_drive_limit_" + name.replace(/-/g, "_") + "=1";
+      var cookie = "kit_drive_limit_" + name.replace(/-/g, "_");
       var start = events.length;
       var path = location.pathname + location.search + location.hash;
       var historyLength = history.length;
@@ -393,7 +393,7 @@ const driveResourceLimitAssertions = `
       var marker = document.getElementById("limit-marker");
       var markerText = marker.textContent;
       document.getElementById("limit-" + name).click();
-      await waitFor(function () { return document.cookie.indexOf(cookie) >= 0; }, label + " did not navigate natively");
+      await __kitTestWaitForCookie(cookie, label + " did not navigate natively", 60000);
       var finishes = events.slice(start).filter(function (detail) { return detail.phase === "finish"; });
       assert(finishes.length === 1 && finishes[0].outcome === "fallback",
         label + " terminal outcomes were " + finishes.map(function (detail) { return detail.outcome; }).join(","));

@@ -181,6 +181,7 @@ kit.component("drive-counter", { count: 0 });
 const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   var waitForDrive = function (predicate, message) {
     return waitFor(predicate, message, 15000);
   };
@@ -267,8 +268,7 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
     "popstate navigation did not restore the prior route");
 
   document.getElementById("unknown-link").click();
-  await waitForDrive(function () { return document.cookie.indexOf("kit_drive_unknown_fallback=1") >= 0; },
-    "unknown component did not hard-navigate");
+  await waitForCookie("kit_drive_unknown_fallback", "unknown component did not hard-navigate", 15000);
   assert(location.pathname === "/fast", "unknown component committed a Drive URL");
   assert(document.title === "Fast" && document.getElementById("route-main").textContent.trim() === "Fast",
     "unknown component mutated the document before hard fallback");
@@ -276,8 +276,7 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
     "unknown component boundary entered the live body");
 
   document.getElementById("mismatch-link").click();
-  await waitForDrive(function () { return document.cookie.indexOf("kit_drive_hard_fallback=1") >= 0; },
-    "artifact mismatch did not hard-navigate");
+  await waitForCookie("kit_drive_hard_fallback", "artifact mismatch did not hard-navigate", 15000);
   assert(location.pathname === "/fast", "204 hard fallback unexpectedly committed a Drive URL");
   assert(document.title === "Fast", "artifact mismatch changed title before hard fallback");
   assert(document.getElementById("route-main").textContent.trim() === "Fast", "artifact mismatch changed body before hard fallback");
@@ -300,17 +299,14 @@ const hydrateDriveAssertions = `__runStandaloneKitTest(async function () {
   }
 
   document.getElementById("base-mismatch-link").click();
-  await waitForDrive(function () { return document.cookie.indexOf("kit_drive_base_fallback=1") >= 0; },
-    "base semantic mismatch did not hard-navigate");
+  await waitForCookie("kit_drive_base_fallback", "base semantic mismatch did not hard-navigate", 15000);
   assertFastDocument("base semantic mismatch");
 
   var hazards = ["iframe", "frame", "object", "embed", "refresh"];
   for (var hazardIndex = 0; hazardIndex < hazards.length; hazardIndex++) {
     var hazard = hazards[hazardIndex];
     document.getElementById(hazard + "-link").click();
-    await waitForDrive(function () {
-      return document.cookie.indexOf("kit_drive_" + hazard + "_fallback=1") >= 0;
-    }, hazard + " active content did not hard-navigate");
+    await waitForCookie("kit_drive_" + hazard + "_fallback", hazard + " active content did not hard-navigate", 15000);
     assertFastDocument(hazard + " active content");
     assert(!document.querySelector("iframe,frame,object,embed,meta[http-equiv]"),
       hazard + " active content entered the live document");

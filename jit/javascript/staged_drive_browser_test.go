@@ -456,6 +456,7 @@ const stagedDriveHandoffPrelude = `(function (global, document) {
 const stagedDriveHandoffAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   var nextTurn = __kitTestNextTurn;
   var runs = globalThis.__stagedHandoffRuns;
   var lifecycle = globalThis.__stagedHandoffLifecycle;
@@ -557,8 +558,7 @@ const stagedDriveHandoffAssertions = `__runStandaloneKitTest(async function () {
   async function expectMetadataFallback(link, cookie, label) {
     var before = snapshot();
     document.getElementById(link).click();
-    await waitFor(function () { return document.cookie.indexOf(cookie + "=1") >= 0; },
-      label + " did not hard-navigate");
+    await waitForCookie(cookie, label + " did not hard-navigate");
     unchanged(before, label);
   }
 
@@ -573,15 +573,13 @@ const stagedDriveHandoffAssertions = `__runStandaloneKitTest(async function () {
 
   var stable = snapshot();
   document.getElementById("to-service").click();
-  await waitFor(function () { return document.cookie.indexOf("staged_handoff_service_full=1") >= 0; },
-    "service graph change did not hard-navigate");
+  await waitForCookie("staged_handoff_service_full", "service graph change did not hard-navigate");
   unchanged(stable, "service graph change");
   assert(runs.service === 0, "service graph package executed during component-only handoff");
 
   stable = snapshot();
   document.getElementById("to-broken").click();
-  await waitFor(function () { return document.cookie.indexOf("staged_handoff_broken_full=1") >= 0; },
-    "failed package transaction did not fall back to hard navigation");
+  await waitForCookie("staged_handoff_broken_full", "failed package transaction did not fall back to hard navigation");
   unchanged(stable, "failed package transaction");
   assert(globalThis.__stagedHandoffIncomingScript === 0,
     "failed package transaction executed an incoming body script");
@@ -597,8 +595,7 @@ const stagedDriveHandoffAssertions = `__runStandaloneKitTest(async function () {
   originalRuntime.parentNode.replaceChild(replacementRuntime, originalRuntime);
   stable = snapshot();
   document.getElementById("to-live-anchor").click();
-  await waitFor(function () { return document.cookie.indexOf("staged_handoff_live_anchor_full=1") >= 0; },
-    "replaced live staged anchor did not hard-navigate");
+  await waitForCookie("staged_handoff_live_anchor_full", "replaced live staged anchor did not hard-navigate");
   unchanged(stable, "replaced live staged anchor");
   await nextTurn();
 });`

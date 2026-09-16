@@ -343,6 +343,7 @@ const driveThemePrepaintAssertions = `__runStandaloneKitTest(async function () {
   var waitFor = function (predicate, message) {
     return __kitTestWaitFor(predicate, message, 15000);
   };
+  var waitForCookie = __kitTestWaitForCookie;
   await waitFor(function () {
     return globalThis.kit && document.getElementById("prepaint-route").textContent === "start";
   }, "initial staged theme-prepaint page did not boot");
@@ -443,8 +444,7 @@ const driveThemePrepaintAssertions = `__runStandaloneKitTest(async function () {
   async function expectFallback(link, cookie, label) {
     var before = snapshot();
     document.getElementById(link).click();
-    await waitFor(function () { return document.cookie.indexOf(cookie + "=1") >= 0; },
-      label + " did not hard-navigate");
+    await waitForCookie(cookie, label + " did not hard-navigate", 15000);
     unchanged(before, label);
   }
 
@@ -469,6 +469,7 @@ const driveThemePrepaintAssertions = `__runStandaloneKitTest(async function () {
 const driveInitialForgedThemeAssertions = `__runStandaloneKitTest(async function () {
   var assert = __kitTestAssert;
   var waitFor = __kitTestWaitFor;
+  var waitForCookie = __kitTestWaitForCookie;
   await waitFor(function () {
     return globalThis.kit && document.getElementById("initial-forged-theme-route").textContent === "start";
   }, "initial authored theme-marker page did not boot");
@@ -487,9 +488,7 @@ const driveInitialForgedThemeAssertions = `__runStandaloneKitTest(async function
     historyState: JSON.stringify(history.state)
   };
   document.getElementById("initial-forged-theme-target").click();
-  await waitFor(function () {
-    return document.cookie.indexOf("initial_forged_theme_full=1") >= 0;
-  }, "initial authored theme marker gained the inline-script exception");
+  await waitForCookie("initial_forged_theme_full", "initial authored theme marker gained the inline-script exception");
 
   assert(document.documentElement === before.root && document.body === before.body,
     "initial authored theme marker replaced a document root before native fallback");
