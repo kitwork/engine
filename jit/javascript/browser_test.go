@@ -222,6 +222,11 @@ const browserHarness = `(function () {
   window.addEventListener("error", function (event) { finish("failed", event.error || event.message); });
   window.addEventListener("unhandledrejection", function (event) { finish("failed", event.reason); });
 
+  // A dump with no data-kit-test attribute means the virtual budget ran out mid-test. This
+  // stamps how far the virtual clock had got, so that dump says whether the budget was spent
+  // step by step or leapt over — an await with nothing pending jumps straight to the end.
+  setInterval(function () { root.setAttribute("data-kit-test-clock", String(Math.round(performance.now()))); }, 500);
+
   function run(test) {
     var start = function () {
       setTimeout(function () {
