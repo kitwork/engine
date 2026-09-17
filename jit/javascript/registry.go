@@ -311,6 +311,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			"switch":           "1.0.0",
 			"tabs":             "1.0.0",
 			"tags":             "1.0.0",
+			"terminal":         "1.0.0",
 			"theme":            "3.0.0",
 			"toast":            "1.0.0",
 			"tooltip":          "1.0.0",
@@ -738,6 +739,17 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			identity: ComponentVersion{Name: "copy", Version: "1.0.0"},
 			requires: []ServiceVersion{{Name: "clipboard", Version: "1.0.0"}},
 			source:   append([]byte(nil), copySource...),
+		},
+	}
+	terminalSource, err := embeddedDeliveryPackages.ReadFile("component/terminal/1.0.0.js")
+	if err != nil {
+		return nil, fmt.Errorf("%w: read component/terminal/1.0.0.js: %v", ErrInvalidModule, err)
+	}
+	catalog.components["terminal"] = map[string]catalogComponent{
+		"1.0.0": {
+			identity: ComponentVersion{Name: "terminal", Version: "1.0.0"},
+			requires: []ServiceVersion{{Name: "clipboard", Version: "1.0.0"}},
+			source:   append([]byte(nil), terminalSource...),
 		},
 	}
 	desktopTitlebarSource, err := embeddedDeliveryPackages.ReadFile("component/desktop-titlebar/1.0.0.js")
