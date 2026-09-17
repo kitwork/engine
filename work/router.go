@@ -162,7 +162,14 @@ func (r *Router) responder(w http.ResponseWriter) {
 		return
 
 	case "redirect":
-		http.Redirect(w, request, data.String(), http.StatusSeeOther)
+		// ctx.redirect(url, 301) means 301. Only a redirect status is honoured; anything
+		// else — the response's 200 default included — falls back to 303, the one that
+		// turns a POST into a GET.
+		code := r.response.Code()
+		if code < 300 || code > 399 {
+			code = http.StatusSeeOther
+		}
+		http.Redirect(w, request, data.String(), code)
 	case "text":
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(r.response.Code())
