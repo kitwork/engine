@@ -297,6 +297,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			"desktop-titlebar": "1.0.0",
 			"dialog":           "1.0.0",
 			"drawer":           "1.0.0",
+			"dropzone":         "1.0.0",
 			"dropdown":         "1.0.0",
 			"otp":              "1.0.0",
 			"pagination":       "1.0.0",
@@ -739,6 +740,16 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			identity: ComponentVersion{Name: "copy", Version: "1.0.0"},
 			requires: []ServiceVersion{{Name: "clipboard", Version: "1.0.0"}},
 			source:   append([]byte(nil), copySource...),
+		},
+	}
+	dropzoneSource, err := embeddedDeliveryPackages.ReadFile("component/dropzone/1.0.0.js")
+	if err != nil {
+		return nil, fmt.Errorf("%w: read component/dropzone/1.0.0.js: %v", ErrInvalidModule, err)
+	}
+	catalog.components["dropzone"] = map[string]catalogComponent{
+		"1.0.0": {
+			identity: ComponentVersion{Name: "dropzone", Version: "1.0.0"},
+			source:   append([]byte(nil), dropzoneSource...),
 		},
 	}
 	terminalSource, err := embeddedDeliveryPackages.ReadFile("component/terminal/1.0.0.js")

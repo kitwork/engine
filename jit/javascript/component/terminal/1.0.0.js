@@ -19,7 +19,14 @@
 //
 // A single file needs no tabs: one panel, a title, the copy control.
 
-var instances = new WeakMap();
+// The instance data hangs off the scope under a symbol. A method a directive invokes
+// receives an action proxy as `this`, and the proxy hands symbol keys through to the
+// scope — which a WeakMap keyed by the raw scope object would not survive.
+var INSTANCE = Symbol("kit:terminal");
+
+function instance(scope) {
+  return scope ? scope[INSTANCE] : undefined;
+}
 var timers = new WeakMap();
 
 function id(value) {
@@ -150,7 +157,7 @@ kit.component("terminal", {
   init: function (context) {
     var scope = this;
     var data = { context: context, disposed: false };
-    instances.set(scope, data);
+    Object.defineProperty(scope, INSTANCE, { value: data, configurable: true });
     scope.active = activeID(scope, data);
     sync(scope, data);
 
@@ -189,7 +196,7 @@ kit.component("terminal", {
   },
 
   select: function (value) {
-    var data = instances.get(this);
+    var data = instance(this);
     var name = id(value);
     if (!name || panelIDs(data).indexOf(name) < 0) return activeID(this, data);
     this.active = name;
@@ -197,16 +204,16 @@ kit.component("terminal", {
     return name;
   },
 
-  next: function () { return move(this, instances.get(this), 1); },
-  previous: function () { return move(this, instances.get(this), -1); },
+  next: function () { return move(this, instance(this), 1); },
+  previous: function () { return move(this, instance(this), -1); },
 
   isActive: function (value) {
     var name = id(value);
-    return name !== "" && activeID(this, instances.get(this)) === name;
+    return name !== "" && activeID(this, instance(this)) === name;
   },
 
   copy: function () {
-    return copyActive(this, instances.get(this));
+    return copyActive(this, instance(this));
   },
 
   reset: function () {

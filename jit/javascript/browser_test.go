@@ -117,7 +117,11 @@ const browserHarness = `(function () {
   // service, before it calls the condition missing. A wait that succeeds never gets here.
   // Calibration: a first body chunk held back 400ms after its headers (the request-form
   // fixture's shape, which lost a ubuntu run) needs about 1000 probes locally; 200 was short.
+  // A probe is not free of virtual time either — measured, about 5ms each while a timer is
+  // pending — so the grace is also capped in virtual time, or a wait that will never pass
+  // spends the whole budget and the dump carries no message at all.
   var probeGrace = 1000;
+  var probeGraceVirtualMS = 1500;
 
   // The probe is an image load, not a fetch: fixtures replace globalThis.fetch to record or
   // fail Drive's requests — one installs its spy before this harness even runs — and the probe
@@ -143,7 +147,7 @@ const browserHarness = `(function () {
         try {
           if (predicate()) { resolve(); return; }
           if (performance.now() >= deadline) {
-            if (grace-- <= 0) { reject(new Error(message)); return; }
+            if (grace-- <= 0 || performance.now() - deadline > probeGraceVirtualMS) { reject(new Error(message)); return; }
             networkTick().then(poll);
             return;
           }

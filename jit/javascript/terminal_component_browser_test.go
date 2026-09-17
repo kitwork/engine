@@ -51,6 +51,7 @@ var terminalComponentDocument = fmt.Sprintf(`<!doctype html>
       <button id="tab-html" type="button" role="tab" data-terminal-tab="html">page.html</button>
       <button id="tab-js" type="button" role="tab" data-terminal-tab="js">page.js</button>
       <button id="copy-files" type="button" data-terminal-copy>Copy</button>
+      <button id="select-js" type="button" data-kit-click="select('js')">Select js</button>
       <output id="files-state" data-kit-text="copied ? 'copied' : 'idle'"></output>
       <output id="files-active" data-kit-text="active"></output>
     </div>
@@ -93,6 +94,12 @@ __runStandaloneKitTest(async function () {
   assert(tabHTML.getAttribute("aria-selected") === "true" && tabJS.getAttribute("aria-selected") === "false", "tabs did not reflect the active file");
   assert(tabHTML.getAttribute("data-state") === "active" && html.getAttribute("data-state") === "active", "data-state did not mark the active parts");
   assert(document.getElementById("files-active").textContent.trim() === "html", "active was not published to bindings");
+
+  // select() through a directive — its this is an action proxy — shows the file too.
+  document.getElementById("select-js").click();
+  await waitFor(function () { return js.hidden === false && html.hidden === true; }, "select() from a directive did not switch the panel");
+  tabHTML.click();
+  await waitFor(function () { return html.hidden === false; }, "clicking the first tab did not switch back");
 
   // Click the other file: it shows, the first hides.
   tabJS.click();

@@ -28,6 +28,7 @@ func main() {
 		{Name: "rating", Version: "1.0.0"},
 		{Name: "tags", Version: "1.0.0"},
 		{Name: "terminal", Version: "1.0.0"},
+		{Name: "dropzone", Version: "1.0.0"},
 		{Name: "collapse", Version: "1.0.0"},
 		{Name: "scrolled", Version: "1.0.0"},
 		{Name: "combobox", Version: "1.0.0"},

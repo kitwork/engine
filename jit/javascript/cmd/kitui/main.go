@@ -26,7 +26,7 @@ import (
 // behavioralFamilies is every KitJS component the recipes mount. The composer
 // seals exactly these (copy also pulls the clipboard service).
 var behavioralFamilies = []string{
-	"accordion", "alert", "carousel", "collapse", "combobox", "copy", "dialog",
+	"accordion", "alert", "carousel", "collapse", "combobox", "copy", "dialog", "dropzone",
 	"drawer", "dropdown", "otp", "pagination", "popover", "rating", "shortcut",
 	"rotator", "slider", "stepper", "switch", "tabs", "tags", "terminal", "toast", "tooltip",
 }
