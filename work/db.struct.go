@@ -43,8 +43,13 @@ type StructDef struct {
 	// catalog is normalized in memory. It never enters the persisted IR.
 	catalogHash         string
 	catalogNeedsUpgrade bool
-	constraintErr       string
-	compiledChecks      []compiledStructCheck
+	// catalogOwned marks a definition the proxy adopted from the durable
+	// catalog rather than from a source declaration. Such a definition follows
+	// the catalog and never reconciles it: a reader that snapshotted it before a
+	// concurrent DDL committed must not plan the struct back to what it saw.
+	catalogOwned   bool
+	constraintErr  string
+	compiledChecks []compiledStructCheck
 }
 
 // StructFieldDef is the deterministic field representation shared by storage,

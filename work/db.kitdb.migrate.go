@@ -437,11 +437,24 @@ func planKitDBSchemaEntryWithIntent(
 		return nil, err
 	}
 	if !found {
+		if current.catalogOwned {
+			// Dropped since this copy was taken. The copy follows the catalog; it
+			// does not bring the struct back.
+			return nil, nil
+		}
 		return &kitDBSchemaPlanEntry{mode: kitDBSchemaPlanAtomic, current: current}, nil
 	}
 	stored, err := decodeKitDBCatalog(catalog.Definition, current.Name)
 	if err != nil {
 		return nil, err
+	}
+	if current.catalogOwned && stored.Hash != current.Hash {
+		// The catalog moved on after this copy was taken — a concurrent DDL
+		// committed. Planning the copy would migrate the struct back to what this
+		// reader last saw; on an empty table that applies without a migrate flag
+		// and silently drops the other statement's column. The copy is stale, not
+		// authoritative: leave the catalog alone and let the reader refresh.
+		return nil, nil
 	}
 	if state, building, err := loadKitDBIndexBuildState(database, stored, kitDBIndexBuildSchema); err != nil {
 		return nil, err

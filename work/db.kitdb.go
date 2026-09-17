@@ -301,6 +301,10 @@ func (proxy *dbProxy) kitDBStructIsSourceDeclared(name string) bool {
 	}
 	proxy.schemaMu.RLock()
 	defer proxy.schemaMu.RUnlock()
+	return proxy.kitDBStructIsSourceDeclaredLocked(name)
+}
+
+func (proxy *dbProxy) kitDBStructIsSourceDeclaredLocked(name string) bool {
 	for _, declared := range proxy.declaredTables {
 		if strings.EqualFold(declared, name) {
 			return true
@@ -464,6 +468,7 @@ func (proxy *dbProxy) replaceKitDBCatalogDefinitionsLocked(
 		} else if found {
 			stored = pending
 		}
+		stored.catalogOwned = true
 		nextDefinitions[entry.Name] = stored
 		nextTables[entry.Name] = stored.columns
 	}
@@ -513,6 +518,13 @@ func (proxy *dbProxy) publishKitDBDefinitions(managed *managedKitDB, definitions
 				delete(proxy.structs, previousName)
 				delete(proxy.tables, previousName)
 			}
+		}
+		if !proxy.kitDBStructIsSourceDeclaredLocked(name) {
+			// The caller keeps its own object; the proxy publishes a copy that knows
+			// it follows the catalog. Snapshots already handed out stay untouched.
+			owned := *definition
+			owned.catalogOwned = true
+			definition = &owned
 		}
 		proxy.structs[name] = definition
 		proxy.tables[name] = definition.columns
