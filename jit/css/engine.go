@@ -51,6 +51,7 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 				"[", "\\[", "]", "\\]", "#", "\\#",
 				"(", "\\(", ")", "\\)", ",", "\\,",
 				"'", "\\'", "\"", "\\\"", "=", "\\=",
+				"&", "\\&", ">", "\\>", "~", "\\~", "+", "\\+", "*", "\\*",
 			).Replace(full)
 			sel := "." + esc
 			if full[0] == '-' {
@@ -92,6 +93,50 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 						cond = cond[:i+1] + " " + cond[i+1:] // prop:value → prop: value
 					}
 					mediaQuery = "@supports (" + cond + ")"
+					continue
+				}
+				// [&::-webkit-slider-thumb]: / [&>*]: / [&_p]: — Tailwind's arbitrary variant. The
+				// bracket is a selector with & standing for the element; underscores are spaces.
+				if strings.HasPrefix(v, "[&") && strings.HasSuffix(v, "]") {
+					pattern := strings.ReplaceAll(v[1:len(v)-1], "_", " ")
+					sel = strings.ReplaceAll(pattern, "&", sel)
+					continue
+				}
+				// aria-pressed: / aria-[sort=ascending]: and the group-/peer- forms. Tailwind's
+				// named set means the attribute is "true"; the bracket form is the pair as written.
+				if m := ariaVariantRe.FindStringSubmatch(v); m != nil {
+					attr := m[2]
+					if strings.HasPrefix(attr, "[") {
+						attr = attr[1 : len(attr)-1]
+						if i := strings.IndexByte(attr, '='); i >= 0 {
+							attr = attr[:i] + `="` + attr[i+1:] + `"`
+						}
+					} else {
+						attr += `="true"`
+					}
+					attr = "[aria-" + attr + "]"
+					switch m[1] {
+					case "group-":
+						ampPattern = ".group" + attr + " &"
+					case "peer-":
+						ampPattern = ".peer" + attr + " ~ &"
+					default:
+						sel += attr
+					}
+					continue
+				}
+				// has-[:checked]: / group-has-[…]: / peer-has-[…]: — :has() on the element, a .group
+				// ancestor or a .peer sibling. Underscores are spaces, so has-[>_img] reads.
+				if m := hasVariantRe.FindStringSubmatch(v); m != nil {
+					probe := ":has(" + strings.ReplaceAll(m[2], "_", " ") + ")"
+					switch m[1] {
+					case "group-":
+						ampPattern = ".group" + probe + " &"
+					case "peer-":
+						ampPattern = ".peer" + probe + " ~ &"
+					default:
+						sel += probe
+					}
 					continue
 				}
 				// data-[state=x] / data-[open] / group-data-[state=x]: element or .group ancestor attr.
@@ -152,6 +197,16 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 // `data-[open]:`, or the `group-` form. The bracket body is turned into a `[data-…]` selector.
 var dataVariantRe = regexp.MustCompile(`^(?:group-)?data-\[[^\]]*\]:`)
 
+// ariaVariantRe matches Tailwind's aria variants: `aria-pressed:`, `aria-[sort=ascending]:`,
+// and the `group-`/`peer-` forms. A named state means the attribute equals "true".
+var ariaVariantRe = regexp.MustCompile(`^(group-|peer-)?aria-(\[[^\]]*\]|[a-z]+)$`)
+
+// hasVariantRe matches `has-[…]:` and its group/peer forms — the :has() relational variant.
+var hasVariantRe = regexp.MustCompile(`^(group-|peer-)?has-\[([^\]]*)\]$`)
+
+// prefixVariantRe finds an aria-/has- variant prefix on a class, bracket body included.
+var prefixVariantRe = regexp.MustCompile(`^(?:group-|peer-)?(?:aria-(?:\[[^\]]*\]|[a-z]+)|has-\[[^\]]*\]):`)
+
 // namedVariantRe matches a NAMED group/peer variant: `group-hover/item:`, `peer-checked/row:`.
 // Tailwind lets groups nest by naming them, so a child can react to one PARTICULAR marked ancestor
 // instead of the nearest `.group`. Unmatched, the whole class silently produced no CSS.
@@ -209,6 +264,25 @@ func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
 		// Feature-query variant: supports-[backdrop-filter]: / supports-[display:grid]:. The bracket
 		// may hold a colon and parentheses, so it is matched to its own "]:" rather than by regex.
 		if !found && strings.HasPrefix(core, "supports-[") {
+			if end := strings.Index(core, "]:"); end > 0 {
+				variants = append(variants, core[:end+1])
+				core = core[end+2:]
+				found = true
+			}
+		}
+
+		// aria-pressed: / aria-[…]: / has-[…]: and their group-/peer- forms.
+		if !found {
+			if m := prefixVariantRe.FindString(core); m != "" {
+				variants = append(variants, strings.TrimSuffix(m, ":"))
+				core = core[len(m):]
+				found = true
+			}
+		}
+
+		// Arbitrary variant [&…]: — the bracket is a selector and may hold colons, so it is
+		// matched to its own "]:" rather than by regex.
+		if !found && strings.HasPrefix(core, "[&") {
 			if end := strings.Index(core, "]:"); end > 0 {
 				variants = append(variants, core[:end+1])
 				core = core[end+2:]
