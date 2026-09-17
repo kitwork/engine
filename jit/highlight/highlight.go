@@ -170,6 +170,7 @@ type language struct {
 	quotes      string
 	methods     bool // color identifier( as a call
 	shell       bool // a line is command + flags + arguments, not an expression
+	markup      bool // tags, attributes and text, not tokens — its own scanner
 }
 
 func words(list ...string) map[string]struct{} {
@@ -251,7 +252,12 @@ var languages = map[string]language{
 	"shell":      bashLanguage,
 	"sql":        sqlLanguage,
 	"css":        cssLanguage,
+	"html":       htmlLanguage,
 }
+
+// htmlLanguage is markup: what a Kitwork page is made of. It has no keyword
+// table; the scanner below reads tags, attributes and text.
+var htmlLanguage = language{markup: true}
 
 func isSpace(char byte) bool {
 	return char == ' ' || char == '\t' || char == '\n' || char == '\r' || char == '\f'
@@ -379,6 +385,9 @@ func Code(source, languageName string, palette Palette) string {
 	lang, known := languages[ThemeKey(languageName)]
 	if !known {
 		return html.EscapeString(source)
+	}
+	if lang.markup {
+		return markupCode(source, palette)
 	}
 
 	var builder strings.Builder
@@ -602,6 +611,119 @@ func Code(source, languageName string, palette Palette) string {
 		span(&builder, class, html.EscapeString(run))
 	}
 
+	return builder.String()
+}
+
+// markupCode colours HTML the way the page reads it: a tag name is the
+// structure (keyword), an attribute is a property, a quoted value is a string,
+// the angle brackets and the equals sign are punctuation, and text between tags
+// is text. A Kitwork directive — data-kit-* — is the behaviour layer, so it takes
+// the command role: the site chooses what glows there (kitwork.io hands it the
+// brand), which says in colour what the catalogue says in words: keep the HTML,
+// add the behaviour. Comments are comments. Everything is escaped on the way
+// out, so the source can never inject markup.
+func markupCode(source string, palette Palette) string {
+	var builder strings.Builder
+	builder.Grow(len(source) * 3)
+	length := len(source)
+	index := 0
+	for index < length {
+		// A comment runs to its close, or to the end of the source.
+		if strings.HasPrefix(source[index:], "<!--") {
+			end := strings.Index(source[index+4:], "-->")
+			if end < 0 {
+				end = length
+			} else {
+				end = index + 4 + end + 3
+			}
+			span(&builder, palette.Comment, html.EscapeString(source[index:end]))
+			index = end
+			continue
+		}
+		// A tag: "<", an optional "/", the name, attributes, then ">" or "/>".
+		if source[index] == '<' && index+1 < length && (isWordStart(source[index+1]) || source[index+1] == '/' || source[index+1] == '!') {
+			open := index + 1
+			if source[open] == '/' || source[open] == '!' {
+				open++
+			}
+			nameEnd := open
+			for nameEnd < length && (isWord(source[nameEnd]) || source[nameEnd] == '-' || source[nameEnd] == ':') {
+				nameEnd++
+			}
+			span(&builder, palette.Punct, html.EscapeString(source[index:open]))
+			span(&builder, palette.Keyword, html.EscapeString(source[open:nameEnd]))
+			index = nameEnd
+			// Attributes until the tag closes.
+			for index < length {
+				char := source[index]
+				if isSpace(char) {
+					start := index
+					for index < length && isSpace(source[index]) {
+						index++
+					}
+					builder.WriteString(source[start:index])
+					continue
+				}
+				if char == '>' {
+					span(&builder, palette.Punct, "&gt;")
+					index++
+					break
+				}
+				if char == '/' && index+1 < length && source[index+1] == '>' {
+					span(&builder, palette.Punct, "/&gt;")
+					index += 2
+					break
+				}
+				if char == '=' {
+					span(&builder, palette.Punct, "=")
+					index++
+					continue
+				}
+				if char == '"' || char == '\'' {
+					end := index + 1
+					for end < length && source[end] != char {
+						end++
+					}
+					if end < length {
+						end++
+					}
+					span(&builder, palette.String, html.EscapeString(source[index:end]))
+					index = end
+					continue
+				}
+				// An attribute name: letters, digits, "-", ":", "." and "@" — the
+				// last three because directives and framework shorthands use them.
+				end := index
+				for end < length && !isSpace(source[end]) && source[end] != '=' && source[end] != '>' &&
+					!(source[end] == '/' && end+1 < length && source[end+1] == '>') {
+					end++
+				}
+				if end == index {
+					end++ // never stall on a stray byte
+				}
+				name := source[index:end]
+				class := palette.Property
+				if strings.HasPrefix(name, "data-kit-") || strings.HasPrefix(name, "data-kitwork-") {
+					class = palette.Command
+				}
+				span(&builder, class, html.EscapeString(name))
+				index = end
+			}
+			continue
+		}
+		// Text between tags, up to the next tag or comment.
+		end := index + 1
+		for end < length && source[end] != '<' {
+			end++
+		}
+		text := source[index:end]
+		if strings.TrimSpace(text) == "" {
+			builder.WriteString(text)
+		} else {
+			span(&builder, palette.Text, html.EscapeString(text))
+		}
+		index = end
+	}
 	return builder.String()
 }
 

@@ -82,6 +82,9 @@ func TestDynamicPresentationDetection(t *testing.T) {
 		{name: "meta attribute", template: `<meta content="{{ description }}">`, dynamic: false},
 		{name: "kit attribute", template: `<button data-kit-action="{{ action }}">x</button>`, dynamic: true},
 		{name: "style block", template: `<style>body{font-family:{{ font }}}</style>`, dynamic: true},
+		{name: "bound highlight slot", template: `<pre><code data-kit-highlight="html">{{ src }}</code></pre>`, dynamic: true},
+		{name: "static highlight slot", template: `<pre><code data-kit-highlight="go">package main</code></pre><p>{{ title }}</p>`, dynamic: false},
+		{name: "expression after a closed slot", template: `<code data-kit-highlight="go">x</code><span>{{ title }}</span>`, dynamic: false},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

@@ -863,6 +863,18 @@ func hasDynamicPresentation(template string) bool {
 		if strings.LastIndex(lower, "<style") > strings.LastIndex(lower, "</style>") {
 			return true
 		}
+		// An expression inside a highlight slot is code the page binds — a
+		// component catalogue printing its own demo. The highlighter must see the
+		// evaluated text, not the expression, so the page renders at request time.
+		if codeOpen := strings.LastIndex(lower, "<code"); codeOpen > strings.LastIndex(lower, "</code>") {
+			tag := lower[codeOpen:]
+			if end := strings.IndexByte(tag, '>'); end >= 0 {
+				tag = tag[:end]
+			}
+			if strings.Contains(tag, "data-kit-highlight") || strings.Contains(tag, "data-kitwork-highlight") {
+				return true
+			}
+		}
 		offset = index + 2
 	}
 	return false
