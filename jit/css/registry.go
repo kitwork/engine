@@ -169,6 +169,7 @@ var Registry = []Pattern{
 	{`^(cursor)-(auto|default|pointer|wait|text|move|help|not-allowed)$`, "tw-cursor"},
 	{`^(transition)(?:-(all|colors|opacity|shadow|transform|none))?$`, "tw-transition"},
 	{`^(duration)-(\d+|\[.+?\])$`, "tw-duration"},
+	{`^(delay)-(\d+|\[.+?\])$`, "tw-delay"},
 	{`^(ease)-(linear|in|out|in-out|\[.+?\])$`, "tw-ease"},
 	{`^(border)(?:-(t|b|l|r|x|y))?(?:-(\d+|\[.+?\]))?$`, "tw-border"},
 	{`^(font)-(thin|extralight|light|normal|medium|semibold|bold|extrabold|black)$`, "tw-font-weight"},

@@ -8,7 +8,7 @@ import (
 	kitcss "github.com/kitwork/engine/jit/css"
 )
 
-const exampleStylesheetName = "kitjs.examples.f7d40a6e2a018e228cfad79abb4a77a26c0dcab28813efd28bd16f86fb4f2e39.css"
+const exampleStylesheetName = "kitjs.examples.d5ec0a87f2bf45850ebc74f84b5ea6e49e3c6c97ef1a882813170afb1a60f3af.css"
 
 func TestCheckedExampleStylesMatchJIT(t *testing.T) {
 	pages := []struct {

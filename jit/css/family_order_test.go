@@ -10,7 +10,7 @@ import (
 // which put pl-11 before px-4 and let px-4 win: the data-table's filter icon sat on its text.
 func TestShorthandFamiliesOrderWholeAxisSide(t *testing.T) {
 	cfg := DefaultConfig
-	out := GenerateJIT(`<div class="pl-11 px-4 p-2 ml-0 mx-auto -mt-1 -m-2 border-b border-x-0 border top-0 inset-x-0 inset-0 rounded-tl-none rounded-t-xl rounded-2xl gap-x-2 gap-4 overflow-x-auto overflow-hidden hover:pl-2 hover:px-1 md:pt-0 md:py-2"></div>`, &cfg)
+	out := GenerateJIT(`<div class="pl-11 px-4 p-2 ml-0 mx-auto -mt-1 -m-2 border-b border-x-0 border top-0 inset-x-0 inset-0 rounded-tl-none rounded-t-xl rounded-2xl gap-x-2 gap-4 overflow-x-auto overflow-hidden hover:pl-2 hover:px-1 md:pt-0 md:py-2 duration-500 ease-out delay-100 transition-transform"></div>`, &cfg)
 	before := func(earlier, later string) {
 		t.Helper()
 		i, j := strings.Index(out, earlier), strings.Index(out, later)
@@ -34,6 +34,10 @@ func TestShorthandFamiliesOrderWholeAxisSide(t *testing.T) {
 	before(".rounded-t-xl {", ".rounded-tl-none {")
 	before(".gap-4 {", ".gap-x-2 {")
 	before(".overflow-hidden {", ".overflow-x-auto {")
+	// transition-transform carries its own 150ms; duration-500, ease-out and delay-100 must beat it.
+	before(".transition-transform {", ".duration-500 {")
+	before(".transition-transform {", ".ease-out {")
+	before(".transition-transform {", ".delay-100 {")
 	// Variants ride along: the rank is read off the core.
 	before(`.hover\:px-1:hover {`, `.hover\:pl-2:hover {`)
 	before(`.md\:py-2 {`, `.md\:pt-0 {`)

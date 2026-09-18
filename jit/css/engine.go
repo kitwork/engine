@@ -1345,6 +1345,14 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			val += "ms"
 		}
 		return "transition-duration: " + val + ";"
+	case "tw-delay":
+		val := m[2]
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {
+			val = val[1 : len(val)-1]
+		} else {
+			val += "ms"
+		}
+		return "transition-delay: " + val + ";"
 	case "tw-ease":
 		val := m[2]
 		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") {

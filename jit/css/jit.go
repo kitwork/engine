@@ -277,6 +277,9 @@ var shorthandFamilies = []struct {
 	{"gap", []string{"gap-x", "gap-y"}, nil},
 	{"overflow", []string{"overflow-x", "overflow-y"}, nil},
 	{"overscroll", []string{"overscroll-x", "overscroll-y"}, nil},
+	// transition-* sets property, timing AND a 150ms duration in one rule; duration-*,
+	// ease-* and delay-* refine it and must come after.
+	{"transition", nil, []string{"duration", "ease", "delay"}},
 }
 
 func inFamily(core, name string) bool {
