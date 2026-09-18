@@ -95,16 +95,21 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 					mediaQuery = "@supports (" + cond + ")"
 					continue
 				}
-				// [&::-webkit-slider-thumb]: / [&>*]: / [&_p]: — Tailwind's arbitrary variant. The
-				// bracket is a selector with & standing for the element; underscores are spaces.
-				if strings.HasPrefix(v, "[&") && strings.HasSuffix(v, "]") {
+				// [&::-webkit-slider-thumb]: / [&>*]: / [&_p]: / [[data-state=selected]>&]: — Tailwind's
+				// arbitrary variant. The bracket is a selector with & standing for the element, wherever
+				// it sits; underscores are spaces.
+				if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") && strings.Contains(v, "&") {
 					pattern := strings.ReplaceAll(v[1:len(v)-1], "_", " ")
 					sel = strings.ReplaceAll(pattern, "&", sel)
 					continue
 				}
 				// aria-pressed: / aria-[sort=ascending]: and the group-/peer- forms. Tailwind's
 				// named set means the attribute is "true"; the bracket form is the pair as written.
-				if m := ariaVariantRe.FindStringSubmatch(v); m != nil {
+				// The three attribute variants below take Tailwind's name suffix too —
+				// group-data-[state=open]/item:, group-aria-expanded/item:, peer-has-[:checked]/row:
+				// — so a child reacts to one PARTICULAR marked ancestor or sibling, as group-hover/item: does.
+				base, mark := splitVariantName(v)
+				if m := ariaVariantRe.FindStringSubmatch(base); m != nil {
 					attr := m[2]
 					if strings.HasPrefix(attr, "[") {
 						attr = attr[1 : len(attr)-1]
@@ -117,9 +122,9 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 					attr = "[aria-" + attr + "]"
 					switch m[1] {
 					case "group-":
-						ampPattern = ".group" + attr + " &"
+						ampPattern = ".group" + mark + attr + " &"
 					case "peer-":
-						ampPattern = ".peer" + attr + " ~ &"
+						ampPattern = ".peer" + mark + attr + " ~ &"
 					default:
 						sel += attr
 					}
@@ -127,28 +132,32 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 				}
 				// has-[:checked]: / group-has-[…]: / peer-has-[…]: — :has() on the element, a .group
 				// ancestor or a .peer sibling. Underscores are spaces, so has-[>_img] reads.
-				if m := hasVariantRe.FindStringSubmatch(v); m != nil {
+				if m := hasVariantRe.FindStringSubmatch(base); m != nil {
 					probe := ":has(" + strings.ReplaceAll(m[2], "_", " ") + ")"
 					switch m[1] {
 					case "group-":
-						ampPattern = ".group" + probe + " &"
+						ampPattern = ".group" + mark + probe + " &"
 					case "peer-":
-						ampPattern = ".peer" + probe + " ~ &"
+						ampPattern = ".peer" + mark + probe + " ~ &"
 					default:
 						sel += probe
 					}
 					continue
 				}
-				// data-[state=x] / data-[open] / group-data-[state=x]: element or .group ancestor attr.
-				if strings.HasPrefix(v, "data-[") || strings.HasPrefix(v, "group-data-[") {
-					inner := v[strings.IndexByte(v, '[')+1 : len(v)-1]
+				// data-[state=x] / data-[open] / group-data-[state=x] / peer-data-[…]: the element,
+				// a .group ancestor or a .peer sibling carries the attribute.
+				if strings.HasPrefix(base, "data-[") || strings.HasPrefix(base, "group-data-[") || strings.HasPrefix(base, "peer-data-[") {
+					inner := base[strings.IndexByte(base, '[')+1 : len(base)-1]
 					attr := "data-" + inner
 					if i := strings.IndexByte(inner, '='); i >= 0 {
 						attr = "data-" + inner[:i] + `="` + inner[i+1:] + `"`
 					}
-					if strings.HasPrefix(v, "group-") {
-						ampPattern = ".group[" + attr + "] &"
-					} else {
+					switch {
+					case strings.HasPrefix(base, "group-"):
+						ampPattern = ".group" + mark + "[" + attr + "] &"
+					case strings.HasPrefix(base, "peer-"):
+						ampPattern = ".peer" + mark + "[" + attr + "] ~ &"
+					default:
 						sel += "[" + attr + "]"
 					}
 					continue
@@ -194,8 +203,9 @@ func ResolveCore(full string, cfg *Config) (cssProp, selector, mediaQuery string
 }
 
 // dataVariantRe matches an arbitrary data-attribute variant prefix: `data-[state=x]:`,
-// `data-[open]:`, or the `group-` form. The bracket body is turned into a `[data-…]` selector.
-var dataVariantRe = regexp.MustCompile(`^(?:group-)?data-\[[^\]]*\]:`)
+// `data-[open]:`, or the `group-`/`peer-` forms, named or not. The bracket body is turned into
+// a `[data-…]` selector.
+var dataVariantRe = regexp.MustCompile(`^(?:group-|peer-)?data-\[[^\]]*\](?:/[A-Za-z0-9_-]+)?:`)
 
 // ariaVariantRe matches Tailwind's aria variants: `aria-pressed:`, `aria-[sort=ascending]:`,
 // and the `group-`/`peer-` forms. A named state means the attribute equals "true".
@@ -204,8 +214,24 @@ var ariaVariantRe = regexp.MustCompile(`^(group-|peer-)?aria-(\[[^\]]*\]|[a-z]+)
 // hasVariantRe matches `has-[…]:` and its group/peer forms — the :has() relational variant.
 var hasVariantRe = regexp.MustCompile(`^(group-|peer-)?has-\[([^\]]*)\]$`)
 
-// prefixVariantRe finds an aria-/has- variant prefix on a class, bracket body included.
-var prefixVariantRe = regexp.MustCompile(`^(?:group-|peer-)?(?:aria-(?:\[[^\]]*\]|[a-z]+)|has-\[[^\]]*\]):`)
+// prefixVariantRe finds an aria-/has- variant prefix on a class, bracket body and any
+// group/peer name included.
+var prefixVariantRe = regexp.MustCompile(`^(?:group-|peer-)?(?:aria-(?:\[[^\]]*\]|[a-z]+)|has-\[[^\]]*\])(?:/[A-Za-z0-9_-]+)?:`)
+
+// splitVariantName takes the `/name` off a named group-/peer- attribute variant
+// (`group-data-[state=open]/item` → `group-data-[state=open]`, `\/item`), so the marker
+// class becomes `.group\/item`. The slash must follow the bracket or the state word, never
+// sit inside a bracket, and an unnamed variant comes back untouched with an empty mark.
+func splitVariantName(v string) (base, mark string) {
+	if !strings.HasPrefix(v, "group-") && !strings.HasPrefix(v, "peer-") {
+		return v, ""
+	}
+	i := strings.LastIndexByte(v, '/')
+	if i < 0 || i < strings.LastIndexByte(v, ']') || i == len(v)-1 {
+		return v, ""
+	}
+	return v[:i], `\/` + v[i+1:]
+}
 
 // namedVariantRe matches a NAMED group/peer variant: `group-hover/item:`, `peer-checked/row:`.
 // Tailwind lets groups nest by naming them, so a child can react to one PARTICULAR marked ancestor
@@ -280,10 +306,11 @@ func parse(f string, cfg *Config) (variants []string, neg bool, core string) {
 			}
 		}
 
-		// Arbitrary variant [&…]: — the bracket is a selector and may hold colons, so it is
-		// matched to its own "]:" rather than by regex.
-		if !found && strings.HasPrefix(core, "[&") {
-			if end := strings.Index(core, "]:"); end > 0 {
+		// Arbitrary variant [&…]: / […&]: — the bracket is a selector and may hold colons, so
+		// it is matched to its own "]:" rather than by regex. The & is what tells it apart from
+		// an arbitrary value.
+		if !found && strings.HasPrefix(core, "[") {
+			if end := strings.Index(core, "]:"); end > 0 && strings.Contains(core[:end], "&") {
 				variants = append(variants, core[:end+1])
 				core = core[end+2:]
 				found = true

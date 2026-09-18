@@ -100,8 +100,14 @@ func GenerateJITCached(html string, cfg *Config) string {
 }
 
 func buildJITCSS(classes []string, cfg *Config) string {
+	// Alphabetical order is the stable base; within a shorthand family the more specific
+	// utility is moved after the less specific one so it wins in the cascade.
+	ordered := append([]string(nil), classes...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return familyRank(ordered[i], cfg) < familyRank(ordered[j], cfg)
+	})
 	groups := make(map[string][]string)
-	for _, c := range classes {
+	for _, c := range ordered {
 		css, sel, mediaQ := ResolveCore(c, cfg)
 		if css == "" {
 			continue
@@ -251,6 +257,52 @@ func GenerateSiteCSS(cfg *Config, htmls ...string) string {
 		css = kf + "\n" + css
 	}
 	return css
+}
+
+// shorthandFamilies are the utilities that come in a whole / axis / side ladder. Tailwind
+// registers each rung after the one before, so `px-4 pl-11` pads the left by pl-11: the side
+// rule sits later in the sheet. Sorted by name alone, pl-11 came before px-4 and lost.
+var shorthandFamilies = []struct {
+	whole string
+	axes  []string
+	sides []string
+}{
+	{"p", []string{"px", "py"}, []string{"pt", "pr", "pb", "pl", "ps", "pe"}},
+	{"m", []string{"mx", "my"}, []string{"mt", "mr", "mb", "ml", "ms", "me"}},
+	{"scroll-p", []string{"scroll-px", "scroll-py"}, []string{"scroll-pt", "scroll-pr", "scroll-pb", "scroll-pl", "scroll-ps", "scroll-pe"}},
+	{"scroll-m", []string{"scroll-mx", "scroll-my"}, []string{"scroll-mt", "scroll-mr", "scroll-mb", "scroll-ml", "scroll-ms", "scroll-me"}},
+	{"rounded", []string{"rounded-t", "rounded-r", "rounded-b", "rounded-l", "rounded-s", "rounded-e"}, []string{"rounded-tl", "rounded-tr", "rounded-br", "rounded-bl", "rounded-ss", "rounded-se", "rounded-es", "rounded-ee"}},
+	{"border", []string{"border-x", "border-y"}, []string{"border-t", "border-r", "border-b", "border-l", "border-s", "border-e"}},
+	{"inset", []string{"inset-x", "inset-y"}, []string{"top", "right", "bottom", "left", "start", "end"}},
+	{"gap", []string{"gap-x", "gap-y"}, nil},
+	{"overflow", []string{"overflow-x", "overflow-y"}, nil},
+	{"overscroll", []string{"overscroll-x", "overscroll-y"}, nil},
+}
+
+func inFamily(core, name string) bool {
+	return core == name || strings.HasPrefix(core, name+"-")
+}
+
+// familyRank places a class on its family's ladder — 0 for everything else, then whole (1),
+// axis (2), side (3) — read off the core with the variants and any leading minus removed.
+func familyRank(class string, cfg *Config) int {
+	_, _, core := parse(class, cfg)
+	for _, family := range shorthandFamilies {
+		for _, side := range family.sides {
+			if inFamily(core, side) {
+				return 3
+			}
+		}
+		for _, axis := range family.axes {
+			if inFamily(core, axis) {
+				return 2
+			}
+		}
+		if inFamily(core, family.whole) {
+			return 1
+		}
+	}
+	return 0
 }
 
 // ============================================================================

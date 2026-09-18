@@ -40,12 +40,15 @@ func TestHasVariantStylesByDescendant(t *testing.T) {
 
 func TestArbitraryVariantSubstitutesTheElement(t *testing.T) {
 	cfg := DefaultConfig
-	out := GenerateJIT(`<input class="[&::-webkit-slider-thumb]:h-5 [&>*]:mt-2 [&_p]:leading-7 hover:[&::before]:opacity-100">`, &cfg)
+	out := GenerateJIT(`<input class="[&::-webkit-slider-thumb]:h-5 [&>*]:mt-2 [&_p]:leading-7 hover:[&::before]:opacity-100 [[data-state=selected]>&]:underline [.dark_&]:opacity-50">`, &cfg)
 	for _, want := range []string{
 		`.\[\&\:\:-webkit-slider-thumb\]\:h-5::-webkit-slider-thumb { height: 1.25rem; }`,
 		`.\[\&\>\*\]\:mt-2>* {`,
 		`.\[\&_p\]\:leading-7 p {`,
 		`.hover\:\[\&\:\:before\]\:opacity-100:hover::before {`,
+		// & need not lead: the element under a selected parent, or inside .dark.
+		`[data-state=selected]>.\[\[data-state\=selected\]\>\&\]\:underline {`,
+		`.dark .\[\.dark_\&\]\:opacity-50 {`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %s\nin:\n%s", want, out)
