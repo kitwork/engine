@@ -13,6 +13,11 @@
 //       <button data-kit-click="select(cell.iso)" data-kit-text="cell.day"></button>
 //
 // year and month left at 0 mean "the month that holds selected, else today".
+//
+// A date picker is the same calendar behind a trigger: `open` and show / hide /
+// toggle are here so the panel and the grid share one scope — a component
+// cannot read another's fields, and the picker needs both at once. Outside
+// click and Escape are directives on the host, not a second component.
 
 var ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -86,6 +91,11 @@ kit.component("calendar", {
   max: "",
   weekStart: 1,
   locale: "",
+  open: false,
+
+  show: function () { this.open = true; return true; },
+  hide: function () { this.open = false; return false; },
+  toggle: function () { return this.open ? this.hide() : this.show(); },
 
   // "September 2026", in the reader's language.
   title: function () {

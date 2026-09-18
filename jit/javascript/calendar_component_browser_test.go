@@ -56,6 +56,9 @@ var calendarComponentDocument = fmt.Sprintf(`<!doctype html>
     <button id="pick" type="button" data-kit-click="select('2026-10-05')">pick</button>
     <button id="early" type="button" data-kit-click="select('2026-09-01')">early</button>
     <button id="today" type="button" data-kit-click="today()">today</button>
+    <button id="flip" type="button" data-kit-click="toggle()">flip</button>
+    <button id="choose" type="button" data-kit-click="select('2026-09-20'); hide()">choose and close</button>
+    <div id="panel" data-kit-show="open" hidden>panel</div>
     <output id="state" data-kit-text="selected + '|' + year + '-' + month + '|' + format()"></output>
   </div>
   <script src="/calendar.js"></script><script>
@@ -99,6 +102,14 @@ __runStandaloneKitTest(async function () {
   var now = new Date();
   await waitFor(function () { return state().indexOf("|" + now.getFullYear() + "-" + (now.getMonth() + 1) + "|") > 0; }, "today() did not show this month: " + state());
   assert(cells().filter(function (c) { return c.className.indexOf("today") >= 0; }).length === 1, "today is not marked once");
+
+  // The picker's disclosure lives on the same scope as the grid.
+  var panel = document.getElementById("panel");
+  assert(panel.hidden === true, "the panel started open");
+  document.getElementById("flip").click();
+  await waitFor(function () { return panel.hidden === false; }, "toggle() did not open the panel");
+  document.getElementById("choose").click();
+  await waitFor(function () { return panel.hidden === true && state().indexOf("2026-09-20|2026-9|") === 0; }, "select(); hide() did not choose and close: " + state());
 });
   </script>
 </body></html>`, browserHarness)
