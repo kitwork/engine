@@ -33,6 +33,7 @@ func main() {
 		{Name: "context-menu", Version: "1.0.0"},
 		{Name: "data-table", Version: "1.0.0"},
 		{Name: "tree", Version: "1.0.0"},
+		{Name: "split", Version: "1.0.0"},
 		{Name: "collapse", Version: "1.0.0"},
 		{Name: "scrolled", Version: "1.0.0"},
 		{Name: "combobox", Version: "1.0.0"},

@@ -28,7 +28,7 @@ import (
 var behavioralFamilies = []string{
 	"accordion", "alert", "carousel", "collapse", "combobox", "command", "context-menu", "copy", "data-table", "dialog", "dropzone",
 	"drawer", "dropdown", "otp", "pagination", "popover", "rating", "shortcut",
-	"rotator", "slider", "stepper", "switch", "tabs", "tags", "terminal", "toast", "tooltip", "tree",
+	"rotator", "slider", "split", "stepper", "switch", "tabs", "tags", "terminal", "toast", "tooltip", "tree",
 }
 
 func main() {

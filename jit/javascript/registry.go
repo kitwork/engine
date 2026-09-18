@@ -309,6 +309,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			"rating":           "1.0.0",
 			"rotator":          "1.0.0",
 			"scrolled":         "1.0.0",
+			"split":            "1.0.0",
 			"shortcut":         "1.0.0",
 			"slider":           "1.0.0",
 			"stepper":          "1.0.0",
@@ -746,7 +747,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			source:   append([]byte(nil), copySource...),
 		},
 	}
-	for _, name := range []string{"command", "context-menu", "data-table", "tree"} {
+	for _, name := range []string{"command", "context-menu", "data-table", "tree", "split"} {
 		source, err := embeddedDeliveryPackages.ReadFile("component/" + name + "/1.0.0.js")
 		if err != nil {
 			return nil, fmt.Errorf("%w: read component/%s/1.0.0.js: %v", ErrInvalidModule, name, err)
