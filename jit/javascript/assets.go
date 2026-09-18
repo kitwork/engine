@@ -20,7 +20,7 @@ import (
 //go:embed component/desktop-titlebar/1.0.0.js component/desktop-titlebar/1.1.0.js
 //go:embed component/capability-lab/1.0.0.js component/capability-lab/1.1.0.js component/capability-lab/1.2.0.js
 //go:embed component/app/1.0.0.js component/app/1.1.0.js component/app/1.2.0.js component/app/1.3.0.js component/app/1.4.0.js component/app/1.5.0.js component/app/1.6.0.js component/app/1.7.0.js component/app/1.8.0.js component/app/1.9.0.js component/app/1.10.0.js component/app/1.11.0.js component/app/1.12.0.js component/app/1.13.0.js component/app/1.14.0.js component/theme/2.0.0.js component/theme/3.0.0.js
-//go:embed component/stepper/1.0.0.js component/slider/1.0.0.js component/rating/1.0.0.js component/tags/1.0.0.js component/terminal/1.0.0.js component/dropzone/1.0.0.js component/command/1.0.0.js component/context-menu/1.0.0.js
+//go:embed component/stepper/1.0.0.js component/slider/1.0.0.js component/rating/1.0.0.js component/tags/1.0.0.js component/terminal/1.0.0.js component/dropzone/1.0.0.js component/command/1.0.0.js component/context-menu/1.0.0.js component/data-table/1.0.0.js component/tree/1.0.0.js
 //go:embed component/collapse/1.0.0.js component/combobox/1.0.0.js component/otp/1.0.0.js component/copy/1.0.0.js
 //go:embed component/rotator/1.0.0.js
 //go:embed component/scrolled/1.0.0.js
