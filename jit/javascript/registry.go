@@ -293,6 +293,8 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			"carousel":         "1.0.0",
 			"collapse":         "1.0.0",
 			"combobox":         "1.0.0",
+			"command":          "1.0.0",
+			"context-menu":     "1.0.0",
 			"copy":             "1.0.0",
 			"desktop-titlebar": "1.0.0",
 			"dialog":           "1.0.0",
@@ -741,6 +743,18 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			requires: []ServiceVersion{{Name: "clipboard", Version: "1.0.0"}},
 			source:   append([]byte(nil), copySource...),
 		},
+	}
+	for _, name := range []string{"command", "context-menu"} {
+		source, err := embeddedDeliveryPackages.ReadFile("component/" + name + "/1.0.0.js")
+		if err != nil {
+			return nil, fmt.Errorf("%w: read component/%s/1.0.0.js: %v", ErrInvalidModule, name, err)
+		}
+		catalog.components[name] = map[string]catalogComponent{
+			"1.0.0": {
+				identity: ComponentVersion{Name: name, Version: "1.0.0"},
+				source:   append([]byte(nil), source...),
+			},
+		}
 	}
 	dropzoneSource, err := embeddedDeliveryPackages.ReadFile("component/dropzone/1.0.0.js")
 	if err != nil {

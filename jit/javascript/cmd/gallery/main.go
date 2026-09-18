@@ -29,6 +29,8 @@ func main() {
 		{Name: "tags", Version: "1.0.0"},
 		{Name: "terminal", Version: "1.0.0"},
 		{Name: "dropzone", Version: "1.0.0"},
+		{Name: "command", Version: "1.0.0"},
+		{Name: "context-menu", Version: "1.0.0"},
 		{Name: "collapse", Version: "1.0.0"},
 		{Name: "scrolled", Version: "1.0.0"},
 		{Name: "combobox", Version: "1.0.0"},
