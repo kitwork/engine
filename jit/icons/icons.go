@@ -25,6 +25,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
 // set holds Kitwork's only built-in icon: the brand network glyph "mesh", which has no clean Tabler
@@ -164,6 +166,11 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // classAttrRe captures the value of each class="…" attribute so scan can tokenise it.
 var classAttrRe = regexp.MustCompile(`class="([^"]*)"`)
 
+// dynamicClassRe captures a data-kit-class="…" expression. Its string literals are classes too —
+// `open ? 'icon-x' : 'icon-menu-2'` — and both branches must resolve, not whichever one the first
+// paint takes, so they are read off the compiled expression the way jitcss reads its colours.
+var dynamicClassRe = regexp.MustCompile(`data-kit-class="([^"]*)"`)
+
 // uriEncode escapes the characters that matter inside a CSS url("data:image/svg+xml,…"). The SVG is
 // authored with single quotes (see dataURI) so double quotes never appear. strings.Replacer is a
 // single pass, so the `%` it emits for `#`/`<`/`>` is not re-encoded.
@@ -257,17 +264,30 @@ func SiteCSS(htmls ...string) string {
 func scan(html string) []string {
 	seen := make(map[string]bool)
 	var out []string
+	add := func(tok string) {
+		if !strings.HasPrefix(tok, classPrefix) {
+			return
+		}
+		name := tok[len(classPrefix):]
+		if name == "" || seen[name] || !nameRe.MatchString(name) || !Has(name) {
+			return
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
 		for _, tok := range strings.Fields(m[1]) {
-			if !strings.HasPrefix(tok, classPrefix) {
-				continue
-			}
-			name := tok[len(classPrefix):]
-			if name == "" || seen[name] || !nameRe.MatchString(name) || !Has(name) {
-				continue
-			}
-			seen[name] = true
-			out = append(out, name)
+			add(tok)
+		}
+	}
+	for _, m := range dynamicClassRe.FindAllStringSubmatch(html, -1) {
+		names, err := hydrate.ClassLiteralsAttribute(m[1])
+		if err != nil {
+			// The hydrate render pass already reports a malformed expression by attribute.
+			continue
+		}
+		for _, tok := range names {
+			add(tok)
 		}
 	}
 	return out

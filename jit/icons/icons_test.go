@@ -176,3 +176,21 @@ func TestRenderIgnoresUnknownAndNonIcons(t *testing.T) {
 		t.Errorf("mid-string icon- should not match: %s", out)
 	}
 }
+
+// An icon named only inside a data-kit-class expression is a class the page will wear — both
+// branches of `open ? 'icon-x' : 'icon-menu-2'` — so both get a rule. The scan used to read
+// class="…" alone, and the branch the first paint did not take drew an empty box.
+func TestRenderReadsIconsFromDynamicClasses(t *testing.T) {
+	html := `<html><head></head><body><i class="block h-4 w-4" data-kit-class="open ? 'icon-x' : 'icon-menu-2'"></i></body></html>`
+	out := Render(html)
+	for _, want := range []string{".icon-x{--i:", ".icon-menu-2{--i:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in: %s", want, out)
+		}
+	}
+	// CONTROL: a plain string that merely contains the prefix is not a class.
+	plain := `<body><p data-kit-text="'icon-x'"></p></body>`
+	if got := Render(plain); got != plain {
+		t.Errorf("data-kit-text is not a class source: %s", got)
+	}
+}
