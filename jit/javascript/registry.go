@@ -730,7 +730,7 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 		requires: []ServiceVersion{{Name: "appearance", Version: "1.0.0"}},
 		source:   append([]byte(nil), themeSource...),
 	}
-	for _, name := range []string{"dialog", "dropdown", "tabs"} {
+	for _, name := range []string{"dialog", "dropdown", "tabs", "carousel"} {
 		path := "component/" + name + "/2.0.0.js"
 		source, err := embeddedDeliveryPackages.ReadFile(path)
 		if err != nil {

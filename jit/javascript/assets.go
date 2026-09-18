@@ -14,7 +14,7 @@ import (
 //go:embed service/deepLinks/1.0.0.js service/deepLinks/1.1.0.js service/lifecycle/1.0.0.js service/media/1.0.0.js service/qr/1.0.0.js service/secureStorage/1.0.0.js service/share/1.0.0.js service/shell/1.0.0.js service/storage/1.0.0.js service/studioDatabase/1.0.0.js service/studioDatabase/1.1.0.js service/studioSqlite/1.0.0.js service/studioState/1.0.0.js service/wakeLock/1.0.0.js service/window/1.0.0.js
 //go:embed component/progress-bar/1.1.0.js component/progress-bar/1.2.0.js component/progress-bar/2.0.0.js
 //go:embed component/accordion/1.0.0.js component/dialog/1.0.0.js component/tabs/1.0.0.js component/dropdown/1.0.0.js
-//go:embed component/dialog/2.0.0.js component/tabs/2.0.0.js component/dropdown/2.0.0.js
+//go:embed component/dialog/2.0.0.js component/tabs/2.0.0.js component/dropdown/2.0.0.js component/carousel/2.0.0.js
 //go:embed component/alert/1.0.0.js component/switch/1.0.0.js component/pagination/1.0.0.js component/carousel/1.0.0.js
 //go:embed component/popover/1.0.0.js component/tooltip/1.0.0.js component/toast/1.0.0.js component/drawer/1.0.0.js component/shortcut/1.0.0.js
 //go:embed component/desktop-titlebar/1.0.0.js component/desktop-titlebar/1.1.0.js
