@@ -56,9 +56,104 @@ func gradientStop(pos, color string) string {
 // spaces, per Tailwind). Non-arbitrary input is returned unchanged.
 func unarb(s string) string {
 	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
-		return strings.ReplaceAll(s[1:len(s)-1], "_", " ")
+		return normalizeMath(strings.ReplaceAll(s[1:len(s)-1], "_", " "))
 	}
 	return s
+}
+
+// normalizeMath puts the spaces CSS math needs around + - * / inside calc(), min(), max()
+// and clamp(): a class cannot hold spaces, so `calc(100%+8px)` is what gets written and
+// `calc(100% + 8px)` is what the browser accepts. A `-` is an operator only after an
+// operand — a number with its unit, or a closing paren — so `safe-area-inset-top` and
+// `var(--gap)` keep their hyphens, and `*-1` keeps its sign.
+func normalizeMath(s string) string {
+	if !strings.Contains(s, "(") {
+		return s
+	}
+	var out strings.Builder
+	var stack []string // the open functions, innermost last
+	mathDepth, varDepth := 0, 0
+	word := ""
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '(':
+			stack = append(stack, word)
+			switch word {
+			case "calc", "min", "max", "clamp":
+				mathDepth++
+			case "var":
+				varDepth++
+			}
+			word = ""
+			out.WriteByte(c)
+			continue
+		case c == ')':
+			if n := len(stack); n > 0 {
+				switch stack[n-1] {
+				case "calc", "min", "max", "clamp":
+					mathDepth--
+				case "var":
+					varDepth--
+				}
+				stack = stack[:n-1]
+			}
+			word = ""
+			out.WriteByte(c)
+			continue
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' && word != "" && varDepth > 0:
+			word += string(c)
+		default:
+			if c != '-' {
+				word = ""
+			}
+		}
+		isOp := c == '+' || c == '*' || c == '/' || (c == '-' && operandBefore(s, i))
+		if isOp && mathDepth > 0 && varDepth == 0 {
+			prevSpace := i > 0 && s[i-1] == ' '
+			nextSpace := i+1 < len(s) && s[i+1] == ' '
+			if !prevSpace && i > 0 && s[i-1] != '(' {
+				out.WriteByte(' ')
+			}
+			out.WriteByte(c)
+			if !nextSpace && i+1 < len(s) {
+				out.WriteByte(' ')
+			}
+			word = ""
+			continue
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+// operandBefore says whether the text before position i ends in an operand: a number with an
+// optional unit or percent sign, or a closing paren.
+func operandBefore(s string, i int) bool {
+	j := i - 1
+	for j >= 0 && s[j] == ' ' {
+		j--
+	}
+	if j < 0 {
+		return false
+	}
+	if s[j] == ')' || s[j] == '%' {
+		return true
+	}
+	for j >= 0 && ((s[j] >= 'a' && s[j] <= 'z') || (s[j] >= 'A' && s[j] <= 'Z')) {
+		j--
+	}
+	return j >= 0 && (s[j] >= '0' && s[j] <= '9' || s[j] == '.')
+}
+
+// negate applies Tailwind's negative prefix: a plain length just gets the sign; a value that
+// is an expression — calc(), var(), a nested function — becomes calc(<value> * -1), because
+// `-calc(…)` is not CSS and the whole declaration would be dropped.
+func negate(val string) string {
+	if strings.Contains(val, "(") || strings.HasPrefix(val, "-") {
+		return "calc(" + val + " * -1)"
+	}
+	return "-" + val
 }
 
 // scaleVal turns a Tailwind scale number (105) into a CSS scale factor (1.05); arbitrary

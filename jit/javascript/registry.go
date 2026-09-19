@@ -764,6 +764,14 @@ func loadDeliveryCatalog() (*deliveryCatalog, error) {
 			},
 		}
 	}
+	editorSource200, err := embeddedDeliveryPackages.ReadFile("component/editor/2.0.0.js")
+	if err != nil {
+		return nil, fmt.Errorf("%w: read component/editor/2.0.0.js: %v", ErrInvalidModule, err)
+	}
+	catalog.components["editor"]["2.0.0"] = catalogComponent{
+		identity: ComponentVersion{Name: "editor", Version: "2.0.0"},
+		source:   append([]byte(nil), editorSource200...),
+	}
 	dropzoneSource, err := embeddedDeliveryPackages.ReadFile("component/dropzone/1.0.0.js")
 	if err != nil {
 		return nil, fmt.Errorf("%w: read component/dropzone/1.0.0.js: %v", ErrInvalidModule, err)

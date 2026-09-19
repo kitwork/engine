@@ -385,7 +385,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "spacing-axis":
 		p, axis, val := m[1], m[2], transformUnit(m[3])
 		if neg && p == "margin" {
-			val = "-" + val
+			val = negate(val)
 		}
 		if p == "gap" {
 			if axis == "x" {
@@ -400,7 +400,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "spacing-dir":
 		p, d, val := m[1], m[2], transformUnit(m[3])
 		if neg && p == "margin" {
-			val = "-" + val
+			val = negate(val)
 		}
 		return fmt.Sprintf("%s-%s: %s;", p, d, val)
 	case "spacing-single":
@@ -409,7 +409,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			return p + ": 0;"
 		}
 		if neg && (p == "margin" || p == "top" || p == "bottom" || p == "left" || p == "right") {
-			val = "-" + val
+			val = negate(val)
 		}
 		return fmt.Sprintf("%s: %s;", p, val)
 	case "sizing":
@@ -540,7 +540,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "letter-spacing":
 		val := transformUnit(m[2])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		return "letter-spacing: " + val + ";"
 	case "line-height":
@@ -672,7 +672,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "translate":
 		axis, val := m[2], transformUnit(m[3])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		return fmt.Sprintf("transform: translate%s(%s);", strings.ToUpper(axis), val)
 	case "scale":
@@ -682,7 +682,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "rotate":
 		val := m[2]
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		return "transform: rotate(" + val + "deg);"
 	case "origin":
@@ -707,14 +707,14 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		dir := map[byte]string{'t': "top", 'r': "right", 'b': "bottom", 'l': "left"}[m[1][1]]
 		val := twUnit(m[2])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		return fmt.Sprintf("%s-%s: %s;", prop, dir, val)
 	case "tw-axis": // mx/my/px/py
 		prop := map[byte]string{'m': "margin", 'p': "padding"}[m[1][0]]
 		val := twUnit(m[2])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		if m[1][1] == 'x' {
 			return fmt.Sprintf("%[1]s-left: %[2]s; %[1]s-right: %[2]s;", prop, val)
@@ -724,7 +724,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		prop := map[string]string{"m": "margin", "p": "padding"}[m[1]]
 		val := twUnit(m[2])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		return fmt.Sprintf("%s: %s;", prop, val)
 	case "tw-gap":
@@ -815,7 +815,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-translate":
 		val := twUnit(m[3])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		slot := "--kitwork-translate-y"
 		if m[2] == "x" {
@@ -1020,7 +1020,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 	case "tw-space": // space-x/space-y → margin on subsequent children (selector suffix in ResolveCore)
 		val := twUnit(m[2])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		if m[1] == "x" {
 			return "margin-left: " + val + ";"
@@ -1258,7 +1258,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 		prop := m[1]
 		val := twUnit(m[2])
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		if prop == "inset" {
 			return fmt.Sprintf("inset: %s;", val)
@@ -1276,7 +1276,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			val = val[1 : len(val)-1]
 		}
 		if neg {
-			val = "-" + val
+			val = negate(val)
 		}
 		return "z-index: " + val + ";"
 	case "tw-shadow":
@@ -1426,7 +1426,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			v = v + "deg"
 		}
 		if neg {
-			v = "-" + v
+			v = negate(v)
 		}
 		return "--kitwork-rotate: " + v + "; transform: " + transformChain + ";"
 	case "tw-scale":
@@ -1446,7 +1446,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			v = v + "deg"
 		}
 		if neg {
-			v = "-" + v
+			v = negate(v)
 		}
 		slot := "--kitwork-skew-x"
 		if m[2] == "y" {
@@ -1516,7 +1516,7 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			v = "0"
 		}
 		if neg {
-			v = "-" + v
+			v = negate(v)
 		}
 		return "order: " + v + ";"
 	case "tw-pointer-events":
