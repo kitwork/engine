@@ -194,7 +194,7 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
     <output id="switch-state" data-kit-text="checked ? 'on' : 'off'"></output>
   </section>
 
-  <section data-kit-component="pagination@1.0.0" data-kit-scope="page: 1; pages: 3">
+  <section data-kit-component="pagination@1.0.0" data-kit-scope="page: 1, pages: 3">
     <button id="page-next" data-kit-click="next()">Next</button>
     <button id="page-last" data-kit-click="last()">Last</button>
     <button id="page-bad" data-kit-click="select('bad')">Bad</button>
@@ -203,7 +203,7 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
     <output id="page-can-next" data-kit-text="canNext() ? 'yes' : 'no'"></output>
   </section>
 
-  <section data-kit-component="carousel@1.0.0" data-kit-scope="slides: ['one', 'two', 'three']; active: 0">
+  <section data-kit-component="carousel@1.0.0" data-kit-scope="slides: ['one', 'two', 'three'], active: 0">
     <button id="carousel-next" data-kit-click="next()">Next</button>
     <button id="carousel-previous" data-kit-click="previous()">Previous</button>
     <button id="carousel-last" data-kit-click="last()">Last</button>

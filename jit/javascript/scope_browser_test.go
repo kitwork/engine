@@ -439,7 +439,7 @@ func scopeBrowserFixture(t *testing.T) string {
 	var page strings.Builder
 	page.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>KitJS scope contract</title></head>
 <body>
-  <main id="outer" data-kit-scope="count: 3; open: true">
+  <main id="outer" data-kit-scope="count: 3, open: true">
     <button id="outer-add" type="button" data-kit-click="count = count + 1">Outer</button>
     <output id="outer-count" data-kit-text="count">server</output>
     <section id="inner" data-kit-scope="count: 7">
@@ -450,7 +450,7 @@ func scopeBrowserFixture(t *testing.T) string {
   <section id="quoted-shorthand" data-kit-scope='"count": 1'>
     <output id="quoted-shorthand-count" data-kit-text="count">server</output>
   </section>
-  <section id="prototype-word-shorthand" data-kit-scope="toString: 1; valueOf: 2; hasOwnProperty: 3">
+  <section id="prototype-word-shorthand" data-kit-scope="toString: 1, valueOf: 2, hasOwnProperty: 3">
     <output id="prototype-word-shorthand-value" data-kit-text="toString + valueOf + hasOwnProperty">server-prototype-shorthand</output>
   </section>
   <section id="prototype-word-object" data-kit-scope="{ toString: 4, valueOf: 5, hasOwnProperty: 6, meta: { toString: 7, valueOf: 8, hasOwnProperty: 9 } }">
@@ -468,7 +468,7 @@ func scopeBrowserFixture(t *testing.T) string {
     <output id="object-rows" data-kit-text="rows.join('-')">server</output>
     <output id="object-ok" data-kit-text="meta.ok">server</output>
   </section>
-  <section id="serialized" data-kit-scope='message: &quot;A &amp; B &lt;ok&gt;&quot;; emoji: &quot;😀&quot;; json: &quot;\u004b\u0069\u0074\u004a\u0053&quot;; pair: &quot;\uD83D\uDE00&quot;; controls: &quot;\b\f\n\r\t\&quot;\\\/&quot;; amount: -12.5e2'>
+  <section id="serialized" data-kit-scope='message: &quot;A &amp; B &lt;ok&gt;&quot;, emoji: &quot;😀&quot;, json: &quot;\u004b\u0069\u0074\u004a\u0053&quot;, pair: &quot;\uD83D\uDE00&quot;, controls: &quot;\b\f\n\r\t\&quot;\\\/&quot;, amount: -12.5e2'>
     <output id="serialized-message" data-kit-text="message">server</output>
     <output id="serialized-emoji" data-kit-text="emoji">server</output>
     <output id="serialized-json" data-kit-text="json">server</output>
@@ -476,7 +476,7 @@ func scopeBrowserFixture(t *testing.T) string {
     <output id="serialized-controls" data-kit-text="controls">server</output>
     <output id="serialized-amount" data-kit-text="amount">server</output>
   </section>
-  <section id="component-seed" data-kit-component="scope-seeded" data-kit-scope="count: 3; open: true">
+  <section id="component-seed" data-kit-component="scope-seeded" data-kit-scope="count: 3, open: true">
     <button id="component-add" type="button" data-kit-click="bump()">Component</button>
     <output id="component-count" data-kit-text="count">server</output>
     <output id="component-open" data-kit-text="open">server</output>
@@ -524,7 +524,7 @@ func scopeBrowserFixture(t *testing.T) string {
   <section id="invalid-nested-null" data-kit-scope="safe: { null: 1 }"><output>server-nested-null</output></section>
   <section id="invalid-leading-nbsp" data-kit-scope="&#160;count: 1"><output>server-leading-nbsp</output></section>
   <section id="invalid-trailing-nbsp" data-kit-scope="count: 1&#160;"><output>server-trailing-nbsp</output></section>
-  <section id="invalid-duplicate" data-kit-scope="count: 1; count: 2"><output>server-duplicate</output></section>
+  <section id="invalid-duplicate" data-kit-scope="count: 1, count: 2"><output>server-duplicate</output></section>
   <section id="invalid-escape" data-kit-scope='text: "\u12G4"'><output>server-escape</output></section>
   <section id="invalid-lone-high" data-kit-scope='text: "\uD800"'><output>server-lone-high</output></section>
   <section id="invalid-lone-low" data-kit-scope='text: "\uDC00"'><output>server-lone-low</output></section>

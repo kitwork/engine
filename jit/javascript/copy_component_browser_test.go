@@ -46,7 +46,7 @@ func TestBrowserCopyComponentFlipsAndResets(t *testing.T) {
 
 var copyComponentDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS copy component</title></head><body>
-  <section data-kit-component="copy@1.0.0" data-kit-scope="text: 'npm i kitwork'; delay: 40">
+  <section data-kit-component="copy@1.0.0" data-kit-scope="text: 'npm i kitwork', delay: 40">
     <button id="copy-default" data-kit-click="copy()">Copy</button>
     <button id="copy-explicit" data-kit-click="copy('explicit-value')">Copy value</button>
     <output id="copy-state" data-kit-text="copied ? 'copied' : 'idle'"></output>

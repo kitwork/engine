@@ -60,7 +60,7 @@ const styleDirectiveDocument = `<!doctype html>
   </script>
 </head>
 <body>
-  <main data-kit-scope="progress: 25; visible: true; left: 10; danger: 'none'; vector: 'translateX(1px)'">
+  <main data-kit-scope="progress: 25, visible: true, left: 10, danger: 'none', vector: 'translateX(1px)'">
     <div id="styled" style="height: 7px; opacity: 0.25 !important; --Authored: keep"
       data-kit-style="width: progress + '%'; opacity: visible ? 1 : null; --Meter: progress + '%'; transform: visible ? 'translateX(2px)' : 'translateX(0px)'"></div>
     <div id="transaction" style="left: 3px; background-image: none"

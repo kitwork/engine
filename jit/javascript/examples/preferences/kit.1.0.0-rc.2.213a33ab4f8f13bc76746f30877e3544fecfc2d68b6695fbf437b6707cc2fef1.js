@@ -1729,6 +1729,8 @@
       syntax("expected a scope value", start);
     }
 
+    // The braces are optional (ideaship-final §6): `qty: 1, price: 250` is the same literal as
+    // `{ qty: 1, price: 250 }`, fields separated by "," like any object. ";" is not a separator.
     function shorthand() {
       depth(1);
       var output = count(Object.create(null));
@@ -1744,7 +1746,8 @@
         output[key] = value(1);
         skip();
         if (index >= source.length) return output;
-        if (source.charAt(index) !== ";") syntax("expected \";\"", index);
+        if (source.charAt(index) === ";") syntax("scope fields are separated by \",\" not \";\"", index);
+        if (source.charAt(index) !== ",") syntax("expected \",\"", index);
         index++;
         skip();
         if (index >= source.length) return output;
@@ -5315,7 +5318,7 @@
   var grants = Object.create(null);
   grants["preferences"] = Object.create(null);
   grants["preferences"]["storage"] = "1.0.0";
-  var graph = { id: "17809720853478b966e414de9580913a77935a2986964f7c1cd2c09695bbe003", profile: "kit", services: services, components: components, actions: actions, grants: grants };
+  var graph = { id: "3ae301ddb8a9031492c8eefce2374b7462db6b6a71669f446cabe81973a76a93", profile: "kit", services: services, components: components, actions: actions, grants: grants };
   if (core.reuse) {
     var installed = global.kit && global.kit[GRAPH];
     if (!installed || installed.id !== graph.id || installed.profile !== graph.profile) {

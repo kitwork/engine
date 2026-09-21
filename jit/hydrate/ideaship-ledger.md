@@ -14,7 +14,7 @@
 | # | Mục đã chốt | Spec | Kernel `/kit.js` hôm nay | Runtime component hôm nay | Trạng thái |
 | :-: | :--- | :--- | :--- | :--- | :--- |
 | 1 | Binding 3 nhóm | `data-kit-bind:<name>` — **một dạng**, tên quyết định nhóm (Quốc chốt 21/09: bỏ `data-kit-attr`, vì hai tên trùng việc). Reflected boolean → property + attribute · live property → property · còn lại (aria-*, data-*, tên có gạch nối) → attribute | ✅ `writeBinding` trong kernel; SSR `PreRenderBind` bake theo cùng luật | ✅ `dom.js` `writeBinding`; scanner từ chối dạng list và đích không an toàn | ✅ 21/09 — test: `binding_groups_browser_test.go`, `bind_dom_test.go`, `scan_test.go`; 405 thuộc tính trên 12 site + fixture đã chuyển |
-| 2 | Scope literal | `{ qty: 1, price: 250 }` hoặc `qty: 1, price: 250` — dấu `,`, **không** `;` | biểu thức | parser dữ liệu thuần, dấu `;` | ☐ |
+| 2 | Scope literal | `{ qty: 1, price: 250 }` hoặc `qty: 1, price: 250` — dấu `,`, **không** `;` | ✅ `boundaryScope` nhận dạng không ngoặc (`^tên:`) và bọc `{…}` rồi đưa vào CÙNG parser biểu thức — không parser thứ hai; dạng tên và dạng init `a = 1; b = 2` giữ nguyên | ✅ shorthand tách bằng `,`; gặp `;` báo `scope fields are separated by "," not ";"` (JS + `scope_seed.go`). Parser dữ liệu thuần vẫn giữ: giá trị phải là data, không biểu thức — hẹp hơn kernel, cùng ngữ pháp | ✅ 21/09 — test: `scope_literal_dom_test.go` (kernel), `scope_seed_test.go`, `scope_browser_test.go`; 89 thuộc tính trên 49 file (site, fixture, docs, cmd/gallery, cmd/kitui) đã chuyển |
 | 3 | Alias = instance | `data-kit-alias="$modal"` | `data-kit-component="name=$alias"` | `data-kit-as="$alias"` | ☐ |
 | 4 | Ref = element | `data-kit-ref="search"` → `$refs.search` (phạm vi: CÒN TREO, đề xuất theo instance) | không | scanner từ chối `data-kit-ref` | ☐ |
 | 5 | 7 biến hệ thống | `$this`(~`$el`) `$host`(~`$root`) `$event` native `$error` `$refs` `$app` `$` | `$el`, `$root`(=element), `$`, `$app`, `$theme` | `$event` bản chụp, `$app`; `$this/$host/$refs/$error` chỉ dành riêng tên | ☐ |
@@ -46,4 +46,5 @@
 
 ## Nhật ký
 
+- 21/09/2026 — mục 2 xong (dấu `,`, ngoặc tuỳ chọn, cả hai runtime + scanner; `ideaship.md`/`ideaship-master.md`/`ideashipping.md` vẫn ghi ví dụ `;` — là hồ sơ, FINAL thắng; kernel giữ thêm dạng init `a = 1; b = 2` ngoài spec — bàn ở đợt B).
 - 21/09/2026 — lập sổ; mục 1 xong (một dạng `data-kit-bind:<name>`; `data-kit-attr` bị bỏ theo quyết định của Quốc; danh sách `a: x; b: y` và dạng object của kernel gỡ hẳn — mọi site trong repo đã chuyển bằng script).

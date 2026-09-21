@@ -7,7 +7,7 @@
 // grid lines from grid(), the axis from ticks(). Everything is in the
 // viewBox's own units, width by height, so the SVG scales with its box.
 //
-//   <div data-kit-component="chart" data-kit-scope="series: [4, 8, 6]; labels: ['Mon', 'Tue', 'Wed']">
+//   <div data-kit-component="chart" data-kit-scope="series: [4, 8, 6], labels: ['Mon', 'Tue', 'Wed']">
 //     <svg data-kit-bind:viewbox="viewBox()"><path data-kit-bind:d="line()" /></svg>
 //     <template data-kit-for="bar of bars()"><div data-kit-style="height: bar.percent + '%';"></div></template>
 

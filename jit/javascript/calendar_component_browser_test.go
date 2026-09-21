@@ -47,7 +47,7 @@ func TestBrowserCalendarDrawsAMonthFromArithmetic(t *testing.T) {
 
 var calendarComponentDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS calendar component</title></head><body>
-  <div id="host" data-kit-component="calendar@1.0.0" data-kit-scope="selected: '2026-09-18'; min: '2026-09-10'; locale: 'en-GB'">
+  <div id="host" data-kit-component="calendar@1.0.0" data-kit-scope="selected: '2026-09-18', min: '2026-09-10', locale: 'en-GB'">
     <button id="previous" type="button" data-kit-click="previous()">‹</button>
     <output id="title" data-kit-text="title()"></output>
     <button id="next" type="button" data-kit-click="next()">›</button>

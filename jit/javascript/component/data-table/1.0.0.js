@@ -7,7 +7,7 @@
 // numbers as numbers and strings by locale; filtering matches every typed word
 // against every field; paging is one-based.
 //
-//   <table data-kit-component="data-table" data-kit-scope="rows: […]; pageSize: 5">
+//   <table data-kit-component="data-table" data-kit-scope="rows: […], pageSize: 5">
 //     <th aria-sort="…" data-kit-bind:aria-sort="direction('name')">
 //       <button data-kit-click="sortBy('name')">Name</button>
 //     <template data-kit-for="row of visible()">…</template>

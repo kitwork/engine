@@ -48,7 +48,7 @@ func TestBrowserSplitResizesByPointerAndKeyboard(t *testing.T) {
 
 var splitComponentDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS split component</title></head><body>
-  <div id="host" data-kit-component="split@1.0.0" data-kit-scope="size: 30; min: 20; max: 70; step: 10" style="display:flex;width:600px;height:200px">
+  <div id="host" data-kit-component="split@1.0.0" data-kit-scope="size: 30, min: 20, max: 70, step: 10" style="display:flex;width:600px;height:200px">
     <div id="panel" data-split-panel style="flex-basis:30%%;flex-shrink:0">first</div>
     <div id="handle" data-split-handle role="separator" tabindex="0" aria-label="Resize" style="width:6px;flex-shrink:0"></div>
     <div style="flex:1">second</div>
@@ -59,7 +59,7 @@ var splitComponentDocument = fmt.Sprintf(`<!doctype html>
       <output id="state" data-kit-text="size + '|' + (collapsed ? 'folded' : 'open') + '|' + (dragging ? 'drag' : 'still')"></output>
     </div>
   </div>
-  <div id="stack" data-kit-component="split@1.0.0" data-kit-scope="size: 50; axis: 'y'" style="display:flex;flex-direction:column;width:300px;height:400px">
+  <div id="stack" data-kit-component="split@1.0.0" data-kit-scope="size: 50, axis: 'y'" style="display:flex;flex-direction:column;width:300px;height:400px">
     <div id="stack-panel" data-split-panel style="flex-basis:50%%;flex-shrink:0">top</div>
     <div id="stack-handle" data-split-handle role="separator" tabindex="0" aria-label="Resize" style="height:6px;flex-shrink:0"></div>
     <div style="flex:1">bottom</div>

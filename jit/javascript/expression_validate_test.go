@@ -272,7 +272,7 @@ func TestExpressionValidatorBudgets(t *testing.T) {
 
 func TestScanHTMLValidatesAuthoredExpressions(t *testing.T) {
 	t.Parallel()
-	valid := `<main data-kit-scope="count: 0; items: []; user: null">
+	valid := `<main data-kit-scope="count: 0, items: [], user: null">
   <output data-kit-text="count &lt; 10 ? count : 10"></output>
   <output data-kit-text="user?.profile.name ?? 'Guest'"></output>
   <output data-kit-show="!!user"></output>

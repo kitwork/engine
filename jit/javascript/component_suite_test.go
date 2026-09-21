@@ -230,7 +230,7 @@ func TestBrowserComponentSuiteStateAndDirectiveContract(t *testing.T) {
 var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS component suite</title></head><body>
   <section id="accordion" data-kit-component="accordion@1.0.0"
-    data-kit-scope="multiple: true; openItems: ['first']">
+    data-kit-scope="multiple: true, openItems: ['first']">
     <button id="accordion-first" type="button" data-kit-click="toggle('first')"
       data-kit-bind:aria-expanded="isOpen('first')">First</button>
     <div id="accordion-panel" data-kit-show="isOpen('first')">First panel</div>
@@ -251,7 +251,7 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
   </section>
 
   <section id="tabs" data-kit-component="tabs@1.0.0"
-    data-kit-scope="tabs: ['overview', 'api', 'examples']; active: 'overview'">
+    data-kit-scope="tabs: ['overview', 'api', 'examples'], active: 'overview'">
     <div role="tablist">
       <button id="tab-overview" type="button" role="tab" data-kit-click="select('overview')"
         data-kit-keydown="$event.key === 'ArrowRight' ? next() : $event.key === 'ArrowLeft' ? previous() : active"

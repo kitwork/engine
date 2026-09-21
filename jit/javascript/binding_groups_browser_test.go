@@ -45,7 +45,7 @@ func TestBrowserBindingGroupsWriteWhereTheSpecSays(t *testing.T) {
 
 var bindingGroupsDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS binding groups</title></head><body>
-  <form id="form" data-kit-scope="on: true; busy: false; label: 'Save'; tone: 'warm'; text: 'seed'; level: 3">
+  <form id="form" data-kit-scope="on: true, busy: false, label: 'Save', tone: 'warm', text: 'seed', level: 3">
     <button id="button" type="button" data-kit-bind:disabled="busy" data-kit-bind:title="label" data-kit-bind:aria-busy="busy" data-kit-bind:aria-expanded="on" data-kit-bind:data-tone="tone" data-kit-bind:data-lit="on">go</button>
     <input id="check" type="checkbox" data-kit-bind:checked="on">
     <input id="text" type="text" value="authored" data-kit-bind:value="text">

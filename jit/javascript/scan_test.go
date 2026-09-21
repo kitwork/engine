@@ -154,7 +154,7 @@ func TestScanHTMLDetectsImplementedRuntimeDirectivesAndEvents(t *testing.T) {
 		`<input data-kit-bind:checked="on" data-kit-bind:value="text">`,
 		`<div data-kit-style="width: progress + '%'; opacity: open ? 1 : 0;"></div>`,
 		`<input data-kit-model="query">`,
-		`<section data-kit-scope="count: 0;"></section>`,
+		`<section data-kit-scope="count: 0"></section>`,
 		`<div data-kit-if="open"><p data-kit-text="label"></p></div>`,
 		`<template data-kit-if="open"><p data-kit-text="label"></p></template>`,
 		`<template data-kit-for="item, index of items" data-kit-key="item.id"><p data-kit-text="item.name"></p></template>`,
@@ -279,7 +279,7 @@ func TestScanHTMLRejectsAppScopeServiceNamespaceCollisions(t *testing.T) {
 	}
 
 	for _, source := range []string{
-		`<main data-kit-component="app@1.0.0" data-kit-as="$app" data-kit-scope="storageKey: null; profile: {storage: true}"></main>`,
+		`<main data-kit-component="app@1.0.0" data-kit-as="$app" data-kit-scope="storageKey: null, profile: {storage: true}"></main>`,
 		`<main data-kit-component="app@1.0.0" data-kit-as="$other" data-kit-scope="storage: null"></main>`,
 		`<main data-kit-component="dialog@1.0.0" data-kit-as="$app" data-kit-scope="storage: null"></main>`,
 	} {

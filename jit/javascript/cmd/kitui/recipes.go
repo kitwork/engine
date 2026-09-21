@@ -88,7 +88,7 @@ var catalog = []group{
 			},
 			{
 				id: "slider", title: "Slider", tag: "kitjs", desc: "Bounded value with percent() fill.",
-				demo: `<div data-kit-component="slider@1.0.0" data-kit-scope="value: 60; min: 0; max: 100; step: 5" class="w-full max-w-xs">
+				demo: `<div data-kit-component="slider@1.0.0" data-kit-scope="value: 60, min: 0, max: 100, step: 5" class="w-full max-w-xs">
   <div class="h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
     <div class="h-full rounded-full bg-brand" data-kit-style="width: percent() + '%';"></div>
   </div>
@@ -101,7 +101,7 @@ var catalog = []group{
 			},
 			{
 				id: "stepper", title: "Stepper", tag: "kitjs", desc: "Numeric input with guarded bounds.",
-				demo: `<div data-kit-component="stepper@1.0.0" data-kit-scope="value: 1; min: 0; max: 9; step: 1" class="inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-700">
+				demo: `<div data-kit-component="stepper@1.0.0" data-kit-scope="value: 1, min: 0, max: 9, step: 1" class="inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-700">
   <button class="px-3 py-2 text-slate-600 hover:text-brand disabled:opacity-40 dark:text-slate-300" data-kit-click="decrement()" data-kit-bind:disabled="!canDecrement()">−</button>
   <output class="w-10 border-x border-slate-200 py-2 text-center text-sm font-semibold dark:border-slate-700" data-kit-text="value">1</output>
   <button class="px-3 py-2 text-slate-600 hover:text-brand disabled:opacity-40 dark:text-slate-300" data-kit-click="increment()" data-kit-bind:disabled="!canIncrement()">+</button>
@@ -121,7 +121,7 @@ var catalog = []group{
 			},
 			{
 				id: "rating", title: "Rating", tag: "kitjs", desc: "Star value with fill projection.",
-				demo: `<div data-kit-component="rating@1.0.0" data-kit-scope="value: 3; max: 5" class="flex items-center gap-3">
+				demo: `<div data-kit-component="rating@1.0.0" data-kit-scope="value: 3, max: 5" class="flex items-center gap-3">
   <div class="flex">
     <button class="text-2xl text-brand" data-kit-click="rate(1)" data-kit-text="isFilled(1) ? '★' : '☆'">☆</button>
     <button class="text-2xl text-brand" data-kit-click="rate(2)" data-kit-text="isFilled(2) ? '★' : '☆'">☆</button>
@@ -134,7 +134,7 @@ var catalog = []group{
 			},
 			{
 				id: "tags", title: "Tags / Pillbox", tag: "kitjs", desc: "Deduplicated tag input.",
-				demo: `<div data-kit-component="tags@1.0.0" data-kit-scope="tags: ['kitwork', 'go']; draft: ''; max: 6" class="w-full max-w-xs">
+				demo: `<div data-kit-component="tags@1.0.0" data-kit-scope="tags: ['kitwork', 'go'], draft: '', max: 6" class="w-full max-w-xs">
   <div class="mb-2 flex flex-wrap gap-1.5">
     <template data-kit-for="tag of tags">
       <span class="inline-flex items-center gap-1 rounded-full bg-brand/10 px-2.5 py-1 text-xs font-medium text-brand">
@@ -149,7 +149,7 @@ var catalog = []group{
 			{
 				id: "combobox", title: "Combobox / Autocomplete", tag: "kitjs", desc: "Type-to-filter with selection.",
 				demo: `<div data-kit-component="combobox@1.0.0" data-kit-click:outside="hide()"
-  data-kit-scope="options: ['Apple', 'Apricot', 'Banana', 'Cherry', 'Grape', 'Kiwi']; query: ''; open: false; activeIndex: -1; selected: ''"
+  data-kit-scope="options: ['Apple', 'Apricot', 'Banana', 'Cherry', 'Grape', 'Kiwi'], query: '', open: false, activeIndex: -1, selected: ''"
   class="relative w-full max-w-xs">
   <input class="` + inputCls + `" placeholder="Search fruit…" data-kit-model="query" data-kit-input="search()" data-kit-focusin="show()" data-kit-keydown:escape="hide()">
   <div class="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800" data-kit-show="open" hidden>
@@ -246,7 +246,7 @@ var catalog = []group{
 			},
 			{
 				id: "alert", title: "Alert / Callout", tag: "kitjs", desc: "Dismissible inline notice.",
-				demo: `<div data-kit-component="alert@1.0.0" data-kit-scope="visible: true; message: 'Your trial ends in 3 days.'; tone: 'warning'" class="w-full max-w-md">
+				demo: `<div data-kit-component="alert@1.0.0" data-kit-scope="visible: true, message: 'Your trial ends in 3 days.', tone: 'warning'" class="w-full max-w-md">
   <div class="flex items-start gap-3 rounded-lg border border-brand/30 bg-brand/5 p-4 text-sm" data-kit-show="visible" hidden>
     <span class="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-brand"></span>
     <p class="flex-1 text-slate-700 dark:text-slate-200" data-kit-text="message"></p>
@@ -256,7 +256,7 @@ var catalog = []group{
 			},
 			{
 				id: "copy", title: "Copy button", tag: "kitjs", desc: "Clipboard write with reset flag.",
-				demo: `<div data-kit-component="copy@1.0.0" data-kit-scope="text: 'npm i kitwork'; delay: 1500" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
+				demo: `<div data-kit-component="copy@1.0.0" data-kit-scope="text: 'npm i kitwork', delay: 1500" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-800">
   <code class="text-sm">npm i kitwork</code>
   <button class="` + btnGhost + ` px-2 py-1 text-xs" data-kit-click="copy()" data-kit-text="copied ? '✓ Copied' : 'Copy'">Copy</button>
 </div>`,
@@ -269,7 +269,7 @@ var catalog = []group{
 		items: []recipe{
 			{
 				id: "tabs", title: "Tabs", tag: "kitjs", desc: "Ordered selection controller.",
-				demo: `<div data-kit-component="tabs@1.0.0" data-kit-scope="tabs: ['overview', 'analytics', 'settings']; active: 'overview'" class="w-full max-w-md">
+				demo: `<div data-kit-component="tabs@1.0.0" data-kit-scope="tabs: ['overview', 'analytics', 'settings'], active: 'overview'" class="w-full max-w-md">
   <div class="flex gap-1 border-b border-slate-200 dark:border-slate-700">
     <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('overview')" data-kit-bind:data-active="isActive('overview') ? 'on' : null">Overview</button>
     <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('analytics')" data-kit-bind:data-active="isActive('analytics') ? 'on' : null">Analytics</button>
@@ -316,7 +316,7 @@ var catalog = []group{
 			},
 			{
 				id: "pagination", title: "Pagination", tag: "kitjs", desc: "Bounded one-based paging.",
-				demo: `<div data-kit-component="pagination@1.0.0" data-kit-scope="page: 1; pages: 5" class="flex items-center gap-1">
+				demo: `<div data-kit-component="pagination@1.0.0" data-kit-scope="page: 1, pages: 5" class="flex items-center gap-1">
   <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="previous()" data-kit-bind:disabled="!canPrevious()">Prev</button>
   <span class="px-3 text-sm">Page <span data-kit-text="page">1</span> / 5</span>
   <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="next()" data-kit-bind:disabled="!canNext()">Next</button>
@@ -387,7 +387,7 @@ var catalog = []group{
 			},
 			{
 				id: "rotator", title: "Rotator", tag: "kitjs", desc: "Carousel that advances itself, and stops when it should.",
-				demo: `<div data-kit-component="rotator@1.0.0" data-kit-scope="items: ['Ship it', 'Own it', 'Keep it']; active: 0; interval: 2000" class="w-full max-w-xs">
+				demo: `<div data-kit-component="rotator@1.0.0" data-kit-scope="items: ['Ship it', 'Own it', 'Keep it'], active: 0, interval: 2000" class="w-full max-w-xs">
   <div class="flex h-28 items-center justify-center rounded-lg bg-brand/10 text-2xl font-bold text-brand">
     <span data-kit-show="isActive(0)">Ship it</span>
     <span data-kit-show="isActive(1)" hidden>Own it</span>
@@ -407,7 +407,7 @@ var catalog = []group{
 			},
 			{
 				id: "carousel", title: "Carousel", tag: "kitjs", desc: "Wrapping slide selection.",
-				demo: `<div data-kit-component="carousel@1.0.0" data-kit-scope="slides: ['One', 'Two', 'Three']; active: 0" class="w-full max-w-xs">
+				demo: `<div data-kit-component="carousel@1.0.0" data-kit-scope="slides: ['One', 'Two', 'Three'], active: 0" class="w-full max-w-xs">
   <div class="flex h-28 items-center justify-center rounded-lg bg-brand/10 text-2xl font-bold text-brand">
     <span data-kit-show="isActive(0)">Slide One</span>
     <span data-kit-show="isActive(1)" hidden>Slide Two</span>

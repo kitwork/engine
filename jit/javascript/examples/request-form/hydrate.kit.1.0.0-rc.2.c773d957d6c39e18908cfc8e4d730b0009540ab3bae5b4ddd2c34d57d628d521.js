@@ -1729,6 +1729,8 @@
       syntax("expected a scope value", start);
     }
 
+    // The braces are optional (ideaship-final §6): `qty: 1, price: 250` is the same literal as
+    // `{ qty: 1, price: 250 }`, fields separated by "," like any object. ";" is not a separator.
     function shorthand() {
       depth(1);
       var output = count(Object.create(null));
@@ -1744,7 +1746,8 @@
         output[key] = value(1);
         skip();
         if (index >= source.length) return output;
-        if (source.charAt(index) !== ";") syntax("expected \";\"", index);
+        if (source.charAt(index) === ";") syntax("scope fields are separated by \",\" not \";\"", index);
+        if (source.charAt(index) !== ",") syntax("expected \",\"", index);
         index++;
         skip();
         if (index >= source.length) return output;
@@ -7834,6 +7837,105 @@
     throw error;
   }
 })(globalThis, document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || ["events", "drive"].indexOf(core.phase) < 0) {
+    throw new Error("KitJS: service registrar loaded out of order");
+  }
+  if (core.reuse) return;
+  if (!core.kit || typeof core.validServiceName !== "function" ||
+    typeof core.sealKit !== "function" || core.serviceRegistry) {
+    throw new Error("KitJS: service registrar cannot be installed");
+  }
+
+  var OWN = core.OWN;
+  var registry = new Map();
+  var identities = new WeakMap();
+  var kit = core.kit;
+  var sealed = false;
+
+  function snapshot(name, namespace) {
+    var prototype = namespace && Object.getPrototypeOf(namespace);
+    if (!namespace || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(namespace).length) {
+      throw new TypeError("KitJS: service namespace must be a plain object");
+    }
+    var descriptors = Object.getOwnPropertyDescriptors(namespace);
+    var output = Object.create(null);
+    Object.keys(descriptors).forEach(function (member) {
+      if (member === "version" || core.blocked(member)) {
+        throw new TypeError("KitJS: invalid service member \"" + member + "\"");
+      }
+      var descriptor = descriptors[member];
+      if (descriptor.set || !OWN.call(descriptor, "value") && typeof descriptor.get !== "function") {
+        throw new TypeError("KitJS: service members must be values or readonly getters");
+      }
+      if (OWN.call(descriptor, "value")) {
+        Object.defineProperty(output, member, {
+          value: descriptor.value,
+          enumerable: descriptor.enumerable !== false
+        });
+      } else {
+        Object.defineProperty(output, member, {
+          get: descriptor.get,
+          enumerable: descriptor.enumerable !== false
+        });
+      }
+    });
+    Object.defineProperty(output, "version", {
+      value: core.graph.services[name]
+    });
+    return Object.freeze(output);
+  }
+
+  function service(name, namespace) {
+    if (arguments.length !== 2) {
+      throw new TypeError("KitJS: service(name, namespace) expects two arguments");
+    }
+    if (sealed) throw new Error("KitJS: service registrar is sealed");
+    if (!core.graph) throw new Error("KitJS: services must register after the graph is installed");
+    if (!core.validServiceName(name)) throw new TypeError("KitJS: invalid service name");
+    if (!OWN.call(core.graph.services, name)) {
+      throw new Error("KitJS: service \"" + name + "\" is not declared by the installed graph");
+    }
+    if (registry.has(name)) throw new Error("KitJS: service \"" + name + "\" already exists");
+    var value = snapshot(name, namespace);
+    Object.defineProperty(kit, name, {
+      value: value,
+      enumerable: true
+    });
+    registry.set(name, value);
+    identities.set(value, name);
+  }
+
+  Object.defineProperty(kit, "service", {
+    value: service,
+    configurable: true
+  });
+
+  core.serviceRegistry = registry;
+  core.sealServices = function () {
+    if (sealed) throw new Error("KitJS: services are already sealed");
+    if (!core.graph) throw new Error("KitJS: service graph is not installed");
+    Object.keys(core.graph.services).forEach(function (name) {
+      if (!registry.has(name)) {
+        throw new Error("KitJS: service graph is missing definition \"" + name + "\"");
+      }
+      Object.keys(core.graph.actions[name]).forEach(function (member) {
+        if (typeof registry.get(name)[member] !== "function") {
+          throw new Error("KitJS: authored action \"" + name + "." + member + "\" is not callable");
+        }
+      });
+    });
+    sealed = true;
+    if (!delete kit.service) throw new Error("KitJS: service registrar could not be removed");
+    core.servicesSealed = true;
+    return core.sealKit();
+  };
+  core.serviceName = function (value) { return identities.get(value) || null; };
+})(document);
 ; (function (global, document) {
   "use strict";
 
@@ -7842,18 +7944,20 @@
   var core = document[ASSEMBLY];
   if (!core || core.phase !== "drive") throw new Error("KitJS: component graph loaded out of order");
   var services = Object.create(null);
+  services["progress"] = "1.0.0";
+  services["request"] = "1.0.0";
   var components = Object.create(null);
-  components["shop-cart"] = "1.0.0";
-  components["shop-checkout"] = "1.0.0";
-  components["shop-dialog"] = "1.0.0";
-  components["shop-products"] = "1.0.0";
+  components["progress-bar"] = "2.0.0";
+  components["request-form"] = "1.0.0";
   var actions = Object.create(null);
+  actions["progress"] = Object.create(null);
+  actions["request"] = Object.create(null);
   var grants = Object.create(null);
-  grants["shop-cart"] = Object.create(null);
-  grants["shop-checkout"] = Object.create(null);
-  grants["shop-dialog"] = Object.create(null);
-  grants["shop-products"] = Object.create(null);
-  var graph = { id: "6120a67a0d6e889c93b78a31f5132abd8d24b333e2ead7711248ebb840e82ed9", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
+  grants["progress-bar"] = Object.create(null);
+  grants["request-form"] = Object.create(null);
+  grants["progress-bar"]["progress"] = "1.0.0";
+  grants["request-form"]["request"] = "1.0.0";
+  var graph = { id: "0d28d63c8e4c28253dc6c15d1aabba59e7f2900669489caeeb482a5f7cd5192c", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
   if (core.reuse) {
     var installed = global.kit && global.kit[GRAPH];
     if (!installed || installed.id !== graph.id || installed.profile !== graph.profile) {
@@ -7868,220 +7972,816 @@
     core.installComponentGraph(graph);
     var kit = core.kit;
     if (!kit || kit.version !== core.version || kit.component !== core.component) throw new Error("KitJS: package facade is unavailable");
-    if (typeof core.sealKit !== "function") throw new Error("KitJS: package facade sealer is unavailable");
-    core.sealKit();
+    ; (function (kit) {
+;(function (global, document, kit) {
+"use strict";
+
+// KitJS service: progress@1.0.0
+var listeners = new Set();
+var deliveries = [];
+var delivering = false;
+var current = freeze({
+  id: "",
+  phase: "idle",
+  source: "",
+  url: "",
+  loaded: 0,
+  total: null,
+  outcome: null
+});
+
+function freeze(value) {
+  return Object.freeze({
+    id: value.id,
+    phase: value.phase,
+    source: value.source,
+    url: value.url,
+    loaded: value.loaded,
+    total: value.total,
+    outcome: value.outcome
+  });
+}
+
+function report(error) {
+  try {
+    if (typeof global.reportError === "function") {
+      global.reportError(error);
+      return;
+    }
+    if (global.console && typeof global.console.error === "function") {
+      global.console.error(error);
+    }
+  } catch (_) { /* Reporting must not break another subscriber. */ }
+}
+
+function deliver(listener, value) {
+  try { listener(value); }
+  catch (error) { report(error); }
+}
+
+function publish(value) {
+  var published = current = freeze(value);
+  deliveries.push({
+    value: published,
+    subscriptions: Array.from(listeners)
+  });
+  if (delivering) return published;
+
+  delivering = true;
+  try {
+    var index = 0;
+    while (index < deliveries.length) {
+      var delivery = deliveries[index];
+      deliveries[index] = null;
+      index++;
+      delivery.subscriptions.forEach(function (subscription) {
+        if (subscription.listener) deliver(subscription.listener, delivery.value);
+      });
+    }
+  } finally {
+    deliveries.length = 0;
+    delivering = false;
+  }
+  return published;
+}
+
+function progressID(value) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Progress id must be a non-empty string or finite number");
+    return String(value);
+  }
+  if (typeof value !== "string" || !value) {
+    throw new TypeError("Progress id must be a non-empty string or finite number");
+  }
+  return value;
+}
+
+function optionsOf(value) {
+  if (value === undefined || value === null) value = {};
+  var prototype = value && Object.getPrototypeOf(value);
+  if (!value || prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError("Progress options must be a plain object");
+  }
+  if (value.source !== undefined && (typeof value.source !== "string" || !value.source)) {
+    throw new TypeError("Progress source must be a non-empty string");
+  }
+  if (value.url !== undefined && typeof value.url !== "string") {
+    throw new TypeError("Progress url must be a string");
+  }
+  if (value.total !== undefined && value.total !== null &&
+    (typeof value.total !== "number" || !Number.isFinite(value.total) || value.total <= 0)) {
+    throw new TypeError("Progress total must be a positive finite number or null");
+  }
+  return {
+    source: value.source === undefined ? "manual" : value.source,
+    url: value.url === undefined ? "" : value.url,
+    total: value.total === undefined || value.total === null ? null : value.total
+  };
+}
+
+function snapshot() {
+  return current;
+}
+
+function subscribe(listener) {
+  if (typeof listener !== "function") throw new TypeError("Progress subscriber must be a function");
+  var subscription = { listener: listener };
+  listeners.add(subscription);
+  deliver(listener, current);
+  var subscribed = true;
+  return function () {
+    if (!subscribed) return;
+    subscribed = false;
+    listeners.delete(subscription);
+    subscription.listener = null;
+    listener = null;
+  };
+}
+
+function start(id, options) {
+  id = progressID(id);
+  options = optionsOf(options);
+  return publish({
+    id: id,
+    phase: "start",
+    source: options.source,
+    url: options.url,
+    loaded: 0,
+    total: options.total,
+    outcome: null
+  });
+}
+
+function update(id, loaded, total) {
+  id = progressID(id);
+  if (current.id !== id || current.phase === "idle" || current.phase === "finish") return false;
+  if (typeof loaded !== "number" || !Number.isFinite(loaded) || loaded < 0 ||
+    typeof total !== "number" || !Number.isFinite(total) || total <= 0 || loaded > total) {
+    throw new TypeError("Progress update expects finite values where 0 <= loaded <= total and total > 0");
+  }
+  return publish({
+    id: current.id,
+    phase: "progress",
+    source: current.source,
+    url: current.url,
+    loaded: loaded,
+    total: total,
+    outcome: null
+  });
+}
+
+function finish(id, outcome) {
+  id = progressID(id);
+  if (current.id !== id || current.phase === "idle" || current.phase === "finish") return false;
+  if (outcome !== "loaded" && outcome !== "cancelled" && outcome !== "error" && outcome !== "fallback") {
+    throw new TypeError("Progress outcome must be loaded, cancelled, error, or fallback");
+  }
+  return publish({
+    id: current.id,
+    phase: "finish",
+    source: current.source,
+    url: current.url,
+    loaded: outcome === "loaded" && current.total !== null ? current.total : current.loaded,
+    total: current.total,
+    outcome: outcome
+  });
+}
+
+function navigation(event) {
+  try {
+    var detail = event && event.detail;
+    if (!detail || typeof detail !== "object" || typeof detail.url !== "string") return;
+    if (detail.phase === "start") {
+      start(detail.id, {
+        source: "navigation",
+        url: detail.url
+      });
+      return;
+    }
+    var id = progressID(detail.id);
+    if (current.source !== "navigation" || current.id !== id) return;
+    if (detail.phase === "progress") update(id, detail.loaded, detail.total);
+    else if (detail.phase === "finish") finish(id, detail.outcome);
+  } catch (_) { /* Untrusted document events never enter the trusted API. */ }
+}
+
+kit.service("progress", {
+  snapshot: snapshot,
+  subscribe: subscribe,
+  start: start,
+  update: update,
+  finish: finish
+});
+
+document.addEventListener("kit:navigation", navigation);
+})(globalThis, document, kit);
+    })(kit);
+    ; (function (kit) {
+;(function (global, document, kit) {
+"use strict";
+
+// KitJS service: request@1.0.0
+var OWN = Object.prototype.hasOwnProperty;
+var METHODS = Object.freeze({
+  GET: true,
+  HEAD: true,
+  POST: true,
+  PUT: true,
+  PATCH: true,
+  DELETE: true
+});
+var OPTION_KEYS = Object.freeze({
+  method: true,
+  headers: true,
+  data: true,
+  key: true,
+  timeout: true
+});
+var MAX_ACTIVE = 256;
+var MAX_KEY_LENGTH = 128;
+var MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+var active = new Map();
+var sequence = 0;
+
+function plainSnapshot(value, label) {
+  var prototype = value && Object.getPrototypeOf(value);
+  if (!value || prototype !== Object.prototype && prototype !== null ||
+    Object.getOwnPropertySymbols(value).length) {
+    throw new TypeError(label + " must be a plain object");
+  }
+  var descriptors = Object.getOwnPropertyDescriptors(value);
+  var output = Object.create(null);
+  Object.keys(descriptors).forEach(function (name) {
+    var descriptor = descriptors[name];
+    if (!OWN.call(descriptor, "value")) {
+      throw new TypeError(label + " must not contain accessors");
+    }
+    output[name] = descriptor.value;
+  });
+  return output;
+}
+
+function optionsOf(value) {
+  if (value === undefined) value = Object.create(null);
+  var options = plainSnapshot(value, "Request options");
+  Object.keys(options).forEach(function (name) {
+    if (!OWN.call(OPTION_KEYS, name)) {
+      throw new TypeError("Unknown request option: " + name);
+    }
+  });
+  return options;
+}
+
+function methodOf(value) {
+  if (value === undefined) return "GET";
+  if (typeof value !== "string" || value !== value.trim()) {
+    throw new TypeError("Request method must be GET, HEAD, POST, PUT, PATCH, or DELETE");
+  }
+  var method = value.toUpperCase();
+  if (!OWN.call(METHODS, method)) {
+    throw new TypeError("Request method must be GET, HEAD, POST, PUT, PATCH, or DELETE");
+  }
+  return method;
+}
+
+function keyOf(value) {
+  if (value === undefined) return null;
+  if (typeof value !== "string" || !value || value !== value.trim() || value.length > MAX_KEY_LENGTH) {
+    throw new TypeError("Request key must be a non-empty string up to 128 characters without surrounding whitespace");
+  }
+  return value;
+}
+
+function timeoutOf(value) {
+  if (value === undefined) return 0;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 120000) {
+    throw new TypeError("Request timeout must be an integer from 0 to 120000 milliseconds");
+  }
+  return value;
+}
+
+function urlOf(value) {
+  if (typeof value !== "string" || !value) throw new TypeError("Request URL must be a non-empty string");
+  var url;
+  try { url = new global.URL(value, global.location.href); }
+  catch (_) { throw new TypeError("Request URL is invalid"); }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.origin !== global.location.origin || url.username || url.password) {
+    throw new TypeError("Request URL must be a same-origin HTTP(S) URL");
+  }
+  url.hash = "";
+  return url.href;
+}
+
+function headersOf(value) {
+  var headers = new global.Headers();
+  if (value === undefined) return headers;
+  var entries = plainSnapshot(value, "Request headers");
+  Object.keys(entries).forEach(function (name) {
+    if (typeof entries[name] !== "string") {
+      throw new TypeError("Request header values must be strings");
+    }
+    headers.set(name, entries[name]);
+  });
+  return headers;
+}
+
+function isJSONType(value) {
+  var type = String(value || "").split(";", 1)[0].trim().toLowerCase();
+  return type === "application/json" || /\+json$/.test(type);
+}
+
+function csrfToken() {
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? String(meta.getAttribute("content") || "") : "";
+}
+
+function validatePlatform() {
+  if (typeof global.URL !== "function" || typeof global.fetch !== "function" ||
+    typeof global.AbortController !== "function" || typeof global.Headers !== "function" ||
+    typeof global.TextDecoder !== "function" || !global.location ||
+    typeof global.location.href !== "string" || typeof global.location.origin !== "string") {
+    throw new TypeError("Request requires URL, fetch, AbortController, Headers, TextDecoder, and location");
+  }
+}
+
+function requestError(code, message, status, url, data) {
+  var error = new Error(message);
+  Object.defineProperties(error, {
+    name: { value: "KitRequestError" },
+    code: { value: code, enumerable: true },
+    status: { value: status || 0, enumerable: true },
+    url: { value: url || "", enumerable: true },
+    data: { value: data === undefined ? null : data, enumerable: true }
+  });
+  return Object.freeze(error);
+}
+
+function resultOf(status, url, data) {
+  return Object.freeze(Object.assign(Object.create(null), {
+    status: status,
+    url: url,
+    data: data
+  }));
+}
+
+function cancel(record, message) {
+  if (!record || record.cancelled || record.timedOut || record.done) return false;
+  record.cancelled = true;
+  record.cancelMessage = message;
+  try { record.controller.abort(); }
+  catch (_) { /* Cancellation state still wins if AbortController is best effort. */ }
+  return true;
+}
+
+function cancelError(record) {
+  return requestError("CANCELLED", record.cancelMessage || "Request was cancelled", 0, record.url, null);
+}
+
+function activate(record) {
+  if (record.key === null) return;
+  var previous = active.get(record.key);
+  if (previous) {
+    active.delete(record.key);
+    cancel(previous, "Request was superseded");
+  } else if (active.size >= MAX_ACTIVE) {
+    var oldest = active.entries().next().value;
+    if (oldest) {
+      active.delete(oldest[0]);
+      cancel(oldest[1], "Request was cancelled to enforce capacity");
+    }
+  }
+  active.set(record.key, record);
+}
+
+function release(record) {
+  record.done = true;
+  if (record.timeoutID !== null) {
+    global.clearTimeout(record.timeoutID);
+    record.timeoutID = null;
+  }
+  if (record.key !== null && active.get(record.key) === record) active.delete(record.key);
+}
+
+function progressID() {
+  sequence++;
+  if (!Number.isSafeInteger(sequence)) sequence = 1;
+  return "request:" + sequence;
+}
+
+function finalURL(response, fallback) {
+  var url;
+  try { url = new global.URL(response.url || fallback, fallback); }
+  catch (_) { return ""; }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.origin !== global.location.origin || url.username || url.password) return "";
+  url.hash = "";
+  return url.href;
+}
+
+function exactLength(response) {
+  var encoding = String(response.headers.get("content-encoding") || "").trim().toLowerCase();
+  if (encoding && encoding !== "identity") return null;
+  var source = String(response.headers.get("content-length") || "").trim();
+  if (!/^(?:0|[1-9][0-9]*)$/.test(source)) return null;
+  var total = Number(source);
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+function cancelBody(response) {
+  try {
+    if (response.body && typeof response.body.cancel === "function") {
+      var pending = response.body.cancel();
+      if (pending && typeof pending.catch === "function") pending.catch(function () {});
+    }
+  } catch (_) { /* The response will be released with the request. */ }
+}
+
+async function responseBytes(response, record, status, url) {
+  var total;
+  try { total = exactLength(response); }
+  catch (_) {
+    throw requestError("INVALID_RESPONSE", "Request returned invalid response headers", status, url, null);
+  }
+  if (total !== null && total > MAX_RESPONSE_BYTES) {
+    cancelBody(response);
+    throw requestError("TOO_LARGE", "Response exceeds the 8 MiB limit", status, url, null);
+  }
+  if (!response.body) {
+    if (total !== null && total !== 0) {
+      throw requestError("INVALID_RESPONSE", "Response body length did not match its headers", status, url, null);
+    }
+    return new Uint8Array(0);
+  }
+  if (typeof response.body.getReader !== "function") {
+    cancelBody(response);
+    throw requestError("INVALID_RESPONSE", "Response body is not readable", status, url, null);
+  }
+
+  var reader;
+  try { reader = response.body.getReader(); }
+  catch (_) {
+    throw requestError("INVALID_RESPONSE", "Response body is not readable", status, url, null);
+  }
+  var chunks = [];
+  var loaded = 0;
+  try {
+    for (;;) {
+      if (record.cancelled) throw cancelError(record);
+      var item = await reader.read();
+      if (record.cancelled) throw cancelError(record);
+      if (item.done) break;
+      var value = item.value;
+      if (!value || !(value instanceof Uint8Array)) {
+        throw requestError("INVALID_RESPONSE", "Response body contained an invalid chunk", status, url, null);
+      }
+      if (value.byteLength === 0) continue;
+      if (loaded > MAX_RESPONSE_BYTES - value.byteLength) {
+        throw requestError("TOO_LARGE", "Response exceeds the 8 MiB limit", status, url, null);
+      }
+      loaded += value.byteLength;
+      chunks.push(value.slice());
+      if (total !== null && total > 0) {
+        if (loaded > total) {
+          throw requestError("INVALID_RESPONSE", "Response body length did not match its headers", status, url, null);
+        }
+        kit.progress.update(record.progressID, loaded, total);
+      }
+    }
+  } catch (error) {
+    try {
+      var cancelled = reader.cancel();
+      if (cancelled && typeof cancelled.catch === "function") cancelled.catch(function () {});
+    } catch (_) { /* AbortController also owns cancellation. */ }
+    throw error;
+  } finally {
+    if (typeof reader.releaseLock === "function") {
+      try { reader.releaseLock(); }
+      catch (_) { /* Completed or cancelled readers may already be unlocked. */ }
+    }
+  }
+  if (total !== null && loaded !== total) {
+    throw requestError("INVALID_RESPONSE", "Response body length did not match its headers", status, url, null);
+  }
+  var bytes = new Uint8Array(loaded);
+  var offset = 0;
+  chunks.forEach(function (chunk) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  });
+  chunks.length = 0;
+  return bytes;
+}
+
+async function responseData(response, record, status, url, method) {
+  if (method === "HEAD" || status === 204 || status === 205) {
+    cancelBody(response);
+    return null;
+  }
+  var bytes = await responseBytes(response, record, status, url);
+  var text;
+  try { text = new global.TextDecoder().decode(bytes); }
+  catch (_) {
+    throw requestError("INVALID_RESPONSE", "Response text could not be decoded", status, url, null);
+  }
+  var contentType;
+  try { contentType = response.headers.get("content-type"); }
+  catch (_) {
+    throw requestError("INVALID_RESPONSE", "Request returned invalid response headers", status, url, null);
+  }
+  if (!isJSONType(contentType)) return text;
+  try { return JSON.parse(text); }
+  catch (_) {
+    throw requestError("INVALID_RESPONSE", "Response JSON is invalid", status, url, null);
+  }
+}
+
+function prepare(url, input) {
+  validatePlatform();
+  var options = optionsOf(input);
+  var method = methodOf(options.method);
+  var headers = headersOf(options.headers);
+  var hasData = OWN.call(options, "data");
+  var body;
+  if (hasData && (method === "GET" || method === "HEAD")) {
+    throw new TypeError(method + " requests cannot contain data");
+  }
+  if (hasData) {
+    try { body = JSON.stringify(options.data); }
+    catch (_) { throw new TypeError("Request data must be JSON-serializable"); }
+    if (body === undefined) throw new TypeError("Request data must be JSON-serializable");
+    var contentType = headers.get("content-type");
+    if (contentType && !isJSONType(contentType)) {
+      throw new TypeError("Request data requires a JSON Content-Type");
+    }
+    if (!contentType) headers.set("Content-Type", "application/json");
+  }
+  if (method !== "GET" && method !== "HEAD" && !headers.has("X-CSRF-Token")) {
+    var token = csrfToken();
+    if (token) headers.set("X-CSRF-Token", token);
+  }
+  return {
+    url: urlOf(url),
+    method: method,
+    headers: headers,
+    body: body,
+    key: keyOf(options.key),
+    timeout: timeoutOf(options.timeout)
+  };
+}
+
+async function execute(plan) {
+  var record = {
+    controller: new global.AbortController(),
+    key: plan.key,
+    url: plan.url,
+    progressID: progressID(),
+    timeoutID: null,
+    cancelled: false,
+    cancelMessage: "",
+    timedOut: false,
+    done: false
+  };
+  activate(record);
+  if (plan.timeout) {
+    record.timeoutID = global.setTimeout(function () {
+      if (record.done || record.cancelled) return;
+      record.timedOut = true;
+      try { record.controller.abort(); }
+      catch (_) { /* Timeout state still wins if AbortController is best effort. */ }
+    }, plan.timeout);
+  }
+  kit.progress.start(record.progressID, {
+    source: "request",
+    url: plan.url
+  });
+
+  var outcome = "error";
+  try {
+    var response = await global.fetch(plan.url, {
+      method: plan.method,
+      headers: plan.headers,
+      body: plan.body,
+      signal: record.controller.signal,
+      credentials: "same-origin",
+      mode: "same-origin",
+      redirect: "follow"
+    });
+    if (record.cancelled) throw cancelError(record);
+    if (record.timedOut) {
+      throw requestError("TIMEOUT", "Request timed out", 0, plan.url, null);
+    }
+    if (!response || !Number.isInteger(response.status) || response.status < 100 || response.status > 599 ||
+      !response.headers || typeof response.headers.get !== "function") {
+      throw requestError("INVALID_RESPONSE", "Request returned an invalid response", 0, plan.url, null);
+    }
+    var url = finalURL(response, plan.url);
+    if (!url) {
+      cancelBody(response);
+      throw requestError("INVALID_RESPONSE", "Request redirected outside its origin", response.status, plan.url, null);
+    }
+    var data = await responseData(response, record, response.status, url, plan.method);
+    if (record.cancelled) throw cancelError(record);
+    if (record.timedOut) {
+      throw requestError("TIMEOUT", "Request timed out", 0, plan.url, null);
+    }
+    if (response.status < 200 || response.status > 299) {
+      throw requestError("HTTP", "Request failed with HTTP " + response.status, response.status, url, data);
+    }
+    outcome = "loaded";
+    return resultOf(response.status, url, data);
+  } catch (error) {
+    if (record.cancelled) {
+      outcome = "cancelled";
+      throw cancelError(record);
+    }
+    if (record.timedOut) {
+      throw requestError("TIMEOUT", "Request timed out", 0, plan.url, null);
+    }
+    if (error && error.name === "KitRequestError") throw error;
+    throw requestError("NETWORK", "Request failed", 0, plan.url, null);
+  } finally {
+    release(record);
+    kit.progress.finish(record.progressID, outcome);
+  }
+}
+
+function send(url, options) {
+  return execute(prepare(url, options));
+}
+
+function convenienceOptions(value, method, data, withData) {
+  var options = optionsOf(value);
+  if (OWN.call(options, "method")) throw new TypeError(method + " options cannot override method");
+  if (OWN.call(options, "data")) throw new TypeError(method + " options cannot contain data");
+  options.method = method;
+  if (withData) options.data = data;
+  return options;
+}
+
+function get(url, options) {
+  return send(url, convenienceOptions(options, "GET", null, false));
+}
+
+function post(url, data, options) {
+  return send(url, convenienceOptions(options, "POST", data, true));
+}
+
+function abort(key) {
+  if (key === undefined) throw new TypeError("Request abort requires a key");
+  key = keyOf(key);
+  var record = active.get(key);
+  if (!record) return false;
+  active.delete(key);
+  return cancel(record, "Request was aborted");
+}
+
+kit.service("request", {
+  send: send,
+  get: get,
+  post: post,
+  abort: abort
+});
+})(globalThis, document, kit);
+    })(kit);
+    if (typeof core.sealServices !== "function") throw new Error("KitJS: service graph sealer is unavailable");
+    core.sealServices();
     ; (function (kit) {
 ;(function () {
 "use strict";
 
-var shopDialogPrivate = new WeakMap();
-
-function shopDialogState() {
-  var host = document.getElementById("shop-confirm-dialog");
-  if (!host) return null;
-  var state = shopDialogPrivate.get(host);
-  if (!state) {
-    state = { callback: null, originID: "", generation: 0 };
-    shopDialogPrivate.set(host, state);
-  }
-  return state;
-}
-
-function shopFocusLater(element, state, generation) {
-  setTimeout(function () {
-    if (state && state.generation !== generation) return;
-    if (element && element.isConnected && typeof element.focus === "function") {
-      element.focus();
-    }
-  }, 0);
-}
-
-function shopSetBackgroundBlocked(blocked) {
-  var shell = document.getElementById("shop-shell");
-  if (!shell) return;
-  if (blocked) {
-    shell.setAttribute("inert", "");
-    shell.setAttribute("aria-hidden", "true");
-    return;
-  }
-  shell.removeAttribute("inert");
-  shell.removeAttribute("aria-hidden");
-}
-
-kit.component("shop-products", {
-  products: [
-    {
-      id: "field-notes",
-      name: "Field Notes",
-      description: "A compact notebook for ideas that should not wait.",
-      price: 24
-    },
-    {
-      id: "desk-lamp",
-      name: "Focus Lamp",
-      description: "Warm, dimmable light for a quieter workspace.",
-      price: 58
-    },
-    {
-      id: "day-bag",
-      name: "Day Bag",
-      description: "A light everyday bag with room for the essentials.",
-      price: 72
-    }
-  ],
-
-  money: function (amount) {
-    return "$" + Number(amount).toFixed(2);
-  }
-});
-
-kit.component("shop-cart", {
-  items: [],
-
-  get count() {
-    return this.items.reduce(function (total, item) {
-      return total + item.quantity;
-    }, 0);
-  },
-
-  get total() {
-    return this.items.reduce(function (total, item) {
-      return total + item.price * item.quantity;
-    }, 0);
-  },
-
-  add: function (product) {
-    var current = this.items.find(function (item) {
-      return item.id === product.id;
-    });
-
-    if (current) {
-      this.items = this.items.map(function (item) {
-        if (item.id !== product.id) return item;
-        return {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity + 1
-        };
-      });
-      return;
-    }
-
-    this.items = this.items.concat([{
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      quantity: 1
-    }]);
-  },
-
-  remove: function (id) {
-    this.items = this.items.filter(function (item) {
-      return item.id !== id;
-    });
-  },
-
-  clear: function () {
-    this.items = [];
-    return true;
-  },
-
-  money: function (amount) {
-    return "$" + Number(amount).toFixed(2);
-  }
-});
-
-kit.component("shop-checkout", {
-  name: "",
-  email: "",
-  address: "",
-  placed: false,
-  orderName: "",
-
-  get ready() {
-    return this.name.trim() !== "" &&
-      this.email.includes("@") &&
-      this.address.trim() !== "";
-  },
-
-  completeOrder: function () {
-    this.orderName = this.name;
-    this.placed = true;
-  }
-});
-
-kit.component("shop-dialog", {
+kit.component("progress-bar", {
   visible: false,
+  value: null,
 
   init: function () {
-    var host = document.getElementById("shop-confirm-dialog");
-    if (!host) return;
-    host.addEventListener("keydown", function (event) {
-      if (event.key !== "Tab") return;
-      var controls = host.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])");
-      if (!controls.length) {
-        event.preventDefault();
-        host.focus();
+    var scope = this;
+    var hideTimer = null;
+
+    function clearHide() {
+      if (hideTimer === null) return;
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+
+    function hide() {
+      scope.visible = false;
+      scope.value = null;
+    }
+
+    var unsubscribe = kit.progress.subscribe(function (progress) {
+      clearHide();
+
+      if (progress.phase === "start") {
+        scope.visible = true;
+        scope.value = null;
         return;
       }
-      var first = controls[0];
-      var last = controls[controls.length - 1];
-      if (event.shiftKey && (document.activeElement === first || !host.contains(document.activeElement))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+
+      if (progress.phase === "progress") {
+        scope.visible = true;
+        scope.value = Math.min(99, Math.floor(progress.loaded / progress.total * 100));
+        return;
       }
+
+      if (progress.phase === "finish" && progress.outcome === "loaded") {
+        scope.visible = true;
+        scope.value = 100;
+        hideTimer = setTimeout(function () {
+          hideTimer = null;
+          hide();
+        }, 300);
+        return;
+      }
+
+      hide();
     });
+
+    return function () {
+      clearHide();
+      unsubscribe();
+    };
+  }
+});
+
+})();
+    })(kit);
+    ; (function (kit) {
+;(function () {
+"use strict";
+
+var requestKey = "profile-save";
+
+function errorMessage(error) {
+  var code = error && typeof error.code === "string" ? error.code : "NETWORK";
+  if (code === "HTTP") return "The server rejected this profile.";
+  if (code === "TIMEOUT") return "The request took too long and was stopped.";
+  if (code === "CANCELLED") return "The request was cancelled.";
+  if (code === "INVALID_RESPONSE") return "The server returned an invalid response.";
+  if (code === "TOO_LARGE") return "The server response was too large.";
+  return "The profile could not be saved. Check the connection and try again.";
+}
+
+kit.component("request-form", {
+  name: "Ada Lovelace",
+  email: "ada@example.test",
+  phase: "idle",
+  message: "Ready to save a profile.",
+  responseStatus: "",
+  attempt: 0,
+
+  init: function () {
+    return function () {
+      kit.request.abort(requestKey);
+    };
   },
 
-  open: function (triggerID, callback) {
-    var state = shopDialogState();
-    if (!state || typeof callback !== "function") return;
-    var generation = state.generation + 1;
-    state.generation = generation;
-    state.callback = callback;
-    state.originID = String(triggerID || "");
-    this.visible = true;
-    setTimeout(function () {
-      if (state.generation !== generation) return;
-      var cancel = document.getElementById("shop-dialog-cancel");
-      if (!cancel || !cancel.isConnected) return;
-      cancel.focus();
-      shopSetBackgroundBlocked(true);
-    }, 0);
-  },
+  save: async function (url) {
+    var endpoint = typeof url === "string" && url ? url : "/api/profile";
+    var current = this.attempt + 1;
+    this.attempt = current;
+    this.phase = "pending";
+    this.message = "Saving " + this.name + "...";
+    this.responseStatus = "";
 
-  close: function () {
-    var state = shopDialogState();
-    var origin = state && document.getElementById(state.originID);
-    var generation = state ? state.generation + 1 : 0;
-    if (state) {
-      state.generation = generation;
-      state.callback = null;
-      state.originID = "";
+    try {
+      var result = await kit.request.post(endpoint, {
+        name: this.name,
+        email: this.email
+      }, {
+        key: requestKey,
+        timeout: 10000
+      });
+
+      if (current !== this.attempt) return;
+      this.phase = "success";
+      this.responseStatus = String(result.status);
+      this.message = "Saved " + this.name + ".";
+    } catch (error) {
+      if (current !== this.attempt) return;
+      this.phase = error && error.code === "CANCELLED" ? "cancelled" : "error";
+      this.message = errorMessage(error);
+      this.responseStatus = error && error.status ? String(error.status) : "";
     }
-    shopSetBackgroundBlocked(false);
-    this.visible = false;
-    shopFocusLater(origin, state, generation);
   },
 
-  confirm: function () {
-    var state = shopDialogState();
-    var callback = state && state.callback;
-    var origin = state && document.getElementById(state.originID);
-    var generation = state ? state.generation + 1 : 0;
-    if (state) {
-      state.generation = generation;
-      state.callback = null;
-      state.originID = "";
+  fail: function () {
+    return this.save("/api/profile?demo=error");
+  },
+
+  latestWins: async function () {
+    var older = this.save("/api/profile?demo=slow");
+    var latest = this.save("/api/profile?demo=fast");
+    await Promise.all([older, latest]);
+  },
+
+  cancel: function () {
+    if (!kit.request.abort(requestKey)) {
+      this.message = "There is no active request to cancel.";
+      return;
     }
-    shopSetBackgroundBlocked(false);
-    this.visible = false;
-    shopFocusLater(origin, state, generation);
-    if (callback) callback();
+    this.phase = "cancelled";
+    this.message = "Cancellation requested.";
   }
 });
 

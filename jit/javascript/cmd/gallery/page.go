@@ -82,7 +82,7 @@ const galleryHTML = `<!doctype html>
 
   <main>
     <!-- stepper -->
-    <section class="card" data-kit-component="stepper@1.0.0" data-kit-scope="value: 3; min: 0; max: 10; step: 1">
+    <section class="card" data-kit-component="stepper@1.0.0" data-kit-scope="value: 3, min: 0, max: 10, step: 1">
       <h2>stepper <span>state-only</span></h2>
       <p class="desc">Bounded numeric value with guarded +/−.</p>
       <div class="body">
@@ -96,7 +96,7 @@ const galleryHTML = `<!doctype html>
     </section>
 
     <!-- slider -->
-    <section class="card" data-kit-component="slider@1.0.0" data-kit-scope="value: 40; min: 0; max: 100; step: 5; page: 20">
+    <section class="card" data-kit-component="slider@1.0.0" data-kit-scope="value: 40, min: 0, max: 100, step: 5, page: 20">
       <h2>slider <span>state-only</span></h2>
       <p class="desc">Step, page, and a live <code>percent()</code> track fill.</p>
       <div class="body">
@@ -112,7 +112,7 @@ const galleryHTML = `<!doctype html>
     </section>
 
     <!-- rating -->
-    <section class="card" data-kit-component="rating@1.0.0" data-kit-scope="value: 0; max: 5">
+    <section class="card" data-kit-component="rating@1.0.0" data-kit-scope="value: 0, max: 5">
       <h2>rating <span>state-only</span></h2>
       <p class="desc">Click a star; <code>isFilled(n)</code> projects the fill.</p>
       <div class="body">
@@ -131,7 +131,7 @@ const galleryHTML = `<!doctype html>
     </section>
 
     <!-- tags -->
-    <section class="card" data-kit-component="tags@1.0.0" data-kit-scope="tags: ['kitwork', 'go']; draft: ''; max: 6">
+    <section class="card" data-kit-component="tags@1.0.0" data-kit-scope="tags: ['kitwork', 'go'], draft: '', max: 6">
       <h2>tags <span>state-only</span></h2>
       <p class="desc">Enter to add, × to remove, deduped, max 6.</p>
       <div class="body">
@@ -161,7 +161,7 @@ const galleryHTML = `<!doctype html>
     </section>
 
     <!-- combobox -->
-    <section class="card" data-kit-component="combobox@1.0.0" data-kit-click:outside="hide()" data-kit-scope="options: ['Apple', 'Apricot', 'Banana', 'Blackberry', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig', 'Grape', 'Kiwi']; query: ''; open: false; activeIndex: -1; selected: ''">
+    <section class="card" data-kit-component="combobox@1.0.0" data-kit-click:outside="hide()" data-kit-scope="options: ['Apple', 'Apricot', 'Banana', 'Blackberry', 'Cherry', 'Dragonfruit', 'Elderberry', 'Fig', 'Grape', 'Kiwi'], query: '', open: false, activeIndex: -1, selected: ''">
       <h2>combobox <span>state-only</span></h2>
       <p class="desc">Type to filter <code>options</code>; click to choose.</p>
       <div class="body">
@@ -176,7 +176,7 @@ const galleryHTML = `<!doctype html>
     </section>
 
     <!-- copy -->
-    <section class="card" data-kit-component="copy@1.0.0" data-kit-scope="text: 'go run -C engine ./jit/javascript/cmd/gallery'; delay: 1500">
+    <section class="card" data-kit-component="copy@1.0.0" data-kit-scope="text: 'go run -C engine ./jit/javascript/cmd/gallery', delay: 1500">
       <h2>copy <span>init · requires clipboard</span></h2>
       <p class="desc">Writes via the sealed clipboard service; flag self-resets.</p>
       <div class="body">

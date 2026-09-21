@@ -48,7 +48,7 @@ func TestBrowserDropzoneComponentKeepsAcceptedFiles(t *testing.T) {
 
 var dropzoneComponentDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS dropzone component</title></head><body>
-  <div id="zone" data-kit-component="dropzone@1.0.0" data-kit-scope="accept: 'image/*,.pdf'; max: 1000; limit: 3">
+  <div id="zone" data-kit-component="dropzone@1.0.0" data-kit-scope="accept: 'image/*,.pdf', max: 1000, limit: 3">
     <input id="picker" type="file" data-dropzone-input>
     <button id="browse" type="button" data-dropzone-browse>Choose</button>
     <output id="dragging" data-kit-text="dragging ? 'over' : 'idle'"></output>

@@ -24,7 +24,7 @@ an application that adds trusted definitions loads them after its chosen
 profile and preserves classic-script order.
 
 ```html
-<section data-kit-scope="count: 0;">
+<section data-kit-scope="count: 0">
   <button data-kit-click="count = count - 1">-</button>
   <output data-kit-text="count">0</output>
   <button data-kit-click="count = count + 1">+</button>
@@ -722,14 +722,15 @@ component sources and exact manifest.
 
 ## Scope data boundaries
 
-`data-kit-scope` accepts a semicolon-separated shorthand or one object:
+`data-kit-scope` is one object literal; the braces are optional, and fields are separated by
+`,` either way (`;` is not a separator):
 
 ```html
-<section data-kit-scope="count: 3; open: true"></section>
+<section data-kit-scope="count: 3, open: true"></section>
 <section data-kit-scope='{ count: 3, map: { "kebab-key": 1 } }'></section>
 ```
 
-The final shorthand semicolon is optional. Top-level fields must be unique,
+A trailing comma is allowed. Top-level fields must be unique,
 safe identifiers matching `[A-Za-z_][A-Za-z0-9_]*`; `$` fields are reserved.
 Nested unquoted keys follow the same rule. Nested quoted keys may be arbitrary
 JSON strings, including empty, `$`-prefixed, or hyphenated keys, except blocked
@@ -762,7 +763,7 @@ for `for`, not a separate family:
 
 | Family | Syntax | Contract |
 |---|---|---|
-| scope | `data-kit-scope="count: 0; open: true"` | creates one anonymous local-state boundary or seeds the component on the same host |
+| scope | `data-kit-scope="count: 0, open: true"` | creates one anonymous local-state boundary or seeds the component on the same host |
 | component | `data-kit-component="counter@1.0.0"` | creates one isolated managed instance at an exact packaged version; optional `data-kit-as="$name"` exposes an action-only handle; unversioned names are for direct client registration |
 | text | `data-kit-text="count"` | writes synchronous expression results through `textContent` |
 | show | `data-kit-show="open"` | toggles the `hidden` property without removing the node |

@@ -46,7 +46,7 @@ func TestBrowserIgnoreSubtreeMatchesScannerOpacity(t *testing.T) {
 	runVanillaBrowser(t, browser, server.URL+"/contracts/ignore.html")
 }
 
-const ignoreOpacityMarkup = `<main data-kit-scope="ready: true;">
+const ignoreOpacityMarkup = `<main data-kit-scope="ready: true">
   <section data-kit-ignore data-kit-unknown="opaque">
     <a id="ignored-action" href="#changed" data-kit-click:prevent="ready">ignored action</a>
   </section>

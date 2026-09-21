@@ -23,20 +23,27 @@ func TestScopeInitializerFieldsReturnsOnlyTopLevelKeys(t *testing.T) {
 		}
 	}
 
-	fields, err = scopeInitializerFields(`count: 1; storageKey: "safe"`)
+	fields, err = scopeInitializerFields(`count: 1, storageKey: "safe"`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(fields) != 2 {
 		t.Fatalf("shorthand fields = %#v, want two", fields)
 	}
+
+	// The shorthand is the same literal without braces, so its separator is the object's ","
+	// (ideaship-final §6). ";" is named in the error so an author migrating knows what to change.
+	_, err = scopeInitializerFields(`count: 1; storageKey: "safe"`)
+	if err == nil || !strings.Contains(err.Error(), `separated by "," not ";"`) {
+		t.Fatalf("semicolon shorthand error = %v, want the separator named", err)
+	}
 }
 
 func TestScanHTMLValidatesScopeSeedContract(t *testing.T) {
 	valid := []string{
-		`<section data-kit-scope="count: 3; open: true;"></section>`,
+		`<section data-kit-scope="count: 3, open: true,"></section>`,
 		`<section data-kit-scope='{"count": 3, map: {"": 1, "$nested": 2, "kebab-key": 3, "window": 4, "true": 5}, list: [null, false, +.5, -2e3]}'></section>`,
-		`<section data-kit-scope="toString: 1; valueOf: 2; hasOwnProperty: 3"></section>`,
+		`<section data-kit-scope="toString: 1, valueOf: 2, hasOwnProperty: 3"></section>`,
 		`<section data-kit-component="profile@1.0.0" data-kit-scope='name: "Ada"'></section>`,
 		`<template><section data-kit-scope="count: 1"></section></template>`,
 		`<div data-kit-ignore><section data-kit-scope></section></div>`,
@@ -60,7 +67,8 @@ func TestScanHTMLValidatesScopeSeedContract(t *testing.T) {
 		`<section data-kit-scope="a$b: 1"></section>`,
 		`<section data-kit-scope="count: other"></section>`,
 		`<section data-kit-scope="count: [1,]"></section>`,
-		`<section data-kit-scope="count: 1; count: 2"></section>`,
+		`<section data-kit-scope="count: 1, count: 2"></section>`,
+		`<section data-kit-scope="count: 1; open: true"></section>`,
 		`<section data-kit-scope="map: {&quot;__proto__&quot;: 1}"></section>`,
 		`<section data-kit-scope="count: &quot;\uD800&quot;"></section>`,
 		`<section data-kit-scope=" count: 1"></section>`,

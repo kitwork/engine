@@ -144,6 +144,8 @@ func (parser *scopeSeedParser) depth(level int) error {
 	return nil
 }
 
+// shorthand is the literal without its braces (ideaship-final §6): `qty: 1, price: 250` means
+// `{ qty: 1, price: 250 }`, fields separated by "," like any object. ";" is not a separator.
 func (parser *scopeSeedParser) shorthand() error {
 	if err := parser.depth(1); err != nil {
 		return err
@@ -176,8 +178,11 @@ func (parser *scopeSeedParser) shorthand() error {
 		if parser.done() {
 			return nil
 		}
-		if parser.peek() != ';' {
-			return parser.syntax(`expected ";"`)
+		if parser.peek() == ';' {
+			return parser.syntax(`scope fields are separated by "," not ";"`)
+		}
+		if parser.peek() != ',' {
+			return parser.syntax(`expected ","`)
 		}
 		parser.index++
 		parser.skip()

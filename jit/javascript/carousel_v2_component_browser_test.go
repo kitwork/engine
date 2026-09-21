@@ -68,7 +68,7 @@ var __ce = console.error; console.error = function () { window.__errs.push(Array
     <button id="pick" type="button" data-kit-click="select(1)">2</button>
     <output id="state" data-kit-text="active + '|' + count() + '|' + (moving ? 'moving' : 'still') + '|' + (isActive(0) ? 'a' : '-') + (isActive(1) ? 'b' : '-') + (isActive(2) ? 'c' : '-')"></output>
   </div>
-  <div id="line" data-kit-component="carousel@2.0.0" data-kit-scope="loop: false; active: 2">
+  <div id="line" data-kit-component="carousel@2.0.0" data-kit-scope="loop: false, active: 2">
     <div class="frame"><div id="line-track" class="still" data-carousel-track>
       <div class="slide" data-carousel-slide>one</div>
       <div class="slide" data-carousel-slide>two</div>

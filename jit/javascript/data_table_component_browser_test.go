@@ -46,7 +46,7 @@ func TestBrowserDataTableSortsFiltersAndPages(t *testing.T) {
 
 var dataTableComponentDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS data-table component</title></head><body>
-  <div data-kit-component="data-table@1.0.0" data-kit-scope="rows: [{ name: 'Mango', qty: 12, region: 'south' }, { name: 'apple', qty: 3, region: 'north' }, { name: 'Banana', qty: 100, region: 'south' }, { name: 'cherry', qty: 7, region: 'north' }, { name: 'Kiwi', qty: 25, region: 'west' }]; pageSize: 2">
+  <div data-kit-component="data-table@1.0.0" data-kit-scope="rows: [{ name: 'Mango', qty: 12, region: 'south' }, { name: 'apple', qty: 3, region: 'north' }, { name: 'Banana', qty: 100, region: 'south' }, { name: 'cherry', qty: 7, region: 'north' }, { name: 'Kiwi', qty: 25, region: 'west' }], pageSize: 2">
     <input id="search" type="search" data-kit-model="query" data-kit-input="search(query)">
     <table>
       <thead><tr>

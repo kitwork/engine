@@ -10,7 +10,7 @@ Unknown directives, events, modifiers, and invalid combinations fail closed.
 
 | Attribute | Contract |
 |---|---|
-| `data-kit-scope="count: 3; open: true"` | Creates one anonymous shallow store, or seeds the component on the same host. Values use the bounded pure-data grammar. |
+| `data-kit-scope="count: 3, open: true"` | Creates one anonymous shallow store, or seeds the component on the same host. Values use the bounded pure-data grammar. |
 | `data-kit-component="counter@1.0.0"` | Creates one isolated managed instance and asserts its exact closed-graph identity. Direct client registrations use an unversioned name. It never selects, downloads, or upgrades code in the browser. |
 | `data-kit-as="$counter"` | Gives a component an action-only alias. Bindings cannot observe alias state, except the exact canonical App 1.1 loader fields `$app.loader.visible` and `$app.loader.value`. |
 | `data-kit-retain="app-counter"` | In Hydrate, preserves this exact component host and live store across a compatible Morph. The key is unique and is not an HTML `id`. |
@@ -124,7 +124,7 @@ fallback intact; dynamic style evaluation begins in the browser runtime.
 
 ```html
 <section
-  data-kit-scope="count: 3; open: true"
+  data-kit-scope="count: 3, open: true"
   class="rounded-2xl border border-slate-200 p-6">
   <button
     type="button"
@@ -221,7 +221,7 @@ Write an action as `data-kit-<event>="program"`. Available modifiers are
 
 ```html
 <form
-  data-kit-scope="query: ''; saved: false"
+  data-kit-scope="query: '', saved: false"
   data-kit-submit:prevent:once="saved = true">
   <input data-kit-model="query" data-kit-input:debounce(250)="query = query.trim()">
   <button type="submit">Save</button>

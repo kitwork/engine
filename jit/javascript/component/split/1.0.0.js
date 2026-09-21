@@ -8,7 +8,7 @@
 // as a percentage of the host, the pointer drag, the handle's keyboard and its
 // separator semantics (aria-valuenow / min / max / orientation), and collapse.
 //
-//   <div data-kit-component="split" data-kit-scope="size: 30; min: 15; max: 60" class="flex">
+//   <div data-kit-component="split" data-kit-scope="size: 30, min: 15, max: 60" class="flex">
 //     <aside data-split-panel style="flex-basis: 30%">…</aside>
 //     <div data-split-handle role="separator" tabindex="0" aria-label="Resize"></div>
 //     <main class="flex-1">…</main>

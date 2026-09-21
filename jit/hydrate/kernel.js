@@ -543,8 +543,10 @@
   //   data-kit-scope="counter"                → a NAME (label; local state)
   //   data-kit-scope="count = 5; open = true" → an INIT program (runs once; writes stay local)
   //   data-kit-scope="{ count: 5, inc: () => count = count + 1 }" → an INLINE blueprint (IR methods)
+  //   data-kit-scope="count: 5, open: true"   → the SAME literal, braces optional (ideaship-final §6)
   // Inline blueprints/init are the same compiled grammar as everything else — parsed, never eval'd —
   // and being markup they are visible to the server (verify + future PreRender).
+  var BARE_LITERAL = /^[A-Za-z_$][\w$]*\s*:/;
   function boundaryScope(b) {
     var st = state(b);
     var craw = b.getAttribute("data-kitwork-component") || b.getAttribute("data-kit-component");
@@ -574,8 +576,8 @@
     if (!v) return st.scope;
     try {
       var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
-      if (v.charAt(0) === "{") {
-        var o = run(parse(lex(v)), parent);
+      if (v.charAt(0) === "{" || BARE_LITERAL.test(v)) {
+        var o = run(parse(lex(v.charAt(0) === "{" ? v : "{" + v + "}")), parent);
         if (o && typeof o === "object") { for (var k in o) st.scope[k] = o[k]; }
         runInit(b);
       } else if (v.indexOf("=") >= 0) {

@@ -179,7 +179,7 @@ func TestBrowserComponentSuiteV3StateAndDirectiveContract(t *testing.T) {
 
 var componentSuiteV3Document = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS component suite v3</title></head><body>
-  <section data-kit-component="stepper@1.0.0" data-kit-scope="value: 5; min: 0; max: 10; step: 2">
+  <section data-kit-component="stepper@1.0.0" data-kit-scope="value: 5, min: 0, max: 10, step: 2">
     <button id="stepper-inc" data-kit-click="increment()">+</button>
     <button id="stepper-dec" data-kit-click="decrement()">-</button>
     <button id="stepper-disable" data-kit-click="disabled = true">disable</button>
@@ -187,7 +187,7 @@ var componentSuiteV3Document = fmt.Sprintf(`<!doctype html>
     <output id="stepper-can" data-kit-text="canIncrement() ? 'yes' : 'no'"></output>
   </section>
 
-  <section data-kit-component="slider@1.0.0" data-kit-scope="value: 20; min: 0; max: 100; step: 5; page: 25">
+  <section data-kit-component="slider@1.0.0" data-kit-scope="value: 20, min: 0, max: 100, step: 5, page: 25">
     <button id="slider-inc" data-kit-click="increment()">+</button>
     <button id="slider-page" data-kit-click="pageUp()">page</button>
     <button id="slider-end" data-kit-click="toEnd()">end</button>
@@ -204,7 +204,7 @@ var componentSuiteV3Document = fmt.Sprintf(`<!doctype html>
     <output id="rating-star4" data-kit-text="isFilled(4) ? 'on' : 'off'"></output>
   </section>
 
-  <section data-kit-component="tags@1.0.0" data-kit-scope="tags: ['alpha']; draft: ''; max: 3">
+  <section data-kit-component="tags@1.0.0" data-kit-scope="tags: ['alpha'], draft: '', max: 3">
     <input id="tags-input" data-kit-model="draft">
     <button id="tags-add" data-kit-click="add(draft)">add</button>
     <button id="tags-remove" data-kit-click="remove('alpha')">remove alpha</button>
@@ -218,7 +218,7 @@ var componentSuiteV3Document = fmt.Sprintf(`<!doctype html>
     <div id="collapse-panel" data-kit-show="open" hidden>panel</div>
   </section>
 
-  <section data-kit-component="combobox@1.0.0" data-kit-scope="options: ['Apple', 'Banana', 'Cherry']; query: ''; open: false; activeIndex: -1; selected: ''">
+  <section data-kit-component="combobox@1.0.0" data-kit-scope="options: ['Apple', 'Banana', 'Cherry'], query: '', open: false, activeIndex: -1, selected: ''">
     <input id="combobox-input" data-kit-model="query" data-kit-input="search()">
     <button id="combobox-next" data-kit-click="next()">next</button>
     <button id="combobox-choose" data-kit-click="chooseActive()">choose</button>

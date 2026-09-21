@@ -47,7 +47,7 @@ func TestBrowserRotatorAdvancesAndHolds(t *testing.T) {
 
 var rotatorComponentDocument = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>KitJS rotator component</title></head><body>
-  <section id="auto-host" data-kit-component="rotator@1.0.0" data-kit-scope="items: ['one', 'two', 'three']; active: 0; interval: 250">
+  <section id="auto-host" data-kit-component="rotator@1.0.0" data-kit-scope="items: ['one', 'two', 'three'], active: 0, interval: 250">
     <output id="auto-active" data-kit-text="active"></output>
     <output id="auto-running" data-kit-text="running ? 'running' : 'held'"></output>
     <button id="auto-pause" data-kit-click="pause()">Pause</button>
@@ -55,11 +55,11 @@ var rotatorComponentDocument = fmt.Sprintf(`<!doctype html>
     <button id="auto-select" data-kit-click="select(2)">Third</button>
   </section>
 
-  <section data-kit-component="rotator@1.0.0" data-kit-scope="items: ['only']; active: 0; interval: 400">
+  <section data-kit-component="rotator@1.0.0" data-kit-scope="items: ['only'], active: 0, interval: 400">
     <output id="solo-active" data-kit-text="active"></output>
   </section>
 
-  <section data-kit-component="rotator@1.0.0" data-kit-scope="active: 0; interval: 400">
+  <section data-kit-component="rotator@1.0.0" data-kit-scope="active: 0, interval: 400">
     <output id="markup-active" data-kit-text="active"></output>
     <span data-rotator-item>alpha</span>
     <span data-rotator-item>beta</span>
