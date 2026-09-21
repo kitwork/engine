@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const requestFormArtifactName = "hydrate.kit.1.0.0-rc.2.2950c7a2a0b805ddd7917580caa86a87a08ea64ffa3aaa67c080011c3687d208.js"
+const requestFormArtifactName = "hydrate.kit.1.0.0-rc.2.c74dbed1a0edd98b5aff7b28768f244eae44ed5351cf83a2057167196959ea78.js"
 
 var requestFormProgressHostRE = regexp.MustCompile(`(?is)<section\b[^>]*\bdata-kit-retain\s*=\s*"request-progress"[^>]*>`)
 

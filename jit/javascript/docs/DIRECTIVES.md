@@ -187,25 +187,31 @@ form for lazy/inert content. Executable scripts are invalid in every structural
 region. Retained components cannot be the direct host or appear inside either
 form.
 
-`data-kit-for` and `data-kit-key` remain valid only on `<template>`:
+`data-kit-for` is written on the row itself (KitJS spec §7): the row is the
+blueprint and leaves the document, and one rendered row per item takes its
+place. A `<template data-kit-for>` wrapping a multi-node row is still accepted.
 
 ```html
 <section data-kit-scope="items: [{ id: 1, name: 'Alpha' }, { id: 2, name: 'Beta' }]">
   <ul class="grid gap-2">
-    <template data-kit-for="item, index of items" data-kit-key="item.id">
-      <li class="rounded-lg bg-slate-100 px-3 py-2 text-slate-900">
-        <span data-kit-text="index + 1"></span>.
-        <span data-kit-text="item.name"></span>
-      </li>
-    </template>
+    <li data-kit-for="item, index of items" data-kit-key="item.id"
+        class="rounded-lg bg-slate-100 px-3 py-2 text-slate-900">
+      <span data-kit-text="index + 1"></span>.
+      <span data-kit-text="item.name"></span>
+      <em data-kit-show="last">last of <span data-kit-text="count"></span></em>
+    </li>
   </ul>
 </section>
 ```
 
-`data-kit-for` also accepts `item of items`. `data-kit-key` is optional, but a
-key should be used when rows can move; it must evaluate to a unique string or
-finite number. Row locals are read-only. A template cannot combine `if` and
-`for`, and `key` is invalid without `for`.
+`data-kit-for` also accepts `item of items`. Each row's scope is an overlay on
+the outer one — the item and index under their authored names plus `count`,
+`first`, `last`, `even`, `odd` — and the item object itself is never modified.
+Those five words are lexical to the row: a component host nested in the row
+keeps its own `count`; the authored item and index names do flow into it.
+`data-kit-key` is optional, but a key should be used when rows can move; it
+must evaluate to a unique string or finite number. Row locals are read-only.
+One element cannot combine `if` and `for`, and `key` is invalid without `for`.
 
 ## Events and modifiers
 

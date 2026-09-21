@@ -217,11 +217,10 @@ func ScanHTML(source []byte) (ScanResult, error) {
 				return ScanResult{}, fmt.Errorf("%w at byte %d: one structural host cannot combine if and for", ErrUnsupportedAttribute, tag.forDirective.offset)
 			}
 			if tag.keyDirective.present && !tag.forDirective.present {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-key requires data-kit-for on the same template", ErrUnsupportedAttribute, tag.keyDirective.offset)
+				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-key requires data-kit-for on the same element", ErrUnsupportedAttribute, tag.keyDirective.offset)
 			}
-			if tag.name != "template" && (tag.forDirective.present || tag.keyDirective.present) {
-				return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-for and data-kit-key require a template element", ErrUnsupportedAttribute, tag.structuralOffset())
-			}
+			// data-kit-for is authored on the row itself (ideaship-final §7) — <li data-kit-for="…">; a
+			// <template> host is the runtime's own form and still accepted.
 		}
 		if tag.name == "script" {
 			insideStructural, containErr := scanFramesContainStructural(frames, &work, start)

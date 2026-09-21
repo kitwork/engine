@@ -20,6 +20,7 @@ var ul = el("ul");
 var li = el("li", { "data-kit-for": "item, i of items", "data-kit-key": "item.id" });
 li.appendChild(el("span", { "data-kit-text": "item.name" }));
 li.appendChild(el("b", { "data-kit-text": "item.price" }));
+li.appendChild(el("i", { "data-kit-text": "i + '/' + count + (first ? ' first' : '') + (last ? ' last' : '') + (even ? ' even' : ' odd')" }));
 ul.appendChild(li);
 section.appendChild(ul);
 document.body.appendChild(section);
@@ -39,6 +40,16 @@ function nameOf(row) { return row.querySelector("[data-kit-text]").textContent; 
 
 var r = rows();
 if (r.length !== 2) throw new Error("initial: expected 2 rows, got " + r.length);
+// The wire shape of ideaship-final §7: a start marker naming the list, rows carrying that id, an end marker.
+var start = ul.childNodes[0], end = ul.childNodes[ul.childNodes.length - 1];
+if (start.nodeType !== 8 || !/^kit-for:start id=\S+$/.test(start._text)) throw new Error("the list should begin with <!--kit-for:start id=…-->, got " + start._text);
+if (end.nodeType !== 8 || end._text !== "kit-for:end") throw new Error("the list should end with <!--kit-for:end-->, got " + end._text);
+var listId = start._text.slice("kit-for:start id=".length);
+if (r[0].getAttribute("data-kit-item") !== listId) throw new Error("each row should carry the list id in data-kit-item, got " + r[0].getAttribute("data-kit-item"));
+// The row overlay: index, count, first/last, even/odd — beside the authored item/index names.
+function overlayOf(row) { return row.querySelectorAll("[data-kit-text]")[2].textContent; }
+if (overlayOf(rowByKey("1")) !== "0/2 first even") throw new Error("overlay on the first row = " + JSON.stringify(overlayOf(rowByKey("1"))));
+if (overlayOf(rowByKey("2")) !== "1/2 last odd") throw new Error("overlay on the last row = " + JSON.stringify(overlayOf(rowByKey("2"))));
 if (nameOf(rowByKey("1")) !== "Ban phim") throw new Error("initial: row 1 name = " + nameOf(rowByKey("1")));
 if (nameOf(rowByKey("2")) !== "Chuot") throw new Error("initial: row 2 name = " + nameOf(rowByKey("2")));
 
@@ -51,6 +62,7 @@ kit.render();
 if (rows().length !== 3) throw new Error("after add: expected 3 rows, got " + rows().length);
 if (rowByKey("2") !== row2) throw new Error("after add: row 2 was rebuilt — keyed identity lost");
 if (nameOf(rowByKey("3")) !== "Moi") throw new Error("after add: new row name = " + nameOf(rowByKey("3")));
+if (overlayOf(rowByKey("2")) !== "1/3 odd") throw new Error("after add: the middle row's overlay should follow the longer list, got " + JSON.stringify(overlayOf(rowByKey("2"))));
 
 // REMOVE key 1 → 2 rows; key 1 gone; row 2 STILL the same node.
 kit.scopeFor(section).remove(1);

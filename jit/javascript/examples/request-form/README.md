@@ -71,7 +71,7 @@ no app marker.
 Both pages point to the same immutable artifact:
 
 ```text
-hydrate.kit.1.0.0-rc.2.2950c7a2a0b805ddd7917580caa86a87a08ea64ffa3aaa67c080011c3687d208.js
+hydrate.kit.1.0.0-rc.2.c74dbed1a0edd98b5aff7b28768f244eae44ed5351cf83a2057167196959ea78.js
 ```
 
 From `engine/`, seal the final graph with:

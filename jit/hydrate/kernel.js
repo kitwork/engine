@@ -842,6 +842,7 @@
   // names the array (`items`) and the key (`item.id`) is walked, exactly like any other attribute.
   var FOR = "[data-kitwork-for],[data-kit-for]";
   var forRegistry = [];
+  var forSerial = 0;
   function parseFor(raw) {
     var m = /^\s*([$A-Za-z_][\w$]*)\s*(?:,\s*([$A-Za-z_][\w$]*)\s*)?\s+of\s+([\s\S]+)$/.exec(raw || "");
     if (!m) return null;
@@ -861,10 +862,15 @@
       var template = el.cloneNode(true);
       template.removeAttribute("data-kit-for");
       template.removeAttribute("data-kitwork-for");
-      var anchor = document.createComment("kit-for");
+      // The list's place in the document is the marker pair of ideaship-final §7 — the same shape
+      // a server-rendered list arrives in — and every row carries the list's id in data-kit-item.
+      var id = "f" + (++forSerial);
+      var anchor = document.createComment("kit-for:start id=" + id);
+      var end = document.createComment("kit-for:end");
       parent.insertBefore(anchor, el);
+      parent.insertBefore(end, el);
       parent.removeChild(el);
-      forRegistry.push({ anchor: anchor, template: template, spec: spec, keyIR: spec.keySrc ? parse(lex(spec.keySrc)) : null });
+      forRegistry.push({ id: id, anchor: anchor, end: end, template: template, spec: spec, keyIR: spec.keySrc ? parse(lex(spec.keySrc)) : null });
     });
   }
   function renderFor() {
@@ -876,17 +882,21 @@
       var arr = run(reg.spec.list, scopeFor(reg.anchor));
       if (!(arr instanceof Array)) arr = [];
 
-      // current rows: the contiguous data-kit-item siblings right after the anchor.
+      // current rows: the data-kit-item siblings between the start and end markers.
       var current = [], curByKey = {}, n = reg.anchor.nextSibling;
-      while (n && n.nodeType === 1 && n.hasAttribute("data-kit-item")) {
-        curByKey[n.getAttribute("data-kit-key")] = n;
-        current.push(n);
+      while (n && n !== reg.end) {
+        if (n.nodeType === 1 && n.getAttribute("data-kit-item") === reg.id) {
+          curByKey[n.getAttribute("data-kit-key")] = n;
+          current.push(n);
+        }
         n = n.nextSibling;
       }
 
       var insertAfter = reg.anchor, used = {};
       for (var i = 0; i < arr.length; i++) {
-        var itemScope = {};
+        // The row's scope is an overlay (§7, rule 2): the item and index under their authored
+        // names plus count / first / last / even / odd — the item object itself is never touched.
+        var itemScope = { count: arr.length, first: i === 0, last: i === arr.length - 1, even: i % 2 === 0, odd: i % 2 === 1 };
         itemScope[reg.spec.item] = arr[i];
         if (reg.spec.index) itemScope[reg.spec.index] = i;
         var key = reg.keyIR ? String(run(reg.keyIR, itemScope)) : String(i);
@@ -895,7 +905,7 @@
         var node = curByKey[key];
         if (!node) {
           node = reg.template.cloneNode(true);
-          node.setAttribute("data-kit-item", "");
+          node.setAttribute("data-kit-item", reg.id);
           node.setAttribute("data-kit-key", key);
         }
         var st = state(node);

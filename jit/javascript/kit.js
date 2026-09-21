@@ -4041,12 +4041,29 @@
     return changed;
   }
 
+  // The row overlay words (count first last even odd) are lexical to the row: they do not enter a
+  // nested component host, whose own `count` stays its own. The authored item/index names do flow
+  // in, as they always have. A context met after climbing past a boundary host is "from outside".
+  var OVERLAY_WORDS = ["count", "first", "last", "even", "odd"];
+  var OVERLAY = Symbol("kit:overlay");
+  function isBoundaryHost(node) {
+    return node.nodeType === 1 && (node.hasAttribute("data-kit-component") || node.hasAttribute("data-kit-scope"));
+  }
+  function withoutOverlay(local) {
+    var output = Object.create(null);
+    Object.keys(local).forEach(function (name) {
+      if (OVERLAY_WORDS.indexOf(name) < 0) output[name] = local[name];
+    });
+    return output;
+  }
   function localsFor(element, extra) {
     var chain = [];
     var node = element;
+    var crossed = false;
     while (node && node !== document) {
       var local = contexts.get(node);
-      if (local) chain.push(local);
+      if (local) chain.push(crossed && local[OVERLAY] ? withoutOverlay(local) : local);
+      if (isBoundaryHost(node)) crossed = true;
       node = node.parentElement;
     }
     if (!chain.length) return extra || null;
@@ -4151,15 +4168,58 @@
     return anchor;
   }
 
+  // A list is authored on the row itself (ideaship-final §7): <li data-kit-for="item, i of items"
+  // data-kit-key="item.id">. The row is the blueprint — clean markup nobody has hydrated — and it
+  // leaves the document: a <template> carrying the same for/key takes its place and the rows are
+  // materialised from it, so the template machinery below is the one list engine.
+  function rejectDirectFor(element, error) {
+    var modules = core.elementRecord(element).modules;
+    modules.structure = null;
+    core.report(error);
+    return null;
+  }
+  function prepareDirectFor(element) {
+    if (!element || element.nodeType !== 1 || element.tagName === "TEMPLATE" ||
+      !element.hasAttribute("data-kit-for") || core.ignoredForRuntime(element)) return null;
+    var modules = core.elementRecord(element).modules;
+    if (OWN.call(modules, "structure")) return null;
+    if (element.hasAttribute("data-kit-if")) {
+      return rejectDirectFor(element, new TypeError("KitJS: one structural host cannot combine if and for"));
+    }
+    if (!element.parentNode) {
+      return rejectDirectFor(element, new TypeError("KitJS: for requires a connected element"));
+    }
+    if (!core.ownerFor(element.parentElement)) {
+      return rejectDirectFor(element, new TypeError("KitJS: for requires an enclosing component or scope"));
+    }
+    if (element.tagName === "SCRIPT" || element.querySelector("script")) {
+      return rejectDirectFor(element, new TypeError("KitJS: structural branches cannot contain script elements"));
+    }
+    if (element.hasAttribute("data-kit-retain") || element.querySelector("[data-kit-retain]")) {
+      return rejectDirectFor(element, new TypeError("KitJS: data-kit-retain cannot be used in a structural branch"));
+    }
+    var blueprint = element.cloneNode(true);
+    blueprint.removeAttribute("data-kit-for");
+    blueprint.removeAttribute("data-kit-key");
+    var template = document.createElement("template");
+    template.setAttribute("data-kit-for", element.getAttribute("data-kit-for"));
+    if (element.hasAttribute("data-kit-key")) template.setAttribute("data-kit-key", element.getAttribute("data-kit-key"));
+    template.content.appendChild(blueprint);
+    element.parentNode.replaceChild(template, element);
+    core.records.delete(element);
+    return template;
+  }
+
   function prepareStructureTree(root) {
     if (!root || !root.querySelectorAll) return false;
     var elements = [];
-    if (root.nodeType === 1 && root.matches && root.matches("[data-kit-if]") &&
+    if (root.nodeType === 1 && root.matches && root.matches("[data-kit-if],[data-kit-for]") &&
       root.tagName !== "TEMPLATE") elements.push(root);
-    Array.prototype.push.apply(elements, root.querySelectorAll("[data-kit-if]"));
+    Array.prototype.push.apply(elements, root.querySelectorAll("[data-kit-if],[data-kit-for]"));
     var changed = false;
     elements.forEach(function (element) {
-      if (element.tagName !== "TEMPLATE" && prepareDirectIf(element)) changed = true;
+      if (element.tagName === "TEMPLATE") return;
+      if (element.hasAttribute("data-kit-for") ? prepareDirectFor(element) : prepareDirectIf(element)) changed = true;
     });
     return changed;
   }
@@ -4180,7 +4240,7 @@
       if (hasKey && !hasFor) throw new TypeError("KitJS: key requires for on the same template");
       if (element.tagName !== "TEMPLATE") {
         throw new TypeError(hasFor || hasKey
-          ? "KitJS: for and key require a template element"
+          ? "KitJS: for could not be prepared on this element"
           : "KitJS: direct if could not be prepared");
       }
       if (!hasIf && !hasFor) throw new TypeError("KitJS: orphan structural template");
@@ -4289,9 +4349,18 @@
     range.nodes = [];
   }
 
-  function makeLocals(outer, itemName, item, indexName, index) {
+  // The row's scope is an overlay on the outer locals (ideaship-final §7, rule 2): the item under
+  // its authored name, the index under its authored name, and count / first / last / even / odd —
+  // the item object itself is never touched.
+  function makeLocals(outer, itemName, item, indexName, index, count) {
     var output = Object.create(null);
     copyOwn(output, outer);
+    output[OVERLAY] = true;
+    output.count = count;
+    output.first = index === 0;
+    output.last = index === count - 1;
+    output.even = index % 2 === 0;
+    output.odd = index % 2 === 1;
     output[itemName] = item;
     if (indexName) output[indexName] = index;
     return output;
@@ -4383,7 +4452,7 @@
       if (core.asyncBinding(items)) return false;
       if (!Array.isArray(items)) throw new TypeError("KitJS: for expression must return an array");
       for (var index = 0; index < items.length; index++) {
-        var locals = makeLocals(outer, state.item, items[index], state.index, index);
+        var locals = makeLocals(outer, state.item, items[index], state.index, index, items.length);
         var key = index;
         if (state.key) {
           var rawKey = state.key(current.scope, locals);

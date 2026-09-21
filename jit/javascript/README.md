@@ -774,7 +774,7 @@ for `for`, not a separate family:
 | model | `data-kit-model="name"` | two-way binds one existing writable field on the nearest reactive boundary to a supported form control |
 | event | `data-kit-click="count = count + 1"` | runs an action through the generic delegated event pipeline |
 | if | `<section data-kit-if="ready">` or `<template data-kit-if="ready">` | owns one direct host or one conditional template fragment |
-| for + key | `<template data-kit-for="item, index of items" data-kit-key="item.id">` | reconciles keyed clone groups while preserving retained DOM identity |
+| for + key | `<li data-kit-for="item, index of items" data-kit-key="item.id">` | the row is the blueprint; rows are reconciled by key, preserving DOM identity; row scope overlays `count first last even odd` (a `<template>` host is still accepted) |
 
 `data-kit-ignore` is a presence-only ownership marker rather than another
 reactive family. Its host and complete subtree are opaque to KitJS preparation,
@@ -894,8 +894,8 @@ Use `<template data-kit-if>` for a multi-root fragment or when content must be
 inert before KitJS boots. Direct hosts follow normal browser loading rules, so
 images, iframes, media, and other resource-bearing descendants may start work
 before a false condition is evaluated. Executable scripts are invalid in every
-structural region. `data-kit-for` and its optional `data-kit-key` remain
-template-only. `for` accepts `item of items` or `item, index of items`. The optional
+structural region. `data-kit-for` and its optional `data-kit-key` are written
+on the row element (a `<template>` host is still accepted). `for` accepts `item of items` or `item, index of items`. The optional
 `data-kit-key` evaluates per row and must produce a unique string or finite
 number; without it, the current index is the row identity. Row locals are
 read-only, and nested structural branches are capped at 64 levels. Replace the
