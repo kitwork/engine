@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -897,10 +898,15 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	switch base {
 	case "click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout":
 		return validateEventModifiers(attribute, base, parts[1:])
+	// A binding names its target in the attribute: data-kit-bind:disabled, data-kit-bind:aria-expanded.
+	// One form for the three groups of ideaship-final §5 — the runtime picks property or attribute by
+	// the name. One target per attribute; the old "a: x; b: y" list is not authored any more.
+	case "bind":
+		return validateBindingTarget(attribute, parts[1:])
 	// "highlight" is server-only: the JIT highlight pass consumes it while
 	// rendering and the browser never sees a directive for it. It is listed here
 	// so an authored code slot is not rejected as an unknown data-kit-* name.
-	case "text", "show", "class", "bind", "style", "model", "scope", "component",
+	case "text", "show", "class", "style", "model", "scope", "component",
 		"as", "retain", "drive", "ignore", "if", "for", "key", "highlight":
 		if len(parts) != 1 {
 			return fmt.Errorf("%w at byte %d: %q only permits modifiers on event attributes", ErrUnsupportedAttribute, attribute.offset, name)
@@ -909,6 +915,35 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	default:
 		return fmt.Errorf("%w at byte %d: %q is not implemented by this KitJS runtime", ErrUnsupportedAttribute, attribute.offset, name)
 	}
+}
+
+// bindingTargetName is a property or attribute name as authored after data-kit-bind: — lowercase,
+// hyphens allowed (aria-expanded, data-state).
+var bindingTargetName = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+
+func unsafeBindingTarget(target string) bool {
+	switch target {
+	case "srcdoc", "style", "innerhtml", "outerhtml", "insertadjacenthtml", "textcontent", "innertext", "outertext":
+		return true
+	}
+	return strings.HasPrefix(target, "on") || strings.HasPrefix(target, "data-kit")
+}
+
+func validateBindingTarget(attribute rawScannedAttribute, rest []string) error {
+	if len(rest) != 1 || rest[0] == "" {
+		return fmt.Errorf("%w at byte %d: %q names no target; write data-kit-bind:<name>, one name per attribute", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	target := rest[0]
+	if !bindingTargetName.MatchString(target) {
+		return fmt.Errorf("%w at byte %d: %q is not a property or attribute name", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	if unsafeBindingTarget(target) {
+		return fmt.Errorf("%w at byte %d: %q binds an unsafe target %q", ErrUnsupportedAttribute, attribute.offset, attribute.name, target)
+	}
+	if !attribute.hasValue {
+		return fmt.Errorf("%w at byte %d: %q requires a value", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	return nil
 }
 
 func validateEventModifiers(attribute rawScannedAttribute, event string, modifiers []string) error {

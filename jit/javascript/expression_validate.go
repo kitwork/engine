@@ -92,15 +92,11 @@ func directiveExpressionServiceCalls(attribute rawScannedAttribute) ([]expressio
 	}
 	mode := ""
 	switch directive {
-	case "text", "show", "class", "if", "key":
+	// bind:<name> names its target in the attribute; the value is one binding expression.
+	case "text", "show", "class", "if", "key", "bind":
 		mode = "binding"
 	case "click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout":
 		mode = "action"
-	case "bind":
-		if !attribute.hasValue {
-			return nil, fmt.Errorf("bind requires a value")
-		}
-		return nil, validateBindExpression(attribute.value)
 	case "style":
 		if !attribute.hasValue {
 			return nil, fmt.Errorf("style requires a value")
@@ -322,45 +318,6 @@ func validExpressionLocal(name string) bool {
 		}
 	}
 	return true
-}
-
-func validateBindExpression(authored string) error {
-	source, err := decodeAuthoredExpression(authored)
-	if err != nil {
-		return err
-	}
-	source = trimECMAScriptSpace(source)
-	if len(source) >= 2 && source[0] == '{' && source[len(source)-1] == '}' {
-		source = source[1 : len(source)-1]
-	}
-	entries := 0
-	for _, part := range splitExpressionTop(source, ",;") {
-		if trimECMAScriptSpace(part) == "" {
-			continue
-		}
-		pieces := splitExpressionTop(part, ":")
-		if len(pieces) < 2 {
-			return fmt.Errorf("invalid bind entry")
-		}
-		key := trimECMAScriptSpace(pieces[0])
-		if unquoted, ok := unquoteBindName(key); ok {
-			key = unquoted
-		} else if !expressionBindNamePattern.MatchString(key) {
-			return fmt.Errorf("invalid bind name")
-		}
-		lower := strings.ToLower(key)
-		if strings.HasPrefix(lower, "on") || strings.HasPrefix(lower, "data-kit-") || expressionUnsafeBindNames[lower] {
-			return fmt.Errorf("unsafe bind name %q", key)
-		}
-		if err := validateDecodedExpression(strings.Join(pieces[1:], ":"), "binding"); err != nil {
-			return err
-		}
-		entries++
-	}
-	if entries == 0 {
-		return fmt.Errorf("empty bind map")
-	}
-	return nil
 }
 
 func validateStyleExpression(authored string) error {

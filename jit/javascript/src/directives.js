@@ -34,6 +34,8 @@
     var parts = source.split(":");
     var type = parts.shift();
     if (!EVENTS[type]) {
+      // data-kit-bind:<name> carries its target after the colon; it is a binding, not an event.
+      if (type === "bind") return null;
       if (RESERVED[type]) {
         if (parts.length) directiveError("directive does not accept modifiers", name);
         return null;

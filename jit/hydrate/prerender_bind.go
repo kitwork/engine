@@ -45,15 +45,20 @@ func PreRenderBind(htmlStr string, state map[string]map[string]any) string {
 		if !ok || len(scope) == 0 {
 			return tag
 		}
-		bm := bindAttrRe.FindStringSubmatch(tag)
-		if bm == nil {
-			return tag
+		// Only a binding whose every read the cookie carries is baked; the rest evaluate as missing
+		// on the client too, and PreRender never bakes a value it might get wrong.
+		attrs := map[string]any{}
+		for _, bm := range bindAttrRe.FindAllStringSubmatch(tag, -1) {
+			node, err := compileAuthoredAttribute(bm[2])
+			if err != nil || !varsKnown(node, scope) {
+				continue
+			}
+			value, err := Eval(node, scope)
+			if err != nil {
+				continue
+			}
+			attrs[strings.ToLower(bm[1])] = value
 		}
-		node, err := compileAuthoredAttribute(bm[1])
-		if err != nil {
-			return tag // a broken expression is reported by Render, not fixed up here
-		}
-		attrs := evalKnownPairs(node, scope)
 		if len(attrs) == 0 {
 			return tag
 		}
@@ -67,7 +72,10 @@ func PreRenderBind(htmlStr string, state map[string]map[string]any) string {
 var componentTagRe = regexp.MustCompile(`(?is)<[a-z][a-z0-9-]*\b[^>]*\bdata-kit-component="[^"]*"[^>]*>`)
 
 var componentAttrRe = regexp.MustCompile(`(?i)\bdata-kit-component="([^"]*)"`)
-var bindAttrRe = regexp.MustCompile(`(?i)\bdata-kit-bind="([^"]*)"`)
+
+// bindAttrRe matches one binding, data-kit-bind:<name>="expr" — the target in the name, one
+// expression in the value.
+var bindAttrRe = regexp.MustCompile(`(?i)\bdata-kit-bind:([a-z][a-z0-9-]*)="([^"]*)"`)
 
 // ComponentName strips the version and alias tails: "sidebar@v1.0.0=$sidebar" → "sidebar".
 func ComponentName(decl string) string {
@@ -77,10 +85,11 @@ func ComponentName(decl string) string {
 	return strings.TrimSpace(decl)
 }
 
-// applyBoundAttrs writes evaluated attributes onto an open tag, matching what the client's bind
-// pass does to a live element: false/null removes, true sets empty, anything else sets the value.
-// An attribute already written by the author is REPLACED, so the server and the client cannot
-// disagree about what the element says at rest.
+// applyBoundAttrs writes evaluated bindings onto an open tag as the first paint the client will
+// compute again: a reflected boolean (disabled, hidden, open…) and the live booleans (checked,
+// selected) are present or absent; aria-* is spelled "true"/"false"; anything else is the value,
+// and false/null removes it. An attribute already written by the author is REPLACED, so the server
+// and the client cannot disagree about what the element says at rest.
 func applyBoundAttrs(tag string, attrs map[string]any) string {
 	inner := strings.TrimSuffix(tag, ">")
 	selfClosing := strings.HasSuffix(inner, "/")
@@ -93,7 +102,12 @@ func applyBoundAttrs(tag string, attrs map[string]any) string {
 			continue
 		}
 		inner = removeAttr(inner, k)
+		aria := strings.HasPrefix(k, "aria-")
 		switch {
+		case aria && (v == nil || v == false):
+			inner += ` ` + k + `="false"`
+		case aria && v == true:
+			inner += ` ` + k + `="true"`
 		case v == nil || v == false:
 			// removed — the client would drop it too
 		case v == true:
@@ -201,42 +215,6 @@ func coerceCookieValue(s string) any {
 		return f
 	}
 	return s
-}
-
-// evalKnownPairs evaluates the pairs of a data-kit-bind object, but ONLY those whose expression
-// depends entirely on keys the cookie carried.
-//
-// Evaluating the object as a whole would be wrong. A missing variable reads as 0, and 0 is neither
-// null nor false, so the client's bind writes it out: a drawer the cookie never mentioned would be
-// baked as data-open="0", then removed a frame later when the component's own default (false)
-// takes over — reintroducing exactly the flash this pass exists to remove. The component owns the
-// defaults; the server only restores what was actually saved.
-func evalKnownPairs(node any, scope map[string]any) map[string]any {
-	arr, ok := node.([]any)
-	if !ok || len(arr) < 2 {
-		return nil
-	}
-	if op, _ := arr[0].(string); op != "{}" {
-		return nil // data-kit-bind is an object by contract
-	}
-	pairs, _ := arr[1].([]any)
-	out := map[string]any{}
-	for _, p := range pairs {
-		pair, ok := p.([]any)
-		if !ok || len(pair) != 2 {
-			continue
-		}
-		key, _ := pair[0].(string)
-		if key == "" || !varsKnown(pair[1], scope) {
-			continue
-		}
-		v, err := Eval(pair[1], scope)
-		if err != nil {
-			continue
-		}
-		out[key] = v
-	}
-	return out
 }
 
 // varsKnown reports whether every scope read in an expression has a value in scope.

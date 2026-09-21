@@ -149,7 +149,9 @@ func TestScanHTMLDetectsImplementedRuntimeDirectivesAndEvents(t *testing.T) {
 		`<b data-kit-text="label"></b>`,
 		`<div data-kit-show="open"></div>`,
 		`<div data-kit-class="tone"></div>`,
-		`<div data-kit-bind="aria-expanded: open;"></div>`,
+		`<div data-kit-bind:aria-expanded="open"></div>`,
+		`<button data-kit-bind:disabled="!ready" data-kit-bind:title="label" data-kit-bind:data-state="tone"></button>`,
+		`<input data-kit-bind:checked="on" data-kit-bind:value="text">`,
 		`<div data-kit-style="width: progress + '%'; opacity: open ? 1 : 0;"></div>`,
 		`<input data-kit-model="query">`,
 		`<section data-kit-scope="count: 0;"></section>`,
@@ -333,6 +335,15 @@ func TestScanHTMLDoesNotPromoteSupportedMetadata(t *testing.T) {
 func TestScanHTMLRejectsUnsupportedReservedAttributes(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
+		// A binding names one target in the attribute; the list form is not authored any more.
+		`<div data-kit-bind="aria-expanded: open;"></div>`,
+		`<div data-kit-bind="{ disabled: !ok }"></div>`,
+		`<div data-kit-bind:="open"></div>`,
+		`<div data-kit-bind:onclick="run"></div>`,
+		`<div data-kit-bind:innerhtml="body"></div>`,
+		`<div data-kit-bind:data-kit-text="x"></div>`,
+		`<div data-kit-bind:aria-expanded:prevent="open"></div>`,
+		`<div data-kit-attr:aria-expanded="open"></div>`,
 		`<div data-kit-guard="prevent stop"></div>`,
 		`<div data-kit-debounce="300"></div>`,
 		`<div data-kit-cloak></div>`,

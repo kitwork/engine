@@ -40,6 +40,8 @@ function makeNode(nodeType) {
     getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null; },
     removeAttribute: function (k) { delete this.attributes[k]; },
     hasAttribute: function (k) { return Object.prototype.hasOwnProperty.call(this.attributes, k); },
+    getAttributeNames: function () { return Object.keys(this.attributes); },
+    toggleAttribute: function (k, force) { var on = force === undefined ? !this.hasAttribute(k) : !!force; if (on) this.attributes[k] = ""; else delete this.attributes[k]; return on; },
     appendChild: function (c) { if (c.parentNode) c.parentNode.removeChild(c); c.parentNode = this; this.childNodes.push(c); return c; },
     insertBefore: function (c, ref) {
       if (c.parentNode) c.parentNode.removeChild(c);

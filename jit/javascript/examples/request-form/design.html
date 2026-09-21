@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KitJS - Request service design</title>
   <link rel="stylesheet" href="../kitjs.examples.d5ec0a87f2bf45850ebc74f84b5ea6e49e3c6c97ef1a882813170afb1a60f3af.css">
-  <script defer src="./hydrate.kit.1.0.0-rc.2.d9698885ee951c57724909cd1e1942f63a69289df4998e0fe47e3f60d4505eda.js" data-kit-drive="stable"></script>
+  <script defer src="./hydrate.kit.1.0.0-rc.2.2d8eee42579c9a6bb06e2991c77f7f2e6d2d6efc5145afab9c05f6bac98f794e.js" data-kit-drive="stable"></script>
 </head>
 
 <body class="min-h-screen bg-slate-950 text-slate-100">
@@ -29,14 +29,14 @@
     class="pointer-events-none fixed inset-x-0 top-0 z-50 h-1">
     <span id="request-progress-label" class="sr-only">Network activity</span>
     <div role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="request-progress-label"
-      data-kit-bind="aria-valuenow: value; aria-valuetext: value === null ? 'Loading' : value + '%'; aria-busy: visible;"
+      data-kit-bind:aria-valuenow="value" data-kit-bind:aria-valuetext="value === null ? 'Loading' : value + '%'" data-kit-bind:aria-busy="visible"
       class="h-1 w-full overflow-hidden bg-slate-800">
       <svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"
         class="block h-1 w-full">
         <rect width="100" height="4" fill="currentColor" class="text-slate-800"></rect>
         <rect data-kit-show="value === null" x="35" width="30" height="4" fill="currentColor"
           class="text-indigo-400 animate-pulse"></rect>
-        <rect data-kit-show="value !== null" data-kit-bind="width: value;" width="0" height="4"
+        <rect data-kit-show="value !== null" data-kit-bind:width="value" width="0" height="4"
           fill="currentColor" class="text-indigo-500 transition-all duration-200"></rect>
       </svg>
     </div>

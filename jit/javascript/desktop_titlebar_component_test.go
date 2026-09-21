@@ -640,10 +640,10 @@ func desktopTitlebar110StagedDocument(assembly StagedAssembly) string {
 <header id="titlebar" data-kit-component="desktop-titlebar@1.1.0" data-kit-as="$bar" data-titlebar-drag>
   <span id="drag-handle">Drag</span>
   <button id="back" type="button" data-titlebar-no-drag data-kit-click="$bar.back()"
-    data-kit-bind="disabled: !canGoBack; 'aria-disabled': canGoBack ? 'false' : 'true';"
+    data-kit-bind:disabled="!canGoBack" data-kit-bind:aria-disabled="canGoBack ? 'false' : 'true'"
     disabled aria-disabled="true">Back</button>
   <button id="forward" type="button" data-titlebar-no-drag data-kit-click="$bar.forward()"
-    data-kit-bind="disabled: !canGoForward; 'aria-disabled': canGoForward ? 'false' : 'true';"
+    data-kit-bind:disabled="!canGoForward" data-kit-bind:aria-disabled="canGoForward ? 'false' : 'true'"
     disabled aria-disabled="true">Forward</button>
   <button id="reload" type="button" data-titlebar-no-drag data-kit-click="$bar.reload()">Reload</button>
   <output id="back-state" data-kit-text="canGoBack ? 'ready' : 'blocked'">server</output>

@@ -96,7 +96,7 @@ case produces one fallback outcome and native navigation before live mutation.
 |---|---|
 | `data-kit-text="count"` | Writes the synchronous result through `textContent`. |
 | `data-kit-show="open"` | Toggles the element's `hidden` property without removing it. |
-| `data-kit-bind="aria-expanded: open;"` | Owns safe attributes and the permitted form properties. Unsafe sinks and URL schemes are rejected. |
+| `data-kit-bind:aria-expanded="open"` | Owns safe attributes and the permitted form properties. Unsafe sinks and URL schemes are rejected. |
 | `data-kit-class="open ? 'block opacity-100' : 'hidden opacity-0'"` | Owns dynamic class tokens while preserving static classes. |
 | `data-kit-style="width: progress + '%'; opacity: visible ? 1 : 0;"` | Owns bounded continuous CSS values without replacing the authored style attribute. |
 | `data-kit-model="name"` | Two-way binds one existing writable top-level field matching `[A-Za-z_][A-Za-z0-9_]*` on the nearest boundary. `$` names and nested paths are invalid. |
@@ -118,7 +118,7 @@ multiple longhands.
 The browser validates all results before writing any of them. Strings and
 finite numbers set a property; nullish values, `false`, and empty strings
 restore its authored inline baseline. Unsafe CSS values, `var()`/`attr()`
-indirection, and raw `data-kit-bind="style: ..."` fail closed.
+indirection, and raw `data-kit-bind:style="..."` fail closed.
 Kitwork validates this map during generation but leaves its authored inline
 fallback intact; dynamic style evaluation begins in the browser runtime.
 
@@ -129,7 +129,7 @@ fallback intact; dynamic style evaluation begins in the browser runtime.
   <button
     type="button"
     data-kit-click="count = count + 1"
-    data-kit-bind="'aria-expanded': open;"
+    data-kit-bind:aria-expanded="open"
     class="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white">
     Increment
   </button>

@@ -15,7 +15,7 @@
 //         <div data-carousel-slide class="w-full shrink-0">…</div>
 //         <div data-carousel-slide class="w-full shrink-0">…</div>
 //     <button data-kit-click="previous()">‹</button>
-//     <button data-kit-click="select(1)" data-kit-bind="aria-selected: isActive(1);"></button>
+//     <button data-kit-click="select(1)" data-kit-bind:aria-selected="isActive(1)"></button>
 //     <button data-kit-click="next()">›</button>
 //
 // The slides are authored; `active` is the real index the dots bind to; a

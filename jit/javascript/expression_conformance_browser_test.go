@@ -352,8 +352,8 @@ func buildClosedExpressionDocument(t *testing.T) []byte {
     <output id="expression-update-rollback-count" data-kit-text="updateRollbackCount">server</output>
     <output id="expression-update-rollback-result" data-kit-text="updateRollbackResult">server</output>
     <output id="expression-unknown-update-count" data-kit-text="unknownUpdateCount">server</output>
-    <div id="expression-inner-html-sink" data-kit-bind="innerHTML: payload"><span>safe-inner</span></div>
-    <div id="expression-outer-html-sink" data-kit-bind="outerHTML: payload">safe-outer</div>
+    <div id="expression-inner-html-sink" data-kit-bind:innerhtml="payload"><span>safe-inner</span></div>
+    <div id="expression-outer-html-sink" data-kit-bind:outerhtml="payload">safe-outer</div>
 
     <button id="expression-mode-action" data-kit-click="count = 99">mode action</button>
     <button id="expression-chain-action" data-kit-click="chainA = chainB = 7">chain action</button>

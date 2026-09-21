@@ -457,6 +457,41 @@
     return "[data-kitwork-" + name + "],[data-kit-" + name + "]";
   }
 
+  // The binding groups, shared in spirit with the component runtime's dom.js: same names, same writes.
+  var REFLECTED_BOOLEAN = { disabled: "disabled", required: "required", readonly: "readOnly", multiple: "multiple", hidden: "hidden", open: "open" };
+  var LIVE_PROPERTY = { checked: "checked", selected: "selected", value: "value", indeterminate: "indeterminate" };
+  var LIVE_BOOLEAN = { checked: true, selected: true, indeterminate: true };
+  var SVG_CASE = { viewbox: "viewBox", preserveaspectratio: "preserveAspectRatio", gradientunits: "gradientUnits", gradienttransform: "gradientTransform", patternunits: "patternUnits", markerwidth: "markerWidth", markerheight: "markerHeight", refx: "refX", refy: "refY", textlength: "textLength", stddeviation: "stdDeviation" };
+  function writeAttribute(el, name, v) {
+    if (el.namespaceURI === "http://www.w3.org/2000/svg" && SVG_CASE[name]) name = SVG_CASE[name];
+    var aria = name.indexOf("aria-") === 0;
+    if (v == null || v === false && !aria) { if (el.hasAttribute(name)) el.removeAttribute(name); return; }
+    var text = v === true && !aria ? "" : String(v);
+    if (el.getAttribute(name) !== text) el.setAttribute(name, text);
+  }
+  function writeBinding(el, name, v) {
+    if (/^on/.test(name) || /^data-kit/.test(name) || name === "style" || name === "srcdoc") return;
+    var reflected = REFLECTED_BOOLEAN[name];
+    if (reflected) {
+      var on = !!v;
+      if (el[reflected] !== on) el[reflected] = on;
+      if (el.hasAttribute(name) !== on) el.toggleAttribute(name, on);
+      return;
+    }
+    var live = LIVE_PROPERTY[name];
+    if (live) {
+      var next = LIVE_BOOLEAN[name] ? !!v : v == null ? "" : v;
+      if (el[live] !== next) el[live] = next;
+      return;
+    }
+    if (name.indexOf("-") < 0 && name in el && typeof el[name] !== "function" && typeof el[name] !== "object") {
+      var plain = v == null ? "" : v;
+      if (el[name] !== plain) el[name] = plain;
+      return;
+    }
+    writeAttribute(el, name, v);
+  }
+
   var MODEL = "[data-kitwork-model],[data-kit-model]";
   function modelKey(el) { return el.getAttribute("data-kitwork-model") || el.getAttribute("data-kit-model"); }
   // number AND range are numeric inputs — coerce to a float so arithmetic (n + step) adds, not
@@ -920,19 +955,26 @@
     renderIf();
     document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; });
     document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; el.hidden = !run(x, scopeFor(el)); });
-    // bind → attributes: the expression is an OBJECT (reusing the closed grammar), each key an attr.
-    // { src: avatar, alt: name, disabled: n > 3 }. false/null removes the attr; true sets it empty;
-    // else the value. So <img data-kit-bind="{ src: avatar }"> tracks a scope key with no new syntax.
-    document.querySelectorAll(selector("bind")).forEach(function (el) {
-      var x = directive(el, "bind"); if (!x) return;
-      var obj = run(x, scopeFor(el));
-      if (!obj || typeof obj !== "object") return;
-      for (var k in obj) {
-        if (!Object.prototype.hasOwnProperty.call(obj, k)) continue;
-        var v = obj[k];
-        if (v === false || v == null) el.removeAttribute(k);
-        else if (v === true) el.setAttribute(k, "");
-        else if (String(el.getAttribute(k)) !== String(v)) el.setAttribute(k, v);
+    // bind → data-kit-bind:<name>="expr": the target is in the attribute name, the value is one
+    // expression (ideaship-final §5). Three groups by name: a reflected boolean (disabled, hidden,
+    // open…) lands on the property AND the attribute; a live property (checked, value…) on the
+    // property only, so a form reset still returns to the authored attribute; anything else — aria-*,
+    // data-*, a name the element has no property for — on the attribute, aria spelled "true"/"false".
+    // A name carries no selector, so the pass walks the document and keeps each element's bound
+    // names on the element after the first look.
+    document.querySelectorAll("*").forEach(function (el) {
+      var names = el.__kitBound;
+      if (!names) {
+        names = [];
+        el.getAttributeNames().forEach(function (n) { if (n.indexOf("data-kit-bind:") === 0) names.push(n); });
+        el.__kitBound = names;
+      }
+      for (var i = 0; i < names.length; i++) {
+        var raw = el.getAttribute(names[i]); if (!raw) continue;
+        var key = "$" + raw;
+        if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
+        if (!cache[key]) continue;
+        writeBinding(el, names[i].slice(14), run(cache[key], scopeFor(el)));
       }
     });
     // class → toggle classes from an expression. Every shape the grammar allows is accepted, so

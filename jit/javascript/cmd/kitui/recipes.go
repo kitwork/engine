@@ -77,7 +77,7 @@ var catalog = []group{
 			{
 				id: "switch", title: "Switch", tag: "kitjs", desc: "Guarded binary toggle.",
 				demo: `<div data-kit-component="switch@1.0.0" class="flex items-center gap-3">
-  <button role="switch" data-kit-click="toggle()" data-kit-bind="'aria-checked': checked;"
+  <button role="switch" data-kit-click="toggle()" data-kit-bind:aria-checked="checked"
     data-kit-class="checked ? 'bg-brand' : 'bg-slate-300 dark:bg-slate-700'"
     class="relative h-6 w-11 rounded-full transition bg-slate-300 dark:bg-slate-700">
     <span data-kit-class="checked ? 'translate-x-5' : 'translate-x-0'"
@@ -102,9 +102,9 @@ var catalog = []group{
 			{
 				id: "stepper", title: "Stepper", tag: "kitjs", desc: "Numeric input with guarded bounds.",
 				demo: `<div data-kit-component="stepper@1.0.0" data-kit-scope="value: 1; min: 0; max: 9; step: 1" class="inline-flex items-center rounded-lg border border-slate-300 dark:border-slate-700">
-  <button class="px-3 py-2 text-slate-600 hover:text-brand disabled:opacity-40 dark:text-slate-300" data-kit-click="decrement()" data-kit-bind="disabled: !canDecrement();">−</button>
+  <button class="px-3 py-2 text-slate-600 hover:text-brand disabled:opacity-40 dark:text-slate-300" data-kit-click="decrement()" data-kit-bind:disabled="!canDecrement()">−</button>
   <output class="w-10 border-x border-slate-200 py-2 text-center text-sm font-semibold dark:border-slate-700" data-kit-text="value">1</output>
-  <button class="px-3 py-2 text-slate-600 hover:text-brand disabled:opacity-40 dark:text-slate-300" data-kit-click="increment()" data-kit-bind="disabled: !canIncrement();">+</button>
+  <button class="px-3 py-2 text-slate-600 hover:text-brand disabled:opacity-40 dark:text-slate-300" data-kit-click="increment()" data-kit-bind:disabled="!canIncrement()">+</button>
 </div>`,
 			},
 			{
@@ -177,7 +177,7 @@ var catalog = []group{
 			{
 				id: "dropdown", title: "Dropdown", tag: "kitjs", desc: "Selection menu with roving state.",
 				demo: `<div data-kit-component="dropdown@1.0.0" data-kit-scope="items: ['Profile', 'Billing', 'Sign out']" data-kit-click:outside="hide()" class="relative inline-block">
-  <button class="` + btnSecondary + `" data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;">Menu ▾</button>
+  <button class="` + btnSecondary + `" data-kit-click="toggle()" data-kit-bind:aria-expanded="open">Menu ▾</button>
   <div class="absolute z-10 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800" data-kit-show="open" hidden>
     <template data-kit-for="item of items">
       <button class="block w-full px-3 py-2 text-left text-sm hover:bg-brand/10" data-kit-click="choose(item)" data-kit-text="item"></button>
@@ -219,7 +219,7 @@ var catalog = []group{
 			{
 				id: "popover", title: "Popover", tag: "kitjs", desc: "Anchored, click-dismissed panel.",
 				demo: `<div data-kit-component="popover@1.0.0" data-kit-click:outside="hide()" class="relative inline-block">
-  <button class="` + btnSecondary + `" data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;">Share ▾</button>
+  <button class="` + btnSecondary + `" data-kit-click="toggle()" data-kit-bind:aria-expanded="open">Share ▾</button>
   <div class="absolute z-10 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-800" data-kit-show="open" hidden>
     <p class="font-medium">Share this page</p>
     <p class="mt-1 text-xs text-slate-500">Anyone with the link can view.</p>
@@ -271,9 +271,9 @@ var catalog = []group{
 				id: "tabs", title: "Tabs", tag: "kitjs", desc: "Ordered selection controller.",
 				demo: `<div data-kit-component="tabs@1.0.0" data-kit-scope="tabs: ['overview', 'analytics', 'settings']; active: 'overview'" class="w-full max-w-md">
   <div class="flex gap-1 border-b border-slate-200 dark:border-slate-700">
-    <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('overview')" data-kit-bind="'data-active': isActive('overview') ? 'on' : null;">Overview</button>
-    <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('analytics')" data-kit-bind="'data-active': isActive('analytics') ? 'on' : null;">Analytics</button>
-    <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('settings')" data-kit-bind="'data-active': isActive('settings') ? 'on' : null;">Settings</button>
+    <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('overview')" data-kit-bind:data-active="isActive('overview') ? 'on' : null">Overview</button>
+    <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('analytics')" data-kit-bind:data-active="isActive('analytics') ? 'on' : null">Analytics</button>
+    <button class="border-b-2 border-transparent px-3 py-2 text-sm text-slate-500 data-[active]:border-brand data-[active]:text-brand" data-kit-click="select('settings')" data-kit-bind:data-active="isActive('settings') ? 'on' : null">Settings</button>
   </div>
   <div class="p-4 text-sm text-slate-600 dark:text-slate-300">
     <p data-kit-show="isActive('overview')">Overview panel — click a tab.</p>
@@ -298,7 +298,7 @@ var catalog = []group{
 			{
 				id: "collapse", title: "Collapse", tag: "kitjs", desc: "Single disclosure region.",
 				demo: `<div data-kit-component="collapse@1.0.0" class="w-full max-w-md">
-  <button class="` + btnSecondary + ` w-full justify-between" data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;">
+  <button class="` + btnSecondary + ` w-full justify-between" data-kit-click="toggle()" data-kit-bind:aria-expanded="open">
     <span>Show details</span><span data-kit-text="open ? '▲' : '▼'">▼</span>
   </button>
   <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800" data-kit-show="open" hidden>
@@ -317,9 +317,9 @@ var catalog = []group{
 			{
 				id: "pagination", title: "Pagination", tag: "kitjs", desc: "Bounded one-based paging.",
 				demo: `<div data-kit-component="pagination@1.0.0" data-kit-scope="page: 1; pages: 5" class="flex items-center gap-1">
-  <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="previous()" data-kit-bind="disabled: !canPrevious();">Prev</button>
+  <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="previous()" data-kit-bind:disabled="!canPrevious()">Prev</button>
   <span class="px-3 text-sm">Page <span data-kit-text="page">1</span> / 5</span>
-  <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="next()" data-kit-bind="disabled: !canNext();">Next</button>
+  <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="next()" data-kit-bind:disabled="!canNext()">Next</button>
 </div>`,
 			},
 		},
@@ -396,9 +396,9 @@ var catalog = []group{
   <div class="mt-3 flex items-center justify-between">
     <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="toggle()" data-kit-text="running ? 'Pause' : 'Play'">Pause</button>
     <div class="flex gap-1.5">
-      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(0)" data-kit-bind="'data-on': isActive(0) ? 'on' : null;"></button>
-      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(1)" data-kit-bind="'data-on': isActive(1) ? 'on' : null;"></button>
-      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(2)" data-kit-bind="'data-on': isActive(2) ? 'on' : null;"></button>
+      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(0)" data-kit-bind:data-on="isActive(0) ? 'on' : null"></button>
+      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(1)" data-kit-bind:data-on="isActive(1) ? 'on' : null"></button>
+      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(2)" data-kit-bind:data-on="isActive(2) ? 'on' : null"></button>
     </div>
     <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="next()">›</button>
   </div>
@@ -416,9 +416,9 @@ var catalog = []group{
   <div class="mt-3 flex items-center justify-between">
     <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="previous()">‹</button>
     <div class="flex gap-1.5">
-      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(0)" data-kit-bind="'data-on': isActive(0) ? 'on' : null;"></button>
-      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(1)" data-kit-bind="'data-on': isActive(1) ? 'on' : null;"></button>
-      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(2)" data-kit-bind="'data-on': isActive(2) ? 'on' : null;"></button>
+      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(0)" data-kit-bind:data-on="isActive(0) ? 'on' : null"></button>
+      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(1)" data-kit-bind:data-on="isActive(1) ? 'on' : null"></button>
+      <button class="h-2 w-2 rounded-full bg-slate-300 data-[on]:bg-brand" data-kit-click="select(2)" data-kit-bind:data-on="isActive(2) ? 'on' : null"></button>
     </div>
     <button class="` + btnSecondary + ` px-3 py-1.5" data-kit-click="next()">›</button>
   </div>

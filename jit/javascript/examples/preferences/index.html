@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KitJS · Sealed preferences</title>
   <link rel="stylesheet" href="../kitjs.examples.d5ec0a87f2bf45850ebc74f84b5ea6e49e3c6c97ef1a882813170afb1a60f3af.css">
-  <script defer src="./kit.1.0.0-rc.2.f67d99b48a716b6efbf4f15c30e8f96a61f02a20b3f21aacfe27e9d6d80498b6.js"></script>
+  <script defer src="./kit.1.0.0-rc.2.a47f152804906d5fb4d4015f9960ee2e90950250a027c2b91cb5f6de6525161f.js"></script>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100">
   <main class="mx-auto flex min-h-screen max-w-8xl items-center justify-center px-6 py-12 sm:px-8 lg:px-12">
@@ -25,7 +25,7 @@
           id="preferences-system"
           type="button"
           data-kit-click="choose('system')"
-          data-kit-bind="aria-pressed: mode === 'system';"
+          data-kit-bind:aria-pressed="mode === 'system'"
           data-kit-class="mode == 'system' ? 'border-indigo-400 bg-indigo-600 text-white' : 'border-slate-700 bg-slate-950 text-slate-300'"
           class="rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400">
           System
@@ -34,7 +34,7 @@
           id="preferences-light"
           type="button"
           data-kit-click="choose('light')"
-          data-kit-bind="aria-pressed: mode === 'light';"
+          data-kit-bind:aria-pressed="mode === 'light'"
           data-kit-class="mode == 'light' ? 'border-indigo-400 bg-indigo-600 text-white' : 'border-slate-700 bg-slate-950 text-slate-300'"
           class="rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400">
           Light
@@ -43,7 +43,7 @@
           id="preferences-dark"
           type="button"
           data-kit-click="choose('dark')"
-          data-kit-bind="aria-pressed: mode === 'dark';"
+          data-kit-bind:aria-pressed="mode === 'dark'"
           data-kit-class="mode == 'dark' ? 'border-indigo-400 bg-indigo-600 text-white' : 'border-slate-700 bg-slate-950 text-slate-300'"
           class="rounded-xl border px-4 py-3 text-sm font-bold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400">
           Dark

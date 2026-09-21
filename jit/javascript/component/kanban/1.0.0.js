@@ -12,7 +12,7 @@
 //   <section data-kit-component="kanban" data-kit-scope="cards: [{ id: 1, column: 'todo', title: '…' }]">
 //     <div data-kanban-column="todo">
 //       <template data-kit-for="card of cardsIn('todo')" data-kit-key="card.id">
-//         <article data-kanban-card tabindex="0" data-kit-bind="data-kanban-card: card.id;">…
+//         <article data-kanban-card tabindex="0" data-kit-bind:data-kanban-card="card.id">…
 //
 // A drag starts after the pointer has moved a few pixels, so a click on a
 // card is still a click.

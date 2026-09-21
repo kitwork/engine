@@ -232,7 +232,7 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
   <section id="accordion" data-kit-component="accordion@1.0.0"
     data-kit-scope="multiple: true; openItems: ['first']">
     <button id="accordion-first" type="button" data-kit-click="toggle('first')"
-      data-kit-bind="'aria-expanded': isOpen('first');">First</button>
+      data-kit-bind:aria-expanded="isOpen('first')">First</button>
     <div id="accordion-panel" data-kit-show="isOpen('first')">First panel</div>
     <button id="accordion-second" type="button" data-kit-click="toggle('second')">Second</button>
     <button id="accordion-collapse" type="button" data-kit-click="collapseAll()">Collapse</button>
@@ -255,9 +255,9 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
     <div role="tablist">
       <button id="tab-overview" type="button" role="tab" data-kit-click="select('overview')"
         data-kit-keydown="$event.key === 'ArrowRight' ? next() : $event.key === 'ArrowLeft' ? previous() : active"
-        data-kit-bind="'aria-selected': isActive('overview'); tabindex: isActive('overview') ? 0 : -1;">Overview</button>
+        data-kit-bind:aria-selected="isActive('overview')" data-kit-bind:tabindex="isActive('overview') ? 0 : -1">Overview</button>
       <button id="tab-api" type="button" role="tab" data-kit-click="select('api')"
-        data-kit-bind="'aria-selected': isActive('api'); tabindex: isActive('api') ? 0 : -1;">API</button>
+        data-kit-bind:aria-selected="isActive('api')" data-kit-bind:tabindex="isActive('api') ? 0 : -1">API</button>
     </div>
     <div id="tab-overview-panel" role="tabpanel" data-kit-show="isActive('overview')">Overview panel</div>
     <div id="tab-api-panel" role="tabpanel" data-kit-show="isActive('api')">API panel</div>
@@ -270,7 +270,7 @@ var componentSuiteDocument = fmt.Sprintf(`<!doctype html>
     data-kit-scope="items: ['profile', 'settings', 'sign-out']" data-kit-click:outside="hide()">
     <button id="dropdown-trigger" type="button" data-kit-click="toggle()"
       data-kit-keydown="$event.key === 'ArrowDown' ? next() : $event.key === 'ArrowUp' ? previous() : activeIndex"
-      data-kit-keydown:escape="hide()" data-kit-bind="'aria-expanded': open;">Menu</button>
+      data-kit-keydown:escape="hide()" data-kit-bind:aria-expanded="open">Menu</button>
     <div id="dropdown-menu" role="menu" data-kit-show="open" data-kit-class="open ? 'visible' : 'invisible'" hidden>
       <button id="dropdown-settings" type="button" role="menuitem" data-kit-click="choose('settings')">Settings</button>
     </div>

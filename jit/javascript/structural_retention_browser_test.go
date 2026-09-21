@@ -51,7 +51,7 @@ const structuralRetentionFixture = `<!doctype html>
   <main id="structural-gc-host" data-kit-component="structural-gc-host">
     <button id="structural-gc-remove" type="button" data-kit-click="removeFirst()">remove first</button>
     <template data-kit-for="item of items" data-kit-key="item.id">
-      <article class="structural-gc-row" data-kit-bind="data-row-id: item.id">
+      <article class="structural-gc-row" data-kit-bind:data-row-id="item.id">
         <section class="structural-gc-child" data-kit-component="structural-gc-child">
           <output data-kit-text="value">server</output>
           <button class="structural-gc-hold" type="button" data-kit-click="$sink.hold(() => value)">hold callback</button>

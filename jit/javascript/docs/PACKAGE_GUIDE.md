@@ -110,7 +110,7 @@ cần marker riêng.
 |---|---|---|
 | `data-kit-text="..."` | Expression | Cập nhật an toàn qua `textContent`. |
 | `data-kit-show="..."` | Boolean Expression | Bật/tắt thuộc tính `hidden` của phần tử mà không xóa khỏi DOM. |
-| `data-kit-bind="..."` | `attr: expr;` | Gán các thuộc tính cho phép như `disabled`, `aria-expanded`, `href`; URL-valued binding từ chối tiền tố `javascript:`, `vbscript:` và `data:text/html` sau khi loại bỏ các ký tự U+0000–U+0020. Các `data:` URL khác không bị cấm mặc định. |
+| `data-kit-bind:<name>="expr"` | một biểu thức | Một ràng buộc, một đích ghi ngay trong tên thuộc tính: `data-kit-bind:disabled="busy"`, `data-kit-bind:aria-expanded="open"`. Ba nhóm theo tên: reflected boolean (`disabled` `required` `readonly` `multiple` `hidden` `open`) ghi cả property lẫn attribute; live property (`checked` `selected` `value` `indeterminate`) chỉ ghi property để form reset còn giá trị tác giả; tên có gạch nối hoặc phần tử không có property → attribute, `aria-*` ra "true"/"false", boolean khác có/không có. URL-valued binding từ chối tiền tố `javascript:`, `vbscript:` và `data:text/html` sau khi loại bỏ các ký tự U+0000–U+0020. |
 | `data-kit-class="..."` | Class Expression | Quản lý danh sách class động dựa trên điều kiện, giữ nguyên các class static có sẵn. |
 | `data-kit-style="..."` | `prop: expr;` | Quản lý các giá trị CSS liên tục an toàn (ví dụ: `width: progress + '%';`). Bị giới hạn 128 entries. |
 | `data-kit-model="..."` | Field Name | Binding 2 chiều cho form control (`<input>`, `<select>`, `<textarea>`). Chỉ nhận tên field top-level khớp `/^[A-Za-z_][A-Za-z0-9_]*$/`. |

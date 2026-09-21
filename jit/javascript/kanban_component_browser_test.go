@@ -56,14 +56,14 @@ var __ce = console.error; console.error = function () { window.__errs.push(Array
   [data-kanban-card] { height: 40px; margin-bottom: 8px; background: #fff; }
 </style></head><body>
   <section id="board" data-kit-component="kanban@1.0.0" data-kit-scope="cards: [{ id: 1, column: 'todo', title: 'Write' }, { id: 2, column: 'todo', title: 'Review' }, { id: 3, column: 'done', title: 'Ship' }]">
-    <div id="todo" data-kanban-column="todo" data-kit-bind="data-count: count('todo');">
-      <template data-kit-for="card of cardsIn('todo')" data-kit-key="card.id"><article data-kanban-card tabindex="0" data-kit-bind="data-kanban-card: card.id; data-lifted: isDragging(card.id);" data-kit-text="card.title"></article></template>
+    <div id="todo" data-kanban-column="todo" data-kit-bind:data-count="count('todo')">
+      <template data-kit-for="card of cardsIn('todo')" data-kit-key="card.id"><article data-kanban-card tabindex="0" data-kit-bind:data-kanban-card="card.id" data-kit-bind:data-lifted="isDragging(card.id)" data-kit-text="card.title"></article></template>
     </div>
-    <div id="doing" data-kanban-column="doing" data-kit-bind="data-count: count('doing');">
-      <template data-kit-for="card of cardsIn('doing')" data-kit-key="card.id"><article data-kanban-card tabindex="0" data-kit-bind="data-kanban-card: card.id;" data-kit-text="card.title"></article></template>
+    <div id="doing" data-kanban-column="doing" data-kit-bind:data-count="count('doing')">
+      <template data-kit-for="card of cardsIn('doing')" data-kit-key="card.id"><article data-kanban-card tabindex="0" data-kit-bind:data-kanban-card="card.id" data-kit-text="card.title"></article></template>
     </div>
-    <div id="done" data-kanban-column="done" data-kit-bind="data-count: count('done');">
-      <template data-kit-for="card of cardsIn('done')" data-kit-key="card.id"><article data-kanban-card tabindex="0" data-kit-bind="data-kanban-card: card.id;" data-kit-text="card.title"></article></template>
+    <div id="done" data-kanban-column="done" data-kit-bind:data-count="count('done')">
+      <template data-kit-for="card of cardsIn('done')" data-kit-key="card.id"><article data-kanban-card tabindex="0" data-kit-bind:data-kanban-card="card.id" data-kit-text="card.title"></article></template>
     </div>
     <button id="add" type="button" data-kit-click="add('doing', 'Test')">add</button>
     <button id="ship" type="button" data-kit-click="move(1, 'done')">ship</button>

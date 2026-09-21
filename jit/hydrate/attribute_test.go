@@ -47,7 +47,7 @@ func TestPreRenderDecodesExpressionAndModelEntitiesOnce(t *testing.T) {
 }
 
 func TestPreRenderBindDecodesExpressionEntities(t *testing.T) {
-	tag := `<button data-kit-component="counter" data-kit-bind="{ disabled: count &lt; 1 }">`
+	tag := `<button data-kit-component="counter" data-kit-bind:disabled="count &lt; 1">`
 	output := PreRenderBind(tag, map[string]map[string]any{
 		"counter": {"count": 0.0},
 	})

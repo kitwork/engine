@@ -53,8 +53,8 @@ var __ce = console.error; console.error = function () { window.__errs.push(Array
 var __cw = console.warn; console.warn = function () { window.__errs.push(Array.prototype.map.call(arguments, String).join(" ")); return __cw.apply(this, arguments); };
 </script></head><body>
   <div id="host" data-kit-component="chart@1.0.0" data-kit-scope="series: [2, 4, 8, 6]; labels: ['Mon', 'Tue', 'Wed', 'Thu']; width: 100; height: 50; padding: 0">
-    <svg id="svg" data-kit-bind="viewBox: viewBox();"><path id="grid" data-kit-bind="d: grid(3);"></path><path id="area" data-kit-bind="d: area();"></path><path id="line" data-kit-bind="d: line();"></path><polyline id="poly" data-kit-bind="points: polyline();"></polyline></svg>
-    <div id="bars" style="display:flex;height:100px;align-items:flex-end"><template data-kit-for="bar of bars()" data-kit-key="bar.index"><div data-kit-style="height: bar.percent + '%%';" data-kit-bind="title: bar.label + ' ' + bar.value;"></div></template></div>
+    <svg id="svg" data-kit-bind:viewbox="viewBox()"><path id="grid" data-kit-bind:d="grid(3)"></path><path id="area" data-kit-bind:d="area()"></path><path id="line" data-kit-bind:d="line()"></path><polyline id="poly" data-kit-bind:points="polyline()"></polyline></svg>
+    <div id="bars" style="display:flex;height:100px;align-items:flex-end"><template data-kit-for="bar of bars()" data-kit-key="bar.index"><div data-kit-style="height: bar.percent + '%%';" data-kit-bind:title="bar.label + ' ' + bar.value"></div></template></div>
     <div id="ticks"><template data-kit-for="tick of ticks(3)"><span data-kit-text="tick.value + '@' + tick.y"></span></template></div>
     <output id="summary" data-kit-text="count() + '|' + total() + '|' + average() + '|' + peak() + '|' + last() + '|' + change() + '|' + low() + '-' + high()"></output>
     <button id="grow" type="button" data-kit-click="series = [10, 20]">grow</button>

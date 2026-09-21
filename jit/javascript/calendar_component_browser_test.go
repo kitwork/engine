@@ -52,7 +52,7 @@ var calendarComponentDocument = fmt.Sprintf(`<!doctype html>
     <output id="title" data-kit-text="title()"></output>
     <button id="next" type="button" data-kit-click="next()">›</button>
     <div id="weekdays"><template data-kit-for="name of weekdays()"><span data-kit-text="name"></span></template></div>
-    <div id="grid"><template data-kit-for="cell of days()" data-kit-key="cell.iso"><button type="button" data-kit-click="select(cell.iso)" data-kit-bind="data-iso: cell.iso; aria-pressed: cell.selected; disabled: cell.disabled; aria-label: cell.label;" data-kit-class="(cell.outside ? 'outside ' : '') + (cell.today ? 'today' : '')" data-kit-text="cell.day"></button></template></div>
+    <div id="grid"><template data-kit-for="cell of days()" data-kit-key="cell.iso"><button type="button" data-kit-click="select(cell.iso)" data-kit-bind:data-iso="cell.iso" data-kit-bind:aria-pressed="cell.selected" data-kit-bind:disabled="cell.disabled" data-kit-bind:aria-label="cell.label" data-kit-class="(cell.outside ? 'outside ' : '') + (cell.today ? 'today' : '')" data-kit-text="cell.day"></button></template></div>
     <button id="pick" type="button" data-kit-click="select('2026-10-05')">pick</button>
     <button id="early" type="button" data-kit-click="select('2026-09-01')">early</button>
     <button id="today" type="button" data-kit-click="today()">today</button>

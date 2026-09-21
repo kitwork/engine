@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const sidebarTag = `<header data-kit-component="sidebar=$sidebar" data-kit-bind="{ 'data-state': status, 'data-open': drawer }" class="w-64">`
+const sidebarTag = `<header data-kit-component="sidebar=$sidebar" data-kit-bind:data-state="status" data-kit-bind:data-open="drawer" class="w-64">`
 
 // The whole point: a collapsed sidebar must arrive collapsed, not arrive expanded and snap.
 func TestPreRenderBindBakesRestoredState(t *testing.T) {
@@ -17,7 +17,7 @@ func TestPreRenderBindBakesRestoredState(t *testing.T) {
 	}
 	// drawer is absent from the cookie: it evaluates as missing, which the client renders as no
 	// attribute. Baking data-open="" would open a mobile overlay on first paint.
-	if strings.Contains(out, `data-open="`) {
+	if strings.Contains(out, ` data-open="`) {
 		t.Errorf("a key the cookie never carried was baked anyway:\n%s", out)
 	}
 	// Everything the author wrote must survive.
@@ -44,7 +44,7 @@ func TestPreRenderBindFalseRemovesAttribute(t *testing.T) {
 	state := map[string]map[string]any{"sidebar": {"status": "expanded", "drawer": false}}
 	out := PreRenderBind(sidebarTag, state)
 
-	if strings.Contains(out, `data-open="`) {
+	if strings.Contains(out, ` data-open="`) {
 		t.Fatalf("false should remove the attribute:\n%s", out)
 	}
 	if !strings.Contains(out, `data-state="expanded"`) {
@@ -55,10 +55,10 @@ func TestPreRenderBindFalseRemovesAttribute(t *testing.T) {
 // An attribute the author already wrote is replaced, not duplicated — two data-state attributes is
 // invalid markup and the browser would keep the wrong one.
 func TestPreRenderBindReplacesAuthoredAttribute(t *testing.T) {
-	tag := `<header data-kit-component="sidebar" data-state="expanded" data-kit-bind="{ 'data-state': status }">`
+	tag := `<header data-kit-component="sidebar" data-state="expanded" data-kit-bind:data-state="status">`
 	out := PreRenderBind(tag, map[string]map[string]any{"sidebar": {"status": "hidden"}})
 
-	if strings.Count(out, "data-state=") != 1 {
+	if strings.Count(out, " data-state=") != 1 {
 		t.Fatalf("expected exactly one data-state:\n%s", out)
 	}
 	if !strings.Contains(out, `data-state="hidden"`) {

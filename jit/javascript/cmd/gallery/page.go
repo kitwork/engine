@@ -87,9 +87,9 @@ const galleryHTML = `<!doctype html>
       <p class="desc">Bounded numeric value with guarded +/−.</p>
       <div class="body">
         <div class="row">
-          <button data-kit-click="decrement()" data-kit-bind="disabled: !canDecrement();">−</button>
+          <button data-kit-click="decrement()" data-kit-bind:disabled="!canDecrement()">−</button>
           <output class="big" data-kit-text="value">3</output>
-          <button data-kit-click="increment()" data-kit-bind="disabled: !canIncrement();">+</button>
+          <button data-kit-click="increment()" data-kit-bind:disabled="!canIncrement()">+</button>
           <span class="muted">range 0–10</span>
         </div>
       </div>
@@ -142,7 +142,7 @@ const galleryHTML = `<!doctype html>
         </div>
         <div class="row">
           <input data-kit-model="draft" data-kit-keydown:enter="add(draft)" placeholder="Add a tag, press Enter">
-          <button class="primary" data-kit-click="add(draft)" data-kit-bind="disabled: !canAdd();">Add</button>
+          <button class="primary" data-kit-click="add(draft)" data-kit-bind:disabled="!canAdd()">Add</button>
         </div>
         <span class="muted"><output data-kit-text="tags.length">2</output> / 6</span>
       </div>
@@ -153,7 +153,7 @@ const galleryHTML = `<!doctype html>
       <h2>collapse <span>state-only</span></h2>
       <p class="desc">Single guarded disclosure.</p>
       <div class="body">
-        <button data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;" data-kit-text="open ? 'Hide details ▲' : 'Show details ▼'">Show details ▼</button>
+        <button data-kit-click="toggle()" data-kit-bind:aria-expanded="open" data-kit-text="open ? 'Hide details ▲' : 'Show details ▼'">Show details ▼</button>
         <div class="panel" data-kit-show="open" hidden>
           The panel toggles the <code>hidden</code> attribute — it stays in the DOM, so authored CSS owns any height transition.
         </div>

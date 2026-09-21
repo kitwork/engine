@@ -213,7 +213,7 @@ var componentSuiteV3Document = fmt.Sprintf(`<!doctype html>
   </section>
 
   <section data-kit-component="collapse@1.0.0">
-    <button id="collapse-toggle" data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;">toggle</button>
+    <button id="collapse-toggle" data-kit-click="toggle()" data-kit-bind:aria-expanded="open">toggle</button>
     <button id="collapse-disable" data-kit-click="disabled = true">disable</button>
     <div id="collapse-panel" data-kit-show="open" hidden>panel</div>
   </section>

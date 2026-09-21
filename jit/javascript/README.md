@@ -766,7 +766,7 @@ for `for`, not a separate family:
 | component | `data-kit-component="counter@1.0.0"` | creates one isolated managed instance at an exact packaged version; optional `data-kit-as="$name"` exposes an action-only handle; unversioned names are for direct client registration |
 | text | `data-kit-text="count"` | writes synchronous expression results through `textContent` |
 | show | `data-kit-show="open"` | toggles the `hidden` property without removing the node |
-| bind | `data-kit-bind="aria-expanded: open;"` | writes safe attributes and a small form-property allowlist |
+| bind | `data-kit-bind:aria-expanded="open"` | writes safe attributes and a small form-property allowlist |
 | class | `data-kit-class="open ? 'block' : 'hidden'"` | owns dynamic class tokens while preserving authored static classes |
 | style | `data-kit-style="width: progress + '%'; opacity: visible ? 1 : 0;"` | transactionally owns fixed CSS properties with continuous binding values |
 | model | `data-kit-model="name"` | two-way binds one existing writable field on the nearest reactive boundary to a supported form control |

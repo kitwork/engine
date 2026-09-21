@@ -9,7 +9,7 @@
 // each button whether its format is on at the caret so aria-pressed can follow.
 //
 //   <div data-kit-component="editor">
-//     <button data-editor-command="bold" data-kit-bind="aria-pressed: isActive('bold');">B</button>
+//     <button data-editor-command="bold" data-kit-bind:aria-pressed="isActive('bold')">B</button>
 //     <div data-editor-area contenteditable="true"><p>Hello</p></div>
 //
 // The engine underneath is document.execCommand — deprecated, universal, and

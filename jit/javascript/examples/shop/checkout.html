@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Plain Shop · Checkout</title>
-  <script defer src="./hydrate.kit.1.0.0-rc.2.db904dd20c58d2112610fe09969cdec5ac35ae3711038f8ad7be568342401dfa.js" data-kit-drive="stable"></script>
+  <script defer src="./hydrate.kit.1.0.0-rc.2.c4abc11da5683fd695cf630081af995ef583c596a06dccd209c9583b1cb5b87a.js" data-kit-drive="stable"></script>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100">
   <div id="shop-shell" class="min-h-screen">
@@ -80,7 +80,7 @@
             disabled
             aria-haspopup="dialog"
             aria-controls="shop-confirm-dialog"
-            data-kit-bind="disabled: !ready; aria-disabled: !ready;"
+            data-kit-bind:disabled="!ready" data-kit-bind:aria-disabled="!ready"
             class="mt-2 inline-flex items-center justify-center rounded-xl bg-indigo-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-indigo-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:cursor-not-allowed disabled:opacity-40">
             Review order
           </button>

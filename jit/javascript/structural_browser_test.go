@@ -62,7 +62,7 @@ const structuralDirectiveDocument = `<!doctype html>
       <output id="keyed-selection" data-kit-text="selection"></output>
       <output id="keyed-context-invocations" data-kit-text="contextInvocations"></output>
       <template id="keyed-template" data-kit-for="item, i of items" data-kit-key="item.id">
-        <article class="keyed-row" data-kit-bind="data-row-id: item.id">
+        <article class="keyed-row" data-kit-bind:data-row-id="item.id">
           <span class="keyed-label" data-kit-text="item.label">server label</span>
           <span class="keyed-index" data-kit-text="i">server index</span>
           <button type="button" class="keyed-select" data-kit-click="select(item.id, i, $event.type)">select</button>
@@ -92,7 +92,7 @@ const structuralDirectiveDocument = `<!doctype html>
       <button type="button" id="nested-open-second" data-kit-click="openSecondGroup()">open second</button>
       <output id="nested-result" data-kit-text="nestedResult"></output>
       <template id="group-template" data-kit-for="group, gi of groups" data-kit-key="group.id">
-        <article class="group-row" data-kit-bind="data-group-id: group.id">
+        <article class="group-row" data-kit-bind:data-group-id="group.id">
           <span class="group-title" data-kit-text="group.title">server group</span>
           <template data-kit-if="group.open">
             <div class="group-open-branch">
@@ -100,7 +100,7 @@ const structuralDirectiveDocument = `<!doctype html>
                 <button
                   type="button"
                   class="nested-action"
-                  data-kit-bind="data-entry-id: entry.id"
+                  data-kit-bind:data-entry-id="entry.id"
                   data-kit-click="captureNested(group.id, gi, entry.id, ei, $event.type)">
                   <span data-kit-text="group.title + ':' + entry.label">server entry</span>
                 </button>
@@ -115,18 +115,18 @@ const structuralDirectiveDocument = `<!doctype html>
       <button type="button" id="multi-root-reorder" data-kit-click="reorderMulti()">reorder multi-root</button>
       <button type="button" id="multi-root-remove-x" data-kit-click="removeMultiX()">remove multi-root x</button>
       <template id="multi-root-template" data-kit-for="part, pi of multiItems" data-kit-key="part.id">
-        <i class="multi-root-head" data-kit-bind="data-multi-id: part.id" data-kit-text="part.label + ':head'"></i>
+        <i class="multi-root-head" data-kit-bind:data-multi-id="part.id" data-kit-text="part.label + ':head'"></i>
         <section class="multi-root-child" data-kit-component="row-state">
           <output class="multi-root-count" data-kit-text="count">0</output>
         </section>
-        <i class="multi-root-tail" data-kit-bind="data-multi-id: part.id" data-kit-text="part.label + ':tail'"></i>
+        <i class="multi-root-tail" data-kit-bind:data-multi-id="part.id" data-kit-text="part.label + ':tail'"></i>
       </template>
     </section>
 
     <section id="duplicate-region">
       <button type="button" id="make-duplicate" data-kit-click="makeDuplicate()">duplicate</button>
       <template id="duplicate-template" data-kit-for="candidate, ci of duplicateRows" data-kit-key="candidate.id">
-        <p class="duplicate-row" data-kit-bind="data-duplicate-id: candidate.id">
+        <p class="duplicate-row" data-kit-bind:data-duplicate-id="candidate.id">
           <span class="duplicate-label" data-kit-text="candidate.label">server duplicate label</span>
           <span class="duplicate-index" data-kit-text="ci">server duplicate index</span>
         </p>

@@ -3576,6 +3576,8 @@
     var parts = source.split(":");
     var type = parts.shift();
     if (!EVENTS[type]) {
+      // data-kit-bind:<name> carries its target after the colon; it is a binding, not an event.
+      if (type === "bind") return null;
       if (RESERVED[type]) {
         if (parts.length) directiveError("directive does not accept modifiers", name);
         return null;
@@ -3646,22 +3648,34 @@
   var OWN = core.OWN;
   var EMPTY = {};
   var EMPTY_SCOPE = Object.freeze(Object.create(null));
-  var BINDINGS = "[data-kit-text],[data-kit-show],[data-kit-bind]";
-  var RENDER_TARGETS = BINDINGS + ",[data-kit-class],[data-kit-style],[data-kit-model]";
-  var SAFE_PROPERTIES = {
-    value: "value",
-    checked: "checked",
-    selected: "selected",
-    disabled: "disabled",
-    hidden: "hidden",
-    readonly: "readOnly",
-    required: "required",
-    multiple: "multiple",
-    indeterminate: "indeterminate"
+  // A binding carries its target in the attribute name — data-kit-bind:disabled, data-kit-bind:aria-expanded —
+  // so a CSS selector cannot list them; render targets are found by walking every owned element and
+  // reading its attribute names once (see boundNames). One form; the name decides property or
+  // attribute, by the three groups of the spec (ideaship-final §5).
+  var BIND_PREFIX = "data-kit-bind:";
+  // Reflected boolean: the property AND the attribute, so CSS [disabled] and the form both agree.
+  var REFLECTED_BOOLEAN = {
+    disabled: "disabled", required: "required", readonly: "readOnly", multiple: "multiple", hidden: "hidden", open: "open"
   };
-  var BOOLEAN_PROPERTIES = {
-    checked: true, selected: true, disabled: true, hidden: true,
-    readonly: true, required: true, multiple: true, indeterminate: true
+  // Live state: the property only, so a form reset still returns to the authored attribute.
+  var LIVE_PROPERTY = { checked: "checked", selected: "selected", value: "value", indeterminate: "indeterminate" };
+  var LIVE_BOOLEAN = { checked: true, selected: true, indeterminate: true };
+  // HTML lowercases attribute names, so a target written data-kit-bind:viewBox reaches us as
+  // "viewbox"; SVG attributes are case-sensitive, so the known mixed-case names are restored on an
+  // SVG element.
+  var SVG_CASE = {
+    viewbox: "viewBox", preserveaspectratio: "preserveAspectRatio", gradientunits: "gradientUnits",
+    gradienttransform: "gradientTransform", patternunits: "patternUnits", patterntransform: "patternTransform",
+    patterncontentunits: "patternContentUnits", markerwidth: "markerWidth", markerheight: "markerHeight",
+    markerunits: "markerUnits", refx: "refX", refy: "refY", textlength: "textLength", lengthadjust: "lengthAdjust",
+    stddeviation: "stdDeviation", basefrequency: "baseFrequency", numoctaves: "numOctaves", tablevalues: "tableValues",
+    clippathunits: "clipPathUnits", maskunits: "maskUnits", maskcontentunits: "maskContentUnits",
+    spreadmethod: "spreadMethod", startoffset: "startOffset", primitiveunits: "primitiveUnits", filterunits: "filterUnits",
+    repeatcount: "repeatCount", repeatdur: "repeatDur", keytimes: "keyTimes", keysplines: "keySplines", attributename: "attributeName"
+  };
+  var UNSAFE_NAMES = {
+    srcdoc: true, style: true, innerhtml: true, outerhtml: true, insertadjacenthtml: true,
+    textcontent: true, innertext: true, outertext: true
   };
 
   function elementRecord(element) {
@@ -3681,7 +3695,7 @@
     if (OWN.call(programs, name)) return programs[name];
     try {
       programs[name] = {
-        read: core.compile(element.getAttribute(name), mode),
+        read: core.compile(core.expressionSource(element.getAttribute(name)), mode),
         last: EMPTY
       };
     } catch (error) {
@@ -3691,62 +3705,20 @@
     return programs[name];
   }
 
-  function splitTop(source, separators) {
-    var output = [];
-    var start = 0;
-    var depth = 0;
-    var quote = "";
-    for (var index = 0; index < source.length; index++) {
-      var character = source.charAt(index);
-      if (quote) {
-        if (character === "\\") index++;
-        else if (character === quote) quote = "";
-      } else if (character === "'" || character === '"') quote = character;
-      else if (character === "(" || character === "[" || character === "{") depth++;
-      else if (character === ")" || character === "]" || character === "}") depth--;
-      else if (depth === 0 && separators.indexOf(character) >= 0) {
-        output.push(source.slice(start, index));
-        start = index + 1;
-      }
-    }
-    output.push(source.slice(start));
-    return output;
-  }
-  function bindEntries(source) {
-    source = core.expressionSource(source).trim();
-    if (source.charAt(0) === "{" && source.charAt(source.length - 1) === "}") {
-      source = source.slice(1, -1);
-    }
-    var entries = [];
-    splitTop(source, ",;").forEach(function (part) {
-      if (!part.trim()) return;
-      var pieces = splitTop(part, ":");
-      if (pieces.length < 2) core.syntax("invalid bind entry", source, 0);
-      var key = pieces.shift().trim();
-      var quoted = /^(['"])([A-Za-z_][A-Za-z0-9_.:-]*)\1$/.exec(key);
-      if (quoted) key = quoted[2];
-      else if (!/^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(key)) core.syntax("invalid bind name", source, 0);
-      var lowerKey = key.toLowerCase();
-      if (/^on/i.test(key) || /^data-kit-/i.test(key) ||
-        ["srcdoc", "style", "innerhtml", "outerhtml", "insertadjacenthtml",
-          "textcontent", "innertext", "outertext"].indexOf(lowerKey) >= 0) {
-        core.syntax("unsafe bind name \"" + key + "\"", source, 0);
-      }
-      entries.push({
-        name: key,
-        read: core.compile(pieces.join(":").trim(), "binding"),
-        last: EMPTY
-      });
+  // The binding attributes an element carries, read once and kept on its record.
+  function boundNames(element) {
+    var record = elementRecord(element);
+    if (record.bound) return record.bound;
+    var names = [];
+    element.getAttributeNames().forEach(function (name) {
+      if (name.indexOf(BIND_PREFIX) === 0) names.push(name);
     });
-    if (!entries.length) core.syntax("empty bind map", source, 0);
-    return entries;
+    record.bound = names;
+    return names;
   }
-  function safeBind(element) {
-    var programs = elementRecord(element).programs;
-    if (OWN.call(programs, "data-kit-bind")) return programs["data-kit-bind"];
-    try { programs["data-kit-bind"] = bindEntries(element.getAttribute("data-kit-bind")); }
-    catch (error) { core.report(error); programs["data-kit-bind"] = null; }
-    return programs["data-kit-bind"];
+  function unsafeName(name) {
+    var lower = name.toLowerCase();
+    return /^on/.test(lower) || /^data-kit/.test(lower) || UNSAFE_NAMES[lower] === true;
   }
 
   function safeURL(name, value) {
@@ -3757,20 +3729,43 @@
     return text.indexOf("javascript:") !== 0 && text.indexOf("vbscript:") !== 0 &&
       text.indexOf("data:text/html") !== 0;
   }
-  function writeBound(element, name, value) {
+  // Attribute-only (aria-*, data-*, any name the element has no property for): setAttribute.
+  // null / undefined / false remove it; true is a bare attribute — except on aria-*, which wants the
+  // words "true" and "false".
+  function writeAttribute(element, name, value) {
     if (!safeURL(name, value)) throw new TypeError("KitJS: unsafe URL binding");
-    var lowerName = name.toLowerCase();
-    var property = SAFE_PROPERTIES[lowerName];
-    if (property) {
-      value = BOOLEAN_PROPERTIES[lowerName] ? !!value :
-        value === null || value === undefined ? "" : value;
-      if (!core.equal(element[property], value)) element[property] = value;
-    } else if (value === null || value === undefined || value === false && name.indexOf("aria-") !== 0) {
+    if (element.namespaceURI === "http://www.w3.org/2000/svg" && SVG_CASE[name]) name = SVG_CASE[name];
+    var aria = name.indexOf("aria-") === 0;
+    if (value === null || value === undefined || value === false && !aria) {
       if (element.hasAttribute(name)) element.removeAttribute(name);
-    } else {
-      var text = value === true && name.indexOf("aria-") !== 0 ? "" : String(value);
-      if (element.getAttribute(name) !== text) element.setAttribute(name, text);
+      return;
     }
+    var text = value === true && !aria ? "" : String(value);
+    if (element.getAttribute(name) !== text) element.setAttribute(name, text);
+  }
+  // data-kit-bind:<name>: reflected boolean → property + attribute; live state → property only; any
+  // other property the element has → property; a hyphenated name or one it does not have → attribute.
+  function writeBinding(element, name, value) {
+    if (!safeURL(name, value)) throw new TypeError("KitJS: unsafe URL binding");
+    var reflected = REFLECTED_BOOLEAN[name];
+    if (reflected) {
+      var on = !!value;
+      if (element[reflected] !== on) element[reflected] = on;
+      if (element.hasAttribute(name) !== on) element.toggleAttribute(name, on);
+      return;
+    }
+    var live = LIVE_PROPERTY[name];
+    if (live) {
+      var next = LIVE_BOOLEAN[name] ? !!value : value === null || value === undefined ? "" : value;
+      if (!core.equal(element[live], next)) element[live] = next;
+      return;
+    }
+    if (name.indexOf("-") < 0 && name in element && typeof element[name] !== "function" && typeof element[name] !== "object") {
+      var plain = value === null || value === undefined ? "" : value;
+      if (!core.equal(element[name], plain)) element[name] = plain;
+      return;
+    }
+    writeAttribute(element, name, value);
   }
   function asyncBinding(value) {
     if (!value || typeof value.then !== "function") return false;
@@ -3820,15 +3815,19 @@
         }
       }
     }
-    if (element.hasAttribute("data-kit-bind")) {
-      var entries = safeBind(element);
-      if (entries) entries.forEach(function (entry) {
-        var bound = entry.read(scope, core.localsFor ? core.localsFor(element) : null);
-        if (asyncBinding(bound) || core.equal(entry.last, bound)) return;
-        entry.last = bound;
-        writeBound(element, entry.name, bound);
-      });
-    }
+    boundNames(element).forEach(function (name) {
+      var target = name.slice(BIND_PREFIX.length);
+      if (!target || unsafeName(target)) {
+        core.report(new SyntaxError("KitJS: unsafe binding target in attribute \"" + name + "\""));
+        return;
+      }
+      var bound = safeProgram(element, name, "binding");
+      if (!bound) return;
+      var value = bound.read(scope, core.localsFor ? core.localsFor(element) : null);
+      if (asyncBinding(value) || core.equal(bound.last, value)) return;
+      bound.last = value;
+      writeBinding(element, target, value);
+    });
   }
   function collectRenderPlan(current) {
     var plan = {
@@ -3837,9 +3836,10 @@
       styles: [],
       models: []
     };
-    core.ownedElements(current, RENDER_TARGETS).forEach(function (element) {
+    core.ownedElements(current, "*").forEach(function (element) {
+      if (!element.attributes.length) return;
       if (element.hasAttribute("data-kit-text") || element.hasAttribute("data-kit-show") ||
-        element.hasAttribute("data-kit-bind")) plan.bindings.push(element);
+        boundNames(element).length) plan.bindings.push(element);
       if (element.hasAttribute("data-kit-class")) plan.classes.push(element);
       if (element.hasAttribute("data-kit-style")) plan.styles.push(element);
       if (element.hasAttribute("data-kit-model")) plan.models.push(element);
@@ -3918,7 +3918,6 @@
     }
   }
 
-  core.BINDINGS = BINDINGS;
   core.elementRecord = elementRecord;
   core.safeProgram = safeProgram;
   core.asyncBinding = asyncBinding;

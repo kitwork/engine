@@ -50,8 +50,8 @@ var dataTableComponentDocument = fmt.Sprintf(`<!doctype html>
     <input id="search" type="search" data-kit-model="query" data-kit-input="search(query)">
     <table>
       <thead><tr>
-        <th id="head-name" data-kit-bind="aria-sort: direction('name');"><button id="sort-name" type="button" data-kit-click="sortBy('name')">Name</button></th>
-        <th id="head-qty" data-kit-bind="aria-sort: direction('qty');"><button id="sort-qty" type="button" data-kit-click="sortBy('qty')">Qty</button></th>
+        <th id="head-name" data-kit-bind:aria-sort="direction('name')"><button id="sort-name" type="button" data-kit-click="sortBy('name')">Name</button></th>
+        <th id="head-qty" data-kit-bind:aria-sort="direction('qty')"><button id="sort-qty" type="button" data-kit-click="sortBy('qty')">Qty</button></th>
       </tr></thead>
       <tbody id="body"><template data-kit-for="row of visible()"><tr><td data-kit-text="row.name"></td><td data-kit-text="row.qty"></td></tr></template></tbody>
     </table>

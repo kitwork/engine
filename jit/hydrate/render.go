@@ -86,7 +86,7 @@ const (
 // directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
 // prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
 // Expressions use single-quoted string literals, so the value never contains a double quote.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|click|away|escape|validate|bind|class)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|click|away|escape|validate|bind:[a-z][a-z0-9-]*|class)="([^"]*)"`)
 
 // presenceRe decides runtime INJECTION: authored data-kit-* forms (including the non-expression
 // attributes — model is a plain scope key, live an SSE URL, scope/component a boundary — which need
@@ -97,7 +97,7 @@ var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|click|away|escape|v
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|click|away|escape|validate|bind|class|model|scope|component)="|data-kitwork-(?:text|show|if|for|click|away|escape|validate|bind|class)=['"]`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|click|away|escape|validate|bind:[a-z][a-z0-9-]*|class|model|scope|component)="|data-kitwork-(?:text|show|if|for|click|away|escape|validate|bind|class)=['"]`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The

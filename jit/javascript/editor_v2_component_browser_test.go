@@ -53,7 +53,7 @@ window.addEventListener("error", function (e) { window.__errs.push(String(e.erro
 var __ce = console.error; console.error = function () { window.__errs.push(Array.prototype.map.call(arguments, String).join(" ")); return __ce.apply(this, arguments); };
 </script></head><body>
   <div id="host" data-kit-component="editor@2.0.0" style="position:relative;width:500px">
-    <button id="bold" type="button" data-editor-command="bold" data-kit-bind="aria-pressed: isActive('bold');">B</button>
+    <button id="bold" type="button" data-editor-command="bold" data-kit-bind:aria-pressed="isActive('bold')">B</button>
     <button id="apply" type="button" data-kit-click="applyLink('kitwork.io/docs')">apply</button>
     <button id="cancel" type="button" data-kit-click="cancelLink()">cancel</button>
     <button id="unlink" type="button" data-kit-click="unlink()">unlink</button>

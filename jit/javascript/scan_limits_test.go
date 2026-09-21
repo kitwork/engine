@@ -113,7 +113,6 @@ func TestAuthoredExpressionSourceLimitsPrecedeDecodeAndLex(t *testing.T) {
 	overRaw := exactRaw + " "
 	for name, validate := range map[string]func(string) error{
 		"expression": func(source string) error { return validateExpression(source, "binding") },
-		"bind":       validateBindExpression,
 		"style":      validateStyleExpression,
 		"model":      validateModelExpression,
 		"for":        validateForExpression,

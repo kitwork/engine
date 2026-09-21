@@ -188,7 +188,7 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
   </section>
 
   <section data-kit-component="switch@1.0.0">
-    <button id="switch-toggle" role="switch" data-kit-click="toggle()" data-kit-bind="'aria-checked': checked;">Switch</button>
+    <button id="switch-toggle" role="switch" data-kit-click="toggle()" data-kit-bind:aria-checked="checked">Switch</button>
     <button id="switch-off" data-kit-click="off()">Off</button>
     <button id="switch-disable" data-kit-click="disabled = true">Disable</button>
     <output id="switch-state" data-kit-text="checked ? 'on' : 'off'"></output>
@@ -213,7 +213,7 @@ var componentSuiteV2Document = fmt.Sprintf(`<!doctype html>
   </section>
 
   <section data-kit-component="popover@1.0.0">
-    <button id="popover-toggle" data-kit-click="toggle()" data-kit-bind="'aria-expanded': open;">Popover</button>
+    <button id="popover-toggle" data-kit-click="toggle()" data-kit-bind:aria-expanded="open">Popover</button>
     <button id="popover-top" data-kit-click="place('top')">Top</button>
     <button id="popover-bad" data-kit-click="place('center')">Bad placement</button>
     <div id="popover-panel" data-kit-show="open" hidden>Popover panel</div>

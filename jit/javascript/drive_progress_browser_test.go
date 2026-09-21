@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const driveProgressArtifactName = "hydrate.kit.1.0.0-rc.2.412127c0d44dd4ce82575faa5ceb14bdbe51ed64fcd82f061867f1063cf0b7f4.js"
+const driveProgressArtifactName = "hydrate.kit.1.0.0-rc.2.afc06ee0845c86c06c407481a5ccc0a0fd6b9b35208d4add350371e66003a5ad.js"
 
 var driveProgressHostRE = regexp.MustCompile(`(?is)<section\b[^>]*\bdata-kit-retain\s*=\s*"app-progress"[^>]*>`)
 
@@ -49,7 +49,7 @@ func TestDriveProgressExampleContract(t *testing.T) {
 		for _, required := range []string{
 			`data-kit-retain="app-progress"`, `data-kit-component="progress-bar@2.0.0"`,
 			`role="progressbar"`, `aria-valuemin="0"`, `aria-valuemax="100"`,
-			`aria-valuenow: value`, `max-w-8xl`,
+			`data-kit-bind:aria-valuenow="value"`, `max-w-8xl`,
 			`focus-visible:outline`, `focus-visible:outline-2`, `focus-visible:outline-offset-2`,
 			`bg-indigo-600`,
 			`id="drive-progress-slow"`, `id="drive-progress-fast"`, `id="drive-progress-error"`,

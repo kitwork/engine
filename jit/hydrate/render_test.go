@@ -220,7 +220,7 @@ func TestRuntimeEmbedded(t *testing.T) {
 		`kit.service("camera"`, `native.call("camera.capture"`, "readAsDataURL",
 		`kit.service("navigation"`, `kit.service("window"`, `kit.service("capabilities"`,
 		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
-		`selector("bind")`,
+		`data-kit-bind:`, `function writeBinding`,
 		// an api element is still a core SCOPE boundary (the fetch that fills it is now the capability)
 		"data-kitwork-api", "data-kit-api",
 		// the reconcile/destroy lifecycle capabilities (api/live/remember) install through, out of core

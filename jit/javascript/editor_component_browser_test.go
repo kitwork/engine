@@ -51,8 +51,8 @@ window.addEventListener("error", function (e) { window.__errs.push(String(e.erro
 var __ce = console.error; console.error = function () { window.__errs.push(Array.prototype.map.call(arguments, String).join(" ")); return __ce.apply(this, arguments); };
 </script></head><body>
   <div id="host" data-kit-component="editor@1.0.0">
-    <button id="bold" type="button" data-editor-command="bold" data-kit-bind="aria-pressed: isActive('bold');">B</button>
-    <button id="heading" type="button" data-editor-command="heading" data-kit-bind="aria-pressed: isActive('heading');">H</button>
+    <button id="bold" type="button" data-editor-command="bold" data-kit-bind:aria-pressed="isActive('bold')">B</button>
+    <button id="heading" type="button" data-editor-command="heading" data-kit-bind:aria-pressed="isActive('heading')">H</button>
     <button id="bullets" type="button" data-editor-command="bullets">•</button>
     <button id="quote" type="button" data-kit-click="run('quote')">Q</button>
     <button id="replace" type="button" data-kit-click="set('<p>Replaced text here</p>')">set</button>

@@ -115,23 +115,6 @@ func TestExpressionValidatorUsesECMAScriptWhitespace(t *testing.T) {
 func TestExpressionValidatorDirectiveSpecificGrammar(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
-		`value: count; aria-label: label`,
-		`{"aria-label": label, disabled: !open}`,
-		`title: condition ? "a:b" : "c"`,
-	} {
-		if err := validateBindExpression(source); err != nil {
-			t.Errorf("validateBindExpression(%q) = %v", source, err)
-		}
-	}
-	for _, source := range []string{
-		``, `onclick: run`, `style: value`, `data-kit-x: value`, `value`, `{}`,
-	} {
-		if err := validateBindExpression(source); err == nil {
-			t.Errorf("validateBindExpression(%q) unexpectedly succeeded", source)
-		}
-	}
-
-	for _, source := range []string{
 		`width: progress + '%'; opacity: visible ? 1 : 0; margin-left: offset + 'px';`,
 		`-webkit-line-clamp: count; --Accent_1: tone; --accent_1: other`,
 		`content: condition ? "a:b;c" : "d"`,
@@ -294,7 +277,7 @@ func TestScanHTMLValidatesAuthoredExpressions(t *testing.T) {
   <output data-kit-text="user?.profile.name ?? 'Guest'"></output>
   <output data-kit-show="!!user"></output>
   <button data-kit-click:prevent="count++; ++count"></button>
-  <input data-kit-model="count" data-kit-bind="disabled: count === 10">
+  <input data-kit-model="count" data-kit-bind:disabled="count === 10">
 	<div data-kit-style="width: count + '%'; opacity: user ? 1 : 0; margin-left: count + 'px'"></div>
   <template data-kit-for="item, index of items" data-kit-key="item.id"></template>
 </main>`
@@ -312,7 +295,6 @@ func TestScanHTMLValidatesAuthoredExpressions(t *testing.T) {
 		`<button data-kit-click="user.count++"></button>`,
 		`<button data-kit-click="user?.count = 1"></button>`,
 		`<p data-kit-text="user?."></p>`,
-		`<div data-kit-bind="onclick: run"></div>`,
 		`<div data-kit-style="{width: count}"></div>`,
 		`<div data-kit-style="width: count; width: 10"></div>`,
 		`<div data-kit-style="width: count = 1"></div>`,
