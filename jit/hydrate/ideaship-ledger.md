@@ -47,6 +47,7 @@
 
 ## Nhật ký
 
+- 21/09/2026 — ĐỢT A XONG: 12/12 mục có trạng thái; mục 11 (corpus `walk ≡ eval`) không thêm ca vì không mục nào đổi ngữ pháp BIỂU THỨC (scope không ngoặc được bọc `{}` trước khi parse; mọi thứ khác là thuộc tính/DOM). Còn treo cho đợt B nằm ở bảng "Còn treo" + "Ngoài spec" phía trên.
 - 21/09/2026 — mục 8 xong theo đề xuất (cả hai runtime) và mục 12 (gate 12 KiB, dư 190 byte). Phát hiện: (1) walker kernel không ném cho tên thiếu/gọi non-function → boundary kernel chỉ thấy lỗi từ code component thật; (2) runtime component: boot render `resetDirty()` nuốt cả invalidation do boundary ghi trong lượt boot → thêm `core.booting`/`boundaryWrote`; (3) kernel trước đây một binding ném là gãy cả lượt render — `guarded()` sửa luôn.
 - 21/09/2026 — mục 7 xong phần client (cả hai runtime). Phát hiện khi làm: 5 từ overlay (`count first last even odd`) đè lên field cùng tên của component LỒNG trong hàng (conformance `row-state.count` vỡ) → chốt luật: overlay lexical theo hàng, không vào host lồng; kernel tự nhiên có cùng kết quả vì chuỗi scope nearest-first. Server materialize list để B (cần quyết định nguồn dữ liệu server cho `data-kit-for`).
 - 21/09/2026 — mục 6 xong. Kernel từ 1 event (`click` + 2 directive riêng + 2 attribute kèm) lên đúng họ 11 event với modifier trong TÊN thuộc tính (cùng cách đi của `data-kit-bind:<name>`: quét `getAttributeNames`, regex ở `render.go`). `:self` của runtime component không có trong spec — giữ, ghi nhận để bàn ở B.
