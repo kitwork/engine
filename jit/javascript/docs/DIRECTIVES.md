@@ -217,8 +217,14 @@ pointerdown pointerup focusin focusout
 ```
 
 Write an action as `data-kit-<event>="program"`. Available modifiers are
-`self`, `prevent`, `stop`, `once`, `outside`, `enter`, `escape`, and
-`debounce(ms)`:
+`window`, `document`, `self`, `outside`, `enter`, `escape`, `prevent`, `stop`,
+`debounce(ms)`, `throttle(ms)` and `once`. Write them in any order; the runtime
+always runs the fixed pipeline of the KitJS spec (`ideaship-final` §4): target
+(`window` / `document` — listen wherever the event lands, e.g. Escape on a `<div>`
+that takes no focus) → filter (`outside`, `escape`, `enter`, `self` — a rejected
+event stops here and is NOT swallowed) → `prevent` → `stop` → timing (`debounce`
+defers to the quiet edge, `throttle` runs the leading edge then rests) → `once`
+→ run:
 
 ```html
 <form
@@ -230,10 +236,12 @@ Write an action as `data-kit-<event>="program"`. Available modifiers are
 </form>
 ```
 
-The debounce delay is an integer from 1 through 60,000 milliseconds. `enter`
-and `escape` apply only to `keydown`/`keyup` and cannot be combined. `outside`
-applies only to `click`, `dblclick`, `pointerdown`, `pointerup`, and `focusin`,
-and cannot be combined with `self`.
+A debounce or throttle delay is an integer from 1 through 60,000 milliseconds,
+and one handler takes one of them. `enter` and `escape` apply only to
+`keydown`/`keyup` and cannot be combined. `outside` applies only to `click`,
+`dblclick`, `pointerdown`, `pointerup`, and `focusin`, and cannot be combined
+with `self`; `window` and `document` name one target, and neither combines with
+`self` or `outside` (which already listen beyond the element).
 
 ### System variables in an action
 

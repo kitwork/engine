@@ -14,7 +14,10 @@
   ).split(" ");
 
   EVENT_NAMES.forEach(function (name) { EVENTS[name] = true; });
-  "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
+  // The modifiers of ideaship-final §4, run in its fixed order whatever order the author wrote:
+  // target (window document) → filter (outside escape enter, and self) → prevent → stop →
+  // timing (debounce(n) throttle(n)) → once → run.
+  "self prevent stop once outside enter escape window document".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
   "component scope version alias ref retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
@@ -47,30 +50,35 @@
     var descriptor = {
       name: name,
       type: type,
+      target: "self",
       self: false,
       prevent: false,
       stop: false,
       once: false,
       outside: false,
       key: "",
-      delay: 0
+      delay: 0,
+      throttle: 0
     };
 
     parts.forEach(function (modifier) {
       if (!modifier) directiveError("empty event modifier", name);
       var canonical = modifier;
-      var debounce = /^debounce\(([0-9]+)\)$/.exec(modifier);
-      if (debounce) canonical = "debounce";
+      var timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(modifier);
+      if (timing) canonical = timing[1];
       else if (!MODIFIERS[modifier]) directiveError("unsupported event modifier \"" + modifier + "\"", name);
       if (seen[canonical]) directiveError("duplicate event modifier \"" + canonical + "\"", name);
       seen[canonical] = true;
 
-      if (canonical === "debounce") {
-        var delay = Number(debounce[1]);
+      if (canonical === "debounce" || canonical === "throttle") {
+        var delay = Number(timing[2]);
         if (!Number.isInteger(delay) || delay < 1 || delay > 60000) {
-          directiveError("debounce delay must be between 1 and 60000", name);
+          directiveError(canonical + " delay must be between 1 and 60000", name);
         }
-        descriptor.delay = delay;
+        if (canonical === "debounce") descriptor.delay = delay; else descriptor.throttle = delay;
+      } else if (canonical === "window" || canonical === "document") {
+        if (descriptor.target !== "self") directiveError("event cannot use both window and document", name);
+        descriptor.target = canonical;
       } else if (canonical === "enter" || canonical === "escape") {
         if (type !== "keydown" && type !== "keyup") {
           directiveError("keyboard modifier requires keydown or keyup", name);
@@ -85,6 +93,15 @@
     }
     if (descriptor.outside && descriptor.self) {
       directiveError("outside and self cannot be combined", name);
+    }
+    if (descriptor.self && descriptor.target !== "self") {
+      directiveError("self and " + descriptor.target + " cannot be combined", name);
+    }
+    if (descriptor.outside && descriptor.target !== "self") {
+      directiveError("outside already listens beyond the element; " + descriptor.target + " is redundant", name);
+    }
+    if (descriptor.delay && descriptor.throttle) {
+      directiveError("debounce and throttle cannot both time one handler", name);
     }
     return descriptor;
   }

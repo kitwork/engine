@@ -43,36 +43,66 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 	}
 }
 
-// data-kit-away (a click OUTSIDE) and data-kit-escape (the Escape key) are ordinary expression
-// directives — the server twin must treat them exactly like data-kit-click: verify the expression,
-// keep the source on the wire, and inject the runtime even on a page whose ONLY directive is one of
-// them (the client dispatch cannot run without /kit.js). This is the server half of the event-
-// modifier feature; if the render.go name lists ever drop them, this goes red.
-func TestRenderAwayAndEscapeAreDirectives(t *testing.T) {
-	// verify: an away/escape expression is recognised as authored source (so a typo is caught + logged).
-	if !directiveRe.MatchString(`data-kit-away="open = false"`) {
-		t.Error("data-kit-away must be verified as an authored expression directive")
+// The event family — data-kit-<event>[:modifier…] (ideaship-final §2–§4) — is verified and injected
+// like any expression directive: the expression compiles, the modifiers are the pipeline's, the
+// source rides unchanged, and a page whose ONLY directive is one of them still ships the runtime.
+// The old dedicated directives (data-kit-away / data-kit-escape) and companions (data-kit-guard)
+// are no longer names the server knows: their jobs are :outside, :escape:window, :prevent.
+func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
+	for _, authored := range []string{
+		`data-kit-click="open = false"`,
+		`data-kit-click:outside="open = false"`,
+		`data-kit-keydown:escape:window:prevent="open = false"`,
+		`data-kit-input:debounce(250)="query = query.trim()"`,
+		`data-kit-submit:prevent:once="saved = true"`,
+		`data-kit-pointerdown:throttle(100):stop="drag = true"`,
+	} {
+		m := directiveRe.FindStringSubmatch(authored)
+		if m == nil {
+			t.Errorf("%s must be verified as an authored expression directive", authored)
+			continue
+		}
+		if err := checkEventModifiers(m[1]); err != nil {
+			t.Errorf("%s: modifiers should be accepted, got %v", authored, err)
+		}
 	}
-	if !directiveRe.MatchString(`data-kit-escape="open = false"`) {
-		t.Error("data-kit-escape must be verified as an authored expression directive")
+	for _, gone := range []string{`data-kit-away="open = false"`, `data-kit-escape="open = false"`} {
+		if directiveRe.MatchString(gone) || presenceRe.MatchString(gone) {
+			t.Errorf("%s is not a directive any more (its job is a modifier)", gone)
+		}
 	}
-	// injection: a page whose only directive is away (with a debounce/guard companion) still ships the
-	// runtime, and the authored attributes ride unchanged.
+	// A modifier the kernel would disable is named at render.
+	for directive, reason := range map[string]string{
+		"click:mystery":                  "unknown modifier",
+		"click:escape":                   "belong on keydown/keyup",
+		"keydown:escape:enter":           "cannot both",
+		"input:outside":                  ":outside applies to",
+		"click:prevent:prevent":          "repeated",
+		"click:debounce(10):throttle(5)": "cannot both time",
+		"click:debounce(0)":              "1–60000",
+		"click:window:document":          "pick one",
+	} {
+		err := checkEventModifiers(directive)
+		if err == nil || !strings.Contains(err.Error(), reason) {
+			t.Errorf("checkEventModifiers(%q) = %v, want an error naming %q", directive, err, reason)
+		}
+	}
+	// injection: a page whose only directive is a modified handler still ships the runtime, and the
+	// authored attribute rides unchanged.
 	in := `<head></head><body>` + marker +
-		`<div data-kit-away="open = false" data-kit-guard="prevent"><a data-kit-escape="open = false">x</a></div>` +
+		`<div data-kit-click:outside="open = false"><a data-kit-keydown:escape:window="open = false">x</a></div>` +
 		`</section></body>`
 	out := Render(in)
 	for _, keep := range []string{
-		`data-kit-away="open = false"`,
-		`data-kit-escape="open = false"`,
-		`data-kit-guard="prevent"`,
+		`data-kit-click:outside="open = false"`,
+		`data-kit-keydown:escape:window="open = false"`,
 	} {
 		if !strings.Contains(out, keep) {
 			t.Errorf("authored attribute must ride unchanged: %s", keep)
 		}
 	}
 	if strings.Count(out, injectTag) != 1 {
-		t.Error("a page whose only directive is away/escape still needs the runtime injected")
+		t.Error("a page whose only directive is a modified event handler still needs the runtime injected")
 	}
 }
 

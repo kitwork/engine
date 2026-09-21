@@ -915,7 +915,7 @@
   }
 
   // A subtree mounted DURING a click (a modal opened by that very click) must not be closed by the
-  // same click's data-kit-away check — the opening click is, by definition, outside a panel that did
+  // same click's :outside check — the opening click is, by definition, outside a panel that did
   // not exist yet. Fresh mounts are remembered until the next microtask, i.e. until the whole click
   // dispatch (every delegated listener) has finished; the NEXT outside click closes normally.
   var freshMounts = [];
@@ -968,7 +968,7 @@
         // this same render, because renderIf runs before the text/show/bind queries.
         reg.mounted = reg.template.cloneNode(true);
         parent.insertBefore(reg.mounted, reg.anchor.nextSibling);
-        markFresh(reg.mounted); // don't let the click that opened it also close it via data-kit-away
+        markFresh(reg.mounted); // don't let the click that opened it also close it via data-kit-click:outside
       } else if (!show && reg.mounted) {
         cleanupTree(reg.mounted); // release the subtree's listeners/observers/streams before removal
         reg.mounted.remove();
@@ -1112,44 +1112,6 @@
   kit.blueprints = blueprints;
   kit.actions = behaviors;
 
-  // ---- event modifiers: dedicated directives + companion attributes (mechanism, not policy) ----
-  // Dispatch is by attribute SELECTOR and the server verifies expressions by exact attribute NAME, so
-  // a modifier can't ride in a directive's name (a suffixed name is neither selectable nor verified).
-  // Two shapes instead: a companion attribute tunes the ACTOR's own event — data-kit-guard on a click,
-  // data-kit-debounce on a model input; a change of event SOURCE is its own ordinary expression
-  // directive — data-kit-away (a click OUTSIDE me) and data-kit-escape (the Escape key), both
-  // selectable and server-verified, and they inject the runtime like any other directive.
-  function guardFlags(el) {
-    var raw = el.getAttribute("data-kitwork-guard") || el.getAttribute("data-kit-guard") || "";
-    return raw ? raw.split(/\s+/) : [];
-  }
-  function applyGuard(el, e) {
-    if (!e) return;
-    var flags = guardFlags(el);
-    for (var i = 0; i < flags.length; i++) {
-      if (flags[i] === "prevent" && e.preventDefault) e.preventDefault();
-      else if (flags[i] === "stop" && e.stopPropagation) e.stopPropagation();
-    }
-  }
-  // data-kit-debounce="300": coalesce a burst of the actor's events into one, ms after it goes quiet.
-  // The pending timer lives in the element's state so cleanupTree cancels it when the actor unmounts.
-  function debounceMs(el) {
-    var raw = el.getAttribute("data-kitwork-debounce") || el.getAttribute("data-kit-debounce");
-    var n = raw ? parseInt(raw, 10) : 0;
-    return n > 0 ? n : 0;
-  }
-  function debounced(el, fn) {
-    var ms = debounceMs(el);
-    if (!ms) { fn(); return; }
-    var st = state(el);
-    if (st.debounceTimer) clearTimeout(st.debounceTimer);
-    st.debounceTimer = setTimeout(function () { st.debounceTimer = null; fn(); }, ms);
-  }
-
-  // Component methods are real JavaScript and may return a Promise (camera, clipboard, storage…).
-  // The expression walker stays synchronous, while an event effect observes the returned thenable
-  // and repaints once it settles. Async component methods therefore remain outside the closed
-  // grammar without requiring every method to end with a manual kit.render().
   function observeEffect(result, current) {
     if (result && typeof result.then === "function") {
       result.then(function () {
@@ -1166,16 +1128,139 @@
     return observeEffect(run(expression, current), current);
   }
 
-  // ---- ONE set of delegated listeners for everything ----
-  listen(document, "click", function (e) {
-    var ex = e.target.closest && e.target.closest(selector("click"));
-    if (ex) {
-      applyGuard(ex, e); // prevent/stop must run synchronously, before any debounce defers the handler
-      var x = directive(ex, "click");
-      if (x) debounced(ex, function () { runEffect(x, ex, e); render(); });
+  // data-kit-debounce="300": coalesce a burst of a data-kit-model input's writes into one, ms after it goes quiet.
+  // The pending timer lives in the element's state so cleanupTree cancels it when the actor unmounts.
+  function debounceMs(el) {
+    var raw = el.getAttribute("data-kitwork-debounce") || el.getAttribute("data-kit-debounce");
+    var n = raw ? parseInt(raw, 10) : 0;
+    return n > 0 ? n : 0;
+  }
+  function debounced(el, fn) {
+    var ms = debounceMs(el);
+    if (!ms) { fn(); return; }
+    var st = state(el);
+    if (st.debounceTimer) clearTimeout(st.debounceTimer);
+    st.debounceTimer = setTimeout(function () { st.debounceTimer = null; fn(); }, ms);
+  }
+  // ---- the event family: data-kit-<event>[:modifier...]="expr" (ideaship-final §2–§4) ----
+  // Dispatch is delegated at the document, one listener per event type. A modifier rides in the
+  // attribute NAME, so an element's handlers are read off getAttributeNames() once and kept on the
+  // element, the way the bind pass keeps its names. The author may write modifiers in any order; the
+  // runtime always runs the fixed pipeline of §4:
+  //   target (:window :document — listen regardless of where the event lands)
+  //   → filter (:outside :escape :enter — a failed filter STOPS here, the event is not swallowed)
+  //   → :prevent → :stop → timing (:debounce(n) :throttle(n)) → :once → run the expression.
+  // data-kit-debounce stays a companion of data-kit-model only (an input coalescing its own
+  // writes); for an event the delay is the :debounce(n) modifier.
+  var EVENT_TYPES = ["click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout"];
+  var KEY_FILTER = { escape: function (e) { return e.key === "Escape" || e.key === "Esc" || e.keyCode === 27; }, enter: function (e) { return e.key === "Enter" || e.keyCode === 13; } };
+  var OUTSIDE_TYPES = { click: true, dblclick: true, pointerdown: true, pointerup: true, focusin: true };
+  function parseHandler(attr, type) {
+    var h = { attr: attr, type: type, target: "self", outside: false, key: "", prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
+    var mods = attr.slice(("data-kit-" + type).length).split(":").slice(1);
+    for (var i = 0; i < mods.length; i++) {
+      var m = mods[i], timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(m);
+      if (m === "window" || m === "document") h.target = m;
+      else if (m === "outside") h.outside = true;
+      else if (m === "escape" || m === "enter") h.key = m;
+      else if (m === "prevent") h.prevent = true;
+      else if (m === "stop") h.stop = true;
+      else if (m === "once") h.once = true;
+      else if (timing) h[timing[1]] = parseInt(timing[2], 10);
+      else h.valid = false;
     }
-    var act = e.target.closest && e.target.closest(ACTION);
-    if (act) fire(act, e);
+    // A modifier that cannot apply to this event disables the handler rather than misfiring: the
+    // server's verify pass already named the mistake.
+    if (h.key && type !== "keydown" && type !== "keyup") h.valid = false;
+    if (h.outside && !OUTSIDE_TYPES[type]) h.valid = false;
+    if (h.debounce && h.throttle) h.valid = false;
+    return h;
+  }
+  function handlersOf(el) {
+    if (el.__kitEvents) return el.__kitEvents;
+    var list = [];
+    if (el.getAttributeNames) {
+      el.getAttributeNames().forEach(function (name) {
+        if (name.indexOf("data-kit-") !== 0) return;
+        for (var i = 0; i < EVENT_TYPES.length; i++) {
+          var head = "data-kit-" + EVENT_TYPES[i];
+          if (name === head || name.indexOf(head + ":") === 0) { list.push(parseHandler(name, EVENT_TYPES[i])); return; }
+        }
+      });
+    }
+    el.__kitEvents = list;
+    return list;
+  }
+  function programOf(el, attr) {
+    var raw = el.getAttribute(attr);
+    if (!raw) return null;
+    var key = "$" + raw;
+    if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
+    return cache[key];
+  }
+  // pipeline runs one handler for one event, filter first; returns true when :stop ends the walk.
+  function pipeline(el, h, e) {
+    if (!h.valid) return false;
+    var st = state(el);
+    if (st.once && st.once[h.attr]) return false;
+    if (h.key && !KEY_FILTER[h.key](e)) return false;
+    if (h.prevent && e.preventDefault) e.preventDefault();
+    if (h.stop && e.stopPropagation) e.stopPropagation();
+    var program = programOf(el, h.attr);
+    if (!program) return h.stop;
+    var execute = function () {
+      if (h.once) { (st.once || (st.once = {}))[h.attr] = true; }
+      runEffect(program, el, e);
+      render();
+    };
+    if (h.debounce) {
+      var timers = st.timers || (st.timers = {});
+      if (timers[h.attr]) clearTimeout(timers[h.attr]);
+      timers[h.attr] = setTimeout(function () { timers[h.attr] = null; execute(); }, h.debounce);
+    } else if (h.throttle) {
+      var last = st.lastRun || (st.lastRun = {}), now = Date.now();
+      if (last[h.attr] && now - last[h.attr] < h.throttle) return h.stop;
+      last[h.attr] = now;
+      execute();
+    } else {
+      execute();
+    }
+    return h.stop;
+  }
+  EVENT_TYPES.forEach(function (type) {
+    listen(document, type, function (e) {
+      // Direct handlers: the element that owns the attribute is the target or an ancestor of it.
+      var el = e.target;
+      while (el && el !== document) {
+        var hs = handlersOf(el), stopped = false;
+        for (var i = 0; i < hs.length; i++) {
+          var h = hs[i];
+          if (h.type !== type || h.target !== "self" || h.outside) continue;
+          if (pipeline(el, h, e)) stopped = true;
+        }
+        if (stopped) break;
+        el = el.parentElement;
+      }
+      // Listeners elsewhere: :window/:document run wherever the event landed; :outside runs when it
+      // landed anywhere but inside the element — and not on the element the very same event mounted.
+      document.querySelectorAll("*").forEach(function (owner) {
+        var hs = handlersOf(owner);
+        if (!hs.length) return;
+        for (var i = 0; i < hs.length; i++) {
+          var h = hs[i];
+          if (h.type !== type) continue;
+          if (h.outside) {
+            if (owner === e.target || (owner.contains && owner.contains(e.target))) continue;
+            if (isFresh(owner)) continue;
+          } else if (h.target === "self") continue;
+          pipeline(owner, h, e);
+        }
+      });
+      if (type === "click") {
+        var act = e.target.closest && e.target.closest(ACTION);
+        if (act) fire(act, e);
+      }
+    });
   });
   // data-kit-drag: a native window drag region (a custom title bar). Primary-button press hands the
   // drag to the OS through the private kit.window transport; double-click maximizes — standard
@@ -1206,32 +1291,6 @@
       scopeFor(el)[modelKey(el)] = modelValue(el);
       render();
     });
-  });
-  // data-kit-away="expr": a click OUTSIDE this element runs the expression (close a menu/popover).
-  // Pairs with data-kit-if — put it on the panel that only exists while open, and there is no
-  // outside-click work at all when it is closed. One render after the pass, however many regions fired.
-  var AWAY = "[data-kitwork-away],[data-kit-away]";
-  listen(document, "click", function (e) {
-    var fired = false;
-    document.querySelectorAll(AWAY).forEach(function (el) {
-      if (el === e.target || (el.contains && el.contains(e.target))) return; // a click inside is not "away"
-      if (isFresh(el)) return; // this region was mounted by the very click being processed — ignore it
-      var x = directive(el, "away"); if (!x) return;
-      runEffect(x, el, e); fired = true;
-    });
-    if (fired) render();
-  });
-  // data-kit-escape="expr": the Escape key runs the expression of every present escape region. A modal
-  // is a present region, so Escape closes it; the expression itself decides what "close" means.
-  var ESC = "[data-kitwork-escape],[data-kit-escape]";
-  listen(document, "keydown", function (e) {
-    if (e.key !== "Escape" && e.key !== "Esc" && e.keyCode !== 27) return;
-    var fired = false;
-    document.querySelectorAll(ESC).forEach(function (el) {
-      var x = directive(el, "escape"); if (!x) return;
-      runEffect(x, el, e); fired = true;
-    });
-    if (fired) render();
   });
   // Submit: the validate gate runs FIRST — an invalid form neither submits nor fires its verb;
   // the server re-checks the SAME rule for truth either way. A valid form then fires its verb.

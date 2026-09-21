@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -86,7 +87,61 @@ const (
 // directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
 // prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
 // Expressions use single-quoted string literals, so the value never contains a double quote.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|click|away|escape|validate|bind:[a-z][a-z0-9-]*|class)="([^"]*)"`)
+// An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4); its modifiers are
+// checked by checkEventModifiers, since the kernel disables a handler it cannot make sense of.
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|validate|bind:[a-z][a-z0-9-]*|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="([^"]*)"`)
+
+// The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
+// → filter → prevent → stop → timing → once. The author may write them in any order; the server
+// names a modifier the kernel would refuse, so the mistake is seen at render, not lost in silence.
+var eventTypes = map[string]bool{"click": true, "dblclick": true, "submit": true, "input": true, "change": true, "keydown": true, "keyup": true, "pointerdown": true, "pointerup": true, "focusin": true, "focusout": true}
+var outsideEventTypes = map[string]bool{"click": true, "dblclick": true, "pointerdown": true, "pointerup": true, "focusin": true}
+var timingModifierRe = regexp.MustCompile(`^(debounce|throttle)\(([0-9]+)\)$`)
+
+func checkEventModifiers(directive string) error {
+	parts := strings.Split(directive, ":")
+	event := parts[0]
+	if !eventTypes[event] {
+		return nil
+	}
+	seen := map[string]bool{}
+	timing := 0
+	for _, modifier := range parts[1:] {
+		name := modifier
+		if m := timingModifierRe.FindStringSubmatch(modifier); m != nil {
+			name = m[1]
+			timing++
+			if n, err := strconv.Atoi(m[2]); err != nil || n < 1 || n > 60000 {
+				return fmt.Errorf("%s(%s): the delay is 1–60000 milliseconds", m[1], m[2])
+			}
+		}
+		if seen[name] {
+			return fmt.Errorf("modifier :%s is repeated", name)
+		}
+		seen[name] = true
+		switch name {
+		case "window", "document", "outside", "escape", "enter", "prevent", "stop", "once", "debounce", "throttle":
+		default:
+			return fmt.Errorf("unknown modifier :%s (the pipeline is :window :document → :outside :escape :enter → :prevent → :stop → :debounce(n) :throttle(n) → :once)", name)
+		}
+	}
+	if (seen["escape"] || seen["enter"]) && event != "keydown" && event != "keyup" {
+		return fmt.Errorf(":escape and :enter filter a key, so they belong on keydown/keyup, not %s", event)
+	}
+	if seen["escape"] && seen["enter"] {
+		return fmt.Errorf(":escape and :enter cannot both be the filter")
+	}
+	if seen["outside"] && !outsideEventTypes[event] {
+		return fmt.Errorf(":outside applies to click, dblclick, pointerdown, pointerup and focusin, not %s", event)
+	}
+	if seen["window"] && seen["document"] {
+		return fmt.Errorf(":window and :document name two targets; pick one")
+	}
+	if timing > 1 {
+		return fmt.Errorf(":debounce and :throttle cannot both time one handler")
+	}
+	return nil
+}
 
 // presenceRe decides runtime INJECTION: authored data-kit-* forms (including the non-expression
 // attributes — model is a plain scope key, live an SSE URL, scope/component a boundary — which need
@@ -97,7 +152,7 @@ var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|click|away|escape|v
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|click|away|escape|validate|bind:[a-z][a-z0-9-]*|class|model|scope|component)="|data-kitwork-(?:text|show|if|for|click|away|escape|validate|bind|class)=['"]`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|validate|bind:[a-z][a-z0-9-]*|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="|data-kitwork-(?:text|show|if|for|click|validate|bind|class)=['"]`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
@@ -126,6 +181,10 @@ func Render(html string) string {
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
 		expression := authoredAttribute(m[2])
 		if _, err := Compile(expression); err != nil {
+			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
+			continue
+		}
+		if err := checkEventModifiers(m[1]); err != nil {
 			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
 			continue
 		}

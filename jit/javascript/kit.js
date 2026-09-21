@@ -3613,7 +3613,10 @@
   ).split(" ");
 
   EVENT_NAMES.forEach(function (name) { EVENTS[name] = true; });
-  "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
+  // The modifiers of ideaship-final §4, run in its fixed order whatever order the author wrote:
+  // target (window document) → filter (outside escape enter, and self) → prevent → stop →
+  // timing (debounce(n) throttle(n)) → once → run.
+  "self prevent stop once outside enter escape window document".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
   "component scope version alias ref retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
@@ -3646,30 +3649,35 @@
     var descriptor = {
       name: name,
       type: type,
+      target: "self",
       self: false,
       prevent: false,
       stop: false,
       once: false,
       outside: false,
       key: "",
-      delay: 0
+      delay: 0,
+      throttle: 0
     };
 
     parts.forEach(function (modifier) {
       if (!modifier) directiveError("empty event modifier", name);
       var canonical = modifier;
-      var debounce = /^debounce\(([0-9]+)\)$/.exec(modifier);
-      if (debounce) canonical = "debounce";
+      var timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(modifier);
+      if (timing) canonical = timing[1];
       else if (!MODIFIERS[modifier]) directiveError("unsupported event modifier \"" + modifier + "\"", name);
       if (seen[canonical]) directiveError("duplicate event modifier \"" + canonical + "\"", name);
       seen[canonical] = true;
 
-      if (canonical === "debounce") {
-        var delay = Number(debounce[1]);
+      if (canonical === "debounce" || canonical === "throttle") {
+        var delay = Number(timing[2]);
         if (!Number.isInteger(delay) || delay < 1 || delay > 60000) {
-          directiveError("debounce delay must be between 1 and 60000", name);
+          directiveError(canonical + " delay must be between 1 and 60000", name);
         }
-        descriptor.delay = delay;
+        if (canonical === "debounce") descriptor.delay = delay; else descriptor.throttle = delay;
+      } else if (canonical === "window" || canonical === "document") {
+        if (descriptor.target !== "self") directiveError("event cannot use both window and document", name);
+        descriptor.target = canonical;
       } else if (canonical === "enter" || canonical === "escape") {
         if (type !== "keydown" && type !== "keyup") {
           directiveError("keyboard modifier requires keydown or keyup", name);
@@ -3684,6 +3692,15 @@
     }
     if (descriptor.outside && descriptor.self) {
       directiveError("outside and self cannot be combined", name);
+    }
+    if (descriptor.self && descriptor.target !== "self") {
+      directiveError("self and " + descriptor.target + " cannot be combined", name);
+    }
+    if (descriptor.outside && descriptor.target !== "self") {
+      directiveError("outside already listens beyond the element; " + descriptor.target + " is redundant", name);
+    }
+    if (descriptor.delay && descriptor.throttle) {
+      directiveError("debounce and throttle cannot both time one handler", name);
     }
     return descriptor;
   }
@@ -4968,7 +4985,9 @@
   if (core.reuse) { core.phase = "events"; return; }
 
   var OWN = core.OWN;
-  var outsideActive = Object.create(null);
+  // Handlers that listen beyond their own element — :outside, :window, :document — are found by a
+  // document walk, so the walk only happens while such a handler exists for the event type.
+  var elsewhereActive = Object.create(null);
   var prepared = false;
 
   function validMetadata(element) {
@@ -5004,8 +5023,8 @@
         generation: 0,
         ownsRemoval: false
       } : null;
-      if (events[name] && descriptor.outside) {
-        outsideActive[descriptor.type] = (outsideActive[descriptor.type] || 0) + 1;
+      if (events[name] && listensElsewhere(descriptor)) {
+        elsewhereActive[descriptor.type] = (elsewhereActive[descriptor.type] || 0) + 1;
       }
     } catch (error) {
       core.report(error);
@@ -5075,8 +5094,8 @@
         state.ownsRemoval = false;
         if (core.releaseRemovalOwner) core.releaseRemovalOwner();
       }
-      if (state.descriptor.outside && outsideActive[state.descriptor.type]) {
-        outsideActive[state.descriptor.type]--;
+      if (listensElsewhere(state.descriptor) && elsewhereActive[state.descriptor.type]) {
+        elsewhereActive[state.descriptor.type]--;
       }
     });
   }
@@ -5170,6 +5189,12 @@
     state.timer = timer;
   }
 
+  function listensElsewhere(descriptor) {
+    return descriptor.outside || descriptor.target !== "self";
+  }
+
+  // execute is the tail of the fixed pipeline (ideaship-final §4) once the filters in matches()
+  // have passed: prevent → stop → timing (debounce or throttle) → run → once.
   function execute(state, element, event, eventSnapshot) {
     var descriptor = state.descriptor;
     if (descriptor.prevent && event.cancelable) event.preventDefault();
@@ -5178,6 +5203,11 @@
     if (descriptor.delay) {
       scheduleDebounce(state, element, eventSnapshot);
       return true;
+    }
+    if (descriptor.throttle) {
+      var now = Date.now();
+      if (state.lastRun && now - state.lastRun < descriptor.throttle) return true;
+      state.lastRun = now;
     }
 
     var success = core.executeAttribute(element, descriptor.name, locals(eventSnapshot));
@@ -5192,7 +5222,7 @@
       var stopped = false;
       for (var index = 0; index < states.length; index++) {
         var state = states[index];
-        if (state.descriptor.outside || !matches(state, element, target, event)) continue;
+        if (listensElsewhere(state.descriptor) || !matches(state, element, target, event)) continue;
         execute(state, element, event, eventSnapshot);
         if (state.descriptor.stop) stopped = true;
       }
@@ -5202,15 +5232,18 @@
     return false;
   }
 
-  function outside(event, target, eventSnapshot) {
+  // elsewhere runs the handlers that listen beyond their element: :outside when the event landed
+  // anywhere but inside it, :window/:document wherever it landed.
+  function elsewhere(event, target, eventSnapshot) {
     return Array.prototype.some.call(document.querySelectorAll("*"), function (element) {
       if (core.ignoredForRuntime(element)) return false;
-      if (element.contains(target)) return false;
+      var inside = element.contains(target);
       var states = eventStates(element, event.type);
       var stopped = false;
       for (var index = 0; index < states.length; index++) {
         var state = states[index];
-        if (!state.descriptor.outside || !matches(state, element, target, event)) continue;
+        if (!listensElsewhere(state.descriptor) || !matches(state, element, target, event)) continue;
+        if (state.descriptor.outside && inside) continue;
         execute(state, element, event, eventSnapshot);
         if (state.descriptor.stop) stopped = true;
       }
@@ -5224,8 +5257,8 @@
       if (!target || core.ignoredForRuntime(target)) return;
       if (event.type === "input" || event.type === "change") core.updateModel(target, event.type, false);
       var eventSnapshot = snapshot(event, target);
-      if (!direct(event, target, eventSnapshot) && outsideActive[event.type]) {
-        outside(event, target, eventSnapshot);
+      if (!direct(event, target, eventSnapshot) && elsewhereActive[event.type]) {
+        elsewhere(event, target, eventSnapshot);
       }
     } catch (error) { core.report(error); }
   }

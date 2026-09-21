@@ -973,10 +973,14 @@ func validateEventModifiers(attribute rawScannedAttribute, event string, modifie
 	key := ""
 	outside := false
 	self := false
+	target := ""
+	timing := 0
 	for _, modifier := range modifiers {
 		canonical := modifier
 		if strings.HasPrefix(modifier, "debounce(") && strings.HasSuffix(modifier, ")") {
 			canonical = "debounce"
+		} else if strings.HasPrefix(modifier, "throttle(") && strings.HasSuffix(modifier, ")") {
+			canonical = "throttle"
 		}
 		if !supportedEventModifier(modifier) {
 			return fmt.Errorf("%w at byte %d: %q uses unsupported event modifier %q", ErrUnsupportedAttribute, attribute.offset, attribute.name, modifier)
@@ -999,7 +1003,20 @@ func validateEventModifiers(attribute rawScannedAttribute, event string, modifie
 			outside = true
 		case "self":
 			self = true
+		case "window", "document":
+			if target != "" {
+				return fmt.Errorf("%w at byte %d: %q cannot combine window and document", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+			}
+			target = canonical
+		case "debounce", "throttle":
+			timing++
 		}
+	}
+	if timing > 1 {
+		return fmt.Errorf("%w at byte %d: %q cannot combine debounce and throttle", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	if target != "" && (self || outside) {
+		return fmt.Errorf("%w at byte %d: %q cannot combine %s with self or outside", ErrUnsupportedAttribute, attribute.offset, attribute.name, target)
 	}
 	if outside && !outsideEvent(event) {
 		return fmt.Errorf("%w at byte %d: %q uses outside on unsupported event %q", ErrUnsupportedAttribute, attribute.offset, attribute.name, event)
@@ -1019,15 +1036,22 @@ func outsideEvent(event string) bool {
 	}
 }
 
+// The modifiers of ideaship-final §4 — target (window document), filter (outside escape enter, and
+// self), prevent, stop, timing (debounce(n) throttle(n)), once — accepted in any authored order.
 func supportedEventModifier(modifier string) bool {
 	switch modifier {
-	case "self", "enter", "escape", "prevent", "stop", "once", "outside":
+	case "self", "enter", "escape", "prevent", "stop", "once", "outside", "window", "document":
 		return true
 	}
-	if !strings.HasPrefix(modifier, "debounce(") || !strings.HasSuffix(modifier, ")") {
+	var delay string
+	switch {
+	case strings.HasPrefix(modifier, "debounce(") && strings.HasSuffix(modifier, ")"):
+		delay = modifier[len("debounce(") : len(modifier)-1]
+	case strings.HasPrefix(modifier, "throttle(") && strings.HasSuffix(modifier, ")"):
+		delay = modifier[len("throttle(") : len(modifier)-1]
+	default:
 		return false
 	}
-	delay := modifier[len("debounce(") : len(modifier)-1]
 	if delay == "" {
 		return false
 	}

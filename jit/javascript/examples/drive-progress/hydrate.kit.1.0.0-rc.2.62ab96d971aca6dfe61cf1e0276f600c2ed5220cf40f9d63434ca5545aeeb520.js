@@ -3613,7 +3613,10 @@
   ).split(" ");
 
   EVENT_NAMES.forEach(function (name) { EVENTS[name] = true; });
-  "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
+  // The modifiers of ideaship-final §4, run in its fixed order whatever order the author wrote:
+  // target (window document) → filter (outside escape enter, and self) → prevent → stop →
+  // timing (debounce(n) throttle(n)) → once → run.
+  "self prevent stop once outside enter escape window document".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
   "component scope version alias ref retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
@@ -3646,30 +3649,35 @@
     var descriptor = {
       name: name,
       type: type,
+      target: "self",
       self: false,
       prevent: false,
       stop: false,
       once: false,
       outside: false,
       key: "",
-      delay: 0
+      delay: 0,
+      throttle: 0
     };
 
     parts.forEach(function (modifier) {
       if (!modifier) directiveError("empty event modifier", name);
       var canonical = modifier;
-      var debounce = /^debounce\(([0-9]+)\)$/.exec(modifier);
-      if (debounce) canonical = "debounce";
+      var timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(modifier);
+      if (timing) canonical = timing[1];
       else if (!MODIFIERS[modifier]) directiveError("unsupported event modifier \"" + modifier + "\"", name);
       if (seen[canonical]) directiveError("duplicate event modifier \"" + canonical + "\"", name);
       seen[canonical] = true;
 
-      if (canonical === "debounce") {
-        var delay = Number(debounce[1]);
+      if (canonical === "debounce" || canonical === "throttle") {
+        var delay = Number(timing[2]);
         if (!Number.isInteger(delay) || delay < 1 || delay > 60000) {
-          directiveError("debounce delay must be between 1 and 60000", name);
+          directiveError(canonical + " delay must be between 1 and 60000", name);
         }
-        descriptor.delay = delay;
+        if (canonical === "debounce") descriptor.delay = delay; else descriptor.throttle = delay;
+      } else if (canonical === "window" || canonical === "document") {
+        if (descriptor.target !== "self") directiveError("event cannot use both window and document", name);
+        descriptor.target = canonical;
       } else if (canonical === "enter" || canonical === "escape") {
         if (type !== "keydown" && type !== "keyup") {
           directiveError("keyboard modifier requires keydown or keyup", name);
@@ -3684,6 +3692,15 @@
     }
     if (descriptor.outside && descriptor.self) {
       directiveError("outside and self cannot be combined", name);
+    }
+    if (descriptor.self && descriptor.target !== "self") {
+      directiveError("self and " + descriptor.target + " cannot be combined", name);
+    }
+    if (descriptor.outside && descriptor.target !== "self") {
+      directiveError("outside already listens beyond the element; " + descriptor.target + " is redundant", name);
+    }
+    if (descriptor.delay && descriptor.throttle) {
+      directiveError("debounce and throttle cannot both time one handler", name);
     }
     return descriptor;
   }
@@ -4968,7 +4985,9 @@
   if (core.reuse) { core.phase = "events"; return; }
 
   var OWN = core.OWN;
-  var outsideActive = Object.create(null);
+  // Handlers that listen beyond their own element — :outside, :window, :document — are found by a
+  // document walk, so the walk only happens while such a handler exists for the event type.
+  var elsewhereActive = Object.create(null);
   var prepared = false;
 
   function validMetadata(element) {
@@ -5004,8 +5023,8 @@
         generation: 0,
         ownsRemoval: false
       } : null;
-      if (events[name] && descriptor.outside) {
-        outsideActive[descriptor.type] = (outsideActive[descriptor.type] || 0) + 1;
+      if (events[name] && listensElsewhere(descriptor)) {
+        elsewhereActive[descriptor.type] = (elsewhereActive[descriptor.type] || 0) + 1;
       }
     } catch (error) {
       core.report(error);
@@ -5075,8 +5094,8 @@
         state.ownsRemoval = false;
         if (core.releaseRemovalOwner) core.releaseRemovalOwner();
       }
-      if (state.descriptor.outside && outsideActive[state.descriptor.type]) {
-        outsideActive[state.descriptor.type]--;
+      if (listensElsewhere(state.descriptor) && elsewhereActive[state.descriptor.type]) {
+        elsewhereActive[state.descriptor.type]--;
       }
     });
   }
@@ -5170,6 +5189,12 @@
     state.timer = timer;
   }
 
+  function listensElsewhere(descriptor) {
+    return descriptor.outside || descriptor.target !== "self";
+  }
+
+  // execute is the tail of the fixed pipeline (ideaship-final §4) once the filters in matches()
+  // have passed: prevent → stop → timing (debounce or throttle) → run → once.
   function execute(state, element, event, eventSnapshot) {
     var descriptor = state.descriptor;
     if (descriptor.prevent && event.cancelable) event.preventDefault();
@@ -5178,6 +5203,11 @@
     if (descriptor.delay) {
       scheduleDebounce(state, element, eventSnapshot);
       return true;
+    }
+    if (descriptor.throttle) {
+      var now = Date.now();
+      if (state.lastRun && now - state.lastRun < descriptor.throttle) return true;
+      state.lastRun = now;
     }
 
     var success = core.executeAttribute(element, descriptor.name, locals(eventSnapshot));
@@ -5192,7 +5222,7 @@
       var stopped = false;
       for (var index = 0; index < states.length; index++) {
         var state = states[index];
-        if (state.descriptor.outside || !matches(state, element, target, event)) continue;
+        if (listensElsewhere(state.descriptor) || !matches(state, element, target, event)) continue;
         execute(state, element, event, eventSnapshot);
         if (state.descriptor.stop) stopped = true;
       }
@@ -5202,15 +5232,18 @@
     return false;
   }
 
-  function outside(event, target, eventSnapshot) {
+  // elsewhere runs the handlers that listen beyond their element: :outside when the event landed
+  // anywhere but inside it, :window/:document wherever it landed.
+  function elsewhere(event, target, eventSnapshot) {
     return Array.prototype.some.call(document.querySelectorAll("*"), function (element) {
       if (core.ignoredForRuntime(element)) return false;
-      if (element.contains(target)) return false;
+      var inside = element.contains(target);
       var states = eventStates(element, event.type);
       var stopped = false;
       for (var index = 0; index < states.length; index++) {
         var state = states[index];
-        if (!state.descriptor.outside || !matches(state, element, target, event)) continue;
+        if (!listensElsewhere(state.descriptor) || !matches(state, element, target, event)) continue;
+        if (state.descriptor.outside && inside) continue;
         execute(state, element, event, eventSnapshot);
         if (state.descriptor.stop) stopped = true;
       }
@@ -5224,8 +5257,8 @@
       if (!target || core.ignoredForRuntime(target)) return;
       if (event.type === "input" || event.type === "change") core.updateModel(target, event.type, false);
       var eventSnapshot = snapshot(event, target);
-      if (!direct(event, target, eventSnapshot) && outsideActive[event.type]) {
-        outside(event, target, eventSnapshot);
+      if (!direct(event, target, eventSnapshot) && elsewhereActive[event.type]) {
+        elsewhere(event, target, eventSnapshot);
       }
     } catch (error) { core.report(error); }
   }
@@ -8020,19 +8053,14 @@
   if (!core || core.phase !== "drive") throw new Error("KitJS: component graph loaded out of order");
   var services = Object.create(null);
   services["progress"] = "1.0.0";
-  services["request"] = "1.0.0";
   var components = Object.create(null);
   components["progress-bar"] = "2.0.0";
-  components["request-form"] = "1.0.0";
   var actions = Object.create(null);
   actions["progress"] = Object.create(null);
-  actions["request"] = Object.create(null);
   var grants = Object.create(null);
   grants["progress-bar"] = Object.create(null);
-  grants["request-form"] = Object.create(null);
   grants["progress-bar"]["progress"] = "1.0.0";
-  grants["request-form"]["request"] = "1.0.0";
-  var graph = { id: "52b5370e6461c643aec6dfebb50009b5bc12b7cbe26cb5bdb9db89a8769f35eb", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
+  var graph = { id: "c172db57681372247e8fd565aab9a8e636af23f7e9b17e570bf449db8111ad3c", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
   if (core.reuse) {
     var installed = global.kit && global.kit[GRAPH];
     if (!installed || installed.id !== graph.id || installed.profile !== graph.profile) {
@@ -8251,474 +8279,6 @@ kit.service("progress", {
 document.addEventListener("kit:navigation", navigation);
 })(globalThis, document, kit);
     })(kit);
-    ; (function (kit) {
-;(function (global, document, kit) {
-"use strict";
-
-// KitJS service: request@1.0.0
-var OWN = Object.prototype.hasOwnProperty;
-var METHODS = Object.freeze({
-  GET: true,
-  HEAD: true,
-  POST: true,
-  PUT: true,
-  PATCH: true,
-  DELETE: true
-});
-var OPTION_KEYS = Object.freeze({
-  method: true,
-  headers: true,
-  data: true,
-  key: true,
-  timeout: true
-});
-var MAX_ACTIVE = 256;
-var MAX_KEY_LENGTH = 128;
-var MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-var active = new Map();
-var sequence = 0;
-
-function plainSnapshot(value, label) {
-  var prototype = value && Object.getPrototypeOf(value);
-  if (!value || prototype !== Object.prototype && prototype !== null ||
-    Object.getOwnPropertySymbols(value).length) {
-    throw new TypeError(label + " must be a plain object");
-  }
-  var descriptors = Object.getOwnPropertyDescriptors(value);
-  var output = Object.create(null);
-  Object.keys(descriptors).forEach(function (name) {
-    var descriptor = descriptors[name];
-    if (!OWN.call(descriptor, "value")) {
-      throw new TypeError(label + " must not contain accessors");
-    }
-    output[name] = descriptor.value;
-  });
-  return output;
-}
-
-function optionsOf(value) {
-  if (value === undefined) value = Object.create(null);
-  var options = plainSnapshot(value, "Request options");
-  Object.keys(options).forEach(function (name) {
-    if (!OWN.call(OPTION_KEYS, name)) {
-      throw new TypeError("Unknown request option: " + name);
-    }
-  });
-  return options;
-}
-
-function methodOf(value) {
-  if (value === undefined) return "GET";
-  if (typeof value !== "string" || value !== value.trim()) {
-    throw new TypeError("Request method must be GET, HEAD, POST, PUT, PATCH, or DELETE");
-  }
-  var method = value.toUpperCase();
-  if (!OWN.call(METHODS, method)) {
-    throw new TypeError("Request method must be GET, HEAD, POST, PUT, PATCH, or DELETE");
-  }
-  return method;
-}
-
-function keyOf(value) {
-  if (value === undefined) return null;
-  if (typeof value !== "string" || !value || value !== value.trim() || value.length > MAX_KEY_LENGTH) {
-    throw new TypeError("Request key must be a non-empty string up to 128 characters without surrounding whitespace");
-  }
-  return value;
-}
-
-function timeoutOf(value) {
-  if (value === undefined) return 0;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 120000) {
-    throw new TypeError("Request timeout must be an integer from 0 to 120000 milliseconds");
-  }
-  return value;
-}
-
-function urlOf(value) {
-  if (typeof value !== "string" || !value) throw new TypeError("Request URL must be a non-empty string");
-  var url;
-  try { url = new global.URL(value, global.location.href); }
-  catch (_) { throw new TypeError("Request URL is invalid"); }
-  if ((url.protocol !== "http:" && url.protocol !== "https:") ||
-    url.origin !== global.location.origin || url.username || url.password) {
-    throw new TypeError("Request URL must be a same-origin HTTP(S) URL");
-  }
-  url.hash = "";
-  return url.href;
-}
-
-function headersOf(value) {
-  var headers = new global.Headers();
-  if (value === undefined) return headers;
-  var entries = plainSnapshot(value, "Request headers");
-  Object.keys(entries).forEach(function (name) {
-    if (typeof entries[name] !== "string") {
-      throw new TypeError("Request header values must be strings");
-    }
-    headers.set(name, entries[name]);
-  });
-  return headers;
-}
-
-function isJSONType(value) {
-  var type = String(value || "").split(";", 1)[0].trim().toLowerCase();
-  return type === "application/json" || /\+json$/.test(type);
-}
-
-function csrfToken() {
-  var meta = document.querySelector('meta[name="csrf-token"]');
-  return meta ? String(meta.getAttribute("content") || "") : "";
-}
-
-function validatePlatform() {
-  if (typeof global.URL !== "function" || typeof global.fetch !== "function" ||
-    typeof global.AbortController !== "function" || typeof global.Headers !== "function" ||
-    typeof global.TextDecoder !== "function" || !global.location ||
-    typeof global.location.href !== "string" || typeof global.location.origin !== "string") {
-    throw new TypeError("Request requires URL, fetch, AbortController, Headers, TextDecoder, and location");
-  }
-}
-
-function requestError(code, message, status, url, data) {
-  var error = new Error(message);
-  Object.defineProperties(error, {
-    name: { value: "KitRequestError" },
-    code: { value: code, enumerable: true },
-    status: { value: status || 0, enumerable: true },
-    url: { value: url || "", enumerable: true },
-    data: { value: data === undefined ? null : data, enumerable: true }
-  });
-  return Object.freeze(error);
-}
-
-function resultOf(status, url, data) {
-  return Object.freeze(Object.assign(Object.create(null), {
-    status: status,
-    url: url,
-    data: data
-  }));
-}
-
-function cancel(record, message) {
-  if (!record || record.cancelled || record.timedOut || record.done) return false;
-  record.cancelled = true;
-  record.cancelMessage = message;
-  try { record.controller.abort(); }
-  catch (_) { /* Cancellation state still wins if AbortController is best effort. */ }
-  return true;
-}
-
-function cancelError(record) {
-  return requestError("CANCELLED", record.cancelMessage || "Request was cancelled", 0, record.url, null);
-}
-
-function activate(record) {
-  if (record.key === null) return;
-  var previous = active.get(record.key);
-  if (previous) {
-    active.delete(record.key);
-    cancel(previous, "Request was superseded");
-  } else if (active.size >= MAX_ACTIVE) {
-    var oldest = active.entries().next().value;
-    if (oldest) {
-      active.delete(oldest[0]);
-      cancel(oldest[1], "Request was cancelled to enforce capacity");
-    }
-  }
-  active.set(record.key, record);
-}
-
-function release(record) {
-  record.done = true;
-  if (record.timeoutID !== null) {
-    global.clearTimeout(record.timeoutID);
-    record.timeoutID = null;
-  }
-  if (record.key !== null && active.get(record.key) === record) active.delete(record.key);
-}
-
-function progressID() {
-  sequence++;
-  if (!Number.isSafeInteger(sequence)) sequence = 1;
-  return "request:" + sequence;
-}
-
-function finalURL(response, fallback) {
-  var url;
-  try { url = new global.URL(response.url || fallback, fallback); }
-  catch (_) { return ""; }
-  if ((url.protocol !== "http:" && url.protocol !== "https:") ||
-    url.origin !== global.location.origin || url.username || url.password) return "";
-  url.hash = "";
-  return url.href;
-}
-
-function exactLength(response) {
-  var encoding = String(response.headers.get("content-encoding") || "").trim().toLowerCase();
-  if (encoding && encoding !== "identity") return null;
-  var source = String(response.headers.get("content-length") || "").trim();
-  if (!/^(?:0|[1-9][0-9]*)$/.test(source)) return null;
-  var total = Number(source);
-  return Number.isSafeInteger(total) ? total : null;
-}
-
-function cancelBody(response) {
-  try {
-    if (response.body && typeof response.body.cancel === "function") {
-      var pending = response.body.cancel();
-      if (pending && typeof pending.catch === "function") pending.catch(function () {});
-    }
-  } catch (_) { /* The response will be released with the request. */ }
-}
-
-async function responseBytes(response, record, status, url) {
-  var total;
-  try { total = exactLength(response); }
-  catch (_) {
-    throw requestError("INVALID_RESPONSE", "Request returned invalid response headers", status, url, null);
-  }
-  if (total !== null && total > MAX_RESPONSE_BYTES) {
-    cancelBody(response);
-    throw requestError("TOO_LARGE", "Response exceeds the 8 MiB limit", status, url, null);
-  }
-  if (!response.body) {
-    if (total !== null && total !== 0) {
-      throw requestError("INVALID_RESPONSE", "Response body length did not match its headers", status, url, null);
-    }
-    return new Uint8Array(0);
-  }
-  if (typeof response.body.getReader !== "function") {
-    cancelBody(response);
-    throw requestError("INVALID_RESPONSE", "Response body is not readable", status, url, null);
-  }
-
-  var reader;
-  try { reader = response.body.getReader(); }
-  catch (_) {
-    throw requestError("INVALID_RESPONSE", "Response body is not readable", status, url, null);
-  }
-  var chunks = [];
-  var loaded = 0;
-  try {
-    for (;;) {
-      if (record.cancelled) throw cancelError(record);
-      var item = await reader.read();
-      if (record.cancelled) throw cancelError(record);
-      if (item.done) break;
-      var value = item.value;
-      if (!value || !(value instanceof Uint8Array)) {
-        throw requestError("INVALID_RESPONSE", "Response body contained an invalid chunk", status, url, null);
-      }
-      if (value.byteLength === 0) continue;
-      if (loaded > MAX_RESPONSE_BYTES - value.byteLength) {
-        throw requestError("TOO_LARGE", "Response exceeds the 8 MiB limit", status, url, null);
-      }
-      loaded += value.byteLength;
-      chunks.push(value.slice());
-      if (total !== null && total > 0) {
-        if (loaded > total) {
-          throw requestError("INVALID_RESPONSE", "Response body length did not match its headers", status, url, null);
-        }
-        kit.progress.update(record.progressID, loaded, total);
-      }
-    }
-  } catch (error) {
-    try {
-      var cancelled = reader.cancel();
-      if (cancelled && typeof cancelled.catch === "function") cancelled.catch(function () {});
-    } catch (_) { /* AbortController also owns cancellation. */ }
-    throw error;
-  } finally {
-    if (typeof reader.releaseLock === "function") {
-      try { reader.releaseLock(); }
-      catch (_) { /* Completed or cancelled readers may already be unlocked. */ }
-    }
-  }
-  if (total !== null && loaded !== total) {
-    throw requestError("INVALID_RESPONSE", "Response body length did not match its headers", status, url, null);
-  }
-  var bytes = new Uint8Array(loaded);
-  var offset = 0;
-  chunks.forEach(function (chunk) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  });
-  chunks.length = 0;
-  return bytes;
-}
-
-async function responseData(response, record, status, url, method) {
-  if (method === "HEAD" || status === 204 || status === 205) {
-    cancelBody(response);
-    return null;
-  }
-  var bytes = await responseBytes(response, record, status, url);
-  var text;
-  try { text = new global.TextDecoder().decode(bytes); }
-  catch (_) {
-    throw requestError("INVALID_RESPONSE", "Response text could not be decoded", status, url, null);
-  }
-  var contentType;
-  try { contentType = response.headers.get("content-type"); }
-  catch (_) {
-    throw requestError("INVALID_RESPONSE", "Request returned invalid response headers", status, url, null);
-  }
-  if (!isJSONType(contentType)) return text;
-  try { return JSON.parse(text); }
-  catch (_) {
-    throw requestError("INVALID_RESPONSE", "Response JSON is invalid", status, url, null);
-  }
-}
-
-function prepare(url, input) {
-  validatePlatform();
-  var options = optionsOf(input);
-  var method = methodOf(options.method);
-  var headers = headersOf(options.headers);
-  var hasData = OWN.call(options, "data");
-  var body;
-  if (hasData && (method === "GET" || method === "HEAD")) {
-    throw new TypeError(method + " requests cannot contain data");
-  }
-  if (hasData) {
-    try { body = JSON.stringify(options.data); }
-    catch (_) { throw new TypeError("Request data must be JSON-serializable"); }
-    if (body === undefined) throw new TypeError("Request data must be JSON-serializable");
-    var contentType = headers.get("content-type");
-    if (contentType && !isJSONType(contentType)) {
-      throw new TypeError("Request data requires a JSON Content-Type");
-    }
-    if (!contentType) headers.set("Content-Type", "application/json");
-  }
-  if (method !== "GET" && method !== "HEAD" && !headers.has("X-CSRF-Token")) {
-    var token = csrfToken();
-    if (token) headers.set("X-CSRF-Token", token);
-  }
-  return {
-    url: urlOf(url),
-    method: method,
-    headers: headers,
-    body: body,
-    key: keyOf(options.key),
-    timeout: timeoutOf(options.timeout)
-  };
-}
-
-async function execute(plan) {
-  var record = {
-    controller: new global.AbortController(),
-    key: plan.key,
-    url: plan.url,
-    progressID: progressID(),
-    timeoutID: null,
-    cancelled: false,
-    cancelMessage: "",
-    timedOut: false,
-    done: false
-  };
-  activate(record);
-  if (plan.timeout) {
-    record.timeoutID = global.setTimeout(function () {
-      if (record.done || record.cancelled) return;
-      record.timedOut = true;
-      try { record.controller.abort(); }
-      catch (_) { /* Timeout state still wins if AbortController is best effort. */ }
-    }, plan.timeout);
-  }
-  kit.progress.start(record.progressID, {
-    source: "request",
-    url: plan.url
-  });
-
-  var outcome = "error";
-  try {
-    var response = await global.fetch(plan.url, {
-      method: plan.method,
-      headers: plan.headers,
-      body: plan.body,
-      signal: record.controller.signal,
-      credentials: "same-origin",
-      mode: "same-origin",
-      redirect: "follow"
-    });
-    if (record.cancelled) throw cancelError(record);
-    if (record.timedOut) {
-      throw requestError("TIMEOUT", "Request timed out", 0, plan.url, null);
-    }
-    if (!response || !Number.isInteger(response.status) || response.status < 100 || response.status > 599 ||
-      !response.headers || typeof response.headers.get !== "function") {
-      throw requestError("INVALID_RESPONSE", "Request returned an invalid response", 0, plan.url, null);
-    }
-    var url = finalURL(response, plan.url);
-    if (!url) {
-      cancelBody(response);
-      throw requestError("INVALID_RESPONSE", "Request redirected outside its origin", response.status, plan.url, null);
-    }
-    var data = await responseData(response, record, response.status, url, plan.method);
-    if (record.cancelled) throw cancelError(record);
-    if (record.timedOut) {
-      throw requestError("TIMEOUT", "Request timed out", 0, plan.url, null);
-    }
-    if (response.status < 200 || response.status > 299) {
-      throw requestError("HTTP", "Request failed with HTTP " + response.status, response.status, url, data);
-    }
-    outcome = "loaded";
-    return resultOf(response.status, url, data);
-  } catch (error) {
-    if (record.cancelled) {
-      outcome = "cancelled";
-      throw cancelError(record);
-    }
-    if (record.timedOut) {
-      throw requestError("TIMEOUT", "Request timed out", 0, plan.url, null);
-    }
-    if (error && error.name === "KitRequestError") throw error;
-    throw requestError("NETWORK", "Request failed", 0, plan.url, null);
-  } finally {
-    release(record);
-    kit.progress.finish(record.progressID, outcome);
-  }
-}
-
-function send(url, options) {
-  return execute(prepare(url, options));
-}
-
-function convenienceOptions(value, method, data, withData) {
-  var options = optionsOf(value);
-  if (OWN.call(options, "method")) throw new TypeError(method + " options cannot override method");
-  if (OWN.call(options, "data")) throw new TypeError(method + " options cannot contain data");
-  options.method = method;
-  if (withData) options.data = data;
-  return options;
-}
-
-function get(url, options) {
-  return send(url, convenienceOptions(options, "GET", null, false));
-}
-
-function post(url, data, options) {
-  return send(url, convenienceOptions(options, "POST", data, true));
-}
-
-function abort(key) {
-  if (key === undefined) throw new TypeError("Request abort requires a key");
-  key = keyOf(key);
-  var record = active.get(key);
-  if (!record) return false;
-  active.delete(key);
-  return cancel(record, "Request was aborted");
-}
-
-kit.service("request", {
-  send: send,
-  get: get,
-  post: post,
-  abort: abort
-});
-})(globalThis, document, kit);
-    })(kit);
     if (typeof core.sealServices !== "function") throw new Error("KitJS: service graph sealer is unavailable");
     core.sealServices();
     ; (function (kit) {
@@ -8776,87 +8336,6 @@ kit.component("progress-bar", {
       clearHide();
       unsubscribe();
     };
-  }
-});
-
-})();
-    })(kit);
-    ; (function (kit) {
-;(function () {
-"use strict";
-
-var requestKey = "profile-save";
-
-function errorMessage(error) {
-  var code = error && typeof error.code === "string" ? error.code : "NETWORK";
-  if (code === "HTTP") return "The server rejected this profile.";
-  if (code === "TIMEOUT") return "The request took too long and was stopped.";
-  if (code === "CANCELLED") return "The request was cancelled.";
-  if (code === "INVALID_RESPONSE") return "The server returned an invalid response.";
-  if (code === "TOO_LARGE") return "The server response was too large.";
-  return "The profile could not be saved. Check the connection and try again.";
-}
-
-kit.component("request-form", {
-  name: "Ada Lovelace",
-  email: "ada@example.test",
-  phase: "idle",
-  message: "Ready to save a profile.",
-  responseStatus: "",
-  attempt: 0,
-
-  init: function () {
-    return function () {
-      kit.request.abort(requestKey);
-    };
-  },
-
-  save: async function (url) {
-    var endpoint = typeof url === "string" && url ? url : "/api/profile";
-    var current = this.attempt + 1;
-    this.attempt = current;
-    this.phase = "pending";
-    this.message = "Saving " + this.name + "...";
-    this.responseStatus = "";
-
-    try {
-      var result = await kit.request.post(endpoint, {
-        name: this.name,
-        email: this.email
-      }, {
-        key: requestKey,
-        timeout: 10000
-      });
-
-      if (current !== this.attempt) return;
-      this.phase = "success";
-      this.responseStatus = String(result.status);
-      this.message = "Saved " + this.name + ".";
-    } catch (error) {
-      if (current !== this.attempt) return;
-      this.phase = error && error.code === "CANCELLED" ? "cancelled" : "error";
-      this.message = errorMessage(error);
-      this.responseStatus = error && error.status ? String(error.status) : "";
-    }
-  },
-
-  fail: function () {
-    return this.save("/api/profile?demo=error");
-  },
-
-  latestWins: async function () {
-    var older = this.save("/api/profile?demo=slow");
-    var latest = this.save("/api/profile?demo=fast");
-    await Promise.all([older, latest]);
-  },
-
-  cancel: function () {
-    if (!kit.request.abort(requestKey)) {
-      this.message = "There is no active request to cancel.";
-      return;
-    }
-    this.phase = "cancelled";
-    this.message = "Cancellation requested.";
   }
 });
 

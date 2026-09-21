@@ -91,6 +91,10 @@ const genericEventDirectiveDocument = `<!doctype html>
       <input id="modifier-escape" data-kit-keydown:escape="mark('escape')">
       <input id="modifier-debounce" data-kit-input:debounce(30)="mark('debounce')">
       <form id="modifier-debounce-prevent" data-kit-submit:prevent:debounce(30)="mark('debounce-prevent')"></form>
+      <div id="modifier-window" data-kit-keydown:escape:window="mark('on-window')">a div cannot be focused, so :window listens for it</div>
+      <button type="button" id="modifier-document" data-kit-click:document="mark('on-document')">document</button>
+      <button type="button" id="modifier-throttle" data-kit-click:throttle(30000)="mark('throttle')">throttle</button>
+      <input id="modifier-filter-first" data-kit-keydown:prevent:enter="mark('filter-first')">
     </section>
 
     <section id="invalid-events">
@@ -106,6 +110,11 @@ const genericEventDirectiveDocument = `<!doctype html>
       <input id="invalid-debounce-text" data-kit-input:debounce(nope)="mark('invalid')">
       <input id="invalid-debounce-too-large" data-kit-input:debounce(60001)="mark('invalid')">
       <input id="invalid-debounce-duplicate" data-kit-input:debounce(10):debounce(20)="mark('invalid')">
+      <input id="invalid-timing-both" data-kit-input:debounce(10):throttle(20)="mark('invalid')">
+      <button type="button" id="invalid-window-document" data-kit-click:window:document="mark('invalid')">window document</button>
+      <button type="button" id="invalid-self-window" data-kit-click:self:window="mark('invalid')">self window</button>
+      <button type="button" id="invalid-outside-window" data-kit-click:outside:window="mark('invalid')">outside window</button>
+      <input id="invalid-throttle-zero" data-kit-input:throttle(0)="mark('invalid')">
     </section>
   </main>
 
@@ -272,6 +281,28 @@ __runStandaloneKitTest(async function () {
   assert(count("debounce") === 0, "debounce ran before its quiet period");
   await waitFor(function () { return count("debounce") === 1; }, "debounce did not coalesce a burst into one action");
 
+  // :window — the event lands elsewhere (a div takes no focus); :document likewise; the element
+  // itself as the target fires once, not twice.
+  var windowBefore = count("on-window");
+  fire(document.body, "keydown", { key: "a" });
+  assert(count("on-window") === windowBefore, "keydown:escape:window fired for a key the filter rejects");
+  fire(document.body, "keydown", { key: "Escape" });
+  assert(count("on-window") === windowBefore + 1, "keydown:escape:window did not fire for an Escape that landed on the body");
+  var documentBefore = count("on-document");
+  fire(document.body, "click");
+  fire("modifier-document", "click");
+  assert(count("on-document") === documentBefore + 2, "click:document should fire for a click anywhere, once per event (the element as target is not twice), got +" + (count("on-document") - documentBefore));
+  // :throttle(n) — leading edge, then quiet for n.
+  fire("modifier-throttle", "click");
+  fire("modifier-throttle", "click");
+  fire("modifier-throttle", "click");
+  assert(count("throttle") === 1, "throttle should run the leading edge once inside its window, got " + count("throttle"));
+  // Filter before prevent, whatever order the author wrote: a rejected key is not swallowed.
+  var rejected = fire("modifier-filter-first", "keydown", { key: "a", cancelable: true });
+  assert(!rejected.defaultPrevented && count("filter-first") === 0, "a key the filter rejected must not be prevented");
+  var accepted = fire("modifier-filter-first", "keydown", { key: "Enter", cancelable: true });
+  assert(accepted.defaultPrevented && count("filter-first") === 1, "an accepted key runs the pipeline: prevent, then the action");
+
   var debouncedSubmit = fire("modifier-debounce-prevent", "submit");
   assert(debouncedSubmit.defaultPrevented, "prevent was delayed behind debounce");
   assert(count("debounce-prevent") === 0, "debounced submit action ran synchronously");
@@ -293,6 +324,12 @@ __runStandaloneKitTest(async function () {
   fire("invalid-debounce-text", "input");
   fire("invalid-debounce-too-large", "input");
   fire("invalid-debounce-duplicate", "input");
+  fire("invalid-timing-both", "input");
+  fire("invalid-window-document", "click");
+  fire("invalid-self-window", "click");
+  fire("invalid-outside-window", "click");
+  fire(document.body, "click");
+  fire("invalid-throttle-zero", "input");
   await new Promise(function (resolve) { setTimeout(resolve, 60); });
   assert(count("invalid") === 0, "an invalid event attribute degraded into an executable handler");
   assert(globalThis.__kitEventErrors.some(function (message) {

@@ -2,77 +2,113 @@ package hydrate
 
 import "testing"
 
-// Event modifiers, the shape the user chose: dedicated directives (data-kit-away / data-kit-escape,
-// which change the event SOURCE) plus companion attributes (data-kit-guard / data-kit-debounce, which
-// tune the actor's own event). This drives the REAL delegated listeners through the shim's event
-// dispatch, and pins the discriminating behaviour of each — the thing a regression would break:
+// The event family with the fixed modifier pipeline of ideaship-final §4 — target → filter →
+// prevent → stop → timing → once → run — driven through the REAL delegated listeners by the shim's
+// event dispatch. Each check pins the discriminating behaviour a regression would break:
 //
-//   guard    → prevent calls preventDefault synchronously, AND the handler still runs;
-//   away     → a click OUTSIDE fires; a click INSIDE does NOT (the whole point of click-away);
-//   escape   → the Escape key fires; any other key does NOT;
-//   debounce → the model write is DEFERRED (not applied on the keystroke) and a burst COALESCES to
-//              the final value.
-//
-// Each check is disable-code-shaped: remove applyGuard → guard red; drop the inside-guard in away →
-// inside click fires red; drop the key check in escape → 'a' fires red; skip debounced() → the model
-// updates immediately and the deferral assert goes red.
+//	:prevent          → preventDefault is called synchronously AND the handler still runs;
+//	:outside          → a click OUTSIDE fires; a click INSIDE does NOT;
+//	:escape :window   → the Escape key fires wherever focus is; another key does NOT — and a
+//	                    failed filter does NOT swallow the event (no preventDefault);
+//	:enter            → the Enter key fires on the element's own keydown;
+//	:stop             → the walk up the ancestors ends at the element that stopped;
+//	:once             → the second event does not run;
+//	:throttle(n)      → a burst inside the window runs once, the leading edge;
+//	unknown modifier  → the handler is disabled, not misfired;
+//	data-kit-debounce → still the model input's own coalescing, deferred to the final value.
 func TestKitEventModifiers(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
+function evt(type, target, extra) {
+  var e = { type: type, target: target, defaultPrevented: false, _stopped: false,
+    preventDefault: function () { this.defaultPrevented = true; },
+    stopPropagation: function () { this._stopped = true; } };
+  if (extra) for (var k in extra) e[k] = extra[k];
+  return e;
+}
 
-// ---- guard: data-kit-guard="prevent" on a click actor ----
+// ---- :prevent — preventDefault, then the handler still runs ----
 var form = el("form", { "data-kit-scope": "n = 0" });
-var btn = el("button", { "data-kit-click": "n = n + 1", "data-kit-guard": "prevent" });
+var btn = el("button", { "data-kit-click:prevent": "n = n + 1" });
 form.appendChild(btn);
 document.body.appendChild(form);
 kit.render();
-
-var clickEvt = { type: "click", target: btn, defaultPrevented: false,
-  preventDefault: function () { this.defaultPrevented = true; },
-  stopPropagation: function () { this._stopped = true; } };
+var clickEvt = evt("click", btn);
 document.dispatchEvent(clickEvt);
-if (!clickEvt.defaultPrevented) throw new Error("guard: prevent did not call preventDefault");
-if (kit.scopeFor(form).n !== 1) throw new Error("guard: click handler did not run, n = " + kit.scopeFor(form).n);
+if (!clickEvt.defaultPrevented) throw new Error(":prevent did not call preventDefault");
+if (kit.scopeFor(form).n !== 1) throw new Error(":prevent: handler did not run, n = " + kit.scopeFor(form).n);
 
-// ---- away: click OUTSIDE fires, click INSIDE does not ----
-var menu = el("div", { "data-kit-away": "open = false", "data-kit-scope": "open = true" });
+// ---- :outside — a click outside fires, a click inside does not ----
+var menu = el("div", { "data-kit-click:outside": "open = false", "data-kit-scope": "open = true" });
 var link = el("a");
 menu.appendChild(link);
 document.body.appendChild(menu);
-if (kit.scopeFor(menu).open !== true) throw new Error("away: initial open should be true");
+document.dispatchEvent(evt("click", link));
+if (kit.scopeFor(menu).open !== true) throw new Error(":outside: an inside click must NOT fire");
+document.dispatchEvent(evt("click", document.body));
+if (kit.scopeFor(menu).open !== false) throw new Error(":outside: an outside click must fire");
 
-document.dispatchEvent({ type: "click", target: link });   // inside the menu
-if (kit.scopeFor(menu).open !== true) throw new Error("away: an inside click must NOT fire away");
-
-document.dispatchEvent({ type: "click", target: document.body }); // outside the menu
-if (kit.scopeFor(menu).open !== false) throw new Error("away: an outside click must fire away");
-
-// ---- escape: Escape fires, another key does not ----
-var modal = el("div", { "data-kit-escape": "open = false", "data-kit-scope": "open = true" });
+// ---- :escape:window — filter first: another key neither fires nor is swallowed ----
+var modal = el("div", { "data-kit-keydown:escape:window:prevent": "open = false", "data-kit-scope": "open = true" });
 document.body.appendChild(modal);
-if (kit.scopeFor(modal).open !== true) throw new Error("escape: initial open should be true");
+var other = evt("keydown", document.body, { key: "a" });
+document.dispatchEvent(other);
+if (kit.scopeFor(modal).open !== true) throw new Error(":escape: a non-Escape key must NOT fire");
+if (other.defaultPrevented) throw new Error("a failed filter must not swallow the event (preventDefault ran before the filter)");
+var esc = evt("keydown", document.body, { key: "Escape" });
+document.dispatchEvent(esc);
+if (kit.scopeFor(modal).open !== false) throw new Error(":escape:window: the Escape key must fire wherever focus is");
+if (!esc.defaultPrevented) throw new Error(":prevent should run once the filter passed");
 
-document.dispatchEvent({ type: "keydown", key: "a" });
-if (kit.scopeFor(modal).open !== true) throw new Error("escape: a non-Escape key must NOT fire");
+// ---- :enter on the element's own keydown ----
+var field = el("input", { "data-kit-keydown:enter": "sent = sent + 1", "data-kit-scope": "sent = 0" });
+document.body.appendChild(field);
+document.dispatchEvent(evt("keydown", field, { key: "Enter" }));
+document.dispatchEvent(evt("keydown", field, { key: "x" }));
+if (kit.scopeFor(field).sent !== 1) throw new Error(":enter should fire for Enter only, sent = " + kit.scopeFor(field).sent);
 
-document.dispatchEvent({ type: "keydown", key: "Escape" });
-if (kit.scopeFor(modal).open !== false) throw new Error("escape: the Escape key must fire");
+// ---- :stop ends the walk; without it the ancestor also runs ----
+var outer = el("div", { "data-kit-click": "hits = hits + 'outer,'", "data-kit-scope": "hits = ''" });
+var inner = el("button", { "data-kit-click:stop": "hits = hits + 'inner,'" });
+var plain = el("button", { "data-kit-click": "hits = hits + 'plain,'" });
+outer.appendChild(inner); outer.appendChild(plain);
+document.body.appendChild(outer);
+document.dispatchEvent(evt("click", inner));
+if (kit.scopeFor(outer).hits !== "inner,") throw new Error(":stop should end the walk at the inner button, hits = " + kit.scopeFor(outer).hits);
+document.dispatchEvent(evt("click", plain));
+if (kit.scopeFor(outer).hits !== "inner,plain,outer,") throw new Error("without :stop the ancestor runs after the target, hits = " + kit.scopeFor(outer).hits);
 
-// ---- debounce: model write deferred + coalesced to the final value ----
+// ---- :once ----
+var once = el("button", { "data-kit-click:once": "count = count + 1", "data-kit-scope": "count = 0" });
+document.body.appendChild(once);
+document.dispatchEvent(evt("click", once));
+document.dispatchEvent(evt("click", once));
+if (kit.scopeFor(once).count !== 1) throw new Error(":once should run a single time, count = " + kit.scopeFor(once).count);
+
+// ---- :throttle(n) — leading edge, then quiet for n ms ----
+var burst = el("button", { "data-kit-click:throttle(500)": "ticks = ticks + 1", "data-kit-scope": "ticks = 0" });
+document.body.appendChild(burst);
+document.dispatchEvent(evt("click", burst));
+document.dispatchEvent(evt("click", burst));
+document.dispatchEvent(evt("click", burst));
+if (kit.scopeFor(burst).ticks !== 1) throw new Error(":throttle should run the leading edge once inside the window, ticks = " + kit.scopeFor(burst).ticks);
+
+// ---- an unknown modifier disables the handler ----
+var odd = el("button", { "data-kit-click:mystery": "n = n + 1" });
+form.appendChild(odd);
+document.dispatchEvent(evt("click", odd));
+if (kit.scopeFor(form).n !== 1) throw new Error("an unknown modifier must disable the handler, n = " + kit.scopeFor(form).n);
+
+// ---- data-kit-debounce on a model input: deferred, coalesced ----
 var box = el("input", { "data-kit-model": "q", "data-kit-debounce": "40", "data-kit-scope": "q = ''" });
 box.value = "";
 document.body.appendChild(box);
-if (kit.scopeFor(box).q !== "") throw new Error("debounce: initial q should be empty");
-
-box.value = "a";  document.dispatchEvent({ type: "input", target: box });
-box.value = "ab"; document.dispatchEvent({ type: "input", target: box });
-// Right now — before the debounce window elapses — the scope must be untouched.
-if (kit.scopeFor(box).q !== "") throw new Error("debounce: model updated immediately, not deferred (q=" + kit.scopeFor(box).q + ")");
-
-// After the window: exactly the final value, once (the burst coalesced).
+box.value = "a";  document.dispatchEvent(evt("input", box));
+box.value = "ab"; document.dispatchEvent(evt("input", box));
+if (kit.scopeFor(box).q !== "") throw new Error("model debounce: updated immediately, not deferred (q=" + kit.scopeFor(box).q + ")");
 setTimeout(function () {
-  if (kit.scopeFor(box).q !== "ab") throw new Error("debounce: after settle expected 'ab', got '" + kit.scopeFor(box).q + "'");
-  console.log("event modifiers: guard(prevent) + away(inside/outside) + escape(key) + debounce(defer/coalesce) OK");
+  if (kit.scopeFor(box).q !== "ab") throw new Error("model debounce: after settle expected 'ab', got '" + kit.scopeFor(box).q + "'");
+  console.log("event pipeline: prevent, outside, escape:window (filter first), enter, stop, once, throttle, unknown-disabled, model debounce OK");
 }, 90);
 `
 	runNodeDOMScript(t, "events.test.js", assertions)
