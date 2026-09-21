@@ -956,13 +956,37 @@
       if (key === "length") return owner.length;
       return OWN.call(owner, key) ? owner[key] : undefined;
     }
+    if (isElement(owner)) return OWN.call(ELEMENT_READS, key) ? owner[key] : undefined;
     if ((typeof owner === "object" || typeof owner === "function") && OWN.call(owner, key)) {
       return markResultOwner(owner[key], resolvedOwner, true);
     }
     return undefined;
   }
 
+  // A DOM element reaches an expression only through `$refs` (data-kit-ref, ideaship-final §6),
+  // and the grammar stays closed around it the way it is around a string or an array: a short list
+  // of state reads and imperative verbs, nothing that walks the tree or rewrites it. Writes to an
+  // element go through bindings, never through a ref.
+  var ELEMENT_READS = Object.create(null);
+  ("value checked selected open disabled hidden readOnly required indeterminate id name type title " +
+    "tagName textContent dataset files length selectionStart selectionEnd scrollTop scrollLeft " +
+    "scrollHeight scrollWidth clientWidth clientHeight offsetWidth offsetHeight offsetTop offsetLeft " +
+    "validationMessage willValidate valueAsNumber currentTime duration paused muted volume ended " +
+    "readyState naturalWidth naturalHeight complete childElementCount").split(" ").forEach(function (name) {
+      ELEMENT_READS[name] = true;
+    });
+  var ELEMENT_CALLS = Object.create(null);
+  ("focus blur click select setSelectionRange scrollIntoView scrollTo scrollBy showModal show close " +
+    "showPicker reportValidity checkValidity requestSubmit reset play pause load getAttribute " +
+    "hasAttribute matches").split(" ").forEach(function (name) {
+      ELEMENT_CALLS[name] = true;
+    });
+  function isElement(value) {
+    return !!value && typeof value === "object" && typeof Element !== "undefined" && value instanceof Element;
+  }
+
   function hasMethod(receiver, name) {
+    if (isElement(receiver)) return OWN.call(ELEMENT_CALLS, name) && typeof receiver[name] === "function";
     if (typeof receiver === "string") {
       return ["includes", "startsWith", "endsWith", "trim", "toLowerCase", "toUpperCase"].indexOf(name) >= 0;
     }
@@ -974,6 +998,10 @@
       OWN.call(receiver, name) && typeof receiver[name] === "function";
   }
   function method(receiver, name, args) {
+    if (isElement(receiver)) {
+      return OWN.call(ELEMENT_CALLS, name) && typeof receiver[name] === "function" ?
+        receiver[name].apply(receiver, args) : undefined;
+    }
     if (typeof receiver === "string") {
       if (name === "includes" && args.length === 1) return receiver.includes(String(args[0]));
       if (name === "startsWith" && args.length === 1) return receiver.startsWith(String(args[0]));
@@ -3323,6 +3351,31 @@
     while ((element = walker.nextNode())) output.push(element);
     return output;
   }
+  // refsFor builds `$refs` for an action running on `element` (ideaship-final §6: data-kit-ref
+  // names a DOM element, data-kit-alias names an instance). The registry is the boundary's own —
+  // the nearest component host or data-kit-scope, else the page — so a name is looked up among
+  // the refs that boundary owns, never inside a nested boundary and never outside. The first
+  // element with a name wins; a missing name is nullish (`$refs.search?.focus()`). Built per
+  // action, since the elements it points at are whatever the DOM holds at that moment.
+  function refsFor(element) {
+    var output = Object.create(null);
+    var host = nearest(element);
+    var candidates;
+    if (host) {
+      var current = core.scopes.get(host);
+      candidates = current ? ownedElements(current, "[data-kit-ref]") : [];
+    } else {
+      candidates = Array.prototype.filter.call(document.querySelectorAll("[data-kit-ref]"), function (candidate) {
+        return !core.ignoredForRuntime(candidate) && nearest(candidate) === null;
+      });
+    }
+    candidates.forEach(function (candidate) {
+      var name = (candidate.getAttribute("data-kit-ref") || "").trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || core.blocked(name) || core.FORBIDDEN[name]) return;
+      if (!OWN.call(output, name)) output[name] = candidate;
+    });
+    return Object.freeze(output);
+  }
   function initialize(current) {
     if (!current || current.initialized || current.disposed) return;
     current.initialized = true;
@@ -3532,6 +3585,7 @@
   core.scopeRecordFor = scopeRecordFor;
   core.ownsElement = ownsElement;
   core.ownedElements = ownedElements;
+  core.refsFor = refsFor;
   core.initialize = initialize;
   core.flushAfterRender = flushAfterRender;
   core.liveComponents = liveComponents;
@@ -3562,7 +3616,7 @@
   "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version alias retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
+  "component scope version alias ref retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
@@ -3911,7 +3965,11 @@
     if (current) core.initialize(current);
     try {
       if (core.localsFor) locals = core.localsFor(element, locals);
-      program.read(current ? current.scope : EMPTY_SCOPE, locals, function (value, owner) {
+      // `$refs` rides every action: the elements the acting boundary named with data-kit-ref.
+      var withRefs = Object.create(null);
+      if (locals) Object.keys(locals).forEach(function (key) { withRefs[key] = locals[key]; });
+      withRefs.$refs = core.refsFor(element);
+      program.read(current ? current.scope : EMPTY_SCOPE, withRefs, function (value, owner) {
         core.observe(value, owner);
       });
       return true;

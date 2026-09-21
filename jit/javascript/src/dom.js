@@ -268,7 +268,11 @@
     if (current) core.initialize(current);
     try {
       if (core.localsFor) locals = core.localsFor(element, locals);
-      program.read(current ? current.scope : EMPTY_SCOPE, locals, function (value, owner) {
+      // `$refs` rides every action: the elements the acting boundary named with data-kit-ref.
+      var withRefs = Object.create(null);
+      if (locals) Object.keys(locals).forEach(function (key) { withRefs[key] = locals[key]; });
+      withRefs.$refs = core.refsFor(element);
+      program.read(current ? current.scope : EMPTY_SCOPE, withRefs, function (value, owner) {
         core.observe(value, owner);
       });
       return true;

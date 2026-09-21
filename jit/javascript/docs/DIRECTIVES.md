@@ -13,6 +13,7 @@ Unknown directives, events, modifiers, and invalid combinations fail closed.
 | `data-kit-scope="count: 3, open: true"` | Creates one anonymous shallow store, or seeds the component on the same host. Values use the bounded pure-data grammar. |
 | `data-kit-component="counter@1.0.0"` | Creates one isolated managed instance and asserts its exact closed-graph identity. Direct client registrations use an unversioned name. It never selects, downloads, or upgrades code in the browser. |
 | `data-kit-alias="$counter"` | Gives a component an action-only alias. Bindings cannot observe alias state, except the exact canonical App 1.1 loader fields `$app.loader.visible` and `$app.loader.value`. |
+| `data-kit-ref="search"` | Names one DOM element for `$refs.search` in ACTIONS of the boundary that owns it (the nearest component host or `data-kit-scope`, else the page); a nested boundary's ref is not visible from outside, an outer one not from inside, and a missing name is nullish (`$refs.search?.focus()`). The element answers a closed set of reads (`value`, `checked`, `open`, `scrollTop`, `dataset`, …) and verbs (`focus()`, `blur()`, `click()`, `select()`, `scrollIntoView()`, `showModal()`, `close()`, `reportValidity()`, `play()`, `getAttribute()`, …); writes go through bindings, never through a ref. |
 | `data-kit-retain="app-counter"` | In Hydrate, preserves this exact component host and live store across a compatible Morph. The key is unique and is not an HTML `id`. |
 
 `data-kit-scope` and `data-kit-component` cannot be placed on `<template>`.

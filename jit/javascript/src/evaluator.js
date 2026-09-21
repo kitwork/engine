@@ -311,13 +311,37 @@
       if (key === "length") return owner.length;
       return OWN.call(owner, key) ? owner[key] : undefined;
     }
+    if (isElement(owner)) return OWN.call(ELEMENT_READS, key) ? owner[key] : undefined;
     if ((typeof owner === "object" || typeof owner === "function") && OWN.call(owner, key)) {
       return markResultOwner(owner[key], resolvedOwner, true);
     }
     return undefined;
   }
 
+  // A DOM element reaches an expression only through `$refs` (data-kit-ref, ideaship-final §6),
+  // and the grammar stays closed around it the way it is around a string or an array: a short list
+  // of state reads and imperative verbs, nothing that walks the tree or rewrites it. Writes to an
+  // element go through bindings, never through a ref.
+  var ELEMENT_READS = Object.create(null);
+  ("value checked selected open disabled hidden readOnly required indeterminate id name type title " +
+    "tagName textContent dataset files length selectionStart selectionEnd scrollTop scrollLeft " +
+    "scrollHeight scrollWidth clientWidth clientHeight offsetWidth offsetHeight offsetTop offsetLeft " +
+    "validationMessage willValidate valueAsNumber currentTime duration paused muted volume ended " +
+    "readyState naturalWidth naturalHeight complete childElementCount").split(" ").forEach(function (name) {
+      ELEMENT_READS[name] = true;
+    });
+  var ELEMENT_CALLS = Object.create(null);
+  ("focus blur click select setSelectionRange scrollIntoView scrollTo scrollBy showModal show close " +
+    "showPicker reportValidity checkValidity requestSubmit reset play pause load getAttribute " +
+    "hasAttribute matches").split(" ").forEach(function (name) {
+      ELEMENT_CALLS[name] = true;
+    });
+  function isElement(value) {
+    return !!value && typeof value === "object" && typeof Element !== "undefined" && value instanceof Element;
+  }
+
   function hasMethod(receiver, name) {
+    if (isElement(receiver)) return OWN.call(ELEMENT_CALLS, name) && typeof receiver[name] === "function";
     if (typeof receiver === "string") {
       return ["includes", "startsWith", "endsWith", "trim", "toLowerCase", "toUpperCase"].indexOf(name) >= 0;
     }
@@ -329,6 +353,10 @@
       OWN.call(receiver, name) && typeof receiver[name] === "function";
   }
   function method(receiver, name, args) {
+    if (isElement(receiver)) {
+      return OWN.call(ELEMENT_CALLS, name) && typeof receiver[name] === "function" ?
+        receiver[name].apply(receiver, args) : undefined;
+    }
     if (typeof receiver === "string") {
       if (name === "includes" && args.length === 1) return receiver.includes(String(args[0]));
       if (name === "startsWith" && args.length === 1) return receiver.startsWith(String(args[0]));

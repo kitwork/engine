@@ -765,6 +765,7 @@ for `for`, not a separate family:
 |---|---|---|
 | scope | `data-kit-scope="count: 0, open: true"` | creates one anonymous local-state boundary or seeds the component on the same host |
 | component | `data-kit-component="counter@1.0.0"` | creates one isolated managed instance at an exact packaged version; optional `data-kit-alias="$name"` exposes an action-only handle; unversioned names are for direct client registration |
+| ref | `data-kit-ref="search"` | names one DOM element for `$refs.search` in actions of the boundary that owns it (nearest component host or scope, else the page); nested boundaries do not see each other's refs; a missing name is nullish; the element exposes a closed set of reads and verbs (`focus()`, `select()`, `scrollIntoView()`, `showModal()`, …), no writes |
 | text | `data-kit-text="count"` | writes synchronous expression results through `textContent` |
 | show | `data-kit-show="open"` | toggles the `hidden` property without removing the node |
 | bind | `data-kit-bind:aria-expanded="open"` | writes safe attributes and a small form-property allowlist |

@@ -903,6 +903,10 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	// the name. One target per attribute; the old "a: x; b: y" list is not authored any more.
 	case "bind":
 		return validateBindingTarget(attribute, parts[1:])
+	// data-kit-ref names a DOM element for `$refs.<name>` (ideaship-final §6); the name is a plain
+	// identifier so the expression can spell it as a member.
+	case "ref":
+		return validateRefName(attribute, parts[1:])
 	// "highlight" is server-only: the JIT highlight pass consumes it while
 	// rendering and the browser never sees a directive for it. It is listed here
 	// so an authored code slot is not rejected as an unknown data-kit-* name.
@@ -927,6 +931,24 @@ func unsafeBindingTarget(target string) bool {
 		return true
 	}
 	return strings.HasPrefix(target, "on") || strings.HasPrefix(target, "data-kit")
+}
+
+// refName is what data-kit-ref may hold: an identifier, so `$refs.search` reads it. A `$` prefix,
+// a hyphen or a blocked/prototype word would not survive the expression's member rule.
+var refName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+func validateRefName(attribute rawScannedAttribute, rest []string) error {
+	if len(rest) != 0 {
+		return fmt.Errorf("%w at byte %d: %q does not accept modifiers", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	if !attribute.hasValue || strings.TrimSpace(attribute.value) == "" {
+		return fmt.Errorf("%w at byte %d: data-kit-ref requires a name", ErrUnsupportedAttribute, attribute.offset)
+	}
+	name := strings.TrimSpace(attribute.value)
+	if !refName.MatchString(name) || expressionBlockedNames[name] || expressionForbiddenNames[name] {
+		return fmt.Errorf("%w at byte %d: data-kit-ref %q is not a usable name; use an identifier ($refs.%s must read it)", ErrUnsupportedAttribute, attribute.offset, name, name)
+	}
+	return nil
 }
 
 func validateBindingTarget(attribute rawScannedAttribute, rest []string) error {

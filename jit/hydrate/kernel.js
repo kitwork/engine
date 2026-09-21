@@ -632,10 +632,31 @@
       get: function (t, k) {
         if (k === "$el") return el;
         if (k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
+        if (k === "$refs") return refsFor(el);
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
+    });
+  }
+  // refsFor is `$refs` for an expression acting on `el` (ideaship-final §6: data-kit-ref names a
+  // DOM element, data-kit-alias names an instance). The registry belongs to the acting boundary —
+  // the nearest data-kit-scope/component/item, else the page — and holds only the refs that
+  // boundary owns: not one inside a nested boundary, not one outside. The first element with a
+  // name wins; a missing name is nullish, so `$refs.search?.focus()` is the guarded spelling.
+  // Looked up on read, since the elements are whatever the DOM holds at that moment.
+  function refsFor(el) {
+    var boundary = (el.closest && el.closest(SCOPE)) || null;
+    return new Proxy(Object.create(null), {
+      get: function (t, name) {
+        if (typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return undefined;
+        var candidates = (boundary || document).querySelectorAll('[data-kit-ref="' + name + '"]');
+        for (var i = 0; i < candidates.length; i++) {
+          if (candidates[i].closest(SCOPE) === boundary) return candidates[i];
+        }
+        return undefined;
+      },
+      set: function () { return false; }
     });
   }
 

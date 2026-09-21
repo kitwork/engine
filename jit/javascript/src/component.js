@@ -1505,6 +1505,31 @@
     while ((element = walker.nextNode())) output.push(element);
     return output;
   }
+  // refsFor builds `$refs` for an action running on `element` (ideaship-final §6: data-kit-ref
+  // names a DOM element, data-kit-alias names an instance). The registry is the boundary's own —
+  // the nearest component host or data-kit-scope, else the page — so a name is looked up among
+  // the refs that boundary owns, never inside a nested boundary and never outside. The first
+  // element with a name wins; a missing name is nullish (`$refs.search?.focus()`). Built per
+  // action, since the elements it points at are whatever the DOM holds at that moment.
+  function refsFor(element) {
+    var output = Object.create(null);
+    var host = nearest(element);
+    var candidates;
+    if (host) {
+      var current = core.scopes.get(host);
+      candidates = current ? ownedElements(current, "[data-kit-ref]") : [];
+    } else {
+      candidates = Array.prototype.filter.call(document.querySelectorAll("[data-kit-ref]"), function (candidate) {
+        return !core.ignoredForRuntime(candidate) && nearest(candidate) === null;
+      });
+    }
+    candidates.forEach(function (candidate) {
+      var name = (candidate.getAttribute("data-kit-ref") || "").trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || core.blocked(name) || core.FORBIDDEN[name]) return;
+      if (!OWN.call(output, name)) output[name] = candidate;
+    });
+    return Object.freeze(output);
+  }
   function initialize(current) {
     if (!current || current.initialized || current.disposed) return;
     current.initialized = true;
@@ -1714,6 +1739,7 @@
   core.scopeRecordFor = scopeRecordFor;
   core.ownsElement = ownsElement;
   core.ownedElements = ownedElements;
+  core.refsFor = refsFor;
   core.initialize = initialize;
   core.flushAfterRender = flushAfterRender;
   core.liveComponents = liveComponents;

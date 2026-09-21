@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const driveProgressArtifactName = "hydrate.kit.1.0.0-rc.2.5954e5339511415bbbbf5c84668f4d7542e165f47dfb0ca20df92269760e55c3.js"
+const driveProgressArtifactName = "hydrate.kit.1.0.0-rc.2.81197805e844eedd1840a62024e790c292abf2ac7487fbac466e88cdcfc81df3.js"
 
 var driveProgressHostRE = regexp.MustCompile(`(?is)<section\b[^>]*\bdata-kit-retain\s*=\s*"app-progress"[^>]*>`)
 
