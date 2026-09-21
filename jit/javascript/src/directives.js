@@ -17,7 +17,7 @@
   "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version as retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
+  "component scope version alias retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {

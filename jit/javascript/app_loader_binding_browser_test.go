@@ -22,7 +22,7 @@ func TestAppLoaderCrossBoundaryBindingLifecycleBrowser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := `<!doctype html><html data-kit-component="app@1.1.0" data-kit-as="$app"><head><meta charset="utf-8"><title>app loader binding</title></head><body data-kit-scope="loader: 'body-clean'">
+	document := `<!doctype html><html data-kit-component="app@1.1.0" data-kit-alias="$app"><head><meta charset="utf-8"><title>app loader binding</title></head><body data-kit-scope="loader: 'body-clean'">
 <output id="visible" data-kit-text="$app.loader.visible"></output>
 <output id="value" data-kit-text="$app.loader.value === null ? 'pending' : $app.loader.value + '%'"></output>
 <div id="shown" data-kit-show="!$app.loader.visible"></div>
@@ -127,7 +127,7 @@ func TestAppLoaderBindingRequiresCanonicalApp110Browser(t *testing.T) {
 		{version: "1.2.0", script: future.Bytes()},
 	} {
 		t.Run(test.version, func(t *testing.T) {
-			document := `<!doctype html><html data-kit-component="app@` + test.version + `" data-kit-as="$app"><head><meta charset="utf-8"><title>noncanonical app</title></head><body data-kit-scope="local: 0"><output id="old" data-kit-text="$app.loader.visible">server-old</output><script>globalThis.__kitDiagnostics=[];console.error=function(){__kitDiagnostics.push(1);};</script><script src="/kit.js"></script><script>` + browserHarness + `__runStandaloneKitTest(async function(){__kitTestAssert(document.getElementById("old").textContent==="server-old","noncanonical app projected loader binding");__kitTestAssert(__kitDiagnostics.length>0,"noncanonical app loader rejection was silent");});</script></body></html>`
+			document := `<!doctype html><html data-kit-component="app@` + test.version + `" data-kit-alias="$app"><head><meta charset="utf-8"><title>noncanonical app</title></head><body data-kit-scope="local: 0"><output id="old" data-kit-text="$app.loader.visible">server-old</output><script>globalThis.__kitDiagnostics=[];console.error=function(){__kitDiagnostics.push(1);};</script><script src="/kit.js"></script><script>` + browserHarness + `__runStandaloneKitTest(async function(){__kitTestAssert(document.getElementById("old").textContent==="server-old","noncanonical app projected loader binding");__kitTestAssert(__kitDiagnostics.length>0,"noncanonical app loader rejection was silent");});</script></body></html>`
 			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 				if request.URL.Path == "/kit.js" {
 					response.Header().Set("Content-Type", "text/javascript; charset=utf-8")

@@ -121,7 +121,7 @@ document.addEventListener("DOMContentLoaded", function () {
     root.setAttribute("data-kit-test-error", String(error && error.message || error));
   });
 }, { once: true });
-</script></head><body><main data-kit-component="app@1.4.0" data-kit-as="$app"></main></body></html>`
+</script></head><body><main data-kit-component="app@1.4.0" data-kit-alias="$app"></main></body></html>`
 
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if source, exists := assets[request.URL.Path]; exists {

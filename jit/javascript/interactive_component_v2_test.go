@@ -226,7 +226,7 @@ __runStandaloneKitTest(async function () {
 var interactiveComponentV2Document = fmt.Sprintf(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>interactive v2</title></head><body>
   <main id="background">
-    <section id="outer" data-kit-component="dialog@2.0.0" data-kit-as="$outer">
+    <section id="outer" data-kit-component="dialog@2.0.0" data-kit-alias="$outer">
       <button id="outer-trigger" type="button" data-dialog-trigger>Open outer</button>
       <div id="outer-panel" data-dialog-panel role="dialog" aria-modal="true" hidden>
         <input id="outer-hidden-input" type="hidden" data-dialog-initial-focus>

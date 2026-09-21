@@ -45,7 +45,7 @@ func morphFixture() string {
 	var page strings.Builder
 	page.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>KitJS Morph contract</title></head>
 <body data-route="old">
-  <main id="keeper" data-kit-component="keeper" data-kit-as="$keeper">
+  <main id="keeper" data-kit-component="keeper" data-kit-alias="$keeper">
     <button id="increment" type="button" data-kit-click:once="increment()">Increment once</button>
     <output id="count" data-kit-text="count">server-old</output>
     <div id="morph-style" style="width: 7px; height: 9px; opacity: 0.1 !important"
@@ -68,7 +68,7 @@ func morphFixture() string {
       <li id="row-b">B old</li>
     </ul>
   </main>
-  <section id="replacement" data-kit-component="replaceable" data-kit-as="$old" data-kit-show="ready">
+  <section id="replacement" data-kit-component="replaceable" data-kit-alias="$old" data-kit-show="ready">
     <output data-kit-text="count">old replacement</output>
   </section>
   <section id="remove-parent" data-kit-component="remove-parent">
@@ -168,7 +168,7 @@ __runStandaloneKitTest(async function () {
   };
 
   var incoming = new DOMParser().parseFromString(` + "`" + `<!doctype html><html><body data-route="new">
-    <main id="keeper" data-kit-component="keeper" data-kit-as="$keeper">
+    <main id="keeper" data-kit-component="keeper" data-kit-alias="$keeper">
       <button id="increment" type="button" data-kit-click:once="increment()">Increment after morph</button>
       <output id="count" data-kit-text="count">server-next</output>
       <div id="morph-style" style="width: 12px; height: 10px; opacity: 0.25 !important"
@@ -191,7 +191,7 @@ __runStandaloneKitTest(async function () {
         <li id="row-a">A next</li>
       </ul>
     </main>
-    <section id="replacement" data-kit-component="replaceable" data-kit-as="$new" data-kit-show="ready">
+    <section id="replacement" data-kit-component="replaceable" data-kit-alias="$new" data-kit-show="ready">
       <output data-kit-text="count">new replacement</output>
     </section>
     <section id="added" data-kit-component="added"><output id="added-output" data-kit-text="value">server</output></section>

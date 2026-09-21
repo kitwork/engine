@@ -1826,7 +1826,7 @@
   var OWN = core.OWN;
   var BOUNDARIES = "[data-kit-component],[data-kit-scope]";
   var METADATA = "[data-kit-component],[data-kit-version],[data-kit-scope]";
-  var ALIASES = "[data-kit-as]";
+  var ALIASES = "[data-kit-alias]";
   var aliases = new WeakMap();
   var metadata = new WeakMap();
   var localRegistry = new Map();
@@ -3187,7 +3187,7 @@
         name: request.name,
         version: request.version,
         lane: request.lane,
-        alias: host.hasAttribute("data-kit-as") ? aliasName(host) : null
+        alias: host.hasAttribute("data-kit-alias") ? aliasName(host) : null
       }) : null
     };
     var scope = new Proxy(target, {
@@ -3273,7 +3273,7 @@
     var hasScope = element.hasAttribute("data-kit-scope");
     var seed = core.scopeSeed(element, true);
     var request = componentMetadata(element, true);
-    var invalidAlias = request === undefined && hasScope && element.hasAttribute("data-kit-as");
+    var invalidAlias = request === undefined && hasScope && element.hasAttribute("data-kit-alias");
     if (invalidAlias) aliasName(element);
     if (request === null || hasScope && seed === null || request === undefined && !hasScope || invalidAlias) {
       core.scopes.set(element, { host: element, failed: true, disposed: false });
@@ -3347,7 +3347,7 @@
   function liveComponents(root) {
     var output = [];
     componentElements(root).forEach(function (element) {
-      if (element.hasAttribute("data-kit-as")) aliasName(element);
+      if (element.hasAttribute("data-kit-alias")) aliasName(element);
       var current = ensureComponent(element);
       if (current) output.push(current);
     });
@@ -3405,9 +3405,9 @@
   }
   function aliasName(element) {
     if (aliases.has(element)) return aliases.get(element);
-    var name = (element.getAttribute("data-kit-as") || "").trim();
+    var name = (element.getAttribute("data-kit-alias") || "").trim();
     if (!element.hasAttribute("data-kit-component") || !validAlias(name)) {
-      core.report(new TypeError("KitJS: data-kit-as requires a component host and a valid $alias"));
+      core.report(new TypeError("KitJS: data-kit-alias requires a component host and a valid $alias"));
       name = null;
     }
     aliases.set(element, name);
@@ -3562,7 +3562,7 @@
   "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version as retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
+  "component scope version alias retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
@@ -5277,7 +5277,7 @@
   }
 
   function canonicalAlias(element) {
-    return element.hasAttribute("data-kit-as") ? element.getAttribute("data-kit-as") : null;
+    return element.hasAttribute("data-kit-alias") ? element.getAttribute("data-kit-alias") : null;
   }
 
   function retainCompatible(currentEntry, incomingEntry) {
@@ -5336,7 +5336,7 @@
     if (!currentHasComponent && !incomingHasComponent) {
       if (currentScope === null && incomingScope === null) return true;
       return currentScope !== null && incomingScope !== null && currentScope === incomingScope &&
-        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as");
+        current.getAttribute("data-kit-alias") === incoming.getAttribute("data-kit-alias");
     }
     if (!currentHasComponent || !incomingHasComponent || typeof core.componentMetadata !== "function") return false;
     var currentRequest = core.componentMetadata(current, false);
@@ -5345,7 +5345,7 @@
       currentRequest.name === incomingRequest.name &&
       currentRequest.version === incomingRequest.version &&
       currentRequest.lane === incomingRequest.lane &&
-      current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as") &&
+      current.getAttribute("data-kit-alias") === incoming.getAttribute("data-kit-alias") &&
       directiveIdentity(current, true) === directiveIdentity(incoming, true);
   }
 
@@ -7094,7 +7094,7 @@
       if (!currentRequest || !nextRequest || currentRequest.name !== nextRequest.name ||
         currentRequest.version !== nextRequest.version || currentRequest.lane !== nextRequest.lane) return false;
     }
-    return ["data-kit-as", "data-kit-scope"].every(function (name) {
+    return ["data-kit-alias", "data-kit-scope"].every(function (name) {
       return current.hasAttribute(name) === next.hasAttribute(name) &&
         rootMetadata(current, name) === rootMetadata(next, name);
     });
@@ -7837,6 +7837,105 @@
     throw error;
   }
 })(globalThis, document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || ["events", "drive"].indexOf(core.phase) < 0) {
+    throw new Error("KitJS: service registrar loaded out of order");
+  }
+  if (core.reuse) return;
+  if (!core.kit || typeof core.validServiceName !== "function" ||
+    typeof core.sealKit !== "function" || core.serviceRegistry) {
+    throw new Error("KitJS: service registrar cannot be installed");
+  }
+
+  var OWN = core.OWN;
+  var registry = new Map();
+  var identities = new WeakMap();
+  var kit = core.kit;
+  var sealed = false;
+
+  function snapshot(name, namespace) {
+    var prototype = namespace && Object.getPrototypeOf(namespace);
+    if (!namespace || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(namespace).length) {
+      throw new TypeError("KitJS: service namespace must be a plain object");
+    }
+    var descriptors = Object.getOwnPropertyDescriptors(namespace);
+    var output = Object.create(null);
+    Object.keys(descriptors).forEach(function (member) {
+      if (member === "version" || core.blocked(member)) {
+        throw new TypeError("KitJS: invalid service member \"" + member + "\"");
+      }
+      var descriptor = descriptors[member];
+      if (descriptor.set || !OWN.call(descriptor, "value") && typeof descriptor.get !== "function") {
+        throw new TypeError("KitJS: service members must be values or readonly getters");
+      }
+      if (OWN.call(descriptor, "value")) {
+        Object.defineProperty(output, member, {
+          value: descriptor.value,
+          enumerable: descriptor.enumerable !== false
+        });
+      } else {
+        Object.defineProperty(output, member, {
+          get: descriptor.get,
+          enumerable: descriptor.enumerable !== false
+        });
+      }
+    });
+    Object.defineProperty(output, "version", {
+      value: core.graph.services[name]
+    });
+    return Object.freeze(output);
+  }
+
+  function service(name, namespace) {
+    if (arguments.length !== 2) {
+      throw new TypeError("KitJS: service(name, namespace) expects two arguments");
+    }
+    if (sealed) throw new Error("KitJS: service registrar is sealed");
+    if (!core.graph) throw new Error("KitJS: services must register after the graph is installed");
+    if (!core.validServiceName(name)) throw new TypeError("KitJS: invalid service name");
+    if (!OWN.call(core.graph.services, name)) {
+      throw new Error("KitJS: service \"" + name + "\" is not declared by the installed graph");
+    }
+    if (registry.has(name)) throw new Error("KitJS: service \"" + name + "\" already exists");
+    var value = snapshot(name, namespace);
+    Object.defineProperty(kit, name, {
+      value: value,
+      enumerable: true
+    });
+    registry.set(name, value);
+    identities.set(value, name);
+  }
+
+  Object.defineProperty(kit, "service", {
+    value: service,
+    configurable: true
+  });
+
+  core.serviceRegistry = registry;
+  core.sealServices = function () {
+    if (sealed) throw new Error("KitJS: services are already sealed");
+    if (!core.graph) throw new Error("KitJS: service graph is not installed");
+    Object.keys(core.graph.services).forEach(function (name) {
+      if (!registry.has(name)) {
+        throw new Error("KitJS: service graph is missing definition \"" + name + "\"");
+      }
+      Object.keys(core.graph.actions[name]).forEach(function (member) {
+        if (typeof registry.get(name)[member] !== "function") {
+          throw new Error("KitJS: authored action \"" + name + "." + member + "\" is not callable");
+        }
+      });
+    });
+    sealed = true;
+    if (!delete kit.service) throw new Error("KitJS: service registrar could not be removed");
+    core.servicesSealed = true;
+    return core.sealKit();
+  };
+  core.serviceName = function (value) { return identities.get(value) || null; };
+})(document);
 ; (function (global, document) {
   "use strict";
 
@@ -7845,18 +7944,15 @@
   var core = document[ASSEMBLY];
   if (!core || core.phase !== "drive") throw new Error("KitJS: component graph loaded out of order");
   var services = Object.create(null);
+  services["progress"] = "1.0.0";
   var components = Object.create(null);
-  components["shop-cart"] = "1.0.0";
-  components["shop-checkout"] = "1.0.0";
-  components["shop-dialog"] = "1.0.0";
-  components["shop-products"] = "1.0.0";
+  components["progress-bar"] = "2.0.0";
   var actions = Object.create(null);
+  actions["progress"] = Object.create(null);
   var grants = Object.create(null);
-  grants["shop-cart"] = Object.create(null);
-  grants["shop-checkout"] = Object.create(null);
-  grants["shop-dialog"] = Object.create(null);
-  grants["shop-products"] = Object.create(null);
-  var graph = { id: "2fee0557d9d30097023d654013c10a7bcdf5c61153163ec1d0b3b81cc69e4da1", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
+  grants["progress-bar"] = Object.create(null);
+  grants["progress-bar"]["progress"] = "1.0.0";
+  var graph = { id: "e8cfb09f0713753f130bd2c78d05df5356cdfb0ea1496cb933d8b8eefa6b5c81", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
   if (core.reuse) {
     var installed = global.kit && global.kit[GRAPH];
     if (!installed || installed.id !== graph.id || installed.profile !== graph.profile) {
@@ -7871,220 +7967,267 @@
     core.installComponentGraph(graph);
     var kit = core.kit;
     if (!kit || kit.version !== core.version || kit.component !== core.component) throw new Error("KitJS: package facade is unavailable");
-    if (typeof core.sealKit !== "function") throw new Error("KitJS: package facade sealer is unavailable");
-    core.sealKit();
+    ; (function (kit) {
+;(function (global, document, kit) {
+"use strict";
+
+// KitJS service: progress@1.0.0
+var listeners = new Set();
+var deliveries = [];
+var delivering = false;
+var current = freeze({
+  id: "",
+  phase: "idle",
+  source: "",
+  url: "",
+  loaded: 0,
+  total: null,
+  outcome: null
+});
+
+function freeze(value) {
+  return Object.freeze({
+    id: value.id,
+    phase: value.phase,
+    source: value.source,
+    url: value.url,
+    loaded: value.loaded,
+    total: value.total,
+    outcome: value.outcome
+  });
+}
+
+function report(error) {
+  try {
+    if (typeof global.reportError === "function") {
+      global.reportError(error);
+      return;
+    }
+    if (global.console && typeof global.console.error === "function") {
+      global.console.error(error);
+    }
+  } catch (_) { /* Reporting must not break another subscriber. */ }
+}
+
+function deliver(listener, value) {
+  try { listener(value); }
+  catch (error) { report(error); }
+}
+
+function publish(value) {
+  var published = current = freeze(value);
+  deliveries.push({
+    value: published,
+    subscriptions: Array.from(listeners)
+  });
+  if (delivering) return published;
+
+  delivering = true;
+  try {
+    var index = 0;
+    while (index < deliveries.length) {
+      var delivery = deliveries[index];
+      deliveries[index] = null;
+      index++;
+      delivery.subscriptions.forEach(function (subscription) {
+        if (subscription.listener) deliver(subscription.listener, delivery.value);
+      });
+    }
+  } finally {
+    deliveries.length = 0;
+    delivering = false;
+  }
+  return published;
+}
+
+function progressID(value) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Progress id must be a non-empty string or finite number");
+    return String(value);
+  }
+  if (typeof value !== "string" || !value) {
+    throw new TypeError("Progress id must be a non-empty string or finite number");
+  }
+  return value;
+}
+
+function optionsOf(value) {
+  if (value === undefined || value === null) value = {};
+  var prototype = value && Object.getPrototypeOf(value);
+  if (!value || prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError("Progress options must be a plain object");
+  }
+  if (value.source !== undefined && (typeof value.source !== "string" || !value.source)) {
+    throw new TypeError("Progress source must be a non-empty string");
+  }
+  if (value.url !== undefined && typeof value.url !== "string") {
+    throw new TypeError("Progress url must be a string");
+  }
+  if (value.total !== undefined && value.total !== null &&
+    (typeof value.total !== "number" || !Number.isFinite(value.total) || value.total <= 0)) {
+    throw new TypeError("Progress total must be a positive finite number or null");
+  }
+  return {
+    source: value.source === undefined ? "manual" : value.source,
+    url: value.url === undefined ? "" : value.url,
+    total: value.total === undefined || value.total === null ? null : value.total
+  };
+}
+
+function snapshot() {
+  return current;
+}
+
+function subscribe(listener) {
+  if (typeof listener !== "function") throw new TypeError("Progress subscriber must be a function");
+  var subscription = { listener: listener };
+  listeners.add(subscription);
+  deliver(listener, current);
+  var subscribed = true;
+  return function () {
+    if (!subscribed) return;
+    subscribed = false;
+    listeners.delete(subscription);
+    subscription.listener = null;
+    listener = null;
+  };
+}
+
+function start(id, options) {
+  id = progressID(id);
+  options = optionsOf(options);
+  return publish({
+    id: id,
+    phase: "start",
+    source: options.source,
+    url: options.url,
+    loaded: 0,
+    total: options.total,
+    outcome: null
+  });
+}
+
+function update(id, loaded, total) {
+  id = progressID(id);
+  if (current.id !== id || current.phase === "idle" || current.phase === "finish") return false;
+  if (typeof loaded !== "number" || !Number.isFinite(loaded) || loaded < 0 ||
+    typeof total !== "number" || !Number.isFinite(total) || total <= 0 || loaded > total) {
+    throw new TypeError("Progress update expects finite values where 0 <= loaded <= total and total > 0");
+  }
+  return publish({
+    id: current.id,
+    phase: "progress",
+    source: current.source,
+    url: current.url,
+    loaded: loaded,
+    total: total,
+    outcome: null
+  });
+}
+
+function finish(id, outcome) {
+  id = progressID(id);
+  if (current.id !== id || current.phase === "idle" || current.phase === "finish") return false;
+  if (outcome !== "loaded" && outcome !== "cancelled" && outcome !== "error" && outcome !== "fallback") {
+    throw new TypeError("Progress outcome must be loaded, cancelled, error, or fallback");
+  }
+  return publish({
+    id: current.id,
+    phase: "finish",
+    source: current.source,
+    url: current.url,
+    loaded: outcome === "loaded" && current.total !== null ? current.total : current.loaded,
+    total: current.total,
+    outcome: outcome
+  });
+}
+
+function navigation(event) {
+  try {
+    var detail = event && event.detail;
+    if (!detail || typeof detail !== "object" || typeof detail.url !== "string") return;
+    if (detail.phase === "start") {
+      start(detail.id, {
+        source: "navigation",
+        url: detail.url
+      });
+      return;
+    }
+    var id = progressID(detail.id);
+    if (current.source !== "navigation" || current.id !== id) return;
+    if (detail.phase === "progress") update(id, detail.loaded, detail.total);
+    else if (detail.phase === "finish") finish(id, detail.outcome);
+  } catch (_) { /* Untrusted document events never enter the trusted API. */ }
+}
+
+kit.service("progress", {
+  snapshot: snapshot,
+  subscribe: subscribe,
+  start: start,
+  update: update,
+  finish: finish
+});
+
+document.addEventListener("kit:navigation", navigation);
+})(globalThis, document, kit);
+    })(kit);
+    if (typeof core.sealServices !== "function") throw new Error("KitJS: service graph sealer is unavailable");
+    core.sealServices();
     ; (function (kit) {
 ;(function () {
 "use strict";
 
-var shopDialogPrivate = new WeakMap();
-
-function shopDialogState() {
-  var host = document.getElementById("shop-confirm-dialog");
-  if (!host) return null;
-  var state = shopDialogPrivate.get(host);
-  if (!state) {
-    state = { callback: null, originID: "", generation: 0 };
-    shopDialogPrivate.set(host, state);
-  }
-  return state;
-}
-
-function shopFocusLater(element, state, generation) {
-  setTimeout(function () {
-    if (state && state.generation !== generation) return;
-    if (element && element.isConnected && typeof element.focus === "function") {
-      element.focus();
-    }
-  }, 0);
-}
-
-function shopSetBackgroundBlocked(blocked) {
-  var shell = document.getElementById("shop-shell");
-  if (!shell) return;
-  if (blocked) {
-    shell.setAttribute("inert", "");
-    shell.setAttribute("aria-hidden", "true");
-    return;
-  }
-  shell.removeAttribute("inert");
-  shell.removeAttribute("aria-hidden");
-}
-
-kit.component("shop-products", {
-  products: [
-    {
-      id: "field-notes",
-      name: "Field Notes",
-      description: "A compact notebook for ideas that should not wait.",
-      price: 24
-    },
-    {
-      id: "desk-lamp",
-      name: "Focus Lamp",
-      description: "Warm, dimmable light for a quieter workspace.",
-      price: 58
-    },
-    {
-      id: "day-bag",
-      name: "Day Bag",
-      description: "A light everyday bag with room for the essentials.",
-      price: 72
-    }
-  ],
-
-  money: function (amount) {
-    return "$" + Number(amount).toFixed(2);
-  }
-});
-
-kit.component("shop-cart", {
-  items: [],
-
-  get count() {
-    return this.items.reduce(function (total, item) {
-      return total + item.quantity;
-    }, 0);
-  },
-
-  get total() {
-    return this.items.reduce(function (total, item) {
-      return total + item.price * item.quantity;
-    }, 0);
-  },
-
-  add: function (product) {
-    var current = this.items.find(function (item) {
-      return item.id === product.id;
-    });
-
-    if (current) {
-      this.items = this.items.map(function (item) {
-        if (item.id !== product.id) return item;
-        return {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity + 1
-        };
-      });
-      return;
-    }
-
-    this.items = this.items.concat([{
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      quantity: 1
-    }]);
-  },
-
-  remove: function (id) {
-    this.items = this.items.filter(function (item) {
-      return item.id !== id;
-    });
-  },
-
-  clear: function () {
-    this.items = [];
-    return true;
-  },
-
-  money: function (amount) {
-    return "$" + Number(amount).toFixed(2);
-  }
-});
-
-kit.component("shop-checkout", {
-  name: "",
-  email: "",
-  address: "",
-  placed: false,
-  orderName: "",
-
-  get ready() {
-    return this.name.trim() !== "" &&
-      this.email.includes("@") &&
-      this.address.trim() !== "";
-  },
-
-  completeOrder: function () {
-    this.orderName = this.name;
-    this.placed = true;
-  }
-});
-
-kit.component("shop-dialog", {
+kit.component("progress-bar", {
   visible: false,
+  value: null,
 
   init: function () {
-    var host = document.getElementById("shop-confirm-dialog");
-    if (!host) return;
-    host.addEventListener("keydown", function (event) {
-      if (event.key !== "Tab") return;
-      var controls = host.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])");
-      if (!controls.length) {
-        event.preventDefault();
-        host.focus();
+    var scope = this;
+    var hideTimer = null;
+
+    function clearHide() {
+      if (hideTimer === null) return;
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+
+    function hide() {
+      scope.visible = false;
+      scope.value = null;
+    }
+
+    var unsubscribe = kit.progress.subscribe(function (progress) {
+      clearHide();
+
+      if (progress.phase === "start") {
+        scope.visible = true;
+        scope.value = null;
         return;
       }
-      var first = controls[0];
-      var last = controls[controls.length - 1];
-      if (event.shiftKey && (document.activeElement === first || !host.contains(document.activeElement))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+
+      if (progress.phase === "progress") {
+        scope.visible = true;
+        scope.value = Math.min(99, Math.floor(progress.loaded / progress.total * 100));
+        return;
       }
+
+      if (progress.phase === "finish" && progress.outcome === "loaded") {
+        scope.visible = true;
+        scope.value = 100;
+        hideTimer = setTimeout(function () {
+          hideTimer = null;
+          hide();
+        }, 300);
+        return;
+      }
+
+      hide();
     });
-  },
 
-  open: function (triggerID, callback) {
-    var state = shopDialogState();
-    if (!state || typeof callback !== "function") return;
-    var generation = state.generation + 1;
-    state.generation = generation;
-    state.callback = callback;
-    state.originID = String(triggerID || "");
-    this.visible = true;
-    setTimeout(function () {
-      if (state.generation !== generation) return;
-      var cancel = document.getElementById("shop-dialog-cancel");
-      if (!cancel || !cancel.isConnected) return;
-      cancel.focus();
-      shopSetBackgroundBlocked(true);
-    }, 0);
-  },
-
-  close: function () {
-    var state = shopDialogState();
-    var origin = state && document.getElementById(state.originID);
-    var generation = state ? state.generation + 1 : 0;
-    if (state) {
-      state.generation = generation;
-      state.callback = null;
-      state.originID = "";
-    }
-    shopSetBackgroundBlocked(false);
-    this.visible = false;
-    shopFocusLater(origin, state, generation);
-  },
-
-  confirm: function () {
-    var state = shopDialogState();
-    var callback = state && state.callback;
-    var origin = state && document.getElementById(state.originID);
-    var generation = state ? state.generation + 1 : 0;
-    if (state) {
-      state.generation = generation;
-      state.callback = null;
-      state.originID = "";
-    }
-    shopSetBackgroundBlocked(false);
-    this.visible = false;
-    shopFocusLater(origin, state, generation);
-    if (callback) callback();
+    return function () {
+      clearHide();
+      unsubscribe();
+    };
   }
 });
 

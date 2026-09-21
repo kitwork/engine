@@ -348,7 +348,7 @@ func nativeAppStagedDocument(assembly StagedAssembly) string {
 })();
 </script>
 ` + tags.String() + `</head><body>
-<main data-kit-component="native-app@0.1.0" data-kit-as="$app">
+<main data-kit-component="native-app@0.1.0" data-kit-alias="$app">
   <button id="native-copy" data-kit-click="$app.copy()">Copy</button>
   <button id="native-minimize" data-kit-click="$app.minimize()">Minimize</button>
   <button id="blocked-app-clipboard" data-kit-click="$app.clipboard.writeText('blocked')">Blocked clipboard</button>

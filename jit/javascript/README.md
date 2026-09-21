@@ -764,7 +764,7 @@ for `for`, not a separate family:
 | Family | Syntax | Contract |
 |---|---|---|
 | scope | `data-kit-scope="count: 0, open: true"` | creates one anonymous local-state boundary or seeds the component on the same host |
-| component | `data-kit-component="counter@1.0.0"` | creates one isolated managed instance at an exact packaged version; optional `data-kit-as="$name"` exposes an action-only handle; unversioned names are for direct client registration |
+| component | `data-kit-component="counter@1.0.0"` | creates one isolated managed instance at an exact packaged version; optional `data-kit-alias="$name"` exposes an action-only handle; unversioned names are for direct client registration |
 | text | `data-kit-text="count"` | writes synchronous expression results through `textContent` |
 | show | `data-kit-show="open"` | toggles the `hidden` property without removing the node |
 | bind | `data-kit-bind:aria-expanded="open"` | writes safe attributes and a small form-property allowlist |
@@ -816,7 +816,7 @@ Event attributes may add `self`, `prevent`, `stop`, `once`, `outside`, `enter`,
 together. Unknown directives, events, modifiers, duplicate modifiers, and
 invalid combinations fail closed.
 
-`data-kit-as` names one component for commands originating in another boundary:
+`data-kit-alias` names one component for commands originating in another boundary:
 
 ```html
 <section data-kit-component="editor">
@@ -825,7 +825,7 @@ invalid combinations fail closed.
 
 <div
   data-kit-component="confirm-dialog"
-  data-kit-as="$dialog"
+  data-kit-alias="$dialog"
   data-kit-show="visible"
   hidden>
   <button data-kit-click="confirm()">Confirm</button>
@@ -917,7 +917,7 @@ and mount it under the exact alias:
 ```html
 <html
   data-kit-component="app@1.1.0"
-  data-kit-as="$app">
+  data-kit-alias="$app">
   <body>
     <button data-kit-click="$app.appearance.toggle()">Toggle theme</button>
   </body>

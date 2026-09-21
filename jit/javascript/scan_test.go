@@ -10,8 +10,8 @@ import (
 func TestScanComponentsReadsInlineExactVersions(t *testing.T) {
 	t.Parallel()
 	source := []byte(`<!doctype html>
-<html data-kit-component="app@1.1.0" data-kit-as="$app">
-  <div DATA-KIT-AS='$theme' DATA-KIT-COMPONENT='theme@2.0.0'></div>
+<html data-kit-component="app@1.1.0" data-kit-alias="$app">
+  <div DATA-KIT-ALIAS='$theme' DATA-KIT-COMPONENT='theme@2.0.0'></div>
   <div data-kit-component="progress-bar@1.2.3-rc.1+build.7"></div>
   <x-panel data-kit-component=dialog></x-panel>
 </html>`)
@@ -214,7 +214,7 @@ func TestScanHTMLRejectsRetainInDirectIfBranch(t *testing.T) {
 func TestScanHTMLResolvesAuthoredServiceCommandsThroughAppAliasGrants(t *testing.T) {
 	t.Parallel()
 	source := []byte(`<button data-kit-click="$app.clipboard.writeText(code); $app.appearance.toggle(); $app.navigation.back()">Run</button>
-<main data-kit-component="app@1.0.0" data-kit-as="$app"></main>`)
+<main data-kit-component="app@1.0.0" data-kit-alias="$app"></main>`)
 	result, err := ScanHTML(source)
 	if err != nil {
 		t.Fatal(err)
@@ -227,8 +227,8 @@ func TestScanHTMLResolvesAuthoredServiceCommandsThroughAppAliasGrants(t *testing
 func TestScanHTMLVersionsAppProgressCommandsAndLoaderBindings(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
-		`<html data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.progress.start('load')"></button><div data-kit-show="$app.loader.visible"></div></html>`,
-		`<html data-kit-component="app@1.1.0" data-kit-as="$app"><div data-kit-style="width: $app.loader.value === null ? '12%' : $app.loader.value + '%';"></div></html>`,
+		`<html data-kit-component="app@1.1.0" data-kit-alias="$app"><button data-kit-click="$app.progress.start('load')"></button><div data-kit-show="$app.loader.visible"></div></html>`,
+		`<html data-kit-component="app@1.1.0" data-kit-alias="$app"><div data-kit-style="width: $app.loader.value === null ? '12%' : $app.loader.value + '%';"></div></html>`,
 	} {
 		result, err := ScanHTML([]byte(source))
 		if err != nil {
@@ -241,9 +241,9 @@ func TestScanHTMLVersionsAppProgressCommandsAndLoaderBindings(t *testing.T) {
 	}
 
 	for _, source := range []string{
-		`<html data-kit-component="app@1.0.0" data-kit-as="$app"><button data-kit-click="$app.progress.start('load')"></button></html>`,
-		`<html data-kit-component="app@1.0.0" data-kit-as="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
-		`<html data-kit-component="app@1.2.0" data-kit-as="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
+		`<html data-kit-component="app@1.0.0" data-kit-alias="$app"><button data-kit-click="$app.progress.start('load')"></button></html>`,
+		`<html data-kit-component="app@1.0.0" data-kit-alias="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
+		`<html data-kit-component="app@1.2.0" data-kit-alias="$app"><div data-kit-show="$app.loader.visible"></div></html>`,
 	} {
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidExpressionUse) {
 			t.Errorf("ScanHTML(%q) error = %v, want ErrInvalidExpressionUse", source, err)
@@ -255,10 +255,10 @@ func TestScanHTMLRejectsMissingAuthoredServiceAliasOrGrant(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{
 		`<button data-kit-click="$missing.clipboard.writeText(code)"></button>`,
-		`<button data-kit-click="$dialog.clipboard.writeText(code)"></button><section data-kit-component="dialog@1.0.0" data-kit-as="$dialog"></section>`,
-		`<button data-kit-click="$app.clipboard.writeText(code)"></button><section data-kit-component="dialog@1.0.0" data-kit-as="$app"></section>`,
-		`<button data-kit-click="$other.clipboard.writeText(code)"></button><main data-kit-component="app@1.0.0" data-kit-as="$app"></main>`,
-		`<button data-kit-click="$app.request.get('/api')"></button><main data-kit-component="app@1.0.0" data-kit-as="$app"></main>`,
+		`<button data-kit-click="$dialog.clipboard.writeText(code)"></button><section data-kit-component="dialog@1.0.0" data-kit-alias="$dialog"></section>`,
+		`<button data-kit-click="$app.clipboard.writeText(code)"></button><section data-kit-component="dialog@1.0.0" data-kit-alias="$app"></section>`,
+		`<button data-kit-click="$other.clipboard.writeText(code)"></button><main data-kit-component="app@1.0.0" data-kit-alias="$app"></main>`,
+		`<button data-kit-click="$app.request.get('/api')"></button><main data-kit-component="app@1.0.0" data-kit-alias="$app"></main>`,
 	} {
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidExpressionUse) {
 			t.Errorf("ScanHTML(%q) error = %v, want ErrInvalidExpressionUse", source, err)
@@ -272,16 +272,16 @@ func TestScanHTMLRejectsAppScopeServiceNamespaceCollisions(t *testing.T) {
 		"announce", "appearance", "clipboard", "cookie", "fullscreen", "navigation",
 		"progress", "share", "storage",
 	} {
-		source := `<main data-kit-component="app@1.1.0" data-kit-as="$app" data-kit-scope="` + field + `: null"></main>`
+		source := `<main data-kit-component="app@1.1.0" data-kit-alias="$app" data-kit-scope="` + field + `: null"></main>`
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidScopeUse) {
 			t.Errorf("ScanHTML(app scope field %q) error = %v, want ErrInvalidScopeUse", field, err)
 		}
 	}
 
 	for _, source := range []string{
-		`<main data-kit-component="app@1.0.0" data-kit-as="$app" data-kit-scope="storageKey: null, profile: {storage: true}"></main>`,
-		`<main data-kit-component="app@1.0.0" data-kit-as="$other" data-kit-scope="storage: null"></main>`,
-		`<main data-kit-component="dialog@1.0.0" data-kit-as="$app" data-kit-scope="storage: null"></main>`,
+		`<main data-kit-component="app@1.0.0" data-kit-alias="$app" data-kit-scope="storageKey: null, profile: {storage: true}"></main>`,
+		`<main data-kit-component="app@1.0.0" data-kit-alias="$other" data-kit-scope="storage: null"></main>`,
+		`<main data-kit-component="dialog@1.0.0" data-kit-alias="$app" data-kit-scope="storage: null"></main>`,
 	} {
 		if _, err := ScanHTML([]byte(source)); err != nil {
 			t.Errorf("ScanHTML(non-projected scope) = %v", err)
@@ -293,7 +293,7 @@ func TestScanHTMLKeepsIgnoredServiceCommandsOpaque(t *testing.T) {
 	t.Parallel()
 	result, err := ScanHTML([]byte(`<section data-kit-ignore>
   <button data-kit-click="$app.request.get('/private').then(done)"></button>
-  <main data-kit-component="app" data-kit-as="$app" data-kit-scope="storage: null"></main>
+  <main data-kit-component="app" data-kit-alias="$app" data-kit-scope="storage: null"></main>
 </section>`))
 	if err != nil {
 		t.Fatal(err)
@@ -412,12 +412,12 @@ func TestScanHTMLSkipsEntireIgnoredSubtree(t *testing.T) {
 	source := []byte(`
 <section data-kit-ignore data-kit-app="ignored-root" data-kit-component="missing">
   <div data-kit-text="ignored">
-    <div data-kit-component="theme" data-kit-as="$duplicate"></div>
+    <div data-kit-component="theme" data-kit-alias="$duplicate"></div>
   </div>
   <script>var fake = '</section><main data-kit-app="fake"></main>';</script>
 </section>
 <img data-kit-ignore data-kit-component="missing">
-<div data-kit-component="theme@3.0.0" data-kit-as="$duplicate"></div>`)
+<div data-kit-component="theme@3.0.0" data-kit-alias="$duplicate"></div>`)
 	result, err := ScanHTML(source)
 	if err != nil {
 		t.Fatal(err)
@@ -531,7 +531,7 @@ func TestScanHTMLIgnoredTableCellsAndCaptionsRemainOpaque(t *testing.T) {
 
 func TestScanHTMLDoesNotValidateKitMetadataOnIgnoredHost(t *testing.T) {
 	t.Parallel()
-	result, err := ScanHTML([]byte(`<section data-kit-component data-kit-component="bad" data-kit-version data-kit-as data-kit-app data-kit-app data-kit-ignore></section>`))
+	result, err := ScanHTML([]byte(`<section data-kit-component data-kit-component="bad" data-kit-version data-kit-alias data-kit-app data-kit-app data-kit-ignore></section>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,11 +585,11 @@ func TestScanComponentsRejectsRemovedVersionInvalidIdentityAndAlias(t *testing.T
 		`<div data-kit-component="dialog@@1.0.0"></div>`,
 		`<div data-kit-component="theme@"></div>`,
 		`<div data-kit-component="theme@v2.0.0"></div>`,
-		`<div data-kit-component="theme" data-kit-as="theme"></div>`,
-		`<div data-kit-component="theme" data-kit-as="$theme.value"></div>`,
-		`<div data-kit-component="theme" data-kit-as="$_theme"></div>`,
-		`<div data-kit-component="theme" data-kit-as="$element"></div>`,
-		`<div data-kit-as="$theme"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="theme"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="$theme.value"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="$_theme"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="$element"></div>`,
+		`<div data-kit-alias="$theme"></div>`,
 		`<div data-kit-component="theme" data-kit-component="dialog"></div>`,
 	}
 	for _, source := range tests {
@@ -602,7 +602,7 @@ func TestScanComponentsRejectsRemovedVersionInvalidIdentityAndAlias(t *testing.T
 func TestScanComponentsUsesECMAScriptWhitespaceForIdentity(t *testing.T) {
 	t.Parallel()
 
-	result, err := ScanHTML([]byte("<div data-kit-component=\"\ufeffdialog@1.0.0\" data-kit-as=\"\ufeff$dialog\ufeff\"></div>"))
+	result, err := ScanHTML([]byte("<div data-kit-component=\"\ufeffdialog@1.0.0\" data-kit-alias=\"\ufeff$dialog\ufeff\"></div>"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +611,7 @@ func TestScanComponentsUsesECMAScriptWhitespaceForIdentity(t *testing.T) {
 		t.Fatalf("ECMAScript-trimmed inline identity = %#v", result.Components)
 	}
 
-	result, err = ScanHTML([]byte("<div data-kit-component=\"\u1680dialog@1.0.0\" data-kit-as=\"\u00a0$dialog\u3000\"></div>"))
+	result, err = ScanHTML([]byte("<div data-kit-component=\"\u1680dialog@1.0.0\" data-kit-alias=\"\u00a0$dialog\u3000\"></div>"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +624,7 @@ func TestScanComponentsUsesECMAScriptWhitespaceForIdentity(t *testing.T) {
 		"<div data-kit-component=\"\u0085dialog@1.0.0\"></div>",
 		"<div data-kit-component=\"dialog@1.0.0\ufeff\"></div>",
 		"<div data-kit-component=\"dialog@\u00851.0.0\"></div>",
-		"<div data-kit-component=\"dialog@1.0.0\" data-kit-as=\"\u0085$dialog\"></div>",
+		"<div data-kit-component=\"dialog@1.0.0\" data-kit-alias=\"\u0085$dialog\"></div>",
 	} {
 		if _, err := ScanHTML([]byte(source)); !errors.Is(err, ErrInvalidComponentUse) {
 			t.Errorf("ScanHTML(%q) error = %v, want ErrInvalidComponentUse", source, err)
@@ -635,8 +635,8 @@ func TestScanComponentsUsesECMAScriptWhitespaceForIdentity(t *testing.T) {
 func TestScanComponentsRejectsDuplicateAliases(t *testing.T) {
 	t.Parallel()
 	_, err := ScanComponents([]byte(`
-<div data-kit-component="theme" data-kit-as="$theme"></div>
-<div data-kit-component="theme" data-kit-as="$theme"></div>`))
+<div data-kit-component="theme" data-kit-alias="$theme"></div>
+<div data-kit-component="theme" data-kit-alias="$theme"></div>`))
 	if !errors.Is(err, ErrInvalidComponentUse) {
 		t.Fatalf("got %v, want ErrInvalidComponentUse", err)
 	}

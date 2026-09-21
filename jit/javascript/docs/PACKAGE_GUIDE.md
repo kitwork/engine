@@ -95,7 +95,7 @@ KitJS sử dụng mô hình **Shallow Dirty-Bit Boundary Scheduler**:
 | `data-kit-scope="..."` | State Map | Tạo một anonymous shallow store hoặc truyền state khởi tạo cho component trên cùng phần tử. Cú pháp: `count: 0; open: false;`. |
 | `data-kit-component="name"` | Component Name | Tạo host cho component đăng ký trực tiếp bằng `kit.component(name, ...)`. |
 | `data-kit-component="name@exact-semver"` | Managed Identity | Khẳng định identity của managed closed-graph component; authored HTML không tự tải package. |
-| `data-kit-as="..."` | `$aliasName` | Gán một bí danh action-only cho Component Instance (ví dụ `data-kit-as="$theme"` $\rightarrow$ `$theme.toggle()`). |
+| `data-kit-alias="..."` | `$aliasName` | Gán một bí danh action-only cho Component Instance (ví dụ `data-kit-alias="$theme"` $\rightarrow$ `$theme.toggle()`). |
 | `data-kit-retain="..."` | Retain Key | Trong Hydrate profile, giữ component host và live store khi phía incoming có cùng key cùng namespace, tag, component identity, version và alias. Key phải duy nhất; host không được lồng nhau hoặc nằm trong template/structural region. |
 | `data-kit-ignore` | Static Marker | Kit scanner không mount cây con. Morph chỉ giữ nguyên boundary khi cả node hiện tại và incoming tương ứng đều có marker; thêm/bỏ marker sẽ thay boundary, còn thiếu counterpart vẫn bị remove bình thường. |
 

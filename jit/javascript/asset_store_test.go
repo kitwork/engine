@@ -118,8 +118,8 @@ func TestAssetStoreBundlesOnlyComponentsSharedByEveryPreparedDocument(t *testing
 		t.Fatal(err)
 	}
 	defer store.Close()
-	homeSource := []byte(`<html><body data-kit-component="app@1.1.0" data-kit-as="$app"><div data-kit-component="theme@3.0.0"></div><main data-kit-component="dialog@2.0.0"></main></body></html>`)
-	docsSource := []byte(`<html><body data-kit-component="app@1.1.0" data-kit-as="$app"><div data-kit-component="theme@3.0.0"></div><main data-kit-component="dropdown@2.0.0"></main></body></html>`)
+	homeSource := []byte(`<html><body data-kit-component="app@1.1.0" data-kit-alias="$app"><div data-kit-component="theme@3.0.0"></div><main data-kit-component="dialog@2.0.0"></main></body></html>`)
+	docsSource := []byte(`<html><body data-kit-component="app@1.1.0" data-kit-alias="$app"><div data-kit-component="theme@3.0.0"></div><main data-kit-component="dropdown@2.0.0"></main></body></html>`)
 	home, err := ScanHTML(homeSource)
 	if err != nil {
 		t.Fatal(err)

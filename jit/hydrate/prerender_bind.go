@@ -21,8 +21,8 @@ import (
 // result into the tag. Any component with persisted state and a bind gets flash-free first paint,
 // and markup written for the client needs no changes:
 //
-//	<header data-kit-component="sidebar=$sidebar"
-//	        data-kit-bind="{ 'data-state': status, 'data-open': drawer }">
+//	<header data-kit-component="sidebar" data-kit-alias="$sidebar"
+//	        data-kit-bind:data-state="status" data-kit-bind:data-open="drawer">
 //
 //	cookie kitwork.sidebar=status%3Dcollapsed   →   <header … data-state="collapsed">
 //
@@ -77,9 +77,10 @@ var componentAttrRe = regexp.MustCompile(`(?i)\bdata-kit-component="([^"]*)"`)
 // expression in the value.
 var bindAttrRe = regexp.MustCompile(`(?i)\bdata-kit-bind:([a-z][a-z0-9-]*)="([^"]*)"`)
 
-// ComponentName strips the version and alias tails: "sidebar@v1.0.0=$sidebar" → "sidebar".
+// ComponentName strips the version tail: "sidebar@v1.0.0" → "sidebar". The alias is its own
+// attribute (data-kit-alias), never part of the name.
 func ComponentName(decl string) string {
-	if i := strings.IndexAny(decl, "@="); i >= 0 {
+	if i := strings.IndexByte(decl, '@'); i >= 0 {
 		decl = decl[:i]
 	}
 	return strings.TrimSpace(decl)

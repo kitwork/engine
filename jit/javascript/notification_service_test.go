@@ -90,7 +90,7 @@ func TestNotificationServiceBuildsAsOneExactPackage(t *testing.T) {
 		`$app.notifications?.requestPermission()`,
 		`$app.notifications.requestPermission?.()`,
 	} {
-		source := `<main data-kit-component="app@1.7.0" data-kit-as="$app"><button data-kit-click="` + expression + `"></button></main>`
+		source := `<main data-kit-component="app@1.7.0" data-kit-alias="$app"><button data-kit-click="` + expression + `"></button></main>`
 		if _, err := composer.ComposeHTML([]byte(source)); err == nil {
 			t.Fatalf("authored HTML gained private notification access through %s", expression)
 		}

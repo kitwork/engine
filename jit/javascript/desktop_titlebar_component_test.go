@@ -353,7 +353,7 @@ func desktopTitlebarDriveAssemblies(t *testing.T) (StagedAssembly, StagedAssembl
 	if err != nil {
 		t.Fatal(err)
 	}
-	use, err := ScanHTML([]byte(`<header data-kit-component="desktop-titlebar@1.0.0" data-kit-as="$bar" data-titlebar-drag></header>`))
+	use, err := ScanHTML([]byte(`<header data-kit-component="desktop-titlebar@1.0.0" data-kit-alias="$bar" data-titlebar-drag></header>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func desktopTitlebarDriveDocument(assembly StagedAssembly, route, tag string, ex
 <a id="to-a" href="/a">A</a><a id="to-b" href="/b">B</a><a id="to-c" href="/c">C</a>
 </nav><main id="route">` + html.EscapeString(route) + `</main><` + tag +
 		` id="titlebar" data-route="` + html.EscapeString(route) +
-		`" data-kit-component="desktop-titlebar@1.0.0" data-kit-as="$bar" data-titlebar-drag>
+		`" data-kit-component="desktop-titlebar@1.0.0" data-kit-alias="$bar" data-titlebar-drag>
   <span id="drag-handle">Drag ` + html.EscapeString(route) + `</span>
   <button id="minimize" type="button" data-titlebar-no-drag data-kit-click="$bar.minimize()">Minimize</button>
   <button id="toggle-maximize" type="button" data-titlebar-no-drag data-kit-click="$bar.toggleMaximize()">Toggle</button>
@@ -559,7 +559,7 @@ func desktopTitlebarStagedAssemblyVersion(t *testing.T, version string) StagedAs
 	if err != nil {
 		t.Fatal(err)
 	}
-	use, err := ScanHTML([]byte(`<header data-kit-component="desktop-titlebar@` + version + `" data-kit-as="$bar" data-titlebar-drag></header>`))
+	use, err := ScanHTML([]byte(`<header data-kit-component="desktop-titlebar@` + version + `" data-kit-alias="$bar" data-titlebar-drag></header>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,7 +637,7 @@ func desktopTitlebar110StagedDocument(assembly StagedAssembly) string {
 })(globalThis, document);
 </script>
 ` + tags.String() + `</head><body>
-<header id="titlebar" data-kit-component="desktop-titlebar@1.1.0" data-kit-as="$bar" data-titlebar-drag>
+<header id="titlebar" data-kit-component="desktop-titlebar@1.1.0" data-kit-alias="$bar" data-titlebar-drag>
   <span id="drag-handle">Drag</span>
   <button id="back" type="button" data-titlebar-no-drag data-kit-click="$bar.back()"
     data-kit-bind:disabled="!canGoBack" data-kit-bind:aria-disabled="canGoBack ? 'false' : 'true'"
@@ -765,7 +765,7 @@ func desktopTitlebarStagedDocument(assembly StagedAssembly) string {
 })();
 </script>
 ` + tags.String() + `</head><body>
-<header id="titlebar" data-kit-component="desktop-titlebar@1.0.0" data-kit-as="$bar" data-titlebar-drag>
+<header id="titlebar" data-kit-component="desktop-titlebar@1.0.0" data-kit-alias="$bar" data-titlebar-drag>
   <span id="drag-handle">Drag</span>
   <button id="minimize" type="button" data-titlebar-no-drag data-kit-click="$bar.minimize()">Minimize</button>
   <button id="toggle-maximize" type="button" data-titlebar-no-drag data-kit-click="$bar.toggleMaximize()">Toggle maximize</button>

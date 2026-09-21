@@ -553,7 +553,7 @@
     if (craw) {
       var tag = parseComponentTag(craw);
       var cname = tag.name;
-      var alias = tag.alias || b.getAttribute("data-kit-alias") || b.getAttribute("data-kitwork-alias") || b.getAttribute("data-alias") || "";
+      var alias = b.getAttribute("data-kit-alias") || "";
       // Component registration (kit.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       if (!st.scope) st.scope = {};
@@ -685,9 +685,11 @@
     });
   }
 
-  // Named component handles: data-kit-component="sidebar=$sidebar" registers `$sidebar` → that
-  // instance's scope, so ANY expression reaches it ($sidebar.cycle()), even from outside its DOM
-  // subtree (the scattered-controls case). No alias = purely lexical (bare cycle() = nearest scope).
+  // Named component handles: data-kit-component="sidebar" data-kit-alias="$sidebar" registers
+  // `$sidebar` → that instance's scope, so ANY expression reaches it ($sidebar.cycle()), even from
+  // outside its DOM subtree (the scattered-controls case). No alias = purely lexical (bare cycle() =
+  // nearest scope). data-kit-alias is the one spelling (ideaship-final §6): the alias names the
+  // component INSTANCE; data-kit-ref will name an element.
   var aliases = Object.create(null);
   var reservedAliases = Object.create(null);
   ["$", "$el", "$root", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
@@ -747,12 +749,12 @@
     getPrototypeOf: function () { return null; }
   });
   aliases["kit"] = publicKitSurface;
-  // parseComponentTag splits `name@version=$alias` (all but name optional) → { name, version, alias }.
+  // parseComponentTag splits `name@version` (version optional) → { name, version }. The alias is
+  // its own attribute, data-kit-alias, never a tail on the name.
   function parseComponentTag(raw) {
-    var name = raw, version = "", alias = "", i;
-    if ((i = name.indexOf("=")) >= 0) { alias = name.slice(i + 1).trim(); name = name.slice(0, i); }
+    var name = raw, version = "", i;
     if ((i = name.indexOf("@")) >= 0) { version = name.slice(i + 1).trim(); name = name.slice(0, i); }
-    return { name: name.trim(), version: version, alias: alias };
+    return { name: name.trim(), version: version };
   }
 
   var activeComponents = {};

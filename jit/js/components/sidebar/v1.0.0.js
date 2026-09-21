@@ -8,7 +8,7 @@
  * Markup activates it and wires controls to bare names; styling is pure utilities via the
  * data-[state=…] / group-data-[…] variants, so there is no stylesheet to ship:
  *
- *   <body data-kit-component="sidebar=$sidebar"
+ *   <body data-kit-component="sidebar" data-kit-alias="$sidebar"
  *         data-kit-bind="{ 'data-state': status, 'data-open': drawer }">
  *     <button data-kit-click="cycle()">…</button>          expanded ⇄ collapsed
  *     <button data-kit-click="toggle()">…</button>          hidden  ⇄ expanded
@@ -16,7 +16,7 @@
  *     <div data-kit-show="drawer" data-kit-click="closeDrawer()" class="fixed inset-0"></div>
  *   </body>
  *
- * Use the =$alias form when controls live OUTSIDE the element that owns the component (a header
+ * Use data-kit-alias when controls live OUTSIDE the element that owns the component (a header
  * button toggling a sidebar that is a sibling); a bare `sidebar` resolves to the nearest one.
  *
  * PERSISTENCE: component state is in-memory and resets on reload, so `status` is written to

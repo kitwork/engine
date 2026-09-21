@@ -234,7 +234,7 @@ func TestBrowserThemeV3MirrorsAppearanceAndDelegatesActions(t *testing.T) {
 }
 
 var themeComponentBrowserDocument = fmt.Sprintf(`<!doctype html>
-<html lang="en" data-kit-component="theme@2.0.0" data-kit-as="$theme">
+<html lang="en" data-kit-component="theme@2.0.0" data-kit-alias="$theme">
 <head><meta charset="utf-8"><title>Theme component contract</title>
 <script>
   (function () {
@@ -324,7 +324,7 @@ __runStandaloneKitTest(async function () {
 </body></html>`, browserHarness)
 
 var themeV3BrowserDocument = fmt.Sprintf(`<!doctype html>
-<html lang="en" data-kit-component="theme@3.0.0" data-kit-as="$theme">
+<html lang="en" data-kit-component="theme@3.0.0" data-kit-alias="$theme">
 <head><meta charset="utf-8"><title>Theme v3 appearance adapter contract</title>
 <script>
   (function () {

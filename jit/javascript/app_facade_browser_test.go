@@ -57,9 +57,9 @@ func TestApp110SelectsSealedMobileServicesWithoutAuthoredActions(t *testing.T) {
 		}
 	}
 	for _, expression := range []string{
-		`<main data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.device.info()"></button></main>`,
-		`<main data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.files.release(value)"></button></main>`,
-		`<main data-kit-component="app@1.1.0" data-kit-as="$app"><button data-kit-click="$app.secureStorage.get('key')"></button></main>`,
+		`<main data-kit-component="app@1.1.0" data-kit-alias="$app"><button data-kit-click="$app.device.info()"></button></main>`,
+		`<main data-kit-component="app@1.1.0" data-kit-alias="$app"><button data-kit-click="$app.files.release(value)"></button></main>`,
+		`<main data-kit-component="app@1.1.0" data-kit-alias="$app"><button data-kit-click="$app.secureStorage.get('key')"></button></main>`,
 	} {
 		if _, err := composer.ComposeHTML([]byte(expression)); err == nil {
 			t.Fatalf("authored HTML gained a sealed mobile service through %s", expression)
@@ -148,7 +148,7 @@ func TestAppServiceFacadeBrowserContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	document := `<!doctype html><html><head><meta charset="utf-8"><title>app facade</title></head><body>
-<main data-kit-component="app@1.0.0" data-kit-as=" $app ">
+<main data-kit-component="app@1.0.0" data-kit-alias=" $app ">
   <button id="allowed" data-kit-click="$app.storage.set('app-facade', 'yes')">allowed</button>
   <button id="allowed-sequence" data-kit-click="$app.storage.set('sequence-a', 'yes'); $app.storage.set('sequence-b', 'yes')">sequence</button>
   <button id="app-method" data-kit-click="$app.save()">app method</button>
@@ -166,11 +166,11 @@ func TestAppServiceFacadeBrowserContract(t *testing.T) {
   <button id="blocked-kit" data-kit-click="kit.storage.set('kit', 'bad')">kit</button>
   <output id="binding" data-kit-text="$app.storage">server-binding</output>
 </main>
-<section data-kit-component="other@1.0.0" data-kit-as="$other">
+<section data-kit-component="other@1.0.0" data-kit-alias="$other">
   <button id="other" data-kit-click="$other.storage.set('other', 'bad')">other</button>
   <output id="other-storage" data-kit-text="storage">server-other-storage</output>
 </section>
-<section data-kit-component="app@1.0.0" data-kit-as="$wrong">
+<section data-kit-component="app@1.0.0" data-kit-alias="$wrong">
   <button id="wrong" data-kit-click="$wrong.storage.set('wrong', 'bad')">wrong</button>
 </section>
 <script>globalThis.__kitDiagnostics=[];var __oldError=console.error;console.error=function(){__kitDiagnostics.push(Array.prototype.map.call(arguments,String).join(' '));};</script>
@@ -250,7 +250,7 @@ func TestAppFacadeProjectsTheExactServiceNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	document := `<!doctype html><html><head><meta charset="utf-8"><title>identity</title></head><body>
-<main data-kit-component="app@1.0.0" data-kit-as="$app">
+<main data-kit-component="app@1.0.0" data-kit-alias="$app">
   <button id="touch" data-kit-click="$app.probe.touch()">touch</button>
 </main><script src="/kit.js"></script><script>` + browserHarness + `
 __runStandaloneKitTest(async function(){
@@ -303,7 +303,7 @@ func TestAppFacadeRejectsConfusedAppAliasBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	document := `<!doctype html><html><head><meta charset="utf-8"><title>confused app alias</title></head><body>
-<main data-kit-component="confuser@1.0.0" data-kit-as="$app">
+<main data-kit-component="confuser@1.0.0" data-kit-alias="$app">
   <button id="confused" data-kit-click="$app.storage.set('confused', 'bad')">confused</button>
 </main>
 <script>globalThis.__kitDiagnostics=[];var __oldError=console.error;console.error=function(){__kitDiagnostics.push(Array.prototype.map.call(arguments,String).join(' '));};</script>

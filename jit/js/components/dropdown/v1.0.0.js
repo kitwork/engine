@@ -7,7 +7,7 @@
  *       <div data-kit-show="open" class="absolute …">…</div>
  *     </div>
  *   - <div data-kit-component="dropdown@v1.0.0">  — pin the version
- *   - <div data-kit-component="dropdown=$menu">   — also expose a global handle: $menu.toggle()
+ *   - <div data-kit-component="dropdown" data-kit-alias="$menu">   — also expose a global handle: $menu.toggle()
  */
 var dropdownDef = {
   open: false,

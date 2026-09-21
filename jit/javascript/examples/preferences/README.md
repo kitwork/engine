@@ -21,7 +21,7 @@ go run ./jit/javascript/cmd/assemble -profile kit -service storage=1.0.0=jit/jav
 With unchanged runtime and package bytes, the command produces the same file:
 
 ```text
-kit.1.0.0-rc.2.213a33ab4f8f13bc76746f30877e3544fecfc2d68b6695fbf437b6707cc2fef1.js
+kit.1.0.0-rc.2.86fbb784816d8dfb5c33b45b3b5c653efa24b03a0cefd20e679b9dd239ba0c52.js
 ```
 
 The page loads the shared checked, content-addressed `../kitjs.examples.<sha256>.css`, generated only from

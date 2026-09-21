@@ -9,8 +9,8 @@ import (
 
 func TestScanHTMLSeparatesUnversionedClientComponentsFromManagedGraph(t *testing.T) {
 	source := []byte(`
-<main data-kit-component="app@1.1.0" data-kit-as="$app"></main>
-<section data-kit-component="test" data-kit-as="$test" data-kit-scope="{ count: 1 }">
+<main data-kit-component="app@1.1.0" data-kit-alias="$app"></main>
+<section data-kit-component="test" data-kit-alias="$test" data-kit-scope="{ count: 1 }">
   <button data-kit-click="count = count + 1"></button>
 </section>
 <aside data-kit-component="notice"></aside>`)
@@ -71,14 +71,14 @@ func TestScanHTMLRejectsRemovedLocalMarker(t *testing.T) {
 
 func TestScanHTMLKeepsAliasesStrictAcrossManagedAndLocalComponents(t *testing.T) {
 	_, err := ScanHTML([]byte(`
-<section data-kit-component="dialog@1.0.0" data-kit-as="$shared"></section>
-<section data-kit-component="test" data-kit-as="$shared"></section>`))
+<section data-kit-component="dialog@1.0.0" data-kit-alias="$shared"></section>
+<section data-kit-component="test" data-kit-alias="$shared"></section>`))
 	if !errors.Is(err, ErrInvalidComponentUse) || !strings.Contains(err.Error(), "duplicate alias") {
 		t.Fatalf("ScanHTML() error = %v, want duplicate alias rejection", err)
 	}
 
 	_, err = ScanHTML([]byte(`
-<section data-kit-component="app" data-kit-as="$app"></section>
+<section data-kit-component="app" data-kit-alias="$app"></section>
 <section data-kit-scope="{ ready: true }" data-kit-click="$app.progress.start()"></section>`))
 	if !errors.Is(err, ErrInvalidExpressionUse) || !strings.Contains(err.Error(), "authored service commands require") {
 		t.Fatalf("local $app service error = %v, want managed app grant rejection", err)

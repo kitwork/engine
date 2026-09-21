@@ -1826,7 +1826,7 @@
   var OWN = core.OWN;
   var BOUNDARIES = "[data-kit-component],[data-kit-scope]";
   var METADATA = "[data-kit-component],[data-kit-version],[data-kit-scope]";
-  var ALIASES = "[data-kit-as]";
+  var ALIASES = "[data-kit-alias]";
   var aliases = new WeakMap();
   var metadata = new WeakMap();
   var localRegistry = new Map();
@@ -3187,7 +3187,7 @@
         name: request.name,
         version: request.version,
         lane: request.lane,
-        alias: host.hasAttribute("data-kit-as") ? aliasName(host) : null
+        alias: host.hasAttribute("data-kit-alias") ? aliasName(host) : null
       }) : null
     };
     var scope = new Proxy(target, {
@@ -3273,7 +3273,7 @@
     var hasScope = element.hasAttribute("data-kit-scope");
     var seed = core.scopeSeed(element, true);
     var request = componentMetadata(element, true);
-    var invalidAlias = request === undefined && hasScope && element.hasAttribute("data-kit-as");
+    var invalidAlias = request === undefined && hasScope && element.hasAttribute("data-kit-alias");
     if (invalidAlias) aliasName(element);
     if (request === null || hasScope && seed === null || request === undefined && !hasScope || invalidAlias) {
       core.scopes.set(element, { host: element, failed: true, disposed: false });
@@ -3347,7 +3347,7 @@
   function liveComponents(root) {
     var output = [];
     componentElements(root).forEach(function (element) {
-      if (element.hasAttribute("data-kit-as")) aliasName(element);
+      if (element.hasAttribute("data-kit-alias")) aliasName(element);
       var current = ensureComponent(element);
       if (current) output.push(current);
     });
@@ -3405,9 +3405,9 @@
   }
   function aliasName(element) {
     if (aliases.has(element)) return aliases.get(element);
-    var name = (element.getAttribute("data-kit-as") || "").trim();
+    var name = (element.getAttribute("data-kit-alias") || "").trim();
     if (!element.hasAttribute("data-kit-component") || !validAlias(name)) {
-      core.report(new TypeError("KitJS: data-kit-as requires a component host and a valid $alias"));
+      core.report(new TypeError("KitJS: data-kit-alias requires a component host and a valid $alias"));
       name = null;
     }
     aliases.set(element, name);
@@ -3562,7 +3562,7 @@
   "self prevent stop once outside enter escape".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version as retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
+  "component scope version alias retain drive ignore text show bind class style model if for key".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
@@ -5277,7 +5277,7 @@
   }
 
   function canonicalAlias(element) {
-    return element.hasAttribute("data-kit-as") ? element.getAttribute("data-kit-as") : null;
+    return element.hasAttribute("data-kit-alias") ? element.getAttribute("data-kit-alias") : null;
   }
 
   function retainCompatible(currentEntry, incomingEntry) {
@@ -5336,7 +5336,7 @@
     if (!currentHasComponent && !incomingHasComponent) {
       if (currentScope === null && incomingScope === null) return true;
       return currentScope !== null && incomingScope !== null && currentScope === incomingScope &&
-        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as");
+        current.getAttribute("data-kit-alias") === incoming.getAttribute("data-kit-alias");
     }
     if (!currentHasComponent || !incomingHasComponent || typeof core.componentMetadata !== "function") return false;
     var currentRequest = core.componentMetadata(current, false);
@@ -5345,7 +5345,7 @@
       currentRequest.name === incomingRequest.name &&
       currentRequest.version === incomingRequest.version &&
       currentRequest.lane === incomingRequest.lane &&
-      current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as") &&
+      current.getAttribute("data-kit-alias") === incoming.getAttribute("data-kit-alias") &&
       directiveIdentity(current, true) === directiveIdentity(incoming, true);
   }
 
@@ -7094,7 +7094,7 @@
       if (!currentRequest || !nextRequest || currentRequest.name !== nextRequest.name ||
         currentRequest.version !== nextRequest.version || currentRequest.lane !== nextRequest.lane) return false;
     }
-    return ["data-kit-as", "data-kit-scope"].every(function (name) {
+    return ["data-kit-alias", "data-kit-scope"].every(function (name) {
       return current.hasAttribute(name) === next.hasAttribute(name) &&
         rootMetadata(current, name) === rootMetadata(next, name);
     });

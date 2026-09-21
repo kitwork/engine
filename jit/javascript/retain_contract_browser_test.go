@@ -47,16 +47,16 @@ func retainMorphFixture() string {
 	page.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Retain Morph contract</title></head>
 <body data-stage="initial">
   <div id="retain-parent-a">
-    <section data-test-host="primary" data-kit-retain="primary" data-kit-component="retain-one@1.0.0" data-kit-as="$one" data-server="old-primary">
+    <section data-test-host="primary" data-kit-retain="primary" data-kit-component="retain-one@1.0.0" data-kit-alias="$one" data-server="old-primary">
       <button id="retain-add" type="button" data-kit-click="increment()">Increment old</button>
       <output id="retain-count" data-kit-text="count">server-old</output>
     </section>
-    <section data-test-host="changed" data-kit-retain="change-old" data-kit-component="retain-one@1.0.0" data-kit-as="$changed"><span>changed old</span></section>
+    <section data-test-host="changed" data-kit-retain="change-old" data-kit-component="retain-one@1.0.0" data-kit-alias="$changed"><span>changed old</span></section>
   </div>
   <div id="retain-parent-b">
-    <section data-test-host="secondary" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-as="$two"><span>secondary old</span></section>
-	<section data-test-host="versioned" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-as="$versioned"><span>version old</span></section>
-    <section data-test-host="removed" data-kit-retain="removed" data-kit-component="retain-one@1.0.0" data-kit-as="$removed"><span>remove old</span></section>
+    <section data-test-host="secondary" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-alias="$two"><span>secondary old</span></section>
+	<section data-test-host="versioned" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-alias="$versioned"><span>version old</span></section>
+    <section data-test-host="removed" data-kit-retain="removed" data-kit-component="retain-one@1.0.0" data-kit-alias="$removed"><span>remove old</span></section>
   </div>
 `)
 	for _, name := range FragmentNames() {
@@ -139,13 +139,13 @@ __runStandaloneKitTest(async function () {
 
   var moved = parsedBody(
     '<div id="retain-parent-a">' +
-      '<section data-test-host="removed" data-kit-retain="removed" data-kit-component="retain-one@1.0.0" data-kit-as="$removed"><span>remove moved</span></section>' +
-      '<section data-test-host="versioned" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-as="$versioned"><span>version moved</span></section>' +
+      '<section data-test-host="removed" data-kit-retain="removed" data-kit-component="retain-one@1.0.0" data-kit-alias="$removed"><span>remove moved</span></section>' +
+      '<section data-test-host="versioned" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-alias="$versioned"><span>version moved</span></section>' +
     '</div>' +
     '<div id="retain-parent-b" data-layout="new">' +
-      '<section data-test-host="secondary" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-as="$two" data-server="new-secondary"><span>secondary moved</span></section>' +
-      '<section data-test-host="changed" data-kit-retain="change-old" data-kit-component="retain-one@1.0.0" data-kit-as="$changed"><span>changed moved</span></section>' +
-      '<section data-test-host="primary" data-kit-retain="primary" data-kit-component="retain-one@1.0.0" data-kit-as="$one" data-server="new-primary">' +
+      '<section data-test-host="secondary" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-alias="$two" data-server="new-secondary"><span>secondary moved</span></section>' +
+      '<section data-test-host="changed" data-kit-retain="change-old" data-kit-component="retain-one@1.0.0" data-kit-alias="$changed"><span>changed moved</span></section>' +
+      '<section data-test-host="primary" data-kit-retain="primary" data-kit-component="retain-one@1.0.0" data-kit-alias="$one" data-server="new-primary">' +
         '<button id="retain-add" type="button" data-kit-click="increment()">Increment moved</button>' +
         '<output id="retain-count" data-kit-text="count">server-next</output><em id="retain-new-child">new child</em>' +
       '</section>' +
@@ -176,9 +176,9 @@ __runStandaloneKitTest(async function () {
 
   var recordedPrimaryScope = primaryScope;
   primary.setAttribute("data-kit-component", "retain-two@1.0.0");
-  primary.setAttribute("data-kit-as", "$mutatedOne");
+  primary.setAttribute("data-kit-alias", "$mutatedOne");
   var matchingMutation = parsedBody(
-    '<section data-test-host="primary-mutated" data-kit-retain="primary" data-kit-component="retain-two@1.0.0" data-kit-as="$mutatedOne">' +
+    '<section data-test-host="primary-mutated" data-kit-retain="primary" data-kit-component="retain-two@1.0.0" data-kit-alias="$mutatedOne">' +
       '<output data-kit-text="count">mutated fresh</output>' +
     '</section>').firstElementChild;
   var mutatedDOMHost = primary;
@@ -193,12 +193,12 @@ __runStandaloneKitTest(async function () {
 
   var incompatible = parsedBody(
     '<div id="retain-parent-a">' +
-      '<section data-test-host="versioned-next" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-as="$versionedNext"><span>version next</span></section>' +
+      '<section data-test-host="versioned-next" data-kit-retain="versioned" data-kit-component="retain-one@1.0.0" data-kit-alias="$versionedNext"><span>version next</span></section>' +
     '</div>' +
     '<div id="retain-parent-b">' +
-      '<section data-test-host="changed-next" data-kit-retain="change-next" data-kit-component="retain-one@1.0.0" data-kit-as="$changed"><span>changed next</span></section>' +
-      '<section data-test-host="primary-next" data-kit-retain="primary" data-kit-component="retain-one@1.0.0" data-kit-as="$one"><output data-kit-text="count">primary fresh</output></section>' +
-      '<section data-test-host="secondary-next" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-as="$twoNext"><output data-kit-text="count">secondary fresh</output></section>' +
+      '<section data-test-host="changed-next" data-kit-retain="change-next" data-kit-component="retain-one@1.0.0" data-kit-alias="$changed"><span>changed next</span></section>' +
+      '<section data-test-host="primary-next" data-kit-retain="primary" data-kit-component="retain-one@1.0.0" data-kit-alias="$one"><output data-kit-text="count">primary fresh</output></section>' +
+      '<section data-test-host="secondary-next" data-kit-retain="secondary" data-kit-component="retain-two@1.0.0" data-kit-alias="$twoNext"><output data-kit-text="count">secondary fresh</output></section>' +
     '</div>');
   assert(morph(document.body, incompatible) === document.body, "incompatible retain Morph replaced the body root");
   await waitFor(function () { return state.init === 10 && state.cleanup === 6; },
@@ -445,10 +445,10 @@ func TestBrowserDriveRetainPreflightBeforeDocumentMutation(t *testing.T) {
 	}
 	validCurrentBody := retainDriveHosts("Valid current poison", false)
 	identityBody := `<main id="retain-route">Identity committed</main>
-<section data-test-host="one-next" data-kit-retain="one" data-kit-component="retain-two@1.0.0" data-kit-as="$one">
+<section data-test-host="one-next" data-kit-retain="one" data-kit-component="retain-two@1.0.0" data-kit-alias="$one">
   <output id="retain-one-next-count" data-kit-text="count">fresh one</output>
 </section>
-<section data-test-host="two-next" data-kit-retain="two" data-kit-component="retain-two@1.0.0" data-kit-as="$twoNext">
+<section data-test-host="two-next" data-kit-retain="two" data-kit-component="retain-two@1.0.0" data-kit-alias="$twoNext">
   <output id="retain-two-next-count" data-kit-text="count">fresh two</output>
 </section>`
 
@@ -556,11 +556,11 @@ func retainDriveHosts(route string, controls bool) string {
 		button = `<button id="retain-drive-add" type="button" data-kit-click="increment()">increment</button>`
 	}
 	return fmt.Sprintf(`<main id="retain-route">%s</main>
-<section data-test-host="one" data-kit-retain="one" data-kit-component="retain-one@1.0.0" data-kit-as="$one">
+<section data-test-host="one" data-kit-retain="one" data-kit-component="retain-one@1.0.0" data-kit-alias="$one">
   %s
   <output id="retain-drive-count" data-kit-text="count">server one</output>
 </section>
-<section data-test-host="two" data-kit-retain="two" data-kit-component="retain-two@1.0.0" data-kit-as="$two">
+<section data-test-host="two" data-kit-retain="two" data-kit-component="retain-two@1.0.0" data-kit-alias="$two">
   <output data-kit-text="count">server two</output>
 </section>`, route, button)
 }

@@ -481,7 +481,7 @@ func scopeBrowserFixture(t *testing.T) string {
     <output id="component-count" data-kit-text="count">server</output>
     <output id="component-open" data-kit-text="open">server</output>
   </section>
-  <section id="alias-target" data-kit-component="scope-alias-target" data-kit-as="$target">
+  <section id="alias-target" data-kit-component="scope-alias-target" data-kit-alias="$target">
     <output id="alias-touches" data-kit-text="touches">server</output>
   </section>
 
@@ -490,7 +490,7 @@ func scopeBrowserFixture(t *testing.T) string {
     <button id="invalid-alias-trigger" type="button" data-kit-click="$target.touch()">Invalid alias trigger</button>
     <output>server-alias</output>
   </section>
-  <section id="invalid-scope-alias" data-kit-scope="count: 1" data-kit-as="$target">
+  <section id="invalid-scope-alias" data-kit-scope="count: 1" data-kit-alias="$target">
     <button id="invalid-scope-alias-trigger" type="button" data-kit-click="$target.touch()">Invalid scope alias</button>
     <output id="invalid-scope-alias-count" data-kit-text="count">server-scope-alias</output>
   </section>

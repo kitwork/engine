@@ -35,7 +35,7 @@ func TestApp1150UpgradesSealedNativeHTTPGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.15.0" data-kit-as="$app"></html>`))
+	current, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.15.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestApp1150UpgradesSealedNativeHTTPGraph(t *testing.T) {
 		t.Fatal("legacy graph silently upgraded")
 	}
 	for _, expression := range []string{"$app.network.request({})", "$app.files.upload({})"} {
-		if _, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.15.0" data-kit-as="$app"><button data-kit-click="` + expression + `"></button></html>`)); err == nil {
+		if _, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.15.0" data-kit-alias="$app"><button data-kit-click="` + expression + `"></button></html>`)); err == nil {
 			t.Fatalf("authored expression gained HTTPS authority: %s", expression)
 		}
 	}

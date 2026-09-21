@@ -72,7 +72,7 @@ document.addEventListener("DOMContentLoaded",function(){
     root.setAttribute("data-kit-test","passed");
   }).catch(function(error){root.setAttribute("data-kit-test","failed");root.setAttribute("data-kit-test-error",String(error && error.message || error));});
 },{once:true});
-</script></head><body><main data-kit-component="app@1.15.0" data-kit-as="$app"></main></body></html>`
+</script></head><body><main data-kit-component="app@1.15.0" data-kit-alias="$app"></main></body></html>`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if source, ok := assets[r.URL.Path]; ok {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")

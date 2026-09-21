@@ -258,7 +258,7 @@ Không cần hàng nghìn test ngay lập tức. Nhưng khoảng 100–200 test 
 Tôi thấy một số đường chạy có độ phức tạp theo toàn bộ document:
 
 * Promise settlement duyệt mọi `[data-kit-component]` để tìm observation ticket.
-* Alias resolution duyệt mọi `[data-kit-as]`.
+* Alias resolution duyệt mọi `[data-kit-alias]`.
 * `outside` event duyệt `document.querySelectorAll("*")`.
 * Debounced event duyệt toàn bộ element để tìm lại owner đang kết nối. 
 

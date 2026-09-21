@@ -19,8 +19,8 @@ var (
 )
 
 const (
-	shopArtifactName   = "hydrate.kit.1.0.0-rc.2.b960793e4d9a2fb4b9c856fc964f671fa623012633caea7ee7a24797b2bc4b3f.js"
-	shopArtifactSHA256 = "b960793e4d9a2fb4b9c856fc964f671fa623012633caea7ee7a24797b2bc4b3f"
+	shopArtifactName   = "hydrate.kit.1.0.0-rc.2.baa8743ecdc9dfff87636f8cc74dfd59e5b2e6f70c8f6e0c1b9584b316aefcc3.js"
+	shopArtifactSHA256 = "baa8743ecdc9dfff87636f8cc74dfd59e5b2e6f70c8f6e0c1b9584b316aefcc3"
 )
 
 func TestShopExampleContract(t *testing.T) {
@@ -66,7 +66,7 @@ func TestShopExampleContract(t *testing.T) {
 				}
 			}
 			for _, shared := range []string{
-				`id="shop-cart"`, `data-kit-component="shop-cart@1.0.0"`, `data-kit-as="$cart"`,
+				`id="shop-cart"`, `data-kit-component="shop-cart@1.0.0"`, `data-kit-alias="$cart"`,
 				`id="shop-cart-count"`, `id="shop-cart-total"`,
 				`id="shop-nav-products"`, `id="shop-nav-cart"`, `id="shop-nav-checkout"`,
 			} {

@@ -1435,7 +1435,7 @@
       if (!currentRequest || !nextRequest || currentRequest.name !== nextRequest.name ||
         currentRequest.version !== nextRequest.version || currentRequest.lane !== nextRequest.lane) return false;
     }
-    return ["data-kit-as", "data-kit-scope"].every(function (name) {
+    return ["data-kit-alias", "data-kit-scope"].every(function (name) {
       return current.hasAttribute(name) === next.hasAttribute(name) &&
         rootMetadata(current, name) === rootMetadata(next, name);
     });

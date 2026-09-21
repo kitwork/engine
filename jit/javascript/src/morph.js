@@ -106,7 +106,7 @@
   }
 
   function canonicalAlias(element) {
-    return element.hasAttribute("data-kit-as") ? element.getAttribute("data-kit-as") : null;
+    return element.hasAttribute("data-kit-alias") ? element.getAttribute("data-kit-alias") : null;
   }
 
   function retainCompatible(currentEntry, incomingEntry) {
@@ -165,7 +165,7 @@
     if (!currentHasComponent && !incomingHasComponent) {
       if (currentScope === null && incomingScope === null) return true;
       return currentScope !== null && incomingScope !== null && currentScope === incomingScope &&
-        current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as");
+        current.getAttribute("data-kit-alias") === incoming.getAttribute("data-kit-alias");
     }
     if (!currentHasComponent || !incomingHasComponent || typeof core.componentMetadata !== "function") return false;
     var currentRequest = core.componentMetadata(current, false);
@@ -174,7 +174,7 @@
       currentRequest.name === incomingRequest.name &&
       currentRequest.version === incomingRequest.version &&
       currentRequest.lane === incomingRequest.lane &&
-      current.getAttribute("data-kit-as") === incoming.getAttribute("data-kit-as") &&
+      current.getAttribute("data-kit-alias") === incoming.getAttribute("data-kit-alias") &&
       directiveIdentity(current, true) === directiveIdentity(incoming, true);
   }
 

@@ -23,7 +23,7 @@ func TestApp1170AddsStructuredSQLiteCommits(t *testing.T) {
 	if !bytes.Equal(readVanillaFile(t, "component", "app", "1.16.0.js"), readVanillaFile(t, "component", "app", "1.17.0.js")) {
 		t.Fatal("app@1.17.0 changed app behavior")
 	}
-	artifact, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.17.0" data-kit-as="$app"></html>`))
+	artifact, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.17.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}

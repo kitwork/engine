@@ -129,7 +129,7 @@ func ignoreHead(title, scriptTags string) string {
 func ignoreOpaqueZone(serverText string) string {
 	return fmt.Sprintf(`<section id="ignore-zone" data-kit-ignore data-server=%q
     data-kit-component="missing-component" data-kit-version="not-semver"
-    data-kit-as="$target" data-kit-retain="invalid key" data-kit-unknown="ignored">
+    data-kit-alias="$target" data-kit-retain="invalid key" data-kit-unknown="ignored">
   <button id="ignore-event" type="button" data-kit-click="count = count + 100">ignored event</button>
   <input id="ignore-model" data-kit-model="count" value="server">
   <output id="ignore-text" data-kit-text="count">%s</output>
@@ -142,7 +142,7 @@ func ignoreOpaqueZone(serverText string) string {
 }
 
 func ignoreActiveAlias() string {
-	return `<section id="ignore-active" data-kit-component="ignore-active@1.0.0" data-kit-as="$target">
+	return `<section id="ignore-active" data-kit-component="ignore-active@1.0.0" data-kit-alias="$target">
   <output id="ignore-touches" data-kit-text="touches">server-active</output>
 </section>
 <button id="ignore-alias-call" type="button" data-kit-click="$target.touch()">active alias</button>`

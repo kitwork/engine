@@ -30,7 +30,7 @@ const (
 var errHTMLScanLimit = errors.New("kitjs: HTML scan resource limit exceeded")
 
 // ComponentRef is one authored component host discovered in HTML. Alias comes
-// only from data-kit-as; legacy inline aliases are deliberately not parsed.
+// only from data-kit-alias; legacy inline aliases are deliberately not parsed.
 // Retain is an optional, exact Morph identity from data-kit-retain.
 type ComponentRef struct {
 	Name    string
@@ -187,7 +187,7 @@ func ScanHTML(source []byte) (ScanResult, error) {
 		serviceCalls = append(serviceCalls, tag.serviceCalls...)
 
 		if tag.alias.present && !tag.component.present {
-			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-as requires data-kit-component on the same element", ErrInvalidComponentUse, tag.alias.offset)
+			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-alias requires data-kit-component on the same element", ErrInvalidComponentUse, tag.alias.offset)
 		}
 		if tag.retain.present && !tag.component.present {
 			return ScanResult{}, fmt.Errorf("%w at byte %d: data-kit-retain requires data-kit-component on the same element", ErrInvalidComponentUse, tag.retain.offset)
@@ -260,7 +260,7 @@ func ScanHTML(source []byte) (ScanResult, error) {
 			if tag.alias.present {
 				alias = trimECMAScriptSpace(htmlattr.Decode(tag.alias.value))
 				if !validAlias(alias) || reservedAlias(alias) {
-					return ScanResult{}, fmt.Errorf("%w at byte %d: invalid data-kit-as value %q", ErrInvalidComponentUse, tag.alias.offset, alias)
+					return ScanResult{}, fmt.Errorf("%w at byte %d: invalid data-kit-alias value %q", ErrInvalidComponentUse, tag.alias.offset, alias)
 				}
 				if prior, exists := aliases[alias]; exists {
 					return ScanResult{}, fmt.Errorf("%w at byte %d: duplicate alias %q (first declared at byte %d)", ErrInvalidComponentUse, tag.alias.offset, alias, prior)
@@ -335,7 +335,7 @@ func validateScannedServiceCalls(calls []expressionServiceCall, aliases map[stri
 	for _, call := range calls {
 		componentRef, exists := aliases["$app"]
 		if !exists || componentRef.Name != "app" {
-			return fmt.Errorf("%w at byte %d: authored service commands require data-kit-component=\"app@1.1.0\" with data-kit-as=\"$app\"",
+			return fmt.Errorf("%w at byte %d: authored service commands require data-kit-component=\"app@1.1.0\" with data-kit-alias=\"$app\"",
 				ErrInvalidExpressionUse, call.Position)
 		}
 		if call.Loader && componentRef.Version != "" && componentRef.Version != "1.1.0" {
@@ -790,12 +790,12 @@ func finalizeScannedTag(tag scannedTag, attributes []rawScannedAttribute, work *
 				return scannedTag{}, fmt.Errorf("%w at byte %d: data-kit-component requires a value", ErrInvalidComponentUse, attribute.offset)
 			}
 			tag.component = scannedAttribute{present: true, value: attribute.value, offset: attribute.offset}
-		case "data-kit-as":
+		case "data-kit-alias":
 			if tag.alias.present {
-				return scannedTag{}, fmt.Errorf("%w at byte %d: duplicate data-kit-as", ErrInvalidComponentUse, attribute.offset)
+				return scannedTag{}, fmt.Errorf("%w at byte %d: duplicate data-kit-alias", ErrInvalidComponentUse, attribute.offset)
 			}
 			if !attribute.hasValue {
-				return scannedTag{}, fmt.Errorf("%w at byte %d: data-kit-as requires a value", ErrInvalidComponentUse, attribute.offset)
+				return scannedTag{}, fmt.Errorf("%w at byte %d: data-kit-alias requires a value", ErrInvalidComponentUse, attribute.offset)
 			}
 			tag.alias = scannedAttribute{present: true, value: attribute.value, offset: attribute.offset}
 		case "data-kit-retain":
@@ -907,7 +907,7 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	// rendering and the browser never sees a directive for it. It is listed here
 	// so an authored code slot is not rejected as an unknown data-kit-* name.
 	case "text", "show", "class", "style", "model", "scope", "component",
-		"as", "retain", "drive", "ignore", "if", "for", "key", "highlight":
+		"alias", "retain", "drive", "ignore", "if", "for", "key", "highlight":
 		if len(parts) != 1 {
 			return fmt.Errorf("%w at byte %d: %q only permits modifiers on event attributes", ErrUnsupportedAttribute, attribute.offset, name)
 		}

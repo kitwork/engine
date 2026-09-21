@@ -17,11 +17,11 @@ func TestApp1130AddsOnlySealedStudioState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.12.0" data-kit-as="$app"></html>`))
+	legacy, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.12.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.13.0" data-kit-as="$app"></html>`))
+	current, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.13.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}

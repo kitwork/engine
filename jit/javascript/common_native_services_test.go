@@ -82,7 +82,7 @@ func TestCommonNativeApp1160ClosesExactSealedGraph(t *testing.T) {
 	if !bytes.Equal(readVanillaFile(t, "component", "app", "1.15.0.js"), readVanillaFile(t, "component", "app", "1.16.0.js")) {
 		t.Fatal("app@1.16.0 changed component behavior, not just the service graph")
 	}
-	artifact, err := composer.ComposeHTML([]byte("<html data-kit-component=\"app@1.16.0\" data-kit-as=\"$app\"></html>"))
+	artifact, err := composer.ComposeHTML([]byte("<html data-kit-component=\"app@1.16.0\" data-kit-alias=\"$app\"></html>"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +131,8 @@ func TestCommonNativeApp1160CapabilityLab140VersionCompatibility(t *testing.T) {
 		t.Fatal("capability-lab@1.4.0 changed component behavior instead of upgrading its service graph")
 	}
 	page := func(app, lab string) []byte {
-		return []byte("<html data-kit-component=\"app@" + app + "\" data-kit-as=\"$app\">" +
-			"<main data-kit-component=\"capability-lab@" + lab + "\" data-kit-as=\"$lab\"></main></html>")
+		return []byte("<html data-kit-component=\"app@" + app + "\" data-kit-alias=\"$app\">" +
+			"<main data-kit-component=\"capability-lab@" + lab + "\" data-kit-alias=\"$lab\"></main></html>")
 	}
 	compatible, err := composer.ComposeHTML(page("1.16.0", "1.4.0"))
 	if err != nil {

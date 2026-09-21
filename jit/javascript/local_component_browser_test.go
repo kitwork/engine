@@ -127,7 +127,7 @@ globalThis.__localTargetGraph = ` + stagedArtifactLiteral(target.Graph) + `;
 <section id="managed" data-kit-component="managed@1.0.0">
   <output id="managed-output" data-kit-text="value">server</output>
 </section>
-<section id="local" data-kit-component="test" data-kit-as="$test"
+<section id="local" data-kit-component="test" data-kit-alias="$test"
   data-kit-scope="{ count: 2 }">
   <button id="local-increment" type="button" data-kit-click="$test.increment()">Increment</button>
   <output id="local-output" data-kit-text="count">server</output>
@@ -286,7 +286,7 @@ console.error = function (error) {
   globalThis.__standaloneOriginalConsoleError.apply(console, arguments);
 };
 </script></head><body>
-<section data-kit-component="plain" data-kit-as="$plain" data-kit-scope="{ count: 4 }">
+<section data-kit-component="plain" data-kit-alias="$plain" data-kit-scope="{ count: 4 }">
   <button id="plain-increment" type="button" data-kit-click="$plain.increment()">Increment</button>
   <output id="plain-output" data-kit-text="count">server</output>
 </section>

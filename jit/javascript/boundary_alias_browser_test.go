@@ -62,12 +62,12 @@ const dirtyBoundaryAliasDocument = `<!doctype html>
   <section data-kit-component="same-tick-parent">
     <button id="same-tick-remove" type="button" data-kit-click="$removalChild.dirty(); $interleavedSibling.dirty(); remove()">dirty child and sibling then remove child</button>
     <template data-kit-if="showChild">
-      <section id="same-tick-child" data-kit-component="same-tick-child" data-kit-as="$removalChild">
+      <section id="same-tick-child" data-kit-component="same-tick-child" data-kit-alias="$removalChild">
         <output id="same-tick-child-output" data-kit-text="rendered">server-same-tick-child</output>
       </section>
     </template>
   </section>
-  <section data-kit-component="same-tick-unrelated" data-kit-as="$interleavedSibling">
+  <section data-kit-component="same-tick-unrelated" data-kit-alias="$interleavedSibling">
     <output id="same-tick-unrelated-output" data-kit-text="rendered">server-same-tick-unrelated</output>
   </section>
 
@@ -94,14 +94,14 @@ const dirtyBoundaryAliasDocument = `<!doctype html>
   <button id="standalone-open" type="button" data-kit-click="$dialog.open(null)">open dialog outside a component</button>
   <button id="shared-alias-trigger" type="button" data-kit-click="$sharedA.shared(); $sharedB.shared()">settle one Promise for two aliases</button>
 
-  <section data-kit-component="shared-owner-a" data-kit-as="$sharedA">
+  <section data-kit-component="shared-owner-a" data-kit-alias="$sharedA">
     <output id="shared-owner-a-output" data-kit-text="rendered">server-shared-a</output>
   </section>
-  <section data-kit-component="shared-owner-b" data-kit-as="$sharedB">
+  <section data-kit-component="shared-owner-b" data-kit-alias="$sharedB">
     <output id="shared-owner-b-output" data-kit-text="rendered">server-shared-b</output>
   </section>
 
-  <section id="external-dialog" data-kit-component="external-dialog" data-kit-as="$dialog" data-kit-show="visible" hidden>
+  <section id="external-dialog" data-kit-component="external-dialog" data-kit-alias="$dialog" data-kit-show="visible" hidden>
     <output id="external-dialog-output" data-kit-text="rendered">server-dialog</output>
     <output id="external-dialog-load-output" data-kit-text="deep.value">server-load</output>
     <output id="external-dialog-transparent-output" data-kit-text="transparentDeep.value">server-transparent</output>
@@ -113,10 +113,10 @@ const dirtyBoundaryAliasDocument = `<!doctype html>
     <output id="alias-binding-output" data-kit-text="$dialog.visible">server-alias-state</output>
   </section>
 
-  <section data-kit-component="duplicate-one" data-kit-as="$duplicate">
+  <section data-kit-component="duplicate-one" data-kit-alias="$duplicate">
     <output id="duplicate-one-output" data-kit-text="touches">server-duplicate-one</output>
   </section>
-  <section data-kit-component="duplicate-two" data-kit-as="$duplicate">
+  <section data-kit-component="duplicate-two" data-kit-alias="$duplicate">
     <output id="duplicate-two-output" data-kit-text="touches">server-duplicate-two</output>
   </section>
 

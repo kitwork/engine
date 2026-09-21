@@ -68,7 +68,7 @@ non-empty authored action surface. Mount it under the exact `$app` alias:
 ```html
 <html
   data-kit-component="app@1.1.0"
-  data-kit-as="$app">
+  data-kit-alias="$app">
   <body>
     <button data-kit-click="$app.appearance.toggle()">Toggle theme</button>
     <button data-kit-click="$app.storage.set('draft', draft)">Save draft</button>

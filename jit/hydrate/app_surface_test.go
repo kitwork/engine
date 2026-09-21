@@ -157,6 +157,15 @@ if (kit.scope["$bad-name"] !== 0) throw new Error("alias accepted characters the
 kit.internal.cleanupTree(box);
 if (kit.scope.$box !== 0) throw new Error("component cleanup left a stale global alias");
 
+// One spelling (ideaship-final §6): the alias is data-kit-alias, never a "=$alias" tail on the
+// component name, and never data-kitwork-alias / data-alias.
+var tail = el("div", { "data-kit-component": "aliasdemo=$tail" });
+var legacy = el("div", { "data-kit-component": "aliasdemo", "data-kitwork-alias": "$legacy", "data-alias": "$plain" });
+document.body.appendChild(tail); document.body.appendChild(legacy);
+kit.render();
+if (kit.scope.$tail !== 0) throw new Error("a =$alias tail on the component name should not register a handle");
+if (kit.scope.$legacy !== 0 || kit.scope.$plain !== 0) throw new Error("data-kitwork-alias / data-alias should not register a handle");
+
 console.log("data-kit-alias: registered globally and released with its component");
 `
 	runNodeDOMScript(t, "data_kit_alias.test.js", assertions)

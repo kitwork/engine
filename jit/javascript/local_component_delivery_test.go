@@ -76,7 +76,7 @@ func TestClientComponentCannotShadowManagedCatalog(t *testing.T) {
 	}
 	for _, source := range []string{
 		`<section data-kit-component="dialog"></section>`,
-		`<section data-kit-component="app" data-kit-as="$app"></section>`,
+		`<section data-kit-component="app" data-kit-alias="$app"></section>`,
 	} {
 		if _, err := composer.ComposeHTML([]byte(source)); !errors.Is(err, ErrInvalidComponentUse) {
 			t.Errorf("ComposeHTML(%q) error = %v, want managed-shadow rejection", source, err)

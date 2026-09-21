@@ -64,7 +64,7 @@ func TestStudioSQLiteCatalogClosesExactSealedGraph(t *testing.T) {
 		t.Fatalf("unknown studioSqlite version error = %v", err)
 	}
 
-	bundle, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.11.0" data-kit-as="$app"></main>`))
+	bundle, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.11.0" data-kit-alias="$app"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -128,7 +128,7 @@ func TestQRMediaCatalogClosesExactApp150Graph(t *testing.T) {
 		}
 	}
 
-	bundle, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.5.0" data-kit-as="$app"></main>`))
+	bundle, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.5.0" data-kit-alias="$app"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestQRMediaCatalogClosesExactApp150Graph(t *testing.T) {
 		t.Fatalf("dependency order files=%d media=%d capabilities=%d qr=%d", filesIndex, mediaIndex, capabilitiesIndex, qrIndex)
 	}
 
-	legacy, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.4.0" data-kit-as="$app"></main>`))
+	legacy, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.4.0" data-kit-alias="$app"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}

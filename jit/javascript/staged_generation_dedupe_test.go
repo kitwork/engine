@@ -208,7 +208,7 @@ func TestGenerationMaterializesLargeComponentOnceAcrossDistinctGraphs(t *testing
 	requireGenerationAllocationWithin(t, "prepared graph lookup", composeAllocated, 8<<20)
 
 	lookupVariant := []byte(`<span data-kit-component="tenant-leaf-00@1.0.0"></span>` +
-		`<main data-kit-component="tenant-heavy@1.0.0" data-kit-as="$heavy" data-kit-retain="heavy"></main>`)
+		`<main data-kit-component="tenant-heavy@1.0.0" data-kit-alias="$heavy" data-kit-retain="heavy"></main>`)
 	variantDelivery, err := store.ComposeHTML(lookupVariant)
 	if err != nil {
 		t.Fatalf("canonical prepared lookup variant: %v", err)

@@ -30,11 +30,11 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 	if defaultApp.identity.Version != "1.1.0" {
 		t.Fatalf("default app version = %s, want unchanged 1.1.0", defaultApp.identity.Version)
 	}
-	canonical110, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.1.0" data-kit-as="$app"></html>`))
+	canonical110, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.1.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := composer.ComposeHTML([]byte(`<html data-kit-component="app" data-kit-version="1.1.0" data-kit-as="$app"></html>`)); !errors.Is(err, ErrUnsupportedAttribute) {
+	if _, err := composer.ComposeHTML([]byte(`<html data-kit-component="app" data-kit-version="1.1.0" data-kit-alias="$app"></html>`)); !errors.Is(err, ErrUnsupportedAttribute) {
 		t.Fatalf("removed split app pin error = %v", err)
 	}
 	for _, marker := range [][]byte{
@@ -62,7 +62,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		}
 	}
 
-	canonical120, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.2.0" data-kit-as="$app"></html>`))
+	canonical120, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.2.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		t.Fatal("app@1.2.0 changed after files@1.2.0 introduced export")
 	}
 
-	canonical130, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.3.0" data-kit-as="$app"></html>`))
+	canonical130, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.3.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		t.Fatal("app@1.2.0 and app@1.3.0 shared an artifact identity")
 	}
 
-	canonical140, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.4.0" data-kit-as="$app"></html>`))
+	canonical140, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.4.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		t.Fatal("app@1.4.0 exposed camera through authored actions")
 	}
 
-	canonical150, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.5.0" data-kit-as="$app"></html>`))
+	canonical150, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.5.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		t.Fatal("app@1.5.0 exposed media or QR through authored actions")
 	}
 
-	canonical160, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.6.0" data-kit-as="$app"></html>`))
+	canonical160, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.6.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		t.Fatal("app@1.6.0 exposed wake lock through authored actions")
 	}
 
-	canonical170, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.7.0" data-kit-as="$app"></html>`))
+	canonical170, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.7.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		t.Fatal("app@1.7.0 exposed notifications through authored actions")
 	}
 
-	canonical180, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.8.0" data-kit-as="$app"></html>`))
+	canonical180, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.8.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestAppLoaderCatalogPins180AndPreservesEarlierVersions(t *testing.T) {
 		}
 	}
 
-	explicit100, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.0.0" data-kit-as="$app"></html>`))
+	explicit100, err := composer.ComposeHTML([]byte(`<html data-kit-component="app@1.0.0" data-kit-alias="$app"></html>`))
 	if err != nil {
 		t.Fatal(err)
 	}

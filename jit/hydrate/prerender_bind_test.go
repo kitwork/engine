@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const sidebarTag = `<header data-kit-component="sidebar=$sidebar" data-kit-bind:data-state="status" data-kit-bind:data-open="drawer" class="w-64">`
+const sidebarTag = `<header data-kit-component="sidebar" data-kit-alias="$sidebar" data-kit-bind:data-state="status" data-kit-bind:data-open="drawer" class="w-64">`
 
 // The whole point: a collapsed sidebar must arrive collapsed, not arrive expanded and snap.
 func TestPreRenderBindBakesRestoredState(t *testing.T) {
@@ -21,7 +21,7 @@ func TestPreRenderBindBakesRestoredState(t *testing.T) {
 		t.Errorf("a key the cookie never carried was baked anyway:\n%s", out)
 	}
 	// Everything the author wrote must survive.
-	if !strings.Contains(out, `class="w-64"`) || !strings.Contains(out, `data-kit-component="sidebar=$sidebar"`) {
+	if !strings.Contains(out, `class="w-64"`) || !strings.Contains(out, `data-kit-component="sidebar" data-kit-alias="$sidebar"`) {
 		t.Errorf("authored attributes were damaged:\n%s", out)
 	}
 }
@@ -76,12 +76,13 @@ func TestPreRenderBindEscapesCookieValues(t *testing.T) {
 	}
 }
 
-func TestComponentNameStripsVersionAndAlias(t *testing.T) {
+// The alias is its own attribute now (data-kit-alias, ideaship-final §6), so a "=$alias" tail is
+// not a form the server unpicks: the name is whatever precedes "@".
+func TestComponentNameStripsVersionOnly(t *testing.T) {
 	for decl, want := range map[string]string{
-		"sidebar":                "sidebar",
-		"sidebar=$sidebar":       "sidebar",
-		"sidebar@v1.0.0":         "sidebar",
-		"sidebar@v1.0.0=$handle": "sidebar",
+		"sidebar":          "sidebar",
+		"sidebar@v1.0.0":   "sidebar",
+		"sidebar=$sidebar": "sidebar=$sidebar",
 	} {
 		if got := ComponentName(decl); got != want {
 			t.Errorf("%q → %q, want %q", decl, got, want)

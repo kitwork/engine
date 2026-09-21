@@ -10,7 +10,7 @@ import (
 // it on demand, and the API the existing markup already calls keeps working.
 
 func TestSidebarIsShippedWhenUsed(t *testing.T) {
-	html := `<body data-kit-component="sidebar=$sidebar"><button data-kit-click="cycle()">x</button></body>`
+	html := `<body data-kit-component="sidebar" data-kit-alias="$sidebar"><button data-kit-click="cycle()">x</button></body>`
 	out := Render(html)
 
 	if !strings.Contains(out, `components=component%3Asidebar`) {

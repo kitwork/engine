@@ -253,7 +253,7 @@ func TestBrowserExpressionSourceFenceMatchesGenerationLimit(t *testing.T) {
 }
 
 func TestScannerMetadataUsesBrowserAttributeDecoding(t *testing.T) {
-	result, err := ScanHTML([]byte(`<main data-kit-component="&#97;pp@1.1.0" data-kit-as="$&#97;pp" data-kit-retain="row&#45;1"></main>`))
+	result, err := ScanHTML([]byte(`<main data-kit-component="&#97;pp@1.1.0" data-kit-alias="$&#97;pp" data-kit-retain="row&#45;1"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}

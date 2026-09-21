@@ -59,7 +59,7 @@ const structuralRetentionFixture = `<!doctype html>
       </article>
     </template>
   </main>
-  <section data-kit-component="structural-gc-sink" data-kit-as="$sink"></section>
+  <section data-kit-component="structural-gc-sink" data-kit-alias="$sink"></section>
 
   <script>
     globalThis.__structuralGCComponentRefs = [];

@@ -105,7 +105,7 @@ func TestCameraCatalogClosesExactSealedGraph(t *testing.T) {
 		t.Fatalf("unknown camera version error = %v", err)
 	}
 
-	bundle, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.4.0" data-kit-as="$app"></main>`))
+	bundle, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.4.0" data-kit-alias="$app"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestCameraCatalogClosesExactSealedGraph(t *testing.T) {
 		t.Fatalf("service order files=%d camera=%d, want files before camera", filesIndex, cameraIndex)
 	}
 
-	legacy, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.3.0" data-kit-as="$app"></main>`))
+	legacy, err := composer.ComposeHTML([]byte(`<main data-kit-component="app@1.3.0" data-kit-alias="$app"></main>`))
 	if err != nil {
 		t.Fatal(err)
 	}

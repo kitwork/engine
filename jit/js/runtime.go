@@ -66,11 +66,10 @@ var (
 	// actionAttrRe extracts the verb from every data-kit-action="…" (or deprecated
 	// data-kitwork-action) attribute.
 	actionAttrRe = regexp.MustCompile(`data-kit(?:work)?-action="([a-z][a-z0-9-]*)"`)
-	// componentAttrRe extracts the component name and optional version suffix. The optional `=$alias`
-	// tail (the client-side global handle, e.g. data-kit-component="sidebar@v1.0.0=$sidebar") is
-	// matched but NOT captured: the alias is purely a runtime concern (kernel registers it), while the
-	// server only needs (name, version) to pick which module to emit.
-	componentAttrRe = regexp.MustCompile(`data-kit(?:work)?-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?(?:=\$[A-Za-z][A-Za-z0-9_-]*)?"`)
+	// componentAttrRe extracts the component name and optional version suffix. The alias is its own
+	// attribute (data-kit-alias, a runtime concern the kernel registers); the server only needs
+	// (name, version) to pick which module to emit.
+	componentAttrRe = regexp.MustCompile(`data-kit(?:work)?-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?"`)
 )
 
 // parseVersion converts a string like "v1.2.3.js" or "v1.2.3" into major, minor, patch ints.
