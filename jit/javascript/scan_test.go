@@ -597,6 +597,9 @@ func TestScanComponentsRejectsRemovedVersionInvalidIdentityAndAlias(t *testing.T
 		`<div data-kit-component="theme" data-kit-alias="$theme.value"></div>`,
 		`<div data-kit-component="theme" data-kit-alias="$_theme"></div>`,
 		`<div data-kit-component="theme" data-kit-alias="$element"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="$this"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="$el"></div>`,
+		`<div data-kit-component="theme" data-kit-alias="$host"></div>`,
 		`<div data-kit-alias="$theme"></div>`,
 		`<div data-kit-component="theme" data-kit-component="dialog"></div>`,
 	}

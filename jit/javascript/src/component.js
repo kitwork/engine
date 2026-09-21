@@ -32,7 +32,7 @@
   var RETAIN_KEY = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
   var EXACT_SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
   var RESERVED_ALIASES = {
-    $element: true, $host: true, $event: true, $refs: true, $component: true,
+    $this: true, $el: true, $element: true, $host: true, $event: true, $refs: true, $component: true,
     $parent: true, $error: true, $alias: true, $invalidate: true
   };
 

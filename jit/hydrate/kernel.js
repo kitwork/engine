@@ -621,17 +621,21 @@
   }
   // elementScope wraps a scope with the acting element's DOM handles — the escape hatch for the
   // rare imperative need (focus, scroll, integrate a widget, toggle an attribute on a child). It is
-  // NOT a prototype mutation: `$el`/`$root` are variables in the expression context that resolve to
-  // native elements, so `$el.querySelector('input').focus()` executes exactly as it reads. `$root`
-  // is the component boundary (nearest data-kit-scope, else <html>), so a query stays inside what
-  // the component owns. Reads and method calls only — value/attribute CHANGES belong to bindings
-  // (data-kit-model, state→CSS), not to reaching in and poking the DOM.
-  function elementScope(el) {
+  // NOT a prototype mutation: they are variables in the expression context that resolve to native
+  // objects, so `$this.querySelector('input').focus()` executes exactly as it reads. The system
+  // variables of ideaship-final §3: `$this` is the element that owns the directive (`$el` is its
+  // compatibility alias); `$host` is the boundary element — nearest data-kit-scope/component, else
+  // <html> — so a query stays inside what the component owns (`$root` is its alias); `$event` is
+  // the native DOM event of the handler that is running; `$refs` the boundary's named elements.
+  // Reads and method calls only — value/attribute CHANGES belong to bindings (data-kit-model,
+  // state→CSS), not to reaching in and poking the DOM.
+  function elementScope(el, event) {
     var base = scopeFor(el);
     return new Proxy(base, {
       get: function (t, k) {
-        if (k === "$el") return el;
-        if (k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
+        if (k === "$this" || k === "$el") return el;
+        if (k === "$host" || k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
+        if (k === "$event") return event || null;
         if (k === "$refs") return refsFor(el);
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
         return base[k];
@@ -713,7 +717,7 @@
   // component INSTANCE; data-kit-ref will name an element.
   var aliases = Object.create(null);
   var reservedAliases = Object.create(null);
-  ["$", "$el", "$root", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
+  ["$", "$this", "$el", "$host", "$root", "$event", "$refs", "$error", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
   function registerAlias(alias, target, owner) {
     alias = String(alias || "").trim();
     var store = owner ? state(owner) : null;
@@ -1157,8 +1161,8 @@
     }
     return result;
   }
-  function runEffect(expression, element) {
-    var current = elementScope(element);
+  function runEffect(expression, element, event) {
+    var current = elementScope(element, event);
     return observeEffect(run(expression, current), current);
   }
 
@@ -1168,7 +1172,7 @@
     if (ex) {
       applyGuard(ex, e); // prevent/stop must run synchronously, before any debounce defers the handler
       var x = directive(ex, "click");
-      if (x) debounced(ex, function () { runEffect(x, ex); render(); });
+      if (x) debounced(ex, function () { runEffect(x, ex, e); render(); });
     }
     var act = e.target.closest && e.target.closest(ACTION);
     if (act) fire(act, e);
@@ -1213,7 +1217,7 @@
       if (el === e.target || (el.contains && el.contains(e.target))) return; // a click inside is not "away"
       if (isFresh(el)) return; // this region was mounted by the very click being processed — ignore it
       var x = directive(el, "away"); if (!x) return;
-      runEffect(x, el); fired = true;
+      runEffect(x, el, e); fired = true;
     });
     if (fired) render();
   });
@@ -1225,7 +1229,7 @@
     var fired = false;
     document.querySelectorAll(ESC).forEach(function (el) {
       var x = directive(el, "escape"); if (!x) return;
-      runEffect(x, el); fired = true;
+      runEffect(x, el, e); fired = true;
     });
     if (fired) render();
   });

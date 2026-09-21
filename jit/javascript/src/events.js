@@ -119,6 +119,14 @@
     });
   }
 
+  // `$event` is a still picture of the native event — the fields an action reads, frozen at
+  // dispatch so a debounced handler sees what happened, not what the browser has since reused the
+  // object for. The elements it points at (target, submitter, relatedTarget) are the real ones,
+  // read through the same closed element table as `$refs` (ideaship-final §3 names `$event` native;
+  // this is the native event as the closed grammar can see it).
+  function elementOrNull(value) {
+    return value && value.nodeType === 1 ? value : null;
+  }
   function snapshot(event, target) {
     var value = null;
     if (target && "value" in target) {
@@ -144,7 +152,10 @@
       repeat: !!event.repeat,
       isComposing: !!event.isComposing,
       value: value,
-      checked: checked
+      checked: checked,
+      target: elementOrNull(target),
+      submitter: elementOrNull(event.submitter),
+      relatedTarget: elementOrNull(event.relatedTarget)
     });
     return Object.freeze(output);
   }

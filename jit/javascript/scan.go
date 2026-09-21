@@ -2193,7 +2193,7 @@ func validAlias(alias string) bool {
 
 func reservedAlias(alias string) bool {
 	switch alias {
-	case "$element", "$host", "$event", "$refs", "$component", "$parent", "$error", "$alias", "$invalidate":
+	case "$this", "$el", "$element", "$host", "$event", "$refs", "$component", "$parent", "$error", "$alias", "$invalidate":
 		return true
 	default:
 		return false

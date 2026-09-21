@@ -1878,7 +1878,7 @@
   var RETAIN_KEY = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
   var EXACT_SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
   var RESERVED_ALIASES = {
-    $element: true, $host: true, $event: true, $refs: true, $component: true,
+    $this: true, $el: true, $element: true, $host: true, $event: true, $refs: true, $component: true,
     $parent: true, $error: true, $alias: true, $invalidate: true
   };
 
@@ -3965,11 +3965,17 @@
     if (current) core.initialize(current);
     try {
       if (core.localsFor) locals = core.localsFor(element, locals);
-      // `$refs` rides every action: the elements the acting boundary named with data-kit-ref.
-      var withRefs = Object.create(null);
-      if (locals) Object.keys(locals).forEach(function (key) { withRefs[key] = locals[key]; });
-      withRefs.$refs = core.refsFor(element);
-      program.read(current ? current.scope : EMPTY_SCOPE, withRefs, function (value, owner) {
+      // The system variables of ideaship-final §3 ride every action: `$this` is the element that
+      // owns the attribute (`$el` its compatibility alias), `$host` the boundary element — the
+      // nearest component host or data-kit-scope, else <html> — and `$refs` the elements that
+      // boundary named with data-kit-ref. `$event` arrives from the dispatcher in `locals`.
+      var system = Object.create(null);
+      if (locals) Object.keys(locals).forEach(function (key) { system[key] = locals[key]; });
+      system.$this = element;
+      system.$el = element;
+      system.$host = boundary || document.documentElement;
+      system.$refs = core.refsFor(element);
+      program.read(current ? current.scope : EMPTY_SCOPE, system, function (value, owner) {
         core.observe(value, owner);
       });
       return true;
@@ -5075,6 +5081,14 @@
     });
   }
 
+  // `$event` is a still picture of the native event — the fields an action reads, frozen at
+  // dispatch so a debounced handler sees what happened, not what the browser has since reused the
+  // object for. The elements it points at (target, submitter, relatedTarget) are the real ones,
+  // read through the same closed element table as `$refs` (ideaship-final §3 names `$event` native;
+  // this is the native event as the closed grammar can see it).
+  function elementOrNull(value) {
+    return value && value.nodeType === 1 ? value : null;
+  }
   function snapshot(event, target) {
     var value = null;
     if (target && "value" in target) {
@@ -5100,7 +5114,10 @@
       repeat: !!event.repeat,
       isComposing: !!event.isComposing,
       value: value,
-      checked: checked
+      checked: checked,
+      target: elementOrNull(target),
+      submitter: elementOrNull(event.submitter),
+      relatedTarget: elementOrNull(event.relatedTarget)
     });
     return Object.freeze(output);
   }

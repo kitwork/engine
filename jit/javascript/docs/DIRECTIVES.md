@@ -235,6 +235,25 @@ and `escape` apply only to `keydown`/`keyup` and cannot be combined. `outside`
 applies only to `click`, `dblclick`, `pointerdown`, `pointerup`, and `focusin`,
 and cannot be combined with `self`.
 
+### System variables in an action
+
+Every action sees the system variables of the KitJS spec (`ideaship-final` §3): `$this` is the
+element that owns the attribute (`$el` is its compatibility alias); `$host` is the nearest boundary
+element — the component host or `data-kit-scope`, else `<html>`; `$event` is the event as the
+closed grammar can see it — a frozen picture with `type key code button clientX clientY value
+checked …` plus the real `target`, `submitter` and `relatedTarget` elements; `$refs.<name>` is the
+element named by `data-kit-ref` in the acting boundary. Elements answer a closed table of reads
+(`value`, `checked`, `open`, `id`, `dataset`, `scrollTop`, …) and verbs (`focus()`, `blur()`,
+`click()`, `select()`, `scrollIntoView()`, `showModal()`, `close()`, `reportValidity()`, `play()`,
+`getAttribute()`, …) and nothing else — no writes, nothing that walks the tree. The `$` namespace is
+action-only, so none of these appear in a binding.
+
+```html
+<input data-kit-ref="search">
+<button data-kit-click="$refs.search.focus(); $this.blur()">Search</button>
+<form data-kit-submit:prevent="sent = $event.submitter.id">…</form>
+```
+
 Bindings are read-only. Actions may assign an existing writable top-level
 field and sequence expressions with semicolons. This is the closed KitJS
 expression language, not JavaScript: page globals, declarations, member
