@@ -980,7 +980,112 @@
     }
   }
 
+  // ---- data-kit-seed: DOM → state, once — the mirror of data-kit-bind (chốt 21/09) ----
+  // The server already rendered the value; seed hands it to state instead of the author writing it
+  // a second time into a scope literal. data-kit-seed="key" reads the element's text (on a
+  // <script type="application/json">, its JSON); data-kit-seed:<name>="key" reads the property or
+  // attribute <name> by the three bind groups, in reverse. The target is a state key, a dotted
+  // path, or list[] — one entry per element in document order, the list rebuilt whenever a member
+  // that has not been seeded yet appears. The write goes where an assignment would go: the scope
+  // in the chain that owns the key, else the nearest one. Once per element; attributes stay
+  // strings (no type guessing beyond a boolean property or a numeric input).
+  var SEED_TARGET = /^([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*)*)(\[\])?$/;
+  function seedsOf(el) {
+    if (el.__kitSeeds) return el.__kitSeeds;
+    var list = [];
+    if (el.getAttributeNames) {
+      el.getAttributeNames().forEach(function (name) {
+        if (name === "data-kit-seed") list.push({ attr: name, name: "" });
+        else if (name.indexOf("data-kit-seed:") === 0) list.push({ attr: name, name: name.slice(14) });
+      });
+    }
+    el.__kitSeeds = list;
+    return list;
+  }
+  function checkSeedData(v, seen) {
+    if (v === null || typeof v !== "object") return v;
+    if (seen.indexOf(v) >= 0) throw new Error("hydrate: circular seed data");
+    seen.push(v);
+    for (var k in v) {
+      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (blockedKey(k)) throw new Error("hydrate: blocked seed key '" + k + "'");
+      checkSeedData(v[k], seen);
+    }
+    return v;
+  }
+  function readSeed(el, name) {
+    if (!name) {
+      var tag = String(el.tagName || "").toLowerCase();
+      var type = String(el.type || (el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
+      if (tag === "script" && type === "application/json") return checkSeedData(JSON.parse(el.textContent), []);
+      return String(el.textContent || "").trim();
+    }
+    if (/^on/.test(name) || /^data-kit/.test(name) || name === "style" || name === "srcdoc" || name === "innerhtml" || name === "outerhtml") {
+      throw new Error("hydrate: unsafe seed source '" + name + "'");
+    }
+    var reflected = REFLECTED_BOOLEAN[name];
+    if (reflected) return reflected in el ? !!el[reflected] : el.hasAttribute(name);
+    var live = LIVE_PROPERTY[name];
+    if (live) {
+      if (LIVE_BOOLEAN[name]) return live in el ? !!el[live] : el.hasAttribute(name);
+      var kind = String(el.type || (el.getAttribute && el.getAttribute("type")) || "").toLowerCase();
+      if (kind === "number" || kind === "range") {
+        if (el.value === "" || el.value == null) return null;
+        var n = Number(el.value);
+        return isFinite(n) ? n : null;
+      }
+      return el[live] == null ? (el.getAttribute(name) || "") : String(el[live]);
+    }
+    if (name.indexOf("-") < 0 && name in el && typeof el[name] !== "function" && typeof el[name] !== "object") return el[name];
+    return el.hasAttribute(name) ? el.getAttribute(name) : null;
+  }
+  function seedWrite(el, path, value) {
+    var s = scopeFor(el);
+    if (path.length === 1) { s[path[0]] = value; return; }
+    var holder = s[path[0]];
+    if (!holder || typeof holder !== "object" || holder instanceof Array) { holder = {}; s[path[0]] = holder; }
+    for (var i = 1; i < path.length - 1; i++) {
+      var next = holder[path[i]];
+      if (!next || typeof next !== "object" || next instanceof Array) { next = {}; holder[path[i]] = next; }
+      holder = next;
+    }
+    holder[path[path.length - 1]] = value;
+  }
+  function seedElements() {
+    var lists = {}, rebuild = {};
+    document.querySelectorAll("*").forEach(function (el) {
+      var seeds = seedsOf(el);
+      if (!seeds.length) return;
+      var done = el.__kitSeeded || (el.__kitSeeded = {});
+      seeds.forEach(function (sd) {
+        var m = SEED_TARGET.exec(el.getAttribute(sd.attr) || "");
+        if (!m) { if (!done[sd.attr]) { done[sd.attr] = true; reportError(new Error("hydrate: data-kit-seed target must be a key, a dotted path, or list[]"), el, sd.attr); } return; }
+        var path = [m[1]].concat(m[2] ? m[2].slice(1).split(".") : []);
+        for (var i = 0; i < path.length; i++) if (blockedKey(path[i])) return;
+        if (m[3]) {
+          var key = path.join(".");
+          if (!done[sd.attr]) rebuild[key] = true;
+          (lists[key] || (lists[key] = [])).push({ el: el, sd: sd, path: path });
+          return;
+        }
+        if (done[sd.attr]) return;
+        done[sd.attr] = true;
+        try { seedWrite(el, path, readSeed(el, sd.name)); } catch (e) { reportError(e, el, sd.attr); }
+      });
+    });
+    for (var key in rebuild) {
+      var members = lists[key], values = [];
+      for (var j = 0; j < members.length; j++) {
+        var member = members[j];
+        member.el.__kitSeeded[member.sd.attr] = true;
+        try { values.push(readSeed(member.el, member.sd.name)); } catch (e) { reportError(e, member.el, member.sd.attr); }
+      }
+      try { seedWrite(members[0].el, members[0].path, values); } catch (e) { reportError(e, members[0].el, members[0].sd.attr); }
+    }
+  }
+
   function render() {
+    seedElements();
     seedModels();
     rebuildActiveComponents();
     renderFor();

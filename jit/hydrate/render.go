@@ -150,7 +150,7 @@ func checkEventModifiers(directive string) error {
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|validate|error|bind:[a-z][a-z0-9-]*|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|validate|error|bind:[a-z][a-z0-9-]*|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
@@ -193,6 +193,13 @@ func Render(html string) string {
 			fmt.Printf("[hydrate] class names must be written out in full — the CSS JIT cannot emit a "+
 				"name built with '+', so this rule is never generated. Use a conditional between "+
 				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s\n", m[0])
+		}
+	}
+	// A seed's value is a state target, not an expression; name a malformed one at render, as the
+	// kernel would only report it in the browser.
+	for _, m := range seedAttrRe.FindAllStringSubmatch(html, -1) {
+		if err := seedTargetError(strings.TrimSpace(authoredAttribute(m[2]))); err != nil {
+			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
 		}
 	}
 	if !presenceRe.MatchString(html) {

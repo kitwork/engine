@@ -76,6 +76,149 @@
     record.bound = names;
     return names;
   }
+  // ---- data-kit-seed: DOM → state, once — the mirror of data-kit-bind (chốt 21/09) ----
+  // The server already rendered the value; seed hands it to state instead of the author writing it
+  // a second time into a scope literal. data-kit-seed="key" reads the element's text (or, on a
+  // <script type="application/json">, its JSON); data-kit-seed:<name>="key" reads the property or
+  // attribute <name> by the same three groups bind writes with, in reverse. The target is a state
+  // key, a dotted path, or list[] — one entry per element in document order, the list rebuilt each
+  // time a new element of that list appears. It runs once per element (boot, and again only for a
+  // new element after a swap). Attribute values stay strings: no type guessing beyond what the
+  // element itself says (a boolean property, a numeric input).
+  var SEED_PREFIX = "data-kit-seed:";
+  var SEED_TARGET = /^([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*)*)(\[\])?$/;
+  function seedNames(element) {
+    var record = elementRecord(element);
+    if (record.seeds) return record.seeds;
+    var names = [];
+    if (element.hasAttribute("data-kit-seed")) names.push("data-kit-seed");
+    element.getAttributeNames().forEach(function (name) {
+      if (name.indexOf(SEED_PREFIX) === 0) names.push(name);
+    });
+    record.seeds = names;
+    record.seeded = Object.create(null);
+    return names;
+  }
+  function parseSeedTarget(source) {
+    var match = SEED_TARGET.exec(source || "");
+    if (!match) throw new SyntaxError("KitJS: data-kit-seed target must be a key, a dotted path, or list[]; got \"" + source + "\"");
+    var path = [match[1]].concat(match[2] ? match[2].slice(1).split(".") : []);
+    path.forEach(function (segment) {
+      if (core.blocked(segment) || core.FORBIDDEN[segment]) throw new SyntaxError("KitJS: data-kit-seed target uses blocked name \"" + segment + "\"");
+    });
+    return { path: path, list: !!match[3] };
+  }
+  function checkSeedData(value, seen) {
+    if (value === null || typeof value !== "object") return value;
+    if (seen.has(value)) throw new TypeError("KitJS: circular seed data");
+    seen.add(value);
+    Object.keys(value).forEach(function (name) {
+      if (core.blockedScopeKey ? core.blockedScopeKey(name) : core.blocked(name)) throw new TypeError("KitJS: blocked seed key \"" + name + "\"");
+      checkSeedData(value[name], seen);
+    });
+    return value;
+  }
+  function numericInput(element) {
+    if (!element.tagName || element.tagName.toLowerCase() !== "input") return false;
+    var type = String(element.type || "").toLowerCase();
+    return type === "number" || type === "range";
+  }
+  function readSeed(element, name) {
+    if (!name) {
+      if (element.tagName && element.tagName.toLowerCase() === "script" &&
+        String(element.type || "").toLowerCase() === "application/json") {
+        return checkSeedData(JSON.parse(element.textContent), new WeakSet());
+      }
+      return String(element.textContent || "").trim();
+    }
+    if (unsafeName(name)) throw new SyntaxError("KitJS: unsafe seed source \"" + name + "\"");
+    var reflected = REFLECTED_BOOLEAN[name];
+    if (reflected) return !!element[reflected];
+    var live = LIVE_PROPERTY[name];
+    if (live) {
+      if (LIVE_BOOLEAN[name]) return !!element[live];
+      if (numericInput(element)) {
+        if (element.value === "") return null;
+        var number = Number(element.value);
+        return Number.isFinite(number) ? number : null;
+      }
+      return element[live] == null ? "" : String(element[live]);
+    }
+    if (name.indexOf("-") < 0 && name in element && typeof element[name] !== "function" && typeof element[name] !== "object") {
+      return element[name];
+    }
+    return element.hasAttribute(name) ? element.getAttribute(name) : null;
+  }
+  function assignSeed(current, target, value) {
+    var scope = current.scope;
+    var root = target.path[0];
+    if (current.componentIdentity && !OWN.call(scope, root)) {
+      throw new TypeError("KitJS: data-kit-seed field \"" + root + "\" is not declared by component \"" + current.componentIdentity.name + "\"");
+    }
+    if (target.path.length === 1) {
+      scope[root] = value;
+      return;
+    }
+    var holder = scope[root];
+    if (holder === null || typeof holder !== "object" || Array.isArray(holder)) {
+      holder = {};
+      scope[root] = holder;
+    }
+    for (var index = 1; index < target.path.length - 1; index++) {
+      var next = holder[target.path[index]];
+      if (next === null || typeof next !== "object" || Array.isArray(next)) {
+        next = {};
+        holder[target.path[index]] = next;
+      }
+      holder = next;
+    }
+    holder[target.path[target.path.length - 1]] = value;
+    core.invalidate(current);
+  }
+  // seedBoundary seeds the elements a boundary owns, before its bindings render, so a binding that
+  // reads the same key sees the DOM's value. A list is rebuilt from every present member when a
+  // member that has not been seeded yet is met.
+  function seedBoundary(current, plan) {
+    var lists = Object.create(null);
+    var rebuild = Object.create(null);
+    plan.seeds.forEach(function (element) {
+      var record = elementRecord(element);
+      seedNames(element).forEach(function (attr) {
+        try {
+          var target = parseSeedTarget(core.expressionSource(element.getAttribute(attr)));
+          if (target.list) {
+            var key = target.path.join(".");
+            if (!record.seeded[attr]) rebuild[key] = true;
+            (lists[key] || (lists[key] = [])).push({ element: element, attr: attr, name: attr === "data-kit-seed" ? "" : attr.slice(SEED_PREFIX.length), target: target });
+            return;
+          }
+          if (record.seeded[attr]) return;
+          record.seeded[attr] = true;
+          assignSeed(current, target, readSeed(element, attr === "data-kit-seed" ? "" : attr.slice(SEED_PREFIX.length)));
+        } catch (error) {
+          record.seeded[attr] = true;
+          core.report(error, element, attr);
+        }
+      });
+    });
+    Object.keys(rebuild).forEach(function (key) {
+      var members = lists[key];
+      var values = [];
+      var target = null;
+      members.forEach(function (member) {
+        try {
+          values.push(readSeed(member.element, member.name));
+          elementRecord(member.element).seeded[member.attr] = true;
+          target = member.target;
+        } catch (error) {
+          core.report(error, member.element, member.attr);
+        }
+      });
+      if (target) {
+        try { assignSeed(current, target, values); } catch (error) { core.report(error, members[0].element, members[0].attr); }
+      }
+    });
+  }
   function unsafeName(name) {
     var lower = name.toLowerCase();
     return /^on/.test(lower) || /^data-kit/.test(lower) || UNSAFE_NAMES[lower] === true;
@@ -202,6 +345,7 @@
   }
   function collectRenderPlan(current) {
     var plan = {
+      seeds: [],
       bindings: [],
       classes: [],
       styles: [],
@@ -211,6 +355,7 @@
       if (!element.attributes.length) return;
       if (element.hasAttribute("data-kit-text") || element.hasAttribute("data-kit-show") ||
         boundNames(element).length) plan.bindings.push(element);
+      if (seedNames(element).length) plan.seeds.push(element);
       if (element.hasAttribute("data-kit-class")) plan.classes.push(element);
       if (element.hasAttribute("data-kit-style")) plan.styles.push(element);
       if (element.hasAttribute("data-kit-model")) plan.models.push(element);
@@ -255,6 +400,7 @@
         try { children = prepareBoundary(current); }
         catch (error) { core.report(error); children = []; }
         var plan = collectRenderPlan(current);
+        if (plan.seeds.length) seedBoundary(current, plan);
         plan.bindings.forEach(function (element) {
           try { renderElement(current, element); } catch (error) { core.report(error, element, error && error.kitDirective); }
         });

@@ -906,6 +906,11 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	// identifier so the expression can spell it as a member.
 	case "ref":
 		return validateRefName(attribute, parts[1:])
+	// data-kit-seed="key" reads the element's text (or JSON) into state once; data-kit-seed:<name>
+	// reads the property/attribute <name>. The value is a state target — key, dotted path, or
+	// list[] — not an expression.
+	case "seed":
+		return validateSeedAttribute(attribute, parts[1:])
 	// "highlight" is server-only: the JIT highlight pass consumes it while
 	// rendering and the browser never sees a directive for it. It is listed here
 	// so an authored code slot is not rejected as an unknown data-kit-* name.
@@ -946,6 +951,37 @@ func validateRefName(attribute rawScannedAttribute, rest []string) error {
 	name := strings.TrimSpace(attribute.value)
 	if !refName.MatchString(name) || expressionBlockedNames[name] || expressionForbiddenNames[name] {
 		return fmt.Errorf("%w at byte %d: data-kit-ref %q is not a usable name; use an identifier ($refs.%s must read it)", ErrUnsupportedAttribute, attribute.offset, name, name)
+	}
+	return nil
+}
+
+// seedTarget is what data-kit-seed may name: a key, a dotted path, or list[] (one entry per element).
+var seedTarget = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)((?:\.[A-Za-z_][A-Za-z0-9_]*)*)(\[\])?$`)
+
+func validateSeedAttribute(attribute rawScannedAttribute, rest []string) error {
+	if len(rest) > 1 || (len(rest) == 1 && rest[0] == "") {
+		return fmt.Errorf("%w at byte %d: %q names no source; write data-kit-seed (text) or data-kit-seed:<name>", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	if len(rest) == 1 {
+		if !bindingTargetName.MatchString(rest[0]) {
+			return fmt.Errorf("%w at byte %d: %q is not a property or attribute name", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+		}
+		if unsafeBindingTarget(rest[0]) {
+			return fmt.Errorf("%w at byte %d: %q reads an unsafe source %q", ErrUnsupportedAttribute, attribute.offset, attribute.name, rest[0])
+		}
+	}
+	if !attribute.hasValue {
+		return fmt.Errorf("%w at byte %d: %q requires a state target", ErrUnsupportedAttribute, attribute.offset, attribute.name)
+	}
+	target := strings.TrimSpace(htmlattr.Decode(attribute.value))
+	match := seedTarget.FindStringSubmatch(target)
+	if match == nil {
+		return fmt.Errorf("%w at byte %d: data-kit-seed target %q must be a key, a dotted path, or list[]", ErrUnsupportedAttribute, attribute.offset, target)
+	}
+	for _, segment := range strings.Split(match[1]+match[2], ".") {
+		if expressionBlockedNames[segment] || expressionForbiddenNames[segment] {
+			return fmt.Errorf("%w at byte %d: data-kit-seed target uses blocked name %q", ErrUnsupportedAttribute, attribute.offset, segment)
+		}
 	}
 	return nil
 }
@@ -1108,7 +1144,7 @@ func runtimeAttribute(name string) bool {
 		directive = directive[:colon]
 	}
 	switch directive {
-	case "text", "show", "class", "bind", "style", "model", "scope", "component", "local", "if", "for", "key":
+	case "text", "show", "class", "bind", "seed", "style", "model", "scope", "component", "local", "if", "for", "key":
 		return true
 	case "click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout":
 		return true

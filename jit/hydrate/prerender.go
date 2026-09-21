@@ -353,6 +353,7 @@ func isLocalBoundaryAttribute(name string) bool {
 func modelScopeOutside(htmlStr string, opaque []sourceRange) map[string]any {
 	scope := map[string]any{}
 	seedModelScopeOutside(htmlStr, opaque, scope)
+	seedScopeOutside(htmlStr, opaque, scope) // data-kit-seed after model: the DOM's word wins
 	return scope
 }
 

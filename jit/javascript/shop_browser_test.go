@@ -19,8 +19,8 @@ var (
 )
 
 const (
-	shopArtifactName   = "hydrate.kit.1.0.0-rc.2.b3bb2b22d732f2b08ba4eb6dc8d58b7f35c9358b0e8a17eed992292b13fc1f9c.js"
-	shopArtifactSHA256 = "b3bb2b22d732f2b08ba4eb6dc8d58b7f35c9358b0e8a17eed992292b13fc1f9c"
+	shopArtifactName   = "hydrate.kit.1.0.0-rc.2.a9c4a3c5122b9300666c774eeda92655f4dd5d83670dd5b83a854908ec49a77b.js"
+	shopArtifactSHA256 = "a9c4a3c5122b9300666c774eeda92655f4dd5d83670dd5b83a854908ec49a77b"
 )
 
 func TestShopExampleContract(t *testing.T) {

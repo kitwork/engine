@@ -20,7 +20,7 @@
   "self prevent stop once outside enter escape window document".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version alias ref retain drive ignore text show bind class style model if for key error".split(" ").forEach(function (name) {
+  "component scope version alias ref retain drive ignore text show bind seed class style model if for key error".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
@@ -37,8 +37,8 @@
     var parts = source.split(":");
     var type = parts.shift();
     if (!EVENTS[type]) {
-      // data-kit-bind:<name> carries its target after the colon; it is a binding, not an event.
-      if (type === "bind") return null;
+      // data-kit-bind:<name> / data-kit-seed:<name> carry their target after the colon; not events.
+      if (type === "bind" || type === "seed") return null;
       if (RESERVED[type]) {
         if (parts.length) directiveError("directive does not accept modifiers", name);
         return null;

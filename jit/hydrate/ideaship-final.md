@@ -56,6 +56,7 @@
 | `data-kit-key` | Định danh ổn định | `="item.id"` | Giữ DOM khi insert/remove/reorder |
 | `data-kit-if` | Mount/unmount subtree | `="isEditing"` | Dùng chung Block Engine với `for` |
 | `data-kit-error` | Error boundary | `="handle($error)"` | Bắt lỗi component → `$error` |
+| `data-kit-seed[:<name>]` ✚21/09 | DOM → state, **một lần** (gương của bind) | `="title"` · `:value="user.email"` · `="tags[]"` | Vế phải = **đích state** (key · `a.b.c` · `list[]`), không phải biểu thức; đọc text / JSON island / property-attribute theo 3 nhóm ngược; DOM thắng scope literal (§5) |
 
 Sự kiện là một họ riêng: `data-kit-<event>` (§3).
 
@@ -113,6 +114,8 @@ Tác giả viết thứ tự nào cũng được; runtime luôn chạy theo:
 | **Attribute-Only** | `data-kit-attr:*` (ARIA, data-*, custom) | `setAttribute` only |
 
 Canonical: `data-kit-bind:<prop>`. Dạng ngắn `data-kit-disabled` normalize về canonical.
+
+**✚ 21/09 — `seed` là gương của `bind`, cùng ba nhóm đọc ngược:** `data-kit-seed="key"` đọc `textContent` (trim) — trên `<script type="application/json">` đọc JSON; `data-kit-seed:<name>="key"` đọc reflected boolean → boolean, `value` → string (số với input number/range), còn lại → attribute string (vắng → `null`). Đích: key · đường `.` (tự tạo object) · `list[]` (một phần tử một mục, theo thứ tự tài liệu, dựng lại khi có thành viên mới). Chạy **một lần** (boot; vùng mới sau Drive swap). DOM thắng scope literal. Không đoán kiểu. Trên host component: field phải khai báo. `model` = seed:value + bind:value + lắng `input`. Server (`PreRender`) đọc cùng seed cho first paint; seed trong boundary cục bộ là của client.
 
 ---
 

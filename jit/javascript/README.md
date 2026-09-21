@@ -769,6 +769,7 @@ for `for`, not a separate family:
 | text | `data-kit-text="count"` | writes synchronous expression results through `textContent` |
 | show | `data-kit-show="open"` | toggles the `hidden` property without removing the node |
 | bind | `data-kit-bind:aria-expanded="open"` | writes safe attributes and a small form-property allowlist |
+| seed | `data-kit-seed="title"`, `data-kit-seed:value="user.email"`, `data-kit-seed="tags[]"` | the mirror of bind: DOM → state once — text (or a JSON island's data), or a property/attribute by the bind groups in reverse — into a key, a dotted path, or a list built in document order; the DOM wins over a scope literal |
 | class | `data-kit-class="open ? 'block' : 'hidden'"` | owns dynamic class tokens while preserving authored static classes |
 | style | `data-kit-style="width: progress + '%'; opacity: visible ? 1 : 0;"` | transactionally owns fixed CSS properties with continuous binding values |
 | model | `data-kit-model="name"` | two-way binds one existing writable field on the nearest reactive boundary to a supported form control |

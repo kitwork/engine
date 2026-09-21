@@ -30,7 +30,7 @@ They also contain the same immutable artifact URL (filled after the retain
 runtime is sealed):
 
 ```text
-hydrate.kit.1.0.0-rc.2.7fa9414fbcceecae6c5fcb24903d152e11e7de751f853188f9045826125e9806.js
+hydrate.kit.1.0.0-rc.2.a3dc58bdb44d59d0fa08f14c190ed640a039a440ea85ab451ef1c2d68b692ff3.js
 ```
 
 The filename hash identifies the exact Hydrate runtime, `progress@1.0.0`,

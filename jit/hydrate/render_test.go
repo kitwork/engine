@@ -48,6 +48,33 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 // source rides unchanged, and a page whose ONLY directive is one of them still ships the runtime.
 // The old dedicated directives (data-kit-away / data-kit-escape) and companions (data-kit-guard)
 // are no longer names the server knows: their jobs are :outside, :escape:window, :prevent.
+// data-kit-seed brings the runtime and has its target checked at render: a key, a dotted path, or
+// list[] — the client's rule, said on the server.
+func TestRenderSeedIsInjectedAndItsTargetChecked(t *testing.T) {
+	for _, ok := range []string{"title", "user.email", "tags[]", "a.b.c"} {
+		if err := seedTargetError(ok); err != nil {
+			t.Errorf("seedTargetError(%q) = %v, want nil", ok, err)
+		}
+	}
+	for target, reason := range map[string]string{"items[1]": "must be", "a b": "must be", "$title": "must be", "user.__proto__": "blocked"} {
+		if err := seedTargetError(target); err == nil || !strings.Contains(err.Error(), reason) {
+			t.Errorf("seedTargetError(%q) = %v, want an error naming %q", target, err, reason)
+		}
+	}
+	for _, authored := range []string{`data-kit-seed="title"`, `data-kit-seed:value="user.email"`} {
+		if !presenceRe.MatchString(authored) {
+			t.Errorf("%s must bring the runtime", authored)
+		}
+		if directiveRe.MatchString(authored) {
+			t.Errorf("%s is a state target, not an expression to verify", authored)
+		}
+	}
+	in := `<head></head><body>` + marker + `<h1 data-kit-seed="title">x</h1></section></body>`
+	if out := Render(in); strings.Count(out, injectTag) != 1 {
+		t.Error("a page whose only directive is a seed still needs the runtime")
+	}
+}
+
 func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 	for _, authored := range []string{
 		`data-kit-click="open = false"`,
