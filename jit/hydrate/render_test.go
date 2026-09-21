@@ -189,24 +189,30 @@ func TestRenderLiveAndModelInject(t *testing.T) {
 	}
 }
 
-// STRICT PREFIX = ORIGIN: data-kit-* is the only authored source form; data-kitwork-* on a
-// directive is engine-emitted IR — never compile-verified as source, but it still needs the
-// runtime injected (the walker runs it).
+// STRICT PREFIX = ORIGIN: data-kit-* is the only authored source form. The long prefix on a
+// directive is not source and, since the kernel stopped decoding IR (ideaship-final §9), not
+// anything: it is neither verified nor a reason to ship the runtime.
 func TestRenderStrictPrefixOrigin(t *testing.T) {
-	// The verify regex must not treat the long prefix as source…
 	if directiveRe.MatchString(`data-kitwork-click="n = n + 1"`) {
 		t.Error("data-kitwork-click must NOT be matched as authored source")
 	}
 	if !directiveRe.MatchString(`data-kit-click="n = n + 1"`) {
 		t.Error("data-kit-click must be matched as authored source")
 	}
-	// …and a page carrying ONLY a precompiled IR directive still gets the runtime.
+	for _, long := range []string{
+		`data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'`,
+		`data-kitwork-text="n"`,
+		`data-kitwork-scope="cart"`,
+	} {
+		if presenceRe.MatchString(long) {
+			t.Errorf("%s is inert and must not bring the runtime", long)
+		}
+	}
 	in := `<head></head><body>` + marker +
 		`<button data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'>+</button>` +
 		`</section></body>`
-	out := Render(in)
-	if strings.Count(out, injectTag) != 1 {
-		t.Error("an IR-only page still needs the runtime injected")
+	if out := Render(in); strings.Contains(out, injectTag) {
+		t.Error("a page whose only directive wears the long prefix has no directive; nothing to hydrate")
 	}
 }
 
@@ -218,12 +224,20 @@ func TestRenderInjectsBeforeBodyWhenNoHead(t *testing.T) {
 	}
 }
 
-// The runtime must ship BOTH halves: the tiny parser (data-kit-* source) and the IR walker
-// (data-kitwork-* precompiled JSON — prefix IS the encoding, no -ir suffix) — and never eval.
+// The runtime ships the tiny parser (data-kit-* source) and the walker — and never eval. It does
+// not decode a precompiled IR any more: no data-kitwork-<directive> read remains in the kernel.
 func TestRuntimeEmbedded(t *testing.T) {
 	rt := Runtime()
 	if strings.Contains(rt, "-ir") {
-		t.Error("the -ir suffix form is retired — the long prefix alone marks engine-emitted IR")
+		t.Error("the -ir suffix form is retired")
+	}
+	for _, gone := range []string{
+		`"data-kitwork-" + name`, `[data-kitwork-scope]`, `[data-kitwork-component]`, `[data-kitwork-for]`,
+		`[data-kitwork-if]`, `[data-kitwork-model]`, `data-kitwork-debounce`,
+	} {
+		if strings.Contains(kernelJS, gone) {
+			t.Errorf("the kernel still reads %s — the long prefix on a directive/boundary is inert now", gone)
+		}
 	}
 	for _, want := range []string{
 		"window.hydrate", "PREC", "function lex", "MutationObserver",
@@ -236,11 +250,11 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// kernel overlays (progress bar, announcer) survive morph via the data-kitwork-ui marker
 		"data-kitwork-ui", "kernelUI",
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
-		"data-kitwork-scope", "scopeFor", `"=$"`,
+		"data-kit-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
 		`"{}"`, `"[]"`, `"=>"`, `"call"`, "__kitLambda", "tryArrowParams", "boundaryScope", "kit.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
-		"kit.component", "data-kitwork-component", "seedComponent", "fn.apply(s, fargs)",
+		"kit.component", "data-kit-component", "seedComponent", "fn.apply(s, fargs)",
 		// the capability seam remember (and later api/live) installs through, now that it is out of core
 		"pageScope", "scheduleRender",
 		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,
@@ -253,7 +267,7 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
 		`data-kit-bind:`, `function writeBinding`,
 		// an api element is still a core SCOPE boundary (the fetch that fills it is now the capability)
-		"data-kitwork-api", "data-kit-api",
+		"data-kit-api",
 		// the reconcile/destroy lifecycle capabilities (api/live/remember) install through, out of core
 		"reconcileHooks", "onReconcile", "onDestroy",
 		// component init() lifecycle hook stays in core

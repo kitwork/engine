@@ -69,7 +69,7 @@ var (
 	// componentAttrRe extracts the component name and optional version suffix. The alias is its own
 	// attribute (data-kit-alias, a runtime concern the kernel registers); the server only needs
 	// (name, version) to pick which module to emit.
-	componentAttrRe = regexp.MustCompile(`data-kit(?:work)?-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?"`)
+	componentAttrRe = regexp.MustCompile(`data-kit-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?"`)
 )
 
 // parseVersion converts a string like "v1.2.3.js" or "v1.2.3" into major, minor, patch ints.
@@ -371,13 +371,12 @@ func SiteRuntimeJS(htmls ...string) string {
 }
 
 // Render injects the per-page runtime as ONE `<script data-kitwork-jit="js">` before </head>.
-// A cheap no-op when the page uses no verbs/components. Both prefixes are checked: the canonical
-// authored form is data-kit-*, and a page that uses ONLY the short form must still get the runtime.
+// A cheap no-op when the page uses no verbs/components. A component is authored as data-kit-component
+// only (the kernel stopped reading the long prefix, ideaship-final §9); the verbs still accept both.
 func Render(html string) string {
 	if !strings.Contains(html, "data-kit-action=") &&
 		!strings.Contains(html, "data-kitwork-action=") &&
 		!strings.Contains(html, "data-kit-component=") &&
-		!strings.Contains(html, "data-kitwork-component=") &&
 		!hasCapabilityDirective(html) {
 		return html
 	}

@@ -68,13 +68,13 @@ const RuntimePath = "/kit.js"
 // The root marker is how a page opts into hydrate. Only when it is present does Render touch the
 // page — so static pages (and demos that show data-* as example text) are never affected.
 //
-// PREFIX CONVENTION (strict for expression directives): data-kit-* is the AUTHOR-written form —
-// what a developer types, always SOURCE. data-kitwork-* is what the ENGINE emits: the
-// data-kitwork-jit=* injected markers, and — on a directive (text/show/click/validate) — the
-// precompiled IR (JSON). The prefix alone tells origin AND encoding; the old -ir suffix form and
-// the data-kitwork-* source alias are gone. Non-expression attributes (model/live/scope/…) keep the
-// long form as a deprecated read-alias in the kernel (they have no IR form, so nothing collides).
-// The app root is the one place the full prefix is also permitted as a branding anchor
+// PREFIX CONVENTION: data-kit-* is the AUTHOR-written form — what a developer types, always
+// SOURCE, and the only form the kernel reads for a directive or a boundary. data-kitwork-* is
+// what the ENGINE puts on the wire: the data-kitwork-jit=* injected markers, the jitjs verbs
+// (action/target/trigger/drag) and the kernel-owned overlays (data-kitwork-ui). A precompiled IR
+// directive (data-kitwork-text="[JSON]") was a reserved wire mode the engine never emitted; the
+// kernel no longer decodes it (ideaship-final §9), so the long prefix on a directive is inert. The
+// app root is the one place the full prefix is also permitted as a branding anchor
 // (`<html data-kitwork-app>`), though `data-kit-app` is equally fine and is what the reference
 // tenant uses.
 const (
@@ -143,16 +143,14 @@ func checkEventModifiers(directive string) error {
 	return nil
 }
 
-// presenceRe decides runtime INJECTION: authored data-kit-* forms (including the non-expression
+// presenceRe decides runtime INJECTION: authored data-kit-* forms, including the non-expression
 // attributes — model is a plain scope key, live an SSE URL, scope/component a boundary — which need
-// the runtime but must never be compile-verified; for's value is a spec, not an expression), plus
-// engine-emitted IR directives (data-kitwork-text|show|if|for|click|away|escape|validate), which
-// equally need the walker.
-// (IR JSON contains double quotes, so an emitted IR attribute is single-quoted — accept both.)
+// the runtime but must never be compile-verified; for's value is a spec, not an expression. A
+// data-kitwork-* directive is not authored and not read, so it does not bring the runtime.
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|validate|error|bind:[a-z][a-z0-9-]*|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="|data-kitwork-(?:text|show|if|for|click|validate|bind|class)=['"]`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|validate|error|bind:[a-z][a-z0-9-]*|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
@@ -168,11 +166,9 @@ const injectTag = `<script data-kitwork-jit="runtime" src="` + RuntimePath + `" 
 //  2. DELIVER — inject the <script src="/kit.js"> reference once, only when the page actually
 //     uses a directive.
 //
-// IR remains the engine's INTERNAL form (ctx.validate, go tests, analysis) and a RESERVED wire
-// mode: if the engine ever emits a precompiled directive it is data-kitwork-<name>="[IR JSON]" —
-// the prefix alone marks it (the kernel JSON.parses the long form; the -ir suffix is gone). Render
-// does not emit it today. A page WITHOUT the marker (or with no directive) is returned
-// byte-for-byte unchanged.
+// IR remains the engine's INTERNAL form (ctx.validate, go tests, analysis); it is not a wire
+// mode — the kernel parses source, and only source. A page WITHOUT the marker (or with no
+// directive) is returned byte-for-byte unchanged.
 func Render(html string) string {
 	if !strings.Contains(html, rootMarker) && !strings.Contains(html, rootMarkerShort) &&
 		!strings.Contains(html, appMarker) && !strings.Contains(html, appMarkerShort) {

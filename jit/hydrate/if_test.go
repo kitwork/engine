@@ -79,18 +79,25 @@ console.log("data-kit-if: mount/unmount + dispose OK (absent -> mount -> relabel
 	runNodeDOMScript(t, "if.test.js", assertions)
 }
 
-func TestKitIfReadsEngineIRThroughTheDirectiveDecoder(t *testing.T) {
+// The long prefix on a directive is INERT (ideaship-final §9): the kernel reads data-kit-* source
+// only and no longer decodes a precompiled IR, so data-kitwork-if is just an attribute the kernel
+// never looks at — the element stays, and its content stays.
+func TestKitIfIgnoresTheLongPrefix(t *testing.T) {
 	const assertions = `
 var branch = el("div", { "data-kitwork-if": '["#",false]' });
 branch.appendChild(el("span", { "data-ir-if-probe": "yes" }));
 document.body.appendChild(branch);
+var text = el("b", { "data-kitwork-text": '["#","ir"]' });
+text.textContent = "authored";
+document.body.appendChild(text);
 
 window.kit.render();
-if (document.querySelectorAll("[data-ir-if-probe]").length !== 0) {
-  throw new Error("false engine IR was parsed as authored array source and mounted");
+if (document.querySelectorAll("[data-ir-if-probe]").length !== 1 || !branch.parentNode) {
+  throw new Error("data-kitwork-if must be inert: the kernel does not decode IR");
 }
+if (text.textContent !== "authored") throw new Error("data-kitwork-text must be inert, got " + JSON.stringify(text.textContent));
 
-console.log("data-kitwork-if: engine IR decoded through directive()");
+console.log("data-kitwork-<directive>: inert — source only");
 `
 	runNodeDOMScript(t, "if-ir.test.js", assertions)
 }

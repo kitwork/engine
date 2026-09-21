@@ -435,26 +435,20 @@
     throw new Error("hydrate: unknown op '" + op + "'");
   }
 
-  // ---- directives: the PREFIX carries the encoding (strict origin convention) ----
-  // data-kit-<name>     = AUTHOR-written source → parsed by the tiny parser here.
-  // data-kitwork-<name> = ENGINE-emitted, precompiled IR (JSON) → JSON.parse, no parsing.
-  // (The old long-prefix source alias and the suffixed IR attribute are gone: two names,
-  // two meanings, told apart by prefix alone.)
+  // ---- directives: data-kit-<name> is the one authored form ----
+  // The kernel reads source and parses it here; it does not decode a precompiled IR any more —
+  // the engine never emitted one, and the data-kitwork-* prefix is reserved for what the engine
+  // does put on the wire (the jit marker, the root anchor, the jitjs verbs, kernel-owned overlays).
   var cache = {};
   function directive(el, name) {
-    var raw = el.getAttribute("data-kitwork-" + name);
-    if (raw) {
-      if (!(raw in cache)) { try { cache[raw] = JSON.parse(raw); } catch (e) { cache[raw] = null; } }
-      return cache[raw];
-    }
-    raw = el.getAttribute("data-kit-" + name);
+    var raw = el.getAttribute("data-kit-" + name);
     if (!raw) return null;
     var key = "$" + raw;
     if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
     return cache[key];
   }
   function selector(name) {
-    return "[data-kitwork-" + name + "],[data-kit-" + name + "]";
+    return "[data-kit-" + name + "]";
   }
 
   // The binding groups, shared in spirit with the component runtime's dom.js: same names, same writes.
@@ -492,8 +486,8 @@
     writeAttribute(el, name, v);
   }
 
-  var MODEL = "[data-kitwork-model],[data-kit-model]";
-  function modelKey(el) { return el.getAttribute("data-kitwork-model") || el.getAttribute("data-kit-model"); }
+  var MODEL = "[data-kit-model]";
+  function modelKey(el) { return el.getAttribute("data-kit-model"); }
   // number AND range are numeric inputs — coerce to a float so arithmetic (n + step) adds, not
   // string-concatenates. Every other input type stays a string.
   function modelValue(el) { return (el.type === "number" || el.type === "range") ? (parseFloat(el.value) || 0) : (el.value || ""); }
@@ -518,9 +512,9 @@
   // `$` addresses the page scope explicitly ($.total = $.total + 1) — the same $ the server's
   // template language uses for its root data. Scope objects live in the node's Symbol state,
   // so they die with their node; two sibling scopes never see each other.
-  // A component boundary is any of these. data-kitwork-component names a REGISTERED blueprint
+  // A component boundary is any of these. data-kit-component names a REGISTERED blueprint
   // (see kit.component); data-kit-scope carries an inline name/init/blueprint.
-  var SCOPE = "[data-kitwork-scope],[data-kit-scope],[data-kitwork-component],[data-kit-component],[data-kitwork-api],[data-kit-api],[data-kit-item],[data-kitwork-item]";
+  var SCOPE = "[data-kit-scope],[data-kit-component],[data-kit-api],[data-kit-item]";
 
   // The component registry: kit.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
@@ -539,7 +533,7 @@
   }
 
   // boundaryScope initializes a boundary's local state ONCE, from the attribute's shape:
-  //   data-kitwork-component="counter"        → a REGISTERED blueprint (state + real JS methods)
+  //   data-kit-component="counter"            → a REGISTERED blueprint (state + real JS methods)
   //   data-kit-scope="counter"                → a NAME (label; local state)
   //   data-kit-scope="count = 5; open = true" → an INIT program (runs once; writes stay local)
   //   data-kit-scope="{ count: 5, inc: () => count = count + 1 }" → an INLINE blueprint (IR methods)
@@ -549,7 +543,7 @@
   var BARE_LITERAL = /^[A-Za-z_$][\w$]*\s*:/;
   function boundaryScope(b) {
     var st = state(b);
-    var craw = b.getAttribute("data-kitwork-component") || b.getAttribute("data-kit-component");
+    var craw = b.getAttribute("data-kit-component");
     if (craw) {
       var tag = parseComponentTag(craw);
       var cname = tag.name;
@@ -572,7 +566,7 @@
     }
     if (st.scope) return st.scope;
     st.scope = {};
-    var v = (b.getAttribute("data-kitwork-scope") || b.getAttribute("data-kit-scope") || "").trim();
+    var v = (b.getAttribute("data-kit-scope") || "").trim();
     if (!v) return st.scope;
     try {
       var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
@@ -786,8 +780,8 @@
   var activeComponents = {};
   function rebuildActiveComponents() {
     var next = {};
-    document.querySelectorAll("[data-kitwork-component],[data-kit-component]").forEach(function (el) {
-      var craw = el.getAttribute("data-kitwork-component") || el.getAttribute("data-kit-component");
+    document.querySelectorAll("[data-kit-component]").forEach(function (el) {
+      var craw = el.getAttribute("data-kit-component");
       if (!craw) return;
       var cname = parseComponentTag(craw).name;
       var st = state(el);
@@ -841,7 +835,7 @@
   // than diffing: a keyed node that survives is MOVED, never rebuilt, so focus/cursor/input on a row
   // are preserved across re-renders. No IR runs the list logic — only the tiny author expression that
   // names the array (`items`) and the key (`item.id`) is walked, exactly like any other attribute.
-  var FOR = "[data-kitwork-for],[data-kit-for]";
+  var FOR = "[data-kit-for]";
   var forRegistry = [];
   var forSerial = 0;
   function parseFor(raw) {
@@ -857,12 +851,11 @@
     document.querySelectorAll(FOR).forEach(function (el) {
       var parent = el.parentNode;
       if (!parent) return;
-      var spec = parseFor(el.getAttribute("data-kit-for") || el.getAttribute("data-kitwork-for"));
-      if (!spec) { el.removeAttribute("data-kit-for"); el.removeAttribute("data-kitwork-for"); return; }
-      spec.keySrc = el.getAttribute("data-kit-key") || el.getAttribute("data-kitwork-key") || "";
+      var spec = parseFor(el.getAttribute("data-kit-for"));
+      if (!spec) { el.removeAttribute("data-kit-for"); return; }
+      spec.keySrc = el.getAttribute("data-kit-key") || "";
       var template = el.cloneNode(true);
       template.removeAttribute("data-kit-for");
-      template.removeAttribute("data-kitwork-for");
       // The list's place in the document is the marker pair of ideaship-final §7 — the same shape
       // a server-rendered list arrives in — and every row carries the list's id in data-kit-item.
       var id = "f" + (++forSerial);
@@ -950,17 +943,16 @@
   // DOM and only toggles `hidden`, so a hidden subtree's bindings and effects keep running; `if`
   // MOUNTS and UNMOUNTS, so an absent branch does nothing at all. That is what a modal, an editing
   // panel or a lazy region needs — not a hidden node quietly holding an SSE stream open.
-  var IF = "[data-kitwork-if],[data-kit-if]";
+  var IF = "[data-kit-if]";
   var ifRegistry = [];
   function collectIf() {
     document.querySelectorAll(IF).forEach(function (el) {
       var parent = el.parentNode;
       if (!parent) return;
       var cond = directive(el, "if");
-      if (!cond) { el.removeAttribute("data-kit-if"); el.removeAttribute("data-kitwork-if"); return; }
+      if (!cond) { el.removeAttribute("data-kit-if"); return; }
       var template = el.cloneNode(true);
       template.removeAttribute("data-kit-if");
-      template.removeAttribute("data-kitwork-if");
       var anchor = document.createComment("kit-if");
       parent.insertBefore(anchor, el);
       parent.removeChild(el);
@@ -1173,7 +1165,7 @@
   // data-kit-debounce="300": coalesce a burst of a data-kit-model input's writes into one, ms after it goes quiet.
   // The pending timer lives in the element's state so cleanupTree cancels it when the actor unmounts.
   function debounceMs(el) {
-    var raw = el.getAttribute("data-kitwork-debounce") || el.getAttribute("data-kit-debounce");
+    var raw = el.getAttribute("data-kit-debounce");
     var n = raw ? parseInt(raw, 10) : 0;
     return n > 0 ? n : 0;
   }
