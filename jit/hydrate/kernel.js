@@ -629,13 +629,14 @@
   // the native DOM event of the handler that is running; `$refs` the boundary's named elements.
   // Reads and method calls only — value/attribute CHANGES belong to bindings (data-kit-model,
   // state→CSS), not to reaching in and poking the DOM.
-  function elementScope(el, event) {
+  function elementScope(el, event, errorContext) {
     var base = scopeFor(el);
     return new Proxy(base, {
       get: function (t, k) {
         if (k === "$this" || k === "$el") return el;
         if (k === "$host" || k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
         if (k === "$event") return event || null;
+        if (k === "$error") return errorContext || null;
         if (k === "$refs") return refsFor(el);
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
         return base[k];
@@ -992,8 +993,8 @@
     rebuildActiveComponents();
     renderFor();
     renderIf();
-    document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; });
-    document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; el.hidden = !run(x, scopeFor(el)); });
+    document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; guarded(el, "data-kit-text", function () { var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; }); });
+    document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; guarded(el, "data-kit-show", function () { el.hidden = !run(x, scopeFor(el)); }); });
     // bind → data-kit-bind:<name>="expr": the target is in the attribute name, the value is one
     // expression (ideaship-final §5). Three groups by name: a reflected boolean (disabled, hidden,
     // open…) lands on the property AND the attribute; a live property (checked, value…) on the
@@ -1013,7 +1014,9 @@
         var key = "$" + raw;
         if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
         if (!cache[key]) continue;
-        writeBinding(el, names[i].slice(14), run(cache[key], scopeFor(el)));
+        (function (name, program) {
+          guarded(el, name, function () { writeBinding(el, name.slice(14), run(program, scopeFor(el))); });
+        })(names[i], cache[key]);
       }
     });
     // class → toggle classes from an expression. Every shape the grammar allows is accepted, so
@@ -1023,7 +1026,8 @@
     // decide what to emit, and cannot see a name built with '+'.
     document.querySelectorAll(selector("class")).forEach(function (el) {
       var x = directive(el, "class"); if (!x) return;
-      var want = classNames(run(x, scopeFor(el)), []);
+      var want = guarded(el, "data-kit-class", function () { return classNames(run(x, scopeFor(el)), []); });
+      if (!want) return;
       // Remove only what THIS directive added last pass, never the static class attribute: an
       // element is normally `class="card" data-kit-class="{ ring: focused }"` and blowing away
       // "card" on the first toggle would strip the page's own styling.
@@ -1033,7 +1037,7 @@
       el.__kitClass = want;
     });
     // validate → state→CSS: the element carries data-state="valid|invalid"; styling is CSS's job.
-    document.querySelectorAll(selector("validate")).forEach(function (el) { var x = directive(el, "validate"); if (!x) return; el.setAttribute("data-state", run(x, scopeFor(el)) ? "valid" : "invalid"); });
+    document.querySelectorAll(selector("validate")).forEach(function (el) { var x = directive(el, "validate"); if (!x) return; guarded(el, "data-kit-validate", function () { el.setAttribute("data-state", run(x, scopeFor(el)) ? "valid" : "invalid"); }); });
     document.querySelectorAll(MODEL).forEach(function (el) { var k = modelKey(el), s = scopeFor(el); if (String(s[k]) !== el.value) el.value = s[k]; });
   }
 
@@ -1133,9 +1137,37 @@
     }
     return result;
   }
-  function runEffect(expression, element, event) {
-    var current = elementScope(element, event);
+  function runEffect(expression, element, event, errorContext) {
+    var current = elementScope(element, event, errorContext);
     return observeEffect(run(expression, current), current);
+  }
+  // ---- data-kit-error: the error boundary (ideaship-final §2) ----
+  // A directive that fails — an action or a binding — hands its error to the nearest ancestor
+  // carrying data-kit-error, whose expression runs with `$error` (cause, message, directive,
+  // element). The error does not travel past that boundary; with no boundary above, or while a
+  // boundary is already handling one, it reaches the console. guarded() wraps every place a
+  // directive's expression runs, so one failing element never aborts the pass for the others.
+  var handlingError = false;
+  function reportError(error, el, directive) {
+    var boundary = el && el.closest ? el.closest("[data-kit-error]") : null;
+    if (boundary && !handlingError) {
+      var x = programOf(boundary, "data-kit-error");
+      if (x) {
+        handlingError = true;
+        try {
+          runEffect(x, boundary, null, { cause: error, message: String(error && error.message || error), directive: directive || "", element: el });
+          return;
+        } catch (failure) {
+          if (typeof console !== "undefined" && console.error) console.error(failure);
+        } finally {
+          handlingError = false;
+        }
+      }
+    }
+    if (typeof console !== "undefined" && console.error) console.error(error);
+  }
+  function guarded(el, directive, fn) {
+    try { return fn(); } catch (error) { reportError(error, el, directive); }
   }
 
   // data-kit-debounce="300": coalesce a burst of a data-kit-model input's writes into one, ms after it goes quiet.
@@ -1220,7 +1252,7 @@
     if (!program) return h.stop;
     var execute = function () {
       if (h.once) { (st.once || (st.once = {}))[h.attr] = true; }
-      runEffect(program, el, e);
+      guarded(el, h.attr, function () { runEffect(program, el, e); });
       render();
     };
     if (h.debounce) {

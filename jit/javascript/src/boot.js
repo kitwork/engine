@@ -44,8 +44,16 @@
     core.booted = true;
     if (typeof core.prepareStructureTree === "function") core.prepareStructureTree(document);
     if (typeof core.prepareComponentTree === "function") core.prepareComponentTree(document);
+    core.booting = true;
     core.render();
     core.resetDirty();
+    core.booting = false;
+    // The boot render discards the invalidations it caused itself — except a state change made by
+    // an error boundary handling a failure of that very render, which must paint.
+    if (core.boundaryWrote) {
+      core.boundaryWrote = false;
+      core.invalidate();
+    }
   }
 
   delete document[ASSEMBLY];

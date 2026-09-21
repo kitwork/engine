@@ -45,7 +45,23 @@
   function syntax(message, source, position) {
     throw new SyntaxError("KitJS: " + message + " in \"" + source + "\" at " + position);
   }
-  function report(error) {
+  // report hands an error to the nearest error boundary — the closest ancestor carrying
+  // data-kit-error (ideaship-final §2) — when the failing element is known; the boundary's action
+  // runs with $error. An error nowhere near a boundary, or one raised while a boundary handles
+  // another, reaches the console as before. Errors do not travel past the first boundary.
+  var reporting = false;
+  function report(error, element, directive) {
+    var boundary = element && element.nodeType === 1 && element.closest ? element.closest("[data-kit-error]") : null;
+    if (boundary && !reporting && core.handleError && !ignoredForRuntime(boundary)) {
+      reporting = true;
+      try {
+        if (core.handleError(boundary, error, element, directive || "")) return;
+      } catch (failure) {
+        if (global.console && typeof global.console.error === "function") global.console.error(failure);
+      } finally {
+        reporting = false;
+      }
+    }
     if (global.console && typeof global.console.error === "function") global.console.error(error);
   }
   function equal(left, right) {

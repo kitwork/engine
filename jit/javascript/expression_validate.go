@@ -69,7 +69,7 @@ func authoredExpressionAttribute(name string) bool {
 		directive = directive[:colon]
 	}
 	switch directive {
-	case "text", "show", "class", "if", "key", "bind", "style", "model", "for",
+	case "text", "show", "class", "if", "key", "bind", "style", "model", "for", "error",
 		"click", "dblclick", "submit", "input", "change", "keydown", "keyup",
 		"pointerdown", "pointerup", "focusin", "focusout":
 		return true
@@ -96,6 +96,9 @@ func directiveExpressionServiceCalls(attribute rawScannedAttribute) ([]expressio
 	case "text", "show", "class", "if", "key", "bind":
 		mode = "binding"
 	case "click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout":
+		mode = "action"
+	// data-kit-error is the boundary's handler (ideaship-final §2): an action run with $error.
+	case "error":
 		mode = "action"
 	case "style":
 		if !attribute.hasValue {

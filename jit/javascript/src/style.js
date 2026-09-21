@@ -232,7 +232,7 @@
           writeStyle(element, state, entry.name, value);
           entry.last = value;
         });
-      } catch (error) { core.report(error); }
+      } catch (error) { core.report(error, element, "data-kit-style"); }
     });
   }
 

@@ -61,7 +61,7 @@
             state.owned[name] = true;
           }
         });
-      } catch (error) { core.report(error); }
+      } catch (error) { core.report(error, element, "data-kit-class"); }
     });
   }
 

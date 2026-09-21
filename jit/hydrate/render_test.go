@@ -56,6 +56,7 @@ func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 		`data-kit-input:debounce(250)="query = query.trim()"`,
 		`data-kit-submit:prevent:once="saved = true"`,
 		`data-kit-pointerdown:throttle(100):stop="drag = true"`,
+		`data-kit-error="failed = $error.message"`,
 	} {
 		m := directiveRe.FindStringSubmatch(authored)
 		if m == nil {

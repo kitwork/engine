@@ -77,11 +77,11 @@
     return { item: match[1], index: match[2] || "", source: match[3] };
   }
 
-  function fail(state, error) {
+  function fail(state, error, template) {
     var message = String(error && error.message || error);
     if (state.error !== message) {
       state.error = message;
-      core.report(error);
+      core.report(error, template, template ? (template.hasAttribute("data-kit-for") ? "data-kit-for" : "data-kit-if") : "");
     }
     return false;
   }
@@ -261,7 +261,7 @@
         };
       }
     } catch (error) {
-      core.report(error);
+      core.report(error, element);
       modules.structure = null;
     }
     return modules.structure;
@@ -381,7 +381,7 @@
       if (core.asyncBinding(visible)) return false;
       visible = !!visible;
       clearFailure(state);
-    } catch (error) { return fail(state, error); }
+    } catch (error) { return fail(state, error, template); }
 
     if (!visible) {
       if (!state.branch) return false;
@@ -464,7 +464,7 @@
       }
       listChanged = !core.equal(state.lastList, items);
       clearFailure(state);
-    } catch (error) { return fail(state, error); }
+    } catch (error) { return fail(state, error, template); }
 
     var nextRows = new Map();
     plan.forEach(function (entry) {

@@ -213,6 +213,24 @@ keeps its own `count`; the authored item and index names do flow into it.
 must evaluate to a unique string or finite number. Row locals are read-only.
 One element cannot combine `if` and `for`, and `key` is invalid without `for`.
 
+## Error boundaries
+
+`data-kit-error` makes an element an error boundary (KitJS spec §2): when an
+action or a binding inside it fails, the nearest boundary runs its own action
+with `$error` — `cause` (the thrown value), `message`, `directive` (the
+attribute that was running, e.g. `data-kit-click`) and `element` (the element
+it ran on, read through the closed element table). The error does not travel
+past the first boundary; an error with no boundary above it, or raised while a
+boundary is already handling one, reaches the console as before. A boundary
+whose own handler throws is not re-entered.
+
+```html
+<section data-kit-scope="failed: ''" data-kit-error="failed = $error.message">
+  <button data-kit-click="save()">Save</button>
+  <p data-kit-show="failed" data-kit-text="failed" hidden></p>
+</section>
+```
+
 ## Events and modifiers
 
 The exact delegated event set is:

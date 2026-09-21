@@ -59,7 +59,7 @@
         last: EMPTY
       };
     } catch (error) {
-      core.report(error);
+      core.report(error, element, name);
       programs[name] = null;
     }
     return programs[name];
@@ -127,6 +127,17 @@
     }
     writeAttribute(element, name, value);
   }
+  // readBinding names the attribute on an error it lets through, so the boundary's $error.directive
+  // can say which binding failed.
+  function readBinding(program, name, scope, element) {
+    try {
+      return program.read(scope, core.localsFor ? core.localsFor(element) : null);
+    } catch (error) {
+      if (error && typeof error === "object" && !error.kitDirective) error.kitDirective = name;
+      throw error;
+    }
+  }
+  core.readBinding = readBinding;
   function asyncBinding(value) {
     if (!value || typeof value.then !== "function") return false;
     value.then(function () { }, core.report);
@@ -152,7 +163,7 @@
     if (element.hasAttribute("data-kit-text")) {
       program = safeProgram(element, "data-kit-text", "binding");
       if (program) {
-        var value = program.read(scope, core.localsFor ? core.localsFor(element) : null);
+        var value = readBinding(program, "data-kit-text", scope, element);
         if (!asyncBinding(value)) {
           var text = value === null || value === undefined ? "" : String(value);
           if (!core.equal(program.last, text)) {
@@ -165,7 +176,7 @@
     if (element.hasAttribute("data-kit-show")) {
       program = safeProgram(element, "data-kit-show", "binding");
       if (program) {
-        var shown = program.read(scope, core.localsFor ? core.localsFor(element) : null);
+        var shown = readBinding(program, "data-kit-show", scope, element);
         if (!asyncBinding(shown)) {
           var hidden = !shown;
           if (!core.equal(program.last, hidden)) {
@@ -183,7 +194,7 @@
       }
       var bound = safeProgram(element, name, "binding");
       if (!bound) return;
-      var value = bound.read(scope, core.localsFor ? core.localsFor(element) : null);
+      var value = readBinding(bound, name, scope, element);
       if (asyncBinding(value) || core.equal(bound.last, value)) return;
       bound.last = value;
       writeBinding(element, target, value);
@@ -245,7 +256,7 @@
         catch (error) { core.report(error); children = []; }
         var plan = collectRenderPlan(current);
         plan.bindings.forEach(function (element) {
-          try { renderElement(current, element); } catch (error) { core.report(error); }
+          try { renderElement(current, element); } catch (error) { core.report(error, element, error && error.kitDirective); }
         });
         core.renderHooks.forEach(function (renderHook) {
           try { renderHook(current, plan); } catch (error) { core.report(error); }
@@ -283,11 +294,26 @@
       });
       return true;
     } catch (error) {
-      core.report(error);
+      core.report(error, element, name);
       return false;
     }
   }
 
+  // handleError runs a boundary's data-kit-error action with `$error`: the cause, its message, the
+  // attribute that was running, and the element it ran on (read through the closed element table).
+  function handleError(boundary, error, element, directive) {
+    var context = Object.create(null);
+    context.cause = error;
+    context.message = String(error && error.message || error);
+    context.directive = directive || "";
+    context.element = element || null;
+    var locals = Object.create(null);
+    locals.$error = Object.freeze(context);
+    var handled = executeAttribute(boundary, "data-kit-error", locals);
+    if (handled && core.booting) core.boundaryWrote = true;
+    return handled;
+  }
+  core.handleError = handleError;
   core.elementRecord = elementRecord;
   core.safeProgram = safeProgram;
   core.asyncBinding = asyncBinding;

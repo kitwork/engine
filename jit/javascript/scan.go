@@ -910,7 +910,7 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	// rendering and the browser never sees a directive for it. It is listed here
 	// so an authored code slot is not rejected as an unknown data-kit-* name.
 	case "text", "show", "class", "style", "model", "scope", "component",
-		"alias", "retain", "drive", "ignore", "if", "for", "key", "highlight":
+		"alias", "retain", "drive", "ignore", "if", "for", "key", "error", "highlight":
 		if len(parts) != 1 {
 			return fmt.Errorf("%w at byte %d: %q only permits modifiers on event attributes", ErrUnsupportedAttribute, attribute.offset, name)
 		}
