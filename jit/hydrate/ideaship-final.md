@@ -221,7 +221,7 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | B6 | server materialize `for` | **hoãn** tới khi có site cần | ✅ ghi §7 |
 | B7 | `data-kit-style` | giữ ở runtime component; kernel **thêm khi có ca** | ✅ ghi §2.3 |
 | B8 | dạng tên trần / init của `data-kit-scope` | **cắt** — một literal, một parser; attribute rỗng = vùng rỗng | ✅ kernel; 0 site dùng |
-| B9 | **một kernel hay hai runtime** | **chính sách**: mọi ngữ pháp mới chỉ vào kernel; runtime component chỉ *nhận* qua cùng ngữ pháp, không tự mọc; gộp thành mảnh lazy là việc dài hơi, làm theo chuỗi phép trừ §9 | ✅ chính sách; chưa có bước code |
+| B9 | **một kernel hay hai runtime** | **MỘT KERNEL** — Quốc chốt 22/09 tối: "một kernel, markup do chủ site viết". Hệ quả: biểu thức trong markup KHÔNG phải ranh giới an toàn (chủ site viết, server render) → evaluator **mở** của kernel là chuẩn; evaluator đóng, đồ thị version `name@x.y.z`, giao hàng staged `/jit/<hash>` + SRI của KitJS không mang sang. Đường đi = **phép trừ**, không gộp một phát: `jit/javascript` đóng băng (không ngữ pháp mới), 10 tenant đang chạy giữ nguyên; port từng component sang kiểu kernel khi site cần; xoá `jit/javascript` khi tenant cuối rời `.jitjs()` | ✅ quyết định. Bước code theo thứ tự: (1) kernel `init(context)` cùng hình `context` đã chốt (`host owned element elements listen cleanup afterRender`) để component init-based port không phải viết lại thân; (2) component riêng của tenant trên kernel (thư mục site, `/kit.js?components=`), thay `router.jitjs({components})`; (3) port apptop (9 file, 1 461 dòng + `progress-bar`/`theme`/`shortcut` catalogue) → họ apptop rời `.jitjs()`; (4) kitjs.org/kitwork.io/studio/kitdesign/lofiwithme cuối cùng vì chính họ là catalogue |
 | B10 | async | **nhánh B**: biểu thức đồng bộ; async sống trong **component** (method JS thật) hoặc **Drive**; suite tuân thủ đã chứng minh method IR-lambda có twin | ✅ 22/09: kernel — method trả Promise → vẽ lại khi settle (đã có); **ghi scope ngoài một lượt vẽ** (timer, `.then` không trả, callback) → xếp một lượt vẽ gộp; trong lượt (handler, model, render) không xếp thêm. Không có `effect`. Test: `write_repaint_test.go`, `jit/js/migration_browser_test.go` |
 
 > Khi B9 cần đảo lại (giữ hai runtime độc lập), nói một câu là đủ — chưa có code nào phụ thuộc vào nó ngoài việc *không* thêm ngữ pháp riêng cho runtime component từ nay.
@@ -238,6 +238,7 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | ~~XOÁ~~ **GIỮ** | Nhánh `typeof fn === "function"` (kernel call) | B10 chốt async sống trong **method JS thật** của component — nhánh này chính là chỗ method đó chạy (`fn.apply(scope)`); dòng XOÁ viết khi còn nghĩ async đi qua `$app` + scope-patch | ✅ 22/09 lật thành GIỮ |
 | **XOÁ** | 9.002 dòng `runtime*.js`, `legacy/core/*`, `main copy*.js` | — | ✅ đã không còn (kiểm 22/09: `find` toàn `jit/` không ra file nào, thư mục `legacy` không tồn tại) |
 | **GIỮ** | Inventory 18 năng lực (ideashipping §4) | regression test **trước** khi sửa | — |
+| **XOÁ** | `jit/javascript` (runtime KitJS 357 KB nguồn, evaluator đóng, đồ thị staged) | B9 ✅ một kernel; điều kiện: 10 tenant `.jitjs()` port xong (apptop ×6, kitjs.org, lofiwithme, kitdesign, studio) | ☐ theo 4 bước ở §8 B9 |
 | **HOÃN** | Extension 1 Proxy dependency engine | **đe doạ server twin** | — |
 | **HOÃN** | Extension 5 virtualization | chưa site nào cần | — |
 | **HOÃN** | 6 build profile → chỉ `core` + `full` | cắt theo nhu cầu | ✅ đã là 2: `assemble.go` chỉ còn `kit` + `hydrate` (kiểm 22/09) |
@@ -286,4 +287,4 @@ không đổi ngữ nghĩa**: chạy suite này, còn xanh thì đúng. Và nó 
 > ~~**một cơ chế** (effect)~~, và **một chuỗi phép trừ** để tách 4 vai khỏi kernel. Không bước nào phát
 > minh cơ chế mới — câu trả lời đã nằm trong code, việc còn lại là chốt 4 quyết định treo ở §8 rồi ráp.
 
-> **Một câu, 22/09:** `for` đã cưỡi morph, bộ test tuân thủ đã chạy, ngữ pháp đã về một bộ (§2), hệ jitjs đã trừ **không cần effect** (component-first: hành vi = component hoặc biểu thức, vận chuyển = Drive). Còn lại một việc lớn: **câu B9** — một kernel hay hai runtime — vì mọi ngữ pháp thêm sau này sẽ trả giá đôi cho tới khi nó được chốt.
+> **Một câu, 22/09:** `for` đã cưỡi morph, bộ test tuân thủ đã chạy, ngữ pháp đã về một bộ (§2), hệ jitjs đã trừ **không cần effect** (component-first: hành vi = component hoặc biểu thức, vận chuyển = Drive). **B9 chốt tối 22/09: một kernel** (markup do chủ site viết → evaluator mở là chuẩn); KitJS đóng băng, trừ dần theo 4 bước ở §8. Từ đây mọi ngữ pháp chỉ có MỘT chỗ để sống.
