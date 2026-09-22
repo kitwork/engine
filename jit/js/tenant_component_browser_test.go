@@ -318,3 +318,66 @@ func runKernelPage(t *testing.T, browser, page string, moduleNames []string) {
 	}
 	t.Fatalf("kernel page proof did not pass (err=%v):\n%.1500s", err, output)
 }
+
+// dialog@v2.0.0 drives a NATIVE <dialog>: the host is the element, the platform owns focus, Escape
+// and the backdrop, and the component adds only what the platform lacks — backdrop click closes,
+// the page behind cannot scroll — while keeping `open`/`result` in step however it closed.
+func TestBrowserDialogComponentDrivesTheNativeElement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping dialog browser proof in short mode")
+	}
+	browser := findHeadlessBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+	page := `<!doctype html>
+<html lang="en" data-kit-app="dialog"><head><meta charset="utf-8"><title>dialog</title></head><body>
+  <button id="open" type="button" data-kit-click="$confirm.show()">Delete</button>
+  <dialog id="confirm" data-kit-component="dialog" data-kit-alias="$confirm">
+    <p id="state" data-kit-text="open ? 'open' : 'closed:' + result"></p>
+    <button id="cancel" type="button" data-kit-click="close('cancel')">Cancel</button>
+  </dialog>
+  <script src="/kit.js"></script>
+  <script>
+  (async function () {
+    var root = document.documentElement;
+    function fail(m) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", m); throw new Error(m); }
+    function assert(c, m) { if (!c) fail(m); }
+    function tick() { return new Promise(function (r) { setTimeout(r, 30); }); }
+    var dialog = document.getElementById("confirm");
+    var overflow = function () { return document.documentElement.style.overflow; };
+    await tick();
+
+    document.getElementById("open").click(); await tick();
+    assert(dialog.open === true, "show() must call the platform's showModal()");
+    assert(document.getElementById("state").textContent === "open", "state must follow the element");
+    assert(overflow() === "hidden", "the page behind a modal must not scroll");
+
+    document.getElementById("cancel").click(); await tick();
+    assert(dialog.open === false, "close(result) must close the element");
+    assert(dialog.returnValue === "cancel", "the result rides the platform's returnValue, got " + dialog.returnValue);
+    assert(document.getElementById("state").textContent === "closed:cancel", "result must reach the binding");
+    assert(overflow() !== "hidden", "the scroll lock must be released");
+
+    // Escape is the platform's: the component only has to keep up
+    document.getElementById("open").click(); await tick();
+    assert(dialog.open === true, "reopen");
+    dialog.dispatchEvent(new Event("close"));
+    dialog.close("");
+    await tick();
+    assert(document.getElementById("state").textContent.indexOf("closed") === 0, "a platform close must update state");
+    assert(overflow() !== "hidden", "a platform close must release the scroll lock");
+
+    // a click on the dialog element itself is the backdrop; a click on its content is not
+    document.getElementById("open").click(); await tick();
+    document.getElementById("state").click(); await tick();
+    assert(dialog.open === true, "a click on the CONTENT must not close the dialog");
+    dialog.click(); await tick();
+    assert(dialog.open === false, "a click on the backdrop must close the dialog");
+
+    root.setAttribute("data-kit-test", "passed");
+  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  </script>
+</body></html>`
+	runKernelPage(t, browser, page, scanModules(page, nil))
+}

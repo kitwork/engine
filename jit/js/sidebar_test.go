@@ -26,13 +26,13 @@ func TestSidebarIsShippedWhenUsed(t *testing.T) {
 // CONTROL: emit-only-what-is-used is the whole point of the JIT. Without this the test above would
 // also pass on a build that inlines every component on every page.
 func TestSidebarIsAbsentWhenUnused(t *testing.T) {
-	html := `<div data-kit-component="dropdown"><button data-kit-click="toggle()">x</button></div>`
+	html := `<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`
 	out := Render(html)
 
 	if strings.Contains(out, `components=component%3Asidebar`) {
 		t.Fatal("sidebar shipped to a page that never mentions it")
 	}
-	if !strings.Contains(out, `components=component%3Adropdown`) {
+	if !strings.Contains(out, `components=component%3Adialog`) {
 		t.Fatal("the component that IS used should still ship")
 	}
 }
