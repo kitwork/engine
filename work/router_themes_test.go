@@ -98,3 +98,73 @@ router.get((ctx) => ctx.html("ok"));
 		t.Fatalf("no themes() must mean no derivation: themes=%v mode=%q", view.JITConfig.Themes, view.ThemeMode)
 	}
 }
+
+// The anti-flash pre-paint is the theme's own job: a site that declares a class-switched dark in
+// router.css() gets it on every page — no call, no switch — while nothing is derived (the
+// stylesheet has no .dark block). "media" dark needs no pre-paint; a site that declared no dark at
+// all keeps the per-page toggle scan.
+func TestRouterCssDarkModeTurnsThePrepaintOnByItself(t *testing.T) {
+	for _, c := range []struct{ darkMode, want string }{
+		{`darkMode: ["class"], `, "force"},
+		{`darkMode: "class", `, "force"},
+		{`darkMode: ["selector", "[data-theme=dark]"], `, "force"},
+		{`darkMode: "media", `, ""},
+		{``, ""},
+	} {
+		tenant := themesFixture(t, `
+import { router, palette, pigment } from "kitwork";
+router.css({ `+c.darkMode+themesTokens+` });
+router.get((ctx) => ctx.html("<div class='bg-canvas dark:bg-ink'>no toggle on this page</div>"));
+`)
+		view := tenant.presentation().View()
+		if view.ThemeMode != c.want {
+			t.Errorf("css({ %s… }): pre-paint mode = %q, want %q", c.darkMode, view.ThemeMode, c.want)
+		}
+		if len(view.JITConfig.Themes) != 0 {
+			t.Errorf("css({ %s… }) must derive nothing, got %+v", c.darkMode, view.JITConfig.Themes)
+		}
+		if css := jitcss.GenerateJIT(`<div class="bg-canvas"></div>`, view.JITConfig); strings.Contains(css, ".dark { --color-") {
+			t.Errorf("css({ %s… }) must not add a derived .dark block:\n%s", c.darkMode, css)
+		}
+	}
+}
+
+// CONTROL: router.themes({ prepaint: false }) is the one setting left — an opt-out that wins over
+// both a declared darkMode and a derived mode, in either order.
+func TestRouterThemesPrepaintFalseOptsOut(t *testing.T) {
+	for _, router := range []string{
+		`router.css({ darkMode: ["class"], ` + themesTokens + ` }).themes({ dark: true, prepaint: false });`,
+		`router.themes({ prepaint: false }).css({ darkMode: ["class"], ` + themesTokens + ` });`,
+	} {
+		tenant := themesFixture(t, `
+import { router, palette, pigment } from "kitwork";
+`+router+`
+router.get((ctx) => ctx.html("ok"));
+`)
+		if view := tenant.presentation().View(); view.ThemeMode != "off" {
+			t.Errorf("%s\n  prepaint: false must turn the pre-paint off, got %q", router, view.ThemeMode)
+		}
+	}
+}
+
+// prepaint: true is not a setting (there is no opt-in — declare the dark you have): a named
+// warning, and the mode stays whatever the declarations say. The deprecated router.jittheme(true)
+// keeps forcing the pre-paint for existing sites.
+func TestRouterThemesPrepaintTrueIsNotASettingAndJitthemeStillWorks(t *testing.T) {
+	undeclared := themesFixture(t, `
+import { router } from "kitwork";
+router.css({}).themes({ prepaint: true });
+router.get((ctx) => ctx.html("ok"));
+`)
+	if view := undeclared.presentation().View(); view.ThemeMode != "" || len(view.JITConfig.Themes) != 0 {
+		t.Fatalf("prepaint: true must change nothing, got mode %q themes %+v", view.ThemeMode, view.JITConfig.Themes)
+	}
+	legacy := themesFixture(t, `
+import { router } from "kitwork";
+router.jittheme(true);
+router.get((ctx) => ctx.html("ok"));
+`)
+	if view := legacy.presentation().View(); view.ThemeMode != "force" {
+		t.Fatalf("router.jittheme(true) must still force the pre-paint, got %q", view.ThemeMode)
+	}
+}

@@ -114,8 +114,7 @@ router
     .assets("/assets/*", "_assets")
     .language("en")
     .title("Welcome to %s")
-    .description("A new tenant site running on Kitwork sovereign Go VM engine.")
-    .jittheme(true);
+    .description("A new tenant site running on Kitwork sovereign Go VM engine.");
 
 router.get((ctx) => {
     const status = getStatus();

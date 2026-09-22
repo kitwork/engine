@@ -3,8 +3,8 @@
 //
 // A tiny synchronous script must run in <head> before first paint to apply the saved theme, or the
 // deferred browser runtime can reveal the wrong palette briefly. Render injects that script when
-// it sees the theme component or a supported legacy theme reference. Force is used by
-// router.jittheme(true) when a site declares theming at its root.
+// it sees the theme component or a supported legacy theme reference. Force is used when the site
+// declared its dark at the root (router.css({ darkMode: ["class"] }) / router.themes({ dark: true })).
 //
 // A page may instead place an explicit marker to control the exact position:
 //
@@ -62,7 +62,7 @@ func Render(source string) string {
 	return source
 }
 
-// Force injects the pre-paint unconditionally: router.jittheme(true) declares theming
+// Force injects the pre-paint unconditionally: a site that declared its dark at the root has theming
 // once at the root instead of relying on the usage scan (e.g. the toggle lives on a page the scan
 // can't see, or theming is applied by external scripts). A marker still pins the position.
 func Force(source string) string {

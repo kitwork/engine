@@ -56,8 +56,13 @@ type Config struct {
 	Animations  map[string]string
 	Keyframes   map[string]string
 	// DarkSelector is the PARENT selector the dark: variant scopes under. Empty = ".dark". Set it
-	// to e.g. `[data-theme="dark"]` via router.jitcss({ darkMode: ['class', '[data-theme="dark"]'] }).
+	// to e.g. `[data-theme="dark"]` via router.css({ darkMode: ['class', '[data-theme="dark"]'] }).
 	DarkSelector string
+	// DarkByClass records that the site DECLARED darkMode as class/selector-switched (anything but
+	// "media"): its dark is a choice the visitor saves in the browser, so the server-rendered page
+	// cannot know it and the theme pre-paint must apply it before the first frame on EVERY page —
+	// the anti-flash is the theme's own job, not a switch the author sets (22/09).
+	DarkByClass bool
 	// Themes holds the appearance modes derived by router.themes() — mode → token → value — kept
 	// OUT of Colors on purpose: a mode is a block of variables under a selector, not a colour, so no
 	// `bg-canvas-midnight` utility is ever minted from it. A hand-written `<token>-<mode>` rung in

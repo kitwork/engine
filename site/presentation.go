@@ -151,8 +151,7 @@ func (p *Presentation) SetThemeMode(mode string) bool {
 
 // SetThemes records the appearance modes router.themes() asked for. Like highlight, the modes ride
 // the JIT config at snapshot time, so router.css() and router.themes() may be written in either
-// order. Declaring a theme also turns the pre-paint on unless the site said router.jittheme(false):
-// a dark skin that flashes light on load is not a dark skin.
+// order. The pre-paint follows from what the site declared (see resolvedThemeMode).
 func (p *Presentation) SetThemes(modes []string) bool {
 	if p == nil {
 		return false
@@ -163,10 +162,23 @@ func (p *Presentation) SetThemes(modes []string) bool {
 		return false
 	}
 	p.themes = append([]string(nil), modes...)
-	if p.themeMode == "" && len(modes) > 0 {
-		p.themeMode = "force"
-	}
 	return true
+}
+
+// resolvedThemeMode is the anti-flash decision, made from what the site declared rather than a
+// switch it sets: an explicit router.themes({ prepaint: false }) (or the deprecated jittheme)
+// wins; otherwise a site with a derived mode (router.themes({ dark: true })) or a class-switched
+// darkMode (router.css({ darkMode: ["class"] })) pre-paints EVERY page — a dark skin that flashes
+// light on load is not a dark skin, and a page without the toggle must not flash either. A site
+// that declared neither falls back to the per-page scan for a toggle ("").
+func (p *Presentation) resolvedThemeMode() string {
+	if p.themeMode != "" {
+		return p.themeMode
+	}
+	if len(p.themes) > 0 || (p.jitConfig != nil && p.jitConfig.DarkByClass) {
+		return "force"
+	}
+	return ""
 }
 
 // SetHighlightPalette records the per-role overrides from
@@ -355,7 +367,7 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 		JITConfig:        jitConfig,
 		FaviconFile:      p.faviconFile,
 		AssetMounts:      append([]AssetMount(nil), p.assetMounts...),
-		ThemeMode:        p.themeMode,
+		ThemeMode:        p.resolvedThemeMode(),
 		Themes:           append([]string(nil), p.themes...),
 		HighlightTheme:   p.highlightTheme,
 		HighlightPalette: p.highlightPalette,

@@ -372,9 +372,9 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// 3i. JIT theme: swap <script data-kitwork-jit="theme"> for a synchronous pre-paint that applies
 	// the saved/OS theme before first paint (no flash). Pairs with $app.theme.toggle().
 	switch r.themeMode {
-	case "off": // router.jittheme(false) — no pre-paint even when the scan would find usage
+	case "off": // router.themes({ prepaint: false }) — no pre-paint even when the scan would find usage
 	case "force":
-		out = theme.Force(out) // router.jittheme(true) — always inject, scan or no scan
+		out = theme.Force(out) // the site declared its dark (css darkMode / themes) — always inject, scan or no scan
 	default:
 		out = theme.Render(out)
 	}

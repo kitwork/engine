@@ -72,10 +72,19 @@ func buildJitcssConfig(cfg value.Value) *jitcss.Config {
 	m := cfg.Map()
 
 	// darkMode: 'class' | ['class', '<selector>'] | ['selector', '<selector>'] — the custom parent
-	// selector (2nd element) scopes the dark: variant. Default (empty) → ".dark".
-	if dmVal, ok := m["darkMode"]; ok && dmVal.K == value.Array {
-		if arr := dmVal.Array(); len(arr) >= 2 && arr[1].Text() != "" {
-			config.DarkSelector = arr[1].Text()
+	// selector (2nd element) scopes the dark: variant. Default (empty) → ".dark". Declaring any
+	// class/selector form (not 'media') says the site's dark is a saved choice → DarkByClass, and
+	// the theme pre-paints it on every page.
+	if dmVal, ok := m["darkMode"]; ok {
+		switch {
+		case dmVal.K == value.Array:
+			arr := dmVal.Array()
+			if len(arr) >= 2 && arr[1].Text() != "" {
+				config.DarkSelector = arr[1].Text()
+			}
+			config.DarkByClass = len(arr) == 0 || !strings.EqualFold(arr[0].Text(), "media")
+		case dmVal.IsString():
+			config.DarkByClass = !strings.EqualFold(dmVal.String(), "media")
 		}
 	}
 

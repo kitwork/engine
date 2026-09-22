@@ -614,9 +614,11 @@ func publicAssetURL(disk string) string {
 // Language is sugar for meta({ language }) — $.meta.language in the view, for <html lang="…">.
 func (f *FolderRouter) Language(v value.Value) *FolderRouter { f.meta["language"] = v; return f }
 
-// Jittheme pins the theme pre-paint for the whole site: router.jittheme(true) ALWAYS injects the
-// anti-flash script (no usage scan needed — e.g. the toggle lives where the scan can't see);
-// router.jittheme(false) disables it entirely. Without the call, the auto-scan decides per page.
+// Jittheme is the deprecated site-wide pre-paint switch (22/09): true ALWAYS injects the
+// anti-flash script, false disables it. The theme now decides this itself from what the site
+// declared — router.css({ darkMode: ["class"] }) or router.themes({ dark: true }) pre-paint every
+// page — and router.themes({ prepaint: false }) is the one remaining setting (opt out). Kept so
+// existing sites keep working; new sites do not call it.
 func (f *FolderRouter) Jittheme(args ...value.Value) *FolderRouter {
 	mode := "force" // bare router.jittheme() reads as "turn it on"
 	if len(args) > 0 && args[0].K == value.Bool && args[0].N == 0 {
