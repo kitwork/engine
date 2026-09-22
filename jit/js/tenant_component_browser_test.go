@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -203,4 +204,117 @@ func TestBrowserApptopTenantComponentsRunVerbatimOnTheKernel(t *testing.T) {
 		t.Fatalf("tenant component proof failed: %s", output[i:end])
 	}
 	t.Fatalf("tenant component proof did not pass (err=%v):\n%.2000s", err, output)
+}
+
+// The shortcut component, ported from the KitJS catalogue (22/09): a keyboard shortcut that clicks
+// its host. Driven in a real browser because the discipline IS the behaviour — exactly one of
+// Ctrl/Cmd, no Alt or Shift, no repeat, and an event something else handled is left alone.
+func TestBrowserShortcutComponentClicksItsHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping shortcut browser proof in short mode")
+	}
+	browser := findHeadlessBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+	page := `<!doctype html>
+<html lang="en" data-kit-app="shortcut"><head><meta charset="utf-8"><title>shortcut</title></head><body>
+  <!-- the undeclared host comes FIRST: its listener runs first, so if it ever answered it would
+       take the key (preventDefault) and the declared host below would never see it -->
+  <a id="plain" href="#plain" data-kit-component="shortcut">No shortcut declared</a>
+  <a id="search" href="#search" data-kit-component="shortcut" data-shortcut="mod+k">Search</a>
+  <script src="/kit.js"></script>
+  <script>
+  (async function () {
+    var root = document.documentElement;
+    function fail(m) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", m); throw new Error(m); }
+    function assert(c, m) { if (!c) fail(m); }
+    function tick() { return new Promise(function (r) { setTimeout(r, 20); }); }
+    var clicks = 0, plainClicks = 0, lastDefaultPrevented = null;
+    document.getElementById("search").addEventListener("click", function (e) { e.preventDefault(); clicks++; });
+    document.getElementById("plain").addEventListener("click", function (e) { e.preventDefault(); plainClicks++; });
+    function press(init) {
+      var e = new KeyboardEvent("keydown", Object.assign({ key: "k", bubbles: true, cancelable: true }, init));
+      document.dispatchEvent(e);
+      lastDefaultPrevented = e.defaultPrevented;
+      return e;
+    }
+    await tick();
+    assert(window.kit.blueprints.shortcut, "the shortcut blueprint must be registered");
+
+    press({ ctrlKey: true }); await tick();
+    assert(clicks === 1, "Ctrl+K must click the host, got " + clicks);
+    assert(lastDefaultPrevented === true, "the component must take the key from the browser");
+
+    press({ metaKey: true }); await tick();
+    assert(clicks === 2, "Cmd+K must click the host too, got " + clicks);
+
+    // discipline: each of these must be ignored
+    press({ ctrlKey: true, metaKey: true });
+    press({ ctrlKey: true, altKey: true });
+    press({ ctrlKey: true, shiftKey: true });
+    press({ ctrlKey: true, repeat: true });
+    press({});
+    var other = new KeyboardEvent("keydown", { key: "j", ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(other);
+    await tick();
+    assert(clicks === 2, "Ctrl+Cmd, Alt, Shift, a repeat, a bare k and another key must all be ignored (clicks=" + clicks + ")");
+
+    // a host that declares no data-shortcut is never triggered
+    // A host that declares no data-shortcut is inert. Checked LAST and against a fresh press, so a
+    // regression here cannot hide behind the earlier counts.
+    press({ ctrlKey: true }); await tick();
+    assert(plainClicks === 0, "a host without data-shortcut must never be clicked (" + plainClicks + ")");
+    assert(clicks === 3, "the declared host still answers (" + clicks + ")");
+
+    root.setAttribute("data-kit-test", "passed");
+  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  </script>
+</body></html>`
+	rendered := Render(page)
+	if !strings.Contains(rendered, "components=component%3Ashortcut") {
+		t.Fatalf("Render should inject the shortcut component:\n%s", rendered)
+	}
+	runKernelPage(t, browser, page, scanModules(page, nil))
+}
+
+// runKernelPage serves one page plus /kit.js (kernel + the named modules) and drives it in a real
+// headless browser, failing with whatever the page wrote into data-kit-test-error.
+func runKernelPage(t *testing.T, browser, page string, moduleNames []string) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case hydrate.RuntimePath:
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write([]byte(hydrate.Runtime() + "\n" + ModulesJS(ModuleKeys(moduleNames))))
+		case "/":
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = response.Write([]byte(page))
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	profile := t.TempDir()
+	args := []string{"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking",
+		"--disable-default-apps", "--disable-extensions", "--disable-sync", "--metrics-recording-only", "--no-first-run",
+		"--run-all-compositor-stages-before-draw", "--user-data-dir=" + filepath.Join(profile, "p"), "--virtual-time-budget=6000", "--dump-dom", server.URL + "/"}
+	if runtime.GOOS == "windows" {
+		args = append([]string{"--disable-background-mode", "--disable-breakpad", "--disable-crashpad-for-testing"}, args...)
+	}
+	output, err := exec.CommandContext(ctx, browser, args...).CombinedOutput()
+	if bytes.Contains(output, []byte(`data-kit-test="passed"`)) {
+		return
+	}
+	if i := bytes.Index(output, []byte("data-kit-test-error=")); i >= 0 {
+		end := i + 300
+		if end > len(output) {
+			end = len(output)
+		}
+		t.Fatalf("kernel page proof failed: %s", output[i:end])
+	}
+	t.Fatalf("kernel page proof did not pass (err=%v):\n%.1500s", err, output)
 }
