@@ -233,14 +233,14 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | **XOÁ** | IR client `data-kitwork-<directive>` + read-alias tiền tố dài cho directive/boundary | — | ✅ 21/09 (C1) |
 | **XOÁ** | `data-kit-away` `data-kit-escape` `data-kit-guard` (→ modifier) | — | ✅ 21/09 |
 | **XOÁ** | `data-kit-as`, đuôi `name=$alias`, `data-kitwork-alias`, `data-alias` (→ `data-kit-alias`) | — | ✅ 21/09 |
-| **XOÁ** | `data-kitwork-key` trong `morph.js` (`jit/js/lib/more.js` đã xoá cùng hệ action) | — | ☐ bước trừ tiếp |
+| **XOÁ** | `data-kitwork-key` trong `morph.js` (`jit/js/lib/more.js` đã xoá cùng hệ action) | key là của tác giả: `data-kit-key` (chữ của `for`) hoặc `data-key` (site apptop viết tay); tiền tố máy không ai phát | ✅ 22/09 — test `morph_key_test.go` (key tác giả DỜI node, `data-kitwork-key` trơ = khớp theo vị trí; có disable-check) |
 | **XOÁ** | Hệ `action` jitjs (`lib/`, `behaviors`, `fire`, `compat.js`, `data-kit(work)-action/target`, `data-kit-trigger`) | không cần `effect`: 23 file site chuyển sang component/biểu thức/Drive; `more` 0 chỗ dùng | ✅ 22/09 |
-| **XOÁ** | Nhánh `typeof fn === "function"` (kernel call) | sau khi chốt async (B10) | ☐ |
-| **XOÁ** | 9.002 dòng `runtime*.js`, `legacy/core/*`, `main copy*.js` | — | ☐ (kiểm lại còn không) |
+| ~~XOÁ~~ **GIỮ** | Nhánh `typeof fn === "function"` (kernel call) | B10 chốt async sống trong **method JS thật** của component — nhánh này chính là chỗ method đó chạy (`fn.apply(scope)`); dòng XOÁ viết khi còn nghĩ async đi qua `$app` + scope-patch | ✅ 22/09 lật thành GIỮ |
+| **XOÁ** | 9.002 dòng `runtime*.js`, `legacy/core/*`, `main copy*.js` | — | ✅ đã không còn (kiểm 22/09: `find` toàn `jit/` không ra file nào, thư mục `legacy` không tồn tại) |
 | **GIỮ** | Inventory 18 năng lực (ideashipping §4) | regression test **trước** khi sửa | — |
 | **HOÃN** | Extension 1 Proxy dependency engine | **đe doạ server twin** | — |
 | **HOÃN** | Extension 5 virtualization | chưa site nào cần | — |
-| **HOÃN** | 6 build profile → chỉ `core` + `full` | cắt theo nhu cầu | — |
+| **HOÃN** | 6 build profile → chỉ `core` + `full` | cắt theo nhu cầu | ✅ đã là 2: `assemble.go` chỉ còn `kit` + `hydrate` (kiểm 22/09) |
 | **KHÔNG LÀM** | `switch/case`, `teleport`, transition framework, state manager mới, `state`/`props` | non-goals | — |
 
 ---

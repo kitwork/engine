@@ -44,8 +44,10 @@
       var fromChildren = Array.prototype.slice.call(fromNode.childNodes).filter(function (n) { return !kernelUI(n); });
       var toChildren = Array.prototype.slice.call(toNode.childNodes);
 
+      // A row's identity is authored: data-kit-key (the for directive's spelling) or plain data-key
+      // (sites write it by hand). The engine-prefixed data-kitwork-key had no emitter — gone (22/09, §9).
       function getKey(n) {
-        return n.nodeType === 1 ? (n.getAttribute("data-kitwork-key") || n.getAttribute("data-kit-key") || n.getAttribute("data-key")) : null;
+        return n.nodeType === 1 ? (n.getAttribute("data-kit-key") || n.getAttribute("data-key")) : null;
       }
 
       var fromKeys = {};
