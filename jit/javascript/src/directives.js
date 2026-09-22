@@ -20,7 +20,7 @@
   "self prevent stop once outside enter escape window document".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version alias ref retain drive ignore text show bind seed class style model if for key error".split(" ").forEach(function (name) {
+  "component scope version alias element retain drive ignore text show bind seed class style model if for key error".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {

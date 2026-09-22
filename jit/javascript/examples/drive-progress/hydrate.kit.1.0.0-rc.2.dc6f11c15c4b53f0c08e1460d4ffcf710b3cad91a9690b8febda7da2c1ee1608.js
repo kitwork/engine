@@ -979,7 +979,7 @@
     return undefined;
   }
 
-  // A DOM element reaches an expression only through `$refs` (data-kit-ref, ideaship-final §6),
+  // A DOM element reaches an expression only through `$element` (data-kit-element, ideaship-final §6),
   // and the grammar stays closed around it the way it is around a string or an array: a short list
   // of state reads and imperative verbs, nothing that walks the tree or rewrites it. Writes to an
   // element go through bindings, never through a ref.
@@ -1894,7 +1894,7 @@
   var RETAIN_KEY = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
   var EXACT_SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
   var RESERVED_ALIASES = {
-    $this: true, $el: true, $element: true, $host: true, $event: true, $refs: true, $component: true,
+    $this: true, $el: true, $element: true, $host: true, $event: true, $component: true,
     $parent: true, $error: true, $alias: true, $invalidate: true
   };
 
@@ -2005,6 +2005,21 @@
       if (current.disposed) return Object.freeze([]);
       return Object.freeze(ownedElements(current, selector));
     }
+    // context.element("track") is the element this component named track (the first, if several);
+    // context.elements("slide") is all of them, in document order — the same data-kit-element the
+    // markup reads as $element.track, through the same owned() fence (a nested host's are not ours).
+    function elements(name) {
+      if (typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new TypeError("KitJS: context.elements(name) expects an identifier");
+      }
+      if (current.disposed) return Object.freeze([]);
+      return Object.freeze(ownedElements(current, "[data-kit-element]").filter(function (candidate) {
+        return (candidate.getAttribute("data-kit-element") || "").trim() === name;
+      }));
+    }
+    function element(name) {
+      return elements(name)[0] || null;
+    }
     function cleanup(callback) {
       if (typeof callback !== "function") throw new TypeError("KitJS: context.cleanup(fn) expects a function");
       return ownCleanup(current, callback);
@@ -2043,6 +2058,8 @@
     Object.defineProperties(context, {
       host: { get: function () { return current.host; }, enumerable: true },
       owned: { value: Object.freeze(owned), enumerable: true },
+      element: { value: Object.freeze(element), enumerable: true },
+      elements: { value: Object.freeze(elements), enumerable: true },
       listen: { value: Object.freeze(listen), enumerable: true },
       cleanup: { value: Object.freeze(cleanup), enumerable: true },
       afterRender: { value: Object.freeze(afterRender), enumerable: true }
@@ -3367,26 +3384,26 @@
     while ((element = walker.nextNode())) output.push(element);
     return output;
   }
-  // refsFor builds `$refs` for an action running on `element` (ideaship-final §6: data-kit-ref
+  // namedElements builds `$element` for an action running on `element` (ideaship-final §6: data-kit-element
   // names a DOM element, data-kit-alias names an instance). The registry is the boundary's own —
   // the nearest component host or data-kit-scope, else the page — so a name is looked up among
   // the refs that boundary owns, never inside a nested boundary and never outside. The first
-  // element with a name wins; a missing name is nullish (`$refs.search?.focus()`). Built per
+  // element with a name wins; a missing name is nullish (`$element.search?.focus()`). Built per
   // action, since the elements it points at are whatever the DOM holds at that moment.
-  function refsFor(element) {
+  function namedElements(element) {
     var output = Object.create(null);
     var host = nearest(element);
     var candidates;
     if (host) {
       var current = core.scopes.get(host);
-      candidates = current ? ownedElements(current, "[data-kit-ref]") : [];
+      candidates = current ? ownedElements(current, "[data-kit-element]") : [];
     } else {
-      candidates = Array.prototype.filter.call(document.querySelectorAll("[data-kit-ref]"), function (candidate) {
+      candidates = Array.prototype.filter.call(document.querySelectorAll("[data-kit-element]"), function (candidate) {
         return !core.ignoredForRuntime(candidate) && nearest(candidate) === null;
       });
     }
     candidates.forEach(function (candidate) {
-      var name = (candidate.getAttribute("data-kit-ref") || "").trim();
+      var name = (candidate.getAttribute("data-kit-element") || "").trim();
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || core.blocked(name) || core.FORBIDDEN[name]) return;
       if (!OWN.call(output, name)) output[name] = candidate;
     });
@@ -3601,7 +3618,7 @@
   core.scopeRecordFor = scopeRecordFor;
   core.ownsElement = ownsElement;
   core.ownedElements = ownedElements;
-  core.refsFor = refsFor;
+  core.namedElements = namedElements;
   core.initialize = initialize;
   core.flushAfterRender = flushAfterRender;
   core.liveComponents = liveComponents;
@@ -3635,7 +3652,7 @@
   "self prevent stop once outside enter escape window document".split(" ").forEach(function (name) {
     MODIFIERS[name] = true;
   });
-  "component scope version alias ref retain drive ignore text show bind seed class style model if for key error".split(" ").forEach(function (name) {
+  "component scope version alias element retain drive ignore text show bind seed class style model if for key error".split(" ").forEach(function (name) {
     RESERVED[name] = true;
   });
   "click dblclick pointerdown pointerup focusin".split(" ").forEach(function (name) {
@@ -4157,14 +4174,14 @@
       if (core.localsFor) locals = core.localsFor(element, locals);
       // The system variables of ideaship-final §3 ride every action: `$this` is the element that
       // owns the attribute (`$el` its compatibility alias), `$host` the boundary element — the
-      // nearest component host or data-kit-scope, else <html> — and `$refs` the elements that
-      // boundary named with data-kit-ref. `$event` arrives from the dispatcher in `locals`.
+      // nearest component host or data-kit-scope, else <html> — and `$element` the elements that
+      // boundary named with data-kit-element. `$event` arrives from the dispatcher in `locals`.
       var system = Object.create(null);
       if (locals) Object.keys(locals).forEach(function (key) { system[key] = locals[key]; });
       system.$this = element;
       system.$el = element;
       system.$host = boundary || document.documentElement;
-      system.$refs = core.refsFor(element);
+      system.$element = core.namedElements(element);
       program.read(current ? current.scope : EMPTY_SCOPE, system, function (value, owner) {
         core.observe(value, owner);
       });
@@ -5360,7 +5377,7 @@
   // `$event` is a still picture of the native event — the fields an action reads, frozen at
   // dispatch so a debounced handler sees what happened, not what the browser has since reused the
   // object for. The elements it points at (target, submitter, relatedTarget) are the real ones,
-  // read through the same closed element table as `$refs` (ideaship-final §3 names `$event` native;
+  // read through the same closed element table as `$element` (ideaship-final §3 names `$event` native;
   // this is the native event as the closed grammar can see it).
   function elementOrNull(value) {
     return value && value.nodeType === 1 ? value : null;
@@ -8202,6 +8219,105 @@
     throw error;
   }
 })(globalThis, document);
+; (function (document) {
+  "use strict";
+
+  var core = document[Symbol.for("kitjs:assembly")];
+  if (!core || ["events", "drive"].indexOf(core.phase) < 0) {
+    throw new Error("KitJS: service registrar loaded out of order");
+  }
+  if (core.reuse) return;
+  if (!core.kit || typeof core.validServiceName !== "function" ||
+    typeof core.sealKit !== "function" || core.serviceRegistry) {
+    throw new Error("KitJS: service registrar cannot be installed");
+  }
+
+  var OWN = core.OWN;
+  var registry = new Map();
+  var identities = new WeakMap();
+  var kit = core.kit;
+  var sealed = false;
+
+  function snapshot(name, namespace) {
+    var prototype = namespace && Object.getPrototypeOf(namespace);
+    if (!namespace || prototype !== Object.prototype && prototype !== null ||
+      Object.getOwnPropertySymbols(namespace).length) {
+      throw new TypeError("KitJS: service namespace must be a plain object");
+    }
+    var descriptors = Object.getOwnPropertyDescriptors(namespace);
+    var output = Object.create(null);
+    Object.keys(descriptors).forEach(function (member) {
+      if (member === "version" || core.blocked(member)) {
+        throw new TypeError("KitJS: invalid service member \"" + member + "\"");
+      }
+      var descriptor = descriptors[member];
+      if (descriptor.set || !OWN.call(descriptor, "value") && typeof descriptor.get !== "function") {
+        throw new TypeError("KitJS: service members must be values or readonly getters");
+      }
+      if (OWN.call(descriptor, "value")) {
+        Object.defineProperty(output, member, {
+          value: descriptor.value,
+          enumerable: descriptor.enumerable !== false
+        });
+      } else {
+        Object.defineProperty(output, member, {
+          get: descriptor.get,
+          enumerable: descriptor.enumerable !== false
+        });
+      }
+    });
+    Object.defineProperty(output, "version", {
+      value: core.graph.services[name]
+    });
+    return Object.freeze(output);
+  }
+
+  function service(name, namespace) {
+    if (arguments.length !== 2) {
+      throw new TypeError("KitJS: service(name, namespace) expects two arguments");
+    }
+    if (sealed) throw new Error("KitJS: service registrar is sealed");
+    if (!core.graph) throw new Error("KitJS: services must register after the graph is installed");
+    if (!core.validServiceName(name)) throw new TypeError("KitJS: invalid service name");
+    if (!OWN.call(core.graph.services, name)) {
+      throw new Error("KitJS: service \"" + name + "\" is not declared by the installed graph");
+    }
+    if (registry.has(name)) throw new Error("KitJS: service \"" + name + "\" already exists");
+    var value = snapshot(name, namespace);
+    Object.defineProperty(kit, name, {
+      value: value,
+      enumerable: true
+    });
+    registry.set(name, value);
+    identities.set(value, name);
+  }
+
+  Object.defineProperty(kit, "service", {
+    value: service,
+    configurable: true
+  });
+
+  core.serviceRegistry = registry;
+  core.sealServices = function () {
+    if (sealed) throw new Error("KitJS: services are already sealed");
+    if (!core.graph) throw new Error("KitJS: service graph is not installed");
+    Object.keys(core.graph.services).forEach(function (name) {
+      if (!registry.has(name)) {
+        throw new Error("KitJS: service graph is missing definition \"" + name + "\"");
+      }
+      Object.keys(core.graph.actions[name]).forEach(function (member) {
+        if (typeof registry.get(name)[member] !== "function") {
+          throw new Error("KitJS: authored action \"" + name + "." + member + "\" is not callable");
+        }
+      });
+    });
+    sealed = true;
+    if (!delete kit.service) throw new Error("KitJS: service registrar could not be removed");
+    core.servicesSealed = true;
+    return core.sealKit();
+  };
+  core.serviceName = function (value) { return identities.get(value) || null; };
+})(document);
 ; (function (global, document) {
   "use strict";
 
@@ -8210,18 +8326,15 @@
   var core = document[ASSEMBLY];
   if (!core || core.phase !== "drive") throw new Error("KitJS: component graph loaded out of order");
   var services = Object.create(null);
+  services["progress"] = "1.0.0";
   var components = Object.create(null);
-  components["shop-cart"] = "1.0.0";
-  components["shop-checkout"] = "1.0.0";
-  components["shop-dialog"] = "1.0.0";
-  components["shop-products"] = "1.0.0";
+  components["progress-bar"] = "2.0.0";
   var actions = Object.create(null);
+  actions["progress"] = Object.create(null);
   var grants = Object.create(null);
-  grants["shop-cart"] = Object.create(null);
-  grants["shop-checkout"] = Object.create(null);
-  grants["shop-dialog"] = Object.create(null);
-  grants["shop-products"] = Object.create(null);
-  var graph = { id: "360c61cf53a659d6fde232d2cbce33b4e626ae72076e7f8175a6c6f53abd571c", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
+  grants["progress-bar"] = Object.create(null);
+  grants["progress-bar"]["progress"] = "1.0.0";
+  var graph = { id: "a27ab2aa6d9bece140b48955f9a907c4348ead0160dd4832c53fb07508a4ff81", profile: "hydrate", services: services, components: components, actions: actions, grants: grants };
   if (core.reuse) {
     var installed = global.kit && global.kit[GRAPH];
     if (!installed || installed.id !== graph.id || installed.profile !== graph.profile) {
@@ -8236,220 +8349,267 @@
     core.installComponentGraph(graph);
     var kit = core.kit;
     if (!kit || kit.version !== core.version || kit.component !== core.component) throw new Error("KitJS: package facade is unavailable");
-    if (typeof core.sealKit !== "function") throw new Error("KitJS: package facade sealer is unavailable");
-    core.sealKit();
+    ; (function (kit) {
+;(function (global, document, kit) {
+"use strict";
+
+// KitJS service: progress@1.0.0
+var listeners = new Set();
+var deliveries = [];
+var delivering = false;
+var current = freeze({
+  id: "",
+  phase: "idle",
+  source: "",
+  url: "",
+  loaded: 0,
+  total: null,
+  outcome: null
+});
+
+function freeze(value) {
+  return Object.freeze({
+    id: value.id,
+    phase: value.phase,
+    source: value.source,
+    url: value.url,
+    loaded: value.loaded,
+    total: value.total,
+    outcome: value.outcome
+  });
+}
+
+function report(error) {
+  try {
+    if (typeof global.reportError === "function") {
+      global.reportError(error);
+      return;
+    }
+    if (global.console && typeof global.console.error === "function") {
+      global.console.error(error);
+    }
+  } catch (_) { /* Reporting must not break another subscriber. */ }
+}
+
+function deliver(listener, value) {
+  try { listener(value); }
+  catch (error) { report(error); }
+}
+
+function publish(value) {
+  var published = current = freeze(value);
+  deliveries.push({
+    value: published,
+    subscriptions: Array.from(listeners)
+  });
+  if (delivering) return published;
+
+  delivering = true;
+  try {
+    var index = 0;
+    while (index < deliveries.length) {
+      var delivery = deliveries[index];
+      deliveries[index] = null;
+      index++;
+      delivery.subscriptions.forEach(function (subscription) {
+        if (subscription.listener) deliver(subscription.listener, delivery.value);
+      });
+    }
+  } finally {
+    deliveries.length = 0;
+    delivering = false;
+  }
+  return published;
+}
+
+function progressID(value) {
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("Progress id must be a non-empty string or finite number");
+    return String(value);
+  }
+  if (typeof value !== "string" || !value) {
+    throw new TypeError("Progress id must be a non-empty string or finite number");
+  }
+  return value;
+}
+
+function optionsOf(value) {
+  if (value === undefined || value === null) value = {};
+  var prototype = value && Object.getPrototypeOf(value);
+  if (!value || prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError("Progress options must be a plain object");
+  }
+  if (value.source !== undefined && (typeof value.source !== "string" || !value.source)) {
+    throw new TypeError("Progress source must be a non-empty string");
+  }
+  if (value.url !== undefined && typeof value.url !== "string") {
+    throw new TypeError("Progress url must be a string");
+  }
+  if (value.total !== undefined && value.total !== null &&
+    (typeof value.total !== "number" || !Number.isFinite(value.total) || value.total <= 0)) {
+    throw new TypeError("Progress total must be a positive finite number or null");
+  }
+  return {
+    source: value.source === undefined ? "manual" : value.source,
+    url: value.url === undefined ? "" : value.url,
+    total: value.total === undefined || value.total === null ? null : value.total
+  };
+}
+
+function snapshot() {
+  return current;
+}
+
+function subscribe(listener) {
+  if (typeof listener !== "function") throw new TypeError("Progress subscriber must be a function");
+  var subscription = { listener: listener };
+  listeners.add(subscription);
+  deliver(listener, current);
+  var subscribed = true;
+  return function () {
+    if (!subscribed) return;
+    subscribed = false;
+    listeners.delete(subscription);
+    subscription.listener = null;
+    listener = null;
+  };
+}
+
+function start(id, options) {
+  id = progressID(id);
+  options = optionsOf(options);
+  return publish({
+    id: id,
+    phase: "start",
+    source: options.source,
+    url: options.url,
+    loaded: 0,
+    total: options.total,
+    outcome: null
+  });
+}
+
+function update(id, loaded, total) {
+  id = progressID(id);
+  if (current.id !== id || current.phase === "idle" || current.phase === "finish") return false;
+  if (typeof loaded !== "number" || !Number.isFinite(loaded) || loaded < 0 ||
+    typeof total !== "number" || !Number.isFinite(total) || total <= 0 || loaded > total) {
+    throw new TypeError("Progress update expects finite values where 0 <= loaded <= total and total > 0");
+  }
+  return publish({
+    id: current.id,
+    phase: "progress",
+    source: current.source,
+    url: current.url,
+    loaded: loaded,
+    total: total,
+    outcome: null
+  });
+}
+
+function finish(id, outcome) {
+  id = progressID(id);
+  if (current.id !== id || current.phase === "idle" || current.phase === "finish") return false;
+  if (outcome !== "loaded" && outcome !== "cancelled" && outcome !== "error" && outcome !== "fallback") {
+    throw new TypeError("Progress outcome must be loaded, cancelled, error, or fallback");
+  }
+  return publish({
+    id: current.id,
+    phase: "finish",
+    source: current.source,
+    url: current.url,
+    loaded: outcome === "loaded" && current.total !== null ? current.total : current.loaded,
+    total: current.total,
+    outcome: outcome
+  });
+}
+
+function navigation(event) {
+  try {
+    var detail = event && event.detail;
+    if (!detail || typeof detail !== "object" || typeof detail.url !== "string") return;
+    if (detail.phase === "start") {
+      start(detail.id, {
+        source: "navigation",
+        url: detail.url
+      });
+      return;
+    }
+    var id = progressID(detail.id);
+    if (current.source !== "navigation" || current.id !== id) return;
+    if (detail.phase === "progress") update(id, detail.loaded, detail.total);
+    else if (detail.phase === "finish") finish(id, detail.outcome);
+  } catch (_) { /* Untrusted document events never enter the trusted API. */ }
+}
+
+kit.service("progress", {
+  snapshot: snapshot,
+  subscribe: subscribe,
+  start: start,
+  update: update,
+  finish: finish
+});
+
+document.addEventListener("kit:navigation", navigation);
+})(globalThis, document, kit);
+    })(kit);
+    if (typeof core.sealServices !== "function") throw new Error("KitJS: service graph sealer is unavailable");
+    core.sealServices();
     ; (function (kit) {
 ;(function () {
 "use strict";
 
-var shopDialogPrivate = new WeakMap();
-
-function shopDialogState() {
-  var host = document.getElementById("shop-confirm-dialog");
-  if (!host) return null;
-  var state = shopDialogPrivate.get(host);
-  if (!state) {
-    state = { callback: null, originID: "", generation: 0 };
-    shopDialogPrivate.set(host, state);
-  }
-  return state;
-}
-
-function shopFocusLater(element, state, generation) {
-  setTimeout(function () {
-    if (state && state.generation !== generation) return;
-    if (element && element.isConnected && typeof element.focus === "function") {
-      element.focus();
-    }
-  }, 0);
-}
-
-function shopSetBackgroundBlocked(blocked) {
-  var shell = document.getElementById("shop-shell");
-  if (!shell) return;
-  if (blocked) {
-    shell.setAttribute("inert", "");
-    shell.setAttribute("aria-hidden", "true");
-    return;
-  }
-  shell.removeAttribute("inert");
-  shell.removeAttribute("aria-hidden");
-}
-
-kit.component("shop-products", {
-  products: [
-    {
-      id: "field-notes",
-      name: "Field Notes",
-      description: "A compact notebook for ideas that should not wait.",
-      price: 24
-    },
-    {
-      id: "desk-lamp",
-      name: "Focus Lamp",
-      description: "Warm, dimmable light for a quieter workspace.",
-      price: 58
-    },
-    {
-      id: "day-bag",
-      name: "Day Bag",
-      description: "A light everyday bag with room for the essentials.",
-      price: 72
-    }
-  ],
-
-  money: function (amount) {
-    return "$" + Number(amount).toFixed(2);
-  }
-});
-
-kit.component("shop-cart", {
-  items: [],
-
-  get count() {
-    return this.items.reduce(function (total, item) {
-      return total + item.quantity;
-    }, 0);
-  },
-
-  get total() {
-    return this.items.reduce(function (total, item) {
-      return total + item.price * item.quantity;
-    }, 0);
-  },
-
-  add: function (product) {
-    var current = this.items.find(function (item) {
-      return item.id === product.id;
-    });
-
-    if (current) {
-      this.items = this.items.map(function (item) {
-        if (item.id !== product.id) return item;
-        return {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity + 1
-        };
-      });
-      return;
-    }
-
-    this.items = this.items.concat([{
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      quantity: 1
-    }]);
-  },
-
-  remove: function (id) {
-    this.items = this.items.filter(function (item) {
-      return item.id !== id;
-    });
-  },
-
-  clear: function () {
-    this.items = [];
-    return true;
-  },
-
-  money: function (amount) {
-    return "$" + Number(amount).toFixed(2);
-  }
-});
-
-kit.component("shop-checkout", {
-  name: "",
-  email: "",
-  address: "",
-  placed: false,
-  orderName: "",
-
-  get ready() {
-    return this.name.trim() !== "" &&
-      this.email.includes("@") &&
-      this.address.trim() !== "";
-  },
-
-  completeOrder: function () {
-    this.orderName = this.name;
-    this.placed = true;
-  }
-});
-
-kit.component("shop-dialog", {
+kit.component("progress-bar", {
   visible: false,
+  value: null,
 
   init: function () {
-    var host = document.getElementById("shop-confirm-dialog");
-    if (!host) return;
-    host.addEventListener("keydown", function (event) {
-      if (event.key !== "Tab") return;
-      var controls = host.querySelectorAll("button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])");
-      if (!controls.length) {
-        event.preventDefault();
-        host.focus();
+    var scope = this;
+    var hideTimer = null;
+
+    function clearHide() {
+      if (hideTimer === null) return;
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+
+    function hide() {
+      scope.visible = false;
+      scope.value = null;
+    }
+
+    var unsubscribe = kit.progress.subscribe(function (progress) {
+      clearHide();
+
+      if (progress.phase === "start") {
+        scope.visible = true;
+        scope.value = null;
         return;
       }
-      var first = controls[0];
-      var last = controls[controls.length - 1];
-      if (event.shiftKey && (document.activeElement === first || !host.contains(document.activeElement))) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+
+      if (progress.phase === "progress") {
+        scope.visible = true;
+        scope.value = Math.min(99, Math.floor(progress.loaded / progress.total * 100));
+        return;
       }
+
+      if (progress.phase === "finish" && progress.outcome === "loaded") {
+        scope.visible = true;
+        scope.value = 100;
+        hideTimer = setTimeout(function () {
+          hideTimer = null;
+          hide();
+        }, 300);
+        return;
+      }
+
+      hide();
     });
-  },
 
-  open: function (triggerID, callback) {
-    var state = shopDialogState();
-    if (!state || typeof callback !== "function") return;
-    var generation = state.generation + 1;
-    state.generation = generation;
-    state.callback = callback;
-    state.originID = String(triggerID || "");
-    this.visible = true;
-    setTimeout(function () {
-      if (state.generation !== generation) return;
-      var cancel = document.getElementById("shop-dialog-cancel");
-      if (!cancel || !cancel.isConnected) return;
-      cancel.focus();
-      shopSetBackgroundBlocked(true);
-    }, 0);
-  },
-
-  close: function () {
-    var state = shopDialogState();
-    var origin = state && document.getElementById(state.originID);
-    var generation = state ? state.generation + 1 : 0;
-    if (state) {
-      state.generation = generation;
-      state.callback = null;
-      state.originID = "";
-    }
-    shopSetBackgroundBlocked(false);
-    this.visible = false;
-    shopFocusLater(origin, state, generation);
-  },
-
-  confirm: function () {
-    var state = shopDialogState();
-    var callback = state && state.callback;
-    var origin = state && document.getElementById(state.originID);
-    var generation = state ? state.generation + 1 : 0;
-    if (state) {
-      state.generation = generation;
-      state.callback = null;
-      state.originID = "";
-    }
-    shopSetBackgroundBlocked(false);
-    this.visible = false;
-    shopFocusLater(origin, state, generation);
-    if (callback) callback();
+    return function () {
+      clearHide();
+      unsubscribe();
+    };
   }
 });
 

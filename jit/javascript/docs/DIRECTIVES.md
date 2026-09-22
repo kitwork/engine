@@ -13,7 +13,7 @@ Unknown directives, events, modifiers, and invalid combinations fail closed.
 | `data-kit-scope="count: 3, open: true"` | Creates one anonymous shallow store, or seeds the component on the same host. Values use the bounded pure-data grammar. |
 | `data-kit-component="counter@1.0.0"` | Creates one isolated managed instance and asserts its exact closed-graph identity. Direct client registrations use an unversioned name. It never selects, downloads, or upgrades code in the browser. |
 | `data-kit-alias="$counter"` | Gives a component an action-only alias. Bindings cannot observe alias state, except the exact canonical App 1.1 loader fields `$app.loader.visible` and `$app.loader.value`. |
-| `data-kit-ref="search"` | Names one DOM element for `$refs.search` in ACTIONS of the boundary that owns it (the nearest component host or `data-kit-scope`, else the page); a nested boundary's ref is not visible from outside, an outer one not from inside, and a missing name is nullish (`$refs.search?.focus()`). The element answers a closed set of reads (`value`, `checked`, `open`, `scrollTop`, `dataset`, …) and verbs (`focus()`, `blur()`, `click()`, `select()`, `scrollIntoView()`, `showModal()`, `close()`, `reportValidity()`, `play()`, `getAttribute()`, …); writes go through bindings, never through a ref. |
+| `data-kit-element="search"` | Names one DOM element: `$element.search` in ACTIONS of the boundary that owns it (the nearest component host or `data-kit-scope`, else the page), and `context.element("search")` (the first) / `context.elements("slide")` (all, in document order) in component code, through the same owned() fence; a nested boundary's named element is not visible from outside, an outer one not from inside, and a missing name is nullish (`$element.search?.focus()`). The element answers a closed set of reads (`value`, `checked`, `open`, `scrollTop`, `dataset`, …) and verbs (`focus()`, `blur()`, `click()`, `select()`, `scrollIntoView()`, `showModal()`, `close()`, `reportValidity()`, `play()`, `getAttribute()`, …); writes go through bindings, never through a ref. |
 | `data-kit-retain="app-counter"` | In Hydrate, preserves this exact component host and live store across a compatible Morph. The key is unique and is not an HTML `id`. |
 
 `data-kit-scope` and `data-kit-component` cannot be placed on `<template>`.
@@ -274,16 +274,16 @@ Every action sees the system variables of the KitJS spec (`ideaship-final` §3):
 element that owns the attribute (`$el` is its compatibility alias); `$host` is the nearest boundary
 element — the component host or `data-kit-scope`, else `<html>`; `$event` is the event as the
 closed grammar can see it — a frozen picture with `type key code button clientX clientY value
-checked …` plus the real `target`, `submitter` and `relatedTarget` elements; `$refs.<name>` is the
-element named by `data-kit-ref` in the acting boundary. Elements answer a closed table of reads
+checked …` plus the real `target`, `submitter` and `relatedTarget` elements; `$element.<name>` is the
+element named by `data-kit-element` in the acting boundary. Elements answer a closed table of reads
 (`value`, `checked`, `open`, `id`, `dataset`, `scrollTop`, …) and verbs (`focus()`, `blur()`,
 `click()`, `select()`, `scrollIntoView()`, `showModal()`, `close()`, `reportValidity()`, `play()`,
 `getAttribute()`, …) and nothing else — no writes, nothing that walks the tree. The `$` namespace is
 action-only, so none of these appear in a binding.
 
 ```html
-<input data-kit-ref="search">
-<button data-kit-click="$refs.search.focus(); $this.blur()">Search</button>
+<input data-kit-element="search">
+<button data-kit-click="$element.search.focus(); $this.blur()">Search</button>
 <form data-kit-submit:prevent="sent = $event.submitter.id">…</form>
 ```
 

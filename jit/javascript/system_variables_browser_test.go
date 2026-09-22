@@ -10,7 +10,7 @@ import (
 // The system variables of ideaship-final §3 inside an action of the component runtime: `$this` is
 // the element that owns the attribute (`$el` its alias), `$host` the nearest boundary element,
 // `$event.target` / `$event.submitter` the real elements behind the event, read through the same
-// closed element table as `$refs`. A control button on the page has <html> as its host.
+// closed element table as `$element`. A control button on the page has <html> as its host.
 func TestBrowserSystemVariablesInActions(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping system variables browser contract in short mode")

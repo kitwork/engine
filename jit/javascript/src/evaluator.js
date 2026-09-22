@@ -318,7 +318,7 @@
     return undefined;
   }
 
-  // A DOM element reaches an expression only through `$refs` (data-kit-ref, ideaship-final §6),
+  // A DOM element reaches an expression only through `$element` (data-kit-element, ideaship-final §6),
   // and the grammar stays closed around it the way it is around a string or an array: a short list
   // of state reads and imperative verbs, nothing that walks the tree or rewrites it. Writes to an
   // element go through bindings, never through a ref.

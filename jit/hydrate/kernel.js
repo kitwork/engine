@@ -620,7 +620,7 @@
   // variables of ideaship-final §3: `$this` is the element that owns the directive (`$el` is its
   // compatibility alias); `$host` is the boundary element — nearest data-kit-scope/component, else
   // <html> — so a query stays inside what the component owns (`$root` is its alias); `$event` is
-  // the native DOM event of the handler that is running; `$refs` the boundary's named elements.
+  // the native DOM event of the handler that is running; `$element` the boundary's named elements.
   // Reads and method calls only — value/attribute CHANGES belong to bindings (data-kit-model,
   // state→CSS), not to reaching in and poking the DOM.
   function elementScope(el, event, errorContext) {
@@ -631,25 +631,25 @@
         if (k === "$host" || k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
         if (k === "$event") return event || null;
         if (k === "$error") return errorContext || null;
-        if (k === "$refs") return refsFor(el);
+        if (k === "$element") return namedElements(el);
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
     });
   }
-  // refsFor is `$refs` for an expression acting on `el` (ideaship-final §6: data-kit-ref names a
+  // namedElements is `$element` for an expression acting on `el` (ideaship-final §6: data-kit-element names a
   // DOM element, data-kit-alias names an instance). The registry belongs to the acting boundary —
   // the nearest data-kit-scope/component/item, else the page — and holds only the refs that
   // boundary owns: not one inside a nested boundary, not one outside. The first element with a
-  // name wins; a missing name is nullish, so `$refs.search?.focus()` is the guarded spelling.
+  // name wins; a missing name is nullish, so `$element.search?.focus()` is the guarded spelling.
   // Looked up on read, since the elements are whatever the DOM holds at that moment.
-  function refsFor(el) {
+  function namedElements(el) {
     var boundary = (el.closest && el.closest(SCOPE)) || null;
     return new Proxy(Object.create(null), {
       get: function (t, name) {
         if (typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return undefined;
-        var candidates = (boundary || document).querySelectorAll('[data-kit-ref="' + name + '"]');
+        var candidates = (boundary || document).querySelectorAll('[data-kit-element="' + name + '"]');
         for (var i = 0; i < candidates.length; i++) {
           if (candidates[i].closest(SCOPE) === boundary) return candidates[i];
         }
@@ -709,10 +709,10 @@
   // `$sidebar` → that instance's scope, so ANY expression reaches it ($sidebar.cycle()), even from
   // outside its DOM subtree (the scattered-controls case). No alias = purely lexical (bare cycle() =
   // nearest scope). data-kit-alias is the one spelling (ideaship-final §6): the alias names the
-  // component INSTANCE; data-kit-ref will name an element.
+  // component INSTANCE; data-kit-element will name an element.
   var aliases = Object.create(null);
   var reservedAliases = Object.create(null);
-  ["$", "$this", "$el", "$host", "$root", "$event", "$refs", "$error", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
+  ["$", "$this", "$el", "$host", "$root", "$event", "$element", "$error", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
   function registerAlias(alias, target, owner) {
     alias = String(alias || "").trim();
     var store = owner ? state(owner) : null;

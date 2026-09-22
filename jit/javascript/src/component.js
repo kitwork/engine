@@ -32,7 +32,7 @@
   var RETAIN_KEY = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
   var EXACT_SEMVER = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
   var RESERVED_ALIASES = {
-    $this: true, $el: true, $element: true, $host: true, $event: true, $refs: true, $component: true,
+    $this: true, $el: true, $element: true, $host: true, $event: true, $component: true,
     $parent: true, $error: true, $alias: true, $invalidate: true
   };
 
@@ -143,6 +143,21 @@
       if (current.disposed) return Object.freeze([]);
       return Object.freeze(ownedElements(current, selector));
     }
+    // context.element("track") is the element this component named track (the first, if several);
+    // context.elements("slide") is all of them, in document order — the same data-kit-element the
+    // markup reads as $element.track, through the same owned() fence (a nested host's are not ours).
+    function elements(name) {
+      if (typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+        throw new TypeError("KitJS: context.elements(name) expects an identifier");
+      }
+      if (current.disposed) return Object.freeze([]);
+      return Object.freeze(ownedElements(current, "[data-kit-element]").filter(function (candidate) {
+        return (candidate.getAttribute("data-kit-element") || "").trim() === name;
+      }));
+    }
+    function element(name) {
+      return elements(name)[0] || null;
+    }
     function cleanup(callback) {
       if (typeof callback !== "function") throw new TypeError("KitJS: context.cleanup(fn) expects a function");
       return ownCleanup(current, callback);
@@ -181,6 +196,8 @@
     Object.defineProperties(context, {
       host: { get: function () { return current.host; }, enumerable: true },
       owned: { value: Object.freeze(owned), enumerable: true },
+      element: { value: Object.freeze(element), enumerable: true },
+      elements: { value: Object.freeze(elements), enumerable: true },
       listen: { value: Object.freeze(listen), enumerable: true },
       cleanup: { value: Object.freeze(cleanup), enumerable: true },
       afterRender: { value: Object.freeze(afterRender), enumerable: true }
@@ -1505,26 +1522,26 @@
     while ((element = walker.nextNode())) output.push(element);
     return output;
   }
-  // refsFor builds `$refs` for an action running on `element` (ideaship-final §6: data-kit-ref
+  // namedElements builds `$element` for an action running on `element` (ideaship-final §6: data-kit-element
   // names a DOM element, data-kit-alias names an instance). The registry is the boundary's own —
   // the nearest component host or data-kit-scope, else the page — so a name is looked up among
   // the refs that boundary owns, never inside a nested boundary and never outside. The first
-  // element with a name wins; a missing name is nullish (`$refs.search?.focus()`). Built per
+  // element with a name wins; a missing name is nullish (`$element.search?.focus()`). Built per
   // action, since the elements it points at are whatever the DOM holds at that moment.
-  function refsFor(element) {
+  function namedElements(element) {
     var output = Object.create(null);
     var host = nearest(element);
     var candidates;
     if (host) {
       var current = core.scopes.get(host);
-      candidates = current ? ownedElements(current, "[data-kit-ref]") : [];
+      candidates = current ? ownedElements(current, "[data-kit-element]") : [];
     } else {
-      candidates = Array.prototype.filter.call(document.querySelectorAll("[data-kit-ref]"), function (candidate) {
+      candidates = Array.prototype.filter.call(document.querySelectorAll("[data-kit-element]"), function (candidate) {
         return !core.ignoredForRuntime(candidate) && nearest(candidate) === null;
       });
     }
     candidates.forEach(function (candidate) {
-      var name = (candidate.getAttribute("data-kit-ref") || "").trim();
+      var name = (candidate.getAttribute("data-kit-element") || "").trim();
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || core.blocked(name) || core.FORBIDDEN[name]) return;
       if (!OWN.call(output, name)) output[name] = candidate;
     });
@@ -1739,7 +1756,7 @@
   core.scopeRecordFor = scopeRecordFor;
   core.ownsElement = ownsElement;
   core.ownedElements = ownedElements;
-  core.refsFor = refsFor;
+  core.namedElements = namedElements;
   core.initialize = initialize;
   core.flushAfterRender = flushAfterRender;
   core.liveComponents = liveComponents;

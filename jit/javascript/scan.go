@@ -902,10 +902,10 @@ func validateReservedAttribute(tagName string, attribute rawScannedAttribute) er
 	// the name. One target per attribute; the old "a: x; b: y" list is not authored any more.
 	case "bind":
 		return validateBindingTarget(attribute, parts[1:])
-	// data-kit-ref names a DOM element for `$refs.<name>` (ideaship-final §6); the name is a plain
+	// data-kit-element names a DOM element for `$element.<name>` (ideaship-final §6); the name is a plain
 	// identifier so the expression can spell it as a member.
-	case "ref":
-		return validateRefName(attribute, parts[1:])
+	case "element":
+		return validateElementName(attribute, parts[1:])
 	// data-kit-seed="key" reads the element's text (or JSON) into state once; data-kit-seed:<name>
 	// reads the property/attribute <name>. The value is a state target — key, dotted path, or
 	// list[] — not an expression.
@@ -937,20 +937,20 @@ func unsafeBindingTarget(target string) bool {
 	return strings.HasPrefix(target, "on") || strings.HasPrefix(target, "data-kit")
 }
 
-// refName is what data-kit-ref may hold: an identifier, so `$refs.search` reads it. A `$` prefix,
+// elementName is what data-kit-element may hold: an identifier, so `$element.search` reads it. A `$` prefix,
 // a hyphen or a blocked/prototype word would not survive the expression's member rule.
-var refName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var elementName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-func validateRefName(attribute rawScannedAttribute, rest []string) error {
+func validateElementName(attribute rawScannedAttribute, rest []string) error {
 	if len(rest) != 0 {
 		return fmt.Errorf("%w at byte %d: %q does not accept modifiers", ErrUnsupportedAttribute, attribute.offset, attribute.name)
 	}
 	if !attribute.hasValue || strings.TrimSpace(attribute.value) == "" {
-		return fmt.Errorf("%w at byte %d: data-kit-ref requires a name", ErrUnsupportedAttribute, attribute.offset)
+		return fmt.Errorf("%w at byte %d: data-kit-element requires a name", ErrUnsupportedAttribute, attribute.offset)
 	}
 	name := strings.TrimSpace(attribute.value)
-	if !refName.MatchString(name) || expressionBlockedNames[name] || expressionForbiddenNames[name] {
-		return fmt.Errorf("%w at byte %d: data-kit-ref %q is not a usable name; use an identifier ($refs.%s must read it)", ErrUnsupportedAttribute, attribute.offset, name, name)
+	if !elementName.MatchString(name) || expressionBlockedNames[name] || expressionForbiddenNames[name] {
+		return fmt.Errorf("%w at byte %d: data-kit-element %q is not a usable name; use an identifier ($element.%s must read it)", ErrUnsupportedAttribute, attribute.offset, name, name)
 	}
 	return nil
 }
@@ -2252,7 +2252,7 @@ func validAlias(alias string) bool {
 
 func reservedAlias(alias string) bool {
 	switch alias {
-	case "$this", "$el", "$element", "$host", "$event", "$refs", "$component", "$parent", "$error", "$alias", "$invalidate":
+	case "$this", "$el", "$element", "$host", "$event", "$component", "$parent", "$error", "$alias", "$invalidate":
 		return true
 	default:
 		return false

@@ -67,7 +67,7 @@ func TestComponentSuiteSourcesAreClosedStatePackages(t *testing.T) {
 			for _, forbidden := range [][]byte{
 				[]byte("kit.service("), []byte("document."), []byte("addEventListener("),
 				[]byte("removeEventListener("), []byte("WeakMap"), []byte("$host"),
-				[]byte("$refs"), []byte("__kitwork_core__"), []byte("init:"),
+				[]byte("$element"), []byte("__kitwork_core__"), []byte("init:"),
 			} {
 				if bytes.Contains(source, forbidden) {
 					t.Fatalf("state package contains forbidden runtime ownership %q", forbidden)

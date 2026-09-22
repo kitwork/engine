@@ -124,7 +124,7 @@
   // `$event` is a still picture of the native event — the fields an action reads, frozen at
   // dispatch so a debounced handler sees what happened, not what the browser has since reused the
   // object for. The elements it points at (target, submitter, relatedTarget) are the real ones,
-  // read through the same closed element table as `$refs` (ideaship-final §3 names `$event` native;
+  // read through the same closed element table as `$element` (ideaship-final §3 names `$event` native;
   // this is the native event as the closed grammar can see it).
   function elementOrNull(value) {
     return value && value.nodeType === 1 ? value : null;

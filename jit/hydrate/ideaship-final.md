@@ -45,7 +45,7 @@
 | `data-kit-component` | Khai báo component | `="modal"` | Hành vi có tên, tái dùng |
 | `data-kit-scope` | Khởi tạo state cục bộ | `="{ qty: 1 }"` | Object literal (§6) |
 | `data-kit-alias` | Tên truy cập **component instance** | `="$paymentModal"` | Là **scope object** (§5) |
-| `data-kit-ref` | Tên truy cập **DOM element** | `="search"` | Là **element**, vào `$refs` (§5) |
+| `data-kit-element` (✎21/09, trước là `data-kit-ref`) | Tên truy cập **DOM element** | `="search"` | Là **element**, đọc qua `$element.search` (§3); code component: `context.element("search")` / `context.elements("slide")` |
 | `data-kit-show` | Ẩn/hiện | `="isOpen"` | `element.hidden = !value` (giữ Flex/Grid) |
 | `data-kit-text` | Binding text | `="qty * price"` | `textContent`. **Không** dùng `${}` |
 | `data-kit-bind:<prop>` | Binding property (canonical) | `:disabled="loading"` | Theo 3 nhóm (§4) |
@@ -70,7 +70,7 @@ Sự kiện là một họ riêng: `data-kit-<event>` (§3).
 | `$host` | Thẻ **boundary scope gần nhất** | Element | `$root` |
 | `$event` | Native DOM event | Event | — |
 | `$error` | Ngữ cảnh error boundary | Object | — |
-| `$refs` | Registry **DOM element** có tên | Registry | — |
+| `$element` (✎21/09, trước là `$refs`) | **DOM element** có tên trong vùng gần nhất: `$element.search` | Element (registry số ít như 6 biến còn lại) | — |
 | `$app` | Cầu nối capability (camera, qr, clipboard…) | Bridge | — |
 | `$` | **Root state** của trang/app | Object (state) | — |
 
@@ -132,14 +132,14 @@ Canonical: `data-kit-bind:<prop>`. Dạng ngắn `data-kit-disabled` normalize v
 Cả hai dạng cho cùng `["{}", pairs]`. Dùng `,` (đã có trong grammar), **không** dùng `;` (buộc phải
 viết bộ tách token thứ hai, hai lần, cho cả `kernel.js` và `compile.go`).
 
-### Alias vs Ref — theo phân vai anh đã chốt
+### Alias vs Element — theo phân vai anh đã chốt (✎21/09: `ref` → `element`, vì `ref` là chữ viết tắt và `element` gộp luôn tên bộ phận cho code component)
 
 | | Trỏ tới | Loại | Truy cập |
 | :--- | :--- | :--- | :--- |
 | `data-kit-alias="$modal"` | Component **instance** | scope object | `$modal.open = true` |
-| `data-kit-ref="search"` | **DOM element** | element | `$refs.search.focus()` |
+| `data-kit-element="search"` | **DOM element** | element | `$element.search.focus()` · `context.element("search")` |
 
-> **Sửa so với master/ideaship:** bỏ `$modal === $refs.search`. Hai loại khác nhau → **không bao giờ
+> **Sửa so với master/ideaship:** bỏ `$modal === $element.search`. Hai loại khác nhau → **không bao giờ
 > bằng nhau**. Nhờ vậy phần lớn "collision rules" tự biến mất.
 
 ---
@@ -171,7 +171,7 @@ Morph **tuyệt đối không gỡ** comment marker.
 
 HTML-first islands · một grammar/một AST · zero-eval + whitelist globals · `{{ }}` server / `data-kit-*`
 client / **không `${}`** · **dirty-check giữ nguyên** · 7 biến hệ thống (bảng §3) · alias=instance /
-ref=element (bảng §6) · scope object-literal ngoặc-tuỳ-chọn · modifier pipeline cố định (§4) · 3 nhóm
+element = phần tử có tên (bảng §6) · scope object-literal ngoặc-tuỳ-chọn · modifier pipeline cố định (§4) · 3 nhóm
 binding (§5) · `show`→`hidden` · Block Engine chung `if`+`for` + morph key (§7) · conformance
 `walk≡eval` trong CI, nhắm **ghi-xuyên-biên** · core ≤ 12KB gzip CI-check.
 
@@ -181,7 +181,7 @@ binding (§5) · `show`→`hidden` · Block Engine chung `if`+`for` + morph key 
 | :--- | :--- | :--- |
 | **Async** (gốc rễ) | `async function` không chạy trên `eval.go` → §19 và §25 của ideashipping mâu thuẫn | **A** JS thật, ghi rõ "không twin" · **B** method đồng bộ, async qua `$app`+scope-patch (mẫu `api`/`live` đã có) · **C** twin chỉ cho expression. *Nghiêng B* — và bộ test tuân thủ (§11) đã CHỨNG MINH nhánh B khả thi: method IR-lambda mutate state chạy giống hệt trên `eval.go` (Go) và `walk` (JS). Server twin phủ được method. Còn phải chốt: async đẩy ra effect có đọc tự nhiên không |
 | `$this` hay `$el` canonical | `$this` cần chú thích dài để khỏi bị hiểu là "thứ vừa bấm" | Giữ `$this` (kèm luật form dùng `$event.submitter`) HAY đổi `$el` |
-| Phạm vi `$refs` | Hai modal cùng `ref="search"` sẽ đụng nếu global | Theo **component instance** (đề xuất) hay theo app |
+| Phạm vi `$element` | Hai modal cùng `element="search"` sẽ đụng nếu global | ĐÃ THI HÀNH 21/09 theo đề xuất: boundary gần nhất, host lồng không thấy nhau, trùng tên → cái đầu, thiếu → nullish. Còn chờ anh xác nhận hay đổi |
 | `$error` lan truyền | Lỗi component con có nổi lên cha? | Chưa định nghĩa = chưa phải boundary |
 
 ---

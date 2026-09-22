@@ -7,13 +7,13 @@ import (
 	"testing"
 )
 
-// data-kit-ref names a DOM element; `$refs.<name>` reads it from an action (ideaship-final §6).
+// data-kit-element names a DOM element; `$element.<name>` reads it from an action (ideaship-final §6).
 // The registry is the acting boundary's own — the nearest component host or data-kit-scope, else
 // the page — so a nested boundary's ref is not visible from outside, an outer ref is not visible
 // from inside, and a missing name is nullish.
-func TestBrowserRefsAreScopedToTheActingBoundary(t *testing.T) {
+func TestBrowserNamedElementsAreScopedToTheActingBoundary(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping $refs browser contract in short mode")
+		t.Skip("skipping $element browser contract in short mode")
 	}
 	browser := findVanillaBrowser()
 	if browser == "" {
@@ -32,32 +32,32 @@ func TestBrowserRefsAreScopedToTheActingBoundary(t *testing.T) {
 		case "/kit.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write(bundle.JavaScript)
-		case "/refs.html":
+		case "/element.html":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(refsDocument))
+			_, _ = response.Write([]byte(elementDocument))
 		default:
 			http.NotFound(response, request)
 		}
 	}))
 	defer server.Close()
-	runVanillaBrowser(t, browser, server.URL+"/refs.html")
+	runVanillaBrowser(t, browser, server.URL+"/element.html")
 }
 
-var refsDocument = fmt.Sprintf(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>KitJS $refs</title></head><body>
-  <input id="page-field" data-kit-ref="field" value="page">
-  <button id="page-focus" type="button" data-kit-click="$refs.field.focus()">page focus</button>
+var elementDocument = fmt.Sprintf(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>KitJS $element</title></head><body>
+  <input id="page-field" data-kit-element="field" value="page">
+  <button id="page-focus" type="button" data-kit-click="$element.field.focus()">page focus</button>
   <section id="outer" data-kit-scope="found: '', missing: 'unset'">
-    <input id="outer-field" data-kit-ref="field" value="outer">
-    <button id="outer-focus" type="button" data-kit-click="$refs.field.focus()">outer focus</button>
-    <button id="outer-read" type="button" data-kit-click="found = $refs.field.value; missing = $refs.nothing == null ? 'null' : 'element'">read</button>
-    <button id="outer-inner" type="button" data-kit-click="missing = $refs.inner == null ? 'null' : 'element'">inner from outer</button>
+    <input id="outer-field" data-kit-element="field" value="outer">
+    <button id="outer-focus" type="button" data-kit-click="$element.field.focus()">outer focus</button>
+    <button id="outer-read" type="button" data-kit-click="found = $element.field.value; missing = $element.nothing == null ? 'null' : 'element'">read</button>
+    <button id="outer-inner" type="button" data-kit-click="missing = $element.inner == null ? 'null' : 'element'">inner from outer</button>
     <output id="found" data-kit-text="found"></output>
     <output id="missing" data-kit-text="missing"></output>
     <div id="nested" data-kit-scope="seen: 'unset'">
-      <input id="inner-field" data-kit-ref="inner" value="inner">
-      <button id="inner-outer" type="button" data-kit-click="seen = $refs.field == null ? 'null' : 'element'">outer from inner</button>
-      <button id="inner-focus" type="button" data-kit-click="$refs.inner.focus()">inner focus</button>
+      <input id="inner-field" data-kit-element="inner" value="inner">
+      <button id="inner-outer" type="button" data-kit-click="seen = $element.field == null ? 'null' : 'element'">outer from inner</button>
+      <button id="inner-focus" type="button" data-kit-click="$element.inner.focus()">inner focus</button>
       <output id="seen" data-kit-text="seen"></output>
     </div>
   </section>
@@ -76,16 +76,16 @@ __runStandaloneKitTest(async function () {
   await waitFor(function () { return byId("missing").textContent === "unset"; }, "scope did not render");
 
   byId("outer-focus").click();
-  await waitFor(function () { return document.activeElement === byId("outer-field"); }, "$refs.field inside the scope should be the scope's own field, not the page's" + errors());
+  await waitFor(function () { return document.activeElement === byId("outer-field"); }, "$element.field inside the scope should be the scope's own field, not the page's" + errors());
 
   byId("page-focus").click();
-  await waitFor(function () { return document.activeElement === byId("page-field"); }, "$refs.field on the page should be the page-level field");
+  await waitFor(function () { return document.activeElement === byId("page-field"); }, "$element.field on the page should be the page-level field");
 
   byId("inner-focus").click();
   await waitFor(function () { return document.activeElement === byId("inner-field"); }, "a nested boundary reaches its own ref");
 
   byId("outer-read").click();
-  await waitFor(function () { return byId("found").textContent === "outer"; }, "$refs.field.value should read the owned input");
+  await waitFor(function () { return byId("found").textContent === "outer"; }, "$element.field.value should read the owned input");
   assert(byId("missing").textContent === "null", "a missing name is nullish, got " + byId("missing").textContent);
 
   byId("outer-inner").click();

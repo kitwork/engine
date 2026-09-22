@@ -150,7 +150,7 @@ __runStandaloneKitTest(async function () {
       !document.getElementById("remove-before-render") && state.contexts.removed.host === null;
   }, "lifecycle contexts did not finish their first render");
   assert(state.contextFrozen, "context or one of its methods was mutable");
-  assert(state.contextKeys === "host,owned,listen,cleanup,afterRender", "context keys were " + state.contextKeys);
+  assert(state.contextKeys === "host,owned,element,elements,listen,cleanup,afterRender", "context keys were " + state.contextKeys);
   assert(state.scopeLeak === false, "lifecycle context entered reactive component scope");
   assert(state.initialOwned === "owned-button", "owned() crossed an ignore or nested boundary: " + state.initialOwned);
   assert(state.ownedFrozen, "owned() did not return a frozen snapshot");
