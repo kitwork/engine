@@ -1,22 +1,18 @@
 // Package js is Kitwork's JIT JavaScript runtime — "jitjs", a sibling of jit/css and jit/icons.
-// The author writes `data-kit-action="<verb>"` (canonical; `data-kitwork-action` is a deprecated
-// alias — see the prefix convention: data-kit-* = author-written, data-kitwork-* = engine-emitted).
-// Render scans the page and injects ONE
-// `<script data-kitwork-jit="js">` holding the core delegated dispatcher plus ONLY the verb modules
-// the page actually uses. No framework, no full-library payload — the jitcss model applied to JS.
-// Verbs are delegated (one listener on document), so the runtime is inherently safe under Kitwork
-// Drive: swapped-in markup just works, swapped-out markup leaks nothing.
+// A page that uses a kernel component (`data-kit-component="dialog"`, versioned or latest) or a
+// capability directive (`data-kit-api`, `data-kit-live`, `data-kit-remember`) gets ONE
+// `<script data-kitwork-jit="runtime">` pointing at /kit.js plus ONLY the modules it uses. No
+// framework, no full-library payload — the jitcss model applied to JS.
 //
-// Each verb is one file in ./lib (copy.js, toggle.js, dismiss.js, tab.js, theme.js, dialog.js, …).
-// Drop a `lib/<name>.js` that calls `window.kit.components.action("<name>", fn)` and it is
-// emitted only on pages that use `data-kit-action="<name>"`. Heavy widgets use the platform,
-// not JS: dropdown → popover, accordion → <details>, modal → <dialog> (the dialog verb only
-// opens/closes it).
+// Each component is a file in ./components/<name>/<version>.js registering a `kit.component`
+// blueprint; each capability a file in ./capabilities. The verb system that used to live beside
+// them (`data-kit-action="copy"` + `data-kit-target`, ./lib) is gone (22/09): behaviour is a
+// component or an expression, transport is Drive.
 //
 // THE CORE IS hydrate.Runtime(): ordered modules behind the canonical window.kit root
-// (window.kitwork remains a compatibility alias), one behavior registry and one delegated event
-// system shared with expressions/model/validate/live.
-// Render requests that core plus a typed, only-used action/component set from one cacheable URL.
+// (window.kitwork remains a compatibility alias) and one delegated event system shared with
+// expressions/model/validate/live. Render requests that core plus a typed, only-used
+// component/capability set from one cacheable URL.
 package js
 
 import (
@@ -31,7 +27,7 @@ import (
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
-//go:embed components lib capabilities
+//go:embed components capabilities
 var jsFS embed.FS
 
 // capabilityAttr maps a capability's authored directive to its module slug. A capability is a chunk
@@ -48,7 +44,7 @@ var capabilityAttr = map[string]*regexp.Regexp{
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.
 var moduleCache sync.Map
 
-// coreName stays reserved so no verb module can ever shadow the kernel slot.
+// coreName stays reserved so no module can ever shadow the kernel slot.
 const coreName = "core"
 
 // runtimeMarker tags the injected <script> within the shared data-kitwork-jit namespace (value
@@ -56,16 +52,13 @@ const coreName = "core"
 const runtimeMarker = `data-kitwork-jit="runtime"`
 
 var (
-	// verbRe validates a verb slug; anchored, so a name can never escape the embedded lib dir.
-	verbRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	// slugRe validates a module slug; anchored, so a name can never escape the embedded dirs.
+	slugRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	// componentNameRe validates a component slug name.
 	componentNameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	// componentVersionRe validates a component version suffix.
 	componentVersionRe = regexp.MustCompile(`^v[0-9]+(\.[0-9]+)*$`)
 
-	// actionAttrRe extracts the verb from every data-kit-action="…" (or deprecated
-	// data-kitwork-action) attribute.
-	actionAttrRe = regexp.MustCompile(`data-kit(?:work)?-action="([a-z][a-z0-9-]*)"`)
 	// componentAttrRe extracts the component name and optional version suffix. The alias is its own
 	// attribute (data-kit-alias, a runtime concern the kernel registers); the server only needs
 	// (name, version) to pick which module to emit.
@@ -125,23 +118,6 @@ func findLatestComponentVersion(name string) string {
 	return latest
 }
 
-// readAction returns the stateless behavior module from lib/<name>.js. Cached separately from
-// stateful component blueprints, because action:dialog and component:dialog are different APIs.
-func readAction(name string) string {
-	key := "action:" + name
-	if v, ok := moduleCache.Load(key); ok {
-		return v.(string)
-	}
-	s := ""
-	if verbRe.MatchString(name) {
-		if b, err := jsFS.ReadFile("lib/" + name + ".js"); err == nil {
-			s = strings.TrimSpace(string(b))
-		}
-	}
-	moduleCache.Store(key, s)
-	return s
-}
-
 // readCapability returns the capability module from capabilities/<name>.js, or "" if absent. Cached
 // under a distinct key so it never collides with an action/component of the same name.
 func readCapability(name string) string {
@@ -150,7 +126,7 @@ func readCapability(name string) string {
 		return v.(string)
 	}
 	s := ""
-	if verbRe.MatchString(name) {
+	if slugRe.MatchString(name) {
 		if b, err := jsFS.ReadFile("capabilities/" + name + ".js"); err == nil {
 			s = strings.TrimSpace(string(b))
 		}
@@ -193,35 +169,15 @@ func readComponent(nameWithVersion string) string {
 	return s
 }
 
-// HasAction reports whether an action has a module (and is not the reserved core).
-func HasAction(name string) bool { return name != coreName && readAction(name) != "" }
-
 // HasComponent reports whether a component has a module (and is not the reserved core).
 func HasComponent(name string) bool { return name != coreName && readComponent(name) != "" }
 
-// HasVerb reports whether a verb/component has a module (and is not the reserved core).
-func HasVerb(name string) bool {
-	return name != coreName && (readAction(name) != "" || readComponent(name) != "")
-}
-
-// scanVerbs collects the distinct actions and components used that resolve to a module.
-// It returns their cache keys (e.g. "action:more", "component:copy@v1.0.0").
-func scanVerbs(html string) []string {
+// scanComponents collects the distinct components used that resolve to a module.
+// It returns their cache keys (e.g. "component:dialog", "component:copy@v1.0.0").
+func scanComponents(html string) []string {
 	seen := make(map[string]bool)
 	var out []string
 
-	// Scan action verbs
-	for _, m := range actionAttrRe.FindAllStringSubmatch(html, -1) {
-		n := m[1]
-		key := "action:" + n
-		if seen[key] || !verbRe.MatchString(n) || !HasAction(n) {
-			continue
-		}
-		seen[key] = true
-		out = append(out, key)
-	}
-
-	// Scan components
 	for _, m := range componentAttrRe.FindAllStringSubmatch(html, -1) {
 		name := m[1]
 		version := m[2]
@@ -253,7 +209,7 @@ func scanVerbs(html string) []string {
 }
 
 // scanCapabilities collects the capability keys (e.g. "capability:remember") a page's directives ask
-// for. Order is deterministic: capabilityAttr is small and the result is sorted with the verbs.
+// for. Order is deterministic: capabilityAttr is small and the result is sorted with the components.
 func scanCapabilities(html string) []string {
 	var out []string
 	for name, re := range capabilityAttr {
@@ -265,9 +221,9 @@ func scanCapabilities(html string) []string {
 	return out
 }
 
-// scanModules is scanVerbs plus scanCapabilities — everything jit/js emits for a page.
+// scanModules is scanComponents plus scanCapabilities — everything jit/js emits for a page.
 func scanModules(html string) []string {
-	return append(scanVerbs(html), scanCapabilities(html)...)
+	return append(scanComponents(html), scanCapabilities(html)...)
 }
 
 func moduleKeys(names []string) []string {
@@ -278,26 +234,18 @@ func moduleKeys(names []string) []string {
 		if strings.Contains(n, ":") {
 			parts := strings.SplitN(n, ":", 2)
 			switch parts[0] {
-			case "action":
-				if verbRe.MatchString(parts[1]) && HasAction(parts[1]) {
-					key = n
-				}
 			case "component":
 				name := strings.SplitN(parts[1], "@", 2)[0]
 				if componentNameRe.MatchString(name) && HasComponent(parts[1]) {
 					key = n
 				}
 			case "capability":
-				if verbRe.MatchString(parts[1]) && HasCapability(parts[1]) {
+				if slugRe.MatchString(parts[1]) && HasCapability(parts[1]) {
 					key = n
 				}
 			}
-		} else {
-			if HasAction(n) {
-				key = "action:" + n
-			} else if HasComponent(n) {
-				key = "component:" + n
-			}
+		} else if HasComponent(n) {
+			key = "component:" + n
 		}
 
 		if key != "" && !seen[key] {
@@ -314,7 +262,7 @@ func moduleKeys(names []string) []string {
 	return keys
 }
 
-// ModuleKeys returns canonical action:<name>/component:<name> keys for the runtime route.
+// ModuleKeys returns canonical component:<name>/capability:<name> keys for the runtime route.
 // Unknown names are omitted, so arbitrary query strings cannot create arbitrary asset variants.
 func ModuleKeys(names []string) []string { return moduleKeys(names) }
 
@@ -333,9 +281,7 @@ func ModulesJS(names []string) string {
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
-		if typ == "action" {
-			b.WriteString(readAction(name))
-		} else if typ == "component" {
+		if typ == "component" {
 			b.WriteString(readComponent(name))
 		} else if typ == "capability" {
 			b.WriteString(readCapability(name))
@@ -354,7 +300,7 @@ func RuntimeJS(names []string) string {
 	return strings.TrimSpace(hydrate.Runtime()) + "\n" + modules
 }
 
-// SiteRuntimeJS is the whole-tenant form: the union of verbs used across many templates (for a
+// SiteRuntimeJS is the whole-tenant form: the union of modules used across many templates (for a
 // future /jitjs service route, mirroring jit/icons SiteCSS).
 func SiteRuntimeJS(htmls ...string) string {
 	seen := make(map[string]bool)
@@ -370,13 +316,11 @@ func SiteRuntimeJS(htmls ...string) string {
 	return RuntimeJS(all)
 }
 
-// Render injects the per-page runtime as ONE `<script data-kitwork-jit="js">` before </head>.
-// A cheap no-op when the page uses no verbs/components. A component is authored as data-kit-component
-// only (the kernel stopped reading the long prefix, ideaship-final §9); the verbs still accept both.
+// Render injects the per-page runtime as ONE `<script data-kitwork-jit="runtime">` before </head>.
+// A cheap no-op when the page uses no component or capability. A component is authored as
+// data-kit-component only (the kernel stopped reading the long prefix, ideaship-final §9).
 func Render(html string) string {
-	if !strings.Contains(html, "data-kit-action=") &&
-		!strings.Contains(html, "data-kitwork-action=") &&
-		!strings.Contains(html, "data-kit-component=") &&
+	if !strings.Contains(html, "data-kit-component=") &&
 		!hasCapabilityDirective(html) {
 		return html
 	}
@@ -393,7 +337,7 @@ func Render(html string) string {
 }
 
 // hasCapabilityDirective reports whether any capability's authored directive is present, so a page
-// that uses a capability but no action/component still gets the runtime injected.
+// that uses a capability but no component still gets the runtime injected.
 func hasCapabilityDirective(html string) bool {
 	for _, re := range capabilityAttr {
 		if re.MatchString(html) {

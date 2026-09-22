@@ -104,8 +104,7 @@
         a.closest("[data-kitwork-app='false'],[data-kit-app='false']") ||
         a.closest("[data-kitwork-hydrate='false'],[data-kit-hydrate='false']")
       )) return false;
-      if (a.getAttribute("data-kitwork-action") || a.getAttribute("data-kit-action")) return false; // verbs own their triggers
-      if (a.getAttribute("data-kit-click") || a.getAttribute("data-kitwork-click")) return false; // expression links (source or IR) don't navigate
+      if (a.getAttribute("data-kit-click")) return false; // an expression link does not navigate
       if (!sameOrigin(a.href)) return false;
       var u = new URL(a.href);
       if (u.pathname === location.pathname && u.search === location.search && u.hash) return false; // in-page #anchor
@@ -290,7 +289,6 @@
       if (!f || f.tagName !== "FORM" || (f.method || "get").toLowerCase() !== "get") return;
       if (f.getAttribute("data-kitwork-app") === "false" || f.getAttribute("data-kit-app") === "false" ||
         f.getAttribute("data-kitwork-hydrate") === "false" || f.getAttribute("data-kit-hydrate") === "false") return;
-      if (f.getAttribute("data-kitwork-action") || f.getAttribute("data-kit-action")) return;
       var u; try { u = new URL(f.action || location.href, location.href); } catch (x) { return; }
       if (!sameOrigin(u.href)) return;
       try { u.search = new URLSearchParams(new FormData(f)).toString(); } catch (x) { return; }

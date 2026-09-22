@@ -347,9 +347,9 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// as icons (jit/logo). router.logo() switches to the shared cached /jitlogo stylesheet.
 	out = logo.Render(out)
 
-	// 3e. Legacy action-only JIT JS: inject a per-page script with the dispatcher and only the
-	// data-kitwork-action verbs the page uses. Staged KitJS delivery bypasses this compatibility
-	// path. A page with no legacy actions remains a cheap no-op.
+	// 3e. JIT JS for kernel pages: inject the /kit.js reference with only the kernel components
+	// (data-kit-component) and capabilities (api/live/remember) the page uses. Staged KitJS delivery
+	// bypasses this path. A page with neither remains a cheap no-op.
 	if r.kitJSAssets == nil {
 		out = jitjs.Render(out)
 	}
@@ -370,7 +370,7 @@ func (r *Render) applyStaticPresentation(out string) string {
 	out = fonts.Render(out)
 
 	// 3i. JIT theme: swap <script data-kitwork-jit="theme"> for a synchronous pre-paint that applies
-	// the saved/OS theme before first paint (no flash). Pairs with the jitjs theme toggle verb.
+	// the saved/OS theme before first paint (no flash). Pairs with $app.theme.toggle().
 	switch r.themeMode {
 	case "off": // router.jittheme(false) — no pre-paint even when the scan would find usage
 	case "force":

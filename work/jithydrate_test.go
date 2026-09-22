@@ -50,8 +50,8 @@ func TestServeHydrateIf(t *testing.T) {
 	r = httptest.NewRequest("GET", hydrate.RuntimePath+"?components=dialog", nil)
 	w = httptest.NewRecorder()
 	serveHydrateIf(w, r)
-	if !strings.Contains(w.Body.String(), `components.action("dialog"`) {
-		t.Error("requested dialog action should be appended to the runtime")
+	if !strings.Contains(w.Body.String(), `component("dialog"`) {
+		t.Error("requested dialog component should be appended to the runtime")
 	}
 	if strings.Contains(w.Body.String(), `component("clipboard"`) {
 		t.Error("unused clipboard component should not ship")

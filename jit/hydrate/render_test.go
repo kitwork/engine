@@ -256,10 +256,17 @@ func TestRenderInjectsBeforeBodyWhenNoHead(t *testing.T) {
 
 // The runtime ships the tiny parser (data-kit-* source) and the walker — and never eval. It does
 // not decode a precompiled IR any more: no data-kitwork-<directive> read remains in the kernel.
+// The verb system (data-kit-action / data-kit-target, kit.fire, the compat surface) is gone too
+// (22/09): behaviour is a component or an expression, transport is Drive.
 func TestRuntimeEmbedded(t *testing.T) {
 	rt := Runtime()
 	if strings.Contains(rt, "-ir") {
 		t.Error("the -ir suffix form is retired")
+	}
+	for _, gone := range []string{"kit.fire", "kit.behavior", "kit.action ", "components.action(", "[data-kit-action]", "data-kit-trigger", "window.hydrate = "} {
+		if strings.Contains(rt, gone) {
+			t.Errorf("the runtime still carries the verb system: %q", gone)
+		}
 	}
 	for _, gone := range []string{
 		`"data-kitwork-" + name`, `[data-kitwork-scope]`, `[data-kitwork-component]`, `[data-kitwork-for]`,
@@ -270,9 +277,9 @@ func TestRuntimeEmbedded(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"window.hydrate", "PREC", "function lex", "MutationObserver",
-		// the unified kernel surfaces: boot guard, behavior registry, verb compat, delegated action
-		"kit.runtime", "kit.behavior", "kit.components", "data-kitwork-action",
+		"PREC", "function lex", "MutationObserver",
+		// the unified kernel surfaces: boot guard, component registry
+		"kit.runtime", "kit.component", "kit.components",
 		// the composed Drive module: navigation fetch header, morph primitive, head reconcile, history,
 		// the two-way lock against the legacy standalone file, and the swap lifecycle events
 		"X-Kitwork-Hydrate", "kit.morph", "mergeHead", "popstate", "kit.hydrate",
@@ -338,7 +345,6 @@ func TestRuntimeCompositionOrder(t *testing.T) {
 		"Browser-backed platform services",
 		"Optional remote component loader",
 		"DOM morph module",
-		"Compatibility surface",
 		"Optional Kitwork Drive module",
 		"Final composition step",
 	}

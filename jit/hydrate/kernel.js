@@ -1,4 +1,4 @@
-// Kitwork hydrate kernel. Composed into /kit.js with bridge, morph, capability, compat and Drive
+// Kitwork hydrate kernel. Composed into /kit.js with bridge, morph, capability modules and Drive
 // modules; jit/js prepends that same composed runtime before verb modules. Expressions, verbs,
 // model, validation and background capabilities all ride one window.kit root (window.kitwork is a
 // deprecated alias to the SAME object), one registry, one delegated event system and one DOM observer.
@@ -60,8 +60,8 @@
   var expressionServiceSurfaces = Object.create(null);
   var reservedServiceNames = Object.create(null);
   ("service bridge runtime internal module modules has onStart cleanup onCleanup " +
-    "compile run scope scopeFor render set fetchWithRetry destroy start component behavior " +
-    "action actions components blueprints target state fire morph hydrate " +
+    "compile run scope scopeFor render set fetchWithRetry destroy start component " +
+    "components blueprints state morph hydrate " +
     "platform isNative mode version").split(" ").forEach(function (name) {
       reservedServiceNames[name] = true;
     });
@@ -504,6 +504,17 @@
 
   var raw = {};
 
+  // A write to any scope OUTSIDE a pass — a component method finishing in a .then, a timer, a
+  // service callback — schedules one coalesced repaint, so `copied` set two seconds later paints
+  // without the component knowing the kernel exists. Inside a pass (render itself, an event
+  // handler, a model write) the pass paints synchronously and nothing is scheduled.
+  var painting = 0;
+  function wrote() { if (!painting) scheduleRender(); }
+  function pass(fn) {
+    painting++;
+    try { return fn(); } finally { painting--; }
+  }
+
   var scope = new Proxy(raw, {
     get: function (t, k) {
       if (k === "$") return t;
@@ -512,6 +523,7 @@
     },
     set: function (t, k, v) {
       t[k] = v;
+      wrote();
       return true;
     }
   });
@@ -529,7 +541,7 @@
   // The component registry: kit.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
   // component scope); state is deep-cloned per instance so two boundaries never share it.
-  // (Named `blueprints` to stay clear of kit.components, which is the verb back-compat surface.)
+  // (Named `blueprints` to stay clear of kit.components, which is the registry of live surface.)
   var blueprints = {};
   function cloneState(v) {
     if (v === null || typeof v !== "object") return v;
@@ -684,10 +696,12 @@
         for (var i = 0; i < objs.length; i++) {
           if (k in objs[i]) {
             objs[i][k] = v;
+            wrote();
             return true;
           }
         }
         objs[0][k] = v;
+        wrote();
         return true;
       }
     });
@@ -793,9 +807,8 @@
       }
     });
 
-    var helpers = { "action": true, "actions": true, "target": true, "state": true, "fire": true };
     for (var k in activeComponents) {
-      if (!helpers[k] && !(k in next)) {
+      if (!(k in next)) {
         delete activeComponents[k];
       }
     }
@@ -1086,7 +1099,8 @@
     }
   }
 
-  function render() {
+  function render() { pass(paint); }
+  function paint() {
     seedElements();
     seedModels();
     rebuildActiveComponents();
@@ -1147,10 +1161,11 @@
   // installs itself through kit.internal.pageScope + kit.internal.scheduleRender. Pages that do not
   // use it ship none of this code. See render.go / jit/js runtime.go for the emission.
 
-  // ---- behaviors (verbs): ONE registry; jit/js modules register into it ----
-  // Per-element runtime state lives behind a private Symbol. Resources registered on the state are
-  // explicitly released when morph or another DOM owner removes the node.
-  var behaviors = {};
+  // ---- per-element runtime state ----
+  // Lives behind a private Symbol. Resources registered on the state are explicitly released when
+  // morph or another DOM owner removes the node. (The verb registry that used to sit here —
+  // data-kit-action, data-kit-target, the fire() dispatcher — is gone: behaviour is a component or an
+  // expression, transport is Drive. 22/09.)
   var stateKey = Symbol("kitwork");
   function state(element) {
     return element[stateKey] || (element[stateKey] = {});
@@ -1166,10 +1181,6 @@
     if (store.componentAlias && aliases[store.componentAlias] === store.scope) {
       delete aliases[store.componentAlias];
       store.componentAlias = "";
-    }
-    if (store.visibilityObserver) {
-      store.visibilityObserver.disconnect();
-      store.visibilityObserver = null;
     }
     if (store.apiController) {
       store.apiController.abort();
@@ -1189,20 +1200,9 @@
     node.querySelectorAll("*").forEach(cleanupElement);
   }
   kit.onCleanup = onCleanup;
-  // data-kitwork-target = "#id"/selector → element; defaults to the actor itself.
-  function target(el) {
-    var sel = el.getAttribute("data-kitwork-target") || el.getAttribute("data-kit-target");
-    return sel ? document.querySelector(sel) : el;
-  }
-  var ACTION = "[data-kitwork-action],[data-kit-action]";
-  function fire(el, e) {
-    var fn = behaviors[el.getAttribute("data-kitwork-action") || el.getAttribute("data-kit-action")];
-    if (fn) fn(el, e);
-  }
-  kit.behavior = function (name, fn) { behaviors[name] = fn; return kitwork; };
-  // Register a reusable stateful component blueprint. Activate it with data-kitwork-component="name".
-  // Distinct from behavior() (a stateless verb): a component has state + methods + a scope boundary.
-  // Registering (re)renders on the next tick, so components registered after boot still paint.
+  // Register a reusable stateful component blueprint. Activate it with data-kit-component="name".
+  // A component has state + methods + a scope boundary. Registering (re)renders on the next tick,
+  // so components registered after boot still paint.
   var renderScheduled = false;
   function scheduleRender() {
     if (renderScheduled) return;
@@ -1216,14 +1216,9 @@
   // kit.remember lives in the remember capability module now (see the note above) — it defines
   // kit.remember when the page loads the module, so a page that never uses remember carries nothing.
 
-  kit.action = function (name, fn) { behaviors[name] = fn; return kitwork; };
-  kit.behavior = kit.action;
-  kit.target = target;
   kit.state = state;
-  kit.fire = fire;
   kit.components = activeComponents;
   kit.blueprints = blueprints;
-  kit.actions = behaviors;
 
   function observeEffect(result, current) {
     if (result && typeof result.then === "function") {
@@ -1354,7 +1349,7 @@
     if (!program) return h.stop;
     var execute = function () {
       if (h.once) { (st.once || (st.once = {}))[h.attr] = true; }
-      guarded(el, h.attr, function () { runEffect(program, el, e); });
+      pass(function () { guarded(el, h.attr, function () { runEffect(program, el, e); }); });
       render();
     };
     if (h.debounce) {
@@ -1400,10 +1395,6 @@
           pipeline(owner, h, e);
         }
       });
-      if (type === "click") {
-        var act = e.target.closest && e.target.closest(ACTION);
-        if (act) fire(act, e);
-      }
     });
   });
   // data-kit-drag: a native window drag region (a custom title bar). Primary-button press hands the
@@ -1432,36 +1423,18 @@
     // data-kit-debounce on a model input delays the scope write + render until typing settles — the
     // final value is read inside the timer, so a search box syncs once, not once per keystroke.
     debounced(el, function () {
-      scopeFor(el)[modelKey(el)] = modelValue(el);
+      pass(function () { scopeFor(el)[modelKey(el)] = modelValue(el); });
       render();
     });
   });
-  // Submit: the validate gate runs FIRST — an invalid form neither submits nor fires its verb;
-  // the server re-checks the SAME rule for truth either way. A valid form then fires its verb.
+  // Submit: the validate gate — an invalid form does not submit; the server re-checks the SAME rule
+  // for truth either way. A valid form goes on to Drive (or the browser).
   listen(document, "submit", function (e) {
     var f = e.target;
     if (f.matches && (f.matches('[data-state="invalid"]') || f.querySelector('[data-state="invalid"]'))) {
       e.preventDefault();
-      return;
     }
-    if (f.getAttribute && (f.getAttribute("data-kitwork-action") || f.getAttribute("data-kit-action"))) fire(f, e);
   }, true);
-
-  // Auto-trigger: [data-kitwork-trigger="visible"] fires its action when scrolled into view (lazy
-  // load / infinite scroll). Re-evaluated on every kitwork:load (after navigation or an append).
-  function bindVisible() {
-    if (!("IntersectionObserver" in window)) return;
-    document.querySelectorAll('[data-kitwork-trigger="visible"],[data-kit-trigger="visible"]').forEach(function (el) {
-      var store = state(el);
-      if (store.visibilityObserver) store.visibilityObserver.disconnect();
-      var observer = new IntersectionObserver(function (entries) {
-        if (entries[0].isIntersecting) fire(el, null);
-      }, { rootMargin: "300px" });
-      store.visibilityObserver = observer;
-      observer.observe(el);
-    });
-  }
-  listen(document, "kitwork:load", bindVisible);
 
   // ---- api / live: MOVED OUT OF THE CORE (capability modules) ----
   // Seeding a boundary from a JSON fetch (data-kit-api) and keeping it fresh over SSE (data-kit-live)
@@ -1518,7 +1491,7 @@
   kit.render = render;
   // kit.streams / .sync / .syncApi are defined by the live + api capability modules now (they own
   // the EventSource registry and the fetch pass); a page that uses neither carries none of it.
-  kit.set = function (k, v) { scope[k] = v; render(); };
+  kit.set = function (k, v) { pass(function () { scope[k] = v; }); render(); };
   kit.fetchWithRetry = function (url, options, retries, delay) {
     var rCount = retries !== undefined ? retries : 2;
     var rDelay = delay !== undefined ? delay : 1000;
@@ -1583,7 +1556,6 @@
     seedModels();
     render();
     reconcile();
-    bindVisible();
     startHooks.slice().forEach(function (start) {
       try { start(); } catch (error) {
         if (runtimeMeta.development && window.console) {
@@ -1604,7 +1576,6 @@
       listen: listen,
       cleanupTree: cleanupTree,
       state: state,
-      target: target,
       // The capability-module seam. A lazily-loaded capability (remember / api / live) installs
       // through here instead of living in the always-shipped core:
       //   pageScope      — the raw $ object, to define accessor properties on chosen keys (remember)
@@ -1633,7 +1604,6 @@
   });
   // (The cross-tab storage listener moved into the remember capability module — it is the only thing
   // that watched localStorage.)
-  // After every swap: seed any new inputs, re-render expressions, reconcile live streams
-  // (bindVisible re-binds through its own kitwork:load listener above).
+  // After every swap: seed any new inputs, re-render expressions, reconcile live streams.
   listen(document, "kitwork:load", function () { seedModels(); render(); reconcile(); });
 })();

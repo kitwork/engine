@@ -5,43 +5,48 @@ import (
 	"testing"
 )
 
-func TestHasVerb(t *testing.T) {
-	for _, n := range []string{"copy", "toggle", "dismiss", "tab", "theme", "dialog", "get", "more", "submit"} {
-		if !HasVerb(n) {
-			t.Errorf("expected verb module %q", n)
+// The verb system is gone (22/09): behaviour is a component or an expression, transport is Drive.
+// What ships is a kernel component, by name or by exact version, and nothing else.
+func TestHasComponent(t *testing.T) {
+	for _, n := range []string{"dialog", "tab", "toggle", "theme", "clipboard", "copy", "sidebar", "dropdown", "toast"} {
+		if !HasComponent(n) {
+			t.Errorf("expected component module %q", n)
 		}
 	}
-	if HasVerb("core") {
-		t.Error("core is reserved, must not be a verb")
+	if HasComponent("core") {
+		t.Error("core is reserved, must not be a component")
 	}
-	if HasVerb("definitely-not-a-verb") {
-		t.Error("unknown verb reported present")
+	if HasComponent("definitely-not-a-component") {
+		t.Error("unknown component reported present")
 	}
 }
 
 func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
-	js := RuntimeJS([]string{"copy", "copy", "nope"})
+	js := RuntimeJS([]string{"component:clipboard", "component:clipboard", "nope"})
 	if js == "" {
-		t.Fatal("expected runtime for a known verb")
+		t.Fatal("expected runtime for a known component")
 	}
 	if !strings.Contains(js, "window.kit = kit") || !strings.Contains(js, "window.kitwork = kit") {
 		t.Errorf("core dispatcher missing: %s", js)
 	}
-	if !strings.Contains(js, `components.action("copy"`) {
-		t.Errorf("copy module missing: %s", js)
+	if !strings.Contains(js, `component("clipboard"`) {
+		t.Errorf("clipboard module missing: %s", js)
 	}
 	if strings.Contains(js, `component("toggle"`) {
 		t.Errorf("toggle should NOT be included (unused): %s", js)
 	}
 	if RuntimeJS([]string{"nope"}) != "" {
-		t.Error("only-unknown verbs should yield no runtime")
+		t.Error("only-unknown names should yield no runtime")
+	}
+	if strings.Contains(js, `components.action(`) || strings.Contains(js, "kit.fire") {
+		t.Errorf("the verb registry must not ship any more: %s", js)
 	}
 }
 
 func TestRenderInjectsOnlyUsed(t *testing.T) {
 	html := `<html><head><title>x</title></head><body>` +
-		`<button data-kitwork-action="tab" data-kitwork-target="#one">One</button>` +
-		`<button data-kitwork-action="dialog" data-kitwork-target="#m">Open</button></body></html>`
+		`<div data-kit-component="tab"><button data-kit-click="select(0)">One</button></div>` +
+		`<dialog data-kit-component="dialog" data-kit-alias="$m"></dialog></body></html>`
 	out := Render(html)
 
 	// count the OPEN TAG precisely — the kernel source itself mentions the marker (mergeHead).
@@ -52,60 +57,44 @@ func TestRenderInjectsOnlyUsed(t *testing.T) {
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("runtime should be injected before </head>: %s", out)
 	}
-	if !strings.Contains(out, `components=action%3Adialog%2Caction%3Atab`) {
+	if !strings.Contains(out, `components=component%3Adialog%2Ccomponent%3Atab`) {
 		t.Errorf("both used components expected: %s", out)
 	}
 	if strings.Contains(out, `clipboard`) {
 		t.Errorf("clipboard is unused and must not ship: %s", out)
 	}
-	if !strings.Contains(out, `<button data-kitwork-action="tab"`) {
+	if !strings.Contains(out, `<div data-kit-component="tab">`) {
 		t.Errorf("author markup should be preserved: %s", out)
 	}
 }
 
-func TestRenderNoOpWithoutVerbs(t *testing.T) {
-	in := `<head></head><body><p>no actions here</p></body>`
+func TestRenderNoOpWithoutComponents(t *testing.T) {
+	in := `<head></head><body><p>nothing here</p></body>`
 	if out := Render(in); out != in {
 		t.Errorf("expected unchanged output, got: %s", out)
 	}
-	unknown := `<head></head><body><button data-kitwork-action="zzz"></button></body>`
+	unknown := `<head></head><body><div data-kit-component="zzz"></div></body>`
 	if out := Render(unknown); out != unknown {
-		t.Errorf("unknown verb should inject nothing, got: %s", out)
+		t.Errorf("unknown component should inject nothing, got: %s", out)
 	}
-}
-
-func TestRenderInjectsShortFormAction(t *testing.T) {
-	// data-kit-action is the CANONICAL authored form. A page using ONLY the short form must still
-	// get the runtime injected (regression: the guard once checked only data-kitwork-action=).
-	html := `<html><head></head><body><button data-kit-action="copy"></button></body></html>`
-	out := Render(html)
-	if out == html {
-		t.Fatal("short-form data-kit-action page got no runtime injected")
-	}
-	if !strings.Contains(out, `components=action%3Acopy`) {
-		t.Errorf("copy component not injected for data-kit-action, got: %s", out)
+	// The retired verb attribute is just an attribute now: it brings nothing.
+	verb := `<head></head><body><button data-kit-action="copy" data-kitwork-action="copy"></button></body>`
+	if out := Render(verb); out != verb {
+		t.Errorf("data-kit-action is not a directive any more and must not inject, got: %s", out)
 	}
 }
 
 func TestRenderInjectsComponents(t *testing.T) {
-	// 1. Only component should be injected if only component is declared
 	htmlComp := `<html><head></head><body><div data-kit-component="copy"></div></body></html>`
 	outComp := Render(htmlComp)
 	if !strings.Contains(outComp, `components=component%3Acopy`) {
 		t.Errorf("expected component copy module to be injected, got: %s", outComp)
 	}
-	if strings.Contains(outComp, `action("copy"`) {
-		t.Errorf("expected copy action verb to NOT be injected, got: %s", outComp)
-	}
 	if !strings.Contains(ModulesJS([]string{"component:copy"}), `component("copy@v2.0.0"`) {
 		t.Errorf("expected latest copy v2.0.0 to be resolved, got: %s", outComp)
 	}
-
-	// 2. Legacy data-kit-action maps to component
-	htmlAct := `<html><head></head><body><button data-kitwork-action="copy"></button></body></html>`
-	outAct := Render(htmlAct)
-	if !strings.Contains(outAct, `components=action%3Acopy`) {
-		t.Errorf("expected copy component to be injected for data-kitwork-action, got: %s", outAct)
+	if ModulesJS([]string{"action:copy"}) != "" {
+		t.Error("an action: key is not a module kind any more")
 	}
 }
 

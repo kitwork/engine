@@ -45,7 +45,6 @@ const prepaint = `<script data-kitwork-jit="theme">` + prepaintBody + `</script>
 var (
 	markerRe    = regexp.MustCompile(`(?is)(?:<script[^>]*\bdata-kit(?:work)?-jit\s*=\s*(?:"theme"|'theme')[^>]*>|<script[^>]*\bdata-kit(?:work)?-jit\s*=\s*theme(?:\s+[^>]*)?/?>).*?</script>`)
 	componentRe = regexp.MustCompile(`(?is)\bdata-kit(?:work)?-component\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))`)
-	actionRe    = regexp.MustCompile(`(?is)\bdata-kit(?:work)?-action\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))`)
 	apiRe       = regexp.MustCompile(`(?i)(?:\bkit|\$app)\s*\.\s*(?:appearance|theme)\b|\btoggleTheme\b`)
 	headOpenRe  = regexp.MustCompile(`(?is)<head(?:\s[^>]*)?>`)
 )
@@ -83,10 +82,9 @@ func Canonicalize(source string) string {
 // usesTheme reports whether the page references the appearance system. app@1 always closes
 // appearance@1 into its exact graph, so an app host needs the same pre-paint even when no toggle is
 // present in this particular document. The other forms keep the component adapter and historical
-// trusted-JavaScript spellings working.
+// trusted-JavaScript spellings working. (The jitjs verb `data-kit-action="theme"` is gone, 22/09.)
 func usesTheme(source string) bool {
-	return componentValueIs(componentRe, source, "app", "theme") ||
-		attributeValueIs(actionRe, source, "theme") || apiRe.MatchString(source)
+	return componentValueIs(componentRe, source, "app", "theme") || apiRe.MatchString(source)
 }
 
 // componentValueIs accepts the client-owned unversioned spelling and the
@@ -99,18 +97,6 @@ func componentValueIs(pattern *regexp.Regexp, source string, expected ...string)
 		if separator := strings.IndexByte(value, '@'); separator >= 0 {
 			value = value[:separator]
 		}
-		for _, candidate := range expected {
-			if strings.EqualFold(value, candidate) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func attributeValueIs(pattern *regexp.Regexp, source string, expected ...string) bool {
-	for _, match := range pattern.FindAllStringSubmatch(source, -1) {
-		value := matchedAttributeValue(match)
 		for _, candidate := range expected {
 			if strings.EqualFold(value, candidate) {
 				return true

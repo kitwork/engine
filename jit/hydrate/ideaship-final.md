@@ -8,6 +8,9 @@
 > ghi từng mục và test). Cái mới so với bản 01/08: `data-kit-seed` (§2.2/§5), `data-kit-element`/`$element`
 > thay `ref`/`$refs` (§3/§6), bảng attribute ngoài directive (§2.6), và §8 giờ là **10 câu hỏi B** có đề xuất.
 >
+> **Cùng ngày, chiều:** hệ `action` jitjs đã **trừ** (§9) — không có `effect`. Hành vi là component hoặc biểu
+> thức, vận chuyển là Drive; ghi state ngoài một lượt vẽ (timer, `.then`, callback) tự xếp một lượt vẽ (§8 B10).
+>
 > Viết sau khi đọc từng dòng `kernel.js`, `eval.go`, `compile.go`, `morph.js`, `drive.js`,
 > `bridge.js`, `modules/native.js`. Khi bảng này khác một tài liệu khác, **bảng này đúng**.
 
@@ -92,13 +95,12 @@
 | Nhóm | Attribute | Ghi chú |
 | :--- | :--- | :--- |
 | directive kernel | `data-kit-validate="expr"` → `data-state="valid\|invalid"` | chỉ kernel; gate submit |
-| capability (`jit/js/capabilities`) | `data-kit-api` `data-kit-live` `data-kit-remember` `data-kit-drag` / `data-kit-no-drag` `data-kit-trigger="visible"` | khai báo, không phải biểu thức |
+| capability (`jit/js/capabilities`) | `data-kit-api` `data-kit-live` `data-kit-remember` `data-kit-drag` / `data-kit-no-drag` | khai báo, không phải biểu thức |
 | Drive / morph | `data-kit-drive` `data-kit-retain` `data-kit-ignore` | chỉ dẫn vận chuyển |
-| jitjs (sẽ trừ, §9) | `data-kit-action` `data-kit-target` | verb; xoá sau khi có `effect` |
 | server-only | `data-kit-highlight` | JIT highlight tiêu thụ khi render |
 | neo gốc | `data-kit-app` / `data-kit-hydrate` (hoặc `data-kitwork-`) | opt-in hydrate; nơi duy nhất cho phép tiền tố dài do tác giả viết |
 
-`data-kitwork-*` là **của máy**: `-jit` (asset inject), `-hash/-plan/-runtime/-handoff` (staged delivery), `-ui` (overlay kernel: bar, announcer, toast), `-highlight`, và các verb jitjs. Trên một directive hay boundary nó **trơ** — kernel không đọc, không giải mã IR (21/09, §9).
+`data-kitwork-*` là **của máy**: `-jit` (asset inject), `-hash/-plan/-runtime/-handoff` (staged delivery), `-ui` (overlay kernel: bar, announcer, toast), `-highlight`. Trên một directive hay boundary nó **trơ** — kernel không đọc, không giải mã IR (21/09, §9). `data-kit-action`/`data-kit-target`/`data-kit-trigger` không còn là attribute (22/09): jit/js chỉ còn component (`data-kit-component`, `jit/js/components`) và capability.
 
 ---
 
@@ -220,7 +222,7 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | B7 | `data-kit-style` | giữ ở runtime component; kernel **thêm khi có ca** | ✅ ghi §2.3 |
 | B8 | dạng tên trần / init của `data-kit-scope` | **cắt** — một literal, một parser; attribute rỗng = vùng rỗng | ✅ kernel; 0 site dùng |
 | B9 | **một kernel hay hai runtime** | **chính sách**: mọi ngữ pháp mới chỉ vào kernel; runtime component chỉ *nhận* qua cùng ngữ pháp, không tự mọc; gộp thành mảnh lazy là việc dài hơi, làm theo chuỗi phép trừ §9 | ✅ chính sách; chưa có bước code |
-| B10 | async | **nhánh B**: method đồng bộ, async qua `$app` + scope-patch; suite tuân thủ đã chứng minh method IR-lambda có twin | ☐ còn định nghĩa cách đọc effect — mở khi làm `effect` |
+| B10 | async | **nhánh B**: biểu thức đồng bộ; async sống trong **component** (method JS thật) hoặc **Drive**; suite tuân thủ đã chứng minh method IR-lambda có twin | ✅ 22/09: kernel — method trả Promise → vẽ lại khi settle (đã có); **ghi scope ngoài một lượt vẽ** (timer, `.then` không trả, callback) → xếp một lượt vẽ gộp; trong lượt (handler, model, render) không xếp thêm. Không có `effect`. Test: `write_repaint_test.go`, `jit/js/migration_browser_test.go` |
 
 > Khi B9 cần đảo lại (giữ hai runtime độc lập), nói một câu là đủ — chưa có code nào phụ thuộc vào nó ngoài việc *không* thêm ngữ pháp riêng cho runtime component từ nay.
 
@@ -231,8 +233,8 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | **XOÁ** | IR client `data-kitwork-<directive>` + read-alias tiền tố dài cho directive/boundary | — | ✅ 21/09 (C1) |
 | **XOÁ** | `data-kit-away` `data-kit-escape` `data-kit-guard` (→ modifier) | — | ✅ 21/09 |
 | **XOÁ** | `data-kit-as`, đuôi `name=$alias`, `data-kitwork-alias`, `data-alias` (→ `data-kit-alias`) | — | ✅ 21/09 |
-| **XOÁ** | `data-kitwork-key` trong `morph.js` / `jit/js/lib/more.js` (không ai phát) | — | ☐ bước trừ tiếp |
-| **XOÁ** | Hệ `action` jitjs (`lib/`, `behaviors`, `fire`, `compat.js`, `data-kit(work)-action/target`) | **effect trước** (copy/more thành effect); 3 site đang dùng | ☐ |
+| **XOÁ** | `data-kitwork-key` trong `morph.js` (`jit/js/lib/more.js` đã xoá cùng hệ action) | — | ☐ bước trừ tiếp |
+| **XOÁ** | Hệ `action` jitjs (`lib/`, `behaviors`, `fire`, `compat.js`, `data-kit(work)-action/target`, `data-kit-trigger`) | không cần `effect`: 23 file site chuyển sang component/biểu thức/Drive; `more` 0 chỗ dùng | ✅ 22/09 |
 | **XOÁ** | Nhánh `typeof fn === "function"` (kernel call) | sau khi chốt async (B10) | ☐ |
 | **XOÁ** | 9.002 dòng `runtime*.js`, `legacy/core/*`, `main copy*.js` | — | ☐ (kiểm lại còn không) |
 | **GIỮ** | Inventory 18 năng lực (ideashipping §4) | regression test **trước** khi sửa | — |
@@ -280,8 +282,8 @@ không đổi ngữ nghĩa**: chạy suite này, còn xanh thì đúng. Và nó 
 
 ---
 
-> **Một câu:** runtime này cần **một directive** (`for`, cưỡi morph), **một bộ test** (tuân thủ),
-> **một cơ chế** (effect), và **một chuỗi phép trừ** để tách 4 vai khỏi kernel. Không bước nào phát
+> **Một câu (01/08, giữ làm sử):** runtime này cần **một directive** (`for`, cưỡi morph), **một bộ test** (tuân thủ),
+> ~~**một cơ chế** (effect)~~, và **một chuỗi phép trừ** để tách 4 vai khỏi kernel. Không bước nào phát
 > minh cơ chế mới — câu trả lời đã nằm trong code, việc còn lại là chốt 4 quyết định treo ở §8 rồi ráp.
 
-> **Một câu, 22/09:** `for` đã cưỡi morph, bộ test tuân thủ đã chạy, ngữ pháp đã về một bộ (§2). Còn lại đúng hai việc lớn: **effect** để trừ hệ jitjs, và **câu B9** — một kernel hay hai runtime — vì mọi ngữ pháp thêm sau này sẽ trả giá đôi cho tới khi nó được chốt.
+> **Một câu, 22/09:** `for` đã cưỡi morph, bộ test tuân thủ đã chạy, ngữ pháp đã về một bộ (§2), hệ jitjs đã trừ **không cần effect** (component-first: hành vi = component hoặc biểu thức, vận chuyển = Drive). Còn lại một việc lớn: **câu B9** — một kernel hay hai runtime — vì mọi ngữ pháp thêm sau này sẽ trả giá đôi cho tới khi nó được chốt.

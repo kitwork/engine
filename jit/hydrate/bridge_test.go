@@ -220,7 +220,7 @@ if (!kitwork.runtime || !kitwork.runtime.booted) throw new Error("runtime metada
 if (kitwork.runtime.engine !== "web") throw new Error("web runtime engine mismatch");
 if (kitwork.isNative) throw new Error("plain web runtime reported native");
 if (kitwork.run(7, {}) !== 7) throw new Error("literal IR parity mismatch");
-["kernel", "native", "storage", "web", "componentLoader", "morph", "compat", "drive"].forEach(function (name) {
+["kernel", "native", "storage", "web", "componentLoader", "morph", "drive"].forEach(function (name) {
   if (!kitwork.has(name)) throw new Error("module missing: " + name);
 });
 if (added !== window.__firstAdded) throw new Error("double inclusion added listeners");

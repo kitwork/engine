@@ -29,17 +29,14 @@ var webJS string
 //go:embed modules/component-loader.js
 var componentLoaderJS string
 
-//go:embed compat.js
-var compatJS string
-
 //go:embed drive.js
 var driveJS string
 
 //go:embed boot.js
 var bootJS string
 
-// Runtime returns the ordered client composition: bridge, kernel, modules, Morph, compatibility,
-// Drive, then boot. It is identical for every tenant and served at one cacheable RuntimePath.
+// Runtime returns the ordered client composition: bridge, kernel, modules, Morph, Drive, then
+// boot. It is identical for every tenant and served at one cacheable RuntimePath.
 // Because the engine serves BOTH this runtime and the Go compiler from one codebase, the two ends
 // version together — grammar sync is by construction, not by discipline.
 func Runtime() string {
@@ -51,7 +48,6 @@ func Runtime() string {
 		webJS,
 		componentLoaderJS,
 		morphJS,
-		compatJS,
 		driveJS,
 		bootJS,
 	}, "\n")

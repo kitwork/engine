@@ -8,10 +8,10 @@ import (
 // remember used to live in the always-shipped core kernel; it is now a CAPABILITY that rides this
 // only-used channel. These tests pin the serving contract that makes that safe:
 //
-//   - a page carrying data-kit-remember (even with NO action/component) gets the runtime injected,
+//   - a page carrying data-kit-remember (even with NO component) gets the runtime injected,
 //     and the injected asset asks for capability:remember;
 //   - ModulesJS(capability:remember) emits the module source (which installs kit.remember);
-//   - a page that uses no capability/verb is still a no-op (unchanged);
+//   - a page that uses no capability/component is still a no-op (unchanged);
 //   - an unknown capability key is dropped, so a crafted ?components= can't pull an arbitrary file.
 func TestRememberCapabilityEmitted(t *testing.T) {
 	if !HasCapability("remember") {
@@ -63,7 +63,7 @@ func TestApiLiveCapabilitiesEmitted(t *testing.T) {
 	}
 }
 
-// The injection gate for the api/live-only case: a page using just one of these directives (no action,
+// The injection gate for the api/live-only case: a page using just one of these directives (no component,
 // no component) still gets the runtime, requesting the right capability. This is what the kitwork.io/
 // org/vn hydrate demo pages rely on now.
 func TestRenderInjectsForApiAndLive(t *testing.T) {
@@ -90,7 +90,7 @@ func TestRenderInjectsForApiAndLive(t *testing.T) {
 	}
 }
 
-// The injection gate: data-kit-remember alone (no action, no component) must still inject the runtime,
+// The injection gate: data-kit-remember alone (no component, no component) must still inject the runtime,
 // pointing at capability:remember. This is the case buildinpublic.guide is — before the extraction it
 // relied on the core being injected by other directives; now the capability channel owns it.
 func TestRenderInjectsForCapabilityOnly(t *testing.T) {
@@ -114,9 +114,9 @@ func TestRenderInjectsForCapabilityOnly(t *testing.T) {
 		t.Error("data-kitwork-remember should also inject the runtime")
 	}
 
-	// A page with no verb and no capability stays untouched.
+	// A page with no component and no capability stays untouched.
 	plain := `<head></head><body><p>hello</p></body>`
 	if Render(plain) != plain {
-		t.Error("a page with no verb/capability must be left unchanged")
+		t.Error("a page with no component/capability must be left unchanged")
 	}
 }
