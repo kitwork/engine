@@ -10,7 +10,7 @@ import (
 // PreRender is the SERVER half of first paint: it runs the same expressions the client would
 // evaluate at boot and bakes the results into the HTML — so the page arrives already showing the
 // right values (no flash of "0"), reads correctly with JS disabled (progressive enhancement), and
-// is fully indexable. It uses the SAME compiler + Go walker (Eval) as ctx.validate, so what the
+// is fully indexable. It uses the SAME compiler + Go walker (Eval) ctx.validate uses, so what the
 // server paints and what the client re-renders are computed identically.
 //
 // The initial scope is derived from the page itself — the value= of each data-kit-model input —
@@ -22,7 +22,7 @@ import (
 //     PreRender never bakes a value it might get wrong.
 //   - Leaf text bindings only: an element whose content is plain text (the overwhelming norm for
 //     data-kit-text). An element wrapping other tags is left untouched.
-//   - text and show. Everything else (click/model/live/validate) is inert markup at rest anyway.
+//   - text and show. Everything else (click/model/live) is inert markup at rest anyway.
 //
 // PreRender runs after Render in the pipeline. Like Render it is gated by the data-kitwork-hydrate
 // root marker, so static pages and example-showing docs are never touched.

@@ -12,10 +12,14 @@ import (
 // so one process-wide map with no eviction is fine, and a request never pays the parse twice.
 var validateCache sync.Map // string → any (nil = known-bad rule)
 
-// Validate is ctx.validate(rule[, data]) / req.validate(rule[, data]) — the SERVER half of
-// data-kit-validate. The client walked the compiled IR of the SAME rule while the user typed;
-// here the server compiles that rule once (cached) and re-evaluates it (hydrate.Eval, budgeted)
-// against the submitted data for truth. One rule, two ends, one verdict.
+// Validate is ctx.validate(rule[, data]) / req.validate(rule[, data]): the server compiles a rule
+// once (cached) and evaluates it (hydrate.Eval, budgeted) against the submitted data. It is the
+// half that decides — a browser can be told anything, so the verdict is made here.
+//
+// It used to be the server end of a pair: data-kit-validate walked the compiled IR of the SAME
+// rule while the visitor typed. That client directive is gone (22/09, 0 sites used it; required /
+// pattern / type give the same live feedback natively, and the kernel's submit gate still blocks a
+// form holding data-state="invalid"). The rule language here is unchanged.
 //
 //	ctx.validate("password.length >= 6 && confirm == password")   // scope = form body (JSON body if the request is JSON)
 //	ctx.validate(rule, { password: p, confirm: c })               // explicit scope

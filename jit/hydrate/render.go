@@ -85,7 +85,7 @@ const (
 // Expressions use single-quoted string literals, so the value never contains a double quote.
 // An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4); its modifiers are
 // checked by checkEventModifiers, since the kernel disables a handler it cannot make sense of.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|validate|error|bind:[a-z][a-z0-9-]*|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="([^"]*)"`)
 
 // The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
 // → filter → prevent → stop → timing → once. The author may write them in any order; the server
@@ -149,7 +149,7 @@ func checkEventModifiers(directive string) error {
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|validate|error|bind:[a-z][a-z0-9-]*|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The

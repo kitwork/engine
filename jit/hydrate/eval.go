@@ -22,8 +22,8 @@ type Lambda struct {
 }
 
 // Eval walks a compiled IR node against scope — the Go twin of the composed client walker.
-// One IR, two ends: the client walks it for instant feedback (e.g. validate as you
-// type), the server walks the SAME data for truth (validate on submit, first-paint, go tests).
+// One IR, two ends: the client walks it to render and react, the server walks the SAME data for
+// truth (ctx.validate on submit, first-paint PreRender, go tests).
 // Scope values follow JSON conventions: float64 numbers, string, bool, nil, []any, map[string]any.
 func Eval(x any, scope map[string]any) (any, error) {
 	budget := evalBudget

@@ -5,7 +5,7 @@
 //
 // Boot-guarded: safe under double inclusion and under Kitwork Drive re-running head scripts.
 // PREFIX = ORIGIN (strict, for expression directives): authors write data-kit-* SOURCE — this
-// kernel carries a tiny parser for it (same grammar the Go side compiles for ctx.validate) plus the
+// kernel carries a tiny parser for it (the same grammar the Go side compiles) plus the
 // IR walker; data-kitwork-* on a directive is ENGINE-emitted precompiled IR (JSON). No eval, no
 // new Function, ever.
 //
@@ -1222,8 +1222,6 @@
       for (var j = 0; j < want.length; j++) el.classList.add(want[j]);
       el.__kitClass = want;
     });
-    // validate → state→CSS: the element carries data-state="valid|invalid"; styling is CSS's job.
-    document.querySelectorAll(selector("validate")).forEach(function (el) { var x = directive(el, "validate"); if (!x) return; guarded(el, "data-kit-validate", function () { el.setAttribute("data-state", run(x, scopeFor(el)) ? "valid" : "invalid"); }); });
     document.querySelectorAll(MODEL).forEach(function (el) { var k = modelKey(el), s = scopeFor(el); if (String(s[k]) !== el.value) el.value = s[k]; });
   }
 
@@ -1500,8 +1498,12 @@
       render();
     });
   });
-  // Submit: the validate gate — an invalid form does not submit; the server re-checks the SAME rule
-  // for truth either way. A valid form goes on to Drive (or the browser).
+  // Submit gate: a form holding data-state="invalid" does not submit. The kernel only READS that
+  // state — the page decides who writes it (the server rendering the attribute, a component, or the
+  // browser's own constraint validation reflected onto it). data-kit-validate, the directive that
+  // used to write it from an expression, is gone (22/09): 0 sites wrote one, and required/pattern/
+  // type do the same work natively. The server still re-checks for truth with ctx.validate, which
+  // is the half nothing else can replace.
   listen(document, "submit", function (e) {
     var f = e.target;
     if (f.matches && (f.matches('[data-state="invalid"]') || f.querySelector('[data-state="invalid"]'))) {

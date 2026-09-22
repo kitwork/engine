@@ -94,7 +94,7 @@
 
 | Nhóm | Attribute | Ghi chú |
 | :--- | :--- | :--- |
-| directive kernel | `data-kit-validate="expr"` → `data-state="valid\|invalid"` | chỉ kernel; gate submit |
+| ~~directive kernel~~ | ~~`data-kit-validate="expr"`~~ | **XOÁ 22/09** (Quốc chốt B): 0 site viết; `required`/`pattern`/`type` cho phản hồi sống sẵn có. **Cổng submit GIỮ** — kernel chỉ ĐỌC `data-state="invalid"` (server render, component, hay constraint validation ghi). **Nửa server GIỮ**: `ctx.validate(rule)` (`work/validate.go`) — trình duyệt nói gì cũng được, phán quyết ở server |
 | capability (`jit/js/capabilities`) | `data-kit-api` `data-kit-live` `data-kit-remember` `data-kit-drag` / `data-kit-no-drag` | khai báo, không phải biểu thức |
 | Drive / morph | `data-kit-drive` `data-kit-retain` `data-kit-ignore` | chỉ dẫn vận chuyển |
 | server-only | `data-kit-highlight` | JIT highlight tiêu thụ khi render |
@@ -264,7 +264,7 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | Câu hỏi | Sự thật trong code | Nguồn |
 | :--- | :--- | :--- |
 | Source-of-truth ở đâu? | `kernel.js` + `modules/*` theo danh sách embed trong `Runtime()` | `render.go` |
-| `render()` cập nhật thế nào? | Quét lại toàn document mỗi tick (dirty-check): `seedElements` → `seedModels` → for/if → text/show/bind/class/validate | `kernel.js` `render()` |
+| `render()` cập nhật thế nào? | Quét lại toàn document mỗi tick (dirty-check): `seedElements` → `seedModels` → for/if → text/show/bind/class | `kernel.js` `render()` |
 | Server và client lệch ở đâu? | Server scope **phẳng**, client scope **chuỗi lexical** → ghi-xuyên-biên (corpus có ca) | `eval.go` |
 | Server biết state gì lúc render? | `data-kit-model` `value=` + **`data-kit-seed`** ngoài boundary; không biết list | `prerender.go`, `prerender_seed.go` |
 | List client hôm nay? | **Có `for`** ở cả hai runtime, keyed, overlay 7 tên; server chưa materialize | `kernel.js` `renderFor`, `structure.js` |

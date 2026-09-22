@@ -14,7 +14,7 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 		`<b data-kit-text="n * qty">0</b>` +
 		`<button data-kit-click="n = n + 1">+</button>` +
 		`<span data-kit-show="n > 3">ok</span>` +
-		`<form data-kit-validate="password.length >= 6"></form>` +
+		`<form data-kit-bind:disabled="sending"></form>` +
 		`<input data-kit-model="name">` +
 		`</section></body>`
 	out := Render(in)
@@ -24,7 +24,7 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 		`data-kit-text="n * qty"`,
 		`data-kit-click="n = n + 1"`,
 		`data-kit-show="n > 3"`,
-		`data-kit-validate="password.length >= 6"`,
+		`data-kit-bind:disabled="sending"`,
 		`data-kit-model="name"`,
 	} {
 		if !strings.Contains(out, keep) {
@@ -50,6 +50,34 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 // are no longer names the server knows: their jobs are :outside, :escape:window, :prevent.
 // data-kit-seed brings the runtime and has its target checked at render: a key, a dotted path, or
 // list[] — the client's rule, said on the server.
+// data-kit-validate is gone (22/09, B answer): 0 sites wrote one, required/pattern/type give the
+// same live feedback natively, and the SERVER half stays (ctx.validate, work/validate.go) because a
+// browser can be told anything. The kernel's submit gate still blocks a form holding
+// data-state="invalid" — it only reads that state now, whoever wrote it.
+func TestValidateIsNoLongerAClientDirective(t *testing.T) {
+	const authored = `data-kit-validate="password.length >= 6"`
+	if directiveRe.MatchString(authored) {
+		t.Error("data-kit-validate must not be verified as an expression directive any more")
+	}
+	if presenceRe.MatchString(authored) {
+		t.Error("data-kit-validate must not bring the runtime on its own any more")
+	}
+	in := `<head></head><body>` + marker + `<form ` + authored + `></form></section></body>`
+	out := Render(in)
+	if !strings.Contains(out, authored) {
+		t.Error("an attribute the engine no longer knows still rides unchanged")
+	}
+	if strings.Count(out, injectTag) != 0 {
+		t.Error("a page whose only data-kit-* attribute is the retired validate needs no runtime")
+	}
+	if strings.Contains(Runtime(), `selector("validate")`) || strings.Contains(Runtime(), `"data-kit-validate"`) {
+		t.Error("the kernel must not carry the validate pass any more")
+	}
+	if !strings.Contains(Runtime(), `[data-state="invalid"]`) {
+		t.Error("the submit gate must stay: it reads data-state, whoever wrote it")
+	}
+}
+
 func TestRenderSeedIsInjectedAndItsTargetChecked(t *testing.T) {
 	for _, ok := range []string{"title", "user.email", "tags[]", "a.b.c"} {
 		if err := seedTargetError(ok); err != nil {
