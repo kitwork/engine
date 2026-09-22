@@ -1,7 +1,8 @@
-// Kitwork hydrate kernel. Composed into /kit.js with bridge, morph, capability modules and Drive
-// modules; jit/js prepends that same composed runtime before verb modules. Expressions, verbs,
-// model, validation and background capabilities all ride one window.kit root (window.kitwork is a
-// deprecated alias to the SAME object), one registry, one delegated event system and one DOM observer.
+// Kitwork hydrate kernel — the whole client runtime. Composed into /kit.js with bridge, the
+// platform modules, morph and Drive; jit/js appends the components and capabilities a page named.
+// Expressions, boundaries, components, structure, events and background capabilities all ride one
+// window.kit root (window.kitwork is a deprecated alias to the SAME object), one registry, one
+// delegated event system and one DOM observer.
 //
 // Boot-guarded: safe under double inclusion and under Kitwork Drive re-running head scripts.
 // PREFIX = ORIGIN (strict, for expression directives): authors write data-kit-* SOURCE — this
