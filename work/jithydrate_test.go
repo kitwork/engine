@@ -18,14 +18,17 @@ func TestServeHydrateIf(t *testing.T) {
 	// A non-matching path is a no-op: returns false, writes nothing.
 	r := httptest.NewRequest("GET", "/something-else", nil)
 	w := httptest.NewRecorder()
-	if serveHydrateIf(w, r) {
+	// No tenant: the route still serves the shared runtime — a site's own components are an
+	// addition, never a requirement (renderPlan and the component set are nil-safe).
+	var tenant *Tenant
+	if tenant.serveHydrateIf(w, r) {
 		t.Fatal("serveHydrateIf should not handle a non-runtime path")
 	}
 
 	// The runtime path serves the interpreter as JavaScript, with an ETag.
 	r = httptest.NewRequest("GET", hydrate.RuntimePath, nil)
 	w = httptest.NewRecorder()
-	if !serveHydrateIf(w, r) {
+	if !tenant.serveHydrateIf(w, r) {
 		t.Fatal("serveHydrateIf should handle the runtime path")
 	}
 	res := w.Result()
@@ -49,7 +52,7 @@ func TestServeHydrateIf(t *testing.T) {
 
 	r = httptest.NewRequest("GET", hydrate.RuntimePath+"?components=dialog", nil)
 	w = httptest.NewRecorder()
-	serveHydrateIf(w, r)
+	tenant.serveHydrateIf(w, r)
 	if !strings.Contains(w.Body.String(), `component("dialog"`) {
 		t.Error("requested dialog component should be appended to the runtime")
 	}
@@ -61,7 +64,7 @@ func TestServeHydrateIf(t *testing.T) {
 	r = httptest.NewRequest("GET", hydrate.RuntimePath, nil)
 	r.Header.Set("If-None-Match", etag)
 	w = httptest.NewRecorder()
-	serveHydrateIf(w, r)
+	tenant.serveHydrateIf(w, r)
 	if w.Result().StatusCode != http.StatusNotModified {
 		t.Errorf("want 304 Not Modified, got %d", w.Result().StatusCode)
 	}

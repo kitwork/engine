@@ -172,9 +172,10 @@ func readComponent(nameWithVersion string) string {
 // HasComponent reports whether a component has a module (and is not the reserved core).
 func HasComponent(name string) bool { return name != coreName && readComponent(name) != "" }
 
-// scanComponents collects the distinct components used that resolve to a module.
-// It returns their cache keys (e.g. "component:dialog", "component:copy@v1.0.0").
-func scanComponents(html string) []string {
+// scanComponents collects the distinct components used that resolve to a module — embedded, or
+// the site's own (site.go). It returns their cache keys (e.g. "component:dialog",
+// "component:copy@v1.0.0", "component:bid-stepper").
+func scanComponents(html string, site Site) []string {
 	seen := make(map[string]bool)
 	var out []string
 
@@ -197,7 +198,7 @@ func scanComponents(html string) []string {
 		}
 
 		key := "component:" + nameWithVersion
-		if seen[key] || !HasComponent(nameWithVersion) {
+		if seen[key] || !hasComponent(nameWithVersion, site) {
 			continue
 		}
 		seen[key] = true
@@ -222,11 +223,11 @@ func scanCapabilities(html string) []string {
 }
 
 // scanModules is scanComponents plus scanCapabilities — everything jit/js emits for a page.
-func scanModules(html string) []string {
-	return append(scanComponents(html), scanCapabilities(html)...)
+func scanModules(html string, site Site) []string {
+	return append(scanComponents(html, site), scanCapabilities(html)...)
 }
 
-func moduleKeys(names []string) []string {
+func moduleKeys(names []string, site Site) []string {
 	seen := make(map[string]bool)
 	var keys []string
 	for _, n := range names {
@@ -236,7 +237,7 @@ func moduleKeys(names []string) []string {
 			switch parts[0] {
 			case "component":
 				name := strings.SplitN(parts[1], "@", 2)[0]
-				if componentNameRe.MatchString(name) && HasComponent(parts[1]) {
+				if componentNameRe.MatchString(name) && hasComponent(parts[1], site) {
 					key = n
 				}
 			case "capability":
@@ -244,7 +245,7 @@ func moduleKeys(names []string) []string {
 					key = n
 				}
 			}
-		} else if HasComponent(n) {
+		} else if hasComponent(n, site) {
 			key = "component:" + n
 		}
 
@@ -264,12 +265,18 @@ func moduleKeys(names []string) []string {
 
 // ModuleKeys returns canonical component:<name>/capability:<name> keys for the runtime route.
 // Unknown names are omitted, so arbitrary query strings cannot create arbitrary asset variants.
-func ModuleKeys(names []string) []string { return moduleKeys(names) }
+func ModuleKeys(names []string) []string { return moduleKeys(names, nil) }
+
+// ModuleKeysFor is ModuleKeys for one tenant: its own _components count as known names.
+func ModuleKeysFor(names []string, site Site) []string { return moduleKeys(names, site) }
 
 // ModulesJS concatenates only the requested component modules. The shared kernel is served by
 // /kit.js; keeping this function separate lets the HTTP asset compose and cache each used set.
-func ModulesJS(names []string) string {
-	keys := moduleKeys(names)
+func ModulesJS(names []string) string { return ModulesJSFor(names, nil) }
+
+// ModulesJSFor is ModulesJS for one tenant, so a site's own component ships in the same response.
+func ModulesJSFor(names []string, site Site) string {
+	keys := moduleKeys(names, site)
 	if len(keys) == 0 {
 		return ""
 	}
@@ -282,7 +289,7 @@ func ModulesJS(names []string) string {
 			b.WriteByte('\n')
 		}
 		if typ == "component" {
-			b.WriteString(readComponent(name))
+			b.WriteString(componentSource(name, site))
 		} else if typ == "capability" {
 			b.WriteString(readCapability(name))
 		}
@@ -306,7 +313,7 @@ func SiteRuntimeJS(htmls ...string) string {
 	seen := make(map[string]bool)
 	var all []string
 	for _, h := range htmls {
-		for _, n := range scanModules(h) {
+		for _, n := range scanModules(h, nil) {
 			if !seen[n] {
 				seen[n] = true
 				all = append(all, n)
@@ -319,12 +326,16 @@ func SiteRuntimeJS(htmls ...string) string {
 // Render injects the per-page runtime as ONE `<script data-kitwork-jit="runtime">` before </head>.
 // A cheap no-op when the page uses no component or capability. A component is authored as
 // data-kit-component only (the kernel stopped reading the long prefix, ideaship-final §9).
-func Render(html string) string {
+func Render(html string) string { return RenderFor(html, nil) }
+
+// RenderFor is Render for one tenant: a page may also name a component the SITE owns
+// (_components/<name>.js, no version — see site.go), and it travels in the same one request.
+func RenderFor(html string, site Site) string {
 	if !strings.Contains(html, "data-kit-component=") &&
 		!hasCapabilityDirective(html) {
 		return html
 	}
-	keys := ModuleKeys(scanModules(html))
+	keys := ModuleKeysFor(scanModules(html, site), site)
 	if len(keys) == 0 {
 		return html
 	}

@@ -43,6 +43,7 @@ type Config struct {
 	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
 	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
 	KitJSAssets      *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
+	SiteComponents   jitjs.Site                // the tenant's own _components/<name>.js, frozen at generation
 	Source           Source                    // immutable template source; nil reads the live filesystem
 }
 
@@ -56,6 +57,7 @@ func New(c Config) *Render {
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
 		kitJSAssets:      c.KitJSAssets,
+		siteComponents:   c.SiteComponents,
 		source:           c.Source,
 	}
 }
@@ -80,6 +82,7 @@ type Render struct {
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
 	kitJSAssets          *kitjavascript.AssetStore
+	siteComponents       jitjs.Site
 	source               Source // immutable generation snapshot; nil = live filesystem
 	program              *node
 	prepareError         string
@@ -351,7 +354,7 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// (data-kit-component) and capabilities (api/live/remember) the page uses. Staged KitJS delivery
 	// bypasses this path. A page with neither remains a cheap no-op.
 	if r.kitJSAssets == nil {
-		out = jitjs.Render(out)
+		out = jitjs.RenderFor(out, r.siteComponents)
 	}
 
 	// 3h. hydrate (frontend bytecode VM): on a page that opts in via the data-kitwork-hydrate root

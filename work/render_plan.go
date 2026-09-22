@@ -7,6 +7,7 @@ import (
 	"time"
 
 	kitjavascript "github.com/kitwork/engine/jit/javascript"
+	jitjs "github.com/kitwork/engine/jit/js"
 	"github.com/kitwork/engine/render"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/value"
@@ -17,11 +18,32 @@ import (
 type RenderPlan struct {
 	mu sync.RWMutex
 
-	base        string
-	snapshot    *render.Snapshot
-	renderers   map[string]*plannedRenderer
-	kitJSAssets *kitjavascript.AssetStore
-	closed      bool
+	base           string
+	snapshot       *render.Snapshot
+	renderers      map[string]*plannedRenderer
+	kitJSAssets    *kitjavascript.AssetStore
+	siteComponents *siteComponents
+	closed         bool
+}
+
+// siteComponentsOrNil hands render a typed nil-free value: a tenant owning no component passes no
+// site at all, so its pages render exactly as they did before this existed.
+func (p *RenderPlan) siteComponentsOrNil() jitjs.Site {
+	if p == nil || p.siteComponents == nil {
+		return nil
+	}
+	return p.siteComponents
+}
+
+// SiteComponents is the tenant's frozen component set (nil when it owns none) — the /kit.js route
+// resolves a component:<name> the embedded catalogue does not have against it.
+func (p *RenderPlan) SiteComponents() *siteComponents {
+	if p == nil {
+		return nil
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.siteComponents
 }
 
 type plannedRenderer struct {
@@ -51,10 +73,21 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 		snapshot.Close()
 		return nil, fmt.Errorf("router.jitComponent requires router.jitjs(true) for the pending generation")
 	}
+	// The site's own browser components (_components/<name>.js, this domain then the identity it
+	// belongs to) are read once here and frozen for the generation; watching the folders makes an
+	// edit reload the site like a template edit does.
+	siteComponents := loadSiteComponents(base)
+	for _, directory := range componentDirectories(base) {
+		if err := t.generation.Sources().WatchDirectory(directory); err != nil {
+			snapshot.Close()
+			return nil, err
+		}
+	}
 	plan := &RenderPlan{
-		base:      base,
-		snapshot:  snapshot,
-		renderers: make(map[string]*plannedRenderer),
+		base:           base,
+		snapshot:       snapshot,
+		siteComponents: siteComponents,
+		renderers:      make(map[string]*plannedRenderer),
 	}
 	complete := false
 	defer func() {
@@ -93,6 +126,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			ManifestPath:     presentation.ManifestPath,
 			HighlightPalette: presentation.HighlightPalette,
 			KitJSAssets:      plan.kitJSAssets,
+			SiteComponents:   plan.siteComponentsOrNil(),
 			Source:           snapshot,
 		}
 	}
