@@ -44,7 +44,7 @@ global.fetch = function () {
 };
 window.fetch = global.fetch;
 
-var bell = el("div", { "data-kit-scope": "bell", "data-kit-live": "/notifs" });
+var bell = el("div", { "data-kit-scope": "", "data-kit-live": "/notifs" });
 bell.appendChild(el("b", { "data-kit-text": "count" }));
 document.body.appendChild(bell);
 

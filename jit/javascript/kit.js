@@ -4173,13 +4173,13 @@
     try {
       if (core.localsFor) locals = core.localsFor(element, locals);
       // The system variables of ideaship-final §3 ride every action: `$this` is the element that
-      // owns the attribute (`$el` its compatibility alias), `$host` the boundary element — the
-      // nearest component host or data-kit-scope, else <html> — and `$element` the elements that
-      // boundary named with data-kit-element. `$event` arrives from the dispatcher in `locals`.
+      // owns the attribute, `$host` the boundary element — the nearest component host or
+      // data-kit-scope, else <html> — and `$element` the elements that boundary named with
+      // data-kit-element. `$event` arrives from the dispatcher in `locals`. `$el` (the old spelling)
+      // is gone (B1, 22/09); the name stays reserved.
       var system = Object.create(null);
       if (locals) Object.keys(locals).forEach(function (key) { system[key] = locals[key]; });
       system.$this = element;
-      system.$el = element;
       system.$host = boundary || document.documentElement;
       system.$element = core.namedElements(element);
       program.read(current ? current.scope : EMPTY_SCOPE, system, function (value, owner) {

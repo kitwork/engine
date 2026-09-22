@@ -91,6 +91,16 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 			return nil, nil
 		}
 		return member(o, name), nil
+	case "idx":
+		o, err := eval(arr[1], scope, budget)
+		if err != nil {
+			return nil, err
+		}
+		key, err := eval(arr[2], scope, budget)
+		if err != nil {
+			return nil, err
+		}
+		return index(o, key), nil
 	case "()":
 		o, err := eval(arr[1], scope, budget)
 		if err != nil {
@@ -404,6 +414,40 @@ func looseEq(l, r any) bool {
 
 // member resolves property access. `.length` counts runes — matches JS for all typical text
 // (differs only on surrogate pairs like emoji, where JS counts UTF-16 units).
+// index mirrors the client's `o[key]`: a number indexes a list or a string (a rune, as JS reads
+// a UTF-16 unit — the same for the BMP text these pages carry); any other key reads a map member
+// by its string form, blocked names reading as nil like they do after a dot.
+func index(o any, key any) any {
+	if o == nil || key == nil {
+		return nil
+	}
+	if f, ok := key.(float64); ok {
+		i := int(f)
+		if float64(i) != f || i < 0 {
+			return nil
+		}
+		switch t := o.(type) {
+		case []any:
+			if i < len(t) {
+				return t[i]
+			}
+			return nil
+		case string:
+			runes := []rune(t)
+			if i < len(runes) {
+				return string(runes[i])
+			}
+			return nil
+		}
+		return member(o, strconv.Itoa(i))
+	}
+	name := toStr(key)
+	if blockedKey(name) {
+		return nil
+	}
+	return member(o, name)
+}
+
 func member(o any, name string) any {
 	switch t := o.(type) {
 	case string:

@@ -17,5 +17,11 @@
   { "name": "object-blueprint",      "src": "{ count: 5, open: false }",                                  "scope": {},                      "want": { "count": 5, "open": false } },
   { "name": "array-literal",         "src": "[1, 2, 3]",                                                  "scope": {},                      "want": [1, 2, 3] },
   { "name": "lambda-method-mutates-state", "src": "count = 0; add = () => count = count + 1; add(); add(); count", "scope": {},          "want": 2 },
-  { "name": "root-scope-read-write",   "src": "$.count = $.count + 1; $.count",                              "scope": { "count": 41 },         "want": 42 }
+  { "name": "root-scope-read-write",   "src": "$.count = $.count + 1; $.count",                              "scope": { "count": 41 },         "want": 42 },
+  {"name": "index-list", "src": "items[1]", "scope": {"items": [10, 20, 30]}, "want": 20},
+  {"name": "index-by-variable", "src": "items[i] + items[i - 1]", "scope": {"items": [10, 20, 30], "i": 2}, "want": 50},
+  {"name": "index-map-by-key", "src": "prices[sku]", "scope": {"prices": {"a": 5, "b": 7}, "sku": "b"}, "want": 7},
+  {"name": "index-then-member", "src": "rows[0].name + '/' + rows[1].name", "scope": {"rows": [{"name": "Ada"}, {"name": "Bob"}]}, "want": "Ada/Bob"},
+  {"name": "index-out-of-range-is-nullish", "src": "items[9] == null", "scope": {"items": [1]}, "want": true},
+  {"name": "index-blocked-key-is-nullish", "src": "obj[key] == null", "scope": {"obj": {"a": 1}, "key": "__proto__"}, "want": true}
 ]

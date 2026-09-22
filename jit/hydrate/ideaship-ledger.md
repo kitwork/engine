@@ -28,15 +28,9 @@
 
 | 13 ✚ | `data-kit-seed` — DOM → state một lần (chốt với Quốc 21/09, gương của bind) | `seed="key"` text/JSON island · `seed:<name>="key"` theo 3 nhóm ngược · đích key / `a.b.c` / `list[]` · DOM thắng scope literal · không đoán kiểu | ✅ `seedElements()` trước mọi pass render; ghi qua `scopeFor(el)` (đúng chủ sở hữu trong chuỗi); `list[]` dựng lại khi có thành viên mới; lỗi → `reportError` | ✅ `seedBoundary()` trong dom.js trước bindings của record; host component: field phải khai báo (lỗi như `data-kit-scope`); once qua `record.seeded`; scanner + directives nhận `seed`/`seed:<name>`, đích được kiểm | ✅ 21/09 — server: `prerender_seed.go` đọc cùng seed vào page scope (ngoài boundary; JSON island; leaf text), `render.go` báo đích sai — test: `seed_dom_test.go`, `seed_browser_test.go`, `prerender_seed_test.go`, `render_test.go`, `scan_test.go` (đều có disable-check) |
 
-## Còn treo (KHÔNG đóng băng — làm theo đề xuất, ghi rõ là đề xuất)
+## Còn treo — ĐÃ CHỐT 22/09 (Quốc: "vậy làm đi" = theo đề xuất; bảng 10 câu B ở `ideaship-final.md` §8)
 
-| Vấn đề | Đề xuất sẽ thi hành | Chờ Quốc |
-| :--- | :--- | :--- |
-| `$this` hay `$el` là chính | ĐÃ THI HÀNH (21/09): cả hai tên trỏ cùng element ở cả hai runtime; docs viết `$this`. Bỏ `$el` hẳn hay không → chờ | tên cuối |
-| `$event` native ở runtime component | Ngữ pháp đóng không đọc được object native (không own-property) → giữ ảnh chụp, thêm `target`/`submitter`/`relatedTarget` thật. Đề xuất sửa spec: "native-shaped" cho runtime component, native thật ở kernel | xác nhận |
-| Phạm vi `$element` (trước `$refs`) | ĐÃ THI HÀNH theo đề xuất (21/09): boundary gần nhất (host component / `data-kit-scope` / item, không thì trang); boundary lồng không thấy ref của nhau; trùng tên → phần tử đầu; tên thiếu → nullish (`$element.x?.focus()`). Runtime component chỉ mở element qua bảng đọc/động từ đóng (như string/array) — không ghi | xác nhận phạm vi + bảng động từ |
-| `$error` lan truyền | ĐÃ THI HÀNH theo đề xuất (21/09): không lan; boundary gần nhất bắt; không có boundary → `console.error`; handler tự ném → console, không tái nhập. `$error.recover()` (master) chưa có nghĩa → chưa làm | định nghĩa + recover() |
-| Async | Không đụng trong đợt này | quyết định A/B |
+B1 bỏ `$el`/`$root` ✅ · B2 `$event` native-shaped ở runtime component ✅ · B3 phạm vi `$element` = vùng gần nhất ✅ · B4 không `$error.recover()` ✅ · B5 `:self` vào Filter (kernel thêm) ✅ · B6 server materialize `for` hoãn · B7 `data-kit-style` kernel thêm khi có ca · B8 cắt dạng tên/init của `data-kit-scope` ✅ · B9 chính sách một kernel (ngữ pháp mới chỉ vào kernel) · B10 async nhánh B (mở khi làm `effect`).
 
 ## Ngoài spec — phát sinh từ catalogue, chờ bàn sau khi A xong
 
@@ -48,6 +42,7 @@
 
 ## Nhật ký
 
+- 22/09/2026 — B1–B10 chốt theo đề xuất; code: kernel bỏ `$el`/`$root` (runtime component bỏ `$el`), cắt dạng tên/init của `data-kit-scope` (báo lỗi "must be an object literal"), thêm `:self` (+ render.go ràng buộc); C2: kernel + `compile.go`/`eval.go` đọc `a[b]` (`"idx"` op; số → list/chuỗi, còn lại → tên member, tên chặn → nil) — corpus +6 ca, cả hai runner xanh, tắt parse `[` → client đỏ. Spec §2–§10 viết lại theo bộ đang chạy (3e99749f).
 - 21/09/2026 — ĐỔI TÊN `ref` → `element` (mục 4): `data-kit-element`, `$element` (số ít), `context.element()`/`context.elements()`; `$refs` không còn là tên dành riêng; spec §2/§3/§6 sửa theo (đánh dấu ✎). Lý do: `ref` là viết tắt; số ít như 6 biến còn lại; một cơ chế đặt tên cho cả biểu thức lẫn code component.
 - 21/09/2026 — SEED (mục 13, ngoài spec gốc, chốt với Quốc): cả hai runtime + scanner + server. Quyết định kèm: không `state`/`props` (alias + scope lexical đủ; liên kết cha–con thuộc câu một-kernel); `data-kit-ref` → `data-kit-element`/`$element` + `context.element(s)` (chốt, CHƯA code); `$component` dành sẵn = host component gần nhất (chưa cấp); `text/show/class/style` giữ tên riêng (bind:text bác); mảng trong attribute không seed — JSON island / `for` / scope literal.
 - 21/09/2026 — C1 (chuỗi phép trừ §9, bước 1): kernel bỏ read-alias `data-kitwork-*` cho directive biểu thức + boundary (text/show/if/for/click/class/scope/component/model/api/item/key/debounce) và bộ giải mã IR client — 0 site nào viết dạng đó (grep toàn apps); giữ jitjs (`action/target/trigger/drag`, 59+40 chỗ đang sống) và neo gốc `data-kitwork-app/hydrate`. `render.go` `presenceRe` không nhận dạng dài nữa; `jit/js` chỉ chọn module theo `data-kit-component`. Số đo kernel.js: thô 71 816 → 70 905 byte; bỏ-comment gzip 12 098 → 11 983; MINIFIED gzip (bản production) 9 365. Sửa mục 12: gate giờ đo bản minified thật, không phải bản bỏ comment. `morph.js`/`jit/js/lib/more.js` còn đọc `data-kitwork-key` (không ai phát) — bước trừ sau.

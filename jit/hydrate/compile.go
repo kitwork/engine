@@ -15,6 +15,7 @@
 //	["=$", "name", value]    assignment to the PAGE scope: $.name = value — the same $ the
 //	                         server template language uses for its root data
 //	[".", obj, "name"]       member access obj.name
+//	["idx", obj, key]        index access obj[key] — key is an expression (number or string)
 //	["()", obj, "name", []]  method call obj.name(args...)
 //	["{}", [[k, v], …]]      object literal { count: 5, open: false } — a BLUEPRINT, parsed not
 //	                         eval'd (objects allow a trailing comma, matching the server language)
@@ -325,6 +326,20 @@ func (p *parser) postfix() (any, error) {
 				return nil, err
 			}
 			e = []any{"call", e, args}
+			continue
+		}
+		// a[b]: the key is any expression — items[1], items[i], map[key] — the same read as a.name once
+		// the key is known (the kernel's postfix() mirrors this).
+		if p.peek().v == "[" {
+			p.next()
+			key, err := p.assign()
+			if err != nil {
+				return nil, err
+			}
+			if err := p.eat("]"); err != nil {
+				return nil, err
+			}
+			e = []any{"idx", e, key}
 			continue
 		}
 		break

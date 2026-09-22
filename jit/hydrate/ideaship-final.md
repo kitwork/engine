@@ -45,14 +45,14 @@
 ## 2. Bộ directive — đầy đủ, như đang chạy (22/09/2026)
 
 > Bảng này thay bảng "14 Directive" cũ. Cột **Trạng thái**: ✅ chạy ở cả kernel `/kit.js` lẫn runtime
-> component (+ scanner Go) · ◐ chỉ một bên · ⚠ có câu hỏi ở §8. Chi tiết thi hành từng mục:
+> component (+ scanner Go) · ◐ chỉ một bên (có lý do ghi tại chỗ). Chi tiết thi hành từng mục:
 > `ideaship-ledger.md`.
 
 ### 2.1 Vùng & danh tính
 
 | Attribute | Nghĩa | Ví dụ | Trạng thái |
 | :--- | :--- | :--- | :--- |
-| `data-kit-scope` | Mở một **vùng** với state khởi đầu; trên host component = state khởi đầu của component | `="qty: 1, price: 250"` · `="{ qty: 1 }"` | ✅ — object literal, ngoặc tuỳ chọn, dấu `,` (§6). Kernel còn nhận tên trần `="cart"` và init `="a = 1; b = 2"` ⚠ |
+| `data-kit-scope` | Mở một **vùng** với state khởi đầu; trên host component = state khởi đầu của component | `="qty: 1, price: 250"` · `="{ qty: 1 }"` | ✅ — object literal, ngoặc tuỳ chọn, dấu `,` (§6); attribute rỗng = vùng rỗng. Dạng tên trần `="cart"` và init `="a = 1; b = 2"` của kernel **đã bỏ** (B8, 22/09) |
 | `data-kit-component` | Hành vi có tên, tái dùng | `="modal@1.2.0"` | ✅ — runtime component bắt buộc version chính xác; kernel chỉ cần tên |
 | `data-kit-alias` | Tay cầm **thể hiện** component, toàn cục, một thể hiện một tên | `="$paymentModal"` | ✅ — runtime component: chỉ trong action; kernel: mọi biểu thức |
 | `data-kit-element` | Phần tử **được đặt tên** trong vùng của nó | `="search"` | ✅ — `$element.search` (§3); code `context.element("search")` / `context.elements("slide")` (§6). Trước 21/09 là `data-kit-ref` |
@@ -72,16 +72,16 @@
 | `data-kit-text` | `textContent` — server bake giữa hai thẻ | ✅ — **không** `${}`; `bind:text` bác vì `text` không phải property name |
 | `data-kit-show` | `element.hidden = !value` (giữ Flex/Grid) | ✅ |
 | `data-kit-class` | **Gộp** vào class tĩnh; string / object / array / ternary; tên viết đủ để jitcss thấy | ✅ |
-| `data-kit-style` | Style declarations `a: x; b: y` | ◐ runtime component; kernel chưa có ⚠ |
+| `data-kit-style` | Style declarations `a: x; b: y` | ◐ runtime component; kernel thêm khi có ca dùng (B7, 22/09) |
 
 ### 2.4 Cấu trúc & lỗi
 
 | Attribute | Nghĩa | Trạng thái |
 | :--- | :--- | :--- |
-| `data-kit-for` + `data-kit-key` | Danh sách, viết **trên chính hàng**; hàng là blueprint, rời tài liệu; overlay `count first last even odd` lexical theo hàng (§7) | ✅ client (`<template>` vẫn được); server materialize ⚠ |
+| `data-kit-for` + `data-kit-key` | Danh sách, viết **trên chính hàng**; hàng là blueprint, rời tài liệu; overlay `count first last even odd` lexical theo hàng (§7) | ✅ client (`<template>` vẫn được); server materialize **hoãn** tới khi có site cần (B6, 22/09) |
 | `data-kit-if` | Mount / unmount subtree | ✅ |
-| `data-kit-item` | Chỉ do máy ghi trên hàng đã materialize; kernel bọc list `<!--kit-for:start id=fN-->`…`<!--kit-for:end-->` | ✅ hình dây; server chưa phát ⚠ |
-| `data-kit-error` | Error boundary: lỗi action/binding bên trong → chạy biểu thức với `$error`; không lan quá boundary đầu; không boundary → console | ✅ theo đề xuất ⚠ |
+| `data-kit-item` | Chỉ do máy ghi trên hàng đã materialize; kernel bọc list `<!--kit-for:start id=fN-->`…`<!--kit-for:end-->` | ✅ hình dây; server chưa phát (B6: hoãn) |
+| `data-kit-error` | Error boundary: lỗi action/binding bên trong → chạy biểu thức với `$error`; không lan quá boundary đầu; không boundary → console | ✅ chốt 22/09: không lan quá boundary đầu; handler tự ném → console, không tái nhập; `$error.recover()` không có (B4) |
 
 ### 2.5 Sự kiện — một họ, một đường ống
 
@@ -108,13 +108,13 @@
 | :--- | :--- | :--- | :--- |
 | `$this` | Thẻ **sở hữu directive** đang chạy | Element | không phải `event.currentTarget`; form → dùng `$event.submitter` |
 | `$host` | Thẻ **vùng gần nhất** (host component / `data-kit-scope` / hàng `for`), không có → `<html>` | Element | không đổi thành `$component` — vùng không phải lúc nào cũng là component |
-| `$element.<name>` | Thẻ **được đặt tên** `data-kit-element="<name>"` trong vùng | Element | thiếu → nullish (`$element.x?.focus()`); trùng → cái đầu; host lồng không thấy nhau |
-| `$event` | Sự kiện của handler đang chạy | Event | kernel: native thật; runtime component: ảnh chụp + `target` `submitter` `relatedTarget` thật ⚠ |
+| `$element.<name>` | Thẻ **được đặt tên** `data-kit-element="<name>"` trong vùng | Element | phạm vi chốt 22/09 (B3): vùng gần nhất; thiếu → nullish (`$element.x?.focus()`); trùng → cái đầu; host lồng không thấy nhau |
+| `$event` | Sự kiện của handler đang chạy | Event | kernel: native thật; runtime component: **native-shaped** — ảnh chụp + `target` `submitter` `relatedTarget` thật, vì ngữ pháp đóng không đọc object native (B2, 22/09) |
 | `$error` | `{ cause, message, directive, element }` | Object | chỉ trong `data-kit-error` |
 | `$app` | Cầu capability (theme, clipboard, camera…) | Bridge | |
 | `$` | **Root state** của trang | Object | |
 
-**Alias tương thích**: `$el` = `$this`, `$root` = `$host` — ⚠ đề xuất bỏ (§8).
+**`$el` / `$root` đã bỏ** (B1, 22/09): không còn resolve ở cả hai runtime; tên vẫn bị chặn để không ai đặt alias trùng. 0 site dùng lúc bỏ.
 **Dành sẵn, chưa cấp**: `$component` = thẻ host component gần nhất (bỏ qua scope con) — thêm khi có ca dùng; tên đã được giữ ở cả hai runtime.
 
 Runtime component có **ngữ pháp đóng**: phần tử (từ `$this` `$host` `$element` `$event.target`) chỉ trả lời một bảng đọc (`value checked open id dataset scrollTop…`) và động từ (`focus blur click select scrollIntoView showModal close reportValidity play getAttribute…`), **không ghi**, không đi cây. Kernel đưa phần tử thô.
@@ -128,14 +128,14 @@ Tác giả viết thứ tự nào cũng được; runtime luôn chạy theo:
 | # | Nhóm | Modifier | Việc |
 | :-: | :--- | :--- | :--- |
 | 1 | Target | `:window` `:document` | Nghe ở đâu — không cần focus (Escape trên `<div>`) |
-| 2 | **Filter** | `:outside` `:escape` `:enter` (+ `:self` ở runtime component ⚠) | Điều kiện. FAIL → **dừng, event KHÔNG bị nuốt** |
+| 2 | **Filter** | `:outside` `:escape` `:enter` `:self` | Điều kiện (`:self` = event rơi đúng lên thẻ, không phải con). FAIL → **dừng, event KHÔNG bị nuốt** |
 | 3 | Prevent | `:prevent` | `preventDefault()` |
 | 4 | Stop | `:stop` | `stopPropagation()` — kết thúc việc leo lên tổ tiên |
 | 5 | Timing | `:debounce(n)` \| `:throttle(n)` | Hoãn tới lúc lặng / chạy mép đầu rồi nghỉ; một handler một trong hai |
 | 6 | Lifecycle | `:once` | Chạy 1 lần rồi tự gỡ |
 | 7 | Execute | | Chạy biểu thức |
 
-Ràng buộc: `:escape/:enter` chỉ `keydown/keyup`, không cùng lúc; `:outside` chỉ `click dblclick pointerdown pointerup focusin`; `:window`/`:document` một trong hai, không đi với `:self`/`:outside`; `n` = 1–60000 ms. Server (`render.go`) và scanner báo lỗi tại render; kernel vô hiệu handler sai thay vì bắn nhầm. ✅ 21/09.
+Ràng buộc: `:escape/:enter` chỉ `keydown/keyup`, không cùng lúc; `:outside` chỉ `click dblclick pointerdown pointerup focusin`; `:window`/`:document` một trong hai; `:self` không đi với `:outside`/`:window`/`:document`; `n` = 1–60000 ms. Server (`render.go`) và scanner báo lỗi tại render; kernel vô hiệu handler sai thay vì bắn nhầm. ✅ 21/09; `:self` vào cả hai runtime 22/09 (B5).
 
 ---
 
@@ -195,7 +195,7 @@ Lệnh xuyên vùng = `$alias` trong action. Dữ liệu: kernel có scope chu�
 2. **Không mutate item object** để nhét metadata. Child scope là overlay: `item, index, count, first, last, even, odd` — năm từ overlay **lexical theo hàng**, không lọt vào host component lồng trong hàng (host giữ `count` riêng); tên item/index tác giả đặt thì lọt (21/09).
 3. **Dùng chung key resolver với `morph`**. Không xây hai identity engine.
 
-**Trạng thái 22/09**: nửa **client** xong ở cả hai runtime (thẻ thường là blueprint; overlay đủ 7 tên; kernel phát đúng hình dây `kit-for:start/end` + `data-kit-item`). Nửa **server** ⚠: `PreRender` chưa có nguồn dữ liệu list (scope server chỉ từ `data-kit-model` + `data-kit-seed`); list SSR hôm nay là `{{ for }}` của template engine. Làm khi có site cần; client `for` = ca reactive, không SEO-trọng.
+**Trạng thái 22/09**: nửa **client** xong ở cả hai runtime (thẻ thường là blueprint; overlay đủ 7 tên; kernel phát đúng hình dây `kit-for:start/end` + `data-kit-item`). Nửa **server** hoãn (B6, 22/09): `PreRender` chưa có nguồn dữ liệu list (scope server chỉ từ `data-kit-model` + `data-kit-seed`); list SSR hôm nay là `{{ for }}` của template engine. Làm khi có site cần; client `for` = ca reactive, không SEO-trọng.
 
 `data-kit-if` = mount/unmount, **cùng** Block Engine với `for`. `data-kit-show` = giữ DOM, đổi visibility. Morph **tuyệt đối không gỡ** comment marker.
 
@@ -207,22 +207,22 @@ Lệnh xuyên vùng = `$alias` trong action. Dữ liệu: kernel có scope chu�
 
 HTML-first islands · một grammar/một AST · zero-eval + whitelist globals · `{{ }}` server / `data-kit-*` client / **không `${}`** · **dirty-check giữ nguyên** · 7 biến hệ thống số ít (§3) · alias = instance / element = phần tử có tên (§6) · scope object-literal ngoặc-tuỳ-chọn dấu `,` · modifier pipeline cố định (§4) · `bind:<name>` một dạng, 3 nhóm · **`seed` gương của bind** · `model` = seed + bind + input · `text show class style` giữ tên riêng · `show`→`hidden` · `for` trên thẻ thường + overlay 7 tên lexical · `data-kit-error` boundary gần nhất · Block Engine chung `if`+`for` + morph key · conformance `walk≡eval` trong CI · core ≤ 12 KiB gzip (đo bản minified production, CI) · `data-kitwork-*` trơ trên directive · không `state`/`props`.
 
-### ⚠️ CÒN TREO — câu hỏi cho Quốc, mỗi dòng một câu trả lời
+### ✅ 10 câu B — Quốc chốt 22/09 ("vậy làm đi" = theo cột đề xuất)
 
-| # | Câu hỏi | Đề xuất đang thi hành | Chờ |
+| # | Câu | Chốt | Thi hành |
 | :-: | :--- | :--- | :--- |
-| B1 | `$el`/`$root` — bỏ hẳn hay giữ alias của `$this`/`$host`? | bỏ (một tên một nghĩa; 0 site cần) | gật / lắc |
-| B2 | `$event` ở runtime component không "native" được (ngữ pháp đóng không đọc object native) | sửa chữ trong spec: "native ở kernel, native-shaped ở runtime component" (ảnh chụp + 3 element thật) | gật / lắc |
-| B3 | Phạm vi `$element` | boundary gần nhất, host lồng không thấy nhau, trùng → cái đầu, thiếu → nullish (đã chạy) | xác nhận |
-| B4 | `$error.recover()` (master) | bỏ khỏi spec tới khi có ca dùng | gật / lắc |
-| B5 | `:self` của runtime component (ngoài spec) | thêm vào nhóm Filter §4 | gật / lắc |
-| B6 | Server materialize `data-kit-for` (§7 nửa server) | hoãn tới khi có site cần | gật / lắc |
-| B7 | `data-kit-style` chỉ có ở runtime component | thêm vào kernel khi có ca; hay bỏ khỏi bảng chung | chọn |
-| B8 | Kernel nhận thêm dạng `data-kit-scope="cart"` (tên) và `"a = 1; b = 2"` (init) ngoài spec | giữ (không hại) hay cắt về một dạng object literal | chọn |
-| B9 | **Đích một kernel** — runtime component là mảnh lazy trên kernel, hay vẫn là runtime thứ hai? | mọi ngữ pháp mới chỉ vào kernel; runtime component chỉ *nhận* qua cùng ngữ pháp | **quyết định lớn nhất** |
-| B10 | **Async** (gốc rễ) | nhánh B: method đồng bộ, async qua `$app` + scope-patch; suite tuân thủ đã chứng minh method IR-lambda có twin | định nghĩa cách đọc effect |
+| B1 | `$el`/`$root` | **bỏ** | ✅ kernel + runtime component không resolve nữa; tên giữ trong danh sách chặn |
+| B2 | `$event` ở runtime component | **native-shaped**: ảnh chụp + `target` `submitter` `relatedTarget` thật; native thật ở kernel | ✅ chữ trong §3 |
+| B3 | phạm vi `$element` | **vùng gần nhất**, host lồng không thấy nhau, trùng → cái đầu, thiếu → nullish | ✅ đang chạy |
+| B4 | `$error.recover()` | **không có** tới khi có ca dùng | ✅ không còn trong spec |
+| B5 | `:self` | **vào nhóm Filter** §4 | ✅ kernel thêm `:self` (+ ràng buộc), runtime component đã có |
+| B6 | server materialize `for` | **hoãn** tới khi có site cần | ✅ ghi §7 |
+| B7 | `data-kit-style` | giữ ở runtime component; kernel **thêm khi có ca** | ✅ ghi §2.3 |
+| B8 | dạng tên trần / init của `data-kit-scope` | **cắt** — một literal, một parser; attribute rỗng = vùng rỗng | ✅ kernel; 0 site dùng |
+| B9 | **một kernel hay hai runtime** | **chính sách**: mọi ngữ pháp mới chỉ vào kernel; runtime component chỉ *nhận* qua cùng ngữ pháp, không tự mọc; gộp thành mảnh lazy là việc dài hơi, làm theo chuỗi phép trừ §9 | ✅ chính sách; chưa có bước code |
+| B10 | async | **nhánh B**: method đồng bộ, async qua `$app` + scope-patch; suite tuân thủ đã chứng minh method IR-lambda có twin | ☐ còn định nghĩa cách đọc effect — mở khi làm `effect` |
 
----
+> Khi B9 cần đảo lại (giữ hai runtime độc lập), nói một câu là đủ — chưa có code nào phụ thuộc vào nó ngoài việc *không* thêm ngữ pháp riêng cho runtime component từ nay.
 
 ## 9. Bảng Giữ / Xoá / Hoãn — chuỗi phép trừ
 

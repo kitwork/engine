@@ -120,9 +120,9 @@ func checkEventModifiers(directive string) error {
 		}
 		seen[name] = true
 		switch name {
-		case "window", "document", "outside", "escape", "enter", "prevent", "stop", "once", "debounce", "throttle":
+		case "window", "document", "outside", "self", "escape", "enter", "prevent", "stop", "once", "debounce", "throttle":
 		default:
-			return fmt.Errorf("unknown modifier :%s (the pipeline is :window :document → :outside :escape :enter → :prevent → :stop → :debounce(n) :throttle(n) → :once)", name)
+			return fmt.Errorf("unknown modifier :%s (the pipeline is :window :document → :outside :escape :enter :self → :prevent → :stop → :debounce(n) :throttle(n) → :once)", name)
 		}
 	}
 	if (seen["escape"] || seen["enter"]) && event != "keydown" && event != "keyup" {
@@ -133,6 +133,9 @@ func checkEventModifiers(directive string) error {
 	}
 	if seen["outside"] && !outsideEventTypes[event] {
 		return fmt.Errorf(":outside applies to click, dblclick, pointerdown, pointerup and focusin, not %s", event)
+	}
+	if seen["self"] && (seen["outside"] || seen["window"] || seen["document"]) {
+		return fmt.Errorf(":self keeps the handler to its own element; it cannot combine with :outside, :window or :document")
 	}
 	if seen["window"] && seen["document"] {
 		return fmt.Errorf(":window and :document name two targets; pick one")

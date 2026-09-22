@@ -147,7 +147,7 @@ func TestPreRenderStillRendersPageScopeSiblings(t *testing.T) {
 
 func TestPreRenderDoesNotSeedPageScopeFromLocalModel(t *testing.T) {
 	in := marker +
-		`<section data-kit-scope="local"><input data-kit-model="status" value="local"></section>` +
+		`<section data-kit-scope=""><input data-kit-model="status" value="local"></section>` +
 		`<b data-kit-text="status ? status : 'page-default'">fallback</b>`
 	out := PreRender(in)
 	if !strings.Contains(out, `>page-default</b>`) {

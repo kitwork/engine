@@ -83,6 +83,7 @@ func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 		`data-kit-input:debounce(250)="query = query.trim()"`,
 		`data-kit-submit:prevent:once="saved = true"`,
 		`data-kit-pointerdown:throttle(100):stop="drag = true"`,
+		`data-kit-click:self="pick = true"`,
 		`data-kit-error="failed = $error.message"`,
 	} {
 		m := directiveRe.FindStringSubmatch(authored)
@@ -109,6 +110,8 @@ func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 		"click:debounce(10):throttle(5)": "cannot both time",
 		"click:debounce(0)":              "1–60000",
 		"click:window:document":          "pick one",
+		"click:self:outside":             "cannot combine",
+		"click:self:window":              "cannot combine",
 	} {
 		err := checkEventModifiers(directive)
 		if err == nil || !strings.Contains(err.Error(), reason) {

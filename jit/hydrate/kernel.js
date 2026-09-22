@@ -243,6 +243,9 @@
           continue;
         }
         if (peek().v === "(") { next(); e = ["call", e, callArgs()]; continue; }
+        // a[b]: the key is any expression — items[1], items[i], map[key]. Same read as a.name once
+        // the key is known; a blocked name reads as undefined, as it does after a dot.
+        if (peek().v === "[") { next(); var key = assign(); eat("]"); e = ["idx", e, key]; continue; }
         break;
       }
       return e;
@@ -406,6 +409,13 @@
       return undefined;
     }
     if (op === "?") return run(x[1], s) ? run(x[2], s) : run(x[3], s);
+    if (op === "idx") {
+      var io = run(x[1], s), ik = run(x[2], s);
+      if (io == null || ik == null) return undefined;
+      var ikey = typeof ik === "number" ? ik : String(ik);
+      if (typeof ikey === "string" && blockedKey(ikey)) return undefined;
+      return io[ikey];
+    }
     if (op === ".") {
       var o = run(x[1], s);
       var publicService = x[2] === "window" && o === publicKitSurface &&
@@ -534,13 +544,12 @@
 
   // boundaryScope initializes a boundary's local state ONCE, from the attribute's shape:
   //   data-kit-component="counter"            → a REGISTERED blueprint (state + real JS methods)
-  //   data-kit-scope="counter"                → a NAME (label; local state)
-  //   data-kit-scope="count = 5; open = true" → an INIT program (runs once; writes stay local)
   //   data-kit-scope="{ count: 5, inc: () => count = count + 1 }" → an INLINE blueprint (IR methods)
   //   data-kit-scope="count: 5, open: true"   → the SAME literal, braces optional (ideaship-final §6)
-  // Inline blueprints/init are the same compiled grammar as everything else — parsed, never eval'd —
-  // and being markup they are visible to the server (verify + future PreRender).
-  var BARE_LITERAL = /^[A-Za-z_$][\w$]*\s*:/;
+  // One literal, one parser: the old NAME form ("counter") and INIT form ("count = 5; open = true")
+  // are gone (B8, 22/09) — an empty attribute is an empty boundary, anything else must parse as
+  // the literal or the boundary reports it. Inline blueprints are the same compiled grammar as
+  // everything else — parsed, never eval'd — and being markup they are visible to the server.
   function boundaryScope(b) {
     var st = state(b);
     var craw = b.getAttribute("data-kit-component");
@@ -570,20 +579,12 @@
     if (!v) return st.scope;
     try {
       var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
-      if (v.charAt(0) === "{" || BARE_LITERAL.test(v)) {
-        var o = run(parse(lex(v.charAt(0) === "{" ? v : "{" + v + "}")), parent);
-        if (o && typeof o === "object") { for (var k in o) st.scope[k] = o[k]; }
-        runInit(b);
-      } else if (v.indexOf("=") >= 0) {
-        // init: reads fall through to ancestors, writes ALWAYS land in this boundary.
-        var target = st.scope;
-        var initProxy = new Proxy(target, {
-          get: function (t, kk) { if (kk === "$") return raw; return kk in t ? t[kk] : parent[kk]; },
-          set: function (t, kk, vv) { t[kk] = vv; return true; }
-        });
-        run(parse(lex(v)), initProxy);
-      }
-    } catch (e) { }
+      var o = run(parse(lex(v.charAt(0) === "{" ? v : "{" + v + "}")), parent);
+      if (o && typeof o === "object") { for (var k in o) st.scope[k] = o[k]; }
+      runInit(b);
+    } catch (e) {
+      reportError(new Error("hydrate: data-kit-scope must be an object literal, braces optional (" + (e && e.message || e) + ")"), b, "data-kit-scope");
+    }
     return st.scope;
   }
   // runInit calls a boundary's init() ONCE, right after it is seeded — the mount lifecycle hook.
@@ -617,18 +618,19 @@
   // rare imperative need (focus, scroll, integrate a widget, toggle an attribute on a child). It is
   // NOT a prototype mutation: they are variables in the expression context that resolve to native
   // objects, so `$this.querySelector('input').focus()` executes exactly as it reads. The system
-  // variables of ideaship-final §3: `$this` is the element that owns the directive (`$el` is its
-  // compatibility alias); `$host` is the boundary element — nearest data-kit-scope/component, else
-  // <html> — so a query stays inside what the component owns (`$root` is its alias); `$event` is
-  // the native DOM event of the handler that is running; `$element` the boundary's named elements.
+  // variables of ideaship-final §3: `$this` is the element that owns the directive; `$host` is the
+  // boundary element — nearest data-kit-scope/component, else <html> — so a query stays inside what
+  // the component owns; `$event` is the native DOM event of the handler that is running;
+  // `$element` the boundary's named elements. `$el` and `$root`, the old spellings, resolve to
+  // nothing any more (B1, 22/09); their names stay reserved so no alias can take them.
   // Reads and method calls only — value/attribute CHANGES belong to bindings (data-kit-model,
   // state→CSS), not to reaching in and poking the DOM.
   function elementScope(el, event, errorContext) {
     var base = scopeFor(el);
     return new Proxy(base, {
       get: function (t, k) {
-        if (k === "$this" || k === "$el") return el;
-        if (k === "$host" || k === "$root") return (el.closest && el.closest(SCOPE)) || document.documentElement;
+        if (k === "$this") return el;
+        if (k === "$host") return (el.closest && el.closest(SCOPE)) || document.documentElement;
         if (k === "$event") return event || null;
         if (k === "$error") return errorContext || null;
         if (k === "$element") return namedElements(el);
@@ -1287,7 +1289,7 @@
   // element, the way the bind pass keeps its names. The author may write modifiers in any order; the
   // runtime always runs the fixed pipeline of §4:
   //   target (:window :document — listen regardless of where the event lands)
-  //   → filter (:outside :escape :enter — a failed filter STOPS here, the event is not swallowed)
+  //   → filter (:outside :escape :enter :self — a failed filter STOPS here, the event is not swallowed)
   //   → :prevent → :stop → timing (:debounce(n) :throttle(n)) → :once → run the expression.
   // data-kit-debounce stays a companion of data-kit-model only (an input coalescing its own
   // writes); for an event the delay is the :debounce(n) modifier.
@@ -1295,12 +1297,13 @@
   var KEY_FILTER = { escape: function (e) { return e.key === "Escape" || e.key === "Esc" || e.keyCode === 27; }, enter: function (e) { return e.key === "Enter" || e.keyCode === 13; } };
   var OUTSIDE_TYPES = { click: true, dblclick: true, pointerdown: true, pointerup: true, focusin: true };
   function parseHandler(attr, type) {
-    var h = { attr: attr, type: type, target: "self", outside: false, key: "", prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
+    var h = { attr: attr, type: type, target: "self", outside: false, self: false, key: "", prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
     var mods = attr.slice(("data-kit-" + type).length).split(":").slice(1);
     for (var i = 0; i < mods.length; i++) {
       var m = mods[i], timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(m);
       if (m === "window" || m === "document") h.target = m;
       else if (m === "outside") h.outside = true;
+      else if (m === "self") h.self = true;
       else if (m === "escape" || m === "enter") h.key = m;
       else if (m === "prevent") h.prevent = true;
       else if (m === "stop") h.stop = true;
@@ -1312,6 +1315,7 @@
     // server's verify pass already named the mistake.
     if (h.key && type !== "keydown" && type !== "keyup") h.valid = false;
     if (h.outside && !OUTSIDE_TYPES[type]) h.valid = false;
+    if (h.self && (h.outside || h.target !== "self")) h.valid = false;
     if (h.debounce && h.throttle) h.valid = false;
     return h;
   }
@@ -1343,6 +1347,7 @@
     var st = state(el);
     if (st.once && st.once[h.attr]) return false;
     if (h.key && !KEY_FILTER[h.key](e)) return false;
+    if (h.self && e.target !== el) return false;
     if (h.prevent && e.preventDefault) e.preventDefault();
     if (h.stop && e.stopPropagation) e.stopPropagation();
     var program = programOf(el, h.attr);

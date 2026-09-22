@@ -271,7 +271,7 @@ with `self`; `window` and `document` name one target, and neither combines with
 ### System variables in an action
 
 Every action sees the system variables of the KitJS spec (`ideaship-final` §3): `$this` is the
-element that owns the attribute (`$el` is its compatibility alias); `$host` is the nearest boundary
+element that owns the attribute (`$el`, the old spelling, no longer resolves); `$host` is the nearest boundary
 element — the component host or `data-kit-scope`, else `<html>`; `$event` is the event as the
 closed grammar can see it — a frozen picture with `type key code button clientX clientY value
 checked …` plus the real `target`, `submitter` and `relatedTarget` elements; `$element.<name>` is the

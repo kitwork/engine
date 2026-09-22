@@ -28,7 +28,7 @@ function evt(type, target, extra) {
 }
 
 // ---- :prevent — preventDefault, then the handler still runs ----
-var form = el("form", { "data-kit-scope": "n = 0" });
+var form = el("form", { "data-kit-scope": "n: 0" });
 var btn = el("button", { "data-kit-click:prevent": "n = n + 1" });
 form.appendChild(btn);
 document.body.appendChild(form);
@@ -39,7 +39,7 @@ if (!clickEvt.defaultPrevented) throw new Error(":prevent did not call preventDe
 if (kit.scopeFor(form).n !== 1) throw new Error(":prevent: handler did not run, n = " + kit.scopeFor(form).n);
 
 // ---- :outside — a click outside fires, a click inside does not ----
-var menu = el("div", { "data-kit-click:outside": "open = false", "data-kit-scope": "open = true" });
+var menu = el("div", { "data-kit-click:outside": "open = false", "data-kit-scope": "open: true" });
 var link = el("a");
 menu.appendChild(link);
 document.body.appendChild(menu);
@@ -49,7 +49,7 @@ document.dispatchEvent(evt("click", document.body));
 if (kit.scopeFor(menu).open !== false) throw new Error(":outside: an outside click must fire");
 
 // ---- :escape:window — filter first: another key neither fires nor is swallowed ----
-var modal = el("div", { "data-kit-keydown:escape:window:prevent": "open = false", "data-kit-scope": "open = true" });
+var modal = el("div", { "data-kit-keydown:escape:window:prevent": "open = false", "data-kit-scope": "open: true" });
 document.body.appendChild(modal);
 var other = evt("keydown", document.body, { key: "a" });
 document.dispatchEvent(other);
@@ -61,14 +61,14 @@ if (kit.scopeFor(modal).open !== false) throw new Error(":escape:window: the Esc
 if (!esc.defaultPrevented) throw new Error(":prevent should run once the filter passed");
 
 // ---- :enter on the element's own keydown ----
-var field = el("input", { "data-kit-keydown:enter": "sent = sent + 1", "data-kit-scope": "sent = 0" });
+var field = el("input", { "data-kit-keydown:enter": "sent = sent + 1", "data-kit-scope": "sent: 0" });
 document.body.appendChild(field);
 document.dispatchEvent(evt("keydown", field, { key: "Enter" }));
 document.dispatchEvent(evt("keydown", field, { key: "x" }));
 if (kit.scopeFor(field).sent !== 1) throw new Error(":enter should fire for Enter only, sent = " + kit.scopeFor(field).sent);
 
 // ---- :stop ends the walk; without it the ancestor also runs ----
-var outer = el("div", { "data-kit-click": "hits = hits + 'outer,'", "data-kit-scope": "hits = ''" });
+var outer = el("div", { "data-kit-click": "hits = hits + 'outer,'", "data-kit-scope": "hits: ''" });
 var inner = el("button", { "data-kit-click:stop": "hits = hits + 'inner,'" });
 var plain = el("button", { "data-kit-click": "hits = hits + 'plain,'" });
 outer.appendChild(inner); outer.appendChild(plain);
@@ -78,15 +78,25 @@ if (kit.scopeFor(outer).hits !== "inner,") throw new Error(":stop should end the
 document.dispatchEvent(evt("click", plain));
 if (kit.scopeFor(outer).hits !== "inner,plain,outer,") throw new Error("without :stop the ancestor runs after the target, hits = " + kit.scopeFor(outer).hits);
 
+// ---- :self — only when the event landed on the element itself, not on a child ----
+var selfBox = el("div", { "data-kit-click:self": "own = own + 1", "data-kit-scope": "own: 0" });
+var selfChild = el("span");
+selfBox.appendChild(selfChild);
+document.body.appendChild(selfBox);
+document.dispatchEvent(evt("click", selfChild));
+if (kit.scopeFor(selfBox).own !== 0) throw new Error(":self must not fire for a click on a child");
+document.dispatchEvent(evt("click", selfBox));
+if (kit.scopeFor(selfBox).own !== 1) throw new Error(":self should fire for a click on the element itself, own = " + kit.scopeFor(selfBox).own);
+
 // ---- :once ----
-var once = el("button", { "data-kit-click:once": "count = count + 1", "data-kit-scope": "count = 0" });
+var once = el("button", { "data-kit-click:once": "count = count + 1", "data-kit-scope": "count: 0" });
 document.body.appendChild(once);
 document.dispatchEvent(evt("click", once));
 document.dispatchEvent(evt("click", once));
 if (kit.scopeFor(once).count !== 1) throw new Error(":once should run a single time, count = " + kit.scopeFor(once).count);
 
 // ---- :throttle(n) — leading edge, then quiet for n ms ----
-var burst = el("button", { "data-kit-click:throttle(500)": "ticks = ticks + 1", "data-kit-scope": "ticks = 0" });
+var burst = el("button", { "data-kit-click:throttle(500)": "ticks = ticks + 1", "data-kit-scope": "ticks: 0" });
 document.body.appendChild(burst);
 document.dispatchEvent(evt("click", burst));
 document.dispatchEvent(evt("click", burst));
@@ -100,7 +110,7 @@ document.dispatchEvent(evt("click", odd));
 if (kit.scopeFor(form).n !== 1) throw new Error("an unknown modifier must disable the handler, n = " + kit.scopeFor(form).n);
 
 // ---- data-kit-debounce on a model input: deferred, coalesced ----
-var box = el("input", { "data-kit-model": "q", "data-kit-debounce": "40", "data-kit-scope": "q = ''" });
+var box = el("input", { "data-kit-model": "q", "data-kit-debounce": "40", "data-kit-scope": "q: ''" });
 box.value = "";
 document.body.appendChild(box);
 box.value = "a";  document.dispatchEvent(evt("input", box));
