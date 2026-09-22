@@ -175,6 +175,19 @@ Runtime component giữ parser dữ liệu thuần (giá trị phải là data, 
 
 `element` thay `ref` (21/09): `ref` là chữ viết tắt; số ít như 6 biến còn lại; **một** cơ chế đặt tên cho cả biểu thức lẫn code component (thay 20 marker tự chế `data-carousel-track`… của catalogue, chuyển dần).
 
+### Code component: `kit.component(name, { state…, method…, init(context) })` — ✅ kernel 22/09 (B9 bước 1)
+
+| `context.` | Là gì | Ghi chú |
+| :--- | :--- | :--- |
+| `host` | phần tử mang `data-kit-component` / `data-kit-scope` | |
+| `owned(selector)` | các phần tử khớp dưới host, **kể cả host**; cây của host lồng (component/scope) **không** thuộc về mình | cùng hàng rào với runtime component |
+| `element(name)` / `elements(name)` | `data-kit-element="name"` host sở hữu — cái đầu / tất cả; thiếu → `null` / `[]`; tên phải là identifier | cùng tên với `$element.name` trong biểu thức |
+| `listen(target, type, fn, options)` | listener được gỡ cùng host | trả về cancel |
+| `cleanup(fn)` | chạy khi morph gỡ host (`this` = scope); **cancel trả về = chạy ngay**, một lần | |
+| `afterRender(fn)` | chạy **một lần** sau lượt vẽ kế, **ngoài** lượt — ghi state trong đó tự xếp lượt vẽ mới (kernel không có gotcha "gán trong afterRender không vẽ lại" của runtime component) | host đã bị gỡ → bỏ qua |
+
+`this` trong `init`/method/cleanup/afterRender = scope của component. Host **luôn mount** khi qua lượt vẽ (seed + init) dù bên trong không có directive nào — component chỉ-init (favicon fallback, bộ đếm sống) vẫn khởi động. `init` ném → tới `data-kit-error` gần nhất với `$error.directive === "init"`, component vẫn mount với state đã seed. Chứng minh: 2 component riêng của apptop (`favicon-fallback.js`, `stats-live.js`) chạy **nguyên văn** trên kernel trong Chrome thật (`jit/js/tenant_component_browser_test.go`).
+
 ### Cha–con: không `state`/`props` (chốt 21/09)
 
 Lệnh xuyên vùng = `$alias` trong action. Dữ liệu: kernel có scope chuỗi lexical (đọc rơi lên, ghi về chủ sở hữu); runtime component cố ý cô lập. Liên kết cha–con vì thế là câu **một kernel** (§8), không phải một directive mới. Con tái dùng nhiều thể hiện phải **tự đủ** (seed của mình, DOM của mình); cái con "cần biết thêm" thì server template đã bake vào markup.
@@ -221,7 +234,7 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | B6 | server materialize `for` | **hoãn** tới khi có site cần | ✅ ghi §7 |
 | B7 | `data-kit-style` | giữ ở runtime component; kernel **thêm khi có ca** | ✅ ghi §2.3 |
 | B8 | dạng tên trần / init của `data-kit-scope` | **cắt** — một literal, một parser; attribute rỗng = vùng rỗng | ✅ kernel; 0 site dùng |
-| B9 | **một kernel hay hai runtime** | **MỘT KERNEL** — Quốc chốt 22/09 tối: "một kernel, markup do chủ site viết". Hệ quả: biểu thức trong markup KHÔNG phải ranh giới an toàn (chủ site viết, server render) → evaluator **mở** của kernel là chuẩn; evaluator đóng, đồ thị version `name@x.y.z`, giao hàng staged `/jit/<hash>` + SRI của KitJS không mang sang. Đường đi = **phép trừ**, không gộp một phát: `jit/javascript` đóng băng (không ngữ pháp mới), 10 tenant đang chạy giữ nguyên; port từng component sang kiểu kernel khi site cần; xoá `jit/javascript` khi tenant cuối rời `.jitjs()` | ✅ quyết định. Bước code theo thứ tự: (1) kernel `init(context)` cùng hình `context` đã chốt (`host owned element elements listen cleanup afterRender`) để component init-based port không phải viết lại thân; (2) component riêng của tenant trên kernel (thư mục site, `/kit.js?components=`), thay `router.jitjs({components})`; (3) port apptop (9 file, 1 461 dòng + `progress-bar`/`theme`/`shortcut` catalogue) → họ apptop rời `.jitjs()`; (4) kitjs.org/kitwork.io/studio/kitdesign/lofiwithme cuối cùng vì chính họ là catalogue |
+| B9 | **một kernel hay hai runtime** | **MỘT KERNEL** — Quốc chốt 22/09 tối: "một kernel, markup do chủ site viết". Hệ quả: biểu thức trong markup KHÔNG phải ranh giới an toàn (chủ site viết, server render) → evaluator **mở** của kernel là chuẩn; evaluator đóng, đồ thị version `name@x.y.z`, giao hàng staged `/jit/<hash>` + SRI của KitJS không mang sang. Đường đi = **phép trừ**, không gộp một phát: `jit/javascript` đóng băng (không ngữ pháp mới), 10 tenant đang chạy giữ nguyên; port từng component sang kiểu kernel khi site cần; xoá `jit/javascript` khi tenant cuối rời `.jitjs()` | ✅ quyết định. Bước code theo thứ tự: (1) ✅ đêm 22/09 kernel `init(context)` cùng hình `context` đã chốt (`host owned element elements listen cleanup afterRender`, bảng ở §6) — 2 component apptop chạy nguyên văn; (2) component riêng của tenant trên kernel (thư mục site, `/kit.js?components=`), thay `router.jitjs({components})`; (3) port apptop (9 file, 1 461 dòng + `progress-bar`/`theme`/`shortcut` catalogue) → họ apptop rời `.jitjs()`; (4) kitjs.org/kitwork.io/studio/kitdesign/lofiwithme cuối cùng vì chính họ là catalogue |
 | B10 | async | **nhánh B**: biểu thức đồng bộ; async sống trong **component** (method JS thật) hoặc **Drive**; suite tuân thủ đã chứng minh method IR-lambda có twin | ✅ 22/09: kernel — method trả Promise → vẽ lại khi settle (đã có); **ghi scope ngoài một lượt vẽ** (timer, `.then` không trả, callback) → xếp một lượt vẽ gộp; trong lượt (handler, model, render) không xếp thêm. Không có `effect`. Test: `write_repaint_test.go`, `jit/js/migration_browser_test.go` |
 
 > Khi B9 cần đảo lại (giữ hai runtime độc lập), nói một câu là đủ — chưa có code nào phụ thuộc vào nó ngoài việc *không* thêm ngữ pháp riêng cho runtime component từ nay.

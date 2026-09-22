@@ -599,9 +599,79 @@
     }
     return st.scope;
   }
+  // ---- init(context): the component's hands on its own DOM (ideaship-final §6, B9 one kernel) ----
+  // The same seven keys the component runtime hands out, so a ported body needs no rewrite:
+  //   host                — the element carrying data-kit-component / data-kit-scope
+  //   owned(selector)     — matches under the host, the host itself included, a nested host's
+  //                         subtree excluded (its elements are its own)
+  //   element(name)       — the first data-kit-element="name" the host owns; elements(name) = all
+  //   listen(target, type, fn, options) — an event listener released with the host
+  //   cleanup(fn)         — runs when morph removes the host (this = the scope); the returned
+  //                         cancel runs it now instead
+  //   afterRender(fn)     — runs ONCE after the next paint, outside the pass — so a state write
+  //                         inside it schedules its own repaint (no lost update)
+  // Every resource lives on the host's state, so cleanupTree releases it when the host leaves.
+  var HOST = "[data-kit-component],[data-kit-scope]";
+  var afterRenders = [];
+  function initContext(b) {
+    function owned(selector) {
+      if (typeof selector !== "string") throw new TypeError("hydrate: context.owned(selector) expects a string");
+      var out = [];
+      if (b.matches && b.matches(selector)) out.push(b);
+      b.querySelectorAll(selector).forEach(function (el) {
+        if (!el.matches(HOST) && el.parentElement && el.parentElement.closest(HOST) === b) out.push(el);
+      });
+      return out;
+    }
+    function elements(name) {
+      if (typeof name !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new TypeError("hydrate: context.elements(name) expects an identifier");
+      return owned('[data-kit-element="' + name + '"]');
+    }
+    function element(name) { return elements(name)[0] || null; }
+    function cleanup(fn) {
+      if (typeof fn !== "function") throw new TypeError("hydrate: context.cleanup(fn) expects a function");
+      var active = true;
+      var release = function () {
+        if (!active) return;
+        active = false;
+        try { fn.call(scopeFor(b)); } catch (error) { reportError(error, b, "cleanup"); }
+      };
+      onCleanup(b, release);
+      return release;
+    }
+    function listen(target, type, fn, options) {
+      if (!target || typeof target.addEventListener !== "function") throw new TypeError("hydrate: context.listen(target, type, fn, options) expects an EventTarget");
+      if (typeof type !== "string" || typeof fn !== "function") throw new TypeError("hydrate: context.listen(target, type, fn, options) expects a string and a function");
+      var capture = typeof options === "boolean" ? options : !!(options && options.capture);
+      target.addEventListener(type, fn, options);
+      return cleanup(function () { target.removeEventListener(type, fn, capture); });
+    }
+    function afterRender(fn) {
+      if (typeof fn !== "function") throw new TypeError("hydrate: context.afterRender(fn) expects a function");
+      var entry = { host: b, run: fn, active: true };
+      afterRenders.push(entry);
+      return function () { entry.active = false; };
+    }
+    return Object.freeze({ host: b, owned: owned, element: element, elements: elements, listen: listen, cleanup: cleanup, afterRender: afterRender });
+  }
+  // flushAfterRender runs after a paint has ended (render → pass → paint, then this): one-shot,
+  // in registration order, only for hosts still in the document; a host that morph removed
+  // between registration and paint is skipped, its entry dropped.
+  function flushAfterRender() {
+    if (!afterRenders.length) return;
+    var entries = afterRenders.splice(0);
+    entries.forEach(function (entry) {
+      if (!entry.active) return;
+      entry.active = false;
+      if (!entry.host.isConnected) return;
+      try { entry.run.call(scopeFor(entry.host)); } catch (error) { reportError(error, entry.host, "afterRender"); }
+    });
+  }
   // runInit calls a boundary's init() ONCE, right after it is seeded — the mount lifecycle hook.
-  // A registered component's init is real JS (this = the scope); an inline blueprint's is an IR
-  // lambda. Set the guard BEFORE calling so a re-entrant scopeFor never loops.
+  // A registered component's init is real JS (this = the scope, one argument: the context above);
+  // an inline blueprint's is an IR lambda. Set the guard BEFORE calling so a re-entrant scopeFor
+  // never loops. An init that throws reaches the error boundary like any directive (directive
+  // "init"), and the component stays mounted with whatever state it seeded.
   function runInit(b) {
     var st = state(b);
     if (st.inited) return;
@@ -611,10 +681,10 @@
     try {
       var proxy = scopeFor(b);
       var result;
-      if (typeof fn === "function") result = fn.apply(proxy, []);
+      if (typeof fn === "function") result = fn.call(proxy, initContext(b));
       else if (fn.__kitLambda) result = run(fn, proxy);
       observeEffect(result, proxy);
-    } catch (e) { }
+    } catch (e) { reportError(e, b, "init"); }
   }
   function chainFor(el) {
     var objs = [];
@@ -794,14 +864,17 @@
   }
 
   var activeComponents = {};
+  // Every host MOUNTS on the pass — seeded from its blueprint and init(context) run — whether or
+  // not a directive inside it ever asks for its scope. An init-only component (a favicon fallback,
+  // a live counter that owns its DOM) has nothing to bind, and still has to start.
   function rebuildActiveComponents() {
     var next = {};
     document.querySelectorAll("[data-kit-component]").forEach(function (el) {
       var craw = el.getAttribute("data-kit-component");
       if (!craw) return;
       var cname = parseComponentTag(craw).name;
-      var st = state(el);
-      if (st.seeded) {
+      boundaryScope(el);
+      if (state(el).seeded) {
         var inst = scopeFor(el);
         (next[cname] = next[cname] || []).push(inst);
       }
@@ -1099,7 +1172,7 @@
     }
   }
 
-  function render() { pass(paint); }
+  function render() { pass(paint); flushAfterRender(); }
   function paint() {
     seedElements();
     seedModels();
