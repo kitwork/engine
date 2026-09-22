@@ -444,7 +444,7 @@ func TestKitJSStagedAssetsReuseAcrossGenerationsAndOldGraphSurvivesRetirement(t 
 }
 
 func TestKitJSLegacyIsolationDefaultOff(t *testing.T) {
-	tenant, _ := writeKitJSTestSite(t, ``, `<nav data-kit-component="toggle"><button data-kit-click="toggle()">Menu</button><div id="menu" data-kit-show="open" hidden></div></nav>`)
+	tenant, _ := writeKitJSTestSite(t, ``, `<nav data-kit-scope="open: false"><button data-kit-click="open = !open">Menu</button><div id="menu" data-kit-show="open" hidden>Links</div></nav><div data-kit-component="toast"></div>`)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}

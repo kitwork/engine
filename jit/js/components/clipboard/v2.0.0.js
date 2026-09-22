@@ -42,5 +42,3 @@ var clipboardDef = {
 
 window.kit.component("clipboard", clipboardDef);
 window.kit.component("clipboard@v2.0.0", clipboardDef);
-window.kit.component("copy", clipboardDef);
-window.kit.component("copy@v2.0.0", clipboardDef);
