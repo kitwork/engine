@@ -290,6 +290,9 @@ func Render(html string) string {
 			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
 		}
 	}
+	// The costliest mistake an authored page can make is a name nothing declares: the kernel reads
+	// it as 0 and the markup looks right. The tree and the expressions are both here, so say it.
+	reportUndeclaredNames(html)
 	// A seed's value is a state target, not an expression; name a malformed one at render, as the
 	// kernel would only report it in the browser.
 	for _, m := range seedAttrRe.FindAllStringSubmatch(html, -1) {
