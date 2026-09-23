@@ -569,3 +569,116 @@ func TestBrowserKeyCombinationModifier(t *testing.T) {
 </body></html>`
 	runKernelPage(t, browser, page, nil)
 }
+
+// tabs: the demo of what a component IS, next to what the grammar already does. Switching panels
+// is a scope value and a show — deleted as a component on 22/09. What is left, and what this test
+// drives, is the part a keyboard user feels: one stop in the tab order, arrows that move selection
+// AND focus, Home/End, and no jumping when the pointer did the choosing.
+func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping tabs browser proof in short mode")
+	}
+	browser := findHeadlessBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+	page := `<!doctype html>
+<html lang="en" data-kit-app="tabs"><head><meta charset="utf-8"><title>tabs</title></head><body>
+  <div data-kit-component="tabs" data-kit-alias="$docs">
+    <div role="tablist" data-kit-element="list" aria-label="Documentation">
+      <button role="tab" id="tab-guide" data-kit-element="tab" data-tab="guide" aria-controls="panel-guide"
+              data-kit-click="select('guide')" data-kit-bind:aria-selected="current === 'guide'" data-kit-bind:tabindex="current === 'guide' ? 0 : -1">Guide</button>
+      <button role="tab" id="tab-api" data-kit-element="tab" data-tab="api" aria-controls="panel-api"
+              data-kit-click="select('api')" data-kit-bind:aria-selected="current === 'api'" data-kit-bind:tabindex="current === 'api' ? 0 : -1">API</button>
+      <button role="tab" id="tab-cli" data-kit-element="tab" data-tab="cli" aria-controls="panel-cli"
+              data-kit-click="select('cli')" data-kit-bind:aria-selected="current === 'cli'" data-kit-bind:tabindex="current === 'cli' ? 0 : -1">CLI</button>
+      <button role="tab" id="tab-broken" data-kit-element="tab">forgot data-tab</button>
+    </div>
+    <section role="tabpanel" id="panel-guide" aria-labelledby="tab-guide" data-kit-show="current === 'guide'">guide</section>
+    <section role="tabpanel" id="panel-api" aria-labelledby="tab-api" hidden data-kit-show="current === 'api'">api</section>
+    <section role="tabpanel" id="panel-cli" aria-labelledby="tab-cli" hidden data-kit-show="current === 'cli'">cli</section>
+  </div>
+  <div data-kit-component="tabs">
+    <div role="tablist" id="vertical-list" data-kit-element="list" aria-orientation="vertical" aria-label="Settings">
+      <button role="tab" id="v-one" data-kit-element="tab" data-tab="one" data-kit-click="select('one')"
+              data-kit-bind:tabindex="current === 'one' ? 0 : -1">One</button>
+      <button role="tab" id="v-two" data-kit-element="tab" data-tab="two" data-kit-click="select('two')"
+              data-kit-bind:tabindex="current === 'two' ? 0 : -1">Two</button>
+    </div>
+  </div>
+  <script src="/kit.js"></script>
+  <script>
+  (async function () {
+    var root = document.documentElement;
+    function fail(m) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", m); throw new Error(m); }
+    function assert(c, m) { if (!c) fail(m); }
+    function tick() { return new Promise(function (r) { setTimeout(r, 30); }); }
+    var byId = function (id) { return document.getElementById(id); };
+    function arrow(key) {
+      byId("tab-guide").parentElement.dispatchEvent(new KeyboardEvent("keydown", { key: key, bubbles: true, cancelable: true }));
+      return tick();
+    }
+    function tabs() { return ["tab-guide", "tab-api", "tab-cli"].map(byId); }
+    function order() { return tabs().map(function (t) { return t.tabIndex; }).join(","); }
+    await tick();
+
+    // opens on its first tab, with one stop in the tab order
+    assert(byId("panel-guide").hidden === false && byId("panel-api").hidden === true, "a tablist opens on its first tab");
+    assert(byId("tab-guide").getAttribute("aria-selected") === "true", "the markup's own binding says which is selected");
+    assert(order() === "0,-1,-1", "exactly one tab is focusable, got " + order());
+
+    // the pointer selects without stealing focus
+    byId("tab-api").click(); await tick();
+    assert(byId("panel-api").hidden === false, "a click selects its panel");
+    assert(order() === "-1,0,-1", "the tab order follows the selection, got " + order());
+    assert(document.activeElement !== byId("tab-api"), "a click must not move focus on its own — the pointer already did");
+
+    // the arrows move selection AND focus, and wrap
+    byId("tab-api").focus();
+    await arrow("ArrowRight");
+    assert(byId("panel-cli").hidden === false, "ArrowRight selects the next tab");
+    assert(document.activeElement === byId("tab-cli"), "ArrowRight moves focus with it");
+    await arrow("ArrowRight");
+    assert(document.activeElement === byId("tab-guide"), "the arrows wrap around the end");
+    await arrow("ArrowLeft");
+    assert(document.activeElement === byId("tab-cli"), "ArrowLeft wraps the other way");
+    await arrow("Home");
+    assert(document.activeElement === byId("tab-guide") && byId("panel-guide").hidden === false, "Home jumps to the first tab");
+    await arrow("End");
+    assert(document.activeElement === byId("tab-cli") && byId("panel-cli").hidden === false, "End jumps to the last");
+    assert(order() === "-1,-1,0", "the tab order followed the keyboard, got " + order());
+
+    // a key with a modifier belongs to the browser or the page, not to the tablist
+    byId("tab-cli").parentElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", ctrlKey: true, bubbles: true, cancelable: true }));
+    await tick();
+    assert(document.activeElement === byId("tab-cli"), "Ctrl+Home is not the tablist's to take");
+
+    // a tab the author forgot to name has no panel: the keyboard must skip it rather than land
+    // focus somewhere selection cannot follow
+    byId("tab-cli").focus();
+    await arrow("ArrowRight");
+    assert(document.activeElement === byId("tab-guide"), "an unnamed tab must be skipped, focus went to " + (document.activeElement.textContent || "").slice(0, 16));
+
+    // the public surface is the contract: everything else lives behind a Symbol
+    assert(Object.keys(window.kit.blueprints.tabs).join(",") === "current,select,next,previous,first,last,init",
+      "the surface must stay short, got " + Object.keys(window.kit.blueprints.tabs).join(","));
+
+    // a vertical tablist answers to the arrows a screen reader announces for it
+    var vertical = document.getElementById("vertical-list");
+    byId("v-one").focus();
+    vertical.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    await tick();
+    assert(document.activeElement === byId("v-two"), "ArrowDown drives a vertical tablist");
+    vertical.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await tick();
+    assert(document.activeElement === byId("v-two"), "ArrowRight is not the vertical tablist's key");
+
+    root.setAttribute("data-kit-test", "passed");
+  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  </script>
+</body></html>`
+	if !strings.Contains(Render(page), "component%3Atabs") {
+		t.Fatal("Render should ask for the tabs component")
+	}
+	runKernelPage(t, browser, page, scanModules(page, nil))
+}
