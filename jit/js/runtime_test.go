@@ -12,12 +12,12 @@ import (
 // and dismiss WERE the grammar (a scope flag plus show/bind), get, more and submit were Drive's
 // work, and all six went unused — deleted 22/09. `copy` went with them: one name, one meaning.
 func TestHasComponent(t *testing.T) {
-	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "theme", "toast"} {
+	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast"} {
 		if !HasComponent(n) {
 			t.Errorf("expected component module %q", n)
 		}
 	}
-	for _, gone := range []string{"toggle", "tab", "dismiss", "get", "more", "submit", "copy", "dropdown"} {
+	for _, gone := range []string{"toggle", "tab", "dismiss", "get", "more", "submit", "copy", "dropdown", "theme"} {
 		if HasComponent(gone) {
 			t.Errorf("%q was deleted: the grammar or the platform covers it", gone)
 		}

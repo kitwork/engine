@@ -1,7 +1,18 @@
-/* clipboard component @v2.0.0 (latest) — copy text to clipboard with 2s feedback.
- * Usage:
- *   - <div data-kit-component="clipboard">
- *   - <div data-kit-component="clipboard@v2.0.0">
+/* clipboard component @v2.0.0 (latest) — copy text, and say so for two seconds.
+ *
+ * Usage (the host is the shared ancestor of the button and whatever it copies):
+ *   <article data-kit-component="clipboard">
+ *     <pre data-kit-element="snippet">npm i kitwork</pre>
+ *     <button data-kit-click="copy($element.snippet.textContent)"
+ *             data-kit-class="copied ? 'is-copied' : ''">Copy</button>
+ *   </article>
+ *
+ * Accessibility: `copied` is state, not an announcement — put it where a reader will hear it
+ * (aria-live="polite") if the confirmation matters.
+ *
+ * The platform call needs a user gesture and a secure context; where it is refused, the component
+ * falls back to a hidden textarea and execCommand, restoring focus afterwards. The reset timer is
+ * released with the host, so a copy confirmed just before Drive swaps the page leaves nothing.
  */
 var clipboardDef = {
   copied: false,
@@ -38,6 +49,11 @@ var clipboardDef = {
       fallback();
     }
   }
+};
+
+clipboardDef.init = function (context) {
+  var self = this;
+  context.cleanup(function () { clearTimeout(self.copyResetTimer); });
 };
 
 window.kit.component("clipboard", clipboardDef);

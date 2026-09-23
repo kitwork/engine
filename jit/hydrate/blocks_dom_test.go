@@ -34,7 +34,15 @@ function makeNode(nodeType) {
   var node = {
     nodeType: nodeType, tagName: "", attributes: {}, childNodes: [], parentNode: null, _text: "",
     hidden: false, value: "", __kitClass: null,
-    style: { setProperty: function () {} },
+    // A small CSSStyleDeclaration: enough for data-kit-style, which writes a property, reads a
+    // baseline back and removes what it invented.
+    style: {
+      _values: {}, _priorities: {},
+      setProperty: function (name, value, priority) { this._values[name] = String(value); this._priorities[name] = priority || ""; },
+      getPropertyValue: function (name) { return Object.prototype.hasOwnProperty.call(this._values, name) ? this._values[name] : ""; },
+      getPropertyPriority: function (name) { return this._priorities[name] || ""; },
+      removeProperty: function (name) { delete this._values[name]; delete this._priorities[name]; }
+    },
     classList: { add: function () {}, remove: function () {}, contains: function () { return false; }, toggle: function () {} },
     setAttribute: function (k, v) { this.attributes[k] = String(v); },
     getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(this.attributes, k) ? this.attributes[k] : null; },

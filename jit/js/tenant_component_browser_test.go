@@ -381,3 +381,116 @@ func TestBrowserDialogComponentDrivesTheNativeElement(t *testing.T) {
 </body></html>`
 	runKernelPage(t, browser, page, scanModules(page, nil))
 }
+
+// The catalogue's own components, driven in a real browser — the standard says one browser test
+// each, because a component's contract is what a visitor experiences, not what the source implies.
+//
+// toast: a timer that outlives the event, released with the host.
+// clipboard: the platform call, the two-second confirmation, and the same release.
+// sidebar: two independent axes (a desktop rail and a mobile drawer) plus its one persisted key.
+func TestBrowserCatalogueComponentsHoldTheirContract(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping catalogue browser proof in short mode")
+	}
+	browser := findHeadlessBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+	page := `<!doctype html>
+<html lang="en" data-kit-app="catalogue"><head><meta charset="utf-8"><title>catalogue</title></head><body>
+  <script>
+  window.__copied = [];
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: function (text) { window.__copied.push(text); return Promise.resolve(); } } });
+  try { localStorage.removeItem("kitwork:sidebar"); } catch (e) {}
+  </script>
+
+  <div id="toast-parent">
+    <div id="toast-host" data-kit-component="toast" data-kit-alias="$toast">
+      <p id="toast-box" data-kit-show="visible" role="status" aria-live="polite" data-kit-text="message" hidden></p>
+    </div>
+  </div>
+  <button id="say" type="button" data-kit-click="$toast.show('Saved')">say</button>
+
+  <article id="copy-parent">
+    <div id="copy-host" data-kit-component="clipboard">
+      <pre data-kit-element="snippet">npm i kitwork</pre>
+      <button id="copy" type="button" data-kit-click="copy($element.snippet.textContent)" data-kit-class="copied ? 'is-copied' : ''">copy</button>
+    </div>
+  </article>
+
+  <section id="rail" data-kit-component="sidebar" data-kit-alias="$sidebar" data-kit-bind:data-state="status" data-kit-bind:data-open="drawer">
+    <button id="cycle" type="button" data-kit-click="cycle()">cycle</button>
+    <button id="open-drawer" type="button" data-kit-click="openDrawer()">open</button>
+    <div id="scrim" hidden data-kit-show="drawer" data-kit-click="closeDrawer()"></div>
+  </section>
+
+  <script src="/kit.js"></script>
+  <script>
+  (async function () {
+    var root = document.documentElement;
+    function fail(m) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", m); throw new Error(m); }
+    function assert(c, m) { if (!c) fail(m); }
+    function tick(ms) { return new Promise(function (r) { setTimeout(r, ms || 40); }); }
+    var byId = function (id) { return document.getElementById(id); };
+    // A release is only observable if we watch for it: a timer that outlives its host writes into a
+    // scope nobody can see, so count the clearTimeout calls instead of guessing.
+    var cleared = 0, nativeClearTimeout = window.clearTimeout;
+    window.clearTimeout = function (id) { if (id !== undefined) cleared++; return nativeClearTimeout.call(window, id); };
+    await tick(60);
+
+    // ---- toast ----
+    byId("say").click(); await tick();
+    assert(byId("toast-box").hidden === false && byId("toast-box").textContent === "Saved", "toast: show() paints the message");
+    assert(byId("toast-box").getAttribute("aria-live") === "polite", "toast: the page keeps its own aria-live");
+    window.kit.components.toast.hide(); await tick();
+    assert(byId("toast-box").hidden === true, "toast: hide() closes it before the timer");
+    // a pending toast whose host morph removes must not write afterwards
+    byId("say").click(); await tick();
+    var clearedBeforeToastRemoval = cleared;
+    window.kit.morph(byId("toast-parent"), byId("toast-parent").cloneNode(false));
+    assert(!byId("toast-host"), "toast: the host was removed");
+    assert(cleared > clearedBeforeToastRemoval, "toast: removing the host must release the pending timer");
+    await tick(60);
+
+    // ---- clipboard ----
+    byId("copy").click(); await tick(); await tick();
+    assert(window.__copied[0] === "npm i kitwork", "clipboard: copy() sends what $element.snippet holds, got " + JSON.stringify(window.__copied[0]));
+    assert(byId("copy").classList.contains("is-copied"), "clipboard: copied paints is-copied");
+    var clearedBeforeCopyRemoval = cleared;
+    window.kit.morph(byId("copy-parent"), byId("copy-parent").cloneNode(false));
+    assert(!byId("copy-host"), "clipboard: the host was removed");
+    assert(cleared > clearedBeforeCopyRemoval, "clipboard: removing the host must release the reset timer");
+
+    // ---- sidebar ----
+    var rail = byId("rail");
+    assert(rail.getAttribute("data-state") === "expanded", "sidebar: a first visit starts expanded, got " + rail.getAttribute("data-state"));
+    byId("cycle").click(); await tick();
+    assert(rail.getAttribute("data-state") === "collapsed", "sidebar: cycle() collapses the rail");
+    assert(localStorage.getItem("kitwork:sidebar") === "collapsed", "sidebar: the rail is persisted");
+    assert(byId("scrim").hidden === true, "sidebar: the rail axis must not open the drawer");
+    byId("open-drawer").click(); await tick();
+    assert(byId("scrim").hidden === false, "sidebar: openDrawer() opens the mobile axis");
+    // a true on a plain attribute writes it empty (the hidden rule), false removes it
+    assert(rail.hasAttribute("data-open") && rail.getAttribute("data-open") === "", "sidebar: data-open must be present and empty while the drawer is open, got " + JSON.stringify(rail.getAttribute("data-open")));
+    assert(rail.getAttribute("data-state") === "collapsed", "sidebar: the drawer axis must not move the rail");
+    assert(localStorage.getItem("kitwork:sidebar") === "collapsed", "sidebar: the drawer is deliberately not persisted");
+    byId("scrim").click(); await tick();
+    assert(byId("scrim").hidden === true, "sidebar: a click on the scrim closes the drawer");
+    assert(!rail.hasAttribute("data-open"), "sidebar: a false result removes the attribute");
+    // ask the BLUEPRINT: a scope proxy answers 0 for a name it does not have, by design
+    assert(typeof window.kit.blueprints.sidebar.open === "undefined" && typeof window.kit.blueprints.sidebar.close === "undefined",
+      "sidebar: open()/close() are gone — one name per thing");
+    assert(typeof window.kit.blueprints.sidebar.openDrawer === "function", "sidebar: the explicit drawer spelling stays");
+
+    root.setAttribute("data-kit-test", "passed");
+  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  </script>
+</body></html>`
+	rendered := Render(page)
+	for _, want := range []string{"component%3Aclipboard", "component%3Asidebar", "component%3Atoast"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("Render should ask for %s:\n%s", want, rendered)
+		}
+	}
+	runKernelPage(t, browser, page, scanModules(page, nil))
+}

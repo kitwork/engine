@@ -744,6 +744,52 @@
     });
   }
 
+  // ---- data-kit-style:<property>="expr" — one property per attribute (ideaship-final §2.3, B7) ----
+  // The same shape as bind and seed: the target is in the attribute NAME, the value is one
+  // expression. A component with a continuous value — a bar's width, a popover's offset, a
+  // carousel's transform — says it in markup instead of writing element.style from JavaScript,
+  // which is the whole point: the server sees the expression and the CSS JIT can read the names.
+  //
+  // A nullish, false or empty result RESTORES what the author wrote in the style attribute, so a
+  // binding that stops applying never leaves a value behind. The baseline is captured once, the
+  // first time this element's property is written.
+  //
+  // What a value may not contain: control characters, `;{}\@`, comments, !important, and the
+  // functions that can fetch or execute (url, image-set, src, expression, attr), plus the
+  // javascript:/vbscript:/data:text/html spellings. `var()` IS allowed — a Kitwork site's colours
+  // are custom properties, so blocking it would make the directive useless here.
+  var STYLE_BLOCKED = { "css-text": 1, csstext: 1, behavior: 1, "-moz-binding": 1 };
+  function styleName(name) {
+    if (name.indexOf("--") === 0) {
+      return /^--[A-Za-z_][A-Za-z0-9_-]*$/.test(name) && !/^--(?:kit|kitwork)-/i.test(name) ? name : "";
+    }
+    return /^-?[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(name) && !STYLE_BLOCKED[name] ? name : "";
+  }
+  function unsafeStyleValue(text) {
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(text) || /[;{}\\@]/.test(text) ||
+      text.indexOf("/*") >= 0 || text.indexOf("*/") >= 0 || /!\s*important\b/i.test(text) ||
+      /(^|[^A-Za-z0-9_-])(url|image-set|-webkit-image-set|src|expression|attr)\s*\(/i.test(text)) return true;
+    var compact = text.replace(/\s+/g, "").toLowerCase();
+    return compact.indexOf("javascript:") >= 0 || compact.indexOf("vbscript:") >= 0 ||
+      compact.indexOf("data:text/html") >= 0;
+  }
+  function writeStyle(el, property, value) {
+    var store = state(el);
+    var baseline = store.styleBaseline || (store.styleBaseline = {});
+    if (!(property in baseline)) {
+      baseline[property] = { value: el.style.getPropertyValue(property), priority: el.style.getPropertyPriority(property) };
+    }
+    if (value == null || value === false || value === "") {
+      var was = baseline[property];
+      if (was.value !== "") el.style.setProperty(property, was.value, was.priority);
+      else el.style.removeProperty(property);
+      return;
+    }
+    var text = typeof value === "number" ? (isFinite(value) ? String(value) : "") : String(value);
+    if (!text || unsafeStyleValue(text)) throw new Error('hydrate: unsafe value for data-kit-style:' + property);
+    el.style.setProperty(property, text, "");
+  }
+
   function scopeFor(el) {
     // A comment node (a data-kit-for / data-kit-if anchor) has no closest() — resolve through its
     // parent element, else the region's local/component scope is lost and reads fall to the PAGE
@@ -1204,6 +1250,23 @@
         (function (name, program) {
           guarded(el, name, function () { writeBinding(el, name.slice(14), run(program, scopeFor(el))); });
         })(names[i], cache[key]);
+      }
+      var styles = el.__kitStyled;
+      if (!styles) {
+        styles = [];
+        el.getAttributeNames().forEach(function (n) { if (n.indexOf("data-kit-style:") === 0) styles.push(n); });
+        el.__kitStyled = styles;
+      }
+      for (var s = 0; s < styles.length; s++) {
+        var source = el.getAttribute(styles[s]); if (!source) continue;
+        var property = styleName(styles[s].slice(15));
+        if (!property) continue; // render.go reported it; the kernel simply does not write it
+        var programKey = "$" + source;
+        if (!(programKey in cache)) { try { cache[programKey] = parse(lex(source)); } catch (e) { cache[programKey] = null; } }
+        if (!cache[programKey]) continue;
+        (function (attribute, name, program) {
+          guarded(el, attribute, function () { writeStyle(el, name, run(program, scopeFor(el))); });
+        })(styles[s], property, cache[programKey]);
       }
     });
     // class → toggle classes from an expression. Every shape the grammar allows is accepted, so

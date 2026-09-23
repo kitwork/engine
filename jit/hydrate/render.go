@@ -85,11 +85,45 @@ const (
 // Expressions use single-quoted string literals, so the value never contains a double quote.
 // An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4); its modifiers are
 // checked by checkEventModifiers, since the kernel disables a handler it cannot make sense of.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="([^"]*)"`)
 
 // The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
 // → filter → prevent → stop → timing → once. The author may write them in any order; the server
 // names a modifier the kernel would refuse, so the mistake is seen at render, not lost in silence.
+// styleAttrRe finds an authored style directive so its PROPERTY can be checked; the expression
+// itself rides the ordinary directive verification.
+var styleAttrRe = regexp.MustCompile(`data-kit-style:([-a-zA-Z0-9_]+)="[^"]*"`)
+
+// styleBlockedProperty holds the property names a value can escape through: three can carry script
+// in some engines, and css-text would let one binding rewrite the whole declaration.
+var styleBlockedProperty = map[string]bool{"css-text": true, "csstext": true, "behavior": true, "-moz-binding": true}
+
+var stylePlainPropertyRe = regexp.MustCompile(`^-?[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`)
+var styleCustomPropertyRe = regexp.MustCompile(`^--[A-Za-z_][A-Za-z0-9_-]*$`)
+var styleReservedCustomRe = regexp.MustCompile(`(?i)^--(?:kit|kitwork)-`)
+
+// stylePropertyError reports why the kernel will not write this property, or nil when it will.
+// Custom properties are allowed — a Kitwork site's colours live in them — except the engine's own
+// --kit-/--kitwork- namespace, which the runtime writes and must be able to trust.
+func stylePropertyError(property string) error {
+	if strings.HasPrefix(property, "--") {
+		if !styleCustomPropertyRe.MatchString(property) {
+			return fmt.Errorf("data-kit-style:%s is not a custom property name (--name, letters, digits, dash, underscore)", property)
+		}
+		if styleReservedCustomRe.MatchString(property) {
+			return fmt.Errorf("data-kit-style:%s writes the engine's own namespace — pick a name of your own", property)
+		}
+		return nil
+	}
+	if !stylePlainPropertyRe.MatchString(property) {
+		return fmt.Errorf("data-kit-style:%s is not a CSS property name (lower case, digits and dashes)", property)
+	}
+	if styleBlockedProperty[property] {
+		return fmt.Errorf("data-kit-style:%s is refused: a value could escape the declaration through it", property)
+	}
+	return nil
+}
+
 var eventTypes = map[string]bool{"click": true, "dblclick": true, "submit": true, "input": true, "change": true, "keydown": true, "keyup": true, "pointerdown": true, "pointerup": true, "focusin": true, "focusout": true}
 var outsideEventTypes = map[string]bool{"click": true, "dblclick": true, "pointerdown": true, "pointerup": true, "focusin": true}
 var timingModifierRe = regexp.MustCompile(`^(debounce|throttle)\(([0-9]+)\)$`)
@@ -149,7 +183,7 @@ func checkEventModifiers(directive string) error {
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
@@ -192,6 +226,14 @@ func Render(html string) string {
 			fmt.Printf("[hydrate] class names must be written out in full — the CSS JIT cannot emit a "+
 				"name built with '+', so this rule is never generated. Use a conditional between "+
 				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s\n", m[0])
+		}
+	}
+	// A style directive names a CSS property in the attribute. The kernel refuses to write one it
+	// cannot vouch for and says nothing further, so say it HERE, next to the markup, where the
+	// author can see which property was refused and why.
+	for _, m := range styleAttrRe.FindAllStringSubmatch(html, -1) {
+		if err := stylePropertyError(m[1]); err != nil {
+			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
 		}
 	}
 	// A seed's value is a state target, not an expression; name a malformed one at render, as the

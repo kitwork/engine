@@ -9,7 +9,7 @@
  * data-[state=…] / group-data-[…] variants, so there is no stylesheet to ship:
  *
  *   <body data-kit-component="sidebar" data-kit-alias="$sidebar"
- *         data-kit-bind="{ 'data-state': status, 'data-open': drawer }">
+ *         data-kit-bind:data-state="status" data-kit-bind:data-open="drawer">
  *     <button data-kit-click="cycle()">…</button>          expanded ⇄ collapsed
  *     <button data-kit-click="toggle()">…</button>          hidden  ⇄ expanded
  *     <button data-kit-click="openDrawer()" class="lg:hidden">…</button>
@@ -58,18 +58,16 @@ var sidebarDef = {
   closeDrawer: function () { this.drawer = false; },
   toggleDrawer: function () { this.drawer = !this.drawer; },
 
-  // open()/close() name the DRAWER, which reads naturally in markup on a mobile control but is
-  // ambiguous beside the rail methods. Both spellings are kept: the explicit ones for new markup,
-  // these for what already ships.
-  open: function () { this.drawer = true; },
-  close: function () { this.drawer = false; },
-
   // Convenience predicates, so markup can ask instead of comparing strings:
   //   data-kit-show="isHidden()"   rather than   data-kit-show="status === 'hidden'"
   isExpanded: function () { return this.status === "expanded"; },
   isCollapsed: function () { return this.status === "collapsed"; },
   isHidden: function () { return this.status === "hidden"; }
 };
+
+// ACCESSIBILITY, stated so a page can hold up its end: the component owns state only. The markup
+// declares what that state MEANS — aria-expanded on the rail control, aria-controls pointing at the
+// panel, and for the mobile drawer a focus trap is the platform's job (<dialog>) or the page's.
 
 window.kit.component("sidebar", sidebarDef);
 window.kit.component("sidebar@v1.0.0", sidebarDef);
