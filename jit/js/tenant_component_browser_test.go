@@ -494,3 +494,78 @@ func TestBrowserCatalogueComponentsHoldTheirContract(t *testing.T) {
 	}
 	runKernelPage(t, browser, page, scanModules(page, nil))
 }
+
+// Key combinations in the event grammar: data-kit-keydown:mod+k="…". `mod` is Control on Windows
+// and Linux, Command on macOS — exactly one of them — and every modifier the author did NOT name
+// must be off, so mod+k and mod+shift+k can mean two different things on one page.
+func TestBrowserKeyCombinationModifier(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping key combination browser proof in short mode")
+	}
+	browser := findHeadlessBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+	page := `<!doctype html>
+<html lang="en" data-kit-app="keys"><head><meta charset="utf-8"><title>keys</title></head><body>
+  <section data-kit-scope="palette: 0, wide: 0, saved: 0, typed: 0">
+    <b id="palette" data-kit-text="palette"></b>
+    <b id="wide" data-kit-text="wide"></b>
+    <b id="saved" data-kit-text="saved"></b>
+    <b id="typed" data-kit-text="typed"></b>
+    <input id="field"
+      data-kit-keydown:mod+k:window:prevent="palette = palette + 1"
+      data-kit-keydown:mod+shift+k:window="wide = wide + 1"
+      data-kit-keydown:mod+enter:window="saved = saved + 1"
+      data-kit-keydown:window="typed = typed + 1">
+  </section>
+  <script src="/kit.js"></script>
+  <script>
+  (async function () {
+    var root = document.documentElement;
+    function fail(m) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", m); throw new Error(m); }
+    function assert(c, m) { if (!c) fail(m); }
+    function tick() { return new Promise(function (r) { setTimeout(r, 25); }); }
+    // A real key press lands on the focused element and bubbles up through document, which is
+    // where the kernel listens; dispatching straight at window would reach nobody.
+    function press(init) {
+      var e = new KeyboardEvent("keydown", Object.assign({ key: "k", bubbles: true, cancelable: true }, init));
+      document.getElementById("field").dispatchEvent(e);
+      return e;
+    }
+    var read = function (id) { return document.getElementById(id).textContent; };
+    await tick();
+
+    var ctrl = press({ ctrlKey: true }); await tick();
+    assert(read("palette") === "1", "mod+k must fire on Ctrl+K, got " + read("palette"));
+    assert(ctrl.defaultPrevented === true, ":prevent must still run after the filter");
+    press({ metaKey: true }); await tick();
+    assert(read("palette") === "2", "mod+k must fire on Cmd+K too, got " + read("palette"));
+
+    // every modifier not named must be off
+    press({ ctrlKey: true, metaKey: true }); await tick();
+    press({ ctrlKey: true, altKey: true }); await tick();
+    press({}); await tick();
+    press({ ctrlKey: true, repeat: true }); await tick();
+    press({ ctrlKey: true, isComposing: true }); await tick();
+    assert(read("palette") === "2", "Ctrl+Cmd, Alt, a bare k, a repeat and an IME composition must all be refused (" + read("palette") + ")");
+
+    // mod+shift+k is its own shortcut, not a looser mod+k
+    press({ ctrlKey: true, shiftKey: true }); await tick();
+    assert(read("wide") === "1", "mod+shift+k must fire on Ctrl+Shift+K");
+    assert(read("palette") === "2", "mod+k must NOT fire when shift is held — that is a different shortcut");
+
+    // a named key other than a letter
+    var enter = new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true });
+    document.getElementById("field").dispatchEvent(enter); await tick();
+    assert(read("saved") === "1", "mod+enter must fire on Ctrl+Enter");
+
+    // a handler with no key filter still hears everything, so the filter is what narrows it
+    assert(Number(read("typed")) >= 8, "the unfiltered handler should have counted every press, got " + read("typed"));
+
+    root.setAttribute("data-kit-test", "passed");
+  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  </script>
+</body></html>`
+	runKernelPage(t, browser, page, nil)
+}

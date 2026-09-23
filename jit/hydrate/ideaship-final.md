@@ -130,7 +130,7 @@ Tác giả viết thứ tự nào cũng được; runtime luôn chạy theo:
 | # | Nhóm | Modifier | Việc |
 | :-: | :--- | :--- | :--- |
 | 1 | Target | `:window` `:document` | Nghe ở đâu — không cần focus (Escape trên `<div>`) |
-| 2 | **Filter** | `:outside` `:escape` `:enter` `:self` | Điều kiện (`:self` = event rơi đúng lên thẻ, không phải con). FAIL → **dừng, event KHÔNG bị nuốt** |
+| 2 | **Filter** | `:outside` `:escape` `:enter` `:self` `:<tổ hợp phím>` | Điều kiện (`:self` = event rơi đúng lên thẻ, không phải con). FAIL → **dừng, event KHÔNG bị nuốt** |
 | 3 | Prevent | `:prevent` | `preventDefault()` |
 | 4 | Stop | `:stop` | `stopPropagation()` — kết thúc việc leo lên tổ tiên |
 | 5 | Timing | `:debounce(n)` \| `:throttle(n)` | Hoãn tới lúc lặng / chạy mép đầu rồi nghỉ; một handler một trong hai |
@@ -138,6 +138,8 @@ Tác giả viết thứ tự nào cũng được; runtime luôn chạy theo:
 | 7 | Execute | | Chạy biểu thức |
 
 Ràng buộc: `:escape/:enter` chỉ `keydown/keyup`, không cùng lúc; `:outside` chỉ `click dblclick pointerdown pointerup focusin`; `:window`/`:document` một trong hai; `:self` không đi với `:outside`/`:window`/`:document`; `n` = 1–60000 ms. Server (`render.go`) và scanner báo lỗi tại render; kernel vô hiệu handler sai thay vì bắn nhầm. ✅ 21/09; `:self` vào cả hai runtime 22/09 (B5).
+
+**Tổ hợp phím (23/09)** — `data-kit-keydown:mod+k="open()"`. `mod` = Control trên Windows/Linux, Command trên macOS, **đúng MỘT trong hai** (Ctrl+Cmd không phải phím tắt). Modifier tác giả KHÔNG nêu thì phải TẮT, nên `mod+k` và `mod+shift+k` là hai phím tắt khác nhau trên cùng một trang. Từ chối: phím giữ (`repeat`), bộ gõ đang dựng chữ (`isComposing`, `keyCode 229`). Cú pháp: `[mod|ctrl|meta|shift|alt]+…+<phím>` — một phím, tên phím so sánh không phân biệt hoa thường với `event.key` (`escape` và `space` có tên riêng). Chỉ `keydown/keyup`; không đi cùng `:escape`/`:enter`; `mod` không trộn với `ctrl`/`meta`. Sai cú pháp → `render.go` gọi tên lỗi tại chỗ và kernel tắt handler thay vì bắn nhầm.
 
 ---
 

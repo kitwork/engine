@@ -1425,9 +1425,45 @@
   // writes); for an event the delay is the :debounce(n) modifier.
   var EVENT_TYPES = ["click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout"];
   var KEY_FILTER = { escape: function (e) { return e.key === "Escape" || e.key === "Esc" || e.keyCode === 27; }, enter: function (e) { return e.key === "Enter" || e.keyCode === 13; } };
+  // ---- key combinations: data-kit-keydown:mod+k="open()" (ideaship-final §4) ----
+  // `mod` is Control on Windows and Linux, Command on macOS — EXACTLY one of the two, so
+  // Ctrl+Cmd+K is not the shortcut. Every modifier the author did NOT name must be off, which is
+  // what makes a combination predictable: mod+k does not also fire on mod+shift+k, so a page can
+  // give those two different meanings.
+  //
+  // A repeat (a held key), an IME composition and the legacy keyCode 229 are refused: they are the
+  // browser assembling text, not a person pressing a shortcut. The key itself is compared
+  // case-insensitively against event.key, so `mod+k` matches whatever the layout produces for K.
+  var COMBO_FLAGS = { ctrl: "ctrlKey", meta: "metaKey", shift: "shiftKey", alt: "altKey" };
+  function parseCombo(source) {
+    var parts = source.split("+");
+    var combo = { mod: false, ctrl: false, meta: false, shift: false, alt: false, key: "" };
+    for (var i = 0; i < parts.length; i++) {
+      var part = parts[i];
+      if (part === "mod") combo.mod = true;
+      else if (part in COMBO_FLAGS) combo[part] = true;
+      else if (combo.key || !part) return null; // one key, and it must be there
+      else combo.key = part;
+    }
+    return combo.key ? combo : null;
+  }
+  function comboMatches(combo, e) {
+    if (!e || e.repeat || e.isComposing || e.keyCode === 229) return false;
+    if (combo.mod) {
+      if (!!e.ctrlKey === !!e.metaKey) return false; // exactly one of them
+    } else {
+      if (!!e.ctrlKey !== combo.ctrl || !!e.metaKey !== combo.meta) return false;
+    }
+    if (!!e.shiftKey !== combo.shift || !!e.altKey !== combo.alt) return false;
+    var key = String(e.key || "").toLowerCase();
+    if (combo.key === "escape") return key === "escape" || key === "esc" || e.keyCode === 27;
+    if (combo.key === "space") return key === " " || key === "spacebar" || e.keyCode === 32;
+    return key === combo.key;
+  }
+
   var OUTSIDE_TYPES = { click: true, dblclick: true, pointerdown: true, pointerup: true, focusin: true };
   function parseHandler(attr, type) {
-    var h = { attr: attr, type: type, target: "self", outside: false, self: false, key: "", prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
+    var h = { attr: attr, type: type, target: "self", outside: false, self: false, key: "", combo: null, prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
     var mods = attr.slice(("data-kit-" + type).length).split(":").slice(1);
     for (var i = 0; i < mods.length; i++) {
       var m = mods[i], timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(m);
@@ -1435,6 +1471,7 @@
       else if (m === "outside") h.outside = true;
       else if (m === "self") h.self = true;
       else if (m === "escape" || m === "enter") h.key = m;
+      else if (m.indexOf("+") > 0 && parseCombo(m)) h.combo = parseCombo(m);
       else if (m === "prevent") h.prevent = true;
       else if (m === "stop") h.stop = true;
       else if (m === "once") h.once = true;
@@ -1443,7 +1480,8 @@
     }
     // A modifier that cannot apply to this event disables the handler rather than misfiring: the
     // server's verify pass already named the mistake.
-    if (h.key && type !== "keydown" && type !== "keyup") h.valid = false;
+    if ((h.key || h.combo) && type !== "keydown" && type !== "keyup") h.valid = false;
+    if (h.key && h.combo) h.valid = false;
     if (h.outside && !OUTSIDE_TYPES[type]) h.valid = false;
     if (h.self && (h.outside || h.target !== "self")) h.valid = false;
     if (h.debounce && h.throttle) h.valid = false;
@@ -1477,6 +1515,7 @@
     var st = state(el);
     if (st.once && st.once[h.attr]) return false;
     if (h.key && !KEY_FILTER[h.key](e)) return false;
+    if (h.combo && !comboMatches(h.combo, e)) return false;
     if (h.self && e.target !== el) return false;
     if (h.prevent && e.preventDefault) e.preventDefault();
     if (h.stop && e.stopPropagation) e.stopPropagation();

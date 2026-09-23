@@ -85,11 +85,55 @@ const (
 // Expressions use single-quoted string literals, so the value never contains a double quote.
 // An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4); its modifiers are
 // checked by checkEventModifiers, since the kernel disables a handler it cannot make sense of.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="([^"]*)"`)
 
 // The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
 // → filter → prevent → stop → timing → once. The author may write them in any order; the server
 // names a modifier the kernel would refuse, so the mistake is seen at render, not lost in silence.
+// comboModifierRe matches a key-combination modifier — `mod+k`, `mod+shift+p`, `alt+enter`. The
+// `+` is what tells it apart from an ordinary modifier like :prevent.
+var comboModifierRe = regexp.MustCompile(`^[a-z0-9]+(?:\+[a-z0-9]+)+$`)
+
+// comboModifierKeys are the modifier words a combination may name. "mod" is Control on Windows and
+// Linux and Command on macOS — one grammar for both, since a shortcut means the same thing to the
+// person pressing it.
+var comboModifierKeys = map[string]bool{"mod": true, "ctrl": true, "meta": true, "shift": true, "alt": true}
+
+// comboModifierError says why a key combination will not run, or nil when it will. The kernel
+// refuses a handler it cannot make sense of rather than misfiring, so the mistake is named here,
+// next to the markup.
+func comboModifierError(modifier, event string) error {
+	if event != "keydown" && event != "keyup" {
+		return fmt.Errorf(":%s is a key combination, so it belongs on keydown/keyup, not %s", modifier, event)
+	}
+	parts := strings.Split(modifier, "+")
+	key := ""
+	seen := map[string]bool{}
+	for _, part := range parts {
+		if part == "" {
+			return fmt.Errorf(":%s has an empty part — write it as mod+k", modifier)
+		}
+		if comboModifierKeys[part] {
+			if seen[part] {
+				return fmt.Errorf(":%s repeats %s", modifier, part)
+			}
+			seen[part] = true
+			continue
+		}
+		if key != "" {
+			return fmt.Errorf(":%s names two keys (%s and %s) — a combination presses one", modifier, key, part)
+		}
+		key = part
+	}
+	if key == "" {
+		return fmt.Errorf(":%s names no key — write it as mod+k", modifier)
+	}
+	if seen["mod"] && (seen["ctrl"] || seen["meta"]) {
+		return fmt.Errorf(":%s mixes mod with ctrl/meta — mod already means whichever one this platform uses", modifier)
+	}
+	return nil
+}
+
 // styleAttrRe finds an authored style directive so its PROPERTY can be checked; the expression
 // itself rides the ordinary directive verification.
 var styleAttrRe = regexp.MustCompile(`data-kit-style:([-a-zA-Z0-9_]+)="[^"]*"`)
@@ -149,11 +193,21 @@ func checkEventModifiers(directive string) error {
 			return fmt.Errorf("modifier :%s is repeated", name)
 		}
 		seen[name] = true
+		if combo := comboModifierRe.FindStringSubmatch(name); combo != nil {
+			if err := comboModifierError(name, event); err != nil {
+				return err
+			}
+			seen["combo"] = true
+			continue
+		}
 		switch name {
 		case "window", "document", "outside", "self", "escape", "enter", "prevent", "stop", "once", "debounce", "throttle":
 		default:
 			return fmt.Errorf("unknown modifier :%s (the pipeline is :window :document → :outside :escape :enter :self → :prevent → :stop → :debounce(n) :throttle(n) → :once)", name)
 		}
+	}
+	if seen["combo"] && (seen["escape"] || seen["enter"]) {
+		return fmt.Errorf("a key combination is already the filter — :escape and :enter cannot join it")
 	}
 	if (seen["escape"] || seen["enter"]) && event != "keydown" && event != "keyup" {
 		return fmt.Errorf(":escape and :enter filter a key, so they belong on keydown/keyup, not %s", event)
@@ -183,7 +237,7 @@ func checkEventModifiers(directive string) error {
 // (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
 // and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
 // remember/api/live modules ship.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z]+(?:\([0-9]+\))?)*)="`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
