@@ -40,7 +40,21 @@ var bootJS string
 // Because the engine serves BOTH this runtime and the Go compiler from one codebase, the two ends
 // version together — grammar sync is by construction, not by discipline.
 func Runtime() string {
-	return strings.Join([]string{
+	return RuntimeWith("")
+}
+
+// RuntimeWith is the runtime plus the page's own modules — components and capabilities — and the
+// modules go in BEFORE the boot shim, on purpose.
+//
+// boot.js starts the kernel, and the kernel's first pass is a real paint: it evaluates every
+// expression on the page. A component that registers after that pass misses it, so for one frame
+// each of its bindings is read against a boundary with no scope — and a name nothing declares
+// reads as 0. The page shows "0" where a label belongs, and an `src` bound that way makes the
+// browser fetch a URL named "0" before the correction arrives. Serving the modules first costs
+// nothing and makes boot.js's own promise — "all modules are registered before the kernel starts"
+// — true.
+func RuntimeWith(modules string) string {
+	parts := []string{
 		bridgeJS,
 		kernelJS,
 		nativeJS,
@@ -49,8 +63,11 @@ func Runtime() string {
 		componentLoaderJS,
 		morphJS,
 		driveJS,
-		bootJS,
-	}, "\n")
+	}
+	if strings.TrimSpace(modules) != "" {
+		parts = append(parts, modules)
+	}
+	return strings.Join(append(parts, bootJS), "\n")
 }
 
 // RuntimePath is the built-in, always-on route the runtime is served at, and what Render points

@@ -301,7 +301,7 @@ func RuntimeJS(names []string) string {
 	if modules == "" {
 		return ""
 	}
-	return strings.TrimSpace(hydrate.Runtime()) + "\n" + modules
+	return hydrate.RuntimeWith(modules)
 }
 
 // SiteRuntimeJS is the whole-tenant form: the union of modules used across many templates (for a

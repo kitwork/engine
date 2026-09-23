@@ -75,10 +75,7 @@ func hydrateAsset(keys []string, site *siteComponents) ([]byte, string) {
 		return asset.body, asset.etag
 	}
 
-	source := hydrate.Runtime()
-	if modules := jitjs.ModulesJSFor(keys, siteOrNil(site)); modules != "" {
-		source += "\n" + modules
-	}
+	source := hydrate.RuntimeWith(jitjs.ModulesJSFor(keys, siteOrNil(site)))
 	if !AllowLocal {
 		// The minifier returns the readable input unchanged on a parse error.
 		source = minifier.JS(source)
