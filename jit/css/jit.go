@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	htmlattr "github.com/kitwork/engine/jit/internal/htmlattr"
 	"sync"
 
 	"github.com/kitwork/engine/jit/hydrate"
@@ -42,7 +44,7 @@ func collectClasses(html string, seen map[string]bool, classes *[]string) {
 		}
 	}
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
-		for _, c := range strings.Fields(m[1]) {
+		for _, c := range htmlattr.ClassTokens(m[1]) {
 			add(c)
 		}
 	}

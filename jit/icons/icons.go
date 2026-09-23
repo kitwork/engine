@@ -24,6 +24,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	htmlattr "github.com/kitwork/engine/jit/internal/htmlattr"
 	"sync"
 
 	"github.com/kitwork/engine/jit/hydrate"
@@ -276,7 +278,7 @@ func scan(html string) []string {
 		out = append(out, name)
 	}
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
-		for _, tok := range strings.Fields(m[1]) {
+		for _, tok := range htmlattr.ClassTokens(m[1]) {
 			add(tok)
 		}
 	}

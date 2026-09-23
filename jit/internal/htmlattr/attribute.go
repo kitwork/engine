@@ -296,3 +296,24 @@ func asciiAlphaNumeric(character byte) bool {
 		character >= 'A' && character <= 'Z' ||
 		character >= '0' && character <= '9'
 }
+
+// ClassTokens splits a class attribute into the names a JIT engine should emit for.
+//
+// A template branch inside the attribute is ordinary authoring —
+//
+//	class="fixed left-0 {{ if macos }}right-0{{ else }}right-36{{ end }}"
+//
+// — but splitting on whitespace alone yields the token "}}right-0{{", which matches no utility and
+// no icon. The class is in the markup, the page renders it, and the stylesheet simply does not have
+// it: the styling disappears with no error anywhere. Worse, only the names TOUCHING a delimiter are
+// lost, so the attribute keeps working for every other class and the gap reads as a design mistake
+// rather than a missing rule.
+//
+// Both branches are collected, deliberately — the same rule data-kit-class already follows: a
+// stylesheet must hold every branch, not whichever one this request happened to take. The template
+// keywords left behind (if, else, end, and the tested value) match nothing, as they already did.
+func ClassTokens(value string) []string {
+	return strings.Fields(templateDelimiters.Replace(value))
+}
+
+var templateDelimiters = strings.NewReplacer("{{", " ", "}}", " ")

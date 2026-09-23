@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	htmlattr "github.com/kitwork/engine/jit/internal/htmlattr"
 	"sync"
 
 	css "github.com/kitwork/engine/jit/css"
@@ -245,7 +247,7 @@ func scan(html string) []string {
 	seen := make(map[string]bool)
 	var out []string
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
-		for _, tok := range strings.Fields(m[1]) {
+		for _, tok := range htmlattr.ClassTokens(m[1]) {
 			if !strings.HasPrefix(tok, classPrefix) {
 				continue
 			}
