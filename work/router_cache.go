@@ -314,6 +314,7 @@ func serveCached(
 		dynamic.writeHeaders(w)
 		dynamic.writeCookies(w)
 	}
+	allowThemePrepaint(w.Header(), body)
 	w.Header().Set("X-Kitwork-Cache", "hit")
 	if requestNotModified(request, w.Header()) {
 		w.WriteHeader(http.StatusNotModified)

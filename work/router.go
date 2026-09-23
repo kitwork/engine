@@ -229,8 +229,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.Write(b)
 	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		html := r.response.toBytes()
+		allowThemePrepaint(w.Header(), html)
 		w.WriteHeader(r.response.Code())
-		w.Write(r.response.toBytes())
+		w.Write(html)
 	case "error":
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
