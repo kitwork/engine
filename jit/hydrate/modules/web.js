@@ -301,23 +301,48 @@
     }
   };
 
+  // Three modes, the same three the server's pre-paint already knows: "light", "dark", and
+  // "system" — which is the DEFAULT and means "follow prefers-color-scheme". The pre-paint script
+  // has read localStorage["theme"] this way since it was written; the kernel only understood two of
+  // them, so a page could ask the server for system and get no way to ask for it back.
   function themeMode() {
     try {
-      var saved = window.localStorage.getItem("theme");
+      var saved = String(window.localStorage.getItem("theme") || "").toLowerCase();
+      // Only the two explicit choices need reading: anything else — "system", an empty store, a
+      // value some other script left behind — means the same thing, follow the OS.
       if (saved === "light" || saved === "dark") return saved;
     } catch (_) { }
-    return document.documentElement.classList.contains("dark") ? "dark" : "light";
+    return "system";
   }
 
+  function systemTheme() {
+    try {
+      return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    } catch (_) {
+      return "light";
+    }
+  }
+
+  // What the page is actually painted as, right now — never "system".
   function resolvedTheme() {
     return document.documentElement.classList.contains("dark") ? "dark" : "light";
   }
 
+  function applyTheme(mode) {
+    var shown = mode === "system" ? systemTheme() : mode;
+    document.documentElement.classList.toggle("dark", shown === "dark");
+    try {
+      document.documentElement.setAttribute("data-theme", mode);
+      document.documentElement.style.colorScheme = shown;
+    } catch (_) { }
+    return shown;
+  }
+
   function setTheme(mode) {
     mode = String(mode || "").toLowerCase();
-    if (mode !== "light" && mode !== "dark") {
+    if (mode !== "light" && mode !== "dark" && mode !== "system") {
       throw kit.KitworkError(
-        "Theme mode must be light or dark",
+        "Theme mode must be light, dark or system",
         "INVALID_ARGUMENT",
         "theme",
         "set",
@@ -327,7 +352,7 @@
     try {
       window.localStorage.setItem("theme", mode);
     } catch (_) { }
-    document.documentElement.classList.toggle("dark", mode === "dark");
+    applyTheme(mode);
     return mode;
   }
 
@@ -335,6 +360,11 @@
     set: setTheme,
     toggle: function () {
       return setTheme(resolvedTheme() === "dark" ? "light" : "dark");
+    },
+    // Hand the choice back to the operating system. The stored value becomes "system", which is
+    // exactly what the pre-paint reads on the next load.
+    system: function () {
+      return setTheme("system");
     }
   };
   Object.defineProperties(theme, {

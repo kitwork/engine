@@ -12,7 +12,7 @@ var kit = window.kit;
 var services = kit.scope.kit;
 if (services === kit) throw new Error("markup received the trusted runtime root");
 if (typeof services.theme.toggle !== "function") throw new Error("kit.theme.toggle must be reachable in markup");
-if (services.theme.mode !== "light" || services.theme.resolved !== "light") throw new Error("kit.theme state missing");
+if (services.theme.mode !== "system" || services.theme.resolved !== "light") throw new Error("kit.theme state missing: " + services.theme.mode + "/" + services.theme.resolved);
 if (typeof services.clipboard.writeText !== "function" ||
     typeof services.clipboard.readText !== "function" ||
     typeof services.clipboard.copy !== "function") throw new Error("kit.clipboard service incomplete");

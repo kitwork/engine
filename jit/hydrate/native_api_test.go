@@ -162,7 +162,15 @@ window.location = global.location;
     throw new Error("web should not report native window controls as supported");
   }
 
-  if (kit.theme.mode !== "light") throw new Error("initial theme mode should follow the document");
+  // mode is the CHOICE, resolved is what is painted. With nothing stored, the choice is "system"
+  // and the paint follows prefers-color-scheme — the same three modes the server pre-paint reads.
+  if (kit.theme.mode !== "system") throw new Error("with nothing stored the choice is system, got " + kit.theme.mode);
+  if (kit.theme.resolved !== "light" && kit.theme.resolved !== "dark") {
+    throw new Error("resolved must be a painted mode, got " + kit.theme.resolved);
+  }
+  if (kit.theme.system() !== "system" || kit.theme.mode !== "system") {
+    throw new Error("theme.system() should hand the choice back to the OS");
+  }
   if (kit.theme.set("dark") !== "dark" || kit.theme.mode !== "dark" || kit.theme.resolved !== "dark") {
     throw new Error("theme.set did not update mode/resolved state");
   }
