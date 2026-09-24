@@ -35,8 +35,8 @@ func TestSiblingSitesShareAppDatabaseUntilAppShutdown(t *testing.T) {
 		}
 	})
 
-	firstDB := (&KitWork{tenant: first}).Database().Connect(value.New(alias)).sqlDB
-	secondDB := (&KitWork{tenant: second}).Database().Connect(value.New(alias)).sqlDB
+	firstDB := (&KitWork{tenant: first}).Database().Connection(value.New(alias)).sqlDB
+	secondDB := (&KitWork{tenant: second}).Database().Connection(value.New(alias)).sqlDB
 	if firstDB == nil || firstDB != secondDB {
 		t.Fatal("sibling sites did not share the app-owned configured database")
 	}

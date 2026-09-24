@@ -22,7 +22,9 @@ func (t *Tenant) serveHydrateIf(w http.ResponseWriter, r *http.Request) bool {
 	}
 	site := t.renderPlan().SiteComponents()
 	keys := runtimeComponentKeys(r.URL.Query().Get("components"), site)
-	body, etag := hydrateAsset(keys, site)
+	// Drive is a site-wide choice; a site that never asked for it has no use for the navigator or
+	// the morph it drives, so the asset simply does not contain them.
+	body, etag := hydrateAsset(keys, site, t.renderPlan().Drive())
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Cache-Control", "public, max-age=300")
 	if r.Header.Get("If-None-Match") == etag {
@@ -62,7 +64,7 @@ func siteOrNil(site *siteComponents) jitjs.Site {
 	return site
 }
 
-func hydrateAsset(keys []string, site *siteComponents) ([]byte, string) {
+func hydrateAsset(keys []string, site *siteComponents, drive bool) ([]byte, string) {
 	mode := "min:"
 	if AllowLocal {
 		mode = "raw:"
@@ -70,12 +72,18 @@ func hydrateAsset(keys []string, site *siteComponents) ([]byte, string) {
 	// The site's content signature joins the cache key: one tenant's component can never be served
 	// from another tenant's entry, and editing a component invalidates only what contains it.
 	key := mode + site.Tag() + "|" + strings.Join(keys, ",")
+	if drive {
+		key += "|drive"
+	}
 	if cached, ok := runtimeAssetCache.Load(key); ok {
 		asset := cached.(runtimeAsset)
 		return asset.body, asset.etag
 	}
 
-	source := hydrate.RuntimeWith(jitjs.ModulesJSFor(keys, siteOrNil(site)))
+	source := hydrate.RuntimeFor(hydrate.RuntimeParts{
+		Modules: jitjs.ModulesJSFor(keys, siteOrNil(site)),
+		Drive:   drive,
+	})
 	if !AllowLocal {
 		// The minifier returns the readable input unchanged on a parse error.
 		source = minifier.JS(source)

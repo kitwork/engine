@@ -187,6 +187,12 @@ func (d *Database) Kitdb(args ...value.Value) value.Value {
 	return newDbProxy(d.tenant, d.requestScope, "kitdb", args...)
 }
 
+// Open is the storage-neutral name for opening an embedded KitDB file. Kitdb
+// remains as a compatibility spelling while application code migrates.
+func (d *Database) Open(args ...value.Value) value.Value {
+	return d.Kitdb(args...)
+}
+
 func bindStructDef(name string, source *StructDef, columns map[string]*ColumnSpec) *StructDef {
 	return bindStructDefWithID(name, "", source, columns)
 }

@@ -36,34 +36,41 @@ var bootJS string
 // boot. It is identical for every tenant and served at one cacheable RuntimePath.
 // Because the engine serves BOTH this runtime and the Go compiler from one codebase, the two ends
 // version together — grammar sync is by construction, not by discipline.
-func Runtime() string {
-	return RuntimeWith("")
+// RuntimeParts is what a particular page needs. The runtime is not one indivisible blob: a site
+// that never asked for Drive has no use for the navigator or the DOM morph it drives, and paying
+// for them on every page is the same waste as shipping a component nobody named.
+type RuntimeParts struct {
+	// Modules is the page's own components and capabilities, already composed by jit/js.
+	Modules string
+	// Drive ships the navigator and the DOM morph it drives — router.drive(). Measured 24/09 on the
+	// MINIFIED asset a visitor actually receives: 18,218 bytes gzip with it, 15,407 without, so it
+	// is 2,811 bytes on every page of a site that never asked. Nothing else calls kit.morph.
+	Drive bool
 }
 
-// RuntimeWith is the runtime plus the page's own modules — components and capabilities — and the
-// modules go in BEFORE the boot shim, on purpose.
-//
-// boot.js starts the kernel, and the kernel's first pass is a real paint: it evaluates every
-// expression on the page. A component that registers after that pass misses it, so for one frame
-// each of its bindings is read against a boundary with no scope — and a name nothing declares
-// reads as 0. The page shows "0" where a label belongs, and an `src` bound that way makes the
-// browser fetch a URL named "0" before the correction arrives. Serving the modules first costs
-// nothing and makes boot.js's own promise — "all modules are registered before the kernel starts"
-// — true.
-func RuntimeWith(modules string) string {
-	parts := []string{
+// Runtime is every part, which is what a test harness or the published package wants.
+func Runtime() string {
+	return RuntimeFor(RuntimeParts{Drive: true})
+}
+
+// RuntimeFor composes exactly the parts a page needs, in the one order that works: bridge and
+// kernel first, platform modules next, then the page's own modules, and boot LAST — a component
+// that registers after the first paint has missed it (see boot.js).
+func RuntimeFor(parts RuntimeParts) string {
+	pieces := []string{
 		bridgeJS,
 		kernelJS,
 		nativeJS,
 		storageJS,
 		webJS,
-		morphJS,
-		driveJS,
 	}
-	if strings.TrimSpace(modules) != "" {
-		parts = append(parts, modules)
+	if parts.Drive {
+		pieces = append(pieces, morphJS, driveJS)
 	}
-	return strings.Join(append(parts, bootJS), "\n")
+	if strings.TrimSpace(parts.Modules) != "" {
+		pieces = append(pieces, parts.Modules)
+	}
+	return strings.Join(append(pieces, bootJS), "\n")
 }
 
 // RuntimePath is the built-in, always-on route the runtime is served at, and what Render points

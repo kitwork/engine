@@ -150,7 +150,7 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if t.serveKitJSAssetIf(w, r) {
 		return
 	}
-	if serveHydrateIf(w, r) {
+	if t.serveHydrateIf(w, r) {
 		return
 	}
 	// /jitfonts/* — vendored woff2 served straight off the embedded FS.

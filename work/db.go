@@ -37,6 +37,7 @@ func (w *KitWork) Database() *Database {
 		tenant:       w.tenant,
 		requestScope: w.requestScope,
 		config:       &database.Config{},
+		alias:        "default",
 	}
 }
 
@@ -46,41 +47,123 @@ type Database struct {
 	config       *database.Config
 	sqlDB        *sql.DB
 	tx           *sql.Tx
+	alias        string
 
 	preset *database.Config
 }
 
-func (d *Database) Connection() *Database {
-	if d.sqlDB == nil {
-		connection, err := database.ResolveOwned("default")
-		if err != nil {
-			fmt.Printf("[DB] Failed to resolve default database: %v\n", err)
-			return d
-		}
-		if connection != nil {
-			d.sqlDB = connection
-			return d
-		}
-		if config, ok := database.Configs["default"]; ok {
-			d.sqlDB = d.tenant.lookupDatabase(&config)
-		}
+// Connection returns an independent handle for one host-declared alias. It
+// never mutates the database capability object, so several aliases can be used
+// safely in the same handler.
+func (d *Database) Connection(vals ...value.Value) *Database {
+	handle := d.clone()
+	alias, ok := databaseAlias(vals)
+	if !ok {
+		fmt.Println("[DB] database.connection expects zero arguments or one alias string")
+		return handle
 	}
-	return d
+	handle.alias = alias
+	handle.preset = nil
+	handle.config = &database.Config{Alias: alias}
+	connection, err := handle.resolveAlias(alias)
+	if err != nil {
+		fmt.Printf("[DB] Failed to resolve database '%s': %v\n", alias, err)
+		return handle
+	}
+	handle.sqlDB = connection
+	return handle
 }
 
-func (d *Database) Connected() *Database {
-	return d.Connection()
+// Connected reports whether a host-declared alias can be resolved. Resolving a
+// lazy owned KitDB root may prepare that host-owned database.
+func (d *Database) Connected(vals ...value.Value) bool {
+	alias, ok := databaseAlias(vals)
+	if !ok {
+		return false
+	}
+	connection, err := d.resolveAlias(alias)
+	return err == nil && connection != nil
 }
 
+// Connect is reserved for a future policy-bounded external connector. Alias
+// lookup belongs to Connection; accepting an alias here would make the two
+// APIs ambiguous again. External connections must currently be declared by
+// the host with app.connect/app.postgresql and retrieved with Connection.
 func (d *Database) Connect(vals ...value.Value) *Database {
-	if len(vals) == 0 && d.sqlDB != nil {
-		return d
+	handle := d.clone()
+	if len(vals) == 1 && vals[0].K == value.String {
+		fmt.Println("[DB] database.connect no longer accepts an alias; use database.connection(alias)")
+		return handle
 	}
+	fmt.Println("[DB] database.connect external configuration is not enabled for tenant code; declare app.connect(...) and use database.connection(alias)")
+	return handle
+}
 
-	if len(vals) == 0 && d.preset != nil {
+func (d *Database) clone() *Database {
+	if d == nil {
+		return &Database{config: &database.Config{}}
+	}
+	return &Database{
+		tenant:       d.tenant,
+		requestScope: d.requestScope,
+		config:       d.config,
+		preset:       d.preset,
+		alias:        d.alias,
+	}
+}
+
+func databaseAlias(vals []value.Value) (string, bool) {
+	if len(vals) == 0 {
+		return "default", true
+	}
+	if len(vals) != 1 || vals[0].K != value.String {
+		return "", false
+	}
+	alias := strings.TrimSpace(vals[0].Text())
+	if alias == "" {
+		alias = "default"
+	}
+	return alias, true
+}
+
+func (d *Database) resolveAlias(alias string) (*sql.DB, error) {
+	connection, err := database.ResolveOwned(alias)
+	if err != nil {
+		return nil, err
+	}
+	configured, external := database.Configs[alias]
+	if connection != nil && external {
+		return nil, fmt.Errorf("connection alias %q is ambiguous between an owned KitDB and an external database", alias)
+	}
+	if connection != nil {
+		return connection, nil
+	}
+	if external {
+		if d.tenant == nil {
+			return nil, fmt.Errorf("tenant database runtime is unavailable")
+		}
+		if connection := d.tenant.lookupDatabase(&configured); connection != nil {
+			return connection, nil
+		}
+		return d.tenant.openDatabase(&configured)
+	}
+	if alias == "default" {
+		return nil, fmt.Errorf("default connection is not configured; use sqlite for local data or declare alias %q", alias)
+	}
+	return nil, fmt.Errorf("connection alias %q is not configured", alias)
+}
+
+func (d *Database) ensureConnection() *sql.DB {
+	if d == nil {
+		return nil
+	}
+	if d.sqlDB != nil {
+		return d.sqlDB
+	}
+	if d.preset != nil {
 		if conn := d.tenant.lookupDatabase(d.preset); conn != nil {
 			d.sqlDB = conn
-			return d
+			return d.sqlDB
 		}
 		if t := strings.ToLower(d.preset.Type); t == "sqlite" || t == "sqlite3" {
 			// Local SQLite files need their parent .data/ folder to exist before
@@ -92,58 +175,26 @@ func (d *Database) Connect(vals ...value.Value) *Database {
 		conn, err := d.tenant.openDatabase(d.preset)
 		if err != nil {
 			fmt.Printf("[DB] Failed to connect %s: %v\n", d.preset.Alias, err)
-			return d
+			return nil
 		}
 		d.sqlDB = conn
-		return d
+		return d.sqlDB
 	}
-
-	alias := "default"
-	switch {
-	case len(vals) == 0:
-	case len(vals) == 1 && vals[0].K == value.String:
-		alias = vals[0].String()
-	default:
-		// The public contract accepts only a host-declared alias. Letting tenant code submit
-		// type/host/user/password here bypasses connection policy and turns the database API into
-		// an unrestricted network dialer.
-		fmt.Println("[DB] Dynamic connection configuration is not allowed; configure an alias in the host manifest")
-		return d
-	}
-
+	alias := d.alias
 	if alias == "" {
 		alias = "default"
 	}
-
-	connection, resolveErr := database.ResolveOwned(alias)
-	if resolveErr != nil {
-		fmt.Printf("[DB] Failed to resolve database '%s': %v\n", alias, resolveErr)
-	} else if connection != nil {
-		d.sqlDB = connection
-	} else if dbCfg, ok := database.Configs[alias]; ok {
-		if dbConn := d.tenant.lookupDatabase(&dbCfg); dbConn != nil {
-			d.sqlDB = dbConn
-		} else {
-			dbConn, err := d.tenant.openDatabase(&dbCfg)
-			if err != nil {
-				fmt.Printf("[DB] Failed to connect to configured database '%s': %v\n", alias, err)
-			} else {
-				d.sqlDB = dbConn
-			}
-		}
-	} else if alias == "default" {
-		// Storage choice is part of the app contract. Creating a local SQLite database here
-		// made a missing shared/external connection look like a healthy but empty database.
-		// Site-local storage remains available through the explicit `sqlite` API.
-		fmt.Println("[DB] Default connection is not configured; use sqlite for local data or configure database alias 'default'")
-	} else {
-		fmt.Printf("Database connection with alias '%s' not found\n", alias)
+	connection, err := d.resolveAlias(alias)
+	if err != nil {
+		fmt.Printf("[DB] Failed to resolve database '%s': %v\n", alias, err)
+		return nil
 	}
-	return d
+	d.sqlDB = connection
+	return d.sqlDB
 }
 
 func (d *Database) db() *sql.DB {
-	return d.Connect().sqlDB
+	return d.ensureConnection()
 }
 
 func (d *Database) Config(config *database.Config) *Database {
@@ -256,6 +307,7 @@ func (d *Database) Atomic(args ...value.Value) value.Value {
 		config:       d.config,
 		sqlDB:        d.sqlDB,
 		tx:           tx,
+		alias:        d.alias,
 	}
 	txVal := value.New(txDb)
 

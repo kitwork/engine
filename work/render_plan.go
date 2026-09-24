@@ -23,7 +23,19 @@ type RenderPlan struct {
 	renderers      map[string]*plannedRenderer
 	kitJSAssets    *kitjavascript.AssetStore
 	siteComponents *siteComponents
+	drive          bool
 	closed         bool
+}
+
+// Drive says whether this generation asked for Kitwork Drive (router.drive()). The /kit.js route
+// reads it to decide whether the navigator and morph belong in the asset at all.
+func (p *RenderPlan) Drive() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.drive
 }
 
 // siteComponentsOrNil hands render a typed nil-free value: a tenant owning no component passes no
@@ -87,6 +99,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 		base:           base,
 		snapshot:       snapshot,
 		siteComponents: siteComponents,
+		drive:          presentation.Drive,
 		renderers:      make(map[string]*plannedRenderer),
 	}
 	complete := false
