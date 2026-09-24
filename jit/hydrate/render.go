@@ -81,21 +81,23 @@ const RuntimePath = "/kit.js"
 // The root marker is how a page opts into hydrate. Only when it is present does Render touch the
 // page — so static pages (and demos that show data-* as example text) are never affected.
 //
-// PREFIX CONVENTION: data-kit-* is the AUTHOR-written form — what a developer types, always
-// SOURCE, and the only form the kernel reads for a directive or a boundary. data-kitwork-* is
-// what the ENGINE puts on the wire: the data-kitwork-jit=* injected markers, the jitjs verbs
-// (action/target/trigger/drag) and the kernel-owned overlays (data-kitwork-ui). A precompiled IR
-// directive (data-kitwork-text="[JSON]") was a reserved wire mode the engine never emitted; the
-// kernel no longer decodes it (ideaship-final §9), so the long prefix on a directive is inert. The
-// app root is the one place the full prefix is also permitted as a branding anchor
-// (`<html data-kitwork-app>`), though `data-kit-app` is equally fine and is what the reference
-// tenant uses.
-const (
-	rootMarker      = "data-kitwork-hydrate"
-	rootMarkerShort = "data-kit-hydrate"
-	appMarker       = "data-kitwork-app"
-	appMarkerShort  = "data-kit-app"
-)
+// PREFIX CONVENTION, restated 24/09 when the root marker went away.
+//
+//	data-kit-*      the GRAMMAR. What an author writes — and also what the engine writes when it
+//	                emits a piece of the grammar itself, as data-kit-item does on a materialised
+//	                row. The test is what the attribute MEANS, not who typed it: an item is a
+//	                boundary, so it reads like one, next to the data-kit-for and data-kit-key it
+//	                belongs with.
+//
+//	data-kitwork-*  TRANSPORT. Things the engine hangs on a page that are not part of the grammar:
+//	                data-kitwork-jit=* asset markers, data-kitwork-drive (the site's answer to
+//	                router.drive()), data-kitwork-ui overlays, data-kitwork-layout. An author never
+//	                writes one, and the kernel never reads one as a directive.
+//
+// A precompiled IR directive (data-kitwork-text="[JSON]") was a reserved wire mode the engine never
+// emitted; the kernel no longer decodes it (ideaship-final §9), so a long prefix on a directive is
+// inert. The root marker (data-kit-app / data-kit-hydrate) is gone entirely: a page is recognised by
+// its grammar, and Drive is switched on by router.drive().
 
 // directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
 // prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
