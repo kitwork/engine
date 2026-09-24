@@ -580,8 +580,13 @@
           st.seeded = true;
           runInit(b);
         } else {
-          var loader = kit.module("componentLoader");
-          if (loader) loader.load(cname);
+          // Nothing registered under this name. The engine ships exactly the components a page
+          // names, so this is a typo or a missing _components/<name>.js. Say it ONCE per host:
+          // every later pass would otherwise repeat it for as long as the page is open.
+          if (!st.reportedMissing) {
+            st.reportedMissing = true;
+            reportError(new Error("hydrate: no component registered as \"" + cname + "\""), b, "data-kit-component");
+          }
         }
       }
       return st.scope;
@@ -1707,7 +1712,6 @@
       var colour = painted.getAttribute("data-kit-progress") || painted.getAttribute("data-kitwork-progress") || "";
       if (colour) document.documentElement.style.setProperty("--kitwork-progress", colour);
     }
-    kit.useIndexed = !!document.querySelector('[data-kit-indexed="true"],[data-kitwork-indexed="true"]');
   }
 
   function boot() {

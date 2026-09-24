@@ -26,9 +26,6 @@ var storageJS string
 //go:embed modules/web.js
 var webJS string
 
-//go:embed modules/component-loader.js
-var componentLoaderJS string
-
 //go:embed drive.js
 var driveJS string
 
@@ -60,7 +57,6 @@ func RuntimeWith(modules string) string {
 		nativeJS,
 		storageJS,
 		webJS,
-		componentLoaderJS,
 		morphJS,
 		driveJS,
 	}

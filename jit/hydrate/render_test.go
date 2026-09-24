@@ -362,7 +362,6 @@ func TestRuntimeCompositionOrder(t *testing.T) {
 		"Native-only capabilities",
 		"Origin-scoped storage service",
 		"Browser-backed platform services",
-		"Optional remote component loader",
 		"DOM morph module",
 		"Optional Kitwork Drive module",
 		"Final composition step",
