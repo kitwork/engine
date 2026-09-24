@@ -273,11 +273,33 @@ const injectTag = `<script data-kitwork-jit="runtime" src="` + RuntimePath + `" 
 // IR remains the engine's INTERNAL form (ctx.validate, go tests, analysis); it is not a wire
 // mode — the kernel parses source, and only source. A page WITHOUT the marker (or with no
 // directive) is returned byte-for-byte unchanged.
-func Render(html string) string {
-	if !strings.Contains(html, rootMarker) && !strings.Contains(html, rootMarkerShort) &&
-		!strings.Contains(html, appMarker) && !strings.Contains(html, appMarkerShort) {
-		return html
+
+// authoredPrefix is the one substring every authored directive shares — the cheap door.
+const authoredPrefix = "data-kit-"
+
+// Diagnostics decides whether authoring mistakes are printed. The engine sets it from AllowLocal at
+// boot: on while someone is developing, off in production, where the same scan would cost every
+// response and nobody would read the result.
+var Diagnostics = true
+
+// hasAuthoredDirective reports whether the page really uses the grammar. A documentation page that
+// PRINTS `data-kit-text="…"` inside a <pre> or <code> is showing an example, not using one, so those
+// blocks are removed before the second look. Measured across this repo, three files depend on that
+// distinction — and 157 pages depend on the engine recognising them without a marker.
+func hasAuthoredDirective(html string) bool {
+	if !presenceRe.MatchString(html) {
+		return false
 	}
+	if !strings.Contains(html, "<pre") && !strings.Contains(html, "<code") {
+		return true
+	}
+	return presenceRe.MatchString(exampleBlockRe.ReplaceAllString(html, ""))
+}
+
+var exampleBlockRe = regexp.MustCompile(`(?s)<(pre|code)[^>]*>.*?</(pre|code)>`)
+
+// reportAuthoringMistakes prints everything the server can see and the browser would only whisper.
+func reportAuthoringMistakes(html string) {
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
 		expression := authoredAttribute(m[2])
 		if _, err := Compile(expression); err != nil {
@@ -317,8 +339,19 @@ func Render(html string) string {
 			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
 		}
 	}
-	if !presenceRe.MatchString(html) {
+}
+
+func Render(html string) string {
+	// Is this a Kitwork page? The markup says so by ITSELF — an authored directive is the evidence,
+	// and no marker attribute is required or read. The cheap string test comes first so an ordinary
+	// static page costs one scan for a substring and nothing else.
+	if !strings.Contains(html, authoredPrefix) || !hasAuthoredDirective(html) {
 		return html
+	}
+	// Authoring mistakes are reported for the person writing the page, so they are printed where a
+	// person is watching. In production nobody reads the server log for this, and the scan is not free.
+	if Diagnostics {
+		reportAuthoringMistakes(html)
 	}
 	// The jit/js pass runs earlier and points its only-used action/component set at this same
 	// runtime route. When that combined asset is present, a second bare reference is duplication.

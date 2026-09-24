@@ -16,8 +16,11 @@ import (
 	"github.com/kitwork/engine/core"
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/domain"
+	"github.com/kitwork/engine/gateway"
 	"github.com/kitwork/engine/host"
+	hydrate "github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/logger"
+	"github.com/kitwork/engine/proxies"
 	"github.com/kitwork/engine/utilities/compress"
 	"github.com/kitwork/engine/work"
 )
@@ -67,7 +70,7 @@ func Run(configFile ...string) (err error) {
 	// DISPATCH THEO MANIFEST: khai báo là DỮ LIỆU, lệnh mới quyết định chạy gì. Không có web
 	// surface thì cloud host không có gì để phục vụ — nếu app khai desktop/mobile thì đó là
 	// hợp lệ (chạy shell tương ứng), không phải lỗi.
-	if !builder.hasWeb && !builder.hasDatabase {
+	if !builder.hasWeb && !builder.hasDatabase && !builder.hasGateway && !builder.hasProxy {
 		if _, hasDesktop := builder.config["desktop"]; hasDesktop {
 			fmt.Printf("%s khai báo app.desktop() nhưng không có web surface — không có gì để phục vụ.\n"+
 				"→ Chạy `kitwork-desktop` cho app desktop, hoặc thêm `app.web({ port: env.PORT || 8080 })` để phục vụ HTTP.\n", file)
@@ -84,20 +87,36 @@ func Run(configFile ...string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
-	surface := "app.database"
-	if builder.hasWeb && builder.hasDatabase {
-		surface = "app.web + app.database"
-	} else if builder.hasWeb {
-		surface = "app.web"
+	surfaces := make([]string, 0, 4)
+	if builder.hasWeb {
+		surfaces = append(surfaces, "app.web")
 	}
+	if builder.hasDatabase {
+		surfaces = append(surfaces, "app.database")
+	}
+	if builder.hasGateway {
+		surfaces = append(surfaces, "app.gateway")
+	}
+	if builder.hasProxy {
+		surfaces = append(surfaces, "app.proxy")
+	}
+	surface := strings.Join(surfaces, " + ")
 	fmt.Printf("Loaded configuration from %s (%s)\n", file, surface)
 
 	cfg, err := ParseConfig(raw)
 	if err != nil {
 		return fmt.Errorf("failed to process configuration: %w", err)
 	}
-	if err := resolveRootConfig(cfg); err != nil {
-		return fmt.Errorf("resolve app root: %w", err)
+	cfg.Web = builder.hasWeb
+	if builder.hasWeb || builder.hasDatabase {
+		if err := resolveRootConfig(cfg); err != nil {
+			return fmt.Errorf("resolve app root: %w", err)
+		}
+	} else {
+		cfg.Root = "."
+	}
+	if err := validateGatewaySurface(builder.hasWeb, cfg.Gateway); err != nil {
+		return err
 	}
 	// An owned KitDB root is declared relative to the manifest, and kitsql needs the web surface.
 	manifestDirectory, err := filepath.Abs(filepath.Dir(file))
@@ -156,7 +175,7 @@ func Run(configFile ...string) (err error) {
 	}
 
 	appDatabaseContext, cancelAppDatabases := context.WithCancel(context.Background())
-	appDatabaseRuntimes, appDatabaseErrors, err := startAppDatabaseRuntimes(appDatabaseContext, cfg.AppDatabases)
+	appDatabaseRuntimes, appDatabaseErrors, err := startAppDatabaseRuntimes(appDatabaseContext, cfg.AppDatabases, cfg.Databases)
 	if err != nil {
 		cancelAppDatabases()
 		return err
@@ -171,7 +190,22 @@ func Run(configFile ...string) (err error) {
 	}
 	defer closeAppDatabases()
 
-	if !builder.hasWeb {
+	var proxyManager *proxies.Manager
+	var proxyErrors <-chan error
+	if len(cfg.Proxies) > 0 {
+		proxyManager, err = proxies.New(cfg.Proxies)
+		if err != nil {
+			return fmt.Errorf("configure app.proxy: %w", err)
+		}
+		proxyErrors = proxyManager.Errors()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = proxyManager.Close(shutdownCtx)
+		}()
+	}
+
+	if !builder.hasWeb && !builder.hasGateway {
 		printBanner(cfg, host.IsLocalhost(), false)
 		signalCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stopSignals()
@@ -181,12 +215,17 @@ func Run(configFile ...string) (err error) {
 		case runErr := <-appDatabaseErrors:
 			slog.Error("KitDB server stopped", "error", runErr)
 			return runErr
+		case runErr := <-proxyErrors:
+			slog.Error("Forward proxy stopped", "error", runErr)
+			return runErr
 		}
 		return closeAppDatabases()
 	}
 
 	// Pass global settings to the work package
 	work.AllowLocal = cfg.AllowLocal
+	// Authoring diagnostics are for a person at a keyboard, not for a production log.
+	hydrate.Diagnostics = cfg.AllowLocal
 	work.ServerPort = cfg.Port
 
 	// Scheduler backend is chosen automatically: a connected system Postgres → the SHARED cluster store
@@ -198,49 +237,68 @@ func Run(configFile ...string) (err error) {
 
 	// Domain whitelist (for AutoSSL HostPolicy) + redirect rules (engine + :80 fallback).
 	domain.Allows = append([]string(nil), cfg.Domains...)
+	for _, target := range cfg.Gateway {
+		if target.Domain != "" {
+			domain.Allows = append(domain.Allows, target.Domain)
+		}
+	}
 	domain.SitesDir = ""
-	switch cfg.RootLayout {
-	case work.RootLayoutSingle:
-		if cfg.Hostname != "" {
-			domain.Allows = append(domain.Allows, cfg.Hostname)
-		}
-	case work.RootLayoutMultiDomain:
-		domain.SitesDir = cfg.Root
-		if sites := work.DiscoverFlatSites(cfg.Root); len(sites) > 0 {
-			domain.Allows = append(domain.Allows, sites...)
-			slog.Info("Multi-site domains discovered", "count", len(sites), "dir", domain.SitesDir)
-		}
-	case work.RootLayoutMultiTenant:
-		if sites := work.DiscoverTenantDomains(cfg.Root); len(sites) > 0 {
-			domain.Allows = append(domain.Allows, sites...)
-			slog.Info("Multi-tenant domains discovered", "count", len(sites), "root", cfg.Root)
-		}
-	case work.RootLayoutAuto:
-		// Compatibility mode for explicitly configured legacy roots.
-		domain.SitesDir = filepath.Join(cfg.Root, work.SitesDirName)
-		if sites := work.DiscoverSites(cfg.Root); len(sites) > 0 {
-			domain.Allows = append(domain.Allows, sites...)
-			slog.Info("Legacy sites discovered", "count", len(sites), "dir", domain.SitesDir)
+	if builder.hasWeb {
+		switch cfg.RootLayout {
+		case work.RootLayoutSingle:
+			if cfg.Hostname != "" {
+				domain.Allows = append(domain.Allows, cfg.Hostname)
+			}
+		case work.RootLayoutMultiDomain:
+			domain.SitesDir = cfg.Root
+			if sites := work.DiscoverFlatSites(cfg.Root); len(sites) > 0 {
+				domain.Allows = append(domain.Allows, sites...)
+				slog.Info("Multi-site domains discovered", "count", len(sites), "dir", domain.SitesDir)
+			}
+		case work.RootLayoutMultiTenant:
+			if sites := work.DiscoverTenantDomains(cfg.Root); len(sites) > 0 {
+				domain.Allows = append(domain.Allows, sites...)
+				slog.Info("Multi-tenant domains discovered", "count", len(sites), "root", cfg.Root)
+			}
+		case work.RootLayoutAuto:
+			// Compatibility mode for explicitly configured legacy roots.
+			domain.SitesDir = filepath.Join(cfg.Root, work.SitesDirName)
+			if sites := work.DiscoverSites(cfg.Root); len(sites) > 0 {
+				domain.Allows = append(domain.Allows, sites...)
+				slog.Info("Legacy sites discovered", "count", len(sites), "dir", domain.SitesDir)
+			}
 		}
 	}
 	domain.Configure(cfg.Canonical, cfg.Redirects)
 
 	// Initialize and run the engine
-	handler := core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
+	var handler *core.Engine
+	if builder.hasWeb {
+		handler = core.New(cfg.Root, cfg.MaxEnergy, cfg.HotReload, cfg.Hostname)
+	} else {
+		handler = core.NewGatewayHost(cfg.Hostname)
+	}
 	defer handler.Close()
-	if err := handler.SetRootLayout(cfg.RootLayout); err != nil {
-		return fmt.Errorf("configure app root layout: %w", err)
-	}
-	if directory := bytecodeCacheDirectory(cfg); directory != "" {
-		handler.SetBytecodeCache(directory)
-	}
-	if cfg.Search.CollectionCanary {
-		if err := handler.SetCollectionSearchCanary(true); err != nil {
-			return fmt.Errorf("configure collection search canary: %w", err)
+	handler.SetWebEnabled(builder.hasWeb)
+	if builder.hasWeb {
+		if err := handler.SetRootLayout(cfg.RootLayout); err != nil {
+			return fmt.Errorf("configure app root layout: %w", err)
 		}
-		slog.Info("Collection search segment canary enabled")
 	}
-
+	var gatewayManager *gateway.Manager
+	if len(cfg.Gateway) > 0 {
+		gatewayManager, err = gateway.NewManager(cfg.Gateway)
+		if err != nil {
+			return fmt.Errorf("configure app.gateway: %w", err)
+		}
+		defer gatewayManager.Close()
+		handler.SetGateway(gatewayManager)
+	}
+	if builder.hasWeb {
+		if directory := bytecodeCacheDirectory(cfg); directory != "" {
+			handler.SetBytecodeCache(directory)
+		}
+	}
 	// Client-IP source: as the edge server Kitwork ignores X-Forwarded-For by default (spoofable);
 	// trust_proxy: true opts in when running behind your own reverse proxy.
 	work.TrustProxyHeaders = cfg.TrustProxy
@@ -263,9 +321,11 @@ func Run(configFile ...string) (err error) {
 	//
 	// The ONE deliberate exception is the scheduler: a cron cannot wait for a request. So every app
 	// (identity) with a _cron/ boots an app runtime NOW that starts its scheduler eagerly.
-	handler.StartAppSchedulers()
-	for _, site := range work.DiscoverLegacySites(cfg.Root) {
-		slog.Warn("Legacy site entry is ignored; migrate to router.kitwork.js", "site", site)
+	if builder.hasWeb {
+		handler.StartAppSchedulers()
+		for _, site := range work.DiscoverLegacySites(cfg.Root) {
+			slog.Warn("Legacy site entry is ignored; migrate to router.kitwork.js", "site", site)
+		}
 	}
 
 	// Transport compression wraps the whole handler once. A Kitwork page is markup-heavy — a real
@@ -322,6 +382,8 @@ func Run(configFile ...string) (err error) {
 		}
 	case runErr = <-appDatabaseErrors:
 		slog.Error("KitDB server stopped", "error", runErr)
+	case runErr = <-proxyErrors:
+		slog.Error("Forward proxy stopped", "error", runErr)
 	}
 
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
@@ -347,6 +409,12 @@ func Check(configFile ...string) (core.CheckReport, error) {
 	cfg, err := commandConfig(configFile...)
 	if err != nil {
 		return core.CheckReport{}, err
+	}
+	if err := validateAppDatabaseRuntimeAliases(cfg.AppDatabases, cfg.Databases); err != nil {
+		return core.CheckReport{}, err
+	}
+	if !cfg.Web {
+		return core.CheckReport{}, nil
 	}
 	for i := range cfg.Databases {
 		dbConfig := cfg.Databases[i]
@@ -374,6 +442,9 @@ func Profile(configFile ...string) (core.ProfileReport, error) {
 	cfg, err := commandConfig(configFile...)
 	if err != nil {
 		return core.ProfileReport{}, err
+	}
+	if !cfg.Web {
+		return core.ProfileReport{}, nil
 	}
 	return core.ProfileWithLayout(cfg.Root, cfg.RootLayout), nil
 }
@@ -426,7 +497,7 @@ func commandConfig(configFile ...string) (*Config, error) {
 			builder.err,
 		)
 	}
-	if !builder.hasWeb && !builder.hasDatabase {
+	if !builder.hasWeb && !builder.hasDatabase && !builder.hasGateway && !builder.hasProxy {
 		return nil, fmt.Errorf(
 			"failed to evaluate config %s: %w",
 			file,
@@ -441,8 +512,16 @@ func commandConfig(configFile ...string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to process configuration: %w", err)
 	}
-	if err := resolveRootConfig(cfg); err != nil {
-		return nil, fmt.Errorf("resolve app root: %w", err)
+	cfg.Web = builder.hasWeb
+	if err := validateGatewaySurface(builder.hasWeb, cfg.Gateway); err != nil {
+		return nil, err
+	}
+	if builder.hasWeb || builder.hasDatabase {
+		if err := resolveRootConfig(cfg); err != nil {
+			return nil, fmt.Errorf("resolve app root: %w", err)
+		}
+	} else {
+		cfg.Root = "."
 	}
 	return cfg, nil
 }
@@ -501,6 +580,17 @@ func printBanner(cfg *Config, isLocalhost, hasWeb bool) {
 			modes = append(modes, fmt.Sprintf("postgresql:%d", db.Port))
 		}
 		fmt.Printf("%skitdb · %s %s(%s)%s\n", label("db"), db.Path, dim, strings.Join(modes, ", "), reset)
+	}
+	for _, proxy := range cfg.Proxies {
+		hostname := proxy.Host
+		if hostname == "" {
+			hostname = "127.0.0.1"
+		}
+		protocol := proxy.Protocol
+		if protocol == "" {
+			protocol = "http"
+		}
+		fmt.Printf("%s%s · %s:%d\n", label("proxy"), protocol, hostname, proxy.Port)
 	}
 	fmt.Println()
 }

@@ -190,15 +190,6 @@ func TestRenderIfAndForInject(t *testing.T) {
 	}
 }
 
-// The activation gate: a page WITHOUT the root marker is returned byte-for-byte unchanged, even if
-// it contains directive-looking attributes (static pages, docs showing examples as text).
-func TestRenderNoMarkerUntouched(t *testing.T) {
-	in := `<body><b data-kit-text="n * qty">0</b><pre>data-kit-click="n = n + 1"</pre></body>`
-	if out := Render(in); out != in {
-		t.Errorf("no marker → must be untouched\n got: %s", out)
-	}
-}
-
 func TestRenderNoDirectivesIsNoop(t *testing.T) {
 	in := `<head></head><body>` + marker + `<div class="card">hello</div></section></body>`
 	if out := Render(in); out != in {
