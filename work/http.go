@@ -9,6 +9,12 @@ import (
 )
 
 var AllowLocal bool
+
+// NativeShell is true when this process serves an app that declared app.desktop() or app.mobile().
+// Only then can a page reach a WebView handle, so only then is it worth sending the bridge and the
+// capability proxies that ride it. It is a property of the PROCESS, not of one site: the shell is
+// what the app was launched into.
+var NativeShell bool
 var ServerPort int
 
 type HTTP = httputil.HTTP

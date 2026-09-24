@@ -62,3 +62,52 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 		t.Fatalf("expected Drive to be worth thousands of bytes on a minified asset, measured %d", saved)
 	}
 }
+
+// The native bridge and the 18 capability proxies that ride it only reach anything inside a desktop
+// or mobile shell. In an ordinary browser window there is no WebView handle, so every one of those
+// calls rejects with UNSUPPORTED — and the app's own manifest already says which world it is in.
+func TestNativeBridgeGoesOnlyToAppsWithAShell(t *testing.T) {
+	serve := func(t *testing.T) string {
+		t.Helper()
+		tenant, _ := writeKitJSTestSite(t, "", `<main><b data-kit-text="'x'">x</b></main>`)
+		if err := tenant.Run(); err != nil {
+			t.Fatal(err)
+		}
+		recorder := httptest.NewRecorder()
+		tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/kit.js", nil))
+		return recorder.Body.String()
+	}
+
+	previous := NativeShell
+	defer func() { NativeShell = previous }()
+
+	NativeShell = false
+	web := serve(t)
+	NativeShell = true
+	shell := serve(t)
+
+	// Markers from the CODE: the minifier deletes comments and renames variables.
+	for _, mark := range []string{"messageHandlers", "requires a native bridge"} {
+		if strings.Contains(web, mark) {
+			t.Fatalf("a web-only app still received %q", mark)
+		}
+		if !strings.Contains(shell, mark) {
+			t.Fatalf("a desktop app should receive %q", mark)
+		}
+	}
+	// The kernel still carries the two facts the bridge used to own.
+	for _, mark := range []string{"KitworkError", "isNative"} {
+		if !strings.Contains(web, mark) {
+			t.Fatalf("a web-only app must still have %q from the kernel", mark)
+		}
+	}
+	t.Logf("kit.js gzip: %d with a shell, %d web-only — %d bytes saved", gzipLen(shell), gzipLen(web), gzipLen(shell)-gzipLen(web))
+}
+
+func gzipLen(s string) int {
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+	_, _ = w.Write([]byte(s))
+	_ = w.Close()
+	return b.Len()
+}

@@ -226,6 +226,11 @@ func Run(configFile ...string) (err error) {
 	work.AllowLocal = cfg.AllowLocal
 	// Authoring diagnostics are for a person at a keyboard, not for a production log.
 	hydrate.Diagnostics = cfg.AllowLocal
+	// The bridge and its capability proxies only reach anything inside a desktop or mobile shell.
+	// A cloud host serving the same app over HTTP has no WebView handle, so it sends neither.
+	_, hasDesktop := builder.config["desktop"]
+	_, hasMobile := builder.config["mobile"]
+	work.NativeShell = hasDesktop || hasMobile
 	work.ServerPort = cfg.Port
 
 	// Scheduler backend is chosen automatically: a connected system Postgres → the SHARED cluster store

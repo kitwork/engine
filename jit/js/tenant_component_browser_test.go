@@ -286,7 +286,7 @@ func runKernelPage(t *testing.T, browser, page string, moduleNames []string) {
 		switch request.URL.Path {
 		case hydrate.RuntimePath:
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: ModulesJS(ModuleKeys(moduleNames)), Drive: true})))
+			_, _ = response.Write([]byte(hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: ModulesJS(ModuleKeys(moduleNames)), Drive: true, Native: true})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = response.Write([]byte(page))

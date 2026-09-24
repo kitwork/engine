@@ -75,6 +75,9 @@ func hydrateAsset(keys []string, site *siteComponents, drive bool) ([]byte, stri
 	if drive {
 		key += "|drive"
 	}
+	if NativeShell {
+		key += "|native"
+	}
 	if cached, ok := runtimeAssetCache.Load(key); ok {
 		asset := cached.(runtimeAsset)
 		return asset.body, asset.etag
@@ -83,6 +86,7 @@ func hydrateAsset(keys []string, site *siteComponents, drive bool) ([]byte, stri
 	source := hydrate.RuntimeFor(hydrate.RuntimeParts{
 		Modules: jitjs.ModulesJSFor(keys, siteOrNil(site)),
 		Drive:   drive,
+		Native:  NativeShell,
 	})
 	if !AllowLocal {
 		// The minifier returns the readable input unchanged on a parse error.

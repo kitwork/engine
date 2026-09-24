@@ -207,8 +207,10 @@ window.location = global.location;
   if (!native.available) {
     throw new Error("late bridge attachment was not observed dynamically");
   }
-  if (!kit.isNative || kit.platform !== "native" || kit.runtime.info().engine !== "native") {
-    throw new Error("late bridge attachment left runtime metadata stale");
+  // kit.isNative / kit.platform / runtime.info().engine are the KERNEL's view of the bridge, and this
+  // test deliberately runs without the kernel — see TestPlatformFactsFollowTheBridge.
+  if (!kit.bridge || typeof kit.bridge.call !== "function") {
+    throw new Error("late bridge attachment left the adapter unusable");
   }
 
   if (await kit.clipboard.writeText("native write") !== undefined) {
@@ -307,8 +309,8 @@ window.location = global.location;
   if (native.available !== false) {
     throw new Error("bridge removal was not observed dynamically");
   }
-  if (kit.isNative || kit.platform !== "web" || kit.runtime.info().engine !== "web") {
-    throw new Error("bridge removal left runtime metadata stale");
+  if (kit.bridge) {
+    throw new Error("bridge removal left the adapter in place");
   }
   await kit.clipboard.writeText("web again");
   if (navigator.clipboard.writes[3] !== "web again") {

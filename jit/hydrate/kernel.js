@@ -23,6 +23,36 @@
   var kit = (window.kit = window.kit || window.kitwork || {});
   var kitwork = (window.kitwork = kit);
 
+  // Two facts that belong to the RUNTIME, not to the native bridge, even though the bridge is what
+  // makes them interesting. They live here so a page that ships no bridge at all still has them:
+  // web.js throws KitworkError from theme.set(), and runtimeMeta reads platform two lines below.
+  if (typeof kit.KitworkError !== "function") {
+    kit.KitworkError = function (message, code, moduleName, actionName, details) {
+      var err = new Error(message || "Kitwork execution error");
+      err.name = "KitworkError";
+      err.code = code || "INTERNAL_ERROR";
+      err.module = moduleName || "system";
+      err.action = actionName || "unknown";
+      err.details = details || {};
+      return err;
+    };
+  }
+  if (!Object.getOwnPropertyDescriptor(kit, "platform")) {
+    Object.defineProperty(kit, "platform", {
+      get: function () {
+        var bridge = kit.bridge;
+        return bridge && typeof bridge.call === "function" ? (bridge.platform || "native") : "web";
+      },
+      configurable: true,
+      enumerable: true
+    });
+    Object.defineProperty(kit, "isNative", {
+      get: function () { return !!(kit.bridge && typeof kit.bridge.call === "function"); },
+      configurable: true,
+      enumerable: true
+    });
+  }
+
   if (kit.runtime && kit.runtime.loaded) return;
   var runtimeMeta = kit.runtime && typeof kit.runtime === "object" ? kit.runtime : {};
   runtimeMeta.name = "kitwork";

@@ -29,8 +29,8 @@ func TestBridgePlainWebStaysWeb(t *testing.T) {
 		`global.window = {};`,
 		`
 if (window.kit !== window.kitwork) throw new Error("runtime roots were not aliased");
-if (window.kitwork.isNative !== false) throw new Error("plain web reported native");
-if (window.kitwork.platform !== "web") throw new Error("plain web platform mismatch");
+if (window.kitwork.bridge !== null) throw new Error("plain web should have no bridge");
+// platform/isNative are derived from kit.bridge by the kernel, which this test does not load.
 if (window.kitwork.bridge !== null) throw new Error("plain web created a bridge");
 if (typeof window.kitwork.Bridge !== "function") throw new Error("Bridge constructor missing");
 `)
@@ -54,8 +54,8 @@ global.window = { kit: canonical, kitwork: legacy };
   if (window.kit !== canonical) throw new Error("canonical kit root was replaced");
   if (window.kitwork !== canonical) throw new Error("legacy root was not aliased to kit");
   if (window.kit.bridge !== seeded) throw new Error("seeded bridge adapter was replaced");
-  if (!window.kit.isNative) throw new Error("seeded bridge did not enable native mode");
-  if (window.kit.platform !== "seeded-native") throw new Error("seeded platform mismatch");
+  if (!window.kit.bridge) throw new Error("seeded bridge was not adopted");
+  if (window.kit.bridge.platform !== "seeded-native") throw new Error("seeded platform mismatch");
 
   var result = await window.kit.bridge.call("echo.write", { text: "hello" });
   if (result.action !== "echo.write" || result.params.text !== "hello") {
@@ -87,8 +87,8 @@ global.window = {
 };
 `,
 				`
-if (!window.kit.isNative) throw new Error("WKWebView handler was not detected");
-if (window.kit.platform !== "wkwebview") throw new Error("WKWebView platform mismatch");
+if (!window.kit.bridge) throw new Error("WKWebView handler was not detected");
+if (window.kit.bridge.platform !== "wkwebview") throw new Error("WKWebView platform mismatch");
 if (window.kit.bridge.handle !== handler) throw new Error("wrong WKWebView handler selected");
 
 window.kit.bridge.call("device.info", {});
@@ -126,8 +126,8 @@ global.window = {
 		`
 (async function () {
   var bridge = window.kitwork.bridge;
-  if (!window.kitwork.isNative) throw new Error("native handle was not detected");
-  if (window.kitwork.platform !== "webview2") throw new Error("native platform mismatch");
+  if (!window.kitwork.bridge) throw new Error("native handle was not detected");
+  if (window.kitwork.bridge.platform !== "webview2") throw new Error("native platform mismatch");
 
   var resultPromise = bridge.call("storage.get", { key: "theme" });
   var request = sent.shift();

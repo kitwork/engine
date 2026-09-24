@@ -96,7 +96,7 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 	}
 
 	t.Run("modules before boot", func(t *testing.T) {
-		result := run(t, hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: module, Drive: true}))
+		result := run(t, hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: module, Drive: true, Native: true}))
 		dom, requests := result[0], result[1:]
 		for _, path := range requests {
 			if path == "/0" {
@@ -126,7 +126,7 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 // line that starts the kernel.
 func TestRuntimeWithPutsModulesBeforeBoot(t *testing.T) {
 	const module = `kit.component("probe-order", {});`
-	source := hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: module, Drive: true})
+	source := hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: module, Drive: true, Native: true})
 	moduleAt := strings.Index(source, module)
 	startAt := strings.LastIndex(source, "kit.start()")
 	if moduleAt < 0 || startAt < 0 {
@@ -140,7 +140,7 @@ func TestRuntimeWithPutsModulesBeforeBoot(t *testing.T) {
 		t.Fatalf("boot is no longer last in the plain runtime — this test's landmark moved")
 	}
 	// An empty module list must not change the runtime at all.
-	if hydrate.RuntimeFor(hydrate.RuntimeParts{Drive: true}) != hydrate.Runtime() || hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: "   ", Drive: true}) != hydrate.Runtime() {
+	if hydrate.RuntimeFor(hydrate.RuntimeParts{Drive: true, Native: true}) != hydrate.Runtime() || hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: "   ", Drive: true, Native: true}) != hydrate.Runtime() {
 		t.Fatal("RuntimeWith with no modules should be exactly the runtime")
 	}
 }

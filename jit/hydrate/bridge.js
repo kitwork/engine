@@ -11,6 +11,9 @@
   window.kitwork = kit;
   if (kit.Bridge) return;
 
+  // The bridge loads BEFORE the kernel (the kernel reads kit.platform as it initialises), so it
+  // cannot borrow the kernel's copy — it carries its own and publishes it. The kernel defines the
+  // same shape only when the bridge is absent, which is how a web-only page still gets it.
   function KitworkError(message, code, moduleName, actionName, details) {
     var err = new Error(message || "Kitwork execution error");
     err.name = "KitworkError";
@@ -202,19 +205,4 @@
   kit.bridge = bridge;
   // The shell normally seeds the bridge at document-start, but these accessors also keep metadata
   // coherent if a test harness or host attaches/replaces the adapter later.
-  Object.defineProperty(kit, "platform", {
-    get: function () {
-      var current = kit.bridge;
-      return current && typeof current.call === "function" ? (current.platform || "native") : "web";
-    },
-    configurable: true,
-    enumerable: true
-  });
-  Object.defineProperty(kit, "isNative", {
-    get: function () {
-      return !!(kit.bridge && typeof kit.bridge.call === "function");
-    },
-    configurable: true,
-    enumerable: true
-  });
 })(window);

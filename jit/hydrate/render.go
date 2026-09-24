@@ -46,24 +46,27 @@ type RuntimeParts struct {
 	// MINIFIED asset a visitor actually receives: 18,218 bytes gzip with it, 15,407 without, so it
 	// is 2,811 bytes on every page of a site that never asked. Nothing else calls kit.morph.
 	Drive bool
+	// Native ships the bridge and the 18 capability proxies that ride it. They only reach anything
+	// inside a desktop or mobile shell: in an ordinary browser window there is no WebView handle, so
+	// every call rejects with UNSUPPORTED. Measured 24/09 on the minified asset: 1,869 bytes gzip.
+	Native bool
 }
 
 // Runtime is every part, which is what a test harness or the published package wants.
 func Runtime() string {
-	return RuntimeFor(RuntimeParts{Drive: true})
+	return RuntimeFor(RuntimeParts{Drive: true, Native: true})
 }
 
 // RuntimeFor composes exactly the parts a page needs, in the one order that works: bridge and
 // kernel first, platform modules next, then the page's own modules, and boot LAST — a component
 // that registers after the first paint has missed it (see boot.js).
 func RuntimeFor(parts RuntimeParts) string {
-	pieces := []string{
-		bridgeJS,
-		kernelJS,
-		nativeJS,
-		storageJS,
-		webJS,
+	pieces := []string{kernelJS}
+	if parts.Native {
+		// The bridge loads BEFORE the kernel: the kernel reads kit.platform as it initialises.
+		pieces = []string{bridgeJS, kernelJS, nativeJS}
 	}
+	pieces = append(pieces, storageJS, webJS)
 	if parts.Drive {
 		pieces = append(pieces, morphJS, driveJS)
 	}
