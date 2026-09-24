@@ -578,9 +578,23 @@
     if (v === null || typeof v !== "object") return v;
     try { return JSON.parse(JSON.stringify(v)); } catch (e) { return v; }
   }
+  // Copy a blueprint onto a boundary's scope. A GETTER is copied as a getter, not called once and
+  // frozen: `get visibleTodos() { return this.todos.filter(...) }` is how a component writes a
+  // computed value, and reading it through the scope proxy is what makes it repaint when todos
+  // change. Plain values are cloned so two instances never share one array.
   function seedComponent(target, def) {
     for (var k in def) {
       if (!Object.prototype.hasOwnProperty.call(def, k)) continue;
+      var descriptor = Object.getOwnPropertyDescriptor(def, k);
+      if (descriptor && (descriptor.get || descriptor.set)) {
+        Object.defineProperty(target, k, {
+          get: descriptor.get,
+          set: descriptor.set,
+          enumerable: true,
+          configurable: true
+        });
+        continue;
+      }
       target[k] = (typeof def[k] === "function") ? def[k] : cloneState(def[k]);
     }
   }
