@@ -7,18 +7,17 @@
   var cleanup = kit.cleanup;
 
   // ---- Drive: optional SPA navigation over the kernel's morph/lifecycle contracts ----
-  // Ported from the proven standalone hydrate.js. Activates at boot ONLY when the page declares a
-  // hydrate region ([data-kitwork-hydrate] / [data-kit-hydrate]) AND no drive is already running:
-  // kit.hydrate is the two-way lock — the legacy standalone file sets the same flag, so old
-  // pages keep their file, new pages use the kernel, and the two never double-drive.
-  // Contract unchanged: intercept same-origin links + GET forms, fetch with X-Kitwork-Hydrate,
-  // swap the region (fallback <main>), morph, mergeHead swaps data-kitwork-jit blocks, history +
-  // scroll restoration and bounded hover prefetch. Everything is delegated.
+  // Ported from the proven standalone hydrate.js. Activates at boot ONLY when the SITE asked for it
+  // — router.drive(), which the engine flags on its own runtime script tag — AND no drive is already
+  // running: kit.hydrate is the two-way lock, so a page still carrying the legacy standalone file
+  // keeps it and the two never double-drive.
+  // Contract unchanged: intercept same-origin links + GET forms (unless data-kit-reload="true"),
+  // fetch with X-Kitwork-Hydrate, swap <main> (fallback <body>), morph, mergeHead swaps
+  // data-kitwork-jit blocks, history + scroll restoration and bounded hover prefetch.
   function start() {
     if (typeof kit.morph !== "function") return;
     if (kit.hydrate || !window.history.pushState || !window.fetch || !window.DOMParser) return;
-    var appEl = document.querySelector("[data-kitwork-app],[data-kit-app],[data-kitwork-hydrate],[data-kit-hydrate]");
-    if (!appEl) return;
+    if (!document.querySelector('script[data-kitwork-jit="runtime"][data-kitwork-drive]')) return;
     kit.hydrate = true;
 
     // mode & version are parsed globally by initAppConfig at boot
@@ -80,7 +79,7 @@
       "overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap";
     document.body.appendChild(announcer);
 
-    function region(doc) { return doc.querySelector("[data-kitwork-app],[data-kit-app],[data-kitwork-hydrate],[data-kit-hydrate]") || doc.querySelector("main"); }
+    function region(doc) { return doc.querySelector("main") || doc.body; }
     function layoutKey(doc) { return doc.body ? (doc.body.getAttribute("data-kitwork-layout") || "") : ""; }
     function sameOrigin(url) { try { return new URL(url, location.href).origin === location.origin; } catch (e) { return false; } }
 
@@ -162,27 +161,12 @@
     function swap(html, url, push, scrollY, responseLayout) {
       var doc = new DOMParser().parseFromString(html, "text/html");
 
-      // Version Mismatch Check: force hard reload if the new page version differs
-      var newAppEl = doc.querySelector("[data-kitwork-app],[data-kit-app],[data-kitwork-hydrate],[data-kit-hydrate]");
-      if (newAppEl) {
-        var newAppVal = newAppEl.getAttribute("data-kitwork-app") || newAppEl.getAttribute("data-kit-app") || "";
-        var newVersion = "latest";
-        if (newAppVal) {
-          var parts = newAppVal.split("@");
-          if (parts.length === 2) {
-            newVersion = parts[1];
-          } else if (parts.length === 1 && parts[0]) {
-            var val = parts[0];
-            if (val.charAt(0) === "v" || (val.charAt(0) >= "0" && val.charAt(0) <= "9")) {
-              newVersion = val;
-            }
-          }
-        }
-        if (newVersion !== kit.version) {
-          location.assign(url);
-          return;
-        }
-      }
+      // (There used to be a version check here: it read `mode@version` off the root marker and forced
+      // a hard reload when the value differed. It never fired — every page of a site shares one shell,
+      // so the value was always identical — and the value itself was arbitrary: 17 of this repo's 21
+      // shells carried strings like "v1.0.0", "seoer" or "kitwork-canary" that nothing read. Forcing a
+      // reload across a deploy is a real need, but it has to be answered with something the engine
+      // actually knows, not with an attribute an author typed for another reason.)
 
       var docLayout = responseLayout || layoutKey(doc);
       var sameLayout = docLayout === layoutKey(document);

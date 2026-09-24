@@ -20,7 +20,8 @@ import (
 //
 // The proof is on the wire, because that is where the difference actually is. Drive fetches a page
 // with X-Kitwork-Hydrate: 1 and swaps it in; the browser's own navigation carries no such header.
-// So the server, not the DOM, says which link went which way.
+// So the server, not the DOM, says which link went which way. The page carries the engine's own
+// runtime tag with its drive flag, which is exactly what router.drive() produces.
 func TestBrowserReloadOptsOutOfDrive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the reload browser proof in short mode")
@@ -33,7 +34,7 @@ func TestBrowserReloadOptsOutOfDrive(t *testing.T) {
 	page := func(title, body string) string {
 		return `<!doctype html><html data-kit-hydrate="v1"><head><meta charset="utf-8"><title>` + title +
 			`</title></head><body data-page="` + title + `">` + body +
-			`<script src="/kit.js"></script></body></html>`
+			`<script data-kitwork-jit="runtime" data-kitwork-drive src="/kit.js"></script></body></html>`
 	}
 
 	var mu sync.Mutex

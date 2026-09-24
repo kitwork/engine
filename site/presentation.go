@@ -55,6 +55,7 @@ type PresentationSnapshot struct {
 	ManifestPath     string
 	KitJS            bool
 	Prerender        bool
+	Drive            bool
 	JITComponents    []JITComponentSource
 	Frozen           bool
 }
@@ -75,6 +76,7 @@ type Presentation struct {
 	manifestPath      string
 	kitJS             bool
 	prerender         bool
+	drive             bool
 	jitComponents     []JITComponentSource
 	jitComponentBytes int
 	frozen            bool
@@ -277,6 +279,25 @@ func (p *Presentation) SetPrerender(enabled bool) bool {
 	return true
 }
 
+// SetDrive opts the generation into Kitwork Drive: same-origin links and GET forms are fetched and
+// morphed in place instead of reloading the page.
+//
+// The default is OFF. Drive changes what a visitor SEES happen when they click, so a site says yes
+// to it deliberately. It used to switch itself on wherever a root marker appeared, which meant the
+// decision rode on an attribute authors wrote for a different reason entirely.
+func (p *Presentation) SetDrive(enabled bool) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	p.drive = enabled
+	return true
+}
+
 // AddJITComponent adds one exact tenant-managed component to the pending
 // generation. A name can have only one declaration and one version, keeping
 // the unversioned HTML form deterministic.
@@ -398,6 +419,7 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 		ManifestPath:     p.manifestPath,
 		KitJS:            p.kitJS,
 		Prerender:        p.prerender,
+		Drive:            p.drive,
 		JITComponents:    cloneJITComponentSources(p.jitComponents),
 		Frozen:           p.frozen,
 	}

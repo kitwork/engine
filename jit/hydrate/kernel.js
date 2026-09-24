@@ -1697,34 +1697,17 @@
   };
 
   function initAppConfig() {
-    var appEl = document.querySelector("[data-kitwork-app],[data-kit-app],[data-kitwork-hydrate],[data-kit-hydrate]");
-    if (appEl) {
-      // data-kit-progress="#0af" — the navigation bar's colour, declared in markup where a reader
-      // can see it. It is published as a CSS variable rather than written onto the bar, so the same
-      // value also works when set in a stylesheet, and so a site can scope it per section.
-      var progressColor = appEl.getAttribute("data-kitwork-progress") || appEl.getAttribute("data-kit-progress") || "";
-      if (progressColor) document.documentElement.style.setProperty("--kitwork-progress", progressColor);
-      var appVal = appEl.getAttribute("data-kitwork-app") || appEl.getAttribute("data-kit-app") || "";
-      var mode = "runtime";
-      var version = "latest";
-      if (appVal) {
-        var parts = appVal.split("@");
-        if (parts.length === 2) {
-          mode = parts[0];
-          version = parts[1];
-        } else if (parts.length === 1 && parts[0]) {
-          var val = parts[0];
-          if (val.charAt(0) === "v" || (val.charAt(0) >= "0" && val.charAt(0) <= "9")) {
-            version = val;
-          } else {
-            mode = val;
-          }
-        }
-      }
-      kit.mode = mode;
-      kit.version = version;
-      kit.useIndexed = appEl.getAttribute("data-kitwork-indexed") === "true" || appEl.getAttribute("data-kit-indexed") === "true";
+    // Two settings a page may declare, each read from the element that carries it — there is no root
+    // marker any more, so nothing has to be hung off one.
+    //
+    // data-kit-progress="#0af" is the navigation bar's colour, published as a CSS variable rather
+    // than written onto the bar, so the same value also works when set in a stylesheet.
+    var painted = document.querySelector("[data-kit-progress],[data-kitwork-progress]");
+    if (painted) {
+      var colour = painted.getAttribute("data-kit-progress") || painted.getAttribute("data-kitwork-progress") || "";
+      if (colour) document.documentElement.style.setProperty("--kitwork-progress", colour);
     }
+    kit.useIndexed = !!document.querySelector('[data-kit-indexed="true"],[data-kitwork-indexed="true"]');
   }
 
   function boot() {

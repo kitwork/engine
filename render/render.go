@@ -40,6 +40,7 @@ type Config struct {
 	DefaultMinify    bool                      // minify when not set explicitly (caller passes !AllowLocal)
 	ThemeMode        string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
 	Prerender        bool                      // router.javascript({ prerender: true }) — off by default
+	Drive            bool                      // router.drive() — off by default
 	HighlightTheme   string                    // folder-scoped default for {{ src.highlight() }} (router.highlight)
 	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
 	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
@@ -53,7 +54,7 @@ func New(c Config) *Render {
 		base: c.Base, jitConfig: c.JitConfig, directory: c.Directory, path: c.Path,
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
-		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, prerender: c.Prerender,
+		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, prerender: c.Prerender, drive: c.Drive,
 		highlightTheme:   c.HighlightTheme,
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
@@ -80,6 +81,7 @@ type Render struct {
 	defaultMinify        bool              // minify default when not explicit (injected — replaces AllowLocal)
 	themeMode            string            // theme pre-paint mode (see Config.ThemeMode)
 	prerender            bool              // server pre-render, opt-in per site (see Config.Prerender)
+	drive                bool              // Kitwork Drive, opt-in per site (see Config.Drive)
 	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
@@ -367,6 +369,11 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// correct with JS off, indexable. Both are marker-gated no-ops on ordinary pages.
 	if r.kitJSAssets == nil {
 		out = hydrate.Render(out)
+	}
+	// Drive is a site-wide choice (router.drive()); the engine flags its own runtime tag so the
+	// client can see the answer without the page carrying a marker for it.
+	if r.drive {
+		out = hydrate.MarkDrive(out)
 	}
 
 	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses

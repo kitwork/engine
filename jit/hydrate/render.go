@@ -366,3 +366,22 @@ func Render(html string) string {
 	}
 	return html + injectTag
 }
+
+// MarkDrive flags the runtime script tag so the client knows this site asked for Drive
+// (router.drive()). The flag rides on the ENGINE's own tag, not on anything the author wrote: it is
+// a transport detail, so it wears the data-kitwork-* prefix and never appears in a template.
+//
+// Before this, Drive switched itself on wherever a root marker appeared — an attribute authors wrote
+// to mean something else entirely.
+func MarkDrive(html string) string {
+	const tag = `<script data-kitwork-jit="runtime"`
+	i := strings.Index(html, tag)
+	if i < 0 || strings.Contains(html, driveFlag) {
+		return html
+	}
+	at := i + len(tag)
+	return html[:at] + " " + driveFlag + html[at:]
+}
+
+// driveFlag is what MarkDrive writes and what drive.js looks for.
+const driveFlag = "data-kitwork-drive"
