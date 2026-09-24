@@ -54,6 +54,7 @@ type PresentationSnapshot struct {
 	HighlightPalette map[string]string
 	ManifestPath     string
 	KitJS            bool
+	Prerender        bool
 	JITComponents    []JITComponentSource
 	Frozen           bool
 }
@@ -73,6 +74,7 @@ type Presentation struct {
 	highlightPalette  map[string]string
 	manifestPath      string
 	kitJS             bool
+	prerender         bool
 	jitComponents     []JITComponentSource
 	jitComponentBytes int
 	frozen            bool
@@ -253,6 +255,28 @@ func (p *Presentation) SetKitJS(enabled bool) bool {
 	return true
 }
 
+// SetPrerender opts the generation into server pre-rendering: the engine evaluates the page-scope
+// data-kit-text / data-kit-show expressions with its Go twin of the client walker and writes the
+// answers into the HTML before sending it.
+//
+// The default is OFF, deliberately. Pre-rendering costs a full scan of every response, and it can
+// only reach page scope — a value inside data-kit-scope, data-kit-component or data-kit-for belongs
+// to the client, which the server must not guess at. Most pages get the same first frame for free by
+// writing `hidden` in the markup, which is what two thirds of this repo's data-kit-show elements
+// already do.
+func (p *Presentation) SetPrerender(enabled bool) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	p.prerender = enabled
+	return true
+}
+
 // AddJITComponent adds one exact tenant-managed component to the pending
 // generation. A name can have only one declaration and one version, keeping
 // the unversioned HTML form deterministic.
@@ -373,6 +397,7 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 		HighlightPalette: p.highlightPalette,
 		ManifestPath:     p.manifestPath,
 		KitJS:            p.kitJS,
+		Prerender:        p.prerender,
 		JITComponents:    cloneJITComponentSources(p.jitComponents),
 		Frozen:           p.frozen,
 	}

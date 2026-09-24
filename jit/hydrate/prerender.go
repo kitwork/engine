@@ -24,12 +24,14 @@ import (
 //     data-kit-text). An element wrapping other tags is left untouched.
 //   - text and show. Everything else (click/model/live) is inert markup at rest anyway.
 //
-// PreRender runs after Render in the pipeline. Like Render it is gated by the data-kitwork-hydrate
-// root marker, so static pages and example-showing docs are never touched.
+// PreRender runs after Render in the pipeline, and only when the site opted in with
+// router.javascript({ prerender: true }); it is off by default.
 func PreRender(htmlStr string) string {
-	if !strings.Contains(htmlStr, rootMarker) && !strings.Contains(htmlStr, rootMarkerShort) {
-		return htmlStr
-	}
+	// No gate here, on purpose. WHETHER to pre-render is the site's decision, taken once in
+	// router.javascript({ prerender: true }); by the time this runs the answer is already yes. There is
+	// no fragment to guard against either — Drive fetches the whole page and morphs it in the browser,
+	// so every string that reaches this function is a complete response. (A `<body>` test would look
+	// prudent and be wrong: the minifier drops optional tags, so production HTML often has none.)
 	var rangeBuffer [16]sourceRange
 	opaque := preRenderOpaqueRanges(htmlStr, rangeBuffer[:0])
 	scope := modelScopeOutside(htmlStr, opaque)

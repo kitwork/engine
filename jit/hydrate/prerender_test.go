@@ -6,7 +6,7 @@ import (
 )
 
 func TestPreRenderText(t *testing.T) {
-	in := `<section data-kitwork-hydrate="v1">` +
+	in := `<body data-kitwork-hydrate="v1">` +
 		`<input type="number" data-kit-model="qty" value="3">` +
 		`<b data-kit-text="qty * 2">0</b>` +
 		`<i data-kit-text="qty">?</i>` +
@@ -78,9 +78,10 @@ func TestPreRenderMalformedLeftAlone(t *testing.T) {
 	if out := PreRender(in); !strings.Contains(out, `>keep</b>`) {
 		t.Errorf("malformed expr → content untouched\n got: %s", out)
 	}
-	// no marker → never touched
-	if got := PreRender(`<b data-kit-text="1 + 1">x</b>`); got != `<b data-kit-text="1 + 1">x</b>` {
-		t.Errorf("unmarked page must be untouched: %s", got)
+	// There is no marker any more: WHETHER to pre-render is router.javascript({ prerender: true }),
+	// decided once per site. What still holds is that an expression the grammar rejects is left alone.
+	if got := PreRender(`<b data-kit-text="1 +">x</b>`); got != `<b data-kit-text="1 +">x</b>` {
+		t.Errorf("a malformed expression must leave the content untouched: %s", got)
 	}
 }
 

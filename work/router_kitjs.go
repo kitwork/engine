@@ -16,6 +16,7 @@ import (
 //	router.jitjs(true)
 //	router.jitjs(false)
 //	router.jitjs({ components: { counter: { version: "1.0.0", source: "./components/counter.js" } } })
+//
 // Javascript is the current name for staged client delivery. The house rule is
 // no abbreviations, and "js" is one — where "css" is the language's own name,
 // not a shortening of anything. Jitjs stays as a deprecated alias so existing
@@ -71,7 +72,7 @@ func (f *FolderRouter) configureJITJS(options value.Value) error {
 
 	manifest := options.Map()
 	for _, key := range sortedValueKeys(manifest) {
-		if key != "components" {
+		if key != "components" && key != "prerender" {
 			return fmt.Errorf("router.jitjs options contains unsupported field %q", key)
 		}
 	}
@@ -85,8 +86,24 @@ func (f *FolderRouter) configureJITJS(options value.Value) error {
 			return err
 		}
 	}
-	if !f.tenant.presentation().SetKitJS(true) {
-		return fmt.Errorf("router.jitjs options cannot change a frozen site generation")
+	if prerender, declared := manifest["prerender"]; declared {
+		if prerender.K != value.Bool {
+			return fmt.Errorf("router.javascript prerender must be a boolean; got %s", prerender.K)
+		}
+		if !f.tenant.presentation().SetPrerender(prerender.N != 0) {
+			return fmt.Errorf("router.javascript options cannot change a frozen site generation")
+		}
+	}
+	// `prerender` is a server-side setting; asking for it ALONE must not drag the site onto the staged
+	// composer. Every other shape keeps the old contract, including an empty object.
+	onlyPrerender := false
+	if len(manifest) == 1 {
+		_, onlyPrerender = manifest["prerender"]
+	}
+	if !onlyPrerender {
+		if !f.tenant.presentation().SetKitJS(true) {
+			return fmt.Errorf("router.jitjs options cannot change a frozen site generation")
+		}
 	}
 	return nil
 }

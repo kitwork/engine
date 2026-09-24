@@ -39,6 +39,7 @@ type Config struct {
 	MinifySet        bool                      // whether Minify was set explicitly
 	DefaultMinify    bool                      // minify when not set explicitly (caller passes !AllowLocal)
 	ThemeMode        string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
+	Prerender        bool                      // router.javascript({ prerender: true }) — off by default
 	HighlightTheme   string                    // folder-scoped default for {{ src.highlight() }} (router.highlight)
 	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
 	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
@@ -52,7 +53,7 @@ func New(c Config) *Render {
 		base: c.Base, jitConfig: c.JitConfig, directory: c.Directory, path: c.Path,
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
-		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode,
+		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, prerender: c.Prerender,
 		highlightTheme:   c.HighlightTheme,
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
@@ -78,6 +79,7 @@ type Render struct {
 	minifySet            bool              // whether minify was set explicitly (else default by environment)
 	defaultMinify        bool              // minify default when not explicit (injected — replaces AllowLocal)
 	themeMode            string            // theme pre-paint mode (see Config.ThemeMode)
+	prerender            bool              // server pre-render, opt-in per site (see Config.Prerender)
 	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
@@ -281,9 +283,10 @@ func (r *Render) tmpl(data any) string {
 		out = r.applyStaticPresentation(out)
 	}
 
-	// The legacy Hydrate pre-render remains request-bound. Staged KitJS is
-	// browser-owned and deliberately bypasses that legacy pre-render.
-	if r.kitJSAssets == nil {
+	// Server pre-render: OFF unless the site asked for it with router.javascript({ prerender: true }).
+	// It costs a scan of every response and only reaches page scope, so it is a deliberate choice, not
+	// a default. Staged KitJS is browser-owned and bypasses it either way.
+	if r.prerender && r.kitJSAssets == nil {
 		out = hydrate.PreRender(out)
 	}
 

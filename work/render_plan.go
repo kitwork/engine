@@ -122,6 +122,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			JitCSS:           true,
 			DefaultMinify:    productionMinify,
 			ThemeMode:        presentation.ThemeMode,
+			Prerender:        presentation.Prerender,
 			HighlightTheme:   presentation.HighlightTheme,
 			ManifestPath:     presentation.ManifestPath,
 			HighlightPalette: presentation.HighlightPalette,

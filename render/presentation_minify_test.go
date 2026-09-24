@@ -52,6 +52,8 @@ func TestPrepareMinifiesHydrateOperatorsWithDOMEquivalentEntities(t *testing.T) 
 		Base:          root,
 		Directory:     ".",
 		DefaultMinify: true,
+		// this test is about the pre-render, so it asks for it the way a site does
+		Prerender: true,
 	}
 	prepared := New(config).Prepare()
 	if err := prepared.PreparationError(); err != nil {

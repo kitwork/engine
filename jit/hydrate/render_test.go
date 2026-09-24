@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const marker = `<section data-kitwork-hydrate="v1.0.0">`
+const marker = `<body data-kitwork-hydrate="v1.0.0">`
 
 // THE WIRE SHIPS THE SOURCE: authored attributes ride unchanged; the engine verifies them and
 // injects the runtime reference once.
