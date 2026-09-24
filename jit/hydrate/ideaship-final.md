@@ -56,7 +56,7 @@
 | Attribute | Nghĩa | Ví dụ | Trạng thái |
 | :--- | :--- | :--- | :--- |
 | `data-kit-scope` | Mở một **vùng** với state khởi đầu; trên host component = state khởi đầu của component | `="qty: 1, price: 250"` · `="{ qty: 1 }"` | ✅ — object literal, ngoặc tuỳ chọn, dấu `,` (§6); attribute rỗng = vùng rỗng. Dạng tên trần `="cart"` và init `="a = 1; b = 2"` của kernel **đã bỏ** (B8, 22/09) |
-| `data-kit-component` | Hành vi có tên, tái dùng | `="modal@1.2.0"` | ✅ — runtime component bắt buộc version chính xác; kernel chỉ cần tên |
+| `data-kit-component` | Hành vi có tên, tái dùng | `="modal@1.2.0"` | ✅ — tên trần là dạng để viết (catalogue mới nhất, hoặc `_components/<tên>.js` của site). Ghim version chỉ để giữ một hợp đồng đứng yên (`dialog@v1.0.0`); component của site không có version để ghim |
 | `data-kit-alias` | Tay cầm **thể hiện** component, toàn cục, một thể hiện một tên | `="$paymentModal"` | ✅ — runtime component: chỉ trong action; kernel: mọi biểu thức |
 | `data-kit-element` | Phần tử **được đặt tên** trong vùng của nó | `="search"` | ✅ — `$element.search` (§3); code `context.element("search")` / `context.elements("slide")` (§6). Trước 21/09 là `data-kit-ref` |
 
@@ -83,12 +83,12 @@
 | :--- | :--- | :--- |
 | `data-kit-for` + `data-kit-key` | Danh sách, viết **trên chính hàng**; hàng là blueprint, rời tài liệu; overlay `count first last even odd` lexical theo hàng (§7) | ✅ client (`<template>` vẫn được); server materialize **hoãn** tới khi có site cần (B6, 22/09) |
 | `data-kit-if` | Mount / unmount subtree | ✅ |
-| `data-kit-item` | Chỉ do máy ghi trên hàng đã materialize; kernel bọc list `<!--kit-for:start id=fN-->`…`<!--kit-for:end-->` | ✅ hình dây; server chưa phát (B6: hoãn) |
+| `data-kit-item` | Máy ghi trên hàng đã materialize, nhưng nó LÀ một boundary (nằm trong `SCOPE` của kernel cùng `scope`/`component`/`api`) nên mang tiền tố của ngữ pháp — xem quy ước ở §2.6; kernel bọc list `<!--kit-for:start id=fN-->`…`<!--kit-for:end-->` | ✅ hình dây; server chưa phát (B6: hoãn) |
 | `data-kit-error` | Error boundary: lỗi action/binding bên trong → chạy biểu thức với `$error`; không lan quá boundary đầu; không boundary → console | ✅ chốt 22/09: không lan quá boundary đầu; handler tự ném → console, không tái nhập; `$error.recover()` không có (B4) |
 
 ### 2.5 Sự kiện — một họ, một đường ống
 
-`data-kit-<event>[:modifier…]="expr"` cho `click dblclick submit input change keydown keyup pointerdown pointerup focusin focusout`. Modifier viết thứ tự nào cũng được, chạy theo §4. ✅ cả hai bên; kernel đã gỡ `data-kit-away` / `data-kit-escape` / `data-kit-guard` (→ `click:outside`, `keydown:escape:window`, `:prevent`).
+`data-kit-<event>[:modifier…]="expr"` cho `click dblclick submit input change keydown keyup pointerdown pointerup focusin focusout`. Modifier viết thứ tự nào cũng được, chạy theo §4. Tổ hợp phím viết ngay trong tên: `data-kit-keydown:mod+k` — `mod` = Ctrl (Win/Linux) hoặc Cmd (macOS), ĐÚNG một trong hai, và mọi modifier không nêu phải TẮT. ✅ cả hai bên; kernel đã gỡ `data-kit-away` / `data-kit-escape` / `data-kit-guard` (→ `click:outside`, `keydown:escape:window`, `:prevent`).
 
 ### 2.6 Ngoài bảng directive — có thật, đang chạy, spec phải nhìn thấy
 
@@ -96,11 +96,27 @@
 | :--- | :--- | :--- |
 | ~~directive kernel~~ | ~~`data-kit-validate="expr"`~~ | **XOÁ 22/09** (Quốc chốt B): 0 site viết; `required`/`pattern`/`type` cho phản hồi sống sẵn có. **Cổng submit GIỮ** — kernel chỉ ĐỌC `data-state="invalid"` (server render, component, hay constraint validation ghi). **Nửa server GIỮ**: `ctx.validate(rule)` (`work/validate.go`) — trình duyệt nói gì cũng được, phán quyết ở server |
 | capability (`jit/js/capabilities`) | `data-kit-api` `data-kit-live` `data-kit-remember` `data-kit-drag` / `data-kit-no-drag` | khai báo, không phải biểu thức |
-| Drive / morph | `data-kit-drive` `data-kit-retain` `data-kit-ignore` | chỉ dẫn vận chuyển |
+| Drive | `data-kit-reload="true"` | **24/09**: "nạp trang này theo cách thường" — đọc trên chính thẻ `<a>`/`<form>` GET hoặc trên tổ tiên. Là dạng viết DUY NHẤT: `data-kit-drive="false"` (29 chỗ) chưa từng được runtime sống đọc, còn `data-kitwork-hydrate="false"` (10 chỗ) chạy được nhưng bắt tác giả gõ từ của máy. `data-kit-retain` / `data-kit-ignore` **không tồn tại** — morph chỉ đọc `data-kit-key`; tên đã chốt cho việc "giữ nguyên vùng này" là `data-kit-keep="true"`, CHƯA CÀI vì 0 ca dùng thật trên kernel |
 | server-only | `data-kit-highlight` | JIT highlight tiêu thụ khi render |
-| neo gốc | `data-kit-app` / `data-kit-hydrate` (hoặc `data-kitwork-`) | opt-in hydrate; nơi duy nhất cho phép tiền tố dài do tác giả viết |
 
-`data-kitwork-*` là **của máy**: `-jit` (asset inject), `-hash/-plan/-runtime/-handoff` (staged delivery), `-ui` (overlay kernel: bar, announcer, toast), `-highlight`. Trên một directive hay boundary nó **trơ** — kernel không đọc, không giải mã IR (21/09, §9). `data-kit-action`/`data-kit-target`/`data-kit-trigger` không còn là attribute (22/09): jit/js chỉ còn component (`data-kit-component`, `jit/js/components`) và capability.
+**Neo gốc đã BIẾN MẤT (24/09).** Không còn `data-kit-app` / `data-kit-hydrate` / dạng `data-kitwork-`. Một trang là trang Kitwork vì **nó dùng ngữ pháp** — một directive tác giả viết là bằng chứng; trang chỉ IN ngữ pháp trong `<pre>`/`<code>` thì được trả về nguyên xi. Số đo lúc chốt: toàn repo 3 file phụ thuộc phân biệt ví-dụ/dùng-thật, 157 trang dùng thật mà chưa từng được soát vì thiếu neo.
+
+**Công tắc nằm ở router, không nằm trong markup:**
+
+| Công tắc | Mặc định | Nghĩa |
+| :--- | :--- | :--- |
+| `router.drive()` | TẮT | Điều hướng mượt (fetch + morph). Engine tự đánh dấu `data-kitwork-drive` trên thẻ runtime của chính nó; markup không mang gì |
+| `router.javascript({ prerender: true })` | TẮT | Server tính sẵn `text`/`show` ở page scope rồi ghi vào HTML. Tốn một lượt quét mỗi response, chỉ với tới page scope (đo: đổi 3/105 trang) — **không khuyến khích**; viết `hidden` vào markup rẻ hơn |
+| `ALLOW_LOCAL` | — | Máy soát lúc render (compile, modifier, tên thuộc tính `style:`, đích `seed`, tên-không-ai-khai) chỉ in khi dev |
+
+`data-kit-action`/`data-kit-target`/`data-kit-trigger` không còn là attribute (22/09): jit/js chỉ còn component (`data-kit-component`, `jit/js/components`) và capability.
+
+**QUY ƯỚC TIỀN TỐ — viết lại 24/09.** `data-kit-*` = **NGỮ PHÁP**, kể cả khi chính máy ghi ra một mục của
+ngữ pháp (`data-kit-item` trên hàng đã materialize — nó là boundary thật, nằm trong `SCOPE` của kernel cùng
+`scope`/`component`/`api`). Phép thử là attribute ấy **nghĩa là gì**, không phải ai gõ nó. `data-kitwork-*` =
+**VẬN CHUYỂN**: `-jit` (asset inject), `-drive` (câu trả lời của `router.drive()`), `-ui` (overlay kernel: bar,
+announcer, toast), `-layout`, `-hash/-plan/-runtime/-handoff` (staged delivery), `-highlight`. Tác giả không bao
+giờ viết một cái `data-kitwork-*`, và kernel không bao giờ đọc một cái như directive.
 
 ---
 
@@ -248,7 +264,7 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | **XOÁ** | IR client `data-kitwork-<directive>` + read-alias tiền tố dài cho directive/boundary | — | ✅ 21/09 (C1) |
 | **XOÁ** | `data-kit-away` `data-kit-escape` `data-kit-guard` (→ modifier) | — | ✅ 21/09 |
 | **XOÁ** | `data-kit-as`, đuôi `name=$alias`, `data-kitwork-alias`, `data-alias` (→ `data-kit-alias`) | — | ✅ 21/09 |
-| **XOÁ** | `data-kitwork-key` trong `morph.js` (`jit/js/lib/more.js` đã xoá cùng hệ action) | key là của tác giả: `data-kit-key` (chữ của `for`) hoặc `data-key` (site apptop viết tay); tiền tố máy không ai phát | ✅ 22/09 — test `morph_key_test.go` (key tác giả DỜI node, `data-kitwork-key` trơ = khớp theo vị trí; có disable-check) |
+| **XOÁ** | `data-kitwork-key` trong `morph.js` (`jit/js/lib/more.js` đã xoá cùng hệ action); và 24/09 xoá nốt alias `data-key` | key là của tác giả và chỉ có MỘT chữ: `data-kit-key` (chữ của `for`). `data-key` là tên bất kỳ thư viện nào trên trang cũng có thể đang dùng — 6 chỗ ở apptop đã đổi |
 | **XOÁ** | Hệ `action` jitjs (`lib/`, `behaviors`, `fire`, `compat.js`, `data-kit(work)-action/target`, `data-kit-trigger`) | không cần `effect`: 23 file site chuyển sang component/biểu thức/Drive; `more` 0 chỗ dùng | ✅ 22/09 |
 | ~~XOÁ~~ **GIỮ** | Nhánh `typeof fn === "function"` (kernel call) | B10 chốt async sống trong **method JS thật** của component — nhánh này chính là chỗ method đó chạy (`fn.apply(scope)`); dòng XOÁ viết khi còn nghĩ async đi qua `$app` + scope-patch | ✅ 22/09 lật thành GIỮ |
 | **XOÁ** | 9.002 dòng `runtime*.js`, `legacy/core/*`, `main copy*.js` | — | ✅ đã không còn (kiểm 22/09: `find` toàn `jit/` không ra file nào, thư mục `legacy` không tồn tại) |
