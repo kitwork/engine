@@ -1620,25 +1620,35 @@
       });
     });
   });
-  // data-kit-drag: a native window drag region (a custom title bar). Primary-button press hands the
-  // drag to the OS through the private kit.window transport; double-click maximizes — standard
-  // title-bar behaviour. Application markup never receives the raw dispatcher.
-  // A no-op on the web (bridge absent). Buttons inside can opt out with data-kit-no-drag.
-  var DRAG = "[data-kitwork-drag],[data-kit-drag]";
+  // data-kit-drag="true" marks a region the OS may drag the window by — a title bar the page draws
+  // itself, because app.desktop({ chrome: "html" }) opens a window with no frame of its own.
+  // Primary-button press hands the drag to the OS through the private kit.window transport;
+  // double-click maximises, which is what a title bar does everywhere.
+  //
+  // A control inside it opts out with data-kit-drag="false", so pressing a button is a press and
+  // not the start of a drag. ONE attribute, two values: the old pair (data-kit-drag beside a
+  // separate data-kit-no-drag) made the opt-out look like a different feature.
+  //
+  // All of it is a no-op on the web, where there is no bridge and no window to move.
+  var DRAG = '[data-kit-drag="true"]';
+  var NO_DRAG = '[data-kit-drag="false"]';
   function runWindowCommand(command) {
     try {
       var result = kit.window[command]();
       if (result && typeof result.catch === "function") result.catch(function () { });
     } catch (_) { }
   }
+  function draggableTarget(e) {
+    if (!e.target || !e.target.closest) return false;
+    if (e.target.closest(NO_DRAG)) return false;
+    return !!e.target.closest(DRAG);
+  }
   listen(document, "mousedown", function (e) {
     if (e.button !== 0) return;
-    if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
-    if (e.target.closest && e.target.closest(DRAG)) runWindowCommand("drag");
+    if (draggableTarget(e)) runWindowCommand("drag");
   });
   listen(document, "dblclick", function (e) {
-    if (e.target.closest && e.target.closest("[data-kit-no-drag],[data-kitwork-no-drag]")) return;
-    if (e.target.closest && e.target.closest(DRAG)) runWindowCommand("maximize");
+    if (draggableTarget(e)) runWindowCommand("maximize");
   });
   listen(document, "input", function (e) {
     var el = e.target.closest && e.target.closest(MODEL);

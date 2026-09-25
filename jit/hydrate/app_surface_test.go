@@ -80,7 +80,7 @@ if (!windowResult || typeof windowResult.then !== "function") {
 kit.bridge = {
   call: function () { return Promise.reject(new Error("native window command failed")); }
 };
-var dragRegion = el("div", { "data-kit-drag": "" });
+var dragRegion = el("div", { "data-kit-drag": "true" });
 document.body.appendChild(dragRegion);
 document.dispatchEvent({ type: "mousedown", button: 0, target: dragRegion });
 document.dispatchEvent({ type: "dblclick", target: dragRegion });
