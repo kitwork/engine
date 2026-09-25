@@ -1648,7 +1648,16 @@
     if (draggableTarget(e)) runWindowCommand("drag");
   });
   listen(document, "dblclick", function (e) {
-    if (draggableTarget(e)) runWindowCommand("maximize");
+    if (!draggableTarget(e)) return;
+    // A double-click TOGGLES: the second one has to put the window back, which is what every other
+    // title bar does. Asking the shell is the only way to know which way to go; if it cannot answer,
+    // maximising is the safer guess than doing nothing.
+    var answer;
+    try { answer = kit.window.isMaximized(); } catch (_) { answer = null; }
+    Promise.resolve(answer).then(
+      function (maximized) { runWindowCommand(maximized === true ? "restore" : "maximize"); },
+      function () { runWindowCommand("maximize"); }
+    );
   });
   listen(document, "input", function (e) {
     var el = e.target.closest && e.target.closest(MODEL);

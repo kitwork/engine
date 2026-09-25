@@ -682,3 +682,85 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
 	}
 	runKernelPage(t, browser, page, scanModules(page, nil))
 }
+
+// titlebar@v1.0.0 — the window controls a page draws when app.desktop({ chrome: "html" }) gives it
+// a frameless window. The kernel already owns dragging (data-kit-drag), so what is left is the part
+// markup cannot express: asking the shell whether the window is maximised, and reading the
+// Navigation API for whether there is anywhere to go back to.
+func TestBrowserTitlebarAsksTheShellBeforeItDecides(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping titlebar browser proof in short mode")
+	}
+	browser := findHeadlessBrowser()
+	if browser == "" {
+		t.Skip("Chrome, Chromium, or Edge is not installed")
+	}
+	page := `<!doctype html>
+<html lang="en" data-kit-app="titlebar"><head><meta charset="utf-8"><title>titlebar</title></head><body>
+  <header id="bar" data-kit-component="titlebar" data-kit-alias="$titlebar" data-kit-drag="true">
+    <button id="back" type="button" data-kit-drag="false" data-kit-click="$titlebar.back()"
+            data-kit-bind:disabled="!canGoBack">back</button>
+    <button id="toggle" type="button" data-kit-drag="false" data-kit-click="$titlebar.toggleMaximize()"
+            data-kit-bind:title="maximized ? 'Restore window' : 'Maximize window'">toggle</button>
+    <b id="state" data-kit-text="maximized ? 'max' : 'normal'"></b>
+  </header>
+  <script src="/kit.js"></script>
+  <script>
+  (async function () {
+    var root = document.documentElement;
+    function assert(ok, message) { if (!ok) throw new Error(message); }
+    function tick() { return new Promise(function (r) { setTimeout(r, 40); }); }
+
+    // A shell that answers: the window starts normal.
+    var calls = [];
+    var maximized = false;
+    window.kit.bridge = {
+      call: function (action) {
+        calls.push(action);
+        if (action === "window.maximize") maximized = true;
+        if (action === "window.restore") maximized = false;
+        return Promise.resolve(action === "window.isMaximized" ? maximized : true);
+      }
+    };
+    window.kit.render();
+    await tick();
+
+    var toggle = document.getElementById("toggle");
+    var state = document.getElementById("state");
+
+    calls = [];
+    toggle.click();
+    await tick();
+    assert(calls.indexOf("window.isMaximized") >= 0, "it must ASK before deciding: " + calls.join(","));
+    assert(calls.indexOf("window.maximize") >= 0, "a normal window should maximise: " + calls.join(","));
+    assert(state.textContent === "max", "state should follow the window, got " + state.textContent);
+    assert(toggle.getAttribute("title") === "Restore window", "the label should offer the OTHER action, got " + toggle.getAttribute("title"));
+
+    calls = [];
+    toggle.click();
+    await tick();
+    assert(calls.indexOf("window.restore") >= 0, "a maximised window should restore: " + calls.join(","));
+    assert(state.textContent === "normal", "state should come back, got " + state.textContent);
+
+    // A shell that refuses to answer must not break the button.
+    window.kit.bridge = { call: function () { return Promise.reject(new Error("no shell")); } };
+    var before = state.textContent;
+    toggle.click();
+    await tick();
+    assert(typeof state.textContent === "string", "a refusing shell must not throw");
+
+    // Back is disabled while the Navigation API says there is nowhere to go.
+    assert(document.getElementById("back").disabled === true, "back should be disabled with no history");
+
+    root.setAttribute("data-kit-test", "passed");
+  })().catch(function (error) {
+    var root = document.documentElement;
+    if (!root.hasAttribute("data-kit-test")) {
+      root.setAttribute("data-kit-test", "failed");
+      root.setAttribute("data-kit-test-error", String(error && error.message || error));
+    }
+  });
+  </script>
+</body></html>`
+	runKernelPage(t, browser, page, scanModules(page, nil))
+}

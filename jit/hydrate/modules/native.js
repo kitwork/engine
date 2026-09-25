@@ -169,10 +169,13 @@
     minimize: function () { return windowCall("minimize"); },
     maximize: function () { return windowCall("maximize"); },
     restore: function () { return windowCall("restore"); },
-    close: function () { return windowCall("close"); }
+    close: function () { return windowCall("close"); },
+    // Asking, not commanding: a title bar has to KNOW whether the window is maximised before it
+    // can choose between maximise and restore, or label its own button.
+    isMaximized: function () { return windowCall("isMaximized"); }
   };
   kit.service("window", windowService, {
-    expression: ["minimize", "maximize", "restore", "close"]
+    expression: ["minimize", "maximize", "restore", "close", "isMaximized"]
   });
 
   Object.defineProperties(kit, {

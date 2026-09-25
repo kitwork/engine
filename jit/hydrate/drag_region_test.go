@@ -61,16 +61,50 @@ calls = [];
 document.dispatchEvent({ type: "mousedown", button: 2, target: bar });
 if (calls.length !== 0) throw new Error("right-click must not drag, got " + calls.join(","));
 
-// Double-click on the bar maximises — what a title bar does everywhere — and the opt-out holds.
-calls = [];
-press(bar, "dblclick");
-if (calls.join(",") !== "window.maximize") throw new Error("double-click should maximise, got " + calls.join(","));
-calls = [];
-press(button, "dblclick");
-if (calls.length !== 0) throw new Error("double-click on an opted-out control must do nothing");
+// Double-click TOGGLES, which is what a title bar does: the second one puts the window back. The
+// shell is asked first, so the calls arrive in that order.
+(async function () {
+  var maximized = false;
+  kit.bridge = {
+    call: function (action) {
+      calls.push(action);
+      if (action === "window.maximize") maximized = true;
+      if (action === "window.restore") maximized = false;
+      return Promise.resolve(action === "window.isMaximized" ? maximized : true);
+    }
+  };
 
-kit.bridge = null;
-console.log("drag region: one attribute, true drags, false opts out");
+  calls = [];
+  press(bar, "dblclick");
+  await new Promise(function (r) { setTimeout(r, 0); });
+  if (calls.join(",") !== "window.isMaximized,window.maximize") {
+    throw new Error("first double-click should ask then maximise, got " + calls.join(","));
+  }
+
+  calls = [];
+  press(bar, "dblclick");
+  await new Promise(function (r) { setTimeout(r, 0); });
+  if (calls.join(",") !== "window.isMaximized,window.restore") {
+    throw new Error("second double-click should ask then restore, got " + calls.join(","));
+  }
+
+  calls = [];
+  press(button, "dblclick");
+  await new Promise(function (r) { setTimeout(r, 0); });
+  if (calls.length !== 0) throw new Error("double-click on an opted-out control must do nothing");
+
+  // A shell that cannot answer still gets a window maximised rather than nothing happening.
+  kit.bridge = { call: function (action) { calls.push(action); return action === "window.isMaximized" ? Promise.reject(new Error("no")) : Promise.resolve(true); } };
+  calls = [];
+  press(bar, "dblclick");
+  await new Promise(function (r) { setTimeout(r, 0); });
+  if (calls.join(",") !== "window.isMaximized,window.maximize") {
+    throw new Error("an unanswerable shell should still maximise, got " + calls.join(","));
+  }
+
+  kit.bridge = null;
+  console.log("drag region: one attribute, true drags, false opts out, double-click toggles");
+})();
 `
 	runNodeDOMScript(t, "drag_region.test.js", assertions)
 }
