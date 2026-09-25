@@ -409,7 +409,10 @@
     expression: ["capture"]
   });
   kit.service("theme", theme, {
-    expression: ["mode", "resolved", "set", "toggle"]
+    // All three modes, because the grant is the surface markup writes against: a method the service
+    // has but this list omits reads as undefined in an expression, so the third mode would exist
+    // for JavaScript and not for a page.
+    expression: ["mode", "resolved", "set", "toggle", "system"]
   });
   kit.service("navigation", navigation, {
     expression: ["back", "forward", "reload"]

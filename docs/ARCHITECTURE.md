@@ -47,7 +47,7 @@ isolated site-folders. Keep these levels separate:
 | experimental capsule auth: signature + capability + identity (`security/`, `id/`, `token/`) | — |
 | cluster: tenant is the unit of placement / migration | — |
 
-"Global" inside a site = **per-tenant** (its own `database.connect()`), never process-global.
+"Global" inside a site = **per-tenant** (its own `database.connection()`), never process-global.
 Process-global belongs to the engine only.
 
 ---
@@ -158,7 +158,7 @@ import home  from "./app/index.kitwork.js"
 import users from "./app/users/index.kitwork.js"
 import gold  from "./app/api/gold/index.kitwork.js"
 
-const db = database.connect()
+const db = database.connection()
 router.context({ db })                 // inject ctx.db for all modules
 
 router.use(home)                       // explicit map — one glance = whole site

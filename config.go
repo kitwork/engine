@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/database"
+	"github.com/kitwork/engine/gateway"
 	"github.com/kitwork/engine/logger"
+	"github.com/kitwork/engine/proxies"
 	"github.com/kitwork/engine/work"
 )
 
 type Config struct {
+	Web              bool                `json:"-" yaml:"-"`
 	Port             int                 `json:"port" yaml:"port"`
 	Root             string              `json:"root" yaml:"root"`
 	RootExplicit     bool                `json:"-" yaml:"-"`
@@ -29,15 +32,9 @@ type Config struct {
 	TrustProxy       bool                `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
 	Logger           logger.Config       `json:"logger" yaml:"logger"`
 	RateLimit        *RateLimitConfig    `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
-	Search           SearchConfig        `json:"search" yaml:"search"`
 	AppDatabases     []AppDatabaseConfig `json:"-" yaml:"-"`
-}
-
-// SearchConfig controls host-owned search rollout. CollectionCanary is
-// deliberately opt-in while collection.search() still serves the legacy
-// SQLite projection and compares the segment engine asynchronously.
-type SearchConfig struct {
-	CollectionCanary bool `json:"collection_canary" yaml:"collection_canary"`
+	Gateway          []gateway.Target    `json:"gateway,omitempty" yaml:"gateway,omitempty"`
+	Proxies          []proxies.Config    `json:"proxy,omitempty" yaml:"proxy,omitempty"`
 }
 
 // RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request
@@ -116,18 +113,6 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 			cfg.TrustProxy = b
 		}
 	}
-	if val, ok := raw["search"]; ok {
-		if search, ok := val.(map[string]interface{}); ok {
-			canary := search["collection_canary"]
-			if camel, exists := search["collectionCanary"]; exists {
-				canary = camel
-			}
-			if enabled, ok := canary.(bool); ok {
-				cfg.Search.CollectionCanary = enabled
-			}
-		}
-	}
-
 	if val, ok := raw["logger"]; ok {
 		if m, ok := val.(map[string]interface{}); ok {
 			if level, ok := m["level"].(string); ok {
@@ -244,12 +229,29 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		}
 		cfg.AppDatabases = owned
 	}
+	if err := validateDeclaredDatabaseAliases(cfg.Databases, cfg.AppDatabases); err != nil {
+		return nil, err
+	}
+	if value, ok := raw["gateway"]; ok {
+		targets, err := parseGatewayTargets(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Gateway = targets
+	}
+	if value, ok := raw["proxy"]; ok {
+		listeners, err := parseProxyConfigs(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Proxies = listeners
+	}
 
 	return cfg, nil
 }
 
 // validateDatabaseAliases refuses two connections under one name: the second would silently shadow
-// the first at database.connect("alias").
+// the first at database.connection("alias").
 func validateDatabaseAliases(configs []database.Config) error {
 	seen := make(map[string]struct{}, len(configs))
 	for _, config := range configs {
@@ -262,6 +264,32 @@ func validateDatabaseAliases(configs []database.Config) error {
 			return fmt.Errorf("database connection alias %q is declared more than once", alias)
 		}
 		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+// validateDeclaredDatabaseAliases keeps the fixed host namespace unambiguous.
+// Managed KitDB roots have dynamic member names and are checked when an alias
+// is resolved; only explicitly named owned databases participate here.
+func validateDeclaredDatabaseAliases(external []database.Config, owned []AppDatabaseConfig) error {
+	seen := make(map[string]string, len(external)+len(owned))
+	for _, config := range external {
+		alias := strings.TrimSpace(config.Alias)
+		if alias == "" {
+			alias = "default"
+		}
+		seen[strings.ToLower(alias)] = "external connection"
+	}
+	for _, config := range owned {
+		alias := strings.TrimSpace(config.Alias)
+		if alias == "" {
+			continue
+		}
+		key := strings.ToLower(alias)
+		if previous, exists := seen[key]; exists {
+			return fmt.Errorf("database alias %q is declared by both %s and app.database", alias, previous)
+		}
+		seen[key] = "app.database"
 	}
 	return nil
 }

@@ -133,7 +133,11 @@ func (root *appDatabaseNativeRoot) Close() error {
 func startAppDatabaseRuntimes(
 	parent context.Context,
 	configs []AppDatabaseConfig,
+	external []hostdatabase.Config,
 ) ([]*appDatabaseRuntime, <-chan error, error) {
+	if err := validateAppDatabaseRuntimeAliases(configs, external); err != nil {
+		return nil, nil, err
+	}
 	errorsChannel := make(chan error, max(1, len(configs)))
 	runtimes := make([]*appDatabaseRuntime, 0, len(configs))
 	for _, config := range configs {
@@ -147,6 +151,52 @@ func startAppDatabaseRuntimes(
 		runtimes = append(runtimes, runtime)
 	}
 	return runtimes, errorsChannel, nil
+}
+
+// validateAppDatabaseRuntimeAliases classifies owned paths before any database
+// is opened. A file owns one fixed alias; a managed root exposes dynamic names
+// and is therefore checked again by the resolver for each requested alias.
+func validateAppDatabaseRuntimeAliases(configs []AppDatabaseConfig, external []hostdatabase.Config) error {
+	externalAliases := make(map[string]struct{}, len(external))
+	for _, config := range external {
+		alias := strings.TrimSpace(config.Alias)
+		if alias == "" {
+			alias = "default"
+		}
+		externalAliases[strings.ToLower(alias)] = struct{}{}
+	}
+
+	ownedAliases := make(map[string]string, len(configs))
+	for _, config := range configs {
+		absolute, err := filepath.Abs(config.Path)
+		if err != nil {
+			return fmt.Errorf("app.database %q: resolve path: %w", config.Path, err)
+		}
+		directory, err := appDatabaseDirectoryTarget(config.Path, absolute)
+		if err != nil {
+			return err
+		}
+		if directory {
+			if config.Alias != "" {
+				return fmt.Errorf("app.database %q: alias requires one KitDB file; managed roots expose databases by their own names", config.Path)
+			}
+			continue
+		}
+
+		alias := strings.TrimSpace(config.Alias)
+		if alias == "" {
+			alias = "default"
+		}
+		key := strings.ToLower(alias)
+		if previous, exists := ownedAliases[key]; exists {
+			return fmt.Errorf("app.database %q: alias %q is already owned by app.database %q", config.Path, alias, previous)
+		}
+		if _, exists := externalAliases[key]; exists {
+			return fmt.Errorf("app.database %q: alias %q conflicts with an external database declaration", config.Path, alias)
+		}
+		ownedAliases[key] = config.Path
+	}
+	return nil
 }
 
 func startAppDatabaseRuntime(

@@ -10,7 +10,7 @@ import usersDetail from "./app/users/[id]/index.kitwork.js"
 import goldApi     from "./app/api/gold/index.kitwork.js"
 
 // per-tenant singleton
-const db = database.connect("system")
+const db = database.connection("system")
 router.context({ db })          // DI-lite: inject ctx.db into every module
 
 // explicit map (default — no magic, full control)

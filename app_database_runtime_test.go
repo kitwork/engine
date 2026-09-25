@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,34 @@ import (
 	"github.com/kitwork/engine/kitdb/relational"
 	_ "github.com/lib/pq"
 )
+
+func TestValidateAppDatabaseRuntimeAliasesRejectsImplicitDefaultCollision(t *testing.T) {
+	configs := []AppDatabaseConfig{
+		{Path: filepath.Join(t.TempDir(), "first.kitdb")},
+		{Path: filepath.Join(t.TempDir(), "second.kitdb")},
+	}
+	err := validateAppDatabaseRuntimeAliases(configs, nil)
+	if err == nil || !strings.Contains(err.Error(), `alias "default"`) {
+		t.Fatalf("implicit default collision must be rejected, got %v", err)
+	}
+}
+
+func TestValidateAppDatabaseRuntimeAliasesRejectsExternalDefaultCollision(t *testing.T) {
+	configs := []AppDatabaseConfig{{Path: filepath.Join(t.TempDir(), "owned.kitdb")}}
+	external := []hostdatabase.Config{{Alias: "default", Type: "sqlite", Name: "external.db"}}
+	err := validateAppDatabaseRuntimeAliases(configs, external)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with an external database") {
+		t.Fatalf("owned and external default collision must be rejected, got %v", err)
+	}
+}
+
+func TestValidateAppDatabaseRuntimeAliasesAllowsDynamicManagedRoots(t *testing.T) {
+	configs := []AppDatabaseConfig{{Path: t.TempDir()}, {Path: t.TempDir()}}
+	external := []hostdatabase.Config{{Alias: "main", Type: "sqlite", Name: "external.db"}}
+	if err := validateAppDatabaseRuntimeAliases(configs, external); err != nil {
+		t.Fatalf("dynamic managed roots must defer member aliases to resolution: %v", err)
+	}
+}
 
 func TestAppDatabaseRuntimePublishesNativeFileWithoutListener(t *testing.T) {
 	databasePath := filepath.Join(t.TempDir(), "native-shop.kitdb")

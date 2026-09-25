@@ -62,6 +62,34 @@ app
 	}
 }
 
+func TestAppConnectionsAcceptCanonicalObjectForm(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app
+  .postgresql({ alias: "system", host: "db.internal", port: 5432, name: "kitwork" })
+  .mysql({ alias: "legacy", url: "mysql://root@legacy.internal/shop" })
+  .sqlite({ alias: "local", name: "./local.db" })
+  .redis({ alias: "cache", url: "redis://cache.internal:6379" })
+  .connect({ alias: "events", type: "postgres", host: "events.internal", name: "events" })
+  .web({ port: 8080 });`)
+
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connections, _ := raw["databases"].([]interface{})
+	if len(connections) != 5 {
+		t.Fatalf("connections = %v", connections)
+	}
+	wantAliases := []string{"system", "legacy", "local", "cache", "events"}
+	wantTypes := []string{"postgres", "mysql", "sqlite", "redis", "postgres"}
+	for index := range wantAliases {
+		connection := connections[index].(map[string]interface{})
+		if connection["alias"] != wantAliases[index] || connection["type"] != wantTypes[index] {
+			t.Fatalf("connection %d = %v", index, connection)
+		}
+	}
+}
+
 // Refusals, each one a validation error naming the method — never a silent nothing.
 func TestAppConnectionRefusals(t *testing.T) {
 	for name, manifest := range map[string]string{
@@ -77,7 +105,7 @@ func TestAppConnectionRefusals(t *testing.T) {
 			t.Errorf("%s: want a validation error naming the method, got %v", name, err)
 		}
 	}
-	// Two connections under one alias would shadow each other at database.connect("alias").
+	// Two connections under one alias would shadow each other at database.connection("alias").
 	file := writeServerJS(t, `import { app } from "kitwork";
 app.sqlite("main", "a.db").sqlite("main", "b.db").web({ port: 8080 });`)
 	raw, err := evalConfigJS(file)
@@ -110,6 +138,30 @@ app
 	dbs, _ := raw["databases"].([]interface{})
 	if len(dbs) != 2 || dbs[0].(map[string]interface{})["alias"] != "system" || dbs[1].(map[string]interface{})["alias"] != "local" {
 		t.Fatalf("databases = %v", raw["databases"])
+	}
+}
+
+func TestAppDatabaseAcceptsCanonicalOwnedObject(t *testing.T) {
+	file := writeServerJS(t, `import { app } from "kitwork";
+app.database({ alias: "main", path: "./main.kitdb", memory: "64mb", concurrency: 2 });`)
+	raw, err := evalConfigJS(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, _ := raw["owned_databases"].([]interface{})
+	if len(owned) != 1 {
+		t.Fatalf("owned databases = %v", owned)
+	}
+	declaration := owned[0].(map[string]interface{})
+	if declaration["alias"] != "main" || declaration["path"] != "./main.kitdb" {
+		t.Fatalf("owned declaration = %v", declaration)
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.AppDatabases) != 1 || cfg.AppDatabases[0].Alias != "main" {
+		t.Fatalf("parsed owned databases = %+v", cfg.AppDatabases)
 	}
 }
 

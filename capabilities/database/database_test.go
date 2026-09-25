@@ -42,3 +42,24 @@ func TestDatabaseCapability(t *testing.T) {
 		t.Fatalf("Table creation failed: %v", tbl.V)
 	}
 }
+
+func TestConnectionReturnsIndependentCapabilityHandle(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	root := dbcap.NewDatabaseAdapter(&mockScope{db: db})
+	main := root.Connection("main")
+	analytics := root.Connection("analytics")
+	if main == root || analytics == root || main == analytics {
+		t.Fatal("connection aliases share a mutable adapter")
+	}
+	if !root.Connected("main") {
+		t.Fatal("declared connection was not reported available")
+	}
+	if connected := root.Connect(value.NewString("main")); connected.DB() != nil {
+		t.Fatal("connect resolved an alias instead of reserving external connection semantics")
+	}
+}

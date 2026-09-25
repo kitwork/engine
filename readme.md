@@ -293,6 +293,8 @@ server.run().catch((err) => console.log("Host boot error:", err));
 | `.sqlite(alias, source)` | `String, String \| Object` | Declares a local SQLite compatibility connection. |
 | `.redis(alias, source)` | `String, String \| Object` | Declares Redis when its runtime connector is linked. |
 | `.connect(alias, source)` | `String, String \| Object` | Declares a generic external connector by URL scheme, type, or driver. |
+| `.gateway(target, ...)` | `Object...` | Declares host-owned reverse-proxy targets with `{ domain?, target, weight? }`. |
+| `.proxy(config, ...)` | `Object...` | Opens host-owned HTTP or SOCKS5 forward-proxy listeners. |
 | `.canonical(mode)` | `String` | Configures auto-redirects: `"apex"` (www ➔ apex) or `"www"` (apex ➔ www). |
 | `.redirects(map)` | `Object` | Static domain redirect mapping: `{ "old.com": "new.com" }`. |
 | `.logger(opts)` | `Object` | Configures structured logging: `{ level, format, logfile }`. |
@@ -319,6 +321,84 @@ All domains under `app/` share one App Runtime and its `_cron/`, `_queue/`,
 those resources. If `.root(...)` is omitted and both `app/` and `apps/` exist,
 startup fails with an explicit ambiguity error instead of selecting one.
 
+### Host Gateway
+
+`app.gateway(target, ...)` maps incoming domains to operator-controlled HTTP or
+HTTPS targets without loading a tenant VM:
+
+```javascript
+import { app } from "kitwork"
+
+app.gateway(
+  { domain: "api.example.com", target: "http://node-a:3000", weight: 2, health: "/health" },
+  { domain: "api.example.com", target: "http://node-b:3000", weight: 1, health: "/health" }
+)
+```
+
+Each object is one target. `target` is required, `weight` defaults to `1`, and
+equal weights produce round-robin distribution. `health` optionally enables an
+active HTTP health check at that target path. Passive upstream failures are
+tracked even without it; after three consecutive failures the published pool
+skips the target for a bounded cooldown and then permits a recovery probe.
+Per-target request, response, failure, availability, and health counters are
+available as a bounded host snapshot. The gateway manager can atomically
+publish a validated replacement while the previous snapshot drains. A
+gateway-only manifest can omit both `domain` and an app root:
+
+```javascript
+app.gateway({ target: "http://127.0.0.1:3000" })
+```
+
+Domainless targets form the default pool and are rejected when `app.web()` is
+also declared, so a gateway cannot silently shadow the web surface. Gateway
+targets may use private VPC addresses because they are trusted host manifest
+configuration, not tenant-controlled outbound requests.
+
+### Host Forward Proxies
+
+`app.proxy(config, ...)` opens independent HTTP or SOCKS5 forward-proxy
+listeners without loading a tenant VM:
+
+```javascript
+import { app, env } from "kitwork"
+
+app.proxy(
+  {
+    port: 8888,
+    username: env.PROXY_USERNAME,
+    password: env.PROXY_PASSWORD,
+  },
+  {
+    protocol: "socks5",
+    host: "127.0.0.1",
+    port: 1080,
+  },
+)
+```
+
+`protocol` defaults to `http` and `host` defaults to `127.0.0.1`. HTTP
+listeners support ordinary absolute-form requests and HTTPS tunneling through
+`CONNECT`; SOCKS5 listeners support the CONNECT command with no-auth or
+username/password authentication. A non-loopback bind is rejected unless both
+credentials are configured, preventing an accidental public open proxy.
+
+Destinations in loopback, private, link-local, multicast, carrier-grade NAT,
+and reserved documentation ranges are denied by default after DNS resolution.
+An operator may set `allowPrivate: true` for intentional loopback/private VPC
+access; link-local and special-purpose destinations remain denied. Each
+listener is bounded to 1,024 active connections, strips proxy and forwarded
+identity headers before ordinary HTTP forwarding, and drains with the host.
+Proxy-only manifests need no `app/` or `apps/` root.
+
+HTTP Basic and SOCKS5 username/password authentication do not encrypt the
+client-to-proxy connection. Public listeners must therefore run inside a
+trusted network, VPN, or TLS tunnel in addition to requiring credentials.
+
+The current contract is static manifest configuration. Repeated
+`app.proxy(config, ...)` calls append to the same immutable listener
+collection. A database-backed registry and reconciler belong to the future
+control plane and are not silently inferred from a configured database.
+
 ### Host-Owned KitDB
 
 Kitwork can own a standalone KitDB file or managed database directory in the
@@ -327,8 +407,9 @@ same process as its web, desktop, and mobile surfaces. The options remain flat:
 ```javascript
 import { app, env } from "kitwork"
 
-app.database("./data.kitdb", {
+app.database({
   alias: "shop",
+  path: "./data.kitdb",
   host: "127.0.0.1",
   port: 5445,
   user: "kitdb",
@@ -347,7 +428,7 @@ app.database("./data.kitdb", {
 ```
 
 Omit `port` for native in-process access only, then use
-`database.connect("shop")` from Kitwork code. Omitting `alias` publishes a
+`database.connection("shop")` from Kitwork code. Omitting `alias` publishes a
 single file as `default`, so plain `database` calls use it automatically. A
 positive `port` exposes the same independent KitDB engine through its
 PostgreSQL-compatible listener while internal calls still take the native
@@ -365,11 +446,12 @@ listener.
 External resources use provider-specific declarations or the generic connector:
 
 ```javascript
-app.postgresql("system", env.POSTGRESQL_URL)
-app.sqlite("legacy", "./legacy.sqlite")
-app.connect("remote-kitdb", env.KITSQL_URL)
-app.connect("warehouse", {
-  driver: "postgresql",
+app.postgresql({ alias: "system", url: env.POSTGRESQL_URL })
+app.sqlite({ alias: "legacy", name: "./legacy.sqlite" })
+app.connect({ alias: "remote-kitdb", url: env.KITSQL_URL })
+app.connect({
+  alias: "warehouse",
+  type: "postgresql",
   host: env.WAREHOUSE_HOST,
   name: "events",
 })
@@ -400,7 +482,7 @@ app.database("./.kitdb/", {
   warm: ["shop"],
 })
 
-const shop = database.connect("shop")
+const shop = database.connection("shop")
 ```
 
 Managed-root connections are lazy and use the same node leases as the
@@ -409,6 +491,11 @@ query; the bounded node may retain its engine as idle or evict it under LRU
 pressure. Two roots exposing the same logical name fail as ambiguous. The
 virtual maintenance database is not exposed to application code. New managed
 roots store their authoritative database catalog in `.catalog/data.kitdb`.
+
+Fixed `app.database(...)` resources and external connections share one
+case-insensitive alias namespace. Duplicate declarations fail before a database
+is opened. Because managed-root member names are dynamic, a collision with an
+external connection fails closed when that name is resolved.
 
 ---
 
@@ -423,7 +510,7 @@ Kitwork handlers feature **Dynamic Parameter Injection**. The VM inspects arrow 
 ```javascript
 import { router, database } from "kitwork"
 
-const db = database.connect("system")
+const db = database.connection("system")
 
 // Inject `ctx` (Unified Context)
 router.get("/api/status").handle((ctx) => {
@@ -524,7 +611,7 @@ The Kitwork Query Builder translates JavaScript lambda expressions into paramete
 ```javascript
 import { database } from "kitwork"
 
-const db = database.connect("system")
+const db = database.connection("system")
 
 // 1. Fetch with Magic Lambda Filtering
 const activeUsers = db.user

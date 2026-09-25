@@ -27,15 +27,22 @@ func (d *DatabaseAdapter) Connection(name ...string) *DatabaseAdapter {
 	if len(name) > 0 && name[0] != "" {
 		alias = name[0]
 	}
-	d.name = alias
-	if d.scope != nil {
-		d.sqlDB = d.scope.DB(alias)
+	handle := &DatabaseAdapter{scope: d.scope, name: alias}
+	if handle.scope != nil {
+		handle.sqlDB = handle.scope.DB(alias)
 	}
-	return d
+	return handle
 }
 
-func (d *DatabaseAdapter) Connect(name ...string) *DatabaseAdapter {
-	return d.Connection(name...)
+func (d *DatabaseAdapter) Connected(name ...string) bool {
+	return d.Connection(name...).DB() != nil
+}
+
+// Connect no longer selects a registered alias. Dynamic external connectors
+// require an explicit host policy and are intentionally unavailable in this
+// narrower capability adapter.
+func (d *DatabaseAdapter) Connect(_ ...value.Value) *DatabaseAdapter {
+	return &DatabaseAdapter{}
 }
 
 func (d *DatabaseAdapter) DB() *sql.DB {

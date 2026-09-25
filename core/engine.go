@@ -31,6 +31,14 @@ type Authorizer func(
 	domain string,
 ) (requestscope.Authorization, error)
 
+// GatewayDispatcher is the host-owned reverse-proxy boundary. Exact domain
+// matches run before tenant resolution; a default pool is used only when the
+// host has no web surface.
+type GatewayDispatcher interface {
+	ServeExact(http.ResponseWriter, *http.Request, string) bool
+	ServeDefault(http.ResponseWriter, *http.Request) bool
+}
+
 type cachedTenant struct {
 	tenant      *work.Tenant
 	lastAccess  time.Time
@@ -73,6 +81,8 @@ type Engine struct {
 	idleTimeout      time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
 	rateLimiter      *RateLimiter  // host-level limits (nil = off); set qua SetRateLimit trước khi serve
 	authorizer       Authorizer
+	gateway          GatewayDispatcher
+	webEnabled       bool
 	bytecodeCacheMu  sync.RWMutex
 	bytecodeCacheDir string
 	runtimeHealth    *work.RuntimeHealth
@@ -89,22 +99,39 @@ type Engine struct {
 }
 
 func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine {
+	return newEngine(root, maxEnergy, hotReload, hostname, true)
+}
+
+// NewGatewayHost creates only the host request boundary needed by a
+// gateway-only manifest. It does not create search/KitDB managers, scan an app
+// root, or start tenant cache maintenance.
+func NewGatewayHost(hostname string) *Engine {
+	return newEngine(".", 0, false, hostname, false)
+}
+
+func newEngine(root string, maxEnergy uint64, hotReload bool, hostname string, webEnabled bool) *Engine {
 	if maxEnergy == 0 {
 		maxEnergy = kitruntime.Limits().DefaultMaxEnergy
 	}
-	searchManager, searchManagerErr := search.NewManager(
-		filepath.Join(root, ".data", "search"),
-		search.ManagerOptions{
-			ReplacementTimeout: 24 * time.Hour,
-			Writer:             search.WriterOptions{Segment: search.BuildOptions{SkipLongTerms: true}},
-		},
-	)
-	if searchManagerErr != nil {
-		slog.Warn("Search manager failed to initialize", "error", searchManagerErr)
-	}
-	kitDBNodeManager, kitDBNodeErr := kitdbnode.NewManager(kitdbnode.Limits{})
-	if kitDBNodeErr != nil {
-		slog.Warn("KitDB node manager failed to initialize", "error", kitDBNodeErr)
+	var searchManager *search.Manager
+	var searchManagerErr error
+	var kitDBNodeManager *kitdbnode.Manager
+	var kitDBNodeErr error
+	if webEnabled {
+		searchManager, searchManagerErr = search.NewManager(
+			filepath.Join(root, ".data", "search"),
+			search.ManagerOptions{
+				ReplacementTimeout: 24 * time.Hour,
+				Writer:             search.WriterOptions{Segment: search.BuildOptions{SkipLongTerms: true}},
+			},
+		)
+		if searchManagerErr != nil {
+			slog.Warn("Search manager failed to initialize", "error", searchManagerErr)
+		}
+		kitDBNodeManager, kitDBNodeErr = kitdbnode.NewManager(kitdbnode.Limits{})
+		if kitDBNodeErr != nil {
+			slog.Warn("KitDB node manager failed to initialize", "error", kitDBNodeErr)
+		}
 	}
 	e := &Engine{
 		startedAt:        time.Now(),
@@ -124,10 +151,13 @@ func New(root string, maxEnergy uint64, hotReload bool, hostname string) *Engine
 		kitDBNodeErr:     kitDBNodeErr,
 		collectionStats:  collectioncap.NewSegmentSearchCanaryTelemetry(),
 		idleTimeout:      10 * time.Minute, // mặc định; chỉnh bằng SetIdleTimeout (0 = không evict)
+		webEnabled:       webEnabled,
 		stopCleanup:      make(chan struct{}),
 	}
-	// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
-	go e.cleanupLoop(1 * time.Minute)
+	if webEnabled {
+		// Vòng dọn cache chạy nền mỗi 1 phút; timeout đọc động từ e.idleTimeout.
+		go e.cleanupLoop(1 * time.Minute)
+	}
 	return e
 }
 
@@ -239,6 +269,21 @@ func (e *Engine) StartAppSchedulers() (started int) {
 // lúc boot, trước khi phục vụ request; nil = tắt.
 func (e *Engine) SetRateLimit(rl *RateLimiter) {
 	e.rateLimiter = rl
+}
+
+// SetGateway installs the host-owned gateway dispatcher.
+func (e *Engine) SetGateway(dispatcher GatewayDispatcher) {
+	e.mu.Lock()
+	e.gateway = dispatcher
+	e.mu.Unlock()
+}
+
+// SetWebEnabled lets a gateway-only manifest avoid every tenant lookup. The
+// default remains true for embedders and existing web hosts.
+func (e *Engine) SetWebEnabled(enabled bool) {
+	e.mu.Lock()
+	e.webEnabled = enabled
+	e.mu.Unlock()
 }
 
 // SetRootLayout freezes the root-to-site mapping selected during host boot.
@@ -1083,6 +1128,21 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, dom.RedirectURL(scheme, to, r.URL.Path, r.URL.RawQuery), http.StatusMovedPermanently)
 			return
 		}
+	}
+
+	e.mu.RLock()
+	gateway := e.gateway
+	webEnabled := e.webEnabled
+	e.mu.RUnlock()
+	if gateway != nil && gateway.ServeExact(w, r, domain) {
+		return
+	}
+	if !webEnabled {
+		if gateway != nil && gateway.ServeDefault(w, r) {
+			return
+		}
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
 	}
 
 	resolveStarted := time.Now()

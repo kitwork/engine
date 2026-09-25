@@ -36,9 +36,10 @@ import (
 // are all written down in the markup itself.
 
 // reservedReadNames are always available inside an expression, so they are never undeclared.
+// It holds no $-names: the scanner skips those before it looks here (a $alias belongs to the page,
+// and the scanner cannot know a page's aliases), so a $-name in this map would be unreachable.
 var reservedReadNames = map[string]bool{
-	"$": true, "$this": true, "$host": true, "$element": true, "$event": true, "$error": true,
-	"$app": true, "kit": true, "$theme": true,
+	"kit": true,
 	// the row overlay data-kit-for adds beside the author's own item/index names
 	"count": true, "first": true, "last": true, "even": true, "odd": true,
 }

@@ -57,12 +57,14 @@ func loadReferencedConfig(path string) (map[string]interface{}, error) {
 // a command: the TOOL (cloud host, desktop shell, future CLI) reads the manifest and decides what to
 // start. Legacy `server.run(port)` still works and counts as declaring the web surface.
 type ServerBuilder struct {
-	config  map[string]value.Value
-	ran     bool // legacy server.run() was called
-	hasWeb  bool // a WEB surface is declared (app.web(...) or legacy server.run/port)
-	path    string
-	err     string
-	unknown []string // manifest methods the chain called that this engine does not have
+	config     map[string]value.Value
+	ran        bool // legacy server.run() was called
+	hasWeb     bool // a WEB surface is declared (app.web(...) or legacy server.run/port)
+	hasGateway bool // a GATEWAY surface is declared with app.gateway(target, ...)
+	hasProxy   bool // forward-proxy listeners declared with app.proxy(config, ...)
+	path       string
+	err        string
+	unknown    []string // manifest methods the chain called that this engine does not have
 	// hasDatabase: an owned KitDB root is declared with app.database(path, options) — the DATABASE
 	// surface (the app offers a database, as app.web offers HTTP). This build has no KitDB runtime
 	// to serve it; the declaration is data the tool reads, exactly like app.desktop on the cloud host.
@@ -155,6 +157,55 @@ func (b *ServerBuilder) Web(args ...value.Value) *ServerBuilder {
 	return b
 }
 
+// Gateway declares operator-controlled reverse-proxy targets. Each argument is
+// one target: { domain?, target, weight?, health? }. Repeated calls append to
+// the same manifest collection.
+func (b *ServerBuilder) Gateway(targets ...value.Value) *ServerBuilder {
+	b.hasGateway = true
+	if len(targets) == 0 {
+		b.err = "app.gateway expects at least one target object"
+		return b
+	}
+
+	var current []value.Value
+	if configured, ok := b.config["gateway"]; ok && configured.K == value.Array {
+		current = append(current, (*configured.V.(*[]value.Value))...)
+	}
+	for index, target := range targets {
+		if !target.IsMap() {
+			b.err = fmt.Sprintf("app.gateway target %d must be an object", index+1)
+			return b
+		}
+		current = append(current, target)
+	}
+	b.config["gateway"] = value.Value{K: value.Array, V: &current}
+	return b
+}
+
+// Proxy declares host-owned HTTP or SOCKS5 forward-proxy listeners. Each
+// argument is one listener object; repeated calls append to the collection.
+func (b *ServerBuilder) Proxy(listeners ...value.Value) *ServerBuilder {
+	b.hasProxy = true
+	if len(listeners) == 0 {
+		b.err = "app.proxy expects at least one listener object"
+		return b
+	}
+
+	var current []value.Value
+	if configured, ok := b.config["proxy"]; ok && configured.K == value.Array {
+		current = append(current, (*configured.V.(*[]value.Value))...)
+	}
+	for index, listener := range listeners {
+		if !listener.IsMap() {
+			b.err = fmt.Sprintf("app.proxy listener %d must be an object", index+1)
+			return b
+		}
+		current = append(current, listener)
+	}
+	b.config["proxy"] = value.Value{K: value.Array, V: &current}
+	return b
+}
+
 // Mobile declares the MOBILE surface (iOS/Android shell). The raw value stays untouched for legacy
 // compatibility; native build tools opt into versioned validation through ReadMobileManifest. The
 // cloud host and desktop shell ignore it.
@@ -213,12 +264,6 @@ func (b *ServerBuilder) RateLimit(v value.Value) *ServerBuilder {
 	return b
 }
 
-// Search declares host-owned search rollout separately from any one surface.
-func (b *ServerBuilder) Search(v value.Value) *ServerBuilder {
-	b.config["search"] = v
-	return b
-}
-
 // TrustProxy: believe X-Forwarded-For/X-Real-IP for the client IP. Enable ONLY when Kitwork runs
 // behind a reverse proxy you control — as the edge server those headers are client-spoofable.
 func (b *ServerBuilder) TrustProxy(v value.Value) *ServerBuilder {
@@ -233,8 +278,24 @@ func (b *ServerBuilder) Databases(v value.Value) *ServerBuilder {
 
 func (b *ServerBuilder) Database(values ...value.Value) *ServerBuilder {
 	if len(values) == 0 || len(values) > 2 {
-		b.err = "app.database expects a connection object or (path, options)"
+		b.err = "app.database expects an owned database object, a legacy connection object, or (path, options)"
 		return b
+	}
+	if len(values) == 1 && values[0].IsMap() {
+		if path, owned := values[0].Map()["path"]; owned {
+			if path.K != value.String || strings.TrimSpace(path.Text()) == "" {
+				b.err = "app.database path must be a non-empty string"
+				return b
+			}
+			var current []value.Value
+			if configured, ok := b.config["owned_databases"]; ok && configured.K == value.Array {
+				current = append(current, (*configured.V.(*[]value.Value))...)
+			}
+			current = append(current, values[0])
+			b.config["owned_databases"] = value.Value{K: value.Array, V: &current}
+			b.hasDatabase = true
+			return b
+		}
 	}
 	if values[0].K == value.String {
 		if strings.TrimSpace(values[0].Text()) == "" {
@@ -302,8 +363,16 @@ func (b *ServerBuilder) Redis(values ...value.Value) *ServerBuilder {
 }
 
 func (b *ServerBuilder) addExternalConnection(provider, method string, values ...value.Value) *ServerBuilder {
+	if len(values) == 1 && values[0].IsMap() {
+		alias, ok := values[0].Map()["alias"]
+		if !ok || alias.K != value.String || strings.TrimSpace(alias.Text()) == "" {
+			b.err = method + " object requires a non-empty alias"
+			return b
+		}
+		values = []value.Value{alias, values[0]}
+	}
 	if len(values) != 2 || values[0].K != value.String {
-		b.err = method + " expects (alias, urlOrOptions)"
+		b.err = method + " expects ({ alias, ...options }) or (alias, urlOrOptions)"
 		return b
 	}
 	alias := strings.TrimSpace(values[0].Text())
@@ -549,7 +618,7 @@ func evalConfigJS(file string) (map[string]interface{}, error) {
 	if builder.err != "" {
 		return nil, fmt.Errorf("config validation error: %s", builder.err)
 	}
-	if !builder.hasWeb && !builder.hasDatabase {
+	if !builder.hasWeb && !builder.hasDatabase && !builder.hasGateway && !builder.hasProxy {
 		return nil, noWebSurfaceErr(builder, file)
 	}
 	return builderToMap(builder, file)

@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseConfigPreservesDatabaseFieldNames(t *testing.T) {
 	cfg, err := ParseConfig(map[string]interface{}{
@@ -62,5 +65,31 @@ func TestParseConfigPreservesNestedDatabaseAliases(t *testing.T) {
 	}
 	if byAlias["system"] != "postgres" || byAlias["analytics"] != "sqlite" {
 		t.Fatalf("database aliases = %#v", byAlias)
+	}
+}
+
+func TestParseConfigRejectsAliasSharedByExternalAndOwnedDatabase(t *testing.T) {
+	_, err := ParseConfig(map[string]interface{}{
+		"databases": []interface{}{
+			map[string]interface{}{"alias": "Main", "type": "sqlite", "name": "external.db"},
+		},
+		"owned_databases": []interface{}{
+			map[string]interface{}{"alias": "main", "path": "owned.kitdb"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `alias "main"`) {
+		t.Fatalf("shared alias must be rejected by name, got %v", err)
+	}
+}
+
+func TestParseConfigRejectsDuplicateOwnedDatabaseAliases(t *testing.T) {
+	_, err := ParseConfig(map[string]interface{}{
+		"owned_databases": []interface{}{
+			map[string]interface{}{"alias": "Main", "path": "first.kitdb"},
+			map[string]interface{}{"alias": "main", "path": "second.kitdb"},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `alias "main"`) {
+		t.Fatalf("duplicate owned alias must be rejected by name, got %v", err)
 	}
 }

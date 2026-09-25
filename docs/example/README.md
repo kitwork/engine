@@ -17,7 +17,7 @@ Defaults used (rename trivially later): `app/`, `public/`, `index.kitwork.js`, `
 `app.kitwork.js` (~490 lines) holds the DB connection **and** every route inline:
 
 ```js
-const db = database.connect("system");
+const db = database.connection("system");
 
 api.get("/gold").cache("1h").handle((response) => {
     const fetch = http.get("https://edge-api.pnj.io/.../get-gold-price?zone=11");

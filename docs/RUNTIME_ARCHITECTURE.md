@@ -15,7 +15,8 @@ Host / Engine
             VM lease
 ```
 
-- The host owns listeners, TLS, process signals, the VM pool, the app registry,
+- The host owns web and forward-proxy listeners, TLS, process signals,
+  immutable gateway pools, the VM pool, the app registry,
   the bounded process-wide full-text search manager, and the bounded KitDB node
   handle/page-cache/maintenance governor.
 - The host may capture detached diagnostics and an explicitly requested private
@@ -29,6 +30,22 @@ Host / Engine
   response/fetch cache, and `LifetimeSite` capabilities.
 - One request scope exists per HTTP request and owns request/response state.
 - A VM is leased for an execution. Apps and sites do not own fixed VMs.
+
+A gateway-only manifest is a smaller host shape: it owns the listener,
+hostname dispatch, rate limiting, immutable reverse-proxy pools, and upstream
+HTTP transport. Optional active health workers and passive failure counters
+are bounded by the immutable node set and drain with the host. The gateway
+publishes bounded per-node telemetry snapshots without retaining request data.
+It creates no app registry entries, tenant VMs, search or KitDB node manager,
+template/JIT pipeline, scheduler, or filesystem root.
+
+A proxy-only manifest is another reduced host shape. The host owns a bounded
+set of independent HTTP/SOCKS5 listeners, destination policy, authentication,
+outbound transports, tunnels, and graceful drain. Proxy traffic never enters a
+tenant route, generation, request scope, or VM. Static manifest configuration
+is immutable for the process lifetime; a future database control plane must
+reconcile desired listener state into this same host-owned runtime rather than
+making database rows own sockets.
 
 ## Filesystem
 

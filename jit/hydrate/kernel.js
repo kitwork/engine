@@ -549,7 +549,7 @@
   var scope = new Proxy(raw, {
     get: function (t, k) {
       if (k === "$") return t;
-      if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
+      if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
       return k in t ? t[k] : 0;
     },
     set: function (t, k, v) {
@@ -766,7 +766,7 @@
         if (k === "$event") return event || null;
         if (k === "$error") return errorContext || null;
         if (k === "$element") return namedElements(el);
-        if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
+        if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
         return base[k];
       },
       set: function (t, k, v) { base[k] = v; return true; }
@@ -852,7 +852,7 @@
     st.scopeProxy = new Proxy(boundaryScope(b), {
       get: function (t, k) {
         if (k === "$") return raw;
-        if (k in aliases) return aliases[k]; // kit / $app / $sidebar / $theme … → a public surface or component handle
+        if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
         return 0;
@@ -894,7 +894,7 @@
   // component INSTANCE; data-kit-element will name an element.
   var aliases = Object.create(null);
   var reservedAliases = Object.create(null);
-  ["$", "$this", "$el", "$host", "$root", "$event", "$element", "$error", "$theme"].forEach(function (name) { reservedAliases[name] = true; });
+  ["$", "$this", "$el", "$host", "$root", "$event", "$element", "$error"].forEach(function (name) { reservedAliases[name] = true; });
   function registerAlias(alias, target, owner) {
     alias = String(alias || "").trim();
     var store = owner ? state(owner) : null;
@@ -906,9 +906,6 @@
     if (store) store.componentAlias = alias;
     return true;
   }
-  // $theme is a compatibility handle for markup that delegates to the registered theme service.
-  // New authored expressions can call kit.theme.toggle() through that service's exact grant.
-  aliases["$theme"] = { toggle: function () { return kit.theme.toggle(); } };
   // `kit` is the platform/runtime service surface. Trusted JavaScript uses window.kit directly;
   // authored markup resolves the identifier `kit` through this curated, read-only view so it cannot
   // reach runtime control internals or the raw native transport. A service becomes callable from
