@@ -129,7 +129,15 @@ kit.render();
 if (typeof kit.scope.$app !== "object") throw new Error("$app did not resolve to the app component instance");
 if (kit.scope.$app.name !== "demo") throw new Error("$app state mismatch: " + kit.scope.$app.name);
 if (label.textContent !== "demo") throw new Error("markup could not read the app component alias");
-if (kit.scope.$app.bridge !== undefined) throw new Error("$app must not inherit the native transport");
+// A handle resolves to the boundary's scope proxy, and that proxy reads an undeclared name as 0 —
+// the same answer any undeclared name gives anywhere in the grammar. What matters is that nothing
+// of the runtime leaks through it.
+if (kit.scope.$app.bridge !== 0) throw new Error("$app must not inherit the native transport, got " + typeof kit.scope.$app.bridge);
+if (kit.scope.$app.destroy !== 0 || kit.scope.$app.component !== 0) throw new Error("$app must not inherit runtime controls");
+
+// The handle is the SAME object a directive is given, which is what makes a write through it
+// repaint: the proxy's set trap is the only thing that tells the kernel anything changed.
+if (kit.scope.$app !== kit.scopeFor(label)) throw new Error("the handle and the directive scope must be one object");
 
 console.log("$app: explicit application component instance");
 `

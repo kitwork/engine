@@ -11,8 +11,11 @@ import (
 // The catalogue only holds what the grammar cannot say and the platform does not do: toggle, tab
 // and dismiss WERE the grammar (a scope flag plus show/bind), get, more and submit were Drive's
 // work, and all six went unused — deleted 22/09. `copy` went with them: one name, one meaning.
+// `dropdown` went too, and stays gone: opening a panel is a scope flag and a show. What replaced
+// it is `menu`, which does the part a flag cannot — where focus lands, and how the arrows walk —
+// standing to it as `tabs` stands to the deleted `tab`.
 func TestHasComponent(t *testing.T) {
-	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast"} {
+	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast", "menu", "scrolled"} {
 		if !HasComponent(n) {
 			t.Errorf("expected component module %q", n)
 		}

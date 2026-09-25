@@ -895,14 +895,36 @@
   var aliases = Object.create(null);
   var reservedAliases = Object.create(null);
   ["$", "$this", "$el", "$host", "$root", "$event", "$element", "$error"].forEach(function (name) { reservedAliases[name] = true; });
+  // aliasOwners remembers which boundary each alias names, so a handle resolves to that boundary's
+  // SCOPE PROXY rather than to its raw state object.
+  //
+  // This is the difference between $menu.hide() working and half-working. A method invoked from a
+  // directive receives the proxy as `this`, and the proxy's set trap calls wrote() — so a write
+  // from a timer the method started still repaints. A method invoked through a handle used to
+  // receive the raw object: the write landed, nothing was told, and the DOM kept the old answer
+  // until something else happened to repaint. Inside a pass nobody noticed, because the pass
+  // repaints anyway; outside one — a timer, a promise, another component — it simply did not work.
+  var aliasOwners = Object.create(null);
   function registerAlias(alias, target, owner) {
     alias = String(alias || "").trim();
     var store = owner ? state(owner) : null;
     var previous = store && store.componentAlias;
-    if (previous && previous !== alias && aliases[previous] === target) delete aliases[previous];
+    if (previous && previous !== alias && aliasOwners[previous] === owner) {
+      delete aliases[previous];
+      delete aliasOwners[previous];
+    }
     if (store) store.componentAlias = "";
     if (!/^\$[A-Za-z][A-Za-z0-9_]*$/.test(alias) || reservedAliases[alias]) return false;
-    aliases[alias] = target;
+    if (owner) {
+      aliasOwners[alias] = owner;
+      Object.defineProperty(aliases, alias, {
+        get: function () { return scopeFor(owner); },
+        configurable: true,
+        enumerable: true
+      });
+    } else {
+      aliases[alias] = target;
+    }
     if (store) store.componentAlias = alias;
     return true;
   }
@@ -1359,8 +1381,11 @@
   function cleanupElement(element) {
     var store = element && element[stateKey];
     if (!store) return;
-    if (store.componentAlias && aliases[store.componentAlias] === store.scope) {
+    // Ownership is the test, not identity: reading aliases[name] now resolves the boundary's scope
+    // proxy, which is never the raw scope object this store holds.
+    if (store.componentAlias && aliasOwners[store.componentAlias] === element) {
       delete aliases[store.componentAlias];
+      delete aliasOwners[store.componentAlias];
       store.componentAlias = "";
     }
     if (store.apiController) {
