@@ -17,6 +17,12 @@
 var clipboardDef = {
   copied: false,
   copy: function (text) {
+    // A page copies what it reads out of its own markup — copy($element.snippet.textContent) — and
+    // an element name that does not resolve gives undefined. Without this the reader gets the word
+    // "undefined" on their clipboard, with the confirmation saying it worked. Numbers are allowed:
+    // a price or a count is a reasonable thing to copy.
+    if (typeof text === "number" && isFinite(text)) text = String(text);
+    if (typeof text !== "string" || text === "") return;
     var self = this;
     var copied = function () {
       self.copied = true;
