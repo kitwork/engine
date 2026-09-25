@@ -39,9 +39,18 @@ type siteComponents struct {
 // componentFileRe is the file name a component may have: the same slug the markup can name.
 var componentFileRe = regexp.MustCompile(`^[a-z][a-z0-9-]*\.js$`)
 
-// maxSiteComponentBytes bounds one component file. A browser module this large is a bundle, and a
-// bundle belongs in the site's own asset pipeline, not in the shared runtime response.
-const maxSiteComponentBytes = 256 * 1024
+// maxSiteComponentBytes bounds ONE component file.
+//
+// Not the shared runtime: a site's component does not ride the common /kit.js. The page asks for
+// what its markup names (/kit.js?components=component:<name>), so a page that names nothing is
+// served the kernel alone — 48 KB. What this bounds is the single response for the page that does
+// name it, and the memory the generation holds it in.
+//
+// The number is what a real application needs. Studio's workbench — the database workspace, the
+// first real app to run on the kernel — is 429 KB of source, ~252 KB minified on the wire. A limit
+// below that refuses an application for being an application. A limit far above it stops being a
+// limit, so this sits where a workbench fits and a bundled dependency tree does not.
+const maxSiteComponentBytes = 512 * 1024
 
 // Component implements jit/js Site.
 func (s *siteComponents) Component(name string) string {

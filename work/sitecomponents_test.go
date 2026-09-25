@@ -145,3 +145,41 @@ func TestDomainComponentOverridesTheIdentityOne(t *testing.T) {
 		t.Fatalf("the domain's component must win, got %q", source)
 	}
 }
+
+// The size limit exists to stop a site shipping a bundle through the runtime route. Studio — the
+// first real application to run on the kernel — arrived at 429 KB in one component and was refused
+// by a 256 KiB limit, so the limit is what a real workbench is measured against now.
+//
+// The rule it protects is narrower than the old comment claimed: a site's component does NOT ride
+// the shared /kit.js. The page asks for what it names (/kit.js?components=component:<name>), so a
+// page that names nothing still gets the kernel alone. What the limit really bounds is ONE
+// response for the page that does name it.
+func TestASiteComponentMayBeAsLargeAsARealApplication(t *testing.T) {
+	// Big enough that the old 256 KiB limit would refuse it, small enough to stay under this one.
+	body := `kit.component("workbench", { ready: true, filler: "` + strings.Repeat("x", 300*1024) + `" });`
+	files := componentPage(`<div data-kit-component="workbench"></div>`)
+	files["localhost/_components/workbench.js"] = body
+	tenant := componentFixture(t, files)
+
+	names := tenant.renderPlan().SiteComponents().Names()
+	found := false
+	for _, n := range names {
+		if n == "workbench" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a %d-byte component was refused; a real application's workbench is this size (names: %v)", len(body), names)
+	}
+
+	// The control: the limit still refuses something, so the assertion above is about the number
+	// being right and not about the check having been deleted.
+	over := `kit.component("bundle", { filler: "` + strings.Repeat("x", maxSiteComponentBytes) + `" });`
+	files2 := componentPage(`<div data-kit-component="bundle"></div>`)
+	files2["localhost/_components/bundle.js"] = over
+	for _, n := range componentFixture(t, files2).renderPlan().SiteComponents().Names() {
+		if n == "bundle" {
+			t.Errorf("a %d-byte file passed a %d-byte limit — the bound is not being applied", len(over), maxSiteComponentBytes)
+		}
+	}
+}
