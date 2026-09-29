@@ -32,17 +32,25 @@
  * which the markup binds to `active`. That split is the WAI-ARIA combobox pattern.
  *
  * Typing clears the mark: the options under it have changed, so an old index would point at a
- * different word.
+ * different word. Rows the filter HIDES (data-kit-show) and rows that are disabled are skipped, so
+ * authored rows work as well as rows from a data-kit-for; `activeId` is the marked row's own id,
+ * for aria-activedescendant when the rows already carry ids.
  *
- * The public surface: open, active, show, hide, toggle. The rest lives behind a Symbol.
+ * The public surface: open, active, activeId, show, hide, toggle. The rest lives behind a Symbol.
  */
 var COMBOBOX = Symbol("kit:combobox");
 
-// The options as they stand after the last paint — the filter's result, read off the rows the
-// data-kit-for materialised, so the component never needs to know what the filter was.
+// The options that can be marked, as they stand after the last paint. A list can be filtered two
+// ways and both are honoured: data-kit-for leaves only the rows that match, and data-kit-show hides
+// the ones that do not (a command palette's rows are authored, so it filters by hiding). A hidden
+// row and a disabled one are skipped — the arrows must never land on something that is not there
+// or cannot be chosen. The component never needs to know what the filter was.
 function comboboxOptions(scope) {
   var own = scope[COMBOBOX];
-  return own ? own.context.elements("option") : [];
+  if (!own) return [];
+  return own.context.elements("option").filter(function (option) {
+    return !option.hidden && !option.disabled && option.getAttribute("aria-disabled") !== "true";
+  });
 }
 
 // Keep the marked option in view without moving focus, once the paint has put the mark on it.
@@ -65,6 +73,13 @@ function mark(scope, index) {
 var comboboxDef = {
   open: false,
   active: -1,
+
+  // The marked option's own id, or "" — what aria-activedescendant needs. An index works when the
+  // markup numbers its rows ('fruit-' + i); authored rows already have ids, and this reads them.
+  get activeId() {
+    var option = comboboxOptions(this)[this.active];
+    return option && option.id ? option.id : "";
+  },
 
   show: function () {
     if (!this.open) this.open = true;
