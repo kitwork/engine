@@ -1152,7 +1152,7 @@
         n = n.nextSibling;
       }
 
-      var insertAfter = reg.anchor, used = {};
+      var insertAfter = reg.anchor, used = {}, created = false;
       for (var i = 0; i < arr.length; i++) {
         // The row's scope is an overlay (§7, rule 2): the item and index under their authored
         // names plus count / first / last / even / odd — the item object itself is never touched.
@@ -1167,6 +1167,7 @@
           node = reg.template.cloneNode(true);
           node.setAttribute("data-kit-item", reg.id);
           node.setAttribute("data-kit-key", key);
+          created = true;
         }
         var st = state(node);
         st.scope = itemScope; // (re)bind the row to its current item; content is filled by render()
@@ -1181,6 +1182,11 @@
           current[d].remove();
         }
       }
+      // A row made in this pass may carry a data-kit-for of its own (weeks of days, groups of
+      // items). Collect it NOW: the loop re-reads forRegistry.length, so the inner list fills in
+      // this same pass. Collected only at the start, a new row stayed empty until something else
+      // happened to repaint — the calendar drew September's title over a grid with no days in it.
+      if (created) collectFor();
     }
   }
 
