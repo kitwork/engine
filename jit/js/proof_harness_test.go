@@ -55,7 +55,13 @@ func runBrowserProof(t *testing.T, label string, components []string, body strin
 		switch request.URL.Path {
 		case hydrate.RuntimePath:
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(RuntimeJS(components)))
+			// RuntimeJS composes the components a page NAMES, and with none it returns nothing at
+			// all — a grammar-only proof would then run with no kernel and fail for the wrong reason.
+			runtime := hydrate.Runtime()
+			if len(components) > 0 {
+				runtime = RuntimeJS(components)
+			}
+			_, _ = response.Write([]byte(runtime))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = response.Write([]byte(page))

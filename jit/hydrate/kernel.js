@@ -1417,7 +1417,14 @@
       for (var j = 0; j < want.length; j++) el.classList.add(want[j]);
       el.__kitClass = want;
     });
-    document.querySelectorAll(MODEL).forEach(function (el) { var k = modelKey(el), s = scopeFor(el); if (String(s[k]) !== el.value) el.value = s[k]; });
+    document.querySelectorAll(MODEL).forEach(function (el) {
+      // A field whose debounce is still pending holds what was typed and the scope does not have it
+      // yet — on purpose. Syncing it here would drag it back to the old value mid-word, whenever
+      // anything else happened to paint.
+      if (state(el).debounceTimer) return;
+      var k = modelKey(el), s = scopeFor(el);
+      if (String(s[k]) !== el.value) el.value = s[k];
+    });
   }
 
   // ---- remember: MOVED OUT OF THE CORE ----
@@ -1744,6 +1751,11 @@
       function () { runWindowCommand("maximize"); }
     );
   });
+  // CAPTURE, so the model writes before any data-kit-input handler runs. Both listen on the
+  // document; in bubble order the handler went first, its paint synced every model field FROM the
+  // scope — which did not have the new value yet — and wiped what was typed before the model could
+  // read it. A search box that also reset its page (data-kit-input="page = 1") lost every
+  // keystroke. The value lands first now, so the handler and its paint see it.
   listen(document, "input", function (e) {
     var el = e.target.closest && e.target.closest(MODEL);
     if (!el) return;
@@ -1753,7 +1765,7 @@
       pass(function () { scopeFor(el)[modelKey(el)] = modelValue(el); });
       render();
     });
-  });
+  }, true);
   // Submit gate: a form holding data-state="invalid" does not submit. The kernel only READS that
   // state — the page decides who writes it (the server rendering the attribute, a component, or the
   // browser's own constraint validation reflected onto it). data-kit-validate, the directive that
