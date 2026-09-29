@@ -71,12 +71,13 @@ type undeclaredRead struct {
 	boundary  *boundary
 }
 
-// reportUndeclaredNames prints one line per expression that reads a name no boundary above it
-// declares. It is a diagnostic only: nothing about the response changes.
-func reportUndeclaredNames(html string) {
-	for _, line := range undeclaredWarnings(html) {
-		fmt.Println(line)
-	}
+// wholeDocument says whether a piece of HTML can be judged at all. A page is assembled from a shell
+// and its parts, and a fragment — the body of a page slotted into a shell, a header, a Drive
+// response — is missing everything above it: every boundary, and every data-kit-element declared
+// in a sibling slot. Nearly every name in it would look undeclared. Render receives the assembled
+// page, so this costs nothing there and keeps every check honest everywhere else.
+func wholeDocument(html string) bool {
+	return strings.Contains(html, "<body") || strings.Contains(html, "<html")
 }
 
 // undeclaredWarnings is the pass itself, kept apart from printing so a test can read exactly what
@@ -91,7 +92,7 @@ func undeclaredWarnings(html string) []string {
 		if declared, knowable := chainDeclares(read.boundary, read.name); declared || !knowable {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("[hydrate] %s reads %q, which no scope above it declares — a name nothing declares reads as 0, so this expression quietly does nothing. In %s",
+		lines = append(lines, fmt.Sprintf("%s reads %q, which no scope above it declares — a name nothing declares reads as 0, so this expression quietly does nothing. In %s",
 			read.attribute, read.name, read.tag))
 	}
 	return lines
@@ -115,11 +116,7 @@ func chainDeclares(from *boundary, name string) (declared bool, knowable bool) {
 // scanUndeclaredNames walks the markup and returns the reads worth reporting. ok is false when the
 // scanner met something it could not read confidently, in which case the caller reports nothing.
 func scanUndeclaredNames(html string) (reads []undeclaredRead, ok bool) {
-	// Only a WHOLE document can be judged. A page is assembled from a shell and its parts, and a
-	// fragment — the body of a page slotted into a shell, a header, a Drive response — is missing
-	// every boundary above it, so nearly every name in it would look undeclared. Render receives the
-	// assembled page, so this costs nothing there and keeps the pass honest everywhere else.
-	if !strings.Contains(html, "<body") && !strings.Contains(html, "<html") {
+	if !wholeDocument(html) {
 		return nil, false
 	}
 	// The page scope is a boundary too — the outermost one. It is knowable from the markup unless

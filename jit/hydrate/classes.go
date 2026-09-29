@@ -20,6 +20,8 @@ package hydrate
 // it: the literal is "text-", and no such class exists to emit. That is reported rather than
 // guessed at, because the alternative is a page whose styling silently disappears for some values.
 
+import "strings"
+
 // ClassLiterals returns every class name that appears in a class expression as a string literal —
 // exactly the set the CSS JIT can emit for it. Order follows the source; duplicates are removed.
 // A compile error is returned as-is so the caller can report it the same way it reports any other
@@ -124,7 +126,11 @@ func hasStringConcat(node any) bool {
 		for _, operand := range parts[1:] {
 			if lit, ok := operand.([]any); ok && len(lit) > 1 {
 				if o, _ := lit[0].(string); o == "#" {
-					if _, isStr := lit[1].(string); isStr {
+					// A literal that is only whitespace SEPARATES names, it does not build one:
+					// (wide ? 'left-96' : 'left-14') + ' ' + (tall ? 'top-8' : 'top-2') joins four
+					// complete names the JIT can all see. studio does exactly this, and was told off
+					// for it. 'text-' + colour is the real case — a fragment glued to a value.
+					if s, isStr := lit[1].(string); isStr && strings.TrimSpace(s) != "" {
 						return true
 					}
 				}

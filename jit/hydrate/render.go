@@ -308,25 +308,40 @@ var exampleBlockRe = regexp.MustCompile(`(?s)<(pre|code)[^>]*>.*?</(pre|code)>`)
 
 // reportAuthoringMistakes prints everything the server can see and the browser would only whisper.
 func reportAuthoringMistakes(html string) {
+	for _, line := range authoringMistakes(html) {
+		fmt.Printf("[hydrate] %s\n", line)
+	}
+}
+
+// authoringMistakes is the same pass without the printing, so a test can read what an author
+// would be told rather than capturing stdout — and so the engine can decide where a report goes.
+func authoringMistakes(html string) []string {
+	var found []string
+	html = withoutExamples(html)
+	declared := declaredElements(html)
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
 		expression := authoredAttribute(m[2])
 		if _, err := Compile(expression); err != nil {
-			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
+			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
 			continue
 		}
 		if err := checkEventModifiers(m[1]); err != nil {
-			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
+			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
 			continue
 		}
+		// Two reads the kernel resolves to nothing without a word: a service member markup was
+		// never granted, and an element name nothing declares.
+		checkKitReads(expression, m[0], &found)
+		checkElementReads(expression, m[0], declared, &found)
 		// data-kit-class carries an extra obligation the other directives do not: the CSS JIT emits
 		// only classes it can SEE, and it reads them off this expression's literals. A name built by
 		// concatenation is invisible to it, so the class would resolve at runtime to a rule that was
 		// never generated — styling that silently disappears for some values and works for others,
 		// which is far harder to diagnose than an error. Say so at render, next to the markup.
 		if m[1] == "class" && HasConstructedClass(expression) {
-			fmt.Printf("[hydrate] class names must be written out in full — the CSS JIT cannot emit a "+
+			found = append(found, fmt.Sprintf("class names must be written out in full — the CSS JIT cannot emit a "+
 				"name built with '+', so this rule is never generated. Use a conditional between "+
-				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s\n", m[0])
+				"complete names (color === 'red' ? 'text-red' : 'text-blue') — in %s", m[0]))
 		}
 	}
 	// A style directive names a CSS property in the attribute. The kernel refuses to write one it
@@ -334,19 +349,20 @@ func reportAuthoringMistakes(html string) {
 	// author can see which property was refused and why.
 	for _, m := range styleAttrRe.FindAllStringSubmatch(html, -1) {
 		if err := stylePropertyError(m[1]); err != nil {
-			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
+			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
 		}
 	}
 	// The costliest mistake an authored page can make is a name nothing declares: the kernel reads
 	// it as 0 and the markup looks right. The tree and the expressions are both here, so say it.
-	reportUndeclaredNames(html)
+	found = append(found, undeclaredWarnings(html)...)
 	// A seed's value is a state target, not an expression; name a malformed one at render, as the
 	// kernel would only report it in the browser.
 	for _, m := range seedAttrRe.FindAllStringSubmatch(html, -1) {
 		if err := seedTargetError(strings.TrimSpace(authoredAttribute(m[2]))); err != nil {
-			fmt.Printf("[hydrate] %v — in %s\n", err, m[0])
+			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
 		}
 	}
+	return found
 }
 
 func Render(html string) string {
