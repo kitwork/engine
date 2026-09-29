@@ -72,6 +72,25 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		}
 		scope[name] = v
 		return v, nil
+	case "++", "--", "++$", "--$":
+		// The server scope is flat, so the page-scope form writes where the lexical one does.
+		name, _ := arr[1].(string)
+		if blockedKey(name) {
+			return nil, nil
+		}
+		old := float64(0) // a missing key reads as 0, like the client Proxy
+		if v, ok := scope[name]; ok {
+			old = num(v)
+		}
+		next := old + 1
+		if op[:2] == "--" {
+			next = old - 1
+		}
+		scope[name] = next
+		if prefix, _ := arr[2].(bool); prefix {
+			return next, nil
+		}
+		return old, nil
 	case "?":
 		c, err := eval(arr[1], scope, budget)
 		if err != nil {

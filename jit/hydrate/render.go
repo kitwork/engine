@@ -321,7 +321,8 @@ func authoringMistakes(html string) []string {
 	declared := declaredElements(html)
 	for _, m := range directiveRe.FindAllStringSubmatch(html, -1) {
 		expression := authoredAttribute(m[2])
-		if _, err := Compile(expression); err != nil {
+		ir, err := Compile(expression)
+		if err != nil {
 			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
 			continue
 		}
@@ -333,6 +334,7 @@ func authoringMistakes(html string) []string {
 		// never granted, and an element name nothing declares.
 		checkKitReads(expression, m[0], &found)
 		checkElementReads(expression, m[0], declared, &found)
+		checkBindingWrites(m[1], ir, m[0], &found)
 		// data-kit-class carries an extra obligation the other directives do not: the CSS JIT emits
 		// only classes it can SEE, and it reads them off this expression's literals. A name built by
 		// concatenation is invisible to it, so the class would resolve at runtime to a rule that was

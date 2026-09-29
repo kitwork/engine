@@ -23,5 +23,15 @@
   {"name": "index-map-by-key", "src": "prices[sku]", "scope": {"prices": {"a": 5, "b": 7}, "sku": "b"}, "want": 7},
   {"name": "index-then-member", "src": "rows[0].name + '/' + rows[1].name", "scope": {"rows": [{"name": "Ada"}, {"name": "Bob"}]}, "want": "Ada/Bob"},
   {"name": "index-out-of-range-is-nullish", "src": "items[9] == null", "scope": {"items": [1]}, "want": true},
-  {"name": "index-blocked-key-is-nullish", "src": "obj[key] == null", "scope": {"obj": {"a": 1}, "key": "__proto__"}, "want": true}
+  {"name": "index-blocked-key-is-nullish", "src": "obj[key] == null", "scope": {"obj": {"a": 1}, "key": "__proto__"}, "want": true},
+  {"name": "update-postfix-yields-old", "src": "count++", "scope": {"count": 1}, "want": 1},
+  {"name": "update-postfix-writes", "src": "count++; count", "scope": {"count": 1}, "want": 2},
+  {"name": "update-prefix-yields-new", "src": "++count", "scope": {"count": 1}, "want": 2},
+  {"name": "update-decrement-writes", "src": "count--; count", "scope": {"count": 3}, "want": 2},
+  {"name": "update-prefix-decrement", "src": "--count", "scope": {"count": 3}, "want": 2},
+  {"name": "update-coerces-a-string", "src": "n++; n", "scope": {"n": "5"}, "want": 6},
+  {"name": "update-postfix-old-is-a-number", "src": "n++", "scope": {"n": "5"}, "want": 5},
+  {"name": "update-missing-name-starts-at-0", "src": "fresh++; fresh", "scope": {}, "want": 1},
+  {"name": "update-page-scope", "src": "$.count++; $.count", "scope": {"count": 1}, "want": 2},
+  {"name": "update-spaced-minus-unchanged", "src": "a - -b", "scope": {"a": 5, "b": 2}, "want": 7}
 ]

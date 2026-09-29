@@ -291,6 +291,8 @@ HTML-first islands · một grammar/một AST · zero-eval + whitelist globals �
 | Hai runtime khác gì? | Kernel: evaluator mở, phần tử thô, scope lexical. Runtime component: ngữ pháp đóng (own-property + bảng method/element), scope cô lập, `$alias` action-only, closed graph có version | `evaluator.js`, `kernel.js` |
 | Kích thước | kernel minified gzip ≈ 10.1 KB / 12 KiB (gate `size_budget_test.go`); `/kit.js` production đi qua `utilities/minifier.JS` | `work/jithydrate.go` |
 | Whitelist globals | 14 object: Math, Date, JSON, Number, String, Boolean, Array, Object.keys, parseInt/Float, encode/decodeURIComponent, isNaN, isFinite | extension §4 |
+| `++` / `--` có không? | **Có** (29/09, port từ KitJS 1.0.0): tiền tố và hậu tố, đích giống `=` — tên, hoặc `$.name`; `obj.x++` bị từ chối như `obj.x = v`. **Op riêng, không phải đường tắt của `x = x + 1`**: giá trị ép sang SỐ trước như JS, nên `"5"++` là `6` còn phép gán sẽ nối thành `"51"` (giá trị từ `data-kit-model` là chuỗi). Hậu tố trả số cũ, tiền tố trả số mới. `+=` **không** có — KitJS cũng không | `compile.go` `updateNode`, `kernel.js` `update`, corpus `update-*` |
+| Binding có được ghi state? | **Không** — binding (`text` `show` `if` `class` `bind:` `style:`) chạy mỗi lần vẽ, ghi trong đó là đổi dữ liệu mỗi khung hình. Runtime **không chặn** (không có phân biệt action/binding lúc chạy); **verify pass báo** mọi phép ghi (`=` `++` `--`), kể cả trong thân lambda — `items.map((x) => n++)` gọi nó mỗi lần vẽ | `verify.go` `checkBindingWrites` |
 
 ---
 

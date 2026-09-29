@@ -157,3 +157,38 @@ func TestVerifyIsSilentOnCorrectMarkup(t *testing.T) {
 		t.Errorf("correct markup produced a report:\n%s", report)
 	}
 }
+
+// A binding runs on every paint, so one that writes changes the state each time the page is drawn.
+// KitJS 1.0.0 made it a rule — bindings read, actions write — and it arrived with ++/-- (29/09).
+// It covers every write, not just the new operators: data-kit-text="count = 5" is the same mistake.
+func TestVerifyNamesAWriteInsideABinding(t *testing.T) {
+	for _, bad := range []string{
+		`<b data-kit-text="count++"></b>`,
+		`<b data-kit-text="--count"></b>`,
+		`<b data-kit-show="open = true"></b>`,
+		`<b data-kit-class="$.seen++ ? 'a' : 'b'"></b>`,
+		`<b data-kit-bind:title="label = 'x'"></b>`,
+		`<b data-kit-style:width="n++"></b>`,
+		// A lambda in a binding is there to be CALLED: map runs this write once per item, per paint.
+		`<b data-kit-text="items.map((x) => seen++).length"></b>`,
+	} {
+		if report := verifyOf(t, bad); !strings.Contains(report, "binding runs on every paint") {
+			t.Errorf("a write inside a binding was not reported: %s\n%s", bad, report)
+		}
+	}
+
+	// CONTROL: the same writes in an ACTION are the point of the grammar and must stay silent —
+	// including the exact demo counter kitjs.org ships. A lambda that only READS is fine anywhere.
+	for _, fine := range []string{
+		`<button data-kit-click="count++">+</button>`,
+		`<button data-kit-click="--count">-</button>`,
+		`<button data-kit-click="open = !open">t</button>`,
+		`<form data-kit-submit:prevent="$.sent++"></form>`,
+		`<b data-kit-text="count + 1"></b>`,
+		`<b data-kit-text="items.filter((x) => x.done).length"></b>`,
+	} {
+		if report := verifyOf(t, fine); report != "" {
+			t.Errorf("a write in an action, or a pure read, was reported: %s\n%s", fine, report)
+		}
+	}
+}

@@ -14,6 +14,13 @@
 //	["=", "name", value]     assignment to a scope variable (lexical: owner scope, else nearest)
 //	["=$", "name", value]    assignment to the PAGE scope: $.name = value — the same $ the
 //	                         server template language uses for its root data
+//	["++", "name", prefix]   update: count++ / ++count, and ["--", …] for the decrement; the page-
+//	["++$", "name", prefix]  scope form is $.count++. prefix is true for ++count. The value is
+//	                         coerced to a NUMBER first, exactly like JavaScript — so "5"++ is 6,
+//	                         where count = count + 1 would have made it "51". That difference is
+//	                         why this is its own op rather than sugar for the assignment. Postfix
+//	                         yields the old number, prefix the new one. Targets are the ones `=`
+//	                         accepts: a name, or $.name.
 //	[".", obj, "name"]       member access obj.name
 //	["idx", obj, key]        index access obj[key] — key is an expression (number or string)
 //	["()", obj, "name", []]  method call obj.name(args...)
@@ -105,7 +112,7 @@ func lex(s string) ([]tok, error) {
 				}
 			}
 			if i+1 < n {
-				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" {
+				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" || two == "++" || two == "--" {
 					out = append(out, tok{"op", two})
 					i += 2
 					continue
@@ -262,6 +269,14 @@ func (p *parser) binary(min int) (any, error) {
 }
 
 func (p *parser) unary() (any, error) {
+	if v := p.peek().v; v == "++" || v == "--" {
+		p.next()
+		target, err := p.unary()
+		if err != nil {
+			return nil, err
+		}
+		return updateNode(v, target, true)
+	}
 	if v := p.peek().v; v == "!" || v == "-" {
 		p.next()
 		e, err := p.unary()
@@ -344,7 +359,41 @@ func (p *parser) postfix() (any, error) {
 		}
 		break
 	}
+	// count++ / count-- binds to the whole left-hand side just read, once: count++++ is an error,
+	// as it is in JavaScript.
+	if v := p.peek().v; v == "++" || v == "--" {
+		p.next()
+		return updateNode(v, e, false)
+	}
 	return e, nil
+}
+
+// updateNode builds ++/-- over a target, which must be one `=` could assign to: a scope name, or
+// the page-scope address $.name. obj.prop++ stays out for the same reason obj.prop = v does —
+// general member assignment is not in the grammar.
+func updateNode(op string, target any, prefix bool) (any, error) {
+	if arr, ok := target.([]any); ok {
+		if len(arr) == 2 && arr[0] == "$" {
+			if arr[1] == "$" {
+				return nil, errors.New("hydrate: cannot " + describeUpdate(op) + " $ itself")
+			}
+			return []any{op, arr[1], prefix}, nil
+		}
+		if len(arr) == 3 && arr[0] == "." {
+			if inner, ok := arr[1].([]any); ok && len(inner) == 2 && inner[0] == "$" && inner[1] == "$" {
+				return []any{op + "$", arr[2], prefix}, nil
+			}
+		}
+	}
+	return nil, errors.New("hydrate: " + op + " needs a name to " + describeUpdate(op) +
+		" — count" + op + " or $.count" + op + ", not a member of an object")
+}
+
+func describeUpdate(op string) string {
+	if op == "++" {
+		return "increment"
+	}
+	return "decrement"
 }
 
 func (p *parser) primary() (any, error) {

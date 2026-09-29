@@ -215,7 +215,7 @@
       var two = s.slice(i, i + 2);
       var three = s.slice(i, i + 3); // longest match first: `===` must not lex as `==` + `=`
       if (three === "===" || three === "!==") { out.push({ t: "op", v: three }); i += 3; continue; }
-      if (two === "==" || two === "!=" || two === ">=" || two === "<=" || two === "&&" || two === "||" || two === "=>") { out.push({ t: "op", v: two }); i += 2; continue; }
+      if (two === "==" || two === "!=" || two === ">=" || two === "<=" || two === "&&" || two === "||" || two === "=>" || two === "++" || two === "--") { out.push({ t: "op", v: two }); i += 2; continue; }
       if ("+-*/%<>!?:().,={}[];".indexOf(c) >= 0) { out.push({ t: "op", v: c }); i++; continue; }
       throw new Error("hydrate: unexpected character '" + c + "'");
     }
@@ -255,8 +255,18 @@
     }
     function unary() {
       var v = peek().v;
+      if (v === "++" || v === "--") { next(); return update(v, unary(), true); }
       if (v === "!" || v === "-") { next(); return ["u" + v, unary()]; }
       return postfix();
+    }
+    // ++/-- take the targets `=` takes — a name, or $.name — and nothing else: obj.count++ is out
+    // for the same reason obj.count = v is. A name is its own op rather than sugar for
+    // count = count + 1 because the value is coerced to a NUMBER first: "5"++ is 6, where the
+    // assignment would have concatenated it into "51".
+    function update(op, target, prefix) {
+      if (target instanceof Array && target[0] === "$" && target[1] !== "$") return [op, target[1], prefix];
+      if (target instanceof Array && target[0] === "." && target[1] instanceof Array && target[1][0] === "$" && target[1][1] === "$") return [op + "$", target[2], prefix];
+      throw new Error("hydrate: " + op + " needs a name — count" + op + " or $.count" + op);
     }
     function callArgs() {
       var args = [];
@@ -279,6 +289,8 @@
         if (peek().v === "[") { next(); var key = assign(); eat("]"); e = ["idx", e, key]; continue; }
         break;
       }
+      // count++ binds once to the left-hand side just read: count++++ is an error, as in JavaScript.
+      if (peek().v === "++" || peek().v === "--") return update(next().v, e, false);
       return e;
     }
     function tryArrowParams() {
@@ -399,6 +411,14 @@
     if (op === "$") return s[x[1]];
     if (op === "=") { if (blockedKey(x[1])) return undefined; var v = run(x[2], s); s[x[1]] = v; return v; }
     if (op === "=$") { if (blockedKey(x[1])) return undefined; var vp = run(x[2], s); s["$"][x[1]] = vp; return vp; }
+    if (op === "++" || op === "--" || op === "++$" || op === "--$") {
+      if (blockedKey(x[1])) return undefined;
+      var home = op.length === 3 ? s["$"] : s; // the page-scope form writes where $.name = v does
+      var was = Number(home[x[1]]);
+      var now = op.charAt(0) === "+" ? was + 1 : was - 1;
+      home[x[1]] = now;
+      return x[2] ? now : was;
+    }
     if (op === "{}") {
       var obj = {};
       for (var oi = 0; oi < x[1].length; oi++) obj[x[1][oi][0]] = run(x[1][oi][1], s);
