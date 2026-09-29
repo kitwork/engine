@@ -50,5 +50,22 @@
   {"name": "array-join-separator", "src": "words.join(' ')", "scope": {"words": ["keep", "the", "html"]}, "want": "keep the html"},
   {"name": "array-lambda-reads-outer", "src": "nums.filter((x) => x > min)", "scope": {"nums": [1, 2, 3], "min": 1}, "want": [2, 3]},
   {"name": "array-filter-combobox", "src": "options.filter((o) => o.toLowerCase().includes(q.trim().toLowerCase()))", "scope": {"options": ["Apple", "Apricot", "Banana"], "q": " ap "}, "want": ["Apple", "Apricot"]},
-  {"name": "array-chain", "src": "rows.filter((r) => r.done).map((r) => r.name).join(', ')", "scope": {"rows": [{"id": 1, "name": "Ada", "done": true}, {"id": 2, "name": "Bob", "done": false}, {"id": 3, "name": "Cy", "done": true}]}, "want": "Ada, Cy"}
+  {"name": "array-chain", "src": "rows.filter((r) => r.done).map((r) => r.name).join(', ')", "scope": {"rows": [{"id": 1, "name": "Ada", "done": true}, {"id": 2, "name": "Bob", "done": false}, {"id": 3, "name": "Cy", "done": true}]}, "want": "Ada, Cy"},
+  {"name": "global-math-ceil", "src": "Math.ceil(total / size)", "scope": {"total": 7, "size": 4}, "want": 2},
+  {"name": "global-math-max-min", "src": "Math.max(1, 5, 3) - Math.min(4, 2)", "scope": {}, "want": 3},
+  {"name": "global-math-floor-abs", "src": "Math.floor(2.7) + Math.abs(-3)", "scope": {}, "want": 5},
+  {"name": "global-math-round-half-up", "src": "Math.round(2.5) + ',' + Math.round(-2.5)", "scope": {}, "want": "3,-2"},
+  {"name": "global-math-constant", "src": "Math.round(Math.PI * 100)", "scope": {}, "want": 314},
+  {"name": "global-number", "src": "Number(typed) + 1", "scope": {"typed": "5"}, "want": 6},
+  {"name": "global-string", "src": "String(12) + 'px'", "scope": {}, "want": "12px"},
+  {"name": "global-boolean", "src": "Boolean('') === false && Boolean('x')", "scope": {}, "want": true},
+  {"name": "global-parse-int", "src": "parseInt('42px') + parseInt('ff', 16)", "scope": {}, "want": 297},
+  {"name": "global-parse-float", "src": "parseFloat('3.5kg') * 2", "scope": {}, "want": 7},
+  {"name": "global-is-nan-is-finite", "src": "isNaN(Number('x')) && isFinite(3) && !isFinite(1 / 0)", "scope": {}, "want": true},
+  {"name": "global-object-keys", "src": "Object.keys(counts).length", "scope": {"counts": {"a": 1, "b": 2, "c": 3}}, "want": 3},
+  {"name": "global-array-is-array", "src": "Array.isArray(items) && !Array.isArray('x')", "scope": {"items": [1]}, "want": true},
+  {"name": "global-json-round-trip", "src": "JSON.parse(JSON.stringify(items))[1]", "scope": {"items": [10, 20]}, "want": 20},
+  {"name": "global-encode-uri-component", "src": "encodeURIComponent('a b&c/d')", "scope": {}, "want": "a%20b%26c%2Fd"},
+  {"name": "global-decode-uri-component", "src": "decodeURIComponent('a%20b%26c')", "scope": {}, "want": "a b&c"},
+  {"name": "global-local-shadows-it", "src": "Math", "scope": {"Math": 5}, "want": 5}
 ]

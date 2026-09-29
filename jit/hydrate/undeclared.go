@@ -40,6 +40,10 @@ import (
 // and the scanner cannot know a page's aliases), so a $-name in this map would be unreachable.
 var reservedReadNames = map[string]bool{
 	"kit": true,
+	// the expression globals (globals.go) — present on every page, declared by no scope
+	"Math": true, "Date": true, "JSON": true, "Number": true, "String": true, "Boolean": true,
+	"Array": true, "Object": true, "parseInt": true, "parseFloat": true,
+	"encodeURIComponent": true, "decodeURIComponent": true, "isNaN": true, "isFinite": true,
 	// the row overlay data-kit-for adds beside the author's own item/index names
 	"count": true, "first": true, "last": true, "even": true, "odd": true,
 }

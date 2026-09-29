@@ -379,6 +379,30 @@
   // ---- run: walk one IR node against the scope ----
   // The client and Go walkers share the same 10k-node budget. callDepth is an additional guard
   // against exhausting the browser stack during recursive component or lambda calls.
+  // The expression globals — the fourteen the design named (ideaship-extension §4) and the spec
+  // listed as fact while the kernel had none: Math.ceil(7 / 4) read as undefined and said nothing.
+  // A global comes LAST: a name the page declares wins, as a local does in JavaScript. There is no
+  // `new` in the grammar, so Date gives now/parse/UTC and never a Date object; `Object` is only
+  // { keys }, so defineProperty and its kind stay out of reach. `.constructor` and `.prototype` are
+  // already refused on every member and index read, which is what keeps Function unreachable.
+  var expressionGlobals = Object.create(null);
+  expressionGlobals.Math = Math;
+  expressionGlobals.Date = Date;
+  expressionGlobals.JSON = JSON;
+  expressionGlobals.Number = Number;
+  expressionGlobals.String = String;
+  expressionGlobals.Boolean = Boolean;
+  expressionGlobals.Array = Array;
+  expressionGlobals.Object = Object.freeze({ keys: Object.keys });
+  expressionGlobals.parseInt = parseInt;
+  expressionGlobals.parseFloat = parseFloat;
+  expressionGlobals.encodeURIComponent = encodeURIComponent;
+  expressionGlobals.decodeURIComponent = decodeURIComponent;
+  expressionGlobals.isNaN = isNaN;
+  expressionGlobals.isFinite = isFinite;
+  function globalOrZero(k) {
+    return Object.prototype.hasOwnProperty.call(expressionGlobals, k) ? expressionGlobals[k] : 0;
+  }
   // invokeLambda runs a lambda VALUE. Params overlay the calling scope; writes to NON-param keys
   // flow back out (lexical). It is the one way a lambda runs: a bare inc() and a callback inside
   // filter() go through here alike, so the two cannot drift apart.
@@ -589,7 +613,7 @@
     get: function (t, k) {
       if (k === "$") return t;
       if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
-      return k in t ? t[k] : 0;
+      return k in t ? t[k] : globalOrZero(k);
     },
     set: function (t, k, v) {
       t[k] = v;
@@ -894,7 +918,7 @@
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
         var objs = chainFor(b);
         for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
-        return 0;
+        return globalOrZero(k);
       },
       set: function (t, k, v) {
         var objs = chainFor(b);
@@ -1783,7 +1807,7 @@
     return new Proxy(s, {
       get: function (target, key) {
         if (key === "$") return target;
-        return key in target ? target[key] : 0;
+        return key in target ? target[key] : globalOrZero(key);
       },
       set: function (target, key, value) {
         target[key] = value;

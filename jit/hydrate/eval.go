@@ -50,6 +50,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		}
 		v, ok := scope[name]
 		if !ok {
+			if expressionGlobals[name] {
+				return globalRef(name), nil // a global comes after every name the page declares
+			}
 			return float64(0), nil // mirror the client Proxy: a missing key reads as 0
 		}
 		switch n := v.(type) { // normalize hand-built scopes to JSON's float64
@@ -143,6 +146,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 				return v, err
 			}
 		}
+		if g, ok := o.(globalRef); ok {
+			return callGlobalMethod(g, name, args), nil
+		}
 		return call(o, name, args), nil
 	case "{}":
 		pairs, _ := arr[1].([]any)
@@ -204,6 +210,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 				return nil, err
 			}
 			args[i] = v
+		}
+		if g, ok := callee.(globalRef); ok {
+			return callGlobal(g, args), nil
 		}
 		lam, ok := callee.(*Lambda)
 		if !ok {
@@ -562,6 +571,8 @@ func sliceIndex(v any, length int, fallback int) int {
 
 func member(o any, name string) any {
 	switch t := o.(type) {
+	case globalRef:
+		return globalMember(t, name)
 	case string:
 		if name == "length" {
 			return float64(utf8.RuneCountInString(t))
