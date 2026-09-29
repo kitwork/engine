@@ -310,7 +310,9 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
 		`"{}"`, `"[]"`, `"=>"`, `"call"`, "__kitLambda", "tryArrowParams", "boundaryScope", "kit.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
-		"kit.component", "data-kit-component", "seedComponent", "fn.apply(s, fargs)",
+		"kit.component", "data-kit-component", "seedComponent", "fn.apply(s, callbacks(fargs, s))",
+		// a lambda handed to a native method becomes a callback that walks its tree in the caller scope
+		"function callbacks", "function invokeLambda",
 		// the capability seam remember (and later api/live) installs through, now that it is out of core
 		"pageScope", "scheduleRender",
 		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,

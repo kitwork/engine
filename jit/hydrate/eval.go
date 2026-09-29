@@ -138,6 +138,11 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 			}
 			args[i] = v
 		}
+		if list, ok := o.([]any); ok {
+			if handled, v, err := callArrayWithLambda(list, name, args, scope, budget); handled {
+				return v, err
+			}
+		}
 		return call(o, name, args), nil
 	case "{}":
 		pairs, _ := arr[1].([]any)
@@ -204,34 +209,7 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		if !ok {
 			return nil, nil // mirror the client: calling a non-lambda yields undefined
 		}
-		if len(lam.Params) == 0 {
-			return eval(lam.Body, scope, budget)
-		}
-		// Params overlay the calling scope; writes to NON-param keys flow back out (lexical),
-		// param bindings themselves stay local to the call.
-		merged := make(map[string]any, len(scope)+len(lam.Params))
-		for k, v := range scope {
-			merged[k] = v
-		}
-		isParam := make(map[string]bool, len(lam.Params))
-		for i, pn := range lam.Params {
-			isParam[pn] = true
-			if i < len(args) {
-				merged[pn] = args[i]
-			} else {
-				merged[pn] = nil
-			}
-		}
-		out, err := eval(lam.Body, merged, budget)
-		if err != nil {
-			return nil, err
-		}
-		for k, v := range merged {
-			if !isParam[k] {
-				scope[k] = v
-			}
-		}
-		return out, nil
+		return invokeLambda(lam, args, scope, budget)
 	case "u!":
 		v, err := eval(arr[1], scope, budget)
 		if err != nil {
@@ -467,6 +445,121 @@ func index(o any, key any) any {
 	return member(o, name)
 }
 
+// invokeLambda runs a lambda VALUE with its arguments. Params overlay the calling scope; writes to
+// NON-param keys flow back out (lexical), param bindings themselves stay local to the call. It is
+// the one way a lambda runs — a bare inc() and a callback inside filter() go through here alike.
+func invokeLambda(lam *Lambda, args []any, scope map[string]any, budget *int) (any, error) {
+	if len(lam.Params) == 0 {
+		return eval(lam.Body, scope, budget)
+	}
+	merged := make(map[string]any, len(scope)+len(lam.Params))
+	for k, v := range scope {
+		merged[k] = v
+	}
+	isParam := make(map[string]bool, len(lam.Params))
+	for i, pn := range lam.Params {
+		isParam[pn] = true
+		if i < len(args) {
+			merged[pn] = args[i]
+		} else {
+			merged[pn] = nil
+		}
+	}
+	out, err := eval(lam.Body, merged, budget)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range merged {
+		if !isParam[k] {
+			scope[k] = v
+		}
+	}
+	return out, nil
+}
+
+// callArrayWithLambda is the half of the array method set that takes a callback: map, filter,
+// find, some, every — the list the standalone KitJS 1.0.0 always offered. The callback receives
+// (item, index, array) as JavaScript passes them, and every step of it counts against the ONE
+// budget the whole expression shares, so a callback over a long list cannot escape the limit.
+// A non-lambda argument yields undefined, as calling a non-function does everywhere else here.
+func callArrayWithLambda(list []any, name string, args []any, scope map[string]any, budget *int) (bool, any, error) {
+	switch name {
+	case "map", "filter", "find", "some", "every":
+	default:
+		return false, nil, nil
+	}
+	if len(args) < 1 {
+		return true, nil, nil
+	}
+	lam, ok := args[0].(*Lambda)
+	if !ok {
+		return true, nil, nil
+	}
+	var mapped, kept []any
+	for i, item := range list {
+		v, err := invokeLambda(lam, []any{item, float64(i), list}, scope, budget)
+		if err != nil {
+			return true, nil, err
+		}
+		switch name {
+		case "map":
+			mapped = append(mapped, v)
+		case "filter":
+			if truthy(v) {
+				kept = append(kept, item)
+			}
+		case "find":
+			if truthy(v) {
+				return true, item, nil
+			}
+		case "some":
+			if truthy(v) {
+				return true, true, nil
+			}
+		case "every":
+			if !truthy(v) {
+				return true, false, nil
+			}
+		}
+	}
+	switch name {
+	case "map":
+		if mapped == nil {
+			mapped = []any{}
+		}
+		return true, mapped, nil
+	case "filter":
+		if kept == nil {
+			kept = []any{}
+		}
+		return true, kept, nil
+	case "find":
+		return true, nil, nil
+	case "some":
+		return true, false, nil
+	}
+	return true, true, nil // every, over a list with nothing that failed
+}
+
+// sliceIndex resolves a slice bound the JavaScript way: negative counts from the end, and both
+// ends are clamped into the list.
+func sliceIndex(v any, length int, fallback int) int {
+	if v == nil {
+		return fallback
+	}
+	n := int(num(v))
+	if n < 0 {
+		n += length
+		if n < 0 {
+			n = 0
+		}
+	}
+	if n > length {
+		n = length
+	}
+	return n
+}
+
 func member(o any, name string) any {
 	switch t := o.(type) {
 	case string:
@@ -507,6 +600,52 @@ func call(o any, name string, args []any) any {
 			return strings.ToLower(t)
 		case "toUpperCase":
 			return strings.ToUpper(t)
+		}
+	case []any:
+		switch name {
+		case "includes":
+			if len(args) >= 1 {
+				for _, item := range t {
+					if strictEq(item, args[0]) {
+						return true
+					}
+				}
+				return false
+			}
+		case "indexOf":
+			if len(args) >= 1 {
+				for i, item := range t {
+					if strictEq(item, args[0]) {
+						return float64(i)
+					}
+				}
+				return float64(-1)
+			}
+		case "join":
+			sep := ","
+			if len(args) >= 1 && args[0] != nil {
+				sep = toStr(args[0])
+			}
+			parts := make([]string, len(t))
+			for i, item := range t {
+				if item != nil { // null and undefined join as empty, as in JavaScript
+					parts[i] = toStr(item)
+				}
+			}
+			return strings.Join(parts, sep)
+		case "slice":
+			var from, to any
+			if len(args) >= 1 {
+				from = args[0]
+			}
+			if len(args) >= 2 {
+				to = args[1]
+			}
+			start, end := sliceIndex(from, len(t), 0), sliceIndex(to, len(t), len(t))
+			if start >= end {
+				return []any{}
+			}
+			return append([]any{}, t[start:end]...)
 		}
 	case float64:
 		if name == "toFixed" {

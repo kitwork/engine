@@ -379,6 +379,38 @@
   // ---- run: walk one IR node against the scope ----
   // The client and Go walkers share the same 10k-node budget. callDepth is an additional guard
   // against exhausting the browser stack during recursive component or lambda calls.
+  // invokeLambda runs a lambda VALUE. Params overlay the calling scope; writes to NON-param keys
+  // flow back out (lexical). It is the one way a lambda runs: a bare inc() and a callback inside
+  // filter() go through here alike, so the two cannot drift apart.
+  function invokeLambda(fn, args, s) {
+    if (callDepth >= 64) throw new Error("hydrate: call depth exceeded");
+    callDepth++;
+    try {
+      if (!fn.params.length) return run(fn.body, s);
+      var local = {};
+      for (var pi = 0; pi < fn.params.length; pi++) local[fn.params[pi]] = args[pi];
+      var overlay = new Proxy(local, {
+        get: function (t, k) { return k in t ? t[k] : s[k]; },
+        set: function (t, k, v2) { if (k in t) t[k] = v2; else s[k] = v2; return true; }
+      });
+      return run(fn.body, overlay);
+    } finally { callDepth--; }
+  }
+  // callbacks turns every lambda VALUE in an argument list into a real function before a native
+  // method sees it. A lambda is a compiled tree, not a function, so items.filter((x) => x.done)
+  // used to throw "object is not a function" — the grammar parsed it and the runtime could not
+  // run it. The function it becomes only walks that tree again, in the caller's scope; it runs
+  // inside the same run(), so every step still counts against the expression's one budget.
+  function callbacks(args, s) {
+    for (var ci = 0; ci < args.length; ci++) {
+      if (args[ci] && args[ci].__kitLambda) {
+        args[ci] = (function (fn) {
+          return function () { return invokeLambda(fn, Array.prototype.slice.call(arguments), s); };
+        })(args[ci]);
+      }
+    }
+    return args;
+  }
   var evalDepth = 0;
   var evalRemaining = 0;
   var callDepth = 0;
@@ -435,27 +467,14 @@
       var fn = run(x[1], s);
       var fargs = x[2].map(function (y) { return run(y, s); });
       if (callDepth >= 64) throw new Error("hydrate: call depth exceeded");
-      if (fn && fn.__kitLambda) {
-        callDepth++;
-        try {
-          if (!fn.params.length) return run(fn.body, s);
-          // Params overlay the calling scope; writes to NON-param keys flow back out (lexical).
-          var local = {};
-          for (var pi = 0; pi < fn.params.length; pi++) local[fn.params[pi]] = fargs[pi];
-          var overlay = new Proxy(local, {
-            get: function (t, k) { return k in t ? t[k] : s[k]; },
-            set: function (t, k, v2) { if (k in t) t[k] = v2; else s[k] = v2; return true; }
-          });
-          return run(fn.body, overlay);
-        } finally { callDepth--; }
-      }
+      if (fn && fn.__kitLambda) return invokeLambda(fn, fargs, s);
       // A registered component method — real JS the developer wrote — called with `this` = the
       // component scope, so `this.count` reads/writes its state. Still no eval: it's a function
       // reference, not a compiled string. (Server-side there are no registered methods, so its
       // walker returns nil here — the divergence is intentional and safe.)
       if (typeof fn === "function") {
         callDepth++;
-        try { return fn.apply(s, fargs); } finally { callDepth--; }
+        try { return fn.apply(s, callbacks(fargs, s)); } finally { callDepth--; }
       }
       return undefined;
     }
@@ -479,7 +498,7 @@
         Object.prototype.hasOwnProperty.call(expressionServiceMembers, x[2]);
       if (oo == null || (blockedKey(x[2]) && !publicMethod)) return undefined;
       var a = x[3].map(function (y) { return run(y, s); });
-      return typeof oo[x[2]] === "function" ? oo[x[2]].apply(oo, a) : undefined;
+      return typeof oo[x[2]] === "function" ? oo[x[2]].apply(oo, callbacks(a, s)) : undefined;
     }
     if (op === "u!") return !run(x[1], s);
     if (op === "u-") return -run(x[1], s);

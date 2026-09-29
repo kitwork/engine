@@ -33,5 +33,22 @@
   {"name": "update-postfix-old-is-a-number", "src": "n++", "scope": {"n": "5"}, "want": 5},
   {"name": "update-missing-name-starts-at-0", "src": "fresh++; fresh", "scope": {}, "want": 1},
   {"name": "update-page-scope", "src": "$.count++; $.count", "scope": {"count": 1}, "want": 2},
-  {"name": "update-spaced-minus-unchanged", "src": "a - -b", "scope": {"a": 5, "b": 2}, "want": 7}
+  {"name": "update-spaced-minus-unchanged", "src": "a - -b", "scope": {"a": 5, "b": 2}, "want": 7},
+  {"name": "array-filter-lambda", "src": "rows.filter((r) => r.done).length", "scope": {"rows": [{"id": 1, "name": "Ada", "done": true}, {"id": 2, "name": "Bob", "done": false}, {"id": 3, "name": "Cy", "done": true}]}, "want": 2},
+  {"name": "array-map-lambda", "src": "nums.map((x) => x * 2)", "scope": {"nums": [1, 2, 3]}, "want": [2, 4, 6]},
+  {"name": "array-map-gets-the-index", "src": "names.map((n, i) => i + ':' + n).join(',')", "scope": {"names": ["a", "b"]}, "want": "0:a,1:b"},
+  {"name": "array-find", "src": "rows.find((r) => r.id === 2).name", "scope": {"rows": [{"id": 1, "name": "Ada", "done": true}, {"id": 2, "name": "Bob", "done": false}, {"id": 3, "name": "Cy", "done": true}]}, "want": "Bob"},
+  {"name": "array-find-none-is-nullish", "src": "rows.find((r) => r.id === 9) == null", "scope": {"rows": [{"id": 1, "name": "Ada", "done": true}, {"id": 2, "name": "Bob", "done": false}, {"id": 3, "name": "Cy", "done": true}]}, "want": true},
+  {"name": "array-some", "src": "nums.some((x) => x > 2)", "scope": {"nums": [1, 2, 3]}, "want": true},
+  {"name": "array-every", "src": "nums.every((x) => x > 1)", "scope": {"nums": [1, 2, 3]}, "want": false},
+  {"name": "array-includes", "src": "nums.includes(2)", "scope": {"nums": [1, 2, 3]}, "want": true},
+  {"name": "array-index-of", "src": "nums.indexOf(3) + '/' + nums.indexOf(9)", "scope": {"nums": [1, 2, 3]}, "want": "2/-1"},
+  {"name": "array-slice-from", "src": "nums.slice(1)", "scope": {"nums": [1, 2, 3]}, "want": [2, 3]},
+  {"name": "array-slice-negative", "src": "nums.slice(-2)", "scope": {"nums": [1, 2, 3]}, "want": [2, 3]},
+  {"name": "array-slice-range", "src": "nums.slice(0, 1)", "scope": {"nums": [1, 2, 3]}, "want": [1]},
+  {"name": "array-join-default-comma", "src": "nums.join()", "scope": {"nums": [1, 2, 3]}, "want": "1,2,3"},
+  {"name": "array-join-separator", "src": "words.join(' ')", "scope": {"words": ["keep", "the", "html"]}, "want": "keep the html"},
+  {"name": "array-lambda-reads-outer", "src": "nums.filter((x) => x > min)", "scope": {"nums": [1, 2, 3], "min": 1}, "want": [2, 3]},
+  {"name": "array-filter-combobox", "src": "options.filter((o) => o.toLowerCase().includes(q.trim().toLowerCase()))", "scope": {"options": ["Apple", "Apricot", "Banana"], "q": " ap "}, "want": ["Apple", "Apricot"]},
+  {"name": "array-chain", "src": "rows.filter((r) => r.done).map((r) => r.name).join(', ')", "scope": {"rows": [{"id": 1, "name": "Ada", "done": true}, {"id": 2, "name": "Bob", "done": false}, {"id": 3, "name": "Cy", "done": true}]}, "want": "Ada, Cy"}
 ]
