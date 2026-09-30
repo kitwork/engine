@@ -73,6 +73,15 @@ function onScreen(scope) {
   });
 }
 
+// The item an event happened on: the nearest item around its target that belongs to this tree.
+function itemAt(scope, target) {
+  var items = treeItems(scope);
+  for (var node = target; node && node.nodeType === 1; node = node.parentElement) {
+    if (items.indexOf(node) >= 0) return node;
+  }
+  return null;
+}
+
 function focusedItem(scope) {
   var name = scope.focused;
   return treeItems(scope).filter(function (item) { return nameOf(item) === name; })[0] || null;
@@ -121,15 +130,25 @@ var treeDef = {
     scope[TREE] = { context: context };
     context.cleanup(function () { delete scope[TREE]; });
 
-    // One tab stop from the start: the chosen item if there is one, else the first.
-    if (!scope.focused) {
+    // One tab stop from the start: the chosen item if there is one, else the first. After the
+    // paint, not now: a page that seeds `selected` from its markup (data-kit-seed) writes it in the
+    // same pass that runs init, AFTER init — decided here, the tab stop would miss the selection.
+    context.afterRender(function () {
+      if (scope.focused) return;
       var first = scope.selected || nameOf(treeItems(scope)[0]);
       if (first) scope.focused = first;
-    }
+    });
+
+    // Focus that arrives any other way — a click, a script, a screen reader's own cursor — moves the
+    // tab stop with it, so the arrows always start from the item the person is actually on.
+    context.listen(context.host, "focusin", function (event) {
+      var item = itemAt(scope, event.target);
+      if (item && nameOf(item) !== scope.focused) scope.focused = nameOf(item);
+    });
 
     context.listen(context.host, "keydown", function (event) {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
-      var current = focusedItem(scope);
+      var current = itemAt(scope, event.target) || focusedItem(scope);
       if (!current) return;
       var visible = onScreen(scope);
       var index = visible.indexOf(current);

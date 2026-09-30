@@ -80,3 +80,40 @@ func TestBrowserContextMenuOpensWhereAskedAndStaysOnScreen(t *testing.T) {
 })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }
+
+// A fixed panel is placed against the viewport only when no ancestor has a transform, a filter or a
+// backdrop-filter; any of those becomes its containing block. The catalogue's demo frame is such an
+// ancestor (backdrop-blur), and there the panel used to open far from the pointer and run off the
+// bottom of the screen. The panel must land at the pointer in the VIEWPORT, whatever box it is
+// positioned against.
+func TestBrowserContextMenuLandsAtThePointerInsideATransformedFrame(t *testing.T) {
+	runBrowserProof(t, "context-menu frame", []string{"context-menu"}, `
+<div style="margin:120px 0 0 90px;transform:translateZ(0);width:320px;height:160px">
+  <div data-kit-component="context-menu" data-kit-click:outside="hide()">
+    <div id="target" data-kit-element="target" tabindex="0" style="width:300px;height:120px">Right-click here</div>
+    <div id="panel" role="menu" aria-label="File" data-kit-show="open" hidden
+         style="position:fixed;width:200px" data-kit-style:left="x + 'px'" data-kit-style:top="y + 'px'">
+      <button type="button" role="menuitem" data-kit-element="item" style="display:block;width:180px;height:32px">Rename</button>
+      <button type="button" role="menuitem" data-kit-element="item" style="display:block;width:180px;height:32px">Delete</button>
+    </div>
+  </div>
+</div>
+<script>
+(async function () {
+  await wait(80);
+  var target = document.getElementById("target"), panel = document.getElementById("panel");
+  function rightClick(x, y) { target.dispatchEvent(new MouseEvent("contextmenu", { clientX: x, clientY: y, bubbles: true, cancelable: true })); }
+
+  rightClick(150, 170); await wait(120);
+  var box = panel.getBoundingClientRect();
+  assert(Math.round(box.left) === 150 && Math.round(box.top) === 170, "the panel lands at the pointer in the viewport, got " + Math.round(box.left) + "," + Math.round(box.top));
+  key(document.activeElement, "Escape"); await wait(40);
+
+  rightClick(innerWidth - 5, innerHeight - 5); await wait(120);
+  box = panel.getBoundingClientRect();
+  assert(box.right <= innerWidth - 7 && box.bottom <= innerHeight - 7, "and is kept inside the view, its box ends at " + Math.round(box.right) + "," + Math.round(box.bottom) + " of " + innerWidth + "," + innerHeight);
+
+  root.setAttribute("data-kit-test", "passed");
+})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+</script>`)
+}

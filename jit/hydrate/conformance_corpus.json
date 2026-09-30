@@ -46,6 +46,8 @@
   {"name": "array-slice-from", "src": "nums.slice(1)", "scope": {"nums": [1, 2, 3]}, "want": [2, 3]},
   {"name": "array-slice-negative", "src": "nums.slice(-2)", "scope": {"nums": [1, 2, 3]}, "want": [2, 3]},
   {"name": "array-slice-range", "src": "nums.slice(0, 1)", "scope": {"nums": [1, 2, 3]}, "want": [1]},
+  {"name": "array-concat-spreads-arrays", "src": "tags.concat(['go'], 'js')", "scope": {"tags": ["kitwork"]}, "want": ["kitwork", "go", "js"]},
+  {"name": "array-concat-leaves-original", "src": "tags.concat(['go']).length + tags.length", "scope": {"tags": ["kitwork"]}, "want": 3},
   {"name": "array-join-default-comma", "src": "nums.join()", "scope": {"nums": [1, 2, 3]}, "want": "1,2,3"},
   {"name": "array-join-separator", "src": "words.join(' ')", "scope": {"words": ["keep", "the", "html"]}, "want": "keep the html"},
   {"name": "array-lambda-reads-outer", "src": "nums.filter((x) => x > min)", "scope": {"nums": [1, 2, 3], "min": 1}, "want": [2, 3]},

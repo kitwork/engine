@@ -87,8 +87,11 @@ var dialogDef = {
 
     // A click that lands on the dialog element itself is a click on the backdrop — the content sits
     // in child elements. The platform renders ::backdrop but never closes on it.
+    //
+    // Except an ALERT dialog (role="alertdialog"): it asks a question that needs an answer, and a
+    // stray click beside it is not one. Its buttons and Escape still close it.
     context.listen(host, "click", function (event) {
-      if (event.target === host) self.close("");
+      if (event.target === host && host.getAttribute("role") !== "alertdialog") self.close("");
     });
 
     this.open = !!host.open;

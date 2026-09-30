@@ -678,6 +678,19 @@ func call(o any, name string, args []any) any {
 				return []any{}
 			}
 			return append([]any{}, t[start:end]...)
+		case "concat":
+			// JavaScript's concat: an array argument is spread one level, anything else is one
+			// item. It is how a list GROWS in the grammar — tags = tags.concat([draft]) — without a
+			// push that would mutate in place and leave the old array painted (30/09).
+			out := append([]any{}, t...)
+			for _, arg := range args {
+				if items, ok := arg.([]any); ok {
+					out = append(out, items...)
+				} else {
+					out = append(out, arg)
+				}
+			}
+			return out
 		}
 	case float64:
 		if name == "toFixed" {

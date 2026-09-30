@@ -44,9 +44,17 @@ function focusQuietly(element) {
   try { element.focus({ preventScroll: true }); } catch (error) { element.focus(); }
 }
 
-// After the panel is painted where it was asked for: measure it, pull it back on screen, and put
-// focus on the first item. Both need the paint — a hidden panel has no size and cannot take focus.
-function settle(scope) {
+// After the panel is painted where it was asked for: measure it, put it where it was asked for and
+// on screen, and put focus on the first item. Both need the paint — a hidden panel has no size and
+// cannot take focus.
+//
+// "Where it was asked for" is a point in the VIEWPORT (a pointer, or under the target), but x and y
+// are what the markup binds to left and top, and a fixed panel is only positioned against the
+// viewport when no ancestor has a transform, a filter or a backdrop-filter — any of those becomes
+// its containing block instead, and left: 1290px lands 1290px from THAT box. So the first paint is
+// also a measurement: where the panel actually landed, minus x and y, is the origin it is positioned
+// against, and the bindings get the numbers that put it at the point in the viewport.
+function settle(scope, pointX, pointY) {
   var own = scope[CONTEXT_MENU];
   if (!own) return;
   own.context.afterRender(function () {
@@ -55,9 +63,10 @@ function settle(scope) {
     var view = own.context.host.ownerDocument.defaultView;
     if (panel && view) {
       var box = panel.getBoundingClientRect();
-      var x = scope.x, y = scope.y;
-      if (x + box.width > view.innerWidth - 8) x = Math.max(8, view.innerWidth - box.width - 8);
-      if (y + box.height > view.innerHeight - 8) y = Math.max(8, view.innerHeight - box.height - 8);
+      var originX = box.left - scope.x, originY = box.top - scope.y;
+      var left = Math.max(8, Math.min(pointX, view.innerWidth - box.width - 8));
+      var top = Math.max(8, Math.min(pointY, view.innerHeight - box.height - 8));
+      var x = Math.round(left - originX), y = Math.round(top - originY);
       if (x !== scope.x) scope.x = x;
       if (y !== scope.y) scope.y = y;
     }
@@ -78,11 +87,12 @@ var contextMenuDef = {
   x: 0,
   y: 0,
 
+  // x and y are a point in the viewport, as a pointer event reports it.
   show: function (x, y) {
     this.x = Math.round(Number(x) || 0);
     this.y = Math.round(Number(y) || 0);
     this.open = true;
-    settle(this);
+    settle(this, this.x, this.y);
   },
 
   // Focus goes back to the target only when it was inside the menu: a click elsewhere closed it

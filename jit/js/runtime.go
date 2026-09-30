@@ -169,6 +169,26 @@ func readComponent(nameWithVersion string) string {
 // HasComponent reports whether a component has a module (and is not the reserved core).
 func HasComponent(name string) bool { return name != coreName && readComponent(name) != "" }
 
+// ComponentSource is the authored module of one catalogue component, as a page would read it to
+// show what it runs: "" when there is no such component. The version may be written with or
+// without its "v" ("1.0.0" or "v1.0.0"), and empty means the latest. Names and versions are checked
+// against the same patterns markup is, so the receiver can only ever address one embedded file.
+func ComponentSource(name, version string) string {
+	if !componentNameRe.MatchString(name) || name == coreName {
+		return ""
+	}
+	if version == "" {
+		return readComponent(name)
+	}
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
+	}
+	if !componentVersionRe.MatchString(version) {
+		return ""
+	}
+	return readComponent(name + "@" + version)
+}
+
 // scanComponents collects the distinct components used that resolve to a module — embedded, or
 // the site's own (site.go). It returns their cache keys (e.g. "component:dialog",
 // "component:copy@v1.0.0", "component:bid-stepper").

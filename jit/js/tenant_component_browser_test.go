@@ -337,6 +337,10 @@ func TestBrowserDialogComponentDrivesTheNativeElement(t *testing.T) {
     <p id="state" data-kit-text="open ? 'open' : 'closed:' + result"></p>
     <button id="cancel" type="button" data-kit-click="close('cancel')">Cancel</button>
   </dialog>
+  <button id="ask" type="button" data-kit-click="$removal.show()">Remove</button>
+  <dialog id="removal" role="alertdialog" data-kit-component="dialog" data-kit-alias="$removal">
+    <button id="keep" type="button" data-kit-click="close('keep')">Keep</button>
+  </dialog>
   <script src="/kit.js"></script>
   <script>
   (async function () {
@@ -374,6 +378,14 @@ func TestBrowserDialogComponentDrivesTheNativeElement(t *testing.T) {
     assert(dialog.open === true, "a click on the CONTENT must not close the dialog");
     dialog.click(); await tick();
     assert(dialog.open === false, "a click on the backdrop must close the dialog");
+
+    // an ALERT dialog asks for an answer: the backdrop does not give one, its own button does
+    var removal = document.getElementById("removal");
+    document.getElementById("ask").click(); await tick();
+    removal.click(); await tick();
+    assert(removal.open === true, "a click on an alertdialog's backdrop must not close it");
+    document.getElementById("keep").click(); await tick();
+    assert(removal.open === false && removal.returnValue === "keep", "an alertdialog closes on its own button");
 
     root.setAttribute("data-kit-test", "passed");
   })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });

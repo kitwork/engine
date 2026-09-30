@@ -51,29 +51,31 @@ func TestStripComponentVersionExact(t *testing.T) {
 	}
 }
 
-// source(version) reveals the real component: it returns the authored
-// kit.component(...) source of the named component, with the delivery IIFE and
-// "use strict" prologue stripped so what shows is what a developer would write.
-func TestSourceReturnsUnwrappedComponentJS(t *testing.T) {
+// source(version) reveals the real component: the kernel module /kit.js ships for the named
+// component, exactly as authored — what shows is what runs.
+func TestSourceReturnsTheKernelComponent(t *testing.T) {
 	base := t.TempDir()
 	shell := `<main><pre>{{ component.source(version) }}</pre></main>`
 	mkfile(t, base, "views/index.kitwork.html", shell)
 	mkfile(t, base, "views/page.kitwork.html", "")
-	data := value.New(map[string]any{"component": "switch", "version": "1.0.0"})
-	out := newViews(base).Bind(data).String()
+	show := func(component, version string) string {
+		return newViews(base).Bind(value.New(map[string]any{"component": component, "version": version})).String()
+	}
 
-	// The meaningful source is present (HTML-escaped, since we did not highlight).
-	if !strings.Contains(out, `kit.component(&#34;switch&#34;`) {
-		t.Fatalf("component source not shown:\n%s", out)
+	// The catalogue writes versions without their "v"; the module registers itself under both names.
+	out := show("tree", "1.0.0")
+	if !strings.Contains(out, `window.kit.component(&#34;tree&#34;`) || !strings.Contains(out, `&#34;tree@v1.0.0&#34;`) {
+		t.Fatalf("tree@1.0.0 source not shown:\n%s", out)
 	}
-	// The delivery wrapper is gone — it is noise, not what a developer copies.
-	if strings.Contains(out, "use strict") || strings.Contains(out, "})();") {
-		t.Fatalf("delivery IIFE leaked into the shown source:\n%s", out)
+	// No version is the latest.
+	if !strings.Contains(show("tree", ""), `window.kit.component(&#34;tree&#34;`) {
+		t.Fatalf("an empty version must resolve to the latest module")
 	}
-	// Control: an unknown component yields nothing rather than an error string.
-	miss := value.New(map[string]any{"component": "does-not-exist", "version": "9.9.9"})
-	if strings.Contains(newViews(base).Bind(miss).String(), "kit.component") {
-		t.Fatalf("an unknown component must resolve to empty source")
+	// Controls: an unknown component, an unknown version and a path in the name all yield nothing.
+	for _, miss := range [][2]string{{"does-not-exist", "1.0.0"}, {"tree", "9.9.9"}, {"../hydrate/kernel", ""}, {"tree", "../../x"}} {
+		if strings.Contains(show(miss[0], miss[1]), "kit.component") {
+			t.Fatalf("%s@%s must resolve to empty source", miss[0], miss[1])
+		}
 	}
 }
 

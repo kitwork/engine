@@ -4,7 +4,7 @@ import (
 	"html"
 	"strings"
 
-	kitjavascript "github.com/kitwork/engine/jit/javascript"
+	kitjs "github.com/kitwork/engine/jit/js"
 	"github.com/kitwork/engine/value"
 )
 
@@ -17,19 +17,15 @@ import (
 // staged delivery.
 func init() {
 	// source(version) returns the authored kit.component(...) JavaScript of the
-	// component named by the receiver, unwrapped from its delivery IIFE so what
-	// shows is what a developer writes. It is a plain (escapable) String; chain
+	// kernel component named by the receiver — the module /kit.js ships, exactly as
+	// written, so what shows is what runs. It is a plain (escapable) String; chain
 	// .highlightScript() to color it. An unknown component yields "".
 	value.String.Prototype("source", func(target value.Value, args ...value.Value) value.Value {
 		version := ""
 		if len(args) > 0 {
 			version = args[0].String()
 		}
-		raw, err := kitjavascript.ComponentSource(target.String(), version)
-		if err != nil {
-			return value.New("")
-		}
-		return value.New(unwrapComponentSource(string(raw)))
+		return value.New(kitjs.ComponentSource(target.String(), version))
 	})
 
 	// standalone() rewrites data-kit-component="name@x.y.z" to the unversioned
@@ -49,23 +45,6 @@ func init() {
 		result.Raw = true
 		return result
 	})
-}
-
-// unwrapComponentSource strips the delivery IIFE (`;(function () { "use strict";
-// … })();`) so the shown source is the component itself — its helpers and the
-// kit.component(...) call — the part a developer copies. The markers are fixed
-// across every vendored component; if they are absent the source is returned as
-// authored.
-func unwrapComponentSource(raw string) string {
-	body := raw
-	const strict = `"use strict";`
-	if i := strings.Index(body, strict); i >= 0 {
-		body = body[i+len(strict):]
-	}
-	if j := strings.LastIndex(body, "})();"); j >= 0 {
-		body = body[:j]
-	}
-	return strings.TrimSpace(body)
 }
 
 // stripComponentVersion removes the @version from every
