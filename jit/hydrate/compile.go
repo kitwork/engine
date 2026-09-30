@@ -85,15 +85,59 @@ func lex(s string) ([]tok, error) {
 			out = append(out, tok{"num", s[i:j]})
 			i = j
 		case c == '"' || c == '\'':
+			// A string reads its escapes the way JavaScript does: \n \t \r \b \f \v \0, \' \" \\,
+			// \uXXXX, and any other escaped character stands for itself. Before 30/09 there were
+			// none — 'a\nb' was five characters, value.split('\n') split on a backslash, and
+			// 'it\'s' ended at the escaped quote and failed to parse.
 			q := c
 			j := i + 1
-			for j < n && s[j] != q {
+			var b strings.Builder
+			closed := false
+			for j < n {
+				ch := s[j]
+				if ch == q {
+					closed = true
+					break
+				}
+				if ch != '\\' || j+1 >= n {
+					b.WriteByte(ch)
+					j++
+					continue
+				}
+				j++
+				switch e := s[j]; e {
+				case 'n':
+					b.WriteByte('\n')
+				case 't':
+					b.WriteByte('\t')
+				case 'r':
+					b.WriteByte('\r')
+				case 'b':
+					b.WriteByte('\b')
+				case 'f':
+					b.WriteByte('\f')
+				case 'v':
+					b.WriteByte('\v')
+				case '0':
+					b.WriteByte(0)
+				case 'u':
+					if j+4 < n {
+						if code, err := strconv.ParseUint(s[j+1:j+5], 16, 32); err == nil {
+							b.WriteRune(rune(code))
+							j += 4
+							break
+						}
+					}
+					b.WriteByte('u')
+				default:
+					b.WriteByte(e) // \' \" \\ \/ and anything else: the character itself
+				}
 				j++
 			}
-			if j >= n {
+			if !closed {
 				return nil, errors.New("hydrate: unterminated string")
 			}
-			out = append(out, tok{"str", s[i+1 : j]})
+			out = append(out, tok{"str", b.String()})
 			i = j + 1
 		case isIDStart(c):
 			j := i

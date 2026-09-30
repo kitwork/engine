@@ -204,9 +204,20 @@
         out.push({ t: "num", v: s.slice(i, j) }); i = j; continue;
       }
       if (c === "'" || c === '"') {
-        var q = c, k = i + 1; while (k < n && s[k] !== q) k++;
-        if (k >= n) throw new Error("hydrate: unterminated string");
-        out.push({ t: "str", v: s.slice(i + 1, k) }); i = k + 1; continue;
+        // Escapes as JavaScript reads them (the Go twin's lex says why they came): \n \t \r \b \f
+        // \v \0, \uXXXX, and any other escaped character stands for itself — \' \" \\ included.
+        var q = c, k = i + 1, text = "", closed = false;
+        while (k < n) {
+          var ch = s[k];
+          if (ch === q) { closed = true; break; }
+          if (ch !== "\\" || k + 1 >= n) { text += ch; k++; continue; }
+          var e = s[++k];
+          if (e === "u" && /^[0-9a-fA-F]{4}$/.test(s.slice(k + 1, k + 5))) { text += String.fromCharCode(parseInt(s.slice(k + 1, k + 5), 16)); k += 5; continue; }
+          text += ({ n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" })[e] || e;
+          k++;
+        }
+        if (!closed) throw new Error("hydrate: unterminated string");
+        out.push({ t: "str", v: text }); i = k + 1; continue;
       }
       if (/[A-Za-z_$]/.test(c)) {
         var m = i; while (m < n && /[A-Za-z0-9_$]/.test(s[m])) m++;

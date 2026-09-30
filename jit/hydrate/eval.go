@@ -605,6 +605,27 @@ func call(o any, name string, args []any) any {
 			if len(args) == 1 {
 				return strings.HasSuffix(t, toStr(args[0]))
 			}
+		case "split":
+			// JavaScript's split: no separator gives the whole string as one piece, "" gives the
+			// characters, anything else splits on it. It came with string escapes (30/09): until
+			// then value.split('\n') could not even name a newline.
+			if len(args) == 0 || args[0] == nil {
+				return []any{t}
+			}
+			sep := toStr(args[0])
+			var parts []string
+			if sep == "" {
+				for _, r := range t {
+					parts = append(parts, string(r))
+				}
+			} else {
+				parts = strings.Split(t, sep)
+			}
+			out := make([]any, len(parts))
+			for i, part := range parts {
+				out[i] = part
+			}
+			return out
 		case "trim":
 			return strings.TrimSpace(t)
 		case "toLowerCase":

@@ -67,5 +67,13 @@
   {"name": "global-json-round-trip", "src": "JSON.parse(JSON.stringify(items))[1]", "scope": {"items": [10, 20]}, "want": 20},
   {"name": "global-encode-uri-component", "src": "encodeURIComponent('a b&c/d')", "scope": {}, "want": "a%20b%26c%2Fd"},
   {"name": "global-decode-uri-component", "src": "decodeURIComponent('a%20b%26c')", "scope": {}, "want": "a b&c"},
-  {"name": "global-local-shadows-it", "src": "Math", "scope": {"Math": 5}, "want": 5}
+  {"name": "global-local-shadows-it", "src": "Math", "scope": {"Math": 5}, "want": 5},
+  {"name": "string-escape-newline", "src": "'a\\nb'.split('\\n').length", "scope": {}, "want": 2},
+  {"name": "string-escape-quote-single", "src": "'it\\'s'", "scope": {}, "want": "it's"},
+  {"name": "string-escape-quote-double", "src": "\"say \\\"hi\\\"\"", "scope": {}, "want": "say \"hi\""},
+  {"name": "string-escape-tab", "src": "'a\\tb'.includes('\\t')", "scope": {}, "want": true},
+  {"name": "string-escape-backslash", "src": "'back\\\\slash'.length", "scope": {}, "want": 10},
+  {"name": "string-escape-unicode", "src": "'caf\\u00e9'", "scope": {}, "want": "café"},
+  {"name": "string-escape-in-value", "src": "value.split('\\n').length", "scope": {"value": "one\ntwo\nthree"}, "want": 3},
+  {"name": "string-escape-unknown-keeps", "src": "'\\q'", "scope": {}, "want": "q"}
 ]
