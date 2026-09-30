@@ -306,7 +306,15 @@ func ModulesJSFor(names []string, site Site) string {
 			b.WriteByte('\n')
 		}
 		if typ == "component" {
+			// Each component runs in a scope of its own. A component file is written as a plain
+			// script — top-level `var` and `function` — and concatenated bare, every one of those
+			// became a global, so two components with a helper of the same name overwrote each
+			// other: tree's nameOf replaced tabs', menu's walk replaced context-menu's, and on a page
+			// with both the one loaded first quietly broke (30/09). The capabilities already wrap
+			// themselves; a component — including a site's own — cannot be trusted to.
+			b.WriteString(";(function () {\n")
 			b.WriteString(componentSource(name, site))
+			b.WriteString("\n})();")
 		} else if typ == "capability" {
 			b.WriteString(readCapability(name))
 		}
