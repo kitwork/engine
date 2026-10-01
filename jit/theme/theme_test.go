@@ -1,8 +1,6 @@
 package theme
 
 import (
-	"bytes"
-	"os"
 	"strings"
 	"testing"
 )
@@ -135,16 +133,5 @@ func TestPrepaintResolvesSystemBeforeFirstPaint(t *testing.T) {
 	mediaResolution := strings.Index(prepaint, `if(m==="system")`)
 	if storageCatch < 0 || mediaResolution < 0 || storageCatch > mediaResolution {
 		t.Fatal("storage failure must continue into system media resolution")
-	}
-}
-
-func TestPrepaintBodyMatchesDriveCanonicalSource(t *testing.T) {
-	source, err := os.ReadFile("../javascript/src/drive.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	contract := []byte("var THEME_PREPAINT_SOURCE = '" + prepaintBody + "';")
-	if !bytes.Contains(source, contract) {
-		t.Fatal("Drive canonical theme prepaint source drifted from the Go renderer")
 	}
 }

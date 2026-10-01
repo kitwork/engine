@@ -2,6 +2,7 @@ package work
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	jitjs "github.com/kitwork/engine/jit/js"
@@ -26,8 +27,8 @@ import (
 // version written in the markup still wins, and a name with no pin is the latest. A site's own
 // components are not declared here at all — dropping _components/<name>.js is the declaration.
 //
-// (Until 01/10 this name switched the site onto staged KitJS. That is router.jitjs() now, kept only
-// until KitJS is removed.)
+// (Until 01/10 this name switched the site onto staged KitJS, the second runtime the engine once
+// carried. KitJS lives on only as the standalone package.)
 func (f *FolderRouter) Javascript(args ...value.Value) (*FolderRouter, error) {
 	if len(args) > 1 {
 		return f, fmt.Errorf("router.javascript expects nothing or one options object")
@@ -47,6 +48,11 @@ func (f *FolderRouter) Javascript(args ...value.Value) (*FolderRouter, error) {
 		return f, fmt.Errorf("router.javascript expects an options object; got %s", args[0].K)
 	}
 }
+
+// Jitjs is the old spelling, kept so a manifest that still says router.jitjs(true) boots. It used
+// to move the site onto staged KitJS; that runtime is gone, so it now means exactly what
+// router.javascript() means — which for true and for no argument is nothing at all.
+func (f *FolderRouter) Jitjs(args ...value.Value) (*FolderRouter, error) { return f.Javascript(args...) }
 
 func (f *FolderRouter) configureJavascript(options map[string]value.Value) error {
 	if f == nil || f.tenant == nil || f.node == nil {
@@ -100,4 +106,13 @@ func (f *FolderRouter) configureJavascript(options map[string]value.Value) error
 		}
 	}
 	return nil
+}
+
+func sortedValueKeys(values map[string]value.Value) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

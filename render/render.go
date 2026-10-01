@@ -12,7 +12,6 @@ import (
 	jithighlight "github.com/kitwork/engine/jit/highlight"
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 	icons "github.com/kitwork/engine/jit/icons"
-	kitjavascript "github.com/kitwork/engine/jit/javascript"
 	jitjs "github.com/kitwork/engine/jit/js"
 	logo "github.com/kitwork/engine/jit/logo"
 	jitmanifest "github.com/kitwork/engine/jit/manifest"
@@ -45,7 +44,6 @@ type Config struct {
 	HighlightTheme   string                    // folder-scoped default for {{ src.highlight() }} (router.highlight)
 	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
 	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
-	KitJSAssets      *kitjavascript.AssetStore // non-nil opts into generation-prepared staged KitJS
 	SiteComponents   jitjs.Site                // the tenant's own _components/<name>.js, frozen at generation
 	Source           Source                    // immutable template source; nil reads the live filesystem
 }
@@ -59,7 +57,6 @@ func New(c Config) *Render {
 		highlightTheme:   c.HighlightTheme,
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
-		kitJSAssets:      c.KitJSAssets,
 		siteComponents:   c.SiteComponents,
 		source:           c.Source,
 	}
@@ -87,7 +84,6 @@ type Render struct {
 	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
-	kitJSAssets          *kitjavascript.AssetStore
 	siteComponents       jitjs.Site
 	source               Source // immutable generation snapshot; nil = live filesystem
 	program              *node
@@ -289,8 +285,8 @@ func (r *Render) tmpl(data any) string {
 
 	// Server pre-render: OFF unless the site asked for it with router.javascript({ prerender: true }).
 	// It costs a scan of every response and only reaches page scope, so it is a deliberate choice, not
-	// a default. Staged KitJS is browser-owned and bypasses it either way.
-	if r.prerender && r.kitJSAssets == nil {
+	// a default.
+	if r.prerender {
 		out = hydrate.PreRender(out)
 	}
 
@@ -359,20 +355,14 @@ func (r *Render) applyStaticPresentation(out string) string {
 
 	// 3e. JavaScript for kernel pages: the kernel, Drive when the site asked for it, and one file per
 	// component (data-kit-component) and capability (api/live/remember) the page uses — each named
-	// by its content, so each is cached once and for good (jit/js delivery.go). Staged KitJS
-	// delivery bypasses this path. A page that uses no grammar gets nothing.
-	if r.kitJSAssets == nil {
-		out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive, Versions: r.versions})
-	}
+	// by its content, so each is cached once and for good (jit/js delivery.go). A page that uses
+	// no grammar gets nothing.
+	out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive, Versions: r.versions})
 
-	// 3h. hydrate (frontend bytecode VM): on a page that opts in via the data-kitwork-hydrate root
-	// marker, verify every authored expression (compile-time linting) and inject the kernel runtime
-	// reference — only-used. The wire ships the SOURCE; the client parses it (no eval). Then PreRender
-	// runs the SAME Go walker over data-kit-text/show to bake initial values into the HTML: no flash,
-	// correct with JS off, indexable. Both are marker-gated no-ops on ordinary pages.
-	if r.kitJSAssets == nil {
-		out = hydrate.Render(out)
-	}
+	// 3h. hydrate: verify every authored expression (compile-time linting, printed while developing).
+	// The kernel reference is already in the page from 3e, so this adds no second one; the wire ships
+	// the SOURCE and the client parses it (no eval).
+	out = hydrate.Render(out)
 	// Drive is a site-wide choice (router.drive()); the engine flags its own runtime tag so the
 	// client can see the answer without the page carrying a marker for it.
 	if r.drive {
@@ -419,24 +409,6 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 		return nil, false, false, fmt.Sprintf("[Error reading index: %v]", indexPath)
 	}
 	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
-	if r.kitJSAssets != nil {
-		if !preparePresentation {
-			return nil, false, false, "KitJS preview requires a generation-prepared template; dynamic page overrides are not supported"
-		}
-		scanSource, scanErr := kitJSStaticScanSource(fullTemplate)
-		if scanErr != nil {
-			return nil, false, false, fmt.Sprintf("KitJS preview requires static data-kit-* attributes and statically scannable HTML during generation preparation: %v", scanErr)
-		}
-		delivery, composeErr := r.kitJSAssets.ComposeHTML(scanSource)
-		if composeErr != nil {
-			return nil, false, false, fmt.Sprintf("prepare KitJS runtime: %v", composeErr)
-		}
-		injected, injectErr := kitjavascript.InjectDelivery([]byte(fullTemplate), delivery)
-		if injectErr != nil {
-			return nil, false, false, fmt.Sprintf("inject KitJS runtime: %v", injectErr)
-		}
-		fullTemplate = string(injected)
-	}
 	if preparePresentation && !hasDynamicPresentation(fullTemplate) {
 		fullTemplate = r.applyStaticPresentation(fullTemplate)
 		presentationPrepared = true
@@ -909,31 +881,6 @@ func (r *Render) PreparationError() error {
 		return nil
 	}
 	return fmt.Errorf("%s", r.prepareError)
-}
-
-// ScanKitJS assembles the same static document used by Prepare and returns its
-// authored runtime use without composing or injecting an asset. Generation
-// owners use this first pass to close one Drive-compatible graph across every
-// route in the opted-in generation.
-func (r *Render) ScanKitJS() (kitjavascript.ScanResult, error) {
-	if r == nil {
-		return kitjavascript.ScanResult{}, fmt.Errorf("scan KitJS template: nil render")
-	}
-	indexPath := r.getIndexPath()
-	shellRaw, err := r.readFile(indexPath)
-	if err != nil {
-		return kitjavascript.ScanResult{}, fmt.Errorf("read KitJS index %s: %w", indexPath, err)
-	}
-	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
-	scanSource, err := kitJSStaticScanSource(fullTemplate)
-	if err != nil {
-		return kitjavascript.ScanResult{}, fmt.Errorf("KitJS preview requires static data-kit-* attributes and statically scannable HTML during generation preparation: %w", err)
-	}
-	use, err := kitjavascript.ScanHTML(scanSource)
-	if err != nil {
-		return kitjavascript.ScanResult{}, err
-	}
-	return use, nil
 }
 
 func (r *Render) assemble(content string, currentDir string, depth int) string {

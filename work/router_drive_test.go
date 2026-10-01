@@ -15,7 +15,7 @@ func TestDriveIsOffUntilTheSiteAsks(t *testing.T) {
 
 	body := func(t *testing.T, router string) string {
 		t.Helper()
-		tenant, _ := writeKitJSTestSite(t, router, page)
+		tenant, _ := writeTestSite(t, router, page)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -55,7 +55,7 @@ func TestDriveIsOffUntilTheSiteAsks(t *testing.T) {
 
 	// A root marker used to be what switched Drive on. It must no longer do anything.
 	t.Run("a marker buys nothing", func(t *testing.T) {
-		tenant, _ := writeKitJSTestSite(t, "", `<main data-kit-hydrate="v1"><b data-kit-text="'x'">x</b></main>`)
+		tenant, _ := writeTestSite(t, "", `<main data-kit-hydrate="v1"><b data-kit-text="'x'">x</b></main>`)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestDriveIsOffUntilTheSiteAsks(t *testing.T) {
 
 // A misspelt argument is named at boot rather than shrugged off.
 func TestDriveRejectsANonBoolean(t *testing.T) {
-	tenant, _ := writeKitJSTestSite(t, `router.drive("yes");`, `<main></main>`)
+	tenant, _ := writeTestSite(t, `router.drive("yes");`, `<main></main>`)
 	err := tenant.Run()
 	if err == nil {
 		t.Fatal(`router.drive("yes") should be refused`)
@@ -77,7 +77,7 @@ func TestDriveRejectsANonBoolean(t *testing.T) {
 	if !strings.Contains(err.Error(), "router.drive expects a boolean") {
 		t.Fatalf("the error should name the problem: %v", err)
 	}
-	ok, _ := writeKitJSTestSite(t, `router.drive(true);`, `<main></main>`)
+	ok, _ := writeTestSite(t, `router.drive(true);`, `<main></main>`)
 	if err := ok.Run(); err != nil {
 		t.Fatalf("a boolean must be accepted: %v", err)
 	}

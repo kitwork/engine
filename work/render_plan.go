@@ -6,10 +6,8 @@ import (
 	"sync"
 	"time"
 
-	kitjavascript "github.com/kitwork/engine/jit/javascript"
 	jitjs "github.com/kitwork/engine/jit/js"
 	"github.com/kitwork/engine/render"
-	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/value"
 )
 
@@ -21,7 +19,6 @@ type RenderPlan struct {
 	base           string
 	snapshot       *render.Snapshot
 	renderers      map[string]*plannedRenderer
-	kitJSAssets    *kitjavascript.AssetStore
 	siteComponents *siteComponents
 	drive          bool
 	closed         bool
@@ -81,10 +78,6 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 	}
 
 	presentation := t.presentation().View()
-	if len(presentation.JITComponents) > 0 && !presentation.KitJS {
-		snapshot.Close()
-		return nil, fmt.Errorf("router.jitComponent requires router.jitjs(true) for the pending generation")
-	}
 	// The site's own browser components (_components/<name>.js, this domain then the identity it
 	// belongs to) are read once here and frozen for the generation; watching the folders makes an
 	// edit reload the site like a template edit does.
@@ -108,23 +101,6 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			plan.Close()
 		}
 	}()
-	if presentation.KitJS {
-		tenantComponents := make([]kitjavascript.ComponentPackage, len(presentation.JITComponents))
-		for index, component := range presentation.JITComponents {
-			tenantComponents[index] = kitjavascript.ComponentPackage{
-				Name:    component.Name,
-				Version: component.Version,
-				Source:  append([]byte(nil), component.JavaScript...),
-			}
-		}
-		plan.kitJSAssets, err = kitjavascript.NewDefaultAssetStoreWithOptions(
-			kitjavascript.AssetStoreOptions{MinifyCore: productionMinify},
-			tenantComponents...,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("prepare KitJS asset store: %w", err)
-		}
-	}
 	configFor := func(relative string) render.Config {
 		return render.Config{
 			Base:             base,
@@ -141,32 +117,8 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			HighlightTheme:   presentation.HighlightTheme,
 			ManifestPath:     presentation.ManifestPath,
 			HighlightPalette: presentation.HighlightPalette,
-			KitJSAssets:      plan.kitJSAssets,
 			SiteComponents:   plan.siteComponentsOrNil(),
 			Source:           snapshot,
-		}
-	}
-	if plan.kitJSAssets != nil {
-		generationScans := make([]kitjavascript.ScanResult, 0, len(tree.routeNodes())*2)
-		for _, node := range tree.routeNodes() {
-			relative := node.relPath()
-			config := configFor(relative)
-			pageUse, scanErr := render.New(config).ScanKitJS()
-			if scanErr != nil {
-				return nil, fmt.Errorf("scan KitJS template for route %q: %w", relative, scanErr)
-			}
-			generationScans = append(generationScans, pageUse)
-
-			notfoundConfig := config
-			notfoundConfig.NotfoundMode = true
-			notfoundUse, scanErr := render.New(notfoundConfig).ScanKitJS()
-			if scanErr != nil {
-				return nil, fmt.Errorf("scan KitJS notfound template for route %q: %w", relative, scanErr)
-			}
-			generationScans = append(generationScans, notfoundUse)
-		}
-		if err := plan.kitJSAssets.PrepareGeneration(generationScans); err != nil {
-			return nil, fmt.Errorf("prepare KitJS generation graph: %w", err)
 		}
 	}
 	for _, node := range tree.routeNodes() {
@@ -176,27 +128,17 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 		notfoundConfig := config
 		notfoundConfig.NotfoundMode = true
 		pageRender := baseRender.Prepare()
-		if presentation.KitJS || snapshot.Exists(filepath.Join(base, filepath.FromSlash(relative), "page.kitwork.html")) {
+		if snapshot.Exists(filepath.Join(base, filepath.FromSlash(relative), "page.kitwork.html")) {
 			if err := pageRender.PreparationError(); err != nil {
 				return nil, fmt.Errorf("prepare template for route %q: %w", relative, err)
 			}
 		}
 		notfoundRender := render.New(notfoundConfig).Prepare()
-		if presentation.KitJS {
-			if err := notfoundRender.PreparationError(); err != nil {
-				return nil, fmt.Errorf("prepare notfound template for route %q: %w", relative, err)
-			}
-		}
 		plan.renderers[relative] = &plannedRenderer{
 			base:     baseRender,
 			page:     pageRender,
 			notfound: notfoundRender,
 			health:   t.runtimeHealth,
-		}
-	}
-	if plan.kitJSAssets != nil {
-		if err := plan.kitJSAssets.Freeze(); err != nil {
-			return nil, fmt.Errorf("freeze KitJS asset store: %w", err)
 		}
 	}
 	complete = true
@@ -243,74 +185,12 @@ func (p *RenderPlan) Close() {
 	}
 	p.closed = true
 	snapshot := p.snapshot
-	kitJSAssets := p.kitJSAssets
 	p.snapshot = nil
-	p.kitJSAssets = nil
 	p.renderers = nil
 	p.mu.Unlock()
 	if snapshot != nil {
 		snapshot.Close()
 	}
-	if kitJSAssets != nil {
-		kitJSAssets.Close()
-	}
-}
-
-func (p *RenderPlan) kitJSAsset(contentHash string) (kitjavascript.Asset, bool) {
-	if p == nil {
-		return kitjavascript.Asset{}, false
-	}
-	p.mu.RLock()
-	store := p.kitJSAssets
-	closed := p.closed
-	p.mu.RUnlock()
-	if closed || store == nil {
-		return kitjavascript.Asset{}, false
-	}
-	return store.Lookup(contentHash)
-}
-
-func (p *RenderPlan) kitJSEnabled() bool {
-	if p == nil {
-		return false
-	}
-	p.mu.RLock()
-	enabled := !p.closed && p.kitJSAssets != nil
-	p.mu.RUnlock()
-	return enabled
-}
-
-// ContentAssets implements site.ContentAssetProvider. Activation copies this
-// frozen generation snapshot into the bounded site-lifetime CAS before the
-// generation becomes current.
-func (p *RenderPlan) ContentAssets() ([]site.ContentAsset, error) {
-	if p == nil {
-		return nil, nil
-	}
-	p.mu.RLock()
-	store := p.kitJSAssets
-	closed := p.closed
-	p.mu.RUnlock()
-	if closed {
-		return nil, fmt.Errorf("render plan is closed")
-	}
-	if store == nil {
-		return nil, nil
-	}
-	assets, err := store.Snapshot()
-	if err != nil {
-		return nil, err
-	}
-	contentAssets := make([]site.ContentAsset, 0, len(assets))
-	for _, asset := range assets {
-		contentAssets = append(contentAssets, site.ContentAsset{
-			ContentHash: asset.ContentHash,
-			Body:        asset.JavaScript,
-			Role:        string(asset.Role),
-			Suffix:      asset.Suffix,
-		})
-	}
-	return contentAssets, nil
 }
 
 func (r *plannedRenderer) BindPage(page string, notfound bool, data value.Value) value.Value {

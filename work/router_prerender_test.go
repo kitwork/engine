@@ -15,7 +15,7 @@ func TestPrerenderIsOffUntilTheSiteAsks(t *testing.T) {
 
 	body := func(t *testing.T, router string) string {
 		t.Helper()
-		tenant, _ := writeKitJSTestSite(t, router, page)
+		tenant, _ := writeTestSite(t, router, page)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -51,44 +51,10 @@ func TestPrerenderIsOffUntilTheSiteAsks(t *testing.T) {
 	})
 }
 
-// The trap this key had to avoid: router.jitjs({...}) means "staged KitJS" for every other shape,
-// and a site asking for a server-side setting must not be moved onto a different client runtime
-// behind its back. router.javascript() never moves a site onto KitJS at all (01/10): it configures
-// the kernel's delivery, whatever shape it is given.
-func TestPrerenderAloneDoesNotEnableStagedDelivery(t *testing.T) {
-	for _, test := range []struct {
-		name          string
-		call          string
-		staged        bool
-		wantPrerender bool
-	}{
-		{name: "prerender alone", call: `router.javascript({ prerender: true });`, staged: false, wantPrerender: true},
-		{name: "javascript never stages", call: `router.javascript({ components: {}, prerender: true });`, staged: false, wantPrerender: true},
-		{name: "jitjs prerender alone", call: `router.jitjs({ prerender: true });`, staged: false, wantPrerender: true},
-		{name: "jitjs empty object keeps the old contract", call: `router.jitjs({});`, staged: true},
-		{name: "jitjs components keep the old contract", call: `router.jitjs({ components: {} });`, staged: true},
-		{name: "jitjs both together", call: `router.jitjs({ components: {}, prerender: true });`, staged: true, wantPrerender: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			tenant, _ := writeKitJSTestSite(t, test.call, `<main></main>`)
-			if err := tenant.Run(); err != nil {
-				t.Fatal(err)
-			}
-			snapshot := tenant.SiteGeneration().Presentation().Snapshot()
-			if snapshot.KitJS != test.staged {
-				t.Fatalf("staged KitJS = %t, want %t", snapshot.KitJS, test.staged)
-			}
-			if snapshot.Prerender != test.wantPrerender {
-				t.Fatalf("prerender = %t, want %t", snapshot.Prerender, test.wantPrerender)
-			}
-		})
-	}
-}
-
 // A misspelt option should be named at boot, not shrugged off — the site would otherwise run for
 // months believing it had asked for something.
 func TestPrerenderRejectsANonBoolean(t *testing.T) {
-	tenant, _ := writeKitJSTestSite(t, `router.javascript({ prerender: "yes" });`, `<main></main>`)
+	tenant, _ := writeTestSite(t, `router.javascript({ prerender: "yes" });`, `<main></main>`)
 	err := tenant.Run()
 	if err == nil {
 		t.Fatal("prerender: \"yes\" should be refused")
@@ -97,7 +63,7 @@ func TestPrerenderRejectsANonBoolean(t *testing.T) {
 		t.Fatalf("the error should name the field: %v", err)
 	}
 	// Control: the same call with a boolean is accepted.
-	ok, _ := writeKitJSTestSite(t, `router.javascript({ prerender: true });`, `<main></main>`)
+	ok, _ := writeTestSite(t, `router.javascript({ prerender: true });`, `<main></main>`)
 	if err := ok.Run(); err != nil {
 		t.Fatalf("a boolean must be accepted: %v", err)
 	}

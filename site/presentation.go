@@ -1,45 +1,16 @@
 package site
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 
 	jitcss "github.com/kitwork/engine/jit/css"
 )
 
-const (
-	// MaxJITComponentSources bounds the generation-owned tenant component
-	// catalog. The staged browser cache has the same component ceiling.
-	MaxJITComponentSources = 256
-	// MaxJITComponentSourceBytes bounds one snapshotted tenant component before
-	// it can allocate generation-owned memory.
-	MaxJITComponentSourceBytes = 1 << 20
-	// MaxJITComponentTotalBytes keeps declarations from consuming the complete
-	// staged asset-store budget before any engine package is assembled.
-	MaxJITComponentTotalBytes = 16 << 20
-)
-
-var (
-	ErrInvalidJITComponent   = errors.New("site: invalid JIT component declaration")
-	ErrDuplicateJITComponent = errors.New("site: duplicate JIT component declaration")
-	ErrJITComponentCapacity  = errors.New("site: JIT component catalog capacity exceeded")
-)
-
 // AssetMount maps one public URL prefix to a site-relative disk prefix.
 type AssetMount struct {
 	URL  string
 	Disk string
-}
-
-// JITComponentSource is a detached, generation-scoped tenant component. Site
-// deliberately stores only neutral identity and bytes so it does not import
-// the JavaScript delivery package.
-type JITComponentSource struct {
-	Name       string
-	Version    string
-	Filename   string
-	JavaScript []byte
 }
 
 // PresentationSnapshot is the immutable presentation state consumed by one
@@ -53,13 +24,11 @@ type PresentationSnapshot struct {
 	HighlightTheme   string
 	HighlightPalette map[string]string
 	ManifestPath     string
-	KitJS            bool
 	Prerender        bool
 	Drive            bool
 	// ComponentVersions pins catalogue components for the whole site — router.javascript({
 	// components: { dialog: "2.0.0" } }) — so the markup can name them without a version.
 	ComponentVersions map[string]string
-	JITComponents     []JITComponentSource
 	Frozen            bool
 }
 
@@ -77,12 +46,9 @@ type Presentation struct {
 	highlightTheme    string
 	highlightPalette  map[string]string
 	manifestPath      string
-	kitJS             bool
 	prerender         bool
 	drive             bool
 	componentVersions map[string]string
-	jitComponents     []JITComponentSource
-	jitComponentBytes int
 	frozen            bool
 
 	frozenSnapshot PresentationSnapshot
@@ -245,22 +211,6 @@ func (p *Presentation) SetHighlightTheme(theme string) bool {
 	return true
 }
 
-// SetKitJS opts this complete site generation into the component-first KitJS
-// composer. The default is false so existing tenants retain the legacy
-// jit/hydrate pipeline until they migrate deliberately.
-func (p *Presentation) SetKitJS(enabled bool) bool {
-	if p == nil {
-		return false
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.frozen {
-		return false
-	}
-	p.kitJS = enabled
-	return true
-}
-
 // SetPrerender opts the generation into server pre-rendering: the engine evaluates the page-scope
 // data-kit-text / data-kit-show expressions with its Go twin of the client walker and writes the
 // answers into the HTML before sending it.
@@ -318,40 +268,6 @@ func (p *Presentation) SetComponentVersion(name, version string) bool {
 	}
 	p.componentVersions[name] = version
 	return true
-}
-
-// AddJITComponent adds one exact tenant-managed component to the pending
-// generation. A name can have only one declaration and one version, keeping
-// the unversioned HTML form deterministic.
-func (p *Presentation) AddJITComponent(component JITComponentSource) error {
-	if p == nil || component.Name == "" || component.Version == "" || component.Filename == "" || len(component.JavaScript) == 0 {
-		return ErrInvalidJITComponent
-	}
-	if len(component.JavaScript) > MaxJITComponentSourceBytes {
-		return fmt.Errorf("%w: component %q has %d bytes (limit %d)", ErrJITComponentCapacity,
-			component.Name, len(component.JavaScript), MaxJITComponentSourceBytes)
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.frozen {
-		return fmt.Errorf("%w: presentation is frozen", ErrInvalidJITComponent)
-	}
-	for _, current := range p.jitComponents {
-		if current.Name == component.Name {
-			return fmt.Errorf("%w: component %q is already declared as %s from %q",
-				ErrDuplicateJITComponent, component.Name, current.Version, current.Filename)
-		}
-	}
-	if len(p.jitComponents) >= MaxJITComponentSources ||
-		p.jitComponentBytes+len(component.JavaScript) > MaxJITComponentTotalBytes {
-		return fmt.Errorf("%w: components=%d/%d bytes=%d/%d", ErrJITComponentCapacity,
-			len(p.jitComponents)+1, MaxJITComponentSources,
-			p.jitComponentBytes+len(component.JavaScript), MaxJITComponentTotalBytes)
-	}
-	component.JavaScript = append([]byte(nil), component.JavaScript...)
-	p.jitComponents = append(p.jitComponents, component)
-	p.jitComponentBytes += len(component.JavaScript)
-	return nil
 }
 
 // Freeze prevents further mutations. It is idempotent.
@@ -439,11 +355,9 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 		HighlightTheme:    p.highlightTheme,
 		HighlightPalette:  p.highlightPalette,
 		ManifestPath:      p.manifestPath,
-		KitJS:             p.kitJS,
 		Prerender:         p.prerender,
 		Drive:             p.drive,
 		ComponentVersions: cloneVersions(p.componentVersions),
-		JITComponents:     cloneJITComponentSources(p.jitComponents),
 		Frozen:            p.frozen,
 	}
 }
@@ -451,7 +365,6 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 func clonePresentationSnapshot(source PresentationSnapshot) PresentationSnapshot {
 	source.JITConfig = cloneJITConfig(source.JITConfig)
 	source.AssetMounts = append([]AssetMount(nil), source.AssetMounts...)
-	source.JITComponents = cloneJITComponentSources(source.JITComponents)
 	source.ComponentVersions = cloneVersions(source.ComponentVersions)
 	return source
 }
@@ -463,18 +376,6 @@ func cloneVersions(source map[string]string) map[string]string {
 	cloned := make(map[string]string, len(source))
 	for name, version := range source {
 		cloned[name] = version
-	}
-	return cloned
-}
-
-func cloneJITComponentSources(source []JITComponentSource) []JITComponentSource {
-	if source == nil {
-		return nil
-	}
-	cloned := make([]JITComponentSource, len(source))
-	for index, component := range source {
-		component.JavaScript = append([]byte(nil), component.JavaScript...)
-		cloned[index] = component
 	}
 	return cloned
 }

@@ -15,7 +15,7 @@ import (
 func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	serve := func(t *testing.T, router string) string {
 		t.Helper()
-		tenant, _ := writeKitJSTestSite(t, router, `<main><b data-kit-text="'x'">x</b></main>`)
+		tenant, _ := writeTestSite(t, router, `<main><b data-kit-text="'x'">x</b></main>`)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 func TestNativeBridgeGoesOnlyToAppsWithAShell(t *testing.T) {
 	serve := func(t *testing.T) string {
 		t.Helper()
-		tenant, _ := writeKitJSTestSite(t, "", `<main><b data-kit-text="'x'">x</b></main>`)
+		tenant, _ := writeTestSite(t, "", `<main><b data-kit-text="'x'">x</b></main>`)
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}

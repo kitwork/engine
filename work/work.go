@@ -141,15 +141,8 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer requestScope.Close()
 
-	// Generation-owned staged assets use /jit/<sha256>.<suffix>.js. Historical
-	// hashed entries and the shared legacy runtime remain isolated under
-	// /kit.js so existing standalone tooling keeps working.
-	if t.serveJITAssetIf(w, r) {
-		return
-	}
-	if t.serveKitJSAssetIf(w, r) {
-		return
-	}
+	// The page JavaScript: one file per part under /kit/ (kitassets.go), and the whole runtime in
+	// one response at /kit.js for tooling and hand-assembled pages.
 	if t.serveKitAssetIf(w, r) {
 		return
 	}

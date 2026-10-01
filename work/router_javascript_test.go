@@ -20,17 +20,16 @@ func homeOf(t *testing.T, tenant *Tenant) string {
 	return recorder.Body.String()
 }
 
-// router.javascript() configures the kernel's delivery: drive and component pins are honoured, and
-// nothing about it moves the site onto staged KitJS.
+// router.javascript() configures the kernel's delivery: drive and component pins are honoured.
 func TestJavascriptOptionsShapeTheKernelsFiles(t *testing.T) {
 	page := `<main><div data-kit-component="clipboard"></div><b data-kit-text="'x'">x</b></main>`
-	tenant, _ := writeKitJSTestSite(t, `router.javascript({ drive: true, components: { clipboard: "1.0.0" } });`, page)
+	tenant, _ := writeTestSite(t, `router.javascript({ drive: true, components: { clipboard: "1.0.0" } });`, page)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
 	snapshot := tenant.SiteGeneration().Presentation().Snapshot()
-	if snapshot.KitJS || !snapshot.Drive || snapshot.ComponentVersions["clipboard"] != "1.0.0" {
-		t.Fatalf("snapshot: KitJS=%t Drive=%t versions=%v", snapshot.KitJS, snapshot.Drive, snapshot.ComponentVersions)
+	if !snapshot.Drive || snapshot.ComponentVersions["clipboard"] != "1.0.0" {
+		t.Fatalf("snapshot: Drive=%t versions=%v", snapshot.Drive, snapshot.ComponentVersions)
 	}
 	out := homeOf(t, tenant)
 	for _, want := range []string{"data-kitwork-drive", "/kit/kernel.", "/kit/drive.", "/kit/components/clipboard@1.0.0."} {
@@ -40,7 +39,7 @@ func TestJavascriptOptionsShapeTheKernelsFiles(t *testing.T) {
 	}
 
 	// CONTROL: the same page with nothing said gets the latest clipboard and no Drive.
-	plain, _ := writeKitJSTestSite(t, ``, page)
+	plain, _ := writeTestSite(t, ``, page)
 	if err := plain.Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +59,7 @@ func TestJavascriptRefusesWhatItCannotMean(t *testing.T) {
 		{`router.javascript({ drive: "yes" });`, "drive must be true or false"},
 		{`router.javascript({ minify: true });`, `no option "minify"`},
 	} {
-		tenant, _ := writeKitJSTestSite(t, test.call, `<main></main>`)
+		tenant, _ := writeTestSite(t, test.call, `<main></main>`)
 		err := tenant.Run()
 		if err == nil || !strings.Contains(err.Error(), test.says) {
 			t.Errorf("%s: want an error saying %q, got %v", test.call, test.says, err)
@@ -68,7 +67,7 @@ func TestJavascriptRefusesWhatItCannotMean(t *testing.T) {
 	}
 	// CONTROL: the accepted shapes boot.
 	for _, call := range []string{`router.javascript();`, `router.javascript(true);`, `router.javascript({ components: { dialog: "v2.0.0" } });`} {
-		tenant, _ := writeKitJSTestSite(t, call, `<main></main>`)
+		tenant, _ := writeTestSite(t, call, `<main></main>`)
 		if err := tenant.Run(); err != nil {
 			t.Errorf("%s should boot: %v", call, err)
 		}

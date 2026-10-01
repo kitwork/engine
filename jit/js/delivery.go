@@ -48,8 +48,8 @@ var (
 	Native bool
 )
 
-// AssetPrefix is where the files are served. It is not /kit.js/ — that prefix belongs to the
-// staged-KitJS store.
+// AssetPrefix is where the files are served — beside /kit.js, which serves the whole runtime in one
+// response for tooling.
 const AssetPrefix = "/kit/"
 
 // Options are a site's choices about its JavaScript — router.javascript() and router.drive().
