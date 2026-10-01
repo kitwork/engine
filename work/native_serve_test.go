@@ -83,7 +83,7 @@ func TestNativeInMemoryServe(t *testing.T) {
 
 	// Sanity on the interesting bytes: page carries the kernel reference + directive; api is json.
 	home := inMemory("/").Body.String()
-	if !strings.Contains(home, "/kit.js") || !strings.Contains(home, "kit.theme.toggle()") {
+	if !strings.Contains(home, "/kit/kernel.") || !strings.Contains(home, "kit.theme.toggle()") {
 		t.Errorf("home over kitwork:// lost its kernel/directives: %s", home)
 	}
 	if api := inMemory("/api").Body.String(); !strings.Contains(api, `"native":true`) {

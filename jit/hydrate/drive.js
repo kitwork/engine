@@ -133,15 +133,26 @@
     // Reconcile <head> with the fetched page: bring over genuinely-new EXTERNAL assets (deduped),
     // REPLACE the per-page JIT stylesheets, and re-CREATE the jitjs script so it executes — the
     // kernel is boot-guarded, so re-running never adds listeners; verb registration is idempotent.
+    //
+    // A script the page arriving needs and this one never loaded — a component file of its own — is
+    // CREATED, not cloned: a script parsed by DOMParser never runs, and neither does a copy of one.
+    // The returned promises settle when each has loaded (or failed), so the swap can wait for them:
+    // morphing first would put the component's host on the page before its file had registered it.
     function mergeHead(doc) {
-      var have = new Set();
+      var have = new Set(), waits = [];
       document.head.querySelectorAll("link[rel=stylesheet][href]").forEach(function (n) { have.add(n.href); });
       document.head.querySelectorAll("script[src]").forEach(function (n) { have.add(n.src); });
       doc.head.querySelectorAll('link[rel="stylesheet"][href]').forEach(function (n) {
         if (!have.has(n.href)) document.head.appendChild(n.cloneNode(true));
       });
       doc.head.querySelectorAll("script[src]").forEach(function (n) {
-        if (!have.has(n.src)) document.head.appendChild(n.cloneNode(true));
+        if (have.has(n.src) || loadedSrc.has(n.src)) return;
+        loadedSrc.add(n.src);
+        var script = document.createElement("script");
+        for (var i = 0; i < n.attributes.length; i++) script.setAttribute(n.attributes[i].name, n.attributes[i].value);
+        script.async = false; // run in document order, as they would have on a full load
+        waits.push(new Promise(function (resolve) { script.onload = script.onerror = resolve; }));
+        document.head.appendChild(script);
       });
       document.head.querySelectorAll("style[data-kitwork-jit]").forEach(function (n) { n.remove(); });
       doc.head.querySelectorAll("style[data-kitwork-jit]").forEach(function (n) {
@@ -156,6 +167,7 @@
         run.textContent = newRun.textContent;
         document.head.appendChild(run);
       }
+      return waits;
     }
 
     function swap(html, url, push, scrollY, responseLayout) {
@@ -184,30 +196,35 @@
 
       document.dispatchEvent(new CustomEvent("kitwork:before-swap", { detail: { url: url } }));
       if (doc.title) document.title = doc.title;
-      mergeHead(doc);
-      kit.morph(cur, next);
-      if (!sameLayout && doc.body) {
-        document.body.className = doc.body.className;
-        document.body.setAttribute("data-kitwork-layout", layoutKey(doc));
+      var waits = mergeHead(doc);
+      if (waits.length) Promise.all(waits).then(finish);
+      else finish();
+
+      function finish() {
+        kit.morph(cur, next);
+        if (!sameLayout && doc.body) {
+          document.body.className = doc.body.className;
+          document.body.setAttribute("data-kitwork-layout", layoutKey(doc));
+        }
+        runScripts(cur);
+
+        if (push) history.pushState({ kitwork: true }, "", url);
+
+        var hash = ""; try { hash = new URL(url, location.href).hash; } catch (e) { }
+        var anchor = null;
+        if (hash) { try { anchor = document.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { } }
+        instant(function () {
+          if (anchor) anchor.scrollIntoView();
+          else window.scrollTo(0, scrollY || 0);
+        });
+
+        var t = region(document);
+        if (t) { t.setAttribute("tabindex", "-1"); try { t.focus({ preventScroll: true }); } catch (e) { } }
+        if (!announcer.isConnected) document.body.appendChild(announcer);
+        announcer.textContent = "";
+        setTimeout(function () { announcer.textContent = document.title; }, 50);
+        document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: url } }));
       }
-      runScripts(cur);
-
-      if (push) history.pushState({ kitwork: true }, "", url);
-
-      var hash = ""; try { hash = new URL(url, location.href).hash; } catch (e) { }
-      var anchor = null;
-      if (hash) { try { anchor = document.getElementById(decodeURIComponent(hash.slice(1))); } catch (e) { } }
-      instant(function () {
-        if (anchor) anchor.scrollIntoView();
-        else window.scrollTo(0, scrollY || 0);
-      });
-
-      var t = region(document);
-      if (t) { t.setAttribute("tabindex", "-1"); try { t.focus({ preventScroll: true }); } catch (e) { } }
-      if (!announcer.isConnected) document.body.appendChild(announcer);
-      announcer.textContent = "";
-      setTimeout(function () { announcer.textContent = document.title; }, 50);
-      document.dispatchEvent(new CustomEvent("kitwork:load", { detail: { url: url } }));
     }
 
     function visit(url, push, scrollY) {

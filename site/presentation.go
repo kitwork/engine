@@ -56,8 +56,11 @@ type PresentationSnapshot struct {
 	KitJS            bool
 	Prerender        bool
 	Drive            bool
-	JITComponents    []JITComponentSource
-	Frozen           bool
+	// ComponentVersions pins catalogue components for the whole site — router.javascript({
+	// components: { dialog: "2.0.0" } }) — so the markup can name them without a version.
+	ComponentVersions map[string]string
+	JITComponents     []JITComponentSource
+	Frozen            bool
 }
 
 // Presentation collects site-wide declarations while a generation is being
@@ -77,6 +80,7 @@ type Presentation struct {
 	kitJS             bool
 	prerender         bool
 	drive             bool
+	componentVersions map[string]string
 	jitComponents     []JITComponentSource
 	jitComponentBytes int
 	frozen            bool
@@ -298,6 +302,24 @@ func (p *Presentation) SetDrive(enabled bool) bool {
 	return true
 }
 
+// SetComponentVersion pins one catalogue component for the whole site. A second pin for the same
+// name replaces the first: the manifest is read top to bottom, and the last word is the one meant.
+func (p *Presentation) SetComponentVersion(name, version string) bool {
+	if p == nil || name == "" || version == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frozen {
+		return false
+	}
+	if p.componentVersions == nil {
+		p.componentVersions = make(map[string]string)
+	}
+	p.componentVersions[name] = version
+	return true
+}
+
 // AddJITComponent adds one exact tenant-managed component to the pending
 // generation. A name can have only one declaration and one version, keeping
 // the unversioned HTML form deterministic.
@@ -409,19 +431,20 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 	}
 
 	return PresentationSnapshot{
-		JITConfig:        jitConfig,
-		FaviconFile:      p.faviconFile,
-		AssetMounts:      append([]AssetMount(nil), p.assetMounts...),
-		ThemeMode:        p.resolvedThemeMode(),
-		Themes:           append([]string(nil), p.themes...),
-		HighlightTheme:   p.highlightTheme,
-		HighlightPalette: p.highlightPalette,
-		ManifestPath:     p.manifestPath,
-		KitJS:            p.kitJS,
-		Prerender:        p.prerender,
-		Drive:            p.drive,
-		JITComponents:    cloneJITComponentSources(p.jitComponents),
-		Frozen:           p.frozen,
+		JITConfig:         jitConfig,
+		FaviconFile:       p.faviconFile,
+		AssetMounts:       append([]AssetMount(nil), p.assetMounts...),
+		ThemeMode:         p.resolvedThemeMode(),
+		Themes:            append([]string(nil), p.themes...),
+		HighlightTheme:    p.highlightTheme,
+		HighlightPalette:  p.highlightPalette,
+		ManifestPath:      p.manifestPath,
+		KitJS:             p.kitJS,
+		Prerender:         p.prerender,
+		Drive:             p.drive,
+		ComponentVersions: cloneVersions(p.componentVersions),
+		JITComponents:     cloneJITComponentSources(p.jitComponents),
+		Frozen:            p.frozen,
 	}
 }
 
@@ -429,7 +452,19 @@ func clonePresentationSnapshot(source PresentationSnapshot) PresentationSnapshot
 	source.JITConfig = cloneJITConfig(source.JITConfig)
 	source.AssetMounts = append([]AssetMount(nil), source.AssetMounts...)
 	source.JITComponents = cloneJITComponentSources(source.JITComponents)
+	source.ComponentVersions = cloneVersions(source.ComponentVersions)
 	return source
+}
+
+func cloneVersions(source map[string]string) map[string]string {
+	if source == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(source))
+	for name, version := range source {
+		cloned[name] = version
+	}
+	return cloned
 }
 
 func cloneJITComponentSources(source []JITComponentSource) []JITComponentSource {

@@ -312,9 +312,7 @@ func ModulesJSFor(names []string, site Site) string {
 			// other: tree's nameOf replaced tabs', menu's walk replaced context-menu's, and on a page
 			// with both the one loaded first quietly broke (30/09). The capabilities already wrap
 			// themselves; a component — including a site's own — cannot be trusted to.
-			b.WriteString(";(function () {\n")
-			b.WriteString(componentSource(name, site))
-			b.WriteString("\n})();")
+			b.WriteString(wrapComponent(componentSource(name, site)))
 		} else if typ == "capability" {
 			b.WriteString(readCapability(name))
 		}

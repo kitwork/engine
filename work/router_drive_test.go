@@ -32,7 +32,7 @@ func TestDriveIsOffUntilTheSiteAsks(t *testing.T) {
 		if strings.Contains(out, "data-kitwork-drive") {
 			t.Fatalf("a site that never asked must not get Drive:\n%s", out)
 		}
-		if !strings.Contains(out, "/kit.js") {
+		if !strings.Contains(out, "/kit/kernel.") {
 			t.Fatalf("the runtime is still served, Drive or not:\n%s", out)
 		}
 	})

@@ -137,6 +137,7 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			ThemeMode:        presentation.ThemeMode,
 			Prerender:        presentation.Prerender,
 			Drive:            presentation.Drive,
+			Versions:         presentation.ComponentVersions,
 			HighlightTheme:   presentation.HighlightTheme,
 			ManifestPath:     presentation.ManifestPath,
 			HighlightPalette: presentation.HighlightPalette,

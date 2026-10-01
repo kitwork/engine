@@ -454,7 +454,7 @@ func TestKitJSLegacyIsolationDefaultOff(t *testing.T) {
 	home := httptest.NewRecorder()
 	tenant.Serve(home, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
 	body := home.Body.String()
-	if !strings.Contains(body, "data-kitwork-jit=runtime") || !strings.Contains(body, "/kit.js?") ||
+	if !strings.Contains(body, "data-kitwork-jit=runtime") || !strings.Contains(body, "/kit/kernel.") ||
 		strings.Contains(body, "data-kitwork-hash") || strings.Contains(body, "/jit/") {
 		t.Fatalf("legacy tenant delivery changed:\n%s", body)
 	}

@@ -51,9 +51,10 @@ func TestPrerenderIsOffUntilTheSiteAsks(t *testing.T) {
 	})
 }
 
-// The trap this key had to avoid: router.javascript({...}) means "staged KitJS" for every other
-// shape, and a site asking for a server-side setting must not be moved onto a different client
-// runtime behind its back.
+// The trap this key had to avoid: router.jitjs({...}) means "staged KitJS" for every other shape,
+// and a site asking for a server-side setting must not be moved onto a different client runtime
+// behind its back. router.javascript() never moves a site onto KitJS at all (01/10): it configures
+// the kernel's delivery, whatever shape it is given.
 func TestPrerenderAloneDoesNotEnableStagedDelivery(t *testing.T) {
 	for _, test := range []struct {
 		name          string
@@ -62,9 +63,11 @@ func TestPrerenderAloneDoesNotEnableStagedDelivery(t *testing.T) {
 		wantPrerender bool
 	}{
 		{name: "prerender alone", call: `router.javascript({ prerender: true });`, staged: false, wantPrerender: true},
-		{name: "empty object keeps the old contract", call: `router.javascript({});`, staged: true},
-		{name: "components keep the old contract", call: `router.javascript({ components: {} });`, staged: true},
-		{name: "both together", call: `router.javascript({ components: {}, prerender: true });`, staged: true, wantPrerender: true},
+		{name: "javascript never stages", call: `router.javascript({ components: {}, prerender: true });`, staged: false, wantPrerender: true},
+		{name: "jitjs prerender alone", call: `router.jitjs({ prerender: true });`, staged: false, wantPrerender: true},
+		{name: "jitjs empty object keeps the old contract", call: `router.jitjs({});`, staged: true},
+		{name: "jitjs components keep the old contract", call: `router.jitjs({ components: {} });`, staged: true},
+		{name: "jitjs both together", call: `router.jitjs({ components: {}, prerender: true });`, staged: true, wantPrerender: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tenant, _ := writeKitJSTestSite(t, test.call, `<main></main>`)
@@ -90,7 +93,7 @@ func TestPrerenderRejectsANonBoolean(t *testing.T) {
 	if err == nil {
 		t.Fatal("prerender: \"yes\" should be refused")
 	}
-	if !strings.Contains(err.Error(), "prerender must be a boolean") {
+	if !strings.Contains(err.Error(), "prerender must be true or false") {
 		t.Fatalf("the error should name the field: %v", err)
 	}
 	// Control: the same call with a boolean is accepted.

@@ -101,8 +101,8 @@ func TestSiteComponentsShipThroughTheRuntimeRoute(t *testing.T) {
 	}
 }
 
-// The rendered page asks for the site's component by itself: Render scans data-kit-component and
-// puts the name in the one /kit.js query.
+// The rendered page asks for the site's component by itself: delivery scans data-kit-component and
+// gives the component a file of its own under /kit/components/.
 func TestRenderRequestsTheSiteComponentsThePageNames(t *testing.T) {
 	files := componentPage(`<div data-kit-component="bid-stepper"></div>`)
 	files["_components/bid-stepper.js"] = sharedComponentSource
@@ -114,7 +114,7 @@ func TestRenderRequestsTheSiteComponentsThePageNames(t *testing.T) {
 	if recorder.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Result().StatusCode)
 	}
-	if body := recorder.Body.String(); !strings.Contains(body, "components=component%3Abid-stepper") {
+	if body := recorder.Body.String(); !strings.Contains(body, `src="/kit/components/bid-stepper.`) {
 		t.Fatalf("the page must request its own component:\n%s", body)
 	}
 }

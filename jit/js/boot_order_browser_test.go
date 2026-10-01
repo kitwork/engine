@@ -108,10 +108,12 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 		}
 	})
 
-	// The control: the composition this fix replaced. It must show the request, or the test above
-	// proves nothing.
-	t.Run("control: boot before modules", func(t *testing.T) {
-		result := run(t, hydrate.Runtime()+"\n"+module)
+	// The control: a kernel started BEFORE its modules, the way this file once composed it. Since
+	// 01/10 boot waits for DOMContentLoaded, so composing boot first no longer starts early — the
+	// control starts the kernel by hand at that point instead, which is what the old boot did on a
+	// deferred script. It must show the request, or the test above proves nothing.
+	t.Run("control: kernel started before modules", func(t *testing.T) {
+		result := run(t, hydrate.Runtime()+"\nwindow.kit.start();\n"+module)
 		requests := result[1:]
 		for _, path := range requests {
 			if path == "/0" {

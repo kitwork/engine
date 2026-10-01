@@ -19,6 +19,7 @@ import (
 	"github.com/kitwork/engine/gateway"
 	"github.com/kitwork/engine/host"
 	hydrate "github.com/kitwork/engine/jit/hydrate"
+	jitjs "github.com/kitwork/engine/jit/js"
 	"github.com/kitwork/engine/logger"
 	"github.com/kitwork/engine/proxies"
 	"github.com/kitwork/engine/utilities/compress"
@@ -231,6 +232,10 @@ func Run(configFile ...string) (err error) {
 	_, hasDesktop := builder.config["desktop"]
 	_, hasMobile := builder.config["mobile"]
 	work.NativeShell = hasDesktop || hasMobile
+	// The page JavaScript files are named by their bytes, so these two decide every name: minified
+	// in production, and the native bridge in the kernel inside a shell.
+	jitjs.Minify = !cfg.AllowLocal
+	jitjs.Native = work.NativeShell
 	work.ServerPort = cfg.Port
 
 	// Scheduler backend is chosen automatically: a connected system Postgres → the SHARED cluster store

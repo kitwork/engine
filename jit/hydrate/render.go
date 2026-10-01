@@ -76,6 +76,31 @@ func RuntimeFor(parts RuntimeParts) string {
 	return strings.Join(append(pieces, bootJS), "\n")
 }
 
+// KernelFile is the kernel as a file of its own — the first of the separate files a page loads
+// (jit/js Deliver): the bridge when the app runs in a shell, the kernel, the platform modules and
+// boot. Boot can close this file rather than the whole composition because it waits for
+// DOMContentLoaded, which every deferred file after it — Drive, each component — precedes.
+func KernelFile(native bool) string {
+	pieces := []string{kernelJS}
+	if native {
+		pieces = []string{bridgeJS, kernelJS, nativeJS}
+	}
+	return strings.Join(append(pieces, storageJS, webJS, bootJS), "\n")
+}
+
+// DriveFile is Drive and the morph it drives, as a file of its own: only a site that asked for
+// router.drive() loads it, and it is the same file on every page of every such site.
+func DriveFile() string {
+	return morphJS + "\n" + driveJS
+}
+
+// UsesGrammar reports whether a page really uses the grammar — an authored directive outside the
+// <pre>/<code> blocks that only show one. It is the test Render applies before touching a page, for
+// a caller deciding whether the page needs the kernel at all.
+func UsesGrammar(html string) bool {
+	return strings.Contains(html, authoredPrefix) && hasAuthoredDirective(html)
+}
+
 // RuntimePath is the built-in, always-on route the runtime is served at, and what Render points
 // pages at. It is NOT a per-page JIT artifact (unlike /jitcss, /jiticons, /jitfonts, which are
 // scanned + emitted only-used) — it is the ONE static client kernel, identical bytes for every
@@ -379,9 +404,10 @@ func Render(html string) string {
 	if Diagnostics {
 		reportAuthoringMistakes(html)
 	}
-	// The jit/js pass runs earlier and points its only-used action/component set at this same
-	// runtime route. When that combined asset is present, a second bare reference is duplication.
-	if strings.Contains(html, `<script data-kitwork-jit="runtime" src="`+RuntimePath) {
+	// The jit/js pass runs earlier and has already given the page its kernel — as /kit.js with the
+	// page's modules, or as /kit/kernel.<hash>.js followed by one file per module. Either way a
+	// second reference would load the kernel twice.
+	if strings.Contains(html, `<script data-kitwork-jit="runtime"`) {
 		return html
 	}
 	if i := strings.LastIndex(html, "</head>"); i >= 0 {

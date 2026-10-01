@@ -41,6 +41,7 @@ type Config struct {
 	ThemeMode        string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
 	Prerender        bool                      // router.javascript({ prerender: true }) — off by default
 	Drive            bool                      // router.drive() — off by default
+	Versions         map[string]string         // router.javascript({ components: { name: "x.y.z" } }) pins
 	HighlightTheme   string                    // folder-scoped default for {{ src.highlight() }} (router.highlight)
 	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
 	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
@@ -54,7 +55,7 @@ func New(c Config) *Render {
 		base: c.Base, jitConfig: c.JitConfig, directory: c.Directory, path: c.Path,
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
-		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, prerender: c.Prerender, drive: c.Drive,
+		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, prerender: c.Prerender, drive: c.Drive, versions: c.Versions,
 		highlightTheme:   c.HighlightTheme,
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
@@ -82,6 +83,7 @@ type Render struct {
 	themeMode            string            // theme pre-paint mode (see Config.ThemeMode)
 	prerender            bool              // server pre-render, opt-in per site (see Config.Prerender)
 	drive                bool              // Kitwork Drive, opt-in per site (see Config.Drive)
+	versions             map[string]string // site-wide component version pins (see Config.Versions)
 	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
@@ -355,11 +357,12 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// as icons (jit/logo). router.logo() switches to the shared cached /jitlogo stylesheet.
 	out = logo.Render(out)
 
-	// 3e. JIT JS for kernel pages: inject the /kit.js reference with only the kernel components
-	// (data-kit-component) and capabilities (api/live/remember) the page uses. Staged KitJS delivery
-	// bypasses this path. A page with neither remains a cheap no-op.
+	// 3e. JavaScript for kernel pages: the kernel, Drive when the site asked for it, and one file per
+	// component (data-kit-component) and capability (api/live/remember) the page uses — each named
+	// by its content, so each is cached once and for good (jit/js delivery.go). Staged KitJS
+	// delivery bypasses this path. A page that uses no grammar gets nothing.
 	if r.kitJSAssets == nil {
-		out = jitjs.RenderFor(out, r.siteComponents)
+		out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive, Versions: r.versions})
 	}
 
 	// 3h. hydrate (frontend bytecode VM): on a page that opts in via the data-kitwork-hydrate root

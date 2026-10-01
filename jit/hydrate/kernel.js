@@ -1505,7 +1505,16 @@
       render();
     });
   }
-  kit.component = function (name, def) { blueprints[name] = def; scheduleRender(); return kitwork; };
+  //
+  // Not before boot. Components arrive as files of their own, one after another, ahead of
+  // DOMContentLoaded — and a render scheduled by the first would paint while the rest had not run,
+  // reporting every one of them missing. Boot's first pass sees them all; after boot, a component
+  // that arrives later (a file Drive added) still schedules its own render.
+  kit.component = function (name, def) {
+    blueprints[name] = def;
+    if (runtimeMeta.booted) scheduleRender();
+    return kitwork;
+  };
   // kit.remember lives in the remember capability module now (see the note above) — it defines
   // kit.remember when the page loads the module, so a page that never uses remember carries nothing.
 
@@ -1816,9 +1825,18 @@
   // ONE observer for the whole kernel: DOM is the manifest — a removed subtree is cleaned up at once,
   // and capability regions arriving or leaving (morph, SPA swaps) re-reconcile on the next tick.
   var reconcilePending = false;
+  //
+  // REMOVED means no longer on the page. A node that was MOVED — taken out and put back somewhere
+  // else, which is how morph reorders a page — appears in removedNodes too, and this callback runs a
+  // tick later, after the component inside it has already been initialised in its new place. Cleaning
+  // it up then took the component's own listeners while its state stayed seeded, so it never
+  // initialised again: after a Drive swap the tree and the tabs on kitwork.io's tree page stopped
+  // answering the keyboard (01/10). Only a node that is not connected any more is cleaned up.
   var domObserver = new MutationObserver(function (records) {
     records.forEach(function (record) {
-      record.removedNodes.forEach(cleanupTree);
+      record.removedNodes.forEach(function (node) {
+        if (!node.isConnected) cleanupTree(node);
+      });
     });
     if (reconcilePending) return;
     reconcilePending = true;

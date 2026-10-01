@@ -150,6 +150,9 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	if t.serveKitJSAssetIf(w, r) {
 		return
 	}
+	if t.serveKitAssetIf(w, r) {
+		return
+	}
 	if t.serveHydrateIf(w, r) {
 		return
 	}
