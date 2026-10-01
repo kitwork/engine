@@ -1,0 +1,24 @@
+{
+  "name": "code-editor",
+  "version": "1.0.0",
+  "summary": "A textarea that indents like an editor and knows where the caret is.",
+  "host": { "attributes": {} },
+  "elements": {
+    "field": {
+      "required": true,
+      "attributes": {
+        "data-tab-size": { "type": "number", "default": 2, "doc": "Spaces per indent, 1 to 8." }
+      },
+      "doc": "The textarea; data-kit-model holds its text."
+    },
+    "gutter": {
+      "doc": "The line numbers, kept scrolled with the field."
+    }
+  },
+  "state": {
+    "line": { "type": "number", "doc": "The caret's line, from 1." },
+    "column": { "type": "number", "doc": "The caret's column, from 1." }
+  },
+  "methods": {},
+  "events": {}
+}

@@ -1,0 +1,28 @@
+{
+  "name": "menu",
+  "version": "1.0.0",
+  "summary": "The keyboard half of a menu button: where focus goes when it opens, walks and closes.",
+  "host": { "attributes": {} },
+  "elements": {
+    "trigger": {
+      "required": true,
+      "doc": "The button that opens the menu; focus returns to it on Escape."
+    },
+    "item": {
+      "required": true,
+      "many": true,
+      "doc": "One per entry; a disabled one is skipped."
+    }
+  },
+  "state": {
+    "open": { "type": "boolean", "doc": "Whether the menu is open." }
+  },
+  "methods": {
+    "show": { "doc": "Opens the menu." },
+    "hide": { "doc": "Closes the menu; focus returns to the trigger if it was inside." },
+    "toggle": { "doc": "Opens or closes the menu." },
+    "first": { "doc": "Opens the menu on its first entry." },
+    "last": { "doc": "Opens the menu on its last entry." }
+  },
+  "events": {}
+}

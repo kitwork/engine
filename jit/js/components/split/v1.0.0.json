@@ -1,0 +1,30 @@
+{
+  "name": "split",
+  "version": "1.0.0",
+  "summary": "A draggable, keyboard-operable divider between two panes.",
+  "host": { "attributes": {} },
+  "elements": {
+    "handle": {
+      "required": true,
+      "attributes": {
+        "aria-valuemin": { "type": "number", "default": 10, "doc": "The smallest size, in percent." },
+        "aria-valuemax": { "type": "number", "default": 90, "doc": "The largest size, in percent." },
+        "aria-valuenow": { "type": "number", "doc": "The size it starts at and reset() returns to." },
+        "aria-orientation": { "type": "\"vertical\"|\"horizontal\"", "default": "vertical", "doc": "vertical divides left from right; horizontal, top from bottom." },
+        "data-step": { "type": "number", "default": 5, "doc": "How far one key press moves it." }
+      },
+      "doc": "The separator the pointer drags and the keys move."
+    }
+  },
+  "state": {
+    "size": { "type": "number", "doc": "The first pane's size, in percent." },
+    "collapsed": { "type": "boolean", "doc": "Whether the first pane is collapsed." },
+    "dragging": { "type": "boolean", "doc": "Whether a pointer is dragging the handle." }
+  },
+  "methods": {
+    "set": { "params": ["size"], "returns": "number", "doc": "Moves the divider, clamped to the range." },
+    "toggle": { "doc": "Collapses the pane, or restores it where it was." },
+    "reset": { "doc": "Returns to the starting size." }
+  },
+  "events": {}
+}

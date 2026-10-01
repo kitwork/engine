@@ -1,0 +1,26 @@
+{
+  "name": "sidebar",
+  "version": "1.0.0",
+  "summary": "The app-shell navigation panel: a desktop rail and a mobile drawer.",
+  "host": { "attributes": {} },
+  "elements": {},
+  "state": {
+    "status": { "type": "\"expanded\"|\"collapsed\"|\"hidden\"", "doc": "The desktop rail; kept across reloads." },
+    "drawer": { "type": "boolean", "doc": "Whether the mobile drawer is open; never kept, so a page never opens covered." }
+  },
+  "methods": {
+    "cycle": { "doc": "Expanded ⇄ collapsed." },
+    "expand": { "doc": "Shows the full rail." },
+    "collapse": { "doc": "Shows icons only." },
+    "hide": { "doc": "Hides the rail." },
+    "toggle": { "doc": "Hidden ⇄ expanded." },
+    "set": { "params": ["status"], "doc": "Sets the rail and keeps it." },
+    "openDrawer": { "doc": "Opens the mobile drawer." },
+    "closeDrawer": { "doc": "Closes the mobile drawer." },
+    "toggleDrawer": { "doc": "Opens or closes the mobile drawer." },
+    "isExpanded": { "returns": "boolean", "doc": "Whether the rail is expanded." },
+    "isCollapsed": { "returns": "boolean", "doc": "Whether the rail is collapsed." },
+    "isHidden": { "returns": "boolean", "doc": "Whether the rail is hidden." }
+  },
+  "events": {}
+}

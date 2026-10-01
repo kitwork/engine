@@ -1,0 +1,21 @@
+{
+  "name": "dialog",
+  "version": "2.0.0",
+  "summary": "Drive a native <dialog>: state a binding can read, a backdrop that closes, a page that holds still.",
+  "host": {
+    "tag": "dialog",
+    "attributes": {}
+  },
+  "elements": {},
+  "state": {
+    "open": { "type": "boolean", "doc": "True between show and close, however it closed." },
+    "result": { "type": "string", "doc": "What the last close passed; the element's returnValue." }
+  },
+  "methods": {
+    "show": { "doc": "Opens the dialog as a modal." },
+    "close": { "params": ["result?"], "doc": "Closes the dialog with a result." },
+    "lockScroll": { "internal": true, "doc": "Holds the page behind still while the dialog is open." },
+    "releaseScroll": { "internal": true, "doc": "Lets the page behind scroll again." }
+  },
+  "events": {}
+}

@@ -1,0 +1,32 @@
+{
+  "name": "rotator",
+  "version": "1.0.0",
+  "summary": "The clock of a region that advances itself, and holds still while someone is reading.",
+  "host": {
+    "attributes": {
+      "data-interval": { "type": "number", "default": 4000, "doc": "Milliseconds each item shows; never below 200." }
+    }
+  },
+  "elements": {
+    "item": {
+      "required": true,
+      "many": true,
+      "doc": "One per item; the count is read every paint."
+    }
+  },
+  "state": {
+    "active": { "type": "number", "doc": "The index of the item showing." },
+    "count": { "type": "number", "doc": "How many items there are." },
+    "playing": { "type": "boolean", "doc": "What was asked for: play or pause." },
+    "running": { "type": "boolean", "doc": "What is happening: false while hovered, focused, hidden or under reduced motion. A play/pause control shows this." }
+  },
+  "methods": {
+    "go": { "params": ["index"], "doc": "Shows an item and restarts its time." },
+    "next": { "doc": "Shows the next item, wrapping." },
+    "previous": { "doc": "Shows the previous item, wrapping." },
+    "play": { "doc": "Starts the clock." },
+    "pause": { "doc": "Stops the clock." },
+    "toggle": { "doc": "Starts or stops the clock." }
+  },
+  "events": {}
+}

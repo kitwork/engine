@@ -1,0 +1,27 @@
+{
+  "name": "carousel",
+  "version": "1.0.0",
+  "summary": "Slides on a scroll-snap track, and which one is showing.",
+  "host": { "attributes": {} },
+  "elements": {
+    "track": {
+      "required": true,
+      "doc": "The scroll-snap container the browser moves."
+    },
+    "slide": {
+      "required": true,
+      "many": true,
+      "doc": "One per slide, inside the track."
+    }
+  },
+  "state": {
+    "active": { "type": "number", "doc": "The index of the slide showing." },
+    "count": { "type": "number", "computed": true, "doc": "How many slides there are." }
+  },
+  "methods": {
+    "go": { "params": ["index"], "returns": "number", "doc": "Scrolls to a slide, wrapping round." },
+    "next": { "returns": "number", "doc": "Scrolls to the next slide; the last goes back to the first." },
+    "previous": { "returns": "number", "doc": "Scrolls to the previous slide; the first goes to the last." }
+  },
+  "events": {}
+}

@@ -1,0 +1,16 @@
+{
+  "name": "toast",
+  "version": "1.0.0",
+  "summary": "A message that shows itself and leaves after three seconds.",
+  "host": { "attributes": {} },
+  "elements": {},
+  "state": {
+    "visible": { "type": "boolean", "doc": "Whether the message is showing." },
+    "message": { "type": "string", "doc": "The message last shown." }
+  },
+  "methods": {
+    "show": { "params": ["message?"], "doc": "Shows a message for three seconds; a second show restarts the clock." },
+    "hide": { "doc": "Hides the message now." }
+  },
+  "events": {}
+}

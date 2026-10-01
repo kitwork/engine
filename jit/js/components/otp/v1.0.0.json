@@ -1,0 +1,21 @@
+{
+  "name": "otp",
+  "version": "1.0.0",
+  "summary": "A one-time code split across one box per digit.",
+  "host": { "attributes": {} },
+  "elements": {
+    "slot": {
+      "required": true,
+      "many": true,
+      "doc": "One input per digit, in order."
+    }
+  },
+  "state": {
+    "value": { "type": "string", "doc": "The digits joined." },
+    "complete": { "type": "boolean", "computed": true, "doc": "True once every box holds a digit." }
+  },
+  "methods": {
+    "clear": { "doc": "Empties every box and focuses the first." }
+  },
+  "events": {}
+}

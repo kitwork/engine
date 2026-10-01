@@ -1,0 +1,33 @@
+{
+  "name": "tabs",
+  "version": "1.0.0",
+  "summary": "The keyboard half of a tablist: arrows, Home and End move selection and focus together.",
+  "host": { "attributes": {} },
+  "elements": {
+    "list": {
+      "attributes": {
+        "aria-orientation": { "type": "\"horizontal\"|\"vertical\"", "doc": "vertical makes ↑↓ drive the tabs instead of ←→." }
+      },
+      "doc": "The tablist the keys are heard on; the host when there is none."
+    },
+    "tab": {
+      "required": true,
+      "many": true,
+      "attributes": {
+        "data-tab": { "type": "string", "required": true, "doc": "The tab's name, what current holds when it is selected." }
+      },
+      "doc": "One per tab, in order."
+    }
+  },
+  "state": {
+    "current": { "type": "string", "doc": "The selected tab's name; the first tab unless the page chose one." }
+  },
+  "methods": {
+    "select": { "params": ["name"], "doc": "Selects a tab without moving focus." },
+    "next": { "doc": "Selects and focuses the next tab, wrapping." },
+    "previous": { "doc": "Selects and focuses the previous tab, wrapping." },
+    "first": { "doc": "Selects and focuses the first tab." },
+    "last": { "doc": "Selects and focuses the last tab." }
+  },
+  "events": {}
+}

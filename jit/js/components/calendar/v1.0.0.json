@@ -1,0 +1,41 @@
+{
+  "name": "calendar",
+  "version": "1.0.0",
+  "summary": "A month grid you can walk with the keys; the component answers the dates, the markup draws them.",
+  "host": {
+    "attributes": {
+      "data-selected": { "type": "YYYY-MM-DD", "doc": "The day chosen at the start, and the month shown." },
+      "data-min": { "type": "YYYY-MM-DD", "doc": "The earliest day that can be chosen." },
+      "data-max": { "type": "YYYY-MM-DD", "doc": "The latest day that can be chosen." },
+      "data-week-start": { "type": "number", "default": 1, "doc": "The first day of the week, 0 Sunday … 6 Saturday; Monday by default." }
+    }
+  },
+  "elements": {
+    "day": {
+      "required": true,
+      "many": true,
+      "attributes": {
+        "data-iso": { "type": "YYYY-MM-DD", "required": true, "doc": "The day the cell stands for; the keys move from it." }
+      },
+      "doc": "One per cell of the grid."
+    }
+  },
+  "state": {
+    "year": { "type": "number", "doc": "The year shown." },
+    "month": { "type": "number", "doc": "The month shown, 0 January … 11 December." },
+    "selected": { "type": "YYYY-MM-DD|\"\"", "doc": "The chosen day; empty for none." },
+    "focused": { "type": "YYYY-MM-DD", "doc": "The grid's one tab stop." },
+    "title": { "type": "string", "computed": true, "doc": "The month and year shown, in the page's language." },
+    "weekdays": { "type": "string[]", "computed": true, "doc": "The short day names, from the week's first day." },
+    "weeks": { "type": "{ iso, day, inMonth, today, disabled, label }[][]", "computed": true, "doc": "Whole weeks of cells, from the week holding the 1st to the week holding the last day." },
+    "formatted": { "type": "string", "computed": true, "doc": "The chosen day written out in full; empty for none." }
+  },
+  "methods": {
+    "select": { "params": ["iso"], "doc": "Chooses a day inside the range." },
+    "clear": { "doc": "Chooses no day." },
+    "next": { "doc": "Shows the next month." },
+    "previous": { "doc": "Shows the previous month." },
+    "today": { "doc": "Chooses and focuses today." }
+  },
+  "events": {}
+}

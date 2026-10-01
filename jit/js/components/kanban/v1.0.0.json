@@ -1,0 +1,34 @@
+{
+  "name": "kanban",
+  "version": "1.0.0",
+  "summary": "Cards moved between columns by pointer or by key, and said aloud.",
+  "host": { "attributes": {} },
+  "elements": {
+    "column": {
+      "required": true,
+      "many": true,
+      "attributes": {
+        "data-column": { "type": "string", "required": true, "doc": "The column's name, what a card's column holds." },
+        "aria-label": { "type": "string", "doc": "The column's name as the announcement says it." }
+      },
+      "doc": "One per column, in order."
+    },
+    "card": {
+      "many": true,
+      "attributes": {
+        "data-card": { "type": "string", "required": true, "doc": "The card's id." }
+      },
+      "doc": "One per card, inside its column."
+    }
+  },
+  "state": {
+    "cards": { "type": "{ id, column, title }[]", "page": true, "doc": "The page's cards; the component replaces the array when it moves one." },
+    "dragging": { "type": "number|string|null", "doc": "The id of the card a pointer is moving." },
+    "over": { "type": "string", "doc": "The column under the pointer while dragging." },
+    "announcement": { "type": "string", "doc": "A sentence for an aria-live region: where the last card went." }
+  },
+  "methods": {
+    "move": { "params": ["id", "column"], "returns": "boolean", "doc": "Moves a card to the end of a column." }
+  },
+  "events": {}
+}
