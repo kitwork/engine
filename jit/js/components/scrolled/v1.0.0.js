@@ -3,6 +3,7 @@
  * Usage — a header that grows a background once the reader leaves the top:
  *
  *   <nav data-kit-component="scrolled" data-scrolled="false"
+ *        data-kit-bind:data-scrolled="scrolled ? 'true' : 'false'"
  *        class="transition-colors data-[scrolled=true]:bg-paper/80 data-[scrolled=true]:backdrop-blur-xl">
  *
  * The threshold is `offset` in pixels, 24 by default; a page that wants another number says so in
@@ -10,20 +11,20 @@
  * component reads — data-offset="80".
  *
  * WHY THIS IS A COMPONENT. Everything a reader can see here is already the grammar: the class list
- * above is CSS reacting to an attribute, and a page that prefers an expression can bind
+ * above is CSS reacting to an attribute the markup binds, and a page that prefers it can bind
  * data-kit-class="scrolled ? … : …" instead. What the grammar cannot do is ANSWER the question —
  * no expression can read how far the page has scrolled, because scroll position is not state a page
  * declares, it is a fact the browser owns and only reports by event. Turning that fact into one
  * boolean is the whole job.
  *
- * The answer is published twice on purpose:
- *   · `scrolled` on the scope, for expressions;
- *   · data-scrolled="true|false" on the host, for CSS alone — no expression, no runtime work per
- *     paint. Author the attribute in the markup too and the first paint already carries the resting
- *     state, so nothing shifts when the component mounts.
+ * The answer is `scrolled`, state and nothing else. The component writes no attribute: the markup
+ * binds whatever it wants from it, where a reader can see the rule — data-scrolled above, for CSS.
+ * (Until 01/10 it wrote data-scrolled itself, an attribute that appeared from nowhere; every other
+ * component leaves its markup to the page.) Author the attribute too, and the first paint already
+ * carries the resting state.
  *
  * There is nothing to throttle: browsers already deliver scroll at most once per frame. The handler
- * is one read and one compare, and it touches the DOM only when the answer changes. The listener
+ * is one read and one compare, and it writes the state only when the answer changes. The listener
  * belongs to the boundary (context.listen), so a host that morph removes stops listening with it.
  */
 var SCROLLED = Symbol("kit:scrolled");
@@ -41,10 +42,6 @@ function measureScroll(scope) {
   if (!own) return Boolean(scope.scrolled);
   var top = own.view.scrollY || own.document.documentElement.scrollTop || 0;
   var next = top > scrollThreshold(scope);
-  var flag = next ? "true" : "false";
-  if (own.context.host.getAttribute("data-scrolled") !== flag) {
-    own.context.host.setAttribute("data-scrolled", flag);
-  }
   if (scope.scrolled !== next) scope.scrolled = next;
   return next;
 }

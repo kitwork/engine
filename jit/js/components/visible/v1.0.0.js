@@ -2,8 +2,9 @@
  *
  * Usage — a section that fades in the first time a reader reaches it:
  *
- *   <section data-kit-component="visible" data-visible="false"
- *            class="opacity-0 transition duration-700 data-[seen=true]:opacity-100">
+ *   <section data-kit-component="visible"
+ *            data-kit-bind:data-unseen="seen === false"
+ *            class="transition duration-700 data-[unseen]:opacity-0">
  *
  * or with an expression, for anything a class cannot say:
  *
@@ -16,11 +17,16 @@
  * writing the IntersectionObserver by hand to start a count-up when it is seen (apptop-impact,
  * kitdata.vn); this is that observer, once.
  *
- * Two answers, published twice:
- *   · `visible` — on screen now; `seen` — has been on screen at least once, and stays true;
- *   · data-visible / data-seen="true|false" on the host, for CSS alone, so a reveal needs no
- *     expression and no work per paint. Author data-visible="false" so the first paint already
- *     carries the resting state.
+ * Two answers, as state: `visible` — on screen now; `seen` — has been on screen at least once, and
+ * stays true. Both are null until the observer has answered once: before that nobody knows, and
+ * "not known yet" must not read as "not seen", or content already on screen would be hidden at
+ * load and fade back in — and stay hidden in a background tab, where no answer comes until it is
+ * shown. So the reveal above binds `seen === false`, true only once the answer is a real no.
+ *
+ * The component writes no attribute; the markup binds what its CSS needs, where a reader can see
+ * where data-unseen comes from. A bound `true` writes the bare attribute and a `false` removes it,
+ * so data-[unseen] matches only content known to be unseen — and before the script runs there is
+ * no attribute at all, so the content shows.
  *
  * The rules are plain attributes, because a component host takes no data-kit-scope:
  *   · data-threshold — how much of the element must show, 0 to 1; 0 (any of it) by default;
@@ -35,19 +41,15 @@
 var VISIBLE = Symbol("kit:visible");
 
 function setAnswer(scope, visible) {
-  var own = scope[VISIBLE];
-  if (!own) return;
-  var host = own.context.host;
+  if (!scope[VISIBLE]) return;
   var seen = scope.seen || visible;
-  if (host.getAttribute("data-visible") !== String(visible)) host.setAttribute("data-visible", String(visible));
-  if (host.getAttribute("data-seen") !== String(seen)) host.setAttribute("data-seen", String(seen));
   if (scope.visible !== visible) scope.visible = visible;
   if (scope.seen !== seen) scope.seen = seen;
 }
 
 var visibleDef = {
-  visible: false,
-  seen: false,
+  visible: null,
+  seen: null,
 
   init: function (context) {
     var scope = this;

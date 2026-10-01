@@ -58,8 +58,9 @@ func TestBrowserScrolledAnswersTheQuestionMarkupCannotAsk(t *testing.T) {
 	}
 
 	page := `<!doctype html><html><body style="margin:0">
-  <nav id="bar" data-kit-component="scrolled" data-scrolled="false" style="position:fixed;top:0;height:40px"></nav>
-  <nav id="late" data-kit-component="scrolled" data-offset="500" data-scrolled="false" style="position:fixed;top:40px;height:40px"></nav>
+  <nav id="bar" data-kit-component="scrolled" data-scrolled="false" data-kit-bind:data-scrolled="scrolled ? 'true' : 'false'" style="position:fixed;top:0;height:40px"></nav>
+  <nav id="late" data-kit-component="scrolled" data-offset="500" data-scrolled="false" data-kit-bind:data-scrolled="scrolled ? 'true' : 'false'" style="position:fixed;top:40px;height:40px"></nav>
+  <nav id="plain" data-kit-component="scrolled" style="position:fixed;top:80px;height:40px"><b id="said" data-kit-text="scrolled ? 'yes' : 'no'"></b></nav>
   <div style="height:3000px"></div>
   <script src="` + hydrate.RuntimePath + `"></script>
   <script>
@@ -83,7 +84,7 @@ func TestBrowserScrolledAnswersTheQuestionMarkupCannotAsk(t *testing.T) {
     var bar = document.getElementById("bar");
     var late = document.getElementById("late");
 
-    // At rest the answer is false, and it is on the host where CSS alone can see it.
+    // At rest the answer is false, on the host through the markup's own binding.
     assert(bar.getAttribute("data-scrolled") === "false", "at rest the host should read false, got " + bar.getAttribute("data-scrolled"));
 
     // Past the default 24px threshold.
@@ -100,6 +101,12 @@ func TestBrowserScrolledAnswersTheQuestionMarkupCannotAsk(t *testing.T) {
     // And back: the answer is a fact, not a latch.
     await scrollTo(0);
     assert(bar.getAttribute("data-scrolled") === "false", "returning to the top should read false again, got " + bar.getAttribute("data-scrolled"));
+
+    // The component writes nothing on its own: a host that binds nothing never gets the attribute,
+    // while its state still answers.
+    await scrollTo(400);
+    var plain = document.getElementById("plain");
+    assert(!plain.hasAttribute("data-scrolled") && document.getElementById("said").textContent === "yes", "no binding, no attribute — but the state answers; got attr=" + plain.getAttribute("data-scrolled") + " said=" + document.getElementById("said").textContent);
 
     root.setAttribute("data-kit-test", "passed");
   })().catch(function (error) { if (!document.documentElement.hasAttribute("data-kit-test")) { document.documentElement.setAttribute("data-kit-test", "failed"); document.documentElement.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
