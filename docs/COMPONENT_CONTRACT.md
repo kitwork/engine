@@ -40,6 +40,11 @@ hai bản khớp nhau. Phần thật sự mới — phần tử và thuộc tín
 
 1. ✅ 02/10 — revert hợp đồng JSON; `context.require` trong kernel, dùng ở các component có phần
    tử bắt buộc.
-2. Sự kiện: `context.emit` + `data-kit-event:<tên>` (kernel và bản Go của verify pass). `visible`
-   phát `seen`; apptop-impact bỏ IntersectionObserver tự viết, dùng `visible`.
-3. Seed trước `init`.
+2. ✅ 02/10 — `context.emit` + `data-kit-event:<tên>` (kernel và verify pass phía Go: nhận
+   directive, gắn kernel, kiểm biểu thức và modifier). `emit` trong lúc đang vẽ thì đợi vẽ xong.
+   `visible` phát `seen`; apptop-impact (3 bản, 5 trang) bỏ IntersectionObserver tự viết, được
+   `visible` bọc ngoài gọi `$impact.start()`.
+3. ✅ 02/10 — seed trước `init`: trong lượt gieo seed, các `init` được giữ lại và chạy sau khi mọi
+   seed đã ghi. `tree` đặt tab stop từ `selected` ngay trong `init`.
+
+Kernel core sau ba bước: 12254 byte gzip, ngân sách 12288 — gần chạm trần.

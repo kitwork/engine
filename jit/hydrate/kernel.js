@@ -789,10 +789,10 @@
       var now = elements(name); // a bad name throws here, where the author wrote it
       afterRender(function () {
         var found = elements(name);
-        var part = 'data-kit-element="' + name + '"', problem = found.length ? "" : "needs " + part + " inside it, and has none";
+        var part = 'data-kit-element="' + name + '"', problem = found.length ? "" : "needs " + part;
         attributes.forEach(function (attribute) {
           var missing = found.filter(function (el) { return !el.hasAttribute(attribute); }).length;
-          if (missing && !problem) problem = "needs " + attribute + " on every " + part + "; " + missing + " of " + found.length + " have none";
+          if (missing && !problem) problem = "needs " + attribute + ", missing on " + missing + " of " + found.length + " " + part;
         });
         if (problem) reportError(new Error("kitwork: " + b.getAttribute("data-kit-component") + " " + problem), b, "data-kit-component");
       });
@@ -804,7 +804,7 @@
     // it waits for the paint to end: a handler must not run inside the pass that is drawing the
     // page, and the paint is also where the document learns to listen for a new name.
     function emit(name, detail) {
-      if (!EVENT_NAME.test(name) || DOM_EVENT_NAMES[name]) throw new TypeError('hydrate: context.emit("' + name + '") needs a lower-case name of its own, not a DOM event\'s');
+      if (!EVENT_NAME.test(name) || DOM_EVENT_NAMES[name]) throw new TypeError('hydrate: emit("' + name + '"): lower case, and not a DOM event');
       var send = function () {
         ensureListener(name);
         b.dispatchEvent(new CustomEvent(name, { bubbles: true, detail: detail }));
@@ -832,7 +832,13 @@
   // an inline blueprint's is an IR lambda. Set the guard BEFORE calling so a re-entrant scopeFor
   // never loops. An init that throws reaches the error boundary like any directive (directive
   // "init"), and the component stays mounted with whatever state it seeded.
+  //
+  // While the page's data-kit-seed values are being written, an init waits (initsHeld): the seed
+  // pass is what first builds most component scopes, and an init run there would read the state
+  // before the markup's values reach it. So the seeds land first, then every held init runs in the
+  // order it was asked for (02/10) — a default derived from seeded state is right in init itself.
   function runInit(b) {
+    if (initsHeld) { initsHeld.push(b); return; } // a scope is built once, so a host is held once
     var st = state(b);
     if (st.inited) return;
     st.inited = true;
@@ -1370,8 +1376,10 @@
     }
     holder[path[path.length - 1]] = value;
   }
+  var initsHeld = null;
   function seedElements() {
     var lists = {}, rebuild = {};
+    initsHeld = []; // every write below is guarded, so the held inits always run at the end
     document.querySelectorAll("*").forEach(function (el) {
       var seeds = seedsOf(el);
       if (!seeds.length) return;
@@ -1401,6 +1409,9 @@
       }
       try { seedWrite(members[0].el, members[0].path, values); } catch (e) { reportError(e, members[0].el, members[0].sd.attr); }
     }
+    var held = initsHeld;
+    initsHeld = null;
+    held.forEach(runInit);
   }
 
   function render() { pass(paint); flushAfterRender(); }
@@ -1630,7 +1641,7 @@
   // The names a component may not emit under: the DOM events a page listens for, so each spelling
   // has one meaning. (Not every DOM event: the kernel's size budget pays for the likely ones.)
   var DOM_EVENT_NAMES = {};
-  (EVENT_TYPES.join(" ") + " focus blur scroll wheel resize load error close toggle select paste copy cut contextmenu drop").split(" ").forEach(function (name) {
+  (EVENT_TYPES.join(" ") + " focus blur scroll load error close toggle paste copy cut drop").split(" ").forEach(function (name) {
     DOM_EVENT_NAMES[name] = true;
   });
   var KEY_FILTER = { escape: function (e) { return e.key === "Escape" || e.key === "Esc" || e.keyCode === 27; }, enter: function (e) { return e.key === "Enter" || e.keyCode === 13; } };

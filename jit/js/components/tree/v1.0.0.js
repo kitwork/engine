@@ -131,12 +131,13 @@ var treeDef = {
     context.require("item", "data-id");
     context.cleanup(function () { delete scope[TREE]; });
 
-    // One tab stop from the start: the chosen item if there is one, else the first. After the
-    // paint, not now: a page that seeds `selected` from its markup (data-kit-seed) writes it in the
-    // same pass that runs init, AFTER init — decided here, the tab stop would miss the selection.
+    // One tab stop from the start: the chosen item if there is one — seeded from the markup, it is
+    // already here, since data-kit-seed lands before init — else the first item, once the paint has
+    // drawn the items a template renders.
+    if (!scope.focused && scope.selected) scope.focused = scope.selected;
     context.afterRender(function () {
       if (scope.focused) return;
-      var first = scope.selected || nameOf(treeItems(scope)[0]);
+      var first = nameOf(treeItems(scope)[0]);
       if (first) scope.focused = first;
     });
 
