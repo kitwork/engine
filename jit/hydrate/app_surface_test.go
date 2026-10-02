@@ -103,7 +103,7 @@ if (kit.scope.kit !== services || kit.scope.kit.label !== undefined) {
 if (kit.scope.$app !== 0) throw new Error("$app must not exist before an app component registers it");
 console.log("kit expression services: exact grants, default-deny, prototype-safe, no implicit $app");
 `
-	runNodeDOMScript(t, "kit_expression_surface.test.js", assertions)
+	runNodeDOMScript(t, "kit_expression_surface.test.js", dragDirective(t)+"\n"+assertions)
 }
 
 // `$app` is an ordinary component alias. The application opts into it explicitly, owns its state

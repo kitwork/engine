@@ -91,7 +91,7 @@
   var expressionServiceSurfaces = Object.create(null);
   var reservedServiceNames = Object.create(null);
   ("service bridge runtime internal module modules has onStart cleanup onCleanup " +
-    "compile run scope scopeFor render set fetchWithRetry destroy start component " +
+    "compile run scope scopeFor render set destroy start component " +
     "components blueprints state morph hydrate " +
     "platform isNative mode version").split(" ").forEach(function (name) {
       reservedServiceNames[name] = true;
@@ -1787,45 +1787,8 @@
     });
   }
   EVENT_TYPES.forEach(ensureListener);
-  // data-kit-drag="true" marks a region the OS may drag the window by — a title bar the page draws
-  // itself, because app.desktop({ chrome: "html" }) opens a window with no frame of its own.
-  // Primary-button press hands the drag to the OS through the private kit.window transport;
-  // double-click maximises, which is what a title bar does everywhere.
-  //
-  // A control inside it opts out with data-kit-drag="false", so pressing a button is a press and
-  // not the start of a drag. ONE attribute, two values: the old pair (data-kit-drag beside a
-  // separate data-kit-no-drag) made the opt-out look like a different feature.
-  //
-  // All of it is a no-op on the web, where there is no bridge and no window to move.
-  var DRAG = '[data-kit-drag="true"]';
-  var NO_DRAG = '[data-kit-drag="false"]';
-  function runWindowCommand(command) {
-    try {
-      var result = kit.window[command]();
-      if (result && typeof result.catch === "function") result.catch(function () { });
-    } catch (_) { }
-  }
-  function draggableTarget(e) {
-    if (!e.target || !e.target.closest) return false;
-    if (e.target.closest(NO_DRAG)) return false;
-    return !!e.target.closest(DRAG);
-  }
-  listen(document, "mousedown", function (e) {
-    if (e.button !== 0) return;
-    if (draggableTarget(e)) runWindowCommand("drag");
-  });
-  listen(document, "dblclick", function (e) {
-    if (!draggableTarget(e)) return;
-    // A double-click TOGGLES: the second one has to put the window back, which is what every other
-    // title bar does. Asking the shell is the only way to know which way to go; if it cannot answer,
-    // maximising is the safer guess than doing nothing.
-    var answer;
-    try { answer = kit.window.isMaximized(); } catch (_) { answer = null; }
-    Promise.resolve(answer).then(
-      function (maximized) { runWindowCommand(maximized === true ? "restore" : "maximize"); },
-      function () { runWindowCommand("maximize"); }
-    );
-  });
+  // (data-kit-drag — a window title bar the page draws — is a file of its own since 02/10,
+  // jit/js/directives/drag.js, delivered only to a page that writes it.)
   // CAPTURE, so the model writes before any data-kit-input handler runs. Both listen on the
   // document; in bubble order the handler went first, its paint synced every model field FROM the
   // scope — which did not have the new value yet — and wiped what was typed before the model could
@@ -1900,19 +1863,6 @@
   kit.scopeFor = scopeFor;
   kit.render = render;
   kit.set = function (k, v) { pass(function () { scope[k] = v; }); render(); };
-  kit.fetchWithRetry = function (url, options, retries, delay) {
-    var rCount = retries !== undefined ? retries : 2;
-    var rDelay = delay !== undefined ? delay : 1000;
-    return fetch(url, options).catch(function (err) {
-      if (err && err.name === "AbortError") throw err;
-      if (rCount <= 0) throw err;
-      return new Promise(function (resolve) {
-        setTimeout(resolve, rDelay);
-      }).then(function () {
-        return kit.fetchWithRetry(url, options, rCount - 1, rDelay * 2);
-      });
-    });
-  };
   kit.destroy = function () {
     while (globalCleanups.length) {
       try { globalCleanups.pop()(); } catch (_) { }
@@ -1923,23 +1873,9 @@
     kit.runtime.loaded = false;
   };
 
-  function initAppConfig() {
-    // Two settings a page may declare, each read from the element that carries it — there is no root
-    // marker any more, so nothing has to be hung off one.
-    //
-    // data-kit-progress="#0af" is the navigation bar's colour, published as a CSS variable rather
-    // than written onto the bar, so the same value also works when set in a stylesheet.
-    var painted = document.querySelector("[data-kit-progress],[data-kitwork-progress]");
-    if (painted) {
-      var colour = painted.getAttribute("data-kit-progress") || painted.getAttribute("data-kitwork-progress") || "";
-      if (colour) document.documentElement.style.setProperty("--kitwork-progress", colour);
-    }
-  }
-
   function boot() {
     if (runtimeMeta.booted) return kitwork;
     runtimeMeta.booted = true;
-    initAppConfig();
     seedModels();
     render();
     startHooks.slice().forEach(function (start) {

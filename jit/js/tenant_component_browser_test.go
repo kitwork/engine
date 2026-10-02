@@ -696,7 +696,7 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
 }
 
 // titlebar@v1.0.0 — the window controls a page draws when app.desktop({ chrome: "html" }) gives it
-// a frameless window. The kernel already owns dragging (data-kit-drag), so what is left is the part
+// a frameless window. The data-kit-drag directive owns dragging, so what is left is the part
 // markup cannot express: asking the shell whether the window is maximised, and reading the
 // Navigation API for whether there is anywhere to go back to.
 func TestBrowserTitlebarAsksTheShellBeforeItDecides(t *testing.T) {

@@ -16,10 +16,10 @@
  *     </button>
  *   </header>
  *
- * WHAT THIS COMPONENT DOES NOT DO. Dragging the window is the KERNEL's job:
- * `data-kit-drag="true"` marks the strip, `="false"` exempts a control, and a double-click there
- * toggles maximise. None of that needs a component, so none of it is here — this is half the size
- * of the KitJS component it replaces.
+ * WHAT THIS COMPONENT DOES NOT DO. Dragging the window is the data-kit-drag directive's job (a file
+ * of its own, delivered to the page that writes it): `data-kit-drag="true"` marks the strip,
+ * `="false"` exempts a control, and a double-click there toggles maximise. None of that needs a
+ * component, so none of it is here — this is half the size of the KitJS component it replaces.
  *
  * What is left is three things a page cannot express:
  *

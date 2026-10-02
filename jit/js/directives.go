@@ -7,7 +7,8 @@ import "strings"
 // delivered only to a page that writes the directive — like a component, but named by the grammar.
 //
 //	data-kit-intersect[:leave][:once][:half|:full][:margin(x)]  → directives/intersect.js
-var directiveMarkers = map[string]string{"intersect": "data-kit-intersect"}
+//	data-kit-drag="true" | "false"                              → directives/drag.js
+var directiveMarkers = map[string]string{"intersect": "data-kit-intersect", "drag": "data-kit-drag"}
 
 func directiveSource(name string) string {
 	if _, known := directiveMarkers[name]; !known {
@@ -38,7 +39,7 @@ func directiveAsset(name string) *Asset {
 // its examples, so a docs page that prints data-kit-intersect gets no observer.
 func directiveAssets(html string) []*Asset {
 	var out []*Asset
-	for _, name := range []string{"intersect"} {
+	for _, name := range []string{"intersect", "drag"} {
 		if strings.Contains(html, directiveMarkers[name]) {
 			if asset := directiveAsset(name); asset != nil {
 				out = append(out, asset)

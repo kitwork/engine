@@ -20,8 +20,6 @@
     if (!document.querySelector('script[data-kitwork-jit="runtime"][data-kitwork-drive]')) return;
     kit.hydrate = true;
 
-    // mode & version are parsed globally by initAppConfig at boot
-
     var inflight = null;                  // AbortController for the current visit
     var watchdog = null;                  // fetch-timeout watchdog timer
     var prefetch = Object.create(null);   // url -> Promise<{html,url,layout}>
@@ -34,10 +32,8 @@
     // any other code that clears <body>.
     var bar = document.createElement("div");
     bar.setAttribute("data-kitwork-ui", "progress");
-    // Colour resolution, most specific first:
-    //   data-kit-progress="#0af" on the app root — this bar only
-    //   --kitwork-progress                       — same, from CSS
-    //   #1a73e8                                  — the browser-blue default
+    // Colour: --kitwork-progress, set in CSS, else #1a73e8, the browser-blue default. (A
+    // data-kit-progress attribute that set the same variable went on 02/10: no page wrote one.)
     //
     // The default is deliberately NOT the site's brand. A loading bar is chrome, not content: blue
     // is what a browser's own progress reads as, so an unconfigured site gets something that looks

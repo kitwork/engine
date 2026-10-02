@@ -1,6 +1,22 @@
 package hydrate
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// dragDirective is jit/js/directives/drag.js — the file the engine delivers to a page that writes
+// data-kit-drag. Read from disk because jit/js imports this package, not the other way round.
+func dragDirective(t *testing.T) string {
+	t.Helper()
+	source, err := os.ReadFile(filepath.Join("..", "js", "directives", "drag.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(source)
+}
 
 // A desktop app opened with app.desktop({ chrome: "html" }) gets a window with no frame of its own,
 // so the page draws its own title bar. data-kit-drag="true" marks the region the OS may drag the
@@ -10,6 +26,10 @@ import "testing"
 // ONE attribute, two values. It used to be a pair — data-kit-drag beside a separate
 // data-kit-no-drag — which made the opt-out look like a different feature; the repo had three
 // spellings of it (39 attributes) before this.
+//
+// The machinery is a directive file of its own since 02/10 (jit/js/directives/drag.js): the kernel
+// alone does not drag — the control below — and a page that writes only data-kit-drag still gets
+// the runtime, so the file has a kernel to stand on.
 func TestDragRegionIsOneAttributeWithTwoValues(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
@@ -106,5 +126,29 @@ if (calls.length !== 0) throw new Error("right-click must not drag, got " + call
   console.log("drag region: one attribute, true drags, false opts out, double-click toggles");
 })();
 `
-	runNodeDOMScript(t, "drag_region.test.js", assertions)
+	runNodeDOMScript(t, "drag_region.test.js", dragDirective(t)+"\n"+assertions)
+}
+
+func TestKernelAloneDoesNotDrag(t *testing.T) {
+	const assertions = `
+var calls = [];
+window.kit.bridge = { call: function (action) { calls.push(action); return Promise.resolve(true); } };
+var bar = el("div", { "data-kit-drag": "true" });
+document.body.appendChild(bar);
+document.dispatchEvent({ type: "mousedown", button: 0, target: bar });
+document.dispatchEvent({ type: "dblclick", target: bar });
+setTimeout(function () {
+  if (calls.length !== 0) throw new Error("the kernel still drags by itself: " + calls.join(","));
+  console.log("kernel alone: no window command");
+}, 0);
+`
+	runNodeDOMScript(t, "kernel_alone_does_not_drag.test.js", assertions)
+
+	page := `<head></head><body><header data-kit-drag="true"></header></body></html>`
+	if strings.Count(Render(page), injectTag) != 1 {
+		t.Error("a page whose only grammar is data-kit-drag needs the runtime under its drag file")
+	}
+	if out := Render(`<head></head><body><pre><code>&lt;header data-kit-drag="true"&gt;</code></pre></body></html>`); strings.Contains(out, injectTag) {
+		t.Error("CONTROL: a page that only prints data-kit-drag in an example gets no runtime")
+	}
 }
