@@ -111,7 +111,6 @@ func TestPreRenderSkipsEveryLocalBoundary(t *testing.T) {
 	cases := []string{
 		`data-kit-scope="{ open: true, label: 'local' }"`,
 		`data-kit-component="dropdown@v1.0.0"`,
-		`data-kit-api="/state.json"`,
 		`data-kit-for="item of items"`,
 	}
 	for _, boundary := range cases {

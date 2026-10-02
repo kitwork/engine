@@ -275,7 +275,7 @@ func TestBrowserShortcutComponentClicksItsHost(t *testing.T) {
 	if !strings.Contains(rendered, "components=component%3Ashortcut") {
 		t.Fatalf("Render should inject the shortcut component:\n%s", rendered)
 	}
-	runKernelPage(t, browser, page, scanModules(page, nil))
+	runKernelPage(t, browser, page, scanComponents(page, nil))
 }
 
 // runKernelPage serves one page plus /kit.js (kernel + the named modules) and drives it in a real
@@ -391,7 +391,7 @@ func TestBrowserDialogComponentDrivesTheNativeElement(t *testing.T) {
   })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
-	runKernelPage(t, browser, page, scanModules(page, nil))
+	runKernelPage(t, browser, page, scanComponents(page, nil))
 }
 
 // The catalogue's own components, driven in a real browser — the standard says one browser test
@@ -504,7 +504,7 @@ func TestBrowserCatalogueComponentsHoldTheirContract(t *testing.T) {
 			t.Fatalf("Render should ask for %s:\n%s", want, rendered)
 		}
 	}
-	runKernelPage(t, browser, page, scanModules(page, nil))
+	runKernelPage(t, browser, page, scanComponents(page, nil))
 }
 
 // Key combinations in the event grammar: data-kit-keydown:mod+k="…". `mod` is Control on Windows
@@ -692,7 +692,7 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
 	if !strings.Contains(Render(page), "component%3Atabs") {
 		t.Fatal("Render should ask for the tabs component")
 	}
-	runKernelPage(t, browser, page, scanModules(page, nil))
+	runKernelPage(t, browser, page, scanComponents(page, nil))
 }
 
 // titlebar@v1.0.0 — the window controls a page draws when app.desktop({ chrome: "html" }) gives it
@@ -774,5 +774,5 @@ func TestBrowserTitlebarAsksTheShellBeforeItDecides(t *testing.T) {
   });
   </script>
 </body></html>`
-	runKernelPage(t, browser, page, scanModules(page, nil))
+	runKernelPage(t, browser, page, scanComponents(page, nil))
 }

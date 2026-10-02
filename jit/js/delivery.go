@@ -16,7 +16,6 @@ import (
 //	<script data-kitwork-jit="runtime"    src="/kit/kernel.9f2c41d0a7b3e815.js" defer></script>
 //	<script data-kitwork-jit="drive"      src="/kit/drive.51e0c2….js" defer></script>
 //	<script data-kitwork-jit="component"  src="/kit/components/menu@1.0.0.c47a….js" defer></script>
-//	<script data-kitwork-jit="capability" src="/kit/capabilities/remember.0b8e….js" defer></script>
 //
 // The kernel is the same file on every page of every site, Drive the same on every site that asked
 // for it, and each component the same wherever it is used — so each is downloaded once and kept.
@@ -65,7 +64,7 @@ type Options struct {
 // Asset is one served file.
 type Asset struct {
 	Path   string // the URL, /kit/…
-	Role   string // runtime | drive | component | capability — the data-kitwork-jit value
+	Role   string // runtime | drive | component — the data-kitwork-jit value
 	Body   []byte
 	Digest string // the whole SHA-256, hex — the ETag
 }
@@ -87,11 +86,8 @@ func buildAsset(role, name, source string) *Asset {
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
 	dir := ""
-	switch role {
-	case "component":
+	if role == "component" {
 		dir = "components/"
-	case "capability":
-		dir = "capabilities/"
 	}
 	return &Asset{
 		Path:   AssetPrefix + dir + name + "." + digest[:hashLength] + ".js",
@@ -163,14 +159,6 @@ func componentAsset(key string, site Site) *Asset {
 	})
 }
 
-func capabilityAsset(name string) *Asset {
-	source := readCapability(name)
-	if source == "" {
-		return nil
-	}
-	return cachedAsset("capability:"+name, func() *Asset { return buildAsset("capability", name, source) })
-}
-
 func splitComponentKey(key string) (name, version string) {
 	parts := strings.SplitN(key, "@", 2)
 	if len(parts) == 2 {
@@ -180,9 +168,9 @@ func splitComponentKey(key string) (name, version string) {
 }
 
 // PageAssets is the ordered set of files a page needs, or nil when it needs no JavaScript at all —
-// no directive, no component, no capability.
+// no directive and no component.
 func PageAssets(html string, site Site, options Options) []*Asset {
-	keys := ModuleKeysFor(scanModules(html, site), site)
+	keys := ModuleKeysFor(scanComponents(html, site), site)
 	if len(keys) == 0 && !hydrate.UsesGrammar(html) {
 		return nil
 	}
@@ -192,17 +180,11 @@ func PageAssets(html string, site Site, options Options) []*Asset {
 	}
 	seen := make(map[string]bool)
 	for _, key := range keys {
-		kind, name, _ := strings.Cut(key, ":")
-		var asset *Asset
-		switch kind {
-		case "component":
-			if pinned, ok := options.Versions[name]; ok && !strings.Contains(name, "@") && HasComponent(name+"@v"+strings.TrimPrefix(pinned, "v")) {
-				name += "@v" + strings.TrimPrefix(pinned, "v")
-			}
-			asset = componentAsset(name, site)
-		case "capability":
-			asset = capabilityAsset(name)
+		_, name, _ := strings.Cut(key, ":")
+		if pinned, ok := options.Versions[name]; ok && !strings.Contains(name, "@") && HasComponent(name+"@v"+strings.TrimPrefix(pinned, "v")) {
+			name += "@v" + strings.TrimPrefix(pinned, "v")
 		}
+		asset := componentAsset(name, site)
 		if asset != nil && !seen[asset.Path] {
 			seen[asset.Path] = true
 			assets = append(assets, asset)
@@ -272,11 +254,6 @@ func AssetAt(path string, site Site) (asset *Asset, exact bool) {
 			asset = componentAsset(base+"@v"+version, nil)
 		} else if componentNameRe.MatchString(name) && !HasComponent(name) {
 			asset = componentAsset(name, site)
-		}
-	case strings.HasPrefix(label, "capabilities/"):
-		name := strings.TrimPrefix(label, "capabilities/")
-		if slugRe.MatchString(name) {
-			asset = capabilityAsset(name)
 		}
 	}
 	if asset == nil {

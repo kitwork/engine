@@ -23,8 +23,6 @@ import (
 //
 //   - a component boundary anywhere in the chain → skip. Its state lives in JavaScript the server
 //     cannot read, so any name might be legitimate.
-//   - a capability boundary (data-kit-api / -live / -remember) → skip, for the same reason: those
-//     write names into the boundary at runtime.
 //   - a page that writes its own page scope from a script (kit.set, kit.scope.x = …) → skip the
 //     page scope entirely, since a name can then arrive from somewhere the markup does not show.
 //     Every other page HAS a readable page scope: a data-kit-model or data-kit-seed written outside
@@ -62,7 +60,7 @@ type boundary struct {
 	tag      string
 	depth    int
 	declared map[string]bool
-	opaque   bool      // a component or capability boundary: its names are not knowable here
+	opaque   bool      // a component boundary: its names are not knowable here
 	parent   *boundary // reads fall through to it, exactly as the kernel's scope chain does
 }
 
@@ -222,17 +220,12 @@ func pageScopeIsWritten(html string) bool {
 		strings.Contains(html, "kitwork.set(") || strings.Contains(html, "kitwork.scope.")
 }
 
-// readBoundary returns the boundary a tag opens, or nil when it opens none. A component or
-// capability host opens an OPAQUE boundary: the scan keeps walking so nesting stays right, but
-// nothing inside it is ever reported.
+// readBoundary returns the boundary a tag opens, or nil when it opens none. A component host opens
+// an OPAQUE boundary: the scan keeps walking so nesting stays right, but nothing inside it is ever
+// reported.
 func readBoundary(tag string, depth int) *boundary {
 	scope, hasScope := attributeValue(tag, "data-kit-scope")
-	opaque := false
-	for _, marker := range []string{"data-kit-component", "data-kit-api", "data-kit-live", "data-kit-remember"} {
-		if _, has := attributeValue(tag, marker); has {
-			opaque = true
-		}
-	}
+	_, opaque := attributeValue(tag, "data-kit-component")
 	if !hasScope && !opaque {
 		return nil
 	}

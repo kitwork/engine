@@ -25,19 +25,20 @@ func deliveredFiles(t *testing.T, html string) (roles, paths []string) {
 	return roles, paths
 }
 
-// A page gets the kernel, Drive when the site asked for it, then one file per capability and
-// component it uses — kernel first, because defer runs them in document order and the rest register
-// into it; among the modules the order is the sorted key order, and any order works.
+// A page gets the kernel, Drive when the site asked for it, then one file per component it uses —
+// kernel first, because defer runs them in document order and the rest register into it; among the
+// components the order is the sorted key order, and any order works. data-kit-remember is no longer
+// anything (02/10) and brings no file.
 func TestDeliverGivesEachPartAFileOfItsOwn(t *testing.T) {
 	page := `<html><head></head><body><nav data-kit-component="menu"></nav><div data-kit-component="clipboard"></div><p data-kit-remember="theme"></p></body></html>`
 	out := Deliver(page, nil, Options{Drive: true})
 	roles, paths := deliveredFiles(t, out)
-	if strings.Join(roles, ",") != "runtime,drive,capability,component,component" {
+	if strings.Join(roles, ",") != "runtime,drive,component,component" {
 		t.Fatalf("roles in order: got %v\n%s", roles, out)
 	}
 	if !strings.HasPrefix(paths[0], "/kit/kernel.") || !strings.HasPrefix(paths[1], "/kit/drive.") ||
-		!strings.HasPrefix(paths[2], "/kit/capabilities/remember.") || !strings.HasPrefix(paths[3], "/kit/components/clipboard@2.0.0.") ||
-		!strings.HasPrefix(paths[4], "/kit/components/menu@1.0.0.") {
+		!strings.HasPrefix(paths[2], "/kit/components/clipboard@2.0.0.") ||
+		!strings.HasPrefix(paths[3], "/kit/components/menu@1.0.0.") {
 		t.Fatalf("paths: %v", paths)
 	}
 	if !strings.Contains(out, `data-kitwork-jit="runtime" data-kitwork-drive src=`) {
@@ -50,7 +51,7 @@ func TestDeliverGivesEachPartAFileOfItsOwn(t *testing.T) {
 		t.Error("the files belong in <head>")
 	}
 	// CONTROL: without Drive, no Drive file and no flag.
-	if roles, _ := deliveredFiles(t, Deliver(page, nil, Options{})); strings.Join(roles, ",") != "runtime,capability,component,component" || strings.Contains(Deliver(page, nil, Options{}), "data-kitwork-drive") {
+	if roles, _ := deliveredFiles(t, Deliver(page, nil, Options{})); strings.Join(roles, ",") != "runtime,component,component" || strings.Contains(Deliver(page, nil, Options{}), "data-kitwork-drive") {
 		t.Errorf("a site that did not ask for Drive gets neither its file nor its flag, got %v", roles)
 	}
 }
@@ -108,7 +109,7 @@ func TestAssetsAreNamedByTheirBytes(t *testing.T) {
 		"/kit/components/../kernel." + strings.Repeat("a", hashLength) + ".js",
 		"/kit/components/tree@9.9.9." + strings.Repeat("a", hashLength) + ".js",
 		"/kit/components/nonesuch." + strings.Repeat("a", hashLength) + ".js",
-		"/kit/capabilities/nonesuch." + strings.Repeat("a", hashLength) + ".js",
+		"/kit/capabilities/remember." + strings.Repeat("a", hashLength) + ".js",
 		"/kit.js",
 	} {
 		if asset, _ := AssetAt(bad, nil); asset != nil {

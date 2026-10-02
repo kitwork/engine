@@ -330,9 +330,8 @@ func tagHasLocalBoundary(tag string) bool {
 
 func isLocalBoundaryAttribute(name string) bool {
 	switch len(name) {
-	case len("data-kit-api"):
-		return strings.EqualFold(name, "data-kit-api") ||
-			strings.EqualFold(name, "data-kit-for")
+	case len("data-kit-for"):
+		return strings.EqualFold(name, "data-kit-for")
 	case len("data-kit-item"):
 		return strings.EqualFold(name, "data-kit-item")
 	case len("data-kit-scope"):
@@ -340,9 +339,8 @@ func isLocalBoundaryAttribute(name string) bool {
 	case len("data-kit-component"):
 		return strings.EqualFold(name, "data-kit-component") ||
 			strings.EqualFold(name, "data-kitwork-scope")
-	case len("data-kitwork-api"):
-		return strings.EqualFold(name, "data-kitwork-api") ||
-			strings.EqualFold(name, "data-kitwork-for")
+	case len("data-kitwork-for"):
+		return strings.EqualFold(name, "data-kitwork-for")
 	case len("data-kitwork-item"):
 		return strings.EqualFold(name, "data-kitwork-item")
 	case len("data-kitwork-component"):

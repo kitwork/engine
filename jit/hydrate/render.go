@@ -40,7 +40,7 @@ var bootJS string
 // that never asked for Drive has no use for the navigator or the DOM morph it drives, and paying
 // for them on every page is the same waste as shipping a component nobody named.
 type RuntimeParts struct {
-	// Modules is the page's own components and capabilities, already composed by jit/js.
+	// Modules is the page's own components, already composed by jit/js.
 	Modules string
 	// Drive ships the navigator and the DOM morph it drives — router.drive(). Measured 24/09 on the
 	// MINIFIED asset a visitor actually receives: 18,218 bytes gzip with it, 15,407 without, so it
@@ -281,12 +281,10 @@ func checkEventModifiers(directive string) error {
 }
 
 // presenceRe decides runtime INJECTION: authored data-kit-* forms, including the non-expression
-// attributes — model is a plain scope key, live an SSE URL, scope/component a boundary — which need
-// the runtime but must never be compile-verified; for's value is a spec, not an expression. A
-// data-kitwork-* directive is not authored and not read, so it does not bring the runtime.
-// (remember/api/live are NOT here: they are no longer core directives — each is a jit/js capability,
-// and that channel injects the runtime for a page that uses one. Those assets are the ONLY place the
-// remember/api/live modules ship.)
+// attributes — model is a plain scope key, scope/component a boundary — which need the runtime but
+// must never be compile-verified; for's value is a spec, not an expression. A data-kitwork-*
+// directive is not authored and not read, so it does not bring the runtime. (data-kit-api, -live and
+// -remember were removed on 02/10; they bring nothing.)
 var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself

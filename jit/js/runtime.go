@@ -1,18 +1,18 @@
 // Package js is Kitwork's JIT JavaScript runtime — "jitjs", a sibling of jit/css and jit/icons.
-// A page that uses a kernel component (`data-kit-component="dialog"`, versioned or latest) or a
-// capability directive (`data-kit-api`, `data-kit-live`, `data-kit-remember`) gets ONE
-// `<script data-kitwork-jit="runtime">` pointing at /kit.js plus ONLY the modules it uses. No
-// framework, no full-library payload — the jitcss model applied to JS.
+// A page that uses a kernel component (`data-kit-component="dialog"`, versioned or latest) gets
+// the kernel plus ONLY the components it names. No framework, no full-library payload — the jitcss
+// model applied to JS.
 //
 // Each component is a file in ./components/<name>/<version>.js registering a `kit.component`
-// blueprint; each capability a file in ./capabilities. The verb system that used to live beside
-// them (`data-kit-action="copy"` + `data-kit-target`, ./lib) is gone (22/09): behaviour is a
-// component or an expression, transport is Drive.
+// blueprint. The verb system that used to live beside them (`data-kit-action="copy"` +
+// `data-kit-target`, ./lib) is gone (22/09): behaviour is a component or an expression, transport
+// is Drive. The optional capability modules (data-kit-api, -live, -remember) went on 02/10: nothing
+// used them, and a site that keeps something in the browser does it in a component of its own.
 //
 // THE CORE IS hydrate.Runtime(): ordered modules behind the canonical window.kit root
-// (window.kitwork remains a compatibility alias) and one delegated event system shared with
-// expressions/model/validate/live. Render requests that core plus a typed, only-used
-// component/capability set from one cacheable URL.
+// (window.kitwork remains a compatibility alias) and one delegated event system. Render requests
+// that core plus the page's components from one cacheable URL; Deliver (delivery.go) is what the
+// engine's own pages use.
 package js
 
 import (
@@ -27,19 +27,8 @@ import (
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
-//go:embed components capabilities
+//go:embed components
 var jsFS embed.FS
-
-// capabilityAttr maps a capability's authored directive to its module slug. A capability is a chunk
-// of runtime that used to sit in the always-shipped core (remember, and later api/live) but is
-// policy, not mechanism — so it rides this only-used channel: a page carrying data-kit-<attr> gets
-// capabilities/<slug>.js appended, and nothing otherwise. Keyed by the attribute stem after the
-// prefix; both data-kit-* and data-kitwork-* forms are detected.
-var capabilityAttr = map[string]*regexp.Regexp{
-	"remember": regexp.MustCompile(`data-kit(?:work)?-remember=["']`),
-	"api":      regexp.MustCompile(`data-kit(?:work)?-api=["']`),
-	"live":     regexp.MustCompile(`data-kit(?:work)?-live=["']`),
-}
 
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.
 var moduleCache sync.Map
@@ -117,26 +106,6 @@ func findLatestComponentVersion(name string) string {
 	}
 	return latest
 }
-
-// readCapability returns the capability module from capabilities/<name>.js, or "" if absent. Cached
-// under a distinct key so it never collides with an action/component of the same name.
-func readCapability(name string) string {
-	key := "capability:" + name
-	if v, ok := moduleCache.Load(key); ok {
-		return v.(string)
-	}
-	s := ""
-	if slugRe.MatchString(name) {
-		if b, err := jsFS.ReadFile("capabilities/" + name + ".js"); err == nil {
-			s = strings.TrimSpace(string(b))
-		}
-	}
-	moduleCache.Store(key, s)
-	return s
-}
-
-// HasCapability reports whether a capability has a module.
-func HasCapability(name string) bool { return readCapability(name) != "" }
 
 // readComponent returns the (trimmed) contents of components/<name>/<version>.js, or "" if absent. Cached.
 func readComponent(nameWithVersion string) string {
@@ -226,24 +195,6 @@ func scanComponents(html string, site Site) []string {
 	return out
 }
 
-// scanCapabilities collects the capability keys (e.g. "capability:remember") a page's directives ask
-// for. Order is deterministic: capabilityAttr is small and the result is sorted with the components.
-func scanCapabilities(html string) []string {
-	var out []string
-	for name, re := range capabilityAttr {
-		if re.MatchString(html) && HasCapability(name) {
-			out = append(out, "capability:"+name)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// scanModules is scanComponents plus scanCapabilities — everything jit/js emits for a page.
-func scanModules(html string, site Site) []string {
-	return append(scanComponents(html, site), scanCapabilities(html)...)
-}
-
 func moduleKeys(names []string, site Site) []string {
 	seen := make(map[string]bool)
 	var keys []string
@@ -251,14 +202,9 @@ func moduleKeys(names []string, site Site) []string {
 		var key string
 		if strings.Contains(n, ":") {
 			parts := strings.SplitN(n, ":", 2)
-			switch parts[0] {
-			case "component":
+			if parts[0] == "component" {
 				name := strings.SplitN(parts[1], "@", 2)[0]
 				if componentNameRe.MatchString(name) && hasComponent(parts[1], site) {
-					key = n
-				}
-			case "capability":
-				if slugRe.MatchString(parts[1]) && HasCapability(parts[1]) {
 					key = n
 				}
 			}
@@ -280,7 +226,7 @@ func moduleKeys(names []string, site Site) []string {
 	return keys
 }
 
-// ModuleKeys returns canonical component:<name>/capability:<name> keys for the runtime route.
+// ModuleKeys returns canonical component:<name> keys for the runtime route.
 // Unknown names are omitted, so arbitrary query strings cannot create arbitrary asset variants.
 func ModuleKeys(names []string) []string { return moduleKeys(names, nil) }
 
@@ -300,22 +246,17 @@ func ModulesJSFor(names []string, site Site) string {
 
 	var b strings.Builder
 	for _, k := range keys {
-		parts := strings.SplitN(k, ":", 2)
-		typ, name := parts[0], parts[1]
+		_, name, _ := strings.Cut(k, ":")
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
-		if typ == "component" {
-			// Each component runs in a scope of its own. A component file is written as a plain
-			// script — top-level `var` and `function` — and concatenated bare, every one of those
-			// became a global, so two components with a helper of the same name overwrote each
-			// other: tree's nameOf replaced tabs', menu's walk replaced context-menu's, and on a page
-			// with both the one loaded first quietly broke (30/09). The capabilities already wrap
-			// themselves; a component — including a site's own — cannot be trusted to.
-			b.WriteString(wrapComponent(componentSource(name, site)))
-		} else if typ == "capability" {
-			b.WriteString(readCapability(name))
-		}
+		// Each component runs in a scope of its own. A component file is written as a plain script
+		// — top-level `var` and `function` — and concatenated bare, every one of those became a
+		// global, so two components with a helper of the same name overwrote each other: tree's
+		// nameOf replaced tabs', menu's walk replaced context-menu's, and on a page with both the one
+		// loaded first quietly broke (30/09). A component — including a site's own — cannot be
+		// trusted to wrap itself.
+		b.WriteString(wrapComponent(componentSource(name, site)))
 	}
 	return b.String()
 }
@@ -336,7 +277,7 @@ func SiteRuntimeJS(htmls ...string) string {
 	seen := make(map[string]bool)
 	var all []string
 	for _, h := range htmls {
-		for _, n := range scanModules(h, nil) {
+		for _, n := range scanComponents(h, nil) {
 			if !seen[n] {
 				seen[n] = true
 				all = append(all, n)
@@ -347,18 +288,17 @@ func SiteRuntimeJS(htmls ...string) string {
 }
 
 // Render injects the per-page runtime as ONE `<script data-kitwork-jit="runtime">` before </head>.
-// A cheap no-op when the page uses no component or capability. A component is authored as
-// data-kit-component only (the kernel stopped reading the long prefix, ideaship-final §9).
+// A cheap no-op when the page uses no component. A component is authored as data-kit-component
+// only (the kernel stopped reading the long prefix, ideaship-final §9).
 func Render(html string) string { return RenderFor(html, nil) }
 
 // RenderFor is Render for one tenant: a page may also name a component the SITE owns
 // (_components/<name>.js, no version — see site.go), and it travels in the same one request.
 func RenderFor(html string, site Site) string {
-	if !strings.Contains(html, "data-kit-component=") &&
-		!hasCapabilityDirective(html) {
+	if !strings.Contains(html, "data-kit-component=") {
 		return html
 	}
-	keys := ModuleKeysFor(scanModules(html, site), site)
+	keys := ModuleKeysFor(scanComponents(html, site), site)
 	if len(keys) == 0 {
 		return html
 	}
@@ -368,15 +308,4 @@ func RenderFor(html string, site Site) string {
 		return html[:i] + tag + html[i:]
 	}
 	return tag + html
-}
-
-// hasCapabilityDirective reports whether any capability's authored directive is present, so a page
-// that uses a capability but no component still gets the runtime injected.
-func hasCapabilityDirective(html string) bool {
-	for _, re := range capabilityAttr {
-		if re.MatchString(html) {
-			return true
-		}
-	}
-	return false
 }

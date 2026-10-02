@@ -1,6 +1,6 @@
 // Kitwork hydrate kernel — the whole client runtime. Composed into /kit.js with bridge, the
-// platform modules, morph and Drive; jit/js appends the components and capabilities a page named.
-// Expressions, boundaries, components, structure, events and background capabilities all ride one
+// platform modules, morph and Drive; jit/js appends the components a page named.
+// Expressions, boundaries, components, structure and events all ride one
 // window.kit root (window.kitwork is a deprecated alias to the SAME object), one registry, one
 // delegated event system and one DOM observer.
 //
@@ -641,7 +641,7 @@
   // so they die with their node; two sibling scopes never see each other.
   // A component boundary is any of these. data-kit-component names a REGISTERED blueprint
   // (see kit.component); data-kit-scope carries an inline name/init/blueprint.
-  var SCOPE = "[data-kit-scope],[data-kit-component],[data-kit-api],[data-kit-item]";
+  var SCOPE = "[data-kit-scope],[data-kit-component],[data-kit-item]";
 
   // The component registry: kit.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
@@ -1444,13 +1444,6 @@
     });
   }
 
-  // ---- remember: MOVED OUT OF THE CORE ----
-  // Persisting page-scope ($) keys to localStorage is a POLICY, not a mechanism, so it is no longer
-  // in the always-shipped kernel. It rides the only-used /jitjs channel now: a page carrying
-  // data-kit-remember gets the capability module appended (jit/js/capabilities/remember.js), which
-  // installs itself through kit.internal.pageScope + kit.internal.scheduleRender. Pages that do not
-  // use it ship none of this code. See render.go / jit/js runtime.go for the emission.
-
   // ---- per-element runtime state ----
   // Lives behind a private Symbol. Resources registered on the state are explicitly released when
   // morph or another DOM owner removes the node. (The verb registry that used to sit here —
@@ -1515,9 +1508,6 @@
     if (runtimeMeta.booted) scheduleRender();
     return kitwork;
   };
-  // kit.remember lives in the remember capability module now (see the note above) — it defines
-  // kit.remember when the page loads the module, so a page that never uses remember carries nothing.
-
   kit.state = state;
   kit.components = activeComponents;
   kit.blueprints = blueprints;
@@ -1805,26 +1795,12 @@
     }
   }, true);
 
-  // ---- api / live: MOVED OUT OF THE CORE (capability modules) ----
-  // Seeding a boundary from a JSON fetch (data-kit-api) and keeping it fresh over SSE (data-kit-live)
-  // are policies, not mechanisms, so they ride the only-used /jitjs channel like remember. The kernel
-  // keeps only the LIFECYCLE they plug into:
-  //   · reconcile hooks — run to (re)scan the DOM at boot, after a Drive swap, and on any mutation, so
-  //     regions arriving via morph get wired and departing ones drop out;
-  //   · destroy hooks   — run by kit.destroy to tear a capability's long-lived resources down.
-  // A capability registers through kit.internal.onReconcile / onDestroy and self-runs once on load
-  // (it is appended after boot, so it cannot rely on boot's reconcile). See jit/js/capabilities.
-  var reconcileHooks = [];
-  var destroyHooks = [];
-  function reconcile() {
-    for (var i = 0; i < reconcileHooks.length; i++) {
-      try { reconcileHooks[i](); } catch (_) { }
-    }
-  }
+  // (data-kit-api, data-kit-live and data-kit-remember — a JSON fetch into a boundary, SSE patches,
+  // page keys kept in localStorage — were optional modules plugged into hooks here. Nothing used
+  // them, and they went on 02/10 with their hooks. A site that keeps something in the browser does
+  // it in a component of its own.)
 
-  // ONE observer for the whole kernel: DOM is the manifest — a removed subtree is cleaned up at once,
-  // and capability regions arriving or leaving (morph, SPA swaps) re-reconcile on the next tick.
-  var reconcilePending = false;
+  // ONE observer for the whole kernel: DOM is the manifest — a removed subtree is cleaned up at once.
   //
   // REMOVED means no longer on the page. A node that was MOVED — taken out and put back somewhere
   // else, which is how morph reorders a page — appears in removedNodes too, and this callback runs a
@@ -1838,9 +1814,6 @@
         if (!node.isConnected) cleanupTree(node);
       });
     });
-    if (reconcilePending) return;
-    reconcilePending = true;
-    setTimeout(function () { reconcilePending = false; reconcile(); }, 0);
   });
   domObserver.observe(document.documentElement, { childList: true, subtree: true });
   cleanup(function () { domObserver.disconnect(); });
@@ -1867,8 +1840,6 @@
   kit.scope = scope;
   kit.scopeFor = scopeFor;
   kit.render = render;
-  // kit.streams / .sync / .syncApi are defined by the live + api capability modules now (they own
-  // the EventSource registry and the fetch pass); a page that uses neither carries none of it.
   kit.set = function (k, v) { pass(function () { scope[k] = v; }); render(); };
   kit.fetchWithRetry = function (url, options, retries, delay) {
     var rCount = retries !== undefined ? retries : 2;
@@ -1884,9 +1855,6 @@
     });
   };
   kit.destroy = function () {
-    for (var i = 0; i < destroyHooks.length; i++) {
-      try { destroyHooks[i](); } catch (_) { } // e.g. the live module closes its EventSources
-    }
     while (globalCleanups.length) {
       try { globalCleanups.pop()(); } catch (_) { }
     }
@@ -1915,7 +1883,6 @@
     initAppConfig();
     seedModels();
     render();
-    reconcile();
     startHooks.slice().forEach(function (start) {
       try { start(); } catch (error) {
         if (runtimeMeta.development && window.console) {
@@ -1935,23 +1902,7 @@
       cleanup: cleanup,
       listen: listen,
       cleanupTree: cleanupTree,
-      state: state,
-      // The capability-module seam. A lazily-loaded capability (remember / api / live) installs
-      // through here instead of living in the always-shipped core:
-      //   pageScope      — the raw $ object, to define accessor properties on chosen keys (remember)
-      //   scheduleRender — the coalesced repaint
-      //   boundaryScope  — resolve an element's nearest scope object (api seeds it, live patches it)
-      //   render         — repaint after a fetch/patch
-      //   scopeSelector  — the boundary selector, to find a live region's target scope
-      //   onReconcile    — register a DOM (re)scan hook (boot / Drive swap / mutation)
-      //   onDestroy      — register a teardown hook (kit.destroy)
-      pageScope: raw,
-      scheduleRender: scheduleRender,
-      boundaryScope: boundaryScope,
-      render: render,
-      scopeSelector: SCOPE,
-      onReconcile: function (fn) { reconcileHooks.push(fn); return fn; },
-      onDestroy: function (fn) { destroyHooks.push(fn); return fn; }
+      state: state
     },
     configurable: true,
     enumerable: false
@@ -1962,8 +1913,6 @@
     run: kit.run,
     render: render
   });
-  // (The cross-tab storage listener moved into the remember capability module — it is the only thing
-  // that watched localStorage.)
-  // After every swap: seed any new inputs, re-render expressions, reconcile live streams.
-  listen(document, "kitwork:load", function () { seedModels(); render(); reconcile(); });
+  // After every swap: seed any new inputs, re-render expressions.
+  listen(document, "kitwork:load", function () { seedModels(); render(); });
 })();

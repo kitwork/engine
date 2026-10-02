@@ -100,7 +100,7 @@ func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
 		switch request.URL.Path {
 		case hydrate.RuntimePath:
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: ModulesJS(ModuleKeys(scanModules(page, nil))), Drive: true, Native: true})))
+			_, _ = response.Write([]byte(hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: ModulesJS(ModuleKeys(scanComponents(page, nil))), Drive: true, Native: true})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = response.Write([]byte(page))

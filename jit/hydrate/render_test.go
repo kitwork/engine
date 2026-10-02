@@ -223,18 +223,18 @@ func TestRenderSkipsWhenRuntimeAssetExists(t *testing.T) {
 	}
 }
 
-// live and model are not expressions — they must trigger runtime injection but never be
-// compile-verified, and they ride the wire unchanged like everything else.
-func TestRenderLiveAndModelInject(t *testing.T) {
+// model is not an expression — it must trigger runtime injection but never be compile-verified, and
+// it rides the wire unchanged like everything else.
+func TestRenderModelInjects(t *testing.T) {
 	in := `<head></head><body>` + marker +
-		`<div data-kit-live="/hydrate-engine/live"><b data-kit-model="x"></b></div>` +
+		`<div><b data-kit-model="x"></b></div>` +
 		`</section></body>`
 	out := Render(in)
-	if !strings.Contains(out, `data-kit-live="/hydrate-engine/live"`) {
-		t.Error("live attribute should ride unchanged")
+	if !strings.Contains(out, `data-kit-model="x"`) {
+		t.Error("model attribute should ride unchanged")
 	}
 	if strings.Count(out, injectTag) != 1 {
-		t.Error("a page with only live/model still needs the runtime injected")
+		t.Error("a page with only model still needs the runtime injected")
 	}
 }
 
@@ -313,8 +313,8 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"kit.component", "data-kit-component", "seedComponent", "fn.apply(s, callbacks(fargs, s))",
 		// a lambda handed to a native method becomes a callback that walks its tree in the caller scope
 		"function callbacks", "function invokeLambda",
-		// the capability seam remember (and later api/live) installs through, now that it is out of core
-		"pageScope", "scheduleRender",
+		// a component registered after boot still paints
+		"scheduleRender",
 		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,
 		"Bridge.prototype.receive", "BRIDGE_TIMEOUT", "kit.destroy", "removeEventListener",
 		// kit services (Native Bridge RFC): exact namespace grants, bridge-first with web fallback
@@ -324,10 +324,6 @@ func TestRuntimeEmbedded(t *testing.T) {
 		`kit.service("navigation"`, `kit.service("window"`, `kit.service("capabilities"`,
 		// data-kit-bind: object expression → attributes (grammar-safe registry directive)
 		`data-kit-bind:`, `function writeBinding`,
-		// an api element is still a core SCOPE boundary (the fetch that fills it is now the capability)
-		"data-kit-api",
-		// the reconcile/destroy lifecycle capabilities (api/live/remember) install through, out of core
-		"reconcileHooks", "onReconcile", "onDestroy",
 		// component init() lifecycle hook stays in core
 		"function runInit", "st.scope.init",
 		// sandbox: the blocklist that seals the Function-constructor / prototype-pollution escape
@@ -342,16 +338,16 @@ func TestRuntimeEmbedded(t *testing.T) {
 			t.Errorf("composed runtime must never use %q", forbid)
 		}
 	}
-	// remember/api/live were lifted out of the always-shipped core into the jit/js capability channel:
-	// their IMPLEMENTATIONS must be GONE from the core bytes (only pointer comments remain). If any of
-	// them creeps back into the kernel, this catches it — that is the whole point of the extraction.
+	// remember/api/live were removed on 02/10, with the hooks they plugged into: none of it may come
+	// back into the kernel by the side door.
 	for _, forbid := range []string{
 		"registerRememberedKey", "function loadRemembered", "rememberStoragePrefix", "kitwork:remember:",
 		"function syncApi", "function syncLive", "function liveTarget", "new EventSource",
 		"kit.streams =", "kit.sync =", "kit.syncApi =",
+		"[data-kit-api]", "reconcileHooks", "onReconcile", "onDestroy",
 	} {
 		if strings.Contains(rt, forbid) {
-			t.Errorf("capability implementation must not be in the core runtime: found %q", forbid)
+			t.Errorf("a removed capability is back in the core runtime: found %q", forbid)
 		}
 	}
 }
