@@ -26,7 +26,7 @@ var serviceUseRe = regexp.MustCompile(`\bkit(?:work)?\.([a-z][A-Za-z0-9]*)\b`)
 
 // serviceRequiresRe reads a service's own note of what it needs loaded first:
 // "// Requires capabilities@1.0.0 and files@1.3.0."
-var serviceRequiresRe = regexp.MustCompile(`(?m)^// Requires ([^\n.]*)`)
+var serviceRequiresRe = regexp.MustCompile(`(?m)^// Requires (.*)$`)
 var serviceRequiredNameRe = regexp.MustCompile(`([a-z][A-Za-z0-9]*)@`)
 
 // ServiceNames lists the embedded services, sorted.
@@ -91,10 +91,14 @@ func serviceSource(name string) string {
 	return s
 }
 
+// serviceLoadsAfter is an order a service needs but its file does not write down: files takes the
+// upload boundary network leaves on the assembly as it loads, and refuses to load without it.
+var serviceLoadsAfter = map[string][]string{"files": {"network"}}
+
 // serviceRequires is what a service says it needs loaded before it, limited to the services this
 // engine carries (capabilities, say, is the kernel's own and always there).
 func serviceRequires(name string) []string {
-	var out []string
+	out := append([]string(nil), serviceLoadsAfter[name]...)
 	for _, line := range serviceRequiresRe.FindAllStringSubmatch(serviceSource(name), -1) {
 		for _, m := range serviceRequiredNameRe.FindAllStringSubmatch(line[1], -1) {
 			if m[1] != name && HasService(m[1]) {

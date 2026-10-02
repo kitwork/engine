@@ -130,3 +130,78 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 		t.Fatalf("%s did not pass (err=%v):\n%.1500s", label, err, output)
 	}
 }
+
+// Every service this engine carries loads on one page, in an order that works — network before
+// files (files takes the upload boundary network leaves), files before camera and media — and
+// registers, the KitJS files/media/network/camera replacing the kernel's own on that page (02/10,
+// agreed: no code anywhere calls the kernel-only members). Nothing reports an error while loading.
+func TestBrowserEveryServiceLoadsInOrder(t *testing.T) {
+	names := ServiceNames()
+	if len(names) < 13 {
+		t.Fatalf("expected the restored services, have %v", names)
+	}
+	previous := Native
+	Native = true
+	defer func() { Native = previous }()
+	var markup, checks strings.Builder
+	for _, name := range names {
+		markup.WriteString(`<button data-kit-click="kit.` + name + `.x()">x</button>`)
+	}
+	members := map[string]string{"files": "importBlob", "media": "pickImage", "network": "request", "camera": "capture",
+		"notifications": "schedule", "biometric": "authenticate", "geolocation": "getCurrentPosition", "nfc": "scan",
+		"deepLinks": "snapshot", "qr": "scan", "studioState": "loadSnapshot", "studioSqlite": "open", "studioDatabase": "open"}
+	for name, member := range members {
+		checks.WriteString(`  assert(window.kit.` + name + ` && typeof window.kit.` + name + `.` + member + ` === "function", "kit.` + name + `.` + member + ` is missing");` + "\n")
+	}
+	page := Deliver(`<!doctype html><html><head><script>window.__errors = []; window.addEventListener("error", function (e) { window.__errors.push(String(e.message)); });</script></head><body>`+markup.String()+`<script>
+document.addEventListener("DOMContentLoaded", function () { (async function () {
+`+proofScriptHead+`
+  await wait(100);
+  assert(window.__errors.length === 0, "loading reported: " + window.__errors.join(" | "));
+`+checks.String()+`
+  assert(typeof window.kit.files.read !== "function", "on this page files is the KitJS one, not the kernel's");
+  root.setAttribute("data-kit-test", "passed");
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
+</script></body></html>`, nil, Options{})
+	_, paths := deliveredFiles(t, page)
+	order := strings.Join(paths, " ")
+	index := func(name string) int { return strings.Index(order, "/kit/services/"+name+"@") }
+	if !(index("network") < index("files") && index("files") < index("camera") && index("files") < index("media")) {
+		t.Fatalf("services out of order: %s", order)
+	}
+
+	browser := findHeadlessBrowser()
+	if browser == "" || testing.Short() {
+		t.Skip("no browser")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if asset, _ := AssetAt(request.URL.Path, nil); asset != nil {
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(asset.Body)
+			return
+		}
+		response.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = response.Write([]byte(page))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	args := []string{"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--disable-background-networking",
+		"--disable-default-apps", "--disable-extensions", "--disable-sync", "--metrics-recording-only", "--no-first-run",
+		"--run-all-compositor-stages-before-draw", "--user-data-dir=" + filepath.Join(t.TempDir(), "p"), "--virtual-time-budget=6000", "--dump-dom", server.URL + "/"}
+	if runtime.GOOS == "windows" {
+		args = append([]string{"--disable-background-mode", "--disable-breakpad", "--disable-crashpad-for-testing"}, args...)
+	}
+	output, err := exec.CommandContext(ctx, browser, args...).CombinedOutput()
+	if bytes.Contains(output, []byte(`data-kit-test="passed"`)) {
+		return
+	}
+	if i := bytes.Index(output, []byte("data-kit-test-error=")); i >= 0 {
+		end := i + 400
+		if end > len(output) {
+			end = len(output)
+		}
+		t.Fatalf("services did not all load: %s", output[i:end])
+	}
+	t.Fatalf("no verdict (err=%v):\n%.1500s", err, output)
+}
