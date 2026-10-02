@@ -250,3 +250,21 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 	}
 	t.Fatalf("delivery proof did not pass (err=%v):\n%.1500s", err, output)
 }
+
+// What a <pre>/<code> block prints is an example, not a host: a docs page that shows the markup of a
+// component or a native service downloads neither. A real host still counts — beside the example,
+// and on a <pre> itself — which is the control: a scan that ignored everything would fail it.
+func TestExamplesBringNoFiles(t *testing.T) {
+	docs := `<html><head></head><body><p data-kit-text="title">x</p>
+<pre><code>&lt;section data-kit-component="visible" data-kit-click="kit.studioState.clearHistory()"&gt;</code></pre></body></html>`
+	if roles, paths := deliveredFiles(t, Deliver(docs, nil, Options{})); len(roles) != 1 || roles[0] != "runtime" {
+		t.Fatalf("an example brought files: %v %v", roles, paths)
+	}
+	live := `<html><head></head><body><div data-kit-component="tabs"></div><pre data-kit-component="visible"><code>x</code></pre>
+<pre><code>data-kit-component="tree"</code></pre></body></html>`
+	_, paths := deliveredFiles(t, Deliver(live, nil, Options{}))
+	joined := strings.Join(paths, " ")
+	if !strings.Contains(joined, "/kit/components/tabs@") || !strings.Contains(joined, "/kit/components/visible@") || strings.Contains(joined, "/kit/components/tree@") {
+		t.Fatalf("real hosts must count, the printed one must not: %v", paths)
+	}
+}

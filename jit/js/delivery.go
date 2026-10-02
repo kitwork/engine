@@ -182,7 +182,7 @@ func PageAssets(html string, site Site, options Options) []*Asset {
 		assets = append(assets, DriveAsset())
 	}
 	var components []*Asset
-	sources := []string{html}
+	sources := []string{hydrate.WithoutExamples(html)} // a service a docs page prints is not one it calls
 	seen := make(map[string]bool)
 	for _, key := range keys {
 		_, name, _ := strings.Cut(key, ":")

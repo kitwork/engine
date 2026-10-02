@@ -160,8 +160,10 @@ func ComponentSource(name, version string) string {
 
 // scanComponents collects the distinct components used that resolve to a module — embedded, or
 // the site's own (site.go). It returns their cache keys (e.g. "component:dialog",
-// "component:copy@v1.0.0", "component:bid-stepper").
+// "component:copy@v1.0.0", "component:bid-stepper"). What a <pre>/<code> block prints is an
+// example, not a host: a docs page must not download the component it documents.
 func scanComponents(html string, site Site) []string {
+	html = hydrate.WithoutExamples(html)
 	seen := make(map[string]bool)
 	var out []string
 

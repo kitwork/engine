@@ -169,6 +169,11 @@ func withoutExamples(html string) string {
 	return exampleContentRe.ReplaceAllString(html, "$1$2")
 }
 
+// WithoutExamples is withoutExamples for jit/js, which scans a page for the components and native
+// services it names: a docs page that printed data-kit-component="visible" downloaded visible until
+// 02/10.
+func WithoutExamples(html string) string { return withoutExamples(html) }
+
 func declaredElements(html string) map[string]bool {
 	if !wholeDocument(html) {
 		return nil
