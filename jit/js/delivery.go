@@ -64,7 +64,7 @@ type Options struct {
 // Asset is one served file.
 type Asset struct {
 	Path   string // the URL, /kit/…
-	Role   string // runtime | drive | component — the data-kitwork-jit value
+	Role   string // runtime | drive | service | component — the data-kitwork-jit value
 	Body   []byte
 	Digest string // the whole SHA-256, hex — the ETag
 }
@@ -86,8 +86,11 @@ func buildAsset(role, name, source string) *Asset {
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
 	dir := ""
-	if role == "component" {
+	switch role {
+	case "component":
 		dir = "components/"
+	case "service":
+		dir = "services/"
 	}
 	return &Asset{
 		Path:   AssetPrefix + dir + name + "." + digest[:hashLength] + ".js",
@@ -178,6 +181,8 @@ func PageAssets(html string, site Site, options Options) []*Asset {
 	if options.Drive {
 		assets = append(assets, DriveAsset())
 	}
+	var components []*Asset
+	sources := []string{html}
 	seen := make(map[string]bool)
 	for _, key := range keys {
 		_, name, _ := strings.Cut(key, ":")
@@ -187,10 +192,21 @@ func PageAssets(html string, site Site, options Options) []*Asset {
 		asset := componentAsset(name, site)
 		if asset != nil && !seen[asset.Path] {
 			seen[asset.Path] = true
-			assets = append(assets, asset)
+			components = append(components, asset)
+			sources = append(sources, string(asset.Body))
 		}
 	}
-	return assets
+	// A native service a page names — in its markup or in a component it uses — comes after the
+	// kernel and before the components that call it (services.go).
+	if services := scanServices(sources...); len(services) > 0 {
+		assets = append(assets, AssemblyAsset())
+		for _, name := range services {
+			if asset := serviceAsset(name); asset != nil {
+				assets = append(assets, asset)
+			}
+		}
+	}
+	return append(assets, components...)
 }
 
 // Deliver puts the page's files into it, before </head> (else </body>, else at the end). A page that
@@ -245,6 +261,13 @@ func AssetAt(path string, site Site) (asset *Asset, exact bool) {
 		asset = KernelAsset()
 	case label == "drive":
 		asset = DriveAsset()
+	case label == "services/assembly":
+		asset = AssemblyAsset()
+	case strings.HasPrefix(label, "services/"):
+		name, version, _ := strings.Cut(strings.TrimPrefix(label, "services/"), "@")
+		if version != "" && serviceVersion(name) == version {
+			asset = serviceAsset(name)
+		}
 	case strings.HasPrefix(label, "components/"):
 		name := strings.TrimPrefix(label, "components/")
 		if base, version, versioned := strings.Cut(name, "@"); versioned {

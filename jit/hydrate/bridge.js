@@ -193,8 +193,21 @@
     this.listeners.clear();
   };
 
+  // The native shells (native/bridge) seed a private adapter at document-start:
+  // document[Symbol.for("kitwork:native:host:v1")], with call(action, params). Its answers come back
+  // through the shell's own script, never as a message event — so a Bridge built on the raw WebView
+  // handle sends requests the shell does carry out, but never hears a reply: on desktop
+  // kit.window.isMaximized() waited out its timeout (02/10). When that adapter is there, it IS the
+  // bridge. The slot is read, not deleted: the shell's own window scripts read it too.
+  function seededHost() {
+    try {
+      var host = window.document && window.document[Symbol.for("kitwork:native:host:v1")];
+      return host && host.version === "1.0.0" && typeof host.call === "function" ? host : null;
+    } catch (_) { return null; }
+  }
+
   var seeded = kit.bridge;
-  var bridge = seeded && typeof seeded.call === "function" ? seeded : null;
+  var bridge = seeded && typeof seeded.call === "function" ? seeded : seededHost();
   if (!bridge) {
     var handle = seeded && typeof seeded.postMessage === "function" ? seeded : nativeHandle();
     if (handle) bridge = new Bridge(handle, { platform: handle.platform });
