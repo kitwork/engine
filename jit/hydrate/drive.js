@@ -50,6 +50,15 @@
       "z-index:2147483647;opacity:0;pointer-events:none;transition:width .2s ease,opacity .3s";
     document.body.appendChild(bar);
     var rafId = 0, barTimer = 0, barShown = false;
+    // A window opened with app.desktop({ chrome: "html" }) has a title bar the page draws itself,
+    // marked data-kit-drag="true". The bar goes UNDER it, where a browser's own progress sits, not
+    // across the window's controls. Read at show time: the title bar may come and go with a swap.
+    function barTop() {
+      var titleBar = document.querySelector('[data-kit-drag="true"]');
+      if (!titleBar) return 0;
+      var box = titleBar.getBoundingClientRect();
+      return box.top <= 0 && box.bottom > 0 ? box.bottom : 0;
+    }
     function progress(on) {
       cancelAnimationFrame(rafId);
       clearTimeout(barTimer);
@@ -59,6 +68,7 @@
         barTimer = setTimeout(function () {
           if (!bar.isConnected) document.body.appendChild(bar);
           barShown = true;
+          bar.style.top = barTop() + "px";
           bar.style.transition = "width .2s ease,opacity .3s";
           bar.style.opacity = "1"; bar.style.width = "0";
           rafId = requestAnimationFrame(function () { bar.style.transition = "width 8s cubic-bezier(.1,.7,.1,1)"; bar.style.width = "90%"; });
