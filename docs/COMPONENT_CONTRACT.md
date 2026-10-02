@@ -21,7 +21,7 @@ hai bản khớp nhau. Phần thật sự mới — phần tử và thuộc tín
    rỗng (option của combobox sau khi lọc, card của kanban) không `require`.
 
 2. **Sự kiện: `context.emit(name, detail)` → `data-kit-event:<tên>`.** Phát một `CustomEvent` có
-   nổi bọt trên host; markup nghe bằng `data-kit-event:seen="$impact.start()"`, dữ liệu ở
+   nổi bọt trên host; markup nghe bằng `data-kit-event:done="$next.show()"`, dữ liệu ở
    `$event.detail`. `data-kit-event:<tên>` cũng nghe được sự kiện DOM ngoài danh sách viết tắt
    (`scroll`, `paste`); `data-kit-click`, `data-kit-input`… giữ làm dạng viết tắt. Component không
    phát sự kiện trùng tên sự kiện DOM gốc (`click`, `input`…).
@@ -41,8 +41,9 @@ hai bản khớp nhau. Phần thật sự mới — phần tử và thuộc tín
    tử bắt buộc.
 2. ✅ 02/10 — `context.emit` + `data-kit-event:<tên>` (kernel và verify pass phía Go: nhận
    directive, gắn kernel, kiểm biểu thức và modifier). `emit` trong lúc đang vẽ thì đợi vẽ xong.
-   `visible` phát `seen`; apptop-impact (3 bản, 5 trang) bỏ IntersectionObserver tự viết, được
-   `visible` bọc ngoài gọi `$impact.start()`.
+   (Cùng ngày, sau khi bàn tên: component `visible` và sự kiện `seen` của nó được thay bằng
+   directive `data-kit-intersect` — vào/ra màn hình là chuyện của ngữ pháp, đọc một chữ trên chính
+   phần tử. apptop-impact giờ dùng `data-kit-intersect:once="start()"` trên host của nó.)
 3. ✅ 02/10 — seed trước `init`: trong lượt gieo seed, các `init` được giữ lại và chạy sau khi mọi
    seed đã ghi. `tree` đặt tab stop từ `selected` ngay trong `init`.
 
