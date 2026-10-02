@@ -133,9 +133,11 @@ const RuntimePath = "/kit.js"
 // directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
 // prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
 // Expressions use single-quoted string literals, so the value never contains a double quote.
-// An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4); its modifiers are
-// checked by checkEventModifiers, since the kernel disables a handler it cannot make sense of.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="([^"]*)"`)
+// An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4), or the long form
+// data-kit-event:<name>[:modifier…] for any event by name — one a component emits, or a DOM event
+// outside the short list (02/10). Its modifiers are checked by checkEventModifiers, since the kernel
+// disables a handler it cannot make sense of.
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="([^"]*)"`)
 
 // The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
 // → filter → prevent → stop → timing → once. The author may write them in any order; the server
@@ -224,10 +226,13 @@ var timingModifierRe = regexp.MustCompile(`^(debounce|throttle)\(([0-9]+)\)$`)
 
 func checkEventModifiers(directive string) error {
 	parts := strings.Split(directive, ":")
-	event := parts[0]
-	if !eventTypes[event] {
+	if parts[0] == "event" && len(parts) > 1 {
+		// data-kit-event:<name>: the name is the event, and the same modifiers apply.
+		parts = parts[1:]
+	} else if !eventTypes[parts[0]] {
 		return nil
 	}
+	event := parts[0]
 	seen := map[string]bool{}
 	timing := 0
 	for _, modifier := range parts[1:] {
@@ -285,7 +290,7 @@ func checkEventModifiers(directive string) error {
 // must never be compile-verified; for's value is a spec, not an expression. A data-kitwork-*
 // directive is not authored and not read, so it does not bring the runtime. (data-kit-api, -live and
 // -remember were removed on 02/10; they bring nothing.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The

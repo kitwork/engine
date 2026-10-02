@@ -52,7 +52,7 @@ var (
 	// forNamesRe reads the names data-kit-for binds: `item, index of items` or `item of items`.
 	forNamesRe = regexp.MustCompile(`^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*)?\bof\b`)
 	// expressionAttrRe finds the attributes whose value reads scope names.
-	expressionAttrRe = regexp.MustCompile(`^data-kit-(?:text|show|if|class|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout)(?::[a-z0-9+]+(?:\([0-9]+\))?)*$`)
+	expressionAttrRe = regexp.MustCompile(`^data-kit-(?:text|show|if|class|error|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*)(?::[a-z0-9+]+(?:\([0-9]+\))?)*$`)
 )
 
 // boundary is one data-kit-scope element while the scan is inside it.

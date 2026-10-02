@@ -724,8 +724,8 @@
     return st.scope;
   }
   // ---- init(context): the component's hands on its own DOM (ideaship-final §6, B9 one kernel) ----
-  // Eight keys — the seven the component runtime handed out, so a ported body needs no rewrite, and
-  // require (below):
+  // Nine keys — the seven the component runtime handed out, so a ported body needs no rewrite, then
+  // require and emit (below):
   //   host                — the element carrying data-kit-component / data-kit-scope
   //   owned(selector)     — matches under the host, the host itself included, a nested host's
   //                         subtree excluded (its elements are its own)
@@ -736,6 +736,7 @@
   //   afterRender(fn)     — runs ONCE after the next paint, outside the pass — so a state write
   //                         inside it schedules its own repaint (no lost update)
   //   require(name, ...attributes) — the elements it cannot work without; a miss is reported
+  //   emit(name, detail)  — an event the page hears with data-kit-event:<name>
   // Every resource lives on the host's state, so cleanupTree releases it when the host leaves.
   var HOST = "[data-kit-component],[data-kit-scope]";
   var afterRenders = [];
@@ -788,24 +789,30 @@
       var now = elements(name); // a bad name throws here, where the author wrote it
       afterRender(function () {
         var found = elements(name);
-        var component = b.getAttribute("data-kit-component") || "this component";
-        var problem = "";
-        if (!found.length) {
-          problem = 'needs data-kit-element="' + name + '" inside it, and has none';
-        } else {
-          attributes.forEach(function (attribute) {
-            var missing = found.filter(function (el) { return !el.hasAttribute(attribute); }).length;
-            if (missing && !problem) {
-              problem = "needs " + attribute + ' on every data-kit-element="' + name + '"; ' +
-                missing + " of " + found.length + " have none";
-            }
-          });
-        }
-        if (problem) reportError(new Error("kitwork: " + component + " " + problem), b, "data-kit-component");
+        var part = 'data-kit-element="' + name + '"', problem = found.length ? "" : "needs " + part + " inside it, and has none";
+        attributes.forEach(function (attribute) {
+          var missing = found.filter(function (el) { return !el.hasAttribute(attribute); }).length;
+          if (missing && !problem) problem = "needs " + attribute + " on every " + part + "; " + missing + " of " + found.length + " have none";
+        });
+        if (problem) reportError(new Error("kitwork: " + b.getAttribute("data-kit-component") + " " + problem), b, "data-kit-component");
       });
       return now;
     }
-    return Object.freeze({ host: b, owned: owned, element: element, elements: elements, listen: listen, cleanup: cleanup, afterRender: afterRender, require: requireElements });
+    // emit(name, detail) — tell the page something happened: a CustomEvent on the host that bubbles,
+    // heard with data-kit-event:<name>="…" and read as $event.detail. A DOM event's name is refused,
+    // so data-kit-event:click always means the DOM's click. Emitted during a paint (from init, say),
+    // it waits for the paint to end: a handler must not run inside the pass that is drawing the
+    // page, and the paint is also where the document learns to listen for a new name.
+    function emit(name, detail) {
+      if (!EVENT_NAME.test(name) || DOM_EVENT_NAMES[name]) throw new TypeError('hydrate: context.emit("' + name + '") needs a lower-case name of its own, not a DOM event\'s');
+      var send = function () {
+        ensureListener(name);
+        b.dispatchEvent(new CustomEvent(name, { bubbles: true, detail: detail }));
+      };
+      if (painting > 0) afterRender(send);
+      else send();
+    }
+    return Object.freeze({ host: b, owned: owned, element: element, elements: elements, listen: listen, cleanup: cleanup, afterRender: afterRender, require: requireElements, emit: emit });
   }
   // flushAfterRender runs after a paint has ended (render → pass → paint, then this): one-shot,
   // in registration order, only for hosts still in the document; a host that morph removed
@@ -1413,6 +1420,10 @@
     // A name carries no selector, so the pass walks the document and keeps each element's bound
     // names on the element after the first look.
     document.querySelectorAll("*").forEach(function (el) {
+      // data-kit-event:<name> listens for a name the short list does not cover: make sure the
+      // document hears it before the first one fires.
+      var handlers = handlersOf(el);
+      for (var h = 0; h < handlers.length; h++) ensureListener(handlers[h].type);
       var names = el.__kitBound;
       if (!names) {
         names = [];
@@ -1610,6 +1621,18 @@
   // data-kit-debounce stays a companion of data-kit-model only (an input coalescing its own
   // writes); for an event the delay is the :debounce(n) modifier.
   var EVENT_TYPES = ["click", "dblclick", "submit", "input", "change", "keydown", "keyup", "pointerdown", "pointerup", "focusin", "focusout"];
+  // data-kit-event:<name>[:modifier…] is the long form of the family (02/10): any event by name — one
+  // a component emits (data-kit-event:seen), or a DOM event outside the short list
+  // (data-kit-event:paste, data-kit-event:scroll:window). data-kit-click and the rest stay its
+  // shorthand. A name is lower case, as an attribute name always is once the browser has parsed it.
+  var EVENT_HEAD = "data-kit-event:";
+  var EVENT_NAME = /^[a-z][a-z0-9-]*$/;
+  // The names a component may not emit under: the DOM events a page listens for, so each spelling
+  // has one meaning. (Not every DOM event: the kernel's size budget pays for the likely ones.)
+  var DOM_EVENT_NAMES = {};
+  (EVENT_TYPES.join(" ") + " focus blur scroll wheel resize load error close toggle select paste copy cut contextmenu drop").split(" ").forEach(function (name) {
+    DOM_EVENT_NAMES[name] = true;
+  });
   var KEY_FILTER = { escape: function (e) { return e.key === "Escape" || e.key === "Esc" || e.keyCode === 27; }, enter: function (e) { return e.key === "Enter" || e.keyCode === 13; } };
   // ---- key combinations: data-kit-keydown:mod+k="open()" (ideaship-final §4) ----
   // `mod` is Control on Windows and Linux, Command on macOS — EXACTLY one of the two, so
@@ -1648,9 +1671,9 @@
   }
 
   var OUTSIDE_TYPES = { click: true, dblclick: true, pointerdown: true, pointerup: true, focusin: true };
-  function parseHandler(attr, type) {
+  function parseHandler(attr, type, head) {
     var h = { attr: attr, type: type, target: "self", outside: false, self: false, key: "", combo: null, prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
-    var mods = attr.slice(("data-kit-" + type).length).split(":").slice(1);
+    var mods = attr.slice((head || "data-kit-" + type).length).split(":").slice(1);
     for (var i = 0; i < mods.length; i++) {
       var m = mods[i], timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(m);
       if (m === "window" || m === "document") h.target = m;
@@ -1679,6 +1702,11 @@
     if (el.getAttributeNames) {
       el.getAttributeNames().forEach(function (name) {
         if (name.indexOf("data-kit-") !== 0) return;
+        if (name.indexOf(EVENT_HEAD) === 0) {
+          var type = name.slice(EVENT_HEAD.length).split(":")[0];
+          if (EVENT_NAME.test(type)) list.push(parseHandler(name, type, EVENT_HEAD + type));
+          return;
+        }
         for (var i = 0; i < EVENT_TYPES.length; i++) {
           var head = "data-kit-" + EVENT_TYPES[i];
           if (name === head || name.indexOf(head + ":") === 0) { list.push(parseHandler(name, EVENT_TYPES[i])); return; }
@@ -1726,7 +1754,12 @@
     }
     return h.stop;
   }
-  EVENT_TYPES.forEach(function (type) {
+  // One delegated listener per event type, the short list at once and any other name the first time
+  // a paint finds an element that listens for it (ensureListener, called from paint).
+  var listening = {};
+  function ensureListener(type) {
+    if (listening[type]) return;
+    listening[type] = true;
     listen(document, type, function (e) {
       // Direct handlers: the element that owns the attribute is the target or an ancestor of it.
       var el = e.target;
@@ -1756,7 +1789,8 @@
         }
       });
     });
-  });
+  }
+  EVENT_TYPES.forEach(ensureListener);
   // data-kit-drag="true" marks a region the OS may drag the window by — a title bar the page draws
   // itself, because app.desktop({ chrome: "html" }) opens a window with no frame of its own.
   // Primary-button press hands the drag to the OS through the private kit.window transport;

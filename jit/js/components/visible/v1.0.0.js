@@ -36,15 +36,23 @@
  * A browser without IntersectionObserver gets both answers true: content that waits to be seen
  * must never stay hidden because the browser cannot say so.
  *
- * The public surface: visible, seen.
+ * And one event, `seen`, the moment the element first reaches the screen — for something that
+ * should HAPPEN then rather than show: a count-up that starts, a chart that draws.
+ *
+ *   <section data-kit-component="visible" data-kit-event:seen="$impact.start()">
+ *
+ * The public surface: visible, seen; the event seen.
  */
 var VISIBLE = Symbol("kit:visible");
 
 function setAnswer(scope, visible) {
-  if (!scope[VISIBLE]) return;
+  var own = scope[VISIBLE];
+  if (!own) return;
   var seen = scope.seen || visible;
+  var first = seen === true && scope.seen !== true;
   if (scope.visible !== visible) scope.visible = visible;
   if (scope.seen !== seen) scope.seen = seen;
+  if (first) own.context.emit("seen");
 }
 
 var visibleDef = {
