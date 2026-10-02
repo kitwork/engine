@@ -74,6 +74,7 @@ var codeEditorDef = {
     var scope = this;
     var released = false; // Escape hands the next Tab back to the browser
     scope[CODE_EDITOR] = { context: context };
+    context.require("field");
     context.cleanup(function () { delete scope[CODE_EDITOR]; });
 
     ["keyup", "click", "input", "select", "focusin"].forEach(function (type) {

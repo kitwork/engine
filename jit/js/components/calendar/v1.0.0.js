@@ -167,6 +167,7 @@ var calendarDef = {
   init: function (context) {
     var scope = this;
     scope[CALENDAR] = { context: context };
+    context.require("day", "data-iso");
     context.cleanup(function () { delete scope[CALENDAR]; });
 
     var seeded = context.host.getAttribute("data-selected");

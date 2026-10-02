@@ -80,6 +80,8 @@ var carouselDef = {
   init: function (context) {
     var scope = this;
     scope[CAROUSEL] = { context: context };
+    context.require("track");
+    context.require("slide");
     context.cleanup(function () { delete scope[CAROUSEL]; });
     var track = context.element("track");
     if (!track) return;

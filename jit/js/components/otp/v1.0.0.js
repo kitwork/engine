@@ -73,6 +73,7 @@ var otpDef = {
   init: function (context) {
     var scope = this;
     scope[OTP] = { context: context };
+    context.require("slot");
     context.cleanup(function () { delete scope[OTP]; });
 
     function slotOf(target) {

@@ -2,7 +2,7 @@ package hydrate
 
 import "testing"
 
-// init(context) on the kernel — the same seven keys the component runtime hands out, so a
+// init(context) on the kernel — eight keys: the seven the component runtime handed out, so a
 // component written for one runs on the other (B9, one kernel). Each key is checked for the thing
 // that would silently break a ported body: the owned() fence, element() by name, listen/cleanup
 // released when morph removes the host, afterRender running once after the paint.
@@ -46,7 +46,7 @@ host.appendChild(track); host.appendChild(nested); host.appendChild(scoped); hos
 document.body.appendChild(host);
 kit.render();
 
-if (seen.keys !== "host,owned,element,elements,listen,cleanup,afterRender") throw new Error("context keys: " + seen.keys);
+if (seen.keys !== "host,owned,element,elements,listen,cleanup,afterRender,require") throw new Error("context keys: " + seen.keys);
 if (seen.host !== host) throw new Error("context.host must be the host element");
 if (!seen.thisIsScope) throw new Error("this inside init must be the component scope");
 if (label.textContent !== "7") throw new Error("a write to this inside init must be state the paint reads: " + label.textContent);
@@ -57,7 +57,7 @@ if (seen.slides !== "own-1,own-2") throw new Error("elements('slide') must list 
 if (seen.missing !== null || seen.missingAll !== 0) throw new Error("a missing name is null / an empty list");
 if (!seen.badName) throw new Error("elements() must reject a non-identifier");
 if (seen.innerOwned !== 1) throw new Error("the nested host owns its own li: " + seen.innerOwned);
-console.log("init(context): 7 keys, host, this = scope, owned fence, element(s) by name");
+console.log("init(context): 8 keys, host, this = scope, owned fence, element(s) by name");
 `
 	runNodeDOMScript(t, "init_context_shape.test.js", assertions)
 }

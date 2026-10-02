@@ -40,7 +40,7 @@ var TABS = Symbol("kit:tabs");
 
 // tabElements is every tab this instance owns, in document order, read live so a tablist a template
 // rebuilt between renders is never stale. A button with no data-tab is not a tab: it is an
-// authoring mistake, reported once at mount and then skipped, so the arrows cannot land on a
+// authoring mistake, reported once (context.require) and then skipped, so the arrows cannot land on a
 // control that has no panel and leave focus and selection disagreeing.
 function tabElements(scope) {
   var own = scope[TABS];
@@ -72,12 +72,8 @@ var tabsDef = {
     var scope = this;
     this[TABS] = { context: context };
 
-    var elements = context.elements("tab");
-    var unnamed = elements.length - tabElements(this).length;
-    if (unnamed > 0 && typeof console !== "undefined" && console.warn) {
-      console.warn('kitwork: data-kit-component="tabs" — ' + unnamed +
-        ' tab' + (unnamed === 1 ? "" : "s") + ' without data-tab="…" cannot be selected, so the keyboard skips them.');
-    }
+    // A tab with no data-tab cannot be selected, so the keyboard skips it — and the kernel says so.
+    context.require("tab", "data-tab");
 
     // A tablist opens on its first tab unless the page already chose one — a scope value, a
     // data-kit-seed, or whatever the server rendered.

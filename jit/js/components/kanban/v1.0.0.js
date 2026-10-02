@@ -81,6 +81,7 @@ var kanbanDef = {
     var scope = this;
     var document = context.host.ownerDocument;
     scope[KANBAN] = { context: context, pointer: null };
+    context.require("column", "data-column");
     context.cleanup(function () { delete scope[KANBAN]; });
 
     function cardOf(target) {

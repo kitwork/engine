@@ -81,7 +81,7 @@ var splitDef = {
 
   init: function (context) {
     var scope = this;
-    var handle = context.element("handle");
+    var handle = context.require("handle")[0] || null;
     // The size the markup says it starts at, before the first paint rewrites aria-valuenow.
     var initial = splitNumber(handle, "aria-valuenow", scope.size);
     scope[SPLIT] = { context: context, initial: 0, pointer: null };

@@ -174,6 +174,7 @@ var editorDef = {
     var scope = this;
     var document = context.host.ownerDocument;
     scope[EDITOR] = { context: context, saved: null };
+    context.require("area");
     context.cleanup(function () { delete scope[EDITOR]; });
     touch(scope);
 

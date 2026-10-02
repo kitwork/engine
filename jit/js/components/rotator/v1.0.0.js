@@ -104,6 +104,7 @@ var rotatorDef = {
       reduced: !!(motion && motion.matches)
     };
     context.cleanup(function () { clearTimeout(own.timer); delete scope[ROTATOR]; });
+    context.require("item");
 
     // pointerenter/leave rather than mouseover, so a touch drag does not wedge it paused.
     context.listen(context.host, "pointerenter", function () { own.hovered = true; rotatorSchedule(scope); });

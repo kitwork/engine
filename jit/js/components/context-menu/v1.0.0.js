@@ -109,6 +109,8 @@ var contextMenuDef = {
   init: function (context) {
     var scope = this;
     scope[CONTEXT_MENU] = { context: context };
+    context.require("target");
+    context.require("item");
     context.cleanup(function () { delete scope[CONTEXT_MENU]; });
 
     context.listen(context.host, "contextmenu", function (event) {

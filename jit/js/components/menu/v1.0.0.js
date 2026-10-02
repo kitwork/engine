@@ -137,6 +137,8 @@ var menuDef = {
     var scope = this;
     var document = context.host.ownerDocument;
     scope[MENU] = { context: context, document: document };
+    context.require("trigger");
+    context.require("item");
     context.cleanup(function () { delete scope[MENU]; });
 
     context.listen(context.host, "keydown", function (event) {

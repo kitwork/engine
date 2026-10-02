@@ -128,6 +128,7 @@ var treeDef = {
   init: function (context) {
     var scope = this;
     scope[TREE] = { context: context };
+    context.require("item", "data-id");
     context.cleanup(function () { delete scope[TREE]; });
 
     // One tab stop from the start: the chosen item if there is one, else the first. After the

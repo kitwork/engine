@@ -724,7 +724,8 @@
     return st.scope;
   }
   // ---- init(context): the component's hands on its own DOM (ideaship-final §6, B9 one kernel) ----
-  // The same seven keys the component runtime hands out, so a ported body needs no rewrite:
+  // Eight keys — the seven the component runtime handed out, so a ported body needs no rewrite, and
+  // require (below):
   //   host                — the element carrying data-kit-component / data-kit-scope
   //   owned(selector)     — matches under the host, the host itself included, a nested host's
   //                         subtree excluded (its elements are its own)
@@ -734,6 +735,7 @@
   //                         cancel runs it now instead
   //   afterRender(fn)     — runs ONCE after the next paint, outside the pass — so a state write
   //                         inside it schedules its own repaint (no lost update)
+  //   require(name, ...attributes) — the elements it cannot work without; a miss is reported
   // Every resource lives on the host's state, so cleanupTree releases it when the host leaves.
   var HOST = "[data-kit-component],[data-kit-scope]";
   var afterRenders = [];
@@ -776,7 +778,34 @@
       afterRenders.push(entry);
       return function () { entry.active = false; };
     }
-    return Object.freeze({ host: b, owned: owned, element: element, elements: elements, listen: listen, cleanup: cleanup, afterRender: afterRender });
+    // require(name, ...attributes) — what the component cannot work without, said in its own code:
+    // context.require("item", "data-id"). Checked after the first paint, so an element a template
+    // renders and an attribute a binding writes both count. A miss is reported ONCE through the error
+    // channel, naming the component — a tree with no data-id used to ignore the keyboard in silence
+    // (02/10). Returns the elements as they stand now.
+    function requireElements(name) {
+      var attributes = Array.prototype.slice.call(arguments, 1);
+      var now = elements(name); // a bad name throws here, where the author wrote it
+      afterRender(function () {
+        var found = elements(name);
+        var component = b.getAttribute("data-kit-component") || "this component";
+        var problem = "";
+        if (!found.length) {
+          problem = 'needs data-kit-element="' + name + '" inside it, and has none';
+        } else {
+          attributes.forEach(function (attribute) {
+            var missing = found.filter(function (el) { return !el.hasAttribute(attribute); }).length;
+            if (missing && !problem) {
+              problem = "needs " + attribute + ' on every data-kit-element="' + name + '"; ' +
+                missing + " of " + found.length + " have none";
+            }
+          });
+        }
+        if (problem) reportError(new Error("kitwork: " + component + " " + problem), b, "data-kit-component");
+      });
+      return now;
+    }
+    return Object.freeze({ host: b, owned: owned, element: element, elements: elements, listen: listen, cleanup: cleanup, afterRender: afterRender, require: requireElements });
   }
   // flushAfterRender runs after a paint has ended (render → pass → paint, then this): one-shot,
   // in registration order, only for hosts still in the document; a host that morph removed
