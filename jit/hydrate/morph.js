@@ -18,7 +18,13 @@
       return;
     }
     if (fromNode.nodeType === 1) {
-      if (fromNode.tagName !== toNode.tagName) {
+      // A different tag is a different element — and so is a different component or scope literal
+      // on the same tag. Patched in place, a tabs host that became a toast host kept the tabs'
+      // scope, listeners and alias: kit.components.toast and $note answered as the tabs (02/10).
+      // The same component on both pages is kept, state and all, which is what Drive is for.
+      if (fromNode.tagName !== toNode.tagName ||
+        fromNode.getAttribute("data-kit-component") !== toNode.getAttribute("data-kit-component") ||
+        fromNode.getAttribute("data-kit-scope") !== toNode.getAttribute("data-kit-scope")) {
         cleanupTree(fromNode);
         fromNode.replaceWith(toNode.cloneNode(true));
         return;

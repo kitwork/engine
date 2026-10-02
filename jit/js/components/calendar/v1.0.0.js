@@ -36,7 +36,7 @@
  * rows; here the rows are real, because a grid without them is announced wrong.
  *
  * The public surface: year, month, selected, focused, weeks, weekdays, title, formatted,
- * select(iso), clear(), next(), previous(), today().
+ * select(iso), clear(), next(), previous(), today(), focus().
  */
 var CALENDAR = Symbol("kit:calendar");
 
@@ -163,6 +163,11 @@ var calendarDef = {
     this.select(iso);
     focusDay(this, iso);
   },
+
+  // Puts focus on the grid's one tab stop, after the next paint — so it lands even when the grid was
+  // hidden until this very click. A date picker calls it as it opens (WAI-ARIA: the dialog opens
+  // onto the chosen day), which no markup can do: the cell is not focusable until it is shown.
+  focus: function () { focusDay(this, this.focused || this.selected || isoOf(new Date())); },
 
   init: function (context) {
     var scope = this;

@@ -1518,10 +1518,6 @@
       delete aliasOwners[store.componentAlias];
       store.componentAlias = "";
     }
-    if (store.apiController) {
-      store.apiController.abort();
-      store.apiController = null;
-    }
     if (store.debounceTimer) {
       clearTimeout(store.debounceTimer);
       store.debounceTimer = null;
