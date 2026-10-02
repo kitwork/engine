@@ -27,7 +27,7 @@ import (
 	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
-//go:embed components services
+//go:embed components services directives
 var jsFS embed.FS
 
 // moduleCache memoizes parsed module files (and misses, stored as "") so each is read at most once.

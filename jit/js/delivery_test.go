@@ -256,15 +256,15 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 // and on a <pre> itself — which is the control: a scan that ignored everything would fail it.
 func TestExamplesBringNoFiles(t *testing.T) {
 	docs := `<html><head></head><body><p data-kit-text="title">x</p>
-<pre><code>&lt;section data-kit-component="visible" data-kit-click="kit.studioState.clearHistory()"&gt;</code></pre></body></html>`
+<pre><code>&lt;section data-kit-component="tree" data-kit-intersect="x()" data-kit-click="kit.studioState.clearHistory()"&gt;</code></pre></body></html>`
 	if roles, paths := deliveredFiles(t, Deliver(docs, nil, Options{})); len(roles) != 1 || roles[0] != "runtime" {
 		t.Fatalf("an example brought files: %v %v", roles, paths)
 	}
-	live := `<html><head></head><body><div data-kit-component="tabs"></div><pre data-kit-component="visible"><code>x</code></pre>
+	live := `<html><head></head><body><div data-kit-component="tabs"></div><pre data-kit-component="menu"><code>x</code></pre>
 <pre><code>data-kit-component="tree"</code></pre></body></html>`
 	_, paths := deliveredFiles(t, Deliver(live, nil, Options{}))
 	joined := strings.Join(paths, " ")
-	if !strings.Contains(joined, "/kit/components/tabs@") || !strings.Contains(joined, "/kit/components/visible@") || strings.Contains(joined, "/kit/components/tree@") {
+	if !strings.Contains(joined, "/kit/components/tabs@") || !strings.Contains(joined, "/kit/components/menu@") || strings.Contains(joined, "/kit/components/tree@") {
 		t.Fatalf("real hosts must count, the printed one must not: %v", paths)
 	}
 }

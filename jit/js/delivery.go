@@ -64,7 +64,7 @@ type Options struct {
 // Asset is one served file.
 type Asset struct {
 	Path   string // the URL, /kit/…
-	Role   string // runtime | drive | service | component — the data-kitwork-jit value
+	Role   string // runtime | drive | directive | service | component — the data-kitwork-jit value
 	Body   []byte
 	Digest string // the whole SHA-256, hex — the ETag
 }
@@ -91,6 +91,8 @@ func buildAsset(role, name, source string) *Asset {
 		dir = "components/"
 	case "service":
 		dir = "services/"
+	case "directive":
+		dir = "directives/"
 	}
 	return &Asset{
 		Path:   AssetPrefix + dir + name + "." + digest[:hashLength] + ".js",
@@ -196,6 +198,11 @@ func PageAssets(html string, site Site, options Options) []*Asset {
 			sources = append(sources, string(asset.Body))
 		}
 	}
+	// A directive whose machinery is not in the kernel (data-kit-intersect: an IntersectionObserver)
+	// is a file of its own, for the page that writes it.
+	for _, asset := range directiveAssets(hydrate.WithoutExamples(html)) {
+		assets = append(assets, asset)
+	}
 	// A native service a page names — in its markup or in a component it uses — comes after the
 	// kernel and before the components that call it (services.go).
 	if services := scanServices(sources...); len(services) > 0 {
@@ -261,6 +268,8 @@ func AssetAt(path string, site Site) (asset *Asset, exact bool) {
 		asset = KernelAsset()
 	case label == "drive":
 		asset = DriveAsset()
+	case strings.HasPrefix(label, "directives/"):
+		asset = directiveAsset(strings.TrimPrefix(label, "directives/"))
 	case label == "services/assembly":
 		asset = AssemblyAsset()
 	case strings.HasPrefix(label, "services/"):

@@ -4,37 +4,27 @@ import "testing"
 
 // data-kit-event:<name> and context.emit, in a real browser:
 //
-//	· visible emits `seen` once, the first time it reaches the screen, and the markup hears it —
-//	  on the host, and on an ancestor, since the event bubbles;
+//	· a component's event reaches the markup — on the host, and on an ancestor, since it bubbles;
 //	· a component that emits from init (inside the first paint) is heard, once the paint is over;
 //	· a DOM event outside the short list (paste) is heard by name, with its modifiers;
 //	· a component may not emit under a DOM event's name.
 //
-// The control is the second visible host, never reported in view: its handler must not run.
+// The control is the second bell, never rung: its handler must not run.
 func TestBrowserComponentEventsReachTheMarkup(t *testing.T) {
-	runBrowserProof(t, "events", []string{"visible"}, `
+	runBrowserProof(t, "events", nil, `
 <div id="page" data-kit-scope="hostHeard: 0, outerHeard: 0, quietHeard: 0, ready: 0, readyAt: '', pasted: 0">
-  <section id="outer" data-kit-event:seen="outerHeard++">
-    <article id="near" data-kit-component="visible" data-kit-event:seen="hostHeard++"></article>
+  <section id="outer" data-kit-event:ring="outerHeard++">
+    <article id="near" data-kit-component="bell" data-kit-event:ring="hostHeard++"></article>
   </section>
-  <article id="quiet" data-kit-component="visible" data-kit-event:seen="quietHeard++"></article>
+  <article id="quiet" data-kit-component="bell" data-kit-event:ring="quietHeard++"></article>
   <div id="probe" data-kit-component="probe" data-kit-event:ready="ready = $event.detail.n; readyAt = $event.target.id"></div>
   <input id="field" data-kit-event:paste:prevent="pasted++">
   <div id="refuse" data-kit-component="refuse"></div>
 </div>
 <script>
-var observers = [];
-window.IntersectionObserver = function (callback, options) {
-  var record = { callback: callback, targets: [] };
-  observers.push(record);
-  this.observe = function (el) { record.targets.push(el); };
-  this.disconnect = function () { };
-};
-function report(el, intersecting) {
-  observers.filter(function (o) { return o.targets.indexOf(el) >= 0; })[0].callback([{ target: el, isIntersecting: intersecting, intersectionRatio: intersecting ? 1 : 0 }]);
-}
-// Registered while the page parses, before the kernel boots: probe emits from init, which runs
-// inside the first paint; refuse tries a DOM event's name.
+// Registered while the page parses, before the kernel boots: bell emits when rung, probe emits from
+// init, which runs inside the first paint; refuse tries a DOM event's name.
+kit.component("bell", { init: function (context) { this.ring = function () { context.emit("ring"); }; } });
 kit.component("probe", { init: function (context) { context.emit("ready", { n: 7 }); } });
 kit.component("refuse", {
   refused: "",
@@ -46,15 +36,13 @@ kit.component("refuse", {
 
   assert(page().ready === 7 && page().readyAt === "probe", "an event emitted from init is heard after the paint, with its detail and target: " + page().ready + " " + page().readyAt);
 
-  var near = document.getElementById("near");
-  report(near, false); await wait(40);
-  assert(page().hostHeard === 0, "not seen yet: no event");
-  report(near, true); await wait(40);
-  assert(page().hostHeard === 1 && page().outerHeard === 1, "first time on screen: heard on the host and on its ancestor, got " + page().hostHeard + "/" + page().outerHeard);
-  report(near, false); await wait(40);
-  report(near, true); await wait(40);
-  assert(page().hostHeard === 1, "seen is announced once, got " + page().hostHeard);
-  assert(page().quietHeard === 0, "the control was never on screen and heard nothing, got " + page().quietHeard);
+  var near = window.kit.scopeFor(document.getElementById("near"));
+  assert(page().hostHeard === 0, "not rung yet: no event");
+  near.ring(); await wait(40);
+  assert(page().hostHeard === 1 && page().outerHeard === 1, "rung: heard on the host and on its ancestor, got " + page().hostHeard + "/" + page().outerHeard);
+  near.ring(); await wait(40);
+  assert(page().hostHeard === 2, "each emit is heard, got " + page().hostHeard);
+  assert(page().quietHeard === 0, "the control was never rung and heard nothing, got " + page().quietHeard);
 
   var field = document.getElementById("field");
   var paste = new Event("paste", { bubbles: true, cancelable: true });

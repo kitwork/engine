@@ -137,7 +137,7 @@ const RuntimePath = "/kit.js"
 // data-kit-event:<name>[:modifier…] for any event by name — one a component emits, or a DOM event
 // outside the short list (02/10). Its modifiers are checked by checkEventModifiers, since the kernel
 // disables a handler it cannot make sense of.
-var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="([^"]*)"`)
+var directiveRe = regexp.MustCompile(`data-kit-(text|show|if|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|class|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*)="([^"]*)"`)
 
 // The event family and the modifier pipeline of ideaship-final §4, as the kernel runs it: target
 // → filter → prevent → stop → timing → once. The author may write them in any order; the server
@@ -225,6 +225,9 @@ var outsideEventTypes = map[string]bool{"click": true, "dblclick": true, "pointe
 var timingModifierRe = regexp.MustCompile(`^(debounce|throttle)\(([0-9]+)\)$`)
 
 func checkEventModifiers(directive string) error {
+	if directive == "intersect" || strings.HasPrefix(directive, "intersect:") {
+		return checkIntersectModifiers(strings.Split(directive, ":")[1:])
+	}
 	parts := strings.Split(directive, ":")
 	if parts[0] == "event" && len(parts) > 1 {
 		// data-kit-event:<name>: the name is the event, and the same modifiers apply.
@@ -285,12 +288,42 @@ func checkEventModifiers(directive string) error {
 	return nil
 }
 
+// checkIntersectModifiers names a data-kit-intersect modifier the observer or the pipeline would not
+// understand. :leave says when (not on screen), :once how often, :half / :full how much must show,
+// :margin(x) where the screen's edge is — the event modifiers (:prevent, :outside…) mean nothing to
+// an element entering the screen.
+func checkIntersectModifiers(modifiers []string) error {
+	seen := map[string]bool{}
+	for _, modifier := range modifiers {
+		name := modifier
+		if strings.HasPrefix(modifier, "margin(") {
+			if !strings.HasSuffix(modifier, ")") || len(modifier) == len("margin()") {
+				return fmt.Errorf(":%s needs a CSS margin, like :margin(-20%%)", modifier)
+			}
+			name = "margin"
+		}
+		if seen[name] {
+			return fmt.Errorf("modifier :%s is repeated", name)
+		}
+		seen[name] = true
+		switch name {
+		case "leave", "once", "half", "full", "margin":
+		default:
+			return fmt.Errorf("unknown modifier :%s for data-kit-intersect (it takes :leave :once :half :full :margin(x))", modifier)
+		}
+	}
+	if seen["half"] && seen["full"] {
+		return fmt.Errorf(":half and :full name two thresholds; pick one")
+	}
+	return nil
+}
+
 // presenceRe decides runtime INJECTION: authored data-kit-* forms, including the non-expression
 // attributes — model is a plain scope key, scope/component a boundary — which need the runtime but
 // must never be compile-verified; for's value is a spec, not an expression. A data-kitwork-*
 // directive is not authored and not read, so it does not bring the runtime. (data-kit-api, -live and
 // -remember were removed on 02/10; they bring nothing.)
-var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*)(?::[a-z0-9+]+(?:\([0-9]+\))?)*)="`)
+var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*)="`)
 
 // The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
 // kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The

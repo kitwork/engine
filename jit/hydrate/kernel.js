@@ -1615,6 +1615,7 @@
   // (data-kit-event:paste, data-kit-event:scroll:window). data-kit-click and the rest stay its
   // shorthand. A name is lower case, as an attribute name always is once the browser has parsed it.
   var EVENT_HEAD = "data-kit-event:";
+  var INTERSECT = "data-kit-intersect";
   var EVENT_NAME = /^[a-z][a-z0-9-]*$/;
   // The names a component may not emit under: the DOM events a page listens for, so each spelling
   // has one meaning. (Not every DOM event: the kernel's size budget pays for the likely ones.)
@@ -1674,6 +1675,7 @@
       else if (m === "stop") h.stop = true;
       else if (m === "once") h.once = true;
       else if (timing) h[timing[1]] = parseInt(timing[2], 10);
+      else if (type.indexOf(INTERSECT) === 0 && /^(leave|half|full|margin\(.+\))$/.test(m)) { } // the observer's, read by the intersect file
       else h.valid = false;
     }
     // A modifier that cannot apply to this event disables the handler rather than misfiring: the
@@ -1691,6 +1693,11 @@
     if (el.getAttributeNames) {
       el.getAttributeNames().forEach(function (name) {
         if (name.indexOf("data-kit-") !== 0) return;
+        // data-kit-intersect[:modifier…] (02/10): each attribute is an event of its own, named by
+        // the attribute itself, which the intersect file (jit/js/directives) dispatches on THIS
+        // element when it enters or leaves the screen — so it runs through the same pipeline
+        // (:once…), and an ancestor's own intersect never answers a child's.
+        if (name.indexOf(INTERSECT) === 0) { var watch = parseHandler(name, name, INTERSECT); watch.self = true; list.push(watch); return; }
         if (name.indexOf(EVENT_HEAD) === 0) {
           var type = name.slice(EVENT_HEAD.length).split(":")[0];
           if (EVENT_NAME.test(type)) list.push(parseHandler(name, type, EVENT_HEAD + type));
