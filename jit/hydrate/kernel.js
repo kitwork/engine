@@ -873,14 +873,13 @@
   // nothing any more (B1, 22/09); their names stay reserved so no alias can take them.
   // Reads and method calls only — value/attribute CHANGES belong to bindings (data-kit-model,
   // state→CSS), not to reaching in and poking the DOM.
-  function elementScope(el, event, errorContext) {
+  function elementScope(el, event) {
     var base = scopeFor(el);
     return new Proxy(base, {
       get: function (t, k) {
         if (k === "$this") return el;
         if (k === "$host") return (el.closest && el.closest(SCOPE)) || document.documentElement;
         if (k === "$event") return event || null;
-        if (k === "$error") return errorContext || null;
         if (k === "$element") return namedElements(el);
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
         return base[k];
@@ -1010,7 +1009,7 @@
   // component INSTANCE; data-kit-element will name an element.
   var aliases = Object.create(null);
   var reservedAliases = Object.create(null);
-  ["$", "$this", "$el", "$host", "$root", "$event", "$element", "$error"].forEach(function (name) { reservedAliases[name] = true; });
+  ["$", "$this", "$el", "$host", "$root", "$event", "$element"].forEach(function (name) { reservedAliases[name] = true; });
   // aliasOwners remembers which boundary each alias names, so a handle resolves to that boundary's
   // SCOPE PROXY rather than to its raw state object.
   //
@@ -1574,34 +1573,17 @@
     }
     return result;
   }
-  function runEffect(expression, element, event, errorContext) {
-    var current = elementScope(element, event, errorContext);
+  function runEffect(expression, element, event) {
+    var current = elementScope(element, event);
     return observeEffect(run(expression, current), current);
   }
-  // ---- data-kit-error: the error boundary (ideaship-final §2) ----
-  // A directive that fails — an action or a binding — hands its error to the nearest ancestor
-  // carrying data-kit-error, whose expression runs with `$error` (cause, message, directive,
-  // element). The error does not travel past that boundary; with no boundary above, or while a
-  // boundary is already handling one, it reaches the console. guarded() wraps every place a
-  // directive's expression runs, so one failing element never aborts the pass for the others.
-  var handlingError = false;
+  // A directive that fails — an action, a binding, an init, a component's require — reaches the
+  // console. guarded() wraps every place a directive's expression runs, so one failing element never
+  // aborts the pass for the others. (data-kit-error, a boundary that ran an expression with $error,
+  // was removed on 02/10: nothing used it. A failure a person should see is an action's rejected
+  // promise, which lands in the scope's `error`; a programming mistake belongs to the verify pass.)
   function reportError(error, el, directive) {
-    var boundary = el && el.closest ? el.closest("[data-kit-error]") : null;
-    if (boundary && !handlingError) {
-      var x = programOf(boundary, "data-kit-error");
-      if (x) {
-        handlingError = true;
-        try {
-          runEffect(x, boundary, null, { cause: error, message: String(error && error.message || error), directive: directive || "", element: el });
-          return;
-        } catch (failure) {
-          if (typeof console !== "undefined" && console.error) console.error(failure);
-        } finally {
-          handlingError = false;
-        }
-      }
-    }
-    if (typeof console !== "undefined" && console.error) console.error(error);
+    if (typeof console !== "undefined" && console.error) console.error(error, directive || "", el || "");
   }
   function guarded(el, directive, fn) {
     try { return fn(); } catch (error) { reportError(error, el, directive); }

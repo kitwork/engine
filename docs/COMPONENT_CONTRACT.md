@@ -9,8 +9,7 @@ hai bản khớp nhau. Phần thật sự mới — phần tử và thuộc tín
 
 1. **Component tự nói nó cần gì: `context.require(name, ...attributes)`.** Gọi trong `init`. Sau
    lượt vẽ đầu, kernel kiểm host có phần tử `data-kit-element="<name>"` và mỗi phần tử có đủ các
-   thuộc tính (viết thẳng hay bind đều được); thiếu thì báo qua kênh lỗi sẵn có (`data-kit-error`,
-   không thì console), một lần, nói rõ component nào thiếu gì. Trả về các phần tử, để dùng luôn.
+   thuộc tính (viết thẳng hay bind đều được); thiếu thì báo ra console (kèm directive và phần tử), một lần, nói rõ component nào thiếu gì. Trả về các phần tử, để dùng luôn.
 
    ```js
    init: function (context) {

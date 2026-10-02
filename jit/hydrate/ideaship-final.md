@@ -84,18 +84,19 @@
 | `data-kit-for` + `data-kit-key` | Danh sách, viết **trên chính hàng**; hàng là blueprint, rời tài liệu; overlay `count first last even odd` lexical theo hàng (§7) | ✅ client (`<template>` vẫn được); server materialize **hoãn** tới khi có site cần (B6, 22/09) |
 | `data-kit-if` | Mount / unmount subtree | ✅ |
 | `data-kit-item` | Máy ghi trên hàng đã materialize, nhưng nó LÀ một boundary (nằm trong `SCOPE` của kernel cùng `scope`/`component`/`api`) nên mang tiền tố của ngữ pháp — xem quy ước ở §2.6; kernel bọc list `<!--kit-for:start id=fN-->`…`<!--kit-for:end-->` | ✅ hình dây; server chưa phát (B6: hoãn) |
-| `data-kit-error` | Error boundary: lỗi action/binding bên trong → chạy biểu thức với `$error`; không lan quá boundary đầu; không boundary → console | ✅ chốt 22/09: không lan quá boundary đầu; handler tự ném → console, không tái nhập; `$error.recover()` không có (B4) |
+| ~~`data-kit-error`~~ | ~~Error boundary với `$error`~~ | **XOÁ 02/10** (Quốc chốt): 0 site, 0 app viết — chỉ trang tài liệu kitjs.org. Lỗi directive (action, binding, init, `context.require`) giờ ra `console.error(error, directive, element)`. Lỗi người dùng cần thấy = promise của action bị từ chối → `error` trong scope (giữ); lỗi lập trình = việc của verify pass. Kernel nhẹ 84 byte gzip |
 
 ### 2.5 Sự kiện — một họ, một đường ống
 
-`data-kit-<event>[:modifier…]="expr"` cho `click dblclick submit input change keydown keyup pointerdown pointerup focusin focusout`. Modifier viết thứ tự nào cũng được, chạy theo §4. Tổ hợp phím viết ngay trong tên: `data-kit-keydown:mod+k` — `mod` = Ctrl (Win/Linux) hoặc Cmd (macOS), ĐÚNG một trong hai, và mọi modifier không nêu phải TẮT. ✅ cả hai bên; kernel đã gỡ `data-kit-away` / `data-kit-escape` / `data-kit-guard` (→ `click:outside`, `keydown:escape:window`, `:prevent`).
+`data-kit-<event>[:modifier…]="expr"` cho `click dblclick submit input change keydown keyup pointerdown pointerup focusin focusout`; dạng đầy đủ `data-kit-event:<tên>[:modifier…]` (02/10) nghe MỌI sự kiện theo tên — sự kiện component phát bằng `context.emit` (`data-kit-event:seen`, dữ liệu ở `$event.detail`) hoặc sự kiện DOM ngoài danh sách (`data-kit-event:paste`); dạng ngắn giữ làm viết tắt. Modifier viết thứ tự nào cũng được, chạy theo §4. Tổ hợp phím viết ngay trong tên: `data-kit-keydown:mod+k` — `mod` = Ctrl (Win/Linux) hoặc Cmd (macOS), ĐÚNG một trong hai, và mọi modifier không nêu phải TẮT. ✅ cả hai bên; kernel đã gỡ `data-kit-away` / `data-kit-escape` / `data-kit-guard` (→ `click:outside`, `keydown:escape:window`, `:prevent`).
 
 ### 2.6 Ngoài bảng directive — có thật, đang chạy, spec phải nhìn thấy
 
 | Nhóm | Attribute | Ghi chú |
 | :--- | :--- | :--- |
 | ~~directive kernel~~ | ~~`data-kit-validate="expr"`~~ | **XOÁ 22/09** (Quốc chốt B): 0 site viết; `required`/`pattern`/`type` cho phản hồi sống sẵn có. **Cổng submit GIỮ** — kernel chỉ ĐỌC `data-state="invalid"` (server render, component, hay constraint validation ghi). **Nửa server GIỮ**: `ctx.validate(rule)` (`work/validate.go`) — trình duyệt nói gì cũng được, phán quyết ở server |
-| capability (`jit/js/capabilities`) | `data-kit-api` `data-kit-live` `data-kit-remember` `data-kit-drag="true"` / `="false"` | khai báo, không phải biểu thức |
+| ~~capability (`jit/js/capabilities`)~~ | ~~`data-kit-api` `data-kit-live` `data-kit-remember`~~ | **XOÁ 02/10**: 0 dùng api/live; remember chỉ buildinpublic.guide → thành component riêng của site (`_components/checklist.js`) |
+| kernel | `data-kit-drag="true"` / `="false"` | khai báo, không phải biểu thức |
 | ~~tải component từ CDN~~ | ~~`data-kit-indexed`~~ | **XOÁ 24/09**: `modules/component-loader.js` (4 386 byte, ship cho MỌI trang) tải component theo `kit.cdnComponents` — mặc định rỗng và **0 site nào set**, nên nó chưa từng tải được gì; `data-kit-indexed` chỉ bật cache IndexedDB cho chính nó. Host mang tên component không ai đăng ký giờ **báo lỗi có tên, đúng một lần** thay vì ngồi im chờ một fetch không bao giờ đến |
 | Drive | `data-kit-reload="true"` | **24/09**: "nạp trang này theo cách thường" — đọc trên chính thẻ `<a>`/`<form>` GET hoặc trên tổ tiên. Là dạng viết DUY NHẤT: `data-kit-drive="false"` (29 chỗ) chưa từng được runtime sống đọc, còn `data-kitwork-hydrate="false"` (10 chỗ) chạy được nhưng bắt tác giả gõ từ của máy. `data-kit-retain` / `data-kit-ignore` **không tồn tại** — morph chỉ đọc `data-kit-key`; tên đã chốt cho việc "giữ nguyên vùng này" là `data-kit-keep="true"`, CHƯA CÀI vì 0 ca dùng thật trên kernel |
 | server-only | `data-kit-highlight` | JIT highlight tiêu thụ khi render |
@@ -129,7 +130,7 @@ giờ viết một cái `data-kitwork-*`, và kernel không bao giờ đọc m�
 | `$host` | Thẻ **vùng gần nhất** (host component / `data-kit-scope` / hàng `for`), không có → `<html>` | Element | không đổi thành `$component` — vùng không phải lúc nào cũng là component |
 | `$element.<name>` | Thẻ **được đặt tên** `data-kit-element="<name>"` trong vùng | Element | phạm vi chốt 22/09 (B3): vùng gần nhất; thiếu → nullish (`$element.x?.focus()`); trùng → cái đầu; host lồng không thấy nhau |
 | `$event` | Sự kiện của handler đang chạy | Event | kernel: native thật; runtime component: **native-shaped** — ảnh chụp + `target` `submitter` `relatedTarget` thật, vì ngữ pháp đóng không đọc object native (B2, 22/09) |
-| `$error` | `{ cause, message, directive, element }` | Object | chỉ trong `data-kit-error` |
+| ~~`$error`~~ | ~~`{ cause, message, directive, element }`~~ | ~~Object~~ | **XOÁ 02/10** cùng `data-kit-error` |
 | `$app` | Cầu capability (theme, clipboard, camera…) | Bridge | |
 | `$` | **Root state** của trang | Object | |
 

@@ -112,7 +112,6 @@ func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 		`data-kit-submit:prevent:once="saved = true"`,
 		`data-kit-pointerdown:throttle(100):stop="drag = true"`,
 		`data-kit-click:self="pick = true"`,
-		`data-kit-error="failed = $error.message"`,
 	} {
 		m := directiveRe.FindStringSubmatch(authored)
 		if m == nil {
@@ -123,7 +122,7 @@ func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 			t.Errorf("%s: modifiers should be accepted, got %v", authored, err)
 		}
 	}
-	for _, gone := range []string{`data-kit-away="open = false"`, `data-kit-escape="open = false"`} {
+	for _, gone := range []string{`data-kit-away="open = false"`, `data-kit-escape="open = false"`, `data-kit-error="failed = $error.message"`} {
 		if directiveRe.MatchString(gone) || presenceRe.MatchString(gone) {
 			t.Errorf("%s is not a directive any more (its job is a modifier)", gone)
 		}
@@ -345,6 +344,8 @@ func TestRuntimeEmbedded(t *testing.T) {
 		"function syncApi", "function syncLive", "function liveTarget", "new EventSource",
 		"kit.streams =", "kit.sync =", "kit.syncApi =",
 		"[data-kit-api]", "reconcileHooks", "onReconcile", "onDestroy",
+		// data-kit-error went on 02/10 the same way: nothing used it.
+		"[data-kit-error]", "handlingError",
 	} {
 		if strings.Contains(rt, forbid) {
 			t.Errorf("a removed capability is back in the core runtime: found %q", forbid)

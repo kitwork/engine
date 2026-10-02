@@ -85,11 +85,14 @@ console.log("data-kit-style: writes, restores the authored baseline, removes wha
 
 // A value may not carry a second declaration, a comment, !important, or a function that fetches or
 // executes. var() IS allowed: a Kitwork site's colours are custom properties, so refusing it would
-// make the directive useless here. A refused value reaches the error boundary like any directive.
+// make the directive useless here. A refused value is reported like any failing directive.
 func TestStyleRefusesAValueThatEscapesTheDeclaration(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
-var boundary = el("div", { "data-kit-scope": "failed: '', bad: '', good: ''", "data-kit-error": "failed = $error.directive" });
+var failed = "";
+var originalError = console.error;
+console.error = function (error, directive) { failed = directive; };
+var boundary = el("div", { "data-kit-scope": "bad: '', good: ''" });
 var probe = el("p", { "data-kit-style:color": "bad", "data-kit-style:background": "good" });
 boundary.appendChild(probe);
 document.body.appendChild(boundary);
@@ -105,10 +108,10 @@ var scope = kit.scopeFor(boundary);
   ["attr(data-x)", "attr()"],
   ["javascript:alert(1)", "a javascript: value"]
 ].forEach(function (pair) {
-  scope.failed = "";
+  failed = "";
   scope.bad = pair[0];
   kit.render();
-  if (scope.failed !== "data-kit-style:color") throw new Error(pair[1] + " must reach the error boundary, got " + JSON.stringify(scope.failed));
+  if (failed !== "data-kit-style:color") throw new Error(pair[1] + " must be reported, naming the directive, got " + JSON.stringify(failed));
   if (probe.style.getPropertyValue("color") !== "") throw new Error(pair[1] + " must write nothing: " + probe.style.getPropertyValue("color"));
 });
 
@@ -116,6 +119,7 @@ var scope = kit.scopeFor(boundary);
 scope.bad = "";
 scope.good = "var(--color-brand)";
 kit.render();
+console.error = originalError;
 if (probe.style.getPropertyValue("background") !== "var(--color-brand)") throw new Error("var() must be allowed: " + probe.style.getPropertyValue("background"));
 console.log("data-kit-style: refuses an escaping value, allows var()");
 `

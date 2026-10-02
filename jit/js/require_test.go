@@ -3,29 +3,39 @@ package js
 import "testing"
 
 // context.require: a component says what it cannot work without, and a page that leaves it out is
-// told — once, through the error channel, naming the component and what is missing. Each case sits
-// in its own error boundary so a message can only have come from the component inside it. The
-// complete tree is the control: a check that reported everything would fail it.
+// told — once, on the console, naming the component and what is missing. Each case sits in its own
+// section and a report is filed by the section of the element it names, so a message can only have
+// come from the component inside it. The complete tree is the control: a check that reported
+// everything would fail it.
 func TestBrowserRequireNamesWhatIsMissing(t *testing.T) {
 	runBrowserProof(t, "require", []string{"tree", "tabs"}, `
-<section id="no-id" data-kit-scope="errors: []" data-kit-error="errors = errors.concat([$error.message])">
+<section id="no-id">
   <ul role="tree" data-kit-component="tree">
     <li role="treeitem" data-kit-element="item" data-id="docs">docs</li>
     <li role="treeitem" data-kit-element="item">intro</li>
   </ul>
 </section>
-<section id="bound" data-kit-scope="errors: [], names: ['a', 'b']" data-kit-error="errors = errors.concat([$error.message])">
+<section id="bound" data-kit-scope="names: ['a', 'b']">
   <ul role="tree" data-kit-component="tree">
     <li role="treeitem" data-kit-for="name of names" data-kit-element="item" data-kit-bind:data-id="name" data-kit-text="name"></li>
   </ul>
 </section>
-<section id="no-tabs" data-kit-scope="errors: []" data-kit-error="errors = errors.concat([$error.message])">
+<section id="no-tabs">
   <div data-kit-component="tabs"><div role="tablist"></div></div>
 </section>
 <script>
+// Reports reach the console (data-kit-error was removed 02/10); each is filed under the section the
+// reporting component sits in, so a message can only have come from that component.
+var reports = { "no-id": [], "bound": [], "no-tabs": [] };
+var originalError = console.error;
+console.error = function (error, directive, element) {
+  var section = element && element.closest ? element.closest("section") : null;
+  if (section && reports[section.id]) reports[section.id].push(String(error && error.message || error));
+  return originalError.apply(console, arguments);
+};
 (async function () {
   await wait(300);
-  function errors(id) { return window.kit.scopeFor(document.getElementById(id)).errors; }
+  function errors(id) { return reports[id]; }
 
   var noId = errors("no-id");
   assert(noId.length === 1, "a tree item without data-id: want one report, got " + JSON.stringify(noId));

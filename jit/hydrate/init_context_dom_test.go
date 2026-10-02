@@ -159,25 +159,27 @@ console.log("init(context): afterRender cancel + removed host skipped");
 	runNodeDOMScript(t, "init_context_after_render_removed.test.js", assertions)
 }
 
-func TestInitThatThrowsReachesTheErrorBoundary(t *testing.T) {
+// A throwing init is reported — to the console, naming the directive — and the component stays
+// mounted with its seeded state. (It used to reach data-kit-error, removed 02/10.)
+func TestInitThatThrowsIsReported(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
+var reported = [];
+var originalError = console.error;
+console.error = function (error, directive) { reported.push(String(error && error.message || error) + "@" + directive); };
 kit.component("broken", {
   ready: "seeded",
   init: function () { throw new Error("no camera"); }
 });
-var boundary = el("div", { "data-kit-scope": "failed: '', where: ''", "data-kit-error": "failed = $error.message; where = $error.directive" });
 var host = el("section", { "data-kit-component": "broken" });
 var label = el("b", { "data-kit-text": "ready" });
-var failed = el("i", { "data-kit-text": "failed + '@' + where" });
 host.appendChild(label);
-boundary.appendChild(host);
-boundary.appendChild(failed);
-document.body.appendChild(boundary);
+document.body.appendChild(host);
 kit.render();
-if (failed.textContent !== "no camera@init") throw new Error("the boundary must see the init error with directive 'init': " + failed.textContent);
+console.error = originalError;
+if (reported.join("|") !== "no camera@init") throw new Error("the init error must be reported once, naming init: " + reported.join("|"));
 if (label.textContent !== "seeded") throw new Error("a failing init leaves the component mounted with its seeded state: " + label.textContent);
-console.log("init(context): a throwing init reaches data-kit-error as directive init");
+console.log("init(context): a throwing init is reported as directive init");
 `
 	runNodeDOMScript(t, "init_context_error.test.js", assertions)
 }
