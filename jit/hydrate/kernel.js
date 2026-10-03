@@ -90,7 +90,7 @@
   var expressionServiceMembers = Object.create(null);
   var expressionServiceSurfaces = Object.create(null);
   var reservedServiceNames = Object.create(null);
-  ("service bridge runtime internal module modules has onStart cleanup onCleanup " +
+  ("service bridge runtime internal module modules has onStart cleanup onCleanup context " +
     "compile run scope scopeFor render set destroy start component " +
     "components blueprints state morph hydrate " +
     "platform isNative mode version").split(" ").forEach(function (name) {
@@ -690,7 +690,9 @@
       var alias = b.getAttribute("data-kit-alias") || "";
       // Component registration (kit.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
-      if (!st.scope) st.scope = {};
+      // HOST_KEY ties the scope to its host, unseen by markup (a Symbol is never a name), so
+      // kit.context(this) finds the host along the same chain a name is read through.
+      if (!st.scope) Object.defineProperty(st.scope = {}, HOST_KEY, { value: b });
       registerAlias(alias, st.scope, b);
       if (!st.seeded) {
         if (blueprints[cname]) {
@@ -740,6 +742,9 @@
   // Every resource lives on the host's state, so cleanupTree releases it when the host leaves.
   var HOST = "[data-kit-component],[data-kit-scope]";
   var afterRenders = [];
+  var HOST_KEY = Symbol("kit:host");
+  // contextOf is the ONE context a host has: init receives it, kit.context(this) returns the same.
+  function contextOf(b) { var st = state(b); return st.context || (st.context = initContext(b)); }
   function initContext(b) {
     function owned(selector) {
       if (typeof selector !== "string") throw new TypeError("hydrate: context.owned(selector) expects a string");
@@ -847,7 +852,7 @@
     try {
       var proxy = scopeFor(b);
       var result;
-      if (typeof fn === "function") result = fn.call(proxy, initContext(b));
+      if (typeof fn === "function") result = fn.call(proxy, contextOf(b));
       else if (fn.__kitLambda) result = run(fn, proxy);
       observeEffect(result, proxy);
     } catch (e) { reportError(e, b, "init"); }
@@ -1553,6 +1558,15 @@
     blueprints[name] = def;
     if (runtimeMeta.booted) scheduleRender();
     return kitwork;
+  };
+  // kit.context(this) — a component method reaching its context after init (emit, element,
+  // listen…) without stashing it. `this` is whatever scope the call ran in: the host's own, a
+  // nested scope inside it, or the host's through its alias from outside — all find the same host.
+  // Anything else is refused by name, never answered with a context that belongs to something else.
+  kit.context = function (self) {
+    var host = self && self[HOST_KEY];
+    if (!host) throw new TypeError("kitwork: kit.context(this) needs the this of a component method");
+    return contextOf(host);
   };
   kit.state = state;
   kit.components = activeComponents;

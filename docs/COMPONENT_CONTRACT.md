@@ -47,6 +47,11 @@ hai bản khớp nhau. Phần thật sự mới — phần tử và thuộc tín
 3. ✅ 02/10 — seed trước `init`: trong lượt gieo seed, các `init` được giữ lại và chạy sau khi mọi
    seed đã ghi. `tree` đặt tab stop từ `selected` ngay trong `init`.
 
+4. ✅ 03/10 — `kit.context(this)`: method của component lấy lại đúng `context` mà `init` đã nhận
+   (cùng một đối tượng), dù được gọi từ trong host, từ scope lồng bên trong, hay qua alias từ ngoài —
+   không cần tự cất vào một ô `Symbol`. Thứ không phải `this` của component bị từ chối có tên.
+   Kernel +101 byte gzip (11827 → 11928).
+
 Kernel core sau ba bước: 12254 byte gzip, ngân sách 12288 — gần chạm trần. Sau đó (02/10) gỡ hai thứ
 0 nơi dùng (`kit.fetchWithRetry`, thuộc tính `data-kit-progress`) và dời `data-kit-drag` ra file directive
 riêng: 11827 byte, còn trống 461.
