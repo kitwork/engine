@@ -25,11 +25,9 @@ if (kit.run(kit.compile("$theme")) !== invented) {
 }
 if (typeof kit.run(kit.compile("$theme.toggle")) === "function") throw new Error("$theme.toggle is still callable");
 
-// The control: the service it used to shadow is reachable, so the two assertions above are about
-// $theme being gone, not about expressions being broken.
-if (typeof kit.run(kit.compile("kit.theme.toggle")) !== "function") {
-  throw new Error("precondition: kit.theme.toggle is reachable from markup");
-}
+// The control: expressions themselves work, so the two assertions above are about $theme being
+// gone, not about expressions being broken. (Markup reaches the theme through the theme component.)
+if (kit.run(kit.compile("1 + 1")) !== 2) throw new Error("precondition: expressions evaluate");
 
 // And the name is an ordinary one now — a page may claim it for its own component. (The shim
 // builds nodes; it does not parse HTML, so the host is assembled rather than written as markup.)

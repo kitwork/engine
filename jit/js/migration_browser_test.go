@@ -22,7 +22,7 @@ import (
 //	tab     → data-kit-scope="tab: 'a'" + bind:aria-selected / bind:data-state / show
 //	dialog  → data-kit-element="search" + $element.search.showModal() / .close()
 //	copy    → data-kit-component="clipboard" + copy('…') + data-kit-class="copied ? 'is-copied' : ''"
-//	theme   → data-kit-click="kit.theme.toggle()"
+//	theme   → a theme host: data-kit-component="theme" data-kit-click="toggle()"
 func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping kernel migration browser proof in short mode")
@@ -46,7 +46,7 @@ func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
   <button id="open" type="button" data-kit-click="$element.search.showModal()">search</button>
   <dialog id="site-search" data-kit-element="search"><button id="close" type="button" data-kit-click="$element.search.close()">x</button></dialog>
   <button id="copy" type="button" data-kit-component="clipboard" data-kit-click="copy('hello kitwork')" data-kit-class="copied ? 'is-copied' : ''">copy</button>
-  <button id="theme" type="button" data-kit-click="kit.theme.toggle()">theme</button>
+  <button id="theme" type="button" data-kit-component="theme" data-kit-click="toggle()">theme</button>
   <script>
   // Headless Chrome grants no clipboard permission; the proof is the kernel wiring (expression →
   // component method → async state write → repaint), so the platform call is recorded, not made.
@@ -84,7 +84,7 @@ func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
 
     var dark = root.classList.contains("dark");
     byId("theme").click(); await tick();
-    assert(root.classList.contains("dark") !== dark, "theme: kit.theme.toggle() should flip the dark class");
+    assert(root.classList.contains("dark") !== dark, "theme: the theme host's toggle() should flip the dark class");
 
     root.setAttribute("data-kit-test", "passed");
   })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });

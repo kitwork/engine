@@ -83,12 +83,10 @@
     return Object.prototype.hasOwnProperty.call(modules, name);
   };
 
-  // Public platform capabilities are services, separate from the runtime's control API. Trusted
-  // JavaScript receives the concrete object at kit.<name>; authored expressions receive only the
-  // exact members explicitly granted at registration time.
+  // Platform capabilities are services, separate from the runtime's control API, and JavaScript
+  // only: component code reaches kit.<name>; markup never calls kit (03/10) — it reaches a service
+  // through the component that is its view (theme, progressbar, titlebar, clipboard…).
   var services = Object.create(null);
-  var expressionServiceMembers = Object.create(null);
-  var expressionServiceSurfaces = Object.create(null);
   var reservedServiceNames = Object.create(null);
   ("service bridge runtime internal module modules has onStart cleanup onCleanup context " +
     "compile run scope scopeFor render set destroy start component " +
@@ -103,43 +101,7 @@
       !Object.prototype.hasOwnProperty.call(reservedServiceNames, name);
   }
 
-  function expressionServiceSurface(name) {
-    if (Object.prototype.hasOwnProperty.call(expressionServiceSurfaces, name)) {
-      return expressionServiceSurfaces[name];
-    }
-    var surface = new Proxy(Object.create(null), {
-      get: function (_, member) {
-        var grants = expressionServiceMembers[name];
-        if (!grants || !Object.prototype.hasOwnProperty.call(grants, member)) return undefined;
-        var service = services[name];
-        if (service == null) return undefined;
-        var value = service[member];
-        return typeof value === "function" ? value.bind(service) : value;
-      },
-      has: function (_, member) {
-        var grants = expressionServiceMembers[name];
-        return !!grants && Object.prototype.hasOwnProperty.call(grants, member);
-      },
-      ownKeys: function () {
-        var grants = expressionServiceMembers[name];
-        return grants ? Object.keys(grants) : [];
-      },
-      getOwnPropertyDescriptor: function (_, member) {
-        var grants = expressionServiceMembers[name];
-        if (!grants || !Object.prototype.hasOwnProperty.call(grants, member)) return undefined;
-        return { configurable: true, enumerable: true };
-      },
-      set: function () { return false; },
-      defineProperty: function () { return false; },
-      deleteProperty: function () { return false; },
-      setPrototypeOf: function () { return false; },
-      getPrototypeOf: function () { return null; }
-    });
-    expressionServiceSurfaces[name] = surface;
-    return surface;
-  }
-
-  kit.service = function (name, value, options) {
+  kit.service = function (name, value) {
     name = String(name || "");
     if (arguments.length === 1) {
       return Object.prototype.hasOwnProperty.call(services, name) ? services[name] : undefined;
@@ -148,19 +110,6 @@
 
     services[name] = value;
     kit[name] = value;
-
-    var grants = Object.create(null);
-    var members = options && options.expression;
-    if (Array.isArray(members)) {
-      members.forEach(function (member) {
-        member = String(member || "");
-        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(member) && !blockedKey(member)) {
-          grants[member] = true;
-        }
-      });
-    }
-    if (Object.keys(grants).length) expressionServiceMembers[name] = grants;
-    else delete expressionServiceMembers[name];
     return value;
   };
 
@@ -523,15 +472,11 @@
     }
     if (op === ".") {
       var o = run(x[1], s);
-      var publicService = x[2] === "window" && o === publicKitSurface &&
-        Object.prototype.hasOwnProperty.call(expressionServiceMembers, x[2]);
-      return (o == null || (blockedKey(x[2]) && !publicService)) ? undefined : o[x[2]];
+      return (o == null || blockedKey(x[2])) ? undefined : o[x[2]];
     }
     if (op === "()") {
       var oo = run(x[1], s);
-      var publicMethod = x[2] === "window" && oo === publicKitSurface &&
-        Object.prototype.hasOwnProperty.call(expressionServiceMembers, x[2]);
-      if (oo == null || (blockedKey(x[2]) && !publicMethod)) return undefined;
+      if (oo == null || blockedKey(x[2])) return undefined;
       var a = x[3].map(function (y) { return run(y, s); });
       return typeof oo[x[2]] === "function" ? oo[x[2]].apply(oo, callbacks(a, s)) : undefined;
     }
@@ -1048,48 +993,9 @@
     if (store) store.componentAlias = alias;
     return true;
   }
-  // `kit` is the platform/runtime service surface. Trusted JavaScript uses window.kit directly;
-  // authored markup resolves the identifier `kit` through this curated, read-only view so it cannot
-  // reach runtime control internals or the raw native transport. A service becomes callable from
-  // expressions only by an explicit grant here.
-  //
-  // `$app` is deliberately NOT installed by the kernel. It is an ordinary component alias owned by
-  // the application:
-  //   kit.component("app", definition)
-  //   <html data-kit-component="app" data-kit-alias="$app">
-  // This keeps application state/lifecycle separate from shared platform services.
-  var publicKitIntrinsics = Object.create(null);
-  ("platform isNative mode version").split(" ").forEach(function (name) {
-    publicKitIntrinsics[name] = true;
-  });
-  function expressionService(name) {
-    if (!Object.prototype.hasOwnProperty.call(expressionServiceMembers, name)) return undefined;
-    return expressionServiceSurface(name);
-  }
-  var publicKitSurface = new Proxy(Object.create(null), {
-    get: function (_, name) {
-      if (Object.prototype.hasOwnProperty.call(publicKitIntrinsics, name)) return kit[name];
-      return expressionService(name);
-    },
-    has: function (_, name) {
-      return Object.prototype.hasOwnProperty.call(publicKitIntrinsics, name) ||
-        Object.prototype.hasOwnProperty.call(expressionServiceMembers, name);
-    },
-    ownKeys: function () {
-      return Object.keys(publicKitIntrinsics).concat(Object.keys(expressionServiceMembers));
-    },
-    getOwnPropertyDescriptor: function (_, name) {
-      if (!Object.prototype.hasOwnProperty.call(publicKitIntrinsics, name) &&
-        !Object.prototype.hasOwnProperty.call(expressionServiceMembers, name)) return undefined;
-      return { configurable: true, enumerable: true };
-    },
-    set: function () { return false; },
-    defineProperty: function () { return false; },
-    deleteProperty: function () { return false; },
-    setPrototypeOf: function () { return false; },
-    getPrototypeOf: function () { return null; }
-  });
-  aliases["kit"] = publicKitSurface;
+  // Markup has no `kit` (03/10): a read of it is a name nothing declares, and the server names it at
+  // render. `$app` is not installed either — an application's state is its own components, each
+  // reached through its alias.
   // parseComponentTag splits `name@version` (version optional) → { name, version }. The alias is
   // its own attribute, data-kit-alias, never a tail on the name.
   function parseComponentTag(raw) {

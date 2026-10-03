@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 )
 
 // The grammar is deliberately quiet at runtime: an expression that names something which is not
@@ -13,110 +12,37 @@ import (
 // break a page a visitor is looking at. That is the right trade for the browser and the wrong one
 // for the author — nothing is thrown, nothing is logged, the button simply does nothing.
 //
-// So the loud half belongs here, where the server holds the whole document, the same parser the
-// kernel runs, and the list of everything each service grants. Everything below is a mistake made
-// in this repo, each of which cost an hour to find by hand:
+// So the loud half belongs here, where the server holds the whole document and the same parser the
+// kernel runs. Everything below is a mistake made in this repo, each of which cost an hour to find
+// by hand:
 //
-//   · kit.theme.system() — on the service, missing from its expression grant (25/09)
+//   · kit.theme.system() — on the service, missing from markup's grant (25/09); since 03/10 markup
+//     has no kit at all, and any kit.<service> in an expression is named
 //   · $element.nosuch.textContent — copy(undefined) reaching the clipboard (25/09)
-//   · kit.permissions.request(…) — a service markup was never given
 
-// serviceGrantRe reads a grant out of the module that declares it:
-//
-//	kit.service("theme", theme, {
-//	  expression: ["mode", "resolved", "set", "toggle", "system"]
-//	});
-//
-// Reading the JS rather than keeping a Go copy means the two cannot drift: adding a member to the
-// grant is the only edit, and this pass sees it on the next build.
-//
-// Each call is read on its OWN span — from `kit.service(` to the `);` that closes it. A single
-// regex across the file cannot be trusted with that: the first version used a lazy `.*?` and still
-// ran from `kit.service("host", host);`, which grants nothing, straight through to the NEXT grant
-// it could find, so `window` was reported as granting nothing while it grants five members. A sweep
-// over every page in the repo is what showed it — as three false alarms on a real titlebar.
-var serviceGrantRe = regexp.MustCompile(`(?s)expression:\s*\[([^\]]*)\]`)
+// Markup never calls kit (03/10): a service reaches the page through the component that is its view,
+// and the kernel gives expressions no kit at all. kit.theme.toggle() would then read as nothing and
+// do nothing, in silence — so it is named here, with where the service is reached instead.
+var kitReadRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_$.])kit\s*\.\s*([A-Za-z][A-Za-z0-9]*)`)
 
-// serviceNameRe finds every service the kernel registers, granted or not — so a service that markup
-// cannot reach at all can be named as exactly that, instead of blaming the member.
-var serviceNameRe = regexp.MustCompile(`kit\.service\(\s*"([A-Za-z][A-Za-z0-9]*)"`)
-
-var (
-	grantsOnce  sync.Once
-	grantedBy   map[string][]string // service → members markup may use
-	knownServic map[string]bool     // every service the kernel registers
-)
-
-func loadGrants() {
-	grantsOnce.Do(func() {
-		grantedBy = map[string][]string{}
-		knownServic = map[string]bool{}
-		modules := webJS + "\n" + nativeJS + "\n" + storageJS
-		for _, at := range serviceNameRe.FindAllStringSubmatchIndex(modules, -1) {
-			name := modules[at[2]:at[3]]
-			knownServic[name] = true
-			// This call's own span: up to the `);` that closes it. A grant object holds no `);`.
-			span := modules[at[0]:]
-			if end := strings.Index(span, ");"); end >= 0 {
-				span = span[:end]
-			}
-			grant := serviceGrantRe.FindStringSubmatch(span)
-			if grant == nil {
-				continue
-			}
-			members := []string{}
-			for _, raw := range strings.Split(grant[1], ",") {
-				if member := strings.Trim(strings.TrimSpace(raw), `"'`); member != "" {
-					members = append(members, member)
-				}
-			}
-			if len(members) > 0 {
-				grantedBy[name] = members
-			}
-		}
-	})
+// kitViews is the component that is each service's view, for the services a page reaches for most.
+var kitViews = map[string]string{
+	"theme":      "the theme component",
+	"progress":   "the progressbar component",
+	"window":     "the titlebar component",
+	"navigation": "the titlebar component",
+	"clipboard":  "the clipboard component",
 }
 
-// kitReadRe finds `kit.<service>.<member>` in an expression. The kernel's own intrinsics —
-// platform, isNative, mode, version — are read straight off kit and have no service.
-var kitReadRe = regexp.MustCompile(`\bkit\.([A-Za-z][A-Za-z0-9]*)\.([A-Za-z][A-Za-z0-9]*)`)
-
-var kitIntrinsics = map[string]bool{"platform": true, "isNative": true, "mode": true, "version": true}
-
 func checkKitReads(expression, where string, into *[]string) {
-	loadGrants()
-	for _, m := range kitReadRe.FindAllStringSubmatch(expression, -1) {
-		service, member := m[1], m[2]
-		if kitIntrinsics[service] {
-			continue
+	for _, m := range kitReadRe.FindAllStringSubmatch(withoutStringLiterals(expression), -1) {
+		via, known := kitViews[m[1]]
+		if !known {
+			via = "a component whose JavaScript calls kit." + m[1]
 		}
-		granted, hasGrant := grantedBy[service]
-		if !hasGrant {
-			if knownServic[service] {
-				*into = append(*into, fmt.Sprintf(
-					"kit.%s is not available to markup — the kernel registers it but grants nothing to "+
-						"expressions, so kit.%s.%s reads as undefined and this does nothing. Call it from "+
-						"component JavaScript instead — in %s", service, service, member, where))
-			} else {
-				*into = append(*into, fmt.Sprintf(
-					"kit.%s is not a service the kernel registers, so kit.%s.%s reads as undefined and "+
-						"this does nothing — in %s", service, service, member, where))
-			}
-			continue
-		}
-		found := false
-		for _, name := range granted {
-			if name == member {
-				found = true
-				break
-			}
-		}
-		if !found {
-			*into = append(*into, fmt.Sprintf(
-				"kit.%s.%s is not granted to markup, so it reads as undefined and this does nothing. "+
-					"kit.%s offers: %s — in %s",
-				service, member, service, strings.Join(granted, ", "), where))
-		}
+		*into = append(*into, fmt.Sprintf(
+			"markup does not call kit — kit.%s reads as nothing in an expression, so this does nothing. "+
+				"Reach it through %s — in %s", m[1], via, where))
 	}
 }
 

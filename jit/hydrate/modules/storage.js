@@ -61,8 +61,6 @@
     }
   };
 
-  kit.service("storage", storage, {
-    expression: ["get", "set", "remove", "clear"]
-  });
+  kit.service("storage", storage);
   kit.module("storage", storage);
 })(window);

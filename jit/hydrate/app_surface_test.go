@@ -2,81 +2,30 @@ package hydrate
 
 import "testing"
 
-// Trusted JavaScript owns the complete window.kit root. Markup resolves `kit` through a curated,
-// read-only service view: public platform methods are reachable, while runtime control internals and
-// the raw bridge transport are not. `$app` is not installed by the kernel.
-func TestKitExpressionSurfaceGrantsServicesDeniesInternals(t *testing.T) {
+// Markup has no kit (03/10). Trusted JavaScript owns the whole window.kit root; an expression gets
+// nothing under that name — it reads like any name nobody declared — so no service, no runtime
+// control and no raw bridge is reachable from markup. A page reaches a service through the component
+// that is its view (theme, progressbar, titlebar, clipboard). `$app` is not installed by the kernel.
+func TestMarkupHasNoKit(t *testing.T) {
 	const assertions = `
 var kit = window.kit;
+var invented = kit.run(kit.compile("nameNobodyDeclared"));
+if (kit.run(kit.compile("kit")) !== invented) throw new Error("markup still resolves kit to something");
 
-var services = kit.scope.kit;
-if (services === kit) throw new Error("markup received the trusted runtime root");
-if (typeof services.theme.toggle !== "function") throw new Error("kit.theme.toggle must be reachable in markup");
-if (services.theme.mode !== "system" || services.theme.resolved !== "light") throw new Error("kit.theme state missing: " + services.theme.mode + "/" + services.theme.resolved);
-if (typeof services.clipboard.writeText !== "function" ||
-    typeof services.clipboard.readText !== "function" ||
-    typeof services.clipboard.copy !== "function") throw new Error("kit.clipboard service incomplete");
-if (typeof services.camera.capture !== "function") throw new Error("kit.camera.capture missing");
-if (typeof services.navigation.back !== "function") throw new Error("kit.navigation.back missing");
-if (typeof services.window.minimize !== "function" ||
-    typeof services.window.restore !== "function" ||
-    typeof services.window.close !== "function") throw new Error("kit.window service incomplete");
-if (typeof services.capabilities.supports !== "function") throw new Error("kit.capabilities.supports missing");
-if (typeof services.dialog.confirm !== "function" ||
-    typeof services.share.open !== "function" ||
-    typeof services.storage.get !== "function") throw new Error("web service grants incomplete");
-if (services.window.drag !== undefined) throw new Error("private window.drag leaked to markup");
-if (services.permissions !== undefined) throw new Error("ungranted permissions service leaked to markup");
-if (services.toggleTheme !== undefined || services.back !== undefined || services.minimize !== undefined) {
-  throw new Error("deprecated flat aliases leaked to markup");
+// The control: JavaScript still has it all, so the refusals below are about markup.
+if (typeof kit.theme.toggle !== "function" || typeof kit.destroy !== "function") throw new Error("precondition: the trusted root is intact");
+
+var mode = kit.theme.mode;
+if (kit.run(kit.compile("kit.theme.toggle()")) !== undefined || kit.theme.mode !== mode) {
+  throw new Error("markup reached kit.theme");
 }
-
-if (typeof kit.destroy !== "function") throw new Error("precondition: kit.destroy exists on the runtime root");
-["bridge", "destroy", "internal", "render", "run", "compile", "component", "module", "service", "scope", "has"].forEach(function (name) {
-  if (services[name] !== undefined) {
-    throw new Error("expression kit." + name + " leaked a private/runtime control API");
-  }
+["kit.window.minimize()", "kit.clipboard.copy('x')", "kit.destroy()", "kit.bridge", "kit.internal", "kit.service('x', 1)"].forEach(function (source) {
+  if (kit.run(kit.compile(source)) !== undefined) throw new Error("markup reached " + source);
 });
-["toString", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__"].forEach(function (name) {
-  if (services[name] !== undefined) {
-    throw new Error("expression kit inherited an ungranted prototype method: " + name);
-  }
-});
+var destroy = kit.destroy;
+kit.run(kit.compile("kit.__defineGetter__('destroy', 1)"));
+if (kit.destroy !== destroy) throw new Error("an expression mutated the trusted runtime");
 
-var originalDestroy = kit.destroy;
-var originalToggle = kit.theme.toggle;
-kit.run(kit.compile("kit.__defineGetter__('destroy', kit.theme.toggle)"));
-kit.run(kit.compile("kit.theme.__defineGetter__('toggle', kit.theme.toggle)"));
-if (kit.destroy !== originalDestroy || kit.theme.toggle !== originalToggle) {
-  throw new Error("expression mutated the trusted runtime through a prototype meta-method");
-}
-
-var privateService = {
-  value: 7,
-  visible: function () { return this === privateService ? this.value : -1; },
-  secret: function () { return 99; }
-};
-kit.service("probe", privateService, { expression: ["value", "visible"] });
-if (services.probe.value !== 7 || services.probe.visible() !== 7) {
-  throw new Error("registered service members or this-binding are broken");
-}
-if (services.probe.secret !== undefined) throw new Error("ungranted service member leaked");
-if (kit.run(kit.compile("kit.probe.visible()")) !== 7) {
-  throw new Error("expression walker could not invoke a dynamically registered service");
-}
-if (kit.run(kit.compile("kit.probe.secret()")) !== undefined) {
-  throw new Error("expression walker invoked an ungranted service member");
-}
-try { services.probe.value = 9; } catch (_) { }
-if (privateService.value !== 7 || services.probe.value !== 7) {
-  throw new Error("expression service facade was writable");
-}
-privateService.value = 8;
-if (services.probe.value !== 8) throw new Error("expression service property was snapshotted");
-var windowResult = kit.run(kit.compile("kit.window.minimize()"));
-if (!windowResult || typeof windowResult.then !== "function") {
-  throw new Error("curated kit.window service did not pass the global-key blocklist safely");
-}
 kit.bridge = {
   call: function () { return Promise.reject(new Error("native window command failed")); }
 };
@@ -92,18 +41,17 @@ try {
   if (error.message === "blocked service name was accepted") throw error;
 }
 
-kit.component("collision", { label: "must-not-replace-kit" });
+// A page cannot hand markup a kit either: an alias is a $-name, so "kit" is not one.
+kit.component("collision", { label: "must-not-become-kit" });
 var collision = el("div", { "data-kit-component": "collision", "data-kit-alias": "kit" });
 document.body.appendChild(collision);
 kit.render();
-if (kit.scope.kit !== services || kit.scope.kit.label !== undefined) {
-  throw new Error("a component alias replaced the reserved kit service identifier");
-}
+if (kit.run(kit.compile("kit.label")) !== undefined) throw new Error("a component alias became kit");
 
 if (kit.scope.$app !== 0) throw new Error("$app must not exist before an app component registers it");
-console.log("kit expression services: exact grants, default-deny, prototype-safe, no implicit $app");
+console.log("markup has no kit; JavaScript keeps it all; no implicit $app");
 `
-	runNodeDOMScript(t, "kit_expression_surface.test.js", dragDirective(t)+"\n"+assertions)
+	runNodeDOMScript(t, "markup_has_no_kit.test.js", dragDirective(t)+"\n"+assertions)
 }
 
 // `$app` is an ordinary component alias. The application opts into it explicitly, owns its state

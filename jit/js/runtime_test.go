@@ -14,13 +14,16 @@ import (
 // `dropdown` went too, and stays gone: opening a panel is a scope flag and a show. What replaced
 // it is `menu`, which does the part a flag cannot — where focus lands, and how the arrows walk —
 // standing to it as `tabs` stands to the deleted `tab`.
+//
+// `theme` was deleted on 23/09, when markup called kit.theme directly, and returned on 03/10 as the
+// page's view of kit.theme, once markup stopped calling kit. `progressbar` is the view of kit.progress.
 func TestHasComponent(t *testing.T) {
-	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast", "menu", "scrolled"} {
+	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast", "menu", "scrolled", "theme", "progressbar"} {
 		if !HasComponent(n) {
 			t.Errorf("expected component module %q", n)
 		}
 	}
-	for _, gone := range []string{"toggle", "tab", "dismiss", "get", "more", "submit", "copy", "dropdown", "theme"} {
+	for _, gone := range []string{"toggle", "tab", "dismiss", "get", "more", "submit", "copy", "dropdown"} {
 		if HasComponent(gone) {
 			t.Errorf("%q was deleted: the grammar or the platform covers it", gone)
 		}

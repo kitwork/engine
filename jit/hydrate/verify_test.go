@@ -17,50 +17,30 @@ func verifyOf(t *testing.T, html string) string {
 	return strings.Join(authoringMistakes(html), "\n")
 }
 
-// kit.theme.system() existed on the service and was missing from its expression grant. In markup it
-// read as undefined, the call returned undefined, the button did nothing, the console stayed clean.
-func TestVerifyNamesAnUngrantedServiceMember(t *testing.T) {
-	report := verifyOf(t, `<button data-kit-click="kit.theme.systen()">x</button>`)
-
-	if !strings.Contains(report, "kit.theme") || !strings.Contains(report, "systen") {
-		t.Errorf("an ungranted service member was not reported:\n%s", report)
-	}
-	// The report has to say what IS available, or the author is left guessing at a spelling.
-	if !strings.Contains(report, "toggle") {
-		t.Errorf("the report should name the members that do exist:\n%s", report)
-	}
-
-	// CONTROL: the members that ARE granted must stay silent, or the check is just noise.
-	//
-	// kit.window is here on purpose. The first grant reader ran one regex across all three modules
-	// and swallowed window's grant into the span of an earlier, ungranted service — so a real
-	// titlebar (huynhnhanquoc.com) got three false alarms for calls that work. native.js declares
-	// window AFTER several services that grant nothing, which is exactly the shape that broke it.
-	for _, fine := range []string{
-		`<button data-kit-click="kit.theme.toggle()">x</button>`,
-		`<button data-kit-click="kit.theme.set('dark')">x</button>`,
-		`<b data-kit-text="kit.theme.mode"></b>`,
-		`<button data-kit-click="kit.clipboard.copy('x')">x</button>`,
-		`<button data-kit-click="kit.window.minimize()">x</button>`,
-		`<button data-kit-click="kit.window.close()">x</button>`,
-		`<button data-kit-click="kit.storage.set('k', 1)">x</button>`,
+// Markup has no kit (03/10). A kit.<service> in an expression reads as nothing and does nothing in
+// silence, so every one is named at render, with the component that is that service's view.
+func TestVerifyNamesAnyKitInMarkup(t *testing.T) {
+	for source, view := range map[string]string{
+		`<button data-kit-click="kit.theme.toggle()">x</button>`:                "the theme component",
+		`<b data-kit-text="kit.theme.resolved"></b>`:                            "the theme component",
+		`<button data-kit-click="kit.window.close()">x</button>`:                "the titlebar component",
+		`<button data-kit-click="kit.clipboard.copy('x')">x</button>`:           "the clipboard component",
+		`<button data-kit-click="kit.permissions.request('camera')">x</button>`: "calls kit.permissions",
 	} {
-		if report := verifyOf(t, fine); report != "" {
-			t.Errorf("a granted member was reported as a mistake: %s\n%s", fine, report)
+		report := verifyOf(t, source)
+		if !strings.Contains(report, "markup does not call kit") || !strings.Contains(report, view) {
+			t.Errorf("%s: want a report naming %q, got:\n%s", source, view, report)
 		}
 	}
-}
-
-// A service the kernel does not expose to markup at all — permissions, files, the bridge — must be
-// named too, and named differently: the member is not the problem, the whole service is.
-func TestVerifyNamesAServiceMarkupCannotReach(t *testing.T) {
-	report := verifyOf(t, `<button data-kit-click="kit.permissions.request('camera')">x</button>`)
-
-	if !strings.Contains(report, "kit.permissions") {
-		t.Errorf("an ungranted service was not reported:\n%s", report)
-	}
-	if !strings.Contains(report, "not available") && !strings.Contains(report, "cannot") {
-		t.Errorf("the report should say the service is out of reach, not blame the member:\n%s", report)
+	// CONTROL: what only looks like kit stays silent.
+	for _, fine := range []string{
+		`<b data-kit-text="'kit.theme is a service'"></b>`,
+		`<b data-kit-text="item.kit.name"></b>`,
+		`<button data-kit-component="theme" data-kit-click="toggle()">x</button>`,
+	} {
+		if report := verifyOf(t, fine); strings.Contains(report, "markup does not call kit") {
+			t.Errorf("%s was reported as a kit call:\n%s", fine, report)
+		}
 	}
 }
 
@@ -150,7 +130,6 @@ func TestVerifyIsSilentOnCorrectMarkup(t *testing.T) {
   <ul data-kit-show="open" hidden>
     <li data-kit-for="item, i of items" data-kit-key="item.id" data-kit-text="item.name + ' ' + i"></li>
   </ul>
-  <b data-kit-text="kit.theme.resolved"></b>
   <input data-kit-model="count" data-kit-debounce="200">
 </div>`
 	if report := verifyOf(t, html); report != "" {

@@ -174,9 +174,7 @@
     // can choose between maximise and restore, or label its own button.
     isMaximized: function () { return windowCall("isMaximized"); }
   };
-  kit.service("window", windowService, {
-    expression: ["minimize", "maximize", "restore", "close", "isMaximized"]
-  });
+  kit.service("window", windowService);
 
   Object.defineProperties(kit, {
     minimize: {
