@@ -74,7 +74,7 @@ Hướng nghiên cứu: `data-kit-seed` trên host, hoặc một dạng tham s�
 
 Token (`canvas`, `paper`, `ink`, `line`, `brand`) → class chất liệu → biến thể theo state
 (`data-[state=open]:…`, `aria-[expanded=true]:…`). Dùng thẻ HTML đúng nghĩa trước khi thêm ARIA
-(`<output>` cho kết quả, `<dialog>` cho hộp thoại, `<button>` cho nút).
+(`<dialog>` cho hộp thoại, `<button>` cho nút). Không dùng `<output>`: con số hiển thị là `<span>`.
 
 ## 6. Nền tảng
 
@@ -117,7 +117,7 @@ Tầng **mẫu** — không cần JS:
 ```html
 <div data-kit-scope="count: 0">
   <button data-kit-click="count--" data-kit-bind:disabled="count <= 0" aria-label="Giảm">−</button>
-  <output data-kit-text="count">0</output>
+  <span data-kit-text="count">0</span>
   <button data-kit-click="count++" data-kit-bind:disabled="count >= 10" aria-label="Tăng">+</button>
 </div>
 ```
@@ -141,7 +141,7 @@ kit.component("counter", {
 ```html
 <div data-kit-component="counter" data-kit-alias="$counter" data-kit-event:changed="total = $event.detail.count">
   <button data-kit-click="decrement()" data-kit-bind:disabled="count <= min" aria-label="Giảm">−</button>
-  <output data-kit-text="count">0</output>
+  <span data-kit-text="count">0</span>
   <button data-kit-click="increment()" data-kit-bind:disabled="count >= max" aria-label="Tăng">+</button>
 </div>
 <button data-kit-click="$counter.set(0)">Đặt lại</button>
