@@ -62,6 +62,12 @@ func isDigit(c byte) bool  { return c >= '0' && c <= '9' }
 
 // lex turns the source into tokens. It is byte-oriented for the ASCII structure; string-literal
 // contents are sliced from the source so UTF-8 (e.g. Vietnamese, emoji) is preserved verbatim.
+// strMark leads a string token's value, so no string can be mistaken for the operator it spells:
+// the parser compares a token's value with "!", "(", "[" and the rest, and before 03/10 the string
+// '!' WAS the not operator — data-kit-text="'!'" failed to parse, as did '(' or '-'. No operator
+// starts with a NUL byte; the parser strips the mark where it reads a string's value.
+const strMark = "\x00"
+
 func lex(s string) ([]tok, error) {
 	var out []tok
 	i, n := 0, len(s)
@@ -140,7 +146,7 @@ func lex(s string) ([]tok, error) {
 			if !closed {
 				return nil, errors.New("hydrate: unterminated string")
 			}
-			out = append(out, tok{"str", b.String()})
+			out = append(out, tok{"str", strMark + b.String()})
 			i = j + 1
 		case isIDStart(c):
 			j := i
@@ -469,7 +475,7 @@ func (p *parser) primary() (any, error) {
 		return []any{"#", f}, nil
 	case "str":
 		p.next()
-		return []any{"#", t.v}, nil
+		return []any{"#", strings.TrimPrefix(t.v, strMark)}, nil
 	case "id":
 		p.next()
 		switch t.v {
@@ -516,7 +522,7 @@ func (p *parser) primary() (any, error) {
 				if err != nil {
 					return nil, err
 				}
-				pairs = append(pairs, []any{kt.v, v})
+				pairs = append(pairs, []any{strings.TrimPrefix(kt.v, strMark), v})
 				if p.peek().v == "," {
 					p.next() // objects allow a trailing comma (server-language convention)
 					continue

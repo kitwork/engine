@@ -166,7 +166,8 @@
           k++;
         }
         if (!closed) throw new Error("hydrate: unterminated string");
-        out.push({ t: "str", v: text }); i = k + 1; continue;
+        // "\0" leads a string's value so '!' or '(' is never taken for the operator it spells.
+        out.push({ t: "str", v: "\0" + text }); i = k + 1; continue;
       }
       if (/[A-Za-z_$]/.test(c)) {
         var m = i; while (m < n && /[A-Za-z0-9_$]/.test(s[m])) m++;
@@ -278,7 +279,7 @@
     function primary() {
       var t = peek();
       if (t.t === "num") { next(); return ["#", parseFloat(t.v)]; }
-      if (t.t === "str") { next(); return ["#", t.v]; }
+      if (t.t === "str") { next(); return ["#", t.v.slice(1)]; }
       if (t.t === "id") {
         next();
         if (t.v === "true") return ["#", true];
@@ -298,7 +299,7 @@
           var kt = next();
           if (kt.t !== "id" && kt.t !== "str") throw new Error("hydrate: bad object key " + kt.v);
           eat(":");
-          pairs.push([kt.v, assign()]);
+          pairs.push([kt.t === "str" ? kt.v.slice(1) : kt.v, assign()]);
           if (peek().v === ",") { next(); continue; } // objects allow a trailing comma
           break;
         }

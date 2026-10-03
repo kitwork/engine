@@ -93,5 +93,9 @@
   { "name": "null-plus-number",      "src": "n + 1",                                                      "scope": { "n": null },           "want": 1 },
   { "name": "missing-times-number",  "src": "cart.count * 2",                                             "scope": { "cart": {} },          "want": 0 },
   { "name": "bool-plus-number",      "src": "flag + 1",                                                   "scope": { "flag": true },        "want": 2 },
-  { "name": "string-plus-number",    "src": "label + 1",                                                  "scope": { "label": "a" },        "want": "a1" }
+  { "name": "string-plus-number",    "src": "label + 1",                                                  "scope": { "label": "a" },        "want": "a1" },
+  { "name": "string-bang",           "src": "'!'",                                                        "scope": {},                      "want": "!" },
+  { "name": "string-open-paren",     "src": "'(' + n + ')'",                                              "scope": { "n": 3 },              "want": "(3)" },
+  { "name": "string-minus",          "src": "n > 0 ? '+' : '-'",                                          "scope": { "n": -1 },             "want": "-" },
+  { "name": "string-key-object",     "src": "{ \"a\": 1 }",                                                "scope": {},                      "want": { "a": 1 } }
 ]
