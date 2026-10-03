@@ -164,7 +164,7 @@ global.window = {
 }
 
 func TestClientExpressionRuntimeAndCleanup(t *testing.T) {
-	runNodeSourceTest(t, Runtime()+"\nwindow.__firstAdded = added;\n"+Runtime(),
+	runNodeSourceTest(t, composedRuntime()+"\nwindow.__firstAdded = added;\n"+composedRuntime(),
 		`
 var added = 0;
 var removed = 0;

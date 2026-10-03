@@ -10,8 +10,6 @@ import (
 	"runtime"
 	"testing"
 	"time"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // KitJS shipped a `terminal` component: a code block with a title bar, a tab per file and a copy
@@ -49,7 +47,7 @@ func TestBrowserACodeBlockNeedsNoTerminalComponent(t *testing.T) {
     <pre data-kit-element="source"><code>app.web({ port: 8080 })</code></pre>
     <button id="broken" type="button" data-kit-click="copy($element.nosuch.textContent)">broken</button>
   </figure>
-  <script src="` + hydrate.RuntimePath + `"></script>
+  <script src="/kit.js"></script>
   <script>
   // Headless grants no clipboard permission, so the platform is stubbed: what is under test is the
   // kernel wiring — expression reads a named element, reaches the component, reaches the platform.
@@ -93,14 +91,15 @@ func TestBrowserACodeBlockNeedsNoTerminalComponent(t *testing.T) {
   </script>
 </body></html>`
 
+	delivered := deliverTestPage(t, page, []string{"clipboard"}, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(RuntimeJS([]string{"clipboard"})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}

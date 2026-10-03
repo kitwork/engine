@@ -92,6 +92,6 @@ func TestBrowserEditorEditsFromTheMarkupsButtons(t *testing.T) {
   assert(document.getElementById("empty").textContent === "empty" && document.getElementById("count").textContent === "0 words", "clear empties the text and the counts follow");
 
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }

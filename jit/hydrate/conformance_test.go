@@ -153,7 +153,7 @@ if (failures.length) { console.error(failures.join("\n")); process.exitCode = 1;
 else console.log("conformance: " + CORPUS.length + " cases — client agrees with server");
 `
 
-	script := setup + "\n" + Runtime() + "\n" + assertions
+	script := setup + "\n" + composedRuntime() + "\n" + assertions
 	path := filepath.Join(t.TempDir(), "conformance.test.js")
 	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
 		t.Fatal(err)

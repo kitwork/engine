@@ -37,13 +37,16 @@ func TestSidebarIsAbsentWhenUnused(t *testing.T) {
 	}
 }
 
-// The dashboard's markup already calls cycle/toggle/open/close. Promoting the component must not
-// break the page that motivated it, so the old spellings stay alongside the explicit ones.
+// The dashboard's markup calls cycle/toggle and the explicit drawer names. open()/close() went on
+// 23/09 (3941bc02) for openDrawer()/closeDrawer(); this test kept listing them and kept passing,
+// because it read the whole composed runtime and the kernel has an "open:" of its own. Meanwhile the
+// dashboard's mobile close button called close() into nothing. It reads the component's own file
+// now (03/10), and the dashboard calls closeDrawer().
 func TestSidebarKeepsTheAPIExistingMarkupCalls(t *testing.T) {
-	src := RuntimeJS([]string{"sidebar"})
+	src := ModulesJS([]string{"sidebar"})
 
 	for _, method := range []string{
-		"cycle:", "toggle:", "open:", "close:", // what huynhnhanquoc.com already calls
+		"cycle:", "toggle:", // what huynhnhanquoc.com already calls
 		"expand:", "collapse:", "hide:", // explicit rail control
 		"openDrawer:", "closeDrawer:", "toggleDrawer:", // explicit drawer control
 		"isExpanded:", "isCollapsed:", "isHidden:", // predicates for data-kit-show
@@ -58,7 +61,7 @@ func TestSidebarKeepsTheAPIExistingMarkupCalls(t *testing.T) {
 // so the component has to persist it itself. The drawer must NOT be persisted: a page that opens
 // with a mobile overlay already covering it is a bug, not a restored preference.
 func TestSidebarPersistsRailButNotDrawer(t *testing.T) {
-	src := RuntimeJS([]string{"sidebar"})
+	src := ModulesJS([]string{"sidebar"})
 
 	if !strings.Contains(src, "localStorage.setItem") || !strings.Contains(src, "localStorage.getItem") {
 		t.Fatal("rail state is not persisted, so a collapsed sidebar reopens expanded")

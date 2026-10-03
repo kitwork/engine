@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // menu is the last of the three kitwork.io needs, and the only one of them that earns being a
@@ -61,7 +59,7 @@ func TestBrowserMenuOwnsFocusAndLeavesOpeningToTheGrammar(t *testing.T) {
     </div>
   </div>
   <button id="elsewhere" type="button">elsewhere</button>
-  <script src="` + hydrate.RuntimePath + `"></script>
+  <script src="/kit.js"></script>
   <script>
   (async function () {
     var root = document.documentElement;
@@ -134,14 +132,15 @@ func TestBrowserMenuOwnsFocusAndLeavesOpeningToTheGrammar(t *testing.T) {
   </script>
 </body></html>`
 
+	delivered := deliverTestPage(t, page, []string{"menu"}, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(RuntimeJS([]string{"menu"})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}

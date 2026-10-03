@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // scrolled is the first of the three components kitwork.io needs before it can leave KitJS. It
@@ -62,7 +60,7 @@ func TestBrowserScrolledAnswersTheQuestionMarkupCannotAsk(t *testing.T) {
   <nav id="late" data-kit-component="scrolled" data-offset="500" data-scrolled="false" data-kit-bind:data-scrolled="scrolled ? 'true' : 'false'" style="position:fixed;top:40px;height:40px"></nav>
   <nav id="plain" data-kit-component="scrolled" style="position:fixed;top:80px;height:40px"><b id="said" data-kit-text="scrolled ? 'yes' : 'no'"></b></nav>
   <div style="height:3000px"></div>
-  <script src="` + hydrate.RuntimePath + `"></script>
+  <script src="/kit.js"></script>
   <script>
   (async function () {
     var root = document.documentElement;
@@ -113,14 +111,15 @@ func TestBrowserScrolledAnswersTheQuestionMarkupCannotAsk(t *testing.T) {
   </script>
 </body></html>`
 
+	delivered := deliverTestPage(t, page, []string{"scrolled"}, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(RuntimeJS([]string{"scrolled"})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}

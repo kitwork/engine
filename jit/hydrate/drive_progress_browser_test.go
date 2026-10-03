@@ -50,9 +50,9 @@ func driveBarTop(t *testing.T, browser, chrome string) string {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case RuntimePath:
+		case "/kit/kernel.js", "/kit/drive.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(Runtime()))
+			_, _ = response.Write([]byte(pageRuntimeFile(request.URL.Path)))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = response.Write([]byte(`<!doctype html><html data-kit-hydrate="v1"><head><meta charset="utf-8"><title>start</title></head>` +
@@ -79,7 +79,7 @@ func driveBarTop(t *testing.T, browser, chrome string) string {
 				     setTimeout(watch, 20);
 				   })();
 				 });</script>` +
-				`<script data-kitwork-jit="runtime" data-kitwork-drive src="/kit.js"></script></body></html>`))
+				pageRuntimeTags + `</body></html>`))
 		default:
 			http.NotFound(response, request)
 		}

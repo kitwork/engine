@@ -77,7 +77,7 @@ func TestBrowserContextMenuOpensWhereAskedAndStaysOnScreen(t *testing.T) {
   assert(panel.hidden, "an outside click closes it through data-kit-click:outside");
 
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }
 
@@ -114,6 +114,6 @@ func TestBrowserContextMenuLandsAtThePointerInsideATransformedFrame(t *testing.T
   assert(box.right <= innerWidth - 7 && box.bottom <= innerHeight - 7, "and is kept inside the view, its box ends at " + Math.round(box.right) + "," + Math.round(box.bottom) + " of " + innerWidth + "," + innerHeight);
 
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }

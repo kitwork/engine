@@ -34,7 +34,7 @@ func TestBrowserReloadOptsOutOfDrive(t *testing.T) {
 	page := func(title, body string) string {
 		return `<!doctype html><html data-kit-hydrate="v1"><head><meta charset="utf-8"><title>` + title +
 			`</title></head><body data-page="` + title + `">` + body +
-			`<script data-kitwork-jit="runtime" data-kitwork-drive src="/kit.js"></script></body></html>`
+			pageRuntimeTags + `</body></html>`
 	}
 
 	var mu sync.Mutex
@@ -46,9 +46,9 @@ func TestBrowserReloadOptsOutOfDrive(t *testing.T) {
 		mu.Unlock()
 		response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch request.URL.Path {
-		case RuntimePath:
+		case "/kit/kernel.js", "/kit/drive.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(Runtime()))
+			_, _ = response.Write([]byte(pageRuntimeFile(request.URL.Path)))
 		case "/":
 			// Click the ordinary link; Drive should take it without leaving the page.
 			_, _ = response.Write([]byte(page("start", `<a id="soft" href="/soft">soft</a>`+

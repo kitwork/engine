@@ -148,13 +148,13 @@ func requireNode(t *testing.T) string {
 	return ""
 }
 
-// runNodeDOMScript concatenates the DOM shim, the compiled kernel (Runtime()), and the test's own
+// runNodeDOMScript concatenates the DOM shim, the compiled kernel (composedRuntime()), and the test's own
 // assertion script, runs the whole thing under node, and fails on any non-zero exit. The assertion
 // script drives the real kernel (kit.component / kit.render / kit.scopeFor) and throws on mismatch.
 func runNodeDOMScript(t *testing.T, name, assertions string) {
 	t.Helper()
 	node := requireNode(t)
-	script := blockDOMShim + "\n" + Runtime() + "\n" + assertions
+	script := blockDOMShim + "\n" + composedRuntime() + "\n" + assertions
 	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
 		t.Fatal(err)

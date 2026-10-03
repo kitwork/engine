@@ -28,6 +28,6 @@ func TestBrowserAMovedHostKeepsItsListeners(t *testing.T) {
   key(el("one"), "ArrowDown"); await wait(40);
   assert(active() === "two", "a moved tree still walks with the arrows, focus is on " + active());
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }

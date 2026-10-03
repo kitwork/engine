@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // proofScriptHead is what every browser proof starts with: an assert that records its reason on
@@ -37,8 +35,9 @@ function active() { return document.activeElement ? (document.activeElement.id |
 `
 
 // runBrowserProof serves `body` (HTML plus a <script> that awaits its assertions and finally sets
-// data-kit-test="passed") with the kernel and the named components, drives it in a real headless
-// browser, and fails with the assertion's own words.
+// data-kit-test="passed") with the files Deliver gives it — the kernel, each component the markup
+// names, plus any named in components — drives it in a real headless browser, and fails with the
+// assertion's own words.
 func runBrowserProof(t *testing.T, label string, components []string, body string) {
 	t.Helper()
 	if testing.Short() {
@@ -48,23 +47,18 @@ func runBrowserProof(t *testing.T, label string, components []string, body strin
 	if browser == "" {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
-	page := "<!doctype html><html><body>" + body + "</body></html>"
-	page = strings.Replace(page, "<script>", "<script src=\""+hydrate.RuntimePath+"\"></script><script>"+proofScriptHead, 1)
+	page := "<!doctype html><html><head></head><body>" + body + "</body></html>"
+	page = strings.Replace(page, "<script>", "<script>"+proofScriptHead, 1)
+	delivered := deliverTestPage(t, page, components, nil)
 
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			// RuntimeJS composes the components a page NAMES, and with none it returns nothing at
-			// all — a grammar-only proof would then run with no kernel and fail for the wrong reason.
-			runtime := hydrate.Runtime()
-			if len(components) > 0 {
-				runtime = RuntimeJS(components)
-			}
-			_, _ = response.Write([]byte(runtime))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}

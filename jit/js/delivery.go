@@ -131,7 +131,11 @@ func DriveAsset() *Asset {
 	return cachedAsset("drive", func() *Asset { return buildAsset("drive", "drive", hydrate.DriveFile()) })
 }
 
-// wrapComponent gives a component a scope of its own (see ModulesJSFor for why).
+// wrapComponent gives a component a scope of its own. A component file is written as a plain script
+// — top-level `var` and `function` — and joined bare, every one of those became a global, so two
+// components with a helper of the same name overwrote each other: tree's nameOf replaced tabs',
+// menu's walk replaced context-menu's, and on a page with both the one loaded first quietly broke
+// (30/09). A component — including a site's own — cannot be trusted to wrap itself.
 func wrapComponent(source string) string {
 	return ";(function () {\n" + source + "\n})();"
 }

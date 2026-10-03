@@ -83,7 +83,7 @@ func TestBrowserTreeWalksFocusAlongTheShape(t *testing.T) {
   assert(el("readme").getAttribute("aria-selected") === "true", "a click selects through data-kit-click");
 
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }
 
@@ -121,6 +121,6 @@ func TestBrowserTreeTabStopFollowsSeedsAndRealFocus(t *testing.T) {
   assert(active() === "api", "ArrowDown starts from the focused item, focus is on " + active());
 
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }

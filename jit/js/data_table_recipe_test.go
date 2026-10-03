@@ -75,6 +75,6 @@ func TestBrowserDataTableIsGrammar(t *testing.T) {
   assert(sites() === "" && text("range") === "0–0 of 0" && text("pages") === "1 / 1", "no match, no rows, still one page, got " + text("range"));
 
   root.setAttribute("data-kit-test", "passed");
-})().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
 </script>`)
 }

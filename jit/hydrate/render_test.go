@@ -45,10 +45,10 @@ func TestValidateIsNoLongerAClientDirective(t *testing.T) {
 	if UsesGrammar(in) {
 		t.Error("a page whose only data-kit-* attribute is the retired validate needs no runtime")
 	}
-	if strings.Contains(Runtime(), `selector("validate")`) || strings.Contains(Runtime(), `"data-kit-validate"`) {
+	if strings.Contains(composedRuntime(), `selector("validate")`) || strings.Contains(composedRuntime(), `"data-kit-validate"`) {
 		t.Error("the kernel must not carry the validate pass any more")
 	}
-	if !strings.Contains(Runtime(), `[data-state="invalid"]`) {
+	if !strings.Contains(composedRuntime(), `[data-state="invalid"]`) {
 		t.Error("the submit gate must stay: it reads data-state, whoever wrote it")
 	}
 }
@@ -214,7 +214,7 @@ func TestRenderStrictPrefixOrigin(t *testing.T) {
 // The verb system (data-kit-action / data-kit-target, kit.fire, the compat surface) is gone too
 // (22/09): behaviour is a component or an expression, transport is Drive.
 func TestRuntimeEmbedded(t *testing.T) {
-	rt := Runtime()
+	rt := composedRuntime()
 	if strings.Contains(rt, "-ir") {
 		t.Error("the -ir suffix form is retired")
 	}
@@ -291,7 +291,7 @@ func TestRuntimeEmbedded(t *testing.T) {
 }
 
 func TestRuntimeCompositionOrder(t *testing.T) {
-	runtime := Runtime()
+	runtime := composedRuntime()
 	markers := []string{
 		"Kitwork native bridge adapter",
 		"Kitwork hydrate kernel",

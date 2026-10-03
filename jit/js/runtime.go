@@ -11,8 +11,7 @@
 //
 // THE CORE IS the kernel behind the canonical window.kit root (window.kitwork remains a
 // compatibility alias) and one delegated event system. Deliver (delivery.go) gives a page the
-// kernel and its components as one file per part. RuntimeJS composes them into one string, for the
-// browser test harnesses only.
+// kernel and its components as one file per part; there is no composed runtime any more.
 package js
 
 import (
@@ -233,57 +232,3 @@ func ModuleKeys(names []string) []string { return moduleKeys(names, nil) }
 
 // ModuleKeysFor is ModuleKeys for one tenant: its own _components count as known names.
 func ModuleKeysFor(names []string, site Site) []string { return moduleKeys(names, site) }
-
-// ModulesJS concatenates only the requested component modules. The shared kernel is served by
-// /kit.js; keeping this function separate lets the HTTP asset compose and cache each used set.
-func ModulesJS(names []string) string { return ModulesJSFor(names, nil) }
-
-// ModulesJSFor is ModulesJS for one tenant, so a site's own component ships in the same response.
-func ModulesJSFor(names []string, site Site) string {
-	keys := moduleKeys(names, site)
-	if len(keys) == 0 {
-		return ""
-	}
-
-	var b strings.Builder
-	for _, k := range keys {
-		_, name, _ := strings.Cut(k, ":")
-		if b.Len() > 0 {
-			b.WriteByte('\n')
-		}
-		// Each component runs in a scope of its own. A component file is written as a plain script
-		// — top-level `var` and `function` — and concatenated bare, every one of those became a
-		// global, so two components with a helper of the same name overwrote each other: tree's
-		// nameOf replaced tabs', menu's walk replaced context-menu's, and on a page with both the one
-		// loaded first quietly broke (30/09). A component — including a site's own — cannot be
-		// trusted to wrap itself.
-		b.WriteString(wrapComponent(componentSource(name, site)))
-	}
-	return b.String()
-}
-
-// RuntimeJS concatenates the unified kernel + each named module (deduped, sorted). It remains the
-// source builder for package distribution and tests; rendered pages use the cacheable HTTP asset.
-func RuntimeJS(names []string) string {
-	modules := ModulesJS(names)
-	if modules == "" {
-		return ""
-	}
-	return hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: modules, Drive: true, Native: true})
-}
-
-// SiteRuntimeJS is the whole-tenant form: the union of modules used across many templates (for a
-// future /jitjs service route, mirroring jit/icons SiteCSS).
-func SiteRuntimeJS(htmls ...string) string {
-	seen := make(map[string]bool)
-	var all []string
-	for _, h := range htmls {
-		for _, n := range scanComponents(h, nil) {
-			if !seen[n] {
-				seen[n] = true
-				all = append(all, n)
-			}
-		}
-	}
-	return RuntimeJS(all)
-}

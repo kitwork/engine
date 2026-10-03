@@ -32,51 +32,6 @@ var driveJS string
 //go:embed boot.js
 var bootJS string
 
-// Runtime returns the ordered client composition: bridge, kernel, modules, Morph, Drive, then
-// boot. It is identical for every tenant. Pages get it as files (KernelFile, DriveFile); the one
-// composed string is for the browser test harnesses.
-// Because the engine serves BOTH this runtime and the Go compiler from one codebase, the two ends
-// version together — grammar sync is by construction, not by discipline.
-// RuntimeParts is what a particular page needs. The runtime is not one indivisible blob: a site
-// that never asked for Drive has no use for the navigator or the DOM morph it drives, and paying
-// for them on every page is the same waste as shipping a component nobody named.
-type RuntimeParts struct {
-	// Modules is the page's own components, already composed by jit/js.
-	Modules string
-	// Drive ships the navigator and the DOM morph it drives — router.drive(). Measured 24/09 on the
-	// MINIFIED asset a visitor actually receives: 18,218 bytes gzip with it, 15,407 without, so it
-	// is 2,811 bytes on every page of a site that never asked. Nothing else calls kit.morph.
-	Drive bool
-	// Native ships the bridge and the 18 capability proxies that ride it. They only reach anything
-	// inside a desktop or mobile shell: in an ordinary browser window there is no WebView handle, so
-	// every call rejects with UNSUPPORTED. Measured 24/09 on the minified asset: 1,869 bytes gzip.
-	Native bool
-}
-
-// Runtime is every part, which is what a test harness or the published package wants.
-func Runtime() string {
-	return RuntimeFor(RuntimeParts{Drive: true, Native: true})
-}
-
-// RuntimeFor composes exactly the parts a page needs, in the one order that works: bridge and
-// kernel first, platform modules next, then the page's own modules, and boot LAST — a component
-// that registers after the first paint has missed it (see boot.js).
-func RuntimeFor(parts RuntimeParts) string {
-	pieces := []string{kernelJS}
-	if parts.Native {
-		// The bridge loads BEFORE the kernel: the kernel reads kit.platform as it initialises.
-		pieces = []string{bridgeJS, kernelJS, nativeJS}
-	}
-	pieces = append(pieces, storageJS, webJS)
-	if parts.Drive {
-		pieces = append(pieces, morphJS, driveJS)
-	}
-	if strings.TrimSpace(parts.Modules) != "" {
-		pieces = append(pieces, parts.Modules)
-	}
-	return strings.Join(append(pieces, bootJS), "\n")
-}
-
 // KernelFile is the kernel as a file of its own — the first of the separate files a page loads
 // (jit/js Deliver): the bridge when the app runs in a shell, the kernel, the platform modules and
 // boot. Boot can close this file rather than the whole composition because it waits for
@@ -91,6 +46,10 @@ func KernelFile(native bool) string {
 
 // DriveFile is Drive and the morph it drives, as a file of its own: only a site that asked for
 // router.drive() loads it, and it is the same file on every page of every such site.
+//
+// These two files are the whole client runtime; there is no composed one any more (03/10). Because
+// the engine serves them and the Go compiler from one codebase, the two ends version together —
+// grammar sync is by construction, not by discipline.
 func DriveFile() string {
 	return morphJS + "\n" + driveJS
 }
@@ -101,11 +60,6 @@ func DriveFile() string {
 func UsesGrammar(html string) bool {
 	return strings.Contains(html, authoredPrefix) && hasAuthoredDirective(html)
 }
-
-// RuntimePath is where the browser test harnesses serve the one-file composition (RuntimeFor) to
-// the pages they build. The engine routes no such path any more (03/10): a page gets its
-// JavaScript as one file per part, /kit/<part>.<hash>.js (jit/js delivery.go).
-const RuntimePath = "/kit.js"
 
 // There is no root marker: an authored directive outside an example block is what makes a page a
 // Kitwork page — so static pages (and demos that show data-* as example text) are never affected.

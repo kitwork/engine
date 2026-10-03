@@ -11,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // Two of apptop.vn's tenant components, VERBATIM (apps/…/apptop.vn/components, 22/09/2026), run on
@@ -163,20 +161,21 @@ func TestBrowserApptopTenantComponentsRunVerbatimOnTheKernel(t *testing.T) {
     assert(cleared === 1, "stats-live: context.cleanup ran on removal and cleared its interval (cleared=" + cleared + ")");
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
+	delivered := deliverTestPage(t, page, nil, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(hydrate.Runtime()))
 		case "/stats/data":
 			response.Header().Set("Content-Type", "application/json")
 			_, _ = response.Write([]byte(`{"ok":true,"stats":{"bids":42},"activities":[{"title":"Ship","kind":"bid","age":"1m","amountLabel":"1.000đ","bidLabel":"2.000đ"}]}`))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}
@@ -268,7 +267,7 @@ func TestBrowserShortcutComponentClicksItsHost(t *testing.T) {
     assert(clicks === 3, "the declared host still answers (" + clicks + ")");
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
 	rendered := deliver(page)
@@ -282,14 +281,15 @@ func TestBrowserShortcutComponentClicksItsHost(t *testing.T) {
 // headless browser, failing with whatever the page wrote into data-kit-test-error.
 func runKernelPage(t *testing.T, browser, page string, moduleNames []string) {
 	t.Helper()
+	delivered := deliverTestPage(t, page, moduleNames, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: ModulesJS(ModuleKeys(moduleNames)), Drive: true, Native: true})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}
@@ -388,7 +388,7 @@ func TestBrowserDialogComponentDrivesTheNativeElement(t *testing.T) {
     assert(removal.open === false && removal.returnValue === "keep", "an alertdialog closes on its own button");
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
 	runKernelPage(t, browser, page, scanComponents(page, nil))
@@ -495,7 +495,7 @@ func TestBrowserCatalogueComponentsHoldTheirContract(t *testing.T) {
     assert(typeof window.kit.blueprints.sidebar.openDrawer === "function", "sidebar: the explicit drawer spelling stays");
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
 	rendered := deliver(page)
@@ -576,7 +576,7 @@ func TestBrowserKeyCombinationModifier(t *testing.T) {
     assert(Number(read("typed")) >= 8, "the unfiltered handler should have counted every press, got " + read("typed"));
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
 	runKernelPage(t, browser, page, nil)
@@ -686,7 +686,7 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
     assert(document.activeElement === byId("v-two"), "ArrowRight is not the vertical tablist's key");
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
 	if !strings.Contains(deliver(page), "/kit/components/tabs@") {

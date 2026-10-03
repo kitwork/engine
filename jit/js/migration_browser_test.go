@@ -12,8 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // The verb system is gone; the sites that used it now say the same things with the kernel's own
@@ -89,21 +87,22 @@ func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
     assert(root.classList.contains("dark") !== dark, "theme: kit.theme.toggle() should flip the dark class");
 
     root.setAttribute("data-kit-test", "passed");
-  })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+  })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
 	rendered := deliver(page)
 	if !strings.Contains(rendered, "/kit/components/clipboard@") {
 		t.Fatalf("Deliver should bring the clipboard component for this page:\n%s", rendered)
 	}
+	delivered := deliverTestPage(t, page, nil, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(hydrate.RuntimeFor(hydrate.RuntimeParts{Modules: ModulesJS(ModuleKeys(scanComponents(page, nil))), Drive: true, Native: true})))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}

@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 	jittheme "github.com/kitwork/engine/jit/theme"
 )
 
@@ -42,7 +41,7 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
     <b id="out" data-kit-text="count * 21"></b>
     <button id="go" data-kit-click="count = count + 1">+</button>
   </div>
-  <script src="` + hydrate.RuntimePath + `"></script>
+  <script src="/kit.js"></script>
   <script src="/proof.js"></script>
 </body></html>`
 
@@ -77,18 +76,19 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
 	// What a site that takes CSP seriously writes. Note what is NOT here: 'unsafe-eval'.
 	const policy = "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'"
 
+	delivered := deliverTestPage(t, page, nil, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if delivered.serveFiles(response, request) {
+			return
+		}
 		switch request.URL.Path {
-		case hydrate.RuntimePath:
-			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-			_, _ = response.Write([]byte(hydrate.Runtime()))
 		case "/proof.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write([]byte(proof))
 		case "/":
 			response.Header().Set("Content-Security-Policy", policy)
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = response.Write([]byte(page))
+			_, _ = response.Write([]byte(delivered.html))
 		default:
 			http.NotFound(response, request)
 		}

@@ -33,25 +33,23 @@ func TestHasComponent(t *testing.T) {
 	}
 }
 
-func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
-	js := RuntimeJS([]string{"component:clipboard", "component:clipboard", "nope"})
-	if js == "" {
-		t.Fatal("expected runtime for a known component")
-	}
-	if !strings.Contains(js, "window.kit = kit") || !strings.Contains(js, "window.kitwork = kit") {
-		t.Errorf("core dispatcher missing: %s", js)
-	}
-	if !strings.Contains(js, `component("clipboard"`) {
-		t.Errorf("clipboard module missing: %s", js)
+func TestModulesOnlyUsedPlusCore(t *testing.T) {
+	js := ModulesJS([]string{"component:clipboard", "component:clipboard", "nope"})
+	if strings.Count(js, `component("clipboard"`) != 1 {
+		t.Errorf("clipboard should ship once, however often it is named: %s", js)
 	}
 	if strings.Contains(js, `component("dialog"`) {
 		t.Errorf("dialog should NOT be included (unused): %s", js)
 	}
-	if RuntimeJS([]string{"nope"}) != "" {
-		t.Error("only-unknown names should yield no runtime")
+	if ModulesJS([]string{"nope"}) != "" {
+		t.Error("only-unknown names should yield no module")
 	}
-	if strings.Contains(js, `components.action(`) || strings.Contains(js, "kit.fire") {
-		t.Errorf("the verb registry must not ship any more: %s", js)
+	kernel := string(KernelAsset().Body)
+	if !strings.Contains(kernel, "window.kit = window.kit") || !strings.Contains(kernel, "window.kitwork = kit") {
+		t.Errorf("core dispatcher missing from the kernel's file")
+	}
+	if strings.Contains(kernel+js, `components.action(`) || strings.Contains(kernel+js, "kit.fire") {
+		t.Error("the verb registry must not ship any more")
 	}
 }
 
