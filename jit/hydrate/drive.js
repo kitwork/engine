@@ -55,6 +55,9 @@
       var box = titleBar.getBoundingClientRect();
       return box.top <= 0 && box.bottom > 0 ? box.bottom : 0;
     }
+    function pageShowsProgress() {
+      return !!document.querySelector('[data-kit-component="progressbar"],[data-kit-component^="progressbar@"]');
+    }
     function progress(on) {
       cancelAnimationFrame(rafId);
       clearTimeout(barTimer);
@@ -62,8 +65,12 @@
         // Show only when the navigation is actually slow (>120ms) — prefetched/fast pages swap
         // before this fires and never flash the bar, so its behaviour reads as consistent.
         barTimer = setTimeout(function () {
-          if (!bar.isConnected) document.body.appendChild(bar);
           barShown = true;
+          // The navigation is work in flight like any other: it reports to kit.progress. A page that
+          // shows kit.progress itself — a progressbar component — gets no second bar from Drive.
+          if (kit.progress) kit.progress.start();
+          if (pageShowsProgress()) return;
+          if (!bar.isConnected) document.body.appendChild(bar);
           bar.style.top = barTop() + "px";
           bar.style.transition = "width .2s ease,opacity .3s";
           bar.style.opacity = "1"; bar.style.width = "0";
@@ -71,6 +78,7 @@
         }, 120);
       } else if (barShown) {
         barShown = false;
+        if (kit.progress) kit.progress.finish();
         bar.style.transition = "width .2s ease,opacity .4s"; bar.style.width = "100%";
         setTimeout(function () { bar.style.opacity = "0"; bar.style.width = "0"; }, 220);
       }

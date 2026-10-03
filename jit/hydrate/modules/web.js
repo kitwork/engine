@@ -393,6 +393,57 @@
     }
   };
 
+  // kit.progress — how far the work in flight has got: a page change (Drive reports it), an upload,
+  // a form being sent. One place for every source, so a page never shows two bars that disagree.
+  // JavaScript only: markup reads it through the progressbar component, whose getters read it here.
+  //   start()       work of unknown length — creeps toward 90%, never claiming to be done
+  //   update(n)     work of known length — exactly n percent
+  //   finish()      to 100%, then gone
+  // The last call wins. Every change asks the page to repaint, coalesced into one microtask: a call
+  // from inside an action must not paint in the middle of it.
+  var progressValue = 0, progressActive = false, progressTimer = 0, progressHide = 0, progressQueued = false;
+  function progressPaint() {
+    if (progressQueued) return;
+    progressQueued = true;
+    (typeof queueMicrotask === "function" ? queueMicrotask : function (f) { setTimeout(f, 0); })(function () {
+      progressQueued = false;
+      if (kit.runtime && kit.runtime.booted) kit.render();
+    });
+  }
+  function progressStop() {
+    clearInterval(progressTimer);
+    clearTimeout(progressHide);
+  }
+  var progress = {
+    start: function () {
+      progressStop();
+      progressValue = 10;
+      progressActive = true;
+      progressTimer = setInterval(function () {
+        if (progressValue < 90) { progressValue += (90 - progressValue) / 10; progressPaint(); }
+      }, 200);
+      progressPaint();
+    },
+    update: function (value) {
+      progressStop();
+      progressValue = Math.max(0, Math.min(100, Number(value) || 0));
+      progressActive = true;
+      progressPaint();
+    },
+    finish: function () {
+      progressStop();
+      if (!progressActive) return;
+      progressValue = 100;
+      progressPaint();
+      progressHide = setTimeout(function () { progressActive = false; progressValue = 0; progressPaint(); }, 300);
+    }
+  };
+  Object.defineProperties(progress, {
+    value: { get: function () { return progressValue; }, enumerable: true },
+    active: { get: function () { return progressActive; }, enumerable: true }
+  });
+  kit.service("progress", progress);
+
   kit.service("capabilities", capabilities, {
     expression: ["supports"]
   });
