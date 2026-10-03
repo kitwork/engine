@@ -85,5 +85,13 @@
   { "name": "optional-member",       "src": "user?.name ?? 'Guest'",                                      "scope": { "user": { "name": "Ann" } }, "want": "Ann" },
   { "name": "optional-index",        "src": "items?.[1]",                                                 "scope": { "items": [1, 2] },     "want": 2 },
   { "name": "optional-chain-deep",   "src": "a?.b?.c ?? 'none'",                                          "scope": { "a": { "b": null } },  "want": "none" },
-  { "name": "ternary-before-decimal","src": "on?.5:1",                                                    "scope": { "on": true },          "want": 0.5 }
+  { "name": "ternary-before-decimal","src": "on?.5:1",                                                    "scope": { "on": true },          "want": 0.5 },
+  { "name": "missing-in-string",     "src": "cart.name + ' items'",                                       "scope": { "cart": {} },          "want": " items" },
+  { "name": "string-then-missing",   "src": "'hi ' + user.name",                                          "scope": { "user": {} },          "want": "hi " },
+  { "name": "null-in-string",        "src": "name + '?'",                                                 "scope": { "name": null },        "want": "?" },
+  { "name": "missing-plus-number",   "src": "cart.count + 1",                                             "scope": { "cart": {} },          "want": 1 },
+  { "name": "null-plus-number",      "src": "n + 1",                                                      "scope": { "n": null },           "want": 1 },
+  { "name": "missing-times-number",  "src": "cart.count * 2",                                             "scope": { "cart": {} },          "want": 0 },
+  { "name": "bool-plus-number",      "src": "flag + 1",                                                   "scope": { "flag": true },        "want": 2 },
+  { "name": "string-plus-number",    "src": "label + 1",                                                  "scope": { "label": "a" },        "want": "a1" }
 ]

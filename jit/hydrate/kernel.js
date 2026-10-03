@@ -490,6 +490,13 @@
     if (op === "||") return l ? l : run(x[2], s);
     if (op === "??") return l != null ? l : run(x[2], s);
     var r = run(x[2], s);
+    // A value that is not there (null, undefined) is "" in a string and 0 in arithmetic, as on the
+    // server (eval.go): a missing cart.name never prints "undefined", a missing cart.count + 1 is 1.
+    if ("+-*/%".indexOf(op) >= 0) {
+      if (op === "+" && (typeof l === "string" || typeof r === "string")) return (l == null ? "" : l) + (r == null ? "" : r);
+      if (l == null) l = 0;
+      if (r == null) r = 0;
+    }
     switch (op) {
       case "+": return l + r; case "-": return l - r; case "*": return l * r; case "/": return l / r; case "%": return l % r;
       case ">": return l > r; case "<": return l < r; case ">=": return l >= r; case "<=": return l <= r;

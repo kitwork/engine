@@ -268,15 +268,15 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		if rs, ok := r.(string); ok {
 			return toStr(l) + rs, nil
 		}
-		return num(l) + num(r), nil
+		return arith(l) + arith(r), nil
 	case "-":
-		return num(l) - num(r), nil
+		return arith(l) - arith(r), nil
 	case "*":
-		return num(l) * num(r), nil
+		return arith(l) * arith(r), nil
 	case "/":
-		return num(l) / num(r), nil
+		return arith(l) / arith(r), nil
 	case "%":
-		return math.Mod(num(l), num(r)), nil
+		return math.Mod(arith(l), arith(r)), nil
 	case ">":
 		return num(l) > num(r), nil
 	case "<":
@@ -332,6 +332,16 @@ func truthy(v any) bool {
 
 // num coerces to number the JS way: bools → 0/1, numeric strings parse, "" → 0, nil → NaN
 // (nil stands for undefined — a MISSING scope key never reaches here, "$" already returns 0).
+// arith is a number for arithmetic. A value that is not there — null, or a member nobody set — is 0,
+// as an undeclared name is: a missing cart.count + 1 is 1, not NaN (03/10). In a string it is ""
+// (toStr), so a missing cart.name never prints "undefined". The kernel's walk does the same.
+func arith(v any) float64 {
+	if v == nil {
+		return 0
+	}
+	return num(v)
+}
+
 func num(v any) float64 {
 	switch t := v.(type) {
 	case float64:
