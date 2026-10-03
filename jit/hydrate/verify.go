@@ -23,7 +23,7 @@ import (
 // Markup never calls kit (03/10): a service reaches the page through the component that is its view,
 // and the kernel gives expressions no kit at all. kit.theme.toggle() would then read as nothing and
 // do nothing, in silence — so it is named here, with where the service is reached instead.
-var kitReadRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_$.])kit\s*\.\s*([A-Za-z][A-Za-z0-9]*)`)
+var kitReadRe = regexp.MustCompile(`(?:^|[^A-Za-z0-9_$.])kit\s*\??\.\s*([A-Za-z][A-Za-z0-9]*)`)
 
 // kitViews is the component that is each service's view, for the services a page reaches for most.
 var kitViews = map[string]string{
@@ -52,7 +52,7 @@ func checkKitReads(expression, where string, into *[]string) {
 // but a name declared nowhere at all is unambiguously a typo, and that is the case worth being
 // certain about.
 var (
-	elementNameRe     = regexp.MustCompile(`\$element\.([A-Za-z_][A-Za-z0-9_]*)`)
+	elementNameRe     = regexp.MustCompile(`\$element\??\.([A-Za-z_][A-Za-z0-9_]*)`)
 	declaredElementRe = regexp.MustCompile(`data-kit-element="([A-Za-z_][A-Za-z0-9_]*)"`)
 )
 

@@ -23,6 +23,7 @@ func TestVerifyNamesAnyKitInMarkup(t *testing.T) {
 	for source, view := range map[string]string{
 		`<button data-kit-click="kit.theme.toggle()">x</button>`:                "the theme component",
 		`<b data-kit-text="kit.theme.resolved"></b>`:                            "the theme component",
+		`<b data-kit-text="kit?.theme?.resolved"></b>`:                          "the theme component",
 		`<button data-kit-click="kit.window.close()">x</button>`:                "the titlebar component",
 		`<button data-kit-click="kit.clipboard.copy('x')">x</button>`:           "the clipboard component",
 		`<button data-kit-click="kit.permissions.request('camera')">x</button>`: "calls kit.permissions",

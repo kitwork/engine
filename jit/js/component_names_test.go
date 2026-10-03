@@ -134,7 +134,7 @@ func TestACallThroughAnAliasIsCheckedAgainstItsHost(t *testing.T) {
 	site := fakeSite{"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`}
 	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site, nil)) }
 
-	for _, call := range []string{`$sidebar.close()`, `open ? $sidebar.close() : 0`, `$sidebar . close()`} {
+	for _, call := range []string{`$sidebar.close()`, `open ? $sidebar.close() : 0`, `$sidebar . close()`, `$sidebar?.close()`} {
 		report := check(page(`<button data-kit-click="` + call + `">x</button>`))
 		if !strings.Contains(report, `reads $sidebar.close, which component sidebar does not have`) || !strings.Contains(report, "closeDrawer") {
 			t.Errorf("%s should be reported against the sidebar, got:\n%s", call, report)

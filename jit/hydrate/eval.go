@@ -250,6 +250,12 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		}
 		return eval(arr[2], scope, budget)
 	}
+	if op == "??" {
+		if l != nil {
+			return l, nil
+		}
+		return eval(arr[2], scope, budget)
+	}
 	r, err := eval(arr[2], scope, budget)
 	if err != nil {
 		return nil, err

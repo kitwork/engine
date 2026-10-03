@@ -77,5 +77,13 @@
   {"name": "string-escape-backslash", "src": "'back\\\\slash'.length", "scope": {}, "want": 10},
   {"name": "string-escape-unicode", "src": "'caf\\u00e9'", "scope": {}, "want": "café"},
   {"name": "string-escape-in-value", "src": "value.split('\\n').length", "scope": {"value": "one\ntwo\nthree"}, "want": 3},
-  {"name": "string-escape-unknown-keeps", "src": "'\\q'", "scope": {}, "want": "q"}
+  {"name": "string-escape-unknown-keeps", "src": "'\\q'", "scope": {}, "want": "q"},
+  { "name": "nullish-keeps-zero",    "src": "count ?? 1",                                                 "scope": { "count": 0 },          "want": 0 },
+  { "name": "nullish-on-null",       "src": "user ?? 'Guest'",                                            "scope": { "user": null },        "want": "Guest" },
+  { "name": "or-drops-zero",         "src": "count || 1",                                                 "scope": { "count": 0 },          "want": 1 },
+  { "name": "optional-member-null",  "src": "user?.name ?? 'Guest'",                                      "scope": { "user": null },        "want": "Guest" },
+  { "name": "optional-member",       "src": "user?.name ?? 'Guest'",                                      "scope": { "user": { "name": "Ann" } }, "want": "Ann" },
+  { "name": "optional-index",        "src": "items?.[1]",                                                 "scope": { "items": [1, 2] },     "want": 2 },
+  { "name": "optional-chain-deep",   "src": "a?.b?.c ?? 'none'",                                          "scope": { "a": { "b": null } },  "want": "none" },
+  { "name": "ternary-before-decimal","src": "on?.5:1",                                                    "scope": { "on": true },          "want": 0.5 }
 ]

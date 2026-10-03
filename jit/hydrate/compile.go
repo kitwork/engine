@@ -7,8 +7,11 @@
 //
 //	["#", literal]            literal (number | string | bool | null)
 //	["$", "name"]            variable read from scope ("$" itself = the PAGE scope object)
-//	[op, left, right]        binary: + - * / % > < >= <= == != === !== && ||
-//	                         (== and != coerce like JavaScript; === and !== are strict)
+//	[op, left, right]        binary: + - * / % > < >= <= == != === !== && || ??
+//	                         (== and != coerce like JavaScript; === and !== are strict; ?? takes
+//	                         the right side only when the left is null or undefined)
+//	                         a?.b, a?.[k] and f?.() compile to the plain ".", "idx" and "call":
+//	                         every access is already null-safe, so the ? adds nothing to keep
 //	["u!", e] / ["u-", e]    unary not / negate
 //	["?", c, a, b]           ternary c ? a : b
 //	["=", "name", value]     assignment to a scope variable (lexical: owner scope, else nearest)
@@ -156,7 +159,9 @@ func lex(s string) ([]tok, error) {
 				}
 			}
 			if i+1 < n {
-				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" || two == "++" || two == "--" {
+				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" || two == "++" || two == "--" || two == "??" ||
+					// ?. is optional chaining — unless a digit follows: a ? .5 : 1 is a ternary.
+					(two == "?." && !(i+2 < n && s[i+2] >= '0' && s[i+2] <= '9')) {
 					out = append(out, tok{"op", two})
 					i += 2
 					continue
@@ -174,7 +179,7 @@ func lex(s string) ([]tok, error) {
 }
 
 var precedence = map[string]int{
-	"||": 1, "&&": 2, "==": 3, "!=": 3, "===": 3, "!==": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6,
+	"||": 1, "??": 1, "&&": 2, "==": 3, "!=": 3, "===": 3, "!==": 3, ">": 4, "<": 4, ">=": 4, "<=": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6,
 }
 
 type parser struct {
@@ -362,6 +367,18 @@ func (p *parser) postfix() (any, error) {
 		return nil, err
 	}
 	for {
+		// a?.b, a?.[k], f?.() — the same reads as a.b, a[k], f(): every access is null-safe already.
+		if p.peek().v == "?." {
+			p.next()
+			if v := p.peek().v; v == "(" || v == "[" {
+				continue
+			}
+			if p.peek().t != "id" {
+				return nil, errors.New("hydrate: ?. needs a name, [ or ( after it")
+			}
+			p.toks[p.pos-1] = tok{"op", "."}
+			p.pos--
+		}
 		if p.peek().v == "." {
 			p.next()
 			name := p.next().v

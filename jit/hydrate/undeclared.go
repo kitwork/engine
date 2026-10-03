@@ -370,7 +370,7 @@ func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead, ali
 
 // aliasMemberRe reads `$alias.member`. The kernel's reserved handles ($this,
 // $host, $event, $element) never name a component, so they are not aliases here.
-var aliasMemberRe = regexp.MustCompile(`(\$[A-Za-z][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)`)
+var aliasMemberRe = regexp.MustCompile(`(\$[A-Za-z][A-Za-z0-9_]*)\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*)`)
 
 // withoutStringLiterals blanks the inside of every quoted string in an expression, so a `$x.y`
 // written inside one is not read as a member access.
