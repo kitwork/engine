@@ -18,13 +18,13 @@ var busy = el("button", { "aria-busy": "true", "data-kit-seed:aria-busy": "busy"
 var ul = el("ul");
 ["go", "sqlite", "html"].forEach(function (t) { var li = el("li", { "data-kit-seed": "tags[]" }); li.textContent = t; ul.appendChild(li); });
 var island = el("script", { "type": "application/json", "data-kit-seed": "items" }); island.textContent = '[{"id": 1, "name": "Ada"}, {"id": 2, "name": "Bob"}]';
-var out = el("output", { "data-kit-text": "title + '|' + user.email + '|' + count + '|' + expanded + '|' + busy + '|' + user.missing + '|' + tags.join(',') + '|' + items.length" });
+var out = el("output", { "data-kit-text": "title + '|' + user.email + '|' + count + '|' + expanded + '|' + busy + '|' + (user.missing === null) + '|' + tags.join(',') + '|' + items.length" });
 [title, email, age, details, busy, ul, island, out].forEach(function (n) { page.appendChild(n); });
 document.body.appendChild(page);
 kit.render();
 
 var scope = kit.scopeFor(page);
-if (out.textContent !== "Rendered by the server|ada@example.com|36|true|true|null|go,sqlite,html|2") throw new Error("seeded state, got " + JSON.stringify(out.textContent));
+if (out.textContent !== "Rendered by the server|ada@example.com|36|true|true|true|go,sqlite,html|2") throw new Error("seeded state, got " + JSON.stringify(out.textContent));
 if (title.textContent !== "Rendered by the server") throw new Error("the text binding re-renders the trimmed value, got " + JSON.stringify(title.textContent));
 if (scope.items[1].name !== "Bob") throw new Error("the JSON island should be parsed into state");
 
