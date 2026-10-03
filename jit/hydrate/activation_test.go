@@ -86,7 +86,7 @@ func TestDiagnosticsAreDevelopmentOnly(t *testing.T) {
 		}
 		stdout := os.Stdout
 		os.Stdout = write
-		Check(page)
+		Check(page, nil)
 		os.Stdout = stdout
 		_ = write.Close()
 		printed, _ := io.ReadAll(read)

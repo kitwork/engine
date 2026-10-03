@@ -313,15 +313,17 @@ func hasAuthoredDirective(html string) bool {
 var exampleBlockRe = regexp.MustCompile(`(?s)<(pre|code)[^>]*>.*?</(pre|code)>`)
 
 // reportAuthoringMistakes prints everything the server can see and the browser would only whisper.
-func reportAuthoringMistakes(html string) {
-	for _, line := range authoringMistakes(html) {
+func reportAuthoringMistakes(html string, components ComponentNames) {
+	for _, line := range authoringMistakesWith(html, components) {
 		fmt.Printf("[hydrate] %s\n", line)
 	}
 }
 
 // authoringMistakes is the same pass without the printing, so a test can read what an author
 // would be told rather than capturing stdout — and so the engine can decide where a report goes.
-func authoringMistakes(html string) []string {
+func authoringMistakes(html string) []string { return authoringMistakesWith(html, nil) }
+
+func authoringMistakesWith(html string, components ComponentNames) []string {
 	var found []string
 	html = withoutExamples(html)
 	declared := declaredElements(html)
@@ -362,7 +364,7 @@ func authoringMistakes(html string) []string {
 	}
 	// The costliest mistake an authored page can make is a name nothing declares: the kernel reads
 	// it as 0 and the markup looks right. The tree and the expressions are both here, so say it.
-	found = append(found, undeclaredWarnings(html)...)
+	found = append(found, undeclaredWarningsWith(html, components)...)
 	// A seed's value is a state target, not an expression; name a malformed one at render, as the
 	// kernel would only report it in the browser.
 	for _, m := range seedAttrRe.FindAllStringSubmatch(html, -1) {
@@ -373,7 +375,12 @@ func authoringMistakes(html string) []string {
 	return found
 }
 
-func Check(html string) {
+// ComponentNames answers, for a data-kit-component value, the names that component's scope holds,
+// or ok=false when they cannot be known for certain — which keeps that component opaque to the
+// checks, as every component was before 03/10. jit/js provides it, per site (ComponentNames there).
+type ComponentNames func(component string) (names []string, ok bool)
+
+func Check(html string, components ComponentNames) {
 	// Is this a Kitwork page? The markup says so by ITSELF — an authored directive is the evidence,
 	// and no marker attribute is required or read. The cheap string test comes first so an ordinary
 	// static page costs one scan for a substring and nothing else.
@@ -382,7 +389,7 @@ func Check(html string) {
 	}
 	// Authoring mistakes are reported for the person writing the page, so they are printed where a
 	// person is watching. In production nobody reads the server log for this, and the scan is not free.
-	reportAuthoringMistakes(html)
+	reportAuthoringMistakes(html, components)
 }
 
 // MarkDrive flags the runtime script tag so the client knows this site asked for Drive

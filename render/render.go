@@ -362,7 +362,7 @@ func (r *Render) applyStaticPresentation(out string) string {
 	// 3h. hydrate: verify every authored expression (compile-time linting, printed while developing).
 	// It reads the page and never changes it; the wire ships the SOURCE and the client parses it
 	// (no eval).
-	hydrate.Check(out)
+	hydrate.Check(out, jitjs.ComponentNames(r.siteComponents, r.versions))
 	// Drive is a site-wide choice (router.drive()); the engine flags its own runtime tag so the
 	// client can see the answer without the page carrying a marker for it.
 	if r.drive {

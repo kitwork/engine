@@ -21,8 +21,11 @@ import (
 // IT MUST NEVER CRY WOLF. A false warning would teach authors to ignore the channel that carries
 // the real ones, so every uncertainty ends the check instead of guessing:
 //
-//   - a component boundary anywhere in the chain → skip. Its state lives in JavaScript the server
-//     cannot read, so any name might be legitimate.
+//   - a component boundary whose names cannot be read for certain → skip. Its state lives in
+//     JavaScript; since 03/10 the server reads that JavaScript (jit/js component_names.go) — the
+//     blueprint's keys and every property its code assigns — and a component it reads is checked
+//     like a scope. One it cannot read (no source, a computed key, a shape the reader does not
+//     follow) stays opaque, and anything inside it is never reported.
 //   - a page that writes its own page scope from a script (kit.set, kit.scope.x = …) → skip the
 //     page scope entirely, since a name can then arrive from somewhere the markup does not show.
 //     Every other page HAS a readable page scope: a data-kit-model or data-kit-seed written outside
@@ -31,7 +34,7 @@ import (
 //   - markup the scanner cannot read confidently → stop the whole pass.
 //
 // What remains is the case that is actually knowable: a plain data-kit-scope boundary, whose names
-// are all written down in the markup itself.
+// are all written down in the markup itself, and a component whose source says what it holds.
 
 // reservedReadNames are always available inside an expression, so they are never undeclared.
 // It holds no $-names: the scanner skips those before it looks here (a $alias belongs to the page,
@@ -60,8 +63,12 @@ type boundary struct {
 	tag      string
 	depth    int
 	declared map[string]bool
-	opaque   bool      // a component boundary: its names are not knowable here
+	opaque   bool      // a component boundary whose names are not knowable here
 	parent   *boundary // reads fall through to it, exactly as the kernel's scope chain does
+	// component is the data-kit-component value of a host whose names ARE known — so a report can
+	// say which component lacks the name, and what it does have.
+	component string
+	names     []string
 }
 
 // undeclaredRead is one reported read, kept until the whole document is scanned because a name may
@@ -84,8 +91,10 @@ func wholeDocument(html string) bool {
 
 // undeclaredWarnings is the pass itself, kept apart from printing so a test can read exactly what
 // an author would be told.
-func undeclaredWarnings(html string) []string {
-	reads, ok := scanUndeclaredNames(html)
+func undeclaredWarnings(html string) []string { return undeclaredWarningsWith(html, nil) }
+
+func undeclaredWarningsWith(html string, components ComponentNames) []string {
+	reads, ok := scanUndeclaredNames(html, components)
 	if !ok {
 		return nil
 	}
@@ -94,10 +103,25 @@ func undeclaredWarnings(html string) []string {
 		if declared, knowable := chainDeclares(read.boundary, read.name); declared || !knowable {
 			continue
 		}
+		if host := nearestComponent(read.boundary); host != nil {
+			lines = append(lines, fmt.Sprintf("%s reads %q, which component %s does not have and no scope above it declares — so this expression quietly does nothing (%s has: %s). In %s",
+				read.attribute, read.name, host.component, host.component, strings.Join(host.names, ", "), read.tag))
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("%s reads %q, which no scope above it declares — a name nothing declares reads as 0, so this expression quietly does nothing. In %s",
 			read.attribute, read.name, read.tag))
 	}
 	return lines
+}
+
+// nearestComponent is the innermost known component host a read sits in, if any.
+func nearestComponent(from *boundary) *boundary {
+	for b := from; b != nil; b = b.parent {
+		if b.component != "" {
+			return b
+		}
+	}
+	return nil
 }
 
 // chainDeclares answers the question the kernel answers at runtime: walking out from this boundary,
@@ -117,7 +141,7 @@ func chainDeclares(from *boundary, name string) (declared bool, knowable bool) {
 
 // scanUndeclaredNames walks the markup and returns the reads worth reporting. ok is false when the
 // scanner met something it could not read confidently, in which case the caller reports nothing.
-func scanUndeclaredNames(html string) (reads []undeclaredRead, ok bool) {
+func scanUndeclaredNames(html string, components ComponentNames) (reads []undeclaredRead, ok bool) {
 	if !wholeDocument(html) {
 		return nil, false
 	}
@@ -178,7 +202,7 @@ func scanUndeclaredNames(html string) (reads []undeclaredRead, ok bool) {
 		selfClosing := strings.HasSuffix(strings.TrimSpace(tag[:len(tag)-1]), "/") || voidElements[name]
 
 		current := innermost(stack)
-		opened := readBoundary(tag, depth)
+		opened := readBoundary(tag, depth, components)
 		if opened != nil {
 			opened.parent = current
 			current = opened
@@ -220,13 +244,13 @@ func pageScopeIsWritten(html string) bool {
 		strings.Contains(html, "kitwork.set(") || strings.Contains(html, "kitwork.scope.")
 }
 
-// readBoundary returns the boundary a tag opens, or nil when it opens none. A component host opens
-// an OPAQUE boundary: the scan keeps walking so nesting stays right, but nothing inside it is ever
-// reported.
-func readBoundary(tag string, depth int) *boundary {
+// readBoundary returns the boundary a tag opens, or nil when it opens none. A component host whose
+// names cannot be read opens an OPAQUE boundary: the scan keeps walking so nesting stays right, but
+// nothing inside it is ever reported.
+func readBoundary(tag string, depth int, components ComponentNames) *boundary {
 	scope, hasScope := attributeValue(tag, "data-kit-scope")
-	_, opaque := attributeValue(tag, "data-kit-component")
-	if !hasScope && !opaque {
+	component, isComponent := attributeValue(tag, "data-kit-component")
+	if !hasScope && !isComponent {
 		return nil
 	}
 	declared := map[string]bool{}
@@ -235,7 +259,19 @@ func readBoundary(tag string, depth int) *boundary {
 			declared[match[1]] = true
 		}
 	}
-	return &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: opaque}
+	opened := &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: isComponent}
+	if isComponent && components != nil {
+		component = strings.TrimSpace(authoredAttribute(component))
+		if names, known := components(component); known {
+			for _, name := range names {
+				declared[name] = true
+			}
+			opened.opaque = false
+			opened.component = component
+			opened.names = names
+		}
+	}
+	return opened
 }
 
 // collectTagNames records what this tag declares into its boundary, and what it reads for checking.
