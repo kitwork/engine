@@ -638,6 +638,24 @@
   // are gone (B8, 22/09) — an empty attribute is an empty boundary, anything else must parse as
   // the literal or the boundary reports it. Inline blueprints are the same compiled grammar as
   // everything else — parsed, never eval'd — and being markup they are visible to the server.
+  // literalInto writes a host's data-kit-scope literal into its scope: a plain scope's whole state, or
+  // on a component host the values that override the blueprint's defaults — <div data-kit-component=
+  // "counter" data-kit-scope="min: 1, max: 99"> (03/10). Evaluated once, in the scope around the
+  // host, so `max: limit` reads the parent's limit; typed, as any expression is. False when there is
+  // no literal or it does not parse (which is reported).
+  function literalInto(b, target) {
+    var v = (b.getAttribute("data-kit-scope") || "").trim();
+    if (!v) return false;
+    try {
+      var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
+      var o = run(parse(lex(v.charAt(0) === "{" ? v : "{" + v + "}")), parent);
+      if (o && typeof o === "object") { for (var k in o) target[k] = o[k]; }
+      return true;
+    } catch (e) {
+      reportError(new Error("hydrate: data-kit-scope must be an object literal, braces optional (" + (e && e.message || e) + ")"), b, "data-kit-scope");
+      return false;
+    }
+  }
   function boundaryScope(b) {
     var st = state(b);
     var craw = b.getAttribute("data-kit-component");
@@ -654,6 +672,7 @@
       if (!st.seeded) {
         if (blueprints[cname]) {
           seedComponent(st.scope, blueprints[cname]);
+          literalInto(b, st.scope); // the host's own values over the blueprint's defaults (03/10)
           st.seeded = true;
           runInit(b);
         } else {
@@ -670,16 +689,7 @@
     }
     if (st.scope) return st.scope;
     st.scope = {};
-    var v = (b.getAttribute("data-kit-scope") || "").trim();
-    if (!v) return st.scope;
-    try {
-      var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
-      var o = run(parse(lex(v.charAt(0) === "{" ? v : "{" + v + "}")), parent);
-      if (o && typeof o === "object") { for (var k in o) st.scope[k] = o[k]; }
-      runInit(b);
-    } catch (e) {
-      reportError(new Error("hydrate: data-kit-scope must be an object literal, braces optional (" + (e && e.message || e) + ")"), b, "data-kit-scope");
-    }
+    if (literalInto(b, st.scope)) runInit(b);
     return st.scope;
   }
   // ---- init(context): the component's hands on its own DOM (ideaship-final §6, B9 one kernel) ----

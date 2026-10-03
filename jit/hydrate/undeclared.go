@@ -75,6 +75,9 @@ type boundary struct {
 	// say which component lacks the name, and what it does have.
 	component string
 	names     []string
+	// literal is the keys a data-kit-scope literal on a component host sets: parameters, each one a
+	// name the component must have.
+	literal []string
 }
 
 // aliasRead is `$alias.member` in an expression, checked against the alias's host once the whole
@@ -112,6 +115,11 @@ func undeclaredWarningsWith(html string, components ComponentNames) []string {
 	}
 	reads := scan.reads
 	var lines []string
+	for _, stray := range scan.strayParameters {
+		host := stray.boundary
+		lines = append(lines, fmt.Sprintf("data-kit-scope sets %q on component %s, which %s does not have — a parameter it never reads (%s has: %s). State of the page's own belongs on a data-kit-scope inside the host. In %s",
+			stray.name, host.component, host.component, host.component, strings.Join(host.names, ", "), stray.tag))
+	}
 	for _, read := range scan.aliasReads {
 		host := scan.aliases[read.alias]
 		if host == nil || host.component == "" {
@@ -136,6 +144,15 @@ func undeclaredWarningsWith(html string, components ComponentNames) []string {
 			read.attribute, read.name, read.tag))
 	}
 	return lines
+}
+
+func containsName(names []string, name string) bool {
+	for _, n := range names {
+		if n == name {
+			return true
+		}
+	}
+	return false
 }
 
 // nearestComponent is the innermost known component host a read sits in, if any.
@@ -169,6 +186,8 @@ func chainDeclares(from *boundary, name string) (declared bool, knowable bool) {
 type undeclaredScan struct {
 	reads      []undeclaredRead
 	aliasReads []aliasRead
+	// parameters a component host's literal sets that its component does not have
+	strayParameters []undeclaredRead
 	aliases    map[string]*boundary // alias → its component host; nil when two hosts claim it
 }
 
@@ -238,6 +257,14 @@ func scanUndeclaredNames(html string, components ComponentNames) (scan undeclare
 		if opened != nil {
 			opened.parent = current
 			current = opened
+			// A literal on a component host sets the component's parameters (counter's min, max), so
+			// a key it does not have is a typo — or state of the page's own, which belongs on a
+			// data-kit-scope inside the host. Only a component whose names are known is checked.
+			for _, key := range opened.literal {
+				if !containsName(opened.names, key) {
+					scan.strayParameters = append(scan.strayParameters, undeclaredRead{name: key, attribute: "data-kit-scope", tag: shortTag(tag), boundary: opened})
+				}
+			}
 			if alias, has := attributeValue(tag, "data-kit-alias"); has && opened.component != "" {
 				alias = strings.TrimSpace(authoredAttribute(alias))
 				if _, claimed := scan.aliases[alias]; claimed {
@@ -294,9 +321,11 @@ func readBoundary(tag string, depth int, components ComponentNames) *boundary {
 		return nil
 	}
 	declared := map[string]bool{}
+	var literal []string
 	if hasScope {
 		for _, match := range scopeLiteralKeyRe.FindAllStringSubmatch("{"+authoredAttribute(scope)+"}", -1) {
 			declared[match[1]] = true
+			literal = append(literal, match[1])
 		}
 	}
 	opened := &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: isComponent}
@@ -309,6 +338,7 @@ func readBoundary(tag string, depth int, components ComponentNames) *boundary {
 			opened.opaque = false
 			opened.component = component
 			opened.names = names
+			opened.literal = literal
 		}
 	}
 	return opened

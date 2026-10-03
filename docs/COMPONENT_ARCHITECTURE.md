@@ -63,8 +63,12 @@ khi đó lỗi viết sai bên trong nó không được báo. Ô riêng thì kh
 (2.0.0); sửa lỗi không đổi gì markup thấy → tại chỗ. Luật này — **CHỜ QUYẾT** (nó cũng trả lời
 `calendar@1.0.0` có thêm `focus()`).
 
-**Tham số từ markup** — chưa có cách chuẩn: muốn đổi `min`/`max` của counter phải sửa JS.
-Hướng nghiên cứu: `data-kit-seed` trên host, hoặc một dạng tham số riêng — **CHỜ QUYẾT**.
+**Tham số từ markup** (chốt 03/10): `data-kit-scope` ngay trên host đặt giá trị của instance đó,
+ghi đè mặc định của blueprint — `<div data-kit-component="counter" data-kit-scope="min: 1, max: 99">`.
+Có kiểu (số là số, `true` là boolean), tính **một lần** trong scope bao quanh host (`max: limit` đọc
+`limit` của cha), và đã nằm sẵn khi `init` chạy. Mỗi khoá phải là tên component có — server báo
+`mx: 99` lúc render, kèm danh sách tên; state riêng của trang thì đặt trong một `data-kit-scope`
+lồng bên trong host. Literal không liên kết: muốn luôn khớp với component khác thì đọc qua alias.
 
 ## 4. Ghép
 
@@ -120,14 +124,17 @@ domain của một chủ), `apps/<identity>/<domain>/_components/` (một site, 
 
 ## 7. Vòng đời
 
-`seed` → `init(context)` → vẽ → `context.afterRender` → `context.cleanup` khi bị gỡ.
+mặc định của blueprint → literal trên host → `seed` → `init(context)` → vẽ → `context.afterRender` →
+`context.cleanup` khi bị gỡ.
 
 - `context` có 9 khoá: `host owned element elements listen cleanup afterRender require emit`.
 - Method lấy lại đúng `context` đó bằng **`kit.context(this)`** — từ trong host, từ scope lồng bên
   trong, hay qua alias. Không cần tự cất context.
 - Mọi listener/hẹn giờ đăng ký qua `context` để được dọn khi host bị gỡ.
 - Drive giữ component qua lượt chuyển trang khi nó vẫn là cùng một thứ: cùng thẻ, cùng component,
-  cùng scope literal.
+  cùng scope literal. Vì vậy literal trên host cũng là cách nói "đây là thứ khác": trang sản phẩm A
+  `data-kit-scope="id: 'ao-thun'"` và trang B `id: 'quan-jean'` dựng lại từ đầu, không mang số lượng
+  của trang cũ sang.
 
 ## 8. Giao
 
@@ -183,6 +190,11 @@ kit.component("counter", {
 <button data-kit-click="$counter.set(0)">Đặt lại</button>       <!-- gọi hành động qua alias -->
 ```
 
-Counter không phát sự kiện nào: trang muốn biết con số thì đọc `$counter.count`.
+Counter không phát sự kiện nào: trang muốn biết con số thì đọc `$counter.count`. Một counter khác
+khoảng thì truyền tham số trên host, không sửa JS:
+
+```html
+<div data-kit-component="counter" data-kit-scope="min: 1, max: 99, count: 1">…</div>
+```
 
 Server báo lúc render nếu viết `incremnt()` trong host, hoặc `$counter.reset()` ở ngoài.
