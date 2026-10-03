@@ -35,6 +35,12 @@ import (
 //
 // What remains is the case that is actually knowable: a plain data-kit-scope boundary, whose names
 // are all written down in the markup itself, and a component whose source says what it holds.
+//
+// The same goes for a component reached from OUTSIDE its host, through its alias: `$sidebar.close()`
+// in a navbar. The kernel resolves `$sidebar` to the host's scope, so `$sidebar.close` is looked up
+// along the HOST's chain — the component, then the scopes around the host, then the page. The check
+// walks that chain. An alias the page does not declare on a component host, or declares on two,
+// says nothing: the handle could come from a script, or mean either.
 
 // reservedReadNames are always available inside an expression, so they are never undeclared.
 // It holds no $-names: the scanner skips those before it looks here (a $alias belongs to the page,
@@ -71,6 +77,12 @@ type boundary struct {
 	names     []string
 }
 
+// aliasRead is `$alias.member` in an expression, checked against the alias's host once the whole
+// document is scanned.
+type aliasRead struct {
+	alias, member, attribute, tag string
+}
+
 // undeclaredRead is one reported read, kept until the whole document is scanned because a name may
 // be declared by a data-kit-model or data-kit-seed further down inside the same boundary.
 type undeclaredRead struct {
@@ -94,11 +106,23 @@ func wholeDocument(html string) bool {
 func undeclaredWarnings(html string) []string { return undeclaredWarningsWith(html, nil) }
 
 func undeclaredWarningsWith(html string, components ComponentNames) []string {
-	reads, ok := scanUndeclaredNames(html, components)
+	scan, ok := scanUndeclaredNames(html, components)
 	if !ok {
 		return nil
 	}
+	reads := scan.reads
 	var lines []string
+	for _, read := range scan.aliasReads {
+		host := scan.aliases[read.alias]
+		if host == nil || host.component == "" {
+			continue // not declared on one readable component host: nothing is knowable
+		}
+		if declared, knowable := chainDeclares(host, read.member); declared || !knowable {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s reads %s.%s, which component %s does not have and no scope around it declares — so this expression quietly does nothing (%s has: %s). In %s",
+			read.attribute, read.alias, read.member, host.component, host.component, strings.Join(host.names, ", "), read.tag))
+	}
 	for _, read := range reads {
 		if declared, knowable := chainDeclares(read.boundary, read.name); declared || !knowable {
 			continue
@@ -141,10 +165,18 @@ func chainDeclares(from *boundary, name string) (declared bool, knowable bool) {
 
 // scanUndeclaredNames walks the markup and returns the reads worth reporting. ok is false when the
 // scanner met something it could not read confidently, in which case the caller reports nothing.
-func scanUndeclaredNames(html string, components ComponentNames) (reads []undeclaredRead, ok bool) {
+// undeclaredScan is what one pass over a document collects.
+type undeclaredScan struct {
+	reads      []undeclaredRead
+	aliasReads []aliasRead
+	aliases    map[string]*boundary // alias → its component host; nil when two hosts claim it
+}
+
+func scanUndeclaredNames(html string, components ComponentNames) (scan undeclaredScan, ok bool) {
 	if !wholeDocument(html) {
-		return nil, false
+		return scan, false
 	}
+	scan.aliases = map[string]*boundary{}
 	// The page scope is a boundary too — the outermost one. It is knowable from the markup unless
 	// the page writes it from a script, which nothing in the tree would show.
 	page := &boundary{tag: "page", depth: -1, declared: map[string]bool{}, opaque: pageScopeIsWritten(html)}
@@ -160,7 +192,7 @@ func scanUndeclaredNames(html string, components ComponentNames) (reads []undecl
 		if strings.HasPrefix(html[index:], "<!--") {
 			end := strings.Index(html[index:], "-->")
 			if end < 0 {
-				return nil, false
+				return scan, false
 			}
 			index += end + 3
 			continue
@@ -168,7 +200,7 @@ func scanUndeclaredNames(html string, components ComponentNames) (reads []undecl
 		if strings.HasPrefix(html[index:], "<!") || strings.HasPrefix(html[index:], "<?") {
 			end := strings.IndexByte(html[index:], '>')
 			if end < 0 {
-				return nil, false
+				return scan, false
 			}
 			index += end + 1
 			continue
@@ -176,7 +208,7 @@ func scanUndeclaredNames(html string, components ComponentNames) (reads []undecl
 		if strings.HasPrefix(html[index:], "</") {
 			end := strings.IndexByte(html[index:], '>')
 			if end < 0 {
-				return nil, false
+				return scan, false
 			}
 			name := strings.ToLower(strings.TrimSpace(html[index+2 : index+end]))
 			index += end + 1
@@ -192,12 +224,12 @@ func scanUndeclaredNames(html string, components ComponentNames) (reads []undecl
 
 		tagEnd := tagEndIndex(html, index)
 		if tagEnd < 0 {
-			return nil, false
+			return scan, false
 		}
 		tag := html[index : tagEnd+1]
 		name := tagName(tag)
 		if name == "" {
-			return nil, false
+			return scan, false
 		}
 		selfClosing := strings.HasSuffix(strings.TrimSpace(tag[:len(tag)-1]), "/") || voidElements[name]
 
@@ -206,8 +238,16 @@ func scanUndeclaredNames(html string, components ComponentNames) (reads []undecl
 		if opened != nil {
 			opened.parent = current
 			current = opened
+			if alias, has := attributeValue(tag, "data-kit-alias"); has && opened.component != "" {
+				alias = strings.TrimSpace(authoredAttribute(alias))
+				if _, claimed := scan.aliases[alias]; claimed {
+					scan.aliases[alias] = nil // two hosts, one handle: the kernel keeps the last; say nothing
+				} else {
+					scan.aliases[alias] = opened
+				}
+			}
 		}
-		collectTagNames(tag, current, &reads)
+		collectTagNames(tag, current, &scan.reads, &scan.aliasReads)
 
 		if opened != nil && !selfClosing {
 			stack = append(stack, opened)
@@ -223,12 +263,12 @@ func scanUndeclaredNames(html string, components ComponentNames) (reads []undecl
 			closing := "</" + name
 			at := strings.Index(strings.ToLower(html[index:]), closing)
 			if at < 0 {
-				return nil, false
+				return scan, false
 			}
 			index += at
 		}
 	}
-	return reads, true
+	return scan, true
 }
 
 // innermost is the boundary an expression resolves against; the page scope sits at the bottom of
@@ -275,7 +315,7 @@ func readBoundary(tag string, depth int, components ComponentNames) *boundary {
 }
 
 // collectTagNames records what this tag declares into its boundary, and what it reads for checking.
-func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead) {
+func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
 	if current == nil {
 		return
 	}
@@ -316,6 +356,9 @@ func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead) {
 		if err != nil {
 			continue // a malformed expression is already reported by the verify pass
 		}
+		for _, match := range aliasMemberRe.FindAllStringSubmatch(withoutStringLiterals(authoredAttribute(value)), -1) {
+			*aliasReads = append(*aliasReads, aliasRead{alias: match[1], member: match[2], attribute: attribute, tag: shortTag(tag)})
+		}
 		for _, name := range names {
 			if reservedReadNames[name] || strings.HasPrefix(name, "$") {
 				continue
@@ -323,6 +366,35 @@ func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead) {
 			*reads = append(*reads, undeclaredRead{name: name, attribute: attribute, tag: shortTag(tag), boundary: current})
 		}
 	}
+}
+
+// aliasMemberRe reads `$alias.member`. The kernel's reserved handles ($this,
+// $host, $event, $element) never name a component, so they are not aliases here.
+var aliasMemberRe = regexp.MustCompile(`(\$[A-Za-z][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_$][A-Za-z0-9_$]*)`)
+
+// withoutStringLiterals blanks the inside of every quoted string in an expression, so a `$x.y`
+// written inside one is not read as a member access.
+func withoutStringLiterals(expression string) string {
+	out := []byte(expression)
+	quote := byte(0)
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		switch {
+		case quote != 0 && c == '\\':
+			out[i] = ' '
+			if i+1 < len(out) {
+				i++
+				out[i] = ' '
+			}
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote != 0:
+			out[i] = ' '
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		}
+	}
+	return string(out)
 }
 
 // leadingName is the first identifier of a state target: `user.email` → user, `rows[]` → rows.

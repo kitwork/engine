@@ -124,6 +124,38 @@ func TestACallToAMissingMethodIsReportedAtRender(t *testing.T) {
 	}
 }
 
+// From outside the host, through the alias: `$sidebar.close()` in a navbar is looked up along the
+// sidebar host's chain — the component, then the scopes around the host, then the page.
+func TestACallThroughAnAliasIsCheckedAgainstItsHost(t *testing.T) {
+	page := func(outside string) string {
+		return `<html><body><div data-kit-scope="theme: 'dark'"><aside data-kit-component="sidebar" data-kit-alias="$sidebar"></aside></div>` +
+			`<nav>` + outside + `</nav></body></html>`
+	}
+	site := fakeSite{"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`}
+	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site, nil)) }
+
+	for _, call := range []string{`$sidebar.close()`, `open ? $sidebar.close() : 0`, `$sidebar . close()`} {
+		report := check(page(`<button data-kit-click="` + call + `">x</button>`))
+		if !strings.Contains(report, `reads $sidebar.close, which component sidebar does not have`) || !strings.Contains(report, "closeDrawer") {
+			t.Errorf("%s should be reported against the sidebar, got:\n%s", call, report)
+		}
+	}
+	for label, html := range map[string]string{
+		"CONTROL: a method it has":                page(`<button data-kit-click="$sidebar.closeDrawer()">x</button>`),
+		"state it has":                            page(`<b data-kit-show="$sidebar.drawer">x</b>`),
+		"a name a scope around the host declares": page(`<b data-kit-text="$sidebar.theme">x</b>`),
+		"inside a string":                         page(`<b data-kit-text="'$sidebar.close'">x</b>`),
+		"an alias the page never declares":        page(`<button data-kit-click="$nobody.close()">x</button>`),
+		"an alias two hosts claim":                page(`<aside data-kit-component="sidebar" data-kit-alias="$sidebar"></aside><button data-kit-click="$sidebar.close()">x</button>`),
+		"the alias of a component it cannot read": `<html><body><div data-kit-component="workbench" data-kit-alias="$bench"></div><button data-kit-click="$bench.anything()">x</button></body></html>`,
+		"a reserved handle":                       page(`<button data-kit-click="$this.blur()">x</button>`),
+	} {
+		if report := check(html); report != "" {
+			t.Errorf("%s: nothing should be reported, got:\n%s", label, report)
+		}
+	}
+}
+
 func capturedCheck(t *testing.T, html string, components hydrate.ComponentNames) string {
 	t.Helper()
 	previous := hydrate.Diagnostics
