@@ -13,7 +13,7 @@ Mỗi phần giao diện có tên là một **đơn vị**, thuộc đúng một
 | Chất liệu | chỉ cần hình dạng | markup + class |
 | Mẫu | hành vi markup nói được | markup + ngữ pháp `data-kit-*` |
 | Component | hành vi markup không nói được: focus, phím, đo, hẹn giờ | markup + một file JS |
-| Dịch vụ | cần nền tảng: camera, file, cửa sổ | `kit.<tên>`, không có markup riêng |
+| Dịch vụ | cần nền tảng: camera, file, cửa sổ, tiến độ | `kit.<tên>`, **chỉ JS gọi**; markup chạm tới qua component mặt tiền (§6) |
 
 **Luật nâng tầng.** Đơn vị bắt đầu ở tầng thấp nhất. Chỉ lên tầng trên khi chỉ ra được đúng một việc
 tầng dưới không làm được, và ghi việc đó ở đầu file. Ví dụ: counter là **mẫu**
@@ -81,11 +81,42 @@ Token (`canvas`, `paper`, `ink`, `line`, `brand`) → class chất liệu → bi
 (`data-[state=open]:…`, `aria-[expanded=true]:…`). Dùng thẻ HTML đúng nghĩa trước khi thêm ARIA
 (`<dialog>` cho hộp thoại, `<button>` cho nút). Không dùng `<output>`: con số hiển thị là `<span>`.
 
-## 6. Nền tảng
+## 6. Nền tảng, dịch vụ và mặt tiền
 
 Một markup cho web, desktop, mobile. Khác biệt nền tảng chỉ đi qua dịch vụ `kit.<tên>`; component
 không tự rẽ nhánh theo nền tảng mà hỏi dịch vụ có sẵn không. Trên web, dịch vụ native trả
 `UNAVAILABLE`.
+
+**Markup không gọi `kit`** (chốt 03/10). `kit.<tên>` là thứ Kitwork cung cấp, giống nhau ở mọi site,
+và chỉ JS gọi. Trong biểu thức không có `kit` — nó đọc như một tên không ai khai báo — và server báo
+mọi `kit.<dịch vụ>` trong markup lúc render. Markup chạm tới một dịch vụ qua **component mặt tiền**
+của nó: getter đọc thẳng dịch vụ (không chép state), method chuyển thẳng lời gọi:
+
+```js
+kit.component("progressbar", {
+  get value()  { return kit.progress.value; },
+  get active() { return kit.progress.active; },
+  start() { kit.progress.start(); },
+  finish() { kit.progress.finish(); }
+});
+```
+
+| Dịch vụ (JS) | Mặt tiền (markup) |
+|---|---|
+| `kit.theme` | `theme` — `mode`, `resolved`, `toggle()`, `set(mode)`, `system()` |
+| `kit.progress` | `progressbar` — `value`, `active`, `start()`, `update(n)`, `finish()` |
+| `kit.window`, `kit.navigation` | `titlebar` — `minimize()`, `toggleMaximize()`, `close()`, `back()`, `forward()` |
+| clipboard | `clipboard` — `copy(text)`, `copied` |
+
+Dịch vụ tự báo kernel vẽ lại khi đổi giá trị ngoài một hành động (gom vào một microtask), nên mặt
+tiền luôn khớp mà không cần hẹn giờ hay ô riêng. `kit.progress` là nơi mọi việc đang chạy báo tiến độ
+(Drive báo việc chuyển trang); Drive chỉ tự vẽ thanh mặc định khi trang **không** có host
+`progressbar`, nên không bao giờ có hai thanh.
+
+**State nghiệp vụ không thuộc `kit`.** Giỏ hàng, phiên đăng nhập… là component của site (`$cart`,
+`$session`), mỗi việc một component, host đặt trong layout chung nếu cả trang cần. Không có `$app`
+gốc bắt buộc. Component ở ba mức: catalogue engine (mọi site), `apps/<identity>/_components/` (mọi
+domain của một chủ), `apps/<identity>/<domain>/_components/` (một site, ghi đè mức trên).
 
 ## 7. Vòng đời
 
