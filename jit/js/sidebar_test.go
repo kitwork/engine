@@ -11,9 +11,9 @@ import (
 
 func TestSidebarIsShippedWhenUsed(t *testing.T) {
 	html := `<body data-kit-component="sidebar" data-kit-alias="$sidebar"><button data-kit-click="cycle()">x</button></body>`
-	out := Render(html)
+	out := deliver(html)
 
-	if !strings.Contains(out, `components=component%3Asidebar`) {
+	if !strings.Contains(out, `/kit/components/sidebar@`) {
 		t.Fatalf("sidebar was not injected for markup that uses it:\n%s", out)
 	}
 	// The versioned alias must ship with it, or data-kit-component="sidebar@v1.0.0" silently
@@ -27,12 +27,12 @@ func TestSidebarIsShippedWhenUsed(t *testing.T) {
 // also pass on a build that inlines every component on every page.
 func TestSidebarIsAbsentWhenUnused(t *testing.T) {
 	html := `<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`
-	out := Render(html)
+	out := deliver(html)
 
-	if strings.Contains(out, `components=component%3Asidebar`) {
+	if strings.Contains(out, `/kit/components/sidebar@`) {
 		t.Fatal("sidebar shipped to a page that never mentions it")
 	}
-	if !strings.Contains(out, `components=component%3Adialog`) {
+	if !strings.Contains(out, `/kit/components/dialog@`) {
 		t.Fatal("the component that IS used should still ship")
 	}
 }

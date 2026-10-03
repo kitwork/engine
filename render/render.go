@@ -360,9 +360,9 @@ func (r *Render) applyStaticPresentation(out string) string {
 	out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive, Versions: r.versions})
 
 	// 3h. hydrate: verify every authored expression (compile-time linting, printed while developing).
-	// The kernel reference is already in the page from 3e, so this adds no second one; the wire ships
-	// the SOURCE and the client parses it (no eval).
-	out = hydrate.Render(out)
+	// It reads the page and never changes it; the wire ships the SOURCE and the client parses it
+	// (no eval).
+	hydrate.Check(out)
 	// Drive is a site-wide choice (router.drive()); the engine flags its own runtime tag so the
 	// client can see the answer without the page carrying a marker for it.
 	if r.drive {

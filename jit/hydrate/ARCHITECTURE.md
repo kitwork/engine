@@ -1,7 +1,9 @@
 # Kitwork Client Runtime
 
-`hydrate.Runtime()` is the delivery contract. It composes the files below into one cacheable
-`/kit.js` response and the same core source generated for the standalone `@kitwork/kitjs` export.
+A page gets the files below as one file per part — `/kit/kernel.<hash>.js`, `/kit/drive.<hash>.js`,
+then a file per directive, service and component it uses (`jit/js` `Deliver`). `hydrate.Runtime()`
+composes them into one string for the browser test harnesses only; the one-response `/kit.js` route
+went on 03/10.
 
 The modules are composed eagerly to preserve one stable asset. Their registry boundaries are also
 the future only-used delivery boundary: a module can move out of core without changing its public

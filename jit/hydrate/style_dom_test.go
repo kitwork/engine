@@ -39,7 +39,7 @@ func TestStylePropertyRuleAtRender(t *testing.T) {
 		t.Error("a style directive must bring the runtime")
 	}
 	in := `<head></head><body>` + marker + `<span data-kit-style:width="value + '%'"></span></section></body>`
-	if out := Render(in); strings.Count(out, injectTag) != 1 {
+	if !UsesGrammar(in) {
 		t.Error("a page whose only directive is a style still needs the runtime")
 	}
 }

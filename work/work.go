@@ -141,12 +141,9 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer requestScope.Close()
 
-	// The page JavaScript: one file per part under /kit/ (kitassets.go), and the whole runtime in
-	// one response at /kit.js for tooling and hand-assembled pages.
+	// The page JavaScript: one file per part under /kit/ (kitassets.go). The one-response /kit.js
+	// went on 03/10 — no page asked for it any more, and it carried none of the directive files.
 	if t.serveKitAssetIf(w, r) {
-		return
-	}
-	if t.serveHydrateIf(w, r) {
 		return
 	}
 	// /jitfonts/* — vendored woff2 served straight off the embedded FS.

@@ -1,8 +1,6 @@
 package work
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +31,6 @@ import (
 type siteComponents struct {
 	sources map[string]string
 	names   []string
-	tag     string
 }
 
 // componentFileRe is the file name a component may have: the same slug the markup can name.
@@ -41,8 +38,8 @@ var componentFileRe = regexp.MustCompile(`^[a-z][a-z0-9-]*\.js$`)
 
 // maxSiteComponentBytes bounds ONE component file.
 //
-// Not the shared runtime: a site's component does not ride the common /kit.js. The page asks for
-// what its markup names (/kit.js?components=component:<name>), so a page that names nothing is
+// Not the shared runtime: a site's component does not ride with the kernel. The page gets a file for
+// what its markup names (/kit/components/<name>.<hash>.js), so a page that names nothing is
 // served the kernel alone — 48 KB. What this bounds is the single response for the page that does
 // name it, and the memory the generation holds it in.
 //
@@ -66,15 +63,6 @@ func (s *siteComponents) Names() []string {
 		return nil
 	}
 	return append([]string(nil), s.names...)
-}
-
-// Tag is a content signature over every source, so the cached /kit.js asset of one tenant can never
-// be served for another, and an edited component invalidates its own entry.
-func (s *siteComponents) Tag() string {
-	if s == nil {
-		return ""
-	}
-	return s.tag
 }
 
 // componentDirectories returns the _components folders to read, nearest LAST so the nearer one
@@ -137,13 +125,5 @@ func loadSiteComponents(base string) *siteComponents {
 		set.names = append(set.names, name)
 	}
 	sort.Strings(set.names)
-	hash := sha256.New()
-	for _, name := range set.names {
-		_, _ = hash.Write([]byte(name))
-		_, _ = hash.Write([]byte{0})
-		_, _ = hash.Write([]byte(set.sources[name]))
-		_, _ = hash.Write([]byte{0})
-	}
-	set.tag = hex.EncodeToString(hash.Sum(nil)[:8])
 	return set
 }

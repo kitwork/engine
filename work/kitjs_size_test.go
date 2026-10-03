@@ -5,9 +5,38 @@ import (
 	"compress/gzip"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+
+	jitjs "github.com/kitwork/engine/jit/js"
 )
+
+var kitScriptRe = regexp.MustCompile(`src="?(/kit/[^"\s>]+)`)
+
+// pageJavaScript is every script the home page asks for under /kit/, fetched through the tenant and
+// joined: what a visitor's browser actually downloads for that page.
+func pageJavaScript(t *testing.T, tenant *Tenant) string {
+	t.Helper()
+	get := func(path string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil))
+		return recorder
+	}
+	page := get("/").Body.String()
+	var all strings.Builder
+	for _, match := range kitScriptRe.FindAllStringSubmatch(page, -1) {
+		response := get(match[1])
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d", match[1], response.Code)
+		}
+		all.WriteString(response.Body.String())
+	}
+	if all.Len() == 0 {
+		t.Fatalf("the page asks for no /kit/ file:\n%s", page)
+	}
+	return all.String()
+}
 
 // A site that never asked for Drive has no use for the navigator or the DOM morph it drives —
 // nothing else in the runtime calls kit.morph. Shipping them anyway is the same waste as shipping a
@@ -19,12 +48,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
-		recorder := httptest.NewRecorder()
-		tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/kit.js", nil))
-		if recorder.Code != http.StatusOK {
-			t.Fatalf("GET /kit.js = %d", recorder.Code)
-		}
-		return recorder.Body.String()
+		return pageJavaScript(t, tenant)
 	}
 
 	gz := func(s string) int {
@@ -57,7 +81,7 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	}
 
 	saved := gz(with) - gz(without)
-	t.Logf("kit.js gzip: %d with Drive, %d without — %d bytes saved on every page", gz(with), gz(without), saved)
+	t.Logf("page JavaScript gzip: %d with Drive, %d without — %d bytes saved on every page", gz(with), gz(without), saved)
 	if saved < 2000 {
 		t.Fatalf("expected Drive to be worth thousands of bytes on a minified asset, measured %d", saved)
 	}
@@ -73,17 +97,17 @@ func TestNativeBridgeGoesOnlyToAppsWithAShell(t *testing.T) {
 		if err := tenant.Run(); err != nil {
 			t.Fatal(err)
 		}
-		recorder := httptest.NewRecorder()
-		tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/kit.js", nil))
-		return recorder.Body.String()
+		return pageJavaScript(t, tenant)
 	}
 
-	previous := NativeShell
-	defer func() { NativeShell = previous }()
+	// The engine sets both from the manifest at boot (kitwork.go): the tenant's flag and the one the
+	// per-file delivery reads.
+	previous, previousFiles := NativeShell, jitjs.Native
+	defer func() { NativeShell, jitjs.Native = previous, previousFiles }()
 
-	NativeShell = false
+	NativeShell, jitjs.Native = false, false
 	web := serve(t)
-	NativeShell = true
+	NativeShell, jitjs.Native = true, true
 	shell := serve(t)
 
 	// Markers from the CODE: the minifier deletes comments and renames variables.
@@ -101,7 +125,7 @@ func TestNativeBridgeGoesOnlyToAppsWithAShell(t *testing.T) {
 			t.Fatalf("a web-only app must still have %q from the kernel", mark)
 		}
 	}
-	t.Logf("kit.js gzip: %d with a shell, %d web-only — %d bytes saved", gzipLen(shell), gzipLen(web), gzipLen(shell)-gzipLen(web))
+	t.Logf("page JavaScript gzip: %d with a shell, %d web-only — %d bytes saved", gzipLen(shell), gzipLen(web), gzipLen(shell)-gzipLen(web))
 }
 
 func gzipLen(s string) int {

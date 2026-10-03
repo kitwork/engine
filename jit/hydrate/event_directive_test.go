@@ -38,7 +38,7 @@ func TestEventDirectiveIsReadLikeTheShortForm(t *testing.T) {
 	// A page whose only grammar is data-kit-event still gets the runtime, and a broken expression in
 	// it is named like any other.
 	page := `<head></head><body>` + marker + `<section data-kit-event:seen="count++"></section></section></body>`
-	if strings.Count(Render(page), injectTag) != 1 {
+	if !UsesGrammar(page) {
 		t.Error("a page with only data-kit-event needs the runtime injected")
 	}
 	found := strings.Join(authoringMistakes(`<section data-kit-event:seen="count +"></section>`), "\n")

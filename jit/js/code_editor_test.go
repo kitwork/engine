@@ -6,8 +6,8 @@ import (
 )
 
 func TestCodeEditorIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="code-editor"><textarea data-kit-element="field"></textarea></div>`)
-	if !strings.Contains(out, `components=component%3Acode-editor`) {
+	out := deliver(`<div data-kit-component="code-editor"><textarea data-kit-element="field"></textarea></div>`)
+	if !strings.Contains(out, `/kit/components/code-editor@`) {
 		t.Fatalf("code-editor was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"code-editor"}), `component("code-editor@v1.0.0"`) {

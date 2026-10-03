@@ -1,8 +1,8 @@
 // Final composition step. All modules are registered before the kernel starts.
 //
 // The kernel can arrive two ways: composed into one script with every module before this file
-// (/kit.js), or as the first of several deferred files — kernel, Drive, then one file per component
-// (/kit/…). The second way is why this waits for DOMContentLoaded rather than for the parser to
+// (the browser test harnesses), or as the first of several deferred files — kernel, Drive, then one
+// file per component (/kit/…, every real page). The second way is why this waits for DOMContentLoaded rather than for the parser to
 // finish: deferred scripts run AFTER parsing (readyState is already "interactive") and BEFORE
 // DOMContentLoaded, in document order. Starting at "interactive" would start the kernel before the
 // component files that follow it had registered, and every component on the page would first be

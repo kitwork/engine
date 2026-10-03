@@ -268,3 +268,7 @@ func TestExamplesBringNoFiles(t *testing.T) {
 		t.Fatalf("real hosts must count, the printed one must not: %v", paths)
 	}
 }
+
+// deliver is Deliver for a page that belongs to no site and asks for no options — what most
+// component tests need to see: which files a page gets.
+func deliver(html string) string { return Deliver(html, nil, Options{}) }

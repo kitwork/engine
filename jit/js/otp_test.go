@@ -6,8 +6,8 @@ import (
 )
 
 func TestOtpIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="otp"><input data-kit-element="slot"></div>`)
-	if !strings.Contains(out, `components=component%3Aotp`) {
+	out := deliver(`<div data-kit-component="otp"><input data-kit-element="slot"></div>`)
+	if !strings.Contains(out, `/kit/components/otp@`) {
 		t.Fatalf("otp was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"otp"}), `component("otp@v1.0.0"`) {

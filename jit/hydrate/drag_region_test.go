@@ -3,7 +3,6 @@ package hydrate
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -145,10 +144,10 @@ setTimeout(function () {
 	runNodeDOMScript(t, "kernel_alone_does_not_drag.test.js", assertions)
 
 	page := `<head></head><body><header data-kit-drag="true"></header></body></html>`
-	if strings.Count(Render(page), injectTag) != 1 {
+	if !UsesGrammar(page) {
 		t.Error("a page whose only grammar is data-kit-drag needs the runtime under its drag file")
 	}
-	if out := Render(`<head></head><body><pre><code>&lt;header data-kit-drag="true"&gt;</code></pre></body></html>`); strings.Contains(out, injectTag) {
+	if UsesGrammar(`<head></head><body><pre><code>&lt;header data-kit-drag="true"&gt;</code></pre></body></html>`) {
 		t.Error("CONTROL: a page that only prints data-kit-drag in an example gets no runtime")
 	}
 }

@@ -6,8 +6,8 @@ import (
 )
 
 func TestSplitIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="split"><div role="separator" data-kit-element="handle"></div></div>`)
-	if !strings.Contains(out, `components=component%3Asplit`) {
+	out := deliver(`<div data-kit-component="split"><div role="separator" data-kit-element="handle"></div></div>`)
+	if !strings.Contains(out, `/kit/components/split@`) {
 		t.Fatalf("split was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"split"}), `component("split@v1.0.0"`) {

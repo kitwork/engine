@@ -271,9 +271,9 @@ func TestBrowserShortcutComponentClicksItsHost(t *testing.T) {
   })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
-	rendered := Render(page)
-	if !strings.Contains(rendered, "components=component%3Ashortcut") {
-		t.Fatalf("Render should inject the shortcut component:\n%s", rendered)
+	rendered := deliver(page)
+	if !strings.Contains(rendered, "/kit/components/shortcut@") {
+		t.Fatalf("Deliver should bring the shortcut component:\n%s", rendered)
 	}
 	runKernelPage(t, browser, page, scanComponents(page, nil))
 }
@@ -498,10 +498,10 @@ func TestBrowserCatalogueComponentsHoldTheirContract(t *testing.T) {
   })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
-	rendered := Render(page)
-	for _, want := range []string{"component%3Aclipboard", "component%3Asidebar", "component%3Atoast"} {
+	rendered := deliver(page)
+	for _, want := range []string{"/kit/components/clipboard@", "/kit/components/sidebar@", "/kit/components/toast@"} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("Render should ask for %s:\n%s", want, rendered)
+			t.Fatalf("Deliver should bring %s:\n%s", want, rendered)
 		}
 	}
 	runKernelPage(t, browser, page, scanComponents(page, nil))
@@ -689,8 +689,8 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
   })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
-	if !strings.Contains(Render(page), "component%3Atabs") {
-		t.Fatal("Render should ask for the tabs component")
+	if !strings.Contains(deliver(page), "/kit/components/tabs@") {
+		t.Fatal("Deliver should bring the tabs component")
 	}
 	runKernelPage(t, browser, page, scanComponents(page, nil))
 }

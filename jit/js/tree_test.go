@@ -6,8 +6,8 @@ import (
 )
 
 func TestTreeIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<ul role="tree" data-kit-component="tree"><li data-kit-element="item" data-id="a">a</li></ul>`)
-	if !strings.Contains(out, `components=component%3Atree`) {
+	out := deliver(`<ul role="tree" data-kit-component="tree"><li data-kit-element="item" data-id="a">a</li></ul>`)
+	if !strings.Contains(out, `/kit/components/tree@`) {
 		t.Fatalf("tree was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"tree"}), `component("tree@v1.0.0"`) {

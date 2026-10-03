@@ -9,15 +9,14 @@
 // is Drive. The optional capability modules (data-kit-api, -live, -remember) went on 02/10: nothing
 // used them, and a site that keeps something in the browser does it in a component of its own.
 //
-// THE CORE IS hydrate.Runtime(): ordered modules behind the canonical window.kit root
-// (window.kitwork remains a compatibility alias) and one delegated event system. Render requests
-// that core plus the page's components from one cacheable URL; Deliver (delivery.go) is what the
-// engine's own pages use.
+// THE CORE IS the kernel behind the canonical window.kit root (window.kitwork remains a
+// compatibility alias) and one delegated event system. Deliver (delivery.go) gives a page the
+// kernel and its components as one file per part. RuntimeJS composes them into one string, for the
+// browser test harnesses only.
 package js
 
 import (
 	"embed"
-	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -287,27 +286,4 @@ func SiteRuntimeJS(htmls ...string) string {
 		}
 	}
 	return RuntimeJS(all)
-}
-
-// Render injects the per-page runtime as ONE `<script data-kitwork-jit="runtime">` before </head>.
-// A cheap no-op when the page uses no component. A component is authored as data-kit-component
-// only (the kernel stopped reading the long prefix, ideaship-final §9).
-func Render(html string) string { return RenderFor(html, nil) }
-
-// RenderFor is Render for one tenant: a page may also name a component the SITE owns
-// (_components/<name>.js, no version — see site.go), and it travels in the same one request.
-func RenderFor(html string, site Site) string {
-	if !strings.Contains(html, "data-kit-component=") {
-		return html
-	}
-	keys := ModuleKeysFor(scanComponents(html, site), site)
-	if len(keys) == 0 {
-		return html
-	}
-	src := hydrate.RuntimePath + "?components=" + url.QueryEscape(strings.Join(keys, ","))
-	tag := `<script ` + runtimeMarker + ` src="` + src + `" defer></script>`
-	if i := strings.LastIndex(html, "</head>"); i >= 0 {
-		return html[:i] + tag + html[i:]
-	}
-	return tag + html
 }

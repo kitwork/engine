@@ -5,10 +5,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
-
-	hydrate "github.com/kitwork/engine/jit/hydrate"
 )
 
 // componentFixture builds apps/<identity>/<domain>; a path in files is relative to the IDENTITY, so
@@ -49,10 +48,10 @@ func componentPage(markup string) map[string]string {
 const sharedComponentSource = `kit.component("bid-stepper", { amount: 0 });`
 const ownComponentSource = `kit.component("search", { open: false });`
 
-// A site's own component: dropped in _components, named with no version, composed into the one
-// cacheable /kit.js response beside the embedded catalogue.
-func TestSiteComponentsShipThroughTheRuntimeRoute(t *testing.T) {
-	files := componentPage(`<div data-kit-component="bid-stepper"></div>`)
+// A site's own component: dropped in _components, named with no version, and served as a file of
+// its own under /kit/components/ beside the embedded catalogue's — for a page that names it.
+func TestSiteComponentsShipAsTheirOwnFiles(t *testing.T) {
+	files := componentPage(`<div data-kit-component="bid-stepper"></div><div data-kit-component="search"></div><dialog data-kit-component="dialog"></dialog>`)
 	files["_components/bid-stepper.js"] = sharedComponentSource
 	files["localhost/_components/search.js"] = ownComponentSource
 	files["localhost/_components/READ-ME.js"] = `kit.component("ignored", {});`
@@ -67,39 +66,43 @@ func TestSiteComponentsShipThroughTheRuntimeRoute(t *testing.T) {
 		t.Fatalf("component names = %q, want the identity's and the domain's (a capitalised file name is refused)", got)
 	}
 
-	// The page asks for all three by name; the response carries exactly those modules. The body is
-	// minified here (tests run with AllowLocal false), so assert on what survives minification.
-	request := httptest.NewRequest("GET", hydrate.RuntimePath+"?components=component:bid-stepper,component:search,component:dialog", nil)
-	recorder := httptest.NewRecorder()
-	if !tenant.serveHydrateIf(recorder, request) {
-		t.Fatal("the runtime route must handle its own path")
+	serve := func(path string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		tenant.Serve(recorder, httptest.NewRequest("GET", "http://localhost"+path, nil))
+		return recorder
 	}
-	body := recorder.Body.String()
+	page := serve("/").Body.String()
+	paths := componentScriptRe.FindAllStringSubmatch(page, -1)
+	if len(paths) != 3 {
+		t.Fatalf("the page names three components and should get three files, got %d:\n%s", len(paths), page)
+	}
+	var bodies strings.Builder
+	for _, match := range paths {
+		response := serve(match[1])
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", match[1], response.Code)
+		}
+		bodies.WriteString(response.Body.String())
+	}
 	for _, want := range []string{`kit.component("bid-stepper"`, `kit.component("search"`, `kit.component("dialog"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("the composed runtime is missing %s", want)
+		if !strings.Contains(bodies.String(), want) {
+			t.Errorf("the component files are missing %s", want)
 		}
 	}
-	if !strings.Contains(body, "kitwork:ready") {
-		t.Error("the kernel must still be the body of the response")
-	}
 
-	// A name the site does not own composes nothing — a query cannot mint asset variants.
-	other := httptest.NewRequest("GET", hydrate.RuntimePath+"?components=component:nonesuch", nil)
-	otherRecorder := httptest.NewRecorder()
-	tenant.serveHydrateIf(otherRecorder, other)
-	if strings.Contains(otherRecorder.Body.String(), "nonesuch") {
-		t.Error("an unknown component name must resolve to nothing")
-	}
-
-	// A version suffix is the engine catalogue's spelling only: a site component has no version.
-	versioned := httptest.NewRequest("GET", hydrate.RuntimePath+"?components=component:search@1.0.0", nil)
-	versionedRecorder := httptest.NewRecorder()
-	tenant.serveHydrateIf(versionedRecorder, versioned)
-	if strings.Contains(versionedRecorder.Body.String(), `kit.component("search"`) {
-		t.Error("search@1.0.0 must not resolve to the site's unversioned component")
+	// A name the site does not own is no file — a path cannot mint asset variants — and a version
+	// suffix is the engine catalogue's spelling only: a site component has none.
+	for _, path := range []string{
+		"/kit/components/nonesuch." + strings.Repeat("0", 16) + ".js",
+		"/kit/components/search@1.0.0." + strings.Repeat("0", 16) + ".js",
+	} {
+		if response := serve(path); response.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", path, response.Code)
+		}
 	}
 }
+
+var componentScriptRe = regexp.MustCompile(`src="?(/kit/components/[^"\s>]+)`)
 
 // The rendered page asks for the site's component by itself: delivery scans data-kit-component and
 // gives the component a file of its own under /kit/components/.
@@ -128,8 +131,8 @@ func TestNoSiteComponentsIsUntouched(t *testing.T) {
 	request := httptest.NewRequest("GET", "http://localhost/", nil)
 	recorder := httptest.NewRecorder()
 	tenant.Serve(recorder, request)
-	if strings.Contains(recorder.Body.String(), "components=") {
-		t.Error("a component name nothing owns must not bring a runtime request")
+	if strings.Contains(recorder.Body.String(), "/kit/components/") {
+		t.Error("a component name nothing owns must not bring a component file")
 	}
 }
 
@@ -151,8 +154,8 @@ func TestDomainComponentOverridesTheIdentityOne(t *testing.T) {
 // by a 256 KiB limit, so the limit is what a real workbench is measured against now.
 //
 // The rule it protects is narrower than the old comment claimed: a site's component does NOT ride
-// the shared /kit.js. The page asks for what it names (/kit.js?components=component:<name>), so a
-// page that names nothing still gets the kernel alone. What the limit really bounds is ONE
+// with the kernel. The page gets a file for each component it names (/kit/components/<name>.<hash>.js),
+// so a page that names nothing still gets the kernel alone. What the limit really bounds is ONE
 // response for the page that does name it.
 func TestASiteComponentMayBeAsLargeAsARealApplication(t *testing.T) {
 	// Big enough that the old 256 KiB limit would refuse it, small enough to stay under this one.

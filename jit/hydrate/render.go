@@ -33,7 +33,8 @@ var driveJS string
 var bootJS string
 
 // Runtime returns the ordered client composition: bridge, kernel, modules, Morph, Drive, then
-// boot. It is identical for every tenant and served at one cacheable RuntimePath.
+// boot. It is identical for every tenant. Pages get it as files (KernelFile, DriveFile); the one
+// composed string is for the browser test harnesses.
 // Because the engine serves BOTH this runtime and the Go compiler from one codebase, the two ends
 // version together — grammar sync is by construction, not by discipline.
 // RuntimeParts is what a particular page needs. The runtime is not one indivisible blob: a site
@@ -95,22 +96,19 @@ func DriveFile() string {
 }
 
 // UsesGrammar reports whether a page really uses the grammar — an authored directive outside the
-// <pre>/<code> blocks that only show one. It is the test Render applies before touching a page, for
+// <pre>/<code> blocks that only show one. It is the test Check applies before reading a page, for
 // a caller deciding whether the page needs the kernel at all.
 func UsesGrammar(html string) bool {
 	return strings.Contains(html, authoredPrefix) && hasAuthoredDirective(html)
 }
 
-// RuntimePath is the built-in, always-on route the runtime is served at, and what Render points
-// pages at. It is NOT a per-page JIT artifact (unlike /jitcss, /jiticons, /jitfonts, which are
-// scanned + emitted only-used) — it is the ONE static client kernel, identical bytes for every
-// tenant, so it lives under a clean, cacheable public name instead of the /jit* namespace. Same
-// file the @kitwork/kitjs package ships (see cmd/kitjs-dist). Distinct from the verb runtime's
-// /jitjs (jit/js) — this is the expression engine.
+// RuntimePath is where the browser test harnesses serve the one-file composition (RuntimeFor) to
+// the pages they build. The engine routes no such path any more (03/10): a page gets its
+// JavaScript as one file per part, /kit/<part>.<hash>.js (jit/js delivery.go).
 const RuntimePath = "/kit.js"
 
-// The root marker is how a page opts into hydrate. Only when it is present does Render touch the
-// page — so static pages (and demos that show data-* as example text) are never affected.
+// There is no root marker: an authored directive outside an example block is what makes a page a
+// Kitwork page — so static pages (and demos that show data-* as example text) are never affected.
 //
 // PREFIX CONVENTION, restated 24/09 when the root marker went away.
 //
@@ -325,23 +323,16 @@ func checkIntersectModifiers(modifiers []string) error {
 // -remember were removed on 02/10; they bring nothing.)
 var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*|drag)="`)
 
-// The value is "runtime" (not "hydrate"): this IS the client runtime — the code calls itself
-// kitwork.runtime, and it runs directives + reactivity + navigation, not just hydration. The
-// data-kitwork-jit attribute stays (the namespace mergeHead/morph scans for engine-injected assets).
-const injectTag = `<script data-kitwork-jit="runtime" src="` + RuntimePath + `" defer></script>`
-
-// Render is the server pass for hydrate pages. THE WIRE SHIPS THE SOURCE: authored data-kit-*
+// Check is the server pass for hydrate pages. THE WIRE SHIPS THE SOURCE: authored data-kit-*
 // attributes ride to the client unchanged (readable DOM, smaller wire) and the client runtime
-// parses them there — no eval, same grammar. What the server does here:
-//
-//  1. VERIFY — every expression is compiled with the Go compiler at render time, so a typo is
-//     caught and logged on the server instead of failing silently in the browser.
-//  2. DELIVER — inject the <script src="/kit.js"> reference once, only when the page actually
-//     uses a directive.
+// parses them there — no eval, same grammar. What the server does here is VERIFY: every
+// expression is compiled with the Go compiler at render time, so a typo is caught and printed on
+// the server instead of failing silently in the browser. It never changes the page: giving it its
+// JavaScript is jit/js Deliver's job, which runs first. (Check was Render until 03/10, when its
+// fallback <script src="/kit.js"> went with the route — Deliver had always answered first.)
 //
 // IR remains the engine's INTERNAL form (ctx.validate, go tests, analysis); it is not a wire
-// mode — the kernel parses source, and only source. A page WITHOUT the marker (or with no
-// directive) is returned byte-for-byte unchanged.
+// mode — the kernel parses source, and only source.
 
 // authoredPrefix is the one substring every authored directive shares — the cheap door.
 const authoredPrefix = "data-kit-"
@@ -428,31 +419,16 @@ func authoringMistakes(html string) []string {
 	return found
 }
 
-func Render(html string) string {
+func Check(html string) {
 	// Is this a Kitwork page? The markup says so by ITSELF — an authored directive is the evidence,
 	// and no marker attribute is required or read. The cheap string test comes first so an ordinary
 	// static page costs one scan for a substring and nothing else.
-	if !strings.Contains(html, authoredPrefix) || !hasAuthoredDirective(html) {
-		return html
+	if !Diagnostics || !strings.Contains(html, authoredPrefix) || !hasAuthoredDirective(html) {
+		return
 	}
 	// Authoring mistakes are reported for the person writing the page, so they are printed where a
 	// person is watching. In production nobody reads the server log for this, and the scan is not free.
-	if Diagnostics {
-		reportAuthoringMistakes(html)
-	}
-	// The jit/js pass runs earlier and has already given the page its kernel — as /kit.js with the
-	// page's modules, or as /kit/kernel.<hash>.js followed by one file per module. Either way a
-	// second reference would load the kernel twice.
-	if strings.Contains(html, `<script data-kitwork-jit="runtime"`) {
-		return html
-	}
-	if i := strings.LastIndex(html, "</head>"); i >= 0 {
-		return html[:i] + injectTag + html[i:]
-	}
-	if i := strings.LastIndex(html, "</body>"); i >= 0 {
-		return html[:i] + injectTag + html[i:]
-	}
-	return html + injectTag
+	reportAuthoringMistakes(html)
 }
 
 // MarkDrive flags the runtime script tag so the client knows this site asked for Drive

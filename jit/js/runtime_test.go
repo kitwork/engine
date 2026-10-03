@@ -55,11 +55,11 @@ func TestRuntimeJSOnlyUsedPlusCore(t *testing.T) {
 	}
 }
 
-func TestRenderInjectsOnlyUsed(t *testing.T) {
+func TestDeliverBringsOnlyUsed(t *testing.T) {
 	html := `<html><head><title>x</title></head><body>` +
 		`<div data-kit-component="toast"><button data-kit-click="show('saved')">One</button></div>` +
 		`<dialog data-kit-component="dialog" data-kit-alias="$m"></dialog></body></html>`
-	out := Render(html)
+	out := deliver(html)
 
 	// count the OPEN TAG precisely — the kernel source itself mentions the marker (mergeHead).
 	if strings.Count(out, `<script data-kitwork-jit="runtime"`) != 1 {
@@ -67,9 +67,9 @@ func TestRenderInjectsOnlyUsed(t *testing.T) {
 	}
 	si := strings.Index(out, `<script data-kitwork-jit="runtime"`)
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
-		t.Errorf("runtime should be injected before </head>: %s", out)
+		t.Errorf("the runtime should be delivered before </head>: %s", out)
 	}
-	if !strings.Contains(out, `components=component%3Adialog%2Ccomponent%3Atoast`) {
+	if !strings.Contains(out, `/kit/components/dialog@`) || !strings.Contains(out, `/kit/components/toast@`) {
 		t.Errorf("both used components expected: %s", out)
 	}
 	if strings.Contains(out, `clipboard`) {
@@ -80,34 +80,36 @@ func TestRenderInjectsOnlyUsed(t *testing.T) {
 	}
 }
 
-func TestRenderNoOpWithoutComponents(t *testing.T) {
+func TestDeliverNothingWithoutGrammar(t *testing.T) {
 	in := `<head></head><body><p>nothing here</p></body>`
-	if out := Render(in); out != in {
+	if out := deliver(in); out != in {
 		t.Errorf("expected unchanged output, got: %s", out)
 	}
+	// A component nobody has is still a host the kernel reports by name, so the page gets the kernel
+	// — and no component file.
 	unknown := `<head></head><body><div data-kit-component="zzz"></div></body>`
-	if out := Render(unknown); out != unknown {
-		t.Errorf("unknown component should inject nothing, got: %s", out)
+	if out := deliver(unknown); strings.Contains(out, "/kit/components/") || !strings.Contains(out, "/kit/kernel.") {
+		t.Errorf("an unknown component brings the kernel and no component file, got: %s", out)
 	}
 	// The retired verb attribute is just an attribute now: it brings nothing.
 	verb := `<head></head><body><button data-kit-action="copy" data-kitwork-action="copy"></button></body>`
-	if out := Render(verb); out != verb {
+	if out := deliver(verb); out != verb {
 		t.Errorf("data-kit-action is not a directive any more and must not inject, got: %s", out)
 	}
 }
 
 // A bare name resolves to the latest version of that component, and only the catalogue's own
 // names resolve: `copy` was clipboard's second name until 22/09 — one name, one meaning.
-func TestRenderInjectsComponents(t *testing.T) {
+func TestDeliverBringsComponents(t *testing.T) {
 	htmlComp := `<html><head></head><body><div data-kit-component="clipboard"></div></body></html>`
-	outComp := Render(htmlComp)
-	if !strings.Contains(outComp, `components=component%3Aclipboard`) {
+	outComp := deliver(htmlComp)
+	if !strings.Contains(outComp, `/kit/components/clipboard@`) {
 		t.Errorf("expected the clipboard module to be injected, got: %s", outComp)
 	}
 	if !strings.Contains(ModulesJS([]string{"component:clipboard"}), `component("clipboard@v2.0.0"`) {
 		t.Error("a bare name must resolve to the latest version (v2.0.0)")
 	}
-	if out := Render(`<html><head></head><body><div data-kit-component="copy"></div></body></html>`); strings.Contains(out, "components=") {
+	if out := deliver(`<html><head></head><body><div data-kit-component="copy"></div></body></html>`); strings.Contains(out, "/kit/components/") {
 		t.Errorf("copy is not a name any more, nothing may be injected for it: %s", out)
 	}
 	if ModulesJS([]string{"component:copy"}) != "" {
@@ -118,10 +120,10 @@ func TestRenderInjectsComponents(t *testing.T) {
 	}
 }
 
-func TestRenderInjectsVersionedComponents(t *testing.T) {
+func TestDeliverBringsVersionedComponents(t *testing.T) {
 	html := `<html><head></head><body><div data-kit-component="clipboard@v1.0.0"></div></body></html>`
-	out := Render(html)
-	if !strings.Contains(out, `components=component%3Aclipboard%40v1.0.0`) {
+	out := deliver(html)
+	if !strings.Contains(out, `/kit/components/clipboard@1.0.0.`) {
 		t.Errorf("expected versioned clipboard component (v1.0.0) to be injected, got: %s", out)
 	}
 }

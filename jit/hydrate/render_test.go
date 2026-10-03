@@ -7,9 +7,9 @@ import (
 
 const marker = `<body data-kitwork-hydrate="v1.0.0">`
 
-// THE WIRE SHIPS THE SOURCE: authored attributes ride unchanged; the engine verifies them and
-// injects the runtime reference once.
-func TestRenderKeepsSourceAndInjects(t *testing.T) {
+// A page that writes the grammar is a Kitwork page: it is checked, and jit/js Deliver gives it its
+// JavaScript. (Rendering used to inject /kit.js here; the route went on 03/10.)
+func TestPagesWithTheGrammarAreRecognised(t *testing.T) {
 	in := `<head><title>x</title></head><body>` + marker +
 		`<b data-kit-text="n * qty">0</b>` +
 		`<button data-kit-click="n = n + 1">+</button>` +
@@ -17,29 +17,8 @@ func TestRenderKeepsSourceAndInjects(t *testing.T) {
 		`<form data-kit-bind:disabled="sending"></form>` +
 		`<input data-kit-model="name">` +
 		`</section></body>`
-	out := Render(in)
-
-	// authored source attributes are the wire format — kept byte-for-byte
-	for _, keep := range []string{
-		`data-kit-text="n * qty"`,
-		`data-kit-click="n = n + 1"`,
-		`data-kit-show="n > 3"`,
-		`data-kit-bind:disabled="sending"`,
-		`data-kit-model="name"`,
-	} {
-		if !strings.Contains(out, keep) {
-			t.Errorf("authored attribute must ride unchanged: %s\nout: %s", keep, out)
-		}
-	}
-	// runtime injected once, inside <head>, pointing at the runtime route
-	if n := strings.Count(out, injectTag); n != 1 {
-		t.Errorf("expected runtime injected once, got %d", n)
-	}
-	if !strings.Contains(injectTag, RuntimePath) {
-		t.Errorf("inject tag should reference %s", RuntimePath)
-	}
-	if strings.Index(out, injectTag) > strings.Index(out, "</head>") {
-		t.Error("runtime should be injected before </head>")
+	if !UsesGrammar(in) {
+		t.Error("a page with text, click, show, bind and model directives must be recognised")
 	}
 }
 
@@ -63,11 +42,7 @@ func TestValidateIsNoLongerAClientDirective(t *testing.T) {
 		t.Error("data-kit-validate must not bring the runtime on its own any more")
 	}
 	in := `<head></head><body>` + marker + `<form ` + authored + `></form></section></body>`
-	out := Render(in)
-	if !strings.Contains(out, authored) {
-		t.Error("an attribute the engine no longer knows still rides unchanged")
-	}
-	if strings.Count(out, injectTag) != 0 {
+	if UsesGrammar(in) {
 		t.Error("a page whose only data-kit-* attribute is the retired validate needs no runtime")
 	}
 	if strings.Contains(Runtime(), `selector("validate")`) || strings.Contains(Runtime(), `"data-kit-validate"`) {
@@ -98,7 +73,7 @@ func TestRenderSeedIsInjectedAndItsTargetChecked(t *testing.T) {
 		}
 	}
 	in := `<head></head><body>` + marker + `<h1 data-kit-seed="title">x</h1></section></body>`
-	if out := Render(in); strings.Count(out, injectTag) != 1 {
+	if !UsesGrammar(in) {
 		t.Error("a page whose only directive is a seed still needs the runtime")
 	}
 }
@@ -150,16 +125,7 @@ func TestRenderEventFamilyIsVerifiedAndInjected(t *testing.T) {
 	in := `<head></head><body>` + marker +
 		`<div data-kit-click:outside="open = false"><a data-kit-keydown:escape:window="open = false">x</a></div>` +
 		`</section></body>`
-	out := Render(in)
-	for _, keep := range []string{
-		`data-kit-click:outside="open = false"`,
-		`data-kit-keydown:escape:window="open = false"`,
-	} {
-		if !strings.Contains(out, keep) {
-			t.Errorf("authored attribute must ride unchanged: %s", keep)
-		}
-	}
-	if strings.Count(out, injectTag) != 1 {
+	if !UsesGrammar(in) {
 		t.Error("a page whose only directive is a modified event handler still needs the runtime injected")
 	}
 }
@@ -183,7 +149,7 @@ func TestRenderIfAndForInject(t *testing.T) {
 		`<div data-kit-if="open">panel</div>`,
 	} {
 		in := `<head></head><body>` + marker + only + `</section></body>`
-		if strings.Count(Render(in), injectTag) != 1 {
+		if !UsesGrammar(in) {
 			t.Errorf("a page whose only directive is for/if must inject the runtime: %s", only)
 		}
 	}
@@ -191,8 +157,8 @@ func TestRenderIfAndForInject(t *testing.T) {
 
 func TestRenderNoDirectivesIsNoop(t *testing.T) {
 	in := `<head></head><body>` + marker + `<div class="card">hello</div></section></body>`
-	if out := Render(in); out != in {
-		t.Errorf("marker but no directive should be unchanged\n got: %s", out)
+	if UsesGrammar(in) {
+		t.Error("a page with no directive is not a Kitwork page")
 	}
 }
 
@@ -200,25 +166,8 @@ func TestRenderNoDirectivesIsNoop(t *testing.T) {
 // compile error at render time; the client runtime simply skips what it cannot parse.
 func TestRenderMalformedKeptAndStillInjects(t *testing.T) {
 	in := `<head></head><body>` + marker + `<b data-kit-text="n +">x</b></section></body>`
-	out := Render(in)
-	if !strings.Contains(out, `data-kit-text="n +"`) {
-		t.Error("malformed expression should ride unchanged")
-	}
-	if strings.Count(out, injectTag) != 1 {
+	if !UsesGrammar(in) {
 		t.Error("page uses a directive, so the runtime should be injected")
-	}
-}
-
-// A combined jit/js asset already carries the kernel, so Hydrate must not add a bare reference.
-func TestRenderSkipsWhenRuntimeAssetExists(t *testing.T) {
-	in := `<head><script data-kitwork-jit="runtime" src="/kit.js?components=dialog" defer></script></head><body>` + marker +
-		`<b data-kit-text="n">0</b></section></body>`
-	out := Render(in)
-	if strings.Count(out, `src="/kit.js`) != 1 {
-		t.Error("kernel already inlined by jit/js — no /kit.js reference should be added")
-	}
-	if out != in {
-		t.Errorf("page should be unchanged\n got: %s", out)
 	}
 }
 
@@ -228,11 +177,7 @@ func TestRenderModelInjects(t *testing.T) {
 	in := `<head></head><body>` + marker +
 		`<div><b data-kit-model="x"></b></div>` +
 		`</section></body>`
-	out := Render(in)
-	if !strings.Contains(out, `data-kit-model="x"`) {
-		t.Error("model attribute should ride unchanged")
-	}
-	if strings.Count(out, injectTag) != 1 {
+	if !UsesGrammar(in) {
 		t.Error("a page with only model still needs the runtime injected")
 	}
 }
@@ -259,16 +204,8 @@ func TestRenderStrictPrefixOrigin(t *testing.T) {
 	in := `<head></head><body>` + marker +
 		`<button data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'>+</button>` +
 		`</section></body>`
-	if out := Render(in); strings.Contains(out, injectTag) {
+	if UsesGrammar(in) {
 		t.Error("a page whose only directive wears the long prefix has no directive; nothing to hydrate")
-	}
-}
-
-func TestRenderInjectsBeforeBodyWhenNoHead(t *testing.T) {
-	in := `<body>` + marker + `<b data-kit-text="n">0</b></section></body>`
-	out := Render(in)
-	if strings.Index(out, injectTag) > strings.Index(out, "</body>") {
-		t.Error("runtime should be injected before </body> when there is no head")
 	}
 }
 

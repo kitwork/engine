@@ -4,7 +4,7 @@
 // recorder. No port, no firewall prompt, no localhost.
 //
 //	go run ./cmd/nativeproof <tenants-root> <domain> [paths...]
-//	go run ./cmd/nativeproof ../tenants huynhnhanquoc.com / /kit.js /about
+//	go run ./cmd/nativeproof ../tenants huynhnhanquoc.com / /about
 package main
 
 import (
@@ -26,7 +26,7 @@ func main() {
 	root, domain := os.Args[1], os.Args[2]
 	paths := os.Args[3:]
 	if len(paths) == 0 {
-		paths = []string{"/", "/kit.js"}
+		paths = []string{"/"}
 	}
 
 	tenant := work.NewTenant(root, domain)

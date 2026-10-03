@@ -67,7 +67,16 @@ func TestNativeInMemoryServe(t *testing.T) {
 		return resp.StatusCode, resp.Header.Get("Content-Type"), body
 	}
 
-	for _, path := range []string{"/", "/kit.js", "/assets/logo.svg", "/api", "/nowhere"} {
+	// The client kernel is a file named by its hash, so its path is read off the page.
+	kernel := ""
+	if home := inMemory("/").Body.String(); strings.Contains(home, `src="/kit/kernel.`) {
+		rest := home[strings.Index(home, `src="/kit/kernel.`)+len(`src="`):]
+		kernel = rest[:strings.Index(rest, `"`)]
+	}
+	if kernel == "" {
+		t.Fatal("the home page carries no kernel file")
+	}
+	for _, path := range []string{"/", kernel, "/assets/logo.svg", "/api", "/nowhere"} {
 		rec := inMemory(path)
 		status, contentType, body := overHTTP(path)
 		if rec.Code != status {

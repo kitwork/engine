@@ -1,5 +1,5 @@
-// Kitwork hydrate kernel — the whole client runtime. Composed into /kit.js with bridge, the
-// platform modules, morph and Drive; jit/js appends the components a page named.
+// Kitwork hydrate kernel — the whole client runtime. Delivered as /kit/kernel.<hash>.js with the
+// bridge and platform modules; Drive and each component a page names come as files of their own.
 // Expressions, boundaries, components, structure and events all ride one
 // window.kit root (window.kitwork is a deprecated alias to the SAME object), one registry, one
 // delegated event system and one DOM observer.
@@ -15,7 +15,7 @@
 // and auto-closed when their last subscriber leaves the DOM.
 (function () {
   "use strict";
-  // `kit` is the canonical author root going forward: authors write data-kit-*, load /kit.js, and
+  // `kit` is the canonical author root going forward: authors write data-kit-*, the engine delivers the kernel, and
   // reach the runtime through window.kit. `window.kitwork` remains a DEPRECATED alias pointing at the
   // SAME object, so every existing component file and module keeps working during the migration —
   // it is removed only after every caller uses window.kit. (An older page that only seeded

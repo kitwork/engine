@@ -21,9 +21,9 @@ import (
 
 func TestScrolledIsShippedWhenUsed(t *testing.T) {
 	html := `<nav data-kit-component="scrolled" data-scrolled="false" class="data-[scrolled=true]:bg-paper"></nav>`
-	out := Render(html)
+	out := deliver(html)
 
-	if !strings.Contains(out, `components=component%3Ascrolled`) {
+	if !strings.Contains(out, `/kit/components/scrolled@`) {
 		t.Fatalf("scrolled was not injected for markup that uses it:\n%s", out)
 	}
 	// Without the versioned alias, data-kit-component="scrolled@v1.0.0" resolves to nothing.
@@ -35,12 +35,12 @@ func TestScrolledIsShippedWhenUsed(t *testing.T) {
 // CONTROL: only-what-is-used is the point. Without this, the test above would also pass on a build
 // that inlines every component on every page.
 func TestScrolledIsAbsentWhenUnused(t *testing.T) {
-	out := Render(`<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`)
+	out := deliver(`<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`)
 
-	if strings.Contains(out, `components=component%3Ascrolled`) {
+	if strings.Contains(out, `/kit/components/scrolled@`) {
 		t.Fatal("scrolled shipped to a page that never mentions it")
 	}
-	if !strings.Contains(out, `components=component%3Adialog`) {
+	if !strings.Contains(out, `/kit/components/dialog@`) {
 		t.Fatal("the component that IS used should still ship")
 	}
 }

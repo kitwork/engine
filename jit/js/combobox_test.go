@@ -10,15 +10,15 @@ import (
 // keyboard. This one is the keyboard half, and the proof drives it only through keys.
 
 func TestComboboxIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="combobox"><input role="combobox"></div>`)
-	if !strings.Contains(out, `components=component%3Acombobox`) {
+	out := deliver(`<div data-kit-component="combobox"><input role="combobox"></div>`)
+	if !strings.Contains(out, `/kit/components/combobox@`) {
 		t.Fatalf("combobox was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"combobox"}), `component("combobox@v1.0.0"`) {
 		t.Error("versioned registration missing")
 	}
 	// CONTROL: only what is used.
-	if strings.Contains(Render(`<dialog data-kit-component="dialog"></dialog>`), `component%3Acombobox`) {
+	if strings.Contains(deliver(`<dialog data-kit-component="dialog"></dialog>`), `/kit/components/combobox@`) {
 		t.Error("combobox shipped to a page that never mentions it")
 	}
 }

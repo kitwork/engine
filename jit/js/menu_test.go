@@ -20,9 +20,9 @@ import (
 
 func TestMenuIsShippedWhenUsed(t *testing.T) {
 	html := `<div data-kit-component="menu"><button data-kit-click="toggle()">m</button></div>`
-	out := Render(html)
+	out := deliver(html)
 
-	if !strings.Contains(out, `components=component%3Amenu`) {
+	if !strings.Contains(out, `/kit/components/menu@`) {
 		t.Fatalf("menu was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"menu"}), `component("menu@v1.0.0"`) {
@@ -32,9 +32,9 @@ func TestMenuIsShippedWhenUsed(t *testing.T) {
 
 // CONTROL: only-what-is-used.
 func TestMenuIsAbsentWhenUnused(t *testing.T) {
-	out := Render(`<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`)
+	out := deliver(`<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`)
 
-	if strings.Contains(out, `components=component%3Amenu`) {
+	if strings.Contains(out, `/kit/components/menu@`) {
 		t.Fatal("menu shipped to a page that never mentions it")
 	}
 }

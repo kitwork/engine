@@ -8,6 +8,14 @@ import (
 	jitjs "github.com/kitwork/engine/jit/js"
 )
 
+// siteOrNil keeps a nil *siteComponents from becoming a non-nil jitjs.Site interface value.
+func siteOrNil(site *siteComponents) jitjs.Site {
+	if site == nil {
+		return nil
+	}
+	return site
+}
+
 // serveKitAssetIf serves the page JavaScript files under /kit/ — the kernel, Drive, and one file per
 // component and capability (jit/js delivery.go). Each name carries a hash of its bytes, so a file is
 // cached for a year and never revalidated: a different byte is a different name. An old name that

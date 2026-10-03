@@ -50,12 +50,8 @@ func TestRenderRecognisesAPageByItsMarkup(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			out := Render(c.html)
-			if got := strings.Contains(out, RuntimePath); got != c.recognise {
-				t.Fatalf("recognised=%t, want %t — output was %s", got, c.recognise, out)
-			}
-			if !c.recognise && out != c.html {
-				t.Fatalf("an unrecognised page must come back unchanged, got %s", out)
+			if got := UsesGrammar(c.html); got != c.recognise {
+				t.Fatalf("recognised=%t, want %t — page was %s", got, c.recognise, c.html)
 			}
 		})
 	}
@@ -65,14 +61,11 @@ func TestRenderRecognisesAPageByItsMarkup(t *testing.T) {
 // like the same page without it, so nothing hinges on remembering to write it.
 func TestRootMarkerNoLongerDecidesAnything(t *testing.T) {
 	const body = `<b data-kit-text="title">t</b>`
-	plain := Render(`<head></head><body>` + body + `</body>`)
-	marked := Render(`<head></head><body data-kit-hydrate="v1">` + body + `</body>`)
-	if !strings.Contains(plain, RuntimePath) || !strings.Contains(marked, RuntimePath) {
-		t.Fatalf("both should be recognised — plain=%s marked=%s", plain, marked)
+	if !UsesGrammar(`<head></head><body>`+body+`</body>`) || !UsesGrammar(`<head></head><body data-kit-hydrate="v1">`+body+`</body>`) {
+		t.Fatal("a page with a directive is recognised, marker or not")
 	}
-	onlyMarker := `<head></head><body data-kit-hydrate="v1"><div>hello</div></body>`
-	if out := Render(onlyMarker); out != onlyMarker {
-		t.Fatalf("a marker alone must not pull in the runtime, got %s", out)
+	if UsesGrammar(`<head></head><body data-kit-hydrate="v1"><div>hello</div></body>`) {
+		t.Fatal("a marker alone must not make a page a Kitwork page")
 	}
 }
 
@@ -84,7 +77,7 @@ func TestDiagnosticsAreDevelopmentOnly(t *testing.T) {
 	previous := Diagnostics
 	defer func() { Diagnostics = previous }()
 
-	render := func(on bool) (string, string) {
+	check := func(on bool) string {
 		t.Helper()
 		Diagnostics = on
 		read, write, err := os.Pipe()
@@ -93,27 +86,20 @@ func TestDiagnosticsAreDevelopmentOnly(t *testing.T) {
 		}
 		stdout := os.Stdout
 		os.Stdout = write
-		out := Render(page)
+		Check(page)
 		os.Stdout = stdout
 		_ = write.Close()
 		printed, _ := io.ReadAll(read)
-		return out, string(printed)
+		return string(printed)
 	}
 
-	quiet, quietLog := render(false)
-	loud, loudLog := render(true)
+	quietLog := check(false)
+	loudLog := check(true)
 
 	if quietLog != "" {
 		t.Fatalf("production must print nothing, got: %s", quietLog)
 	}
 	if !strings.Contains(loudLog, "[hydrate]") || !strings.Contains(loudLog, "nameNobodyDeclares") {
 		t.Fatalf("development must name the mistake, got: %s", loudLog)
-	}
-	// Whatever is printed, the page that goes out is identical: a diagnostic never changes a response.
-	if quiet != loud {
-		t.Fatalf("diagnostics changed the output — quiet=%s loud=%s", quiet, loud)
-	}
-	if !strings.Contains(quiet, RuntimePath) {
-		t.Fatalf("the page is still recognised with diagnostics off, got %s", quiet)
 	}
 }

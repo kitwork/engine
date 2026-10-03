@@ -32,7 +32,7 @@ func TestIntersectDirectiveIsVerified(t *testing.T) {
 		}
 	}
 	page := `<head></head><body>` + marker + `<section data-kit-intersect:once="count++"></section></section></body></html>`
-	if strings.Count(Render(page), injectTag) != 1 {
+	if !UsesGrammar(page) {
 		t.Error("a page with only data-kit-intersect needs the runtime injected")
 	}
 	if found := strings.Join(authoringMistakes(`<section data-kit-intersect:sideways="count++"></section>`), "\n"); !strings.Contains(found, "unknown modifier :sideways") {

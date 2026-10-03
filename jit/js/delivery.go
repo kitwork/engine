@@ -36,8 +36,8 @@ import (
 // also why the tags carry no integrity attribute: it would turn a stale page into a page with no
 // JavaScript at all, to protect a same-origin file that the hash in its name already identifies.
 //
-// /kit.js?components=… — everything in one response — is still served, for tooling and for a page
-// assembled by hand (Render); the engine's own pages use Deliver.
+// (/kit.js?components=… — everything in one response — went on 03/10: no page asked for it, and it
+// carried none of the directive files.)
 
 // Minify and Native are set once at boot by the engine, like hydrate.Diagnostics: minified files
 // in production, and the native bridge in the kernel when the app runs inside a desktop or mobile
@@ -47,8 +47,7 @@ var (
 	Native bool
 )
 
-// AssetPrefix is where the files are served — beside /kit.js, which serves the whole runtime in one
-// response for tooling.
+// AssetPrefix is where the files are served.
 const AssetPrefix = "/kit/"
 
 // Options are a site's choices about its JavaScript — router.javascript() and router.drive().

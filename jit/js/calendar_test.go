@@ -6,8 +6,8 @@ import (
 )
 
 func TestCalendarIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="calendar"><b data-kit-text="title"></b></div>`)
-	if !strings.Contains(out, `components=component%3Acalendar`) {
+	out := deliver(`<div data-kit-component="calendar"><b data-kit-text="title"></b></div>`)
+	if !strings.Contains(out, `/kit/components/calendar@`) {
 		t.Fatalf("calendar was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"calendar"}), `component("calendar@v1.0.0"`) {

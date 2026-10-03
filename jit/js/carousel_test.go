@@ -6,8 +6,8 @@ import (
 )
 
 func TestCarouselIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="carousel"><div data-kit-element="track"></div></div>`)
-	if !strings.Contains(out, `components=component%3Acarousel`) {
+	out := deliver(`<div data-kit-component="carousel"><div data-kit-element="track"></div></div>`)
+	if !strings.Contains(out, `/kit/components/carousel@`) {
 		t.Fatalf("carousel was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"carousel"}), `component("carousel@v1.0.0"`) {

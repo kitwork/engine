@@ -6,8 +6,8 @@ import (
 )
 
 func TestDropzoneIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="dropzone"><input type="file" data-kit-element="picker"></div>`)
-	if !strings.Contains(out, `components=component%3Adropzone`) {
+	out := deliver(`<div data-kit-component="dropzone"><input type="file" data-kit-element="picker"></div>`)
+	if !strings.Contains(out, `/kit/components/dropzone@`) {
 		t.Fatalf("dropzone was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"dropzone"}), `component("dropzone@v1.0.0"`) {

@@ -6,8 +6,8 @@ import (
 )
 
 func TestRotatorIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="rotator"><span data-kit-element="item">a</span></div>`)
-	if !strings.Contains(out, `components=component%3Arotator`) {
+	out := deliver(`<div data-kit-component="rotator"><span data-kit-element="item">a</span></div>`)
+	if !strings.Contains(out, `/kit/components/rotator@`) {
 		t.Fatalf("rotator was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"rotator"}), `component("rotator@v1.0.0"`) {

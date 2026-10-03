@@ -6,8 +6,8 @@ import (
 )
 
 func TestContextMenuIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="context-menu"><div data-kit-element="target">t</div></div>`)
-	if !strings.Contains(out, `components=component%3Acontext-menu`) {
+	out := deliver(`<div data-kit-component="context-menu"><div data-kit-element="target">t</div></div>`)
+	if !strings.Contains(out, `/kit/components/context-menu@`) {
 		t.Fatalf("context-menu was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"context-menu"}), `component("context-menu@v1.0.0"`) {

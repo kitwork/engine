@@ -6,8 +6,8 @@ import (
 )
 
 func TestKanbanIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<section data-kit-component="kanban"><div data-kit-element="column" data-column="a"></div></section>`)
-	if !strings.Contains(out, `components=component%3Akanban`) {
+	out := deliver(`<section data-kit-component="kanban"><div data-kit-element="column" data-column="a"></div></section>`)
+	if !strings.Contains(out, `/kit/components/kanban@`) {
 		t.Fatalf("kanban was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"kanban"}), `component("kanban@v1.0.0"`) {

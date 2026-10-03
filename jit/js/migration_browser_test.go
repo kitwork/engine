@@ -92,9 +92,9 @@ func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
   })().catch(function (error) { if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
-	rendered := Render(page)
-	if !strings.Contains(rendered, "components=component%3Aclipboard") {
-		t.Fatalf("Render should inject the clipboard component for this page:\n%s", rendered)
+	rendered := deliver(page)
+	if !strings.Contains(rendered, "/kit/components/clipboard@") {
+		t.Fatalf("Deliver should bring the clipboard component for this page:\n%s", rendered)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {

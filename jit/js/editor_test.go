@@ -6,8 +6,8 @@ import (
 )
 
 func TestEditorIsShippedWhenUsed(t *testing.T) {
-	out := Render(`<div data-kit-component="editor"><div data-kit-element="area" contenteditable="true"></div></div>`)
-	if !strings.Contains(out, `components=component%3Aeditor`) {
+	out := deliver(`<div data-kit-component="editor"><div data-kit-element="area" contenteditable="true"></div></div>`)
+	if !strings.Contains(out, `/kit/components/editor@`) {
 		t.Fatalf("editor was not injected for markup that uses it:\n%s", out)
 	}
 	if !strings.Contains(ModulesJS([]string{"editor"}), `component("editor@v1.0.0"`) {
