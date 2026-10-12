@@ -5,46 +5,56 @@ import "time"
 // Stats is a point-in-time view of one open database's bounded storage state.
 // It contains no user keys or values and is safe to collect concurrently.
 type Stats struct {
-	ReplicaMode                 bool
-	LastTransaction             uint64
-	CheckpointTransaction       uint64
-	WALBaseTransaction          uint64
-	WALBytes                    int64
-	MainFormatVersion           uint16
-	MainGeneration              uint64
-	MainRecords                 uint64
-	MainMutations               uint64
-	MainSegments                int
-	MainBlocks                  int
-	MainDataBytes               int64
-	MainDirectoryBytes          int64
-	MainFileBytes               int64
-	OverlayMutations            int
-	ActiveSnapshots             int
-	ActiveTransactions          int
-	ActiveTransactionBytes      int
-	PendingCommits              int
-	CommitQueueCapacity         int
-	MaxCommitBatch              int
-	GroupCommitDelay            time.Duration
-	CommitBatches               uint64
-	CommittedTransactions       uint64
-	CommitSyncs                 uint64
-	LargestCommitBatch          int
-	CatalogStructs              int
-	CatalogBytes                int
-	CatalogRevision             string
-	HistoryEnabled              bool
-	HistoryBaseTransaction      uint64
-	HistorySegments             int
-	HistoryBytes                int64
-	HistoryRetiredSegments      int
-	HistoryRetiredBytes         int64
-	HistoryPins                 int
-	HistoryOldestPinTransaction uint64
-	CachedPages                 int
-	CachedBytes                 int64
-	PageCacheLimitBytes         int64
+	OverlaySince                 time.Time
+	LastCheckpointAt             time.Time
+	ReplicaMode                  bool
+	LastTransaction              uint64
+	CheckpointTransaction        uint64
+	WALBaseTransaction           uint64
+	WALBytes                     int64
+	MainFormatVersion            uint16
+	MainGeneration               uint64
+	MainRecords                  uint64
+	MainMutations                uint64
+	MainSegments                 int
+	MainBlocks                   int
+	MainDataBytes                int64
+	MainDirectoryBytes           int64
+	MainFileBytes                int64
+	OverlayMutations             int
+	ActiveSnapshots              int
+	SnapshotReservations         int
+	SnapshotWaiters              int
+	SnapshotBytes                int64
+	SnapshotReservedBytes        int64
+	SnapshotMemoryLimitBytes     int64
+	SnapshotOverlayEstimateBytes int64
+	FrontendTransactionBytes     int64
+	TransactionMemoryLimitBytes  int64
+	ActiveTransactions           int
+	ActiveTransactionBytes       int
+	PendingCommits               int
+	CommitQueueCapacity          int
+	MaxCommitBatch               int
+	GroupCommitDelay             time.Duration
+	CommitBatches                uint64
+	CommittedTransactions        uint64
+	CommitSyncs                  uint64
+	LargestCommitBatch           int
+	CatalogStructs               int
+	CatalogBytes                 int
+	CatalogRevision              string
+	HistoryEnabled               bool
+	HistoryBaseTransaction       uint64
+	HistorySegments              int
+	HistoryBytes                 int64
+	HistoryRetiredSegments       int
+	HistoryRetiredBytes          int64
+	HistoryPins                  int
+	HistoryOldestPinTransaction  uint64
+	CachedPages                  int
+	CachedBytes                  int64
+	PageCacheLimitBytes          int64
 }
 
 // Stats returns storage and cache counters for admission, diagnostics, and
@@ -67,39 +77,51 @@ func (db *DB) Stats() (Stats, error) {
 		mutations = db.main.records
 	}
 	stats := Stats{
-		ReplicaMode:            db.replicaMode,
-		LastTransaction:        db.lastTx,
-		CheckpointTransaction:  db.checkpointTx,
-		WALBaseTransaction:     db.walBaseTx,
-		WALBytes:               db.walEnd,
-		MainFormatVersion:      db.main.formatVersion,
-		MainGeneration:         db.main.generation,
-		MainRecords:            db.main.records,
-		MainMutations:          mutations,
-		MainSegments:           len(db.main.segments),
-		MainBlocks:             len(db.main.blocks),
-		MainDataBytes:          db.main.dataBytes,
-		MainDirectoryBytes:     db.main.directoryBytes,
-		MainFileBytes:          db.main.fileEnd,
-		OverlayMutations:       len(db.overlay),
-		ActiveSnapshots:        db.activeSnapshotCount(),
-		ActiveTransactions:     len(db.activeTx),
-		ActiveTransactionBytes: db.activeTxBytes,
-		PendingCommits:         len(db.commitQueue),
-		CommitQueueCapacity:    cap(db.commitQueue),
-		MaxCommitBatch:         db.maxCommitBatch,
-		GroupCommitDelay:       db.groupCommitDelay,
-		CommitBatches:          db.commitBatches,
-		CommittedTransactions:  db.committedTransactions,
-		CommitSyncs:            db.commitSyncs,
-		LargestCommitBatch:     db.largestCommitBatch,
-		CatalogStructs:         len(db.catalog.byID),
-		CatalogBytes:           db.catalog.bytes,
-		CatalogRevision:        db.catalog.revision,
-		CachedPages:            pages,
-		CachedBytes:            used,
-		PageCacheLimitBytes:    db.main.cache.maximum,
+		OverlaySince:                 db.overlaySince,
+		LastCheckpointAt:             db.lastCheckpointAt,
+		FrontendTransactionBytes:     db.frontendTxBytes,
+		TransactionMemoryLimitBytes:  db.transactionMemoryLimit,
+		SnapshotMemoryLimitBytes:     db.snapshotMemoryLimit,
+		SnapshotOverlayEstimateBytes: db.snapshotOverlayBytes.Load(),
+		ReplicaMode:                  db.replicaMode,
+		LastTransaction:              db.lastTx,
+		CheckpointTransaction:        db.checkpointTx,
+		WALBaseTransaction:           db.walBaseTx,
+		WALBytes:                     db.walEnd,
+		MainFormatVersion:            db.main.formatVersion,
+		MainGeneration:               db.main.generation,
+		MainRecords:                  db.main.records,
+		MainMutations:                mutations,
+		MainSegments:                 len(db.main.segments),
+		MainBlocks:                   len(db.main.blocks),
+		MainDataBytes:                db.main.dataBytes,
+		MainDirectoryBytes:           db.main.directoryBytes,
+		MainFileBytes:                db.main.fileEnd,
+		OverlayMutations:             len(db.overlay),
+		ActiveTransactions:           len(db.activeTx),
+		ActiveTransactionBytes:       db.activeTxBytes,
+		PendingCommits:               len(db.commitQueue),
+		CommitQueueCapacity:          cap(db.commitQueue),
+		MaxCommitBatch:               db.maxCommitBatch,
+		GroupCommitDelay:             db.groupCommitDelay,
+		CommitBatches:                db.commitBatches,
+		CommittedTransactions:        db.committedTransactions,
+		CommitSyncs:                  db.commitSyncs,
+		LargestCommitBatch:           db.largestCommitBatch,
+		CatalogStructs:               len(db.catalog.byID),
+		CatalogBytes:                 db.catalog.bytes,
+		CatalogRevision:              db.catalog.revision,
+		CachedPages:                  pages,
+		CachedBytes:                  used,
+		PageCacheLimitBytes:          db.main.cache.maximum,
 	}
+	db.snapshotMu.Lock()
+	stats.ActiveSnapshots = len(db.snapshots)
+	stats.SnapshotReservations = len(db.snapshotReservations)
+	stats.SnapshotWaiters = len(db.snapshotWaiters)
+	stats.SnapshotBytes = db.snapshotBytes
+	stats.SnapshotReservedBytes = db.snapshotReservedBytes
+	db.snapshotMu.Unlock()
 	if db.history != nil {
 		stats.HistoryEnabled = true
 		stats.HistoryBaseTransaction = db.history.baseTx

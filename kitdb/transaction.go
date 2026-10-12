@@ -83,6 +83,13 @@ func (tx *Tx) Commit() (uint64, error) {
 	return tx.commit(nil, false)
 }
 
+// CommitWithDependencies validates a complete physical dependency set at the
+// commit writer. It is for trusted adapters, not automatic SQL isolation.
+// Missing journal coverage or oversized dependencies uses the coarse fence.
+func (tx *Tx) CommitWithDependencies(snapshot uint64, dependencies CommitDependencies) (uint64, error) {
+	return tx.commitPrepared(&snapshot, false, &dependencies)
+}
+
 // CommitIfUnchanged checks the snapshot boundary inside the commit writer.
 // Only kernel-owned sequence value reservations are excluded from conflicts;
 // catalog changes and all caller-authored writes still invalidate the snapshot.
@@ -91,19 +98,37 @@ func (tx *Tx) CommitIfUnchanged(snapshot uint64) (uint64, error) {
 }
 
 func (tx *Tx) commit(snapshot *uint64, sequenceOnly bool) (uint64, error) {
+	return tx.commitPrepared(snapshot, sequenceOnly, nil)
+}
+
+func (tx *Tx) commitPrepared(snapshot *uint64, sequenceOnly bool, dependencies *CommitDependencies) (uint64, error) {
 	tx.mu.Lock()
 	if tx.done {
 		tx.mu.Unlock()
 		return 0, ErrTransactionClosed
 	}
+	var validation *commitValidation
+	extraBytes := 0
+	if dependencies != nil {
+		validation = prepareCommitValidation(*dependencies, tx.operations)
+		if validation != nil {
+			// Charge key/bound bytes plus a fixed map/slice metadata allowance
+			// against the same aggregate admission budget as pending mutations.
+			extraBytes = validation.bytes + len(validation.keys)*128 + len(validation.ranges)*128
+			if err := tx.db.reserveTransactionBytes(tx, extraBytes); err != nil {
+				tx.mu.Unlock()
+				return 0, err
+			}
+		}
+	}
 	tx.done = true
 	operations := tx.operations
-	payloadSize := tx.payloadSize
+	payloadSize := tx.payloadSize + extraBytes
 	tx.operations = nil
 	tx.mu.Unlock()
 
 	defer tx.db.finishTransaction(tx, payloadSize)
-	return tx.db.submitCommit(&commitRequest{operations: operations, snapshot: snapshot, sequenceOnly: sequenceOnly})
+	return tx.db.submitCommit(&commitRequest{operations: operations, snapshot: snapshot, sequenceOnly: sequenceOnly, validation: validation})
 }
 
 // Rollback discards every uncommitted operation.

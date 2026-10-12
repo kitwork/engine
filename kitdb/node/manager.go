@@ -212,19 +212,20 @@ const (
 )
 
 type databaseEntry struct {
-	key        string
-	path       string
-	options    kitdb.OpenOptions
-	policy     DatabasePolicy
-	cacheBytes int64
-	gate       DatabaseGate
-	state      entryState
-	ready      chan struct{}
-	database   *kitdb.DB
-	leases     int
-	idle       *list.Element
-	err        error
-	closeErr   error
+	checkpointPressure checkpointPressureState
+	key                string
+	path               string
+	options            kitdb.OpenOptions
+	policy             DatabasePolicy
+	cacheBytes         int64
+	gate               DatabaseGate
+	state              entryState
+	ready              chan struct{}
+	database           *kitdb.DB
+	leases             int
+	idle               *list.Element
+	err                error
+	closeErr           error
 }
 
 // DatabaseGate serializes host-level relational operations that span more

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/kitwork/engine/app"
 	kitdbengine "github.com/kitwork/engine/kitdb"
@@ -826,7 +827,9 @@ func checkpointKitDBBackgroundMaintenanceWithPolicy(
 	if err != nil {
 		return false, err
 	}
-	if stats.WALBytes < policy.softWALBytes && stats.OverlayMutations < policy.softChanges {
+	if stats.WALBytes < policy.softWALBytes && stats.OverlayMutations < policy.softChanges &&
+		stats.SnapshotOverlayEstimateBytes < max(int64(1), stats.SnapshotMemoryLimitBytes/4) &&
+		(stats.OverlaySince.IsZero() || time.Since(stats.OverlaySince) < 30*time.Second) {
 		return false, nil
 	}
 	_, err = database.Checkpoint()
@@ -842,9 +845,17 @@ func checkpointKitDBBeforeWriteWithPolicy(managed *managedKitDB, policy kitDBChe
 		return err
 	}
 	hard := stats.WALBytes >= policy.hardWALBytes ||
-		stats.OverlayMutations >= policy.hardChanges
+		stats.OverlayMutations >= policy.hardChanges ||
+		stats.SnapshotOverlayEstimateBytes >= max(int64(1), stats.SnapshotMemoryLimitBytes/2)
+	pressure := kitdbnode.CheckpointPressurePolicy{
+		WALBytes: policy.softWALBytes, Mutations: policy.softChanges,
+		OverlayBytes: max(int64(1), stats.SnapshotMemoryLimitBytes/4),
+		MaxAge:       30 * time.Second,
+	}
 	if !hard && stats.WALBytes < policy.softWALBytes &&
-		stats.OverlayMutations < policy.softChanges {
+		stats.OverlayMutations < policy.softChanges &&
+		stats.SnapshotOverlayEstimateBytes < pressure.OverlayBytes &&
+		(stats.OverlaySince.IsZero() || time.Since(stats.OverlaySince) < pressure.MaxAge) {
 		return nil
 	}
 	priority := kitdbnode.MaintenanceNormal
@@ -855,8 +866,8 @@ func checkpointKitDBBeforeWriteWithPolicy(managed *managedKitDB, policy kitDBChe
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ticket, err := managed.manager.fleet.ScheduleCheckpoint(
-		ctx, managed.path, managed.options, priority,
+	ticket, err := managed.manager.fleet.EvaluateCheckpoint(
+		ctx, managed.path, managed.options, pressure, priority,
 	)
 	if err != nil {
 		if !hard && (errors.Is(err, kitdbnode.ErrMaintenanceQueueFull) ||
@@ -865,7 +876,7 @@ func checkpointKitDBBeforeWriteWithPolicy(managed *managedKitDB, policy kitDBChe
 		}
 		return err
 	}
-	if !hard {
+	if !hard || ticket == nil {
 		return nil
 	}
 	_, err = ticket.Wait(ctx)

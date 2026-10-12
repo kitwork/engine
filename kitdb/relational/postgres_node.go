@@ -519,10 +519,7 @@ func (node *PostgresNode) Authenticate(
 	defer cancel()
 	entry, err := node.acquireEngine(acquireContext, database)
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, kitdbnode.ErrWarmCapacity) {
-			return nil, pgwire.NewError("53300", "KitDB database capacity is busy; retry the connection")
-		}
-		return nil, pgwire.NewError("55000", err.Error())
+		return nil, postgresNodeAcquireError(err)
 	}
 	trace := func(source string, parameterCount int) {
 		if node.trace != nil {
@@ -540,6 +537,19 @@ func (node *PostgresNode) Authenticate(
 			return node.releaseEngine(entry)
 		},
 	}, nil
+}
+
+func postgresNodeAcquireError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return pgwire.NewError("53300", "KitDB database acquisition timed out; retry the connection")
+	}
+	if errors.Is(err, kitdbnode.ErrWarmCapacity) {
+		return pgwire.NewError("53300", "KitDB warm databases exhaust capacity; retry the connection")
+	}
+	if errors.Is(err, context.Canceled) {
+		return pgwire.NewError("57014", "KitDB database acquisition canceled")
+	}
+	return pgwire.NewError("55000", err.Error())
 }
 
 func (node *PostgresNode) discoverDatabases() ([]postgresNodeDatabase, error) {
@@ -755,6 +765,7 @@ func (node *PostgresNode) acquireEngine(
 			return nil, err
 		}
 		relationalOptions := node.relational
+		relationalOptions.CheckpointManager = node.manager
 		if warm {
 			relationalOptions.ProjectionOpenPolicy = stricterProjectionOpenPolicy(
 				relationalOptions.ProjectionOpenPolicy, node.warmProjectionOpenPolicy,

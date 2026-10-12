@@ -9,19 +9,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
 )
 
 const (
 	walFilename = "WAL"
 	walSuffix   = ".wal"
 
-	walHeaderSize       = 64
-	walHeaderChecksumAt = 60
-	frameHeaderSize     = 32
-	frameTrailerSize    = 24
-	payloadPrefixSize   = 4
+	walHeaderSize          = 64
+	walHeaderChecksumAt    = 60
+	frameHeaderSize        = 32
+	frameTrailerSize       = 24
+	payloadPrefixSize      = 4
 	timedPayloadPrefixSize = payloadPrefixSize + 8
-	operationHeaderSize = 9
+	operationHeaderSize    = 9
 
 	walFormatVersion   = 1
 	frameFormatVersion = 1
@@ -49,13 +51,13 @@ type walHeader struct {
 }
 
 type walRecovery struct {
-	file        *os.File
-	identity    [16]byte
-	overlay     map[string]rowMutation
-	lastTx      uint64
-	walEnd      int64
-	walChecksum uint32
-	walBaseTx   uint64
+	file           *os.File
+	identity       [16]byte
+	overlay        map[string]rowMutation
+	lastTx         uint64
+	walEnd         int64
+	walChecksum    uint32
+	walBaseTx      uint64
 	lastCommitTime int64
 }
 
@@ -303,11 +305,15 @@ func readWALHeader(path string, file *os.File, size int64) (walHeader, error) {
 // rotateWALLocked requires commitMu. It prepares the replacement before
 // closing the active WAL, so pre-publication failures leave commits available.
 func (db *DB) rotateWALLocked(baseTx uint64, baseChecksum uint32) error {
+	if err := checkpointfault.Error(db.path, "rotate-prepare"); err != nil {
+		return err
+	}
 	path := databaseWALPath(db.path)
 	stagingPath, err := prepareWAL(path, db.identity, baseTx, baseChecksum)
 	if err != nil {
 		return err
 	}
+	checkpointfault.Reach(db.path, "wal-staging-synced")
 	published := false
 	defer func() {
 		if !published {
@@ -327,11 +333,12 @@ func (db *DB) rotateWALLocked(baseTx uint64, baseChecksum uint32) error {
 	if err := wal.Close(); err != nil {
 		return db.restoreWALAfterRotationFailure(path, fmt.Errorf("kitdb: close WAL for rotation: %w", err))
 	}
-	if err := replaceFile(stagingPath, path); err != nil {
+	if err := storageReplace(db.path, "rotate-replace", stagingPath, path); err != nil {
 		return db.restoreWALAfterRotationFailure(path, fmt.Errorf("kitdb: publish rotated WAL: %w", err))
 	}
+	checkpointfault.Reach(db.path, "wal-replaced")
 	published = true
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
+	if err := storageSyncDirectory(db.path, "rotate-directory-sync", filepath.Dir(path)); err != nil {
 		durableErr := errors.Join(ErrDurabilityUncertain, fmt.Errorf("kitdb: sync rotated WAL directory: %w", err))
 		db.markUnavailable(durableErr)
 		return durableErr

@@ -18,6 +18,7 @@ const (
 
 type commitRequest struct {
 	snapshot         *uint64
+	validation       *commitValidation
 	sequenceOnly     bool
 	operations       []operation
 	committedAt      int64
@@ -214,6 +215,7 @@ func (db *DB) commitBatch(requests []*commitRequest) {
 	}
 	lastTransaction := db.lastTx
 	lastDataTransaction := db.lastDataTx
+	publishedDataTransaction := lastDataTransaction
 	lastCommitTime := db.lastCommitTime
 	catalog := db.catalog
 	wal := db.wal
@@ -222,7 +224,26 @@ func (db *DB) commitBatch(requests []*commitRequest) {
 
 	valid = requests[:0]
 	for _, request := range requests {
-		if request.snapshot != nil && (*request.snapshot > lastTransaction || lastDataTransaction > *request.snapshot) {
+		conflict := false
+		if request.snapshot != nil {
+			base := *request.snapshot
+			conflict = base > lastTransaction
+			if request.validation == nil {
+				conflict = conflict || lastDataTransaction > base
+			} else {
+				db.conflicts.activate(lastTransaction)
+				if !conflict && publishedDataTransaction > base {
+					conflict = db.conflicts.conflicts(base, request.validation)
+				}
+				for _, previous := range valid {
+					if conflict {
+						break
+					}
+					conflict = request.validation.conflicts(previous)
+				}
+			}
+		}
+		if conflict {
 			request.result <- commitResult{err: ErrTransactionConflict}
 			continue
 		}
@@ -308,7 +329,7 @@ func (db *DB) commitBatch(requests []*commitRequest) {
 			completeCommitBatch(requests, frames, durabilityErr)
 			return
 		}
-		if _, err := writeAll(wal, frame); err != nil {
+		if _, err := storageWrite(db.path, "wal-write", wal, frame); err != nil {
 			durabilityErr := errors.Join(ErrDurabilityUncertain, err)
 			db.markUnavailable(durabilityErr)
 			db.commitMu.Unlock()
@@ -318,7 +339,7 @@ func (db *DB) commitBatch(requests []*commitRequest) {
 		frames[index].checksum = frameChecksum(frame)
 		end += int64(len(frame))
 	}
-	if err := wal.Sync(); err != nil {
+	if err := storageSync(db.path, "wal-sync", wal); err != nil {
 		durabilityErr := errors.Join(ErrDurabilityUncertain, err)
 		db.markUnavailable(durabilityErr)
 		db.commitMu.Unlock()
@@ -328,7 +349,8 @@ func (db *DB) commitBatch(requests []*commitRequest) {
 
 	db.mu.Lock()
 	for index, request := range requests {
-		applyOperations(db.overlay, request.operations)
+		db.applyOverlayOperations(request.operations)
+		db.conflicts.record(frames[index].transaction, request)
 		db.lastTx = frames[index].transaction
 		if !request.sequenceOnly {
 			db.lastDataTx = frames[index].transaction

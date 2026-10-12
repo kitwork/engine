@@ -114,7 +114,36 @@ func TestKitSQLRefusesCleartextOutsideLoopback(t *testing.T) {
 	}
 }
 
-func openKitSQLFixture(t *testing.T) (*sql.DB, func()) {
+func TestKitSQLBoundsResultPayload(t *testing.T) {
+	native, closeNative := openKitSQLFixture(t)
+	defer closeNative()
+	handler, err := kitsql.NewHandler(kitsql.HandlerOptions{
+		Open: fixtureOpener(native), MaximumResultBytes: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(handler)
+	defer server.Close()
+	parsed, _ := url.Parse(server.URL)
+	database, err := kitsql.OpenWithClient("kitsql://kitdb:secret@"+parsed.Host+"/shop", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	rows, err := database.Query(`SELECT name FROM products`)
+	if err == nil {
+		for rows.Next() {
+		}
+		err = rows.Err()
+		_ = rows.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "KSQL_RESULT_LIMIT") {
+		t.Fatalf("bounded streamed result error = %v", err)
+	}
+}
+
+func openKitSQLFixture(t testing.TB) (*sql.DB, func()) {
 	t.Helper()
 	engine, err := relational.Open(filepath.Join(t.TempDir(), "shop.kitdb"))
 	if err != nil {

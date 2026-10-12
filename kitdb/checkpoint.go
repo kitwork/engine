@@ -173,6 +173,7 @@ func (db *DB) installAppendedMain(newMain *mainImage, transaction uint64) error 
 	newMain.cache = oldMain.cache
 	db.main = newMain
 	db.overlay = make(map[string]rowMutation)
+	db.resetOverlayMemory()
 	db.checkpointTx = transaction
 	db.mu.Unlock()
 	if err := oldMain.close(); err != nil {
@@ -211,6 +212,7 @@ func (db *DB) publishCompactedMain(stagingPath string, transaction uint64) error
 	}
 	db.main = newMain
 	db.overlay = make(map[string]rowMutation)
+	db.resetOverlayMemory()
 	db.checkpointTx = transaction
 	if publishErr != nil && db.fatal == nil {
 		db.fatal = publishErr

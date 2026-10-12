@@ -53,6 +53,64 @@ jobs:
           include-hidden-files: true
           retention-days: 14
 
+  storage-soak:
+    name: KitDB 30-minute soak (${{ matrix.os }})
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Add MinGW for the Windows race detector
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+
+      - name: Mixed SQL soak and recovery
+        shell: pwsh
+        env:
+          KITDB_SQL_SOAK: "1"
+          KITDB_SQL_SOAK_SECONDS: "1800"
+          KITDB_SQL_SOAK_REPORT: .artifacts/kitdb-sql-soak.json
+        run: |
+          New-Item -ItemType Directory -Force .artifacts | Out-Null
+          go test -race ./kitdb/relational -run '^TestSQLPressureSoak$' -count=1 -v -timeout=35m 2>&1 | Tee-Object -FilePath .artifacts/kitdb-sql-soak.log
+          exit $LASTEXITCODE
+
+      - name: Flag write-progress gaps
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path .artifacts/kitdb-sql-soak.json) {
+            $report = Get-Content .artifacts/kitdb-sql-soak.json -Raw | ConvertFrom-Json
+            $stalled = @($report.Rounds | Where-Object { $_.ZeroWriteWindows -gt 0 })
+            if ($stalled.Count -gt 0) {
+              Write-Output '::warning::Soak data/reopen checks completed, but write-progress gaps were observed. Inspect MaxNoWriteSeconds and ZeroWriteWindows; this is not a liveness qualification.'
+            }
+          }
+
+      - name: Upload soak evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kitdb-soak-${{ runner.os }}-${{ github.sha }}
+          path: .artifacts/kitdb-sql-soak.*
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
+
   runtime-hardening:
     name: Runtime hardening (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -76,6 +134,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+
+      - name: KitDB checkpoint publication crash matrix
+        run: go test -race -tags kitdbfault ./kitdb/relational -run "^TestSQLCheckpoint(PublicationCrash|CrashHelper)$" -count=3 -timeout=5m
+
+      - name: KitDB storage I/O failure matrix
+        run: go test -race -tags kitdbfault ./kitdb ./kitdb/relational -run "^(TestWALIOFaultDrainsCommitResources|TestSQLStorageIOFaultMatrix)$" -count=3 -timeout=5m
 
       - name: Focused race gate
         run: go test -race ./runtime ./compiler ./conformance ./compatibility ./core ./site ./app ./request ./kitdb/... ./search ./work ./utilities/sse -run Test -count=1

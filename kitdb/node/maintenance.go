@@ -952,7 +952,7 @@ func runMaintenanceOperation(
 	}
 	switch kind {
 	case MaintenanceCheckpoint:
-		return database.Checkpoint()
+		return database.CheckpointContext(ctx)
 	case MaintenanceVerify:
 		return 0, database.VerifyContext(ctx)
 	default:

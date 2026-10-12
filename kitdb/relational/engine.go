@@ -14,6 +14,7 @@ import (
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
+	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
 	"github.com/kitwork/engine/search"
 )
@@ -31,6 +32,9 @@ func standaloneStatementReadOnly(kind kitdbsql.StatementKind) bool {
 }
 
 type Options struct {
+	// CheckpointManager is the host owner of this kernel. Nil leaves maintenance
+	// explicit; adapters must not create a separate manager for the same file.
+	CheckpointManager *kitdbnode.Manager
 	// ExperimentalProjections enables read-only .analytics and .search snapshots.
 	// RefreshProjections is explicit; this is not an incremental index mode.
 	ExperimentalProjections bool
@@ -55,6 +59,8 @@ type Options struct {
 }
 
 type Engine struct {
+	checkpointManager       *kitdbnode.Manager
+	kernelOptions           kitdbengine.OpenOptions
 	projectionMu            sync.RWMutex
 	projectionCache         projectionReaderCache
 	projectionBuilds        chan struct{}
@@ -244,6 +250,19 @@ func newEngineWithDatabase(
 	if closeDatabase == nil {
 		return nil, fmt.Errorf("kitdb: managed database release is nil")
 	}
+	if options.CheckpointManager != nil {
+		owner, err := options.CheckpointManager.Acquire(ctx, database.Path(), options.Kernel)
+		if err != nil {
+			return nil, fmt.Errorf("kitdb: checkpoint owner: %w", err)
+		}
+		sameKernel := owner.DB() == database
+		if err := owner.Release(); err != nil {
+			return nil, err
+		}
+		if !sameKernel {
+			return nil, fmt.Errorf("kitdb: checkpoint manager does not own the attached kernel")
+		}
+	}
 	searchConfiguration, err := normalizeRelationalSearchOptions(
 		database.Path(), database.ID(), maximum, options,
 	)
@@ -252,6 +271,8 @@ func newEngineWithDatabase(
 	}
 	searchContext, searchCancel := context.WithCancel(context.Background())
 	engine := &Engine{
+		checkpointManager:       options.CheckpointManager,
+		kernelOptions:           options.Kernel,
 		projectionQueries:       make(chan struct{}, 2),
 		projectionBuilds:        make(chan struct{}, 1),
 		experimentalProjections: options.ExperimentalProjections,
@@ -532,6 +553,14 @@ func (engine *Engine) executePreparedPlanWithSequences(
 	if readOnly && !standaloneStatementReadOnly(statement.Kind) {
 		return Result{}, fmt.Errorf("kitdb: database is read-only")
 	}
+	if !standaloneStatementReadOnly(statement.Kind) {
+		if err := engine.evaluateCheckpoint(ctx, true); err != nil {
+			return Result{}, err
+		}
+	}
+	// Evaluation after execution is best-effort, never a commit acknowledgement.
+	// SELECT nextval can also mutate the catalog, so include read statements.
+	defer engine.evaluateCheckpoint(ctx, false)
 	if _, handled, err := describeSequenceSelect(statement.Select); handled {
 		if err != nil {
 			return Result{}, err

@@ -227,7 +227,9 @@ func TestPostgresNodeWarmDatabaseRetainsProjectionWhileIdleBudgetTrimsOthers(t *
 		WarmDatabases:                       []string{"alpha.kitdb"},
 		MaximumIdleProjectionDatabases:      1,
 		MaximumIdleProjectionDirectoryBytes: 8 << 20,
-		DatabaseAcquireTimeout:              50 * time.Millisecond,
+		// This is a residency test, not an acquisition deadline test. Opening
+		// the kernel and immutable projection can exceed 50ms on loaded disks.
+		DatabaseAcquireTimeout: 5 * time.Second,
 		ManagerLimits: kitdbnode.Limits{
 			MaxOpenDatabases: 2, MaxPageCacheBytes: 2 << 20,
 			DefaultPageCacheBytes: 1 << 20, MaxConcurrentOpens: 2,

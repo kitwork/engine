@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
 )
 
 type generationSegmentWriter struct {
@@ -225,13 +227,15 @@ func appendIncrementalGeneration(path string, main *mainImage, overlay map[strin
 		return nil, fmt.Errorf("kitdb: locate generation manifest: %w", err)
 	}
 	manifest := encodeGenerationManifest(main.identity, generation, transaction, boundaryChecksum, logicalRecords, descriptors)
-	if _, err := writeAll(file, manifest); err != nil {
+	if _, err := storageWrite(path, "append-write", file, manifest); err != nil {
 		return nil, fmt.Errorf("kitdb: write generation manifest: %w", err)
 	}
 	fileEnd := manifestOffset + int64(len(manifest))
-	if err := file.Sync(); err != nil {
+	checkpointfault.Reach(path, "append-body-written")
+	if err := storageSync(path, "append-sync", file); err != nil {
 		return nil, fmt.Errorf("kitdb: sync generation data before publication: %w", err)
 	}
+	checkpointfault.Reach(path, "append-body-synced")
 	slotIndex := 1 - main.activeSlot
 	slot := encodeGenerationSlot(main.identity, generationSlot{
 		index: slotIndex, generation: generation, transaction: transaction,
@@ -241,12 +245,14 @@ func appendIncrementalGeneration(path string, main *mainImage, overlay map[strin
 		segmentCount:     uint32(len(descriptors)), records: logicalRecords,
 	})
 	slotOffset := int64(generationSlotAOffset + slotIndex*generationSlotSize)
-	if err := writeAllAt(file, slot, slotOffset); err != nil {
+	if err := storageWriteAt(path, "slot-write", file, slot, slotOffset); err != nil {
 		return nil, errors.Join(ErrDurabilityUncertain, fmt.Errorf("kitdb: publish generation slot: %w", err))
 	}
-	if err := file.Sync(); err != nil {
+	checkpointfault.Reach(path, "superblock-written")
+	if err := storageSync(path, "slot-sync", file); err != nil {
 		return nil, errors.Join(ErrDurabilityUncertain, fmt.Errorf("kitdb: sync generation slot: %w", err))
 	}
+	checkpointfault.Reach(path, "superblock-synced")
 	return &generationAppendResult{
 		generation: generation, transaction: transaction,
 		boundaryChecksum: boundaryChecksum, logicalRecords: logicalRecords,
@@ -365,7 +371,7 @@ func prepareCompactedGeneration(path string, identity [16]byte, transaction uint
 		return "", fmt.Errorf("kitdb: locate compacted generation manifest: %w", err)
 	}
 	manifest := encodeGenerationManifest(identity, generation, transaction, boundaryChecksum, records, descriptors)
-	if _, err := writeAll(file, manifest); err != nil {
+	if _, err := storageWrite(path, "compact-write", file, manifest); err != nil {
 		return "", fmt.Errorf("kitdb: write compacted generation manifest: %w", err)
 	}
 	fileEnd := manifestOffset + int64(len(manifest))
@@ -379,9 +385,10 @@ func prepareCompactedGeneration(path string, identity [16]byte, transaction uint
 	if _, err := file.WriteAt(slot, generationSlotAOffset); err != nil {
 		return "", fmt.Errorf("kitdb: write compacted generation slot: %w", err)
 	}
-	if err := file.Sync(); err != nil {
+	if err := storageSync(path, "compact-sync", file); err != nil {
 		return "", fmt.Errorf("kitdb: sync compacted generation staging: %w", err)
 	}
+	checkpointfault.Reach(path, "compact-staging-synced")
 	if err := file.Close(); err != nil {
 		return "", fmt.Errorf("kitdb: close compacted generation staging: %w", err)
 	}

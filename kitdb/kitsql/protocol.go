@@ -12,13 +12,22 @@ import (
 )
 
 const (
-	Version = 1
-	Path    = "/_kitsql/v1/query"
+	Version         = 1
+	Path            = "/_kitsql/v1/query"
+	MediaType       = "application/vnd.kitsql+json"
+	StreamMediaType = "application/vnd.kitsql.stream+json"
 )
 
 const (
 	ModeQuery = "query"
 	ModeExec  = "exec"
+)
+
+const (
+	FrameColumns  = "columns"
+	FrameRow      = "row"
+	FrameComplete = "complete"
+	FrameError    = "error"
 )
 
 type Request struct {
@@ -40,6 +49,17 @@ type Response struct {
 	Rows     [][]Value `json:"rows,omitempty"`
 	Affected int64     `json:"affected,omitempty"`
 	Error    *Error    `json:"error,omitempty"`
+}
+
+// StreamFrame is one newline-delimited frame in a streamed query response.
+// Exactly one of Columns, Row, Rows, or Error is meaningful for its Type.
+type StreamFrame struct {
+	Version int      `json:"version"`
+	Type    string   `json:"type"`
+	Columns []Column `json:"columns,omitempty"`
+	Row     []Value  `json:"row,omitempty"`
+	Rows    int64    `json:"rows,omitempty"`
+	Error   *Error   `json:"error,omitempty"`
 }
 
 type Error struct {

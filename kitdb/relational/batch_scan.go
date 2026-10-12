@@ -20,6 +20,8 @@ func (transaction *Transaction) scanAggregateBatches(
 	reset func(),
 	observe bool,
 ) (*ExecutionStats, error) {
+	// Batch and sidecar readers bypass Get/Scan, including skipped chunks.
+	transaction.requireCoarseValidation()
 	select {
 	case transaction.engine.projectionQueries <- struct{}{}:
 	case <-ctx.Done():

@@ -77,9 +77,11 @@ func (transaction *Transaction) executeSelect(
 		return Result{}, fmt.Errorf("kitdb SQL: SEARCH requires the engine autocommit path")
 	}
 	if len(plan.Joins) != 0 {
+		transaction.requireCoarseValidation()
 		return transaction.executeJoinSelect(ctx, plan, parameters, observe, working)
 	}
 	if selectHasAggregates(plan) {
+		transaction.requireCoarseValidation()
 		return transaction.executeAggregateSelect(ctx, plan, parameters, observe, working)
 	}
 	if selectHasScalarExpressions(plan) {

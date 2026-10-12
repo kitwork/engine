@@ -17,6 +17,7 @@ import (
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
+	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/pgwire"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
 )
@@ -1046,6 +1047,11 @@ func postgresError(err error) error {
 		code = "21000"
 	case errors.Is(err, ErrTransactionConflict):
 		code = "40001"
+	case errors.Is(err, kitdbnode.ErrCheckpointBackoff), errors.Is(err, kitdbnode.ErrMaintenanceQueueFull),
+		errors.Is(err, kitdbengine.ErrSnapshotsActive):
+		code = "53300"
+	case errors.Is(err, kitdbnode.ErrClosed):
+		code = "57P01"
 	case errors.Is(err, kitdbengine.ErrSequenceNotFound):
 		code = "42P01"
 	case errors.Is(err, kitdbengine.ErrSequenceLimit):

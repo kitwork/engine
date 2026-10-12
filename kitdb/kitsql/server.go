@@ -142,6 +142,26 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		writeProtocolError(writer, http.StatusTooManyRequests, "KSQL_BUSY", "KitSQL query capacity is busy")
 		return
 	}
+	ctx, cancel := context.WithTimeout(request.Context(), handler.queryTimeout)
+	defer cancel()
+	controller := http.NewResponseController(writer)
+	deadline, _ := ctx.Deadline()
+	_ = controller.SetReadDeadline(deadline)
+	_ = controller.SetWriteDeadline(deadline)
+	// Cancellation must interrupt network I/O as well as the database cursor.
+	interrupted := make(chan struct{})
+	stopInterrupt := context.AfterFunc(ctx, func() {
+		defer close(interrupted)
+		_ = controller.SetReadDeadline(time.Now())
+		_ = controller.SetWriteDeadline(time.Now())
+	})
+	defer func() {
+		if !stopInterrupt() {
+			<-interrupted
+		}
+		_ = controller.SetReadDeadline(time.Time{})
+		_ = controller.SetWriteDeadline(time.Time{})
+	}()
 	user, password, ok := request.BasicAuth()
 	if !ok || user == "" {
 		writer.Header().Set("WWW-Authenticate", `Basic realm="KitSQL"`)
@@ -189,8 +209,6 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		}
 		parameters[index] = value
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), handler.queryTimeout)
-	defer cancel()
 	database, release, err := handler.open(ctx, user, password, protocolRequest.Database)
 	if err != nil {
 		switch {
@@ -215,6 +233,10 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		handler.execute(writer, ctx, database, protocolRequest.SQL, parameters)
 		return
 	}
+	if acceptsMediaType(request.Header.Values("Accept"), StreamMediaType) {
+		handler.queryStream(writer, ctx, database, protocolRequest.SQL, parameters)
+		return
+	}
 	handler.query(writer, ctx, database, protocolRequest.SQL, parameters)
 }
 
@@ -227,7 +249,7 @@ func (handler *Handler) execute(
 ) {
 	result, err := database.ExecContext(ctx, source, parameters...)
 	if err != nil {
-		writeProtocolError(writer, http.StatusBadRequest, "KSQL_EXECUTION", err.Error())
+		writeExecutionError(writer, err)
 		return
 	}
 	affected, err := result.RowsAffected()
@@ -247,7 +269,7 @@ func (handler *Handler) query(
 ) {
 	rows, err := database.QueryContext(ctx, source, parameters...)
 	if err != nil {
-		writeProtocolError(writer, http.StatusBadRequest, "KSQL_EXECUTION", err.Error())
+		writeExecutionError(writer, err)
 		return
 	}
 	defer rows.Close()
@@ -303,14 +325,173 @@ func (handler *Handler) query(
 		resultRows = append(resultRows, encoded)
 	}
 	if err := rows.Err(); err != nil {
-		writeProtocolError(writer, http.StatusBadRequest, "KSQL_EXECUTION", err.Error())
+		writeExecutionError(writer, err)
 		return
 	}
-	writeProtocolJSON(writer, http.StatusOK, Response{
+	response := Response{
 		Version: Version,
 		Columns: columns,
 		Rows:    resultRows,
-	})
+	}
+	payload, err := json.Marshal(response)
+	if err != nil {
+		writeProtocolError(writer, http.StatusInternalServerError, "KSQL_RESULT", err.Error())
+		return
+	}
+	if int64(len(payload))+1 > handler.maximumResultBytes {
+		writeProtocolError(writer, http.StatusRequestEntityTooLarge, "KSQL_RESULT_LIMIT", "result exceeds the configured byte limit")
+		return
+	}
+	writer.Header().Set("Content-Type", MediaType)
+	writer.Header().Set("KitSQL-Version", "1")
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(append(payload, '\n'))
+}
+
+func (handler *Handler) queryStream(
+	writer http.ResponseWriter,
+	ctx context.Context,
+	database *sql.DB,
+	source string,
+	parameters []any,
+) {
+	rows, err := database.QueryContext(ctx, source, parameters...)
+	if err != nil {
+		writeExecutionError(writer, err)
+		return
+	}
+	defer rows.Close()
+	columns, err := resultColumns(rows)
+	if err != nil {
+		writeProtocolError(writer, http.StatusInternalServerError, "KSQL_RESULT", err.Error())
+		return
+	}
+	writer.Header().Set("Content-Type", StreamMediaType)
+	writer.Header().Set("KitSQL-Version", "1")
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.WriteHeader(http.StatusOK)
+	controller := http.NewResponseController(writer)
+	var resultBytes int64
+	writeFrame := func(frame StreamFrame, flush bool) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		payload, err := json.Marshal(frame)
+		if err != nil {
+			return false
+		}
+		payload = append(payload, '\n')
+		if frame.Type != FrameError {
+			if int64(len(payload)) > handler.maximumResultBytes-resultBytes {
+				writeProtocolStreamLimit(writer)
+				return false
+			}
+			resultBytes += int64(len(payload))
+		}
+		if _, err := writer.Write(payload); err != nil {
+			return false
+		}
+		if flush {
+			if err := controller.Flush(); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				return false
+			}
+		}
+		return true
+	}
+	if !writeFrame(StreamFrame{Version: Version, Type: FrameColumns, Columns: columns}, true) {
+		return
+	}
+	var rowCount int64
+	for rows.Next() {
+		if rowCount >= int64(handler.maximumRows) {
+			writeFrame(streamError("KSQL_RESULT_LIMIT", "result exceeds the configured row limit"), true)
+			return
+		}
+		encoded, err := scanEncodedRow(rows, len(columns))
+		if err != nil {
+			writeFrame(streamError("KSQL_RESULT", err.Error()), true)
+			return
+		}
+		rowCount++
+		if !writeFrame(StreamFrame{Version: Version, Type: FrameRow, Row: encoded}, rowCount%64 == 0) {
+			return
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_, code := executionError(err)
+		writeFrame(streamError(code, err.Error()), true)
+		return
+	}
+	writeFrame(StreamFrame{Version: Version, Type: FrameComplete, Rows: rowCount}, true)
+}
+
+// A fixed terminal error is allowed beyond the result budget so a partial
+// stream fails explicitly rather than looking like a successful truncated query.
+func writeProtocolStreamLimit(writer http.ResponseWriter) {
+	_ = json.NewEncoder(writer).Encode(streamError("KSQL_RESULT_LIMIT", "result exceeds the configured byte limit"))
+	_ = http.NewResponseController(writer).Flush()
+}
+
+func resultColumns(rows *sql.Rows) ([]Column, error) {
+	names, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	types, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+	columns := make([]Column, len(names))
+	for index, name := range names {
+		columns[index] = Column{Name: name}
+		if index < len(types) {
+			columns[index].DatabaseType = types[index].DatabaseTypeName()
+		}
+	}
+	return columns, nil
+}
+
+func scanEncodedRow(rows *sql.Rows, width int) ([]Value, error) {
+	values := make([]any, width)
+	destinations := make([]any, width)
+	for index := range values {
+		destinations[index] = &values[index]
+	}
+	if err := rows.Scan(destinations...); err != nil {
+		return nil, err
+	}
+	encoded := make([]Value, width)
+	for index, value := range values {
+		var err error
+		encoded[index], err = encodeValue(value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return encoded, nil
+}
+
+func streamError(code, message string) StreamFrame {
+	if len(message) > 512 {
+		message = message[:512]
+	}
+	return StreamFrame{
+		Version: Version,
+		Type:    FrameError,
+		Error:   &Error{Code: code, Message: message},
+	}
+}
+
+func acceptsMediaType(values []string, expected string) bool {
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			if strings.TrimSpace(strings.Split(item, ";")[0]) == expected {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func estimatedSourceBytes(value any) int64 {
@@ -343,7 +524,7 @@ func writeProtocolError(writer http.ResponseWriter, status int, code, message st
 }
 
 func writeProtocolJSON(writer http.ResponseWriter, status int, response Response) {
-	writer.Header().Set("Content-Type", "application/vnd.kitsql+json")
+	writer.Header().Set("Content-Type", MediaType)
 	writer.Header().Set("KitSQL-Version", "1")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.WriteHeader(status)

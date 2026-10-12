@@ -149,6 +149,31 @@ func TestKitDBBulkWriteUsesLargerBoundedCheckpointWindow(t *testing.T) {
 	}
 }
 
+func TestKitDBBulkWriteChecksOverlayMemory(t *testing.T) {
+	root := t.TempDir()
+	fleet, err := kitdbnode.NewManager(kitdbnode.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newKitDBManager(fleet, false)
+	managed, err := manager.open(context.Background(), filepath.Join(root, "memory-pressure.kitdb"))
+	if err != nil {
+		_ = fleet.Close()
+		t.Fatal(err)
+	}
+	defer func() { managed.Release(); manager.Close(); _ = fleet.Close() }()
+	// Below the 256 MiB bulk WAL threshold, above 1/4 of the snapshot budget.
+	commitKitDBTestValue(t, managed.database, "large", 20<<20)
+	if err := checkpointKitDBBeforeBulkWrite(managed); err != nil {
+		t.Fatal(err)
+	}
+	waitForKitDBMaintenance(t, fleet, 1)
+	stats, err := managed.database.Stats()
+	if err != nil || stats.OverlayMutations != 0 || !stats.OverlaySince.IsZero() {
+		t.Fatalf("overlay pressure not relieved: %+v / %v", stats, err)
+	}
+}
+
 func TestKitDBBackgroundMaintenanceBoundsItsOwnOverlay(t *testing.T) {
 	database, err := kitdbengine.Open(filepath.Join(t.TempDir(), "maintenance.kitdb"))
 	if err != nil {

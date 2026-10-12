@@ -2,6 +2,10 @@
 
 These claims are preserved by implementation and executable tests.
 
+The current transaction concurrency contract and its executable baseline are
+described in [CONCURRENCY.md](CONCURRENCY.md). Audited standalone SQL paths use
+bounded key/range validation; unsupported paths retain the database-wide fence.
+
 ## Commit
 
 1. At most the configured queue capacity of transactions may be prepared or
@@ -21,6 +25,12 @@ These claims are preserved by implementation and executable tests.
    to resolve the durable transaction boundary.
 8. Close stops admission, drains commits already accepted by the writer, and
    invalidates transactions that were not submitted.
+9. Opt-in kernel dependency commits validate published and earlier accepted
+   same-batch mutations before WAL append. The bounded, process-local journal
+   publishes only after WAL Sync and never replaces durability truth. Missing
+   coverage uses the conservative conflict boundary. Standalone SQL supplies
+   tracked reads and writes, with sticky coarse fallback for unsupported paths
+   and collector exhaustion. Shared metadata writes remain conflict dependencies.
 
 ## Schema catalog
 
@@ -401,6 +411,25 @@ ordering; they do not become kernel truth.
 12. Generation-entry counts include immutable-segment duplicates, tombstones
     and merge lookahead actually consumed before the logical cursor stops. They
     are not inferred from the number of rows returned to the caller.
+13. A relational row stream owns one read-only transaction and therefore one
+    catalog/data snapshot until EOF or explicit close. Later commits never
+    appear in that stream.
+14. The native SQL row stream has a fixed one-row handoff. A slow or abandoned
+    consumer cannot cause unbounded row accumulation; closing it cancels the
+    producer, waits for exit, and releases the snapshot.
+15. Only plans whose output order is produced directly by their access path may
+    use the row stream. Plans requiring joins, aggregation, duplicate
+    elimination, an in-memory sort, or result-cache ownership use the bounded
+    materializing executor instead.
+16. KitSQL admission covers one bounded request lifetime, including request-body
+    reads and response writes. On deadline-capable HTTP writers, cancellation
+    interrupts socket I/O; handler exit releases rows, the database lease and
+    admission even if the peer stopped reading. Middleware must preserve the
+    response controller's deadline support.
+17. KitSQL result limits include encoded JSON bytes, not just source values.
+    A bounded terminal error may exceed the result budget to report failure.
+    The driver closes failed streams and refuses truncation, inconsistent
+    frame payloads and a completion count different from the rows received.
 
 ## Backup anchors
 

@@ -30,10 +30,11 @@ type transactionMutation struct {
 }
 
 type transactionOperation struct {
-	key      []byte
-	value    []byte
-	deleted  bool
-	byteSize int
+	memorySize int64
+	key        []byte
+	value      []byte
+	deleted    bool
+	byteSize   int
 }
 
 // Savepoint is an in-memory boundary inside one relational transaction. It is
@@ -48,13 +49,14 @@ type Savepoint struct {
 // immutable kernel snapshot and overlays a bounded write-set. Commit is
 // optimistic and publishes the complete write-set as one kernel transaction.
 type Transaction struct {
-	mu        sync.Mutex
-	engine    *Engine
-	snapshot  *kitdbengine.Snapshot
-	catalog   kitdbengine.CatalogSnapshot
-	base      uint64
-	readOnly  bool
-	sequences *sequenceSession
+	mu           sync.Mutex
+	engine       *Engine
+	snapshot     *kitdbengine.Snapshot
+	catalog      kitdbengine.CatalogSnapshot
+	base         uint64
+	readOnly     bool
+	sequences    *sequenceSession
+	dependencies transactionDependencies
 
 	operations []transactionOperation
 	savepoints []namedSavepoint
@@ -78,6 +80,14 @@ func (engine *Engine) BeginTransaction(ctx context.Context, options TransactionO
 		engine.mu.RUnlock()
 		return nil, err
 	}
+	// Admit writers before capturing their snapshot: a full checkpoint must
+	// not be blocked by the snapshot of the transaction asking to enter.
+	if !options.ReadOnly {
+		if err := engine.evaluateCheckpointLocked(ctx, true); err != nil {
+			engine.mu.RUnlock()
+			return nil, err
+		}
+	}
 
 	// Relational commits use writeMu too, so all three observations share one
 	// boundary. The version read must stay inside the gate: otherwise a DDL
@@ -85,17 +95,27 @@ func (engine *Engine) BeginTransaction(ctx context.Context, options TransactionO
 	// Direct kernel frontends do not share writeMu, so retry a bounded number of
 	// times if one of them publishes catalog bytes during the capture.
 	for attempt := 0; attempt < maximumSnapshotCaptureRetries; attempt++ {
+		reservation, err := engine.database.ReserveSnapshot(ctx)
+		if err != nil {
+			engine.mu.RUnlock()
+			return nil, err
+		}
 		engine.writeMu.Lock()
-		catalog, err := engine.database.Catalog()
+		var catalog kitdbengine.CatalogSnapshot
+		err = ctx.Err()
+		if err == nil {
+			catalog, err = engine.database.Catalog()
+		}
 		var snapshot *kitdbengine.Snapshot
 		if err == nil {
-			snapshot, err = engine.database.Snapshot()
+			snapshot, err = reservation.Snapshot()
 		}
 		var version kitdbengine.CatalogVersion
 		if err == nil {
 			version, err = engine.database.CatalogVersion()
 		}
 		engine.writeMu.Unlock()
+		_ = reservation.Close()
 		if err != nil {
 			if snapshot != nil {
 				_ = snapshot.Close()
@@ -267,6 +287,7 @@ func (transaction *Transaction) executeParsed(
 		if err != nil {
 			return Result{}, err
 		}
+		transaction.requireCoarseValidation()
 		transaction.mu.Lock()
 		if transaction.sequences == nil {
 			transaction.sequences = &sequenceSession{}
@@ -284,6 +305,7 @@ func (transaction *Transaction) executeParsed(
 		ctx = context.WithValue(ctx, foreignKeyCheckKey{}, &foreignKeyChecks{})
 	}
 	if write && len(transaction.catalog.Triggers) != 0 {
+		transaction.requireCoarseValidation()
 		ctx = context.WithValue(ctx, triggerExecutionKey{}, &triggerExecution{bound: make(map[string][]*boundTrigger)})
 	}
 	var savepoint Savepoint
@@ -306,12 +328,14 @@ func (transaction *Transaction) executeParsed(
 	case kitdbsql.StatementDelete:
 		result, err = transaction.executeDelete(ctx, statement.Delete, parameters)
 	case kitdbsql.StatementExplain:
+		transaction.requireCoarseValidation()
 		if statement.ExplainAnalyze {
 			result, err = transaction.executeExplainAnalyze(ctx, statement.Explain, parameters)
 		} else {
 			result, err = transaction.executeExplain(ctx, statement.Explain, parameters)
 		}
 	case kitdbsql.StatementPragma:
+		transaction.requireCoarseValidation()
 		result, err = transaction.executePragma(ctx, statement.Pragma)
 	default:
 		err = fmt.Errorf("kitdb SQL: schema statements cannot run inside a data transaction")
@@ -397,12 +421,18 @@ func (transaction *Transaction) rollbackToLocked(savepoint Savepoint) error {
 		savepoint.operations > len(transaction.operations) {
 		return fmt.Errorf("kitdb: savepoint does not belong to this transaction")
 	}
+	var released int64
+	for i := savepoint.operations; i < len(transaction.operations); i++ {
+		released += transaction.operations[i].memorySize
+		transaction.operations[i] = transactionOperation{}
+	}
 	transaction.operations = transaction.operations[:savepoint.operations]
 	transaction.bytes = savepoint.bytes
 	for len(transaction.savepoints) > 0 && transaction.savepoints[len(transaction.savepoints)-1].point.operations > savepoint.operations {
 		transaction.savepoints = transaction.savepoints[:len(transaction.savepoints)-1]
 	}
 	transaction.rebuildOverlayLocked()
+	transaction.snapshot.ReleaseTransactionMemory(released)
 	return nil
 }
 
@@ -414,6 +444,9 @@ func (transaction *Transaction) Get(key []byte) ([]byte, bool, error) {
 	if transaction.done || transaction.snapshot == nil {
 		transaction.mu.Unlock()
 		return nil, false, fmt.Errorf("kitdb: relational transaction is closed")
+	}
+	if !transaction.readOnly {
+		transaction.dependencies.recordKey(key, dependencyRead)
 	}
 	if mutation, found := transaction.overlay[string(key)]; found {
 		transaction.mu.Unlock()
@@ -441,6 +474,9 @@ func (transaction *Transaction) getWithStats(
 	if transaction.done || transaction.snapshot == nil {
 		transaction.mu.Unlock()
 		return nil, false, fmt.Errorf("kitdb: relational transaction is closed")
+	}
+	if !transaction.readOnly {
+		transaction.dependencies.recordKey(key, dependencyRead)
 	}
 	if mutation, found := transaction.overlay[string(key)]; found {
 		transaction.mu.Unlock()
@@ -476,6 +512,9 @@ func (transaction *Transaction) scan(
 	if transaction.done || transaction.snapshot == nil {
 		transaction.mu.Unlock()
 		return fmt.Errorf("kitdb: relational transaction is closed")
+	}
+	if !transaction.readOnly {
+		transaction.dependencies.recordRange(options)
 	}
 	snapshot := transaction.snapshot
 	overlay := make(map[string]transactionMutation, len(transaction.overlay))
@@ -572,6 +611,9 @@ func (transaction *Transaction) scanKeys(
 		transaction.mu.Unlock()
 		return fmt.Errorf("kitdb: relational transaction is closed")
 	}
+	if !transaction.readOnly {
+		transaction.dependencies.recordRange(options)
+	}
 	snapshot := transaction.snapshot
 	hasOverlay := len(transaction.overlay) != 0
 	transaction.mu.Unlock()
@@ -620,8 +662,13 @@ func (transaction *Transaction) add(operation transactionOperation) error {
 			maximumTransactionOperations, maximumTransactionBytes,
 		)
 	}
+	operation.memorySize = 128 + 2*int64(len(operation.key)) + int64(len(operation.value))
+	if err := transaction.snapshot.ReserveTransactionMemory(operation.memorySize); err != nil {
+		return err
+	}
 	operation.key = bytes.Clone(operation.key)
 	operation.value = bytes.Clone(operation.value)
+	transaction.dependencies.recordKey(operation.key, dependencyWrite)
 	transaction.operations = append(transaction.operations, operation)
 	transaction.bytes += operation.byteSize
 	transaction.overlay[string(operation.key)] = transactionMutation{
@@ -643,18 +690,32 @@ func (transaction *Transaction) Commit(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("kitdb: relational transaction is closed")
 	}
 	operations := append([]transactionOperation(nil), transaction.operations...)
+	var dependencies kitdbengine.CommitDependencies
+	if len(operations) != 0 {
+		dependencies = transaction.dependencies.commitDependencies()
+	}
 	engine := transaction.engine
 	base := transaction.base
 	catalogRevision := transaction.catalog.Revision
 	transaction.done = true
 	transaction.mu.Unlock()
-	defer transaction.release()
+	defer func() {
+		transaction.release()
+		// The write gate is released first. A maintenance failure cannot change
+		// the WAL commit outcome returned to any SQL adapter.
+		if len(operations) != 0 {
+			_ = engine.evaluateCheckpoint(ctx, false)
+		}
+	}()
 
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	if len(operations) == 0 {
 		return base, nil
+	}
+	if err := engine.evaluateCheckpointLocked(ctx, true); err != nil {
+		return 0, err
 	}
 	engine.writeMu.Lock()
 	defer engine.writeMu.Unlock()
@@ -666,12 +727,16 @@ func (transaction *Transaction) Commit(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 	if version.Revision != catalogRevision {
-		return 0, fmt.Errorf("%w: catalog changed after transaction %d", ErrTransactionConflict, base)
+		return 0, errors.Join(
+			fmt.Errorf("%w: catalog changed after transaction %d", ErrTransactionConflict, base),
+			kitdbengine.ErrTransactionConflict,
+		)
 	}
 	kernel, err := engine.database.Begin()
 	if err != nil {
 		return 0, err
 	}
+	defer kernel.Rollback()
 	for _, operation := range operations {
 		if err := ctx.Err(); err != nil {
 			_ = kernel.Rollback()
@@ -691,7 +756,7 @@ func (transaction *Transaction) Commit(ctx context.Context) (uint64, error) {
 		_ = kernel.Rollback()
 		return 0, err
 	}
-	committed, err := kernel.CommitIfUnchanged(base)
+	committed, err := kernel.CommitWithDependencies(base, dependencies)
 	if errors.Is(err, kitdbengine.ErrTransactionConflict) {
 		return committed, errors.Join(ErrTransactionConflict, err)
 	}
@@ -738,6 +803,7 @@ func (transaction *Transaction) release() {
 	transaction.engine = nil
 	transaction.operations = nil
 	transaction.overlay = nil
+	transaction.dependencies = transactionDependencies{}
 	transaction.mu.Unlock()
 	if snapshot != nil {
 		_ = snapshot.Close()

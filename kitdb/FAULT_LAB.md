@@ -18,6 +18,21 @@ second supervisor-specific cursor matrix.
 
 ## Hard-crash matrix
 
+The separate [storage I/O failure matrix](relational/STORAGE_IO_FAULTS.md)
+uses the same explicit fault-lab build tag to return partial-write, no-space,
+sync and replace errors. It checks pre-publication recovery, conservative
+durability errors, rejection of further writes, resource drain and exact SQL
+row/index recovery. This is returned-error evidence, not process-exit evidence
+or a physical disk-failure qualification.
+
+The [exact checkpoint publication matrix](relational/CHECKPOINT_CRASH.md)
+runs with `-tags kitdbfault` and exits at eight successful I/O boundaries,
+including WAL rotation after both incremental and full checkpoints (ten
+cases). It validates SQL ACKs, main-generation selection, complete row/index
+recovery and the next write/checkpoint/reopen with abandoned staging untouched.
+Ordinary builds compile the internal probe to a no-op. These tagged exits are
+not production failpoints or physical power-loss evidence.
+
 `go test ./kitdb/relational -run '^TestWriteCompositionConflictAndRecovery$'
 -count=10` additionally exits a child process without defers after committed
 INSERT SELECT/upsert operations and an uncommitted savepoint transaction.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+
+	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
 )
 
 func prepareMergedMainSnapshot(path string, identity [16]byte, transaction uint64, boundaryChecksum uint32, main *mainImage, overlay map[string]rowMutation) (stagingPath string, returnErr error) {
@@ -18,10 +20,11 @@ func prepareMergedMainSnapshot(path string, identity [16]byte, transaction uint6
 }
 
 func publishPreparedMainSnapshot(stagingPath, path string) (bool, error) {
-	if err := replaceFile(stagingPath, path); err != nil {
+	if err := storageReplace(path, "compact-replace", stagingPath, path); err != nil {
 		return false, fmt.Errorf("kitdb: publish main file: %w", err)
 	}
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
+	checkpointfault.Reach(path, "compact-main-replaced")
+	if err := storageSyncDirectory(path, "compact-directory-sync", filepath.Dir(path)); err != nil {
 		return true, errors.Join(ErrDurabilityUncertain, fmt.Errorf("kitdb: sync main-file directory: %w", err))
 	}
 	return true, nil

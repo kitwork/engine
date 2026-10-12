@@ -22,6 +22,8 @@ type Snapshot struct {
 	transaction      uint64
 	boundaryChecksum uint32
 	closed           bool
+	memoryBytes      int64
+	transactionBytes int64
 }
 
 // RangeOptions bounds a cursor. Start is inclusive, End is exclusive, Prefix
@@ -70,8 +72,20 @@ func (db *DB) Snapshot() (*Snapshot, error) {
 
 	db.snapshotMu.Lock()
 	defer db.snapshotMu.Unlock()
-	if len(db.snapshots) >= maxActiveSnapshots {
+	if db.snapshotPauseDone != nil {
+		return nil, ErrSnapshotsActive
+	}
+	if len(db.snapshots)+len(db.snapshotReservations) >= maxActiveSnapshots {
 		return nil, ErrTooManySnapshots
+	}
+	return db.captureSnapshotLocked()
+}
+
+// Requires db.mu and snapshotMu; callers have accounted for their slot.
+func (db *DB) captureSnapshotLocked() (*Snapshot, error) {
+	cost := db.snapshotOverlayBytes.Load()
+	if cost > db.snapshotMemoryLimit-db.snapshotBytes-db.snapshotReservedBytes {
+		return nil, ErrSnapshotMemory
 	}
 	file, err := os.Open(db.path)
 	if err != nil {
@@ -80,6 +94,7 @@ func (db *DB) Snapshot() (*Snapshot, error) {
 	main := *db.main
 	main.file = file
 	snapshot := &Snapshot{
+		memoryBytes:      cost,
 		owner:            db,
 		main:             &main,
 		overlay:          cloneSnapshotOverlay(db.overlay),
@@ -91,6 +106,7 @@ func (db *DB) Snapshot() (*Snapshot, error) {
 		db.snapshots = make(map[*Snapshot]struct{})
 	}
 	db.snapshots[snapshot] = struct{}{}
+	db.snapshotBytes += cost
 	return snapshot, nil
 }
 
@@ -400,6 +416,8 @@ func (snapshot *Snapshot) Close() error {
 		return nil
 	}
 	snapshot.closed = true
+	transactionBytes := snapshot.transactionBytes
+	snapshot.transactionBytes = 0
 	owner := snapshot.owner
 	snapshot.owner = nil
 	main := snapshot.main
@@ -407,10 +425,17 @@ func (snapshot *Snapshot) Close() error {
 	snapshot.overlay = nil
 	snapshot.mu.Unlock()
 
+	// Release the file before advertising a drained reader set (Windows replace).
+	err := main.close()
 	if owner != nil {
+		if transactionBytes != 0 {
+			owner.mu.Lock()
+			owner.frontendTxBytes -= transactionBytes
+			owner.mu.Unlock()
+		}
 		owner.unregisterSnapshot(snapshot)
 	}
-	return main.close()
+	return err
 }
 
 func cloneSnapshotOverlay(source map[string]rowMutation) map[string]rowMutation {
@@ -450,7 +475,11 @@ func (db *DB) activeSnapshotCount() int {
 
 func (db *DB) unregisterSnapshot(snapshot *Snapshot) {
 	db.snapshotMu.Lock()
+	if _, found := db.snapshots[snapshot]; found {
+		db.snapshotBytes -= snapshot.memoryBytes
+	}
 	delete(db.snapshots, snapshot)
+	db.grantSnapshotWaitersLocked()
 	db.snapshotMu.Unlock()
 }
 
@@ -461,6 +490,7 @@ func (db *DB) detachSnapshots() []*Snapshot {
 		snapshots = append(snapshots, snapshot)
 	}
 	db.snapshots = nil
+	db.snapshotBytes = 0
 	db.snapshotMu.Unlock()
 	return snapshots
 }

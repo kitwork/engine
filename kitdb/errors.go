@@ -6,6 +6,7 @@ import (
 )
 
 var (
+	ErrSnapshotMemory   = errors.New("kitdb: snapshot memory budget reached")
 	ErrClosed           = errors.New("kitdb: database is closed")
 	ErrUnavailable      = errors.New("kitdb: database is unavailable")
 	ErrDatabaseNotFound = errors.New("kitdb: database does not exist")
@@ -26,6 +27,8 @@ var (
 	ErrTransactionIDOverflow    = errors.New("kitdb: transaction ID overflow")
 	ErrSnapshotClosed           = errors.New("kitdb: snapshot is closed")
 	ErrTooManySnapshots         = errors.New("kitdb: active snapshot limit reached")
+	ErrSnapshotAdmissionFull    = errors.New("kitdb: snapshot admission queue is full")
+	ErrSnapshotAdmissionTimeout = errors.New("kitdb: snapshot admission wait timed out")
 	ErrSnapshotsActive          = errors.New("kitdb: active snapshots prevent compaction")
 	ErrHistoryDisabled          = errors.New("kitdb: retained history is disabled")
 	ErrHistoryGap               = errors.New("kitdb: retained history has a transaction gap")

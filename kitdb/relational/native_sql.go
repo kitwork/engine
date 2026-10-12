@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -200,7 +201,35 @@ func (connection *nativeSQLConnection) QueryContext(
 	query string,
 	arguments []driver.NamedValue,
 ) (driver.Rows, error) {
-	result, err := connection.execute(ctx, query, nativeSQLArguments(arguments))
+	values := nativeSQLArguments(arguments)
+	connection.mu.Lock()
+	if connection.closed || connection.engine == nil {
+		connection.mu.Unlock()
+		return nil, driver.ErrBadConn
+	}
+	if connection.trace != nil {
+		connection.trace(query, len(values))
+	}
+	if connection.transaction != nil {
+		result, err := connection.transaction.Execute(ctx, query, values...)
+		connection.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		return newNativeSQLRows(result)
+	}
+	stream, handled, err := connection.engine.openSelectRowStream(ctx, query, values)
+	if handled {
+		connection.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		return newNativeSQLStreamRows(stream), nil
+	}
+	result, err := connection.engine.executeWithSequences(
+		ctx, query, values, &connection.sequences, connection.readOnly,
+	)
+	connection.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +316,62 @@ type nativeSQLRows struct {
 	columns []Column
 	rows    [][]any
 	index   int
+}
+
+type nativeSQLStreamRows struct {
+	columns []Column
+	stream  atomic.Pointer[selectRowStream]
+}
+
+func newNativeSQLStreamRows(stream *selectRowStream) *nativeSQLStreamRows {
+	rows := &nativeSQLStreamRows{columns: stream.Columns()}
+	rows.stream.Store(stream)
+	return rows
+}
+
+func (rows *nativeSQLStreamRows) Columns() []string {
+	columns := make([]string, len(rows.columns))
+	for index, column := range rows.columns {
+		columns[index] = column.Name
+	}
+	return columns
+}
+
+func (rows *nativeSQLStreamRows) Close() error {
+	stream := rows.stream.Swap(nil)
+	if stream == nil {
+		return nil
+	}
+	return stream.Close()
+}
+
+func (rows *nativeSQLStreamRows) Next(destination []driver.Value) error {
+	stream := rows.stream.Load()
+	if stream == nil {
+		return io.EOF
+	}
+	row, err := stream.Next()
+	if err != nil {
+		return err
+	}
+	if len(row) != len(rows.columns) {
+		return fmt.Errorf("kitdb native SQL: row width does not match result columns")
+	}
+	for index, item := range row {
+		converted, err := nativeSQLValue(item)
+		if err != nil {
+			return err
+		}
+		destination[index] = converted
+	}
+	return nil
+}
+
+func (rows *nativeSQLStreamRows) ColumnTypeDatabaseTypeName(index int) string {
+	if index < 0 || index >= len(rows.columns) {
+		return ""
+	}
+	return rows.columns[index].Kind
 }
 
 func newNativeSQLRows(result Result) (*nativeSQLRows, error) {

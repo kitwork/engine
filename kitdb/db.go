@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,6 +31,7 @@ type DB struct {
 	closeMu        sync.Mutex
 	submitMu       sync.Mutex
 	commitMu       sync.Mutex
+	conflicts      conflictJournal
 	historyMu      sync.Mutex
 	replicaMu      sync.Mutex
 	mu             sync.RWMutex
@@ -37,40 +39,54 @@ type DB struct {
 	sequenceMu     sync.Mutex
 	sequenceLeases map[string]sequenceLease
 
-	main                  *mainImage
-	overlay               map[string]rowMutation
-	lastTx                uint64
-	lastDataTx            uint64
-	walEnd                int64
-	walChecksum           uint32
-	walBaseTx             uint64
-	lastCommitTime        int64
-	checkpointTx          uint64
-	activeTx              map[*Tx]struct{}
-	activeTxBytes         int
-	closing               bool
-	closed                bool
-	fatal                 error
-	commitBatches         uint64
-	committedTransactions uint64
-	commitSyncs           uint64
-	largestCommitBatch    int
-	commitQueue           chan *commitRequest
-	commitWriterDone      chan struct{}
-	maxCommitBatch        int
-	groupCommitDelay      time.Duration
-	replicaMode           bool
-	history               *historyState
-	catalog               catalogState
-	catalogLoaded         bool
-	catalogErr            error
+	main                   *mainImage
+	overlay                map[string]rowMutation
+	lastTx                 uint64
+	lastDataTx             uint64
+	walEnd                 int64
+	walChecksum            uint32
+	walBaseTx              uint64
+	lastCommitTime         int64
+	checkpointTx           uint64
+	overlaySince           time.Time
+	lastCheckpointAt       time.Time
+	activeTx               map[*Tx]struct{}
+	activeTxBytes          int
+	frontendTxBytes        int64
+	transactionMemoryLimit int64
+	snapshotMemoryLimit    int64
+	snapshotOverlayBytes   atomic.Int64
+	closing                bool
+	closed                 bool
+	fatal                  error
+	commitBatches          uint64
+	committedTransactions  uint64
+	commitSyncs            uint64
+	largestCommitBatch     int
+	commitQueue            chan *commitRequest
+	commitWriterDone       chan struct{}
+	maxCommitBatch         int
+	groupCommitDelay       time.Duration
+	replicaMode            bool
+	history                *historyState
+	catalog                catalogState
+	catalogLoaded          bool
+	catalogErr             error
 
 	listenerMu      sync.RWMutex
 	nextListenerID  uint64
 	commitListeners map[uint64]CommitListener
 
-	snapshotMu sync.Mutex
-	snapshots  map[*Snapshot]struct{}
+	snapshotMu              sync.Mutex
+	snapshots               map[*Snapshot]struct{}
+	snapshotReservations    map[*SnapshotReservation]int64
+	snapshotBytes           int64
+	snapshotReservedBytes   int64
+	snapshotWaiters         []*snapshotWaiter
+	snapshotAdmissionClosed bool
+	snapshotPauseDone       chan struct{}
+	snapshotDrain           chan struct{}
+	snapshotDrainReady      bool
 
 	wal  commitWAL
 	lock *writerLock
@@ -89,14 +105,18 @@ type DB struct {
 // makes this handle read-only to Begin while allowing verified one-way
 // catch-up through CatchUpReplica.
 type OpenOptions struct {
-	PageCacheBytes   int64
-	VerifyOnOpen     bool
-	CommitQueueSize  int
-	MaxCommitBatch   int
-	GroupCommitDelay time.Duration
-	RetainHistory    bool
-	HistoryRetention HistoryRetentionPolicy
-	Replica          bool
+	// Zero selects defaults; negative budgets are rejected. These account for
+	// overlay copies and transaction writes, not total process RSS.
+	SnapshotMemoryBytes    int64
+	TransactionMemoryBytes int64
+	PageCacheBytes         int64
+	VerifyOnOpen           bool
+	CommitQueueSize        int
+	MaxCommitBatch         int
+	GroupCommitDelay       time.Duration
+	RetainHistory          bool
+	HistoryRetention       HistoryRetentionPolicy
+	Replica                bool
 }
 
 // Open creates or recovers a KitDB file with default bounded resources.
@@ -107,6 +127,16 @@ func Open(path string) (*DB, error) {
 // OpenWithOptions creates or recovers a KitDB file. It holds an exclusive
 // process-level writer lock until Close.
 func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
+	if options.SnapshotMemoryBytes < 0 || options.TransactionMemoryBytes < 0 {
+		return nil, fmt.Errorf("kitdb: memory budgets must not be negative")
+	}
+	snapshotLimit, transactionLimit := options.SnapshotMemoryBytes, options.TransactionMemoryBytes
+	if snapshotLimit == 0 {
+		snapshotLimit = 64 << 20
+	}
+	if transactionLimit == 0 {
+		transactionLimit = maxPayloadSize
+	}
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("kitdb: open: empty database path")
 	}
@@ -197,6 +227,7 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 		return nil, err
 	}
 	database := &DB{
+		snapshotMemoryLimit: snapshotLimit, transactionMemoryLimit: transactionLimit,
 		path: absolute, identity: recovered.identity, pageCacheBytes: pageCacheBytes,
 		main: main, overlay: recovered.overlay, lastTx: recovered.lastTx, lastDataTx: recovered.lastTx,
 		walEnd: recovered.walEnd, walChecksum: recovered.walChecksum,
@@ -210,6 +241,12 @@ func OpenWithOptions(path string, options OpenOptions) (*DB, error) {
 		history:          history,
 		catalog:          newCatalogState(),
 		wal:              recovered.file, lock: lock,
+	}
+	database.snapshotOverlayBytes.Store(snapshotOverlayCost(recovered.overlay))
+	if len(recovered.overlay) != 0 {
+		database.overlaySince = time.Now()
+	} else {
+		database.lastCheckpointAt = time.Now()
 	}
 	if options.VerifyOnOpen {
 		catalog, err := loadCatalogState(main, recovered.overlay)
@@ -310,7 +347,7 @@ func (db *DB) Begin() (*Tx, error) {
 	if len(db.activeTx) >= cap(db.commitQueue) {
 		return nil, ErrTooManyTransactions
 	}
-	if db.activeTxBytes > maxPayloadSize-timedPayloadPrefixSize {
+	if int64(timedPayloadPrefixSize) > db.transactionMemoryLimit-int64(db.activeTxBytes)-db.frontendTxBytes {
 		return nil, ErrActiveTransactionMemory
 	}
 	tx := &Tx{db: db, payloadSize: timedPayloadPrefixSize}
@@ -334,6 +371,7 @@ func (db *DB) Close() error {
 		return nil
 	}
 	db.closing = true
+	db.closeSnapshotAdmission()
 	activeTransactions := make([]*Tx, 0, len(db.activeTx))
 	for transaction := range db.activeTx {
 		activeTransactions = append(activeTransactions, transaction)
@@ -358,6 +396,7 @@ func (db *DB) Close() error {
 		return nil
 	}
 	db.closed = true
+	db.conflicts = conflictJournal{}
 	db.activeTx = nil
 	db.activeTxBytes = 0
 	wal := db.wal
@@ -417,7 +456,7 @@ func (db *DB) reserveTransactionBytes(tx *Tx, size int) error {
 	if _, active := db.activeTx[tx]; !active {
 		return ErrTransactionClosed
 	}
-	if size > maxPayloadSize-db.activeTxBytes {
+	if int64(size) > db.transactionMemoryLimit-int64(db.activeTxBytes)-db.frontendTxBytes {
 		return ErrActiveTransactionMemory
 	}
 	db.activeTxBytes += size
