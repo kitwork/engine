@@ -13,7 +13,12 @@ import (
 
 // BytecodeVersion identifies the structural format understood by this runtime.
 // Increment it when instruction encoding or constant semantics become incompatible.
-const BytecodeVersion uint16 = 2
+//
+// 3 (14/10/2026): the wide forms PUSH_WIDE … ITER_WIDE, a three-byte constant index or jump address,
+// and a 2 MiB program limit (it was 65,535 bytes, the reach of a two-byte jump). A bytecode 2 program
+// is the same bytes in bytecode 3 and means the same; a runtime of 2 cannot run a wide program, which
+// is why the version moved.
+const BytecodeVersion uint16 = 3
 
 // Program is an immutable, verified unit of Kitwork execution.
 //
@@ -26,6 +31,8 @@ type Program struct {
 	version   uint16
 	checksum  [sha256.Size]byte
 	profile   ProgramProfile
+	// calls names the callee of a failed call (callee.go); read back from the code on first use
+	calls *callSites
 }
 
 // NewProgram copies and verifies a complete program before publishing it.
@@ -68,6 +75,7 @@ func NewProgramWithDebug(
 		debug:     debug,
 		version:   BytecodeVersion,
 		profile:   profile,
+		calls:     &callSites{},
 	}
 	program.checksum = programChecksum(program)
 	return program, nil

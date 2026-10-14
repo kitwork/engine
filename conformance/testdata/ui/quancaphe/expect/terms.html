@@ -1,0 +1,80 @@
+<body class="flex-column background-canvas color-ink" data-kitwork-layout="page.ui">
+  <div class="progressbar" data-kitwork-component="progressbar" data-kitwork-bind="show: active; aria-valuenow: value" hidden role="progressbar" data-kitwork-delay="0" aria-label="Đang chuyển trang" aria-valuemin="0" aria-valuemax="100" data-kitwork-style="top: top">
+    <div class="thickness-1 background-brand" data-kitwork-style="width: value + '%'"></div>
+  </div>
+  <header class="flex-row align-center space-between gap-4 padding-4 medium:padding-6 container-wide"><a class="flex-row align-center gap-2 weight-bold" href="/" data-kitwork-current=""><i class="color-brand icon-coffee" aria-hidden="true"></i><span>Quán Cà Phê</span></a>
+    <nav class="flex-row gap-6 show-false medium:show-true"><a class="color-ink-30 active:color-ink active:weight-bold hover:color-ink" href="/" data-kitwork-current="">Thực đơn</a><a class="color-ink-30 active:color-ink active:weight-bold hover:color-ink" href="/ve-chung-toi" data-kitwork-current="">Về chúng tôi</a><a class="color-ink-30 active:color-ink active:weight-bold hover:color-ink" href="/tai-app" data-kitwork-current="">Tải ứng dụng</a></nav>
+    <div class="flex-row align-center gap-2">
+      <button class="flex-row background-panel radius-full padding-2 border-none" data-kitwork-component="appearance" type="button" data-kitwork-event="click: toggle()"><i class="icon-moon" role="img" aria-label="Đổi giao diện sáng/tối" data-kitwork-class="icon-moon: (dark ? &#39;sun&#39; : &#39;moon&#39;) == &#39;moon&#39;; icon-sun: (dark ? &#39;sun&#39; : &#39;moon&#39;) == &#39;sun&#39;"></i></button>
+      <div class="flex-column place-anchor">
+        <button class="flex-row place-anchor background-panel radius-full padding-2 border-none" type="button" aria-expanded="false"><i class="icon-shopping-cart" role="img" aria-label="Giỏ hàng"></i><span class="badge flex-row place-top-end color-brand" aria-label="0 món trong giỏ" hidden><span>0</span></span></button>
+        <div class="card place-below-end flex-column gap-4 padding-6 shadow-large" hidden>
+          <h2 class="size-mini">Giỏ hàng</h2>
+          <ul class="flex-column gap-3 scroll-y max-height-80" role="list">
+            <li class="flex-column color-ink-30" role="status">Chưa có món nào.</li>
+          </ul>
+          <p hidden>Tạm tính: <span class="weight-bold font-code"></span></p>
+          <form class="flex-column gap-3">
+            <div class="field flex-column">
+              <label for="kitwork-field-1">Số điện thoại</label>
+              <input id="kitwork-field-1" aria-describedby="kitwork-field-1-hint" type="tel" required value="">
+              <p class="hint" id="kitwork-field-1-hint">Quán gọi lại khi món đã xong.</p>
+              <p class="error"></p>
+            </div>
+            <div class="field flex-column">
+              <label for="kitwork-field-2">Ghi chú</label>
+              <textarea id="kitwork-field-2"></textarea>
+            </div>
+            <div class="field flex-column">
+              <label for="kitwork-field-3">Tôi đồng ý với <a class="underline-true" href="/dieu-khoan" aria-current="page" data-kitwork-current="">điều khoản đặt món</a></label>
+              <input id="kitwork-field-3" type="checkbox">
+            </div>
+            <p class="color-danger+15" hidden></p>
+            <button class="flex-row background-brand color-brand.on radius-full padding-3 weight-bold border-none hover:background-brand+20 hover:color-paper disabled:opacity-50" type="submit" disabled>Đặt món</button>
+          </form>
+          <p class="color-success+25" hidden>Đã nhận đơn . Cảm ơn bạn!</p>
+        </div>
+      </div>
+      <div class="flex-column place-anchor" data-kitwork-component="dropdown: $account" data-kitwork-event="click-outside: close(); keydown.escape: close()">
+        <button class="flex-row align-center gap-2 background-panel radius-full border-none" type="button" data-kitwork-bind="aria-expanded: open" data-kitwork-event="click: toggle()" aria-expanded="false"><i class="icon-user" aria-hidden="true"></i><span>Quốc</span></button>
+        <div class="popover flex-column place-below-end padding-2" hidden data-kitwork-bind="show: open">
+          <ul class="flex-column gap-1" role="list">
+            <li class="flex-column"><a class="padding-2 radius-small hover:background-panel" href="/don-hang" data-kitwork-current="">Đơn hàng của tôi</a></li>
+            <li class="flex-column"><a class="padding-2 radius-small hover:background-panel" href="/quan-ly" data-kitwork-current="">Quản lý</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </header>
+  <main class="flex-column gap-6 padding-6 container-wide">
+    <section class="flex-column gap-2 max-width-small">
+      <h1>Điều khoản đặt món</h1>
+      <p class="color-ink-30">Ngắn gọn, để bạn đặt món mà không phải đoán.</p>
+    </section>
+    <ul class="flex-column gap-3 max-width-small" role="list">
+      <li class="flex-column">
+        <div class="card flex-column gap-1 padding-5">
+          <h2 class="size-mini">Đặt món</h2>
+          <p class="color-ink-30">Đơn được giữ 30 phút kể từ giờ hẹn lấy. Quá giờ quán pha lại nếu bạn vẫn muốn lấy.</p>
+        </div>
+      </li>
+      <li class="flex-column">
+        <div class="card flex-column gap-1 padding-5">
+          <h2 class="size-mini">Giá</h2>
+          <p class="color-ink-30">Giá tính ở quầy theo thực đơn lúc đặt; giá trên giỏ hàng là tạm tính.</p>
+        </div>
+      </li>
+    </ul>
+  </main>
+  <footer class="flex-column medium:flex-row space-between gap-4 padding-6 container-wide">
+    <div class="flex-column gap-1">
+      <p class="weight-bold">Quán Cà Phê</p>
+      <p class="size-small color-ink-30">12 Lý Tự Trọng, Quận 1 · Mở cửa <time datetime="07:00">7:00</time> – <time datetime="22:00">22:00</time></p>
+    </div>
+    <div class="flex-row gap-4"><a class="size-small color-ink-30 hover:color-ink" href="/ve-chung-toi" data-kitwork-current="">Về chúng tôi</a><a class="size-small color-ink-30 hover:color-ink" href="/dieu-khoan" aria-current="page" data-kitwork-current="">Điều khoản</a><a class="size-small color-ink-30 hover:color-ink" href="/tai-app" data-kitwork-current="">Tải ứng dụng</a></div>
+  </footer>
+  <div class="flex-column">
+    <div class="toast" data-kitwork-component="toast: $toast" role="status" aria-live="polite"></div>
+  </div>
+  <div class="reader" data-kitwork-component="reader" data-kitwork-bind="text: text" aria-live="polite" aria-atomic="true"></div>
+</body>

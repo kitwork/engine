@@ -1,0 +1,7 @@
+<page background="canvas" color="ink" container="wide">
+  <box component="progressbar" color="brand" delay="0" thickness="1"></box>
+  <header />
+  <content />
+  <footer />
+  <overlay />
+</page>

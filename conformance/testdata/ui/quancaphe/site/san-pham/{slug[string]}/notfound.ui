@@ -1,0 +1,5 @@
+<content gap="3" padding="6">
+  <text heading="1">Không có món này</text>
+  <text color="ink-30">Có thể món đã đổi tên hoặc không còn bán.</text>
+  <link value="/">Xem thực đơn</link>
+</content>

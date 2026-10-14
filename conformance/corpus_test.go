@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kitwork/engine/app"
+	"github.com/kitwork/engine/builtins"
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -68,6 +69,8 @@ let staleResult = [1, 2, 3].map((number) => make(40)(number));
 		t.Fatalf("compile dirty VM fixture: %v", err)
 	}
 	pool := app.NewPool()
+	// the globals of the language every host gives a program: safe(() => …) and fail("…")
+	language := map[string]value.Value{"safe": builtins.Safe(), "fail": builtins.Fail()}
 
 	for _, fixture := range manifest.Cases {
 		fixture := fixture
@@ -89,6 +92,9 @@ let staleResult = [1, 2, 3].map((number) => make(40)(number));
 			}
 
 			fresh := runtime.New(restored.Program)
+			for name, global := range language {
+				fresh.Globals[name] = global
+			}
 			fresh.MaxEnergy = maxEnergy
 			baseline := snapshotExecution(t, fresh)
 			assertFixtureExpectation(t, fixture, baseline)
@@ -96,7 +102,7 @@ let staleResult = [1, 2, 3].map((number) => make(40)(number));
 			reused := runtime.New(dirtyBytecode.Program)
 			reused.MaxEnergy = defaultMaxEnergy
 			_ = reused.Run()
-			reused.FastReset(restored.Program, nil)
+			reused.FastReset(restored.Program, language)
 			reused.MaxEnergy = maxEnergy
 			assertSameExecution(t, "reused VM", baseline, snapshotExecution(t, reused))
 
@@ -107,7 +113,7 @@ let staleResult = [1, 2, 3].map((number) => make(40)(number));
 			pool.Release(dirtyLease)
 
 			lease := pool.Acquire()
-			lease.FastReset(restored.Program, nil)
+			lease.FastReset(restored.Program, language)
 			lease.MaxEnergy = maxEnergy
 			pooled := snapshotExecution(t, lease)
 			pool.Release(lease)

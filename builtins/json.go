@@ -2,6 +2,7 @@ package builtins
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/kitwork/engine/value"
 )
@@ -13,7 +14,15 @@ func JSON() value.Value {
 		}
 		bytes, err := json.Marshal(args[0])
 		if err != nil {
-			return value.Value{K: value.Invalid, V: err.Error()}
+			// An object that holds itself is JavaScript's TypeError (TYPE), one nested past
+			// value.MaxDepth its RangeError (INVALID_ARGUMENT): a failure the program can catch with
+			// safe(() => …) (14/10/2026). Until then the first stopped the whole host with a Go stack
+			// overflow.
+			var walk *value.WalkError
+			if errors.As(err, &walk) {
+				return walk.Failure("JSON.stringify")
+			}
+			return value.InvalidFailure(value.InvalidArgumentCode, "JSON.stringify: "+err.Error())
 		}
 		return value.NewString(string(bytes))
 	})
@@ -23,7 +32,8 @@ func JSON() value.Value {
 		}
 		var val value.Value
 		if err := json.Unmarshal([]byte(args[0].Text()), &val); err != nil {
-			return value.Value{K: value.Invalid, V: err.Error()}
+			// text that is not JSON is data from outside that cannot be read
+			return value.InvalidFailure(value.InvalidInputCode, "JSON.parse: "+err.Error())
 		}
 		return val
 	})

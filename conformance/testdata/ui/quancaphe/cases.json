@@ -1,0 +1,205 @@
+{
+  "schema_version": 1,
+  "site": "site",
+  "target": "website",
+  "origin": "https://quancaphe.localhost",
+  "theme": {
+    "brand": "#c8742c",
+    "canvas": { "light": "#f6f3ee", "dark": "#141110" },
+    "panel": { "light": "#efe9e1", "dark": "#1a1613" },
+    "paper": { "light": "#ffffff", "dark": "#1f1a17" },
+    "ink": { "light": "#2b211b", "dark": "#f3ece6" },
+    "line": { "light": "#e6ded5", "dark": "#3a302a" },
+    "success": "#2f9e63",
+    "warning": "#c98a1e",
+    "danger": "#e5484d"
+  },
+  "branches": {
+    "quan-ly": { "brand": "#2563eb" }
+  },
+  "shared": {
+    "staff": { "name": "Quốc", "isStaff": true },
+    "guest": { "name": "Lan", "isStaff": false },
+    "products": [
+      {
+        "id": "ca-phe-sua",
+        "slug": "ca-phe-sua",
+        "name": "Cà phê sữa",
+        "summary": "Robusta pha phin, sữa đặc.",
+        "image": "/assets/img/ca-phe-sua.svg",
+        "price": 29000,
+        "oldPrice": 35000,
+        "prices": { "nho": 25000, "vua": 29000, "lon": 35000 },
+        "soldOut": false
+      },
+      {
+        "id": "bac-xiu",
+        "slug": "bac-xiu",
+        "name": "Bạc xỉu",
+        "summary": "Nhiều sữa, ít cà phê.",
+        "image": "/assets/img/bac-xiu.svg",
+        "price": 32000,
+        "oldPrice": null,
+        "prices": { "nho": 28000, "vua": 32000, "lon": 38000 },
+        "soldOut": false
+      },
+      {
+        "id": "tra-dao",
+        "slug": "tra-dao",
+        "name": "Trà đào",
+        "summary": "Trà đen, đào ngâm.",
+        "image": "/assets/img/tra-dao.svg",
+        "price": 35000,
+        "oldPrice": null,
+        "prices": { "nho": 30000, "vua": 35000, "lon": 40000 },
+        "soldOut": true
+      }
+    ],
+    "faqs": [
+      { "id": "giao-hang", "title": "Giao hàng mất bao lâu?", "answer": "Trong nội thành 30–45 phút." },
+      { "id": "doi-tra", "title": "Đổi trả thế nào?", "answer": "Trong 24 giờ nếu món bị sai." }
+    ],
+    "crumbs": [
+      { "url": "/", "name": "Thực đơn" }
+    ],
+    "orders": [
+      { "id": "DH-1027", "phone": "0912 345 678", "items": "2 × Cà phê sữa, 1 × Bạc xỉu", "total": 90000, "createdAt": "2026-10-11T08:42:00Z", "label": "Đang pha", "tone": "warning" },
+      { "id": "DH-1026", "phone": "0987 654 321", "items": "1 × Trà đào", "total": 35000, "createdAt": "2026-10-11T08:31:00Z", "label": "Chờ lấy", "tone": "brand" },
+      { "id": "DH-1025", "phone": "0903 111 222", "items": "3 × Bạc xỉu", "total": 96000, "createdAt": "2026-10-11T08:05:00Z", "label": "Đã giao", "tone": "success" }
+    ]
+  },
+  "cases": [
+    {
+      "name": "menu",
+      "route": ".",
+      "path": "/",
+      "scope": { "user": "@shared.staff", "products": "@shared.products" },
+      "expect": "expect/menu.html"
+    },
+    {
+      "name": "menu-guest",
+      "route": ".",
+      "path": "/",
+      "scope": { "user": "@shared.guest", "products": [] },
+      "expect": "expect/menu-guest.html"
+    },
+    {
+      "name": "detail",
+      "route": "san-pham/{slug[string]}",
+      "path": "/san-pham/ca-phe-sua",
+      "scope": {
+        "user": "@shared.staff",
+        "product": "@shared.products[0]",
+        "reviews": [
+          { "id": "r1", "author": "Lan", "body": "Đậm, thơm, vừa ngọt.", "createdAt": "2026-10-02T08:30:00Z" },
+          { "id": "r2", "author": "Minh", "body": "Sữa hơi nhiều <3", "createdAt": "2026-09-28T14:00:00Z" }
+        ],
+        "faqs": "@shared.faqs",
+        "crumbs": "@shared.crumbs",
+        "size": "vua",
+        "quantity": 1
+      },
+      "functions": { "total": "product.prices[size] * quantity" },
+      "expect": "expect/detail.html"
+    },
+    {
+      "name": "detail-sold-out-no-reviews",
+      "route": "san-pham/{slug[string]}",
+      "path": "/san-pham/tra-dao",
+      "scope": {
+        "user": "@shared.staff",
+        "product": "@shared.products[2]",
+        "reviews": [],
+        "faqs": "@shared.faqs",
+        "crumbs": "@shared.crumbs",
+        "size": "lon",
+        "quantity": 2
+      },
+      "functions": { "total": "product.prices[size] * quantity" },
+      "expect": "expect/detail-sold-out-no-reviews.html"
+    },
+    {
+      "name": "about",
+      "route": "ve-chung-toi",
+      "path": "/ve-chung-toi",
+      "scope": {
+        "user": "@shared.staff",
+        "values": [
+          { "id": "hat", "icon": "plant", "title": "Hạt rang mỗi tuần", "body": "Robusta Cầu Đất, rang mộc, không tẩm." },
+          { "id": "may", "icon": "coffee", "title": "Pha bằng máy", "body": "Mỗi ly một liều, vị đều từ sáng tới tối." },
+          { "id": "gan", "icon": "map-pin", "title": "Ngay góc phố", "body": "Đặt trước trên web, ghé qua là lấy." }
+        ]
+      },
+      "expect": "expect/about.html"
+    },
+    {
+      "name": "app",
+      "route": "tai-app",
+      "path": "/tai-app",
+      "scope": { "user": "@shared.staff" },
+      "expect": "expect/app.html"
+    },
+    {
+      "name": "orders-empty",
+      "route": "don-hang",
+      "path": "/don-hang",
+      "scope": { "user": "@shared.staff", "orders": [] },
+      "expect": "expect/orders-empty.html"
+    },
+    {
+      "name": "terms",
+      "route": "dieu-khoan",
+      "path": "/dieu-khoan",
+      "scope": {
+        "user": "@shared.staff",
+        "terms": [
+          { "id": "dat", "title": "Đặt món", "body": "Đơn được giữ 30 phút kể từ giờ hẹn lấy. Quá giờ quán pha lại nếu bạn vẫn muốn lấy." },
+          { "id": "gia", "title": "Giá", "body": "Giá tính ở quầy theo thực đơn lúc đặt; giá trên giỏ hàng là tạm tính." }
+        ]
+      },
+      "expect": "expect/terms.html"
+    },
+    {
+      "name": "manage",
+      "route": "quan-ly",
+      "path": "/quan-ly",
+      "scope": { "user": "@shared.staff", "orders": "@shared.orders" },
+      "expect": "expect/manage.html"
+    },
+    {
+      "name": "not-found",
+      "route": ".",
+      "path": "/khong-co",
+      "notfound": true,
+      "scope": { "user": "@shared.staff" },
+      "expect": "expect/not-found.html"
+    },
+    {
+      "name": "detail-not-found",
+      "route": "san-pham/{slug[string]}",
+      "path": "/san-pham/khong-co",
+      "notfound": true,
+      "scope": { "user": "@shared.staff" },
+      "expect": "expect/detail-not-found.html"
+    },
+    {
+      "name": "contrast-brand-text-on-canvas",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><text size=\"mini\" weight=\"bold\" case=\"upper\" color=\"brand\">Thực đơn</text></content>"
+      },
+      "warnings": [
+        { "at": "content.ui:1:55", "says": "color=\"brand\" trên nền canvas chỉ 3.17:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color=\"brand+30\" (4.74:1 sáng, 13.23:1 tối). brand+30 là một bậc cho cả hai chế độ: ở chế độ tối nó là #ffcfad, gần trắng, mà tối chỉ cần brand (7.50:1). Muốn giữ sắc ở cả hai chế độ thì khai một vai trò riêng: router.colors({ \"brand.text\": { light: \"#a75700\", dark: \"#d79565\" } }) rồi viết color=\"brand.text\"." }
+      ]
+    },
+    {
+      "name": "contrast-brand-text-on-canvas-strict",
+      "route": ".",
+      "contrast": "strict",
+      "files": {
+        "content.ui": "<content><text size=\"mini\" weight=\"bold\" case=\"upper\" color=\"brand\">Thực đơn</text></content>"
+      },
+      "error": { "at": "content.ui:1:55", "says": "color=\"brand\" trên nền canvas chỉ 3.17:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color=\"brand+30\" (4.74:1 sáng, 13.23:1 tối). brand+30 là một bậc cho cả hai chế độ: ở chế độ tối nó là #ffcfad, gần trắng, mà tối chỉ cần brand (7.50:1). Muốn giữ sắc ở cả hai chế độ thì khai một vai trò riêng: router.colors({ \"brand.text\": { light: \"#a75700\", dark: \"#d79565\" } }) rồi viết color=\"brand.text\"." }
+    }
+  ]
+}

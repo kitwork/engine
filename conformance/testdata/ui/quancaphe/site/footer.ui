@@ -1,0 +1,11 @@
+<footer flex="column" medium:flex="row" space="between" gap="4" padding="6">
+  <box gap="1">
+    <text weight="bold">Quán Cà Phê</text>
+    <text size="small" color="ink-30">12 Lý Tự Trọng, Quận 1 · Mở cửa <time value="07:00">7:00</time> – <time value="22:00">22:00</time></text>
+  </box>
+  <box flex="row" gap="4">
+    <link value="/ve-chung-toi" size="small" color="ink-30" hover:color="ink">Về chúng tôi</link>
+    <link value="/dieu-khoan" size="small" color="ink-30" hover:color="ink">Điều khoản</link>
+    <link value="/tai-app" size="small" color="ink-30" hover:color="ink">Tải ứng dụng</link>
+  </box>
+</footer>

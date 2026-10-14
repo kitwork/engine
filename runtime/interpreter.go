@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/kitwork/engine/value"
@@ -41,6 +40,32 @@ func (vm *VM) ExecuteLambda(lambda *value.Lambda, args []value.Value) (result va
 	}
 	floor := vm.FrameIdx
 	return vm.executePreparedLambda(callerFrame, stackBase, floor)
+}
+
+// ExecuteLambdaScope runs a lambda like ExecuteLambda and also returns the names its body declared
+// (parameters included), as they stand when it returns. Kitwork UI reads a view this way: the
+// const and var of router.view are what the interface sees. A const or let of a block inside the
+// view lives in that block (14/10/2026) and is not one of them. The map is handed over, so the frame
+// slot never reuses it.
+func (vm *VM) ExecuteLambdaScope(lambda *value.Lambda, args []value.Value) (value.Value, map[string]value.Value) {
+	if lambda == nil {
+		return value.Value{K: value.Nil}, nil
+	}
+	if vm == nil || vm.program == nil {
+		return vm.diagnosticValue(DiagnosticNoProgram, "VM has no verified program", -1), nil
+	}
+
+	callerFrame := vm.FrameIdx
+	stackBase := len(vm.Stack)
+	if fault := vm.pushLambdaFrame(lambda, args); fault != nil {
+		return vm.diagnosticValue(fault.code, fault.message, vm.Frames[vm.FrameIdx].LastIP), nil
+	}
+	floor := vm.FrameIdx
+	result := vm.executePreparedLambda(callerFrame, stackBase, floor)
+	frame := &vm.Frames[floor]
+	locals := frame.Vars
+	frame.captured = true // handed out: the next call into this slot allocates a fresh map
+	return result, DeclaredNames(locals)
 }
 
 func (vm *VM) executePreparedLambda(callerFrame, stackBase, floor int) (result value.Value) {
@@ -159,19 +184,15 @@ func (vm *VM) execute(floor int) value.Value {
 		}
 
 		vm.instructions++
-		if vm.Context != nil && vm.instructions&cancellationCheckMask == 0 {
-			if err := vm.Context.Err(); err != nil {
-				return vm.exitFailure(floor, vm.diagnosticValue(
-					DiagnosticCancelled,
-					fmt.Sprintf("Execution Cancelled: %v", err),
-					opIP,
-				))
+		if vm.instructions&cancellationCheckMask == 0 {
+			if failure, failed := vm.checkpoint(opIP); failed {
+				return vm.exitFailure(floor, failure)
 			}
 		}
 
 		switch op {
-		case PUSH:
-			index := vm.readUint16(frame)
+		case PUSH, PUSH_WIDE:
+			index := vm.readOperand(frame, spec.operandSize)
 			constant := vm.program.constants[index]
 			if template, ok := constant.V.(*value.Lambda); ok {
 				closure := &value.Lambda{
@@ -194,12 +215,12 @@ func (vm *VM) execute(floor int) value.Value {
 		case POP:
 			vm.pop()
 
-		case LOAD:
-			name := vm.program.constants[vm.readUint16(frame)].V.(string)
+		case LOAD, LOAD_WIDE:
+			name := vm.program.constants[vm.readOperand(frame, spec.operandSize)].V.(string)
 			vm.push(vm.load(frame, name))
 
-		case STORE:
-			name := vm.program.constants[vm.readUint16(frame)].V.(string)
+		case STORE, STORE_WIDE:
+			name := vm.program.constants[vm.readOperand(frame, spec.operandSize)].V.(string)
 			vm.store(frame, name, vm.peek())
 
 		case GET:
@@ -208,9 +229,7 @@ func (vm *VM) execute(floor int) value.Value {
 			if key.K == value.Number {
 				vm.push(target.At(int(key.N)))
 			} else {
-				vm.push(vm.nativeValue("property access", func() value.Value {
-					return target.Get(key.Text())
-				}))
+				vm.push(vm.nativeProperty(target, key.Text()))
 			}
 
 		case DUP:
@@ -264,21 +283,21 @@ func (vm *VM) execute(floor int) value.Value {
 			right, left := vm.pop(), vm.pop()
 			vm.compare(left, right, mode)
 
-		case JUMP:
-			frame.IP = int(vm.readUint16(frame))
-		case TRUE:
-			address := int(vm.readUint16(frame))
+		case JUMP, JUMP_WIDE:
+			frame.IP = vm.readOperand(frame, spec.operandSize)
+		case TRUE, TRUE_WIDE:
+			address := vm.readOperand(frame, spec.operandSize)
 			if vm.pop().Truthy() {
 				frame.IP = address
 			}
-		case FALSE:
-			address := int(vm.readUint16(frame))
+		case FALSE, FALSE_WIDE:
+			address := vm.readOperand(frame, spec.operandSize)
 			if !vm.pop().Truthy() {
 				frame.IP = address
 			}
 
-		case ITER:
-			address := int(vm.readUint16(frame))
+		case ITER, ITER_WIDE:
+			address := vm.readOperand(frame, spec.operandSize)
 			index := vm.pop()
 			collection := vm.peek()
 			if int(index.N) < collection.Len() {
@@ -304,7 +323,13 @@ func (vm *VM) execute(floor int) value.Value {
 				target.V.(map[string]value.Value)[key.Text()] = item
 			} else if target.IsArray() {
 				items := target.V.(*[]value.Value)
-				*items = append(*items, item)
+				// a[i] = v sets item i, as in JavaScript (14/10/2026: it appended v whatever i was); the
+				// key one past the last item adds one, which is how an array literal fills itself
+				if index := key.N; key.K == value.Number && index >= 0 && index < float64(len(*items)) && index == float64(int(index)) {
+					(*items)[int(index)] = item
+				} else {
+					*items = append(*items, item)
+				}
 			}
 			vm.push(target)
 
@@ -370,9 +395,20 @@ func (vm *VM) execute(floor int) value.Value {
 			if hasFailure {
 				message = failure.Message
 			}
+			// A host call that failed because the request is over (a query's "context canceled", a VM
+			// asked of a closed scope, SQLite's CANCELLED) is the cancellation, which nothing catches;
+			// a host that wrapped a failure nothing catches keeps it so; any other failure of the host
+			// is a runtime error, caught by safe(() => …).
+			if (hasFailure && failure.Code == value.CancelledCode) || vm.cancelled() {
+				return vm.exitFailure(floor, vm.diagnosticValue(DiagnosticCancelled, cancelledMessage(message), opIP))
+			}
+			if code, never := uncatchableCode(failure.Code); hasFailure && never {
+				return vm.exitFailure(floor, vm.diagnosticValue(code, message, opIP))
+			}
 			diagnostic := vm.buildDiagnostic(DiagnosticRuntimeError, message, opIP)
 			if hasFailure {
 				diagnostic.CauseCode = failure.Code
+				diagnostic.Progress = failure.Progress
 			}
 			return vm.exitFailure(
 				floor,
@@ -384,11 +420,16 @@ func (vm *VM) execute(floor int) value.Value {
 	return value.Value{K: value.Nil}
 }
 
-func (vm *VM) readUint16(frame *Frame) uint16 {
-	number := uint16(vm.program.code[frame.IP])<<8 |
-		uint16(vm.program.code[frame.IP+1])
-	frame.IP += 2
-	return number
+// readOperand reads a constant index or a jump address: two bytes, or three in a wide form (size is
+// the instruction's operand size, which the verifier proved).
+func (vm *VM) readOperand(frame *Frame, size uint8) int {
+	code, ip := vm.program.code, frame.IP
+	if size == 3 {
+		frame.IP = ip + 3
+		return int(code[ip])<<16 | int(code[ip+1])<<8 | int(code[ip+2])
+	}
+	frame.IP = ip + 2
+	return int(code[ip])<<8 | int(code[ip+1])
 }
 
 func (vm *VM) load(frame *Frame, name string) value.Value {
@@ -441,7 +482,8 @@ func (vm *VM) prepareLambdaFrame(lambda *value.Lambda) (*Frame, *runtimeFault) {
 			}
 		}
 	}
-	if vm.FrameIdx+1 >= defaultMaxCallDepth || vm.FrameIdx+1 >= len(vm.Frames) {
+	// callFloor is the frames held by the VMs this one runs inside (nesting.go): one ceiling for all.
+	if vm.callFloor+vm.FrameIdx+1 >= defaultMaxCallDepth || vm.FrameIdx+1 >= len(vm.Frames) {
 		return nil, &runtimeFault{
 			code:    DiagnosticStackOverflow,
 			message: "Stack overflow: Call stack limit exceeded",
@@ -570,41 +612,66 @@ func (vm *VM) executeCall(frame *Frame) {
 		args[index] = vm.pop()
 	}
 	callable := vm.pop()
+	// The global safe runs its function on this VM (safe.go), so it is the VM's to call.
+	if value.IsSafeFunction(callable) {
+		vm.push(vm.callSafe(frame.LastIP, args))
+		return
+	}
+	// The host may run a lambda among args in a VM nested in this one (nesting.go: LambdaCaller).
+	if mark := vm.passLambdas(args); len(vm.passing) > mark {
+		defer vm.withdrawLambdas(mark)
+	}
 
+	if result, callable := vm.callHost(callable, args); callable {
+		vm.push(result)
+		return
+	}
+	if callable.K == value.Proxy {
+		// a proxy with no handler answers nothing
+		return
+	}
+
+	// Anything else is not a function: calling it is a runtime error (14/10/2026), and it never prints.
+	// Until then such a call gave null, and printed its arguments to standard output when the value was
+	// the string "log" or "PRINT", so data a request carried could write a secret into the server's log.
+	vm.push(vm.calledNotAFunction(frame.LastIP, callable))
+}
+
+// callHost calls a function of the host (not a script lambda) with args, as CALL calls it; callable is
+// false when the value is not one. A function value of a kind the VM does not know gives null.
+func (vm *VM) callHost(callable value.Value, args []value.Value) (result value.Value, ok bool) {
 	if callable.K == value.Func {
 		switch function := callable.V.(type) {
 		case value.Method:
-			vm.push(vm.nativeValue("function call", func() value.Value {
+			return vm.nativeValue("function call", func() value.Value {
 				return function(value.Value{K: value.Nil}, args...)
-			}))
+			}), true
 		case func(...value.Value) value.Value:
-			vm.push(vm.nativeValue("function call", func() value.Value {
+			return vm.nativeValue("function call", func() value.Value {
 				return function(args...)
-			}))
+			}), true
 		case *value.FuncObject:
-			vm.push(vm.nativeValue("function object call", func() value.Value {
+			return vm.nativeValue("function object call", func() value.Value {
 				return function.Fn(args...)
-			}))
+			}), true
 		case reflect.Value:
-			vm.push(vm.nativeValue("reflected function call", func() value.Value {
+			return vm.nativeValue("reflected function call", func() value.Value {
 				return callable.Call(callable.Text(), args...)
-			}))
+			}), true
+		case value.SafeFunction:
+			return vm.callSafe(vm.currentInstruction(), args), true
 		default:
-			vm.push(value.Value{K: value.Nil})
+			return value.Value{K: value.Nil}, true
 		}
-		return
 	}
-
 	if callable.K == value.Proxy {
 		if handler, ok := callable.V.(value.ProxyHandler); ok {
-			vm.push(vm.nativeValue("proxy call", func() value.Value {
+			return vm.nativeValue("proxy call", func() value.Value {
 				return handler.OnInvoke("", args...)
-			}))
+			}), true
 		}
-		return
 	}
-
-	vm.call(callable.Text(), args...)
+	return value.Value{}, false
 }
 
 func (vm *VM) executeInvoke(frame *Frame) {
@@ -613,22 +680,19 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	method := vm.pop().Text()
 
 	targetIndex := len(vm.Stack) - count - 1
-	if targetIndex >= frame.StackBase && count == 0 && method == "safe" {
-		target := vm.Stack[targetIndex]
-		if evaluator, ok := target.V.(*value.Lambda); ok && evaluator.IsSafeEvaluator() {
-			clear(vm.Stack[targetIndex:])
-			vm.Stack = vm.Stack[:targetIndex]
-			vm.push(safeEvaluationResult(vm.ExecuteLambda(evaluator, nil)))
-			return
-		}
-	}
-
 	if targetIndex >= frame.StackBase &&
-		count > 0 &&
+		vm.Stack[targetIndex].K == value.Array &&
 		isArrayCallbackMethod(method) {
 		target := vm.Stack[targetIndex]
-		callback, _ := vm.Stack[targetIndex+1].V.(*value.Lambda)
-		if target.K == value.Array && callback != nil {
+		argument := value.Value{K: value.Nil}
+		if count > 0 {
+			argument = vm.Stack[targetIndex+1]
+		}
+		// The callback is called for each element when it is a function: a script lambda, or a function
+		// of the engine (console.log, Boolean), as JavaScript calls it. Anything else is not a function,
+		// so the call is the runtime error (14/10/2026), naming the argument; sort() and unique() without
+		// one keep their own order and key.
+		if callback, ok := newArrayCallback(argument); ok {
 			initial := value.Value{K: value.Nil}
 			hasInitial := count > 1
 			if hasInitial {
@@ -645,11 +709,20 @@ func (vm *VM) executeInvoke(frame *Frame) {
 			vm.push(result)
 			return
 		}
+		if argument.K != value.Nil || (method != "sort" && method != "unique") {
+			clear(vm.Stack[targetIndex:])
+			vm.Stack = vm.Stack[:targetIndex]
+			vm.push(vm.callbackNotAFunction(frame.LastIP, method, count, argument))
+			return
+		}
 	}
 
 	if targetIndex >= frame.StackBase {
 		target := vm.Stack[targetIndex]
-		if standardMethodUsesStackArgs(target.K) {
+		// A call reaches an object's own key only when the key holds a function (value.CallsOwn):
+		// { delete: f }.delete("k") calls f. An own key holding data never answers a call, so
+		// { pick: {…} }.pick("name") is the builtin, as on an object without that key.
+		if standardMethodUsesStackArgs(target.K) && !target.CallsOwn(method) {
 			if standard, ok := target.K.StandardMethod(method); ok {
 				top := len(vm.Stack)
 				args := vm.Stack[targetIndex+1 : top : top]
@@ -716,27 +789,19 @@ func (vm *VM) executeInvoke(frame *Frame) {
 		}
 	}
 
-	vm.push(vm.nativeMethod(target, method, args))
-}
-
-func safeEvaluationResult(result value.Value) value.Value {
-	if result.K != value.Invalid {
-		return result.Safe()
+	// o.safe(f) where o.safe is the global safe (kitwork().safe, { safe }): the VM runs it, as CALL does.
+	if method == "safe" && (target.K == value.Map || target.K == value.Struct) {
+		if member := vm.nativeProperty(target, method); value.IsSafeFunction(member) {
+			vm.push(vm.callSafe(frame.LastIP, args))
+			return
+		}
 	}
 
-	if diagnostic, ok := DiagnosticFrom(result); ok {
-		if diagnostic.Code != DiagnosticRuntimeError {
-			return result
-		}
-		if diagnostic.CauseCode != "" {
-			return value.InvalidFailure(
-				diagnostic.CauseCode,
-				diagnostic.Message,
-			).Safe()
-		}
-		result = value.Value{K: value.Invalid, V: diagnostic.Message}
+	result := vm.nativeMethod(target, method, args)
+	if message, ok := value.NotAFunctionFrom(result); ok {
+		result = vm.invokedNotAFunction(frame.LastIP, message)
 	}
-	return result.Safe()
+	vm.push(result)
 }
 
 func standardMethodUsesStackArgs(kind value.Kind) bool {

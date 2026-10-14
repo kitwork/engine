@@ -1,0 +1,15 @@
+<content gap="6" padding="6" mobile:padding="4">
+  <section gap="2" max-width="small">
+    <text heading="1">Điều khoản đặt món</text>
+    <text color="ink-30">Ngắn gọn, để bạn đặt món mà không phải đoán.</text>
+  </section>
+
+  <list gap="3" max-width="small">
+    <item for="term of terms; key: term.id">
+      <card gap="1" padding="5">
+        <text heading="2" size="mini">{{ term.title }}</text>
+        <text color="ink-30">{{ term.body }}</text>
+      </card>
+    </item>
+  </list>
+</content>

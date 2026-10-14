@@ -13,10 +13,16 @@ func (v Value) To(target any) error {
 		return fmt.Errorf("target must be a non-nil pointer")
 	}
 
-	return v.mapTo(rv.Elem())
+	return v.mapTo(rv.Elem(), 0)
 }
 
-func (v Value) mapTo(target reflect.Value) error {
+// mapTo maps v into target, depth objects and arrays down from the value To was given. A Go type
+// that holds itself (type Node struct{ Next *Node }) takes a value that holds itself down forever:
+// past MaxDepth the mapping fails rather than overflow Go's stack (14/10/2026).
+func (v Value) mapTo(target reflect.Value, depth int) error {
+	if depth > MaxDepth {
+		return fmt.Errorf("giá trị lồng quá sâu (hơn %d tầng object và mảng)", MaxDepth)
+	}
 	// 1. Handle Nil Value
 	if v.K == Nil {
 		target.Set(reflect.Zero(target.Type()))
@@ -30,7 +36,7 @@ func (v Value) mapTo(target reflect.Value) error {
 		if target.IsNil() {
 			target.Set(reflect.New(t.Elem()))
 		}
-		return v.mapTo(target.Elem())
+		return v.mapTo(target.Elem(), depth)
 	}
 
 	// 3. Mapping dựa trên Kind của Target
@@ -59,12 +65,12 @@ func (v Value) mapTo(target reflect.Value) error {
 			}
 
 			if val, ok := m[key]; ok {
-				if err := val.mapTo(target.Field(i)); err != nil {
+				if err := val.mapTo(target.Field(i), depth+1); err != nil {
 					return err
 				}
 			} else if val, ok := m[strings.ToLower(key)]; ok {
 				// Fallback cho viết thường
-				if err := val.mapTo(target.Field(i)); err != nil {
+				if err := val.mapTo(target.Field(i), depth+1); err != nil {
 					return err
 				}
 			}
@@ -77,7 +83,7 @@ func (v Value) mapTo(target reflect.Value) error {
 		arr := v.Array()
 		slice := reflect.MakeSlice(t, len(arr), len(arr))
 		for i, item := range arr {
-			if err := item.mapTo(slice.Index(i)); err != nil {
+			if err := item.mapTo(slice.Index(i), depth+1); err != nil {
 				return err
 			}
 		}

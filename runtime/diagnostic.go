@@ -32,10 +32,14 @@ type StackFrame struct {
 	Column   int32
 }
 
-// Diagnostic is the structured form of a runtime failure.
+// Diagnostic is the structured form of a runtime failure. Message never holds where the failure is:
+// File, Line and Column do (the innermost frame at the failing instruction), and Error() writes
+// "file:line:column: message" when it prints (14/10/2026).
 type Diagnostic struct {
-	Code       DiagnosticCode
-	CauseCode  string
+	Code      DiagnosticCode
+	CauseCode string
+	// Progress is what a PARTIAL failure of the host had done (value.Failure.Progress).
+	Progress   value.Value
 	Message    string
 	IP         int
 	File       string
@@ -52,9 +56,15 @@ func (d *Diagnostic) Error() string {
 	}
 
 	var out strings.Builder
-	out.WriteString(d.Message)
-	if d.Line > 0 && !strings.Contains(d.Message, "(at line") {
-		fmt.Fprintf(&out, " (at line %d)", d.Line)
+	if place := diagnosticAt(d); d.File != "" && place != "" {
+		out.WriteString(place)
+		out.WriteString(": ")
+		out.WriteString(d.Message)
+	} else {
+		out.WriteString(d.Message)
+		if d.Line > 0 && !strings.Contains(d.Message, "(at line") {
+			fmt.Fprintf(&out, " (at line %d)", d.Line)
+		}
 	}
 	for _, frame := range d.Stack {
 		out.WriteString("\n    at ")
@@ -117,10 +127,13 @@ func (vm *VM) diagnosticValue(code DiagnosticCode, message string, ip int) value
 	return diagnosticResult(diagnostic)
 }
 
+// diagnosticResult is the failure of a run. Its text (Error(): the message, the place, every frame of
+// the stack) is written only when something reads it (value.Text): a failure safe(() => …) catches is
+// never printed, so it never pays for the formatting (14/10/2026).
 func diagnosticResult(diagnostic *Diagnostic) value.Value {
 	return value.Value{
 		K:        value.Invalid,
-		V:        diagnostic.Error(),
+		V:        diagnostic,
 		IsError:  true,
 		ErrorVal: diagnostic,
 	}
@@ -206,9 +219,6 @@ func (vm *VM) buildDiagnostic(code DiagnosticCode, message string, ip int) *Diag
 func lambdaDisplayName(lambda *value.Lambda) string {
 	if lambda == nil {
 		return "<anonymous>"
-	}
-	if lambda.IsSafeEvaluator() {
-		return "<safe>"
 	}
 	if lambda.Name == "" {
 		return "<anonymous>"

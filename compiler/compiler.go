@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -23,20 +25,41 @@ type Bytecode struct {
 
 // Compiler chịu trách nhiệm chuyển đổi AST thành Bytecode
 type Compiler struct {
-	instructions  []byte
-	constants     []value.Value
-	debugEntries  []runtime.DebugEntry
-	sources       map[string][]int32
+	instructions []byte
+	constants    []value.Value
+	debugEntries []runtime.DebugEntry
+	sources      map[string][]int32
+	// texts holds each source's text, so a column counts characters (14/10/2026) and a compile error
+	// can quote the source; a source without one counts bytes.
+	texts         map[string]string
+	columns       columnMemo
 	currentSource string
 	currentPos    int32
 
 	sourceFingerprint string
 	breakFrames       []compilerBreakFrame
+	// chain is the optional chain being compiled: the jumps its ?. links take when they find null.
+	chain *chainJumps
+	// scopes is what resolving the program's names gave (scope.go): each variable's slot.
+	scopes *resolution
+	// wide writes every jump with a three-byte address: the program is longer than a two-byte jump
+	// reaches (65,535 bytes). overflow records a two-byte jump given an address past that, which makes
+	// the Program compile again wide (bytecode 3, 14/10/2026).
+	wide     bool
+	overflow bool
 }
 
 type compilerBreakFrame struct {
 	cleanup int
 	jumps   []int
+}
+
+// chainJumps collects the exits of one optional chain. A ?. that finds null jumps with that null as
+// the one value the chain leaves (short); o.m?.() finds null with o still under it (method), which
+// a shared tail drops first.
+type chainJumps struct {
+	short  []int
+	method []int
 }
 
 func NewCompiler(source ...string) *Compiler {
@@ -51,14 +74,17 @@ func NewCompiler(source ...string) *Compiler {
 		}
 	}
 	sources := make(map[string][]int32)
+	texts := make(map[string]string)
 	if offsets != nil {
 		sources[""] = offsets
+		texts[""] = source[0]
 	}
 	compiler := &Compiler{
 		instructions: []byte{},
 		constants:    []value.Value{},
 		debugEntries: []runtime.DebugEntry{},
 		sources:      sources,
+		texts:        texts,
 	}
 	sourceText := ""
 	if len(source) > 0 {
@@ -74,9 +100,11 @@ func newCompilerWithSources(sources map[string]string) *Compiler {
 		constants:         []value.Value{},
 		debugEntries:      []runtime.DebugEntry{},
 		sources:           make(map[string][]int32, len(sources)),
+		texts:             make(map[string]string, len(sources)),
 		sourceFingerprint: fingerprintSources(sources),
 	}
 	for name, source := range sources {
+		compiler.texts[name] = source
 		offsets := []int32{0}
 		for index := 0; index < len(source); index++ {
 			if source[index] == '\n' {
@@ -164,8 +192,50 @@ func getNodePosition(node Node) int32 {
 		return n.Token.Position
 	case *TemplateLiteral:
 		return n.Token.Position
+	case *ChainExpression:
+		return getNodePosition(n.Expression)
+	case *BindingPattern:
+		return n.Token.Position
 	}
 	return 0
+}
+
+// templateText reports a part of a template that is text: written text, or a string written in ${…}.
+func templateText(part Expression) bool {
+	literal, ok := part.(*Literal)
+	return ok && literal.Value.K == value.String
+}
+
+// startPosition is where the source of an expression begins: the callee of f(x), o.f(x)(y), g()(z)
+// starts at f, o, g. A CALL records it, so an error of the call points at what is called rather
+// than at its last argument.
+func startPosition(node Expression) int32 {
+	for depth := 0; depth < 1024; depth++ {
+		switch n := node.(type) {
+		case *MemberExpression:
+			node = n.Object
+		case *IndexExpression:
+			node = n.Left
+		case *CallExpression:
+			node = n.Function
+		case *MethodCallExpression:
+			node = n.Object
+		case *InfixExpression:
+			node = n.Left
+		case *TernaryExpression:
+			node = n.Condition
+		case *ChainExpression:
+			node = n.Expression
+		case *AssignmentExpression:
+			node = n.Name
+		default:
+			return getNodePosition(node)
+		}
+		if node == nil {
+			return 0
+		}
+	}
+	return getNodePosition(node)
 }
 
 func getNodeSource(node Node) string {
@@ -235,6 +305,10 @@ func getNodeSource(node Node) string {
 		return n.Token.Source
 	case *TemplateLiteral:
 		return n.Token.Source
+	case *ChainExpression:
+		return getNodeSource(n.Expression)
+	case *BindingPattern:
+		return n.Token.Source
 	}
 	return ""
 }
@@ -266,8 +340,107 @@ func (c *Compiler) getSourceLocation(source string, pos int32) runtime.SourceLoc
 	return runtime.SourceLocation{
 		File:   source,
 		Line:   int32(lineIndex + 1),
-		Column: pos - offsets[lineIndex] + 1,
+		Column: c.column(source, offsets[lineIndex], pos),
 	}
+}
+
+// columnMemo is the column found last: positions of one line come one after another while a line
+// compiles, so the next one counts on from it instead of from the line's start.
+type columnMemo struct {
+	source    string
+	lineStart int32
+	pos       int32
+	column    int32
+}
+
+// column is the column of pos, on the line that starts at lineStart, counted in characters as an editor
+// shows it (14/10/2026; until then in bytes, so a line with Vietnamese text before the place was off).
+func (c *Compiler) column(source string, lineStart, pos int32) int32 {
+	text, ok := c.texts[source]
+	if !ok || pos > int32(len(text)) || lineStart > pos {
+		return pos - lineStart + 1
+	}
+	from, column := lineStart, int32(1)
+	if memo := c.columns; memo.source == source && memo.lineStart == lineStart && memo.pos <= pos {
+		from, column = memo.pos, memo.column
+	}
+	column += int32(utf8.RuneCountInString(text[from:pos]))
+	c.columns = columnMemo{source: source, lineStart: lineStart, pos: pos, column: column}
+	return column
+}
+
+// sourceText is the source from start up to end (positions in source), as one line; "" when the compiler
+// does not have it.
+func (c *Compiler) sourceText(source string, start, end int32) string {
+	text, ok := c.texts[source]
+	if !ok || start < 0 || end > int32(len(text)) || start >= end {
+		return ""
+	}
+	return oneLine(text[start:end])
+}
+
+// locationText writes a place as an error leads with it: file:line:column, line:column for a source
+// with no name.
+func locationText(location runtime.SourceLocation) string {
+	if location.File == "" {
+		return fmt.Sprintf("%d:%d", location.Line, location.Column)
+	}
+	return fmt.Sprintf("%s:%d:%d", location.File, location.Line, location.Column)
+}
+
+// checkSafeCall makes the mistake a move from x.safe() makes most a compile error: safe(findUser(id)),
+// where the arrow is forgotten. At run time findUser(id) runs before safe is called, so if it fails the
+// request ends with findUser's error and nothing says the arrow was missing. An argument that is
+// certainly not a function (a call, a literal, an object, an array, arithmetic) is the error, quoting
+// what to write; so is a call of safe without exactly one argument. A name, a member or a ternary may
+// hold a function and is checked when it runs. The check is off when the bundle (the entry file and
+// every module it imports) declares or assigns a name safe anywhere: that safe is the author's own.
+func (c *Compiler) checkSafeCall(n *CallExpression) error {
+	callee, ok := n.Function.(*Identifier)
+	if !ok || callee.Value != "safe" || (c.scopes != nil && c.scopes.declaresSafe) {
+		return nil
+	}
+	var message string
+	switch {
+	case len(n.Arguments) == 0:
+		message = "safe nhận một hàm: viết safe(() => …)"
+	case len(n.Arguments) > 1:
+		message = fmt.Sprintf("safe nhận đúng một hàm, không nhận %d đối số: viết safe(() => …)", len(n.Arguments))
+	case certainlyNotAFunction(n.Arguments[0]):
+		written := ""
+		if n.Close > n.Token.Position {
+			written = c.sourceText(n.Token.Source, n.Token.Position+1, n.Close)
+		}
+		if written == "" {
+			written = "…"
+		}
+		if strings.HasPrefix(written, "{") {
+			written = "(" + written + ")"
+		}
+		message = "safe nhận một hàm: viết safe(() => " + written + ")"
+	default:
+		return nil
+	}
+	return fmt.Errorf("%s: %s", locationText(c.getSourceLocation(callee.Token.Source, callee.Token.Position)), message)
+}
+
+// certainlyNotAFunction reports an expression that can never give a function: a call (its result is
+// computed before safe runs), a literal, an object, an array, arithmetic, a comparison, a negation.
+func certainlyNotAFunction(e Expression) bool {
+	switch n := e.(type) {
+	case *CallExpression, *MethodCallExpression, *Literal, *TemplateLiteral, *ObjectLiteral, *ArrayLiteral,
+		*PrefixExpression:
+		return true
+	case *ChainExpression:
+		return certainlyNotAFunction(n.Expression)
+	case *InfixExpression:
+		switch n.Operator {
+		case "&&", "||", "??":
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 // Compile bắt đầu quá trình duyệt cây và phát sinh mã
@@ -284,6 +457,16 @@ func (c *Compiler) Compile(node Node) error {
 
 	switch n := node.(type) {
 	case *Program:
+		start, constants, entries := len(c.instructions), len(c.constants), len(c.debugEntries)
+		if c.scopes == nil {
+			// every name is resolved before code is emitted: a variable's slot depends on the whole
+			// program (14/10/2026, scope.go)
+			scopes, err := c.resolveProgram(n)
+			if err != nil {
+				return err
+			}
+			c.scopes = scopes
+		}
 		for _, s := range n.Statements {
 			err := c.Compile(s)
 			if err != nil {
@@ -292,6 +475,16 @@ func (c *Compiler) Compile(node Node) error {
 		}
 		// Luôn kết thúc Program bằng RETURN để đảm bảo thực thi defer
 		c.emit(runtime.RETURN)
+		if c.overflow && !c.wide {
+			// a jump's address did not fit two bytes: the program is written again with every jump
+			// wide. Names were resolved once (c.scopes), so the second pass emits the same program.
+			c.instructions = c.instructions[:start]
+			c.constants = c.constants[:constants]
+			c.debugEntries = c.debugEntries[:entries]
+			c.breakFrames, c.chain = nil, nil
+			c.wide, c.overflow = true, false
+			return c.Compile(n)
+		}
 
 	case *ImportStatement:
 		// Bundler ở package script phải giải quyết hết ImportStatement (IIFE-wrap)
@@ -321,6 +514,10 @@ func (c *Compiler) Compile(node Node) error {
 		return nil
 
 	case *InfixExpression:
+		switch n.Operator {
+		case "&&", "||", "??":
+			return c.compileLogical(n)
+		}
 		err := c.Compile(n.Left)
 		if err != nil {
 			return err
@@ -329,6 +526,9 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
+		// an operation that fails (o - 1 on an object: TYPE) fails at its operator, not at its right
+		// operand (14/10/2026)
+		c.at(n.Token.Source, n.Token.Position)
 
 		switch n.Operator {
 		case "+":
@@ -353,10 +553,6 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(runtime.COMPARE, 4)
 		case "<=":
 			c.emit(runtime.COMPARE, 5)
-		case "&&":
-			c.emit(runtime.AND)
-		case "||":
-			c.emit(runtime.OR)
 		}
 
 	case *PrefixExpression:
@@ -364,10 +560,11 @@ func (c *Compiler) Compile(node Node) error {
 		if err != nil {
 			return err
 		}
+		c.at(n.Token.Source, n.Token.Position)
 		switch n.Operator {
 		case "-":
 			constIndex := c.addConstant(value.New(-1))
-			c.emit(runtime.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
+			c.emitIndex(runtime.PUSH, constIndex)
 			c.emit(runtime.MUL)
 		case "!":
 			c.emit(runtime.NOT)
@@ -375,20 +572,19 @@ func (c *Compiler) Compile(node Node) error {
 			// void expr — bỏ kết quả biểu thức, trả về null (esbuild sinh `void 0`)
 			c.emit(runtime.POP)
 			nullIndex := c.addConstant(value.NewNull())
-			c.emit(runtime.PUSH, byte(nullIndex>>8), byte(nullIndex&0xFF))
+			c.emitIndex(runtime.PUSH, nullIndex)
 		}
 
 	case *Literal:
 		constIndex := c.addConstant(n.Value)
-		c.emit(runtime.PUSH, byte(constIndex>>8), byte(constIndex&0xFF))
+		c.emitIndex(runtime.PUSH, constIndex)
 
 	case *Identifier:
 		if n.Value == "kitwork" {
 			c.emit(runtime.BUILTIN, 0)
 			return nil
 		}
-		symbolIndex := c.addConstant(value.NewString(n.Value))
-		c.emit(runtime.LOAD, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+		c.loadName(n)
 
 	case *VarStatement:
 		if n.DestructMode == DestructNone && len(n.Names) > 0 {
@@ -399,28 +595,20 @@ func (c *Compiler) Compile(node Node) error {
 			return err
 		}
 
-		if n.DestructMode == DestructObject {
-			for _, id := range n.Names {
-				c.emit(runtime.DUP)
-				symbolIndex := c.addConstant(value.NewString(id.Value))
-				c.emit(runtime.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-				c.emit(runtime.GET)
-				c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-				c.emit(runtime.POP)
+		if n.DestructMode == DestructObject || n.DestructMode == DestructArray {
+			pattern := n.Pattern
+			if pattern == nil {
+				// const { a, b } = kitwork(), lowered from an import: the names are the keys.
+				pattern = &BindingPattern{Array: n.DestructMode == DestructArray}
+				for _, id := range n.Names {
+					pattern.Elements = append(pattern.Elements, BindingElement{Key: id.Value, KeyToken: id.Token, Name: id})
+				}
 			}
-		} else if n.DestructMode == DestructArray {
-			for i, id := range n.Names {
-				c.emit(runtime.DUP)
-				idxIndex := c.addConstant(value.New(i))
-				c.emit(runtime.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
-				c.emit(runtime.GET)
-				symbolIndex := c.addConstant(value.NewString(id.Value))
-				c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-				c.emit(runtime.POP)
+			if err := c.compilePattern(pattern); err != nil {
+				return err
 			}
 		} else {
-			symbolIndex := c.addConstant(value.NewString(n.Names[0].Value))
-			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+			c.storeName(n.Names[0])
 		}
 		// STORE keeps the value on the stack. Commit the configured expression, then clean up.
 		c.emit(runtime.COMMIT)
@@ -429,18 +617,19 @@ func (c *Compiler) Compile(node Node) error {
 	case *AssignmentExpression:
 		if id, ok := n.Name.(*Identifier); ok {
 			nameFunction(n.Value, id.Value)
-			err := c.Compile(n.Value)
-			if err != nil {
+			if err := c.assignName(id, n.Value); err != nil {
 				return err
 			}
-			symbolIndex := c.addConstant(value.NewString(id.Value))
-			c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
 		} else if mem, ok := n.Name.(*MemberExpression); ok {
 			nameFunction(n.Value, mem.String())
-			c.Compile(mem.Object)
+			if err := c.Compile(mem.Object); err != nil {
+				return err
+			}
 			propIndex := c.addConstant(value.NewString(mem.Property.Value))
-			c.emit(runtime.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
-			c.Compile(n.Value)
+			c.emitIndex(runtime.PUSH, propIndex)
+			if err := c.Compile(n.Value); err != nil {
+				return err
+			}
 			c.emit(runtime.SET)
 		} else if index, ok := n.Name.(*IndexExpression); ok {
 			nameFunction(n.Value, index.String())
@@ -454,78 +643,57 @@ func (c *Compiler) Compile(node Node) error {
 				return err
 			}
 			c.emit(runtime.SET)
-		} else if obj, ok := n.Name.(*ObjectLiteral); ok {
-			err := c.Compile(n.Value)
-			if err != nil {
+		} else if pattern, ok := n.Name.(*BindingPattern); ok {
+			// ({ a, b: c } = o), [a, b] = arr: the value stays on the stack as the expression's result.
+			if err := c.Compile(n.Value); err != nil {
 				return err
 			}
-			for _, entry := range obj.Entries {
-				if id, ok := entry.Key.(*Identifier); ok {
-					c.emit(runtime.DUP)
-					symbolIndex := c.addConstant(value.NewString(id.Value))
-					c.emit(runtime.PUSH, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-					c.emit(runtime.GET)
-					c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-					c.emit(runtime.POP)
-				}
-			}
-		} else if arr, ok := n.Name.(*ArrayLiteral); ok {
-			err := c.Compile(n.Value)
-			if err != nil {
+			if err := c.compilePattern(pattern); err != nil {
 				return err
 			}
-			for i, el := range arr.Elements {
-				if id, ok := el.(*Identifier); ok {
-					c.emit(runtime.DUP)
-					idxIndex := c.addConstant(value.New(i))
-					c.emit(runtime.PUSH, byte(idxIndex>>8), byte(idxIndex&0xFF))
-					c.emit(runtime.GET)
-					symbolIndex := c.addConstant(value.NewString(id.Value))
-					c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
-					c.emit(runtime.POP)
-				}
-			}
+		} else {
+			location := c.getSourceLocation(n.Token.Source, n.Token.Position)
+			return fmt.Errorf("%s:%d:%d: không gán được vào %s: vế trái của = là một tên, o.x, o[k] hay một mẫu tách { … }, [ … ]",
+				location.File, location.Line, location.Column, n.Name.String())
 		}
 
 	case *TernaryExpression:
-		err := c.Compile(n.Condition)
+		ternFalseJumps, err := c.compileCondition(n.Condition)
 		if err != nil {
 			return err
 		}
-		ternFalsePos := c.emit(runtime.FALSE, 0, 0)
 		err = c.Compile(n.Consequence)
 		if err != nil {
 			return err
 		}
-		ternJumpPos := c.emit(runtime.JUMP, 0, 0)
-		c.patchUint16(ternFalsePos+1, uint16(len(c.instructions)))
+		ternJumpPos := c.emitJump(runtime.JUMP)
+		c.patchJumps(ternFalseJumps, len(c.instructions))
 		err = c.Compile(n.Alternative)
 		if err != nil {
 			return err
 		}
-		c.patchUint16(ternJumpPos+1, uint16(len(c.instructions)))
+		c.patchJump(ternJumpPos, len(c.instructions))
 
 	case *IfExpression:
-		err := c.Compile(n.Condition)
+		falseJumps, err := c.compileCondition(n.Condition)
 		if err != nil {
 			return err
 		}
-		falsePos := c.emit(runtime.FALSE, 0, 0)
 		err = c.Compile(n.Consequence)
 		if err != nil {
 			return err
 		}
 
 		if n.Alternative != nil {
-			jumpPos := c.emit(runtime.JUMP, 0, 0)
-			c.patchUint16(falsePos+1, uint16(len(c.instructions)))
+			jumpPos := c.emitJump(runtime.JUMP)
+			c.patchJumps(falseJumps, len(c.instructions))
 			err = c.Compile(n.Alternative)
 			if err != nil {
 				return err
 			}
-			c.patchUint16(jumpPos+1, uint16(len(c.instructions)))
+			c.patchJump(jumpPos, len(c.instructions))
 		} else {
-			c.patchUint16(falsePos+1, uint16(len(c.instructions)))
+			c.patchJumps(falseJumps, len(c.instructions))
 		}
 
 	case *SwitchStatement:
@@ -539,11 +707,14 @@ func (c *Compiler) Compile(node Node) error {
 			return err
 		}
 		constZero := c.addConstant(value.New(0))
-		c.emit(runtime.PUSH, byte(constZero>>8), byte(constZero&0xFF))
+		c.emitIndex(runtime.PUSH, constZero)
 		loopStart := len(c.instructions)
-		exitJump := c.emit(runtime.ITER, 0, 0)
-		symbolIndex := c.addConstant(value.NewString(n.Item.Value))
-		c.emit(runtime.STORE, byte(symbolIndex>>8), byte(symbolIndex&0xFF))
+		exitJump := c.emitJump(runtime.ITER)
+		// each iteration makes its own object when a closure reaches a variable of it (scope.go)
+		if environment := c.loopEnvironment(n); environment != "" {
+			c.newIteration(environment)
+		}
+		c.storeName(n.Item)
 		c.emit(runtime.POP)
 		c.pushBreakFrame(2)
 		bodyErr := c.Compile(n.Body)
@@ -551,14 +722,25 @@ func (c *Compiler) Compile(node Node) error {
 		if bodyErr != nil {
 			return bodyErr
 		}
-		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
+		c.emitJumpTo(runtime.JUMP, loopStart)
 		loopEnd := len(c.instructions)
-		c.patchUint16(exitJump+1, uint16(loopEnd))
+		c.patchJump(exitJump, loopEnd)
 		c.patchBreakJumps(breakJumps, loopEnd)
 
 	case *ForRangeStatement:
 		// Counting loop, compiled to a plain condition-jump — bounded by construction because the
 		// parser guarantees the shape (declared counter, compares the counter, mutates the counter).
+		// When a closure reaches a variable of an iteration, each iteration makes its own object
+		// (scope.go): before the counter when the counter is one, else as the body starts.
+		environment := c.loopEnvironment(n)
+		var counter *binding
+		if init, ok := n.Init.(*VarStatement); ok && len(init.Names) == 1 {
+			counter = c.variable(init.Names[0])
+		}
+		counterInObject := environment != "" && counter != nil && counter.environment
+		if counterInObject {
+			c.newIteration(environment)
+		}
 		//   init: let i = 0        (VarStatement leaves a clean stack — it POPs its own value)
 		if err := c.Compile(n.Init); err != nil {
 			return err
@@ -568,21 +750,28 @@ func (c *Compiler) Compile(node Node) error {
 		if err := c.Compile(n.Cond); err != nil {
 			return err
 		}
-		exitJump := c.emit(runtime.FALSE, 0, 0)
+		exitJump := c.emitJump(runtime.FALSE)
+		if environment != "" && !counterInObject {
+			c.newIteration(environment)
+		}
 		c.pushBreakFrame(0)
 		bodyErr := c.Compile(n.Body)
 		breakJumps := c.popBreakFrame()
 		if bodyErr != nil {
 			return bodyErr
 		}
+		if counterInObject {
+			// the next iteration gets its own counter before the update changes it
+			c.nextIteration(environment, counter.slot)
+		}
 		//   update: i = i + 1      (AssignmentExpression leaves its value on the stack → POP it)
 		if err := c.Compile(n.Update); err != nil {
 			return err
 		}
 		c.emit(runtime.POP)
-		c.emit(runtime.JUMP, byte(loopStart>>8), byte(loopStart&0xFF))
+		c.emitJumpTo(runtime.JUMP, loopStart)
 		loopEnd := len(c.instructions)
-		c.patchUint16(exitJump+1, uint16(loopEnd))
+		c.patchJump(exitJump, loopEnd)
 		c.patchBreakJumps(breakJumps, loopEnd)
 
 	case *BlockStatement:
@@ -593,21 +782,47 @@ func (c *Compiler) Compile(node Node) error {
 		}
 
 	case *ReturnStatement:
+		// a return inside for…of leaves the loop's iterable and index on the stack: they go first, as a
+		// break drops them (14/10/2026; the verifier refused the program, RETURN retains 3 stack values)
+		for _, frame := range c.breakFrames {
+			for cleanup := 0; cleanup < frame.cleanup; cleanup++ {
+				c.emit(runtime.POP)
+			}
+		}
 		if n.ReturnValue != nil {
-			c.Compile(n.ReturnValue)
+			if err := c.Compile(n.ReturnValue); err != nil {
+				return err
+			}
 		} else {
 			constNull := c.addConstant(value.Value{K: value.Nil})
-			c.emit(runtime.PUSH, byte(constNull>>8), byte(constNull&0xFF))
+			c.emitIndex(runtime.PUSH, constNull)
 		}
 		c.emit(runtime.COMMIT)
 		c.emit(runtime.RETURN)
 
 	case *CallExpression:
-		c.Compile(n.Function)
-		for _, arg := range n.Arguments {
-			c.Compile(arg)
+		if err := c.checkSafeCall(n); err != nil {
+			return err
 		}
+		if err := c.Compile(n.Function); err != nil {
+			return err
+		}
+		if n.Optional {
+			if err := c.optionalLink(false); err != nil {
+				return err
+			}
+		}
+		for _, arg := range n.Arguments {
+			if err := c.Compile(arg); err != nil {
+				return err
+			}
+		}
+		// The call is where what it calls starts, not its last argument (14/10/2026).
+		c.at(n.Token.Source, startPosition(n.Function))
 		c.emit(runtime.CALL, byte(len(n.Arguments)))
+
+	case *ChainExpression:
+		return c.compileChain(n.Expression)
 
 	case *ObjectLiteral:
 		c.emit(runtime.MAKE, 0)
@@ -632,7 +847,7 @@ func (c *Compiler) Compile(node Node) error {
 				if id, ok := entry.Key.(*Identifier); ok {
 					nameFunction(entry.Value, id.Value)
 					idx := c.addConstant(value.NewString(id.Value))
-					c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
+					c.emitIndex(runtime.PUSH, idx)
 				} else {
 					nameFunction(entry.Value, entry.Key.String())
 					if err := c.Compile(entry.Key); err != nil {
@@ -653,105 +868,104 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(runtime.DUP)
 			// Push the index as the key for SET
 			idx := c.addConstant(value.New(float64(i)))
-			c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
-			c.Compile(el)
+			c.emitIndex(runtime.PUSH, idx)
+			if err := c.Compile(el); err != nil {
+				return err
+			}
 			c.emit(runtime.SET)
 			c.emit(runtime.POP) // SET pushes target back, but we duped it already
 		}
 
 	case *IndexExpression:
-		c.Compile(n.Left)
-		c.Compile(n.Index)
+		if err := c.Compile(n.Left); err != nil {
+			return err
+		}
+		if n.Optional {
+			if err := c.optionalLink(false); err != nil {
+				return err
+			}
+		}
+		if err := c.Compile(n.Index); err != nil {
+			return err
+		}
+		// a read that fails (of a request with no answer) fails at its [ (14/10/2026)
+		c.at(n.Token.Source, n.Token.Position)
 		c.emit(runtime.GET)
 
 	case *MethodCallExpression:
-		if n.Method.Value == "safe" && len(n.Arguments) == 0 {
-			location := c.getSourceLocation(n.Token.Source, n.Token.Position)
-			jumpOver := c.emit(runtime.JUMP, 0, 0)
-			startIP := len(c.instructions)
-			if err := c.Compile(n.Object); err != nil {
+		// x.safe() is gone (14/10/2026): the parser reports it with the new spelling, so it never gets here
+		// as a protected evaluation; with arguments it is an ordinary call of a method named safe.
+		if err := c.Compile(n.Object); err != nil {
+			return err
+		}
+		if n.Optional {
+			if err := c.optionalLink(false); err != nil {
 				return err
 			}
-			c.emit(runtime.RETURN)
-			c.patchUint16(jumpOver+1, uint16(len(c.instructions)))
-
-			fn := value.NewSafeEvaluatorLambda(
-				startIP,
-				location.File,
-				location.Line,
-				location.Column,
-			)
-			fnIndex := c.addConstant(value.New(fn))
-			c.currentSource = n.Token.Source
-			c.currentPos = n.Token.Position
-			c.emit(runtime.PUSH, byte(fnIndex>>8), byte(fnIndex&0xFF))
-			methodIndex := c.addConstant(value.NewString("safe"))
-			c.emit(runtime.PUSH, byte(methodIndex>>8), byte(methodIndex&0xFF))
-			c.emit(runtime.INVOKE, 0)
-			return nil
 		}
-
-		c.Compile(n.Object)
+		if n.OptionalCall {
+			// o.m?.(…): read o.m first; null skips the call with o still under it.
+			c.emit(runtime.DUP)
+			readIndex := c.addConstant(value.NewString(n.Method.Value))
+			c.emitIndex(runtime.PUSH, readIndex)
+			c.emit(runtime.GET)
+			if err := c.optionalLink(true); err != nil {
+				return err
+			}
+			c.emit(runtime.POP)
+		}
 		for _, arg := range n.Arguments {
-			c.Compile(arg)
+			if err := c.Compile(arg); err != nil {
+				return err
+			}
 		}
+		// The call is at its dot, not at its last argument (14/10/2026).
+		c.at(n.Token.Source, n.Token.Position)
 		methIndex := c.addConstant(value.NewString(n.Method.Value))
-		c.emit(runtime.PUSH, byte(methIndex>>8), byte(methIndex&0xFF))
+		c.emitIndex(runtime.PUSH, methIndex)
 		c.emit(runtime.INVOKE, byte(len(n.Arguments)))
 
 	case *MemberExpression:
-		c.Compile(n.Object)
+		if err := c.Compile(n.Object); err != nil {
+			return err
+		}
+		if n.Optional {
+			if err := c.optionalLink(false); err != nil {
+				return err
+			}
+		}
+		// a read that fails (.status of a request with no answer) fails at its dot, as a method call
+		// does, not where the chain started (14/10/2026)
+		c.at(n.Token.Source, n.Token.Position)
 		propIndex := c.addConstant(value.NewString(n.Property.Value))
-		c.emit(runtime.PUSH, byte(propIndex>>8), byte(propIndex&0xFF))
+		c.emitIndex(runtime.PUSH, propIndex)
 		c.emit(runtime.GET)
 
 	case *FunctionLiteral:
-		jumpOver := c.emit(runtime.JUMP, 0, 0)
-		startIP := len(c.instructions)
-		outerBreakFrames := c.breakFrames
-		c.breakFrames = nil
-		bodyErr := c.Compile(n.Body)
-		c.breakFrames = outerBreakFrames
-		if bodyErr != nil {
-			return bodyErr
-		}
-		c.emit(runtime.RETURN)
-		endIP := len(c.instructions)
-		c.patchUint16(jumpOver+1, uint16(endIP))
-
-		params := make([]string, len(n.Parameters))
-		for i, p := range n.Parameters {
-			if p == nil {
-				return fmt.Errorf("compiler: arrow function parameter %d is invalid", i+1)
+		if c.scopes != nil {
+			if environments := c.scopes.environments[n]; len(environments) > 0 {
+				return c.compileHandedClosure(n, environments)
 			}
-			params[i] = p.Value
 		}
-		n.Address = startIP // Propagate address back to AST node
-		name := n.DebugName
-		if name == "" {
-			name = "<anonymous>"
-		}
-		location := c.getSourceLocation(n.Token.Source, n.Token.Position)
-		fnData := &value.Lambda{
-			Address:      startIP,
-			Name:         name,
-			SourceFile:   location.File,
-			SourceLine:   location.Line,
-			SourceColumn: location.Column,
-			Params:       params,
-		}
-		idx := c.addConstant(value.New(fnData))
-		c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
+		return c.compileFunctionLiteral(n)
 
 	case *TemplateLiteral:
 		if len(n.Parts) == 0 {
 			idx := c.addConstant(value.NewString(""))
-			c.emit(runtime.PUSH, byte(idx>>8), byte(idx&0xFF))
+			c.emitIndex(runtime.PUSH, idx)
 			return nil
 		}
-		// Compile first part
-		err := c.Compile(n.Parts[0])
-		if err != nil {
+		// A template is text: one that starts with two values, or is one value, starts from "", so
+		// `${a}${b}` of 1 and 2 is "12" and `${5}` is "5" (14/10/2026: they added, and stayed a number).
+		// One that starts with text needs nothing: its first + joins text.
+		if !templateText(n.Parts[0]) && (len(n.Parts) == 1 || !templateText(n.Parts[1])) {
+			empty := c.addConstant(value.NewString(""))
+			c.emitIndex(runtime.PUSH, empty)
+			if err := c.Compile(n.Parts[0]); err != nil {
+				return err
+			}
+			c.emit(runtime.ADD)
+		} else if err := c.Compile(n.Parts[0]); err != nil {
 			return err
 		}
 		// Compile and ADD subsequent parts
@@ -764,6 +978,57 @@ func (c *Compiler) Compile(node Node) error {
 		}
 	}
 
+	return nil
+}
+
+// compileFunctionLiteral jumps over the function's code and pushes it as a value, which the VM makes a
+// closure of the frame running.
+func (c *Compiler) compileFunctionLiteral(n *FunctionLiteral) error {
+	jumpOver := c.emitJump(runtime.JUMP)
+	startIP := len(c.instructions)
+	if c.scopes != nil {
+		// a parameter assigned while a function around may hold its name lives in a slot of its own
+		// (scope.go): the function copies it there as it starts
+		for _, parameter := range c.scopes.copies[n] {
+			c.emitName(runtime.LOAD, parameter.name)
+			c.emitName(runtime.STORE, parameter.slot)
+			c.emit(runtime.POP)
+		}
+	}
+	outerBreakFrames := c.breakFrames
+	c.breakFrames = nil
+	bodyErr := c.Compile(n.Body)
+	c.breakFrames = outerBreakFrames
+	if bodyErr != nil {
+		return bodyErr
+	}
+	c.emit(runtime.RETURN)
+	endIP := len(c.instructions)
+	c.patchJump(jumpOver, endIP)
+
+	params := make([]string, len(n.Parameters))
+	for i, p := range n.Parameters {
+		if p == nil {
+			return fmt.Errorf("compiler: arrow function parameter %d is invalid", i+1)
+		}
+		params[i] = p.Value
+	}
+	n.Address = startIP // Propagate address back to AST node
+	name := n.DebugName
+	if name == "" {
+		name = "<anonymous>"
+	}
+	location := c.getSourceLocation(n.Token.Source, n.Token.Position)
+	fnData := &value.Lambda{
+		Address:      startIP,
+		Name:         name,
+		SourceFile:   location.File,
+		SourceLine:   location.Line,
+		SourceColumn: location.Column,
+		Params:       params,
+	}
+	idx := c.addConstant(value.New(fnData))
+	c.emitIndex(runtime.PUSH, idx)
 	return nil
 }
 
@@ -793,13 +1058,13 @@ func (c *Compiler) compileSwitchStatement(statement *SwitchStatement) error {
 			return err
 		}
 		c.emit(runtime.COMPARE, 0)
-		caseDispatchJumps[index] = c.emit(runtime.TRUE, 0, 0)
+		caseDispatchJumps[index] = c.emitJump(runtime.TRUE)
 	}
 
 	// Both matched and unmatched dispatch paths discard the single discriminant
 	// before entering a body, so fallthrough bodies all share one stack shape.
 	c.emit(runtime.POP)
-	noMatchJump := c.emit(runtime.JUMP, 0, 0)
+	noMatchJump := c.emitJump(runtime.JUMP)
 	bodyDispatchJumps := make([]int, len(statement.Cases))
 	for index := range bodyDispatchJumps {
 		bodyDispatchJumps[index] = -1
@@ -808,9 +1073,9 @@ func (c *Compiler) compileSwitchStatement(statement *SwitchStatement) error {
 		if dispatchJump < 0 {
 			continue
 		}
-		c.patchUint16(dispatchJump+1, uint16(len(c.instructions)))
+		c.patchJump(dispatchJump, len(c.instructions))
 		c.emit(runtime.POP)
-		bodyDispatchJumps[index] = c.emit(runtime.JUMP, 0, 0)
+		bodyDispatchJumps[index] = c.emitJump(runtime.JUMP)
 	}
 
 	bodyPositions := make([]int, len(statement.Cases))
@@ -836,15 +1101,273 @@ func (c *Compiler) compileSwitchStatement(statement *SwitchStatement) error {
 	switchEnd := len(c.instructions)
 	for index, bodyJump := range bodyDispatchJumps {
 		if bodyJump >= 0 {
-			c.patchUint16(bodyJump+1, uint16(bodyPositions[index]))
+			c.patchJump(bodyJump, bodyPositions[index])
 		}
 	}
 	if defaultIndex >= 0 {
-		c.patchUint16(noMatchJump+1, uint16(bodyPositions[defaultIndex]))
+		c.patchJump(noMatchJump, bodyPositions[defaultIndex])
 	} else {
-		c.patchUint16(noMatchJump+1, uint16(switchEnd))
+		c.patchJump(noMatchJump, switchEnd)
 	}
 	c.patchBreakJumps(breakJumps, switchEnd)
+	return nil
+}
+
+// at moves the position the next instructions record, when the source is one this compiler knows.
+func (c *Compiler) at(source string, position int32) {
+	if _, known := c.sources[source]; known {
+		c.currentSource = source
+		c.currentPos = position
+	}
+}
+
+func (c *Compiler) pushNull() {
+	index := c.addConstant(value.NewNull())
+	c.emitIndex(runtime.PUSH, index)
+}
+
+// emitNullishTest leaves the value on top of the stack where it is and jumps when it is null or
+// undefined (one Nil in the VM); it returns the jump to patch. 0, "", false and NaN are not nullish.
+// A truthy value is let through first: a proxy (the query builder's row) is truthy, and comparing it
+// with null would ask the proxy to build a condition.
+//
+//	DUP; TRUE go; DUP; PUSH null; COMPARE ==; TRUE <nullish>; go:
+func (c *Compiler) emitNullishTest() int {
+	c.emit(runtime.DUP)
+	present := c.emitJump(runtime.TRUE)
+	c.emit(runtime.DUP)
+	c.pushNull()
+	c.emit(runtime.COMPARE, 0)
+	nullish := c.emitJump(runtime.TRUE)
+	c.patchJump(present, len(c.instructions))
+	return nullish
+}
+
+// emitPresentExits is the other side of the same test, for a ?? b and a default: two jumps, to patch
+// to where the value is kept, taken when the value on top is not null; falling through, it is null.
+//
+//	DUP; TRUE keep; DUP; PUSH null; COMPARE ==; FALSE keep; (null here)
+func (c *Compiler) emitPresentExits() []int {
+	c.emit(runtime.DUP)
+	truthy := c.emitJump(runtime.TRUE)
+	c.emit(runtime.DUP)
+	c.pushNull()
+	c.emit(runtime.COMPARE, 0)
+	notNull := c.emitJump(runtime.FALSE)
+	return []int{truthy, notNull}
+}
+
+// optionalLink is a ?. of the chain being compiled: when the value on top is null the chain ends there
+// and is null. method is o.m?.(…), whose test runs on o.m with o under it.
+func (c *Compiler) optionalLink(method bool) error {
+	if c.chain == nil {
+		return fmt.Errorf("compiler: ?. ngoài một chuỗi tuỳ chọn")
+	}
+	jump := c.emitNullishTest()
+	if method {
+		c.chain.method = append(c.chain.method, jump)
+	} else {
+		c.chain.short = append(c.chain.short, jump)
+	}
+	return nil
+}
+
+// compileChain compiles an optional chain: every ?. in it that finds null jumps to its end, where that
+// null is the chain's one value. A chain without ?. compiles exactly as the expression alone.
+func (c *Compiler) compileChain(expression Expression) error {
+	outer := c.chain
+	jumps := &chainJumps{}
+	c.chain = jumps
+	err := c.Compile(expression)
+	c.chain = outer
+	if err != nil {
+		return err
+	}
+	if len(jumps.method) > 0 {
+		over := c.emitJump(runtime.JUMP)
+		for _, jump := range jumps.method {
+			c.patchJump(jump, len(c.instructions))
+		}
+		// [o, null] → [null]
+		c.emit(runtime.POP)
+		c.emit(runtime.POP)
+		c.pushNull()
+		c.patchJump(over, len(c.instructions))
+	}
+	for _, jump := range jumps.short {
+		c.patchJump(jump, len(c.instructions))
+	}
+	return nil
+}
+
+// compileLogical compiles a && b, a || b, a ?? b as JavaScript runs them (14/10/2026): b runs only when
+// a does not decide, and the result is the operand that decided. Until then the compiler ran both
+// sides and chose with AND/OR, so b's calls, writes and errors happened either way.
+//
+//	a && b: a; DUP; FALSE end; POP; b; end:
+//	a || b: a; DUP; TRUE end; POP; b; end:
+//	a ?? b: a; <a not null: end>; POP; b; end:
+//
+// A right side that is a constant or a name can neither fail nor change anything, so running it
+// anyway is the same program: there the compiler keeps AND/OR, one byte instead of five. With the
+// condition form (compileCondition) that keeps the largest bundles under the 65,535-byte limit of one
+// program: apptop.vn's app/{host} route was 63,630 bytes with 654 of these operators, 310 of them with
+// such a right side, and is 64,550 bytes now (every operator in the jump form would make it 66,246).
+func (c *Compiler) compileLogical(n *InfixExpression) error {
+	if err := c.Compile(n.Left); err != nil {
+		return err
+	}
+	if n.Operator != "??" && plainOperand(n.Right) {
+		if err := c.Compile(n.Right); err != nil {
+			return err
+		}
+		if n.Operator == "&&" {
+			c.emit(runtime.AND)
+		} else {
+			c.emit(runtime.OR)
+		}
+		return nil
+	}
+	var exits []int
+	switch n.Operator {
+	case "&&":
+		c.emit(runtime.DUP)
+		exits = append(exits, c.emitJump(runtime.FALSE))
+	case "||":
+		c.emit(runtime.DUP)
+		exits = append(exits, c.emitJump(runtime.TRUE))
+	case "??":
+		exits = c.emitPresentExits()
+	}
+	c.emit(runtime.POP)
+	if err := c.Compile(n.Right); err != nil {
+		return err
+	}
+	for _, exit := range exits {
+		c.patchJump(exit, len(c.instructions))
+	}
+	return nil
+}
+
+// compileCondition compiles the condition of an if or a ternary for its truth alone, and returns the
+// jumps taken when it is false. A && or || there needs no value, only where to go: if (a && f()) is
+// a; FALSE else; f(); FALSE else, two bytes shorter than its value form, with the same order and
+// short-circuit. Any other condition compiles as before: the expression, then FALSE.
+func (c *Compiler) compileCondition(condition Expression) ([]int, error) {
+	return c.compileJumps(condition, false)
+}
+
+// compileJumps compiles e for its truth and returns the jumps taken when that truth is `when`; control
+// falls through otherwise, with the stack as it was.
+func (c *Compiler) compileJumps(e Expression, when bool) ([]int, error) {
+	if branching(e) {
+		infix := e.(*InfixExpression)
+		if (infix.Operator == "&&") != when {
+			// a && b is false as soon as a is, a || b true as soon as a is: both jump to one place.
+			left, err := c.compileJumps(infix.Left, when)
+			if err != nil {
+				return nil, err
+			}
+			right, err := c.compileJumps(infix.Right, when)
+			if err != nil {
+				return nil, err
+			}
+			return append(left, right...), nil
+		}
+		// a && b is not true when a is false, a || b not false when a is true: then b is skipped.
+		skip, err := c.compileJumps(infix.Left, !when)
+		if err != nil {
+			return nil, err
+		}
+		jumps, err := c.compileJumps(infix.Right, when)
+		if err != nil {
+			return nil, err
+		}
+		c.patchJumps(skip, len(c.instructions))
+		return jumps, nil
+	}
+	if prefix, ok := e.(*PrefixExpression); ok && prefix.Operator == "!" && branching(prefix.Right) {
+		return c.compileJumps(prefix.Right, !when)
+	}
+	if err := c.Compile(e); err != nil {
+		return nil, err
+	}
+	if when {
+		return []int{c.emitJump(runtime.TRUE)}, nil
+	}
+	return []int{c.emitJump(runtime.FALSE)}, nil
+}
+
+// branching is a && or || that compileLogical would give jumps (its right side is not plain).
+func branching(e Expression) bool {
+	infix, ok := e.(*InfixExpression)
+	return ok && (infix.Operator == "&&" || infix.Operator == "||") && !plainOperand(infix.Right)
+}
+
+func (c *Compiler) patchJumps(jumps []int, target int) {
+	for _, jump := range jumps {
+		c.patchJump(jump, target)
+	}
+}
+
+// plainOperand is an operand whose evaluation reads a constant or a variable and nothing else: it
+// cannot fail, call, or write (LOAD of a missing name is null).
+func plainOperand(e Expression) bool {
+	switch e.(type) {
+	case *Literal, *Identifier:
+		return true
+	}
+	return false
+}
+
+// compilePattern destructures the value on top of the stack, which stays there: each element reads its
+// key (an index in an array pattern) as a member read does, takes its default when what it read is null
+// or missing, then stores a variable or destructures further.
+//
+//	DUP; PUSH key; GET; [default]; STORE name; POP
+//
+// { a } uses one constant for the key and the name, as before 14/10/2026, so the destructuring code
+// already written compiles to the same bytes.
+func (c *Compiler) compilePattern(pattern *BindingPattern) error {
+	for index, element := range pattern.Elements {
+		c.emit(runtime.DUP)
+		var keyIndex int
+		if pattern.Array {
+			keyIndex = c.addConstant(value.New(index))
+		} else {
+			keyIndex = c.addConstant(value.NewString(element.Key))
+		}
+		c.emitIndex(runtime.PUSH, keyIndex)
+		c.emit(runtime.GET)
+		if element.Default != nil {
+			// what was read stays unless it is null or missing; then the default replaces it, as v ?? d
+			exits := c.emitPresentExits()
+			c.emit(runtime.POP)
+			if err := c.Compile(element.Default); err != nil {
+				return err
+			}
+			for _, exit := range exits {
+				c.patchJump(exit, len(c.instructions))
+			}
+		}
+		switch {
+		case element.Pattern != nil:
+			if err := c.compilePattern(element.Pattern); err != nil {
+				return err
+			}
+			c.emit(runtime.POP)
+		case element.Name != nil:
+			if found := c.variable(element.Name); !pattern.Array && c.slotOf(element.Name) == element.Key &&
+				(found == nil || !found.environment) {
+				c.emitIndex(runtime.STORE, keyIndex)
+			} else {
+				c.storeName(element.Name)
+			}
+			c.emit(runtime.POP)
+		default:
+			return fmt.Errorf("compiler: phần %d của mẫu tách không có tên", index+1)
+		}
+	}
 	return nil
 }
 
@@ -856,7 +1379,7 @@ func (c *Compiler) compileBreakStatement() error {
 	for cleanup := 0; cleanup < c.breakFrames[frameIndex].cleanup; cleanup++ {
 		c.emit(runtime.POP)
 	}
-	jump := c.emit(runtime.JUMP, 0, 0)
+	jump := c.emitJump(runtime.JUMP)
 	c.breakFrames[frameIndex].jumps = append(c.breakFrames[frameIndex].jumps, jump)
 	return nil
 }
@@ -874,7 +1397,7 @@ func (c *Compiler) popBreakFrame() []int {
 
 func (c *Compiler) patchBreakJumps(jumps []int, target int) {
 	for _, jump := range jumps {
-		c.patchUint16(jump+1, uint16(target))
+		c.patchJump(jump, target)
 	}
 }
 
@@ -891,9 +1414,22 @@ func (c *Compiler) Reset() {
 	if c.breakFrames != nil {
 		c.breakFrames = c.breakFrames[:0]
 	}
+	c.scopes = nil
+	c.wide, c.overflow = false, false
 }
 
 func (c *Compiler) ByteCodeResult() (*Bytecode, error) {
+	if c.overflow {
+		// only a compile that did not start from a Program gets here: its jumps were never rewritten
+		return nil, fmt.Errorf("compiler: a jump address past %d bytes was written in two bytes", runtime.MaxNarrowOperand)
+	}
+	if len(c.instructions) > runtime.MaxBytecodeSize {
+		location := c.debugLocationAt(runtime.MaxBytecodeSize)
+		return nil, fmt.Errorf(
+			"%s: chương trình dịch ra %d byte bytecode, quá giới hạn %d byte của một chương trình (đến đây thì vượt): chia bớt mã ra module, để mỗi route chỉ import phần nó dùng",
+			locationText(location), len(c.instructions), runtime.MaxBytecodeSize,
+		)
+	}
 	program, err := runtime.NewProgramWithDebug(c.instructions, c.constants, c.debugEntries)
 	if err != nil {
 		var verifyErr *runtime.VerifyError
@@ -944,8 +1480,40 @@ func (c *Compiler) debugLocationAt(ip int) runtime.SourceLocation {
 	return runtime.SourceLocation{}
 }
 
-func (c *Compiler) patchUint16(pos int, val uint16) {
-	binary.BigEndian.PutUint16(c.instructions[pos:], val)
+// emitIndex writes PUSH, LOAD or STORE of a constant: its wide form when the index needs three bytes.
+func (c *Compiler) emitIndex(op runtime.Opcode, index int) int {
+	if index > runtime.MaxNarrowOperand {
+		return c.emit(op.Wide(), byte(index>>16), byte(index>>8), byte(index))
+	}
+	return c.emit(op, byte(index>>8), byte(index))
+}
+
+// emitJump writes JUMP, TRUE, FALSE or ITER whose address patchJump writes once it is known: wide when
+// the program is.
+func (c *Compiler) emitJump(op runtime.Opcode) int {
+	if c.wide {
+		return c.emit(op.Wide(), 0, 0, 0)
+	}
+	return c.emit(op, 0, 0)
+}
+
+// emitJumpTo writes a jump back to an address already known.
+func (c *Compiler) emitJumpTo(op runtime.Opcode, target int) {
+	c.patchJump(c.emitJump(op), target)
+}
+
+// patchJump writes the address of the jump at position jump: three bytes in a wide jump, two otherwise.
+func (c *Compiler) patchJump(jump, target int) {
+	if runtime.Opcode(c.instructions[jump]).IsWide() {
+		c.instructions[jump+1] = byte(target >> 16)
+		c.instructions[jump+2] = byte(target >> 8)
+		c.instructions[jump+3] = byte(target)
+		return
+	}
+	if target > runtime.MaxNarrowOperand {
+		c.overflow = true
+	}
+	binary.BigEndian.PutUint16(c.instructions[jump+1:], uint16(target))
 }
 
 func (c *Compiler) addConstant(v value.Value) int {

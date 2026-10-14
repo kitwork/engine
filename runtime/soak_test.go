@@ -32,7 +32,7 @@ for (let i = 0; i < 20; i++) { result = result + i; }
 `,
 		`
 var owner = "safe";
-var result = [].reduce((total, item) => total + item).safe().error;
+var result = safe(() => [].reduce((total, item) => total + item)).error.message;
 `,
 	}
 	wantOwners := []string{"callbacks", "closure", "loop", "safe"}
@@ -48,7 +48,7 @@ var result = [].reduce((total, item) => total + item).safe().error;
 		fingerprints[index] = runFingerprint(
 			runtime.New(bytecode.Program),
 			bytecode.Program,
-			map[string]value.Value{"fixture": value.New(index)},
+			map[string]value.Value{"fixture": value.New(index), "safe": value.NewSafeFunction()},
 			nil,
 			100_000,
 		)
@@ -73,7 +73,7 @@ var result = [].reduce((total, item) => total + item).safe().error;
 				fingerprint := runFingerprint(
 					vm,
 					programs[index].Program,
-					map[string]value.Value{"fixture": value.New(index)},
+					map[string]value.Value{"fixture": value.New(index), "safe": value.NewSafeFunction()},
 					nil,
 					100_000,
 				)

@@ -1,0 +1,16 @@
+<list gap="2">
+  <item for="order of orders; key: order.id">
+    <card flex="column" medium:flex="row" medium:align="center" space="between" gap="2" padding="4">
+      <box gap="1">
+        <text weight="bold" font="code">{{ order.id }}</text>
+        <text size="small" color="ink-30">{{ order.items }}</text>
+      </box>
+      <box flex="row" align="start" gap="4">
+        <text size="small" font="code" color="ink-30">{{ order.phone }}</text>
+        <text weight="bold" font="code">{{ money(order.total) }}</text>
+        <badge color="{{ order.tone }}"><text>{{ order.label }}</text></badge>
+      </box>
+    </card>
+  </item>
+  <empty color="ink-30">Chưa có đơn nào.</empty>
+</list>

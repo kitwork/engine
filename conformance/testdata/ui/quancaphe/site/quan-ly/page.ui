@@ -1,0 +1,15 @@
+<!-- Trang riêng, thay page gốc; header viết tại chỗ nên không tìm header.ui -->
+<page background="canvas" color="ink" container="wide">
+  <box component="progressbar" color="brand" />
+  <header flex="row" align="center" space="between" gap="4" padding="4" medium:padding="6">
+    <link value="/quan-ly" flex="row" align="center" gap="2" weight="bold">
+      <icon value="layout-dashboard" color="brand"></icon>
+      <text>Quản lý</text>
+    </link>
+    <link value="/" flex="row" align="center" gap="1" color="ink-30" hover:color="ink">
+      <icon value="arrow-left"></icon>
+      <text>Về trang bán hàng</text>
+    </link>
+  </header>
+  <content />
+</page>

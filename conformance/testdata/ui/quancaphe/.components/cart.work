@@ -1,0 +1,67 @@
+// Giỏ hàng: component đầy đủ = logic này + giao diện `cart.ui` (gốc site). Ở `.components/` cấp identity,
+// nên mọi site của identity dùng chung; tên trong `define` trùng tên file. Không file nào import nó:
+// trang gọi nó bằng `<box component="cart" as="$cart" />` (gốc của `cart.ui` là `<box>`, nên chỗ gọi
+// viết đúng thẻ đó, rỗng). Có logic nên là component; `product-card.ui` chỉ có giao diện nên là layout,
+// gọi bằng thẻ của nó (`<product-card for="…" />`).
+//
+// Engine (10/10/2026) chưa chạy `component.define` (bước 4) và chưa có đường ống (bước 3): giỏ hàng hiện
+// dựng tĩnh, rỗng. Logic viết sẵn theo đặc tả mục 17 để là đích cho hai bước đó.
+
+import { component, database } from "kitwork";
+import { findProduct } from "../.shared/menu.work";
+
+component.define("cart", () => {
+  var open = false;
+  var items = [];
+  var phone = "";
+  var note = "";
+  var agree = false;
+  var phoneError = "";
+  var error = "";
+  var orderId = "";
+
+  const toggle = () => { open = !open; };                // → client
+  const close = () => { open = false; };                 // → client
+
+  const add = (product, quantity) => {                   // → client; engine chỉ điền id, name, price
+    const found = items.find((item) => item.id == product.id);
+    if (found) {
+      found.quantity = found.quantity + quantity;
+      return;
+    }
+    items.push({ id: product.id, name: product.name, price: product.price, quantity: quantity });
+  };
+
+  const remove = (id) => {                               // → client
+    items = items.filter((item) => item.id != id);
+  };
+
+  const total = () => {                                  // → client, giá trị suy ra
+    var sum = 0;
+    for (const item of items) {
+      sum = sum + item.price * item.quantity;
+    }
+    return sum;
+  };
+
+  const checkout = () => {                               // dùng database → server action
+    phoneError = "";
+    error = "";
+    if (!phone) {
+      phoneError = "Vui lòng nhập số điện thoại.";
+      return;
+    }
+    var sum = 0;
+    for (const item of items) {
+      const product = findProduct(item.id);              // tính lại giá ở server, không tin client
+      if (!product || product.soldOut) {
+        error = "Có món đã hết, vui lòng xem lại giỏ hàng.";
+        return;
+      }
+      sum = sum + product.price * item.quantity;
+    }
+    const order = database.entity().table("orders").insert({ phone: phone, note: note, items: items, total: sum });
+    orderId = order.id;
+    items = [];
+  };
+});

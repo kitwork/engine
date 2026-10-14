@@ -125,6 +125,33 @@ func (v Value) Set(key string, val Value) {
 	}
 }
 
+// HasOwn reports whether v is an object carrying key as its own key. Get returns such a key before
+// any method of the kind; a call reaches it only when it holds a function (CallsOwn).
+func (v Value) HasOwn(key string) bool {
+	if v.K != Map {
+		return false
+	}
+	_, ok := v.Map()[key]
+	return ok
+}
+
+// CallsOwn reports whether a call v.name(…) goes to v's own key rather than to the builtin of the
+// kind. An own key wins a call only when it holds a function: a lambda the author wrote
+// ({ greet: () => … }), or a host function such as the toString of new Date(). An own key holding
+// data (a string, a number, a bool, null, an object, an array: anything request.json(), JSON.parse
+// or a database row can carry) never answers a call to a builtin method of the kind: the call goes
+// to the builtin exactly as on an object without that key, so data from outside cannot replace
+// body.pick(…), has, keys, text, json… A data key named otherwise (error, isError and type
+// included) is not called either: calling it after a dot is the NOT_A_FUNCTION runtime error
+// (14/10/2026; until then { x: 3 }.x() gave 3).
+func (v Value) CallsOwn(name string) bool {
+	if v.K != Map {
+		return false
+	}
+	own, ok := v.Map()[name]
+	return ok && own.K == Func
+}
+
 // MissingMember lets a native object answer for a member it does not have — to record an error
 // naming it, to keep a fluent chain alive, or both. Get consults it after reflection finds nothing.
 type MissingMember interface {
@@ -133,15 +160,11 @@ type MissingMember interface {
 
 func (v Value) Get(key string) Value {
 	if v.K == Invalid {
-		// An errored value (a failed db query, fail("…") / new Error("…")) is K==Invalid carrying its
-		// message in .V. Expose a small, deliberate surface so it reads like an error object AND can
-		// be caught — while every OTHER access stays Invalid so a bare value keeps bubbling:
-		//   .safe() rescues it into a capturable shape; .message is the text; .isError true.
+		// A failure (a failed db query, fail("…")) is K==Invalid carrying its message in .V. A program
+		// never holds one: it ends the run the instruction that made it (safe(() => …) is how a program
+		// reads a failure). A host reading one finds .message and .isError; every OTHER access stays
+		// the failure, so it keeps bubbling.
 		switch key {
-		case "safe":
-			if fn, ok := v.K.Method(key); ok {
-				return Value{K: Func, V: fn}
-			}
 		case "message":
 			if s, ok := v.V.(string); ok {
 				return New(s)
@@ -150,6 +173,18 @@ func (v Value) Get(key string) Value {
 			return New(true)
 		}
 		return v
+	}
+	// An object's own key wins over every method of its kind, as an own property shadows a
+	// prototype method in JavaScript: { delete: 3 }.delete is 3, { text: "hi" }.text is "hi", and
+	// an object's own `type` is data, not the kind helper (`$.meta.type`). It wins over length too:
+	// { ok: false, error: "x" }.error is "x", { length: 5 }.length is 5, always (14/10/2026: no value
+	// carries an error the engine attached to data any more, so no object keeps the engine's
+	// length, isError and error over its own). An object without the key reaches the methods
+	// ({ a: 1 }.keys() still lists its keys). A call is another matter: see CallsOwn.
+	if v.K == Map {
+		if item, ok := v.Map()[key]; ok {
+			return item
+		}
 	}
 	// JS-Compatibility: .length property
 	if key == "length" {
@@ -160,18 +195,6 @@ func (v Value) Get(key string) Value {
 		}
 		return New(v.Len())
 	}
-	if key == "isError" && (v.K == Array || v.K == Map || v.IsError) {
-		return New(v.IsError)
-	}
-	if key == "error" && (v.K == Array || v.K == Map || v.IsError) {
-		if v.ErrorVal != nil {
-			return New(v.ErrorVal)
-		}
-		if v.K == Array || v.K == Map {
-			return Value{K: Nil}
-		}
-	}
-
 	// ƯU TIÊN 0: Thuộc tính tĩnh của FuncObject (vd: Date.now, Date.parse)
 	if v.K == Func {
 		if fo, ok := v.V.(*FuncObject); ok {
@@ -196,14 +219,6 @@ func (v Value) Get(key string) Value {
 		}
 	}
 
-	// An object's own `type` field is data, not the generic kind helper. This is especially
-	// important for metadata objects (`$.meta.type`).
-	if key == "type" && v.K == Map {
-		if item, ok := v.Map()[key]; ok {
-			return item
-		}
-	}
-
 	// Plain values expose `.type` as a kind name. Struct methods and map fields take precedence so
 	// APIs such as ctx.type(...) and data objects with a `type` field remain usable.
 	if key == "type" {
@@ -219,14 +234,8 @@ func (v Value) Get(key string) Value {
 		return Value{K: Nil}
 	}
 
-	// ƯU TIÊN 3: Tra cứu Map/Proxy còn lại
+	// ƯU TIÊN 3: Proxy (an object's own keys were read above)
 	switch v.K {
-	case Map:
-		if m := v.Map(); m != nil {
-			if val, ok := m[key]; ok {
-				return val
-			}
-		}
 	case Proxy:
 		// Tracking keys through a generic proxy
 		if handler, ok := v.V.(ProxyHandler); ok {
@@ -324,11 +333,9 @@ func (v Value) reflect(key string) Value {
 	if descriptor, ok := members.methods[foldedKey]; ok {
 		method := ptrRv.Method(descriptor.index)
 		if descriptor.getter {
-			results := method.Call(nil)
-			if len(results) > 0 {
-				return New(results[0].Interface())
-			}
-			return Value{K: Nil}
+			// a method read as a field still has its error channel: a Go method of no argument that
+			// returns only an error (napas.validate()) fails with it, as a call of it does
+			return reflectedCallResult(key, method.Call(nil))
 		}
 		return Value{K: Func, V: method}
 	}

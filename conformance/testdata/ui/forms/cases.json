@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "site": "site",
+  "target": "website",
+  "reload": true,
+  "cases": [
+    {
+      "name": "component-written-as-a-tag",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><cart as=\"$cart\" /></content>",
+        "cart.ui": "<box><text>{{ items.length }}</text></box>",
+        "../.components/cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"cart\", () => {\n  var items = [];\n});\n"
+      },
+      "error": { "at": "content.ui:1:10", "says": "cart có logic (.components/cart.work): viết <box component=\"cart\" as=\"$cart\" />" }
+    },
+    {
+      "name": "layout-written-as-a-component",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><grid><card component=\"product-card\" for=\"product of products\" /></grid></content>",
+        "product-card.ui": "<card><text>{{ product.name }}</text></card>"
+      },
+      "error": { "at": "content.ui:1:22", "says": "product-card là layout (chỉ có giao diện, không có logic): viết <product-card … />" }
+    },
+    {
+      "name": "kitwork-component-written-as-a-tag",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><dropdown as=\"$account\"><button click=\"toggle()\">Tài khoản</button></dropdown></content>"
+      },
+      "error": { "at": "content.ui:1:10", "says": "dropdown có logic (component của Kitwork): viết <box component=\"dropdown\" as=\"$account\">…</box>" }
+    },
+    {
+      "name": "call-on-another-tag-than-the-root",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><card component=\"cart\" as=\"$cart\" /></content>",
+        "cart.ui": "<box><text>{{ items.length }}</text></box>",
+        "../.components/cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"cart\", () => {\n  var items = [];\n});\n"
+      },
+      "error": { "at": "content.ui:1:16", "says": "cart.ui dựng một <box>: viết <box component=\"cart\" as=\"$cart\" />" }
+    },
+    {
+      "name": "content-inside-a-call-of-a-component-with-a-ui",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><box component=\"cart\"><text>Giỏ</text></box></content>",
+        "cart.ui": "<box><text>{{ items.length }}</text></box>",
+        "../.components/cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"cart\", () => {\n  var items = [];\n});\n"
+      },
+      "error": { "at": "content.ui:1:10", "says": "cart có giao diện (cart.ui) nên thẻ gọi để rỗng: nội dung con không phải slot" }
+    },
+    {
+      "name": "presentation-at-a-call-of-a-component-with-a-ui",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><box component=\"cart\" padding=\"2\" /></content>",
+        "cart.ui": "<box><text>{{ items.length }}</text></box>",
+        "../.components/cart.work": "import { component } from \"kitwork\";\ncomponent.define(\"cart\", () => {\n  var items = [];\n});\n"
+      },
+      "error": { "at": "content.ui:1:32", "says": "trình bày của cart nằm trong cart.ui; chỗ gọi nhận component, as, if, show, for, span, place và dữ liệu nó đọc" }
+    },
+    {
+      "name": "show-at-the-call-reads-the-components-name",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><box component=\"dropdown\" show=\"open\"><button click=\"toggle()\">Menu</button></box></content>"
+      },
+      "error": { "at": "content.ui:1:36", "says": "show đọc bên ngoài thẻ chủ; open là của dropdown: đặt nó lên phần con" }
+    },
+    {
+      "name": "component-without-a-ui-on-an-empty-host",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><box component=\"dropdown\" as=\"$account\" /></content>"
+      },
+      "error": { "at": "content.ui:1:10", "says": "dropdown không có giao diện: nội dung bên trong thẻ là giao diện của nó" }
+    },
+    {
+      "name": "as-on-a-layout",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><product-card as=\"$card\" /></content>",
+        "product-card.ui": "<card><text>{{ product.name }}</text></card>"
+      },
+      "warnings": [
+        { "at": "content.ui:1:24", "says": "as đặt tên cho một instance; product-card là layout (chỉ có giao diện, không có logic) nên không có instance để gọi" }
+      ]
+    },
+    {
+      "name": "a-layout-that-gains-logic",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><grid><product-card for=\"product of products\" /></grid></content>",
+        "product-card.ui": "<card><text>{{ product.name }}</text></card>",
+        "product-card.work": "import { component } from \"kitwork\";\ncomponent.define(\"product-card\", () => {\n  var open = false;\n});\n"
+      },
+      "error": { "at": "content.ui:1:16", "says": "product-card có logic (product-card.work): viết <card component=\"product-card\" … />" }
+    },
+    {
+      "name": "a-layout-named-like-a-core-tag",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><grid><card for=\"product of products\"><text>{{ product.name }}</text></card></grid></content>",
+        "card.ui": "<box><text>{{ product.name }}</text></box>"
+      },
+      "error": { "at": "card.ui:1:1", "says": "card.ui đặt tên trùng thẻ lõi <card> của Kitwork: <card> luôn là thẻ lõi của Kitwork nên file này không bao giờ được gọi" }
+    },
+    {
+      "name": "as-inside-a-for",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><list><item for=\"order of orders\"><box component=\"dropdown\" as=\"$menu\"><button click=\"toggle()\">x</button></box></item></list></content>"
+      },
+      "error": { "at": "content.ui:1:70", "says": "as nằm trong for (content.ui:1:22): mỗi hàng là một instance, mà alias chỉ trỏ một" }
+    },
+    {
+      "name": "an-alias-twice-on-a-page",
+      "route": ".",
+      "files": {
+        "page.ui": "<page><header /><content /></page>",
+        "header.ui": "<header><box component=\"dropdown\" as=\"$menu\"><button click=\"toggle()\">x</button></box></header>",
+        "content.ui": "<content><box component=\"dropdown\" as=\"$menu\"><button click=\"toggle()\">y</button></box></content>"
+      },
+      "error": { "at": "content.ui:1:36", "says": "alias $menu đã đặt ở header.ui:1:35; alias là duy nhất trên trang" }
+    },
+    {
+      "name": "an-alias-nothing-sets",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><button click=\"$cart.add(1)\">Thêm</button></content>"
+      },
+      "error": { "at": "content.ui:1:18", "says": "$cart chưa có trên trang này (route /): không thẻ nào trong tầm đặt as=\"$cart\"" }
+    },
+    {
+      "name": "component-on-an-empty-region-call",
+      "route": ".",
+      "files": {
+        "page.ui": "<page><header component=\"dropdown\" /><content /></page>",
+        "header.ui": "<header><text>Quán</text></header>",
+        "content.ui": "<content><text>x</text></content>"
+      },
+      "error": { "at": "page.ui:1:15", "says": "<header /> rỗng là chỗ gọi vùng, lấy header.ui" }
+    },
+    {
+      "name": "component-on-an-element-with-no-content",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><image component=\"gallery\" value=\"/a.png\" alt=\"\" /></content>"
+      },
+      "error": { "at": "content.ui:1:17", "says": "component không đặt trên <image>: image không có nội dung con, và phần tử của nó do Kitwork quyết" }
+    },
+    {
+      "name": "a-name-the-component-and-the-view-both-declare",
+      "route": ".",
+      "files": {
+        "router.work": "import { router } from \"kitwork\";\nrouter.view((ctx) => {\n  var open = true;\n});\n",
+        "content.ui": "<content><box component=\"dropdown\"><text show=\"open\">menu</text></box></content>"
+      },
+      "warnings": [
+        { "at": "content.ui:1:42", "says": "open ở đây là của dropdown, mà view của route / (router.work) cũng khai open" }
+      ]
+    },
+    {
+      "name": "live-if-on-a-host",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><box component=\"appearance\"><box component=\"dropdown\" if=\"dark\"><button click=\"toggle()\">x</button></box></box></content>"
+      },
+      "error": { "at": "content.ui:1:64", "says": "if trên thẻ chủ của dropdown đọc trạng thái sống (dark): kernel chưa tách được hàng của for khỏi instance của component" }
+    },
+    {
+      "name": "a-branch-gives-a-component-without-a-ui-a-ui",
+      "route": "quan-ly",
+      "files": {
+        "quan-ly/content.ui": "<content><box component=\"dropdown\"><button click=\"toggle()\">x</button></box></content>",
+        "quan-ly/dropdown.ui": "<box><text>menu</text></box>"
+      },
+      "error": { "at": "quan-ly/dropdown.ui:1:1", "says": "dropdown là component không có giao diện (của Kitwork)" }
+    }
+  ]
+}

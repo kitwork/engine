@@ -179,10 +179,13 @@ func (b *bundler) ensureModule(spec, fromDir string) (string, error) {
 	return name, nil
 }
 
+// sourceName is how a module's file is named in the debug table, and so in an error's at: relative to
+// the entry's folder, never the machine's absolute path. When no relative path exists (another drive on
+// Windows) it is the file's name alone (14/10/2026; until then the absolute path).
 func (b *bundler) sourceName(path string) string {
 	relative, err := filepath.Rel(b.debugRoot, path)
 	if err != nil {
-		return filepath.ToSlash(filepath.Clean(path))
+		return filepath.Base(path)
 	}
 	return filepath.ToSlash(relative)
 }

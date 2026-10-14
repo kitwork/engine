@@ -1,151 +1,141 @@
 package value
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+)
 
-// safe() is the ONLY inline-error shape. It replaced a pair — an object and a two-element array —
-// that were similar enough the dispatch table's own comments ended up describing each other, which
-// is the clearest evidence two spellings of one idea cost more than they gave.
-//
-// Each case below is a different way a failure can arrive, because the point of having one shape is
-// that a handler never has to know which way it did.
+// x.safe() and its result, a Go struct (SafeResult), are gone (14/10/2026): safe(() => x) is a global
+// the VM runs (runtime/safe.go) and gives a plain object. What stays in this package is the failure
+// itself: its closed set of codes, PARTIAL's progress, and the global's value.
 
-// an error-carrying value: the data half plus an attached error
-func erroredRecord() Value {
-	return WithFailure(
-		New(map[string]Value{"id": New(7)}),
-		"DATABASE_ERROR",
-		"boom",
-	)
-}
-
-func TestSafeSplitsAnAttachedError(t *testing.T) {
-	r := erroredRecord().Safe()
-
-	if r.Get("value").Get("id").Int() != 7 {
-		t.Error(".value must hold the data")
+// Every code of the set is itself; any other code, an old vendor one included, reads as ERROR.
+func TestClosedCodeKeepsTheSetAndFoldsTheRest(t *testing.T) {
+	set := []string{FailCode, NotAFunctionCode, TypeCode, InvalidArgumentCode, InvalidInputCode,
+		UnavailableCode, UnsupportedCode, DatabaseCode, ConflictCode, PartialCode, TimeoutCode,
+		NetworkCode, DeniedCode, DefaultFailureCode}
+	for _, code := range set {
+		if got := ClosedCode(code); got != code {
+			t.Errorf("ClosedCode(%q) = %q, want itself", code, got)
+		}
 	}
-	if !r.Get("isError").Truthy() {
-		t.Error(".isError must be true (carried on the wrapper)")
+	if len(set) != len(closedCodes) {
+		t.Errorf("the set has %d codes, the test knows %d: a code was added without a test", len(closedCodes), len(set))
 	}
-	// .error is an ACCESSOR, not a map field: a plain "error" key would be shadowed by it.
-	if got := r.Get("error").String(); got != "boom" {
-		t.Errorf(".error = %q, want boom", got)
-	}
-	// The data must come back clean, or the caller re-discovers the failure it just handled.
-	if r.Get("value").IsError {
-		t.Error(".value still carries the error flag")
-	}
-}
-
-func TestSafeOnSuccess(t *testing.T) {
-	r := New(map[string]Value{"id": New(7)}).Safe()
-
-	// Readable and null rather than missing: `if (check.error)` must be safe to write before
-	// knowing whether anything failed.
-	if r.Get("error").K != Nil {
-		t.Errorf(".error must be null on success, got kind %v", r.Get("error").K)
-	}
-	if r.Get("value").Get("id").Int() != 7 {
-		t.Error(".value must hold the record on success")
-	}
-	if r.IsError {
-		t.Error("a plain value must not be reported as an error")
-	}
-}
-
-// A hard failure — a broken query, fail("…"). This language has no try/catch, so without safe()
-// the Invalid value keeps propagating and the request ends in an error page instead of a decision
-// the author made.
-func TestSafeRescuesAHardFailure(t *testing.T) {
-	r := Value{K: Invalid, V: "database query error: boom"}.Safe()
-
-	if r.Get("value").K != Nil {
-		t.Error(".value must be null on a hard failure — there is no data")
-	}
-	if got := r.Get("error").String(); got != "database query error: boom" {
-		t.Errorf(".error = %q, want the Invalid .V", got)
-	}
-}
-
-func TestSafePreservesAnAttachedHardFailureCode(t *testing.T) {
-	bad := InvalidFailure("KITDB_TRANSACTION_CONFLICT", "transaction conflict")
-	result := bad.Safe()
-	if got := result.Get("code").String(); got != "KITDB_TRANSACTION_CONFLICT" {
-		t.Fatalf("safe code = %q", got)
-	}
-	if got := result.Get("error").String(); got != "transaction conflict" {
-		t.Fatalf("safe error = %q", got)
-	}
-}
-
-func TestSafeReadsLegacyFailureMapsDuringMigration(t *testing.T) {
-	legacy := New(map[string]Value{"id": New(7)})
-	legacy.IsError = true
-	legacy.ErrorVal = map[string]Value{
-		"code":    New("LEGACY_ERROR"),
-		"message": New("legacy failure"),
-	}
-
-	result := legacy.Safe()
-	if got := result.Get("code").String(); got != "LEGACY_ERROR" {
-		t.Fatalf("legacy safe code = %q", got)
-	}
-	if got := result.Get("error").String(); got != "legacy failure" {
-		t.Fatalf("legacy safe error = %q", got)
-	}
-}
-
-func TestFailureHelpersUseTypedEnvelope(t *testing.T) {
-	result := WithFailure(New(42), " CAPABILITY_ERROR ", "host failed")
-	failure, ok := FailureFrom(result)
-	if !ok {
-		t.Fatal("typed failure was not readable")
-	}
-	if failure.Code != "CAPABILITY_ERROR" || failure.Message != "host failed" {
-		t.Fatalf("typed failure = %#v", failure)
-	}
-	if _, ok := result.ErrorVal.(Failure); !ok {
-		t.Fatalf("failure payload type = %T, want value.Failure", result.ErrorVal)
-	}
-}
-
-// CONTROL: safe() must WRAP, not pass the value through. Without this every assertion above would
-// also hold on an implementation that returns its input unchanged.
-//
-// Asserted through the accessors rather than by checking the concrete kind: the wrapper is a struct
-// today and was a map before, and a test that pins the representation fails on a refactor that
-// changes nothing an author can see.
-func TestSafeAlwaysWraps(t *testing.T) {
-	r := New("hello").Safe()
-
-	if r.Get("value").String() != "hello" {
-		t.Fatalf(".value = %q, want hello", r.Get("value").String())
-	}
-	if r.String() == "hello" {
-		t.Fatal("safe() returned the bare value instead of wrapping it")
-	}
-	// The wrapper answers all four questions, whichever way it is built.
-	for _, key := range []string{"value", "error", "ok", "isError"} {
-		if r.Get(key).K == Invalid {
-			t.Errorf(".%s is not readable on the wrapper", key)
+	for _, old := range []string{"KITDB_TRANSACTION_CONFLICT", "KITDB_CREATE_MANY_PARTIAL", "DATABASE_ERROR",
+		"TYPE_ERROR", "RANGE_ERROR", "OUT_OF_STOCK", "", "ENERGY_LIMIT", CancelledCode, "fail"} {
+		if got := ClosedCode(old); got != DefaultFailureCode {
+			t.Errorf("ClosedCode(%q) = %q, want %s: the set stays closed", old, got, DefaultFailureCode)
 		}
 	}
 }
 
-// safe() is the one door through an Invalid value; every other access stays Invalid so a bare
-// failure keeps bubbling instead of silently reading as empty.
-func TestInvalidExposesOnlySafe(t *testing.T) {
-	bad := Value{K: Invalid, V: "boom"}
-
-	if bad.Get("safe").K != Func {
-		t.Error(".safe must dispatch even on Invalid")
+// PARTIAL is the one failure with something done to report: its progress travels with it.
+func TestPartialFailureCarriesProgress(t *testing.T) {
+	progress := New(map[string]Value{"inserted": New(3), "next": New(3)})
+	failed := PartialFailure("stopped at row 3", progress)
+	if failed.K != Invalid || failed.Text() != "stopped at row 3" {
+		t.Fatalf("PartialFailure = %s %q, want a failure with its message", failed.K, failed.Text())
 	}
-	if bad.Get("name").K != Invalid {
-		t.Error("any other access on Invalid must stay Invalid (bubble)")
+	failure, ok := FailureFrom(failed)
+	if !ok || failure.Code != PartialCode || failure.Progress.Get("inserted").Int() != 3 {
+		t.Fatalf("failure = %+v, want PARTIAL carrying inserted 3", failure)
+	}
+	// control: a failure of any other code carries no progress
+	if other, _ := FailureFrom(InvalidFailure(DatabaseCode, "x")); other.Progress.K != Invalid {
+		t.Fatalf("a DATABASE failure carries progress %s", other.Progress.Text())
 	}
 }
 
-// An error value still reads like an error object without being reshaped.
+type namedCodeError struct{}
+
+func (namedCodeError) Error() string       { return "named" }
+func (namedCodeError) FailureCode() string { return ConflictCode }
+
+// A Go error a host returns becomes a failure with the code it says: the request's cancellation, a
+// deadline, a code the error names; ERROR only when nothing tells.
+func TestFailureOfErrorReadsWhatTheErrorSays(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("query: %w", context.Canceled), CancelledCode},
+		{fmt.Errorf("query: %w", context.DeadlineExceeded), TimeoutCode},
+		{fmt.Errorf("wrapped: %w", namedCodeError{}), ConflictCode},
+		{errors.New("something"), DefaultFailureCode},
+	} {
+		failure, _ := FailureFrom(FailureOfError("call x", c.err))
+		if failure.Code != c.want || !strings.HasPrefix(failure.Message, "call x: ") {
+			t.Errorf("FailureOfError(%v) = %+v, want %s led by the call", c.err, failure, c.want)
+		}
+	}
+}
+
+// .safe is a method of no kind any more, and a failure does not answer it: x.safe() is a compile error
+// (compiler), and a template's {{ o.safe() }} is the NOT_A_FUNCTION error of any missing method.
+func TestSafeIsNoMethodOfAnyKind(t *testing.T) {
+	for _, k := range []Kind{Nil, Number, Bool, Time, Duration, String, Bytes, Map, Array, Struct, Func} {
+		if _, ok := k.Method("safe"); ok {
+			t.Errorf("safe is still a method of %v", k)
+		}
+		if _, ok := k.Method("result"); ok {
+			t.Errorf("result is a method of %v", k)
+		}
+	}
+	if got := (Value{K: Invalid, V: "boom"}).Get("safe"); got.K != Invalid {
+		t.Errorf("a failure answers .safe with %s, want the failure itself", got.K)
+	}
+	if got := New(map[string]Value{"a": New(1)}).Invoke("safe"); got.K != Invalid {
+		t.Fatalf("{ a: 1 }.safe() = %s, want the NOT_A_FUNCTION failure", got.K)
+	} else if failure, _ := FailureFrom(got); failure.Code != NotAFunctionCode {
+		t.Fatalf("{ a: 1 }.safe() failed with %+v, want %s", failure, NotAFunctionCode)
+	}
+}
+
+// The global safe runs its function on the VM that called it; a host handed it has none to lend.
+func TestSafeFunctionNeedsTheProgramThatCallsIt(t *testing.T) {
+	safe := NewSafeFunction()
+	if !IsSafeFunction(safe) || IsSafeFunction(New(1)) || IsSafeFunction(NewFunc(func(...Value) Value { return New(1) })) {
+		t.Fatal("IsSafeFunction does not tell the global safe from other values")
+	}
+	got := safe.Call("safe", NewFunc(func(...Value) Value { return New(1) }))
+	if failure, _ := FailureFrom(got); got.K != Invalid || failure.Code != InvalidArgumentCode ||
+		!strings.Contains(failure.Message, "safe(() => …)") {
+		t.Fatalf("safe called by a host = %s %+v, want INVALID_ARGUMENT saying how to call it", got.K, failure)
+	}
+}
+
+// An operator on kinds it does not take is TYPE, saying the operator and both kinds and never a value
+// (until 14/10/2026 it had no code and its whole message was "invalid").
+func TestTypeFailureNamesOperatorAndKinds(t *testing.T) {
+	for _, c := range []struct {
+		got  Value
+		want string
+	}{
+		{NewString("bí mật").Mul(New(2)), "phép * không dùng được giữa chuỗi và số"},
+		{New(1).Sub(NewString("x")), "phép - không dùng được giữa số và chuỗi"},
+		{New(7).Extend(New([]Value{New(1)})), "phép + không dùng được giữa số và mảng"},
+		{New(map[string]Value{}).Div(New(2)), "phép / không dùng được giữa object và số"},
+		{New(true).Mod(New(2)), "phép % không dùng được giữa boolean và số"},
+	} {
+		failure, ok := FailureFrom(c.got)
+		if c.got.K != Invalid || !ok || failure.Code != TypeCode || failure.Message != c.want {
+			t.Errorf("got %s %+v, want TYPE %q", c.got.K, failure, c.want)
+		}
+		if strings.Contains(failure.Message, "bí mật") || strings.Contains(failure.Message, "7") {
+			t.Errorf("a type failure printed a value: %q", failure.Message)
+		}
+	}
+	// control: the kinds an operator does take still compute
+	if got := New(6).Mul(New(7)); got.K != Number || got.N != 42 {
+		t.Fatalf("6 * 7 = %s %v", got.K, got.Text())
+	}
+}
+
+// An error value still reads like an error object to a host, without being reshaped.
 func TestInvalidExposesMessageAndIsError(t *testing.T) {
 	e := Value{K: Invalid, V: "Email trống"}
 
@@ -160,62 +150,7 @@ func TestInvalidExposesMessageAndIsError(t *testing.T) {
 	}
 }
 
-func TestSafeRegisteredAndResultGone(t *testing.T) {
-	for _, k := range []Kind{Map, Array} {
-		if _, ok := k.Method("safe"); !ok {
-			t.Errorf("safe not registered for %v", k)
-		}
-		// Asserting the absence keeps a later "restore the old helper" from quietly bringing back
-		// two shapes for one idea.
-		if _, ok := k.Method("result"); ok {
-			t.Errorf("result is back on %v — there must be exactly one inline-error shape", k)
-		}
-	}
-}
-
-// .ok exists because a JS author writes it by reflex — fetch() responses have carried .ok for a
-// decade. Without it the habit reads undefined, which is falsy, so `if (!check.ok)` takes the
-// failure branch on EVERY call including the successful ones: a silent bug that looks like the
-// database being down.
-func TestSafeCarriesOk(t *testing.T) {
-	good := New(map[string]Value{"id": New(7)}).Safe()
-	if !good.Get("ok").Truthy() {
-		t.Error("ok must be true on success")
-	}
-
-	bad := Value{K: Invalid, V: "boom"}.Safe()
-	if bad.Get("ok").Truthy() {
-		t.Error("ok must be false on a failure")
-	}
-
-	// The guard the field exists for has to work in both directions.
-	if !good.Get("ok").Truthy() || bad.Get("ok").Truthy() {
-		t.Fatal("if (!check.ok) must distinguish success from failure")
-	}
-}
-
-// ok mirrors error rather than drifting from it: two fields answering one question must never
-// disagree, or a handler checking one behaves differently from a handler checking the other.
-func TestSafeOkAgreesWithError(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		in   Value
-	}{
-		{"success", New("data")},
-		{"hard failure", Value{K: Invalid, V: "boom"}},
-		{"attached error", erroredRecord()},
-	} {
-		out := c.in.Safe()
-		hasError := out.Get("error").K != Nil
-		isOk := out.Get("ok").Truthy()
-		if hasError == isOk {
-			t.Errorf("%s: ok=%v but error present=%v — they must be opposites", c.name, isOk, hasError)
-		}
-	}
-}
-
-// ok is a plain key on the wrapper, NOT a registered accessor, so it must not shadow a column
-// named "ok" the way `error` shadows one named "error".
+// ok is a plain key of data, not a reserved word: a column named ok reads as itself.
 func TestOkDoesNotBecomeAReservedWord(t *testing.T) {
 	row := New(map[string]Value{"ok": New("DU-LIEU-CUA-TOI")})
 	if got := row.Get("ok").String(); got != "DU-LIEU-CUA-TOI" {

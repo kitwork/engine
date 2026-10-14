@@ -88,6 +88,9 @@ const (
 	// Reserved: từ khóa bị loại bỏ có chủ đích khỏi ngôn ngữ (while, try, ...)
 	// Parser sẽ báo lỗi biên dịch thân thiện kèm hướng dẫn thay thế.
 	Reserved
+
+	// OptionalChain là ?. (14/10/2026): o?.x, o?.[k], f?.(…) đọc hay gọi chỉ khi vế trái không rỗng.
+	OptionalChain
 )
 
 // String trả về chuỗi đại diện cho Kind (Hữu ích cho Debug/Error Reporting)
@@ -211,6 +214,8 @@ func (k Kind) String() string {
 		return "switch"
 	case Reserved:
 		return "RESERVED"
+	case OptionalChain:
+		return "?."
 	// case Go:
 	// 	return "go"
 	// case Defer:

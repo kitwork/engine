@@ -1,0 +1,77 @@
+<content gap="10" padding="6" mobile:padding="4">
+
+  <breadcrumb gap="2" show="false" website:show="true">
+    <item for="crumb of crumbs; key: crumb.url" gap="2">
+      <link value="{{ crumb.url }}" color="ink-30" hover:color="ink">{{ crumb.name }}</link>
+      <icon value="chevron-right" color="ink-30"></icon>
+    </item>
+    <item><text>{{ product.name }}</text></item>
+  </breadcrumb>
+
+  <grid columns="1" large:columns="2" gap="8">
+    <image value="{{ product.image }}" alt="{{ product.name }}" radius="large"></image>
+
+    <box gap="5">
+      <box gap="2">
+        <text heading="1">{{ product.name }}</text>
+        <text color="ink-30">{{ product.summary }}</text>
+      </box>
+
+      <card gap="4" padding="5">
+        <field>
+          <label>Cỡ</label>
+          <select value="{{ size }}">
+            <option value="nho">Nhỏ</option>
+            <option value="vua">Vừa</option>
+            <option value="lon">Lớn</option>
+          </select>
+        </field>
+
+        <box if="!product.soldOut" flex="row" align="start" gap="3">
+          <button click="quantity > 1 && quantity--" radius="full" padding="2"><icon value="minus" alt="Giảm"></icon></button>
+          <text weight="bold" font="code">{{ quantity }}</text>
+          <button click="quantity++" radius="full" padding="2"><icon value="plus" alt="Tăng"></icon></button>
+        </box>
+
+        <text size="large">Tạm tính: <text weight="bold" font="code">{{ money(total()) }}</text></text>
+
+        <button if="!product.soldOut" click="$cart.add(product, quantity)" flex="row" align="center" gap="2"
+                background="brand" color="brand.on" radius="full" padding="3" weight="bold" border="none"
+                hover:background="brand+20" hover:color="paper" pressed:scale="95">
+          <icon value="shopping-cart"></icon>
+          <text>Thêm vào giỏ</text>
+        </button>
+        <badge if="product.soldOut" color="ink-30"><text>Tạm hết</text></badge>
+      </card>
+    </box>
+  </grid>
+
+  <section gap="3">
+    <text heading="2">Đánh giá</text>
+    <list gap="3">
+      <item for="review of reviews; key: review.id">
+        <card gap="1" padding="4">
+          <quote><text>{{ review.body }}</text></quote>
+          <text size="small" color="ink-30">
+            {{ review.author }} · <time value="{{ review.createdAt }}">{{ date(review.createdAt) }}</time>
+          </text>
+        </card>
+      </item>
+      <empty color="ink-30">Chưa có đánh giá.</empty>
+    </list>
+  </section>
+
+  <section gap="3">
+    <text heading="2">Hỏi đáp</text>
+    <accordions gap="2">
+      <accordion for="faq of faqs; key: faq.id" open="{{ faq.id == 'giao-hang' }}">
+        <box click="toggle()" flex="row" space="between" align="center" padding="4">
+          <text heading="3">{{ faq.title }}</text>
+          <icon value="chevron-down" open:rotate="180"></icon>
+        </box>
+        <text size="small" color="ink-30" padding="4">{{ faq.answer }}</text>
+      </accordion>
+    </accordions>
+  </section>
+
+</content>

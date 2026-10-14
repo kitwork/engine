@@ -15,6 +15,7 @@ func TestInstructionSpecsCoverExecutableOpcodes(t *testing.T) {
 		COMPARE, JUMP, TRUE, FALSE, ITER, HALT,
 		MAKE, SET, MERGE,
 		CALL, INVOKE, RETURN, DEFER, SPAWN, COMMIT,
+		PUSH_WIDE, LOAD_WIDE, STORE_WIDE, JUMP_WIDE, TRUE_WIDE, FALSE_WIDE, ITER_WIDE,
 	}
 
 	for _, op := range executable {

@@ -49,6 +49,15 @@ type VM struct {
 	reusableGlobals  map[string]value.Value
 	reusableBuiltins []value.Value
 	hostStateOwned   bool
+
+	// Nesting (nesting.go): nested is what VMs running inside this one's host calls see; outer and
+	// callFloor belong to this VM's own run inside another, while NestIn holds; passing lists the
+	// lambdas this VM's host calls in progress were passed, contextShown the Context it last showed.
+	nested       nesting
+	outer        *nestLink
+	callFloor    int // frames held by the VMs this one runs inside
+	passing      []*value.Lambda
+	contextShown context.Context
 }
 
 // VMStats is a point-in-time execution snapshot. Read it after execution; a VM
@@ -174,6 +183,7 @@ func (vm *VM) ResetForPool() {
 	vm.MaxEnergy = 0
 	vm.Spawner = nil
 	vm.hostStateOwned = false
+	vm.resetNesting()
 
 	if hostStateOwned && len(globals) <= maxReusableGlobals {
 		clear(globals)

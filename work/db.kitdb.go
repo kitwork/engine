@@ -21,7 +21,7 @@ import (
 const (
 	kitDBResourceName               = "database:kitdb"
 	kitDBDefaultFile                = "app.kitdb"
-	kitDBTransactionConflictCode    = "KITDB_TRANSACTION_CONFLICT"
+	kitDBTransactionConflictCode    = value.ConflictCode
 	kitDBDocumentLimit              = 8 << 20
 	kitDBJSONDepthLimit             = 128
 	kitDBJSONNodeLimit              = 100_000
@@ -933,21 +933,41 @@ func decodeKitDBValue(encoded []byte) value.Value {
 	return decoded
 }
 
+// kitDBError is a KitDB failure as the program sees it: DATABASE, CONFLICT for a transaction that met
+// another (KITDB_TRANSACTION_CONFLICT until 14/10/2026), the request's cancellation or a deadline as
+// such (kitDBFailureCode).
 func kitDBError(err error) value.Value {
 	message := err.Error()
 	if !strings.HasPrefix(message, "kitdb: ") {
 		message = "kitdb: " + message
 	}
-	result := value.Value{K: value.Invalid, V: message}
-	if code := kitDBErrorCode(err); code != "" {
-		return value.InvalidFailure(code, message)
-	}
-	return result
+	return value.InvalidFailure(kitDBFailureCode(err), message)
 }
 
-func kitDBErrorCode(err error) string {
-	if errors.Is(err, errKitDBTransactionConflict) {
+// kitDBFailureCode is the code of a KitDB error: CONFLICT for a transaction conflict, the request's
+// cancellation (value.CancelledCode), TIMEOUT for a deadline, the code an error names itself
+// (codedError), DATABASE for any other.
+func kitDBFailureCode(err error) string {
+	var coded interface{ FailureCode() string }
+	switch {
+	case errors.Is(err, errKitDBTransactionConflict):
 		return kitDBTransactionConflictCode
+	case errors.Is(err, context.Canceled):
+		return value.CancelledCode
+	case errors.Is(err, context.DeadlineExceeded):
+		return value.TimeoutCode
+	case errors.As(err, &coded):
+		return coded.FailureCode()
 	}
-	return ""
+	return value.DatabaseCode
 }
+
+// codedError is an error that names the code of its failure (value.FailureOfError, kitDBFailureCode).
+type codedError struct {
+	code string
+	err  error
+}
+
+func (e codedError) Error() string       { return e.err.Error() }
+func (e codedError) Unwrap() error       { return e.err }
+func (e codedError) FailureCode() string { return e.code }

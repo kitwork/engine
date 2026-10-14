@@ -1,0 +1,10 @@
+<content gap="6" padding="6" mobile:padding="4">
+  <box flex="row" align="center" space="between" gap="3">
+    <box gap="1">
+      <text size="mini" weight="bold" case="upper" color="brand">Hôm nay</text>
+      <text heading="1">Đơn hàng gần đây</text>
+    </box>
+    <badge color="warning"><text>DEMO · dữ liệu mẫu</text></badge>
+  </box>
+  <order-table />
+</content>

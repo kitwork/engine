@@ -294,6 +294,14 @@ func (l *Lexer) NextToken() Token {
 			tok.Kind = Colon
 			tok.Value = value.NewString(":")
 		case '.':
+			if Table[l.peekChar()] == Digit {
+				// .5 is a number, as in JavaScript (a ?.5 : 1 included)
+				numStr := l.readNumber()
+				tok.Kind = Number
+				tok.Value = value.ParseNumber(numStr)
+				tok.Length = int16(len(numStr))
+				return tok
+			}
 			if l.peekChar() == '.' {
 				// Check for third dot
 				if l.next+1 < len(l.input) && l.input[l.next+1] == '.' {
@@ -326,6 +334,11 @@ func (l *Lexer) NextToken() Token {
 				l.readChar()
 				tok.Kind = NullCoalescing
 				tok.Value = value.NewString("??")
+			} else if l.peekChar() == '.' && !(l.next+1 < len(l.input) && Table[l.input[l.next+1]] == Digit) {
+				// ?. là chuỗi tuỳ chọn, trừ khi một chữ số theo sau: a ?.5 : 1 là ba ngôi, như JavaScript.
+				l.readChar()
+				tok.Kind = OptionalChain
+				tok.Value = value.NewString("?.")
 			} else {
 				// Toán tử ternary: cond ? a : b
 				tok.Kind = Question

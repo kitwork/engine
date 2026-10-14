@@ -1,8 +1,6 @@
 package runtime
 
 import (
-	"fmt"
-
 	"github.com/kitwork/engine/value"
 )
 
@@ -56,16 +54,4 @@ func (vm *VM) compare(a, b value.Value, mode uint8) {
 		res = a.LessEqual(b)
 	}
 	vm.push(value.ToBool(res))
-}
-
-func (vm *VM) call(name string, args ...value.Value) {
-	if name == "log" || name == "PRINT" {
-		for _, arg := range args {
-			fmt.Print(arg.Text(), " ")
-		}
-		fmt.Println()
-		vm.push(value.Value{K: value.Nil})
-	} else {
-		vm.push(value.Value{K: value.Nil})
-	}
 }

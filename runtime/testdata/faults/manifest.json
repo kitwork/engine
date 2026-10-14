@@ -82,6 +82,26 @@
       "name": "unsupported-assigned-opcode",
       "scenario": "unsupported-assigned-opcode",
       "code": "UNKNOWN_OPCODE"
+    },
+    {
+      "name": "wide-index-fits-two-bytes",
+      "scenario": "wide-index-fits-two-bytes",
+      "code": "INVALID_OPERAND"
+    },
+    {
+      "name": "wide-jump-in-short-program",
+      "scenario": "wide-jump-in-short-program",
+      "code": "INVALID_OPERAND"
+    },
+    {
+      "name": "wide-jump-inside-operand",
+      "scenario": "wide-jump-inside-operand",
+      "code": "INVALID_JUMP"
+    },
+    {
+      "name": "truncated-wide-operand",
+      "scenario": "truncated-wide-operand",
+      "code": "TRUNCATED_OPERAND"
     }
   ],
   "execution": [

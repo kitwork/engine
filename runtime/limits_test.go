@@ -14,9 +14,9 @@ var limitsSnapshotSink runtime.LimitsSnapshot
 
 func TestRuntimeLimitsAreStableDetachedAndAllocationFree(t *testing.T) {
 	want := runtime.LimitsSnapshot{
-		MaxProgramBinaryBytes:     16 << 20,
-		MaxBytecodeBytes:          1<<16 - 1,
-		MaxConstants:              1 << 16,
+		MaxProgramBinaryBytes:     64 << 20,
+		MaxBytecodeBytes:          2 << 20,
+		MaxConstants:              1 << 20,
 		MaxVerifiedStackDepth:     1<<16 - 1,
 		MaxCallDepth:              64,
 		DefaultMaxEnergy:          10_000_000,

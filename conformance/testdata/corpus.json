@@ -23,11 +23,67 @@
       "expected": 42
     },
     {
+      "name": "reserved-word-keys",
+      "category": "expressions",
+      "file": "expressions/reserved-word-keys.kitwork.js",
+      "kind": "execute",
+      "expected": "brand:21"
+    },
+    {
+      "name": "own-key-shadows-method",
+      "category": "expressions",
+      "file": "expressions/own-key-shadows-method.kitwork.js",
+      "kind": "execute",
+      "expected": "k,3,x?,hi,post,k,2,true,map"
+    },
+    {
+      "name": "own-data-key-never-answers-a-call",
+      "category": "expressions",
+      "file": "expressions/own-data-key-never-answers-a-call.kitwork.js",
+      "kind": "execute",
+      "expected": "admin,false,a,false,true,5,broken,5,I,true,2,null"
+    },
+    {
+      "name": "calling-a-non-function-is-an-error",
+      "category": "expressions",
+      "file": "expressions/calling-a-non-function-is-an-error.kitwork.js",
+      "kind": "execute",
+      "expected": "null|NOT_A_FUNCTION|o.x không phải hàm (là số): không gọi được|calling-a-non-function-is-an-error.kitwork.js:2:24|o[\"x\"] không phải hàm (là số): không gọi được|calling-a-non-function-is-an-error.kitwork.js:3:28|o.nope không phải hàm (là null): không gọi được|calling-a-non-function-is-an-error.kitwork.js:4:28|called không phải hàm (là chuỗi): không gọi được|calling-a-non-function-is-an-error.kitwork.js:6:25|2|1"
+    },
+    {
+      "name": "safe-reads-a-failure",
+      "category": "expressions",
+      "file": "expressions/safe-reads-a-failure.kitwork.js",
+      "kind": "execute",
+      "expected": "an|null|null|FAIL|không có người dùng 0|safe-reads-a-failure.kitwork.js:2:18|2|null|dự phòng|null|TYPE|phép * không dùng được giữa chuỗi và số"
+    },
+    {
       "name": "logical-ternary",
       "category": "expressions",
       "file": "expressions/logical-ternary.kitwork.js",
       "kind": "execute",
       "expected": "yes"
+    },
+    {
+      "name": "short-circuit",
+      "category": "expressions",
+      "file": "expressions/short-circuit.kitwork.js",
+      "kind": "execute",
+      "expected": [[false, "x", null], [4, 5], "or", 4]
+    },
+    {
+      "name": "nullish-optional-chain",
+      "category": "expressions",
+      "file": "expressions/nullish-optional-chain.kitwork.js",
+      "kind": "execute",
+      "expected": [["d", 0, "", false, "d"], [null, null, 0, 2, 6, null, null], 0]
+    },
+    {
+      "name": "destructuring",
+      "category": "expressions",
+      "file": "expressions/destructuring.kitwork.js",
+      "kind": "execute",
+      "expected": ["ann", "none", 1, "html", 2, 5, 9, 7, 1, 3]
     },
     {
       "name": "closure",
@@ -44,6 +100,13 @@
       "expected": "2,4,6"
     },
     {
+      "name": "block-scope",
+      "category": "functions",
+      "file": "functions/block-scope.kitwork.js",
+      "kind": "execute",
+      "expected": [1, 2, "inner", "top", 15, 1, null]
+    },
+    {
       "name": "counted-break",
       "category": "loops",
       "file": "loops/counted-break.kitwork.js",
@@ -56,6 +119,13 @@
       "file": "loops/forof-break.kitwork.js",
       "kind": "execute",
       "expected": 103
+    },
+    {
+      "name": "closures-per-iteration",
+      "category": "loops",
+      "file": "loops/closures-per-iteration.kitwork.js",
+      "kind": "execute",
+      "expected": [["a", "b", 0, 1], "p2", "q1"]
     },
     {
       "name": "fallthrough",
@@ -94,6 +164,20 @@
       "error_contains": "while"
     },
     {
+      "name": "safe-method-removed",
+      "category": "rejected",
+      "file": "rejected/safe-method-removed.kitwork.js",
+      "kind": "reject",
+      "error_contains": "safe-method-removed.kitwork.js:1:20: .safe() đã bỏ (14/10/2026): viết safe(() => ({ a: 1 })), nhận { value, error }"
+    },
+    {
+      "name": "safe-without-arrow",
+      "category": "rejected",
+      "file": "rejected/safe-without-arrow.kitwork.js",
+      "kind": "reject",
+      "error_contains": "safe-without-arrow.kitwork.js:2:11: safe nhận một hàm: viết safe(() => load(1))"
+    },
+    {
       "name": "unbounded-for",
       "category": "rejected",
       "file": "rejected/unbounded-for.kitwork.js",
@@ -127,6 +211,111 @@
       "file": "rejected/array-trailing-comma.kitwork.js",
       "kind": "reject",
       "error_contains": "trailing comma"
+    },
+    {
+      "name": "reserved-word-binding",
+      "category": "rejected",
+      "file": "rejected/reserved-word-binding.kitwork.js",
+      "kind": "reject",
+      "error_contains": "reserved-word-binding.kitwork.js:2:7: function là từ khoá của ngôn ngữ, không làm tên biến được"
+    },
+    {
+      "name": "nullish-mixed-with-or",
+      "category": "rejected",
+      "file": "rejected/nullish-mixed-with-or.kitwork.js",
+      "kind": "reject",
+      "error_contains": "nullish-mixed-with-or.kitwork.js:2:18: không trộn ?? với && hay || khi không có ngoặc"
+    },
+    {
+      "name": "destructuring-rest",
+      "category": "rejected",
+      "file": "rejected/destructuring-rest.kitwork.js",
+      "kind": "reject",
+      "error_contains": "destructuring-rest.kitwork.js:2:12: Kitwork chưa có phần còn lại khi tách (...tên)"
+    },
+    {
+      "name": "redeclared-in-block",
+      "category": "rejected",
+      "file": "rejected/redeclared-in-block.kitwork.js",
+      "kind": "reject",
+      "error_contains": "redeclared-in-block.kitwork.js:3:24: error đã được khai báo trong cùng khối ở redeclared-in-block.kitwork.js:2:16"
+    },
+    {
+      "name": "array-index-assignment",
+      "category": "expressions",
+      "file": "expressions/array-index-assignment.kitwork.js",
+      "kind": "execute",
+      "expected": [
+        [
+          9,
+          2,
+          3
+        ],
+        [
+          2,
+          0,
+          0,
+          1
+        ],
+        [
+          2
+        ],
+        [
+          {
+            "fresh": true,
+            "id": 1
+          },
+          {
+            "id": 2
+          }
+        ],
+        [
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "name": "return-inside-for-of",
+      "category": "loops",
+      "file": "loops/return-inside-for-of.kitwork.js",
+      "kind": "execute",
+      "expected": [
+        2,
+        null
+      ]
+    },
+    {
+      "name": "template-is-text",
+      "category": "expressions",
+      "file": "expressions/template-is-text.kitwork.js",
+      "kind": "execute",
+      "expected": [
+        "12",
+        1,
+        "a}b"
+      ]
+    },
+    {
+      "name": "const-assigned",
+      "category": "rejected",
+      "file": "rejected/const-assigned.kitwork.js",
+      "kind": "reject",
+      "error_contains": "const-assigned.kitwork.js:3:1: limit là hằng (const), khai báo ở const-assigned.kitwork.js:2:7"
+    },
+    {
+      "name": "continue",
+      "category": "rejected",
+      "file": "rejected/continue.kitwork.js",
+      "kind": "reject",
+      "error_contains": "continue.kitwork.js:4:9: Kitwork chưa có continue"
+    },
+    {
+      "name": "comma-operator",
+      "category": "rejected",
+      "file": "rejected/comma-operator.kitwork.js",
+      "kind": "reject",
+      "error_contains": "comma-operator.kitwork.js:2:15: Kitwork không có toán tử dấu phẩy"
     }
   ]
 }

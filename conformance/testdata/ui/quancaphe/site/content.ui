@@ -1,0 +1,20 @@
+<content gap="10" padding="6" mobile:padding="4">
+  <section>
+    <image value="/assets/img/hero.svg" alt="Quầy pha chế của quán" width="full" radius="large" aspect-ratio="4/3" large:aspect-ratio="21/9" fit="cover"></image>
+    <box place="fill" align="bottom-start" gap="2" padding="8" mobile:padding="5">
+      <text heading="1" color="white">Đặt món trước, đến là có</text>
+      <text color="white">Xin chào {{ user.name }}. Hôm nay quán mở cửa từ 7:00.</text>
+    </box>
+  </section>
+
+  <section gap="4">
+    <box gap="1">
+      <text size="mini" weight="bold" case="upper" color="brand+30">Thực đơn</text>
+      <text heading="2">Hôm nay có gì</text>
+    </box>
+    <grid if="products.length > 0" columns="1" small:columns="2" wide:columns="3" gap="4">
+      <product-card for="product of products; key: product.id" />
+    </grid>
+    <text if="products.length == 0" color="ink-30">Hôm nay quán chưa mở bán.</text>
+  </section>
+</content>

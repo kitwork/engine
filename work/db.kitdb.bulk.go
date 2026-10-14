@@ -12,9 +12,6 @@ const (
 	kitDBCreateManyDefaultBatch = 256
 	kitDBCreateManyMaximumBatch = 256
 	kitDBCreateManyRowLimit     = 10_000
-
-	kitDBCreateManyFailedCode  = "KITDB_CREATE_MANY_FAILED"
-	kitDBCreateManyPartialCode = "KITDB_CREATE_MANY_PARTIAL"
 )
 
 // CreateMany ingests a bounded array through ordinary relational
@@ -25,16 +22,23 @@ const (
 //
 // Inside db.transaction(), the call remains part of the caller's transaction
 // and therefore accepts at most one batch.
+//
+// It returns its progress { inserted, batches, next, complete: true }. A call that stops midway after
+// rows were written is the failure PARTIAL (14/10/2026), its progress (failedRow too) the error's
+// progress for safe(() => …): const { error } = safe(() => db.products.createMany(rows)); resume
+// from error.progress.next. One that wrote nothing is the failure of what stopped it (DATABASE,
+// CONFLICT, INVALID_ARGUMENT for a row the table does not take). Until then both were the progress,
+// carrying an attached error the program could forget.
 func (t *SchemaTable) CreateMany(args ...value.Value) value.Value {
 	if v, ok := t.ready(); !ok {
 		return v
 	}
 	if t.engine != "kitdb" {
-		return value.Value{K: value.Invalid, V: "db.createMany: available only for KitDB"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.createMany: available only for KitDB")
 	}
 	rows, batch, err := parseKitDBCreateManyArguments(args)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: "db.createMany: " + err.Error()}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.createMany: "+err.Error())
 	}
 	ctx := context.Background()
 	if t.scope != nil {
@@ -94,7 +98,7 @@ func (t *SchemaTable) createManyKitDB(
 		if len(rows) > batch {
 			return kitDBCreateManyFailure(
 				0, 0, 0, 0,
-				fmt.Errorf("inside db.transaction() accepts at most one batch of %d rows", batch),
+				codedError{code: value.InvalidArgumentCode, err: fmt.Errorf("inside db.transaction() accepts at most one batch of %d rows", batch)},
 			)
 		}
 		return t.createManyKitDBTransaction(ctx, rows, 0, 0, t.transaction, false)
@@ -114,7 +118,7 @@ func (t *SchemaTable) createManyKitDB(
 		result := t.createManyKitDBTransaction(
 			ctx, rows[inserted:end], inserted, batches, transaction, owned,
 		)
-		if result.IsError {
+		if result.K == value.Invalid {
 			return result
 		}
 		inserted = end
@@ -152,7 +156,7 @@ func (t *SchemaTable) createManyKitDBTransaction(
 			rollback()
 			return kitDBCreateManyFailure(
 				start, batches, start, start+offset,
-				fmt.Errorf("row %d: table %q %s", start+offset, batchTable.table, message),
+				codedError{code: value.InvalidArgumentCode, err: fmt.Errorf("row %d: table %q %s", start+offset, batchTable.table, message)},
 			)
 		}
 		if err := batchTable.writeKitDBRowInTransaction(transaction, row); err != nil {
@@ -190,18 +194,18 @@ func kitDBCreateManyProgress(inserted, batches, next int, complete bool, failedR
 	return value.New(progress)
 }
 
+// kitDBCreateManyFailure is createMany stopped at failedRow by err: PARTIAL with its progress when rows
+// were already written, otherwise the failure err is (kitDBFailureCode).
 func kitDBCreateManyFailure(
 	inserted, batches, next, failedRow int,
 	err error,
 ) value.Value {
-	result := kitDBCreateManyProgress(inserted, batches, next, false, failedRow)
-	code := kitDBCreateManyFailedCode
-	if inserted > 0 {
-		code = kitDBCreateManyPartialCode
-	}
 	message := fmt.Sprintf(
 		"kitdb: createMany stopped at row %d after %d durable rows: %v",
 		failedRow, inserted, err,
 	)
-	return value.WithFailure(result, code, message)
+	if inserted > 0 {
+		return value.PartialFailure(message, kitDBCreateManyProgress(inserted, batches, next, false, failedRow))
+	}
+	return value.InvalidFailure(kitDBFailureCode(err), message)
 }

@@ -23,7 +23,9 @@ func TestProgramBinaryGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const expected = "4b5750420001000246bde7df2474349a05ca33d851d09f18f33cffd36f7cbbcf5b4de1ee1f62a6be0000000400000001000000000000001b02004045000000000000"
+	// Bytecode 3 (14/10/2026): only the version (0002 → 0003) and the checksum after it moved; the
+	// envelope, the code and the constant are those bytecode 2 wrote.
+	const expected = "4b575042000100031b74a5aab6b7c1e59dffa8f8a9a5f48f0dbb3832db8c7ef4d24bfccb008349fe0000000400000001000000000000001b02004045000000000000"
 	if got := hex.EncodeToString(encoded); got != expected {
 		t.Fatalf("encoded Program changed:\n got %s\nwant %s", got, expected)
 	}

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 520" role="img" aria-label="Quầy pha chế của quán">
+  <defs>
+    <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9d8c4"/>
+      <stop offset="1" stop-color="#d9bfa1"/>
+    </linearGradient>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset=".35" stop-color="#1f140d" stop-opacity="0"/>
+      <stop offset="1" stop-color="#1f140d" stop-opacity=".78"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="520" fill="url(#wall)"/>
+  <!-- kệ và ly trên tường -->
+  <rect x="640" y="96" width="460" height="10" rx="5" fill="#a77b52"/>
+  <rect x="640" y="186" width="460" height="10" rx="5" fill="#a77b52"/>
+  <g fill="#fff" opacity=".9">
+    <path d="M668 50h44l-4 46h-36z"/><path d="M728 50h44l-4 46h-36z"/><path d="M788 50h44l-4 46h-36z"/>
+    <path d="M868 140h44l-4 46h-36z"/><path d="M928 140h44l-4 46h-36z"/><path d="M988 140h44l-4 46h-36z"/>
+  </g>
+  <!-- đèn treo -->
+  <path d="M260 0v70" stroke="#5b3a22" stroke-width="4"/>
+  <path d="M220 70h80l-14 34h-52z" fill="#c8742c"/>
+  <circle cx="260" cy="112" r="10" fill="#ffe2b0"/>
+  <!-- máy pha -->
+  <rect x="120" y="230" width="300" height="150" rx="18" fill="#3a2a20"/>
+  <rect x="140" y="250" width="260" height="34" rx="10" fill="#c8742c"/>
+  <circle cx="200" cy="320" r="16" fill="#e9d8c4"/>
+  <circle cx="340" cy="320" r="16" fill="#e9d8c4"/>
+  <path d="M180 380h40v26h-40zM320 380h40v26h-40z" fill="#5b3a22"/>
+  <!-- quầy -->
+  <rect x="0" y="406" width="1200" height="114" fill="#7a4a2a"/>
+  <rect x="0" y="400" width="1200" height="14" fill="#a77b52"/>
+  <!-- ly trên quầy -->
+  <path d="M760 300h96l-12 100a12 12 0 0 1-12 10h-48a12 12 0 0 1-12-10z" fill="#fff"/>
+  <path d="M768 330h80l-9 66a9 9 0 0 1-9 8h-44a9 9 0 0 1-9-8z" fill="#7a4a2a"/>
+  <path d="M900 320h84l-10 82a10 10 0 0 1-10 8h-44a10 10 0 0 1-10-8z" fill="#fff"/>
+  <path d="M906 346h72l-8 54a8 8 0 0 1-8 7h-40a8 8 0 0 1-8-7z" fill="#c89b6d"/>
+  <!-- tối dần ở dưới để chữ sáng đọc được -->
+  <rect width="1200" height="520" fill="url(#scrim)"/>
+</svg>

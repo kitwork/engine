@@ -20,8 +20,8 @@ var builtins = map[string]func() value.Value{
 	"Array":      Array,
 	"parseInt":   ParseInt,
 	"parseFloat": ParseFloat,
-	"fail":       Error,
-	"Error":      Error,
+	"fail":       Fail,
+	"safe":       Safe,
 	"fetch": func() value.Value {
 		return value.NewFunc(http.Fetch)
 	},

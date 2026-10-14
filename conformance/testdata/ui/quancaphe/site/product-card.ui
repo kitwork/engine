@@ -1,0 +1,29 @@
+<card flex="column" gap="3" padding="4">
+  <link value="/san-pham/{{ product.slug }}">
+    <image value="{{ product.image }}" alt="{{ product.name }}" radius="medium"></image>
+  </link>
+
+  <box gap="1">
+    <text heading="3" lines="1">
+      <link value="/san-pham/{{ product.slug }}">{{ product.name }}</link>
+    </text>
+    <text size="small" color="ink-30" lines="2">{{ product.summary }}</text>
+  </box>
+
+  <box flex="row" align="center" space="between" gap="2">
+    <box flex="row" align="start" gap="2">
+      <text weight="bold" font="code" color="{{ product.oldPrice ? 'danger+15' : 'ink' }}">{{ money(product.price) }}</text>
+      <text if="product.oldPrice" strikethrough="true" size="small" font="code" color="ink-30"
+            alt="Giá cũ {{ money(product.oldPrice) }}">{{ money(product.oldPrice) }}</text>
+    </box>
+
+    <button if="!product.soldOut" click="$cart.add(product, 1)" flex="row" align="center" gap="1"
+            background="ink" color="paper" radius="full" border="none" hover:background="brand" hover:color="brand.on">
+      <icon value="plus"></icon>
+      <text>Thêm</text>
+    </button>
+    <badge if="product.soldOut" color="ink-30"><text>Tạm hết</text></badge>
+  </box>
+
+  <text if="user.isStaff" size="mini" font="code" color="ink-30">Mã: {{ product.id }}</text>
+</card>

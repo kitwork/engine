@@ -2,6 +2,7 @@ package value
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -63,7 +64,13 @@ func (v Value) Length(_ ...Value) Value {
 func (v Value) ToJson(args ...Value) Value {
 	if len(args) > 0 {
 		if args[0].V == "string" {
-			v.V = string(v.ToJSON())
+			data, err := json.Marshal(v)
+			// an object that holds itself, or nests past MaxDepth, as JSON.stringify fails on it
+			var walk *WalkError
+			if errors.As(err, &walk) {
+				return walk.Failure("json")
+			}
+			v.V = string(data)
 			v.K = String
 			return v
 		}
@@ -320,7 +327,7 @@ func (v Value) Repeat(args ...Value) Value {
 	}
 	s := v.Text()
 	if len(s)*count > maxRepeatBytes {
-		return Value{K: Invalid, V: "repeat: result too large (max 8MB)"}
+		return InvalidFailure(InvalidArgumentCode, "repeat: result too large (max 8MB)")
 	}
 	return Value{K: String, V: strings.Repeat(s, count)}
 }
@@ -350,7 +357,7 @@ func (v Value) PadStart(args ...Value) Value {
 		return Value{K: String, V: s}
 	}
 	if target > maxRepeatBytes {
-		return Value{K: Invalid, V: "padStart: result too large (max 8MB)"}
+		return InvalidFailure(InvalidArgumentCode, "padStart: result too large (max 8MB)")
 	}
 	pad := " "
 	if len(args) > 1 {
@@ -371,7 +378,7 @@ func (v Value) PadEnd(args ...Value) Value {
 		return Value{K: String, V: s}
 	}
 	if target > maxRepeatBytes {
-		return Value{K: Invalid, V: "padEnd: result too large (max 8MB)"}
+		return InvalidFailure(InvalidArgumentCode, "padEnd: result too large (max 8MB)")
 	}
 	pad := " "
 	if len(args) > 1 {
@@ -650,24 +657,49 @@ func (v Value) ArrayConcat(args ...Value) Value {
 	return New(out)
 }
 
-func flattenInto(dst []Value, src []Value, depth int) []Value {
-	for _, item := range src {
+// flatten appends what src holds to dst, spreading the arrays in it depth levels down, on the path w.
+// An array that holds itself cannot be spread: its spreading never ends (a.push(a, a): a.flat(n) is
+// 2ⁿ elements), and JavaScript's flat(Infinity) ends in a RangeError. Kitwork fails at the first
+// such array, at any depth (14/10/2026; until then a.flat(1e9) overflowed Go's stack).
+func (w *walk) flatten(dst []Value, src []Value, depth int) ([]Value, *WalkError) {
+	for i, item := range src {
 		if item.K == Array && depth > 0 {
-			dst = flattenInto(dst, item.Array(), depth-1)
+			if err := w.enterValue(item, "", i); err != nil {
+				return dst, err
+			}
+			var err *WalkError
+			dst, err = w.flatten(dst, item.Array(), depth-1)
+			w.leave()
+			if err != nil {
+				return dst, err
+			}
 		} else {
 			dst = append(dst, item)
 		}
 	}
-	return dst
+	return dst, nil
 }
 
-// ArrayFlat — chuẩn JS Array.flat(depth), mặc định depth = 1.
+// ArrayFlat — chuẩn JS Array.flat(depth), mặc định depth = 1; flat(Infinity) spreads every level,
+// up to MaxDepth.
 func (v Value) ArrayFlat(args ...Value) Value {
 	depth := 1
 	if len(args) > 0 && args[0].K == Number {
-		depth = int(args[0].N)
+		switch n := args[0].N; {
+		case n != n || n <= 0: // NaN, as JavaScript, is 0
+			depth = 0
+		case n > MaxDepth:
+			depth = MaxDepth + 1
+		default:
+			depth = int(n)
+		}
 	}
-	out := flattenInto(make([]Value, 0, v.Len()), v.Array(), depth)
+	var w walk
+	w.enterValue(v, "", rootStep)
+	out, err := w.flatten(make([]Value, 0, v.Len()), v.Array(), depth)
+	if err != nil {
+		return err.Failure("flat")
+	}
 	return New(out)
 }
 

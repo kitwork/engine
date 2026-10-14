@@ -1,0 +1,6 @@
+<content align="center" gap="3" padding="10">
+  <icon value="coffee-off" color="brand" size="huge"></icon>
+  <text heading="1">Không tìm thấy trang</text>
+  <text color="ink-30">Đường dẫn này không có trong quán. Có thể nó đã đổi tên.</text>
+  <link value="/" background="ink" color="paper" radius="full" padding="3" hover:background="brand" hover:color="brand.on">Về thực đơn</link>
+</content>

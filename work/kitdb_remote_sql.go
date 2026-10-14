@@ -3690,7 +3690,7 @@ func runKitDBHranaRequest(
 		}
 		result, err := runKitDBHranaStmt(ctx, scope, database, *request.Stmt, store, readonly)
 		if err != nil {
-			return hranaErrCode(err.Error(), kitDBErrorCode(err))
+			return hranaErrCode(err.Error(), kitDBWireErrorCode(err))
 		}
 		return hranaOK(map[string]any{"type": "execute", "result": result})
 	case "batch":
@@ -3792,10 +3792,23 @@ func runKitDBHranaBatch(
 
 func kitDBRemoteErrorPayload(err error) map[string]any {
 	payload := map[string]any{"message": err.Error()}
-	if code := kitDBErrorCode(err); code != "" {
+	if code := kitDBWireErrorCode(err); code != "" {
 		payload["code"] = code
 	}
 	return payload
+}
+
+// kitDBWireConflictCode is the code a remote SQL client reads for a transaction conflict.
+const kitDBWireConflictCode = "KITDB_TRANSACTION_CONFLICT"
+
+// kitDBWireErrorCode is the code a remote SQL client (the libSQL wire) reads for an error: the wire's
+// own, kitDBWireConflictCode for a transaction conflict, "" for any other. It is not a Kitwork
+// program's error.code (kitDBFailureCode, CONFLICT): a client of the wire keeps what it was given.
+func kitDBWireErrorCode(err error) string {
+	if errors.Is(err, errKitDBTransactionConflict) {
+		return kitDBWireConflictCode
+	}
+	return ""
 }
 
 func kitDBTransactionControl(source string) string {

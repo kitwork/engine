@@ -1,0 +1,5 @@
+<navbar flex="row" gap="6">
+  <link value="/" color="ink-30" active:color="ink" active:weight="bold" hover:color="ink">Thực đơn</link>
+  <link value="/ve-chung-toi" color="ink-30" active:color="ink" active:weight="bold" hover:color="ink">Về chúng tôi</link>
+  <link value="/tai-app" color="ink-30" active:color="ink" active:weight="bold" hover:color="ink">Tải ứng dụng</link>
+</navbar>

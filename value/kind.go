@@ -102,10 +102,6 @@ func (k Kind) StandardMethod(name string) (Method, bool) {
 		return Value.ToJson, true
 	case "len", "length":
 		return Value.Length, true
-	case "safe":
-		// Reshape an inline-error value into an object { value } carrying .error / .isError.
-		return Value.Safe, true
-
 	}
 
 	// 2. TYPE-SPECIFIC METHODS
@@ -163,8 +159,6 @@ func (k Kind) StandardMethod(name string) (Method, bool) {
 			return Value.Concat, true
 		case "capitalize":
 			return Value.Capitalize, true
-			// case "safe":
-			// 	return Value.Safe, true
 		}
 	case Array:
 		switch name {

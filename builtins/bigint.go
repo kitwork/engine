@@ -17,7 +17,7 @@ func BigInt() value.Value {
 		switch v.K {
 		case value.Number:
 			if v.N != math.Trunc(v.N) {
-				return value.Value{K: value.Invalid, V: "BigInt: not an integer"}
+				return value.InvalidFailure(value.InvalidInputCode, "BigInt: not an integer")
 			}
 			return value.Value{K: value.Number, N: v.N}
 		case value.Bool:
@@ -30,8 +30,8 @@ func BigInt() value.Value {
 			if i, err := strconv.ParseInt(s, 10, 64); err == nil {
 				return value.New(i)
 			}
-			return value.Value{K: value.Invalid, V: "BigInt: cannot convert \"" + v.Text() + "\""}
+			return value.InvalidFailure(value.InvalidInputCode, "BigInt: cannot convert \""+v.Text()+"\"")
 		}
-		return value.Value{K: value.Invalid, V: "BigInt: cannot convert value"}
+		return value.InvalidFailure(value.InvalidInputCode, "BigInt: cannot convert value")
 	})
 }

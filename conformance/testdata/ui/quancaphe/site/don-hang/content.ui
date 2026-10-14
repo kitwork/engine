@@ -1,0 +1,20 @@
+<content gap="6" padding="6" mobile:padding="4">
+  <text heading="1">Đơn hàng của tôi</text>
+
+  <list gap="3">
+    <item for="order of orders; key: order.id">
+      <card flex="row" align="center" space="between" padding="4">
+        <text weight="bold" font="code">{{ order.id }}</text>
+        <text font="code">{{ money(order.total) }}</text>
+      </card>
+    </item>
+    <empty>
+      <card align="center" gap="3" padding="8">
+        <icon value="receipt" color="brand" size="huge"></icon>
+        <text weight="bold">Chưa có đơn nào</text>
+        <text size="small" color="ink-30">Món bạn đặt sẽ hiện ở đây, kèm trạng thái đang pha hay chờ lấy.</text>
+        <link value="/" background="ink" color="paper" radius="full" padding="3" hover:background="brand" hover:color="brand.on">Xem thực đơn</link>
+      </card>
+    </empty>
+  </list>
+</content>

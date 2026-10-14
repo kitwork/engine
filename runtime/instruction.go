@@ -20,7 +20,7 @@ type InstructionSpec struct {
 	Energy        Cost
 
 	operandSize uint8
-	stackEffect func([]uint16) (int, int)
+	stackEffect func([]uint32) (int, int)
 }
 
 func instruction(name string, widths []uint8, stackIn, stackOut int, energy Cost) InstructionSpec {
@@ -42,7 +42,7 @@ func dynamicInstruction(
 	name string,
 	widths []uint8,
 	energy Cost,
-	effect func([]uint16) (int, int),
+	effect func([]uint32) (int, int),
 ) InstructionSpec {
 	spec := instruction(name, widths, DynamicStack, DynamicStack, energy)
 	spec.stackEffect = effect
@@ -81,16 +81,25 @@ var instructionTable = [256]InstructionSpec{
 	SET:   instruction("SET", nil, 3, 1, 10),
 	MERGE: instruction("MERGE", nil, 2, 1, 20),
 
-	CALL: dynamicInstruction("CALL", []uint8{1}, 150, func(operands []uint16) (int, int) {
+	CALL: dynamicInstruction("CALL", []uint8{1}, 150, func(operands []uint32) (int, int) {
 		return int(operands[0]) + 1, 1
 	}),
-	INVOKE: dynamicInstruction("INVOKE", []uint8{1}, 150, func(operands []uint16) (int, int) {
+	INVOKE: dynamicInstruction("INVOKE", []uint8{1}, 150, func(operands []uint32) (int, int) {
 		return int(operands[0]) + 2, 1
 	}),
 	RETURN: instruction("RETURN", nil, 0, 0, 5),
 	DEFER:  instruction("DEFER", nil, 1, 0, 10),
 	SPAWN:  instruction("SPAWN", nil, 1, 0, 200),
 	COMMIT: instruction("COMMIT", nil, 1, 1, 1),
+
+	// Each wide form is its instruction with a three-byte operand: same stack effect, same energy.
+	PUSH_WIDE:  instruction("PUSH_WIDE", []uint8{3}, 0, 1, 1),
+	LOAD_WIDE:  instruction("LOAD_WIDE", []uint8{3}, 0, 1, 2),
+	STORE_WIDE: instruction("STORE_WIDE", []uint8{3}, 1, 1, 2),
+	JUMP_WIDE:  instruction("JUMP_WIDE", []uint8{3}, 0, 0, 3),
+	TRUE_WIDE:  instruction("TRUE_WIDE", []uint8{3}, 1, 0, 3),
+	FALSE_WIDE: instruction("FALSE_WIDE", []uint8{3}, 1, 0, 3),
+	ITER_WIDE:  instruction("ITER_WIDE", []uint8{3}, 2, 3, 15),
 }
 
 // LookupInstruction returns metadata only for opcodes implemented by the VM.
@@ -112,11 +121,17 @@ func lookupInstructionSpec(op Opcode) (*InstructionSpec, bool) {
 // BytecodeVersion remains the explicit compatibility decision; this checksum
 // lets compiler caches also notice accidental metadata drift.
 func InstructionSetChecksum() string {
+	return instructionSetChecksum(BytecodeVersion, len(instructionTable))
+}
+
+// instructionSetChecksum hashes a version and the instructions in the slots below limit: bytecode 2's
+// checksum is instructionSetChecksum(2, int(PUSH_WIDE)), as the slots bytecode 3 kept are unchanged.
+func instructionSetChecksum(version uint16, limit int) string {
 	hash := sha256.New()
 	var number [8]byte
-	binary.BigEndian.PutUint16(number[:2], BytecodeVersion)
+	binary.BigEndian.PutUint16(number[:2], version)
 	hash.Write(number[:2])
-	for raw := 0; raw < len(instructionTable); raw++ {
+	for raw := 0; raw < limit; raw++ {
 		spec := instructionTable[raw]
 		if spec.Name == "" {
 			continue
@@ -141,7 +156,7 @@ func (s InstructionSpec) OperandSize() int {
 	return int(s.operandSize)
 }
 
-func (s InstructionSpec) StackEffect(operands []uint16) (int, int) {
+func (s InstructionSpec) StackEffect(operands []uint32) (int, int) {
 	if s.stackEffect != nil {
 		return s.stackEffect(operands)
 	}
@@ -149,21 +164,23 @@ func (s InstructionSpec) StackEffect(operands []uint16) (int, int) {
 }
 
 // DecodeOperands decodes one instruction's operands from the bytes immediately
-// following its opcode.
-func DecodeOperands(spec InstructionSpec, data []byte) ([]uint16, int, error) {
+// following its opcode. An operand is one, two or three bytes (three in a wide form).
+func DecodeOperands(spec InstructionSpec, data []byte) ([]uint32, int, error) {
 	need := spec.OperandSize()
 	if len(data) < need {
 		return nil, 0, fmt.Errorf("need %d operand bytes, have %d", need, len(data))
 	}
 
-	operands := make([]uint16, len(spec.OperandWidths))
+	operands := make([]uint32, len(spec.OperandWidths))
 	offset := 0
 	for i, width := range spec.OperandWidths {
 		switch width {
 		case 1:
-			operands[i] = uint16(data[offset])
+			operands[i] = uint32(data[offset])
 		case 2:
-			operands[i] = uint16(data[offset])<<8 | uint16(data[offset+1])
+			operands[i] = uint32(data[offset])<<8 | uint32(data[offset+1])
+		case 3:
+			operands[i] = uint32(data[offset])<<16 | uint32(data[offset+1])<<8 | uint32(data[offset+2])
 		default:
 			return nil, 0, fmt.Errorf("unsupported operand width %d", width)
 		}

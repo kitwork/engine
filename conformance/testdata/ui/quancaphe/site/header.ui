@@ -1,0 +1,29 @@
+<header flex="row" align="center" space="between" gap="4" padding="4" medium:padding="6">
+  <link value="/" flex="row" align="center" gap="2" weight="bold">
+    <icon value="coffee" color="brand"></icon>
+    <text>Quán Cà Phê</text>
+  </link>
+
+  <navbar show="false" medium:show="true" />
+
+  <box flex="row" align="center" gap="2">
+    <button component="appearance" click="toggle()" background="panel" radius="full" padding="2" border="none">
+      <icon value="{{ dark ? 'sun' : 'moon' }}" alt="Đổi giao diện sáng/tối"></icon>
+    </button>
+
+    <box component="cart" as="$cart" />
+
+    <box component="dropdown" as="$account" click-outside="close()" keydown:escape="close()">
+      <button click="toggle()" expanded="{{ open }}" flex="row" align="center" gap="2" background="panel" radius="full" border="none">
+        <icon value="user"></icon>
+        <text>{{ user.name }}</text>
+      </button>
+      <popover place="below-end" padding="2">
+        <list gap="1">
+          <item><link value="/don-hang" padding="2" radius="small" hover:background="panel">Đơn hàng của tôi</link></item>
+          <item if="user.isStaff"><link value="/quan-ly" padding="2" radius="small" hover:background="panel">Quản lý</link></item>
+        </list>
+      </popover>
+    </box>
+  </box>
+</header>

@@ -29,6 +29,9 @@ func (vm *VM) commit(v value.Value) value.Value {
 	}); failure.K == value.Invalid {
 		return failure
 	}
+	if committed.Failure.K == value.Invalid && committed.Failure.IsError {
+		return committed.Failure
+	}
 	if committed.Handler != nil {
 		result := vm.executeLambda1(committed.Handler, committed.Argument)
 		if result.K == value.Invalid {
@@ -65,7 +68,52 @@ func storeScopeChain(fn *value.Lambda, name string, val value.Value) bool {
 	return false
 }
 
-// arrayCallbackMethod executes every Array method that accepts a script lambda.
+// arrayCallback is the function an array method (map, filter, forEach…) calls for each element: a
+// script lambda, or a function of the engine (console.log, Boolean, parseInt), called the same way.
+type arrayCallback struct {
+	lambda *value.Lambda
+	native value.Value
+}
+
+// newArrayCallback takes an array method's first argument; ok is false when it is not a function.
+func newArrayCallback(argument value.Value) (arrayCallback, bool) {
+	if lambda, isLambda := argument.V.(*value.Lambda); isLambda && lambda != nil {
+		return arrayCallback{lambda: lambda}, true
+	}
+	if (argument.K == value.Func || argument.K == value.Proxy) && argument.V != nil {
+		return arrayCallback{native: argument}, true
+	}
+	return arrayCallback{}, false
+}
+
+func (vm *VM) callback2(cb arrayCallback, first, second value.Value) value.Value {
+	if cb.lambda != nil {
+		return vm.executeLambda2(cb.lambda, first, second)
+	}
+	return vm.nativeCallback(cb.native, first, second)
+}
+
+func (vm *VM) callback3(cb arrayCallback, first, second, third value.Value) value.Value {
+	if cb.lambda != nil {
+		return vm.executeLambda3(cb.lambda, first, second, third)
+	}
+	return vm.nativeCallback(cb.native, first, second, third)
+}
+
+// nativeCallback calls a function of the engine as CALL calls it.
+func (vm *VM) nativeCallback(function value.Value, args ...value.Value) value.Value {
+	if value.IsSafeFunction(function) {
+		return vm.callSafe(vm.currentInstruction(), args)
+	}
+	return vm.nativeValue("callback call", func() value.Value {
+		if handler, ok := function.V.(value.ProxyHandler); ok && function.K == value.Proxy {
+			return handler.OnInvoke("", args...)
+		}
+		return function.Call(function.Text(), args...)
+	})
+}
+
+// arrayCallbackMethod executes every Array method that accepts a callback.
 // Keeping callback execution here gives all methods the same failure, energy,
 // cancellation, and frame-restoration semantics.
 // Trả về (kết quả, true) nếu method được xử lý tại đây; ngược lại (zero, false)
@@ -73,7 +121,7 @@ func storeScopeChain(fn *value.Lambda, name string, val value.Value) bool {
 func (vm *VM) arrayCallbackMethod(
 	target value.Value,
 	m string,
-	cb *value.Lambda,
+	cb arrayCallback,
 	initial value.Value,
 	hasInitial bool,
 ) (value.Value, bool) {
@@ -86,7 +134,7 @@ func (vm *VM) arrayCallbackMethod(
 		return value.Value{}, false
 	}
 
-	if cb == nil {
+	if cb.lambda == nil && cb.native.V == nil {
 		return value.Value{}, false
 	}
 
@@ -94,7 +142,7 @@ func (vm *VM) arrayCallbackMethod(
 	case "map":
 		result := make([]value.Value, len(arr))
 		for i, item := range arr {
-			result[i] = vm.executeLambda2(cb, item, arrayIndex(i))
+			result[i] = vm.callback2(cb, item, arrayIndex(i))
 			if result[i].K == value.Invalid {
 				return result[i], true
 			}
@@ -104,7 +152,7 @@ func (vm *VM) arrayCallbackMethod(
 	case "filter":
 		result := make([]value.Value, 0, len(arr))
 		for i, item := range arr {
-			matched := vm.executeLambda2(cb, item, arrayIndex(i))
+			matched := vm.callback2(cb, item, arrayIndex(i))
 			if matched.K == value.Invalid {
 				return matched, true
 			}
@@ -116,7 +164,7 @@ func (vm *VM) arrayCallbackMethod(
 
 	case "find":
 		for i, item := range arr {
-			matched := vm.executeLambda2(cb, item, arrayIndex(i))
+			matched := vm.callback2(cb, item, arrayIndex(i))
 			if matched.K == value.Invalid {
 				return matched, true
 			}
@@ -128,7 +176,7 @@ func (vm *VM) arrayCallbackMethod(
 
 	case "forEach":
 		for i, item := range arr {
-			result := vm.executeLambda2(cb, item, arrayIndex(i))
+			result := vm.callback2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -138,7 +186,7 @@ func (vm *VM) arrayCallbackMethod(
 
 	case "some":
 		for i, item := range arr {
-			result := vm.executeLambda2(cb, item, arrayIndex(i))
+			result := vm.callback2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -150,7 +198,7 @@ func (vm *VM) arrayCallbackMethod(
 
 	case "every":
 		for i, item := range arr {
-			result := vm.executeLambda2(cb, item, arrayIndex(i))
+			result := vm.callback2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -162,7 +210,7 @@ func (vm *VM) arrayCallbackMethod(
 
 	case "findIndex":
 		for i, item := range arr {
-			result := vm.executeLambda2(cb, item, arrayIndex(i))
+			result := vm.callback2(cb, item, arrayIndex(i))
 			if result.K == value.Invalid {
 				return result, true
 			}
@@ -179,13 +227,14 @@ func (vm *VM) arrayCallbackMethod(
 			acc = initial
 		} else {
 			if len(arr) == 0 {
-				return value.Value{K: value.Invalid, V: "reduce: empty array with no initial value"}, true
+				// JavaScript's TypeError
+				return value.InvalidFailure(value.TypeCode, "reduce: empty array with no initial value"), true
 			}
 			acc = arr[0]
 			start = 1
 		}
 		for i := start; i < len(arr); i++ {
-			acc = vm.executeLambda3(cb, acc, arr[i], arrayIndex(i))
+			acc = vm.callback3(cb, acc, arr[i], arrayIndex(i))
 			if acc.K == value.Invalid {
 				return acc, true
 			}
@@ -200,7 +249,7 @@ func (vm *VM) arrayCallbackMethod(
 			if failed {
 				return false
 			}
-			result := vm.executeLambda2(cb, a, b)
+			result := vm.callback2(cb, a, b)
 			if result.K == value.Invalid {
 				failure = result
 				failed = true
@@ -216,7 +265,7 @@ func (vm *VM) arrayCallbackMethod(
 	case "group", "groupBy":
 		groups := make(map[string]value.Value)
 		for i, item := range arr {
-			keyVal := vm.executeLambda2(cb, item, arrayIndex(i))
+			keyVal := vm.callback2(cb, item, arrayIndex(i))
 			if keyVal.K == value.Invalid {
 				return keyVal, true
 			}
@@ -238,7 +287,7 @@ func (vm *VM) arrayCallbackMethod(
 		}
 		pairs := make([]pair, len(arr))
 		for i, item := range arr {
-			key := vm.executeLambda2(cb, item, arrayIndex(i))
+			key := vm.callback2(cb, item, arrayIndex(i))
 			if key.K == value.Invalid {
 				return key, true
 			}
@@ -261,7 +310,7 @@ func (vm *VM) arrayCallbackMethod(
 		seen := make(map[arrayUniqueKey]struct{}, len(arr))
 		resArr := make([]value.Value, 0, len(arr))
 		for i, item := range arr {
-			keyVal := vm.executeLambda2(cb, item, arrayIndex(i))
+			keyVal := vm.callback2(cb, item, arrayIndex(i))
 			if keyVal.K == value.Invalid {
 				return keyVal, true
 			}

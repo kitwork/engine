@@ -1,0 +1,16 @@
+<content gap="10" padding="6" mobile:padding="4">
+  <section gap="3" max-width="small">
+    <text size="mini" weight="bold" case="upper" color="brand+30">Về chúng tôi</text>
+    <text heading="1">Quán nhỏ ở góc phố, pha cà phê bằng máy từ năm 2020.</text>
+    <text color="ink-30">Bọn mình bắt đầu với một chiếc máy pha và ba món. Giờ thực đơn dài hơn, nhưng cách làm vẫn
+      vậy: hạt rang mỗi tuần, ly nào cũng pha lại từ đầu.</text>
+  </section>
+
+  <grid columns="1" medium:columns="3" gap="4">
+    <card for="value of values; key: value.id" gap="3" padding="5">
+      <icon value="{{ value.icon }}" color="brand" size="huge"></icon>
+      <text heading="3">{{ value.title }}</text>
+      <text size="small" color="ink-30">{{ value.body }}</text>
+    </card>
+  </grid>
+</content>

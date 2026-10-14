@@ -27,10 +27,23 @@ func (a Value) Add(others ...Value) Value {
 	return res
 }
 
+// typeFailure is an operator used on kinds it does not take ("a" * 2): TypeCode, its message naming
+// the operator and both kinds, never their values (what a program computes with can be a secret).
+// Until 14/10/2026 the failure had no code and its whole message was "invalid".
+func typeFailure(operator string, a, b Value) Value {
+	if a.K == Invalid {
+		return a
+	}
+	if b.K == Invalid {
+		return b
+	}
+	return InvalidFailure(TypeCode, "phép "+operator+" không dùng được giữa "+KindName(a)+" và "+KindName(b))
+}
+
 func (a Value) Extend(b Value) Value {
-	// Nếu một trong hai là Invalid, kết quả phải là Invalid để báo lỗi mạch toán
+	// a failure stays the failure it is
 	if a.IsInvalid() || b.IsInvalid() {
-		return Value{K: Invalid}
+		return typeFailure("+", a, b)
 	}
 
 	switch {
@@ -50,8 +63,8 @@ func (a Value) Extend(b Value) Value {
 		return Value{K: Time, N: a.N + b.N*1e9}
 
 	default:
-		// Nếu không khớp kiểu dữ liệu nào (ví dụ: cộng Number với Array)
-		return Value{K: Invalid}
+		// no kind pair adds up (a number and an array)
+		return typeFailure("+", a, b)
 	}
 }
 
@@ -62,14 +75,14 @@ func (a Value) Sub(b Value) Value {
 	if a.K == Time && b.K == Duration {
 		return Value{K: Time, N: a.N - b.N}
 	}
-	return Value{K: Invalid}
+	return typeFailure("-", a, b)
 }
 
 func (a Value) Mul(b Value) Value {
 	if a.K == Number && b.K == Number {
 		return Value{K: Number, N: a.N * b.N}
 	}
-	return Value{K: Invalid}
+	return typeFailure("*", a, b)
 }
 
 func (a Value) Div(b Value) Value {
@@ -79,7 +92,7 @@ func (a Value) Div(b Value) Value {
 		}
 		return Value{K: Number, N: a.N / b.N}
 	}
-	return Value{K: Invalid}
+	return typeFailure("/", a, b)
 }
 
 func (a Value) Mod(b Value) Value {
@@ -89,12 +102,62 @@ func (a Value) Mod(b Value) Value {
 		}
 		return Value{K: Number, N: math.Mod(a.N, b.N)}
 	}
-	return Value{K: Invalid}
+	return typeFailure("%", a, b)
 }
 
-// Deep equality
+// Deep equality. Two objects or arrays are equal when what they hold is, pair by pair. The pairs wait
+// on a list rather than on Go's stack, so two values nested a million deep compare without a stack
+// overflow, which no recover() catches (14/10/2026); a pair met again is equal so far, so values that
+// hold themselves compare too.
 func (a Value) Equal(b Value) bool {
-	return equalValue(a, b, nil)
+	var waiting [8]equalityPair
+	pending := append(waiting[:0], equalityPair{a, b})
+	var seen map[equalityVisit]struct{}
+	for len(pending) > 0 {
+		last := len(pending) - 1
+		left, right := pending[last].left, pending[last].right
+		pending = pending[:last]
+		if left.K != right.K {
+			return false
+		}
+		switch left.K {
+		case Array:
+			x, y := left.Array(), right.Array()
+			if len(x) != len(y) {
+				return false
+			}
+			if same, visited, nextSeen := equalityCollectionVisit(left, right, seen); same || visited {
+				continue
+			} else {
+				seen = nextSeen
+			}
+			for i := len(x) - 1; i >= 0; i-- {
+				pending = append(pending, equalityPair{x[i], y[i]})
+			}
+		case Map:
+			x, y := left.Map(), right.Map()
+			if len(x) != len(y) {
+				return false
+			}
+			if same, visited, nextSeen := equalityCollectionVisit(left, right, seen); same || visited {
+				continue
+			} else {
+				seen = nextSeen
+			}
+			for k, xv := range x {
+				yv, ok := y[k]
+				if !ok {
+					return false
+				}
+				pending = append(pending, equalityPair{xv, yv})
+			}
+		default:
+			if !equalScalar(left, right) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type equalityVisit struct {
@@ -102,10 +165,12 @@ type equalityVisit struct {
 	left, right uintptr
 }
 
-func equalValue(a, b Value, seen map[equalityVisit]struct{}) bool {
-	if a.K != b.K {
-		return false
-	}
+type equalityPair struct {
+	left, right Value
+}
+
+// equalScalar compares two values of one kind that hold nothing to walk into.
+func equalScalar(a, b Value) bool {
 	switch a.K {
 	case Number:
 		diff := a.N - b.N
@@ -121,39 +186,6 @@ func equalValue(a, b Value, seen map[equalityVisit]struct{}) bool {
 		return true
 	case Bytes:
 		return bytes.Equal(a.Bytes(), b.Bytes())
-	case Array:
-		x, y := a.Array(), b.Array()
-		if len(x) != len(y) {
-			return false
-		}
-		if same, visited, nextSeen := equalityCollectionVisit(a, b, seen); same || visited {
-			return true
-		} else {
-			seen = nextSeen
-		}
-		for i := range x {
-			if !equalValue(x[i], y[i], seen) {
-				return false
-			}
-		}
-		return true
-	case Map:
-		x, y := a.Map(), b.Map()
-		if len(x) != len(y) {
-			return false
-		}
-		if same, visited, nextSeen := equalityCollectionVisit(a, b, seen); same || visited {
-			return true
-		} else {
-			seen = nextSeen
-		}
-		for k, xv := range x {
-			yv, ok := y[k]
-			if !ok || !equalValue(xv, yv, seen) {
-				return false
-			}
-		}
-		return true
 	default:
 		if a.V == nil || b.V == nil {
 			return a.V == nil && b.V == nil

@@ -43,11 +43,14 @@ func (e *VerifyError) Error() string {
 }
 
 type decodedInstruction struct {
-	ip       int
-	next     int
+	ip   int
+	next int
+	// op is what the instruction does: PUSH for a PUSH_WIDE too, so every reader of the decoded
+	// program treats a wide form as its instruction. encoded is the opcode as written.
 	op       Opcode
+	encoded  Opcode
 	spec     InstructionSpec
-	operands []uint16
+	operands []uint32
 }
 
 // OpcodeProfile describes one opcode's static presence in an immutable Program.
@@ -142,7 +145,7 @@ func verifyAndProfile(code []byte, constants []value.Value) (ProgramProfile, err
 	profile.MaxStackDepth = maxStackDepth
 	var counts [256]int
 	for _, instruction := range instructions {
-		counts[uint8(instruction.op)]++
+		counts[uint8(instruction.encoded)]++
 		profile.EncodedEnergy += uint64(instruction.spec.Energy)
 	}
 	for rawOpcode, count := range counts {
@@ -191,7 +194,8 @@ func decodeProgram(code []byte) ([]decodedInstruction, map[int]int, []bool, erro
 		instructions = append(instructions, decodedInstruction{
 			ip:       start,
 			next:     ip,
-			op:       op,
+			op:       op.Narrow(),
+			encoded:  op,
 			spec:     spec,
 			operands: operands,
 		})
@@ -210,11 +214,20 @@ func validateOperands(
 		switch ins.op {
 		case PUSH, LOAD, STORE:
 			index := int(ins.operands[0])
+			if ins.encoded.IsWide() && index <= MaxNarrowOperand {
+				// one encoding per program: the wide form only where two bytes cannot hold the index
+				return verifyError(
+					VerifyInvalidOperand,
+					ins.ip,
+					ins.encoded,
+					fmt.Sprintf("wide constant index %d fits two bytes", index),
+				)
+			}
 			if index >= len(constants) {
 				return verifyError(
 					VerifyConstantOutOfBounds,
 					ins.ip,
-					ins.op,
+					ins.encoded,
 					fmt.Sprintf("constant %d with pool size %d", index, len(constants)),
 				)
 			}
@@ -223,7 +236,7 @@ func validateOperands(
 					return verifyError(
 						VerifyInvalidConstant,
 						ins.ip,
-						ins.op,
+						ins.encoded,
 						fmt.Sprintf("constant %d must be a variable-name string", index),
 					)
 				}
@@ -231,19 +244,28 @@ func validateOperands(
 					return verifyError(
 						VerifyInvalidConstant,
 						ins.ip,
-						ins.op,
+						ins.encoded,
 						fmt.Sprintf("constant %d has string kind with non-string payload", index),
 					)
 				}
 			}
 
 		case JUMP, TRUE, FALSE, ITER:
+			if ins.encoded.IsWide() && codeLen <= MaxNarrowOperand {
+				// the compiler writes jumps wide only in a program two-byte addresses cannot reach
+				return verifyError(
+					VerifyInvalidOperand,
+					ins.ip,
+					ins.encoded,
+					fmt.Sprintf("wide jump in a %d-byte program, which two-byte addresses reach", codeLen),
+				)
+			}
 			target := int(ins.operands[0])
 			if target < 0 || target > codeLen || !boundaries[target] {
 				return verifyError(
 					VerifyInvalidJump,
 					ins.ip,
-					ins.op,
+					ins.encoded,
 					fmt.Sprintf("target %d is not an instruction boundary", target),
 				)
 			}
@@ -253,7 +275,7 @@ func validateOperands(
 				return verifyError(
 					VerifyInvalidOperand,
 					ins.ip,
-					ins.op,
+					ins.encoded,
 					fmt.Sprintf("comparison mode %d is not supported", ins.operands[0]),
 				)
 			}
@@ -263,7 +285,7 @@ func validateOperands(
 				return verifyError(
 					VerifyInvalidOperand,
 					ins.ip,
-					ins.op,
+					ins.encoded,
 					fmt.Sprintf("collection kind %d is not supported", ins.operands[0]),
 				)
 			}
@@ -328,7 +350,7 @@ func analyzeStack(
 				return verifyError(
 					VerifyStackMismatch,
 					ip,
-					instructions[byIP[ip]].op,
+					instructions[byIP[ip]].encoded,
 					fmt.Sprintf("control-flow join has depths %d and %d", existing, depth),
 				)
 			}
@@ -355,7 +377,7 @@ func analyzeStack(
 			return 0, nil, verifyError(
 				VerifyStackUnderflow,
 				ins.ip,
-				ins.op,
+				ins.encoded,
 				fmt.Sprintf("%s needs %d values, stack has %d", ins.spec.Name, stackIn, state.depth),
 			)
 		}
@@ -367,7 +389,7 @@ func analyzeStack(
 				return 0, nil, verifyError(
 					VerifyStackMismatch,
 					ins.ip,
-					ins.op,
+					ins.encoded,
 					fmt.Sprintf("%s retains %d stack values", ins.spec.Name, state.depth),
 				)
 			}

@@ -121,12 +121,20 @@ const (
 	DestructArray  DestructMode = 2
 )
 
-// VarStatement: const a = 10; let b = 20;
+// VarStatement: const a = 10; let b = 20; const { a, b: c = 1 } = o;
 type VarStatement struct {
-	Token        Token // const, let
+	Token Token // const, let
+	// Names are the variables the statement declares, in source order: with a pattern, every name
+	// in it (the targets, not the keys: const { value: user } = … declares user).
 	Names        []*Identifier
 	Value        Expression
 	DestructMode DestructMode
+	// Pattern is the destructuring the source wrote; nil for a plain name, and for the { a, b } that
+	// an import lowers to (the compiler reads Names then).
+	Pattern *BindingPattern
+	// Function: function f() {…}, which declares f as a variable a program may assign, as in
+	// JavaScript; any other const may not be (scope.go).
+	Function bool
 }
 
 func (vs *VarStatement) statementNode() {}
@@ -134,7 +142,9 @@ func (vs *VarStatement) String() string {
 	var out bytes.Buffer
 	out.WriteString(vs.Token.String() + " ")
 
-	if vs.DestructMode == DestructObject {
+	if vs.Pattern != nil {
+		out.WriteString(vs.Pattern.String())
+	} else if vs.DestructMode == DestructObject {
 		out.WriteString("{ ")
 		for i, n := range vs.Names {
 			out.WriteString(n.String())
@@ -162,6 +172,63 @@ func (vs *VarStatement) String() string {
 	}
 	out.WriteString(";")
 	return out.String()
+}
+
+// BindingPattern is the left side of a destructuring (14/10/2026): { a, b: c, d = 1, e: { f } } or
+// [a, b = 2, [c]]. It is a declaration's (const { … } = o) and an assignment's (({ … } = o)); the
+// compiler reads each element off the value with the opcodes a member read uses, no new one.
+type BindingPattern struct {
+	Token    Token // '{' or '['
+	Array    bool
+	Elements []BindingElement
+}
+
+// BindingElement is one place of a pattern: the key it reads (the index, in an array pattern), and
+// either a variable or a nested pattern, with the value used when what it reads is missing or null.
+type BindingElement struct {
+	Key      string // the property an object pattern reads; "" in an array pattern
+	KeyToken Token
+	Name     *Identifier     // the variable bound; nil when Pattern is set
+	Pattern  *BindingPattern // a nested pattern
+	Default  Expression      // nil when none
+}
+
+// Names lists the variables the pattern binds, nested ones included, in source order.
+func (bp *BindingPattern) Names() []*Identifier {
+	var names []*Identifier
+	for _, element := range bp.Elements {
+		if element.Pattern != nil {
+			names = append(names, element.Pattern.Names()...)
+		} else if element.Name != nil {
+			names = append(names, element.Name)
+		}
+	}
+	return names
+}
+
+func (bp *BindingPattern) expressionNode() {}
+func (bp *BindingPattern) String() string {
+	parts := make([]string, 0, len(bp.Elements))
+	for _, element := range bp.Elements {
+		target := ""
+		if element.Pattern != nil {
+			target = element.Pattern.String()
+		} else if element.Name != nil {
+			target = element.Name.Value
+		}
+		part := target
+		if !bp.Array && (element.Name == nil || element.Name.Value != element.Key) {
+			part = element.Key + ": " + target
+		}
+		if element.Default != nil {
+			part += " = " + element.Default.String()
+		}
+		parts = append(parts, part)
+	}
+	if bp.Array {
+		return "[" + strings.Join(parts, ", ") + "]"
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 // ExpressionStatement: Dùng cho các lệnh đứng độc lập (vd: call();)
@@ -265,6 +332,8 @@ type ForStatement struct {
 	Item     *Identifier
 	Iterable Expression
 	Body     *BlockStatement
+	// Const: for (const x of …), whose x the body may not assign; let lets it.
+	Const bool
 }
 
 // ForRangeStatement: a BOUNDED counting loop — for (let i = 0; i < n; i++) { … }.
@@ -401,6 +470,10 @@ type CallExpression struct {
 	Token     Token      // Dấu '('
 	Function  Expression // Tên hàm hoặc object.method
 	Arguments []Expression
+	Optional  bool // f?.(a): no call, and null, when f is null
+	// Close is where its closing ) is: the source between ( and ) is what a compile error quotes
+	// (safe(findUser(id)) says to write safe(() => findUser(id))). 0 when the parser did not read it.
+	Close int32
 }
 
 func (ce *CallExpression) expressionNode() {}
@@ -411,6 +484,9 @@ func (ce *CallExpression) String() string {
 		args = append(args, a.String())
 	}
 	out.WriteString(ce.Function.String())
+	if ce.Optional {
+		out.WriteString("?.")
+	}
 	out.WriteString("(")
 	out.WriteString(strings.Join(args, ", "))
 	out.WriteString(")")
@@ -422,24 +498,42 @@ type MemberExpression struct {
 	Token    Token // Dấu '.'
 	Object   Expression
 	Property *Identifier
+	Optional bool // object?.property
 }
 
 func (me *MemberExpression) expressionNode() {}
 func (me *MemberExpression) String() string {
+	if me.Optional {
+		return me.Object.String() + "?." + me.Property.String()
+	}
 	return me.Object.String() + "." + me.Property.String()
 }
 
 // IndexExpression: array[index]
 type IndexExpression struct {
-	Token Token // Dấu '['
-	Left  Expression
-	Index Expression
+	Token    Token // Dấu '['
+	Left     Expression
+	Index    Expression
+	Optional bool // array?.[index]
 }
 
 func (ie *IndexExpression) expressionNode() {}
 func (ie *IndexExpression) String() string {
+	if ie.Optional {
+		return "(" + ie.Left.String() + "?.[" + ie.Index.String() + "])"
+	}
 	return "(" + ie.Left.String() + "[" + ie.Index.String() + "])"
 }
+
+// ChainExpression is an optional chain as a whole (14/10/2026): a?.b.c(d), x.y?.[k], f?.(). When a link
+// written ?. finds null or undefined on its left, the rest of the chain does not run and the whole
+// expression is null, as in JavaScript. Parentheses end a chain: (a?.b).c reads c of whatever (a?.b) is.
+type ChainExpression struct {
+	Expression Expression // a MemberExpression, IndexExpression, CallExpression or MethodCallExpression
+}
+
+func (ce *ChainExpression) expressionNode() {}
+func (ce *ChainExpression) String() string  { return ce.Expression.String() }
 
 // TernaryExpression: cond ? consequence : alternative
 type TernaryExpression struct {
@@ -584,6 +678,10 @@ type MethodCallExpression struct {
 	Object    Expression   // Đối tượng (ví dụ: "hello")
 	Method    *Identifier  // Tên phương thức (ví dụ: upper)
 	Arguments []Expression // Các tham số truyền vào
+	// Optional is object?.method(…): nothing is called, and the chain is null, when object is null.
+	Optional bool
+	// OptionalCall is object.method?.(…): nothing is called when object.method is null.
+	OptionalCall bool
 }
 
 func (mce *MethodCallExpression) expressionNode() {}
@@ -594,8 +692,15 @@ func (mce *MethodCallExpression) String() string {
 		args = append(args, a.String())
 	}
 	out.WriteString(mce.Object.String())
-	out.WriteString(".")
+	if mce.Optional {
+		out.WriteString("?.")
+	} else {
+		out.WriteString(".")
+	}
 	out.WriteString(mce.Method.String())
+	if mce.OptionalCall {
+		out.WriteString("?.")
+	}
 	out.WriteString("(")
 	out.WriteString(strings.Join(args, ", "))
 	out.WriteString(")")

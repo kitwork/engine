@@ -1,0 +1,20 @@
+<content gap="6" padding="6" mobile:padding="4">
+  <section gap="3" max-width="small">
+    <text size="mini" weight="bold" case="upper" color="brand+30">Ứng dụng</text>
+    <text heading="1">Quán Cà Phê trên điện thoại</text>
+    <text color="ink-30">Cùng một giao diện với trang web, chạy như ứng dụng thật: đặt món, theo dõi đơn đang pha,
+      tích điểm mỗi ly.</text>
+  </section>
+
+  <card flex="column" medium:flex="row" align="start" space="between" gap="4" padding="6">
+    <box gap="1">
+      <text heading="2" size="mini">Sắp có trên App Store và Google Play</text>
+      <text size="small" color="ink-30">Ứng dụng đang được thử với khách quen. Trong lúc chờ, đặt món ngay trên web.</text>
+    </box>
+    <link value="/" flex="row" align="center" gap="2" background="brand" color="brand.on" radius="full" padding="3" weight="bold"
+          hover:background="brand+20" hover:color="paper">
+      <icon value="coffee"></icon>
+      <text>Xem thực đơn</text>
+    </link>
+  </card>
+</content>

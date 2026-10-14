@@ -1,104 +1,31 @@
 package value
 
-// Inline-error handling — turn a value that carries (or IS) an error into one explicit shape a
-// handler picks apart. Three sources are unified:
-//   - a value with IsError/ErrorVal attached;
-//   - a hard failure: a K==Invalid value whose message is in .V (a failed query, fail("…"));
-//   - success: a plain value, no error.
+// safe(() => x) is how a program reads a failure (14/10/2026): it calls x's function with no arguments
+// and always gives a plain object,
 //
-// ONE shape, deliberately. There were two — an object and a two-element array for destructuring —
-// and they were confusing enough that the dispatch table's own comments ended up describing each
-// other. Two spellings of one idea is a tax on every reader, and the array form additionally
-// depended on destructuring, which this language only accepts after `const`.
-
-// SafeResult is what safe() hands back: the data, plus whether it arrived.
+//	{ value: <what the function returned>, error: null }                      it finished
+//	{ value: null, error: { message, code, at } }                             it failed, anywhere inside
 //
-//	const check = database.entity().table("users").where("email", e).first().safe()
-//	if (!check.ok) return ctx.status(503).json({ message: check.error })
-//	return ctx.json(check.value)
+// with error.progress as well for a PARTIAL failure (a bulk write that stopped midway). The object is
+// an ordinary map: ctx.json(found) writes it, a .ui page reads it, const { value, error } = … takes it
+// apart. It replaced x.safe(), whose result was a Go struct (SafeResult) that JSON wrote as null and a
+// view dropped; x.safe() is now a compile error that says how to write it.
 //
-// A STRUCT rather than a map, and that choice is what makes `.ok` read correctly without parens.
-// Property access on a Go value reaches these methods through reflection, and a method taking no
-// arguments is INVOKED rather than returned (the getter pattern in navigation.go) — so `check.ok`
-// is a real boolean. A method registered on the Kind table instead would hand back a function
-// value, and a function is truthy, so `if (!check.ok)` would be false forever and a genuine
-// failure would be skipped in silence.
-//
-// The other half of the choice: these methods belong to THIS type. Kind methods are global, so
-// naming one "ok" would shadow a column called ok in everyone's data — the way `error` already
-// shadows one called error on every map in the system.
-type SafeResult struct {
-	value   Value
-	failure *Failure
-}
+// Failures a host attached to data without stopping the program (database.entity() returning [] with
+// DATABASE_ERROR, createMany returning its progress with KITDB_CREATE_MANY_PARTIAL) are gone with it:
+// they are failures like any other now, DATABASE and PARTIAL, so a page that forgets safe answers 500
+// and logs it rather than showing an empty list while the database is down.
 
-// Ok reports that the call succeeded. Named for what a JS author reaches for by reflex: fetch()
-// responses have carried .ok for a decade.
-func (s *SafeResult) Ok() bool { return s.failure == nil }
+// SafeFunction is the global safe. It has no Go body: the function it is given runs on the VM that
+// called safe, in a frame of its own, on the same energy budget and the same rules for what stops the
+// run, so the VM runs it (runtime/safe.go). A host handed the value has no VM to lend it (Call).
+type SafeFunction struct{}
 
-// IsError is Ok's opposite, kept because the same name means the same thing on a bare error value.
-func (s *SafeResult) IsError() bool { return s.failure != nil }
+// NewSafeFunction is the value of the global safe, which the "kitwork" module also exports.
+func NewSafeFunction() Value { return Value{K: Func, V: SafeFunction{}} }
 
-// Value is the data — null on a hard failure, since there is none.
-func (s *SafeResult) Value() Value { return s.value }
-
-// Error is the MESSAGE, or null when nothing failed — not a {code, message} object, so it drops
-// straight into a response without a second hop:
-//
-//	if (!check.ok) return ctx.status(503).json({ message: check.error })
-//
-// Nesting the object there produced {"message":{"code":…,"message":…}}, which reads as a bug in the
-// handler rather than a description of the failure. The code is still reachable as .code for the
-// callers that branch on it, which are far fewer than the ones that just want to say what happened.
-//
-// It returns a Value rather than a string deliberately: a method named Error returning a string
-// would make this type satisfy Go's error interface, and it is a result, not an error.
-func (s *SafeResult) Error() Value {
-	if s.failure == nil {
-		return Value{K: Nil}
-	}
-	return New(s.failure.Message)
-}
-
-// Code is the machine-readable half, for a handler that branches on the kind of failure rather
-// than reporting it.
-func (s *SafeResult) Code() Value {
-	if s.failure == nil {
-		return Value{K: Nil}
-	}
-	return New(s.failure.Code)
-}
-
-// Safe reshapes a value — successful, carrying an attached error, or an outright failure — into one
-// SafeResult, so a handler never has to know which of the three it was.
-func (v Value) Safe(_ ...Value) Value {
-	clean, failure := splitInlineError(v)
-	return New(&SafeResult{value: clean, failure: failure})
-}
-
-// splitInlineError peels the typed application failure off v and returns clean
-// data plus an immutable failure envelope.
-func splitInlineError(v Value) (clean Value, failure *Failure) {
-	// Hard failure: an Invalid value (e.g. db query error). Message is in .V; there is no data.
-	if v.K == Invalid {
-		if attached, ok := FailureFrom(v); ok {
-			return Value{K: Nil}, &attached
-		}
-		msg := "error"
-		if s, ok := v.V.(string); ok && s != "" {
-			msg = s
-		}
-		fallback := NewFailure(DefaultFailureCode, msg)
-		return Value{K: Nil}, &fallback
-	}
-
-	// Safe*-style: the data carries an attached error inline.
-	if attached, ok := FailureFrom(v); ok {
-		failure = &attached
-	}
-
-	clean = v
-	clean.IsError = false
-	clean.ErrorVal = nil
-	return clean, failure
+// IsSafeFunction reports whether v is the global safe.
+func IsSafeFunction(v Value) bool {
+	_, ok := v.V.(SafeFunction)
+	return ok && v.K == Func
 }

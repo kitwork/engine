@@ -85,19 +85,20 @@ var total = items
 }
 
 func BenchmarkVMSafeSuccess(b *testing.B) {
-	benchmarkRun(b, `
-const check = { answer: 42 }.safe();
+	benchmarkRunWithGlobals(b, `
+const check = safe(() => ({ answer: 42 }));
 var result = check.value.answer;
-`)
+`, map[string]value.Value{"safe": value.NewSafeFunction()})
 }
 
 func BenchmarkVMSafeApplicationFailure(b *testing.B) {
 	benchmarkRunWithGlobals(
 		b,
-		`const result = failHost().safe().code;`,
+		`const result = safe(() => failHost()).error.code;`,
 		map[string]value.Value{
+			"safe": value.NewSafeFunction(),
 			"failHost": value.NewFunc(func(...value.Value) value.Value {
-				return value.InvalidFailure("BENCHMARK_FAILURE", "benchmark failure")
+				return value.InvalidFailure(value.DatabaseCode, "benchmark failure")
 			}),
 		},
 	)

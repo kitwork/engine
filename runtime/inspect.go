@@ -56,7 +56,7 @@ type InspectedInstruction struct {
 	NextIP          int             `json:"next_ip"`
 	Opcode          Opcode          `json:"opcode"`
 	Name            string          `json:"name"`
-	Operands        []uint16        `json:"operands,omitempty"`
+	Operands        []uint32        `json:"operands,omitempty"`
 	Energy          uint64          `json:"energy"`
 	StackIn         int             `json:"stack_in"`
 	StackOut        int             `json:"stack_out"`
@@ -117,9 +117,9 @@ func InspectProgram(program *Program) (ProgramInspection, error) {
 		item := InspectedInstruction{
 			IP:          instruction.ip,
 			NextIP:      instruction.next,
-			Opcode:      instruction.op,
+			Opcode:      instruction.encoded,
 			Name:        instruction.spec.Name,
-			Operands:    append([]uint16(nil), instruction.operands...),
+			Operands:    append([]uint32(nil), instruction.operands...),
 			Energy:      uint64(instruction.spec.Energy),
 			StackIn:     stackIn,
 			StackOut:    stackOut,

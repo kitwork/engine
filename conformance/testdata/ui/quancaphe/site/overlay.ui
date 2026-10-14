@@ -1,0 +1,3 @@
+<overlay>
+  <box component="toast" as="$toast" />
+</overlay>

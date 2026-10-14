@@ -199,9 +199,12 @@ var result = [1, 2, 3, 4]
 		{
 			name: "safe-runtime-error",
 			source: `
-const check = [].reduce((total, item) => total + item).safe();
-var result = { ok: check.ok, error: check.error };
+const check = safe(() => [].reduce((total, item) => total + item));
+var result = { value: check.value, error: check.error };
 `,
+			globals: func() map[string]value.Value {
+				return map[string]value.Value{"safe": value.NewSafeFunction()}
+			},
 			maxEnergy: 100_000,
 		},
 		{
@@ -221,13 +224,14 @@ var result = { ok: check.ok, error: check.error };
 		{
 			name: "safe-runtime-error-with-cause",
 			source: `
-const check = failHost().safe();
-var result = { ok: check.ok, code: check.code, error: check.error };
+const check = safe(() => failHost());
+var result = { value: check.value, code: check.error.code, error: check.error };
 `,
 			globals: func() map[string]value.Value {
 				return map[string]value.Value{
+					"safe": value.NewSafeFunction(),
 					"failHost": value.NewFunc(func(...value.Value) value.Value {
-						return value.InvalidFailure("HOST_CONFLICT", "host conflict")
+						return value.InvalidFailure(value.ConflictCode, "host conflict")
 					}),
 				}
 			},

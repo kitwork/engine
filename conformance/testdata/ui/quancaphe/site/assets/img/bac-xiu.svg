@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" role="img" aria-label="Bạc xỉu">
+  <rect width="640" height="480" fill="#efe3d3"/>
+  <ellipse cx="320" cy="400" rx="150" ry="22" fill="#000" opacity=".08"/>
+  <path d="M230 150h180l-22 240a20 20 0 0 1-20 18H272a20 20 0 0 1-20-18z" fill="#fff" opacity=".9"/>
+  <path d="M240 200h160l-17 186a14 14 0 0 1-14 12H271a14 14 0 0 1-14-12z" fill="#b58a63"/>
+  <path d="M240 200h160l-3 30H243z" fill="#e8d3b8"/>
+  <rect x="222" y="138" width="196" height="18" rx="9" fill="#fff"/>
+  <rect x="306" y="70" width="14" height="80" rx="7" fill="#fff" opacity=".85" transform="rotate(12 313 110)"/>
+</svg>

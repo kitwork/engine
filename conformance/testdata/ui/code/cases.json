@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "site": "site",
+  "target": "website",
+  "reload": true,
+  "cases": [
+    {
+      "name": "a-block-coloured-when-the-page-compiles",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"go\" size=\"small\">func main() { println(\"xin chào\", 42) } // chạy</code></content>"
+      },
+      "expect": "expect/block.html"
+    },
+    {
+      "name": "code-in-a-line",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><text>Chạy <code language=\"bash\">go run . --port 8080</code> rồi mở trình duyệt.</text></content>"
+      },
+      "expect": "expect/in-a-line.html"
+    },
+    {
+      "name": "code-and-its-language-from-data",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"{{ snippet.language }}\">{{ snippet.code }}</code></content>"
+      },
+      "scope": { "snippet": { "language": "javascript", "code": "const total = items.reduce((sum, item) => sum + item.price, 0); // đồng" } },
+      "expect": "expect/from-data.html"
+    },
+    {
+      "name": "a-language-from-data-the-engine-does-not-have-shows-plain",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"{{ snippet.language }}\">{{ snippet.code }}</code></content>"
+      },
+      "scope": { "snippet": { "language": "js", "code": "const a = 1;" } },
+      "expect": "expect/unknown-from-data.html"
+    },
+    {
+      "name": "markup-in-the-code-is-text",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"html\">{{ snippet }}</code></content>"
+      },
+      "scope": { "snippet": "</code></pre><script>alert(1)</script>" },
+      "expect": "expect/markup-is-text.html"
+    },
+    {
+      "name": "text-is-plain",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"text\">if x then y</code></content>"
+      },
+      "expect": "expect/text.html"
+    },
+    {
+      "name": "a-short-language-name",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"js\">const a = 1;</code></content>"
+      },
+      "error": { "at": "content.ui:1:16", "says": "ngôn ngữ \"js\" chưa có; viết javascript" }
+    },
+    {
+      "name": "a-misspelled-language-the-expression-spells-out",
+      "route": ".",
+      "files": {
+        "content.ui": "<content><code language=\"{{ windows ? 'pwsh' : 'bash' }}\">dir</code></content>"
+      },
+      "error": { "at": "content.ui:1:16", "says": "ngôn ngữ \"pwsh\" chưa có; viết powershell" }
+    }
+  ]
+}

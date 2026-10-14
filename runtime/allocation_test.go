@@ -83,19 +83,20 @@ var total = items
 	})
 
 	t.Run("safe-success", func(t *testing.T) {
-		assertAllocationBudget(t, `
-const check = { answer: 42 }.safe();
+		assertAllocationBudgetWithGlobals(t, `
+const check = safe(() => ({ answer: 42 }));
 var result = check.value.answer;
-`, 12)
+`, map[string]value.Value{"safe": value.NewSafeFunction()}, 12)
 	})
 
 	t.Run("safe-application-failure", func(t *testing.T) {
 		assertAllocationBudgetWithGlobals(
 			t,
-			`const result = failHost().safe().code;`,
+			`const result = safe(() => failHost()).error.code;`,
 			map[string]value.Value{
+				"safe": value.NewSafeFunction(),
 				"failHost": value.NewFunc(func(...value.Value) value.Value {
-					return value.InvalidFailure("ALLOCATION_FAILURE", "allocation failure")
+					return value.InvalidFailure(value.DatabaseCode, "allocation failure")
 				}),
 			},
 			30,

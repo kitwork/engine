@@ -34,7 +34,7 @@ type coldProcessFixtureReport struct {
 	CacheKey          string `json:"cache_key"`
 }
 
-func TestCompilerV3ArtifactDeterminismAcrossColdProcesses(t *testing.T) {
+func TestCompilerV4ArtifactDeterminismAcrossColdProcesses(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)

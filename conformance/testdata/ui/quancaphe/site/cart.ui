@@ -1,0 +1,52 @@
+<box click-outside="close()" keydown:escape="close()">
+  <button click="toggle()" expanded="{{ open }}" background="panel" radius="full" padding="2" border="none">
+    <icon value="shopping-cart" alt="Giỏ hàng"></icon>
+    <badge place="top-end" show="items.length > 0" color="brand" alt="{{ items.length }} món trong giỏ">
+      <text>{{ items.length }}</text>
+    </badge>
+  </button>
+
+  <card show="open" place="below-end" flex="column" gap="4" padding="6" shadow="large">
+    <text heading="2" size="mini">Giỏ hàng</text>
+
+    <list gap="3" scroll="y" max-height="80">
+      <item for="line of items; key: line.id" flex="row" align="start" gap="3">
+        <text>{{ line.name }}</text>
+        <input type="number" min="1" value="{{ line.quantity }}" alt="Số lượng {{ line.name }}"></input>
+        <button click="remove(line.id)" border="none"><icon value="trash" alt="Xoá {{ line.name }}"></icon></button>
+      </item>
+      <empty color="ink-30">Chưa có món nào.</empty>
+    </list>
+
+    <text show="items.length > 0">Tạm tính: <text weight="bold" font="code">{{ money(total()) }}</text></text>
+
+    <form flex="column" gap="3" submit:prevent="checkout()">
+      <field>
+        <label>Số điện thoại</label>
+        <input type="tel" value="{{ phone }}" required="true"></input>
+        <hint>Quán gọi lại khi món đã xong.</hint>
+        <error>{{ phoneError }}</error>
+      </field>
+
+      <field>
+        <label>Ghi chú</label>
+        <textarea value="{{ note }}"></textarea>
+      </field>
+
+      <field>
+        <label>Tôi đồng ý với <link value="/dieu-khoan" underline="true">điều khoản đặt món</link></label>
+        <input type="checkbox" checked="{{ agree }}"></input>
+      </field>
+
+      <text show="error" color="danger+15">{{ error }}</text>
+
+      <button type="submit" disabled="{{ checkout.pending || !agree || items.length == 0 }}"
+              background="brand" color="brand.on" radius="full" padding="3" weight="bold" border="none"
+              hover:background="brand+20" hover:color="paper" disabled:opacity="50">
+        {{ checkout.pending ? 'Đang lưu...' : 'Đặt món' }}
+      </button>
+    </form>
+
+    <text show="orderId" color="success+25">Đã nhận đơn {{ orderId }}. Cảm ơn bạn!</text>
+  </card>
+</box>

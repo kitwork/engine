@@ -39,7 +39,8 @@ type Entities struct {
 	tenant   *Tenant
 	table    string
 	identity string
-	err      error // a construction failure, surfaced by the first terminal call
+	err      error  // a construction failure, surfaced by the first terminal call
+	code     string // err's code (value.DeniedCode, UnavailableCode, InvalidArgumentCode)
 
 	q *query.Query
 }
@@ -81,16 +82,16 @@ func (e *EntityScope) Table(table string) *Entities {
 
 	switch {
 	case e.denied != nil:
-		d.err = e.denied
+		d.err, d.code = e.denied, value.DeniedCode
 		return d
 	case e.tenant == nil:
-		d.err = fmt.Errorf("entity: no tenant in scope")
+		d.err, d.code = fmt.Errorf("entity: no tenant in scope"), value.UnavailableCode
 		return d
 	case table == "":
-		d.err = fmt.Errorf("entity: table name is required")
+		d.err, d.code = fmt.Errorf("entity: table name is required"), value.InvalidArgumentCode
 		return d
 	case database.System == nil:
-		d.err = fmt.Errorf("entity: no shared database is connected (system)")
+		d.err, d.code = fmt.Errorf("entity: no shared database is connected (system)"), value.UnavailableCode
 		return d
 	}
 
@@ -100,6 +101,7 @@ func (e *EntityScope) Table(table string) *Entities {
 		// and answering with everyone's rows would be a leak wearing the shape of a result.
 		d.err = fmt.Errorf("entity: this app has no identity, so a shared query cannot be scoped — " +
 			"use sqlite for site-local data, or run under apps/<identity>/<domain>")
+		d.code = value.DeniedCode
 		return d
 	}
 
@@ -217,40 +219,42 @@ func (d *Entities) stamped(args []value.Value) []value.Value {
 	return out
 }
 
-// run executes a terminal and reports known query failures as ATTACHED errors.
+// run executes a terminal. A failed query is a failure like any other (14/10/2026): it ends the run
+// unless the program reads it with safe(() => …), code DATABASE:
 //
-// X.safe() can rescue a hard runtime failure, but an attached error is still the better boundary
-// for a domain API: it preserves DATABASE_ERROR and the clean message without first turning the
-// failure into a VM diagnostic. It also remains visibly errored when a caller forgets safe():
+//	const found = safe(() => database.entity().table("users").where("email", e).first())
+//	if (found.error) return ctx.status(503).json({ message: "Chưa đọc được dữ liệu." })
+//	return ctx.json(found.value)
 //
-//	const check = database.entity().table("users").where("email", e).first().safe()
-//	if (!check.ok) return ctx.status(503).json({ message: check.error })
-//	return ctx.json(check.value)
-//
-// This is what the old SafeList/SafeFirst pair was really for: preserving domain information, not
-// reshaping. Doing it here rather than in parallel "safe" terminals keeps one spelling per query.
-//
-// Ignoring the failure still surfaces it: the value is empty and carries .isError, so a handler
-// that forgets to check gets nothing rather than something wrong.
+// Until then it was an empty result carrying DATABASE_ERROR without stopping anything, so a page that
+// forgot to check showed an empty list while the database was down, and the error was gone as soon as
+// the rows were transformed. Now a page that forgets answers 500 and the log has the failure.
 func (d *Entities) run(fn func() value.Value) value.Value {
 	if d.err != nil {
-		return attachedError(d.err.Error())
+		return value.InvalidFailure(d.code, d.err.Error())
 	}
 	if d.q == nil {
-		return attachedError("entity: query was not initialised")
+		return value.InvalidFailure(value.UnavailableCode, "entity: query was not initialised")
 	}
 	res := fn()
 	if res.K == value.Invalid {
-		return attachedError(res.String())
+		return databaseFailure(res)
 	}
 	return res
 }
 
-// attachedError builds an empty result that reports a failure without halting the program.
-func attachedError(message string) value.Value {
-	return value.WithFailure(
-		value.New([]value.Value{}),
-		"DATABASE_ERROR",
-		message,
-	)
+// databaseFailure is a failed query as the storage layer's failure, DATABASE, unless it says more
+// already: a failure with a code of its own (CONFLICT, TIMEOUT, the request's cancellation…) passes on
+// as it is, and so does the diagnostic of a run, so what safe never catches is never made catchable.
+func databaseFailure(failed value.Value) value.Value {
+	switch attached := failed.ErrorVal.(type) {
+	case nil:
+	case value.Failure:
+		if attached.Code != value.DefaultFailureCode {
+			return failed
+		}
+	default:
+		return failed
+	}
+	return value.InvalidFailure(value.DatabaseCode, failed.String())
 }

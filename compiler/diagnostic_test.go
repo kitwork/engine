@@ -59,7 +59,8 @@ outer()`
 			diagnostic.Column,
 		)
 	}
-	if text := result.Text(); !strings.Contains(text, "host failed (at line 2)") ||
+	// the printed text leads with the place (14/10/2026; it was "host failed (at line 2)")
+	if text := result.Text(); !strings.HasPrefix(text, "<source>:2:2: host failed\n") ||
 		!strings.Contains(text, "at outer (<source>:5:2") {
 		t.Fatalf("formatted diagnostic = %q", text)
 	}

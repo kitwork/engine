@@ -366,6 +366,20 @@ func verifierFaultInput(t testing.TB, scenario string) ([]byte, []value.Value) {
 		}, []value.Value{value.New(&value.Lambda{Address: 1})}
 	case "unsupported-assigned-opcode":
 		return []byte{byte(runtime.YIELD)}, nil
+	case "wide-index-fits-two-bytes":
+		return []byte{byte(runtime.PUSH_WIDE), 0, 0, 0, byte(runtime.RETURN)}, []value.Value{value.New(1)}
+	case "wide-jump-in-short-program":
+		return []byte{byte(runtime.JUMP_WIDE), 0, 0, 4, byte(runtime.RETURN)}, nil
+	case "wide-jump-inside-operand":
+		// long enough for a wide jump, aimed at its own operand
+		code := make([]byte, runtime.MaxNarrowOperand+2)
+		for index := range code {
+			code[index] = byte(runtime.HALT)
+		}
+		copy(code, []byte{byte(runtime.JUMP_WIDE), 0, 0, 2})
+		return code, nil
+	case "truncated-wide-operand":
+		return []byte{byte(runtime.ITER_WIDE), 0, 0}, nil
 	default:
 		t.Fatalf("unknown verifier scenario %q", scenario)
 		return nil, nil
