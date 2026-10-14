@@ -748,7 +748,7 @@ type dbProxy struct {
 // and the data is left untouched.
 func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
 	if engine != "sqlite" && engine != "kitdb" {
-		return value.Value{K: value.Invalid, V: "db: unsupported storage engine"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db: unsupported storage engine")
 	}
 	defaultName := "app.db"
 	if engine == "kitdb" {
@@ -763,10 +763,7 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 		p.dbName = args[0].String()
 	}
 	if engine == "kitdb" && strings.EqualFold(kitDBRel(p.dbName), kitDBNodeCatalogFile) {
-		return value.Value{
-			K: value.Invalid,
-			V: fmt.Sprintf("db: KitDB database name %q is reserved for the node catalog", p.dbName),
-		}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: KitDB database name %q is reserved for the node catalog", p.dbName))
 	}
 	if len(args) > 1 && args[1].K == value.Map {
 		for tableName, tableVal := range args[1].Map() {
@@ -779,7 +776,7 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 				}
 			} else if tableVal.K == value.Map {
 				if engine == "kitdb" {
-					return value.Value{K: value.Invalid, V: fmt.Sprintf("db: KitDB struct %q must be declared with struct({ ... })", tableName)}
+					return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: KitDB struct %q must be declared with struct({ ... })", tableName))
 				}
 				for colName, colVal := range tableVal.Map() {
 					if spec, ok := colVal.V.(*ColumnSpec); ok {
@@ -787,7 +784,7 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 					}
 				}
 			} else {
-				return value.Value{K: value.Invalid, V: fmt.Sprintf("db: schema %q is not a struct", tableName)}
+				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: schema %q is not a struct", tableName))
 			}
 			p.tables[tableName] = cols
 			p.structs[tableName] = source
@@ -799,7 +796,7 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 		for _, tableName := range sortedTableNames(p.tables) {
 			definition := p.structs[tableName]
 			if err := validateStructForeignConstraints(definition, p.structs); err != nil {
-				return value.Value{K: value.Invalid, V: fmt.Sprintf("db: schema %q: %v", tableName, err)}
+				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: schema %q: %v", tableName, err))
 			}
 		}
 		p.declaredTables = sortedTableNames(p.tables)
@@ -815,7 +812,7 @@ func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args .
 		if recovery, ok := opts["recovery"]; ok {
 			retain, policy, err := parseKitDBRecoveryOption(recovery)
 			if err != nil {
-				return value.Value{K: value.Invalid, V: "db: recovery: " + err.Error()}
+				return value.InvalidFailure(value.InvalidArgumentCode, "db: recovery: "+err.Error())
 			}
 			p.recoverySet = true
 			p.retainHistory = retain
@@ -1353,12 +1350,12 @@ func isWriteSQL(text string) bool {
 // name → an in-band error (so a typo fails loudly, not as an empty result).
 func (p *dbProxy) OnGet(key string) value.Value {
 	if err := p.refreshKitDBCatalogDefinitions(); err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return kitDBError(err)
 	}
 	tables, definitions := p.schemaSnapshot()
 	cols, ok := tables[key]
 	if !ok {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: no table %q defined in this database", key)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: no table %q defined in this database", key))
 	}
 	return value.New(&SchemaTable{
 		tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName,
@@ -1413,6 +1410,9 @@ type SchemaTable struct {
 	q       *query.Query
 	failed  bool
 	failMsg string
+	// failure is what a lambda of the chain failed with (where(row => fail("…"))), the chain's failure
+	// as it is; when it is not one, the chain's failure is failMsg's (INVALID_ARGUMENT).
+	failure value.Value
 
 	searchActive           bool   // set by .search("…") — List runs the full-text path instead of the plain query
 	searchText             string // the query string passed to .search()
@@ -1423,7 +1423,21 @@ type SchemaTable struct {
 }
 
 func (t *SchemaTable) fail(msg string) *SchemaTable { t.failed = true; t.failMsg = msg; return t }
-func (t *SchemaTable) failVal() value.Value         { return value.Value{K: value.Invalid, V: t.failMsg} }
+
+// failWith makes failure, what a lambda of the chain failed with, the chain's failure as it is.
+func (t *SchemaTable) failWith(failure value.Value) *SchemaTable {
+	t.failed, t.failMsg, t.failure = true, failure.String(), failure
+	return t
+}
+
+// failVal is the chain's failure: a lambda's as it was, or a use of the table it does not take
+// (a column it has not, a search with no text), INVALID_ARGUMENT.
+func (t *SchemaTable) failVal() value.Value {
+	if t.failure.IsError {
+		return t.failure
+	}
+	return value.InvalidFailure(value.InvalidArgumentCode, t.failMsg)
+}
 
 // source builds the SQL blueprint for SQLite. KitDB does not expose an
 // SQL source; it consumes builder state through ExecutionPlan instead.
@@ -1454,7 +1468,7 @@ func (t *SchemaTable) ready() (value.Value, bool) {
 		return t.failVal(), false
 	}
 	if err := t.ensureTable(); err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: table %q migration failed: %v", t.table, err)}, false
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: table %q migration failed: %v", t.table, err)), false
 	}
 	return value.Value{}, true
 }
@@ -1473,6 +1487,10 @@ func (t *SchemaTable) Where(args ...value.Value) *SchemaTable {
 		return t.fail(fmt.Sprintf("db: table %q has no column %q", t.table, args[0].String()))
 	}
 	t.builder().Where(args...)
+	if failure, failed := t.builder().Failure(); failed {
+		// the lambda failed: KitDB reads the plan, not a terminal of the builder, so the chain keeps it
+		return t.failWith(failure)
+	}
 	return t
 }
 
@@ -1599,11 +1617,11 @@ func (t *SchemaTable) Create(args ...value.Value) value.Value {
 		return v
 	}
 	if len(args) == 0 || args[0].K != value.Map {
-		return value.Value{K: value.Invalid, V: "db.create: expects an object"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.create: expects an object")
 	}
 	row, errMsg := fillRow(t.columns, args[0].Map())
 	if errMsg != "" {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q %s", t.table, errMsg)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.create: table %q %s", t.table, errMsg))
 	}
 	if t.engine == "kitdb" {
 		return t.kitDBCreate(row)
@@ -1686,7 +1704,7 @@ func (t *SchemaTable) Update(args ...value.Value) value.Value {
 	if len(args) > 0 && args[0].K == value.Map {
 		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
 		if errMsg != "" {
-			return value.Value{K: value.Invalid, V: fmt.Sprintf("db.update: table %q %s", t.table, errMsg)}
+			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.update: table %q %s", t.table, errMsg))
 		}
 		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
 		args[0] = value.New(row)
@@ -1726,11 +1744,11 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 	}
 	db := t.source().db()
 	if db == nil {
-		return value.Value{K: value.Invalid, V: "db.plan: connection unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "db.plan: connection unavailable")
 	}
 	current, err := tableColumns(db, t.table)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.plan: %v", err)}
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db.plan: %v", err))
 	}
 	steps := planMigration(current, t.columns, false, t.allowDrop)
 	out := make([]value.Value, 0, len(steps))
@@ -2083,7 +2101,7 @@ func newEntityProxy(tenant *Tenant, scope *requestscope.Scope, args ...value.Val
 func (p *entityProxy) OnGet(key string) value.Value {
 	cols, ok := p.tables[key]
 	if !ok {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: no table %q defined in this database", key)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: no table %q defined in this database", key))
 	}
 	return value.New(&EntityTable{tenant: p.tenant, scope: p.scope, table: key, columns: cols})
 }
@@ -2108,8 +2126,13 @@ type EntityTable struct {
 }
 
 func (t *EntityTable) fail(msg string) *EntityTable { t.failed = true; t.failMsg = msg; return t }
-func (t *EntityTable) failVal() value.Value         { return value.Value{K: value.Invalid, V: t.failMsg} }
-func (t *EntityTable) known(col string) bool        { _, ok := t.columns[col]; return ok }
+
+// failVal is the chain's failure: a use of the table it does not take, INVALID_ARGUMENT. A lambda's
+// failure is the terminal's own (Entities: the query answers it).
+func (t *EntityTable) failVal() value.Value {
+	return value.InvalidFailure(value.InvalidArgumentCode, t.failMsg)
+}
+func (t *EntityTable) known(col string) bool { _, ok := t.columns[col]; return ok }
 
 func (t *EntityTable) builder() *Entities {
 	if t.e == nil {
@@ -2125,7 +2148,7 @@ func (t *EntityTable) ready() (value.Value, bool) {
 		return t.failVal(), false
 	}
 	if err := t.ensureTable(); err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: table %q migration failed: %v", t.table, err)}, false
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: table %q migration failed: %v", t.table, err)), false
 	}
 	return value.Value{}, true
 }
@@ -2215,11 +2238,11 @@ func (t *EntityTable) Create(args ...value.Value) value.Value {
 		return v
 	}
 	if len(args) == 0 || args[0].K != value.Map {
-		return value.Value{K: value.Invalid, V: "db.create: expects an object"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.create: expects an object")
 	}
 	row, errMsg := fillRow(t.columns, args[0].Map())
 	if errMsg != "" {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db.create: table %q %s", t.table, errMsg)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.create: table %q %s", t.table, errMsg))
 	}
 	// Entities.Create stamps the `identity` column itself — we never set it here.
 	return coerceResult(t.columns, t.builder().Create(value.New(row)))
@@ -2232,7 +2255,7 @@ func (t *EntityTable) Update(args ...value.Value) value.Value {
 	if len(args) > 0 && args[0].K == value.Map {
 		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
 		if errMsg != "" {
-			return value.Value{K: value.Invalid, V: fmt.Sprintf("db.update: table %q %s", t.table, errMsg)}
+			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.update: table %q %s", t.table, errMsg))
 		}
 		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
 		args[0] = value.New(row)

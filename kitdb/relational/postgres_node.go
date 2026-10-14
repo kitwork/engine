@@ -3,7 +3,6 @@ package relational
 import (
 	"container/list"
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -37,6 +36,9 @@ const (
 // Root. A .catalog database selects managed folder mode; otherwise legacy flat
 // discovery is retained. User databases open lazily through ManagerLimits.
 type PostgresNodeOptions struct {
+	// MaximumSessions bounds authenticated physical connections across adapters.
+	// Zero selects DefaultMaximumSessions; idle pooled connections count too.
+	MaximumSessions            int
 	Root                       string
 	MaintenanceDatabase        string
 	User                       string
@@ -69,6 +71,8 @@ type PostgresNodeOptions struct {
 // reader structures. They exclude payload pages, transient query allocations,
 // allocator overhead, and operating-system page-cache residency.
 type PostgresNodeStats struct {
+	RegisteredSessions                  int
+	MaximumSessions                     int
 	Closed                              bool
 	ManagedEngines                      int
 	OpeningEngines                      int
@@ -118,6 +122,9 @@ type postgresNodeEngineEntry struct {
 // PostgresNode owns bounded, lazily opened relational engines for one database
 // directory. It is independent from Kitwork Tenant, VM, routing and app state.
 type PostgresNode struct {
+	maximumSessions                     int
+	nextSessionID                       int64
+	sessionRegistry                     map[int64]*nodeSessionRecord
 	root                                string
 	maintenanceDatabase                 string
 	user                                string
@@ -155,6 +162,12 @@ type PostgresNode struct {
 // OpenPostgresNode opens only .catalog in managed mode. User database handles
 // remain lazy. A managed node holds the catalog's exclusive lock until Close.
 func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
+	if options.MaximumSessions == 0 {
+		options.MaximumSessions = DefaultMaximumSessions
+	}
+	if options.MaximumSessions < 1 || options.MaximumSessions > MaximumSessions {
+		return nil, fmt.Errorf("kitdb node: MaximumSessions must be between 1 and %d", MaximumSessions)
+	}
 	root := strings.TrimSpace(options.Root)
 	if root == "" {
 		return nil, fmt.Errorf("kitdb postgres node: root is required")
@@ -183,9 +196,6 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 	user := strings.TrimSpace(options.User)
 	if user == "" {
 		user = "kitdb"
-	}
-	if options.Password == "" {
-		return nil, fmt.Errorf("kitdb postgres node: password is required")
 	}
 	maximumDiscovered := options.MaximumDiscoveredDatabases
 	if maximumDiscovered == 0 {
@@ -261,7 +271,7 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 	node := &PostgresNode{
 		root: absoluteRoot, maintenanceDatabase: maintenance,
 		user: user, password: options.Password, readOnly: options.ReadOnly,
-		maximumDiscovered: maximumDiscovered, manager: manager,
+		maximumDiscovered: maximumDiscovered, manager: manager, maximumSessions: options.MaximumSessions,
 		managerMaximumOpen:                  managerStats.MaxOpenDatabases,
 		managerMaximumCache:                 managerStats.MaxPageCacheBytes,
 		databaseCacheBytes:                  databaseCacheBytes,
@@ -288,6 +298,12 @@ func OpenPostgresNode(options PostgresNodeOptions) (*PostgresNode, error) {
 			_ = manager.Close()
 			return nil, err
 		}
+	}
+	if node.catalog != nil && node.catalog.AuthEnabled() {
+		node.password = "" // Config credentials are not a fallback for catalog auth.
+	} else if node.password == "" {
+		_ = node.Close()
+		return nil, fmt.Errorf("kitdb postgres node: password is required when catalog auth is not enabled")
 	}
 	databases, err := node.discoverDatabases()
 	if err != nil {
@@ -461,6 +477,9 @@ func (node *PostgresNode) OpenNativeDatabase(name string) (*sql.DB, error) {
 	if node == nil {
 		return nil, fmt.Errorf("kitdb native node: node is nil")
 	}
+	if node.catalog != nil && node.catalog.AuthEnabled() {
+		return nil, managed.ErrAuthentication
+	}
 	name = postgresLogicalDatabaseName(name)
 	if err := validatePostgresLogicalDatabaseName(name); err != nil {
 		return nil, fmt.Errorf("kitdb native node: %w", err)
@@ -490,8 +509,11 @@ func (node *PostgresNode) Authenticate(
 	if err := ctx.Err(); err != nil {
 		return nil, pgwire.NewError("57014", "connection canceled")
 	}
-	if subtle.ConstantTimeCompare([]byte(startup.User()), []byte(node.user)) != 1 ||
-		subtle.ConstantTimeCompare([]byte(password), []byte(node.password)) != 1 {
+	account, err := node.authenticateAccount(ctx, startup.User(), password)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, pgwire.NewError("57014", "connection canceled")
+		}
 		return nil, pgwire.NewError("28P01", "password authentication failed for KitDB user")
 	}
 	databases, err := node.discoverDatabases()
@@ -503,13 +525,17 @@ func (node *PostgresNode) Authenticate(
 		requested = node.maintenanceDatabase
 	}
 	if strings.EqualFold(requested, node.maintenanceDatabase) {
-		return &postgresSession{
+		return (&postgresSession{
 			authenticator: &postgresAuthenticator{
-				database: node.maintenanceDatabase, user: node.user,
+				database: node.maintenanceDatabase, user: account.Name,
 				readOnly: true,
 			},
-			node: node, maintenance: true,
-		}, nil
+			node: node, maintenance: true, account: account,
+		}).registerNodeSession()
+	}
+	readOnly, allowed := account.Access(requested)
+	if !allowed {
+		return nil, pgwire.NewError("42501", "permission denied for database")
 	}
 	database, found := findPostgresNodeDatabase(databases, requested)
 	if !found {
@@ -526,17 +552,28 @@ func (node *PostgresNode) Authenticate(
 			node.trace(database.name, source, parameterCount)
 		}
 	}
-	return &postgresSession{
+	permissions := account.Permissions(requested)
+	localPolicy, err := entry.engine.localRolePolicy(account, database.name)
+	if err != nil {
+		_ = node.releaseEngine(entry)
+		return nil, postgresError(err)
+	}
+	if localPolicy != nil {
+		readOnly = false
+	}
+	return (&postgresSession{
 		authenticator: &postgresAuthenticator{
 			engine: entry.engine, database: database.name,
-			user: node.user, password: node.password,
-			readOnly: node.readOnly, trace: trace,
+			user:     account.Name,
+			readOnly: node.readOnly || readOnly, trace: trace,
+			permissions: &permissions,
+			localPolicy: localPolicy,
 		},
-		node: node,
+		node: node, account: account,
 		onClose: func() error {
 			return node.releaseEngine(entry)
 		},
-	}, nil
+	}).registerNodeSession()
 }
 
 func postgresNodeAcquireError(err error) error {
@@ -940,6 +977,8 @@ func (node *PostgresNode) Stats() PostgresNodeStats {
 	node.mu.Lock()
 	engines := make([]engineSnapshot, 0, len(node.engines))
 	stats := PostgresNodeStats{
+		RegisteredSessions:                  len(node.sessionRegistry),
+		MaximumSessions:                     node.maximumSessions,
 		Closed:                              node.closed,
 		ManagedEngines:                      len(node.engines),
 		ConfiguredWarmDatabases:             len(node.warmDatabases),
@@ -1034,6 +1073,10 @@ func (node *PostgresNode) Close() error {
 		return err
 	}
 	node.closed = true
+	sessions := make([]*nodeSessionRecord, 0, len(node.sessionRegistry))
+	for _, record := range node.sessionRegistry {
+		sessions = append(sessions, record)
+	}
 	engines := make([]*Engine, 0, len(node.engines))
 	for _, entry := range node.engines {
 		if entry.engine != nil {
@@ -1046,6 +1089,13 @@ func (node *PostgresNode) Close() error {
 	node.mu.Unlock()
 
 	var closeErr error
+	// Never call connection code under node.mu: Close rolls back and releases leases.
+	for _, record := range sessions {
+		record.cancel()
+	}
+	for _, record := range sessions {
+		closeErr = errors.Join(closeErr, record.close())
+	}
 	for _, engine := range engines {
 		closeErr = errors.Join(closeErr, engine.Close())
 	}

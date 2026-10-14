@@ -294,11 +294,11 @@ func (d *Database) Atomic(args ...value.Value) value.Value {
 
 	dbConn := d.db()
 	if dbConn == nil {
-		return value.Value{K: value.Invalid, V: "database not connected"}
+		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 	tx, err := dbConn.Begin()
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return query.DatabaseFailure("database: begin", err)
 	}
 
 	txDb := &Database{
@@ -327,7 +327,7 @@ func (d *Database) Atomic(args ...value.Value) value.Value {
 
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return query.DatabaseFailure("database: commit", err)
 	}
 
 	return result

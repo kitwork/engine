@@ -584,7 +584,8 @@ func (t *SchemaTable) validateKitDBConstraints(reader kitDBReader, row map[strin
 	if existing, found, err := t.getKitDBRow(reader, primaryKey); err != nil {
 		return err
 	} else if found && !bytes.Equal(primaryKey, previousRowKey) && len(existing) != 0 {
-		return fmt.Errorf("kitdb: struct %q key %s already exists", t.table, printableKitDBPrimary(t.definition, row))
+		// a write that met another is CONFLICT, as the SQL path says of a unique constraint
+		return codedError{code: value.ConflictCode, err: fmt.Errorf("kitdb: struct %q key %s already exists", t.table, printableKitDBPrimary(t.definition, row))}
 	}
 	for _, field := range t.definition.Fields {
 		item, found := row[field.Name]
@@ -598,7 +599,7 @@ func (t *SchemaTable) validateKitDBConstraints(reader kitDBReader, row map[strin
 				return err
 			}
 			if exists && !bytes.Equal(target, previousRowKey) {
-				return fmt.Errorf("kitdb: struct %q field %q must be unique", t.table, field.Name)
+				return codedError{code: value.ConflictCode, err: fmt.Errorf("kitdb: struct %q field %q must be unique", t.table, field.Name)}
 			}
 		}
 		if field.Reference != nil && found && !item.IsNil() {
@@ -628,10 +629,10 @@ func (t *SchemaTable) validateKitDBConstraints(reader kitDBReader, row map[strin
 			for index, field := range fields {
 				names[index] = field.Name
 			}
-			return fmt.Errorf(
+			return codedError{code: value.ConflictCode, err: fmt.Errorf(
 				"kitdb: struct %q constraint %q requires fields (%s) to be unique",
 				t.table, constraint.Name, strings.Join(names, ", "),
-			)
+			)}
 		}
 	}
 	for _, constraint := range t.definition.ForeignConstraints {

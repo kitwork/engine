@@ -493,9 +493,9 @@ counterpart for independent clients: text and CSV frames decode directly into
 the same typed row/constraint/index transaction, one COPY remains atomic, and
 transport byte, record, transaction, and lifetime ceilings fail closed. Large
 imports must orchestrate repeated bounded COPY transactions with an external
-resume cursor rather than weakening statement rollback. Stable
-`KITDB_TRANSACTION_CONFLICT` errors make optimistic retries machine-readable
-through both `.safe()` and Hrana. No calibrated cost, histogram, window, or
+resume cursor rather than weakening statement rollback. Stable conflict codes
+make optimistic retries machine-readable: `CONFLICT` through `safe(() => …)`,
+`KITDB_TRANSACTION_CONFLICT` through Hrana. No calibrated cost, histogram, window, or
 general analytical execution claim is implied.
 
 The same relational transaction now closes the immediate constraint loop.

@@ -7,6 +7,12 @@ create another copy of the database.
 
 ## Access paths
 
+Managed nodes can share root-scoped accounts with native and pgwire via
+`HandlerOptions.Open: kitsql.OpenNodeDatabase(node)`. See
+[catalog connection accounts](managed/AUTH.md) for offline provisioning, reader/
+writer grants, verifier storage, and catalog-v2 compatibility. This is separate
+from website/application auth and does not automatically enable auth for a root.
+
 | Path | Purpose | Transport |
 | --- | --- | --- |
 | Native KitDB | Lowest-latency access in the owning Go process | No network |

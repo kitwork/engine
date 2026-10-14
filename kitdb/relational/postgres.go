@@ -14,9 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	kitdbengine "github.com/kitwork/engine/kitdb"
+	"github.com/kitwork/engine/kitdb/managed"
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 	"github.com/kitwork/engine/kitdb/pgwire"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
@@ -51,15 +53,19 @@ type PostgresServerOptions struct {
 }
 
 type postgresAuthenticator struct {
-	engine   *Engine
-	database string
-	user     string
-	password string
-	readOnly bool
-	trace    func(source string, parameterCount int)
+	localPolicy *localRolePolicy
+	engine      *Engine
+	database    string
+	user        string
+	password    string
+	readOnly    bool
+	permissions *managed.DatabasePermissions
+	trace       func(source string, parameterCount int)
 }
 
 type postgresSession struct {
+	closed                 atomic.Bool
+	record                 *nodeSessionRecord
 	sequences              sequenceSession
 	authenticator          *postgresAuthenticator
 	closeOnce              sync.Once
@@ -67,6 +73,7 @@ type postgresSession struct {
 	transaction            *Transaction
 	failed                 bool
 	node                   *PostgresNode
+	account                managed.UserInfo
 	maintenance            bool
 	maintenanceTransaction bool
 	onClose                func() error
@@ -160,8 +167,12 @@ func (session *postgresSession) Close() error {
 	if session == nil {
 		return nil
 	}
+	if session.record != nil {
+		session.record.cancel()
+	}
 	var closeErr error
 	session.closeOnce.Do(func() {
+		session.closed.Store(true)
 		session.mu.Lock()
 		transaction := session.transaction
 		session.transaction = nil
@@ -173,6 +184,9 @@ func (session *postgresSession) Close() error {
 		}
 		if session.onClose != nil {
 			closeErr = errors.Join(closeErr, session.onClose())
+		}
+		if session.node != nil {
+			session.node.unregisterSession(session.record)
 		}
 	})
 	return closeErr
@@ -212,12 +226,52 @@ func (session *postgresSession) Describe(
 	source string,
 	parameters []pgwire.Parameter,
 ) ([]pgwire.Column, error) {
-	if session == nil || session.authenticator == nil ||
+	defer session.refreshSessionState()
+	if session == nil || session.closed.Load() || session.authenticator == nil ||
 		(session.authenticator.engine == nil && !session.maintenance) {
 		return nil, pgwire.NewError("08003", "KitDB session is closed")
 	}
+	ctx, cleanup := session.record.operationContext(ctx)
+	defer cleanup()
+	if result, handled, err := session.localRoleCommand(ctx, source, true, len(parameters)); handled {
+		return result.Columns, err
+	}
+	if result, handled, err := session.accountCommand(ctx, source, parameters, true); handled {
+		return result.Columns, err
+	}
+	if result, handled, err := session.sessionCommand(ctx, source, parameters, true); handled {
+		return result.Columns, err
+	}
+	if isAccountCatalogQuery(source) {
+		session.mu.Lock()
+		failed := session.failed
+		session.mu.Unlock()
+		if failed {
+			return nil, pgwire.NewError("25P02", "current transaction is aborted; issue ROLLBACK")
+		}
+		result, _, err := session.accountCatalogQuery(ctx, source, parameters, true)
+		if err != nil {
+			session.mu.Lock()
+			if session.transaction != nil || session.maintenanceTransaction {
+				session.failed = true
+			}
+			session.mu.Unlock()
+		}
+		return result.Columns, err
+	}
 	if session.maintenance {
 		return session.describeMaintenance(source, parameters)
+	}
+	if result, handled, err := session.localStatement(ctx, source, parameters, true); handled {
+		return result.Columns, err
+	}
+	if err := checkDatabaseStatement(session.authenticator.permissions, source); err != nil {
+		session.mu.Lock()
+		if session.transaction != nil {
+			session.failed = true
+		}
+		session.mu.Unlock()
+		return nil, postgresError(err)
 	}
 	if isSavepointSQL(source) {
 		_, err := kitdbsql.ParseStatement(source)
@@ -281,15 +335,55 @@ func (session *postgresSession) Execute(
 	source string,
 	parameters []pgwire.Parameter,
 ) (pgwire.Result, error) {
-	if session == nil || session.authenticator == nil ||
+	defer session.refreshSessionState()
+	if session == nil || session.closed.Load() || session.authenticator == nil ||
 		(session.authenticator.engine == nil && !session.maintenance) {
 		return pgwire.Result{}, pgwire.NewError("08003", "KitDB session is closed")
+	}
+	ctx, cleanup := session.record.operationContext(ctx)
+	defer cleanup()
+	if result, handled, err := session.localRoleCommand(ctx, source, false, len(parameters)); handled {
+		return result, err
+	}
+	if result, handled, err := session.accountCommand(ctx, source, parameters, false); handled {
+		return result, err
+	}
+	if result, handled, err := session.sessionCommand(ctx, source, parameters, false); handled {
+		return result, err
+	}
+	if isAccountCatalogQuery(source) {
+		session.mu.Lock()
+		failed := session.failed
+		session.mu.Unlock()
+		if failed {
+			return pgwire.Result{}, pgwire.NewError("25P02", "current transaction is aborted; issue ROLLBACK")
+		}
+		result, _, err := session.accountCatalogQuery(ctx, source, parameters, false)
+		if err != nil {
+			session.mu.Lock()
+			if session.transaction != nil || session.maintenanceTransaction {
+				session.failed = true
+			}
+			session.mu.Unlock()
+		}
+		return result, err
 	}
 	if session.maintenance {
 		return session.executeMaintenance(ctx, source, parameters)
 	}
+	if result, handled, err := session.localStatement(ctx, source, parameters, false); handled {
+		return result, err
+	}
+	if err := checkDatabaseStatement(session.authenticator.permissions, source); err != nil {
+		session.mu.Lock()
+		if session.transaction != nil {
+			session.failed = true
+		}
+		session.mu.Unlock()
+		return pgwire.Result{}, postgresError(err)
+	}
 	if session.authenticator.trace != nil {
-		session.authenticator.trace(source, len(parameters))
+		session.authenticator.trace(kitdbsql.AccountTraceSource(source), len(parameters))
 	}
 	if normalizePostgresSQL(source) == "discard all" {
 		session.mu.Lock()
@@ -656,7 +750,7 @@ func (session *postgresSession) executeMaintenance(
 		return pgwire.Result{}, pgwire.NewError("57014", "KitDB query canceled or timed out")
 	}
 	if session.node != nil && session.node.trace != nil {
-		session.node.trace(session.authenticator.database, source, len(parameters))
+		session.node.trace(session.authenticator.database, kitdbsql.AccountTraceSource(source), len(parameters))
 	}
 	normalized := normalizePostgresSQL(source)
 	if begin, _, err := parsePostgresBegin(normalized); begin {
@@ -711,7 +805,7 @@ func (session *postgresSession) maintenanceCatalogQuery(source string) (pgwire.R
 	names := []string{session.authenticator.database}
 	if session.node != nil {
 		var err error
-		names, err = session.node.Databases()
+		names, err = session.visibleDatabases()
 		if err != nil {
 			return pgwire.Result{}, true, pgwire.NewError("58030", err.Error())
 		}
@@ -726,7 +820,7 @@ func (session *postgresSession) attachNodeDatabases(catalog *postgresCatalogSnap
 	if session == nil || session.node == nil || catalog == nil {
 		return nil
 	}
-	names, err := session.node.Databases()
+	names, err := session.visibleDatabases()
 	if err != nil {
 		return pgwire.NewError("58030", err.Error())
 	}
@@ -1023,6 +1117,11 @@ func postgresError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// An uncertain commit must never inherit a retryable rejection code from
+	// another wrapped or joined cause.
+	if errors.Is(err, kitdbengine.ErrDurabilityUncertain) {
+		return pgwire.NewError("XX000", err.Error())
+	}
 	var protocolError *pgwire.Error
 	if errors.As(err, &protocolError) {
 		return err
@@ -1045,10 +1144,13 @@ func postgresError(err error) error {
 		code = "25P01"
 	case errors.Is(err, errUpsertCardinality):
 		code = "21000"
-	case errors.Is(err, ErrTransactionConflict):
+	case errors.Is(err, ErrTransactionConflict), errors.Is(err, kitdbengine.ErrTransactionConflict):
 		code = "40001"
 	case errors.Is(err, kitdbnode.ErrCheckpointBackoff), errors.Is(err, kitdbnode.ErrMaintenanceQueueFull),
-		errors.Is(err, kitdbengine.ErrSnapshotsActive):
+		errors.Is(err, kitdbengine.ErrSnapshotsActive), errors.Is(err, kitdbengine.ErrSnapshotMemory),
+		errors.Is(err, kitdbengine.ErrSnapshotAdmissionFull), errors.Is(err, kitdbengine.ErrSnapshotAdmissionTimeout),
+		errors.Is(err, kitdbengine.ErrTooManySnapshots), errors.Is(err, kitdbengine.ErrTooManyTransactions),
+		errors.Is(err, kitdbengine.ErrActiveTransactionMemory):
 		code = "53300"
 	case errors.Is(err, kitdbnode.ErrClosed):
 		code = "57P01"

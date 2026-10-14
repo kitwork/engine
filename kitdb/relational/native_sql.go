@@ -12,6 +12,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/kitwork/engine/kitdb/managed"
+	kitdbsql "github.com/kitwork/engine/kitdb/sql"
 )
 
 // OpenNativeSQL exposes this Engine through database/sql without opening a
@@ -44,8 +47,12 @@ func (connector nativeSQLConnector) Driver() driver.Driver {
 }
 
 type nativeNodeSQLConnector struct {
-	node     *PostgresNode
-	database string
+	adapter     string
+	node        *PostgresNode
+	database    string
+	readOnly    bool
+	permissions *managed.DatabasePermissions
+	account     *managed.UserInfo
 }
 
 func (connector nativeNodeSQLConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -71,10 +78,52 @@ func (connector nativeNodeSQLConnector) Connect(ctx context.Context) (driver.Con
 			connector.node.trace(database.name, source, parameterCount)
 		}
 	}
-	return &nativeSQLConnection{
-		engine: entry.engine, readOnly: connector.node.readOnly, trace: trace,
+	account := managed.UserInfo{Name: connector.node.user, Admin: true}
+	if connector.account != nil {
+		account = *connector.account
+	}
+	localPolicy, err := entry.engine.localRolePolicy(account, database.name)
+	if err != nil {
+		_ = connector.node.releaseEngine(entry)
+		return nil, err
+	}
+	connection := &nativeSQLConnection{
+		localPolicy: localPolicy,
+		engine:      entry.engine, readOnly: connector.node.readOnly || connector.readOnly, trace: trace,
+		permissions: connector.permissions,
+		accountCommand: func(ctx context.Context, source string, values []any, inTransaction bool) (Result, bool, error) {
+			return connector.node.accountCommand(ctx, account, source, values, inTransaction, false)
+		},
 		release: func() error { return connector.node.releaseEngine(entry) },
-	}, nil
+	}
+	if localPolicy != nil {
+		connection.readOnly = connector.node.readOnly
+	}
+	connection.catalogQuery = func(ctx context.Context, source string, values []any) (Result, bool, error) {
+		if isLocalRoleCatalogQuery(source) {
+			return connector.node.localRoleCatalogQuery(ctx, account, databaseCatalogScope{engine: entry.engine, database: database.name, active: connection.transaction, permissions: connection.permissions, local: connection.localPolicy, readOnly: connection.readOnly}, source, values)
+		}
+		return connector.node.accountCatalogQuery(account, source, values)
+	}
+	adapter := connector.adapter
+	connection.localRoleCommand = func(ctx context.Context, source string, inTx bool) (Result, bool, error) {
+		return connector.node.localRoleCommand(ctx, entry.engine, database.name, account, source, inTx, false)
+	}
+	connection.sessionCommand = func(ctx context.Context, source string, values []any, inTransaction bool) (Result, bool, error) {
+		return connector.node.sessionCommand(ctx, account, connection.record, source, values, inTransaction, false)
+	}
+	if adapter == "" {
+		adapter = "native"
+	}
+	_, err = connector.node.registerSession(account, database.name, adapter, connection.Close, func(record *nodeSessionRecord) {
+		connection.record = record
+		connection.node = connector.node
+	})
+	if err != nil {
+		_ = connection.Close()
+		return nil, err
+	}
+	return connection, nil
 }
 
 func (connector nativeNodeSQLConnector) Driver() driver.Driver { return nativeSQLDriver{} }
@@ -86,14 +135,24 @@ func (nativeSQLDriver) Open(string) (driver.Conn, error) {
 }
 
 type nativeSQLConnection struct {
-	mu          sync.Mutex
-	engine      *Engine
-	transaction *Transaction
-	sequences   sequenceSession
-	readOnly    bool
-	trace       func(source string, parameterCount int)
-	release     func() error
-	closed      bool
+	localPolicy      *localRolePolicy
+	localRoleCommand func(context.Context, string, bool) (Result, bool, error)
+	sessionCommand   func(context.Context, string, []any, bool) (Result, bool, error)
+	record           *nodeSessionRecord
+	node             *PostgresNode
+	mu               sync.Mutex
+	engine           *Engine
+	transaction      *Transaction
+	sequences        sequenceSession
+	readOnly         bool
+	permissions      *managed.DatabasePermissions
+	catalogQuery     func(context.Context, string, []any) (Result, bool, error)
+	accountCommand   func(context.Context, string, []any, bool) (Result, bool, error)
+	trace            func(source string, parameterCount int)
+	release          func() error
+	closed           bool
+	closeDone        chan struct{}
+	closeErr         error
 }
 
 func (connection *nativeSQLConnection) Prepare(query string) (driver.Stmt, error) {
@@ -110,12 +169,21 @@ func (connection *nativeSQLConnection) PrepareContext(_ context.Context, query s
 }
 
 func (connection *nativeSQLConnection) Close() error {
+	if connection.record != nil {
+		connection.record.cancel()
+	}
 	connection.mu.Lock()
 	if connection.closed {
+		done := connection.closeDone
 		connection.mu.Unlock()
-		return nil
+		<-done
+		connection.mu.Lock()
+		err := connection.closeErr
+		connection.mu.Unlock()
+		return err
 	}
 	connection.closed = true
+	connection.closeDone = make(chan struct{})
 	var closeErr error
 	if connection.transaction != nil {
 		closeErr = connection.transaction.Rollback()
@@ -128,6 +196,13 @@ func (connection *nativeSQLConnection) Close() error {
 	if release != nil {
 		closeErr = errors.Join(closeErr, release())
 	}
+	if connection.node != nil {
+		connection.node.unregisterSession(connection.record)
+	}
+	connection.mu.Lock()
+	connection.closeErr = closeErr
+	close(connection.closeDone)
+	connection.mu.Unlock()
 	return closeErr
 }
 
@@ -136,6 +211,8 @@ func (connection *nativeSQLConnection) Begin() (driver.Tx, error) {
 }
 
 func (connection *nativeSQLConnection) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
+	ctx, cleanup := connection.record.operationContext(ctx)
+	defer cleanup()
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
 	if connection.closed || connection.engine == nil {
@@ -156,6 +233,9 @@ func (connection *nativeSQLConnection) BeginTx(ctx context.Context, options driv
 		return nil, err
 	}
 	connection.transaction = transaction
+	if connection.record != nil {
+		connection.record.state.Store(1)
+	}
 	return &nativeSQLTransaction{connection: connection, transaction: transaction}, nil
 }
 
@@ -173,6 +253,9 @@ func (connection *nativeSQLConnection) ResetSession(context.Context) error {
 	if connection.transaction != nil {
 		_ = connection.transaction.Rollback()
 		connection.transaction = nil
+		if connection.record != nil {
+			connection.record.state.Store(0)
+		}
 	}
 	return nil
 }
@@ -201,6 +284,12 @@ func (connection *nativeSQLConnection) QueryContext(
 	query string,
 	arguments []driver.NamedValue,
 ) (driver.Rows, error) {
+	ctx, cleanup := connection.record.operationContext(ctx)
+	defer func() {
+		if cleanup != nil {
+			cleanup()
+		}
+	}()
 	values := nativeSQLArguments(arguments)
 	connection.mu.Lock()
 	if connection.closed || connection.engine == nil {
@@ -208,7 +297,60 @@ func (connection *nativeSQLConnection) QueryContext(
 		return nil, driver.ErrBadConn
 	}
 	if connection.trace != nil {
-		connection.trace(query, len(values))
+		connection.trace(kitdbsql.AccountTraceSource(query), len(values))
+	}
+	if connection.sessionCommand != nil {
+		if result, handled, err := connection.sessionCommand(ctx, query, values, connection.transaction != nil); handled {
+			connection.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			return connection.materializedRows(result)
+		}
+	}
+	if connection.localRoleCommand != nil {
+		if _, handled, _ := kitdbsql.ParseLocalRoleStatement(query); handled && len(values) != 0 {
+			connection.mu.Unlock()
+			return nil, fmt.Errorf("local role statements do not accept value parameters")
+		}
+		if result, handled, err := connection.localRoleCommand(ctx, query, connection.transaction != nil); handled {
+			connection.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			return connection.materializedRows(result)
+		}
+	}
+	if connection.accountCommand != nil {
+		if result, handled, err := connection.accountCommand(ctx, query, values, connection.transaction != nil); handled {
+			connection.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			return connection.materializedRows(result)
+		}
+	}
+	if connection.catalogQuery != nil {
+		if result, handled, err := connection.catalogQuery(ctx, query, values); handled {
+			connection.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			return connection.materializedRows(result)
+		}
+	}
+	if connection.localPolicy != nil {
+		if result, handled, err := connection.engine.executeLocalStatement(ctx, connection.localPolicy, connection.transaction, query, values, false, connection.readOnly); handled {
+			connection.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			return connection.materializedRows(result)
+		}
+	}
+	if err := checkDatabaseStatement(connection.permissions, query); err != nil {
+		connection.mu.Unlock()
+		return nil, err
 	}
 	if connection.transaction != nil {
 		result, err := connection.transaction.Execute(ctx, query, values...)
@@ -216,7 +358,7 @@ func (connection *nativeSQLConnection) QueryContext(
 		if err != nil {
 			return nil, err
 		}
-		return newNativeSQLRows(result)
+		return connection.materializedRows(result)
 	}
 	stream, handled, err := connection.engine.openSelectRowStream(ctx, query, values)
 	if handled {
@@ -224,7 +366,17 @@ func (connection *nativeSQLConnection) QueryContext(
 		if err != nil {
 			return nil, err
 		}
-		return newNativeSQLStreamRows(stream), nil
+		rows := newNativeSQLStreamRows(stream)
+		if connection.record != nil {
+			rows.lifetime = connection.record.ctx
+			stop := context.AfterFunc(connection.record.ctx, func() { _ = stream.Close() })
+			finish := cleanup
+			rows.cleanup = func() { stop(); finish() }
+		} else {
+			rows.cleanup = cleanup
+		}
+		cleanup = nil
+		return rows, nil
 	}
 	result, err := connection.engine.executeWithSequences(
 		ctx, query, values, &connection.sequences, connection.readOnly,
@@ -233,17 +385,50 @@ func (connection *nativeSQLConnection) QueryContext(
 	if err != nil {
 		return nil, err
 	}
-	return newNativeSQLRows(result)
+	return connection.materializedRows(result)
 }
 
 func (connection *nativeSQLConnection) execute(ctx context.Context, query string, arguments []any) (Result, error) {
+	ctx, cleanup := connection.record.operationContext(ctx)
+	defer cleanup()
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
 	if connection.closed || connection.engine == nil {
 		return Result{}, driver.ErrBadConn
 	}
 	if connection.trace != nil {
-		connection.trace(query, len(arguments))
+		connection.trace(kitdbsql.AccountTraceSource(query), len(arguments))
+	}
+	if connection.sessionCommand != nil {
+		if result, handled, err := connection.sessionCommand(ctx, query, arguments, connection.transaction != nil); handled {
+			return result, err
+		}
+	}
+	if connection.localRoleCommand != nil {
+		if _, handled, _ := kitdbsql.ParseLocalRoleStatement(query); handled && len(arguments) != 0 {
+			return Result{}, fmt.Errorf("local role statements do not accept value parameters")
+		}
+		if result, handled, err := connection.localRoleCommand(ctx, query, connection.transaction != nil); handled {
+			return result, err
+		}
+	}
+	if connection.accountCommand != nil {
+		if result, handled, err := connection.accountCommand(ctx, query, arguments, connection.transaction != nil); handled {
+			return result, err
+		}
+	}
+	if connection.catalogQuery != nil {
+		if result, handled, err := connection.catalogQuery(ctx, query, arguments); handled {
+			return result, err
+		}
+	}
+	if connection.localPolicy != nil {
+		if result, handled, err := connection.engine.executeLocalStatement(ctx, connection.localPolicy, connection.transaction, query, arguments, false, connection.readOnly); handled {
+			return result, err
+		}
+	}
+	if err := checkDatabaseStatement(connection.permissions, query); err != nil {
+		return Result{}, err
 	}
 	if connection.transaction != nil {
 		return connection.transaction.Execute(ctx, query, arguments...)
@@ -275,8 +460,13 @@ func (transaction *nativeSQLTransaction) finish(commit bool) error {
 		return sql.ErrTxDone
 	}
 	connection.transaction = nil
+	if connection.record != nil {
+		connection.record.state.Store(0)
+	}
 	if commit {
-		_, err := transaction.transaction.Commit(context.Background())
+		ctx, cleanup := connection.record.operationContext(context.Background())
+		defer cleanup()
+		_, err := transaction.transaction.Commit(ctx)
 		return err
 	}
 	return transaction.transaction.Rollback()
@@ -313,14 +503,17 @@ func (statement *nativeSQLStatement) QueryContext(
 }
 
 type nativeSQLRows struct {
-	columns []Column
-	rows    [][]any
-	index   int
+	lifetime context.Context
+	columns  []Column
+	rows     [][]any
+	index    int
 }
 
 type nativeSQLStreamRows struct {
-	columns []Column
-	stream  atomic.Pointer[selectRowStream]
+	lifetime context.Context
+	cleanup  func()
+	columns  []Column
+	stream   atomic.Pointer[selectRowStream]
 }
 
 func newNativeSQLStreamRows(stream *selectRowStream) *nativeSQLStreamRows {
@@ -342,10 +535,16 @@ func (rows *nativeSQLStreamRows) Close() error {
 	if stream == nil {
 		return nil
 	}
+	if rows.cleanup != nil {
+		rows.cleanup()
+	}
 	return stream.Close()
 }
 
 func (rows *nativeSQLStreamRows) Next(destination []driver.Value) error {
+	if rows.lifetime != nil && rows.lifetime.Err() != nil {
+		return rows.lifetime.Err()
+	}
 	stream := rows.stream.Load()
 	if stream == nil {
 		return io.EOF
@@ -383,6 +582,14 @@ func newNativeSQLRows(result Result) (*nativeSQLRows, error) {
 	return &nativeSQLRows{columns: result.Columns, rows: result.Rows}, nil
 }
 
+func (connection *nativeSQLConnection) materializedRows(result Result) (*nativeSQLRows, error) {
+	rows, err := newNativeSQLRows(result)
+	if err == nil && connection.record != nil {
+		rows.lifetime = connection.record.ctx
+	}
+	return rows, err
+}
+
 func (rows *nativeSQLRows) Columns() []string {
 	columns := make([]string, len(rows.columns))
 	for index, column := range rows.columns {
@@ -397,6 +604,9 @@ func (rows *nativeSQLRows) Close() error {
 }
 
 func (rows *nativeSQLRows) Next(destination []driver.Value) error {
+	if rows.lifetime != nil && rows.lifetime.Err() != nil {
+		return rows.lifetime.Err()
+	}
 	if rows.index >= len(rows.rows) {
 		return io.EOF
 	}

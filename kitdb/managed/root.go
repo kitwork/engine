@@ -34,17 +34,22 @@ type Database struct {
 }
 
 type Catalog struct {
-	Version   int        `json:"version"`
-	Databases []Database `json:"databases"`
+	Version      int        `json:"version"`
+	Databases    []Database `json:"databases"`
+	AuthRequired bool       `json:"auth_required,omitempty"`
 }
 
 // Root holds the exclusive .catalog database lock until Close. User databases
 // are not opened by Open or Catalog. Registration is an offline operation.
 type Root struct {
-	mu      sync.Mutex
-	path    string
-	store   *kitdb.DB
-	catalog Catalog
+	mu                  sync.Mutex
+	path                string
+	store               *kitdb.DB
+	catalog             Catalog
+	auth                *authCatalog
+	authSlots           chan struct{}
+	accountInstances    map[string]uint64
+	nextAccountInstance uint64
 }
 
 // Init creates a fresh catalog without adopting any existing database files.
@@ -118,7 +123,11 @@ func Open(path string) (*Root, error) {
 	if err != nil {
 		return nil, errors.Join(err, store.Close())
 	}
-	return &Root{path: absolute, store: store, catalog: catalog}, nil
+	auth, err := readAuth(store, catalog)
+	if err != nil {
+		return nil, errors.Join(err, store.Close())
+	}
+	return &Root{path: absolute, store: store, catalog: catalog, auth: auth, authSlots: make(chan struct{}, 4)}, nil
 }
 
 func catalogOptions() kitdb.OpenOptions {
@@ -161,13 +170,23 @@ func directoryPresent(path, name string) (bool, error) {
 func (root *Root) Catalog() Catalog {
 	root.mu.Lock()
 	defer root.mu.Unlock()
-	return Catalog{Version: root.catalog.Version, Databases: slices.Clone(root.catalog.Databases)}
+	return Catalog{Version: root.catalog.Version, AuthRequired: root.catalog.AuthRequired, Databases: slices.Clone(root.catalog.Databases)}
 }
 
 // Register publishes an already-created database with its verified identity.
 // Retrying the same registration is idempotent. It never creates, renames or
 // deletes the user's files, so publication is one ordinary catalog transaction.
 func (root *Root) Register(name, directory string) (result Database, err error) {
+	if name != directory {
+		return result, fmt.Errorf("kitdb root: database name must equal its folder name; use Attach(name)")
+	}
+	return root.Attach(name)
+}
+
+// Attach verifies and exclusively owns an existing folder while publishing its
+// registration. It never creates a database or replaces an existing identity.
+func (root *Root) Attach(name string) (result Database, err error) {
+	directory := name
 	root.mu.Lock()
 	defer root.mu.Unlock()
 	if root.store == nil {
@@ -183,16 +202,17 @@ func (root *Root) Register(name, directory string) (result Database, err error) 
 	if err != nil {
 		return result, err
 	}
-	result = Database{Name: name, Directory: directory, DatabaseID: database.ID()}
-	if err := database.Close(); err != nil {
-		return result, err
+	defer func() { err = errors.Join(err, database.Close()) }()
+	if err := database.Verify(); err != nil {
+		return result, fmt.Errorf("kitdb root: verify attach: %w", err)
 	}
+	result = Database{Name: name, Directory: directory, DatabaseID: database.ID()}
 	for _, existing := range root.catalog.Databases {
 		if existing == result {
 			return result, nil
 		}
 	}
-	updated := Catalog{Version: 1, Databases: append(slices.Clone(root.catalog.Databases), result)}
+	updated := Catalog{Version: root.catalog.Version, AuthRequired: root.catalog.AuthRequired, Databases: append(slices.Clone(root.catalog.Databases), result)}
 	if err := validateCatalog(updated); err != nil {
 		return Database{}, err
 	}
@@ -280,7 +300,7 @@ func safeName(name string) bool {
 }
 
 func validateCatalog(catalog Catalog) error {
-	if catalog.Version != 1 || len(catalog.Databases) > MaximumDatabases {
+	if !((catalog.Version == 1 && !catalog.AuthRequired) || (catalog.Version == 2 && catalog.AuthRequired)) || len(catalog.Databases) > MaximumDatabases {
 		return fmt.Errorf("kitdb root: unsupported catalog version or database limit exceeded")
 	}
 	names, paths, ids := map[string]bool{}, map[string]bool{}, map[string]bool{}

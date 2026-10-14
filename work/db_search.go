@@ -91,11 +91,11 @@ func (t *SchemaTable) primaryKeyColumn() string {
 func (t *SchemaTable) runSearch() value.Value {
 	columns := t.searchableColumns()
 	if len(columns) == 0 {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: table %q has no .searchable() column", t.table)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: table %q has no .searchable() column", t.table))
 	}
 	primaryKey := t.primaryKeyColumn()
 	if primaryKey == "" {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search on %q needs a primary key column; mark one .key()", t.table)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: search on %q needs a primary key column; mark one .key()", t.table))
 	}
 	if strings.TrimSpace(t.searchText) == "" {
 		return value.New([]any{})
@@ -105,7 +105,7 @@ func (t *SchemaTable) runSearch() value.Value {
 		limit = 20
 	}
 	if limit > searchMaximumLimit {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search limit exceeds %d", searchMaximumLimit)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: search limit exceeds %d", searchMaximumLimit))
 	}
 	ctx := context.Background()
 	if t.scope != nil {
@@ -113,41 +113,41 @@ func (t *SchemaTable) runSearch() value.Value {
 	}
 	manager, err := t.tenant.searchManagerFor()
 	if err != nil || manager == nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search manager: %v", err)}
+		return value.InvalidFailure(value.UnavailableCode, fmt.Sprintf("db: search manager: %v", err))
 	}
 	schema, allFields, err := newSearchSchema(columns)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search schema: %v", err)}
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search schema: %v", err))
 	}
 	fields, snippetColumns, err := t.selectedSearchColumns(columns, allFields)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: %v", err)}
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search: %v", err))
 	}
 	indexKey := t.searchIndexKey(schema)
 	state := t.tenant.searchIndexState(indexKey)
 	if t.engine == "kitdb" {
 		if t.transaction != nil {
-			return value.Value{K: value.Invalid, V: "db: KitDB search is unavailable inside a record transaction"}
+			return value.InvalidFailure(value.InvalidArgumentCode, "db: KitDB search is unavailable inside a record transaction")
 		}
 		hits, err := t.searchFreshKitDBSnapshot(
 			ctx, manager, state, indexKey, schema, fields, primaryKey, columns, limit,
 		)
 		if err != nil {
-			return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: %v", err)}
+			return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search: %v", err))
 		}
 		t.searchHitCount = len(hits)
 		return t.hydrateKitDBSearchHits(ctx, hits, primaryKey, snippetColumns)
 	}
 	source := t.source().db()
 	if source == nil {
-		return value.Value{K: value.Invalid, V: "db: search: database unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "db: search: database unavailable")
 	}
 	if err := t.ensureSearchRevision(ctx, source, state); err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search revision: %v", err)}
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search revision: %v", err))
 	}
 	hits, err := t.searchFreshSnapshot(ctx, source, manager, state, indexKey, schema, fields, primaryKey, columns, limit)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: %v", err)}
+		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search: %v", err))
 	}
 	t.searchHitCount = len(hits)
 	return t.hydrateSearchHits(ctx, hits, primaryKey, snippetColumns)
@@ -709,7 +709,7 @@ func (t *SchemaTable) hydrateSearchHits(
 		fields := row.Map()
 		snippet, err := bestSearchSnippet(ctx, fields, columns, t.searchText)
 		if err != nil {
-			return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search snippet: %v", err)}
+			return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search snippet: %v", err))
 		}
 		fields["_score"] = value.New(hit.Score)
 		fields["_snippet"] = value.New(snippet)
@@ -728,7 +728,7 @@ func (t *SchemaTable) hydrateKitDBSearchHits(
 		return value.New([]any{})
 	}
 	if t.columns[primaryKey] == nil || len(t.definition.primaryFields()) == 0 {
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search: no primary field %q", primaryKey)}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: search: no primary field %q", primaryKey))
 	}
 	managed, err := t.kitDBManaged()
 	if err != nil {
@@ -778,7 +778,7 @@ func (t *SchemaTable) hydrateKitDBSearchHits(
 		fields := row.Map()
 		snippet, err := bestSearchSnippet(ctx, fields, columns, t.searchText)
 		if err != nil {
-			return value.Value{K: value.Invalid, V: fmt.Sprintf("db: search snippet: %v", err)}
+			return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: search snippet: %v", err))
 		}
 		fields["_score"] = value.New(hit.Score)
 		fields["_snippet"] = value.New(snippet)

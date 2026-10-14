@@ -87,11 +87,11 @@ router.get((ctx) => {
     const progress = db.products.createMany(rows, { batch: 64 });
     return ctx.json({ progress: progress, count: db.products.count() });
   }
-  const attempt = db.products.createMany(rows, { batch: 128 }).safe();
+  const attempt = safe(() => db.products.createMany(rows, { batch: 128 }));
   return ctx.json({
-    ok: attempt.ok,
-    code: attempt.code,
-    progress: attempt.value,
+    value: attempt.value,
+    code: attempt.error.code,
+    progress: attempt.error.progress,
     count: db.products.count(),
     rolledBack: db.products.find("product-269") === null
   });
@@ -111,8 +111,10 @@ router.get((ctx) => {
 	if failed.Code != http.StatusOK {
 		t.Fatalf("failed bulk status = %d, body = %s", failed.Code, failed.Body.String())
 	}
+	// a createMany that stopped midway is the failure PARTIAL (14/10/2026), its progress the error's:
+	// value is null, as for every failure
 	for _, expected := range []string{
-		`"ok":false`, `"code":"KITDB_CREATE_MANY_PARTIAL"`, `"inserted":256`,
+		`"value":null`, `"code":"PARTIAL"`, `"inserted":256`,
 		`"batches":2`, `"next":256`, `"failedRow":270`, `"complete":false`,
 		`"count":256`, `"rolledBack":true`,
 	} {
@@ -143,16 +145,11 @@ func TestKitDBCreateManyCancellationStopsBeforeFirstBatch(t *testing.T) {
 		[]value.Value{value.New(map[string]value.Value{"id": value.New("one")})},
 		1,
 	)
-	if !result.IsError {
-		t.Fatalf("canceled createMany result = %#v, want attached error", result)
-	}
-	progress := result.Map()
-	if progress["inserted"].Int() != 0 || progress["next"].Int() != 0 || progress["complete"].N != 0 {
-		t.Fatalf("canceled createMany progress = %#v", progress)
-	}
+	// nothing was written and the request is over: the cancellation, which the VM ends the run with
+	// (EXECUTION_CANCELLED, never caught), not a PARTIAL with progress
 	failure, ok := value.FailureFrom(result)
-	if !ok || failure.Code != kitDBCreateManyFailedCode {
-		t.Fatalf("canceled createMany error = %#v", result.ErrorVal)
+	if result.K != value.Invalid || !ok || failure.Code != value.CancelledCode || failure.Progress.K != value.Invalid {
+		t.Fatalf("canceled createMany = %s %+v, want the cancellation", result.K, failure)
 	}
 }
 

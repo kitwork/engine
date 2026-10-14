@@ -38,7 +38,7 @@ func TestReleasePlanModes(t *testing.T) {
 
 	required := map[string]bool{
 		"KitDB 1.x compatibility contract":  false,
-		"VM v2 compatibility archive":       false,
+		"VM compatibility archive":          false,
 		"VM fault gauntlet":                 false,
 		"Language/inspector contracts":      false,
 		"KitDB database journey":            false,
@@ -156,16 +156,16 @@ func TestReleasePlanModes(t *testing.T) {
 			t.Fatalf("%s is not repeated ten times", step.Name)
 		}
 		if step.Name == "VM/compiler contracts" &&
-			!containsArgument(step.Command, "TestVMV2Contract|TestCompilerV3") {
+			!containsArgument(step.Command, "TestVMContract|TestCompilerV4") {
 			t.Fatal("contract gate omitted cold-process compiler determinism")
 		}
 		if step.Name == "Language/inspector contracts" &&
 			!containsArgument(step.Command, "TestInspectFile|TestInspectProgram|TestLanguageConformanceCorpus") {
 			t.Fatal("contract gate omitted language corpus or bytecode inspector")
 		}
-		if step.Name == "VM v2 compatibility archive" &&
-			!containsArgument(step.Command, "^TestVMV2CompatibilityArchive") {
-			t.Fatal("contract gate omitted the frozen VM v2 Program archive")
+		if step.Name == "VM compatibility archive" &&
+			!containsArgument(step.Command, "^TestVMCompatibilityArchive") {
+			t.Fatal("contract gate omitted the frozen VM Program archive")
 		}
 		if step.Name == "VM fault gauntlet" &&
 			!containsArgument(step.Command, "^TestVMFaultGauntlet") {
@@ -242,7 +242,7 @@ func TestKitDBCommerceGateCannotBeOmitted(t *testing.T) {
 
 func TestCompatibilityReportMatchesRuntime(t *testing.T) {
 	report := currentCompatibilityReport()
-	if report.BytecodeVersion != 2 ||
+	if report.BytecodeVersion != 3 ||
 		report.ProgramEncodingVersion != 1 ||
 		report.ArtifactVersion != compiler.BytecodeArtifactVersion ||
 		report.CompilerSchemaVersion != compiler.CompilerSchemaVersion ||

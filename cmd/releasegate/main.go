@@ -187,8 +187,8 @@ func releasePlan(mode string) ([]gateStep, error) {
 	verify := []gateStep{
 		kitDBCompatibilityStep(),
 		{
-			Name:    "VM v2 compatibility archive",
-			Command: []string{"go", "test", "./compatibility", "-run", "^TestVMV2CompatibilityArchive", "-count=1"},
+			Name:    "VM compatibility archive",
+			Command: []string{"go", "test", "./compatibility", "-run", "^TestVMCompatibilityArchive", "-count=1"},
 		},
 		{
 			Name:    "VM fault gauntlet",
@@ -200,7 +200,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 		},
 		{
 			Name:    "VM/compiler contracts",
-			Command: []string{"go", "test", "./runtime", "./compiler", "-run", "TestVMV2Contract|TestCompilerV3", "-count=1"},
+			Command: []string{"go", "test", "./runtime", "./compiler", "-run", "TestVMContract|TestCompilerV4", "-count=1"},
 		},
 		{
 			Name:    "Diagnostics/lifecycle",

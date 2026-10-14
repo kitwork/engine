@@ -31,7 +31,7 @@ func (t *SchemaTable) Explain(_ ...value.Value) value.Value {
 		return v
 	}
 	if t.engine != "kitdb" {
-		return value.Value{K: value.Invalid, V: "db.explain: currently available only for KitDB"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.explain: currently available only for KitDB")
 	}
 	plan := t.builder().ExecutionPlan()
 	access, err := t.planKitDBAccess(plan)
@@ -127,10 +127,7 @@ func (t *SchemaTable) schemaAggregate(operation, field string) value.Value {
 	}
 	spec := t.columns[field]
 	if spec == nil {
-		return value.Value{
-			K: value.Invalid,
-			V: fmt.Sprintf("db.%s: table %q has no column %q", operation, t.table, field),
-		}
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.%s: table %q has no column %q", operation, t.table, field))
 	}
 	if t.engine == "kitdb" {
 		results, err := t.kitDBAggregates([]kitDBAggregateRequest{{operation: operation, field: field}})
@@ -150,7 +147,7 @@ func (t *SchemaTable) schemaAggregate(operation, field string) value.Value {
 	case "max":
 		result = t.builder().Max(field)
 	default:
-		return value.Value{K: value.Invalid, V: "db.aggregate: unsupported operation"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.aggregate: unsupported operation")
 	}
 	if operation == "min" || operation == "max" {
 		return coerceRead(spec.kind, result)

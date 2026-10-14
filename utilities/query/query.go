@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -111,6 +112,45 @@ type Query struct {
 	maxLimit  int
 
 	debug bool
+
+	// failure is what a lambda of the query failed with (where(row => …) running into fail("…") or a
+	// call of what is not a function): every terminal answers it, so the query fails as its lambda did,
+	// and safe(() => …) reads it (14/10/2026). Until then the condition was dropped without a word and
+	// the query ran without it. A failure nothing catches (energy, cancellation) ends the run anyway,
+	// through the VM the lambda ran in (runtime/nesting.go).
+	failure value.Value
+	failed  bool
+}
+
+// DatabaseFailure is a driver's error as the program's failure, led by what failed: a unique
+// constraint CONFLICT, the request's cancellation and a deadline as such, any other DATABASE (a
+// driver error is the storage layer's, even when the server could not be reached).
+func DatabaseFailure(what string, err error) value.Value {
+	message := what + ": " + err.Error()
+	text := strings.ToLower(err.Error())
+	switch {
+	case errors.Is(err, context.Canceled):
+		return value.InvalidFailure(value.CancelledCode, message)
+	case errors.Is(err, context.DeadlineExceeded):
+		return value.InvalidFailure(value.TimeoutCode, message)
+	case strings.Contains(text, "unique constraint"), strings.Contains(text, "duplicate key"):
+		return value.InvalidFailure(value.ConflictCode, message)
+	}
+	return value.InvalidFailure(value.DatabaseCode, message)
+}
+
+// fail keeps the first failure of a lambda of the query (failure).
+func (q *Query) fail(failure value.Value) *Query {
+	if !q.failed {
+		q.failure, q.failed = failure, true
+	}
+	return q
+}
+
+// Failure is what a lambda of the query failed with; ok is false when none did. An executor that reads
+// the plan (ExecutionPlan) answers it before running anything.
+func (q *Query) Failure() (failure value.Value, ok bool) {
+	return q.failure, q.failed
 }
 
 // ExecutionPlan is the storage-neutral part of a fluent query. SQL backends
@@ -297,6 +337,9 @@ func (q *Query) Where(args ...value.Value) *Query {
 			}
 
 			res := q.vm.ExecuteLambda(sFn, proxies)
+			if res.K == value.Invalid {
+				return q.fail(res)
+			}
 
 			if res.K == value.Proxy {
 				if filter, ok := res.V.(*SQLProxy); ok {
@@ -386,6 +429,9 @@ func (q *Query) Or(args ...value.Value) *Query {
 			handler := &SQLProxy{TableName: tableName}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.vm.ExecuteLambda(sFn, []value.Value{proxy})
+			if res.K == value.Invalid {
+				return q.fail(res)
+			}
 
 			if res.K == value.Proxy {
 				if filter, ok := res.V.(*SQLProxy); ok {
@@ -445,6 +491,9 @@ func (q *Query) Having(args ...value.Value) *Query {
 			handler := &SQLProxy{TableName: tableName}
 			proxy := value.Value{K: value.Proxy, V: handler}
 			res := q.vm.ExecuteLambda(sFn, []value.Value{proxy})
+			if res.K == value.Invalid {
+				return q.fail(res)
+			}
 
 			if res.K == value.Proxy {
 				if filter, ok := res.V.(*SQLProxy); ok {
@@ -507,6 +556,9 @@ func (q *Query) Join(args ...value.Value) *Query {
 				pPrimary := value.Value{K: value.Proxy, V: hPrimary}
 
 				res := q.vm.ExecuteLambda(sFn, []value.Value{pJoin, pPrimary})
+				if res.K == value.Invalid {
+					return q.fail(res)
+				}
 
 				if res.K == value.Proxy {
 					if filter, ok := res.V.(*SQLProxy); ok {
@@ -539,6 +591,9 @@ func (q *Query) RightJoin(table string, on string) *Query {
 }
 
 func (q *Query) First(val ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(val) > 0 {
 		q.Where(val...)
 	}
@@ -563,6 +618,9 @@ func (q *Query) find(column string, value any) *Query {
 }
 
 func (q *Query) Find(vals ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	length := len(vals)
 
 	switch length {
@@ -593,6 +651,9 @@ func (q *Query) Find(vals ...value.Value) value.Value {
 }
 
 func (q *Query) List(args ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(args) == 0 {
 		return q.get()
 	}
@@ -608,6 +669,9 @@ func (q *Query) List(args ...value.Value) value.Value {
 }
 
 func (q *Query) Exists(args ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(args) > 0 {
 		q.Where(args...)
 	}
@@ -678,6 +742,9 @@ func (q *Query) min(col string) *Query {
 }
 
 func (q *Query) Count(args ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	length := len(args)
 
 	switch length {
@@ -705,18 +772,30 @@ func (q *Query) Count(args ...value.Value) value.Value {
 }
 
 func (q *Query) Sum(col string) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	return q.sum(col).val()
 }
 
 func (q *Query) Avg(col string) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	return q.avg(col).val()
 }
 
 func (q *Query) Max(col string) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	return q.max(col).val()
 }
 
 func (q *Query) Min(col string) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	return q.min(col).val()
 }
 
@@ -823,6 +902,9 @@ func (q *Query) ToSQL() map[string]any {
 }
 
 func (q *Query) Raw() value.Value {
+	if q.failed {
+		return q.failure
+	}
 	res := q.ToSQL()
 	return value.New(res)
 }
@@ -911,7 +993,7 @@ func (q *Query) buildConditions(conditions []Condition, argOffset int) (string, 
 
 func (q *Query) get() value.Value {
 	if q.db == nil {
-		return value.Value{K: value.Invalid, V: "database not connected"}
+		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 
 	sqlStr, args := q.getSQL()
@@ -927,7 +1009,7 @@ func (q *Query) get() value.Value {
 	rows, err := q.db.QueryContext(ctx, sqlStr, args...)
 	if err != nil {
 		fmt.Printf("[DB] Query Error: %v\n", err)
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("database query error: %v", err)}
+		return DatabaseFailure("database query error", err)
 	}
 	defer rows.Close()
 
@@ -955,6 +1037,9 @@ func (q *Query) get() value.Value {
 }
 
 func (q *Query) Create(args ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(args) == 0 {
 		return value.Value{K: value.Nil}
 	}
@@ -966,6 +1051,9 @@ func (q *Query) Create(args ...value.Value) value.Value {
 }
 
 func (q *Query) Save(args ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(args) == 0 {
 		return value.Value{K: value.Nil}
 	}
@@ -982,6 +1070,9 @@ func (q *Query) Save(args ...value.Value) value.Value {
 }
 
 func (q *Query) Update(args ...value.Value) value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(args) == 0 {
 		return value.Value{K: value.Nil}
 	}
@@ -1002,19 +1093,25 @@ func (q *Query) Update(args ...value.Value) value.Value {
 }
 
 func (q *Query) Delete() value.Value {
+	if q.failed {
+		return q.failure
+	}
 	return q.delete()
 }
 
 func (q *Query) Remove() value.Value {
+	if q.failed {
+		return q.failure
+	}
 	return q.remove()
 }
 
 func (q *Query) insert(val map[string]value.Value) value.Value {
 	if len(q.tables) == 0 {
-		return value.Value{K: value.Invalid, V: "missing table name for insert"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "missing table name for insert")
 	}
 	if q.db == nil {
-		return value.Value{K: value.Invalid, V: "database not connected"}
+		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 
 	var cols []string
@@ -1052,7 +1149,7 @@ func (q *Query) insert(val map[string]value.Value) value.Value {
 	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		fmt.Printf("[DB] Insert Error: %v\n", err)
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("database insert error: %v", err)}
+		return DatabaseFailure("database insert error", err)
 	}
 	defer rows.Close()
 
@@ -1076,15 +1173,15 @@ func (q *Query) insert(val map[string]value.Value) value.Value {
 
 func (q *Query) update(val map[string]value.Value) value.Value {
 	if len(q.tables) == 0 {
-		return value.Value{K: value.Invalid, V: "missing table name for update"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "missing table name for update")
 	}
 	if q.db == nil {
-		return value.Value{K: value.Invalid, V: "database not connected"}
+		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 
 	if len(q.conditions) == 0 {
 		fmt.Printf("[DB] Update Error: Missing WHERE clause. Bulk updates are blocked for safety.\n")
-		return value.Value{K: value.Invalid, V: "missing WHERE clause for update"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "missing WHERE clause for update")
 	}
 
 	var sets []string
@@ -1122,7 +1219,7 @@ func (q *Query) update(val map[string]value.Value) value.Value {
 	rows, err := q.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		fmt.Printf("[DB] Update Error: %v\n", err)
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("database update error: %v", err)}
+		return DatabaseFailure("database update error", err)
 	}
 	defer rows.Close()
 
@@ -1152,15 +1249,15 @@ func (q *Query) delete() value.Value {
 
 func (q *Query) remove() value.Value {
 	if len(q.tables) == 0 {
-		return value.Value{K: value.Invalid, V: "missing table name for delete"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "missing table name for delete")
 	}
 	if q.db == nil {
-		return value.Value{K: value.Invalid, V: "database not connected"}
+		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 
 	if len(q.conditions) == 0 {
 		fmt.Printf("[DB] WARNING: Attempting hard REMOVE without WHERE on table %s. Blocked for safety.\n", q.tables[0])
-		return value.Value{K: value.Invalid, V: "missing WHERE clause for delete"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "missing WHERE clause for delete")
 	}
 
 	whereSQL, whereArgs := q.buildConditions(q.conditions, 1)
@@ -1178,7 +1275,7 @@ func (q *Query) remove() value.Value {
 	res, err := q.db.ExecContext(ctx, query, whereArgs...)
 	if err != nil {
 		fmt.Printf("[DB] Remove Error: %v\n", err)
-		return value.Value{K: value.Invalid, V: fmt.Sprintf("database delete error: %v", err)}
+		return DatabaseFailure("database delete error", err)
 	}
 	affected, _ := res.RowsAffected()
 	return value.New(affected)
@@ -1190,6 +1287,9 @@ func (q *Query) SingleOrDefault() value.Value { return q.First() }
 func (q *Query) ToList() value.Value { return q.List() }
 
 func (q *Query) Last() value.Value {
+	if q.failed {
+		return q.failure
+	}
 	if len(q.orders) == 0 {
 		q.OrderBy("id", "DESC")
 	} else {

@@ -71,7 +71,7 @@ func main() {
 		return
 	}
 
-	if strings.TrimSpace(*password) == "" {
+	if strings.TrimSpace(*password) == "" && strings.TrimSpace(*root) == "" {
 		fatalf("password is required; pass -password or set KITDB_TOKEN")
 	}
 	projectionOpenPolicy, err := relational.ParseProjectionOpenPolicy(*projectionOpenPolicySource)

@@ -669,14 +669,14 @@ func (proxy *dbProxy) beginKitDBRecordTransactionWithPolicy(
 
 func (proxy *dbProxy) kitDBTransaction(args ...value.Value) value.Value {
 	if proxy == nil || proxy.engine != "kitdb" {
-		return value.Value{K: value.Invalid, V: "db.transaction is available only for KitDB"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.transaction is available only for KitDB")
 	}
 	if len(args) != 1 || !args[0].IsCallable() {
-		return value.Value{K: value.Invalid, V: "db.transaction expects one callback"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.transaction expects one callback")
 	}
 	lambda, ok := args[0].V.(*value.Lambda)
 	if !ok {
-		return value.Value{K: value.Invalid, V: "db.transaction callback must be a Kitwork function"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.transaction callback must be a Kitwork function")
 	}
 	transactionProxy, transaction, err := proxy.beginKitDBRecordTransaction(proxy.scope)
 	if err != nil {

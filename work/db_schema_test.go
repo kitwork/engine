@@ -811,6 +811,7 @@ func TestMigrateReturnsErrorOnFailure(t *testing.T) {
 // against an unmigrated table and throw a cryptic "no such column". A poisoned (non-database) file at
 // the db path makes the connection fail deterministically.
 func TestSchemaMigrationFailureSurfacesToHandler(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "test", "localhost")
 	if err := os.MkdirAll(filepath.Join(dir, ".data"), 0755); err != nil {

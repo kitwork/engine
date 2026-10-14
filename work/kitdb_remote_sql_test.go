@@ -1694,7 +1694,7 @@ router.get(() => db.products.count());`
 	}
 	if _, err := transaction.Commit(); err == nil || !strings.Contains(err.Error(), "transaction conflict") ||
 		!stderrors.Is(err, errKitDBTransactionConflict) ||
-		kitDBRemoteErrorPayload(err)["code"] != kitDBTransactionConflictCode {
+		kitDBRemoteErrorPayload(err)["code"] != kitDBWireConflictCode {
 		t.Fatalf("stale transaction commit error = %v", err)
 	}
 	conflictRows, err := executeKitDBRemoteSQL(

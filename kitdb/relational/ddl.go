@@ -82,6 +82,10 @@ func (engine *Engine) executeDropTable(ctx context.Context, plan *kitdbsql.DropT
 		_ = transaction.Rollback()
 		return Result{}, err
 	}
+	if err := clearDroppedTableRoles(engine.database, transaction, schema.ID); err != nil {
+		_ = transaction.Rollback()
+		return Result{}, err
+	}
 	for _, trigger := range catalog.Triggers {
 		if trigger.SourceStruct == schema.ID {
 			if err := transaction.DeleteTrigger(trigger.ID); err != nil {

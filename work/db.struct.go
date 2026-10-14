@@ -145,18 +145,18 @@ type columnForeignGroup struct {
 func (d *Database) Struct() value.Value {
 	return value.NewFunc(func(args ...value.Value) value.Value {
 		if len(args) != 1 || args[0].K != value.Map {
-			return value.Value{K: value.Invalid, V: "db.struct: expects one field object"}
+			return value.InvalidFailure(value.InvalidArgumentCode, "db.struct: expects one field object")
 		}
 		columns := make(map[string]*ColumnSpec, len(args[0].Map()))
 		for name, field := range args[0].Map() {
 			spec, ok := field.V.(*ColumnSpec)
 			if !ok || spec == nil {
-				return value.Value{K: value.Invalid, V: fmt.Sprintf("db.struct: field %q is not a column type", name)}
+				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.struct: field %q is not a column type", name))
 			}
 			columns[name] = spec
 		}
 		if len(columns) == 0 {
-			return value.Value{K: value.Invalid, V: "db.struct: needs at least one field"}
+			return value.InvalidFailure(value.InvalidArgumentCode, "db.struct: needs at least one field")
 		}
 		return value.Value{K: value.Proxy, V: &StructDef{Version: structIRVersion, columns: columns}}
 	})
@@ -170,7 +170,7 @@ func (definition *StructDef) OnGet(name string) value.Value {
 			return value.New(field)
 		}
 	}
-	return value.Value{K: value.Invalid, V: fmt.Sprintf("db.struct: no field %q", name)}
+	return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.struct: no field %q", name))
 }
 
 func (definition *StructDef) OnCompare(_ string, _ value.Value) value.Value {
@@ -178,7 +178,7 @@ func (definition *StructDef) OnCompare(_ string, _ value.Value) value.Value {
 }
 
 func (definition *StructDef) OnInvoke(_ string, _ ...value.Value) value.Value {
-	return value.Value{K: value.Invalid, V: "db.struct: a definition is not callable"}
+	return value.InvalidFailure(value.NotAFunctionCode, "db.struct: a definition is not callable")
 }
 
 // Kitdb binds named structs to KitDB while preserving the same db.<name> ORM

@@ -24,6 +24,7 @@ const (
 
 var (
 	ErrUnauthorized     = errors.New("kitsql: unauthorized")
+	ErrForbidden        = errors.New("kitsql: forbidden")
 	ErrDatabaseNotFound = errors.New("kitsql: database not found")
 )
 
@@ -214,6 +215,8 @@ func (handler *Handler) ServeHTTP(writer http.ResponseWriter, request *http.Requ
 		switch {
 		case errors.Is(err, ErrUnauthorized):
 			writeProtocolError(writer, http.StatusUnauthorized, "KSQL_AUTH", "invalid KitSQL credentials")
+		case errors.Is(err, ErrForbidden):
+			writeProtocolError(writer, http.StatusForbidden, "KSQL_FORBIDDEN", "permission denied for KitSQL database")
 		case errors.Is(err, ErrDatabaseNotFound):
 			writeProtocolError(writer, http.StatusNotFound, "KSQL_DATABASE", "KitSQL database does not exist")
 		default:

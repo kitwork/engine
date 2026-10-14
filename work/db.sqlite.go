@@ -75,12 +75,12 @@ func (s *SQLite) Memory() *SQLite {
 
 // Exec runs raw SQL — the escape hatch for DDL (CREATE TABLE / CREATE INDEX / migrations), which a
 // query builder cannot express. Data access should stay on the builder (parameterized, mandatory
-// WHERE); args here are still bound as parameters, never interpolated. Errors return in-band
-// (K=Invalid → .isError/.message), the same shape as a failed query.
+// WHERE); args here are still bound as parameters, never interpolated. An error is the failure of a
+// failed query (DATABASE), read with safe(() => …).
 func (s *SQLite) Exec(sqlText string, args ...value.Value) value.Value {
 	conn := s.db()
 	if conn == nil {
-		return value.Value{K: value.Invalid, V: "sqlite: connection unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "sqlite: connection unavailable")
 	}
 	goArgs := make([]any, len(args))
 	for i, a := range args {
@@ -88,7 +88,7 @@ func (s *SQLite) Exec(sqlText string, args ...value.Value) value.Value {
 	}
 	res, err := conn.Exec(sqlText, goArgs...)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.DatabaseCode, err.Error())
 	}
 	affected, _ := res.RowsAffected()
 	return value.New(map[string]value.Value{"rowsAffected": value.New(int(affected))})
@@ -101,17 +101,17 @@ func (s *SQLite) Exec(sqlText string, args ...value.Value) value.Value {
 // required; neither is treated as a substitute for the other.
 func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 	if input.K != value.String {
-		return sqliteReadQueryFailure("INVALID_QUERY", "Enter one SELECT statement")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Enter one SELECT statement")
 	}
 	sqlText := input.String()
 	if len(sqlText) > sqliteReadQueryMaxSQLBytes {
-		return sqliteReadQueryFailure("QUERY_TOO_LARGE", "SELECT statement exceeds the 32 KiB limit")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "SELECT statement exceeds the 32 KiB limit")
 	}
 	if strings.TrimSpace(sqlText) == "" || strings.ContainsRune(sqlText, '\x00') {
-		return sqliteReadQueryFailure("INVALID_QUERY", "Enter one SELECT statement")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Enter one SELECT statement")
 	}
 	if !sqliteSingleReadStatement(sqlText) {
-		return sqliteReadQueryFailure("READ_ONLY_REQUIRED", "Only one SELECT statement is allowed")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Only one SELECT statement is allowed")
 	}
 
 	parent := context.Background()
@@ -123,7 +123,7 @@ func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 
 	db := s.db()
 	if db == nil {
-		return sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite database is unavailable")
+		return sqliteReadQueryFailure(value.UnavailableCode, "SQLite database is unavailable")
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 		}
 		// Never return a connection whose write policy is unknown to the shared pool.
 		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		result = sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite connection could not be reset safely")
+		result = sqliteReadQueryFailure(value.UnavailableCode, "SQLite connection could not be reset safely")
 	}()
 
 	if _, err = conn.ExecContext(ctx, "PRAGMA query_only=ON"); err != nil {
@@ -163,7 +163,7 @@ func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 		return s.sqliteReadQueryContextFailure(err)
 	}
 	if len(names) == 0 || len(names) > sqliteReadQueryMaxColumns {
-		return sqliteReadQueryFailure("RESULT_TOO_LARGE", "Query result exceeds the 128 column limit")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Query result exceeds the 128 column limit")
 	}
 	types, err := rows.ColumnTypes()
 	if err != nil {
@@ -173,7 +173,7 @@ func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 	resultBytes := 0
 	for index, name := range names {
 		if len(name) > 1024 {
-			return sqliteReadQueryFailure("RESULT_TOO_LARGE", "Query result contains an oversized column name")
+			return sqliteReadQueryFailure(value.InvalidArgumentCode, "Query result contains an oversized column name")
 		}
 		typeName := "UNKNOWN"
 		if index < len(types) && strings.TrimSpace(types[index].DatabaseTypeName()) != "" {
@@ -201,7 +201,7 @@ func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 		for index, raw := range values {
 			cell, size, ok := sqliteReadQueryCell(raw)
 			if !ok || resultBytes+size > sqliteReadQueryMaxResultBytes {
-				return sqliteReadQueryFailure("RESULT_TOO_LARGE", "Query result exceeds the 2 MiB limit")
+				return sqliteReadQueryFailure(value.InvalidArgumentCode, "Query result exceeds the 2 MiB limit")
 			}
 			values[index] = cell
 			resultBytes += size
@@ -223,16 +223,21 @@ func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
 	})
 }
 
+// sqliteReadQueryFailure is a read of the database inspector that failed: a failure (14/10/2026) the
+// program reads with safe(() => …), no longer data shaped { ok: false, code, message }. A statement the
+// reader may not run, or a result past a bound, is INVALID_ARGUMENT, the database out of reach
+// UNAVAILABLE, the 2 second limit TIMEOUT, an error of SQLite DATABASE, a catalog that changed since the
+// page asked CONFLICT; the request's cancellation is EXECUTION_CANCELLED, which nothing catches.
 func sqliteReadQueryFailure(code, message string) value.Value {
-	return value.New(map[string]any{"ok": false, "code": code, "message": message})
+	return value.InvalidFailure(code, message)
 }
 
 func (s *SQLite) sqliteReadQueryContextFailure(err error) value.Value {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return sqliteReadQueryFailure("TIMEOUT", "Query exceeded the 2 second time limit")
+		return sqliteReadQueryFailure(value.TimeoutCode, "Query exceeded the 2 second time limit")
 	}
 	if errors.Is(err, context.Canceled) {
-		return sqliteReadQueryFailure("CANCELLED", "Query was cancelled")
+		return sqliteReadQueryFailure(value.CancelledCode, "Query was cancelled")
 	}
 	message := strings.Join(strings.Fields(err.Error()), " ")
 	if s != nil && s.preset != nil && s.preset.Name != "" {
@@ -245,7 +250,7 @@ func (s *SQLite) sqliteReadQueryContextFailure(err error) value.Value {
 	if message == "" {
 		message = "SQLite could not execute this SELECT statement"
 	}
-	return sqliteReadQueryFailure("SQL_ERROR", message)
+	return sqliteReadQueryFailure(value.DatabaseCode, message)
 }
 
 func sqliteReadQueryCell(raw any) (any, int, bool) {

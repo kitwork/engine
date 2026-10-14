@@ -15,6 +15,7 @@ import (
 )
 
 func TestKitDBCompositeUniqueDSLIsAtomicAndSurvivesRestart(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	root := t.TempDir()
 	directory := filepath.Join(root, "test", "localhost")
 	if err := os.MkdirAll(directory, 0o755); err != nil {

@@ -225,6 +225,7 @@ router.get((ctx) => ctx.json({ title: db.products.where("sku", "=", "A").first()
 }
 
 func TestKitDBStructConstraintsFailClosed(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	root := t.TempDir()
 	dir := filepath.Join(root, "test", "localhost")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -539,14 +540,14 @@ const { kitdb, struct, text } = database;
 const items = struct({ id: text().key(), value: text() });
 const db = kitdb("conflict-code.kitdb", { items });
 router.get((ctx) => {
-  const result = db.transaction((tx) => {
+  const result = safe(() => db.transaction((tx) => {
     tx.items.create({ id: "stale", value: "must roll back" });
     db.items.create({ id: "winner", value: "committed" });
     return true;
-  }).safe();
+  }));
   return ctx.json({
-    ok: result.ok,
-    code: result.code,
+    value: result.value,
+    code: result.error.code,
     count: db.items.count(),
     stale: db.items.find("stale") !== null,
     winner: db.items.find("winner") !== null
@@ -562,8 +563,9 @@ router.get((ctx) => {
 	defer tenant.Close()
 	recorder := httptest.NewRecorder()
 	tenant.Serve(recorder, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
+	// the conflict is CONFLICT in the closed set (KITDB_TRANSACTION_CONFLICT until 14/10/2026)
 	for _, expected := range []string{
-		`"ok":false`, `"code":"KITDB_TRANSACTION_CONFLICT"`, `"count":1`,
+		`"value":null`, `"code":"CONFLICT"`, `"count":1`,
 		`"stale":false`, `"winner":true`,
 	} {
 		if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), expected) {
@@ -573,6 +575,7 @@ router.get((ctx) => {
 }
 
 func TestKitDBStructChangeRequiresExplicitMigration(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	root := t.TempDir()
 	dir := filepath.Join(root, "test", "localhost")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -651,6 +654,7 @@ func TestKitDBRelSafety(t *testing.T) {
 }
 
 func TestKitDBRecordTransactionCommitsRollsBackAndReopens(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	root := t.TempDir()
 	dir := filepath.Join(root, "test", "localhost")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -7,6 +7,12 @@ must adapt to that contract without limiting the standalone value domain.
 
 ## Promotion Rule
 
+Managed-root connection accounts are documented in [Catalog Auth](../managed/AUTH.md).
+The root's `.catalog` can opt into persisted admin/reader/writer accounts and
+per-database grants, shared with native and KitSQL. This is not PostgreSQL
+`CREATE ROLE`/`GRANT` compatibility or website authentication; pgwire remains
+the existing loopback profile. Auth-enabled catalog v2 roots reject old readers.
+
 A name in the parser is not a completed type. A promotion needs admission and
 NULL rules, canonical round trips, comparisons/casts, keys and constraints,
 expressions/functions, aggregate semantics, wire metadata, and recovery tests.

@@ -1199,8 +1199,9 @@ intervening write. A callback error, cancellation, failed constraint, or
 conflict publishes none of its staged mutations. Nested transactions are
 refused. The record transaction is bounded to 100,000 physical mutations and
 32 MiB; each update/delete statement retains the 10,000-row mutation bound.
-After `.safe()`, conflict is identified by the stable code
-`KITDB_TRANSACTION_CONFLICT`. This is optimistic record-layer concurrency, not
+Read through `safe(() => …)`, a conflict is `error.code` `CONFLICT` (the
+closed set of codes, 14/10/2026; `KITDB_TRANSACTION_CONFLICT` until then, and
+still on the libSQL wire). This is optimistic record-layer concurrency, not
 kernel MVCC.
 
 `createMany(rows, { batch: 128 })` ingests up to 10,000 rows per call using
@@ -1208,8 +1209,10 @@ ordinary record transactions of at most 256 rows. Every completed batch is
 independently durable and uses the same type, constraint, reference, index,
 WAL, and cancellation path as `create`. The returned object contains
 `inserted`, `batches`, `next`, and `complete`; a failed batch rolls back in
-full and also reports `failedRow`. After `.safe()`, distinguish no-progress
-`KITDB_CREATE_MANY_FAILED` from resumable `KITDB_CREATE_MANY_PARTIAL`. Inside
+full. A call that stops after durable batches is the failure `PARTIAL`, whose
+`error.progress` (read through `safe(() => …)`) holds that object with
+`failedRow`, resumable from `next`; one that wrote nothing fails with what
+stopped it (`DATABASE`, `CONFLICT`, `INVALID_ARGUMENT`). Inside
 `db.transaction()`, `createMany` accepts at most one batch and remains atomic
 with the caller's other mutations. It is a bounded materialized application
 API; PostgreSQL `COPY FROM STDIN` is the separate streaming transport surface.

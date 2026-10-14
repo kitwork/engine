@@ -297,13 +297,13 @@ func (t *SchemaTable) Analyze(args ...value.Value) value.Value {
 		return v
 	}
 	if len(args) != 0 {
-		return value.Value{K: value.Invalid, V: "db.analyze: does not accept arguments"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.analyze: does not accept arguments")
 	}
 	if t.engine != "kitdb" {
-		return value.Value{K: value.Invalid, V: "db.analyze: available only for KitDB"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.analyze: available only for KitDB")
 	}
 	if t.transaction != nil {
-		return value.Value{K: value.Invalid, V: "db.analyze: cannot run inside db.transaction()"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.analyze: cannot run inside db.transaction()")
 	}
 	ctx := context.Background()
 	if t.scope != nil {

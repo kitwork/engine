@@ -19,7 +19,7 @@ func TestRootRegistrationRecoveryAndOwnership(t *testing.T) {
 	if _, err := Init(path); err == nil {
 		t.Fatal("init overwrote an existing root")
 	}
-	wantID := createDatabase(t, filepath.Join(path, "physical", "data.kitdb"))
+	wantID := createDatabase(t, filepath.Join(path, "shop", "data.kitdb"))
 	root, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -30,14 +30,14 @@ func TestRootRegistrationRecoveryAndOwnership(t *testing.T) {
 		_ = other.Close()
 		t.Fatal("two owners acquired one root")
 	}
-	registered, err := root.Register("shop", "physical")
+	registered, err := root.Register("shop", "shop")
 	if err != nil || registered.DatabaseID != wantID {
 		t.Fatalf("register = %+v, %v", registered, err)
 	}
-	if repeated, err := root.Register("shop", "physical"); err != nil || repeated != registered {
+	if repeated, err := root.Register("shop", "shop"); err != nil || repeated != registered {
 		t.Fatalf("idempotent retry = %+v, %v", repeated, err)
 	}
-	if _, err := root.Register("alias", "physical"); err == nil {
+	if _, err := root.Register("alias", "shop"); err == nil {
 		t.Fatal("registered the same physical database twice")
 	}
 	catalog := root.Catalog()
@@ -63,10 +63,10 @@ func TestRootRegistrationRecoveryAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := reopened.DatabasePath(registered); err != nil || got != filepath.Join(canonical, "physical", "data.kitdb") {
+	if got, err := reopened.DatabasePath(registered); err != nil || got != filepath.Join(canonical, "shop", "data.kitdb") {
 		t.Fatalf("database path = %q, %v", got, err)
 	}
-	if _, err := reopened.DatabasePath(Database{Name: "unregistered", Directory: "physical"}); err == nil {
+	if _, err := reopened.DatabasePath(Database{Name: "unregistered", Directory: "shop"}); err == nil {
 		t.Fatal("accepted an unregistered entry")
 	}
 }
@@ -217,4 +217,41 @@ func createDatabase(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func TestRootLegacyAliasExplicitMigration(t *testing.T) {
+	path := t.TempDir()
+	if _, err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	id := createDatabase(t, filepath.Join(path, "shop", "data.kitdb"))
+	root, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Historic registration format remains readable, without automatic rename.
+	if err := writeCatalog(root.store, Catalog{Version: 1, Databases: []Database{{Name: "old_alias", Directory: "shop", DatabaseID: id}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.Close(); err != nil {
+		t.Fatal(err)
+	}
+	root, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if root.Catalog().Databases[0].Name != "old_alias" {
+		t.Fatal("legacy name changed silently")
+	}
+	if _, err := root.Register("new_alias", "shop"); err == nil {
+		t.Fatal("created new alias")
+	}
+	if _, err := root.Detach("old_alias"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := root.Attach("shop")
+	if err != nil || db.DatabaseID != id || db.Name != db.Directory {
+		t.Fatalf("migration: %+v / %v", db, err)
+	}
 }

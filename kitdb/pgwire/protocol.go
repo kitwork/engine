@@ -95,6 +95,12 @@ type Session interface {
 	Close() error
 }
 
+// TerminationSession optionally binds session cancellation to its transport.
+// The returned function unregisters the callback before transport cleanup.
+type TerminationSession interface {
+	BindTermination(func()) func()
+}
+
 // QueryAdmission identifies one host-trusted scheduling partition. Sessions
 // with the same key share a concurrency quota; Weight changes their relative
 // service rate only after they are queued. A host must keep the key and weight

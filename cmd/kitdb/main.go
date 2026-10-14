@@ -101,6 +101,8 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 			return fmt.Errorf("init-root requires ROOT")
 		}
 		result, err = managed.Init(args[1])
+	case "auth-init", "auth-user", "auth-list":
+		result, err = runRootAuth(command, args[1:])
 	case "register-database":
 		if len(args) != 4 {
 			return fmt.Errorf("register-database requires ROOT NAME DIRECTORY (existing ROOT/DIRECTORY/data.kitdb)")
@@ -109,6 +111,20 @@ func run(ctx context.Context, args []string, output io.Writer) error {
 		root, err = managed.Open(args[1])
 		if err == nil {
 			result, err = root.Register(args[2], args[3])
+			err = errors.Join(err, root.Close())
+		}
+	case "attach", "detach":
+		if len(args) != 3 {
+			return fmt.Errorf("%s requires ROOT DATABASE (offline)", command)
+		}
+		var root *managed.Root
+		root, err = managed.Open(args[1])
+		if err == nil {
+			if command == "attach" {
+				result, err = root.Attach(args[2])
+			} else {
+				result, err = root.Detach(args[2])
+			}
 			err = errors.Join(err, root.Close())
 		}
 	case "root-catalog":
@@ -606,6 +622,6 @@ func newFlagSet(name string) *flag.FlagSet {
 
 func usageError() error {
 	return fmt.Errorf(
-		"usage: kitdb <version|init-root|register-database|root-catalog|query|serve|refresh-projections|pack-search|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
+		"usage: kitdb <version|init-root|attach|detach|register-database|root-catalog|auth-init|auth-user|auth-list|query|serve|refresh-projections|pack-search|projections|doctor|inspect|catalog|verify|backup|restore|restore-time> [options]",
 	)
 }

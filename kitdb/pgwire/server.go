@@ -386,18 +386,19 @@ func loopbackListener(address net.Addr) bool {
 }
 
 type wireConnection struct {
-	runtime  *serverRuntime
-	conn     net.Conn
-	reader   *bufio.Reader
-	writer   *bufio.Writer
-	session  Session
-	startup  Startup
-	pid      uint32
-	secret   uint32
-	cancel   *cancelSlot
-	prepared map[string]*preparedStatement
-	portals  map[string]*portal
-	failed   bool
+	stopTermination func()
+	runtime         *serverRuntime
+	conn            net.Conn
+	reader          *bufio.Reader
+	writer          *bufio.Writer
+	session         Session
+	startup         Startup
+	pid             uint32
+	secret          uint32
+	cancel          *cancelSlot
+	prepared        map[string]*preparedStatement
+	portals         map[string]*portal
+	failed          bool
 }
 
 type preparedStatement struct {
@@ -544,6 +545,12 @@ func (wire *wireConnection) authenticate(ctx context.Context) error {
 	wire.secret = randomUint32()
 	wire.cancel = &cancelSlot{secret: wire.secret}
 	wire.runtime.cancels.Store(wire.pid, wire.cancel)
+	if terminator, ok := session.(TerminationSession); ok {
+		wire.stopTermination = terminator.BindTermination(func() {
+			wire.cancel.invoke(wire.secret)
+			_ = wire.conn.Close()
+		})
+	}
 
 	var ok encoder
 	ok.int32(0)
@@ -591,6 +598,9 @@ func randomUint32() uint32 {
 }
 
 func (wire *wireConnection) close() {
+	if wire.stopTermination != nil {
+		wire.stopTermination()
+	}
 	if wire.cancel != nil {
 		wire.cancel.clear()
 		wire.runtime.cancels.Delete(wire.pid)

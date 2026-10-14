@@ -73,7 +73,7 @@ func (s *SQLite) ReadCatalog() (result value.Value) {
 	}
 	defer func() {
 		if !session.close() {
-			result = sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite connection could not be reset safely")
+			result = sqliteReadQueryFailure(value.UnavailableCode, "SQLite connection could not be reset safely")
 		}
 	}()
 
@@ -92,7 +92,7 @@ func (s *SQLite) ReadCatalog() (result value.Value) {
 		return s.sqliteReadQueryContextFailure(err)
 	}
 	if len(objects) > sqliteInspectorMaxObjects {
-		return sqliteReadQueryFailure("CATALOG_TOO_LARGE", "SQLite catalog exceeds the 256 object limit")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite catalog exceeds the 256 object limit")
 	}
 
 	catalog := make([]map[string]any, 0, len(objects))
@@ -103,7 +103,7 @@ func (s *SQLite) ReadCatalog() (result value.Value) {
 			return s.sqliteReadQueryContextFailure(err)
 		}
 		if len(columns) == 0 || len(columns) > sqliteReadQueryMaxColumns {
-			return sqliteReadQueryFailure("CATALOG_TOO_LARGE", "SQLite object exceeds the 128 column limit")
+			return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite object exceeds the 128 column limit")
 		}
 		indexes, indexBytes, err := sqliteInspectorIndexes(session.context(), tx, object.name, columns)
 		if err != nil {
@@ -115,7 +115,7 @@ func (s *SQLite) ReadCatalog() (result value.Value) {
 		}
 		resultBytes += len(object.name)*2 + metadataBytes + indexBytes + foreignKeyBytes + 96
 		if resultBytes > sqliteReadQueryMaxResultBytes {
-			return sqliteReadQueryFailure("CATALOG_TOO_LARGE", "SQLite catalog exceeds the 2 MiB metadata limit")
+			return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite catalog exceeds the 2 MiB metadata limit")
 		}
 		catalog = append(catalog, map[string]any{
 			"id":           object.kind + "-" + object.name,
@@ -152,7 +152,7 @@ func (s *SQLite) ReadTablePage(input value.Value) (result value.Value) {
 	}
 	defer func() {
 		if !session.close() {
-			result = sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite connection could not be reset safely")
+			result = sqliteReadQueryFailure(value.UnavailableCode, "SQLite connection could not be reset safely")
 		}
 	}()
 
@@ -168,21 +168,21 @@ func (s *SQLite) ReadTablePage(input value.Value) (result value.Value) {
 		return s.sqliteReadQueryContextFailure(err)
 	}
 	if request.catalogVersion != catalogVersion {
-		return sqliteReadQueryFailure("SCHEMA_CHANGED", "SQLite schema changed; refresh the catalog and try again")
+		return sqliteReadQueryFailure(value.ConflictCode, "SQLite schema changed; refresh the catalog and try again")
 	}
 	object, found, err := sqliteInspectorFindObject(session.context(), tx, request.name, request.kind)
 	if err != nil {
 		return s.sqliteReadQueryContextFailure(err)
 	}
 	if !found {
-		return sqliteReadQueryFailure("OBJECT_NOT_FOUND", "SQLite table or view was not found in the current catalog")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite table or view was not found in the current catalog")
 	}
 	columns, metadataBytes, err := sqliteInspectorColumns(session.context(), tx, object.name)
 	if err != nil {
 		return s.sqliteReadQueryContextFailure(err)
 	}
 	if len(columns) == 0 || len(columns) > sqliteReadQueryMaxColumns {
-		return sqliteReadQueryFailure("RESULT_TOO_LARGE", "SQLite object exceeds the 128 column limit")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite object exceeds the 128 column limit")
 	}
 
 	quotedObject := sqliteInspectorQuoteIdentifier(object.name)
@@ -191,7 +191,7 @@ func (s *SQLite) ReadTablePage(input value.Value) (result value.Value) {
 		return s.sqliteReadQueryContextFailure(err)
 	}
 	if totalRows < 0 || totalRows > sqliteJavaScriptMaxSafeInt {
-		return sqliteReadQueryFailure("RESULT_TOO_LARGE", "SQLite row count exceeds the supported numeric range")
+		return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite row count exceeds the supported numeric range")
 	}
 
 	columnSQL := make([]string, len(columns))
@@ -210,7 +210,7 @@ func (s *SQLite) ReadTablePage(input value.Value) (result value.Value) {
 		if len(primary) == 0 {
 			rowID, available := sqliteInspectorRowIDAlias(columns)
 			if !available {
-				return sqliteReadQueryFailure("UNSTABLE_ORDER", "SQLite table shadows every rowid alias and has no primary key")
+				return sqliteReadQueryFailure(value.UnsupportedCode, "SQLite table shadows every rowid alias and has no primary key")
 			}
 			orderSQL = " ORDER BY " + rowID
 		} else {
@@ -243,7 +243,7 @@ func (s *SQLite) ReadTablePage(input value.Value) (result value.Value) {
 		for index, raw := range values {
 			cell, size, ok := sqliteReadQueryCell(raw)
 			if !ok || resultBytes+size > sqliteReadQueryMaxResultBytes {
-				return sqliteReadQueryFailure("RESULT_TOO_LARGE", "SQLite page exceeds the 2 MiB result limit")
+				return sqliteReadQueryFailure(value.InvalidArgumentCode, "SQLite page exceeds the 2 MiB result limit")
 			}
 			values[index] = cell
 			resultBytes += size
@@ -299,7 +299,7 @@ type sqliteInspectorPageInput struct {
 
 func sqliteInspectorPageRequest(input value.Value) (sqliteInspectorPageInput, value.Value) {
 	invalid := func() (sqliteInspectorPageInput, value.Value) {
-		return sqliteInspectorPageInput{}, sqliteReadQueryFailure("INVALID_REQUEST", "Expected exactly type, name, catalogVersion, page, and pageSize")
+		return sqliteInspectorPageInput{}, sqliteReadQueryFailure(value.InvalidArgumentCode, "Expected exactly type, name, catalogVersion, page, and pageSize")
 	}
 	if input.K != value.Map {
 		return invalid()
@@ -365,7 +365,7 @@ func (s *SQLite) openSQLiteInspectorSession() (*sqliteInspectorSession, value.Va
 	db := s.db()
 	if db == nil {
 		cancel()
-		return nil, sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite database is unavailable")
+		return nil, sqliteReadQueryFailure(value.UnavailableCode, "SQLite database is unavailable")
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
@@ -393,14 +393,14 @@ func (s *SQLite) openSQLiteInspectorSession() (*sqliteInspectorSession, value.Va
 	session.queryOnlyConfigured = true
 	if _, err := conn.ExecContext(ctx, "PRAGMA query_only=ON"); err != nil {
 		if !session.close() {
-			return nil, sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite connection could not be reset safely")
+			return nil, sqliteReadQueryFailure(value.UnavailableCode, "SQLite connection could not be reset safely")
 		}
 		return nil, s.sqliteReadQueryContextFailure(err)
 	}
 	session.trustedConfigured = true
 	if _, err := conn.ExecContext(ctx, "PRAGMA trusted_schema=OFF"); err != nil {
 		if !session.close() {
-			return nil, sqliteReadQueryFailure("DATABASE_UNAVAILABLE", "SQLite connection could not be reset safely")
+			return nil, sqliteReadQueryFailure(value.UnavailableCode, "SQLite connection could not be reset safely")
 		}
 		return nil, s.sqliteReadQueryContextFailure(err)
 	}
