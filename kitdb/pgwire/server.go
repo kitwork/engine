@@ -340,6 +340,7 @@ func (server Server) Serve(ctx context.Context, listener net.Listener) error {
 			_ = connection.Close()
 			return nil
 		default:
+			_ = connection.SetWriteDeadline(time.Now().Add(server.WriteTimeout))
 			writer := bufio.NewWriter(connection)
 			_ = writeError(writer, NewError("53300", "too many KitDB PostgreSQL connections"))
 			_ = writer.Flush()
@@ -512,7 +513,7 @@ func (wire *wireConnection) authenticate(ctx context.Context) error {
 	if err := wire.send('R', auth); err != nil {
 		return err
 	}
-	if err := wire.writer.Flush(); err != nil {
+	if err := wire.flush(); err != nil {
 		return err
 	}
 
@@ -578,7 +579,7 @@ func (wire *wireConnection) authenticate(ctx context.Context) error {
 	if err := wire.ready(); err != nil {
 		return err
 	}
-	return wire.writer.Flush()
+	return wire.flush()
 }
 
 func randomUint32() uint32 {
@@ -646,7 +647,7 @@ func (wire *wireConnection) run(ctx context.Context) error {
 				wire.failed = true
 			}
 		}
-		if flushErr := wire.writer.Flush(); flushErr != nil {
+		if flushErr := wire.flush(); flushErr != nil {
 			return flushErr
 		}
 	}
@@ -1198,7 +1199,7 @@ func (wire *wireConnection) runCopyIn(
 		_ = request.Stream.Abort(err)
 		return Result{}, true, err
 	}
-	if err := wire.writer.Flush(); err != nil {
+	if err := wire.flush(); err != nil {
 		_ = request.Stream.Abort(err)
 		return Result{}, true, err
 	}
@@ -1283,7 +1284,7 @@ func (wire *wireConnection) runCopyIn(
 				abort(copyErr)
 				return Result{}, true, copyErr
 			}
-			if err := wire.writer.Flush(); err != nil {
+			if err := wire.flush(); err != nil {
 				abort(err)
 				return Result{}, true, err
 			}
@@ -1587,7 +1588,7 @@ func (wire *wireConnection) sendError(err error) error {
 	if writeErr := writeError(wire.writer, err); writeErr != nil {
 		return writeErr
 	}
-	return wire.writer.Flush()
+	return wire.flush()
 }
 
 func writeError(writer *bufio.Writer, err error) error {
@@ -1650,6 +1651,16 @@ func (wire *wireConnection) readMessageWithin(timeout time.Duration) (byte, []by
 	return kind, body, nil
 }
 
+// flush arms a fresh write deadline before draining the buffered writer. A
+// reply may follow a statement that ran far longer than WriteTimeout, so the
+// deadline armed by the previous message must never govern this write.
+func (wire *wireConnection) flush() error {
+	if err := wire.conn.SetWriteDeadline(time.Now().Add(wire.runtime.server.WriteTimeout)); err != nil {
+		return err
+	}
+	return wire.writer.Flush()
+}
+
 func (wire *wireConnection) send(kind byte, body []byte) error {
 	if err := wire.conn.SetWriteDeadline(time.Now().Add(wire.runtime.server.WriteTimeout)); err != nil {
 		return err
@@ -1677,5 +1688,5 @@ func (wire *wireConnection) writeRaw(data []byte) error {
 	if _, err := wire.writer.Write(data); err != nil {
 		return err
 	}
-	return wire.writer.Flush()
+	return wire.flush()
 }
