@@ -64,6 +64,7 @@ func Run(configFile ...string) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
+	printBootNotices(file, builder)
 	if builder.err != "" {
 		return fmt.Errorf("failed to evaluate config %s: config validation error: %s", file, builder.err)
 	}
@@ -515,6 +516,7 @@ func commandConfig(configFile ...string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to evaluate config %s: %w", file, err)
 	}
+	printBootNotices(file, builder)
 	if builder.err != "" {
 		return nil, fmt.Errorf(
 			"failed to evaluate config %s: config validation error: %s",

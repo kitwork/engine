@@ -64,7 +64,9 @@ type ServerBuilder struct {
 	hasProxy   bool // forward-proxy listeners declared with app.proxy(config, ...)
 	path       string
 	err        string
-	unknown    []string // manifest methods the chain called that this engine does not have
+	unknown    []string // manifest methods the chain called that this engine does not have, each once
+	// connections are the external connections the chain declared, as written (printBootNotices).
+	connections []manifestConnection
 	// hasDatabase: an owned KitDB root is declared with app.database(path, options) — the DATABASE
 	// surface (the app offers a database, as app.website offers HTTP). This build has no KitDB runtime
 	// to serve it; the declaration is data the tool reads, exactly like app.desktop on the cloud host.
@@ -81,6 +83,11 @@ type ServerBuilder struct {
 // line entirely.
 func (b *ServerBuilder) MissingMember(name string) value.Value {
 	return value.NewFunc(func(args ...value.Value) value.Value {
+		for _, known := range b.unknown {
+			if known == name {
+				return value.New(b) // named once however many times the chain calls it
+			}
+		}
 		b.unknown = append(b.unknown, name)
 		return value.New(b)
 	})
@@ -577,6 +584,7 @@ func (b *ServerBuilder) addExternalConnection(provider, method string, values ..
 	}
 	current = append(current, value.New(connection))
 	b.config["databases"] = value.Value{K: value.Array, V: &current}
+	b.connections = append(b.connections, manifestConnection{method: method, alias: alias, provider: provider})
 	return b
 }
 
@@ -911,9 +919,7 @@ func evalConfigJS(file string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	if warning := builder.unknownMethodWarning(); warning != "" {
-		fmt.Printf("[app] %s: %s\n", filepath.Base(file), warning)
-	}
+	printBootNotices(file, builder)
 	if builder.err != "" {
 		return nil, fmt.Errorf("config validation error: %s", builder.err)
 	}

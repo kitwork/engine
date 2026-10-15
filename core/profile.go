@@ -250,14 +250,24 @@ func profileRouteEntrypoints(root string) ([]string, error) {
 			return nil
 		}
 
-		name := entry.Name()
-		if name == work.RouterFileName {
+		if isRouterMarker(path, entry.Name()) {
 			files = append(files, path)
 		}
 		return nil
 	})
 	sort.Strings(files)
 	return files, err
+}
+
+// isRouterMarker reports whether a walked file is the router that marks its folder: router.kitwork.js,
+// or router.work for a Kitwork UI site — only the one work.RouterMarker chooses when both exist, so
+// profile and check compile the router the host would run. Until 15/10/2026 only the first name was
+// an entrypoint, and a .ui site had no program in the profile at all.
+func isRouterMarker(path, name string) bool {
+	if name != work.RouterFileName && name != work.UIRouterFileName {
+		return false
+	}
+	return work.RouterMarker(filepath.Dir(path)) == path
 }
 
 func profileAppEntrypoints(root string) ([]string, error) {
@@ -326,7 +336,7 @@ func profileLegacyEntrypoints(root string) ([]string, error) {
 		}
 
 		name := entry.Name()
-		if name == work.RouterFileName {
+		if isRouterMarker(path, name) {
 			files = append(files, path)
 			return nil
 		}

@@ -267,17 +267,12 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 	if len(layouts) > 0 {
 		layout = layouts[0]
 	}
+	// A site is marked by router.kitwork.js or, written in Kitwork UI, by router.work (work.RouterMarker);
+	// looking for the first name only, as this did until 15/10/2026, reported "ok" for a tree of .ui
+	// sites it never opened.
 	if layout == work.RootLayoutSingle {
 		var targets []checkTarget
-		file := filepath.Join(root, work.RouterFileName)
-		info, err := os.Stat(file)
-		if os.IsNotExist(err) {
-			return targets, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		if !info.IsDir() {
+		if file := work.RouterMarker(root); file != "" {
 			targets = append(targets, checkTarget{
 				identity: work.RootAppIdentity,
 				domain:   "localhost",
@@ -296,7 +291,7 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 			targets = append(targets, checkTarget{
 				identity: work.RootAppIdentity,
 				domain:   site.Domain,
-				file:     filepath.Join(site.Directory, work.RouterFileName),
+				file:     siteRouterFile(site.Directory),
 			})
 		}
 		return targets, nil
@@ -311,7 +306,7 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 			targets = append(targets, checkTarget{
 				identity: site.Identity,
 				domain:   site.Domain,
-				file:     filepath.Join(site.Directory, work.RouterFileName),
+				file:     siteRouterFile(site.Directory),
 			})
 		}
 		return targets, nil
@@ -324,8 +319,7 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 
 	var targets []checkTarget
 	add := func(identity, domain, dir string) {
-		file := filepath.Join(dir, work.RouterFileName)
-		if info, statErr := os.Stat(file); statErr == nil && !info.IsDir() {
+		if file := work.RouterMarker(dir); file != "" {
 			targets = append(targets, checkTarget{
 				identity: identity,
 				domain:   domain,
@@ -381,4 +375,14 @@ func discoverCheckTargets(root string, layouts ...work.RootLayout) ([]checkTarge
 		return targets[i].domain < targets[j].domain
 	})
 	return targets, nil
+}
+
+// siteRouterFile is the router that marks a discovered site: router.kitwork.js, or router.work for
+// a Kitwork UI site. Discovery found the marker a moment ago, so the fallback only names the file an
+// issue would point at if it vanished in between.
+func siteRouterFile(directory string) string {
+	if marker := work.RouterMarker(directory); marker != "" {
+		return marker
+	}
+	return filepath.Join(directory, work.RouterFileName)
 }

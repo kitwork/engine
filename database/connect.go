@@ -41,7 +41,7 @@ func (d *Config) Connect() (*sql.DB, error) {
 	if driver == "sqlite3" {
 		driver = "sqlite"
 	}
-	if !sqlDriverRegistered(driver) {
+	if !DriverLinked(driver) {
 		return nil, fmt.Errorf(
 			"database connector %q is not linked in this Kitwork distribution",
 			driver,
@@ -91,6 +91,19 @@ func (d *Config) Endpoint() string {
 		return "(url)"
 	}
 	return fmt.Sprintf("%s:%d (DB: %s)", d.Host, d.Port, d.Name)
+}
+
+// DriverLinked reports whether this build links a database/sql driver for a connection type as the
+// manifest names it: "postgres", "sqlite" (and its "sqlite3" spelling), "mysql", "redis". The
+// manifest accepts every kind so a declaration is portable between builds; the boot asks this to
+// say, before anything opens, which declared connections this build cannot serve, instead of the
+// first query failing with the same words after the server is up.
+func DriverLinked(connectionType string) bool {
+	driver := strings.ToLower(strings.TrimSpace(connectionType))
+	if driver == "sqlite3" {
+		driver = "sqlite"
+	}
+	return sqlDriverRegistered(driver)
 }
 
 func sqlDriverRegistered(name string) bool {

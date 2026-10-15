@@ -12,9 +12,11 @@ review comments are just a pointer back into it.
 ## Before you open a pull request
 
 **1. Licence.** The engine is AGPL-3.0 with a commercial licence alongside it. That second half only
-works if one party holds the rights to the whole codebase, so a first contribution needs the
-agreement in `CLA.md`. You keep your copyright; you grant the right to relicense. Typo and
-formatting fixes are exempt.
+works if one party holds the rights to the whole codebase, which is what the contributor agreement
+in `CLA.md` is for: you keep your copyright; you grant the right to relicense. The agreement is a
+draft no lawyer has reviewed, so nobody is asked to sign it yet. Until it is in force, a
+contribution that changes behaviour is held open rather than merged — the merge is the part that
+cannot be undone — and typo and formatting fixes merge as they always did.
 
 **2. Run everything.** `docs/STABILITY.md` §6 requires all four, in this order:
 
@@ -30,8 +32,11 @@ go run . check
 
 CI runs the same commands. Running them first only saves you the round trip.
 
-**3. Dependencies.** The engine is standard-library-only by design — one binary, no supply chain.
-A new `go.mod` entry needs a discussion before code, not after.
+**3. Dependencies.** The engine is standard-library-first, not standard-library-only. `go.mod`
+lists eleven direct modules, every one pure Go so the build stays `CGO_ENABLED=0`: SQLite,
+PostgreSQL, ACME, YAML, minification, QR codes, images, XML, log rotation and screenshots. A new one
+needs a discussion before code, not after — what it replaces, why the standard library cannot do
+it, and that it builds without cgo.
 
 ---
 
