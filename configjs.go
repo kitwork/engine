@@ -52,28 +52,31 @@ func loadReferencedConfig(path string) (map[string]interface{}, error) {
 // `env` riêng, cô lập theo path, dựng trong work.Tenant.Run() (kitwork().env).
 //
 // An toàn để thực thi vì subset Kitwork cấm `while` + có gas → không thể treo.
-// ServerBuilder captures the app MANIFEST: what this app IS (root/database/logger) and WHERE it runs
-// — its surfaces: app.web({port}) / app.desktop({}) / app.mobile({}). Declaring a surface is data, not
-// a command: the TOOL (cloud host, desktop shell, future CLI) reads the manifest and decides what to
-// start. Legacy `server.run(port)` still works and counts as declaring the web surface.
+// ServerBuilder captures the app manifest: what it owns, which surfaces it
+// exposes, and the server started by app.run(port). Legacy app.web(...) and
+// server.run(...) declarations remain compatibility paths.
 type ServerBuilder struct {
 	config     map[string]value.Value
-	ran        bool // legacy server.run() was called
-	hasWeb     bool // a WEB surface is declared (app.web(...) or legacy server.run/port)
+	ran        bool // app.run() or its legacy server.run() alias was called
+	hasWeb     bool // an HTTP server is declared by app.run() or legacy app.web()
+	hasWebsite bool // the canonical app.website() surface was declared
 	hasGateway bool // a GATEWAY surface is declared with app.gateway(target, ...)
 	hasProxy   bool // forward-proxy listeners declared with app.proxy(config, ...)
 	path       string
 	err        string
 	unknown    []string // manifest methods the chain called that this engine does not have
 	// hasDatabase: an owned KitDB root is declared with app.database(path, options) — the DATABASE
-	// surface (the app offers a database, as app.web offers HTTP). This build has no KitDB runtime
+	// surface (the app offers a database, as app.website offers HTTP). This build has no KitDB runtime
 	// to serve it; the declaration is data the tool reads, exactly like app.desktop on the cloud host.
 	hasDatabase bool
+	// minify is MINIFY=true of the host env (root .env or the real environment): the engine minifies
+	// what it serves as production does while ALLOW_LOCAL stays true (Config.Minify, minifies).
+	minify bool
 }
 
 // MissingMember is called for a manifest method this engine does not have — app.postgresql() on a
 // build that predates it, a typo, a method from a newer engine. The chain must not break: the name
-// is recorded and the builder itself is returned, so app.web() after it still lands and the boot
+// is recorded and the builder itself is returned, so app.website() after it still lands and the boot
 // prints one line naming the method instead of "declares no surface", which pointed at the wrong
 // line entirely.
 func (b *ServerBuilder) MissingMember(name string) value.Value {
@@ -106,7 +109,7 @@ func coerceToNumeric(v value.Value) value.Value {
 	return v
 }
 
-// Port is the legacy way to declare the web surface's port; app.web({ port }) is the current one.
+// Port is the legacy way to declare the website server port. New manifests use app.run(port).
 func (b *ServerBuilder) Port(v value.Value) *ServerBuilder {
 	b.config["port"] = coerceToNumeric(v)
 	b.hasWeb = true
@@ -154,6 +157,112 @@ func (b *ServerBuilder) Web(args ...value.Value) *ServerBuilder {
 			b.config[k] = val
 		}
 	}
+	return b
+}
+
+// Website declares the canonical website surface. A string is the primary
+// hostname; port belongs to the terminal app.run(port) operation. The object
+// form accepts the existing host policies while deliberately rejecting port so
+// the new API has one unambiguous place for server startup.
+func (b *ServerBuilder) Website(args ...value.Value) *ServerBuilder {
+	b.hasWebsite = true
+	if len(args) > 1 {
+		b.err = "app.website expects no arguments, a hostname string, or one options object"
+		return b
+	}
+	if len(args) == 0 {
+		return b
+	}
+
+	v := args[0]
+	if v.K == value.String {
+		hostname, err := normalizeWebsiteHostname(v.Text())
+		if err != nil {
+			b.err = err.Error()
+			return b
+		}
+		b.config["hostname"] = value.New(hostname)
+		return b
+	}
+	if !v.IsMap() {
+		b.err = "app.website expects a hostname string or options object; pass the port to app.run(port)"
+		return b
+	}
+	if _, configured := v.Map()["port"]; configured {
+		b.err = "app.website does not accept port; pass it to app.run(port)"
+		return b
+	}
+	for key, item := range v.Map() {
+		switch key {
+		case "hostname":
+			if item.K != value.String {
+				b.err = "app.website hostname must be a string"
+				return b
+			}
+			hostname, err := normalizeWebsiteHostname(item.Text())
+			if err != nil {
+				b.err = err.Error()
+				return b
+			}
+			b.config["hostname"] = value.New(hostname)
+		case "rateLimit":
+			b.config["rate_limit"] = item
+		case "allowLocal":
+			b.config["allow_local"] = item
+		case "trustProxy":
+			b.config["trust_proxy"] = item
+		case "hotReload":
+			b.config["hot_reload"] = item
+		case "bytecodeCache":
+			b.config["bytecode_cache"] = item
+		case "bytecodeCacheDir":
+			b.config["bytecode_cache_dir"] = item
+		case "domain":
+			b.config["domains"] = item
+		default:
+			b.config[key] = item
+		}
+	}
+	return b
+}
+
+func normalizeWebsiteHostname(source string) (string, error) {
+	hostname := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(source, ".")))
+	if hostname == "" {
+		return "", fmt.Errorf("app.website hostname cannot be empty")
+	}
+	if strings.ContainsAny(hostname, "/\\:@ ") || strings.Contains(hostname, "*") {
+		return "", fmt.Errorf("app.website hostname %q is invalid", source)
+	}
+	return hostname, nil
+}
+
+// Prewarm selects web generations that must be prepared before the host is
+// ready. No arguments means the primary hostname, "*" means every discovered
+// site, and false explicitly keeps request-driven cold loading.
+func (b *ServerBuilder) Prewarm(domains ...value.Value) *ServerBuilder {
+	if _, declared := b.config["prewarm"]; declared {
+		b.err = "app.prewarm may be declared only once"
+		return b
+	}
+	if len(domains) == 0 {
+		b.config["prewarm"] = value.TRUE
+		return b
+	}
+	if len(domains) == 1 && domains[0].K == value.Bool {
+		b.config["prewarm"] = domains[0]
+		return b
+	}
+
+	configured := make([]value.Value, 0, len(domains))
+	for index, domain := range domains {
+		if domain.K != value.String {
+			b.err = fmt.Sprintf("app.prewarm argument %d must be a domain string", index+1)
+			return b
+		}
+		configured = append(configured, domain)
+	}
+	b.config["prewarm"] = value.Value{K: value.Array, V: &configured}
 	return b
 }
 
@@ -214,16 +323,16 @@ func (b *ServerBuilder) Mobile(v value.Value) *ServerBuilder {
 	return b
 }
 
-// Title is the app's NAME — an APP-level identity, not a surface option. A build only ever targets one
-// OS, so the same name becomes the desktop window title or the mobile app name; declaring it per
-// surface would just repeat it. (A web page's <title> is per-page: $.meta.title.)
+// Title remains the current mobile identity field and a compatibility fallback
+// for older desktop tooling. Canonical desktop identity lives in app.desktop.
+// A web page's <title> is per-page metadata and unrelated to this value.
 func (b *ServerBuilder) Title(v value.Value) *ServerBuilder {
 	b.config["title"] = v
 	return b
 }
 
-// Icon is the app's icon — APP-level identity, same reasoning as Title. Each surface derives the sizes
-// / formats it needs from it.
+// Icon remains the current mobile icon and a compatibility fallback for older
+// desktop tooling. Canonical desktop identity lives in app.desktop.
 func (b *ServerBuilder) Icon(v value.Value) *ServerBuilder {
 	b.config["icon"] = v
 	return b
@@ -501,18 +610,179 @@ func (b *ServerBuilder) Logger(v value.Value) *ServerBuilder {
 	return b
 }
 
-// Desktop declares the DESKTOP surface — app.desktop({ chrome, window }). The cloud host ignores it;
-// the desktop shell reads it (via ReadManifest) to build the window. MERGES rather than replaces, so
-// the grouped form and the flat sugar (app.chrome/app.window) compose in any order.
+// Desktop declares one native desktop surface. The canonical API is flat:
+// app.desktop({ name, icon, width, height, native, ... }). Compatibility
+// mirrors keep the previous top-level title/icon and nested chrome/window
+// representation available to existing desktop tools.
 func (b *ServerBuilder) Desktop(v value.Value) *ServerBuilder {
 	if !v.IsMap() {
 		b.config["desktop"] = v // app.desktop(true) — surface declared, all defaults
 		return b
 	}
-	for k, val := range v.Map() {
-		b.setDesktop(k, val)
+	options := v.Map()
+	if _, position := options["position"]; position {
+		if _, center := options["center"]; center {
+			b.err = "app.desktop cannot combine position with center"
+			return b
+		}
+	}
+	if _, native := options["native"]; native {
+		if _, chrome := options["chrome"]; chrome {
+			b.err = "app.desktop cannot combine native with legacy chrome"
+			return b
+		}
+	}
+	if _, window := options["window"]; window {
+		for _, key := range []string{"width", "height", "minWidth", "minHeight", "resizable", "center", "maximized"} {
+			if _, flat := options[key]; flat {
+				b.err = "app.desktop cannot combine flat window options with legacy window"
+				return b
+			}
+		}
+	}
+	for key, item := range options {
+		if !b.applyDesktopOption(key, item) {
+			return b
+		}
+	}
+	if desktop, ok := b.config["desktop"]; ok && desktop.IsMap() {
+		if name, named := desktop.Map()["name"]; named {
+			if _, titled := desktop.Map()["title"]; !titled {
+				b.setDesktop("title", name)
+			}
+		}
+		// Normalize compatibility identity after all map entries are read. Go map
+		// iteration is intentionally unordered, so an explicit title must win over
+		// the name-derived default regardless of source-object traversal order.
+		desktop = b.config["desktop"]
+		if title, titled := desktop.Map()["title"]; titled {
+			b.config["title"] = title
+		}
+		if icon, configured := desktop.Map()["icon"]; configured {
+			b.config["icon"] = icon
+		}
 	}
 	return b
+}
+
+func (b *ServerBuilder) applyDesktopOption(key string, item value.Value) bool {
+	switch key {
+	case "material":
+		if item.K != value.String || (item.Text() != "none" && item.Text() != "glass" && item.Text() != "mica") {
+			b.err = "desktop.material must be none, glass or mica"
+			return false
+		}
+		b.setDesktop(key, item)
+	case "background", "color":
+		if err := validateDesktopColor(item); err != nil {
+			b.err = "desktop." + key + ": " + err.Error()
+			return false
+		}
+		b.setDesktop(key, item)
+	case "bind":
+		if !item.IsMap() {
+			b.err = "desktop.bind must be an object"
+			return false
+		}
+		budget := 10000
+		if err := validateSplashData(item, 0, &budget); err != nil {
+			b.err = "desktop.bind: " + err.Error()
+			return false
+		}
+		b.setDesktop(key, item)
+	case "splash", "offline", "launch":
+		if _, exists := b.config[key]; exists {
+			b.err = "cannot combine desktop." + key + " with app." + key
+			return false
+		}
+		if desktop, ok := b.config["desktop"]; ok && desktop.IsMap() {
+			if _, exists := desktop.Map()[key]; exists {
+				b.err = "desktop." + key + " may only be declared once"
+				return false
+			}
+		}
+		var normalized value.Value
+		var err error
+		if key != "launch" {
+			normalized, err = normalizeSplashOption(item, key)
+		}
+		if key == "launch" {
+			normalized, err = normalizeLaunchOption(item)
+		}
+		if err != nil {
+			b.err = "desktop." + key + ": " + err.Error()
+			return false
+		}
+		b.setDesktop(key, normalized)
+	case "name", "title", "icon":
+		if item.K != value.String || strings.TrimSpace(item.Text()) == "" {
+			b.err = "app.desktop " + key + " must be a non-empty string"
+			return false
+		}
+		b.setDesktop(key, item)
+		// Existing native tools read shared identity fields. Keep those fields as
+		// fallbacks while the canonical ownership moves into the desktop surface.
+		compatibilityKey := key
+		if key == "name" {
+			compatibilityKey = "title"
+		}
+		if _, explicit := b.config[compatibilityKey]; !explicit {
+			b.config[compatibilityKey] = item
+		}
+	case "position":
+		if err := validateDesktopPosition(item); err != nil {
+			b.err = "app.desktop position: " + err.Error()
+			return false
+		}
+		b.setDesktop(key, item)
+	case "native":
+		if item.K != value.Bool {
+			b.err = "app.desktop native must be a boolean"
+			return false
+		}
+		b.setDesktop("native", item)
+		chrome := "html"
+		if item.IsTrue() {
+			chrome = "native"
+		}
+		b.setDesktop("chrome", value.New(chrome))
+	case "width", "height", "minWidth", "minHeight":
+		if !item.IsNumeric() || item.N <= 0 {
+			b.err = "app.desktop " + key + " must be a positive number"
+			return false
+		}
+		b.setDesktop(key, item)
+		b.setDesktopWindow(key, item)
+	case "resizable", "center", "maximized":
+		if item.K != value.Bool {
+			b.err = "app.desktop " + key + " must be a boolean"
+			return false
+		}
+		b.setDesktop(key, item)
+		b.setDesktopWindow(key, item)
+	case "chrome":
+		b.setDesktop(key, item)
+		if item.K == value.String {
+			switch item.Text() {
+			case "native":
+				b.setDesktop("native", value.TRUE)
+			case "html":
+				b.setDesktop("native", value.FALSE)
+			}
+		}
+	case "window":
+		if !item.IsMap() {
+			b.err = "app.desktop window must be an object"
+			return false
+		}
+		b.setDesktop(key, item)
+		for windowKey, windowValue := range item.Map() {
+			b.setDesktop(windowKey, windowValue)
+		}
+	default:
+		b.setDesktop(key, item)
+	}
+	return true
 }
 
 // setDesktop merges ONE key into the desktop surface block, creating the block if needed. This is what
@@ -528,6 +798,19 @@ func (b *ServerBuilder) setDesktop(key string, v value.Value) {
 	b.config["desktop"] = value.New(m)
 }
 
+func (b *ServerBuilder) setDesktopWindow(key string, v value.Value) {
+	window := map[string]value.Value{}
+	if desktop, ok := b.config["desktop"]; ok && desktop.IsMap() {
+		if current, ok := desktop.Map()["window"]; ok && current.IsMap() {
+			for currentKey, currentValue := range current.Map() {
+				window[currentKey] = currentValue
+			}
+		}
+	}
+	window[key] = v
+	b.setDesktop("window", value.New(window))
+}
+
 // Chrome is flat sugar for app.desktop({ chrome }) — the window chrome: "html" | "native" | "auto".
 func (b *ServerBuilder) Chrome(v value.Value) *ServerBuilder {
 	b.setDesktop("chrome", v)
@@ -540,10 +823,19 @@ func (b *ServerBuilder) Window(v value.Value) *ServerBuilder {
 	return b
 }
 
-// Run is the LEGACY imperative form (server.run(8080) / server.run({...}) / server.run("cfg.yaml")).
-// It is kept working for existing configs and counts as declaring the web surface. New manifests use
-// the declarative app.web({ port }) instead — nothing in a manifest should read like a command.
+// Run is the terminal server operation. app.run(8080) is the canonical form;
+// the object and referenced-file forms remain for legacy server.run(...)
+// manifests. A website hostname is an implicit readiness target unless the
+// manifest explicitly selected another prewarm policy.
 func (b *ServerBuilder) Run(args ...value.Value) value.Value {
+	if b.ran {
+		b.err = "app.run may be called only once"
+		return value.New(b.err)
+	}
+	if len(args) > 1 {
+		b.err = "app.run expects no arguments or one port"
+		return value.New(b.err)
+	}
 	b.ran = true
 	b.hasWeb = true
 	if len(args) > 0 {
@@ -594,6 +886,13 @@ func (b *ServerBuilder) Run(args ...value.Value) value.Value {
 			return value.New(b.err)
 		}
 	}
+	if b.hasWebsite {
+		if _, explicit := b.config["prewarm"]; !explicit {
+			if hostname, configured := b.config["hostname"]; configured && hostname.K == value.String && strings.TrimSpace(hostname.Text()) != "" {
+				b.config["prewarm"] = value.TRUE
+			}
+		}
+	}
 
 	return value.Value{K: value.Nil}
 }
@@ -628,6 +927,9 @@ func evalConfigJS(file string) (map[string]interface{}, error) {
 // perfectly valid — it just has nothing for the cloud host to serve — so say that instead of implying
 // the file is broken.
 func noWebSurfaceErr(b *ServerBuilder, file string) error {
+	if b.hasWebsite && !b.ran {
+		return fmt.Errorf("%s declares app.website() but does not start its server: finish the manifest with `app.run(port)`", filepath.Base(file))
+	}
 	_, hasDesktop := b.config["desktop"]
 	_, hasMobile := b.config["mobile"]
 	if hasDesktop || hasMobile {
@@ -635,11 +937,11 @@ func noWebSurfaceErr(b *ServerBuilder, file string) error {
 		if hasMobile && !hasDesktop {
 			surface = "app.mobile()"
 		}
-		return fmt.Errorf("%s declares %s but no web surface: the cloud host has nothing to serve.\n"+
-			"Add `app.web({ port: env.PORT || 8080 })` to also serve HTTP — or run `kitwork-desktop`, which needs no web surface.",
+		return fmt.Errorf("%s declares %s but no website server: the cloud host has nothing to serve.\n"+
+			"Add `app.website().run(env.PORT || 8080)` to also serve HTTP — or run `kitwork-desktop`, which needs no website server.",
 			filepath.Base(file), surface)
 	}
-	return fmt.Errorf("%s declares no surface: add `app.web({ port: 8080 })` to serve HTTP, and/or `app.desktop({...})` for a desktop app.\n"+
+	return fmt.Errorf("%s declares no surface: add `app.website().run(8080)` to serve HTTP, and/or `app.desktop({...})` for a desktop app.\n"+
 		"(Legacy `server.run(8080)` still works.)", filepath.Base(file))
 }
 
@@ -672,7 +974,7 @@ func builderToMap(b *ServerBuilder, file string) (map[string]interface{}, error)
 // it shares (a desktop window's title is the APP's title — one app, one name).
 //
 // Unlike the cloud boot it does NOT require a web surface: a desktop-only manifest is perfectly valid,
-// so no app.web()/server.run() is needed here. Errors (missing/invalid file) are returned so the
+// so no app.website()/app.run() is needed here. Errors (missing/invalid file) are returned so the
 // caller can fall back to its own defaults.
 func ReadManifest(manifestPath string) (map[string]interface{}, error) {
 	builder, err := evalServerBuilder(manifestPath)
@@ -733,11 +1035,18 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 			envMap[kv[:i]] = kv[i+1:]
 		}
 	}
+	if text, ok := envMap["MINIFY"]; ok {
+		minify, err := parseMinifyEnv(text)
+		if err != nil {
+			return nil, err
+		}
+		builder.minify = minify
+	}
 	var missingEnv []string
 	envObj := work.NewEnvWithMissing(envMap, &missingEnv)
 
 	// kitwork() trong context setup trả về {app, server, env} (KHÔNG phải tenant runtime).
-	// `app` là tên chính thức (app.web/.desktop/.mobile — manifest khai báo surface);
+	// `app` là tên chính thức (app.website/.desktop/.mobile — manifest khai báo surface);
 	// `server` giữ làm ALIAS tương thích ngược cho config cũ (server.run/.port/...).
 	setupRoot := value.New(map[string]value.Value{
 		"app":    serverObj,
@@ -756,4 +1065,18 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 		return nil, fmt.Errorf("missing required env var(s): %s", strings.Join(missingEnv, ", "))
 	}
 	return builder, nil
+}
+
+// parseMinifyEnv reads MINIFY of the host env: "true" turns production minification on while
+// ALLOW_LOCAL stays true (a local run that serves production's bytes: a Lighthouse score, the size of
+// a page), "false" or nothing leaves it to ALLOW_LOCAL. Anything else stops the boot naming the two
+// words, as env.KEY reads only "true" and "false" as a bool.
+func parseMinifyEnv(text string) (bool, error) {
+	switch strings.TrimSpace(text) {
+	case "true":
+		return true, nil
+	case "false", "":
+		return false, nil
+	}
+	return false, fmt.Errorf(`MINIFY=%s: chỉ nhận true hoặc false; MINIFY=true nén HTML và JavaScript như production trong khi ALLOW_LOCAL vẫn là true (không ACME, không TLS)`, strings.TrimSpace(text))
 }

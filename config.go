@@ -35,6 +35,11 @@ type Config struct {
 	AppDatabases     []AppDatabaseConfig `json:"-" yaml:"-"`
 	Gateway          []gateway.Target    `json:"gateway,omitempty" yaml:"gateway,omitempty"`
 	Proxies          []proxies.Config    `json:"proxy,omitempty" yaml:"proxy,omitempty"`
+	Prewarm          PrewarmConfig       `json:"prewarm,omitempty" yaml:"prewarm,omitempty"`
+
+	// Minify is MINIFY=true of the host env: minify HTML and JavaScript as production does while
+	// AllowLocal stays true (minifies). Production always minifies.
+	Minify bool `json:"-" yaml:"-"`
 }
 
 // RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request
@@ -112,6 +117,13 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		if b, ok := val.(bool); ok {
 			cfg.TrustProxy = b
 		}
+	}
+	if value, ok := raw["prewarm"]; ok {
+		prewarm, err := parsePrewarmConfig(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.Prewarm = prewarm
 	}
 	if val, ok := raw["logger"]; ok {
 		if m, ok := val.(map[string]interface{}); ok {

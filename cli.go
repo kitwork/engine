@@ -11,12 +11,14 @@ import (
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/id"
 	kitruntime "github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/version"
 	"github.com/kitwork/engine/work"
 )
 
-// Version Constants
+// Version is the engine release; the number itself lives in package version, the one place every
+// part (pages included) reads it from.
 const (
-	Version = "0.9.0"
+	Version = version.Number
 )
 
 // VersionInfo returns structured metadata about the Kitwork engine build.

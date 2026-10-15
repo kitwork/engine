@@ -510,6 +510,108 @@ app.web({ port: 3100, hostname: "flat.example", allowLocal: true, rateLimit: { r
 	}
 }
 
+func TestManifestStyleWebsiteRun(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.website("kitwork.io").run(8080);`))
+	if err != nil {
+		t.Fatalf("app.website().run() should be valid: %v", err)
+	}
+	if raw["hostname"] != "kitwork.io" {
+		t.Errorf("hostname = %v, want kitwork.io", raw["hostname"])
+	}
+	if raw["port"] != float64(8080) {
+		t.Errorf("port = %v, want 8080", raw["port"])
+	}
+	if raw["prewarm"] != true {
+		t.Errorf("prewarm = %v, want implicit primary readiness", raw["prewarm"])
+	}
+}
+
+func TestManifestStyleAppRunStartsServer(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.run(8080);`))
+	if err != nil {
+		t.Fatalf("app.run(8080) should start the server: %v", err)
+	}
+	if raw["port"] != float64(8080) {
+		t.Errorf("port = %v, want 8080", raw["port"])
+	}
+	if _, configured := raw["prewarm"]; configured {
+		t.Fatalf("app.run without a website hostname unexpectedly selected prewarm: %+v", raw)
+	}
+}
+
+func TestManifestStyleWebsiteRequiresRun(t *testing.T) {
+	_, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.website("kitwork.io");`))
+	if err == nil || !strings.Contains(err.Error(), "finish the manifest with `app.run(port)`") {
+		t.Fatalf("website without run error = %v", err)
+	}
+}
+
+func TestManifestStyleWebsiteExplicitPrewarmWins(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.website("kitwork.io").prewarm(false).run(8080);`))
+	if err != nil {
+		t.Fatalf("explicit website prewarm policy should be valid: %v", err)
+	}
+	if raw["prewarm"] != false {
+		t.Errorf("prewarm = %v, want explicit false", raw["prewarm"])
+	}
+}
+
+func TestManifestStyleWebsiteOptions(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.website({ hostname: "kitwork.io", allowLocal: true, trustProxy: true }).run(9090);`))
+	if err != nil {
+		t.Fatalf("website options should be valid: %v", err)
+	}
+	if raw["hostname"] != "kitwork.io" || raw["allow_local"] != true || raw["trust_proxy"] != true {
+		t.Fatalf("website options = %+v", raw)
+	}
+	if raw["port"] != float64(9090) {
+		t.Errorf("port = %v, want 9090", raw["port"])
+	}
+}
+
+func TestManifestStyleWebsiteKeepsPortAtRun(t *testing.T) {
+	for name, source := range map[string]string{
+		"number": `import { app } from "kitwork"; app.website(8080).run();`,
+		"object": `import { app } from "kitwork"; app.website({ hostname: "kitwork.io", port: 8080 }).run();`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := evalConfigJS(writeServerJS(t, source))
+			if err == nil || !strings.Contains(err.Error(), "app.run(port)") {
+				t.Fatalf("website port error = %v", err)
+			}
+		})
+	}
+}
+
+func TestManifestStyleWebsiteValidatesHostname(t *testing.T) {
+	for name, source := range map[string]string{
+		"empty":      `import { app } from "kitwork"; app.website(" ").run();`,
+		"url":        `import { app } from "kitwork"; app.website("https://kitwork.io").run();`,
+		"wrong type": `import { app } from "kitwork"; app.website({ hostname: 42 }).run();`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := evalConfigJS(writeServerJS(t, source))
+			if err == nil || !strings.Contains(err.Error(), "app.website hostname") {
+				t.Fatalf("hostname validation error = %v", err)
+			}
+		})
+	}
+}
+
+func TestManifestStyleRunIsTerminal(t *testing.T) {
+	_, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.run(8080);
+app.run(9090);`))
+	if err == nil || !strings.Contains(err.Error(), "app.run may be called only once") {
+		t.Fatalf("duplicate run error = %v", err)
+	}
+}
+
 // app.web(8080) shorthand declares the surface with just a port.
 func TestManifestStyle_WebShorthandPort(t *testing.T) {
 	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork"; app.web(8080);`))
@@ -521,8 +623,7 @@ func TestManifestStyle_WebShorthandPort(t *testing.T) {
 	}
 }
 
-// Desktop in BOTH styles: flat sugar (app.chrome/app.window) and grouped (app.desktop({...})),
-// mixed in one chain and in either order — they must merge into one desktop block.
+// Compatibility methods and the legacy grouped shape still merge into one desktop block.
 func TestManifestStyle_DesktopFlatAndGroupedCompose(t *testing.T) {
 	file := writeServerJS(t, `import { app } from "kitwork";
 app.port(3000).chrome("native").desktop({ window: { width: 800, maximized: true } });`)
@@ -547,6 +648,76 @@ app.port(3000).chrome("native").desktop({ window: { width: 800, maximized: true 
 	}
 }
 
+func TestManifestStyleDesktopFlatSurface(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.desktop({
+  name: "Kitwork Studio",
+  icon: "./assets/icon.png",
+  width: 1280,
+  height: 820,
+  minWidth: 960,
+  minHeight: 640,
+  native: true,
+  resizable: true,
+  center: true
+}).run(8080);`))
+	if err != nil {
+		t.Fatalf("flat desktop surface: %v", err)
+	}
+	desktop, ok := raw["desktop"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("desktop = %#v", raw["desktop"])
+	}
+	if desktop["name"] != "Kitwork Studio" || desktop["title"] != "Kitwork Studio" || desktop["icon"] != "./assets/icon.png" {
+		t.Fatalf("desktop identity = %#v", desktop)
+	}
+	if desktop["width"] != float64(1280) || desktop["height"] != float64(820) || desktop["native"] != true {
+		t.Fatalf("desktop window = %#v", desktop)
+	}
+	if desktop["chrome"] != "native" {
+		t.Fatalf("desktop compatibility chrome = %#v", desktop["chrome"])
+	}
+	window, ok := desktop["window"].(map[string]interface{})
+	if !ok || window["width"] != float64(1280) || window["center"] != true {
+		t.Fatalf("desktop compatibility window = %#v", desktop["window"])
+	}
+	if raw["title"] != "Kitwork Studio" || raw["icon"] != "./assets/icon.png" {
+		t.Fatalf("desktop compatibility identity = title:%#v icon:%#v", raw["title"], raw["icon"])
+	}
+}
+
+func TestManifestStyleDesktopCustomHTMLChrome(t *testing.T) {
+	raw, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork";
+app.desktop({ name: "Studio", title: "Workspace", native: false }).run(8080);`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	desktop := raw["desktop"].(map[string]interface{})
+	if desktop["title"] != "Workspace" || desktop["native"] != false || desktop["chrome"] != "html" {
+		t.Fatalf("desktop HTML chrome = %#v", desktop)
+	}
+	if raw["title"] != "Workspace" {
+		t.Fatalf("desktop compatibility title = %#v, want Workspace", raw["title"])
+	}
+}
+
+func TestManifestStyleDesktopRejectsAmbiguousOrInvalidOptions(t *testing.T) {
+	for name, source := range map[string]string{
+		"native and chrome": `import { app } from "kitwork"; app.desktop({ native: true, chrome: "native" }).run();`,
+		"flat and window":   `import { app } from "kitwork"; app.desktop({ width: 800, window: { width: 800 } }).run();`,
+		"negative width":    `import { app } from "kitwork"; app.desktop({ width: -1 }).run();`,
+		"invalid native":    `import { app } from "kitwork"; app.desktop({ native: "yes" }).run();`,
+		"empty name":        `import { app } from "kitwork"; app.desktop({ name: "" }).run();`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := evalConfigJS(writeServerJS(t, source))
+			if err == nil || !strings.Contains(err.Error(), "app.desktop") {
+				t.Fatalf("desktop validation error = %v", err)
+			}
+		})
+	}
+}
+
 // The legacy `server` object stays an alias of `app` — old manifests must not break.
 func TestManifestStyle_ServerAliasStillWorks(t *testing.T) {
 	raw, err := evalConfigJS(writeServerJS(t, `import { server } from "kitwork"; server.run(4321);`))
@@ -558,15 +729,15 @@ func TestManifestStyle_ServerAliasStillWorks(t *testing.T) {
 	}
 }
 
-// A desktop-only manifest is VALID data (the shell reads it) but has no web surface for the cloud
+// A desktop-only manifest is VALID data (the shell reads it) but has no website server for the cloud
 // host — the error must say that, not "you forgot to call run()".
-func TestManifestStyle_DesktopOnlyHasNoWebSurface(t *testing.T) {
-	_, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork"; app.title("X").desktop({ chrome: "native" });`))
+func TestManifestStyleDesktopOnlyHasNoWebsiteServer(t *testing.T) {
+	_, err := evalConfigJS(writeServerJS(t, `import { app } from "kitwork"; app.desktop({ name: "X", native: true });`))
 	if err == nil {
 		t.Fatal("desktop-only manifest must not satisfy the cloud host")
 	}
-	if !strings.Contains(err.Error(), "no web surface") {
-		t.Errorf("error should explain the missing WEB surface, got: %v", err)
+	if !strings.Contains(err.Error(), "no website server") {
+		t.Errorf("error should explain the missing website server, got: %v", err)
 	}
 }
 
@@ -625,8 +796,30 @@ func TestReadMobileManifestKeepsLegacyDeclaration(t *testing.T) {
 	}
 
 	_, err = evalConfigJS(file)
-	if err == nil || !strings.Contains(err.Error(), "no web surface") || !strings.Contains(err.Error(), "app.mobile()") {
+	if err == nil || !strings.Contains(err.Error(), "no website server") || !strings.Contains(err.Error(), "app.mobile()") {
 		t.Fatalf("mobile-only cloud error = %v", err)
+	}
+}
+
+func TestRepositoryAppManifestUsesWebsiteRun(t *testing.T) {
+	t.Setenv("SITE_HOSTNAME", "kitwork.io")
+	t.Setenv("PORT", "8080")
+	raw, err := evalConfigJS(filepath.Join("..", "app.kitwork.js"))
+	if err != nil {
+		t.Fatalf("repository app manifest: %v", err)
+	}
+	if raw["hostname"] != "kitwork.io" || raw["port"] != float64(8080) {
+		t.Fatalf("repository website server = %+v", raw)
+	}
+	if raw["prewarm"] != true {
+		t.Fatalf("repository primary website prewarm = %v, want true", raw["prewarm"])
+	}
+	desktop, ok := raw["desktop"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("repository desktop surface = %#v", raw["desktop"])
+	}
+	if desktop["name"] != "AppBidTop" || desktop["width"] != float64(1200) || desktop["native"] != false {
+		t.Fatalf("repository desktop config = %#v", desktop)
 	}
 }
 

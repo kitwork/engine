@@ -82,7 +82,7 @@ func rootLayoutForPath(root string) work.RootLayout {
 }
 
 func appRootLayout(root string) work.RootLayout {
-	if regularFileExists(filepath.Join(root, work.RouterFileName)) {
+	if work.RouterMarker(root) != "" {
 		return work.RootLayoutSingle
 	}
 	if len(work.DiscoverFlatSites(root)) > 0 {

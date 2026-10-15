@@ -73,8 +73,8 @@ func Run(configFile ...string) (err error) {
 	// hợp lệ (chạy shell tương ứng), không phải lỗi.
 	if !builder.hasWeb && !builder.hasDatabase && !builder.hasGateway && !builder.hasProxy {
 		if _, hasDesktop := builder.config["desktop"]; hasDesktop {
-			fmt.Printf("%s khai báo app.desktop() nhưng không có web surface — không có gì để phục vụ.\n"+
-				"→ Chạy `kitwork-desktop` cho app desktop, hoặc thêm `app.web({ port: env.PORT || 8080 })` để phục vụ HTTP.\n", file)
+			fmt.Printf("%s khai báo app.desktop() nhưng không có website server — không có gì để phục vụ.\n"+
+				"→ Chạy `kitwork-desktop` cho app desktop, hoặc thêm `app.website().run(env.PORT || 8080)` để phục vụ HTTP.\n", file)
 			return nil
 		}
 		if _, hasMobile := builder.config["mobile"]; hasMobile {
@@ -90,7 +90,14 @@ func Run(configFile ...string) (err error) {
 	}
 	surfaces := make([]string, 0, 4)
 	if builder.hasWeb {
-		surfaces = append(surfaces, "app.web")
+		switch {
+		case builder.hasWebsite:
+			surfaces = append(surfaces, "app.website")
+		case builder.ran:
+			surfaces = append(surfaces, "app.run")
+		default:
+			surfaces = append(surfaces, "app.web (compatibility)")
+		}
 	}
 	if builder.hasDatabase {
 		surfaces = append(surfaces, "app.database")
@@ -109,6 +116,7 @@ func Run(configFile ...string) (err error) {
 		return fmt.Errorf("failed to process configuration: %w", err)
 	}
 	cfg.Web = builder.hasWeb
+	cfg.Minify = builder.minify
 	if builder.hasWeb || builder.hasDatabase {
 		if err := resolveRootConfig(cfg); err != nil {
 			return fmt.Errorf("resolve app root: %w", err)
@@ -117,6 +125,9 @@ func Run(configFile ...string) (err error) {
 		cfg.Root = "."
 	}
 	if err := validateGatewaySurface(builder.hasWeb, cfg.Gateway); err != nil {
+		return err
+	}
+	if err := validatePrewarmSurface(builder.hasWeb, cfg.Prewarm); err != nil {
 		return err
 	}
 	// An owned KitDB root is declared relative to the manifest, and kitsql needs the web surface.
@@ -132,7 +143,7 @@ func Run(configFile ...string) (err error) {
 	if !builder.hasWeb {
 		for _, configured := range cfg.AppDatabases {
 			if configured.KitSQL {
-				return fmt.Errorf("app.database %q: kitsql requires an app.web surface", configured.Path)
+				return fmt.Errorf("app.database %q: kitsql requires an app.website server", configured.Path)
 			}
 		}
 	}
@@ -233,8 +244,10 @@ func Run(configFile ...string) (err error) {
 	_, hasMobile := builder.config["mobile"]
 	work.NativeShell = hasDesktop || hasMobile
 	// The page JavaScript files are named by their bytes, so these two decide every name: minified
-	// in production, and the native bridge in the kernel inside a shell.
-	jitjs.Minify = !cfg.AllowLocal
+	// in production (or with MINIFY=true while developing: minifies), and the native bridge in the
+	// kernel inside a shell. Templates and the heads of .ui pages minify by the same rule (work.Minify).
+	jitjs.Minify = minifies(cfg)
+	work.Minify = cfg.Minify
 	jitjs.Native = work.NativeShell
 	work.ServerPort = cfg.Port
 
@@ -325,13 +338,15 @@ func Run(configFile ...string) (err error) {
 		})
 	}
 
-	// FILESYSTEM-ROUTED is lazy BY DESIGN: nothing is scanned or compiled at startup — the engine is
-	// idle until the first request, and each folder's router.kitwork.js compiles on first hit. So
-	// there is NO route prewarm; the old eager route-registration is gone with the flat model.
-	//
-	// The ONE deliberate exception is the scheduler: a cron cannot wait for a request. So every app
-	// (identity) with a _cron/ boots an app runtime NOW that starts its scheduler eagerly.
 	if builder.hasWeb {
+		// Selected sites publish complete generations before readiness. Sites not
+		// selected here retain request-driven cold loading.
+		if err := prewarmConfiguredSites(handler, cfg); err != nil {
+			return fmt.Errorf("prepare web runtime: %w", err)
+		}
+
+		// A cron cannot wait for a request, so every app identity with _cron/
+		// starts its scheduler owner eagerly after selected sites are ready.
 		handler.StartAppSchedulers()
 		for _, site := range work.DiscoverLegacySites(cfg.Root) {
 			slog.Warn("Legacy site entry is ignored; migrate to router.kitwork.js", "site", site)
@@ -526,6 +541,9 @@ func commandConfig(configFile ...string) (*Config, error) {
 	if err := validateGatewaySurface(builder.hasWeb, cfg.Gateway); err != nil {
 		return nil, err
 	}
+	if err := validatePrewarmSurface(builder.hasWeb, cfg.Prewarm); err != nil {
+		return nil, err
+	}
 	if builder.hasWeb || builder.hasDatabase {
 		if err := resolveRootConfig(cfg); err != nil {
 			return nil, fmt.Errorf("resolve app root: %w", err)
@@ -616,4 +634,13 @@ func rootLayoutLabel(layout work.RootLayout) string {
 	default:
 		return "Legacy Auto"
 	}
+}
+
+// minifies reports whether the engine minifies what it serves (the page JavaScript files, the HTML of
+// template pages, the head of a .ui page): always in production, and while developing (AllowLocal)
+// when MINIFY=true asks for production's bytes (14/10/2026). ALLOW_LOCAL must stay true on a local
+// machine (no ACME, no TLS), so before MINIFY a local run could never show what production serves.
+// Only minification follows it: a .ui page's warnings and every other part of developing stay.
+func minifies(cfg *Config) bool {
+	return cfg != nil && (!cfg.AllowLocal || cfg.Minify)
 }
