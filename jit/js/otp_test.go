@@ -7,11 +7,11 @@ import (
 
 func TestOtpIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="otp"><input data-kit-element="slot"></div>`)
-	if !strings.Contains(out, `/kit/components/otp@`) {
+	if !strings.Contains(out, `/_kitwork/components/otp.`) {
 		t.Fatalf("otp was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"otp"}), `component("otp@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"otp"}); !strings.Contains(src, `component("otp", `) || strings.Contains(src, `component("otp@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

@@ -123,7 +123,7 @@ func TestSQLiteInspectorCatalogAndPagedObjects(t *testing.T) {
 		t.Fatalf("unshadowed _rowid_ ordering = %#v", rowIDPage)
 	}
 	unstable := sqliteInspectorResultMap(t, db.ReadTablePage(sqliteInspectorPageValue("table", "all_rowid_aliases_shadowed", int(version), 1, 10)))
-	if unstable["ok"] != false || unstable["code"] != "UNSTABLE_ORDER" {
+	if unstable["ok"] != false || unstable["code"] != value.UnsupportedCode || !strings.Contains(unstable["message"].(string), "rowid") {
 		t.Fatalf("fully shadowed rowid table = %#v", unstable)
 	}
 
@@ -151,7 +151,7 @@ func TestSQLiteInspectorRejectsInvalidStaleAndNonCatalogRequests(t *testing.T) {
 	}
 	for index, request := range invalid {
 		result := sqliteInspectorResultMap(t, db.ReadTablePage(request))
-		if result["ok"] != false || result["code"] != "INVALID_REQUEST" {
+		if result["ok"] != false || result["code"] != value.InvalidArgumentCode || !strings.HasPrefix(result["message"].(string), "Expected exactly") {
 			t.Errorf("invalid request %d = %#v", index, result)
 		}
 	}
@@ -162,14 +162,14 @@ func TestSQLiteInspectorRejectsInvalidStaleAndNonCatalogRequests(t *testing.T) {
 		sqliteInspectorPageValue("table", "sqlite_schema", version, 1, 10),
 	} {
 		result := sqliteInspectorResultMap(t, db.ReadTablePage(request))
-		if result["code"] != "OBJECT_NOT_FOUND" {
+		if result["code"] != value.InvalidArgumentCode || !strings.Contains(result["message"].(string), "was not found") {
 			t.Errorf("non-catalog request = %#v", result)
 		}
 	}
 
 	mustSQLiteInspectorExec(t, db, `CREATE TABLE later (id INTEGER PRIMARY KEY)`)
 	stale := sqliteInspectorResultMap(t, db.ReadTablePage(sqliteInspectorPageValue("table", "users", version, 1, 10)))
-	if stale["ok"] != false || stale["code"] != "SCHEMA_CHANGED" {
+	if stale["ok"] != false || stale["code"] != value.ConflictCode || !strings.Contains(stale["message"].(string), "schema changed") {
 		t.Fatalf("stale catalog request = %#v", stale)
 	}
 }
@@ -245,7 +245,7 @@ func TestSQLiteInspectorCellAndPageBoundsFailClosed(t *testing.T) {
 	catalog := sqliteInspectorResultMap(t, db.ReadCatalog())
 	version := int(catalog["catalogVersion"].(float64))
 	page := sqliteInspectorResultMap(t, db.ReadTablePage(sqliteInspectorPageValue("table", "records", version, 1, 1)))
-	if page["ok"] != false || page["code"] != "RESULT_TOO_LARGE" {
+	if page["ok"] != false || page["code"] != value.InvalidArgumentCode || !strings.Contains(page["message"].(string), "2 MiB") {
 		t.Fatalf("oversized cell page = %#v", page)
 	}
 }
@@ -265,11 +265,24 @@ func mustSQLiteInspectorExec(t *testing.T, db *SQLite, statement string) {
 	}
 }
 
+// sqliteInspectorResultMap is a read's result as a map: its data, or for a failure (14/10/2026: a
+// failure of the program, no longer data shaped { ok: false, code, message }) the same three keys,
+// read from the failure, so a test reads both one way.
 func sqliteInspectorResultMap(t *testing.T, result value.Value) map[string]any {
 	t.Helper()
+	if result.K == value.Invalid {
+		failure, ok := value.FailureFrom(result)
+		if !ok {
+			t.Fatalf("a failure without its code: %s", result.Text())
+		}
+		return map[string]any{"ok": false, "code": failure.Code, "message": failure.Message}
+	}
 	payload, ok := result.Interface().(map[string]any)
 	if !ok {
 		t.Fatalf("result = %T %#v", result.Interface(), result.Interface())
+	}
+	if payload["ok"] == false {
+		t.Fatalf("a failure came back as data, { ok: false } (until 14/10/2026), not as a failure: %#v", payload)
 	}
 	return payload
 }

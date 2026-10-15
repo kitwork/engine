@@ -30,7 +30,7 @@ func DiscoverSites(root string) []string {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(sitesDir, e.Name(), RouterFileName)); err == nil {
+		if RouterMarker(filepath.Join(sitesDir, e.Name())) != "" {
 			domains = append(domains, e.Name())
 		}
 	}
@@ -56,14 +56,7 @@ func DiscoverAppSites(root string) ([]AppSiteSource, error) {
 			continue
 		}
 		directory := filepath.Join(root, entry.Name())
-		marker, statErr := os.Stat(filepath.Join(directory, RouterFileName))
-		if os.IsNotExist(statErr) {
-			continue
-		}
-		if statErr != nil {
-			return nil, fmt.Errorf("inspect app site %q: %w", entry.Name(), statErr)
-		}
-		if marker.IsDir() {
+		if RouterMarker(directory) == "" {
 			continue
 		}
 		sites = append(sites, AppSiteSource{
@@ -137,19 +130,7 @@ func DiscoverTenantSites(root string) ([]TenantSiteSource, error) {
 				continue
 			}
 			directory := filepath.Join(identityRoot, domain.Name())
-			marker, statErr := os.Stat(filepath.Join(directory, RouterFileName))
-			if os.IsNotExist(statErr) {
-				continue
-			}
-			if statErr != nil {
-				return nil, fmt.Errorf(
-					"inspect site %q for app identity %q: %w",
-					domain.Name(),
-					identity.Name(),
-					statErr,
-				)
-			}
-			if marker.IsDir() {
+			if RouterMarker(directory) == "" {
 				continue
 			}
 			sites = append(sites, TenantSiteSource{
@@ -187,13 +168,5 @@ func reservedRootEntry(name string) bool {
 }
 
 func regularRouterMarker(root string) (bool, error) {
-	marker := filepath.Join(root, RouterFileName)
-	info, err := os.Stat(marker)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("inspect router marker %q: %w", marker, err)
-	}
-	return !info.IsDir(), nil
+	return RouterMarker(root) != "", nil
 }

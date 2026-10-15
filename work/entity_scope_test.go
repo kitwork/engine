@@ -138,12 +138,13 @@ func TestEntityRefusesWhenTheAppHasNoIdentity(t *testing.T) {
 	withSharedDB(t)
 
 	res := tableAs("", "posts").List()
-	// A known domain refusal remains attached so its code and clean message survive safe().
-	if !res.IsError {
-		t.Fatalf("an app with no identity got a clean result instead of an error: %v", res.V)
+	// A refusal is a failure (14/10/2026), DENIED, its message saying what is missing.
+	failure, _ := value.FailureFrom(res)
+	if res.K != value.Invalid || failure.Code != value.DeniedCode {
+		t.Fatalf("an app with no identity got %s %+v instead of the DENIED failure", res.K, failure)
 	}
-	if msg := res.Safe().Get("error").String(); !strings.Contains(msg, "identity") {
-		t.Errorf("the error should say what is missing, got: %s", msg)
+	if !strings.Contains(failure.Message, "identity") {
+		t.Errorf("the error should say what is missing, got: %s", failure.Message)
 	}
 }
 
@@ -152,8 +153,9 @@ func TestEntityRefusesWithoutASharedDatabase(t *testing.T) {
 	database.System = nil
 	t.Cleanup(func() { database.System = prev })
 
-	if res := tableAs("acme", "posts").List(); !res.IsError {
-		t.Fatal("expected an error when no shared database is connected")
+	res := tableAs("acme", "posts").List()
+	if failure, _ := value.FailureFrom(res); res.K != value.Invalid || failure.Code != value.UnavailableCode {
+		t.Fatalf("no shared database: %s %+v, want the UNAVAILABLE failure", res.K, failure)
 	}
 }
 
@@ -183,11 +185,12 @@ func TestSystemIsRefusedUntilPermissionsExist(t *testing.T) {
 	withSharedDB(t)
 
 	res := (&Database{tenant: tenantFor("acme")}).System().Table("posts").List()
-	if !res.IsError {
-		t.Fatalf("database.system() returned rows before permissions exist: %v", res.V)
+	failure, _ := value.FailureFrom(res)
+	if res.K != value.Invalid || failure.Code != value.DeniedCode {
+		t.Fatalf("database.system() returned %s %+v before permissions exist, want DENIED", res.K, failure)
 	}
-	if msg := res.Safe().Get("error").String(); !strings.Contains(msg, "permission") {
-		t.Errorf("the refusal should name what is missing, got: %s", msg)
+	if !strings.Contains(failure.Message, "permission") {
+		t.Errorf("the refusal should name what is missing, got: %s", failure.Message)
 	}
 	// CONTROL: the scoped door is open, so the refusal above is about system() specifically and
 	// not about the whole API being broken.
@@ -196,32 +199,20 @@ func TestSystemIsRefusedUntilPermissionsExist(t *testing.T) {
 	}
 }
 
-// The handler this was built for, both ways round. A query that fails must leave the author in
-// control — status, shape and wording all theirs — rather than becoming a 500 the engine chose.
+// A query that fails is a failure (14/10/2026), DATABASE: a handler reads it with safe(() => …) and
+// keeps control of status, shape and wording, and one that forgets answers 500 with a log line. Until
+// then it was an empty list carrying DATABASE_ERROR, which a page showed as "nothing here" while the
+// database was down.
 func TestEntityFailureIsAnswerableByTheHandler(t *testing.T) {
-	// A failure reaches run() as K==Invalid from the query builder. Attaching it at this domain
-	// boundary preserves DATABASE_ERROR instead of reducing it to a generic runtime error.
 	withSharedDB(t)
 	res := tableAs("acme", "no_such_table").List()
 
-	if res.K == value.Invalid {
-		t.Fatal("a failed query returned a hard VM error instead of an attached domain error")
+	failure, _ := value.FailureFrom(res)
+	if res.K != value.Invalid || failure.Code != value.DatabaseCode {
+		t.Fatalf("a failed query gave %s %+v, want the DATABASE failure", res.K, failure)
 	}
-	if !res.IsError {
-		t.Fatal("the failure was swallowed — a handler that forgets to check would read it as data")
-	}
-
-	// safe() then reports it, and .error is the MESSAGE so it drops straight into a response
-	// instead of nesting {code, message} inside the caller's own message field.
-	check := res.Safe()
-	if check.Get("ok").Truthy() {
-		t.Error("ok must be false when the query failed")
-	}
-	if msg := check.Get("error").String(); msg == "" || strings.Contains(msg, "map[") {
-		t.Errorf(".error must be the message text, got %q", msg)
-	}
-	if code := check.Get("code").String(); code != "DATABASE_ERROR" {
-		t.Errorf(".code must stay reachable for handlers that branch on it, got %q", code)
+	if failure.Message == "" || strings.Contains(failure.Message, "map[") {
+		t.Errorf("the failure's message must be the driver's text, got %q", failure.Message)
 	}
 }
 
@@ -231,10 +222,7 @@ func TestEntitySuccessIsNotMarkedAsError(t *testing.T) {
 	withSharedDB(t)
 	res := tableAs("acme", "posts").List()
 
-	if res.IsError {
+	if res.IsError || res.K == value.Invalid {
 		t.Fatal("a working query was reported as an error")
-	}
-	if !res.Safe().Get("ok").Truthy() {
-		t.Fatal("ok must be true on success")
 	}
 }

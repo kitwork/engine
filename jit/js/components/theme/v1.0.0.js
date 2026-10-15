@@ -1,4 +1,4 @@
-/* theme component @v1.0.0 — the page's view of kit.theme.
+/* theme component — the page's view of kit.theme.
  *
  * Usage:
  *   <button data-kit-component="theme" data-kit-click="toggle()" aria-label="Toggle theme">
@@ -29,4 +29,3 @@ var themeDef = {
 };
 
 window.kit.component("theme", themeDef);
-window.kit.component("theme@v1.0.0", themeDef);

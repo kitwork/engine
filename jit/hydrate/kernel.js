@@ -1,14 +1,15 @@
-// Kitwork hydrate kernel — the whole client runtime. Delivered as /kit/kernel.<hash>.js with the
+// Kitwork hydrate kernel — the whole client runtime. Delivered as /_kitwork/kernel.<hash>.js with the
 // bridge and platform modules; Drive and each component a page names come as files of their own.
 // Expressions, boundaries, components, structure and events all ride one
 // window.kit root (window.kitwork is a deprecated alias to the SAME object), one registry, one
 // delegated event system and one DOM observer.
 //
 // Boot-guarded: safe under double inclusion and under Kitwork Drive re-running head scripts.
-// PREFIX = ORIGIN (strict, for expression directives): authors write data-kit-* SOURCE — this
-// kernel carries a tiny parser for it (the same grammar the Go side compiles) plus the
-// IR walker; data-kitwork-* on a directive is ENGINE-emitted precompiled IR (JSON). No eval, no
-// new Function, ever.
+// Two spellings of the same directives, both SOURCE: data-kit-* is what a person writes by hand on a
+// template page, and the eight grouped data-kitwork-* attributes (component, scope, bind, class,
+// style, event, if, for) are what the engine writes for a Kitwork UI page (KITWORK_UI.md §11). This kernel
+// carries a tiny parser for the expressions (the same grammar the Go side compiles), the one grouped
+// splitter (twin of pairs.go) and the IR walker. No eval, no new Function, ever.
 //
 // Leak-free by architecture: nodes carry no listeners and no closures (everything is delegated),
 // per-element state hides behind a Symbol and dies with the node, SSE streams are deduped by URL
@@ -367,6 +368,10 @@
   function globalOrZero(k) {
     return Object.prototype.hasOwnProperty.call(expressionGlobals, k) ? expressionGlobals[k] : 0;
   }
+  // A lambda VALUE is a KitLambda, and only the "=>" op makes one. JSON.parse, a seed and the literal
+  // grammar make plain objects, so no data can pass for a lambda and run a tree it wrote: the old
+  // { __kitLambda: true } mark was a key any JSON could carry (14/10/2026).
+  function KitLambda(params, body) { this.params = params; this.body = body; }
   // invokeLambda runs a lambda VALUE. Params overlay the calling scope; writes to NON-param keys
   // flow back out (lexical). It is the one way a lambda runs: a bare inc() and a callback inside
   // filter() go through here alike, so the two cannot drift apart.
@@ -391,7 +396,7 @@
   // inside the same run(), so every step still counts against the expression's one budget.
   function callbacks(args, s) {
     for (var ci = 0; ci < args.length; ci++) {
-      if (args[ci] && args[ci].__kitLambda) {
+      if (args[ci] instanceof KitLambda) {
         args[ci] = (function (fn) {
           return function () { return invokeLambda(fn, Array.prototype.slice.call(arguments), s); };
         })(args[ci]);
@@ -404,8 +409,7 @@
   var callDepth = 0;
   // blockedKey seals the ONLY member names that can reach code execution — `.constructor` leads to
   // Function (i.e. eval), and __proto__/prototype enable prototype pollution. Denying them in every
-  // read / call / write makes "no eval" true BY CONSTRUCTION (not merely blocked by CSP), which is
-  // the precondition for running client-sent expressions (capsules) safely.
+  // read / call / write makes "no eval" true BY CONSTRUCTION (not merely blocked by CSP).
   function blockedKey(k) {
     return k === "constructor" || k === "__proto__" || k === "prototype" ||
       k === "__defineGetter__" || k === "__defineSetter__" ||
@@ -441,11 +445,12 @@
     }
     if (op === "{}") {
       var obj = {};
-      for (var oi = 0; oi < x[1].length; oi++) obj[x[1][oi][0]] = run(x[1][oi][1], s);
+      // A "__proto__" key would set the prototype the data chose, not a key: it is dropped (14/10/2026).
+      for (var oi = 0; oi < x[1].length; oi++) if (x[1][oi][0] !== "__proto__") obj[x[1][oi][0]] = run(x[1][oi][1], s);
       return obj;
     }
     if (op === "[]") { return x[1].map(function (y) { return run(y, s); }); }
-    if (op === "=>") { return { __kitLambda: true, params: x[1], body: x[2] }; }
+    if (op === "=>") { return new KitLambda(x[1], x[2]); }
     if (op === ";") {
       var sv;
       for (var si = 1; si < x.length; si++) sv = run(x[si], s);
@@ -455,7 +460,7 @@
       var fn = run(x[1], s);
       var fargs = x[2].map(function (y) { return run(y, s); });
       if (callDepth >= 64) throw new Error("hydrate: call depth exceeded");
-      if (fn && fn.__kitLambda) return invokeLambda(fn, fargs, s);
+      if (fn instanceof KitLambda) return invokeLambda(fn, fargs, s);
       // A registered component method — real JS the developer wrote — called with `this` = the
       // component scope, so `this.count` reads/writes its state. Still no eval: it's a function
       // reference, not a compiled string. (Server-side there are no registered methods, so its
@@ -482,7 +487,10 @@
       var oo = run(x[1], s);
       if (oo == null || blockedKey(x[2])) return undefined;
       var a = x[3].map(function (y) { return run(y, s); });
-      return typeof oo[x[2]] === "function" ? oo[x[2]].apply(oo, callbacks(a, s)) : undefined;
+      var member = oo[x[2]];
+      // A member holding a lambda VALUE is called, as on the server and in the VM: { add: (x) => x + 1 }.add(1).
+      if (member instanceof KitLambda) return invokeLambda(member, a, s);
+      return typeof member === "function" ? member.apply(oo, callbacks(a, s)) : undefined;
     }
     if (op === "u!") return !run(x[1], s);
     if (op === "u-") return -run(x[1], s);
@@ -507,20 +515,95 @@
     throw new Error("hydrate: unknown op '" + op + "'");
   }
 
-  // ---- directives: data-kit-<name> is the one authored form ----
-  // The kernel reads source and parses it here; it does not decode a precompiled IR any more —
-  // the engine never emitted one, and the data-kitwork-* prefix is reserved for what the engine
-  // does put on the wire (the jit marker, the root anchor, the jitjs verbs, kernel-owned overlays).
+  // ---- directives: two spellings, one meaning ----
+  // data-kit-<name> is the hand-written form (template pages, one directive per attribute, the target
+  // in the NAME). data-kitwork-* is what the engine writes for a Kitwork UI page (KITWORK_UI.md §11):
+  // EIGHT fixed attributes — component, scope, bind, class, style, event, if, for — each found by its own
+  // selector, never by walking the page. Every other data-kitwork-* attribute (generated, layout,
+  // current, delay, transition…) is transport and never a directive. Both are source, parsed here:
+  // no precompiled IR, no eval.
+  //
+  // compiled(source) is the one parse cache, keyed by the source string; a failure is cached as null
+  // (and reported when the caller names the attribute, which the grouped readers do).
   var cache = {};
-  function directive(el, name) {
-    var raw = el.getAttribute("data-kit-" + name);
+  function compiled(raw, el, attr) {
     if (!raw) return null;
     var key = "$" + raw;
-    if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
+    if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; if (attr) reportError(e, el, attr); } }
     return cache[key];
+  }
+  function directive(el, name) {
+    return compiled(el.getAttribute("data-kit-" + name));
   }
   function selector(name) {
     return "[data-kit-" + name + "]";
+  }
+
+  // ---- the grouped reader: ONE splitter for scope, bind, class, style and event (twin: pairs.go) ----
+  // split cuts at every ';' outside a string ('…' "…" `…`, backslash escapes) and outside ( ) [ ] { };
+  // empty parts drop out, so a trailing ';' is fine. cut takes a part apart at its FIRST ':' — the
+  // name (letters, digits, - . _ + / and a modifier's flat (…)) and the value, a raw expression. Both
+  // are held to grouped_corpus.json, which the Go twin runs too.
+  var ALIAS = /^\$[A-Za-z][A-Za-z0-9_]*$/;
+  var FOR_HEAD = /^\s*([$A-Za-z_][\w$]*)\s*(?:,\s*([$A-Za-z_][\w$]*)\s*)?\s+of\s+([\s\S]+)$/;
+  function misread(text, want) { return new Error('hydrate: "' + text + '" is not ' + want); }
+  function split(raw) {
+    var out = [], stack = [], quote = "", start = 0, c;
+    for (var i = 0; i < raw.length; i++) {
+      c = raw[i];
+      if (quote) { if (c === "\\") i++; else if (c === quote) quote = ""; }
+      else if ("'\"`".indexOf(c) >= 0) quote = c;
+      else if ("([{".indexOf(c) >= 0) stack.push(")]}"["([{".indexOf(c)]);
+      else if (")]}".indexOf(c) >= 0) { if (stack.pop() !== c) throw misread(raw, "balanced"); }
+      else if (c === ";" && !stack.length) { out.push(raw.slice(start, i)); start = i + 1; }
+    }
+    if (quote || stack.length) throw misread(raw, "closed");
+    out.push(raw.slice(start));
+    return out.map(function (part) { return part.trim(); }).filter(Boolean);
+  }
+  function cut(part) {
+    var at = part.indexOf(":"), name = part.slice(0, at).trim(), value = part.slice(at + 1).trim();
+    if (at < 0 || !/^([\w.+\/-]|\([\w.+\/-]*\))+$/.test(name) || !value) throw misread(part, "name: value");
+    return [name, value];
+  }
+  function pairs(raw) { return split(raw).map(cut); }
+  // data-kitwork-component: "name" or "name: $alias". The engine writes no version; one written by
+  // hand (theme@1.0.0) reads, and hostOf drops it before the lookup.
+  function component(raw) {
+    var at = raw.indexOf(":"), name = (at < 0 ? raw : raw.slice(0, at)).trim(), alias = at < 0 ? "" : raw.slice(at + 1).trim();
+    if (!/^[\w.@-]+$/.test(name) || at >= 0 && !ALIAS.test(alias)) throw misread(raw, "name or name: $alias");
+    return { name: name, alias: alias };
+  }
+  // data-kitwork-for: "item[, index] of list", then only "key: expr" (the row's identity).
+  function loop(raw) {
+    var parts = split(raw), m = FOR_HEAD.exec(parts[0] || ""), key = "";
+    if (!m) throw misread(raw, "item of list");
+    parts.slice(1).forEach(function (part) {
+      var p = cut(part);
+      if (p[0] !== "key" || key) throw misread(part, "the one key: of a for");
+      key = p[1];
+    });
+    return { item: m[1], index: m[2] || "", list: m[3].trim(), key: key };
+  }
+  // grouped(el, kind) → [[name, program, source], …] for one pair attribute. Parsed once per VALUE, not
+  // per element, so a Drive morph that rewrites a value is read afresh; a failure is reported once,
+  // naming the attribute (and the pair), and a pair that does not compile is skipped by its reader.
+  var groupedCache = {};
+  function grouped(el, kind) {
+    var attr = "data-kitwork-" + kind, raw = el.getAttribute(attr), key = attr + "=" + raw, list = [];
+    if (!raw) return list;
+    if (!(key in groupedCache)) {
+      try { list = pairs(raw); } catch (e) { reportError(e, el, attr); }
+      groupedCache[key] = list.map(function (p) { return [p[0], compiled(p[1], el, attr + " " + p[0]), p[1]]; });
+    }
+    return groupedCache[key];
+  }
+  // eachPair runs fn(el, name, program, label) for every compiled pair of every element carrying the
+  // attribute — found by its selector.
+  function eachPair(kind, fn) {
+    document.querySelectorAll("[data-kitwork-" + kind + "]").forEach(function (el) {
+      grouped(el, kind).forEach(function (p) { if (p[1]) fn(el, p[0], p[1], "data-kitwork-" + kind + " " + p[0]); });
+    });
   }
 
   // The binding groups, shared in spirit with the component runtime's dom.js: same names, same writes.
@@ -534,6 +617,12 @@
     if (v == null || v === false && !aria) { if (el.hasAttribute(name)) el.removeAttribute(name); return; }
     var text = v === true && !aria ? "" : String(v);
     if (el.getAttribute(name) !== text) el.setAttribute(name, text);
+  }
+  // setText writes text only when it differs: a repaint that rewrites the same words is still a DOM
+  // change, and a live region (the reader) would read it out again on every paint.
+  function setText(el, v) {
+    v = v == null ? "" : String(v);
+    if (el.textContent !== v) el.textContent = v;
   }
   function writeBinding(el, name, v) {
     if (/^on/.test(name) || /^data-kit/.test(name) || name === "style" || name === "srcdoc") return;
@@ -558,11 +647,21 @@
     writeAttribute(el, name, v);
   }
 
-  var MODEL = "[data-kit-model]";
-  function modelKey(el) { return el.getAttribute("data-kit-model"); }
+  // A two-way field: data-kit-model="key", or in data-kitwork-bind a `value:` / `checked:` whose
+  // value is a bare name, on an input, select or textarea. modelOf(el) → [key, "value" | "checked"],
+  // or null. Any other value/checked binding is one-way and goes through writeBinding.
+  var MODEL = "[data-kit-model],[data-kitwork-bind]";
+  function twoWay(el, name, program) {
+    return (name === "value" || name === "checked") && program[0] === "$" && !blockedKey(program[1]) && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
+  }
+  function modelOf(el) {
+    var key = el.getAttribute("data-kit-model"), hit = key ? [key, "value"] : null;
+    grouped(el, "bind").forEach(function (p) { if (!hit && p[1] && twoWay(el, p[0], p[1])) hit = [p[1][1], p[0]]; });
+    return hit;
+  }
   // number AND range are numeric inputs — coerce to a float so arithmetic (n + step) adds, not
-  // string-concatenates. Every other input type stays a string.
-  function modelValue(el) { return (el.type === "number" || el.type === "range") ? (parseFloat(el.value) || 0) : (el.value || ""); }
+  // string-concatenates. Every other input type stays a string; a checkbox's `checked` is a boolean.
+  function modelValue(el, m) { return m[1] === "checked" ? !!el.checked : (el.type === "number" || el.type === "range") ? (parseFloat(el.value) || 0) : (el.value || ""); }
 
   var raw = {};
 
@@ -598,7 +697,9 @@
   // so they die with their node; two sibling scopes never see each other.
   // A component boundary is any of these. data-kit-component names a REGISTERED blueprint
   // (see kit.component); data-kit-scope carries an inline name/init/blueprint.
-  var SCOPE = "[data-kit-scope],[data-kit-component],[data-kit-item]";
+  // (HOST is the same list without the rows, which are not hosts.)
+  var HOST = "[data-kit-component],[data-kit-scope],[data-kitwork-component],[data-kitwork-scope]";
+  var SCOPE = HOST + ",[data-kit-item]";
 
   // The component registry: kit.component("counter", { count: 0, inc() {…} }). A blueprint is a
   // plain JS object — state values + methods. Methods are real functions (called with this = the
@@ -643,11 +744,17 @@
   // "counter" data-kit-scope="min: 1, max: 99"> (03/10). Evaluated once, in the scope around the
   // host, so `max: limit` reads the parent's limit; typed, as any expression is. False when there is
   // no literal or it does not parse (which is reported).
+  // data-kitwork-scope="min: 1; max: limit" is the same thing written as pairs: each value its own
+  // expression, run once in the scope around the host.
   function literalInto(b, target) {
-    var v = (b.getAttribute("data-kit-scope") || "").trim();
-    if (!v) return false;
+    var v = (b.getAttribute("data-kit-scope") || "").trim(), list = grouped(b, "scope");
+    if (!v && !list.length) return false;
+    var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
+    list.forEach(function (p) {
+      if (p[1] && !blockedKey(p[0])) guarded(b, "data-kitwork-scope " + p[0], function () { target[p[0]] = run(p[1], parent); });
+    });
+    if (!v) return true;
     try {
-      var parent = b.parentElement ? scopeFor(b.parentElement) : scope;
       var o = run(parse(lex(v.charAt(0) === "{" ? v : "{" + v + "}")), parent);
       if (o && typeof o === "object") { for (var k in o) target[k] = o[k]; }
       return true;
@@ -656,19 +763,34 @@
       return false;
     }
   }
+  // hostOf(b) → { name, alias, attr } for a component host, else null. data-kitwork-component carries
+  // "name[@version][: $alias]" (read once per value); data-kit-component carries name[@version] with
+  // the alias in its own data-kit-alias. A grouped value that does not read is reported and the host
+  // is a plain boundary.
+  function hostOf(b) {
+    var raw = b.getAttribute("data-kitwork-component"), key = "component=" + raw;
+    if (!raw) {
+      raw = b.getAttribute("data-kit-component");
+      return raw ? { name: parseComponentTag(raw).name, alias: b.getAttribute("data-kit-alias") || "", attr: "data-kit-component" } : null;
+    }
+    if (!(key in groupedCache)) {
+      groupedCache[key] = null;
+      try { var c = component(raw); groupedCache[key] = { name: parseComponentTag(c.name).name, alias: c.alias, attr: "data-kitwork-component" }; }
+      catch (e) { reportError(e, b, "data-kitwork-component"); }
+    }
+    return groupedCache[key];
+  }
   function boundaryScope(b) {
     var st = state(b);
-    var craw = b.getAttribute("data-kit-component");
-    if (craw) {
-      var tag = parseComponentTag(craw);
+    var tag = hostOf(b);
+    if (tag) {
       var cname = tag.name;
-      var alias = b.getAttribute("data-kit-alias") || "";
       // Component registration (kit.component) can run AFTER the first render — so seed lazily,
       // the first time the blueprint is available, and never re-seed once done (keeps mutations).
       // HOST_KEY ties the scope to its host, unseen by markup (a Symbol is never a name), so
       // kit.context(this) finds the host along the same chain a name is read through.
       if (!st.scope) Object.defineProperty(st.scope = {}, HOST_KEY, { value: b });
-      registerAlias(alias, st.scope, b);
+      registerAlias(tag.alias, st.scope, b);
       if (!st.seeded) {
         if (blueprints[cname]) {
           seedComponent(st.scope, blueprints[cname]);
@@ -681,7 +803,7 @@
           // every later pass would otherwise repeat it for as long as the page is open.
           if (!st.reportedMissing) {
             st.reportedMissing = true;
-            reportError(new Error("hydrate: no component registered as \"" + cname + "\""), b, "data-kit-component");
+            reportError(new Error("hydrate: no component registered as \"" + cname + "\""), b, tag.attr);
           }
         }
       }
@@ -707,7 +829,6 @@
   //   require(name, ...attributes) — the elements it cannot work without; a miss is reported
   //   emit(name, detail)  — an event the page hears with data-kit-event:<name>
   // Every resource lives on the host's state, so cleanupTree releases it when the host leaves.
-  var HOST = "[data-kit-component],[data-kit-scope]";
   var afterRenders = [];
   var HOST_KEY = Symbol("kit:host");
   // contextOf is the ONE context a host has: init receives it, kit.context(this) returns the same.
@@ -766,7 +887,7 @@
           var missing = found.filter(function (el) { return !el.hasAttribute(attribute); }).length;
           if (missing && !problem) problem = "needs " + attribute + ", missing on " + missing + " of " + found.length + " " + part;
         });
-        if (problem) reportError(new Error("kitwork: " + b.getAttribute("data-kit-component") + " " + problem), b, "data-kit-component");
+        if (problem) reportError(new Error("kitwork: " + (b.getAttribute("data-kit-component") || b.getAttribute("data-kitwork-component")) + " " + problem), b, "data-kit-component");
       });
       return now;
     }
@@ -820,7 +941,7 @@
       var proxy = scopeFor(b);
       var result;
       if (typeof fn === "function") result = fn.call(proxy, contextOf(b));
-      else if (fn.__kitLambda) result = run(fn, proxy);
+      else if (fn instanceof KitLambda) result = run(fn, proxy);
       observeEffect(result, proxy);
     } catch (e) { reportError(e, b, "init"); }
   }
@@ -880,9 +1001,10 @@
     });
   }
 
-  // ---- data-kit-style:<property>="expr" — one property per attribute (ideaship-final §2.3, B7) ----
-  // The same shape as bind and seed: the target is in the attribute NAME, the value is one
-  // expression. A component with a continuous value — a bar's width, a popover's offset, a
+  // ---- data-kit-style:<property>="expr" and data-kitwork-style="property: expr; …" ----
+  // By hand, one property per attribute (ideaship-final §2.3, B7), the target in the attribute NAME;
+  // from the engine, one data-kitwork-style that reads like CSS (KITWORK_UI.md §11). Both write
+  // through writeStyle below. A component with a continuous value — a bar's width, a popover's offset, a
   // carousel's transform — says it in markup instead of writing element.style from JavaScript,
   // which is the whole point: the server sees the expression and the CSS JIT can read the names.
   //
@@ -909,7 +1031,9 @@
     return compact.indexOf("javascript:") >= 0 || compact.indexOf("vbscript:") >= 0 ||
       compact.indexOf("data:text/html") >= 0;
   }
-  function writeStyle(el, property, value) {
+  // (label names the attribute in the error: data-kitwork-style <property>, or the hand-written
+  // data-kit-style:<property> by default.)
+  function writeStyle(el, property, value, label) {
     var store = state(el);
     var baseline = store.styleBaseline || (store.styleBaseline = {});
     if (!(property in baseline)) {
@@ -922,7 +1046,7 @@
       return;
     }
     var text = typeof value === "number" ? (isFinite(value) ? String(value) : "") : String(value);
-    if (!text || unsafeStyleValue(text)) throw new Error('hydrate: unsafe value for data-kit-style:' + property);
+    if (!text || unsafeStyleValue(text)) throw new Error("hydrate: unsafe value for " + (label || "data-kit-style:") + property);
     el.style.setProperty(property, text, "");
   }
 
@@ -967,10 +1091,12 @@
   // A key is seeded into the input's NEAREST scope, only when no scope in its chain owns it yet.
   function seedModels() {
     document.querySelectorAll(MODEL).forEach(function (el) {
-      var k = modelKey(el);
+      var m = modelOf(el);
+      if (!m) return;
+      var k = m[0];
       var objs = chainFor(el), found = false;
       for (var i = 0; i < objs.length; i++) { if (k in objs[i]) { found = true; break; } }
-      if (!found) objs[0][k] = modelValue(el);
+      if (!found) objs[0][k] = modelValue(el, m);
     });
   }
 
@@ -1001,7 +1127,7 @@
       delete aliasOwners[previous];
     }
     if (store) store.componentAlias = "";
-    if (!/^\$[A-Za-z][A-Za-z0-9_]*$/.test(alias) || reservedAliases[alias]) return false;
+    if (!ALIAS.test(alias) || reservedAliases[alias]) return false;
     if (owner) {
       aliasOwners[alias] = owner;
       Object.defineProperty(aliases, alias, {
@@ -1032,10 +1158,10 @@
   // a live counter that owns its DOM) has nothing to bind, and still has to start.
   function rebuildActiveComponents() {
     var next = {};
-    document.querySelectorAll("[data-kit-component]").forEach(function (el) {
-      var craw = el.getAttribute("data-kit-component");
-      if (!craw) return;
-      var cname = parseComponentTag(craw).name;
+    document.querySelectorAll("[data-kit-component],[data-kitwork-component]").forEach(function (el) {
+      var tag = hostOf(el);
+      if (!tag) return;
+      var cname = tag.name;
       boundaryScope(el);
       if (state(el).seeded) {
         var inst = scopeFor(el);
@@ -1086,27 +1212,27 @@
   // than diffing: a keyed node that survives is MOVED, never rebuilt, so focus/cursor/input on a row
   // are preserved across re-renders. No IR runs the list logic — only the tiny author expression that
   // names the array (`items`) and the key (`item.id`) is walked, exactly like any other attribute.
-  var FOR = "[data-kit-for]";
+  // data-kit-for="x of list" (the key in data-kit-key) and data-kitwork-for="x of list; key: x.id" are
+  // read by the same loop(); rows the kernel makes carry its own data-kit-item / data-kit-key markers.
+  var FOR = "[data-kit-for],[data-kitwork-for]";
   var forRegistry = [];
   var forSerial = 0;
-  function parseFor(raw) {
-    var m = /^\s*([$A-Za-z_][\w$]*)\s*(?:,\s*([$A-Za-z_][\w$]*)\s*)?\s+of\s+([\s\S]+)$/.exec(raw || "");
-    if (!m) return null;
-    var list;
-    try { list = parse(lex(m[3])); } catch (e) { return null; }
-    return { item: m[1], index: m[2] || "", list: list, keySrc: "" };
+  function parseFor(raw, keySrc) {
+    var f = loop(raw || ""), key = f.key || keySrc;
+    return { item: f.item, index: f.index, list: parse(lex(f.list)), keyIR: key ? parse(lex(key)) : null };
   }
-  // First sight of a data-kit-for element: capture it as a template, replace it with a comment anchor.
+  // First sight of a for element: capture it as a template, replace it with a comment anchor.
   // The anchor is where materialised rows are inserted; the source element itself never renders.
   function collectFor() {
     document.querySelectorAll(FOR).forEach(function (el) {
       var parent = el.parentNode;
       if (!parent) return;
-      var spec = parseFor(el.getAttribute("data-kit-for"));
-      if (!spec) { el.removeAttribute("data-kit-for"); return; }
-      spec.keySrc = el.getAttribute("data-kit-key") || "";
+      var attr = el.hasAttribute("data-kit-for") ? "data-kit-for" : "data-kitwork-for", spec = null;
+      try { spec = parseFor(el.getAttribute(attr), el.getAttribute("data-kit-key")); } catch (e) { reportError(e, el, attr); }
+      el.removeAttribute("data-kit-for");
+      el.removeAttribute("data-kitwork-for");
+      if (!spec) return;
       var template = el.cloneNode(true);
-      template.removeAttribute("data-kit-for");
       // The list's place in the document is the marker pair of ideaship-final §7 — the same shape
       // a server-rendered list arrives in — and every row carries the list's id in data-kit-item.
       var id = "f" + (++forSerial);
@@ -1115,7 +1241,7 @@
       parent.insertBefore(anchor, el);
       parent.insertBefore(end, el);
       parent.removeChild(el);
-      forRegistry.push({ id: id, anchor: anchor, end: end, template: template, spec: spec, keyIR: spec.keySrc ? parse(lex(spec.keySrc)) : null });
+      forRegistry.push({ id: id, anchor: anchor, end: end, template: template, spec: spec, keyIR: spec.keyIR });
     });
   }
   function renderFor() {
@@ -1200,16 +1326,17 @@
   // DOM and only toggles `hidden`, so a hidden subtree's bindings and effects keep running; `if`
   // MOUNTS and UNMOUNTS, so an absent branch does nothing at all. That is what a modal, an editing
   // panel or a lazy region needs — not a hidden node quietly holding an SSE stream open.
-  var IF = "[data-kit-if]";
+  var IF = "[data-kit-if],[data-kitwork-if]";
   var ifRegistry = [];
   function collectIf() {
     document.querySelectorAll(IF).forEach(function (el) {
       var parent = el.parentNode;
       if (!parent) return;
-      var cond = directive(el, "if");
-      if (!cond) { el.removeAttribute("data-kit-if"); return; }
+      var cond = directive(el, "if") || compiled(el.getAttribute("data-kitwork-if"), el, "data-kitwork-if");
+      el.removeAttribute("data-kit-if");
+      el.removeAttribute("data-kitwork-if");
+      if (!cond) return;
       var template = el.cloneNode(true);
-      template.removeAttribute("data-kit-if");
       var anchor = document.createComment("kit-if");
       parent.insertBefore(anchor, el);
       parent.removeChild(el);
@@ -1353,7 +1480,7 @@
     rebuildActiveComponents();
     renderFor();
     renderIf();
-    document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; guarded(el, "data-kit-text", function () { var v = run(x, scopeFor(el)); el.textContent = v == null ? "" : v; }); });
+    document.querySelectorAll(selector("text")).forEach(function (el) { var x = directive(el, "text"); if (!x) return; guarded(el, "data-kit-text", function () { setText(el, run(x, scopeFor(el))); }); });
     document.querySelectorAll(selector("show")).forEach(function (el) { var x = directive(el, "show"); if (!x) return; guarded(el, "data-kit-show", function () { el.hidden = !run(x, scopeFor(el)); }); });
     // bind → data-kit-bind:<name>="expr": the target is in the attribute name, the value is one
     // expression (ideaship-final §5). Three groups by name: a reflected boolean (disabled, hidden,
@@ -1374,13 +1501,11 @@
         el.__kitBound = names;
       }
       for (var i = 0; i < names.length; i++) {
-        var raw = el.getAttribute(names[i]); if (!raw) continue;
-        var key = "$" + raw;
-        if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
-        if (!cache[key]) continue;
+        var bound = compiled(el.getAttribute(names[i]));
+        if (!bound) continue;
         (function (name, program) {
           guarded(el, name, function () { writeBinding(el, name.slice(14), run(program, scopeFor(el))); });
-        })(names[i], cache[key]);
+        })(names[i], bound);
       }
       var styles = el.__kitStyled;
       if (!styles) {
@@ -1392,13 +1517,42 @@
         var source = el.getAttribute(styles[s]); if (!source) continue;
         var property = styleName(styles[s].slice(15));
         if (!property) continue; // render.go reported it; the kernel simply does not write it
-        var programKey = "$" + source;
-        if (!(programKey in cache)) { try { cache[programKey] = parse(lex(source)); } catch (e) { cache[programKey] = null; } }
-        if (!cache[programKey]) continue;
+        var styled = compiled(source);
+        if (!styled) continue;
         (function (attribute, name, program) {
           guarded(el, attribute, function () { writeStyle(el, name, run(program, scopeFor(el))); });
-        })(styles[s], property, cache[programKey]);
+        })(styles[s], property, styled);
       }
+    });
+    // The grouped attributes, each found by its selector. event: listen for every name, and queue a
+    // `ready` to run once after this element's first paint. bind: text (never HTML), show (hidden),
+    // a two-way value/checked (left to the model pass below), anything else through writeBinding, the
+    // name lower-cased as the HTML parser does to data-kit-bind:<name> — a class is not a bind name
+    // any more (class.<name> is an attribute write like the rest; the server names data-kitwork-class).
+    // class: each pair is one exact class name and its condition, truthy adds it, falsy removes it,
+    // and no other class is touched. The name is held to the splitter's name rule (no ':'), so a
+    // variant class (hover:x) is never toggled this way; an alpha or a glass (bg-x/50, glass/60) is.
+    // style: writeStyle, with its checks.
+    document.querySelectorAll("[data-kitwork-event]").forEach(function (el) {
+      groupedEvents(el).forEach(function (h) {
+        if (h.type !== "ready") ensureListener(h.type);
+        else if (!(state(el).once || {})[h.attr]) afterRenders.push({ host: el, active: true, run: function () { pipeline(el, h, { type: "ready", target: el }); } });
+      });
+    });
+    eachPair("bind", function (el, name, program, label) {
+      if (!twoWay(el, name, program)) guarded(el, label, function () {
+        var v = run(program, scopeFor(el));
+        if (name === "text") setText(el, v);
+        else if (name === "show") el.hidden = !v;
+        else writeBinding(el, name.toLowerCase(), v);
+      });
+    });
+    eachPair("class", function (el, name, program, label) {
+      guarded(el, label, function () { el.classList.toggle(name, !!run(program, scopeFor(el))); });
+    });
+    eachPair("style", function (el, name, program, label) {
+      var property = styleName(name);
+      if (property) guarded(el, label, function () { writeStyle(el, property, run(program, scopeFor(el)), "data-kitwork-style "); });
     });
     // class → toggle classes from an expression. Every shape the grammar allows is accepted, so
     // nobody has to remember a special syntax: a string ('card ring'), an object whose truthy keys
@@ -1421,9 +1575,11 @@
       // A field whose debounce is still pending holds what was typed and the scope does not have it
       // yet — on purpose. Syncing it here would drag it back to the old value mid-word, whenever
       // anything else happened to paint.
-      if (state(el).debounceTimer) return;
-      var k = modelKey(el), s = scopeFor(el);
-      if (String(s[k]) !== el.value) el.value = s[k];
+      var m = modelOf(el);
+      if (!m || state(el).debounceTimer) return;
+      var k = m[0], s = scopeFor(el);
+      if (m[1] === "checked") { if (el.checked !== !!s[k]) el.checked = !!s[k]; }
+      else if (String(s[k]) !== el.value) el.value = s[k];
     });
   }
 
@@ -1542,9 +1698,11 @@
     st.debounceTimer = setTimeout(function () { st.debounceTimer = null; fn(); }, ms);
   }
   // ---- the event family: data-kit-<event>[:modifier...]="expr" (ideaship-final §2–§4) ----
-  // Dispatch is delegated at the document, one listener per event type. A modifier rides in the
-  // attribute NAME, so an element's handlers are read off getAttributeNames() once and kept on the
-  // element, the way the bind pass keeps its names. The author may write modifiers in any order; the
+  // ---- and data-kitwork-event="<event>[.modifier...]: expr; …" (KITWORK_UI.md §11) ----
+  // Dispatch is delegated at the document, one listener per event type. By hand a modifier rides in
+  // the attribute NAME, so an element's handlers are read off getAttributeNames() once and kept on the
+  // element, the way the bind pass keeps its names; the grouped attribute is read once per value
+  // (groupedEvents). Both run the same modifiers. The author may write modifiers in any order; the
   // runtime always runs the fixed pipeline of §4:
   //   target (:window :document — listen regardless of where the event lands)
   //   → filter (:outside :escape :enter :self — a failed filter STOPS here, the event is not swallowed)
@@ -1603,9 +1761,14 @@
   }
 
   var OUTSIDE_TYPES = { click: true, dblclick: true, pointerdown: true, pointerup: true, focusin: true };
-  function parseHandler(attr, type, head) {
+  // Events that do not bubble: the document hears them in the capture phase, and only the element
+  // the event is for answers (an ancestor gets its own event, or none).
+  var CAPTURE = { scroll: 1, load: 1, error: 1, toggle: 1, pointerenter: 1, pointerleave: 1 };
+  // parseHandler(attr, type, modifiers): attr names the handler (its state key and its label in an
+  // error); the modifiers come from the attribute name (data-kit-click:prevent) or from the pair's
+  // name (click.prevent).
+  function parseHandler(attr, type, mods) {
     var h = { attr: attr, type: type, target: "self", outside: false, self: false, key: "", combo: null, prevent: false, stop: false, debounce: 0, throttle: 0, once: false, valid: true };
-    var mods = attr.slice((head || "data-kit-" + type).length).split(":").slice(1);
     for (var i = 0; i < mods.length; i++) {
       var m = mods[i], timing = /^(debounce|throttle)\(([0-9]+)\)$/.exec(m);
       if (m === "window" || m === "document") h.target = m;
@@ -1617,7 +1780,7 @@
       else if (m === "stop") h.stop = true;
       else if (m === "once") h.once = true;
       else if (timing) h[timing[1]] = parseInt(timing[2], 10);
-      else if (type.indexOf(INTERSECT) === 0 && /^(leave|half|full|margin\(.+\))$/.test(m)) { } // the observer's, read by the intersect file
+      else if (/intersect/.test(type) && /^(leave|half|full|margin\(.+\))$/.test(m)) { } // the observer's, read by the intersect file
       else h.valid = false;
     }
     // A modifier that cannot apply to this event disables the handler rather than misfiring: the
@@ -1639,27 +1802,46 @@
         // the attribute itself, which the intersect file (jit/js/directives) dispatches on THIS
         // element when it enters or leaves the screen — so it runs through the same pipeline
         // (:once…), and an ancestor's own intersect never answers a child's.
-        if (name.indexOf(INTERSECT) === 0) { var watch = parseHandler(name, name, INTERSECT); watch.self = true; list.push(watch); return; }
+        var mods = name.split(":");
+        if (name.indexOf(INTERSECT) === 0) { var watch = parseHandler(name, name, mods.slice(1)); watch.self = true; list.push(watch); return; }
         if (name.indexOf(EVENT_HEAD) === 0) {
-          var type = name.slice(EVENT_HEAD.length).split(":")[0];
-          if (EVENT_NAME.test(type)) list.push(parseHandler(name, type, EVENT_HEAD + type));
+          if (EVENT_NAME.test(mods[1])) list.push(parseHandler(name, mods[1], mods.slice(2)));
           return;
         }
         for (var i = 0; i < EVENT_TYPES.length; i++) {
-          var head = "data-kit-" + EVENT_TYPES[i];
-          if (name === head || name.indexOf(head + ":") === 0) { list.push(parseHandler(name, EVENT_TYPES[i])); return; }
+          if (mods[0] === "data-kit-" + EVENT_TYPES[i]) { list.push(parseHandler(name, EVENT_TYPES[i], mods.slice(1))); return; }
         }
       });
     }
     el.__kitEvents = list;
     return list;
   }
-  function programOf(el, attr) {
-    var raw = el.getAttribute(attr);
-    if (!raw) return null;
-    var key = "$" + raw;
-    if (!(key in cache)) { try { cache[key] = parse(lex(raw)); } catch (e) { cache[key] = null; } }
-    return cache[key];
+  // data-kitwork-event="click.prevent: save(); keydown.escape: close(); click-outside: close()": the
+  // names are Kitwork UI's, mapped here — double-click, context-menu, focus-in/-out, pointer-down/-up/
+  // -enter/-leave to the DOM's; click-outside is click with the outside modifier; intersect-enter /
+  // intersect-leave are what the intersect file dispatches, under the pair's own name, on the element
+  // itself; ready runs once after the element's first paint; any other name is an event of that name
+  // (one a component emits). Modifiers are cut at the dots outside a modifier's (…), as the server's
+  // splitEventName does, so intersect-enter.margin(-1.5rem) keeps its argument. Each handler carries
+  // its own program, and its state key and label are the attribute plus the pair, so two pairs never
+  // share once/debounce/throttle. Read once per VALUE.
+  function groupedEvents(el) {
+    var raw = el.getAttribute && el.getAttribute("data-kitwork-event"), key = "on=" + raw;
+    if (!raw) return [];
+    return groupedCache[key] || (groupedCache[key] = grouped(el, "event").filter(function (p) { return p[1]; }).map(function (p) {
+      var mods = p[0].split(/\.(?![^(]*\))/), name = mods.shift(), type = name;
+      if (name === "click-outside") { type = "click"; mods.push("outside"); }
+      else if (/^intersect-(enter|leave)$/.test(name)) { type = p[0]; mods.push("self"); }
+      else if (name === "ready") mods.push("once");
+      else if (name === "double-click") type = "dblclick";
+      else if (/^(context-menu|focus-(in|out)|pointer-(down|up|enter|leave))$/.test(name)) type = name.replace("-", "");
+      var h = parseHandler("data-kitwork-event " + p[0] + ": " + p[2], type, mods);
+      h.program = p[1];
+      return h;
+    }));
+  }
+  function programOf(el, h) {
+    return h.program || compiled(el.getAttribute(h.attr));
   }
   // pipeline runs one handler for one event, filter first; returns true when :stop ends the walk.
   function pipeline(el, h, e) {
@@ -1671,7 +1853,7 @@
     if (h.self && e.target !== el) return false;
     if (h.prevent && e.preventDefault) e.preventDefault();
     if (h.stop && e.stopPropagation) e.stopPropagation();
-    var program = programOf(el, h.attr);
+    var program = programOf(el, h);
     if (!program) return h.stop;
     var execute = function () {
       if (h.once) { (st.once || (st.once = {}))[h.attr] = true; }
@@ -1698,35 +1880,40 @@
   function ensureListener(type) {
     if (listening[type]) return;
     listening[type] = true;
+    var capture = !!CAPTURE[type];
     listen(document, type, function (e) {
-      // Direct handlers: the element that owns the attribute is the target or an ancestor of it.
-      var el = e.target;
-      while (el && el !== document) {
-        var hs = handlersOf(el), stopped = false;
+      // Direct handlers: the element that owns the attribute is the target or an ancestor of it (the
+      // target alone for an event that does not bubble).
+      for (var el = e.target; el && el !== document; el = capture ? null : el.parentElement) {
+        var hs = handlersOf(el).concat(groupedEvents(el)), stopped = false;
         for (var i = 0; i < hs.length; i++) {
           var h = hs[i];
           if (h.type !== type || h.target !== "self" || h.outside) continue;
           if (pipeline(el, h, e)) stopped = true;
         }
         if (stopped) break;
-        el = el.parentElement;
       }
+      if (capture && e.target !== document) return;
       // Listeners elsewhere: :window/:document run wherever the event landed; :outside runs when it
       // landed anywhere but inside the element — and not on the element the very same event mounted.
-      document.querySelectorAll("*").forEach(function (owner) {
-        var hs = handlersOf(owner);
-        if (!hs.length) return;
-        for (var i = 0; i < hs.length; i++) {
-          var h = hs[i];
-          if (h.type !== type) continue;
-          if (h.outside) {
-            if (owner === e.target || (owner.contains && owner.contains(e.target))) continue;
-            if (isFresh(owner)) continue;
-          } else if (h.target === "self") continue;
-          pipeline(owner, h, e);
-        }
-      });
-    });
+      // The hand-written names are found by walking the page; the grouped attribute by its selector.
+      elsewhere("*", handlersOf);
+      elsewhere("[data-kitwork-event]", groupedEvents);
+      function elsewhere(selector, of) {
+        document.querySelectorAll(selector).forEach(function (owner) {
+          var hs = of(owner);
+          for (var i = 0; i < hs.length; i++) {
+            var h = hs[i];
+            if (h.type !== type) continue;
+            if (h.outside) {
+              if (owner === e.target || (owner.contains && owner.contains(e.target))) continue;
+              if (isFresh(owner)) continue;
+            } else if (h.target === "self") continue;
+            pipeline(owner, h, e);
+          }
+        });
+      }
+    }, capture);
   }
   EVENT_TYPES.forEach(ensureListener);
   // (data-kit-drag — a window title bar the page draws — is a file of its own since 02/10,
@@ -1737,12 +1924,12 @@
   // read it. A search box that also reset its page (data-kit-input="page = 1") lost every
   // keystroke. The value lands first now, so the handler and its paint see it.
   listen(document, "input", function (e) {
-    var el = e.target.closest && e.target.closest(MODEL);
-    if (!el) return;
+    var el = e.target.closest && e.target.closest(MODEL), m = el && modelOf(el);
+    if (!m) return;
     // data-kit-debounce on a model input delays the scope write + render until typing settles — the
     // final value is read inside the timer, so a search box syncs once, not once per keystroke.
     debounced(el, function () {
-      pass(function () { scopeFor(el)[modelKey(el)] = modelValue(el); });
+      pass(function () { scopeFor(el)[m[0]] = modelValue(el, m); });
       render();
     });
   }, true);
@@ -1839,7 +2026,10 @@
       cleanup: cleanup,
       listen: listen,
       cleanupTree: cleanupTree,
-      state: state
+      state: state,
+      // the grouped reader, for Drive (a link with a click entry is not driven), the intersect file
+      // and the corpus test — the one copy of it the client has
+      grouped: { pairs: pairs, component: component, loop: loop }
     },
     configurable: true,
     enumerable: false

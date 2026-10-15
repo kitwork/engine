@@ -6,6 +6,8 @@ package work
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	jitcss "github.com/kitwork/engine/jit/css"
@@ -175,19 +177,56 @@ func contains(arr []string, val string) bool {
 	return false
 }
 
+// buildKeyframeCSS writes the stages of one @keyframes in the order they run (from, then each
+// percentage, then to) and each stage's declarations by name. The config arrives as maps, so this
+// order is what makes the CSS, and the stylesheet hash and ETag built from it, the same on every boot.
 func buildKeyframeCSS(stagesMap map[string]value.Value) string {
-	var sb strings.Builder
+	stages := make([]string, 0, len(stagesMap))
 	for stage, props := range stagesMap {
-		if !props.IsMap() {
-			continue
+		if props.IsMap() {
+			stages = append(stages, stage)
 		}
+	}
+	sort.Slice(stages, func(i, j int) bool {
+		a, b := keyframeOffset(stages[i]), keyframeOffset(stages[j])
+		if a != b {
+			return a < b
+		}
+		return stages[i] < stages[j]
+	})
+	var sb strings.Builder
+	for _, stage := range stages {
+		props := stagesMap[stage].Map()
+		names := make([]string, 0, len(props))
+		for prop := range props {
+			names = append(names, prop)
+		}
+		sort.Strings(names)
 		sb.WriteString("\t" + stage + " {\n")
-		for prop, val := range props.Map() {
-			sb.WriteString(fmt.Sprintf("\t\t%s: %s;\n", prop, val.String()))
+		for _, prop := range names {
+			sb.WriteString(fmt.Sprintf("\t\t%s: %s;\n", prop, props[prop].String()))
 		}
 		sb.WriteString("\t}\n")
 	}
 	return sb.String()
+}
+
+// keyframeOffset is where a stage selector starts in the animation, in percent: from is 0, to is 100,
+// "50%" is 50, and "0%, 100%" counts from its first offset. A selector it cannot read sorts last.
+func keyframeOffset(stage string) float64 {
+	first := strings.TrimSpace(strings.SplitN(stage, ",", 2)[0])
+	switch strings.ToLower(first) {
+	case "from":
+		return 0
+	case "to":
+		return 100
+	}
+	if number, ok := strings.CutSuffix(first, "%"); ok {
+		if offset, err := strconv.ParseFloat(number, 64); err == nil {
+			return offset
+		}
+	}
+	return 1000
 }
 
 // quoteFamily quotes a family name that contains spaces, as CSS requires: Plus Jakarta Sans is

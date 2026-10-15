@@ -60,7 +60,7 @@ func Fetch(args ...value.Value) value.Value {
 // options land in the injected per-tenant tiers — the options-map spelling of the builder chain.
 func FetchWith(h *HTTP, args ...value.Value) value.Value {
 	if len(args) == 0 {
-		return value.New(Response{Status: 0, Error: "fetch: url is required"})
+		return value.InvalidFailure(value.InvalidArgumentCode, "fetch: url is required")
 	}
 	h = h.clone()
 	urlStr := args[0].Text()
@@ -100,11 +100,15 @@ func FetchWith(h *HTTP, args ...value.Value) value.Value {
 		if rt, ok := opts["retry"]; ok && rt.IsNumeric() {
 			h.retry = int(rt.N)
 		}
+		if limit, ok := opts["maxBytes"]; ok && limit.IsNumeric() {
+			h = h.MaxBytes(int(limit.N))
+		}
 	}
 
 	// fetch(url, opts) returns the SAME lazy *Request as http.get/post: it is just the JS-idiomatic
-	// entry point (options map + the fetch(url).then(res => …) muscle memory) onto the identical
-	// builder. Options configure the request; the chain (.retry/.cache/.then/.catch) still works; it
-	// commits on observation or at the end of the statement.
+	// entry point (an options map) onto the identical builder. Options configure the request; the chain
+	// (.retry/.cache) still works; it commits on observation or at the end of the statement. A request
+	// that gets no answer is a failure there, as fetch rejects in JavaScript: safe(() => fetch(url)).
+	// There is no .then/.catch (14/10/2026): one way to read a failure.
 	return newRequest(h, method, urlStr, body)
 }

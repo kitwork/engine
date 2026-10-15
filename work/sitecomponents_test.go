@@ -49,7 +49,7 @@ const sharedComponentSource = `kit.component("bid-stepper", { amount: 0 });`
 const ownComponentSource = `kit.component("search", { open: false });`
 
 // A site's own component: dropped in _components, named with no version, and served as a file of
-// its own under /kit/components/ beside the embedded catalogue's — for a page that names it.
+// its own under /_kitwork/components/ beside the embedded catalogue's — for a page that names it.
 func TestSiteComponentsShipAsTheirOwnFiles(t *testing.T) {
 	files := componentPage(`<div data-kit-component="bid-stepper"></div><div data-kit-component="search"></div><dialog data-kit-component="dialog"></dialog>`)
 	files["_components/bid-stepper.js"] = sharedComponentSource
@@ -91,8 +91,11 @@ func TestSiteComponentsShipAsTheirOwnFiles(t *testing.T) {
 	}
 
 	// A name the site does not own is no file — a path cannot mint asset variants — and a version
-	// suffix is the engine catalogue's spelling only: a site component has none.
+	// suffix was only ever the engine catalogue's spelling: a site component has none, under the
+	// engine's prefix or the one before it.
 	for _, path := range []string{
+		"/_kitwork/components/nonesuch." + strings.Repeat("0", 16) + ".js",
+		"/_kitwork/components/search@1.0.0." + strings.Repeat("0", 16) + ".js",
 		"/kit/components/nonesuch." + strings.Repeat("0", 16) + ".js",
 		"/kit/components/search@1.0.0." + strings.Repeat("0", 16) + ".js",
 	} {
@@ -102,10 +105,10 @@ func TestSiteComponentsShipAsTheirOwnFiles(t *testing.T) {
 	}
 }
 
-var componentScriptRe = regexp.MustCompile(`src="?(/kit/components/[^"\s>]+)`)
+var componentScriptRe = regexp.MustCompile(`src="?(/_kitwork/components/[^"\s>]+)`)
 
 // The rendered page asks for the site's component by itself: delivery scans data-kit-component and
-// gives the component a file of its own under /kit/components/.
+// gives the component a file of its own under /_kitwork/components/.
 func TestRenderRequestsTheSiteComponentsThePageNames(t *testing.T) {
 	files := componentPage(`<div data-kit-component="bid-stepper"></div>`)
 	files["_components/bid-stepper.js"] = sharedComponentSource
@@ -117,7 +120,7 @@ func TestRenderRequestsTheSiteComponentsThePageNames(t *testing.T) {
 	if recorder.Result().StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Result().StatusCode)
 	}
-	if body := recorder.Body.String(); !strings.Contains(body, `src="/kit/components/bid-stepper.`) {
+	if body := recorder.Body.String(); !strings.Contains(body, `src="/_kitwork/components/bid-stepper.`) {
 		t.Fatalf("the page must request its own component:\n%s", body)
 	}
 }
@@ -131,7 +134,7 @@ func TestNoSiteComponentsIsUntouched(t *testing.T) {
 	request := httptest.NewRequest("GET", "http://localhost/", nil)
 	recorder := httptest.NewRecorder()
 	tenant.Serve(recorder, request)
-	if strings.Contains(recorder.Body.String(), "/kit/components/") {
+	if body := recorder.Body.String(); strings.Contains(body, "/_kitwork/components/") || strings.Contains(body, "/kit/components/") {
 		t.Error("a component name nothing owns must not bring a component file")
 	}
 }
@@ -154,7 +157,7 @@ func TestDomainComponentOverridesTheIdentityOne(t *testing.T) {
 // by a 256 KiB limit, so the limit is what a real workbench is measured against now.
 //
 // The rule it protects is narrower than the old comment claimed: a site's component does NOT ride
-// with the kernel. The page gets a file for each component it names (/kit/components/<name>.<hash>.js),
+// with the kernel. The page gets a file for each component it names (/_kitwork/components/<name>.<hash>.js),
 // so a page that names nothing still gets the kernel alone. What the limit really bounds is ONE
 // response for the page that does name it.
 func TestASiteComponentMayBeAsLargeAsARealApplication(t *testing.T) {

@@ -1,0 +1,103 @@
+<!-- Trang quản lý đơn: dữ liệu từ router.view, trạng thái var trong orders.work -->
+<page title="Đơn hàng — {{ site.name }}" container="large" background="canvas"
+      keydown:ctrl+k.prevent="$search.open()">
+  <header pin="top" scrolled:material="glass" scrolled:shadow="small"
+          flex="row" align="center" space="between" padding-x="4" padding-y="3">
+    <link value="/quan-ly" flex="row" align="center" gap="2">
+      <icon value="coffee" alt="Quán Sáng và Chiều"></icon>
+      <text weight="bold">{{ site.name }}</text>
+    </link>
+    <navbar flex="row" gap="4" show="false" medium:show="true">
+      <link value="/quan-ly/don-hang" color="ink-30" active:color="ink" active:weight="bold">Đơn hàng</link>
+      <link value="/quan-ly/kho" color="ink-30" active:color="ink" active:weight="bold">Kho</link>
+      <link value="/quan-ly/doanh-thu" color="ink-30" active:color="ink" active:weight="bold">Doanh thu</link>
+    </navbar>
+    <button click="$account.toggle()" radius="full" border="line" padding="2"
+            hover:background="paper" medium+hover:background="brand" medium+hover:color="brand.on">
+      <icon value="user" alt="Tài khoản của {{ user.name }}"></icon>
+    </button>
+  </header>
+
+  <section gap="4" padding="6">
+    <box flex="column" large:flex="row" align="start" large:align="center" space="between" gap="3">
+      <text heading="1" size="large">Đơn hàng hôm nay</text>
+      <box flex="row" gap="2" wrap="true">
+        <input type="search" placeholder="Tìm theo mã đơn hoặc tên khách" value="{{ keyword }}"
+               input:debounce(300)="search()" keydown:escape="keyword = ''" />
+        <select value="{{ status }}" change="filter($event.value)">
+          <option value="all">Tất cả</option>
+          <option value="new">Mới</option>
+          <option value="brewing">Đang pha</option>
+          <option value="done">Xong</option>
+        </select>
+      </box>
+    </box>
+
+    <text if="orders.length === 0" color="ink-30">Chưa có đơn nào{{ keyword ? ` khớp "${keyword}"` : "" }}.</text>
+
+    <list if="orders.length > 0" gap="2">
+      <order-row for="order of orders" key="{{ order.id }}" order="{{ order }}"
+                 click="select(order.id)" pressed:scale="98" />
+    </list>
+
+    <box component="dropdown" as="$filters" click-outside="$filters.close()"
+         pointer-enter,focus-in="$filters.preview()" pointer-leave,focus-out="$filters.hide()">
+      <button click="$filters.toggle()" gap="2">
+        <icon value="adjustments"></icon>
+        <text>Bộ lọc ({{ activeFilters.length }})</text>
+      </button>
+      <popover place="below-end" padding="3" gap="2">
+        <label flex="row" gap="2">
+          <input type="checkbox" checked="{{ onlyLate }}" />
+          <text>Chỉ đơn trễ hơn {{ lateMinutes }} phút</text>
+        </label>
+        <label flex="row" gap="2">
+          <input type="checkbox" checked="{{ onlyDelivery }}" />
+          <text>Chỉ đơn giao tận nơi</text>
+        </label>
+      </popover>
+    </box>
+  </section>
+
+  <section gap="4" padding="6" background="paper">
+    <grid columns="1" small:columns="2" ios,android+large:columns="3" gap="4">
+      <card for="stat of stats" padding="4" gap="1" shadow="small" hover:shadow="medium">
+        <text size="small" color="ink-30">{{ stat.label }}</text>
+        <text size="huge" weight="bold" font="code">{{ number(stat.value) }}</text>
+        <badge if="stat.change !== 0" color="{{ stat.change > 0 ? 'success' : 'danger' }}"
+               alt="{{ stat.change > 0 ? 'Tăng' : 'Giảm' }} {{ Math.abs(stat.change) }}%">
+          <text>{{ stat.change > 0 ? '+' : '' }}{{ stat.change }}%</text>
+        </badge>
+      </card>
+    </grid>
+  </section>
+
+  <overlay if="selected" component="dialog" as="$detail" keydown:escape="$detail.close()">
+    <card padding="6" gap="4" container="small" radius="large" shadow="large">
+      <box flex="row" align="center" space="between">
+        <text heading="2">Đơn {{ selected.code }}</text>
+        <button click="$detail.close()" alt="Đóng"><icon value="x"></icon></button>
+      </box>
+      <list gap="1">
+        <item for="line of selected.lines" flex="row" space="between">
+          <text>{{ line.quantity }} × {{ line.name }}</text>
+          <text font="code">{{ money(line.quantity * line.price) }}</text>
+        </item>
+      </list>
+      <text weight="bold">Tổng: {{ money(total) }}</text>
+      <text>Mã đơn để tra cứu: <code>{{ selected.code }}</code></text>
+      <box flex="row" gap="2" align="end">
+        <button click="advance(selected.id)" background="brand" color="brand.on"
+                disabled="{{ selected.status === 'done' }}" disabled:opacity="50">Chuyển bước tiếp</button>
+        <button click="print(selected.id)" border="line">In hoá đơn</button>
+      </box>
+    </card>
+  </overlay>
+
+  <box component="terminal" shell="bash" if="user.isStaff">kitwork logs --site {{ site.domain }} --since 1h</box>
+
+  <footer padding="6" gap="2" align="center">
+    <text size="small" color="ink-30">Cập nhật {{ date(updatedAt) }} · {{ orders.length }} đơn</text>
+    <link value="/quan-ly/huong-dan" new-tab="true">Hướng dẫn \{{ cú pháp }} của .ui</link>
+  </footer>
+</page>

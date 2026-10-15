@@ -1,0 +1,20 @@
+// Cấu hình kiểu tsconfig: JSON có chú thích, như người ta vẫn dán.
+{
+  /* Biên dịch */
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "strict": true, // bật mọi kiểm tra
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] },
+    'lib': ['DOM', 'ES2022'],
+    maxNodeModuleJsDepth: 0,
+    "ratio": .5,
+    "limit": +10,
+    "nothing": NaN,
+    "forever": -Infinity,
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

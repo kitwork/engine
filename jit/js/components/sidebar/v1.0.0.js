@@ -1,4 +1,4 @@
-/* sidebar component @v1.0.0 — the app-shell navigation panel.
+/* sidebar component — the app-shell navigation panel.
  *
  * TWO independent axes, because a sidebar behaves differently by viewport and the two must not
  * fight each other:
@@ -70,4 +70,3 @@ var sidebarDef = {
 // panel, and for the mobile drawer a focus trap is the platform's job (<dialog>) or the page's.
 
 window.kit.component("sidebar", sidebarDef);
-window.kit.component("sidebar@v1.0.0", sidebarDef);

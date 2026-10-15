@@ -15,6 +15,12 @@ func (c *Context) Data(v value.Value) *ViewBuilder         { return c.viewBuilde
 func (c *Context) Meta(v value.Value) *ViewBuilder         { return c.viewBuilder().Meta(v) }
 func (c *Context) Jsonld(args ...value.Value) *ViewBuilder { return c.viewBuilder().Jsonld(args...) }
 
+// Title, Description and Image set the page's head from inside a handler or a Kitwork UI view:
+// ctx.title(product.name + " — Quán Cà Phê").
+func (c *Context) Title(v value.Value) *ViewBuilder       { return c.viewBuilder().Title(v) }
+func (c *Context) Description(v value.Value) *ViewBuilder { return c.viewBuilder().Description(v) }
+func (c *Context) Image(v value.Value) *ViewBuilder       { return c.viewBuilder().Image(v) }
+
 // Notfound marks a 404 and renders the nearest notfound.kitwork.html, bubbling up the folder
 // chain. Variadic so the reflection layer does not auto-invoke it as a 0-arg getter — it must stay
 // callable as ctx.notfound().

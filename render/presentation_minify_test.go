@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	hydrate "github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/value"
 )
 
@@ -52,8 +53,6 @@ func TestPrepareMinifiesHydrateOperatorsWithDOMEquivalentEntities(t *testing.T) 
 		Base:          root,
 		Directory:     ".",
 		DefaultMinify: true,
-		// this test is about the pre-render, so it asks for it the way a site does
-		Prerender: true,
 	}
 	prepared := New(config).Prepare()
 	if err := prepared.PreparationError(); err != nil {
@@ -63,7 +62,15 @@ func TestPrepareMinifiesHydrateOperatorsWithDOMEquivalentEntities(t *testing.T) 
 		t.Fatal("hydrate template did not use generation minification")
 	}
 	preparedOutput := prepared.Bind(value.New(map[string]any{})).String()
-	if !strings.Contains(preparedOutput, ">visible</b>") {
-		t.Fatalf("encoded comparison was not pre-rendered: %s", preparedOutput)
+	// The page is sent as written: the server no longer fills in page-scope answers (router.javascript's
+	// prerender went on 11/10/2026), so the browser is the one that evaluates the expression.
+	if !strings.Contains(preparedOutput, ">pending</b>") {
+		t.Fatalf("the server must send the author's content, not an answer: %s", preparedOutput)
+	}
+	// What the minifier left in the attribute must still read, once the DOM decodes its entities, as
+	// the comparison the author wrote. The Go twin of the client's walker decodes and evaluates exactly
+	// as the browser does, so it is the witness: count > 0 with count 1 is visible.
+	if evaluated := hydrate.PreRender(preparedOutput); !strings.Contains(evaluated, ">visible</b>") {
+		t.Fatalf("the minified comparison no longer evaluates as written: %s", preparedOutput)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kitwork/engine/value"
 )
 
 // router.jitcss(config) must feed the render's JIT-CSS engine: a custom brand color from
@@ -62,5 +64,33 @@ func TestJitcssConfigApplied(t *testing.T) {
 	// The dark: variant must scope under the configured selector (minified: quotes stripped).
 	if !strings.Contains(body, "[data-theme=dark]") || strings.Contains(body, ".dark .dark") {
 		t.Errorf("custom dark selector [data-theme=dark] not applied:\n%.400q", body)
+	}
+}
+
+// A keyframe from router.css({ theme: { extend: { keyframes } } }) arrives as maps, which Go walks in a
+// different order each time. Its CSS must not: stages run from, the percentages in order, then to, and
+// each stage's declarations by name, so the template page's stylesheet (and its hash) is the same on
+// every boot. Control: the stages really are given out of order and in a map.
+func TestKeyframeCSSIsTheSameOnEveryBoot(t *testing.T) {
+	stages := map[string]value.Value{
+		"to":       value.New(map[string]value.Value{"opacity": value.New("1"), "transform": value.New("none"), "filter": value.New("none")}),
+		"from":     value.New(map[string]value.Value{"transform": value.New("translateY(8px)"), "opacity": value.New("0"), "filter": value.New("blur(4px)")}),
+		"50%":      value.New(map[string]value.Value{"opacity": value.New("0.6"), "filter": value.New("blur(1px)")}),
+		"10%, 90%": value.New(map[string]value.Value{"color": value.New("red")}),
+		"bogus":    value.New("not a stage"),
+	}
+	want := "\tfrom {\n\t\tfilter: blur(4px);\n\t\topacity: 0;\n\t\ttransform: translateY(8px);\n\t}\n" +
+		"\t10%, 90% {\n\t\tcolor: red;\n\t}\n" +
+		"\t50% {\n\t\tfilter: blur(1px);\n\t\topacity: 0.6;\n\t}\n" +
+		"\tto {\n\t\tfilter: none;\n\t\topacity: 1;\n\t\ttransform: none;\n\t}\n"
+	seen := map[string]bool{}
+	for i := 0; i < 64; i++ {
+		seen[buildKeyframeCSS(stages)] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("the same keyframe gave %d different CSS texts over 64 builds; the order must not follow the map", len(seen))
+	}
+	if got := buildKeyframeCSS(stages); got != want {
+		t.Errorf("stages from, percentages, to; declarations by name:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }

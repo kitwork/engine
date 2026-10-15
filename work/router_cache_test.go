@@ -86,7 +86,8 @@ func TestTreeCachePersistLimit(t *testing.T) {
 	req.Header.Set("X-Request-ID", "runtime-cache-test")
 	rec := httptest.NewRecorder()
 	tn.Serve(rec, req)
-	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "cache failure") {
+	// in production the visitor reads the request id; the message is the log record's
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "runtime-cache-test") || strings.Contains(rec.Body.String(), "cache failure") {
 		t.Fatalf("failed response: code=%d body=%q", rec.Code, rec.Body.String())
 	}
 	if got := rec.Header().Get("X-Kitwork-Cache"); got != "" {
@@ -107,6 +108,7 @@ func TestTreeCachePersistLimit(t *testing.T) {
 		`"program":`,
 		`"code":"RUNTIME_ERROR"`,
 		`"source":"router.kitwork.js"`,
+		`cache failure`,
 	} {
 		if !strings.Contains(logged, field) {
 			t.Fatalf("runtime diagnostic missing %s:\n%s", field, logged)

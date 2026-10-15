@@ -182,35 +182,55 @@ func TestRenderModelInjects(t *testing.T) {
 	}
 }
 
-// STRICT PREFIX = ORIGIN: data-kit-* is the only authored source form. The long prefix on a
-// directive is not source and, since the kernel stopped decoding IR (ideaship-final §9), not
-// anything: it is neither verified nor a reason to ship the runtime.
+// TWO SPELLINGS, ONE GRAMMAR (11/10/2026, KITWORK_UI.md §11): data-kit-* is what a person writes by
+// hand, and the EIGHT grouped data-kitwork-* attributes — component, scope, bind, class, style, event,
+// if, for — are what the engine writes for a Kitwork UI page. Each of the eight alone makes a page use
+// the grammar. Every other data-kitwork-* name stays inert: the transport markers the engine hangs on
+// nearly every page (generated, layout, current, delay, transition) and the retired per-directive
+// spellings (data-kitwork-click, data-kitwork-text — now pairs inside event and bind).
 func TestRenderStrictPrefixOrigin(t *testing.T) {
 	if directiveRe.MatchString(`data-kitwork-click="n = n + 1"`) {
-		t.Error("data-kitwork-click must NOT be matched as authored source")
+		t.Error("data-kitwork-click must NOT be matched as authored source: a grouped click is a pair of data-kitwork-event")
 	}
 	if !directiveRe.MatchString(`data-kit-click="n = n + 1"`) {
 		t.Error("data-kit-click must be matched as authored source")
 	}
-	for _, long := range []string{
-		`data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'`,
-		`data-kitwork-text="n"`,
-		`data-kitwork-scope="cart"`,
+	page := func(body string) string { return `<head></head><body>` + marker + body + `</section></body>` }
+	for _, grouped := range []string{
+		`<div data-kitwork-component="counter: $counter"></div>`,
+		`<div data-kitwork-scope="n: 0"></div>`,
+		`<b data-kitwork-bind="text: n">0</b>`,
+		`<li data-kitwork-class="done: n == 100">x</li>`,
+		`<div data-kitwork-style="width: n + '%'"></div>`,
+		`<button data-kitwork-event="click: n = n + 1">+</button>`,
+		`<p data-kitwork-if="n">x</p>`,
+		`<li data-kitwork-for="row of rows; key: row.id">x</li>`,
 	} {
-		if presenceRe.MatchString(long) {
-			t.Errorf("%s is inert and must not bring the runtime", long)
+		if !UsesGrammar(page(grouped)) {
+			t.Errorf("a page whose only directive is %s uses the grammar and needs the runtime", grouped)
 		}
 	}
-	in := `<head></head><body>` + marker +
-		`<button data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'>+</button>` +
-		`</section></body>`
-	if UsesGrammar(in) {
-		t.Error("a page whose only directive wears the long prefix has no directive; nothing to hydrate")
+	for _, inert := range []string{
+		`<button data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'>+</button>`,
+		`<b data-kitwork-text="n">0</b>`,
+		`<style data-kitwork-generated="css"></style>`,
+		`<main data-kitwork-layout="page.ui"></main>`,
+		`<a href="/" data-kitwork-current="page">x</a>`,
+		`<div data-kitwork-delay="0"></div>`,
+		`<div data-kitwork-transition="fade"></div>`,
+	} {
+		if UsesGrammar(page(inert)) {
+			t.Errorf("%s is not one of the eight grouped directives and must not bring the runtime", inert)
+		}
 	}
 }
 
-// The runtime ships the tiny parser (data-kit-* source) and the walker — and never eval. It does
-// not decode a precompiled IR any more: no data-kitwork-<directive> read remains in the kernel.
+// The runtime ships the tiny parser and the walker — and never eval. It reads two spellings of the
+// same directives: data-kit-* by hand, and the eight grouped data-kitwork-* attributes the engine
+// writes (KITWORK_UI.md §11), each found by its own selector. It never decodes a precompiled IR, and
+// reads no other data-kitwork-* name: not the transport markers, not the retired per-directive
+// spellings that the grouped form folded into bind / event / for / component. A class is its own
+// grouped attribute (data-kitwork-class), so the bind reader no longer special-cases class.<name>.
 // The verb system (data-kit-action / data-kit-target, kit.fire, the compat surface) is gone too
 // (22/09): behaviour is a component or an expression, transport is Drive.
 func TestRuntimeEmbedded(t *testing.T) {
@@ -223,13 +243,29 @@ func TestRuntimeEmbedded(t *testing.T) {
 			t.Errorf("the runtime still carries the verb system: %q", gone)
 		}
 	}
+	// the eight grouped attributes, the fixed-name ones by their selectors
+	for _, read := range []string{
+		`[data-kitwork-component]`, `[data-kitwork-scope]`, `[data-kitwork-bind]`, `[data-kitwork-event]`,
+		`[data-kitwork-if]`, `[data-kitwork-for]`, `eachPair("bind"`, `eachPair("class"`, `eachPair("style"`,
+		`grouped(b, "scope")`, `grouped(el, "event")`, `"data-kitwork-component"`, `"data-kitwork-if"`,
+	} {
+		if !strings.Contains(kernelJS, read) {
+			t.Errorf("the kernel does not read the grouped form: %s is missing", read)
+		}
+	}
 	for _, gone := range []string{
-		`"data-kitwork-" + name`, `[data-kitwork-scope]`, `[data-kitwork-component]`, `[data-kitwork-for]`,
-		`[data-kitwork-if]`, `[data-kitwork-model]`, `data-kitwork-debounce`,
+		`[data-kitwork-model]`, `data-kitwork-debounce`, `data-kitwork-text`, `data-kitwork-show`,
+		`data-kitwork-click`, `data-kitwork-key`, `data-kitwork-alias`, `data-kitwork-seed`, `data-kitwork-item`,
+		`data-kitwork-generated`, `data-kitwork-layout`, `data-kitwork-current`, `data-kitwork-delay`, `data-kitwork-transition`,
 	} {
 		if strings.Contains(kernelJS, gone) {
-			t.Errorf("the kernel still reads %s — the long prefix on a directive/boundary is inert now", gone)
+			t.Errorf("the kernel reads %s — only the eight grouped data-kitwork-* attributes are directives", gone)
 		}
+	}
+	// class.<name> left data-kitwork-bind for data-kitwork-class: the bind reader must not keep a
+	// special case for it.
+	if strings.Contains(kernelJS, `indexOf("class.")`) {
+		t.Error(`the kernel still special-cases class.<name> in data-kitwork-bind — a class is data-kitwork-class now`)
 	}
 	for _, want := range []string{
 		"PREC", "function lex", "MutationObserver",
@@ -239,12 +275,13 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// the two-way lock against the legacy standalone file, and the swap lifecycle events
 		"X-Kitwork-Hydrate", "kit.morph", "mergeHead", "popstate", "kit.hydrate",
 		"kitwork:before-swap", "kitwork:load",
-		// kernel overlays (progress bar, announcer) survive morph via the data-kitwork-ui marker
-		"data-kitwork-ui", "kernelUI",
+		// nodes the client made for itself (the transition style) survive morph:
+		// remembered in memory (clientOwned), not by an attribute
+		"clientOwned", "kernelUI",
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
 		"data-kit-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
-		`"{}"`, `"[]"`, `"=>"`, `"call"`, "__kitLambda", "tryArrowParams", "boundaryScope", "kit.run",
+		`"{}"`, `"[]"`, `"=>"`, `"call"`, "function KitLambda", "tryArrowParams", "boundaryScope", "kit.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
 		"kit.component", "data-kit-component", "seedComponent", "fn.apply(s, callbacks(fargs, s))",
 		// a lambda handed to a native method becomes a callback that walks its tree in the caller scope

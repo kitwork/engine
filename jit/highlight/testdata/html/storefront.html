@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cà phê rang mỗi sáng, giao trong 30 phút.">
+  <title>Quán Sáng &amp; Chiều — Cửa hàng</title>
+  <link rel="preload" href="/_kitwork/fonts/outfit.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --brand: #a16207;
+      --paper: #fffdf8;
+      --radius: 0.75rem;
+    }
+    body { margin: 0; font: 400 1rem/1.6 "Outfit", system-ui, sans-serif; background: var(--paper); }
+    .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 1.5rem; }
+    .product-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -12px rgb(0 0 0 / 30%); }
+    .badge[data-state="new"]::after { content: " ✦"; color: var(--brand); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .4; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation: none !important; }
+    }
+  </style>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CafeOrCoffeeShop",
+      "name": "Quán Sáng & Chiều",
+      "servesCuisine": ["Cà phê", "Trà"],
+      "priceRange": "29.000₫ – 65.000₫"
+    }
+  </script>
+</head>
+<body class="page">
+  <a class="skip-link" href="#noi-dung">Bỏ qua điều hướng</a>
+  <header class="site-header">
+    <nav aria-label="Chính">
+      <a href="/" aria-current="page">Trang chủ</a>
+      <a href="/thuc-don">Thực đơn</a>
+      <a href="/cua-hang">Cửa hàng</a>
+      <button type="button" class="cart-toggle" data-kit-click="cart.open()" aria-expanded="false">
+        Giỏ hàng <span class="badge" data-kit-text="cart.count">0</span>
+      </button>
+    </nav>
+    <a class="checkout" href="/gio-hang?ma=DH-1024&amp;buoc=2">Thanh toán</a>
+  </header>
+
+  <main id="noi-dung">
+    <section class="hero">
+      <h1>Rang mỗi sáng,<br>giao trong 30&nbsp;phút</h1>
+      <p>Hạt Robusta Cầu Đất &mdash; vị đậm, hậu ngọt. Đặt trước 10 giờ, nhận trước 11 giờ.</p>
+      <img src="/images/hero-1280.webp"
+           srcset="/images/hero-640.webp 640w, /images/hero-1280.webp 1280w"
+           sizes="(min-width: 768px) 50vw, 100vw"
+           alt="Ly cà phê sữa đá trên quầy gỗ" width=1280 height=853 decoding=async>
+    </section>
+
+    <!-- Món nổi bật: server dựng sẵn -->
+    <section aria-labelledby="noi-bat">
+      <h2 id="noi-bat">Món nổi bật</h2>
+      <ul class="product-grid">
+        <li class="product-card">
+          <img src="/images/ca-phe-sua.webp" alt="Cà phê sữa" loading="lazy" width="320" height="320">
+          <h3>Cà phê sữa đá</h3>
+          <p class="price">29.000&#8363; <s>35.000&#x20AB;</s></p>
+          <span class="badge" data-state="new">Mới</span>
+          <button type="button" data-kit-click="cart.add('ca-phe-sua', 1)">Thêm vào giỏ</button>
+        </li>
+        <li class="product-card">
+          <img src="/images/bac-xiu.webp" alt="Bạc xỉu" loading="lazy" width="320" height="320">
+          <h3>Bạc xỉu</h3>
+          <p class="price">32.000&#8363;</p>
+          <button type="button" data-kit-click="cart.add('bac-xiu', 1)" disabled>Tạm hết</button>
+        </li>
+      </ul>
+    </section>
+
+    <section aria-labelledby="dat-hang">
+      <h2 id="dat-hang">Đặt hàng</h2>
+      <form method="post" action="/dat-hang" novalidate>
+        <label for="ten">Tên người nhận</label>
+        <input id="ten" name="ten" type="text" autocomplete="name" required>
+        <label for="dien-thoai">Số điện thoại</label>
+        <input id="dien-thoai" name="dien-thoai" type="tel" inputmode="tel" pattern="0[0-9]{9}" required>
+        <label for="gio">Giờ nhận</label>
+        <select id="gio" name="gio">
+          <option value="9:00">9 giờ</option>
+          <option value="10:30" selected>10 giờ 30</option>
+        </select>
+        <label for="ghi-chu">Ghi chú</label>
+        <textarea id="ghi-chu" name="ghi-chu" rows="3"><b>Giao trước 9 giờ</b> &amp; gọi trước</textarea>
+        <button type="submit">Đặt hàng</button>
+      </form>
+    </section>
+
+    <table class="hours">
+      <caption>Giờ mở cửa</caption>
+      <thead><tr><th scope="col">Ngày</th><th scope="col">Giờ</th></tr></thead>
+      <tbody>
+        <tr><td>Thứ hai &ndash; thứ sáu</td><td>6:30 &ndash; 21:00</td></tr>
+        <tr><td>Thứ bảy, chủ nhật</td><td>7:00 &ndash; 22:00</td></tr>
+      </tbody>
+    </table>
+
+    <template id="cart-row">
+      <li class="cart-row"><span data-kit-text="item.name"></span> &times; <span data-kit-text="item.quantity"></span></li>
+    </template>
+  </main>
+
+  <footer class="site-footer">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4 12h16M12 4v16" stroke="currentColor" stroke-width="2" fill="none"/>
+    </svg>
+    <p>&copy; 2026 Quán Sáng &amp; Chiều. 12 Lê Lợi, Quận 1.</p>
+    <noscript>Trang vẫn đặt hàng được khi tắt JavaScript.</noscript>
+  </footer>
+
+  <script type="module">
+    const cart = { items: [], open: false };
+    const money = new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" });
+
+    function render() {
+      const list = document.querySelector(".cart-list");
+      if (!list || cart.items.length === 0) {
+        return;
+      }
+      list.innerHTML = cart.items
+        .map((item) => `<li>${item.name} × ${item.quantity}</li>`)
+        .join("");
+      document.title = `(${cart.items.length}) Quán Sáng & Chiều`;
+    }
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-kit-click]");
+      if (button && button.disabled === false) {
+        console.debug("bấm", button.dataset.kitClick, "</div> trong chuỗi không đóng script");
+        render();
+      }
+    });
+  </script>
+</body>
+</html>

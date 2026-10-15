@@ -159,3 +159,18 @@ func TestPaletteOnRungPicksTheRightEnd(t *testing.T) {
 		t.Error("a light amber fill must not take a white label — that is the failure this rung exists to prevent")
 	}
 }
+
+// Contrast reads both spellings of a hex colour and gives WCAG's ratio, 21 for black on white and 1
+// for a colour on itself; a word it cannot read gives 0, so "reaches 3:1" is false for it rather than
+// computed from a black that was never written.
+func TestContrastReadsHexColours(t *testing.T) {
+	if got := Contrast("#000", "#ffffff"); got < 20.99 || got > 21.01 {
+		t.Errorf("black on white = %v, want 21", got)
+	}
+	if got := Contrast("#c8742c", "#c8742c"); got != 1 {
+		t.Errorf("a colour on itself = %v, want 1", got)
+	}
+	if got := Contrast("brand", "#ffffff"); got != 0 {
+		t.Errorf("an unreadable colour gives %v, want 0", got)
+	}
+}

@@ -2,8 +2,9 @@ package hydrate
 
 import "testing"
 
-// Three modes, and the client must know the same three the server's pre-paint has always read from
-// localStorage["theme"]: light, dark, and system — the default, meaning "follow the OS".
+// Three modes, and the client must know the same three the server's pre-paint reads from
+// localStorage (under "appearance" since 11/10/2026, "theme" before): light, dark, and system — the
+// default, meaning "follow the OS".
 //
 // The kernel used to understand only two. A page could ask the server for system (by storing
 // nothing) and then have no way to ask for it back, which is how kitjs.org ended up with an
@@ -40,16 +41,16 @@ if (kit.theme.resolved !== "light" && kit.theme.resolved !== "dark") {
 if (kit.theme.set("dark") !== "dark" || kit.theme.mode !== "dark" || kit.theme.resolved !== "dark") {
   throw new Error("set('dark') did not stick: " + kit.theme.mode + "/" + kit.theme.resolved);
 }
-if (localStorage.getItem("theme") !== "dark") throw new Error("the choice should be stored as written");
+if (localStorage.getItem("appearance") !== "dark") throw new Error("the choice should be stored as written, under \"appearance\"");
 if (document.documentElement.getAttribute("data-theme") !== "dark") {
-  throw new Error("data-theme should carry the choice, like the pre-paint writes it");
+  throw new Error("data-theme should carry what is shown, like the pre-paint writes it");
 }
 
 // Handing it back: the stored value becomes the word the pre-paint reads on the next load.
 if (kit.theme.system() !== "system" || kit.theme.mode !== "system") {
   throw new Error("system() did not hand the choice back: " + kit.theme.mode);
 }
-if (localStorage.getItem("theme") !== "system") throw new Error("stored value should be 'system', got " + localStorage.getItem("theme"));
+if (localStorage.getItem("appearance") !== "system") throw new Error("stored value should be 'system', got " + localStorage.getItem("appearance"));
 if (kit.theme.resolved !== "light" && kit.theme.resolved !== "dark") {
   throw new Error("resolved must still be a painted mode under system");
 }
@@ -58,7 +59,7 @@ if (kit.theme.resolved !== "light" && kit.theme.resolved !== "dark") {
 var refused = false;
 try { kit.theme.set("sepia"); } catch (e) { refused = true; }
 if (!refused) throw new Error("an unknown mode must be refused");
-if (localStorage.getItem("theme") !== "system") throw new Error("a refused set must not change what is stored");
+if (localStorage.getItem("appearance") !== "system") throw new Error("a refused set must not change what is stored");
 
 console.log("theme: light / dark / system, the same three the pre-paint reads");
 `

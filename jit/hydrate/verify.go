@@ -82,17 +82,23 @@ func checkElementReads(expression, where string, declared map[string]bool, into 
 	}
 }
 
-// exampleContentRe finds the INSIDE of a <pre> or <code> block. Documentation prints the grammar
-// there — kitjs.org's installation page shows `data-kit-click="count++"` as an example — and an
-// example is text, not a directive. Only the content goes: the element's own attributes stay, so a
-// live <pre data-kit-text="…"> is still judged.
-var exampleContentRe = regexp.MustCompile(`(?s)(<(?:pre|code)\b[^>]*>).*?(</(?:pre|code)>)`)
+// preContentRe and codeContentRe find the INSIDE of a <pre> or <code> block. Documentation prints
+// the grammar there — kitjs.org's installation page shows `data-kit-click="count++"` as an example —
+// and an example is text, not a directive. Only the content goes: the element's own attributes stay,
+// so a live <pre data-kit-text="…"> is still judged. Each runs from its tag to the close of the same
+// tag (RE2 has no backreference, so one expression a tag): a terminal's command is
+// <pre><span>$ </span><code>…</code></pre>, and cut at its first </code> it left <pre></code></pre>,
+// one close too many, which put every boundary after it a level too deep.
+var (
+	preContentRe  = regexp.MustCompile(`(?s)(<pre\b[^>]*>).*?(</pre>)`)
+	codeContentRe = regexp.MustCompile(`(?s)(<code\b[^>]*>).*?(</code>)`)
+)
 
 func withoutExamples(html string) string {
 	if !strings.Contains(html, "<pre") && !strings.Contains(html, "<code") {
 		return html
 	}
-	return exampleContentRe.ReplaceAllString(html, "$1$2")
+	return codeContentRe.ReplaceAllString(preContentRe.ReplaceAllString(html, "$1$2"), "$1$2")
 }
 
 // WithoutExamples is withoutExamples for jit/js, which scans a page for the components and native

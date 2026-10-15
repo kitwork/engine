@@ -143,10 +143,10 @@ func TestRenderInjectsStyleAndKeepsMarkup(t *testing.T) {
 		t.Errorf("icon markup should be left untouched: %s", out)
 	}
 	// Exactly one style block, injected into <head>, carrying both icons' rules.
-	if strings.Count(out, `data-kitwork-jit="icons"`) != 1 {
+	if strings.Count(out, `data-kitwork-generated="icons"`) != 1 {
 		t.Errorf("expected exactly one icon style block: %s", out)
 	}
-	si := strings.Index(out, `<style data-kitwork-jit="icons">`)
+	si := strings.Index(out, `<style data-kitwork-generated="icons">`)
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("icon style should be injected before </head>: %s", out)
 	}

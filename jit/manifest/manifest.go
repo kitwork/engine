@@ -4,7 +4,7 @@
 // a <link> for does nothing at all — so unlike the other JIT passes this one has
 // to reach into <head>. It follows jit/theme's rule exactly:
 //
-//	<link data-kitwork-jit="manifest">   an author-placed marker is filled IN
+//	<link data-kitwork-generated="manifest">   an author-placed marker is filled IN
 //	                                     PLACE, so the author owns the position
 //	no marker                            the link is injected at the end of
 //	                                     <head>
@@ -23,8 +23,9 @@ import (
 // the unquoted form: after a closing quote both neighbours are non-word
 // characters, so  there could never match.
 // markerRe matches an author-placed slot. Both prefixes are accepted, matching
-// how jit/theme reads its own marker.
-var markerRe = regexp.MustCompile(`(?is)<link[^>]*\bdata-kit(?:work)?-jit\s*=\s*(?:"manifest"|'manifest'|manifest\b)[^>]*>`)
+// how jit/theme reads its own marker, and the old name data-kitwork-jit too: a
+// template written before the rename (10/10/2026) keeps its slot.
+var markerRe = regexp.MustCompile(`(?is)<link[^>]*\bdata-kit(?:work)?-(?:generated|jit)\s*=\s*(?:"manifest"|'manifest'|manifest\b)[^>]*>`)
 
 var headCloseRe = regexp.MustCompile(`(?i)</head>`)
 
@@ -34,7 +35,7 @@ func Render(source, path string) string {
 	if source == "" || path == "" {
 		return source
 	}
-	link := `<link data-kitwork-jit="manifest" rel="manifest" href="` + html.EscapeString(path) + `">`
+	link := `<link data-kitwork-generated="manifest" rel="manifest" href="` + html.EscapeString(path) + `">`
 
 	if markerRe.MatchString(source) {
 		// Filled in place. Replacing rather than appending keeps the pass

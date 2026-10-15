@@ -3,8 +3,10 @@ package http
 import (
 	stdhttp "net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kitwork/engine/value"
 )
@@ -75,7 +77,7 @@ func TestLazyRequestRetryTransient(t *testing.T) {
 	defer srv.Close()
 
 	req := NewClient(nil, nil).Get(srv.URL).V.(*Request).Retry(3)
-	if req.Status() != 200 {
+	if req.Status().Int() != 200 {
 		t.Fatalf("status = %d, want 200 after retries", req.res.Status)
 	}
 	if n := atomic.LoadInt32(&hits); n != 3 {
@@ -97,7 +99,7 @@ func TestLazyRequestNoRetryOn4xx(t *testing.T) {
 	defer srv.Close()
 
 	req := NewClient(nil, nil).Get(srv.URL).V.(*Request).Retry(3)
-	if req.Status() != 404 {
+	if req.Status().Int() != 404 {
 		t.Fatalf("status = %d, want 404", req.res.Status)
 	}
 	if n := atomic.LoadInt32(&hits); n != 1 {
@@ -154,12 +156,27 @@ func TestRequestMaxBytesRejectsOversizedResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// an answer past the limit the program set is a failure, INVALID_INPUT, at the first read; its
+	// message says so once, the words .error read until 14/10/2026 (sites compare them)
 	request := NewClient(nil, nil).MaxBytes(5).Get(srv.URL).V.(*Request)
-	if request.Status() != 0 {
-		t.Fatalf("status = %d, want 0 for oversized response", request.Status())
+	status := request.Status()
+	failure, _ := value.FailureFrom(status)
+	if status.K != value.Invalid || failure.Code != value.InvalidInputCode ||
+		failure.Message != "http: response body exceeds max bytes" {
+		t.Fatalf("status = %s %+v, want the INVALID_INPUT failure", status.K, failure)
 	}
-	if request.Error() != "http: response body exceeds max bytes" {
-		t.Fatalf("error = %q", request.Error())
+
+	// fetch(url, { maxBytes }) is the same limit, spelled as an option
+	limited := FetchWith(NewClient(nil, nil), value.New(srv.URL), value.New(map[string]any{"maxBytes": 5})).V.(*Request)
+	status = limited.Status()
+	failure, _ = value.FailureFrom(status)
+	if status.K != value.Invalid || failure.Code != value.InvalidInputCode {
+		t.Fatalf("fetch(url, { maxBytes: 5 }).status = %s %+v, want the INVALID_INPUT failure", status.Text(), failure)
+	}
+	// control: the same fetch with room for the body reads it
+	roomy := FetchWith(NewClient(nil, nil), value.New(srv.URL), value.New(map[string]any{"maxBytes": 64})).V.(*Request)
+	if text := roomy.Text(); text.Text() != "0123456789" {
+		t.Fatalf("fetch(url, { maxBytes: 64 }).text = %s, want the body", text.Text())
 	}
 }
 
@@ -176,7 +193,6 @@ func TestRequestCommitFiresExactlyOnce(t *testing.T) {
 	defer srv.Close()
 
 	request := NewClient(nil, nil).Get(srv.URL).V.(*Request)
-	request.onOk = &value.Lambda{}
 	first := request.Commit()
 	second := request.Commit()
 	_ = request.Status()
@@ -184,10 +200,97 @@ func TestRequestCommitFiresExactlyOnce(t *testing.T) {
 	if n := atomic.LoadInt32(&hits); n != 1 {
 		t.Fatalf("server hit %d times, want exactly 1", n)
 	}
-	if first.Handler == nil {
-		t.Fatal("first commit did not return its success continuation")
+	// an answer, of any status, is no failure and asks the VM for nothing
+	if first.Failure.IsError || first.Handler != nil || second.Failure.IsError || second.Handler != nil {
+		t.Fatalf("commits = %+v, %+v, want nothing for the VM", first, second)
 	}
-	if second.Handler != nil {
-		t.Fatal("second commit returned the continuation again")
+}
+
+// A request that got no answer is a failure of the program (14/10/2026), as fetch rejects in
+// JavaScript: the COMMIT fails with it, and so does every read. Its code says why: NETWORK when nothing
+// answered, TIMEOUT past its limit, DENIED when the SSRF guard refused the address. A 4xx or 5xx is an
+// answer, and stays one.
+func TestRequestWithoutAnAnswerIsAFailure(t *testing.T) {
+	prev := IsLocalAllowed
+	defer func() { IsLocalAllowed = prev }()
+
+	slow := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.WriteHeader(200)
+	}))
+	defer slow.Close()
+	broken := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		w.WriteHeader(503)
+	}))
+	defer broken.Close()
+	closed := httptest.NewServer(stdhttp.HandlerFunc(func(stdhttp.ResponseWriter, *stdhttp.Request) {}))
+	closedURL := closed.URL
+	closed.Close()
+	// what a URL may carry that a message must never show: its user information and its query
+	const secret = "/x?api_key=SECRET123#frag"
+	withUser := strings.Replace(closedURL, "://", "://user:hunter2@", 1)
+
+	for _, c := range []struct {
+		label, url string
+		local      bool
+		timeout    int
+		code       string
+	}{
+		{"nothing answers", withUser + secret, true, 0, value.NetworkCode},
+		{"past its time limit", slow.URL + secret, true, 50, value.TimeoutCode},
+		{"refused by the SSRF guard", slow.URL + secret, false, 0, value.DeniedCode},
+		{"not a URL", "http://user:hunter2@[::1]:namedport" + secret, true, 0, value.InvalidArgumentCode},
+	} {
+		IsLocalAllowed = func() bool { return c.local }
+		client := NewClient(nil, nil)
+		if c.timeout > 0 {
+			client = client.Timeout(c.timeout)
+		}
+		request := client.Get(c.url).V.(*Request)
+		committed := request.Commit()
+		failure, _ := value.FailureFrom(committed.Failure)
+		if !committed.Failure.IsError || failure.Code != c.code {
+			t.Errorf("%s: commit = %+v, want the %s failure", c.label, failure, c.code)
+			continue
+		}
+		// the message names the request, with no user information, query or fragment, and once
+		if strings.Contains(failure.Message, "SECRET123") || strings.Contains(failure.Message, "hunter2") ||
+			strings.Contains(failure.Message, "user") || strings.Contains(failure.Message, "frag") ||
+			strings.HasPrefix(failure.Message, "http: http:") {
+			t.Errorf("%s: message %q shows what the URL carried", c.label, failure.Message)
+		}
+		if c.code != value.InvalidArgumentCode && !strings.Contains(failure.Message, "/x\"") {
+			t.Errorf("%s: message %q does not name the request", c.label, failure.Message)
+		}
+		for name, read := range map[string]func() value.Value{
+			"status": request.Status, "ok": request.Ok, "json": request.JSON, "text": request.Text, "body": request.Body,
+		} {
+			if got := read(); got.K != value.Invalid {
+				t.Errorf("%s: .%s = %s, want the failure", c.label, name, got.Text())
+			}
+		}
+	}
+
+	// control: a 503 is an answer, read as one
+	IsLocalAllowed = func() bool { return true }
+	request := NewClient(nil, nil).Get(broken.URL).V.(*Request)
+	if committed := request.Commit(); committed.Failure.IsError {
+		t.Fatalf("a 503 failed the commit: %s", committed.Failure.Text())
+	}
+	if status, ok := request.Status(), request.Ok(); status.Int() != 503 || ok.Truthy() {
+		t.Fatalf("a 503 reads status %s ok %s, want 503 and false", status.Text(), ok.Text())
+	}
+}
+
+// .then and .catch are gone (14/10/2026): a request has no method of those names.
+func TestRequestHasNoThenOrCatch(t *testing.T) {
+	request := NewClient(nil, nil).Get("https://example.test")
+	for _, name := range []string{"then", "catch", "error"} {
+		if got := request.Get(name); got.K != value.Nil {
+			t.Errorf("request.%s = %s, want nothing", name, got.K)
+		}
+	}
+	if request.V.(*Request).fired {
+		t.Fatal("looking for .then fired the request")
 	}
 }

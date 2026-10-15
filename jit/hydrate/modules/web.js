@@ -5,7 +5,15 @@
   var kit = window.kit || window.kitwork;
   if (!kit || !kit.module || !kit.service || kit.has("web")) return;
 
-  var native = kit.module("native");
+  // The web kernel carries no native module (KernelFile(false)): the bridge is looked up when a
+  // service runs, so a page in a browser takes the browser path instead of throwing on undefined.
+  var native = {
+    get available() {
+      var bridge = kit.module("native");
+      return !!(bridge && bridge.available);
+    },
+    call: function (name, args) { return kit.module("native").call(name, args); }
+  };
   var navigator = window.navigator || {};
   var hasOwn = Object.prototype.hasOwnProperty;
   var capabilityIDs = Object.create(null);
@@ -20,6 +28,12 @@
     "clipboard.readText",
     "clipboard.copy",
     "camera.capture",
+    "appearance.mode",
+    "appearance.dark",
+    "appearance.resolved",
+    "appearance.set",
+    "appearance.toggle",
+    "appearance.system",
     "theme.mode",
     "theme.resolved",
     "theme.set",
@@ -118,6 +132,12 @@
           typeof document.createElement === "function" &&
           typeof window.FileReader !== "undefined"
         );
+      case "appearance.mode":
+      case "appearance.dark":
+      case "appearance.resolved":
+      case "appearance.set":
+      case "appearance.toggle":
+      case "appearance.system":
       case "theme.mode":
       case "theme.resolved":
       case "theme.set":
@@ -144,6 +164,7 @@
       if (!hasOwn.call(capabilityIDs, id)) return Promise.resolve(false);
       if (
         id === "capabilities.supports" ||
+        id.indexOf("appearance.") === 0 ||
         id.indexOf("theme.") === 0 ||
         id.indexOf("navigation.") === 0
       ) {
@@ -301,18 +322,57 @@
     }
   };
 
-  // Three modes, the same three the server's pre-paint already knows: "light", "dark", and
-  // "system" — which is the DEFAULT and means "follow prefers-color-scheme". The pre-paint script
-  // has read localStorage["theme"] this way since it was written; the kernel only understood two of
-  // them, so a page could ask the server for system and get no way to ask for it back.
-  function themeMode() {
+  // kit.appearance — light or dark. Three modes, the same three the server's pre-paint knows:
+  // "light", "dark", and "system" — meaning "follow prefers-color-scheme".
+  //   mode       "light" | "dark" | "system": what was chosen; with no choice stored, the mode the
+  //              site shows before the visitor chooses (router.appearance, below); then "system"
+  //   dark       true while the page shows dark (system resolved) — what an icon follows
+  //   resolved   "light" | "dark", the same fact as a word (the theme component reads it)
+  //   toggle()   flip what is shown;  set(mode);  system() — hand the choice back to the OS
+  // The light/dark service was kit.theme until 11/10/2026; kit.theme is still this same object, so a
+  // page written for it, and the theme component, keep working.
+  //
+  // The choice is stored under "appearance". It was stored under "theme" before, so a choice found
+  // only there is still the visitor's: "appearance" is read first, and "theme" only when
+  // "appearance" holds none of the three words. A new choice is written to "appearance" alone.
+  //
+  // With no choice stored, the site decides: router.appearance("light" | "dark") in the route's
+  // folder is written on the page as <html data-kitwork-appearance>, and nothing is written for
+  // "system", the default. A stored "system" is a choice like the other two (system() stores it), so
+  // a visitor can follow the device even on a site whose default is dark.
+  //
+  // The pre-paint (jit/theme) decides by exactly this rule before the first paint, so the first paint
+  // and the runtime agree.
+  var appearanceKeys = ["appearance", "theme"];
+  var appearanceDefault = "data-kitwork-appearance";
+
+  function modeWord(value) {
+    value = String(value || "").toLowerCase();
+    return value === "light" || value === "dark" || value === "system" ? value : "";
+  }
+
+  function storedMode(key) {
     try {
-      var saved = String(window.localStorage.getItem("theme") || "").toLowerCase();
-      // Only the two explicit choices need reading: anything else — "system", an empty store, a
-      // value some other script left behind — means the same thing, follow the OS.
-      if (saved === "light" || saved === "dark") return saved;
+      return modeWord(window.localStorage.getItem(key));
     } catch (_) { }
-    return "system";
+    return "";
+  }
+
+  // The mode the site shows before the visitor chooses, as the page arriving says it. Read as
+  // defensively as the attributes are written (applyTheme): a host whose document is not a full DOM
+  // has no default, not an error.
+  function siteMode() {
+    try {
+      return modeWord(document.documentElement.getAttribute(appearanceDefault));
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function appearanceMode() {
+    // Anything that is not one of the three words — an empty store, a value some other script left
+    // behind — is no choice: the site's default decides, and with none, the OS.
+    return storedMode(appearanceKeys[0]) || storedMode(appearanceKeys[1]) || siteMode() || "system";
   }
 
   function systemTheme() {
@@ -328,48 +388,76 @@
     return document.documentElement.classList.contains("dark") ? "dark" : "light";
   }
 
+  // Paint a mode the way the pre-paint does: the dark class, and data-theme and color-scheme set to
+  // what is SHOWN — never "system", which no stylesheet selects on (a site may scope its dark under
+  // [data-theme="dark"] instead of .dark, and "system" there would paint a dark device light).
   function applyTheme(mode) {
     var shown = mode === "system" ? systemTheme() : mode;
     document.documentElement.classList.toggle("dark", shown === "dark");
     try {
-      document.documentElement.setAttribute("data-theme", mode);
+      document.documentElement.setAttribute("data-theme", shown);
       document.documentElement.style.colorScheme = shown;
+      showThemeColor(shown);
     } catch (_) { }
     return shown;
+  }
+
+  // The browser's bar follows the mode shown, as the pre-paint set it: a Kitwork UI page with a
+  // backdrop writes each <meta name="theme-color"> with both modes' colours (data-kitwork-light,
+  // data-kitwork-dark); the mode shown takes its content and drops its media, so a visitor's choice of
+  // the other mode than the device's colours the bar too. Drive keeps it across a move (drive.js).
+  function showThemeColor(shown) {
+    document.querySelectorAll('meta[name="theme-color"][data-kitwork-' + shown + "]").forEach(function (n) {
+      n.setAttribute("content", n.getAttribute("data-kitwork-" + shown));
+      n.removeAttribute("media");
+    });
+  }
+
+  // Show the mode the rule above gives right now. Drive calls it after a move without a reload when
+  // the page arriving says another site default than the page it replaced (router.appearance is
+  // inherited down the folders, so a branch may show dark where the root follows the device): the
+  // move then looks as a whole load of that page would. A stored choice is shown as it was.
+  function showAppearance() {
+    return applyTheme(appearanceMode());
   }
 
   function setTheme(mode) {
     mode = String(mode || "").toLowerCase();
     if (mode !== "light" && mode !== "dark" && mode !== "system") {
       throw kit.KitworkError(
-        "Theme mode must be light, dark or system",
+        "Appearance mode must be light, dark or system",
         "INVALID_ARGUMENT",
-        "theme",
+        "appearance",
         "set",
         { mode: mode }
       );
     }
     try {
-      window.localStorage.setItem("theme", mode);
+      window.localStorage.setItem(appearanceKeys[0], mode);
     } catch (_) { }
     applyTheme(mode);
     return mode;
   }
 
-  var theme = {
+  var appearance = {
     set: setTheme,
     toggle: function () {
       return setTheme(resolvedTheme() === "dark" ? "light" : "dark");
     },
-    // Hand the choice back to the operating system. The stored value becomes "system", which is
-    // exactly what the pre-paint reads on the next load.
+    // Hand the choice back to the operating system. "system" is STORED, not the store emptied: an
+    // empty store means "the site decides", and on a site whose default is dark that is not the
+    // device. The pre-paint reads the stored word on the next load.
     system: function () {
       return setTheme("system");
     }
   };
-  Object.defineProperties(theme, {
+  Object.defineProperties(appearance, {
     mode: {
-      get: themeMode,
+      get: appearanceMode,
+      enumerable: true
+    },
+    dark: {
+      get: function () { return resolvedTheme() === "dark"; },
       enumerable: true
     },
     resolved: {
@@ -444,12 +532,33 @@
   });
   kit.service("progress", progress);
 
+  // kit.reader — what a screen reader says aloud: the new page's title after a move without a reload
+  // (Drive says it), or a sentence a page wants heard. JavaScript only: markup hears it through the
+  // reader component, an invisible live region whose text is this service's.
+  //   say(text)   say a sentence. The text is emptied first and set a moment later: a live region
+  //               speaks a change, and the same title twice (A, B, A) is still two changes.
+  var readerText = "", readerTimer = 0;
+  var reader = {
+    say: function (text) {
+      clearTimeout(readerTimer);
+      readerText = "";
+      progressPaint();
+      readerTimer = setTimeout(function () {
+        readerText = text == null ? "" : String(text);
+        progressPaint();
+      }, 50);
+    }
+  };
+  Object.defineProperty(reader, "text", { get: function () { return readerText; }, enumerable: true });
+  kit.service("reader", reader);
+
   kit.service("capabilities", capabilities);
   kit.service("dialog", dialog);
   kit.service("share", share);
   kit.service("clipboard", clipboard);
   kit.service("camera", camera);
-  kit.service("theme", theme);
+  kit.service("appearance", appearance);
+  kit.service("theme", appearance); // the name before 11/10/2026: the same object, not a copy
   kit.service("navigation", navigation);
 
   function compatibility(name, value) {
@@ -470,7 +579,7 @@
     return capabilities.supports(id);
   });
   compatibility("toggleTheme", function () {
-    return theme.toggle();
+    return appearance.toggle();
   });
   compatibility("back", function () {
     return navigation.back();
@@ -484,6 +593,7 @@
 
   kit.module("web", {
     supports: browserSupports,
-    captureCamera: captureCamera
+    captureCamera: captureCamera,
+    showAppearance: showAppearance
   });
 })(window, document);

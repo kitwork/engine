@@ -1,4 +1,4 @@
-/* dialog component @v2.0.0 — drive a native <dialog>. The HOST IS the dialog element.
+/* dialog component — drive a native <dialog>. The HOST IS the dialog element.
  *
  * Usage:
  *   <button data-kit-click="$confirm.show()">Delete project</button>
@@ -101,4 +101,3 @@ var dialogDef = {
 };
 
 window.kit.component("dialog", dialogDef);
-window.kit.component("dialog@v2.0.0", dialogDef);

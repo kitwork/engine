@@ -1,13 +1,14 @@
 // Package js is Kitwork's JIT JavaScript runtime — "jitjs", a sibling of jit/css and jit/icons.
-// A page that uses a kernel component (`data-kit-component="dialog"`, versioned or latest) gets
-// the kernel plus ONLY the components it names. No framework, no full-library payload — the jitcss
-// model applied to JS.
+// A page that uses a kernel component (`data-kit-component="dialog"`) gets the kernel plus ONLY the
+// components it names. No framework, no full-library payload — the jitcss model applied to JS.
 //
 // Each component is a file in ./components/<name>/<version>.js registering a `kit.component`
-// blueprint. The verb system that used to live beside them (`data-kit-action="copy"` +
-// `data-kit-target`, ./lib) is gone (22/09): behaviour is a component or an expression, transport
-// is Drive. The optional capability modules (data-kit-api, -live, -remember) went on 02/10: nothing
-// used them, and a site that keeps something in the browser does it in a component of its own.
+// blueprint under its bare name — never a versioned one (11/10/2026): which version's source ships
+// is the engine's business, the latest unless a template page's markup names one. The verb system
+// that used to live beside them (`data-kit-action="copy"` + `data-kit-target`, ./lib) is gone
+// (22/09): behaviour is a component or an expression, transport is Drive. The optional capability
+// modules (data-kit-api, -live, -remember) went on 02/10: nothing used them, and a site that keeps
+// something in the browser does it in a component of its own.
 //
 // THE CORE IS the kernel behind the canonical window.kit root (window.kitwork remains a
 // compatibility alias) and one delegated event system. Deliver (delivery.go) gives a page the
@@ -23,6 +24,7 @@ import (
 	"sync"
 
 	hydrate "github.com/kitwork/engine/jit/hydrate"
+	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
 //go:embed components services directives
@@ -34,9 +36,13 @@ var moduleCache sync.Map
 // coreName stays reserved so no module can ever shadow the kernel slot.
 const coreName = "core"
 
-// runtimeMarker tags the injected <script> within the shared data-kitwork-jit namespace (value
+// runtimeMarker tags the injected <script> within the shared data-kitwork-generated namespace (value
 // "js"), so Kitwork Drive's mergeHead re-runs it on navigation alongside the css/icons blocks.
-const runtimeMarker = `data-kitwork-jit="runtime"`
+const runtimeMarker = `data-kitwork-generated="runtime"`
+
+// legacyRuntimeMarker is the same tag under its name before 10/10/2026 (data-kitwork-jit): a page
+// rendered then, and still in a cache, already carries the kernel and must not get a second one.
+const legacyRuntimeMarker = `data-kitwork-jit="runtime"`
 
 var (
 	// slugRe validates a module slug; anchored, so a name can never escape the embedded dirs.
@@ -50,6 +56,12 @@ var (
 	// attribute (data-kit-alias, a runtime concern the kernel registers); the server only needs
 	// (name, version) to pick which module to emit.
 	componentAttrRe = regexp.MustCompile(`data-kit-component="([a-z][a-z0-9-]*)(?:@([v0-9.]+))?"`)
+
+	// groupedComponentAttrRe finds the engine's form, data-kitwork-component="name[: $alias]"
+	// (KITWORK_UI.md §11). Its value is read by hydrate.ComponentValue, the reader the kernel's twin
+	// is held to; the alias goes. The .ui engine never writes a version there, but the reader takes
+	// "name@version" (with or without its "v") from a template page that writes one.
+	groupedComponentAttrRe = regexp.MustCompile(`data-kitwork-component="([^"]*)"`)
 )
 
 // parseVersion converts a string like "v1.2.3.js" or "v1.2.3" into major, minor, patch ints.
@@ -165,7 +177,30 @@ func scanComponents(html string, site Site) []string {
 	seen := make(map[string]bool)
 	var out []string
 
-	for _, m := range componentAttrRe.FindAllStringSubmatch(html, -1) {
+	found := componentAttrRe.FindAllStringSubmatch(html, -1)
+	for _, m := range found {
+		// A template page may write the version with or without its "v" (dialog@2.0.0), as the
+		// grouped form may: both mean the catalogue's v2.0.0.
+		if m[2] != "" {
+			m[2] = "v" + strings.TrimPrefix(m[2], "v")
+		}
+	}
+	var grouped [][]string
+	if strings.Contains(html, "data-kitwork-component=") {
+		grouped = groupedComponentAttrRe.FindAllStringSubmatch(html, -1)
+	}
+	for _, m := range grouped {
+		named, _, err := hydrate.ComponentValue(htmlattr.Decode(m[1]))
+		if err != nil {
+			continue // Check names it
+		}
+		name, version, _ := strings.Cut(named, "@")
+		if version != "" {
+			version = "v" + strings.TrimPrefix(version, "v")
+		}
+		found = append(found, []string{m[0], name, version})
+	}
+	for _, m := range found {
 		name := m[1]
 		version := m[2]
 

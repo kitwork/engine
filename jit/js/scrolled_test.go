@@ -21,12 +21,13 @@ func TestScrolledIsShippedWhenUsed(t *testing.T) {
 	html := `<nav data-kit-component="scrolled" data-scrolled="false" class="data-[scrolled=true]:bg-paper"></nav>`
 	out := deliver(html)
 
-	if !strings.Contains(out, `/kit/components/scrolled@`) {
+	if !strings.Contains(out, `/_kitwork/components/scrolled.`) {
 		t.Fatalf("scrolled was not injected for markup that uses it:\n%s", out)
 	}
-	// Without the versioned alias, data-kit-component="scrolled@v1.0.0" resolves to nothing.
-	if !strings.Contains(ModulesJS([]string{"scrolled"}), `component("scrolled@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	// The bare name only: data-kit-component="scrolled@v1.0.0" in a template page still finds it,
+	// because the kernel drops the version before it looks the blueprint up.
+	if src := ModulesJS([]string{"scrolled"}); !strings.Contains(src, `component("scrolled", `) || strings.Contains(src, `component("scrolled@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 
@@ -35,10 +36,10 @@ func TestScrolledIsShippedWhenUsed(t *testing.T) {
 func TestScrolledIsAbsentWhenUnused(t *testing.T) {
 	out := deliver(`<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`)
 
-	if strings.Contains(out, `/kit/components/scrolled@`) {
+	if strings.Contains(out, `/_kitwork/components/scrolled.`) {
 		t.Fatal("scrolled shipped to a page that never mentions it")
 	}
-	if !strings.Contains(out, `/kit/components/dialog@`) {
+	if !strings.Contains(out, `/_kitwork/components/dialog.`) {
 		t.Fatal("the component that IS used should still ship")
 	}
 }

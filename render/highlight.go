@@ -4,6 +4,7 @@ import (
 	"html"
 	"strings"
 
+	hydrate "github.com/kitwork/engine/jit/hydrate"
 	"github.com/kitwork/engine/value"
 )
 
@@ -170,7 +171,7 @@ func highlightTag(builder *strings.Builder, src string, open int, palette hlPale
 		}
 		name := src[nameStart:index]
 		class := palette.attr
-		if strings.HasPrefix(name, "data-kit-") {
+		if strings.HasPrefix(name, "data-kit-") || hydrate.IsGroupedDirective(name) {
 			class = palette.directive
 		}
 		highlightSpan(builder, class, html.EscapeString(name))

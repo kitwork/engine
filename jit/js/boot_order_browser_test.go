@@ -55,13 +55,13 @@ func TestBrowserComponentsRegisterBeforeTheFirstPaint(t *testing.T) {
 	run := func(t *testing.T, startEarly bool) []string {
 		t.Helper()
 		delivered := deliverTestPage(t, page, nil, site)
-		if !strings.Contains(delivered.html, "/kit/components/probe-photo.") {
+		if !strings.Contains(delivered.html, "/_kitwork/components/probe-photo.") {
 			t.Fatalf("the page should get the component as a file of its own:\n%s", delivered.html)
 		}
 		if startEarly {
 			// Between the kernel's file and the component's: what the old composition did when it put
 			// boot before the modules.
-			at := strings.LastIndex(delivered.html[:strings.Index(delivered.html, `src="/kit/components/probe-photo.`)], "<script")
+			at := strings.LastIndex(delivered.html[:strings.Index(delivered.html, `src="/_kitwork/components/probe-photo.`)], "<script")
 			delivered.html = delivered.html[:at] + `<script src="/test-scripts/start.js" defer></script>` + delivered.html[at:]
 			delivered.files["/test-scripts/start.js"] = "window.kit.start();"
 		}

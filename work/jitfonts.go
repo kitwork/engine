@@ -2,33 +2,22 @@ package work
 
 import (
 	"net/http"
-	"strings"
 
 	fonts "github.com/kitwork/engine/jit/fonts"
 )
 
-// serveFontIf serves a vendored woff2 from the embedded jit/fonts FS when the path is under
-// fonts.RoutePrefix, returning true once it has handled the request. Always-on (the injected
-// @font-face `src` + preload links point here), no VM, no tenant lookup. The bytes are pinned at
-// build time, so they are hard-cached + immutable; crossorigin so the preload/`format('woff2')`
-// fetch (which fonts always make anonymously) is accepted.
-func serveFontIf(w http.ResponseWriter, r *http.Request) bool {
-	if !strings.HasPrefix(r.URL.Path, fonts.RoutePrefix) {
-		return false
+// serveFont serves a vendored woff2 off the embedded jit/fonts FS: the path is under
+// fonts.RoutePrefix (/_kitwork/fonts/<family>-<weight>-<subset>.<hash>.woff2) or a name written
+// before (fonts.FileAt). Always-on — the @font-face `src` and the preload links point here — with no
+// VM and no tenant lookup. The exact name is hard-cached and immutable, its hash being the bytes';
+// an old name gets today's file, not kept. Access-Control-Allow-Origin lets the anonymous fetch every
+// font load makes (preload crossorigin, `format('woff2')`) accept it.
+func serveFont(w http.ResponseWriter, r *http.Request) {
+	file, exact := fonts.FileAt(r.URL.Path)
+	if file == nil {
+		engineNotFound(w, r)
+		return
 	}
-	rel := strings.TrimPrefix(r.URL.Path, fonts.RoutePrefix) // e.g. "outfit/400-latin.woff2"
-	if rel == "" || strings.Contains(rel, "..") || !strings.HasSuffix(rel, ".woff2") {
-		http.NotFound(w, r)
-		return true
-	}
-	data, err := fonts.FS.ReadFile("families/" + rel)
-	if err != nil {
-		http.NotFound(w, r)
-		return true
-	}
-	w.Header().Set("Content-Type", "font/woff2")
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	_, _ = w.Write(data)
-	return true
+	serveEngineFile(w, r, "font/woff2", file.Body, file.Digest, exact)
 }

@@ -109,8 +109,8 @@
 
 | Công tắc | Mặc định | Nghĩa |
 | :--- | :--- | :--- |
-| `router.drive()` | TẮT | Điều hướng mượt (fetch + morph). Engine tự đánh dấu `data-kitwork-drive` trên thẻ runtime của chính nó; markup không mang gì |
-| `router.javascript({ prerender: true })` | TẮT | Server tính sẵn `text`/`show` ở page scope rồi ghi vào HTML. Tốn một lượt quét mỗi response, chỉ với tới page scope (đo: đổi 3/105 trang) — **không khuyến khích**; viết `hidden` vào markup rẻ hơn |
+| `router.reload(false)` | TẮT ở site template, BẬT ở site Kitwork UI | Điều hướng mượt (fetch + morph). Có Drive thì trang nhận file `/_kitwork/drive.<hash>.js`; không cờ nào trên thẻ, markup không mang gì. (Trước 11/10/2026 là `router.drive()`, nay gọi thì không áp gì, boot in một dòng) |
+| ~~`router.javascript({ prerender: true })`~~ | — | **GỠ 11/10/2026** cùng `router.javascript()`: server từng tính sẵn `text`/`show` ở page scope (đo: đổi 3/105 trang). `hydrate.PreRender` còn lại chỉ làm đối chứng trong test |
 | `ALLOW_LOCAL` | — | Máy soát lúc render (compile, modifier, tên thuộc tính `style:`, đích `seed`, tên-không-ai-khai) chỉ in khi dev |
 
 `data-kit-action`/`data-kit-target`/`data-kit-trigger` không còn là attribute (22/09): jit/js chỉ còn component (`data-kit-component`, `jit/js/components`) và capability.
@@ -120,7 +120,9 @@ ngữ pháp (`data-kit-item` trên hàng đã materialize — nó là boundary t
 `scope`/`component`/`api`). Phép thử là attribute ấy **nghĩa là gì**, không phải ai gõ nó. `data-kitwork-*` =
 **VẬN CHUYỂN**: `-jit` (asset inject), `-drive` (câu trả lời của `router.drive()`), `-ui` (overlay kernel: bar,
 announcer, toast), `-layout`, `-hash/-plan/-runtime/-handoff` (staged delivery), `-highlight`. Tác giả không bao
-giờ viết một cái `data-kitwork-*`, và kernel không bao giờ đọc một cái như directive.
+giờ viết một cái `data-kitwork-*`, và kernel không bao giờ đọc một cái như directive. (10–11/10/2026: `-drive` và
+`-ui` đã bỏ — có file Drive là có câu trả lời, thứ client tự tạo mang `data-kitwork-generated`; trang Kitwork UI
+mang dạng gộp `data-kitwork-component`/`-bind`/`-class`/`-event` do engine ghi, mục KITWORK_UI §11.)
 
 ---
 
@@ -318,7 +320,7 @@ Ba thứ nó chứng minh bằng thứ chạy được (không phải lập lu�
    tức đỏ đó tự nó chứng minh hai engine tính giống nhau.
 
 Đây là lưới. Mọi bước sau (bỏ IR client, rename sâu, tách vai khỏi kernel) giờ **chứng minh được là
-không đổi ngữ nghĩa**: chạy suite này, còn xanh thì đúng. Và nó là tiền đề bắt buộc cho capsule.
+không đổi ngữ nghĩa**: chạy suite này, còn xanh thì đúng. Và nó là tiền đề bắt buộc để cùng một hàm chạy ở cả hai phía (đường ống, sync engine).
 
 ---
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,6 +48,15 @@ type cachedTenant struct {
 	reloadMu    sync.Mutex
 }
 
+// tenantPreparation is one cold generation build shared by every concurrent
+// request for the same canonical domain. Closing done publishes tenant and err
+// to waiters; preparation itself runs without holding Engine.mu.
+type tenantPreparation struct {
+	done   chan struct{}
+	tenant *work.Tenant
+	err    error
+}
+
 func (c *cachedTenant) touch() {
 	c.mu.Lock()
 	c.lastAccess = time.Now()
@@ -78,6 +88,8 @@ type Engine struct {
 	appRuntimes      map[string]*app.Runtime
 	appTenants       map[string]*work.Tenant // identity → app runtime that owns that identity's _cron scheduler
 	appStarting      map[string]struct{}
+	preparations     map[string]*tenantPreparation
+	preparationWG    sync.WaitGroup
 	idleTimeout      time.Duration // bao lâu idle thì evict khỏi cache; 0 = không bao giờ evict
 	rateLimiter      *RateLimiter  // host-level limits (nil = off); set qua SetRateLimit trước khi serve
 	authorizer       Authorizer
@@ -144,6 +156,7 @@ func newEngine(root string, maxEnergy uint64, hotReload bool, hostname string, w
 		appRuntimes:      make(map[string]*app.Runtime),
 		appTenants:       make(map[string]*work.Tenant),
 		appStarting:      make(map[string]struct{}),
+		preparations:     make(map[string]*tenantPreparation),
 		runtimeHealth:    work.NewRuntimeHealth(),
 		searchManager:    searchManager,
 		searchManagerErr: searchManagerErr,
@@ -633,9 +646,10 @@ func (e *Engine) Health() work.RuntimeHealthSnapshot {
 		return snapshot
 	}
 	defer e.mu.RUnlock()
-	// Cold preparation and every activation begin while owning e.mu. Capture
-	// lifecycle only after the ownership read lock is secured so an available
-	// snapshot cannot pair stale lifecycle gauges with post-transition ownership.
+	// Lifecycle gauges are independently atomic. Cold generation work runs
+	// outside e.mu, so an available ownership snapshot may intentionally show an
+	// app owner with no published site while Generations.Preparing is non-zero.
+	// Activation and cache publication still occur under e.mu.
 	snapshot := e.runtimeHealth.Snapshot()
 	snapshot.VMPool = work.VMPoolHealth()
 	snapshot.OwnershipSnapshotAvailable = true
@@ -822,6 +836,15 @@ func (e *Engine) Close() {
 
 		e.mu.Lock()
 		e.closed = true
+		e.mu.Unlock()
+
+		// A cold generation prepares outside Engine.mu so unrelated sites can
+		// load concurrently. Marking the engine closed prevents new owners;
+		// wait for accepted preparations to publish failure and release their
+		// candidate resources before app/site owners are closed.
+		e.preparationWG.Wait()
+
+		e.mu.Lock()
 		tenants := make([]*work.Tenant, 0, len(e.cache)+len(e.appTenants))
 		seen := make(map[*work.Tenant]struct{}, len(e.cache)+len(e.appTenants))
 		for _, cached := range e.cache {
@@ -845,6 +868,7 @@ func (e *Engine) Close() {
 		e.appTenants = make(map[string]*work.Tenant)
 		e.appRuntimes = make(map[string]*app.Runtime)
 		e.appStarting = make(map[string]struct{})
+		e.preparations = make(map[string]*tenantPreparation)
 		e.mu.Unlock()
 
 		for _, tenant := range tenants {
@@ -963,55 +987,120 @@ func (e *Engine) run(hostname string) (*work.Tenant, error) {
 		return cached.current(), nil
 	}
 
-	// 2. Write lock block for initialization
+	// 2. Register or join the one cold preparation for this domain. Engine.mu
+	// protects ownership publication only; route/template/JIT preparation runs
+	// outside it so another domain cannot freeze the whole host.
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	if e.closed {
+		e.mu.Unlock()
 		return nil, fmt.Errorf("engine is closed")
 	}
 
-	// 3. Double-check to see if another goroutine initialized it while we were waiting for the lock
+	// 3. Double-check after upgrading from the initial read lock.
 	if cached, ok = e.cache[hostname]; ok {
 		cached.touch()
+		e.mu.Unlock()
 		return cached.current(), nil
 	}
+	if preparation := e.preparations[hostname]; preparation != nil {
+		e.mu.Unlock()
+		<-preparation.done
+		return preparation.tenant, preparation.err
+	}
+	preparation := &tenantPreparation{done: make(chan struct{})}
+	e.preparations[hostname] = preparation
+	e.preparationWG.Add(1)
+	e.mu.Unlock()
 
 	identity, err := work.ResolveIdentityForLayout(e.root, hostname, e.rootLayout)
 	if err != nil {
+		e.finishTenantPreparation(hostname, preparation, nil, err)
+		return nil, err
+	}
+
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		err = fmt.Errorf("engine is closed")
+		e.finishTenantPreparation(hostname, preparation, nil, err)
 		return nil, err
 	}
 	appRuntime := e.appRuntimeLocked(identity, hostname)
+	e.mu.Unlock()
+
 	siteRuntime, err := appRuntime.Site(e.root, hostname)
 	if err != nil {
+		e.finishTenantPreparation(hostname, preparation, nil, err)
 		return nil, err
 	}
 	tenant, err := e.prepareTenantCandidate(hostname, appRuntime, siteRuntime)
 	if err != nil {
 		appRuntime.RemoveSite(hostname)
-		return nil, err
-	}
-	if err := e.activateGeneration(tenant); err != nil {
-		tenant.Close()
-		appRuntime.RemoveSite(hostname)
+		e.finishTenantPreparation(hostname, preparation, nil, err)
 		return nil, err
 	}
 
-	e.cache[hostname] = &cachedTenant{
-		tenant:      tenant,
-		lastAccess:  time.Now(),
-		lastChecked: time.Now(),
+	// Activation and cache publication are one short engine-owned decision.
+	// Close marks the engine closed under this same lock before waiting for
+	// accepted preparations, so a candidate cannot publish after shutdown.
+	e.mu.Lock()
+	if e.closed {
+		err = fmt.Errorf("engine is closed")
+	} else {
+		err = e.activateGeneration(tenant)
+		if err == nil {
+			e.cache[hostname] = &cachedTenant{
+				tenant:      tenant,
+				lastAccess:  time.Now(),
+				lastChecked: time.Now(),
+			}
+		}
 	}
+	e.mu.Unlock()
+	if err != nil {
+		tenant.Close()
+		appRuntime.RemoveSite(hostname)
+		e.finishTenantPreparation(hostname, preparation, nil, err)
+		return nil, err
+	}
+
+	e.finishTenantPreparation(hostname, preparation, tenant, nil)
 	return tenant, nil
 }
 
-// Prewarm compile sẵn mọi tenant tìm thấy dưới root vào cache, để request ĐẦU
-// TIÊN tới mỗi tenant không phải chịu cold compile. Best-effort: tenant nào lỗi
-// compile sẽ được log và bỏ qua (request sau sẽ thử lại). Gọi sau New(),
-// trước khi phục vụ. Trả về (số warm, số lỗi). Caller có thể chạy nền: go e.Prewarm().
+func (e *Engine) finishTenantPreparation(
+	hostname string,
+	preparation *tenantPreparation,
+	tenant *work.Tenant,
+	err error,
+) {
+	e.mu.Lock()
+	preparation.tenant = tenant
+	preparation.err = err
+	if e.preparations[hostname] == preparation {
+		delete(e.preparations, hostname)
+	}
+	close(preparation.done)
+	e.mu.Unlock()
+	e.preparationWG.Done()
+}
+
+// PrewarmDomain prepares one site generation before request traffic reaches it.
+func (e *Engine) PrewarmDomain(domain string) error {
+	domain = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(domain, ".")))
+	if domain == "" {
+		return fmt.Errorf("prewarm domain is empty")
+	}
+	_, err := e.run(domain)
+	return err
+}
+
+// Prewarm prepares every site found under the selected root layout. It is
+// best-effort so callers receive complete counts and every failure is logged.
 func (e *Engine) Prewarm() (warmed int, failed int) {
 	domains := e.discoverTenants()
 	for _, d := range domains {
-		if _, err := e.run(d); err != nil {
+		if err := e.PrewarmDomain(d); err != nil {
 			slog.Warn("Prewarm: tenant failed to compile; a later request will retry", "domain", d, "error", err)
 			failed++
 			continue
@@ -1032,7 +1121,7 @@ func (e *Engine) discoverTenants() []string {
 		if domain == "" {
 			domain = "localhost"
 		}
-		if info, err := os.Stat(filepath.Join(e.root, work.RouterFileName)); err == nil && !info.IsDir() {
+		if work.RouterMarker(e.root) != "" {
 			return []string{domain}
 		}
 		return nil
@@ -1059,7 +1148,7 @@ func (e *Engine) discoverTenants() []string {
 			continue
 		}
 		// 1. Kiểm tra cấu trúc phẳng: root/<domain>/router.kitwork.js
-		if _, err := os.Stat(filepath.Join(e.root, entry.Name(), work.RouterFileName)); err == nil {
+		if work.RouterMarker(filepath.Join(e.root, entry.Name())) != "" {
 			domains = append(domains, entry.Name())
 			continue
 		}
@@ -1073,7 +1162,7 @@ func (e *Engine) discoverTenants() []string {
 			if !sub.IsDir() {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(idPath, sub.Name(), work.RouterFileName)); err == nil {
+			if work.RouterMarker(filepath.Join(idPath, sub.Name())) != "" {
 				domains = append(domains, sub.Name())
 			}
 		}
@@ -1151,7 +1240,9 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		e.forgetLocalHostResolution(resolvedHost)
-		http.Error(w, err.Error(), 404)
+		// a site that did not boot (a file that does not compile…) or is not there: the log keeps the
+		// error, a visitor reads it only while developing
+		work.WriteSiteFailure(w, r, http.StatusNotFound, err)
 		return
 	}
 	e.rememberLocalHostResolution(resolvedHost)

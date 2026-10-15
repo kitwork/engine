@@ -509,8 +509,11 @@ func fingerprintTemplateTree(root string) (sourceFingerprint, error) {
 		if filename != absolute && entry.IsDir() && strings.HasPrefix(entry.Name(), ".") {
 			return filepath.SkipDir
 		}
+		name := strings.ToLower(entry.Name())
+		// templates (*.html), Kitwork UI interface files (*.ui) and the logic of a component (*.work:
+		// cart.work, whose declared names cover the page's inside <box component="cart" />) all shape the rendered page
 		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() ||
-			!strings.HasSuffix(strings.ToLower(entry.Name()), ".html") {
+			!(strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".ui") || strings.HasSuffix(name, ".work")) {
 			return nil
 		}
 		relative, relErr := filepath.Rel(absolute, filename)

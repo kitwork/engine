@@ -12,9 +12,11 @@ import (
 	"time"
 )
 
-// A page change is work in flight like any other: Drive reports it to kit.progress. A page that
-// shows kit.progress itself — it has a progressbar host — gets no bar of Drive's own, so it never
-// shows two; a page without one keeps Drive's bar. Real Chrome, a navigation answered 500ms late.
+// A page change is work in flight like any other: Drive reports it to kit.progress, and the progressbar
+// COMPONENT shows it. Drive draws no bar of its own (10/10/2026): not on a page with a progressbar host,
+// and not on a page without one either (the engine gives every page of a Drive site a host; a page
+// that somehow has none shows no bar rather than a second, different one). Real Chrome, a navigation
+// answered 500ms late. The no-host case is the control: if Drive's own bar came back, it shows there.
 func TestBrowserDriveReportsToKitProgress(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the Drive progress browser proof in short mode")
@@ -29,7 +31,7 @@ func TestBrowserDriveReportsToKitProgress(t *testing.T) {
 	}{
 		{"a progressbar host", `<div data-kit-component="progressbar"></div>`, "false", "true"},
 		{"a pinned progressbar host", `<div data-kit-component="progressbar@1.0.0"></div>`, "false", "true"},
-		{"CONTROL: no progressbar host", ``, "true", "true"},
+		{"CONTROL: no progressbar host, still no bar of Drive's own", ``, "false", "true"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -66,7 +68,7 @@ func watchNavigationProgress(t *testing.T, browser, host string) (driveBar, kitP
 				   var driveBar = false, kitProgress = false, ticks = 0;
 				   setTimeout(function () { document.getElementById("next").click(); }, 60);
 				   (function watch() {
-				     var bar = document.querySelector('[data-kitwork-ui="progress"]');
+				     var bar = document.querySelector('[data-kitwork-ui],[data-kitwork-generated="progress"]'); // a bar Drive made, under either name
 				     if (bar && bar.style.opacity === "1") driveBar = true;
 				     if (window.kit.progress && window.kit.progress.active) kitProgress = true;
 				     if (++ticks < 60) { setTimeout(watch, 20); return; }

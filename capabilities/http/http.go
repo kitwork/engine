@@ -86,7 +86,7 @@ func (h *HTTPAdapter) Header(key, val string) *HTTPAdapter {
 
 func (h *HTTPAdapter) Get(args ...value.Value) value.Value {
 	if len(args) == 0 {
-		return value.Value{K: value.Invalid, V: "http: url required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "http: url required")
 	}
 	url := args[0].Text()
 	resp := h.client.Get(url)
@@ -95,7 +95,7 @@ func (h *HTTPAdapter) Get(args ...value.Value) value.Value {
 
 func (h *HTTPAdapter) Post(args ...value.Value) value.Value {
 	if len(args) == 0 {
-		return value.Value{K: value.Invalid, V: "http: url required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "http: url required")
 	}
 	urlVal := args[0]
 	bodyVal := value.Value{K: value.Nil}

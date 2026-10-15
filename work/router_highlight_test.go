@@ -99,3 +99,37 @@ func TestHighlightEmitsTokenClassesNotBakedHex(t *testing.T) {
 		t.Fatal("the tokenizer still emits baked arbitrary-hex classes")
 	}
 }
+
+// router.highlight keeps the template's meaning in router.kitwork.js (13/10/2026: in router.work it is
+// Kitwork UI's, router_ui_highlight.go): kitwork.io's call, a named theme and the command as a class of
+// the site, boots, colours the command with that class and the frame with the theme; kitjs.org's
+// router.highlight("classic") still changes the frame. The file decides, never the shape of the value.
+// CONTROL: the same call in router.work is told what each key is on a .ui page.
+func TestRouterHighlightKeepsTheTemplateMeaning(t *testing.T) {
+	page := `<div class="bg-terminal"><code data-kitwork-highlight="bash">npm install kitwork</code></div>`
+	tokyo := scaffold(t, map[string]string{
+		"filesystem.kitwork": "",
+		"index.kitwork.html": highlightShell,
+		"page.kitwork.html":  page,
+		"router.kitwork.js":  `import { router } from "kitwork";` + "\n" + `router.css({}).highlight({ theme: "tokyonight", command: "brand-dark" });`,
+	})("/").Body.String()
+	if !strings.Contains(tokyo, `text-brand-dark">npm</span>`) && !strings.Contains(tokyo, `text-brand-dark>npm</span>`) {
+		t.Errorf("the command takes the class the site names:\n%s", tokyo)
+	}
+	if rule := ruleFor(t, tokyo, "bg-terminal"); !strings.Contains(rule, "26,27,38") {
+		t.Errorf("tokyonight colours the frame: %s", rule)
+	}
+	classic := scaffold(t, map[string]string{
+		"filesystem.kitwork": "",
+		"index.kitwork.html": highlightShell,
+		"page.kitwork.html":  page,
+		"router.kitwork.js":  `import { router } from "kitwork";` + "\n" + `router.css({}).highlight("classic");`,
+	})("/").Body.String()
+	if ruleFor(t, classic, "bg-terminal") == ruleFor(t, tokyo, "bg-terminal") {
+		t.Error(`router.highlight("classic") changes the frame`)
+	}
+	files := withRootRouter(t, sitePalette+"\n"+`router.highlight({ theme: "tokyonight", command: "brand-dark" });`, nil) // CONTROL
+	if _, err := bootUISite(t, files, true); err == nil || !strings.Contains(err.Error(), "trang .ui không có khoá command, theme") {
+		t.Errorf("CONTROL: in router.work the template's keys are told, got %v", err)
+	}
+}

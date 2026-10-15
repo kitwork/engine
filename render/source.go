@@ -48,10 +48,19 @@ func init() {
 }
 
 // stripComponentVersion removes the @version from every
-// data-kit-component="name@x.y.z" occurrence, leaving data-kit-component="name".
-// Only that attribute's value is touched; all other markup is copied verbatim.
+// data-kit-component="name@x.y.z" occurrence, leaving data-kit-component="name",
+// and from the engine's data-kitwork-component="name@x.y.z: $alias", leaving
+// data-kitwork-component="name: $alias" — the alias is the markup's, the version
+// is staging. Only that attribute's value is touched; all other markup is copied
+// verbatim.
 func stripComponentVersion(markup string) string {
-	const attr = `data-kit-component="`
+	return stripVersionIn(stripVersionIn(markup, `data-kit-component="`), `data-kitwork-component="`)
+}
+
+func stripVersionIn(markup, attr string) string {
+	if !strings.Contains(markup, attr) {
+		return markup
+	}
 	var builder strings.Builder
 	builder.Grow(len(markup))
 	rest := markup
@@ -70,7 +79,11 @@ func stripComponentVersion(markup string) string {
 		}
 		host := rest[:end]
 		if at := strings.IndexByte(host, '@'); at >= 0 {
-			host = host[:at]
+			tail := ""
+			if colon := strings.IndexByte(host[at:], ':'); colon >= 0 {
+				tail = host[at+colon:] // ": $alias" stays
+			}
+			host = host[:at] + tail
 		}
 		builder.WriteString(host)
 		builder.WriteByte('"')

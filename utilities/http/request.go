@@ -10,14 +10,18 @@ import (
 // Builder modifiers may appear before the verb and request modifiers may appear after it. COMMIT
 // executes the normalized plan after the expression ends; observing a response field also executes
 // it. The response is memoized, so every plan reaches the network at most once.
+//
+// A request that got no answer (no connection, its time limit, the SSRF guard, a body past its
+// limit) is a failure of the program (14/10/2026), as fetch rejects in JavaScript: the COMMIT or the
+// read that fired it fails with NETWORK, TIMEOUT, DENIED, INVALID_INPUT…, and safe(() => fetch(url))
+// reads it. Until then it was a response of status 0 carrying .error, which a program had to know to
+// check. Any answer, 4xx and 5xx included, is a response. .then() and .catch() are gone with it: one
+// way to read a failure.
 type Request struct {
 	h       *HTTP // the cloned, configured client (owns cache/persist/timeout/headers/retry)
 	method  string
 	url     string
 	reqBody value.Value
-
-	onOk  *value.Lambda // .then() — final success (a first attempt or any retry succeeded)
-	onErr *value.Lambda // .catch() — final failure (every attempt, retries included, failed)
 
 	fired     bool
 	committed bool
@@ -37,36 +41,35 @@ func (r *Request) Header(k, v string) *Request       { r.h = r.h.Header(k, v); r
 func (r *Request) Cache(a ...value.Value) *Request   { r.h = r.h.Cache(a...); return r }
 func (r *Request) Persist(a ...value.Value) *Request { r.h = r.h.Persist(a...); return r }
 
-// Then / Catch record handlers that run when the expression commits. They may be
-// placed ANYWHERE in the chain — before or after retry/cache — because nothing fires until the end.
-func (r *Request) Then(cb value.Value) *Request {
-	if l, ok := cb.V.(*value.Lambda); ok {
-		r.onOk = l
-	}
-	return r
-}
-func (r *Request) Catch(cb value.Value) *Request {
-	if l, ok := cb.V.(*value.Lambda); ok {
-		r.onErr = l
-	}
-	return r
-}
-
-// Commit executes the normalized plan and selects an optional continuation for the current VM.
+// Commit executes the normalized plan; a request that got no answer fails the COMMIT.
 func (r *Request) Commit() value.CommitResult {
 	if r.committed {
 		return value.CommitResult{}
 	}
 	r.committed = true
-	r.ensure()
-	if r.res.Ok() {
-		if r.onOk != nil {
-			return value.CommitResult{Handler: r.onOk, Argument: value.New(r)}
-		}
-	} else if r.onErr != nil {
-		return value.CommitResult{Handler: r.onErr, Argument: value.New(r)}
+	if failure, failed := r.failure(); failed {
+		return value.CommitResult{Failure: failure}
 	}
 	return value.CommitResult{}
+}
+
+// failure fires the request and reports the failure it ended in when it got no answer (Status 0).
+func (r *Request) failure() (value.Value, bool) {
+	r.ensure()
+	if r.res.Status != 0 {
+		return value.Value{}, false
+	}
+	code := r.res.Code
+	if code == "" {
+		code = value.NetworkCode
+	}
+	message := r.res.Error
+	if message == "" {
+		message = "http: no answer"
+	}
+	// the message as the client said it, once ("Get \"…\": dial tcp …", "http: response body exceeds
+	// max bytes"): until 14/10/2026 it was what .error read, and sites compare it
+	return value.InvalidFailure(code, message), true
 }
 
 // ensure fires the request once, applying the retry policy, and memoises the result.
@@ -99,17 +102,41 @@ func (r *Request) ensure() {
 }
 
 // ---- observation triggers ----
+//
+// Each fires the request, and is the request's failure when it got no answer. There is no .error: a
+// request that reached a field got an answer.
 
-func (r *Request) Status() int         { r.ensure(); return r.res.Status }
-func (r *Request) Ok() bool            { r.ensure(); return r.res.Ok() }
-func (r *Request) Body() value.Value   { r.ensure(); return r.res.Body }
-func (r *Request) JSON() value.Value   { r.ensure(); return r.res.JSON() }
-func (r *Request) Text() string        { r.ensure(); return r.res.Text() }
-func (r *Request) Base64() string      { r.ensure(); return r.res.Base64() }
-func (r *Request) ContentType() string { r.ensure(); return r.res.ContentType }
-func (r *Request) Error() string       { r.ensure(); return r.res.Error }
-func (r *Request) Cached() bool        { r.ensure(); return r.res.Cached }
-func (r *Request) Stale() bool         { r.ensure(); return r.res.Stale }
+func (r *Request) Status() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.Status) })
+}
+func (r *Request) Ok() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.Ok()) })
+}
+func (r *Request) Body() value.Value { return r.observe(func() value.Value { return r.res.Body }) }
+func (r *Request) JSON() value.Value { return r.observe(func() value.Value { return r.res.JSON() }) }
+func (r *Request) Text() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.Text()) })
+}
+func (r *Request) Base64() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.Base64()) })
+}
+func (r *Request) ContentType() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.ContentType) })
+}
+func (r *Request) Cached() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.Cached) })
+}
+func (r *Request) Stale() value.Value {
+	return r.observe(func() value.Value { return value.New(r.res.Stale) })
+}
+
+// observe is read() of a fired request, or the request's failure.
+func (r *Request) observe(read func() value.Value) value.Value {
+	if failure, failed := r.failure(); failed {
+		return failure
+	}
+	return read()
+}
 
 // Fire is the Go-side accessor (e.g. router.proxy()): ensure + hand back the concrete Response.
 func (r *Request) Fire() Response { r.ensure(); return r.res }

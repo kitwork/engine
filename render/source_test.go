@@ -62,14 +62,32 @@ func TestSourceReturnsTheKernelComponent(t *testing.T) {
 		return newViews(base).Bind(value.New(map[string]any{"component": component, "version": version})).String()
 	}
 
-	// The catalogue writes versions without their "v"; the module registers itself under both names.
+	// The catalogue writes versions without their "v". A module registers its bare name only: no
+	// version travels on the wire, the version only picks which source file is read.
 	out := show("tree", "1.0.0")
-	if !strings.Contains(out, `window.kit.component(&#34;tree&#34;`) || !strings.Contains(out, `&#34;tree@v1.0.0&#34;`) {
+	if !strings.Contains(out, `window.kit.component(&#34;tree&#34;`) {
 		t.Fatalf("tree@1.0.0 source not shown:\n%s", out)
+	}
+	if strings.Contains(out, `kit.component(&#34;tree@`) {
+		t.Fatalf("the module must register its bare name only, no version:\n%s", out)
 	}
 	// No version is the latest.
 	if !strings.Contains(show("tree", ""), `window.kit.component(&#34;tree&#34;`) {
 		t.Fatalf("an empty version must resolve to the latest module")
+	}
+	// The version still picks the file: clipboard 1.0.0 and 2.0.0 are two sources, both registering
+	// "clipboard", and no version is the latest of them.
+	first, second, latest := show("clipboard", "1.0.0"), show("clipboard", "2.0.0"), show("clipboard", "")
+	for _, source := range []string{first, second} {
+		if !strings.Contains(source, `window.kit.component(&#34;clipboard&#34;`) || strings.Contains(source, `kit.component(&#34;clipboard@`) {
+			t.Fatalf("each clipboard source registers the bare name:\n%.300s", source)
+		}
+	}
+	if first == second {
+		t.Fatal("control: clipboard 1.0.0 and 2.0.0 must be different sources")
+	}
+	if latest != second {
+		t.Fatal("no version must be the latest clipboard (2.0.0)")
 	}
 	// Controls: an unknown component, an unknown version and a path in the name all yield nothing.
 	for _, miss := range [][2]string{{"does-not-exist", "1.0.0"}, {"tree", "9.9.9"}, {"../hydrate/kernel", ""}, {"tree", "../../x"}} {

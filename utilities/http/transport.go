@@ -11,6 +11,14 @@ import (
 var IsLocalAllowed func() bool
 var GetServerPort func() int
 
+// deniedAddress is the SSRF guard refusing an address in private or local space: the request's failure
+// is DENIED (failureCode).
+type deniedAddress struct{ host string }
+
+func (e *deniedAddress) Error() string {
+	return fmt.Sprintf("SSRF prevention: connection to private/local space is blocked (%s)", e.host)
+}
+
 var sharedTransport = &stdhttp.Transport{
 	DialContext: (&net.Dialer{
 		Timeout: 30 * time.Second,
@@ -23,7 +31,7 @@ var sharedTransport = &stdhttp.Transport{
 			ip := net.ParseIP(host)
 			if ip != nil {
 				if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() {
-					return fmt.Errorf("SSRF prevention: connection to private/local space is blocked (%s)", host)
+					return &deniedAddress{host: host}
 				}
 			}
 			return nil

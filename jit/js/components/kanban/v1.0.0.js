@@ -1,4 +1,4 @@
-/* kanban component @v1.0.0 — cards moved between columns by pointer or by key.
+/* kanban component — cards moved between columns by pointer or by key.
  *
  * Usage — the page's scope holds the cards and the grammar sorts them into columns; the
  * component moves them:
@@ -150,4 +150,3 @@ var kanbanDef = {
 };
 
 window.kit.component("kanban", kanbanDef);
-window.kit.component("kanban@v1.0.0", kanbanDef);

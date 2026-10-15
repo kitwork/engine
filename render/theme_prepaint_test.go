@@ -36,13 +36,28 @@ func TestPreparePreservesCanonicalThemePrepaintBody(t *testing.T) {
 	}
 }
 
+// themePrepaintBodyForTest returns the engine's marked pre-paint, its opening tag included, so the
+// comparison covers the marker as well as the body. The marker is whichever one the canonical script
+// carries (appearance, or theme before it), and there must be exactly one marked script.
 func themePrepaintBodyForTest(source string) (string, bool) {
-	const open = `<script data-kitwork-jit="theme">`
-	start := strings.Index(source, open)
-	if start < 0 || strings.Count(source, open) != 1 {
+	found := ""
+	for _, open := range []string{`<script data-kitwork-generated="appearance">`, `<script data-kitwork-generated="theme">`} {
+		switch strings.Count(source, open) {
+		case 0:
+			continue
+		case 1:
+			if found != "" {
+				return "", false
+			}
+			found = open
+		default:
+			return "", false
+		}
+	}
+	if found == "" {
 		return "", false
 	}
-	start += len(open)
+	start := strings.Index(source, found)
 	end := strings.Index(source[start:], `</script>`)
 	if end < 0 {
 		return "", false

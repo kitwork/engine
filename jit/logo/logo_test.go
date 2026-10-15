@@ -97,13 +97,13 @@ func TestCSSBrandSugar(t *testing.T) {
 
 func TestRenderInjectsAndKeepsMarkup(t *testing.T) {
 	out := Render(`<html><head></head><body><i class="logo-github"></i></body></html>`)
-	if strings.Count(out, `data-kitwork-jit="logo"`) != 1 {
+	if strings.Count(out, `data-kitwork-generated="logo"`) != 1 {
 		t.Errorf("expected exactly one logo style block: %s", out)
 	}
 	if !strings.Contains(out, `<i class="logo-github"></i>`) {
 		t.Errorf("markup should be untouched: %s", out)
 	}
-	si := strings.Index(out, `<style data-kitwork-jit="logo">`)
+	si := strings.Index(out, `<style data-kitwork-generated="logo">`)
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("logo style should be injected before </head>: %s", out)
 	}

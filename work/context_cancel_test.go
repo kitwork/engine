@@ -68,6 +68,7 @@ func TestRequestRunsToCompletionWithoutCancellation(t *testing.T) {
 // cancellation probe has to exist in BOTH or this path keeps running after the client is gone.
 // The context is cancelled up front so the test is deterministic, with no sleep-and-hope race.
 func TestHTTPRequestContextCancellation(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	tenant := newCancelFixtureTenant(t)
 
 	ctx, cancel := context.WithCancel(context.Background())

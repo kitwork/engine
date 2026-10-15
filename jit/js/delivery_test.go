@@ -14,7 +14,15 @@ import (
 	"time"
 )
 
-var deliveredSrc = regexp.MustCompile(`<script data-kitwork-jit="([a-z]+)"(?: data-kitwork-drive)? src="([^"]+)" defer></script>`)
+var deliveredSrc = regexp.MustCompile(`<script data-kitwork-generated="([a-z]+)" src="([^"]+)" defer></script>`)
+
+// assetPath is what a failure message says about an asset: its name, not its bytes.
+func assetPath(asset *Asset) string {
+	if asset == nil {
+		return "<nil>"
+	}
+	return asset.Path
+}
 
 func deliveredFiles(t *testing.T, html string) (roles, paths []string) {
 	t.Helper()
@@ -36,23 +44,29 @@ func TestDeliverGivesEachPartAFileOfItsOwn(t *testing.T) {
 	if strings.Join(roles, ",") != "runtime,drive,component,component" {
 		t.Fatalf("roles in order: got %v\n%s", roles, out)
 	}
-	if !strings.HasPrefix(paths[0], "/kit/kernel.") || !strings.HasPrefix(paths[1], "/kit/drive.") ||
-		!strings.HasPrefix(paths[2], "/kit/components/clipboard@2.0.0.") ||
-		!strings.HasPrefix(paths[3], "/kit/components/menu@1.0.0.") {
+	if !strings.HasPrefix(paths[0], "/_kitwork/kernel.") || !strings.HasPrefix(paths[1], "/_kitwork/drive.") ||
+		!strings.HasPrefix(paths[2], "/_kitwork/components/clipboard.") ||
+		!strings.HasPrefix(paths[3], "/_kitwork/components/menu.") {
 		t.Fatalf("paths: %v", paths)
 	}
-	if !strings.Contains(out, `data-kitwork-jit="runtime" data-kitwork-drive src=`) {
-		t.Error("the kernel's tag must carry the Drive flag the client looks for")
+	// A component's name on the wire carries no version; the hash says which bytes.
+	for _, path := range paths {
+		if strings.Contains(path, "@") {
+			t.Errorf("%s: a delivered name carries a version", path)
+		}
+	}
+	if strings.Contains(out, "data-kitwork-drive") {
+		t.Error("no flag is written for Drive: its file being delivered is the answer")
 	}
 	if strings.Contains(out, "?components=") {
 		t.Error("the per-page query form is gone from delivered pages")
 	}
-	if i := strings.Index(out, `<script data-kitwork-jit`); i > strings.Index(out, "</head>") {
+	if i := strings.Index(out, `<script data-kitwork-generated`); i > strings.Index(out, "</head>") {
 		t.Error("the files belong in <head>")
 	}
-	// CONTROL: without Drive, no Drive file and no flag.
-	if roles, _ := deliveredFiles(t, Deliver(page, nil, Options{})); strings.Join(roles, ",") != "runtime,component,component" || strings.Contains(Deliver(page, nil, Options{}), "data-kitwork-drive") {
-		t.Errorf("a site that did not ask for Drive gets neither its file nor its flag, got %v", roles)
+	// CONTROL: without Drive, no Drive file.
+	if roles, _ := deliveredFiles(t, Deliver(page, nil, Options{})); strings.Join(roles, ",") != "runtime,component,component" {
+		t.Errorf("a site that did not ask for Drive does not get its file, got %v", roles)
 	}
 }
 
@@ -65,12 +79,17 @@ func TestDeliverOnlyWhereTheGrammarIsUsed(t *testing.T) {
 		"plain":   `<html><head></head><body><p>hello</p></body></html>`,
 		"example": `<html><head></head><body><pre><code>&lt;b data-kit-text="x"&gt;</code></pre></body></html>`,
 	} {
-		if out := Deliver(page, nil, Options{Drive: true}); out != page {
+		if out := Deliver(page, nil, Options{}); out != page {
 			t.Errorf("%s: a page that uses no grammar must be returned untouched, got %s", name, out)
+		}
+		// A site that moves between pages without a reload does so from EVERY page: a page with no
+		// grammar still gets the kernel and Drive, or its links would reload and drop what the swap keeps.
+		if roles, _ := deliveredFiles(t, Deliver(page, nil, Options{Drive: true})); strings.Join(roles, ",") != "runtime,drive" {
+			t.Errorf("%s: on a Drive site a page with no grammar gets the kernel and Drive, got %v", name, roles)
 		}
 	}
 	// A page that already carries the engine's runtime tag is left alone.
-	already := `<html><head><script data-kitwork-jit="runtime" src="/kit.js" defer></script></head><body><div data-kit-component="menu"></div></body></html>`
+	already := `<html><head><script data-kitwork-generated="runtime" src="/kit.js" defer></script></head><body><div data-kit-component="menu"></div></body></html>`
 	if Deliver(already, nil, Options{}) != already {
 		t.Error("a second kernel would load")
 	}
@@ -89,7 +108,7 @@ func TestAssetsAreNamedByTheirBytes(t *testing.T) {
 		}
 	}
 	tree, _ := AssetAt(paths[2], nil)
-	if !bytes.HasPrefix(tree.Body, []byte(";(function () {")) || !bytes.Contains(tree.Body, []byte(`component("tree@v1.0.0"`)) {
+	if !bytes.HasPrefix(tree.Body, []byte(";(function () {")) || !bytes.Contains(tree.Body, []byte(`component("tree", treeDef)`)) {
 		t.Errorf("a component file is the component, in a scope of its own:\n%.200s", tree.Body)
 	}
 	Minify = true
@@ -101,21 +120,152 @@ func TestAssetsAreNamedByTheirBytes(t *testing.T) {
 	// An old hash: today's kernel, but not under its own name.
 	wrongHash := paths[0][:len(paths[0])-len(".js")-hashLength] + strings.Repeat("0", hashLength) + ".js"
 	if asset, exact := AssetAt(wrongHash, nil); asset == nil || exact || asset.Path != paths[0] {
-		t.Errorf("%s: want today's kernel, not exact; got %v exact=%t", wrongHash, asset, exact)
+		t.Errorf("%s: want today's kernel, not exact; got %s exact=%t", wrongHash, assetPath(asset), exact)
 	}
-	// Paths that name nothing.
+	// Paths that name nothing, under the prefix and the one before it.
 	for _, bad := range []string{
+		"/_kitwork/kernel.js",
+		"/_kitwork/components/../kernel." + strings.Repeat("a", hashLength) + ".js",
+		"/_kitwork/components/tree@9.9.9." + strings.Repeat("a", hashLength) + ".js",
+		"/_kitwork/components/tree@v1.0.0." + strings.Repeat("a", hashLength) + ".js",
+		"/_kitwork/components/nonesuch." + strings.Repeat("a", hashLength) + ".js",
+		"/_kitwork/capabilities/remember." + strings.Repeat("a", hashLength) + ".js",
+		"/_kitwork/fonts/kernel." + strings.Repeat("a", hashLength) + ".js",
 		"/kit/kernel.js",
-		"/kit/components/../kernel." + strings.Repeat("a", hashLength) + ".js",
 		"/kit/components/tree@9.9.9." + strings.Repeat("a", hashLength) + ".js",
 		"/kit/components/nonesuch." + strings.Repeat("a", hashLength) + ".js",
-		"/kit/capabilities/remember." + strings.Repeat("a", hashLength) + ".js",
 		"/kit.js",
+		"/other/kernel." + strings.Repeat("a", hashLength) + ".js",
 	} {
 		if asset, _ := AssetAt(bad, nil); asset != nil {
 			t.Errorf("%s must not resolve", bad)
 		}
 	}
+}
+
+// Everything the engine serves is under /_kitwork/; the names it wrote before 11/10/2026 still find
+// their file — under the old /kit/ prefix, and a catalogue component under the name that carried
+// its version — but never as their exact name, so the server marks them not to be kept, the way it
+// marks an old hash. CONTROL: each file's current name is exact.
+func TestOldNamesFindTodaysFile(t *testing.T) {
+	defer func(minify bool) { Minify = minify }(Minify)
+	Minify = false
+	page := `<html><head></head><body><div data-kit-component="tree"></div><div data-kit-component="clipboard@1.0.0"></div><b data-kit-intersect="x()" data-kit-click="kit.studioState.clearHistory()"></b></body></html>`
+	roles, paths := deliveredFiles(t, Deliver(page, nil, Options{Drive: true}))
+	if strings.Join(roles, ",") != "runtime,drive,directive,service,service,component,component" {
+		t.Fatalf("roles: %v %v", roles, paths)
+	}
+	// Every name is <role>.<hash>.js, one-of-a-kind files at the top and the rest in a folder by
+	// role — and no name carries a version, whatever the role: the page named clipboard@1.0.0, and
+	// studioState has a version of its own in the engine.
+	shape := regexp.MustCompile(`^/_kitwork/(?:(?:components|services|directives)/[a-zA-Z][a-zA-Z0-9-]*|kernel|drive)\.[0-9a-f]{16}\.js$`)
+	for _, path := range paths {
+		if !shape.MatchString(path) {
+			t.Errorf("%s is not /_kitwork/[<role folder>/]<name>.<hash>.js with no version", path)
+		}
+	}
+	for _, path := range paths {
+		current, exact := AssetAt(path, nil)
+		if current == nil || !exact || !strings.HasPrefix(path, "/_kitwork/") {
+			t.Fatalf("%s: the current name must be exact and under /_kitwork/ (exact=%t)", path, exact)
+		}
+		old := "/kit/" + strings.TrimPrefix(path, "/_kitwork/")
+		if asset, exact := AssetAt(old, nil); asset != current || exact {
+			t.Errorf("%s: the old prefix must answer with today's file %s, not as its name; got %s exact=%t", old, path, assetPath(asset), exact)
+		}
+	}
+
+	tree := componentAsset("tree", nil)
+	v1 := componentAsset("clipboard@v1.0.0", nil)
+	v2 := componentAsset("clipboard", nil)
+	if v1 == nil || v2 == nil || v1.Path == v2.Path || !bytes.Contains(v1.Body, []byte("}, 1000);")) || !bytes.Contains(v2.Body, []byte("}, 2000);")) {
+		t.Fatalf("the two clipboard sources must be two files under one name: %s %s", assetPath(v1), assetPath(v2))
+	}
+	stale := strings.Repeat("0", hashLength)
+	for _, c := range []struct{ path, want string }{
+		// The name a page carried before: the version that name had, as it is today.
+		{"/kit/components/tree@1.0.0." + stale + ".js", tree.Path},
+		{"/kit/components/clipboard@1.0.0." + stale + ".js", v1.Path},
+		{"/kit/components/clipboard@2.0.0." + stale + ".js", v2.Path},
+		{"/_kitwork/components/clipboard@1.0.0." + stale + ".js", v1.Path},
+		// The name without a version and a hash no build makes: the latest.
+		{"/_kitwork/components/clipboard." + stale + ".js", v2.Path},
+		{"/kit/kernel." + stale + ".js", KernelAsset().Path},
+	} {
+		if asset, exact := AssetAt(c.path, nil); asset == nil || exact || asset.Path != c.want {
+			t.Errorf("%s: want %s, not exact; got %s exact=%t", c.path, c.want, assetPath(asset), exact)
+		}
+	}
+	// The hash, not the name, says which version: v1's current name is v1's file, exactly — and the
+	// same name under the old prefix is still v1's file (not the latest), only not as its own name.
+	if asset, exact := AssetAt(v1.Path, nil); asset != v1 || !exact {
+		t.Errorf("%s: an older version's current name must be that version's file, exactly; got %s exact=%t", v1.Path, assetPath(asset), exact)
+	}
+	oldV1 := "/kit/" + strings.TrimPrefix(v1.Path, "/_kitwork/")
+	if asset, exact := AssetAt(oldV1, nil); asset != v1 || exact {
+		t.Errorf("%s: want v1's file %s, not exact; got %s exact=%t", oldV1, v1.Path, assetPath(asset), exact)
+	}
+}
+
+// A catalogue component's file registers its bare name and nothing else: a versioned name is not
+// something the wire knows (11/10/2026). A template page that still writes a version in its host
+// works because the kernel drops the version before it looks the blueprint up — the browser proof
+// below.
+func TestComponentFilesRegisterOnlyTheirName(t *testing.T) {
+	registration := regexp.MustCompile(`\bkit(?:work)?\.component\(\s*["']([^"']+)["']`)
+	entries, err := jsFS.ReadDir("components")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := 0
+	for _, entry := range entries {
+		versions, _ := jsFS.ReadDir("components/" + entry.Name())
+		for _, version := range versions {
+			source, err := jsFS.ReadFile("components/" + entry.Name() + "/" + version.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			files++
+			var names []string
+			for _, m := range registration.FindAllStringSubmatch(string(source), -1) {
+				names = append(names, m[1])
+			}
+			if len(names) != 1 || names[0] != entry.Name() {
+				t.Errorf("components/%s/%s registers %v, want exactly [%s]", entry.Name(), version.Name(), names, entry.Name())
+			}
+		}
+	}
+	if files < 20 {
+		t.Fatalf("read %d component files: the catalogue was not where this test looks", files)
+	}
+}
+
+// A template page written before 11/10/2026 names a version in its host — data-kit-component=
+// "dialog@2.0.0" — and still works: the file it gets registers only the bare name, and the kernel
+// drops the version before it looks the blueprint up, so the host is seeded and nothing is reported
+// missing. CONTROL in the page: a host whose name nothing registers IS reported, so the hook would
+// have caught a kernel that looked "clipboard@1.0.0" up as written.
+func TestBrowserAVersionWrittenInAHostFindsTheBareName(t *testing.T) {
+	runBrowserProof(t, "versioned host", nil, `
+<div data-kit-component="clipboard@1.0.0"><b id="clip" data-kit-text="copied === false ? 'seeded' : 'unseeded'"></b></div>
+<dialog data-kit-component="dialog@2.0.0"><b id="dialog" data-kit-text="open === false ? 'seeded' : 'unseeded'"></b></dialog>
+<div id="nobody" data-kit-component="nobody@1.0.0"></div>
+<script>
+window.__errors = [];
+(function () { var original = console.error; console.error = function (e) { window.__errors.push(String(e && e.message || e)); original.apply(console, arguments); }; })();
+(async function () {
+  await wait(150);
+  var byId = function (id) { return document.getElementById(id); };
+  var names = Object.keys(window.kit.blueprints);
+  assert(names.indexOf("clipboard") >= 0 && names.indexOf("dialog") >= 0, "the bare names are registered: " + names.join(","));
+  assert(names.every(function (name) { return name.indexOf("@") < 0; }), "no versioned name is registered: " + names.join(","));
+  assert(byId("clip").textContent === "seeded" && byId("dialog").textContent === "seeded",
+    "a version written in the host still seeds it from the bare name: " + byId("clip").textContent + " / " + byId("dialog").textContent);
+  var missing = window.__errors.filter(function (e) { return e.indexOf("no component registered") >= 0; });
+  assert(missing.length === 1 && missing[0].indexOf('"nobody"') >= 0, "only the host nothing registers is reported missing: " + missing.join(" | "));
+  root.setAttribute("data-kit-test", "passed");
+})().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
+</script>`)
 }
 
 type fakeSite map[string]string
@@ -127,7 +277,7 @@ func TestSiteComponentsAreFilesOfTheirOwn(t *testing.T) {
 	site := fakeSite{"bid-stepper": `window.kit.component("bid-stepper", { amount: 0 });`}
 	page := `<html><head></head><body><div data-kit-component="bid-stepper"></div></body></html>`
 	_, paths := deliveredFiles(t, Deliver(page, site, Options{}))
-	if len(paths) != 2 || !strings.HasPrefix(paths[1], "/kit/components/bid-stepper.") {
+	if len(paths) != 2 || !strings.HasPrefix(paths[1], "/_kitwork/components/bid-stepper.") {
 		t.Fatalf("paths: %v", paths)
 	}
 	if asset, exact := AssetAt(paths[1], site); asset == nil || !exact {
@@ -145,18 +295,37 @@ func TestSiteComponentsAreFilesOfTheirOwn(t *testing.T) {
 	}
 }
 
-// A site-wide pin decides what an unversioned name means; a version in the markup still wins.
-func TestVersionsPinTheCatalogueForTheSite(t *testing.T) {
-	page := `<html><head></head><body><div data-kit-component="clipboard"></div></body></html>`
-	if _, paths := deliveredFiles(t, Deliver(page, nil, Options{Versions: map[string]string{"clipboard": "1.0.0"}})); !strings.HasPrefix(paths[1], "/kit/components/clipboard@1.0.0.") {
-		t.Errorf("the pin was not applied: %v", paths)
+// Which version's source a page gets is the engine's business: the latest, unless a template page's
+// markup names one — in either form the engine reads. The name is the component's either way; only
+// the bytes, and so the hash, differ.
+func TestTheLatestShipsUnlessTheMarkupNamesAVersion(t *testing.T) {
+	fileOf := func(host string) *Asset {
+		t.Helper()
+		_, paths := deliveredFiles(t, Deliver(`<html><head></head><body>`+host+`</body></html>`, nil, Options{}))
+		if len(paths) != 2 || !strings.HasPrefix(paths[1], "/_kitwork/components/clipboard.") {
+			t.Fatalf("%s: paths %v", host, paths)
+		}
+		asset, exact := AssetAt(paths[1], nil)
+		if asset == nil || !exact {
+			t.Fatalf("%s: %s does not resolve to its file", host, paths[1])
+		}
+		return asset
 	}
-	written := `<html><head></head><body><div data-kit-component="clipboard@v2.0.0"></div></body></html>`
-	if _, paths := deliveredFiles(t, Deliver(written, nil, Options{Versions: map[string]string{"clipboard": "1.0.0"}})); !strings.HasPrefix(paths[1], "/kit/components/clipboard@2.0.0.") {
-		t.Errorf("the markup's version must win over the pin: %v", paths)
+	latest := fileOf(`<div data-kit-component="clipboard"></div>`)
+	if !bytes.Contains(latest.Body, []byte("}, 2000);")) {
+		t.Errorf("an unversioned host gets the latest source:\n%.300s", latest.Body)
 	}
-	if !HasComponentVersion("dialog", "2.0.0") || HasComponentVersion("dialog", "9.0.0") || strings.Join(ComponentVersionsOf("clipboard"), ",") != "1.0.0,2.0.0" {
-		t.Errorf("versions: %v", ComponentVersionsOf("clipboard"))
+	for _, host := range []string{
+		`<div data-kit-component="clipboard@1.0.0"></div>`,
+		`<div data-kit-component="clipboard@v1.0.0"></div>`,
+		`<div data-kitwork-component="clipboard@1.0.0: $copy"></div>`,
+	} {
+		if older := fileOf(host); older.Path == latest.Path || !bytes.Contains(older.Body, []byte("}, 1000);")) {
+			t.Errorf("%s: the version the markup names ships, under the component's name: %s", host, older.Path)
+		}
+	}
+	if strings.Join(componentVersionsOf("clipboard"), ",") != "1.0.0,2.0.0" {
+		t.Errorf("versions: %v", componentVersionsOf("clipboard"))
 	}
 }
 
@@ -193,12 +362,12 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
   await wait(150);
   var tree = document.querySelector('[data-kit-component="tree"]');
   assert(tree, "Drive swapped in the tree page");
-  assert(document.querySelector('script[src^="/kit/components/tree@1.0.0."]'), "the tree's file was added to <head>");
+  assert(document.querySelector('script[src^="/_kitwork/components/tree."]'), "the tree's file was added to <head>");
   focusIn(document.getElementById("one"));
   key(document.getElementById("one"), "ArrowDown"); await wait(60);
   assert(active() === "two", "the newly loaded tree works after the swap, focus is on " + active());
   assert(window.__errors.length === 0, "the swap waited for the file, so nothing was reported missing: " + window.__errors.join(" | "));
-  assert(document.querySelectorAll('script[src^="/kit/kernel."]').length === 1, "the kernel was not loaded twice");
+  assert(document.querySelectorAll('script[src^="/_kitwork/kernel."]').length === 1, "the kernel was not loaded twice");
   root.setAttribute("data-kit-test", "passed");
 })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } }); });
 </script></body></html>`, nil, Options{Drive: true})
@@ -264,7 +433,7 @@ func TestExamplesBringNoFiles(t *testing.T) {
 <pre><code>data-kit-component="tree"</code></pre></body></html>`
 	_, paths := deliveredFiles(t, Deliver(live, nil, Options{}))
 	joined := strings.Join(paths, " ")
-	if !strings.Contains(joined, "/kit/components/tabs@") || !strings.Contains(joined, "/kit/components/menu@") || strings.Contains(joined, "/kit/components/tree@") {
+	if !strings.Contains(joined, "/_kitwork/components/tabs.") || !strings.Contains(joined, "/_kitwork/components/menu.") || strings.Contains(joined, "/_kitwork/components/tree.") {
 		t.Fatalf("real hosts must count, the printed one must not: %v", paths)
 	}
 }

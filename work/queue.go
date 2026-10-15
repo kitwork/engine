@@ -1,8 +1,6 @@
 package work
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -419,11 +417,7 @@ func (t *Tenant) LoadQueueFiles() {
 			fmt.Printf("[Queue] compile %s: %v\n", e.Name(), compileErr)
 			continue
 		}
-		hash := ""
-		if raw, rerr := os.ReadFile(file); rerr == nil {
-			sum := sha256.Sum256(raw)
-			hash = hex.EncodeToString(sum[:])
-		}
+		hash := bc.CacheKey() // sources + compiler fingerprint, as for _cron (see LoadCronFiles)
 		stem := strings.TrimSuffix(e.Name(), ".kitwork.js")
 		t.runQueueFile(worker, bc, stem, hash)
 	}
@@ -450,7 +444,11 @@ func (t *Tenant) runQueueFile(worker *queueRuntime, bc *compiler.Bytecode, stem,
 	vm.Builtins = t.vm.Builtins
 	vm.Globals = globals
 	vm.MaxEnergy = t.MaxEnergy
-	vm.Run()
+	// A runtime error at the top of the file says so, as a compile error does: it would otherwise
+	// leave the queue without a word.
+	if result := vm.Run(); result.K == value.Invalid {
+		fmt.Printf("[Queue] run %s.kitwork.js: %s\n", stem, result.Text())
+	}
 
 	worker.mu.Lock()
 	registered := worker.handlers[before:]

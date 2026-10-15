@@ -1,7 +1,9 @@
 // Package hydrate is the server half of the "frontend bytecode VM": it compiles a small,
 // deliberately-constrained expression subset (the same one authors write in data-* attributes)
-// into a compact IR — a nested JSON array the tiny client interpreter walks. The client also keeps
-// a matching parser for author-written data-kit-* source; engine-emitted data-kitwork-* ships IR.
+// into a compact IR — a nested JSON array the tiny client interpreter walks. The wire carries SOURCE,
+// never IR: the client keeps a matching parser and reads the same expressions from the hand-written
+// data-kit-* attributes and from the values of the eight grouped data-kitwork-* attributes the engine
+// writes (pairs.go). The IR is the server's own form — verification, eval, tests.
 //
 // IR shapes (each is a JSON array):
 //
@@ -191,6 +193,50 @@ var precedence = map[string]int{
 type parser struct {
 	toks []tok
 	pos  int
+	// depth is how deep the parser recurses now (nestingLimit).
+	depth int
+}
+
+// nestingLimit bounds how deep an expression may nest, as the server language's compiler does
+// (14/10/2026): the parser and every walker of the IR (the render of a .ui page, the check for safe, the
+// JSON a page ships) recurse as deep as it nests, so an expression nested as deep as it is long would
+// overflow the Go stack of the shared host while a page compiles. Past it the expression is an error.
+const nestingLimit = 1000
+
+var errNested = errors.New("hydrate: biểu thức lồng quá sâu (hơn 1000 tầng ngoặc, toán tử hay mắt xích a.b.c): tách bớt")
+
+// enter counts one level of the parser's recursion; leave undoes it.
+func (p *parser) enter() error {
+	if p.depth >= nestingLimit {
+		return errNested
+	}
+	p.depth++
+	return nil
+}
+
+func (p *parser) leave() { p.depth-- }
+
+// tooDeep reports an IR nested deeper than nestingLimit, walked without recursion: a chain a.b.c… or
+// 1 + 1 + … nests the IR without the parser recursing.
+func tooDeep(node any) bool {
+	type pending struct {
+		node  any
+		depth int
+	}
+	stack := []pending{{node, 1}}
+	for len(stack) > 0 {
+		top := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if top.depth > nestingLimit {
+			return true
+		}
+		if list, ok := top.node.([]any); ok {
+			for _, child := range list {
+				stack = append(stack, pending{child, top.depth + 1})
+			}
+		}
+	}
+	return false
 }
 
 func (p *parser) peek() tok {
@@ -246,6 +292,10 @@ func (p *parser) sequence() (any, error) {
 }
 
 func (p *parser) assign() (any, error) {
+	if err := p.enter(); err != nil {
+		return nil, err
+	}
+	defer p.leave()
 	left, err := p.ternary()
 	if err != nil {
 		return nil, err
@@ -324,6 +374,13 @@ func (p *parser) binary(min int) (any, error) {
 }
 
 func (p *parser) unary() (any, error) {
+	if v := p.peek().v; v == "++" || v == "--" || v == "!" || v == "-" {
+		// an operator before an operand nests one level, as a parenthesis does (assign)
+		if err := p.enter(); err != nil {
+			return nil, err
+		}
+		defer p.leave()
+	}
 	if v := p.peek().v; v == "++" || v == "--" {
 		p.next()
 		target, err := p.unary()
@@ -612,6 +669,9 @@ func Compile(expr string) (any, error) {
 	}
 	if p.peek().t != "eof" {
 		return nil, errors.New("hydrate: unexpected trailing token '" + p.peek().v + "'")
+	}
+	if tooDeep(node) {
+		return nil, errNested
 	}
 	return node, nil
 }

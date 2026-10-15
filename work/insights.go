@@ -30,11 +30,11 @@ func (in *Insights) Search(args ...value.Value) value.Value {
 
 	st := in.store()
 	if st == nil {
-		return value.Value{K: value.Invalid, V: "insights: store unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "insights: store unavailable")
 	}
 
 	if err := st.RecordSearch(q, results); err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.DatabaseCode, err.Error())
 	}
 	return value.Value{K: value.Nil}
 }
@@ -46,11 +46,11 @@ func (in *Insights) Gaps(args ...value.Value) value.Value {
 	}
 	st := in.store()
 	if st == nil {
-		return value.Value{K: value.Invalid, V: "insights: store unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "insights: store unavailable")
 	}
 	records, err := st.Gaps(limit)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.DatabaseCode, err.Error())
 	}
 	return recordsToValue(records)
 }
@@ -62,11 +62,11 @@ func (in *Insights) Searches(args ...value.Value) value.Value {
 	}
 	st := in.store()
 	if st == nil {
-		return value.Value{K: value.Invalid, V: "insights: store unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "insights: store unavailable")
 	}
 	records, err := st.Searches(limit)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.DatabaseCode, err.Error())
 	}
 	return recordsToValue(records)
 }

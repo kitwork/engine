@@ -1,0 +1,119 @@
+From 5d1c2e9a7b3f4c6d8e0a1b2c3d4e5f60718293a4 Mon Sep 17 00:00:00 2001
+From: Kitwork Dev <dev@kitwork.test>
+Date: Mon, 12 Oct 2026 09:30:00 +0700
+Subject: [PATCH] highlight: read shells, yaml and diffs on the server
+
+Bộ tách từ cho bash, powershell, yaml và diff, để <code language="…">
+không cần JavaScript trên trình duyệt.
+---
+ engine/jit/highlight/diff.go   | 12 ++++++++----
+ engine/jit/highlight/legacy.go |  9 ---------
+ 2 files changed, 8 insertions(+), 13 deletions(-)
+
+diff --git a/engine/jit/highlight/diff.go b/engine/jit/highlight/diff.go
+index 4b825dc..7a3f0e1 100644
+--- a/engine/jit/highlight/diff.go
++++ b/engine/jit/highlight/diff.go
+@@ -1,12 +1,15 @@
+ package highlight
+ 
+-import "strings"
++import (
++	"strings"
++)
+ 
+ // tokenizeDiff reads a unified diff line by line.
+ func tokenizeDiff(scan *scanner) {
+-	for !scan.done() {
+-		scan.emitRest(Plain)
+-	}
++	diff := &diffTokenizer{}
++	for loop := scan.loop(); loop.next(); {
++		diff.step(scan)
++	}
+ }
+ 
+ // diffHeaders start the lines that describe a file.
+@@ -30,8 +33,9 @@ var diffHeaders = []string{"diff ", "index ", "--- ", "+++ "}
+ func (diff *diffTokenizer) classify(line string) Kind {
+ 	switch {
+ 	case strings.HasPrefix(line, "@@"):
++		diff.oldLeft, diff.newLeft, diff.inHunk = diffHunkCounts(line)
+ 		return Heading
+ 	case line[0] == '+':
+ 		return Inserted
+ 	case line[0] == '-':
+ 		return Deleted
+diff --git a/engine/jit/highlight/testdata/sql/orders.sql b/engine/jit/highlight/testdata/sql/orders.sql
+index 1a2b3c4..5d6e7f8 100644
+--- a/engine/jit/highlight/testdata/sql/orders.sql
++++ b/engine/jit/highlight/testdata/sql/orders.sql
+@@ -2,7 +2,7 @@
+ CREATE TABLE orders (
+   id INTEGER PRIMARY KEY,
+   site TEXT NOT NULL,
+--- a comment that was a line of its own
++-- tổng tiền tính bằng đồng
+   total INTEGER NOT NULL DEFAULT 0,
+   created_at TEXT NOT NULL
+ );
+diff --git a/engine/jit/highlight/legacy.go b/engine/jit/highlight/legacy.go
+deleted file mode 100644
+index 9c1d2e3..0000000
+--- a/engine/jit/highlight/legacy.go
++++ /dev/null
+@@ -1,9 +0,0 @@
+-package highlight
+-
+-// legacyNames maps the short names the first highlighter accepted.
+-var legacyNames = map[string]string{
+-	"js":     "javascript",
+-	"golang": "go",
+-	"sh":     "bash",
+-	"yml":    "yaml",
+-}
+diff --git a/docs/KITWORK_UI.md b/docs/kitwork-ui.md
+similarity index 96%
+rename from docs/KITWORK_UI.md
+rename to docs/kitwork-ui.md
+index 0f1e2d3..4c5b6a7 100644
+--- a/docs/KITWORK_UI.md
++++ b/docs/kitwork-ui.md
+@@ -40,6 +40,8 @@ Mã nguồn hiện có màu ngay trên máy chủ.
+ ## <code>
+ 
+ `<code language="bash">` tô màu không cần JavaScript.
++Tên ngôn ngữ viết đầy đủ: `javascript`, không `js`.
++
+ Các ngôn ngữ: bash, powershell, yaml, diff, …
+ 
+ ## <terminal>
+diff --git a/scripts/deploy.sh b/scripts/deploy.sh
+old mode 100644
+new mode 100755
+diff --git a/.github/workflows/engine.yaml b/.github/workflows/engine.yaml
+new file mode 100644
+index 0000000..b1c2d3e
+--- /dev/null
++++ b/.github/workflows/engine.yaml
+@@ -0,0 +1,6 @@
++name: engine
++on: [push]
++jobs:
++  test:
++    runs-on: ubuntu-latest
++    steps: [{run: go test ./...}]
+diff --git a/docs/logo.png b/docs/logo.png
+index 2e3f4a5..6b7c8d9 100644
+Binary files a/docs/logo.png and b/docs/logo.png differ
+diff --git a/VERSION b/VERSION
+index 3e1f2a0..8c9d0b1 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-0.9.0
+\ No newline at end of file
++0.10.0
+\ No newline at end of file
+-- 
+2.46.0

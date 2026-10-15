@@ -24,11 +24,12 @@ import (
 //     data-kit-text). An element wrapping other tags is left untouched.
 //   - text and show. Everything else (click/model/live) is inert markup at rest anyway.
 //
-// PreRender runs after Render in the pipeline, and only when the site opted in with
-// router.javascript({ prerender: true }); it is off by default.
+// Nothing in the engine calls PreRender since router.javascript({ prerender: true }), the only switch
+// that turned it on, went (11/10/2026): a template page's page-scope answers are the browser's. It
+// stays as a witness the tests use (render/presentation_minify_test.go evaluates a prepared page with
+// it, as the browser would).
 func PreRender(htmlStr string) string {
-	// No gate here, on purpose. WHETHER to pre-render is the site's decision, taken once in
-	// router.javascript({ prerender: true }); by the time this runs the answer is already yes. There is
+	// No gate here, on purpose: whether to pre-render was the caller's decision. There is
 	// no fragment to guard against either — Drive fetches the whole page and morphs it in the browser,
 	// so every string that reaches this function is a complete response. (A `<body>` test would look
 	// prudent and be wrong: the minifier drops optional tags, so production HTML often has none.)
@@ -38,9 +39,10 @@ func PreRender(htmlStr string) string {
 	return preRenderOutside(htmlStr, opaque, scope)
 }
 
-// PreRender evaluates authored SOURCE only, so all three regexes match the data-kit-* prefix
-// exclusively — data-kitwork-text/show on the wire is engine-emitted IR (JSON), not an expression,
-// and must not be Eval'd as source. model has no IR form but follows the same authored canon.
+// PreRender writes the first paint of a hand-written template page, so all three regexes read the
+// data-kit-* form only. The grouped data-kitwork-* form is what a Kitwork UI page carries, and that
+// page is rendered on the server by its own compiler — its text and show are already the first paint
+// — so PreRender has nothing to add there. (There is no IR on the wire in either form.)
 var (
 	// a data-kit-model input — captures the scope key; value/type are read from the tag body.
 	modelTagRe  = regexp.MustCompile(`<[a-zA-Z][^>]*\bdata-kit-model="([^"]*)"[^>]*>`)

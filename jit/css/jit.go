@@ -27,11 +27,12 @@ var dynamicClassRe = regexp.MustCompile(`data-kit-class="([^"]*)"`)
 
 // collectClasses appends every class name a page uses to classes, skipping ones already in seen.
 //
-// TWO sources, deliberately handled differently. A static class="a b" is a list, so it is split on
+// THREE sources, deliberately handled differently. A static class="a b" is a list, so it is split on
 // whitespace. A dynamic data-kit-class="open ? 'on' : 'off'" is an EXPRESSION, so it is compiled
 // and its string literals are read off the resulting tree — EVERY branch, not whichever one the
 // page happens to take at runtime. Splitting that attribute on spaces would yield "?" and "'on'"
-// and emit nothing usable.
+// and emit nothing usable. The engine's data-kitwork-class="done: value == 100" is a list of pairs,
+// and only its KEYS are classes (hydrate.ToggledClasses); its values are conditions.
 //
 // Every entry point shares this so the scans cannot drift: a class that styles a page inline must
 // also reach the site-wide stylesheet, or the same markup renders differently depending on which
@@ -58,6 +59,11 @@ func collectClasses(html string, seen map[string]bool, classes *[]string) {
 		for _, c := range names {
 			add(c)
 		}
+	}
+	// The engine's grouped form names a class it toggles as the KEY of a pair —
+	// data-kitwork-class="done: value == 100" — written out in full for exactly this reader.
+	for _, c := range hydrate.ToggledClasses(html) {
+		add(c)
 	}
 }
 
@@ -90,6 +96,12 @@ func GenerateJITCached(html string, cfg *Config) string {
 		// one cache entry and the second would be served the first site's palette.
 		_, _ = h.Write([]byte(cfg.HighlightTheme))
 		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.HighlightPalette)))
+		// The typefaces, the derived appearance blocks and the selector they sit under change the CSS
+		// of the same class set too: a branch's router.fonts() or a route shown dark first must not be
+		// served the site's cached stylesheet.
+		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.FontFamily)))
+		_, _ = h.Write([]byte(fmt.Sprintf("%v", cfg.Themes)))
+		_, _ = h.Write([]byte(cfg.DarkSelector))
 	}
 	sig := h.Sum64()
 	if v, ok := jitCache.Load(sig); ok {

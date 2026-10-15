@@ -215,3 +215,46 @@ func TestAppIsolationStaticRefusesSourcesAndDotFiles(t *testing.T) {
 		}
 	}
 }
+
+// Kitwork UI sources (*.ui interface, *.work logic) carry no ".kitwork." in their names, so the
+// *.kitwork.* rule alone would serve them. They must be refused like any other source, in any
+// folder and in any letter case, while an ordinary file in the same folder still serves.
+func TestAppIsolationStaticRefusesUISources(t *testing.T) {
+	root, tenant := buildIsolationFixture(t, staticOnlyRouter)
+
+	appDir := filepath.Join(root, "acme", "localhost")
+	sources := map[string]string{
+		"page.ui":              "<page>" + victimMarker + "</page>",
+		"router.work":          "// " + victimMarker,
+		"shop/content.ui":      "<content>" + victimMarker + "</content>",
+		"shop/cart.work":       "// " + victimMarker,
+		"shop/Product-Card.UI": "<card>" + victimMarker + "</card>",
+		"shop/notes.txt":       "PLAIN-FILE-SERVES",
+	}
+	for name, body := range sources {
+		file := filepath.Join(appDir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Control: the static path is live, so a refusal below is the guard and not a broken route.
+	if body := serveIsolation(t, tenant, "http://localhost/shop/notes.txt").Body.String(); !strings.Contains(body, "PLAIN-FILE-SERVES") {
+		t.Fatalf("control file was not served, the test cannot tell a refusal from a broken path: %q", body)
+	}
+
+	for _, target := range []string{
+		"http://localhost/page.ui",
+		"http://localhost/router.work",
+		"http://localhost/shop/content.ui",
+		"http://localhost/shop/cart.work",
+		"http://localhost/shop/Product-Card.UI",
+	} {
+		if body := serveIsolation(t, tenant, target).Body.String(); strings.Contains(body, victimMarker) {
+			t.Fatalf("static serving exposed UI source %q: %s", target, body)
+		}
+	}
+}

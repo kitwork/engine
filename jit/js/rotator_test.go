@@ -7,11 +7,11 @@ import (
 
 func TestRotatorIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="rotator"><span data-kit-element="item">a</span></div>`)
-	if !strings.Contains(out, `/kit/components/rotator@`) {
+	if !strings.Contains(out, `/_kitwork/components/rotator.`) {
 		t.Fatalf("rotator was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"rotator"}), `component("rotator@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"rotator"}); !strings.Contains(src, `component("rotator", `) || strings.Contains(src, `component("rotator@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

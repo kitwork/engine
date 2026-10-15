@@ -10,10 +10,10 @@ func TestRenderEmitsOnlyUsedFamilies(t *testing.T) {
 		`<button class="button button-brand">Go</button></body></html>`
 	out := Render(html)
 
-	if strings.Count(out, `data-kitwork-jit="material"`) != 1 {
+	if strings.Count(out, `data-kitwork-generated="material"`) != 1 {
 		t.Fatalf("expected exactly one material style block: %s", out)
 	}
-	si := strings.Index(out, `<style data-kitwork-jit="material">`)
+	si := strings.Index(out, `<style data-kitwork-generated="material">`)
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("material style should be injected before </head>: %s", out)
 	}

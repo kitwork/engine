@@ -37,16 +37,16 @@ func TestEmbeddedFilesExist(t *testing.T) {
 func TestRenderDetectsByFontFamily(t *testing.T) {
 	in := `<html><head><style>body{font-family: Outfit, sans-serif}</style></head><body>x</body></html>`
 	out := Render(in)
-	if strings.Count(out, `data-kitwork-jit="fonts"`) != 1 {
+	if strings.Count(out, `data-kitwork-generated="fonts"`) != 1 {
 		t.Errorf("expected exactly one fonts style block: %s", out)
 	}
 	if !strings.Contains(out, "@font-face{font-family:'Outfit'") {
 		t.Errorf("expected an Outfit @font-face: %s", out)
 	}
-	if !strings.Contains(out, "src:url("+RoutePrefix+"outfit/") || !strings.Contains(out, "format('woff2')") {
-		t.Errorf("@font-face should point at the local /jitfonts woff2: %s", out)
+	if !strings.Contains(out, "src:url("+RoutePrefix+"outfit-") || !strings.Contains(out, "format('woff2')") {
+		t.Errorf("@font-face should point at the local /_kitwork/fonts woff2: %s", out)
 	}
-	if !strings.Contains(out, `<link rel="preload" as="font" type="font/woff2" href="`+RoutePrefix+`outfit/`) {
+	if !strings.Contains(out, `<link rel="preload" as="font" type="font/woff2" href="`+RoutePrefix+`outfit-`) {
 		t.Errorf("expected a preload link for Outfit: %s", out)
 	}
 	if !strings.Contains(out, "font-display:swap") {

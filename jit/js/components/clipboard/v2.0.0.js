@@ -1,4 +1,5 @@
-/* clipboard component @v2.0.0 (latest) — copy text, and say so for two seconds.
+/* clipboard component — copy text, and say so for two seconds. The file a page gets for
+ * data-kit-component="clipboard" (the latest).
  *
  * Usage (the host is the shared ancestor of the button and whatever it copies):
  *   <article data-kit-component="clipboard">
@@ -63,4 +64,3 @@ clipboardDef.init = function (context) {
 };
 
 window.kit.component("clipboard", clipboardDef);
-window.kit.component("clipboard@v2.0.0", clipboardDef);

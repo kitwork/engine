@@ -1,4 +1,4 @@
-/* scrolled component @v1.0.0 — has the page moved under this element?
+/* scrolled component — has the page moved under this element?
  *
  * Usage — a header that grows a background once the reader leaves the top:
  *
@@ -63,4 +63,3 @@ var scrolledDef = {
 };
 
 window.kit.component("scrolled", scrolledDef);
-window.kit.component("scrolled@v1.0.0", scrolledDef);

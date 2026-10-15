@@ -20,7 +20,7 @@ func TestRenderInjectsTheLinkWhenNoMarkerIsPresent(t *testing.T) {
 // The author owns the position when they place a marker — the same rule
 // jit/theme follows.
 func TestRenderFillsAnAuthorPlacedMarkerInPlace(t *testing.T) {
-	source := `<html><head><link data-kitwork-jit="manifest"><title>x</title></head><body></body></html>`
+	source := `<html><head><link data-kitwork-generated="manifest"><title>x</title></head><body></body></html>`
 	out := Render(source, "/manifest.json")
 
 	if strings.Count(out, `rel="manifest"`) != 1 {

@@ -44,8 +44,8 @@ func KernelFile(native bool) string {
 	return strings.Join(append(pieces, storageJS, webJS, bootJS), "\n")
 }
 
-// DriveFile is Drive and the morph it drives, as a file of its own: only a site that asked for
-// router.drive() loads it, and it is the same file on every page of every such site.
+// DriveFile is Drive and the morph it drives, as a file of its own: only a site that moves without a
+// reload (router.reload(false)) loads it, and it is the same file on every page of every such site.
 //
 // These two files are the whole client runtime; there is no composed one any more (03/10). Because
 // the engine serves them and the Go compiler from one codebase, the two ends version together —
@@ -54,36 +54,39 @@ func DriveFile() string {
 	return morphJS + "\n" + driveJS
 }
 
-// UsesGrammar reports whether a page really uses the grammar — an authored directive outside the
-// <pre>/<code> blocks that only show one. It is the test Check applies before reading a page, for
-// a caller deciding whether the page needs the kernel at all.
+// UsesGrammar reports whether a page really uses the grammar — a directive outside the <pre>/<code>
+// blocks that only show one, written in either form: the data-kit-* an author writes, or the eight
+// grouped data-kitwork-* attributes the engine writes. It is the test Check applies before reading a
+// page, for a caller deciding whether the page needs the kernel at all.
 func UsesGrammar(html string) bool {
-	return strings.Contains(html, authoredPrefix) && hasAuthoredDirective(html)
+	return hasDirectivePrefix(html) && hasAuthoredDirective(html)
 }
 
 // There is no root marker: an authored directive outside an example block is what makes a page a
 // Kitwork page — so static pages (and demos that show data-* as example text) are never affected.
 //
-// PREFIX CONVENTION, restated 24/09 when the root marker went away.
+// PREFIX CONVENTION, restated 11/10/2026 for the grouped web output (KITWORK_UI.md §11).
 //
-//	data-kit-*      the GRAMMAR. What an author writes — and also what the engine writes when it
-//	                emits a piece of the grammar itself, as data-kit-item does on a materialised
-//	                row. The test is what the attribute MEANS, not who typed it: an item is a
-//	                boundary, so it reads like one, next to the data-kit-for and data-kit-key it
-//	                belongs with.
+//	data-kitwork-*  what the ENGINE writes, one prefix for both of its kinds:
+//	                · the eight grouped DIRECTIVES the kernel reads — component, scope, bind, class,
+//	                  style, event, if, for (GroupedDirectives, pairs.go) — "name: value; …" in one
+//	                  attribute each;
+//	                · TRANSPORT that is not grammar: data-kitwork-generated=* (what the engine or
+//	                  Drive made), -layout, -current, -delay, -transition, -shell, -highlight and the
+//	                  old -jit. These never make a page look like a Kitwork page.
 //
-//	data-kitwork-*  TRANSPORT. Things the engine hangs on a page that are not part of the grammar:
-//	                data-kitwork-jit=* asset markers, data-kitwork-drive (the site's answer to
-//	                router.drive()), data-kitwork-ui overlays, data-kitwork-layout. An author never
-//	                writes one, and the kernel never reads one as a directive.
+//	data-kit-*      the hand-written GRAMMAR of template pages (data-kit-text, data-kit-bind:x,
+//	                data-kit-click:prevent, …), read beside the grouped form until the shared
+//	                clean-up; and what the kernel itself writes on a materialised row
+//	                (data-kit-item, data-kit-key).
 //
-// A precompiled IR directive (data-kitwork-text="[JSON]") was a reserved wire mode the engine never
-// emitted; the kernel no longer decodes it (ideaship-final §9), so a long prefix on a directive is
-// inert. The root marker (data-kit-app / data-kit-hydrate) is gone entirely: a page is recognised by
-// its grammar, and Drive is switched on by router.drive().
+// (A precompiled IR directive — data-kitwork-text="[JSON]" — was a reserved wire mode the engine
+// never emitted; it is gone (ideaship-final §9), and data-kitwork-text is not a grouped directive:
+// text is a pair of data-kitwork-bind.) The root marker (data-kit-app / data-kit-hydrate) is gone
+// entirely: a page is recognised by its grammar, and Drive is switched on by router.reload(false).
 
-// directiveRe matches an authored EXPRESSION directive — data-kit-<name>="<expr>" ONLY. The long
-// prefix is engine-emitted IR, never authored source, so it must not be compile-verified here.
+// directiveRe matches a hand-written EXPRESSION directive — data-kit-<name>="<expr>". The grouped
+// data-kitwork-* attributes are verified by their own pass (grouped_check.go), pair by pair.
 // Expressions use single-quoted string literals, so the value never contains a double quote.
 // An event handler is data-kit-<event>[:modifier…] (ideaship-final §2–§4), or the long form
 // data-kit-event:<name>[:modifier…] for any event by name — one a component emits, or a DOM event
@@ -106,40 +109,43 @@ var comboModifierKeys = map[string]bool{"mod": true, "ctrl": true, "meta": true,
 // comboModifierError says why a key combination will not run, or nil when it will. The kernel
 // refuses a handler it cannot make sense of rather than misfiring, so the mistake is named here,
 // next to the markup.
-func comboModifierError(modifier, event string) error {
+// sep is how the modifier is written where it was found: ':' in a data-kit-* attribute name, '.' in a
+// data-kitwork-event pair.
+func comboModifierError(modifier, event, sep string) error {
 	if event != "keydown" && event != "keyup" {
-		return fmt.Errorf(":%s is a key combination, so it belongs on keydown/keyup, not %s", modifier, event)
+		return fmt.Errorf("%s%s is a key combination, so it belongs on keydown/keyup, not %s", sep, modifier, event)
 	}
 	parts := strings.Split(modifier, "+")
 	key := ""
 	seen := map[string]bool{}
 	for _, part := range parts {
 		if part == "" {
-			return fmt.Errorf(":%s has an empty part — write it as mod+k", modifier)
+			return fmt.Errorf("%s%s has an empty part — write it as mod+k", sep, modifier)
 		}
 		if comboModifierKeys[part] {
 			if seen[part] {
-				return fmt.Errorf(":%s repeats %s", modifier, part)
+				return fmt.Errorf("%s%s repeats %s", sep, modifier, part)
 			}
 			seen[part] = true
 			continue
 		}
 		if key != "" {
-			return fmt.Errorf(":%s names two keys (%s and %s) — a combination presses one", modifier, key, part)
+			return fmt.Errorf("%s%s names two keys (%s and %s) — a combination presses one", sep, modifier, key, part)
 		}
 		key = part
 	}
 	if key == "" {
-		return fmt.Errorf(":%s names no key — write it as mod+k", modifier)
+		return fmt.Errorf("%s%s names no key — write it as mod+k", sep, modifier)
 	}
 	if seen["mod"] && (seen["ctrl"] || seen["meta"]) {
-		return fmt.Errorf(":%s mixes mod with ctrl/meta — mod already means whichever one this platform uses", modifier)
+		return fmt.Errorf("%s%s mixes mod with ctrl/meta — mod already means whichever one this platform uses", sep, modifier)
 	}
 	return nil
 }
 
 // styleAttrRe finds an authored style directive so its PROPERTY can be checked; the expression
-// itself rides the ordinary directive verification.
+// itself rides the ordinary directive verification. A data-kitwork-style pair goes through the same
+// property check (grouped_check.go).
 var styleAttrRe = regexp.MustCompile(`data-kit-style:([-a-zA-Z0-9_]+)="[^"]*"`)
 
 // styleBlockedProperty holds the property names a value can escape through: three can carry script
@@ -154,20 +160,26 @@ var styleReservedCustomRe = regexp.MustCompile(`(?i)^--(?:kit|kitwork)-`)
 // Custom properties are allowed — a Kitwork site's colours live in them — except the engine's own
 // --kit-/--kitwork- namespace, which the runtime writes and must be able to trust.
 func stylePropertyError(property string) error {
+	return stylePropertyErrorIn("data-kit-style:"+property, property)
+}
+
+// stylePropertyErrorIn is stylePropertyError for a property written in label — "data-kit-style:top"
+// or "data-kitwork-style top" — so the message names what the author wrote.
+func stylePropertyErrorIn(label, property string) error {
 	if strings.HasPrefix(property, "--") {
 		if !styleCustomPropertyRe.MatchString(property) {
-			return fmt.Errorf("data-kit-style:%s is not a custom property name (--name, letters, digits, dash, underscore)", property)
+			return fmt.Errorf("%s is not a custom property name (--name, letters, digits, dash, underscore)", label)
 		}
 		if styleReservedCustomRe.MatchString(property) {
-			return fmt.Errorf("data-kit-style:%s writes the engine's own namespace — pick a name of your own", property)
+			return fmt.Errorf("%s writes the engine's own namespace — pick a name of your own", label)
 		}
 		return nil
 	}
 	if !stylePlainPropertyRe.MatchString(property) {
-		return fmt.Errorf("data-kit-style:%s is not a CSS property name (lower case, digits and dashes)", property)
+		return fmt.Errorf("%s is not a CSS property name (lower case, digits and dashes)", label)
 	}
 	if styleBlockedProperty[property] {
-		return fmt.Errorf("data-kit-style:%s is refused: a value could escape the declaration through it", property)
+		return fmt.Errorf("%s is refused: a value could escape the declaration through it", label)
 	}
 	return nil
 }
@@ -178,7 +190,7 @@ var timingModifierRe = regexp.MustCompile(`^(debounce|throttle)\(([0-9]+)\)$`)
 
 func checkEventModifiers(directive string) error {
 	if directive == "intersect" || strings.HasPrefix(directive, "intersect:") {
-		return checkIntersectModifiers(strings.Split(directive, ":")[1:])
+		return checkIntersectModifiers(strings.Split(directive, ":")[1:], ":", "data-kit-intersect", "leave")
 	}
 	parts := strings.Split(directive, ":")
 	if parts[0] == "event" && len(parts) > 1 {
@@ -187,10 +199,16 @@ func checkEventModifiers(directive string) error {
 	} else if !eventTypes[parts[0]] {
 		return nil
 	}
-	event := parts[0]
+	return checkModifierPipeline(parts[0], parts[1:], ":")
+}
+
+// checkModifierPipeline checks the modifiers of one handler of event (the DOM event the kernel
+// listens for). sep is how they are written: ':' in a data-kit-* name, '.' in a data-kitwork-event
+// pair — the rules are the kernel's, one pipeline for both.
+func checkModifierPipeline(event string, modifiers []string, sep string) error {
 	seen := map[string]bool{}
 	timing := 0
-	for _, modifier := range parts[1:] {
+	for _, modifier := range modifiers {
 		name := modifier
 		if m := timingModifierRe.FindStringSubmatch(modifier); m != nil {
 			name = m[1]
@@ -200,11 +218,11 @@ func checkEventModifiers(directive string) error {
 			}
 		}
 		if seen[name] {
-			return fmt.Errorf("modifier :%s is repeated", name)
+			return fmt.Errorf("modifier %s%s is repeated", sep, name)
 		}
 		seen[name] = true
 		if combo := comboModifierRe.FindStringSubmatch(name); combo != nil {
-			if err := comboModifierError(name, event); err != nil {
+			if err := comboModifierError(name, event, sep); err != nil {
 				return err
 			}
 			seen["combo"] = true
@@ -213,29 +231,30 @@ func checkEventModifiers(directive string) error {
 		switch name {
 		case "window", "document", "outside", "self", "escape", "enter", "prevent", "stop", "once", "debounce", "throttle":
 		default:
-			return fmt.Errorf("unknown modifier :%s (the pipeline is :window :document → :outside :escape :enter :self → :prevent → :stop → :debounce(n) :throttle(n) → :once)", name)
+			return fmt.Errorf("unknown modifier %s%s (the pipeline is %s)", sep, name,
+				strings.ReplaceAll(":window :document → :outside :escape :enter :self → :prevent → :stop → :debounce(n) :throttle(n) → :once", ":", sep))
 		}
 	}
 	if seen["combo"] && (seen["escape"] || seen["enter"]) {
-		return fmt.Errorf("a key combination is already the filter — :escape and :enter cannot join it")
+		return fmt.Errorf("a key combination is already the filter — %sescape and %senter cannot join it", sep, sep)
 	}
 	if (seen["escape"] || seen["enter"]) && event != "keydown" && event != "keyup" {
-		return fmt.Errorf(":escape and :enter filter a key, so they belong on keydown/keyup, not %s", event)
+		return fmt.Errorf("%sescape and %senter filter a key, so they belong on keydown/keyup, not %s", sep, sep, event)
 	}
 	if seen["escape"] && seen["enter"] {
-		return fmt.Errorf(":escape and :enter cannot both be the filter")
+		return fmt.Errorf("%sescape and %senter cannot both be the filter", sep, sep)
 	}
 	if seen["outside"] && !outsideEventTypes[event] {
-		return fmt.Errorf(":outside applies to click, dblclick, pointerdown, pointerup and focusin, not %s", event)
+		return fmt.Errorf("%soutside applies to click, dblclick, pointerdown, pointerup and focusin, not %s", sep, event)
 	}
 	if seen["self"] && (seen["outside"] || seen["window"] || seen["document"]) {
-		return fmt.Errorf(":self keeps the handler to its own element; it cannot combine with :outside, :window or :document")
+		return fmt.Errorf("%sself keeps the handler to its own element; it cannot combine with %soutside, %swindow or %sdocument", sep, sep, sep, sep)
 	}
 	if seen["window"] && seen["document"] {
-		return fmt.Errorf(":window and :document name two targets; pick one")
+		return fmt.Errorf("%swindow and %sdocument name two targets; pick one", sep, sep)
 	}
 	if timing > 1 {
-		return fmt.Errorf(":debounce and :throttle cannot both time one handler")
+		return fmt.Errorf("%sdebounce and %sthrottle cannot both time one handler", sep, sep)
 	}
 	return nil
 }
@@ -243,39 +262,59 @@ func checkEventModifiers(directive string) error {
 // checkIntersectModifiers names a data-kit-intersect modifier the observer or the pipeline would not
 // understand. :leave says when (not on screen), :once how often, :half / :full how much must show,
 // :margin(x) where the screen's edge is — the event modifiers (:prevent, :outside…) mean nothing to
-// an element entering the screen.
-func checkIntersectModifiers(modifiers []string) error {
+// an element entering the screen. sep and label say how it was written (data-kit-intersect:once, or
+// intersect-enter.once in data-kitwork-event, where the name already says enter or leave and the
+// allowed list leaves "leave" out).
+func checkIntersectModifiers(modifiers []string, sep, label string, allowed ...string) error {
+	allowed = append(allowed, "once", "half", "full", "margin")
 	seen := map[string]bool{}
 	for _, modifier := range modifiers {
 		name := modifier
 		if strings.HasPrefix(modifier, "margin(") {
 			if !strings.HasSuffix(modifier, ")") || len(modifier) == len("margin()") {
-				return fmt.Errorf(":%s needs a CSS margin, like :margin(-20%%)", modifier)
+				example := "-20%" // a pair's name has no '%' (pairs.go), so the grouped form's example is a length
+				if sep == "." {
+					example = "-2rem"
+				}
+				return fmt.Errorf("%s%s needs a CSS margin, like %smargin(%s)", sep, modifier, sep, example)
 			}
 			name = "margin"
 		}
 		if seen[name] {
-			return fmt.Errorf("modifier :%s is repeated", name)
+			return fmt.Errorf("modifier %s%s is repeated", sep, name)
 		}
 		seen[name] = true
-		switch name {
-		case "leave", "once", "half", "full", "margin":
-		default:
-			return fmt.Errorf("unknown modifier :%s for data-kit-intersect (it takes :leave :once :half :full :margin(x))", modifier)
+		known := false
+		for _, a := range allowed {
+			known = known || a == name
+		}
+		if !known {
+			takes := make([]string, len(allowed))
+			for i, a := range allowed {
+				if a == "margin" {
+					a = "margin(x)"
+				}
+				takes[i] = sep + a
+			}
+			return fmt.Errorf("unknown modifier %s%s for %s (it takes %s)", sep, modifier, label, strings.Join(takes, " "))
 		}
 	}
 	if seen["half"] && seen["full"] {
-		return fmt.Errorf(":half and :full name two thresholds; pick one")
+		return fmt.Errorf("%shalf and %sfull name two thresholds; pick one", sep, sep)
 	}
 	return nil
 }
 
 // presenceRe decides runtime INJECTION: authored data-kit-* forms, including the non-expression
 // attributes — model is a plain scope key, scope/component a boundary — which need the runtime but
-// must never be compile-verified; for's value is a spec, not an expression. A data-kitwork-*
-// directive is not authored and not read, so it does not bring the runtime. (data-kit-api, -live and
+// must never be compile-verified; for's value is a spec, not an expression. (data-kit-api, -live and
 // -remember were removed on 02/10; they bring nothing.)
 var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|bind:[a-z][a-z0-9-]*|style:[-a-zA-Z0-9_]+|seed(?::[a-z][a-z0-9-]*)?|class|model|scope|component|(?:click|dblclick|submit|input|change|keydown|keyup|pointerdown|pointerup|focusin|focusout|event:[a-z][a-z0-9-]*|intersect)(?::[a-z0-9+]+(?:\([^)"]*\))?)*|drag)="`)
+
+// groupedPresenceRe is presenceRe for the engine's form: exactly the eight grouped directives, never
+// a transport marker — data-kitwork-generated sits on nearly every page, and matching the prefix would
+// give every page the kernel.
+var groupedPresenceRe = regexp.MustCompile(`(?:` + strings.Join(GroupedDirectives, "|") + `)="`)
 
 // Check is the server pass for hydrate pages. THE WIRE SHIPS THE SOURCE: authored data-kit-*
 // attributes ride to the client unchanged (readable DOM, smaller wire) and the client runtime
@@ -288,8 +327,26 @@ var presenceRe = regexp.MustCompile(`data-kit-(?:text|show|if|for|bind:[a-z][a-z
 // IR remains the engine's INTERNAL form (ctx.validate, go tests, analysis); it is not a wire
 // mode — the kernel parses source, and only source.
 
-// authoredPrefix is the one substring every authored directive shares — the cheap door.
+// authoredPrefix is the one substring every hand-written directive shares — the cheap door, with the
+// eight grouped names beside it (hasDirectivePrefix). "data-kit-" is not a substring of
+// "data-kitwork-", so a page whose directives are all grouped needs the second look.
 const authoredPrefix = "data-kit-"
+
+// hasDirectivePrefix is the cheap door: a substring test per form, before any regex runs.
+func hasDirectivePrefix(html string) bool {
+	if strings.Contains(html, authoredPrefix) {
+		return true
+	}
+	if !strings.Contains(html, "data-kitwork-") {
+		return false
+	}
+	for _, directive := range GroupedDirectives {
+		if strings.Contains(html, directive+`="`) {
+			return true
+		}
+	}
+	return false
+}
 
 // Diagnostics decides whether authoring mistakes are printed. The engine sets it from AllowLocal at
 // boot: on while someone is developing, off in production, where the same scan would cost every
@@ -301,13 +358,14 @@ var Diagnostics = true
 // blocks are removed before the second look. Measured across this repo, three files depend on that
 // distinction — and 157 pages depend on the engine recognising them without a marker.
 func hasAuthoredDirective(html string) bool {
-	if !presenceRe.MatchString(html) {
+	present := func(html string) bool { return presenceRe.MatchString(html) || groupedPresenceRe.MatchString(html) }
+	if !present(html) {
 		return false
 	}
 	if !strings.Contains(html, "<pre") && !strings.Contains(html, "<code") {
 		return true
 	}
-	return presenceRe.MatchString(exampleBlockRe.ReplaceAllString(html, ""))
+	return present(exampleBlockRe.ReplaceAllString(html, ""))
 }
 
 var exampleBlockRe = regexp.MustCompile(`(?s)<(pre|code)[^>]*>.*?</(pre|code)>`)
@@ -362,6 +420,9 @@ func authoringMistakesWith(html string, components ComponentNames) []string {
 			found = append(found, fmt.Sprintf("%v — in %s", err, m[0]))
 		}
 	}
+	// The grouped form the engine writes — data-kitwork-component, -scope, -bind, -class, -style,
+	// -event, -if and -for — is read pair by pair and held to the same rules (grouped_check.go).
+	found = append(found, groupedMistakes(html, declared)...)
 	// The costliest mistake an authored page can make is a name nothing declares: the kernel reads
 	// it as 0 and the markup looks right. The tree and the expressions are both here, so say it.
 	found = append(found, undeclaredWarningsWith(html, components)...)
@@ -375,7 +436,9 @@ func authoringMistakesWith(html string, components ComponentNames) []string {
 	return found
 }
 
-// ComponentNames answers, for a data-kit-component value, the names that component's scope holds,
+// ComponentNames answers, for a component — a data-kit-component value, or the name a
+// data-kitwork-component carries before its ": $alias" (the version stays: "theme@1.0.0") — the
+// names that component's scope holds,
 // or ok=false when they cannot be known for certain — which keeps that component opaque to the
 // checks, as every component was before 03/10. jit/js provides it, per site (ComponentNames there).
 type ComponentNames func(component string) (names []string, ok bool)
@@ -384,7 +447,7 @@ func Check(html string, components ComponentNames) {
 	// Is this a Kitwork page? The markup says so by ITSELF — an authored directive is the evidence,
 	// and no marker attribute is required or read. The cheap string test comes first so an ordinary
 	// static page costs one scan for a substring and nothing else.
-	if !Diagnostics || !strings.Contains(html, authoredPrefix) || !hasAuthoredDirective(html) {
+	if !Diagnostics || !hasDirectivePrefix(html) || !hasAuthoredDirective(html) {
 		return
 	}
 	// Authoring mistakes are reported for the person writing the page, so they are printed where a
@@ -392,21 +455,7 @@ func Check(html string, components ComponentNames) {
 	reportAuthoringMistakes(html, components)
 }
 
-// MarkDrive flags the runtime script tag so the client knows this site asked for Drive
-// (router.drive()). The flag rides on the ENGINE's own tag, not on anything the author wrote: it is
-// a transport detail, so it wears the data-kitwork-* prefix and never appears in a template.
-//
-// Before this, Drive switched itself on wherever a root marker appeared — an attribute authors wrote
-// to mean something else entirely.
-func MarkDrive(html string) string {
-	const tag = `<script data-kitwork-jit="runtime"`
-	i := strings.Index(html, tag)
-	if i < 0 || strings.Contains(html, driveFlag) {
-		return html
-	}
-	at := i + len(tag)
-	return html[:at] + " " + driveFlag + html[at:]
-}
-
-// driveFlag is what MarkDrive writes and what drive.js looks for.
-const driveFlag = "data-kitwork-drive"
+// (MarkDrive is gone, 10/10/2026. It flagged the kernel's tag data-kitwork-drive so drive.js could
+// tell whether the site asked for Drive; that was needed while Drive rode inside one runtime file every
+// page loaded. Drive is a file of its own now, delivered only to a site that asked for it, so the file
+// being on the page is the answer.)

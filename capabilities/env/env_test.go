@@ -46,4 +46,10 @@ func TestEnvCapability(t *testing.T) {
 	if port.N != 8080 {
 		t.Errorf("Expected PORT=8080, got %v", port.N)
 	}
+
+	// env has one method, require: env.DEBUG() calls a value, the not-a-function error (14/10/2026).
+	called := val.Invoke("DEBUG")
+	if message, ok := value.NotAFunctionFrom(called); !ok || message != "DEBUG không phải hàm (là boolean true): không gọi được" {
+		t.Errorf("env.DEBUG() = %s, want the not-a-function error", called.Text())
+	}
 }

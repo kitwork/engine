@@ -1,4 +1,4 @@
-/* carousel component @v1.0.0 — slides on a scroll-snap track, and which one is showing.
+/* carousel component — slides on a scroll-snap track, and which one is showing.
  *
  * Usage — the browser moves the track; the markup draws the dots from `active`:
  *
@@ -93,4 +93,3 @@ var carouselDef = {
 };
 
 window.kit.component("carousel", carouselDef);
-window.kit.component("carousel@v1.0.0", carouselDef);

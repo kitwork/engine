@@ -217,7 +217,7 @@ func (e *Engine) hasExactSiteSource(domain string) bool {
 		// intentionally named legacy site.
 		return false
 	case work.RootLayoutMultiDomain:
-		return fileExists(filepath.Join(e.root, domain, work.RouterFileName))
+		return work.RouterMarker(filepath.Join(e.root, domain)) != ""
 	case work.RootLayoutMultiTenant:
 		return nestedSiteSourceExists(e.root, domain)
 	}
@@ -229,8 +229,8 @@ func (e *Engine) hasExactSiteSource(domain string) bool {
 		return false
 	}
 	if directoryExists(filepath.Join(e.root, domain)) ||
-		fileExists(filepath.Join(e.root, work.SitesDirName, domain, work.RouterFileName)) ||
-		fileExists(filepath.Join(e.root, "test", domain, work.RouterFileName)) {
+		work.RouterMarker(filepath.Join(e.root, work.SitesDirName, domain)) != "" ||
+		work.RouterMarker(filepath.Join(e.root, "test", domain)) != "" {
 		return true
 	}
 
@@ -252,12 +252,7 @@ func nestedSiteSourceExists(root, domain string) bool {
 		return false
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && fileExists(filepath.Join(
-			root,
-			entry.Name(),
-			domain,
-			work.RouterFileName,
-		)) {
+		if entry.IsDir() && work.RouterMarker(filepath.Join(root, entry.Name(), domain)) != "" {
 			return true
 		}
 	}

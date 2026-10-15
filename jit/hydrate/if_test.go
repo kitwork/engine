@@ -79,25 +79,43 @@ console.log("data-kit-if: mount/unmount + dispose OK (absent -> mount -> relabel
 	runNodeDOMScript(t, "if.test.js", assertions)
 }
 
-// The long prefix on a directive is INERT (ideaship-final §9): the kernel reads data-kit-* source
-// only and no longer decodes a precompiled IR, so data-kitwork-if is just an attribute the kernel
-// never looks at — the element stays, and its content stays.
-func TestKitIfIgnoresTheLongPrefix(t *testing.T) {
+// data-kitwork-if is one of the eight grouped attributes a Kitwork UI page carries (KITWORK_UI.md
+// §11): its value is expression SOURCE, exactly like data-kit-if (the control beside it), and a false
+// condition takes the element out. What stays inert is every other data-kitwork-* name — a retired
+// per-directive spelling (data-kitwork-text, now `text:` in data-kitwork-bind) and the transport
+// markers the engine hangs on a page (generated, layout, current, delay, transition): their elements
+// and contents stay exactly as written.
+func TestKitIfReadsTheGroupedForm(t *testing.T) {
 	const assertions = `
-var branch = el("div", { "data-kitwork-if": '["#",false]' });
-branch.appendChild(el("span", { "data-ir-if-probe": "yes" }));
-document.body.appendChild(branch);
-var text = el("b", { "data-kitwork-text": '["#","ir"]' });
+var grouped = el("div", { "data-kitwork-if": "count > 1" });
+grouped.appendChild(el("span", { "data-if-probe": "grouped" }));
+document.body.appendChild(grouped);
+var legacy = el("div", { "data-kit-if": "count > 1" });
+legacy.appendChild(el("span", { "data-if-probe": "legacy" }));
+document.body.appendChild(legacy);
+var text = el("b", { "data-kitwork-text": "'ir'" });
 text.textContent = "authored";
 document.body.appendChild(text);
+var markers = el("div", { "data-kitwork-generated": "css", "data-kitwork-layout": "page.ui", "data-kitwork-current": "page",
+  "data-kitwork-delay": "0", "data-kitwork-transition": "fade" });
+markers.appendChild(el("span", { "data-marker-probe": "yes" }));
+document.body.appendChild(markers);
+function probes(kind) { return document.querySelectorAll('[data-if-probe="' + kind + '"]').length; }
 
-window.kit.render();
-if (document.querySelectorAll("[data-ir-if-probe]").length !== 1 || !branch.parentNode) {
-  throw new Error("data-kitwork-if must be inert: the kernel does not decode IR");
-}
-if (text.textContent !== "authored") throw new Error("data-kitwork-text must be inert, got " + JSON.stringify(text.textContent));
+window.kit.set("count", 0);
+if (probes("legacy") !== 0) throw new Error("control: data-kit-if with a false condition must take its element out");
+if (probes("grouped") !== 0) throw new Error("data-kitwork-if with a false condition must take its element out, as data-kit-if does");
 
-console.log("data-kitwork-<directive>: inert — source only");
+window.kit.set("count", 2);
+if (probes("legacy") !== 1) throw new Error("control: data-kit-if must mount when its condition turns true");
+if (probes("grouped") !== 1) throw new Error("data-kitwork-if must mount when its condition turns true");
+
+if (text.textContent !== "authored") throw new Error("data-kitwork-text is not a directive and must stay inert, got " + JSON.stringify(text.textContent));
+if (!markers.parentNode || document.querySelectorAll("[data-marker-probe]").length !== 1) throw new Error("an element carrying transport markers must stay, with its content");
+var kept = ["generated", "layout", "current", "delay", "transition"].filter(function (n) { return markers.hasAttribute("data-kitwork-" + n); });
+if (kept.length !== 5) throw new Error("the kernel must not touch transport markers, kept " + kept.join(","));
+
+console.log("data-kitwork-if: read as source like data-kit-if; data-kitwork-text and transport markers inert");
 `
-	runNodeDOMScript(t, "if-ir.test.js", assertions)
+	runNodeDOMScript(t, "if-grouped.test.js", assertions)
 }

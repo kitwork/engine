@@ -10,9 +10,12 @@ import (
 )
 
 type Response struct {
-	Status      int
-	Body        value.Value
+	Status int
+	Body   value.Value
+	// Error is why the request got no answer (Status 0), and Code its failure's code (failureCode):
+	// such a request is a failure of the program (Request.failure), not a response.
 	Error       string
+	Code        string
 	ContentType string // the upstream's media type — router.proxy() replays the response under it
 	Cached      bool   // served from the .cache()/.persist() tiers, not the network
 	Stale       bool   // served from an EXPIRED persisted copy because the live request failed

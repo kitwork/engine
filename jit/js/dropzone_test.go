@@ -7,11 +7,11 @@ import (
 
 func TestDropzoneIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="dropzone"><input type="file" data-kit-element="picker"></div>`)
-	if !strings.Contains(out, `/kit/components/dropzone@`) {
+	if !strings.Contains(out, `/_kitwork/components/dropzone.`) {
 		t.Fatalf("dropzone was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"dropzone"}), `component("dropzone@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"dropzone"}); !strings.Contains(src, `component("dropzone", `) || strings.Contains(src, `component("dropzone@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

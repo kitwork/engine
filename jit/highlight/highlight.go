@@ -1,5 +1,5 @@
-// Package highlight is the JIT syntax highlighter: a source-driven scan that
-// fills author-declared code slots.
+// This file is the template highlighter (the package documentation is in
+// doc.go): a source-driven scan that fills author-declared code slots.
 //
 // An author marks a code block and names its language:
 //
@@ -26,6 +26,7 @@
 //
 // Because it emits utility classes, it MUST run before the JIT CSS pass so the
 // classes it introduces are part of the set that pass generates CSS for.
+
 package highlight
 
 import (

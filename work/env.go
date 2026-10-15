@@ -53,6 +53,11 @@ func (e *envVars) OnInvoke(method string, args ...value.Value) value.Value {
 		}
 		return value.Value{K: value.Nil}
 	}
+	// env.API_KEY() calls a value, not a method: env has only require, so it is the not-a-function
+	// runtime error (14/10/2026), which never shows a string's text. Until then it gave null.
+	if method != "" {
+		return value.NotAFunction(method, e.OnGet(method))
+	}
 	return value.Value{K: value.Nil}
 }
 

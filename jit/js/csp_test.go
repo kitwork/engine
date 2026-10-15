@@ -35,7 +35,7 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
 	}
 
 	page := `<!doctype html><html><head>
-  <style data-kitwork-jit="css">.probe { color: rgb(1, 2, 3); }</style>
+  <style data-kitwork-generated="css">.probe { color: rgb(1, 2, 3); }</style>
 </head><body>
   <div id="box" data-kit-scope="{ count: 1 }" class="probe">
     <b id="out" data-kit-text="count * 21"></b>
@@ -64,7 +64,7 @@ func TestBrowserUnderAStrictContentSecurityPolicy(t *testing.T) {
     await wait(50);
     assert(document.getElementById("out").textContent === "42", "a write did not repaint: got " + document.getElementById("out").textContent);
 
-    // THE STYLESHEET DOES NOT. The engine's own <style data-kitwork-jit="css"> is inline, and
+    // THE STYLESHEET DOES NOT. The engine's own <style data-kitwork-generated="css"> is inline, and
     // style-src in this policy allows neither 'unsafe-inline' nor a hash for it.
     var colour = getComputedStyle(document.getElementById("box")).color;
     root.setAttribute("data-kit-css-colour", colour);

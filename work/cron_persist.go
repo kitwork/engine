@@ -1,12 +1,14 @@
 package work
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/id"
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
 )
 
@@ -295,9 +297,20 @@ func (t *Tenant) runClaimed(scheduler *cronRuntime, r claimedRow, job *CronJob) 
 		scheduler.store.recordSummary(appID, r.name, "failed")
 	}
 	if job.OnError != nil {
-		errObj := value.New(map[string]value.Value{"message": value.New(runErr.Error())})
-		_, _ = t.runInJobVM(job, job.OnError, []value.Value{ctx, errObj})
+		_, _ = t.runInJobVM(job, job.OnError, []value.Value{ctx, jobErrorObject(runErr)})
 	}
+}
+
+// jobErrorObject is the error a cron's or a queue's .error((run, err) => …) handler receives: the
+// shape a router's .error() handler and safe give, { message, code, at } (14/10/2026; it was
+// { message } with the place first and the stack after). A run that failed hands its diagnostic; any
+// other error (a job with no bytecode) has no place.
+func jobErrorObject(runErr error) value.Value {
+	var diagnostic *runtime.Diagnostic
+	if errors.As(runErr, &diagnostic) {
+		return runtime.FailureObject(diagnostic.Failure())
+	}
+	return runtime.FailureObject(value.FailureOfError("", runErr))
 }
 
 // cronContext is the `ctx` a persisted handler receives: what differs run-to-run, plus a log sink whose

@@ -1,0 +1,37 @@
+WebGradients collection — licensing
+===================================
+
+webgradients.go holds 175 of the 180 gradients of WebGradients (https://github.com/itmeo/webgradients,
+https://webgradients.com), built into every Kitwork UI site: the top layer of each, its colours and the
+places of its stops as the collection's stylesheet, webgradients.css, writes them (read 13/10/2026 at
+commit 0157829a0069756083abd3bfa81bef7117e14dfd, sha256
+472b0f48569a9fbbbbd7d84e75fa859a5add3e0a5be82953c1e12e7434ff1349), each angle rounded to the nearest
+of eight directions and twelve of them under another name (webGradientRenames in webgradients.go). Four
+are drawn short of the stylesheet, and five, layers one gradient cannot draw, are left out
+(webgradients_gen.go says which). webgradients_source_test.go keeps the stylesheet's blocks as
+published, for the tests. Both are redistributed under the collection's MIT License, copied below
+exactly as its LICENSE file states it.
+
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2017 itmeo
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

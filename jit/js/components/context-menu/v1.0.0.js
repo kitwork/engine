@@ -1,4 +1,4 @@
-/* context-menu component @v1.0.0 — a menu that opens where it was asked for.
+/* context-menu component — a menu that opens where it was asked for.
  *
  * Usage — the markup declares the panel and its position; the component answers where and when:
  *
@@ -146,4 +146,3 @@ var contextMenuDef = {
 };
 
 window.kit.component("context-menu", contextMenuDef);
-window.kit.component("context-menu@v1.0.0", contextMenuDef);

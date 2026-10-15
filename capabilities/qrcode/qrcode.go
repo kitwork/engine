@@ -278,7 +278,7 @@ func (q *QRCodeAdapter) Generate(v value.Value, sizeVal ...value.Value) value.Va
 func (q *QRCodeAdapter) Svg() value.Value {
 	svgStr, err := q.options.Svg()
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.InvalidArgumentCode, err.Error())
 	}
 	return value.New(svgStr)
 }
@@ -286,7 +286,7 @@ func (q *QRCodeAdapter) Svg() value.Value {
 func (q *QRCodeAdapter) Png() value.Value {
 	pngBytes, err := q.options.Png()
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.InvalidArgumentCode, err.Error())
 	}
 	return value.New(pngBytes)
 }
@@ -294,7 +294,7 @@ func (q *QRCodeAdapter) Png() value.Value {
 func (q *QRCodeAdapter) Base64() value.Value {
 	pngBytes, err := q.options.Png()
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return value.InvalidFailure(value.InvalidArgumentCode, err.Error())
 	}
 	encoded := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
 	return value.New(encoded)

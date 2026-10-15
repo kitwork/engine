@@ -2,7 +2,7 @@
 // pipeline emits just-in-time as CSS. It is a sibling of the JIT CSS engine (jit/css) and works the
 // same way: an icon name is just a class. Write `<i class="icon-shield-check"></i>` in a template,
 // and Render scans the page for used `icon-<name>` classes and injects ONE inline
-// `<style data-kitwork-jit="icons">` holding a mask rule for only the icons the page actually used — no
+// `<style data-kitwork-generated="icons">` holding a mask rule for only the icons the page actually used — no
 // Font Awesome, no CDN, no full-library payload, and no markup rewriting (the <i> stays as-is).
 //
 // Delivery technique is CSS mask: each rule sets `mask-image` to a data-URI SVG and paints it with
@@ -154,10 +154,10 @@ const (
 	// fixed at generation time; a future `icon-w-*` token would generate a heavier variant.
 	strokeWidth = "1.75"
 	// styleMarker tags our injected <style> so the client (Kitwork Drive) can swap it per page. It
-	// shares the data-kitwork-jit namespace with jit/css under a distinct VALUE ("icons" vs "css"),
-	// so one `style[data-kitwork-jit]` selector handles every JIT stylesheet — icons, css, and
+	// shares the data-kitwork-generated namespace with jit/css under a distinct VALUE ("icons" vs "css"),
+	// so one `style[data-kitwork-generated]` selector handles every JIT stylesheet — icons, css, and
 	// whatever comes next (components, …) — while each engine still owns its own block.
-	styleMarker = `data-kitwork-jit="icons"`
+	styleMarker = `data-kitwork-generated="icons"`
 )
 
 // nameRe validates an icon slug — lowercase, digits, dashes. Anchored, so a class token like
@@ -165,8 +165,11 @@ const (
 // name can never traverse out of the embedded tabler/ directory.
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// classAttrRe captures the value of each class="…" attribute so scan can tokenise it.
-var classAttrRe = regexp.MustCompile(`class="([^"]*)"`)
+// classAttrRe captures the value of each static class="…" attribute so scan can tokenise it. The
+// leading white space keeps it off every attribute that ENDS in class: data-kit-class is an
+// expression (dynamicClassRe below), and data-kitwork-class="icon-sun: dark" is a list of pairs whose
+// keys hydrate.ToggledClasses reads and whose values are conditions, not classes (as jit/css).
+var classAttrRe = regexp.MustCompile(`(?:^|\s)class="([^"]*)"`)
 
 // dynamicClassRe captures a data-kit-class="…" expression. Its string literals are classes too —
 // `open ? 'icon-x' : 'icon-menu-2'` — and both branches must resolve, not whichever one the first
@@ -245,8 +248,9 @@ func CSS(names []string) string {
 }
 
 // SiteCSS is the site-wide form of CSS: it scans many HTML sources (a whole tenant's templates) for
-// used icon-<name> classes and returns ONE stylesheet covering every icon any of them reference —
-// for the shared /jiticons service route (vs CSS, which is per-page). Empty when no icons are used.
+// used icon-<name> classes and returns ONE stylesheet covering every icon any of them reference
+// (vs CSS, which is per-page). Empty when no icons are used. The engine serves no shared icon
+// stylesheet today: the /jiticons route of router.icons() went with the tree router (09/07/2026).
 func SiteCSS(htmls ...string) string {
 	seen := make(map[string]bool)
 	var names []string
@@ -292,11 +296,16 @@ func scan(html string) []string {
 			add(tok)
 		}
 	}
+	// data-kitwork-class="icon-sun: dark" toggles icon-sun on the client: its rule must be here
+	// before it is, or the swap draws nothing.
+	for _, tok := range hydrate.ToggledClasses(html) {
+		add(tok)
+	}
 	return out
 }
 
 // Render is the JIT entry point. It scans html for used `icon-<name>` classes and, if any resolve
-// to a real icon, injects ONE `<style data-kitwork-jit="icons">` (its own block in the shared JIT
+// to a real icon, injects ONE `<style data-kitwork-generated="icons">` (its own block in the shared JIT
 // namespace) right before </head>. The markup itself is left untouched — the CSS does all the
 // work. A cheap no-op when the page references no icons.
 func Render(html string) string {

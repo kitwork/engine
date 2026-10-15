@@ -9,7 +9,7 @@ import (
 )
 
 // testPage is a hand-written test page served the way the engine serves a real one: Deliver gives
-// it its files (/kit/kernel.<hash>.js, /kit/drive…, a file per directive and component), and the
+// it its files (/_kitwork/kernel.<hash>.js, /_kitwork/drive…, a file per directive and component), and the
 // browser loads exactly those bytes from exactly those names. Until 03/10 the browser proofs got one
 // composed string at /kit.js instead — a composition production had stopped serving, which is how a
 // directive file could be missing from every proof without one of them noticing.
@@ -61,7 +61,7 @@ func deliverTestPage(t *testing.T, page string, components []string, site Site) 
 	tag := func(asset *Asset) string { return `<script src="` + asset.Path + `" defer></script>` }
 	kernel := KernelAsset()
 	if !strings.Contains(html, kernel.Path) {
-		html = strings.Replace(html, "</head>", `<script data-kitwork-jit="runtime" src="`+kernel.Path+`" defer></script></head>`, 1)
+		html = strings.Replace(html, "</head>", `<script data-kitwork-generated="runtime" src="`+kernel.Path+`" defer></script></head>`, 1)
 	}
 	// Drive's file right after the kernel's, as Deliver places it — present, not switched on.
 	kernelEnd := strings.Index(html, kernel.Path)
@@ -77,7 +77,7 @@ func deliverTestPage(t *testing.T, page string, components []string, site Site) 
 	return p
 }
 
-// serveFiles answers the page's JavaScript — its /kit/ files and its own scripts — and reports
+// serveFiles answers the page's JavaScript — its /_kitwork/ files and its own scripts — and reports
 // whether it did. The page itself is the caller's to serve, with whatever headers its proof needs.
 func (p *testPage) serveFiles(response http.ResponseWriter, request *http.Request) bool {
 	if source, ok := p.files[request.URL.Path]; ok {
@@ -99,7 +99,7 @@ func (p *testPage) serveFiles(response http.ResponseWriter, request *http.Reques
 }
 
 // ModulesJS is the named components' files, joined — the bytes a page that names them downloads
-// under /kit/components/. Tests read registrations out of it.
+// under /_kitwork/components/. Tests read registrations out of it.
 func ModulesJS(names []string) string {
 	var b strings.Builder
 	for _, key := range moduleKeys(names, nil) {

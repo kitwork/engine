@@ -13,13 +13,13 @@ func TestSidebarIsShippedWhenUsed(t *testing.T) {
 	html := `<body data-kit-component="sidebar" data-kit-alias="$sidebar"><button data-kit-click="cycle()">x</button></body>`
 	out := deliver(html)
 
-	if !strings.Contains(out, `/kit/components/sidebar@`) {
+	if !strings.Contains(out, `/_kitwork/components/sidebar.`) {
 		t.Fatalf("sidebar was not injected for markup that uses it:\n%s", out)
 	}
-	// The versioned alias must ship with it, or data-kit-component="sidebar@v1.0.0" silently
-	// resolves to nothing.
-	if !strings.Contains(ModulesJS([]string{"sidebar"}), `component("sidebar@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	// The bare name only: the kernel drops a version written in a host (data-kit-component=
+	// "sidebar@v1.0.0") before it looks the blueprint up, so no versioned name is registered.
+	if src := ModulesJS([]string{"sidebar"}); !strings.Contains(src, `component("sidebar", `) || strings.Contains(src, `component("sidebar@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 
@@ -29,10 +29,10 @@ func TestSidebarIsAbsentWhenUnused(t *testing.T) {
 	html := `<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`
 	out := deliver(html)
 
-	if strings.Contains(out, `/kit/components/sidebar@`) {
+	if strings.Contains(out, `/_kitwork/components/sidebar.`) {
 		t.Fatal("sidebar shipped to a page that never mentions it")
 	}
-	if !strings.Contains(out, `/kit/components/dialog@`) {
+	if !strings.Contains(out, `/_kitwork/components/dialog.`) {
 		t.Fatal("the component that IS used should still ship")
 	}
 }

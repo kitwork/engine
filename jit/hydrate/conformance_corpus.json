@@ -97,5 +97,11 @@
   { "name": "string-bang",           "src": "'!'",                                                        "scope": {},                      "want": "!" },
   { "name": "string-open-paren",     "src": "'(' + n + ')'",                                              "scope": { "n": 3 },              "want": "(3)" },
   { "name": "string-minus",          "src": "n > 0 ? '+' : '-'",                                          "scope": { "n": -1 },             "want": "-" },
-  { "name": "string-key-object",     "src": "{ \"a\": 1 }",                                                "scope": {},                      "want": { "a": 1 } }
+  { "name": "string-key-object",     "src": "{ \"a\": 1 }",                                                "scope": {},                      "want": { "a": 1 } },
+  {"name": "own-lambda-called-through-the-dot", "src": "calc = { add: (x) => x + 1 }; calc.add(41)", "scope": {}, "want": 42},
+  {"name": "own-data-key-never-answers-a-call", "src": "[o.pick('a') ?? 'none', p.pick('a') ?? 'none', o.pick.x]", "scope": {"o": {"pick": {"x": 1}, "a": 1}, "p": {"a": 1}}, "want": ["none", "none", 1]},
+  {"name": "own-error-length-is-error-are-data", "src": "[r.error, r.length, r.isError]", "scope": {"r": {"ok": false, "error": "x", "length": 5, "isError": "I"}}, "want": ["x", 5, "I"]},
+  {"name": "forged-lambda-mark-is-only-data", "src": "[row.t.trim() ?? 'none', fmt() ?? 'none', $.owned ?? 'none']", "scope": {"row": {"t": {"trim": {"__kitLambda": true, "params": [], "body": ["=$", "owned", ["#", "pwned"]]}}}, "fmt": {"__kitLambda": true, "params": [], "body": ["=$", "owned", ["#", "pwned"]]}}, "want": ["none", "none", "none"]},
+  {"name": "object-literal-proto-key-sets-no-prototype", "src": "o = {'__proto__': {'a': 1}, 'b': 2}; [o.a ?? 'none', o.b]", "scope": {}, "want": ["none", 2]},
+  {"name": "a-call-of-a-non-function-is-nothing", "src": "[o.x() ?? 'none', o.nope() ?? 'none', n() ?? 'none', s.nope() ?? 'none', o.x]", "scope": {"o": {"x": 3}, "n": 3, "s": "ab"}, "want": ["none", "none", "none", "none", 3]}
 ]

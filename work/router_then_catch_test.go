@@ -11,8 +11,11 @@ import (
 )
 
 // End to end through a real tenant VM: COMMIT fires each configured request exactly once at the
-// expression boundary, runs .then()/.catch(), and accepts modifiers on either side of the verb.
-func TestTreeHttpThenCatch(t *testing.T) {
+// expression boundary, and accepts modifiers on either side of the verb. Any answer is a response, a
+// 503 included; a request that got no answer is a failure (14/10/2026), as fetch rejects in
+// JavaScript, read with safe(() => …). .then() and .catch() are gone with it: calling one is the
+// NOT_A_FUNCTION error of any missing method.
+func TestTreeHttpCommitsOnceAndFailsWithoutAnAnswer(t *testing.T) {
 	savedLocal := AllowLocal
 	AllowLocal = true // upstream is loopback; SSRF guard would otherwise block it
 	defer func() { AllowLocal = savedLocal }()
@@ -31,6 +34,9 @@ func TestTreeHttpThenCatch(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	goneURL := gone.URL
+	gone.Close() // nothing answers there any more
 
 	tmp, err := os.MkdirTemp("", "kitwork-then-catch-*")
 	if err != nil {
@@ -45,21 +51,19 @@ func TestTreeHttpThenCatch(t *testing.T) {
 	u := srv.URL
 	router := `import { router, http } from "kitwork";` + "\n" +
 		`router.get((ctx) => {` + "\n" +
-		`  let a = "none"; let b = "none"; let d = "none"; let e = "none";` + "\n" +
-		// bare statement, handlers BEFORE config (dạng 2) + success
-		`  http.get("` + u + `/ok").then(res => { a = "ok:" + res.status }).catch(x => { a = "err" }).retry(3);` + "\n" +
-		// bare statement, config BEFORE handlers (dạng 1) + all-fail
-		`  http.get("` + u + `/fail").retry(1).then(res => { b = "ok" }).catch(x => { b = "caught:" + x.status });` + "\n" +
-		// Assigned to a var WITH a handler: commit once and run the continuation.
-		`  const asg = http.get("` + u + `/ok").then(res => { d = "assigned:" + res.status });` + "\n" +
-		// Arrow-body return WITH a handler: commit before crossing the return boundary.
-		`  const f = () => http.get("` + u + `/ok").then(res => { e = "returned:" + res.status });` + "\n" +
-		`  f();` + "\n" +
-		// A configured request commits even when assigned and never observed.
+		// a 503 is an answer: read as a response, retried as a transient one
+		`  const failed = http.get("` + u + `/fail").retry(1);` + "\n" +
+		// a configured request commits even when assigned and never observed
 		`  const lz = http.get("` + u + `/lazy");` + "\n" +
 		`  const pre = http.retry(0).timeout(5000).get("` + u + `/pre");` + "\n" +
 		`  const post = http.get("` + u + `/post").retry(0).timeout(5000);` + "\n" +
-		`  return ctx.json({ a: a, b: b, d: d, e: e, pre: pre.status, post: post.status });` + "\n" +
+		// no answer: a failure, caught where it is
+		`  const down = safe(() => http.get("` + goneURL + `/x"));` + "\n" +
+		`  const json = safe(() => http.get("` + goneURL + `/x").json());` + "\n" +
+		// .then is no method of a request
+		`  const then = safe(() => http.get("` + u + `/ok").then((res) => 1));` + "\n" +
+		`  return ctx.json({ failed: failed.status, ok: failed.ok, pre: pre.status, post: post.status, ` +
+		`down: down.error.code, json: json.error.code, downValue: down.value, then: then.error.message });` + "\n" +
 		`});`
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {
 		t.Fatal(err)
@@ -74,20 +78,14 @@ func TestTreeHttpThenCatch(t *testing.T) {
 	tenant.Serve(rec, req)
 	body := rec.Body.String()
 
-	if !strings.Contains(body, `"a":"ok:200"`) {
-		t.Errorf("bare dạng 2 (handlers before config) success failed — body: %s", body)
-	}
-	if !strings.Contains(body, `"b":"caught:503"`) {
-		t.Errorf("bare dạng 1 (config before handlers) failure path failed — body: %s", body)
-	}
-	if !strings.Contains(body, `"d":"assigned:200"`) {
-		t.Errorf("SHARP EDGE 1 — assigned request .then() did not run: %s", body)
-	}
-	if !strings.Contains(body, `"e":"returned:200"`) {
-		t.Errorf("SHARP EDGE 2 — returned (arrow-body) request .then() did not run: %s", body)
-	}
-	if !strings.Contains(body, `"pre":200`) || !strings.Contains(body, `"post":200`) {
-		t.Errorf("modifiers before/after the verb are not equivalent: %s", body)
+	for _, want := range []string{
+		`"failed":503`, `"ok":false`, `"pre":200`, `"post":200`,
+		`"down":"NETWORK"`, `"json":"NETWORK"`, `"downValue":null`,
+		`"then":"http.get(…).then không phải hàm (là null): không gọi được"`,
+	} {
+		if rec.Code != http.StatusOK || !strings.Contains(body, want) {
+			t.Errorf("%d %s lacks %s", rec.Code, body, want)
+		}
 	}
 	if n := atomic.LoadInt32(&committedHits); n != 1 {
 		t.Errorf("assigned request committed %d times, want exactly 1", n)

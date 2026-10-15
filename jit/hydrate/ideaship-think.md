@@ -393,8 +393,8 @@ Tối thiểu: literals, arrays, objects, arithmetic, comparison, boolean logic,
 access, method calls, assignment, **lexical resolution**, **shadowing**, **nearest-owner assignment**,
 **new-key assignment**, missing variable, reserved variables, null behavior.
 
-Đây là cổng cho mọi hợp nhất sau này, **và** là tiền đề bắt buộc cho capsule (code client gửi lên
-chạy dưới identity — buộc phải biết hai đầu hiểu giống nhau).
+Đây là cổng cho mọi hợp nhất sau này, **và** là tiền đề bắt buộc để cùng một hàm chạy ở cả hai phía (đường ống, sync engine — buộc phải
+biết hai đầu hiểu giống nhau). Capsule (code client gửi lên) đã bỏ 07/10/2026.
 
 ---
 

@@ -44,6 +44,10 @@ type expression struct {
 type renderScope struct {
 	parent *renderScope
 	values map[string]value.Value
+	// failed hears an expression whose value is a failure, on the root scope of a render (failure):
+	// the expression as the engine reads it and the failure's message. nil writes the message where
+	// the value would stand, the page's own way of saying it while developing.
+	failed func(expression, message string)
 
 	firstKey    string
 	firstValue  value.Value
@@ -71,6 +75,17 @@ func (scope *renderScope) bind(key string, item value.Value) {
 	}
 	scope.secondKey = key
 	scope.secondValue = item
+}
+
+// failure is the hook of the render this scope belongs to for an expression that failed (the root's
+// failed), nil when the render writes the failure's message into the page.
+func (scope *renderScope) failure() func(expression, message string) {
+	for current := scope; current != nil; current = current.parent {
+		if current.failed != nil {
+			return current.failed
+		}
+	}
+	return nil
 }
 
 func (scope *renderScope) get(key string) (value.Value, bool) {
@@ -384,7 +399,15 @@ func resolveExpression(
 				args = append(args, theme)
 			}
 		}
-		return receiver.Invoke(compiled.parts[0], args...)
+		result := receiver.Invoke(compiled.parts[0], args...)
+		// A name the receiver has no function for is not a function (14/10/2026): the call is a
+		// runtime error, and a template prints a runtime error where the value would go, as it
+		// prints any other. The path written before the dot says which call it was. A receiver
+		// that is already a failure passes on as it is, named once by the call that failed.
+		if message, ok := value.NotAFunctionFrom(result); ok && receiver.K != value.Invalid {
+			return value.InvalidFailure(value.NotAFunctionCode, expressionSource(compiled.left)+"."+message)
+		}
+		return result
 	}
 
 	left := resolveExpression(compiled.left, data, scope)

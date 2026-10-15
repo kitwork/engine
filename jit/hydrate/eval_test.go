@@ -126,7 +126,7 @@ func TestEvalLogicalOperatorsShortCircuit(t *testing.T) {
 
 // Sandbox: the walker must never reach the Function constructor (i.e. eval) or prototype pollution,
 // so constructor/__proto__/prototype resolve to nil in reads, calls and writes. This is what makes
-// "no eval" true by construction — essential before any client-sent expression (capsule) runs.
+// "no eval" true by construction.
 func TestEvalSandboxBlocksConstructor(t *testing.T) {
 	cases := []string{
 		"''.constructor",                  // → String, must be nil

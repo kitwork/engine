@@ -1,4 +1,4 @@
-/* otp component @v1.0.0 — a one-time code split across one box per digit.
+/* otp component — a one-time code split across one box per digit.
  *
  * Usage — the markup draws the boxes and says what to show; the component moves the caret:
  *
@@ -125,4 +125,3 @@ var otpDef = {
 };
 
 window.kit.component("otp", otpDef);
-window.kit.component("otp@v1.0.0", otpDef);

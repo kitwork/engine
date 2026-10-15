@@ -132,6 +132,18 @@ func contrastRatio(r1, g1, b1, r2, g2, b2 float64) float64 {
 	return b / a
 }
 
+// Contrast is WCAG 2's contrast ratio of two colours written #rgb or #rrggbb, from 1 to 21; 0 when
+// either is not a colour it can read, so a check against a minimum fails. Kitwork UI's stylesheet picks
+// its focus ring with it.
+func Contrast(a, b string) float64 {
+	r1, g1, b1, ok1 := parseHexRGB(a)
+	r2, g2, b2, ok2 := parseHexRGB(b)
+	if !ok1 || !ok2 {
+		return 0
+	}
+	return contrastRatio(r1, g1, b1, r2, g2, b2)
+}
+
 // readableHex nudges L until the colour clears target contrast on bg — darker on a light
 // background, lighter on a dark one — so body text stays legible under any brand hue or theme.
 func readableHex(c oklch, bgR, bgG, bgB, target float64) string {

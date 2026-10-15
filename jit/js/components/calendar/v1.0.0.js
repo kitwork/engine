@@ -1,4 +1,4 @@
-/* calendar component @v1.0.0 — a month grid you can walk with the keys.
+/* calendar component — a month grid you can walk with the keys.
  *
  * Usage — the component answers the dates; the markup draws them and binds every state:
  *
@@ -213,4 +213,3 @@ var calendarDef = {
 };
 
 window.kit.component("calendar", calendarDef);
-window.kit.component("calendar@v1.0.0", calendarDef);

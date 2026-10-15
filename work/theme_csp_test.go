@@ -28,7 +28,7 @@ func TestServedPageCarriesThePrepaintHashInItsOwnPolicy(t *testing.T) {
 		t.Fatalf("status = %d", recorder.Result().StatusCode)
 	}
 	body := recorder.Body.String()
-	if !strings.Contains(body, `<script data-kitwork-jit="theme">`) {
+	if !strings.Contains(body, `<script data-kitwork-generated="appearance">`) {
 		t.Fatal("the page should carry the pre-paint: darkMode is declared")
 	}
 	sent := recorder.Result().Header.Get("Content-Security-Policy")

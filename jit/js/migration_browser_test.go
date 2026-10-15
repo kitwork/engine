@@ -91,7 +91,7 @@ func TestBrowserMigratedPatternsRunOnTheKernel(t *testing.T) {
   </script>
 </body></html>`
 	rendered := deliver(page)
-	if !strings.Contains(rendered, "/kit/components/clipboard@") {
+	if !strings.Contains(rendered, "/_kitwork/components/clipboard.") {
 		t.Fatalf("Deliver should bring the clipboard component for this page:\n%s", rendered)
 	}
 	delivered := deliverTestPage(t, page, nil, nil)

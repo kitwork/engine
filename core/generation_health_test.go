@@ -285,8 +285,8 @@ func TestEngineHealthObservesActualCandidatePreparation(t *testing.T) {
 		preparing = engine.Health()
 		return preparing.Generations.Preparing == 1
 	})
-	if preparing.OwnershipSnapshotAvailable ||
-		preparing.LoadedApps != 0 ||
+	if !preparing.OwnershipSnapshotAvailable ||
+		preparing.LoadedApps != 1 ||
 		preparing.LoadedSites != 0 ||
 		preparing.ActiveGenerations != 0 ||
 		preparing.Generations.Activating != 0 {

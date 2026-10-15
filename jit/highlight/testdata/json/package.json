@@ -1,0 +1,107 @@
+{
+  "name": "@kitwork/quancaphe",
+  "version": "1.4.0-beta.2",
+  "private": true,
+  "description": "Quán cà phê — thực đơn, giỏ hàng và \"thanh toán\" — ví dụ",
+  "homepage": "https://quancaphe.localhost:8107/",
+  "port": 8107,
+  "ratio": -0.75,
+  "opening": { "weekday": [7, 22], "weekend": [8, 23], "timezone": "Asia/Ho_Chi_Minh" },
+  "limits": {
+    "energy": 1e6,
+    "stack": 2048,
+    "timeout": 2.5E+1,
+    "minimum": -1.5e-3,
+    "body": 1048576
+  },
+  "tags": ["coffee", "ui", "vi-VN"],
+  "flags": { "drive": true, "preview": false, "theme": null },
+  "currency": { "code": "VND", "symbol": "₫", "separator": ".", "decimals": 0 },
+  "menu": [
+    {
+      "id": "ca-phe-sua-da",
+      "name": "Cà phê sữa đá",
+      "price": 29000,
+      "sizes": ["S", "M", "L"],
+      "hot": false,
+      "tags": ["signature", "milk"],
+      "nutrition": { "calories": 180, "sugar": 24.5, "caffeine": 95 }
+    },
+    {
+      "id": "bac-xiu",
+      "name": "Bạc xỉu",
+      "price": 32000,
+      "sizes": [],
+      "hot": true,
+      "tags": [],
+      "nutrition": { "calories": 210, "sugar": 28, "caffeine": 60 }
+    },
+    {
+      "id": "tra-dao",
+      "name": "Trà đào",
+      "price": 35000,
+      "sizes": ["M", "L"],
+      "hot": false,
+      "note": "path\\to\\file \/ slash \u00e9 \t tab",
+      "nutrition": null
+    },
+    {
+      "id": "banh-mi",
+      "name": "Bánh mì thịt",
+      "price": 25000,
+      "sizes": null,
+      "hot": true,
+      "tags": ["food"],
+      "nutrition": { "calories": 420, "sugar": 4, "caffeine": 0 }
+    }
+  ],
+  "surcharge": { "S": 0, "M": 4000, "L": 6000 },
+  "staff": [
+    { "name": "An", "role": "barista", "shifts": [[7, 12], [17, 22]] },
+    { "name": "Bình", "role": "cashier", "shifts": [[12, 17]] },
+    { "name": "Châu", "role": "manager", "shifts": [] }
+  ],
+  "payments": {
+    "cash": { "enabled": true },
+    "vietqr": {
+      "enabled": true,
+      "bank": "970436",
+      "account": "0011004455667",
+      "template": "compact2"
+    },
+    "card": { "enabled": false, "fee": 0.022 }
+  },
+  "routes": {
+    "/": "home",
+    "/menu": "menu",
+    "/menu/:slug": "drink",
+    "/order": { "method": "POST", "limit": "10/m" },
+    "/status/:code": "status"
+  },
+  "headers": {
+    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:",
+    "Cache-Control": "public, max-age=3600"
+  },
+  "translations": {
+    "vi": { "open": "Đang mở", "closed": "Đã đóng", "paused": "Tạm nghỉ" },
+    "en": { "open": "Open", "closed": "Closed", "paused": "Paused" },
+    "ja": { "open": "営業中", "closed": "閉店", "paused": "休憩中" }
+  },
+  "nested": { "a": { "b": { "c": [1, [2, [3, [4]]]] } } },
+  "empty": {},
+  "emptyList": [],
+  "numbers": [0, -0, 1, -1, 3.14159, 6.02e23, 1E-7, 123456789012345678901234567890],
+  "unicode": "日本語 😀 \ud83d\ude00",
+  "escapes": "\"\\\/\b\f\n\r\t",
+  "scripts": {
+    "start": "kitwork run",
+    "test": "go test ./... -count=1",
+    "build": "kitwork build --out dist"
+  },
+  "engines": { "kitwork": ">=1.0.0" },
+  "keywords": [
+    "kitwork",
+    "coffee",
+    "menu"
+  ]
+}

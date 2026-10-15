@@ -68,6 +68,9 @@ func (t *Tenant) serveTree(
 				chainMeta[k] = v
 			}
 			chainJsonld = append(chainJsonld, node.folder.jsonld...)
+			if node.folder.transition != "" {
+				reqRouter.transition = node.folder.transition
+			}
 		}
 	}
 	reqRouter.chainMeta = chainMeta
@@ -135,6 +138,11 @@ func (t *Tenant) serveTree(
 	// reached) at HTTP 404 — the bubble the docs describe.
 	notFound := func() {
 		reqRouter.isNotfound = true
+		if t.hasUINotFound(match.Node) { // a Kitwork UI site: the nearest notfound.ui
+			t.respondUI(reqRouter, match.Node, nil)
+			finalize()
+			return
+		}
 		ctxObj.View() // creates the deferred builder; finalize renders it
 		finalize()
 	}
@@ -196,6 +204,9 @@ func (t *Tenant) serveTree(
 		if r.Method == http.MethodGet && t.folderHasPage(match.Node) {
 			ctxObj.View()
 			finalize()
+		} else if r.Method == http.MethodGet && t.folderHasUIPage(match.Node) {
+			t.respondUI(reqRouter, match.Node, nil) // a content.ui with no router.view: a page with no data
+			finalize()
 		} else {
 			notFound()
 		}
@@ -248,19 +259,21 @@ func (t *Tenant) serveTree(
 			// VM — reaching here means a miss, so fetch the upstream now. A failure is the UPSTREAM's
 			// fault, not ours: 502.
 			if err := t.serveProxy(vm, leaf.bytecode, method, ctxObj); err != nil {
-				reqRouter.err = err
-				reqRouter.response.Text(value.New(err.Error()), http.StatusBadGateway)
+				t.recordStageFailure(reqRouter, leaf.bytecode, "proxy", err)
+				reqRouter.fail(err, http.StatusBadGateway)
 			}
 		case method.outputKind != "":
 			if err := t.executeGeneratedOutput(vm, leaf.bytecode, method, ctxObj); err != nil {
-				reqRouter.err = err
-				reqRouter.response.Text(value.New(err.Error()), http.StatusInternalServerError)
+				t.recordStageFailure(reqRouter, leaf.bytecode, "output", err)
+				reqRouter.fail(err, http.StatusInternalServerError)
 			}
+		case method.uiView:
+			t.serveUIView(vm, leaf, method, ctxObj, reqRouter, match.Node)
 		case method.handle != nil:
 			res := t.execTree(vm, leaf.bytecode, method.handle, ctxObj)
 			if res.K == value.Invalid {
 				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "handler", res)
-				reqRouter.err = fmt.Errorf("%s", res.Text())
+				reqRouter.err = uncaught(res.Text())
 			} else if reqRouter.viewBuilder == nil && !reqRouter.response.IsSend() && res.Truthy() {
 				// A raw value (not a deferred view builder) → send it directly (JSON or HTML).
 				if res.K == value.Map || res.K == value.Array {
@@ -279,12 +292,20 @@ func (t *Tenant) serveTree(
 		}
 	}
 
-	// Post-processing: error() on failure, else success(); finally() always.
+	// Post-processing: error() on failure, else success(); finally() always. The method's own .error()
+	// answers its failure; without one the nearest folder's router.error() does, leaf to root, as the
+	// docs say (14/10/2026: a folder's was kept and never run).
 	if reqRouter.err != nil {
-		if method.errorH != nil {
-			res := t.execTree(vm, leaf.bytecode, method.errorH, ctxObj)
+		errorH, errorBytecode := method.errorH, leaf.bytecode
+		for index := len(match.Chain) - 1; errorH == nil && index >= 0; index-- {
+			if folder := match.Chain[index].folder; folder != nil && folder.errorH != nil && folder.bytecode != nil {
+				errorH, errorBytecode = folder.errorH, folder.bytecode
+			}
+		}
+		if errorH != nil {
+			res := t.execTree(vm, errorBytecode, errorH, ctxObj)
 			if res.K == value.Invalid {
-				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "error", res)
+				t.recordRuntimeFailure(reqRouter, errorBytecode, "error", res)
 			}
 			if res.K != value.Invalid && !reqRouter.response.IsSend() && res.Truthy() {
 				if reqRouter.response.Code() == 0 {
@@ -301,7 +322,7 @@ func (t *Tenant) serveTree(
 		res := t.execTree(vm, leaf.bytecode, method.success, ctxObj)
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "success", res)
-			reqRouter.err = fmt.Errorf("%s", res.Text())
+			reqRouter.err = uncaught(res.Text())
 		}
 	}
 	if method.final != nil {
@@ -309,7 +330,7 @@ func (t *Tenant) serveTree(
 		if res.K == value.Invalid {
 			t.recordRuntimeFailure(reqRouter, leaf.bytecode, "finally", res)
 			if reqRouter.err == nil {
-				reqRouter.err = fmt.Errorf("%s", res.Text())
+				reqRouter.err = uncaught(res.Text())
 			}
 		}
 	}
@@ -363,9 +384,9 @@ func (t *Tenant) runStage(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 		stage := "middleware"
 		if isGuard {
 			stage = "guard"
-			r.err = fmt.Errorf("guard error: %v", res.V)
+			r.err = uncaught(fmt.Sprintf("guard error: %v", res.V))
 		} else {
-			r.err = fmt.Errorf("middleware error: %v", res.V)
+			r.err = uncaught(fmt.Sprintf("middleware error: %v", res.V))
 		}
 		t.recordRuntimeFailure(r, bc, stage, res)
 		return false
@@ -374,7 +395,7 @@ func (t *Tenant) runStage(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 		return false // stage sent its own response (ctx.json / redirect / …)
 	}
 	if res.IsBool() && !res.Truthy() {
-		r.err = fmt.Errorf("request rejected")
+		r.err = errRequestRejected
 		return false
 	}
 	if isGuard && !res.IsBlank() && !res.IsBool() {
@@ -398,6 +419,16 @@ func (t *Tenant) folderHasPage(n *RouteNode) bool {
 	return n != nil && t.renderPlan() != nil && t.renderPlan().hasPage(n.relPath())
 }
 
+// isUISource reports whether a URL path names a Kitwork UI source file: *.ui (interface) or *.work
+// (logic). Their names carry no ".kitwork.", so the *.kitwork.* rule alone would serve them.
+func isUISource(urlPath string) bool {
+	switch strings.ToLower(path.Ext(urlPath)) {
+	case ".ui", ".work":
+		return true
+	}
+	return false
+}
+
 // serveTreeStatic streams a real on-disk file under the tenant (assets, images, …) with no VM.
 // It refuses path traversal, dot segments (protects .env, .persist/) and any *.kitwork.* source so
 // templates/routers are never exposed. When the root router declared .assets(), only those
@@ -413,6 +444,9 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 	if strings.Contains(strings.ToLower(clean), extension+".") { // never expose *.kitwork.* sources
 		return false
 	}
+	if isUISource(clean) { // never expose Kitwork UI sources: *.ui (interface), *.work (logic)
+		return false
+	}
 	for _, seg := range strings.Split(clean, "/") { // any dot SEGMENT: .env, .persist/…, .git/…
 		if strings.HasPrefix(seg, ".") {
 			return false
@@ -424,6 +458,9 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 
 	// /favicon.ico: browsers request it unprompted; .favicon() names the file that answers.
 	if clean == "/favicon.ico" && presentation.FaviconFile != "" {
+		if info, err := os.Stat(presentation.FaviconFile); err == nil && !info.IsDir() {
+			staticCacheHeaders(w, clean, presentation.FaviconFile, info)
+		}
 		http.ServeFile(w, r, presentation.FaviconFile)
 		return true
 	}
@@ -459,6 +496,7 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
+	staticCacheHeaders(w, clean, full, info) // Cache-Control and ETag; ServeFile answers 304 by them
 	http.ServeFile(w, r, full)
 	return true
 }

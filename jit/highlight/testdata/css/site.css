@@ -1,0 +1,47 @@
+/* Kit Design: lớp nền của trang (reboot tách riêng). */
+@charset "utf-8";
+@import url("https://fonts.example.test/outfit.css") layer(fonts);
+
+@layer reboot, colors, page;
+
+:root {
+  --canvas: #fafaf9;
+  --ink: rgb(28 25 23 / 92%);
+  --brand: hsl(32deg 95% 44%);
+  --radius: .75rem;
+  --font: "Outfit", system-ui, -apple-system, sans-serif;
+}
+
+@layer page {
+  html { font: 400 1rem/1.6 var(--font); color: var(--ink); background: var(--canvas); }
+
+  .card,
+  .card > .title::before,
+  a[href^="https://"]:not(.plain):hover {
+    padding: calc(var(--radius) * 2) 1.5em;
+    border-radius: var(--radius);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 8px 24px -12px #0003;
+    transition: transform 150ms cubic-bezier(.2, .8, .2, 1) !important;
+  }
+
+  .card::before { content: "\201C Trích dẫn"; color: #B45309; }
+  #hero { width: min(100%, 640px); aspect-ratio: 16 / 9; margin: 0 auto -2px; }
+}
+
+@media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
+  .card:nth-child(2n + 1) { transform: translateY(-4px) rotate(0.5turn); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@font-face {
+  font-family: "Outfit";
+  src: url(/_kitwork/fonts/outfit.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+1EA0-1EF9;
+}
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 1rem 2%; }
+.unterminated { background: url(data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=); }

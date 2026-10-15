@@ -10,7 +10,7 @@ import (
 // gets no directive file at all.
 func TestDragIsDeliveredWhereWritten(t *testing.T) {
 	roles, paths := deliveredFiles(t, Deliver(`<html><head></head><body><header data-kit-component="titlebar" data-kit-drag="true"><button data-kit-drag="false"></button></header></body></html>`, nil, Options{}))
-	if strings.Join(roles, ",") != "runtime,directive,component" || !strings.HasPrefix(paths[1], "/kit/directives/drag.") {
+	if strings.Join(roles, ",") != "runtime,directive,component" || !strings.HasPrefix(paths[1], "/_kitwork/directives/drag.") {
 		t.Fatalf("a title bar page: roles %v paths %v", roles, paths)
 	}
 	if asset, exact := AssetAt(paths[1], nil); asset == nil || !exact {

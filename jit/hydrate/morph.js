@@ -4,6 +4,13 @@
   var kitwork = window.kitwork, kit = kitwork;
   if (!kitwork || !kit.module || kit.has("morph")) return;
   var cleanupTree = kit.internal.cleanupTree;
+  // Nodes the client made for itself (Drive's transition stylesheet): the
+  // fetched HTML never has them, so a swap must neither match them nor remove them. Remembered here,
+  // in memory, and not by an attribute: data-kitwork-generated also marks what the SERVER generated,
+  // which a fetched page does carry and a swap must replace like anything else. Drive adds to it.
+  var clientOwned = kit.internal.clientOwned || (kit.internal.clientOwned = new WeakSet());
+  // What makes an element the same component on both sides of a swap (see morph, below).
+  var IDENTITY = ["data-kit-component", "data-kit-scope", "data-kitwork-component", "data-kitwork-scope"];
 
   // ---- morph: kernel primitive — make an existing DOM node match a new one, preserving
   // focus, cursor, scroll and input state (nodes are PATCHED, never recreated).
@@ -21,10 +28,11 @@
       // A different tag is a different element — and so is a different component or scope literal
       // on the same tag. Patched in place, a tabs host that became a toast host kept the tabs'
       // scope, listeners and alias: kit.components.toast and $note answered as the tabs (02/10).
-      // The same component on both pages is kept, state and all, which is what Drive is for.
-      if (fromNode.tagName !== toNode.tagName ||
-        fromNode.getAttribute("data-kit-component") !== toNode.getAttribute("data-kit-component") ||
-        fromNode.getAttribute("data-kit-scope") !== toNode.getAttribute("data-kit-scope")) {
+      // The same component on both pages is kept, state and all, which is what Drive is for. Both
+      // spellings are identity: the hand-written data-kit-* and a Kitwork UI page's data-kitwork-*.
+      if (fromNode.tagName !== toNode.tagName || IDENTITY.some(function (name) {
+        return fromNode.getAttribute(name) !== toNode.getAttribute(name);
+      })) {
         cleanupTree(fromNode);
         fromNode.replaceWith(toNode.cloneNode(true));
         return;
@@ -42,11 +50,11 @@
       } else if (fromNode.tagName === "SELECT") {
         if (fromNode.value !== toNode.value) fromNode.value = toNode.value;
       }
-      // Kernel-owned overlay nodes (progress bar, announcer, toasts — marked data-kitwork-ui) are
-      // CLIENT truth: the fetched HTML never contains them, so they are invisible to matching and
-      // exempt from removal. Without this, an app rooted at <html> loses the progress bar on the
-      // first swap (the bar died with the morph, so it "sometimes shows, sometimes doesn't").
-      function kernelUI(n) { return n.nodeType === 1 && n.hasAttribute("data-kitwork-ui"); }
+      // Client-owned nodes (clientOwned, above) are CLIENT truth: the fetched HTML never contains
+      // them, so they are invisible to matching and exempt from removal. Without this, an app rooted
+      // at <html> loses them on the first swap (the overlay died with the morph, so it "sometimes
+      // shows, sometimes doesn't"). (Until 10/10/2026 they carried data-kitwork-ui; that went.)
+      function kernelUI(n) { return clientOwned.has(n); }
       var fromChildren = Array.prototype.slice.call(fromNode.childNodes).filter(function (n) { return !kernelUI(n); });
       var toChildren = Array.prototype.slice.call(toNode.childNodes);
 

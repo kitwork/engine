@@ -343,4 +343,25 @@ func TestSourceManifestDetectsTemplateTreeChanges(t *testing.T) {
 		t.Fatalf("new template was not detected: changed=%v err=%v", changed, err)
 	}
 	addition.Retire()
+
+	// A component's logic shapes the page too: cart.work's names cover the page's inside <box component="cart" />.
+	logic := filepath.Join(root, "cart.work")
+	if err := os.WriteFile(logic, []byte("var items = [];"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	component, err := siteRuntime.PrepareGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := component.Sources().WatchTemplateTree(root); err != nil {
+		t.Fatal(err)
+	}
+	component.Sources().Freeze()
+	if err := os.WriteFile(logic, []byte("var items = [1];"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := component.Sources().Changed(); err != nil || !changed {
+		t.Fatalf("an edit to a component's logic was not detected: changed=%v err=%v", changed, err)
+	}
+	component.Retire()
 }

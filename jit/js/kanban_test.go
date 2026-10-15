@@ -7,11 +7,11 @@ import (
 
 func TestKanbanIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<section data-kit-component="kanban"><div data-kit-element="column" data-column="a"></div></section>`)
-	if !strings.Contains(out, `/kit/components/kanban@`) {
+	if !strings.Contains(out, `/_kitwork/components/kanban.`) {
 		t.Fatalf("kanban was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"kanban"}), `component("kanban@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"kanban"}); !strings.Contains(src, `component("kanban", `) || strings.Contains(src, `component("kanban@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

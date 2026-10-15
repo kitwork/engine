@@ -1,4 +1,4 @@
-/* combobox component @v1.0.0 — the keyboard half of a text field with a list of suggestions.
+/* combobox component — the keyboard half of a text field with a list of suggestions.
  *
  * Usage — the page's scope holds the data, the grammar filters it, the component owns the keys:
  *
@@ -141,4 +141,3 @@ var comboboxDef = {
 };
 
 window.kit.component("combobox", comboboxDef);
-window.kit.component("combobox@v1.0.0", comboboxDef);

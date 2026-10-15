@@ -24,28 +24,33 @@ import (
 // Config is everything the render engine needs — no *Tenant, no HTTP. Build a render with New(),
 // then Bind(data) for a page or HTML(tmpl, data) for a raw string template (e.g. an email).
 type Config struct {
-	Base             string                    // template root — the anchor every path resolves against
-	JitConfig        *jitcss.Config            // JIT-CSS config (brand colors, keyframes…); nil = defaults
-	Directory        string                    // sub-root under Base (tree uses "."; legacy used "views"/"app")
-	Path             string                    // the folder whose page/index/slots resolve, walked up
-	Page             string                    // explicit page override (usually "" — derived from Path)
-	Index            string                    // explicit shell filename override
-	Notfound         string                    // notfound filename (default "notfound")
-	NotfoundMode     bool                      // render the notfound page for {{ @page }}
-	JitCSS           bool                      // inline the minimal JIT CSS for the page's classes
-	Global           value.Value               // data merged into every render
-	Minify           []string                  // explicit minify content types
-	MinifySet        bool                      // whether Minify was set explicitly
-	DefaultMinify    bool                      // minify when not set explicitly (caller passes !AllowLocal)
-	ThemeMode        string                    // theme pre-paint: "" = auto-scan, "force" = always, "off" = never
-	Prerender        bool                      // router.javascript({ prerender: true }) — off by default
-	Drive            bool                      // router.drive() — off by default
-	Versions         map[string]string         // router.javascript({ components: { name: "x.y.z" } }) pins
-	HighlightTheme   string                    // folder-scoped default for {{ src.highlight() }} (router.highlight)
-	ManifestPath     string                    // where router.manifest() publishes, for the <head> link
-	HighlightPalette map[string]string         // per-role overrides from router.highlight({ role: … })
-	SiteComponents   jitjs.Site                // the tenant's own _components/<name>.js, frozen at generation
-	Source           Source                    // immutable template source; nil reads the live filesystem
+	Base             string            // template root — the anchor every path resolves against
+	JitConfig        *jitcss.Config    // JIT-CSS config (brand colors, keyframes…); nil = defaults
+	Directory        string            // sub-root under Base (tree uses "."; legacy used "views"/"app")
+	Path             string            // the folder whose page/index/slots resolve, walked up
+	Page             string            // explicit page override (usually "" — derived from Path)
+	Index            string            // explicit shell filename override
+	Notfound         string            // notfound filename (default "notfound")
+	NotfoundMode     bool              // render the notfound page for {{ @page }}
+	JitCSS           bool              // inline the minimal JIT CSS for the page's classes
+	Global           value.Value       // data merged into every render
+	Minify           []string          // explicit minify content types
+	MinifySet        bool              // whether Minify was set explicitly
+	DefaultMinify    bool              // minify when not set explicitly (caller passes !AllowLocal)
+	ThemeMode        string            // appearance pre-paint: "" = auto-scan, "force" = always, "off" = never
+	Drive            bool              // router.reload(false): Drive on every page — off by default
+	HighlightTheme   string            // folder-scoped default for {{ src.highlight() }} (router.highlight)
+	ManifestPath     string            // where router.manifest() publishes, for the <head> link
+	HighlightPalette map[string]string // per-role overrides from router.highlight({ role: … })
+	SiteComponents   jitjs.Site        // the tenant's own _components/<name>.js, frozen at generation
+	Source           Source            // immutable template source; nil reads the live filesystem
+	// ExpressionFailed hears a {{ expression }} whose value is a failure (a method that is not a
+	// function, a value an error left), with the expression as the engine reads it and the failure's
+	// message, and the page writes nothing in its place. nil writes the message where the value would
+	// stand. The engine passes nil while developing (AllowLocal) and, in production, a hook that logs
+	// it: a visitor never reads an engine's message in a page (14/10/2026), as a 500 shows them only
+	// the status and the request id.
+	ExpressionFailed func(expression, message string)
 }
 
 func New(c Config) *Render {
@@ -53,12 +58,13 @@ func New(c Config) *Render {
 		base: c.Base, jitConfig: c.JitConfig, directory: c.Directory, path: c.Path,
 		page: c.Page, index: c.Index, notfound: c.Notfound, notfoundMode: c.NotfoundMode,
 		jitCSS: c.JitCSS, global: c.Global, minify: c.Minify, minifySet: c.MinifySet,
-		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, prerender: c.Prerender, drive: c.Drive, versions: c.Versions,
+		defaultMinify: c.DefaultMinify, themeMode: c.ThemeMode, drive: c.Drive,
 		highlightTheme:   c.HighlightTheme,
 		manifestPath:     c.ManifestPath,
 		highlightPalette: c.HighlightPalette,
 		siteComponents:   c.SiteComponents,
 		source:           c.Source,
+		expressionFailed: c.ExpressionFailed,
 	}
 }
 
@@ -77,15 +83,14 @@ type Render struct {
 	minify               []string          // content types to minify on the final HTML output
 	minifySet            bool              // whether minify was set explicitly (else default by environment)
 	defaultMinify        bool              // minify default when not explicit (injected — replaces AllowLocal)
-	themeMode            string            // theme pre-paint mode (see Config.ThemeMode)
-	prerender            bool              // server pre-render, opt-in per site (see Config.Prerender)
+	themeMode            string            // appearance pre-paint mode (see Config.ThemeMode)
 	drive                bool              // Kitwork Drive, opt-in per site (see Config.Drive)
-	versions             map[string]string // site-wide component version pins (see Config.Versions)
 	highlightTheme       string            // folder-scoped default theme for {{ src.highlight() }}
 	manifestPath         string            // router.manifest() output path, linked from <head>
 	highlightPalette     map[string]string // per-role class overrides for the highlight pass
 	siteComponents       jitjs.Site
-	source               Source // immutable generation snapshot; nil = live filesystem
+	source               Source                           // immutable generation snapshot; nil = live filesystem
+	expressionFailed     func(expression, message string) // see Config.ExpressionFailed
 	program              *node
 	prepareError         string
 	presentationPrepared bool
@@ -278,16 +283,9 @@ func (r *Render) tmpl(data any) string {
 	}
 
 	// Parse và Eval một lần duy nhất cho toàn bộ cây mẫu
-	out := eval(program, data, scope)
+	out := evalWith(program, data, scope, r.expressionFailed)
 	if !presentationPrepared {
 		out = r.applyStaticPresentation(out)
-	}
-
-	// Server pre-render: OFF unless the site asked for it with router.javascript({ prerender: true }).
-	// It costs a scan of every response and only reaches page scope, so it is a deliberate choice, not
-	// a default.
-	if r.prerender {
-		out = hydrate.PreRender(out)
 	}
 
 	if r.shouldMinify() {
@@ -314,9 +312,21 @@ func (r *Render) applyStaticPresentation(out string) string {
 
 	// Link the web app manifest. Unlike every other pass this one reaches into
 	// <head>, because a manifest with no <link> does nothing — an author-placed
-	// <link data-kitwork-jit="manifest"> is filled in place, otherwise the link
+	// <link data-kitwork-generated="manifest"> is filled in place, otherwise the link
 	// is injected. A site that declared no manifest is untouched.
 	out = jitmanifest.Render(out, r.manifestPath)
+
+	// Name the engine in <head>: <meta name="generator" content="Kitwork …"> (generator.go).
+	out = withGenerator(out)
+
+	// The bar between pages: a site that moves without a reload gets the progressbar component on every
+	// page that has none (progressbar.go). Before the CSS pass, which styles its classes, and before
+	// the JavaScript pass, which delivers its component.
+	if r.drive {
+		out = withProgressbar(out)
+		// and the reader that says the new page's title to a screen reader (reader.go)
+		out = withReader(out)
+	}
 
 	// 3. JIT CSS (opt-in via .jit()): sinh CSS tối thiểu cho đúng các class trang dùng
 	// (Tailwind + hệ industrial), nhét <style> trước </head>. Thay CDN client-side;
@@ -328,7 +338,7 @@ func (r *Render) applyStaticPresentation(out string) string {
 			if kf := jitcss.UsedKeyframes(css, r.jitConfig); kf != "" {
 				css = kf + "\n" + css
 			}
-			style := "<style data-kitwork-jit=\"css\">\n" + css + "</style>"
+			style := "<style data-kitwork-generated=\"css\">\n" + css + "</style>"
 			if i := strings.LastIndex(out, "</head>"); i >= 0 {
 				out = out[:i] + style + out[i:]
 			} else {
@@ -337,46 +347,46 @@ func (r *Render) applyStaticPresentation(out string) string {
 		}
 	}
 
-	// 3d. JIT material: inject <style data-kitwork-jit="material"> with CSS for ONLY the UI
+	// 3d. JIT material: inject <style data-kitwork-generated="material"> with CSS for ONLY the UI
 	// material families (.button/.btn, .card, …) the page uses (jit/material). No-op otherwise.
 	out = material.Render(out)
 
-	// 3c. JIT icons. DEFAULT (inline): scan for `<i class="icon-x">` and inject a per-page
-	// <style data-kitwork-jit="icons"> with CSS-mask rules for ONLY the icons used (jit/icons) — a
-	// cheap no-op when none are present. SERVICE mode: if the tenant declared router.icons(), a
-	// shared cached stylesheet is served at iconRoute instead, so we skip the inline pass and
-	// auto-link that stylesheet (same guards as router.jit(): a LIVE isIcons route, idempotent if a
-	// link is already present). Sovereign + minimal either way: no Font Awesome, no CDN, no payload.
+	// 3c. JIT icons: scan for `<i class="icon-x">` (and the icons a data-kitwork-class toggles in) and
+	// inject a per-page <style data-kitwork-generated="icons"> with CSS-mask rules for ONLY the icons
+	// used (jit/icons) — a cheap no-op when none are present. A Kitwork UI page links that CSS as
+	// /_kitwork/icons.<hash>.css instead (PresentHead). No Font Awesome, no CDN, no payload; there is
+	// no shared icon stylesheet (the /jiticons route of router.icons() went on 09/07/2026).
 	out = icons.Render(out)
 
-	// 3f. JIT logos: brand logos (Simple Icons) via <i class="logo-x"> — same inline/service model
-	// as icons (jit/logo). router.logo() switches to the shared cached /jitlogo stylesheet.
+	// 3f. JIT logos: brand logos (Simple Icons) via <i class="logo-x"> — inline like icons (jit/logo),
+	// /_kitwork/logo.<hash>.css on a Kitwork UI page; the /jitlogo route of router.logo() is gone.
 	out = logo.Render(out)
 
 	// 3e. JavaScript for kernel pages: the kernel, Drive when the site asked for it, and one file per
-	// component (data-kit-component) and capability (api/live/remember) the page uses — each named
-	// by its content, so each is cached once and for good (jit/js delivery.go). A page that uses
-	// no grammar gets nothing.
-	out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive, Versions: r.versions})
+	// component (data-kit-component, or the engine's data-kitwork-component) and directive file the
+	// page uses — each named by its content, so each is cached once and for good (jit/js
+	// delivery.go). A page that uses no grammar — neither data-kit-* nor the eight grouped
+	// data-kitwork-* directives — gets nothing.
+	out = jitjs.Deliver(out, r.siteComponents, jitjs.Options{Drive: r.drive})
 
 	// 3h. hydrate: verify every authored expression (compile-time linting, printed while developing).
 	// It reads the page and never changes it; the wire ships the SOURCE and the client parses it
 	// (no eval).
-	hydrate.Check(out, jitjs.ComponentNames(r.siteComponents, r.versions))
-	// Drive is a site-wide choice (router.drive()); the engine flags its own runtime tag so the
-	// client can see the answer without the page carrying a marker for it.
-	if r.drive {
-		out = hydrate.MarkDrive(out)
-	}
+	hydrate.Check(out, jitjs.ComponentNames(r.siteComponents))
+	// Drive is a site-wide choice (router.reload(false), the default of a Kitwork UI site): the page
+	// carries Drive's file only when the site asked for it, so the file being there is the answer and
+	// no flag is written for it.
 
 	// 3g. JIT fonts (jitfonts): self-hosted Google Fonts. Scan for the font FAMILIES the page uses
 	// (a `font-family: <Name>` value or a `font-<slug>` class) → inject preload links + ONE
-	// <style data-kitwork-jit="fonts"> with @font-face (subset woff2 served from /jitfonts) for ONLY
+	// <style data-kitwork-generated="fonts"> with @font-face (subset woff2 served from /_kitwork/fonts/) for ONLY
 	// those families. No Google at runtime, no third-party CDN; a cheap no-op when none are used.
 	out = fonts.Render(out)
 
-	// 3i. JIT theme: swap <script data-kitwork-jit="theme"> for a synchronous pre-paint that applies
-	// the saved/OS theme before first paint (no flash). Pairs with $app.theme.toggle().
+	// 3i. Appearance pre-paint (jit/theme): swap <script data-kitwork-generated="appearance"> (or the
+	// older "theme" marker) for a synchronous pre-paint that applies the saved or system light/dark
+	// choice before first paint (no flash). Pairs with the kit.appearance service (kit.theme is the same
+	// object) that the appearance and theme components read.
 	switch r.themeMode {
 	case "off": // router.themes({ prepaint: false }) — no pre-paint even when the scan would find usage
 	case "force":
@@ -435,6 +445,26 @@ func (r *Render) Prepare() *Render {
 	prepared.program, prepared.presentationPrepared, prepared.minifyPrepared, prepared.prepareError =
 		prepared.compileTemplate(true)
 	return &prepared
+}
+
+// Present finishes a whole HTML document built elsewhere exactly like a template page: CSS for the
+// classes it uses, icons, fonts, delivered scripts, appearance pre-paint, then minification when the site
+// minifies. Nothing in the engine calls it: a Kitwork UI page builds its head once from its skeleton
+// (PresentHead) and links its own stylesheets (engine/ui/stylesheet), with none of the template
+// passes' CSS. It stays as the control two tests compare with: what these passes would make of the same
+// document (TestUIPageRunsNoPassPerRequest, TestPresentHeadTakesTheStylesheetsOut).
+func (r *Render) Present(document string) string {
+	if r == nil {
+		return document
+	}
+	out := r.applyStaticPresentation(document)
+	if r.shouldMinify() {
+		out = minifier.HTML(out)
+		if r.themeMode != "off" {
+			out = theme.Canonicalize(out)
+		}
+	}
+	return out
 }
 
 // PresentationPrepared reports whether source-driven presentation work was
@@ -545,7 +575,7 @@ func (context *kitJSTemplateHTMLContext) rejectToken(kind kitJSTemplateTokenKind
 		if !kitAttributeName(context.attribute) {
 			return ""
 		}
-		return "template tokens cannot change a data-kit-* attribute value"
+		return "template tokens cannot change a data-kit-* or data-kitwork-* attribute value"
 	case kitJSHTMLComment:
 		return "template tokens inside HTML comments can change the scanner boundary"
 	case kitJSHTMLRawCandidate:
@@ -1107,7 +1137,7 @@ func (r *Render) BindPage(page string, notfoundMode bool, data value.Value) valu
 // HTML renders a raw template string with data
 func (r *Render) HTML(tmpl string, data any) string {
 	viewDir := r.resolve("views")
-	return engineRenderWithSource(tmpl, data, viewDir, viewDir, r.source)
+	return engineRenderWithSource(tmpl, data, viewDir, viewDir, r.source, r.expressionFailed)
 }
 
 // File renders a file from the 'views' directory
@@ -1133,10 +1163,10 @@ func (r *Render) HTML(tmpl string, data any) string {
 // ----------------------------------------------------------------------------
 
 func engineRender(tmpl string, data any, viewDir string, globalDir string) string {
-	return engineRenderWithSource(tmpl, data, viewDir, globalDir, nil)
+	return engineRenderWithSource(tmpl, data, viewDir, globalDir, nil, nil)
 }
 
-func engineRenderWithSource(tmpl string, data any, viewDir string, globalDir string, source Source) string {
+func engineRenderWithSource(tmpl string, data any, viewDir string, globalDir string, source Source, failed func(expression, message string)) string {
 	tokens := specializeTokens(tmpl)
 	node := parse(tokens)
 
@@ -1155,7 +1185,7 @@ func engineRenderWithSource(tmpl string, data any, viewDir string, globalDir str
 		}
 	}
 
-	return eval(node, data, initialScope)
+	return evalWith(node, data, initialScope, failed)
 }
 
 func readScopedTemplate(scope *renderScope, filename string) ([]byte, error) {
@@ -1471,12 +1501,17 @@ func indexOf(parts []string, target string) int {
 	return -1
 }
 
-func eval(n *node, data any, scope map[string]value.Value) (out string) {
+func eval(n *node, data any, scope map[string]value.Value) string {
+	return evalWith(n, data, scope, nil)
+}
+
+// evalWith is eval with the hook of the render for an expression that failed (Config.ExpressionFailed).
+func evalWith(n *node, data any, scope map[string]value.Value, failed func(expression, message string)) (out string) {
 	var sb strings.Builder
 	if n != nil {
 		sb.Grow(n.staticBytes)
 	}
-	rootScope := renderScope{values: scope}
+	rootScope := renderScope{values: scope, failed: failed}
 	current := value.New(data)
 	defer func() {
 		if r := recover(); r != nil {
@@ -1505,7 +1540,15 @@ func evalInto(
 		output.WriteString(n.val)
 
 	case nodeVar:
-		writeResolvedValue(output, resolveExpression(n.expr, data, scope), !n.raw)
+		resolved := resolveExpression(n.expr, data, scope)
+		if resolved.K == value.Invalid {
+			if failed := scope.failure(); failed != nil {
+				// production: nothing in the page where the value would stand, the message to the log
+				failed(expressionSource(n.expr), resolved.Text())
+				return
+			}
+		}
+		writeResolvedValue(output, resolved, !n.raw)
 
 	case nodeIf:
 		val := resolveExpression(n.expr, data, scope)

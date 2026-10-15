@@ -26,7 +26,7 @@ func routerMethodNames(t *testing.T) map[string]reflect.Method {
 
 func TestRouterExposesCurrentDesignAndDeliveryNames(t *testing.T) {
 	names := routerMethodNames(t)
-	for _, want := range []string{"css", "javascript"} {
+	for _, want := range []string{"css", "colors", "fonts", "appearance", "reload", "transition", "highlight"} {
 		if _, ok := names[want]; !ok {
 			t.Fatalf("router.%s() does not resolve: no exported method lowercases to %q", want, want)
 		}
@@ -34,10 +34,14 @@ func TestRouterExposesCurrentDesignAndDeliveryNames(t *testing.T) {
 }
 
 // The old spellings stay reachable: dozens of live sites still call them, and a
-// rename that breaks them is a rename that cannot ship.
+// rename that breaks them is a rename that cannot ship. router.jitcss() still
+// means router.css(); router.theme() is applied as router.colors() and
+// router.fonts(); router.drive(), router.javascript() and router.jitjs() apply
+// nothing, but they must resolve so the boot names what replaced them instead of
+// reporting an unknown method.
 func TestRouterKeepsDeprecatedJitAliases(t *testing.T) {
 	names := routerMethodNames(t)
-	for _, want := range []string{"jitcss", "jitjs"} {
+	for _, want := range []string{"jitcss", "theme", "drive", "javascript", "jitjs"} {
 		if _, ok := names[want]; !ok {
 			t.Fatalf("router.%s() stopped resolving; existing sites would break", want)
 		}
@@ -62,6 +66,6 @@ func TestCssAliasMatchesJitcssSignature(t *testing.T) {
 // a shortening of JavaScript, so it must not become a reachable router name.
 func TestRouterDoesNotExposeAbbreviatedJs(t *testing.T) {
 	if _, ok := routerMethodNames(t)["js"]; ok {
-		t.Fatal("router.js() resolves — the abbreviated spelling is back; the name is router.javascript()")
+		t.Fatal("router.js() resolves — the abbreviated spelling is back")
 	}
 }

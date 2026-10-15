@@ -7,11 +7,11 @@ import (
 
 func TestCodeEditorIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="code-editor"><textarea data-kit-element="field"></textarea></div>`)
-	if !strings.Contains(out, `/kit/components/code-editor@`) {
+	if !strings.Contains(out, `/_kitwork/components/code-editor.`) {
 		t.Fatalf("code-editor was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"code-editor"}), `component("code-editor@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"code-editor"}); !strings.Contains(src, `component("code-editor", `) || strings.Contains(src, `component("code-editor@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

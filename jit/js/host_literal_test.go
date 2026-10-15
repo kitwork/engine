@@ -53,7 +53,7 @@ func TestAHostLiteralKeyTheComponentLacksIsReported(t *testing.T) {
 		"counter":   counterSource,
 		"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`,
 	}
-	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site, nil)) }
+	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site)) }
 
 	report := check(`<html><body><div data-kit-component="counter" data-kit-scope="mx: 99"></div></body></html>`)
 	if !strings.Contains(report, `data-kit-scope sets "mx" on component counter`) || !strings.Contains(report, "max") {

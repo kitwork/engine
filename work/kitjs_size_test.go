@@ -12,10 +12,11 @@ import (
 	jitjs "github.com/kitwork/engine/jit/js"
 )
 
-var kitScriptRe = regexp.MustCompile(`src="?(/kit/[^"\s>]+)`)
+var kitScriptRe = regexp.MustCompile(`src="?(/(?:kit|_kitwork)/[^"\s>]+)`)
 
-// pageJavaScript is every script the home page asks for under /kit/, fetched through the tenant and
-// joined: what a visitor's browser actually downloads for that page.
+// pageJavaScript is every script the home page asks for under the engine's prefix (/_kitwork/, or the
+// older /kit/), fetched through the tenant and joined: what a visitor's browser actually downloads
+// for that page.
 func pageJavaScript(t *testing.T, tenant *Tenant) string {
 	t.Helper()
 	get := func(path string) *httptest.ResponseRecorder {
@@ -33,7 +34,7 @@ func pageJavaScript(t *testing.T, tenant *Tenant) string {
 		all.WriteString(response.Body.String())
 	}
 	if all.Len() == 0 {
-		t.Fatalf("the page asks for no /kit/ file:\n%s", page)
+		t.Fatalf("the page asks for no file of the engine's:\n%s", page)
 	}
 	return all.String()
 }
@@ -60,16 +61,18 @@ func TestDriveIsNotShippedToSitesThatDidNotAskForIt(t *testing.T) {
 	}
 
 	without := serve(t, "")
-	with := serve(t, `router.drive();`)
+	with := serve(t, `router.reload(false);`)
 
 	// Marker strings from the CODE, not from comments: the production asset is minified, so a comment
-	// would prove nothing. X-Kitwork-Hydrate is the header Drive fetches with; kit.morph is what it drives.
-	for _, mark := range []string{"X-Kitwork-Hydrate", "TEXTAREA"} {
+	// would prove nothing. X-Kitwork-Hydrate is the header Drive fetches with; kit.morph is what it
+	// drives, and kit.internal.clientOwned is the set only the two of them keep (the kernel spells
+	// TEXTAREA too since it reads data-kitwork-bind's two-way value:, so that word is no marker).
+	for _, mark := range []string{"X-Kitwork-Hydrate", "clientOwned"} {
 		if strings.Contains(without, mark) {
 			t.Fatalf("a site that never asked for Drive still received %q", mark)
 		}
 		if !strings.Contains(with, mark) {
-			t.Fatalf("router.drive() should ship %q", mark)
+			t.Fatalf("router.reload(false) should ship %q", mark)
 		}
 	}
 

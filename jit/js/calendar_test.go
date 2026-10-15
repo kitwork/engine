@@ -7,11 +7,11 @@ import (
 
 func TestCalendarIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="calendar"><b data-kit-text="title"></b></div>`)
-	if !strings.Contains(out, `/kit/components/calendar@`) {
+	if !strings.Contains(out, `/_kitwork/components/calendar.`) {
 		t.Fatalf("calendar was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"calendar"}), `component("calendar@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"calendar"}); !strings.Contains(src, `component("calendar", `) || strings.Contains(src, `component("calendar@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

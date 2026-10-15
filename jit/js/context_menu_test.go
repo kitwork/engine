@@ -7,11 +7,11 @@ import (
 
 func TestContextMenuIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="context-menu"><div data-kit-element="target">t</div></div>`)
-	if !strings.Contains(out, `/kit/components/context-menu@`) {
+	if !strings.Contains(out, `/_kitwork/components/context-menu.`) {
 		t.Fatalf("context-menu was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"context-menu"}), `component("context-menu@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"context-menu"}); !strings.Contains(src, `component("context-menu", `) || strings.Contains(src, `component("context-menu@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

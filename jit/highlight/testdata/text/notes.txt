@@ -1,0 +1,9 @@
+Ghi chú triển khai — 12/10/2026
+
+1. Chạy `go test ./...` trong engine/ trước khi đẩy.
+2. Không dùng "while" trong .work; dùng for (let i = 0; i < n; i++).
+3. Đường dẫn Windows: D:\project\kitwork\apps\ — dấu gạch ngược giữ nguyên.
+
+	Dòng thụt bằng tab, rồi khoảng trắng cuối dòng.
+Ký tự lạ: <script>alert(1)</script> &amp; {{ not.an.expression }} /* không phải chú thích */
+日本語のテキスト، العربية، emoji 😀 và kết thúc.

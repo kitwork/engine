@@ -2,13 +2,19 @@ package work
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
+	"io"
+	"io/fs"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/value"
 )
@@ -51,12 +57,9 @@ type Router struct {
 	// JIT stylesheet route: serve the tenant's site-wide JIT CSS (no JS handler, no VM).
 	// Set by .jit(); the path defaults to /jitcss.
 	isJIT bool
-	// JIT icon stylesheet route: serve the tenant's site-wide icon CSS (masks, no JS handler,
-	// no VM). Set by .icons(); the path defaults to /jiticons.
-	isIcons bool
-	// JIT logo stylesheet route: serve the tenant's site-wide brand-logo CSS (Simple Icons masks,
-	// no JS handler, no VM). Set by .logo(); the path defaults to /jitlogo.
-	isLogo bool
+	// (isIcons and isLogo — the shared stylesheet routes router.icons() and router.logo() served at
+	// /jiticons and /jitlogo — went with those two methods in the tree router, 09/07/2026; a page's
+	// icons and logos are inlined into it, and nothing set or read these fields since.)
 
 	response       *Response
 	request        *http.Request
@@ -64,6 +67,10 @@ type Router struct {
 
 	params map[string]string
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
+	// failure is the runtime failure behind err when a run ended in one (failed), what a .error()
+	// handler's error parameter describes (errorObject).
+	failure value.Value
+	failed  bool
 
 	requestID string
 
@@ -94,6 +101,9 @@ type Router struct {
 	// chainJsonld is the router.jsonld() nodes accumulated down the folder chain (root→leaf); the
 	// view appends its own ctx.jsonld() nodes and renders them all into <head>.
 	chainJsonld []value.Value
+	// transition is router.transition() of the nearest folder up the chain that declared one: how
+	// <content /> changes when a link moves here without a reload. "" is "none".
+	transition string
 }
 
 // rateRule is one rate-limit rule. Type is the key dimension ("ip" | "user" | "browser" |
@@ -115,7 +125,12 @@ func (r *Router) responder(w http.ResponseWriter) {
 
 	// 1. Tự động xác định kind nếu trống dựa trên data hoặc lỗi
 	if kind == "" {
-		if r.err != nil {
+		if r.err != nil && isUncaught(r.err) {
+			// an error nothing caught is the server's: 500, whatever status the handler had set for the
+			// answer it did not finish, written by writeFailure
+			kind = "failure"
+			r.response.Return(value.Value{K: value.Nil}, kind, http.StatusInternalServerError)
+		} else if r.err != nil {
 			kind = "error"
 			data = value.New(r.err.Error())
 			r.response.Return(data, kind)
@@ -142,6 +157,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 	}
 	r.response.writeCookies(w)
 	r.response.writeHeaders(w)
+	if kind == "failure" {
+		r.writeFailure(w, r.response.Code())
+		return
+	}
 	if requestNotModified(request, w.Header()) {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -219,13 +238,21 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
 	case "json":
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(r.response.Code())
+		// encoded before the status goes out: a value JSON cannot carry (NaN, Infinity) is a failure
+		// of the request, answered as one, not a 200 with an error after it
 		b, err := json.Marshal(r.response.Data())
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			r.err = uncaught("không viết được câu trả lời thành JSON: " + err.Error())
+			var number *json.UnsupportedValueError
+			if errors.As(err, &number) {
+				r.err = uncaught("không viết được câu trả lời thành JSON: JSON không có số " + number.Str + " (vô hạn hoặc không phải số)")
+			}
+			r.tenant.recordFailure(r, "json", r.err)
+			r.writeFailure(w, http.StatusInternalServerError)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(r.response.Code())
 		w.Write(b)
 	case "html":
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -239,6 +266,160 @@ func (r *Router) responder(w http.ResponseWriter) {
 	default:
 		http.NotFound(w, request)
 	}
+}
+
+// uncaughtError is a failure no code of the site caught: a runtime error of the VM, whose text is its
+// whole diagnostic (message, stack, file:line:column, byte offsets), a page that does not compile, a
+// value the engine could not write. Its text is for the site's author: the log record keeps it whole
+// (recordRuntimeFailure, recordFailure), and a visitor reads it only while developing (AllowLocal);
+// in production the answer is the status and the request id (writeFailure). An error the site chose
+// to show is not one: ctx.error("…"), a guard that rejected the request.
+type uncaughtError struct{ text string }
+
+func (e *uncaughtError) Error() string { return e.text }
+
+func uncaught(text string) error { return &uncaughtError{text: text} }
+
+func isUncaught(err error) bool {
+	var failure *uncaughtError
+	return errors.As(err, &failure)
+}
+
+// errorObject is what the parameter err, error or e of a .error() handler receives: the error that
+// ended the request, in the shape safe(() => …) gives an error, { message, code, at } (14/10/2026;
+// until then the string of the whole diagnostic, stack included). A runtime failure keeps its code and
+// its place; a failure safe never catches (ENERGY_LIMIT…) shows its own code. An error the site set
+// (ctx.error("…")) is FAIL, a guard that rejected the request DENIED, an answer the engine could not
+// write ERROR; none of them has a place. null when nothing failed.
+func (r *Router) errorObject() value.Value {
+	if r == nil || r.err == nil {
+		return value.Value{K: value.Nil}
+	}
+	if r.failed {
+		return runtime.FailureObject(r.failure)
+	}
+	code := value.DefaultFailureCode
+	switch {
+	case r.err == errRequestRejected:
+		code = value.DeniedCode
+	case !isUncaught(r.err):
+		code = value.FailCode
+	}
+	return runtime.FailureObject(value.InvalidFailure(code, r.err.Error()))
+}
+
+// errRequestRejected is the error of a guard that returned false.
+var errRequestRejected = errors.New("request rejected")
+
+// fail answers the request with an error nothing caught, at status (500; 502 for a proxy whose
+// upstream failed). The router keeps the error for .error() and the log; the responder writes
+// writeFailure.
+func (r *Router) fail(err error, status int) {
+	if !isUncaught(err) {
+		err = uncaught(err.Error())
+	}
+	r.err = err
+	r.response.Return(value.Value{K: value.Nil}, "failure", status)
+}
+
+// writeFailure writes the answer of an error nothing caught. While developing (AllowLocal) it is the
+// error's whole text, as router.view and a .ui page answered theirs; in production a visitor reads
+// only the status and the request id the log record carries (X-Request-ID): a page for a browser,
+// JSON for a client that asked for JSON, text for any other.
+func (r *Router) writeFailure(w http.ResponseWriter, status int) {
+	writeFailure(w, r.request, status, r.requestID, r.err)
+}
+
+func writeFailure(w http.ResponseWriter, request *http.Request, status int, id string, err error) {
+	header := w.Header()
+	// nothing the handler set for the answer it did not finish describes this one
+	for _, name := range []string{"Content-Encoding", "Content-Length", "Content-Disposition", "ETag", "Last-Modified"} {
+		header.Del(name)
+	}
+	header.Set("Cache-Control", "no-store")
+	header.Set("X-Content-Type-Options", "nosniff")
+	if AllowLocal && err != nil {
+		header.Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(status)
+		io.WriteString(w, err.Error())
+		return
+	}
+	title := http.StatusText(status)
+	switch failureFormat(request) {
+	case "html":
+		header.Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		fmt.Fprintf(w, failurePage, status, html.EscapeString(title), html.EscapeString(id))
+	case "json":
+		body, _ := json.Marshal(struct {
+			Error     string `json:"error"`
+			Status    int    `json:"status"`
+			RequestID string `json:"requestId"`
+		}{title, status, id})
+		header.Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(status)
+		w.Write(body)
+	default:
+		header.Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(status)
+		fmt.Fprintf(w, "%s\nRequest ID: %s\n", title, id)
+	}
+}
+
+// failurePage is the page a browser reads for an error nothing caught, in production: the status and
+// the request id, nothing of the site's code.
+const failurePage = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex"><title>%[1]d %[2]s</title></head>
+<body><h1>%[2]s</h1><p>Request ID: <code>%[3]s</code></p></body>
+</html>
+`
+
+// failureFormat is how a failure is written for the client that asked: "html" for a browser, "json"
+// for a client that accepts or sends JSON, "text" for any other.
+func failureFormat(request *http.Request) string {
+	if request == nil {
+		return "text"
+	}
+	accept := strings.ToLower(request.Header.Get("Accept"))
+	switch {
+	case strings.Contains(accept, "text/html"):
+		return "html"
+	case strings.Contains(accept, "json"),
+		strings.Contains(strings.ToLower(request.Header.Get("Content-Type")), "json"):
+		return "json"
+	}
+	return "text"
+}
+
+// WriteSiteFailure answers a request no site could take: the site's generation did not prepare (a
+// file that does not compile, a boot that failed) or no site is there. The log record keeps the error
+// whole with the request id the answer carries (X-Request-ID); the answer is writeFailure's, the
+// error itself only while developing.
+func WriteSiteFailure(w http.ResponseWriter, request *http.Request, status int, err error) {
+	id := requestID(request)
+	w.Header().Set("X-Request-ID", id)
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	level, said := slog.LevelError, "Kitwork site could not answer"
+	if errors.Is(err, fs.ErrNotExist) {
+		// no site is there: any Host a client sends reaches this, so it is not an error of a site
+		level, said = slog.LevelWarn, "Kitwork site not found"
+	}
+	slog.Log(
+		request.Context(),
+		level,
+		said,
+		"request_id", id,
+		"host", request.Host,
+		"method", request.Method,
+		"path", request.URL.Path,
+		"status", status,
+		"message", message,
+	)
+	writeFailure(w, request, status, id, uncaught(message))
 }
 
 // streamSSE runs the Go-native side of an SSE connection. Once the site broker

@@ -217,7 +217,7 @@ func (b *Browser) ResetError() *Browser {
 func (b *Browser) HTML(selectorVal ...value.Value) value.Value {
 	b.ensureCtx()
 	if b.err != nil {
-		return value.Value{K: value.Invalid, V: b.err.Error()}
+		return failure(b.err)
 	}
 	var html string
 	var err error
@@ -228,7 +228,7 @@ func (b *Browser) HTML(selectorVal ...value.Value) value.Value {
 		err = chromedp.Run(b.ctx, chromedp.OuterHTML("html", &html, chromedp.ByQuery))
 	}
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return failure(err)
 	}
 	return value.New(html)
 }
@@ -236,13 +236,13 @@ func (b *Browser) HTML(selectorVal ...value.Value) value.Value {
 func (b *Browser) Text(selectorVal value.Value) value.Value {
 	b.ensureCtx()
 	if b.err != nil {
-		return value.Value{K: value.Invalid, V: b.err.Error()}
+		return failure(b.err)
 	}
 	selector := selectorVal.Text()
 	var text string
 	err := chromedp.Run(b.ctx, chromedp.Text(selector, &text, chromedp.ByQuery))
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return failure(err)
 	}
 	return value.New(text)
 }
@@ -250,13 +250,13 @@ func (b *Browser) Text(selectorVal value.Value) value.Value {
 func (b *Browser) Value(selectorVal value.Value) value.Value {
 	b.ensureCtx()
 	if b.err != nil {
-		return value.Value{K: value.Invalid, V: b.err.Error()}
+		return failure(b.err)
 	}
 	selector := selectorVal.Text()
 	var val string
 	err := chromedp.Run(b.ctx, chromedp.Value(selector, &val, chromedp.ByQuery))
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return failure(err)
 	}
 	return value.New(val)
 }
@@ -264,12 +264,12 @@ func (b *Browser) Value(selectorVal value.Value) value.Value {
 func (b *Browser) Screenshot() value.Value {
 	b.ensureCtx()
 	if b.err != nil {
-		return value.Value{K: value.Invalid, V: b.err.Error()}
+		return failure(b.err)
 	}
 	var buf []byte
 	err := chromedp.Run(b.ctx, chromedp.CaptureScreenshot(&buf))
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return failure(err)
 	}
 	return value.New(buf)
 }
@@ -277,13 +277,13 @@ func (b *Browser) Screenshot() value.Value {
 func (b *Browser) Evaluate(scriptVal value.Value) value.Value {
 	b.ensureCtx()
 	if b.err != nil {
-		return value.Value{K: value.Invalid, V: b.err.Error()}
+		return failure(b.err)
 	}
 	script := scriptVal.Text()
 	var res interface{}
 	err := chromedp.Run(b.ctx, chromedp.Evaluate(script, &res))
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return failure(err)
 	}
 	return value.New(res)
 }

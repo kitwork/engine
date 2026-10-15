@@ -7,11 +7,11 @@ import (
 
 func TestEditorIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="editor"><div data-kit-element="area" contenteditable="true"></div></div>`)
-	if !strings.Contains(out, `/kit/components/editor@`) {
+	if !strings.Contains(out, `/_kitwork/components/editor.`) {
 		t.Fatalf("editor was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"editor"}), `component("editor@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"editor"}); !strings.Contains(src, `component("editor", `) || strings.Contains(src, `component("editor@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

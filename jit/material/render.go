@@ -1,14 +1,16 @@
 // render.go adds the JIT Material layer to package material — a sibling of jit/css, jit/icons
 // and jit/js. Render scans the page for Kitwork material classes (.button/.btn, .card, …) and
-// injects a <style data-kitwork-jit="material"> with CSS for ONLY the families the page uses.
+// injects a <style data-kitwork-generated="material"> with CSS for ONLY the families the page uses.
 package material
 
 import (
 	"regexp"
 	"strings"
+
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
-const materialMarker = `data-kitwork-jit="material"`
+const materialMarker = `data-kitwork-generated="material"`
 
 // family is a material family: it is emitted only when the page uses a class whose token equals or
 // starts with one of its bases (e.g. base "button" matches `button` and `button-brand`).
@@ -34,15 +36,23 @@ var families = []family{
 	{[]string{"timeline"}, timelineCSS},
 }
 
-var materialClassRe = regexp.MustCompile(`class="([^"]*)"`)
+// materialClassRe matches the static class attribute only. The leading white space keeps it off
+// every attribute that ENDS in class — data-kitwork-class="dirty: input != null" would otherwise make
+// the word input in a condition look like the input family (as jit/css's classAttrRe).
+var materialClassRe = regexp.MustCompile(`(?:^|\s)class="([^"]*)"`)
 
-// usedTokens returns the set of distinct class tokens used in class="…" attributes.
+// usedTokens returns the set of distinct class tokens used in class="…" attributes, and the classes
+// a page toggles through data-kitwork-class="card-hover: active" — the kernel adds those later, so
+// their family must already be on the page.
 func usedTokens(html string) map[string]bool {
 	out := make(map[string]bool)
 	for _, m := range materialClassRe.FindAllStringSubmatch(html, -1) {
 		for _, tok := range strings.Fields(m[1]) {
 			out[tok] = true
 		}
+	}
+	for _, tok := range hydrate.ToggledClasses(html) {
+		out[tok] = true
 	}
 	return out
 }
@@ -60,7 +70,7 @@ func triggered(used map[string]bool, bases []string) bool {
 }
 
 // Render scans html for material classes and injects ONE inline
-// <style data-kitwork-jit="material"> before </head> holding rules for ONLY the used families.
+// <style data-kitwork-generated="material"> before </head> holding rules for ONLY the used families.
 // It is a fast no-op if no material classes are used or if a style with materialMarker is already present.
 func Render(html string) string {
 	if html == "" || strings.Contains(html, materialMarker) {

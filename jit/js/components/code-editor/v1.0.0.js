@@ -1,4 +1,4 @@
-/* code-editor component @v1.0.0 — a textarea that indents like an editor and knows where the caret is.
+/* code-editor component — a textarea that indents like an editor and knows where the caret is.
  *
  * Usage — the grammar counts the lines; the component handles the keys and the caret:
  *
@@ -133,4 +133,3 @@ var codeEditorDef = {
 };
 
 window.kit.component("code-editor", codeEditorDef);
-window.kit.component("code-editor@v1.0.0", codeEditorDef);

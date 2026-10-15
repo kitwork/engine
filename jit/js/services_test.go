@@ -23,7 +23,7 @@ func TestServicesAreDeliveredWhereTheyAreNamed(t *testing.T) {
 	page := `<html><head></head><body><div data-kit-component="workbench"></div></body></html>`
 	roles, paths := deliveredFiles(t, Deliver(page, site, Options{}))
 	if strings.Join(roles, ",") != "runtime,service,service,component" ||
-		!strings.HasPrefix(paths[1], "/kit/services/assembly.") || !strings.HasPrefix(paths[2], "/kit/services/studioState@1.0.0.") {
+		!strings.HasPrefix(paths[1], "/_kitwork/services/assembly.") || !strings.HasPrefix(paths[2], "/_kitwork/services/studioState.") {
 		t.Fatalf("named from a component: roles %v paths %v", roles, paths)
 	}
 	for _, path := range paths[1:3] {
@@ -35,13 +35,34 @@ func TestServicesAreDeliveredWhereTheyAreNamed(t *testing.T) {
 	if asset, exact := AssetAt(stale, nil); asset == nil || exact {
 		t.Errorf("an old hash of a known service must still answer, uncached: %s", stale)
 	}
-	if asset, _ := AssetAt("/kit/services/studioState@9.9.9."+strings.Repeat("0", hashLength)+".js", nil); asset != nil {
-		t.Error("a version this engine does not carry must not resolve")
+	// A service's name on the wire carries no version (11/10/2026). The name a page carried before
+	// spelled the version the engine had then; the engine carries one version of each service, so
+	// that name — under either prefix, whatever version it spelled — answers today's file, never as
+	// its own name. CONTROL: a service the engine does not carry, or a version that is no version,
+	// names nothing.
+	for _, old := range []string{
+		"/_kitwork/services/studioState@" + serviceVersion("studioState") + "." + strings.Repeat("0", hashLength) + ".js",
+		"/kit/services/studioState@" + serviceVersion("studioState") + "." + strings.Repeat("0", hashLength) + ".js",
+		"/kit/services/studioState@0.9.0." + strings.Repeat("0", hashLength) + ".js",
+	} {
+		if asset, exact := AssetAt(old, nil); asset == nil || exact || asset.Path != paths[2] {
+			t.Errorf("%s: want today's file %s, not exact; got %v exact=%t", old, paths[2], assetPath(asset), exact)
+		}
+	}
+	for _, nothing := range []string{
+		"/_kitwork/services/nonesuch@1.0.0." + strings.Repeat("0", hashLength) + ".js",
+		"/_kitwork/services/nonesuch." + strings.Repeat("0", hashLength) + ".js",
+		"/_kitwork/services/studioState@latest." + strings.Repeat("0", hashLength) + ".js",
+		"/_kitwork/services/assembly@1.0.0." + strings.Repeat("0", hashLength) + ".js",
+	} {
+		if asset, _ := AssetAt(nothing, nil); asset != nil {
+			t.Errorf("%s must not resolve, got %s", nothing, asset.Path)
+		}
 	}
 
 	markup := `<html><head></head><body><button data-kit-click="kit.studioSqlite.close('x')">x</button></body></html>`
 	if roles, paths := deliveredFiles(t, Deliver(markup, nil, Options{})); strings.Join(roles, ",") != "runtime,service,service" ||
-		!strings.HasPrefix(paths[2], "/kit/services/studioSqlite@") {
+		!strings.HasPrefix(paths[2], "/_kitwork/services/studioSqlite.") {
 		t.Errorf("named in markup: roles %v paths %v", roles, paths)
 	}
 
@@ -165,7 +186,12 @@ document.addEventListener("DOMContentLoaded", function () { (async function () {
 </script></body></html>`, nil, Options{})
 	_, paths := deliveredFiles(t, page)
 	order := strings.Join(paths, " ")
-	index := func(name string) int { return strings.Index(order, "/kit/services/"+name+"@") }
+	index := func(name string) int { return strings.Index(order, "/_kitwork/services/"+name+".") }
+	for _, name := range []string{"network", "files", "camera", "media"} {
+		if index(name) < 0 {
+			t.Fatalf("no file for %s: %s", name, order)
+		}
+	}
 	if !(index("network") < index("files") && index("files") < index("camera") && index("files") < index("media")) {
 		t.Fatalf("services out of order: %s", order)
 	}

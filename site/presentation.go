@@ -24,12 +24,9 @@ type PresentationSnapshot struct {
 	HighlightTheme   string
 	HighlightPalette map[string]string
 	ManifestPath     string
-	Prerender        bool
-	Drive            bool
-	// ComponentVersions pins catalogue components for the whole site — router.javascript({
-	// components: { dialog: "2.0.0" } }) — so the markup can name them without a version.
-	ComponentVersions map[string]string
-	Frozen            bool
+	// Drive is router.reload(false): a link fetches the next page and swaps it in place
+	Drive  bool
+	Frozen bool
 }
 
 // Presentation collects site-wide declarations while a generation is being
@@ -38,18 +35,16 @@ type PresentationSnapshot struct {
 type Presentation struct {
 	mu sync.RWMutex
 
-	jitConfig         *jitcss.Config
-	faviconFile       string
-	assetMounts       []AssetMount
-	themeMode         string
-	themes            []string
-	highlightTheme    string
-	highlightPalette  map[string]string
-	manifestPath      string
-	prerender         bool
-	drive             bool
-	componentVersions map[string]string
-	frozen            bool
+	jitConfig        *jitcss.Config
+	faviconFile      string
+	assetMounts      []AssetMount
+	themeMode        string
+	themes           []string
+	highlightTheme   string
+	highlightPalette map[string]string
+	manifestPath     string
+	drive            bool
+	frozen           bool
 
 	frozenSnapshot PresentationSnapshot
 }
@@ -123,9 +118,10 @@ func (p *Presentation) SetThemeMode(mode string) bool {
 	return true
 }
 
-// SetThemes records the appearance modes router.themes() asked for. Like highlight, the modes ride
-// the JIT config at snapshot time, so router.css() and router.themes() may be written in either
-// order. The pre-paint follows from what the site declared (see resolvedThemeMode).
+// SetThemes records the appearance modes router.themes() asked for (and the dark a { light, dark }
+// pair in the site root's router.colors() declares). Like highlight, the modes ride the JIT config at
+// snapshot time, so router.css() and router.themes() may be written in either order. The pre-paint
+// follows from what the site declared (see resolvedThemeMode).
 func (p *Presentation) SetThemes(modes []string) bool {
 	if p == nil {
 		return false
@@ -211,34 +207,15 @@ func (p *Presentation) SetHighlightTheme(theme string) bool {
 	return true
 }
 
-// SetPrerender opts the generation into server pre-rendering: the engine evaluates the page-scope
-// data-kit-text / data-kit-show expressions with its Go twin of the client walker and writes the
-// answers into the HTML before sending it.
-//
-// The default is OFF, deliberately. Pre-rendering costs a full scan of every response, and it can
-// only reach page scope — a value inside data-kit-scope, data-kit-component or data-kit-for belongs
-// to the client, which the server must not guess at. Most pages get the same first frame for free by
-// writing `hidden` in the markup, which is what two thirds of this repo's data-kit-show elements
-// already do.
-func (p *Presentation) SetPrerender(enabled bool) bool {
-	if p == nil {
-		return false
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.frozen {
-		return false
-	}
-	p.prerender = enabled
-	return true
-}
-
 // SetDrive opts the generation into Kitwork Drive: same-origin links and GET forms are fetched and
-// morphed in place instead of reloading the page.
+// morphed in place instead of reloading the page. router.reload(false) sets it, router.reload(true)
+// clears it.
 //
-// The default is OFF. Drive changes what a visitor SEES happen when they click, so a site says yes
-// to it deliberately. It used to switch itself on wherever a root marker appeared, which meant the
-// decision rode on an attribute authors wrote for a different reason entirely.
+// The builder starts OFF, which is a template site's default: Drive changes what a visitor SEES
+// happen when they click, so such a site says yes to it deliberately. A Kitwork UI site starts ON
+// (the router sets it before router.work runs). It used to switch itself on wherever a root marker
+// appeared, which meant the decision rode on an attribute authors wrote for a different reason
+// entirely.
 func (p *Presentation) SetDrive(enabled bool) bool {
 	if p == nil {
 		return false
@@ -249,24 +226,6 @@ func (p *Presentation) SetDrive(enabled bool) bool {
 		return false
 	}
 	p.drive = enabled
-	return true
-}
-
-// SetComponentVersion pins one catalogue component for the whole site. A second pin for the same
-// name replaces the first: the manifest is read top to bottom, and the last word is the one meant.
-func (p *Presentation) SetComponentVersion(name, version string) bool {
-	if p == nil || name == "" || version == "" {
-		return false
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.frozen {
-		return false
-	}
-	if p.componentVersions == nil {
-		p.componentVersions = make(map[string]string)
-	}
-	p.componentVersions[name] = version
 	return true
 }
 
@@ -347,38 +306,29 @@ func (p *Presentation) snapshotLocked() PresentationSnapshot {
 	}
 
 	return PresentationSnapshot{
-		JITConfig:         jitConfig,
-		FaviconFile:       p.faviconFile,
-		AssetMounts:       append([]AssetMount(nil), p.assetMounts...),
-		ThemeMode:         p.resolvedThemeMode(),
-		Themes:            append([]string(nil), p.themes...),
-		HighlightTheme:    p.highlightTheme,
-		HighlightPalette:  p.highlightPalette,
-		ManifestPath:      p.manifestPath,
-		Prerender:         p.prerender,
-		Drive:             p.drive,
-		ComponentVersions: cloneVersions(p.componentVersions),
-		Frozen:            p.frozen,
+		JITConfig:        jitConfig,
+		FaviconFile:      p.faviconFile,
+		AssetMounts:      append([]AssetMount(nil), p.assetMounts...),
+		ThemeMode:        p.resolvedThemeMode(),
+		Themes:           append([]string(nil), p.themes...),
+		HighlightTheme:   p.highlightTheme,
+		HighlightPalette: p.highlightPalette,
+		ManifestPath:     p.manifestPath,
+		Drive:            p.drive,
+		Frozen:           p.frozen,
 	}
 }
 
 func clonePresentationSnapshot(source PresentationSnapshot) PresentationSnapshot {
 	source.JITConfig = cloneJITConfig(source.JITConfig)
 	source.AssetMounts = append([]AssetMount(nil), source.AssetMounts...)
-	source.ComponentVersions = cloneVersions(source.ComponentVersions)
 	return source
 }
 
-func cloneVersions(source map[string]string) map[string]string {
-	if source == nil {
-		return nil
-	}
-	cloned := make(map[string]string, len(source))
-	for name, version := range source {
-		cloned[name] = version
-	}
-	return cloned
-}
+// CloneJITConfig is a copy of a CSS configuration that shares no map or slice with it: the render
+// plan merges a branch's router.colors() and router.fonts() over the site's without touching the
+// site's.
+func CloneJITConfig(config *jitcss.Config) *jitcss.Config { return cloneJITConfig(config) }
 
 func cloneJITConfig(config *jitcss.Config) *jitcss.Config {
 	if config == nil {
@@ -390,6 +340,8 @@ func cloneJITConfig(config *jitcss.Config) *jitcss.Config {
 	clone.MediaQueries = cloneMap(config.MediaQueries)
 	clone.States = cloneMap(config.States)
 	clone.ShadowLevels = cloneMap(config.ShadowLevels)
+	clone.FontFamily = cloneMap(config.FontFamily)
+	clone.HighlightPalette = cloneMap(config.HighlightPalette)
 	clone.Scale = append([]int(nil), config.Scale...)
 	clone.AlphaScales = append([]int(nil), config.AlphaScales...)
 	clone.Opacities = append([]int(nil), config.Opacities...)

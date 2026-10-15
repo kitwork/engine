@@ -1,4 +1,4 @@
-/* split component @v1.0.0 — a draggable, keyboard-operable divider between two panes.
+/* split component — a draggable, keyboard-operable divider between two panes.
  *
  * Usage — the markup draws the panes and binds their size; the component moves the divider:
  *
@@ -133,4 +133,3 @@ var splitDef = {
 };
 
 window.kit.component("split", splitDef);
-window.kit.component("split@v1.0.0", splitDef);

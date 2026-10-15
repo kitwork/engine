@@ -17,7 +17,7 @@ func NewJWTAdapter(capabilities.Scope) *JWTAdapter {
 func (j *JWTAdapter) Sign(payloadVal value.Value, secretVal value.Value, opts ...value.Value) value.Value {
 	secret := secretVal.Text()
 	if secret == "" {
-		return value.Value{K: value.Invalid, V: "jwt sign error: secret key is required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "jwt sign error: secret key is required")
 	}
 
 	claims := make(map[string]interface{})
@@ -41,14 +41,14 @@ func (j *JWTAdapter) Sign(payloadVal value.Value, secretVal value.Value, opts ..
 				dur, err = jwthelper.ParseExpiresIn(expOpt.Text())
 			}
 			if err != nil {
-				return value.Value{K: value.Invalid, V: "jwt sign error: invalid expiresIn: " + err.Error()}
+				return value.InvalidFailure(value.InvalidArgumentCode, "jwt sign error: invalid expiresIn: "+err.Error())
 			}
 		}
 	}
 
 	token, err := jwthelper.Sign(claims, secret, dur)
 	if err != nil {
-		return value.Value{K: value.Invalid, V: "jwt sign error: " + err.Error()}
+		return value.InvalidFailure(value.InvalidArgumentCode, "jwt sign error: "+err.Error())
 	}
 
 	return value.New(token)
@@ -62,9 +62,16 @@ func (j *JWTAdapter) Verify(tokenVal value.Value, secretVal value.Value) value.V
 	return value.New(res)
 }
 
+// Decode reads a token's claims without checking it. A token that is not one (not three parts, a
+// payload that is not base64 JSON) is INVALID_INPUT, data from outside that cannot be read, as the
+// closed set says of a token (14/10/2026: it gave {}). Verify stays data: null for any token it cannot
+// trust, a malformed one included, since a visitor's cookie is such a token every day.
 func (j *JWTAdapter) Decode(tokenVal value.Value) value.Value {
 	token := tokenVal.Text()
-	res, _ := jwthelper.Decode(token)
+	res, err := jwthelper.Decode(token)
+	if err != nil {
+		return value.InvalidFailure(value.InvalidInputCode, "jwt decode: "+err.Error())
+	}
 	return value.New(res)
 }
 

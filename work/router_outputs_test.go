@@ -10,6 +10,7 @@ import (
 )
 
 func TestTreeSemanticOutputsAndTypedResponse(t *testing.T) {
+	developing(t) // a 500 carries its diagnostic only while developing
 	tmp, err := os.MkdirTemp("", "kitwork-tree-outputs-*")
 	if err != nil {
 		t.Fatal(err)

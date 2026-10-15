@@ -92,12 +92,17 @@ func (n *Napas) Payload() string {
 	return n.core.Payload()
 }
 
+// Validate fails when the payment lacks what a payload needs (a bank, an amount…): the program's
+// argument, INVALID_ARGUMENT, as Generate's.
 func (n *Napas) Validate() error {
-	return n.core.Validate()
+	if err := n.core.Validate(); err != nil {
+		return codedError{code: value.InvalidArgumentCode, err: err}
+	}
+	return nil
 }
 
 func (n *Napas) Generate() (value.Value, error) {
-	if err := n.core.Validate(); err != nil {
+	if err := n.Validate(); err != nil {
 		return value.Value{}, err
 	}
 	return value.New(n.core.Payload()), nil

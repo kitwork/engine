@@ -21,6 +21,7 @@ import (
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/site"
+	"github.com/kitwork/engine/ui/stylesheet"
 	"github.com/kitwork/engine/value"
 )
 
@@ -57,6 +58,7 @@ type FolderMethod struct {
 	final      *value.Lambda
 	isView     bool
 	viewArgs   []value.Value
+	uiView     bool // router.view(): the page is the folder's content.ui, fed by the view's names
 	outputKind string
 	outputData value.Value
 	outputPath string
@@ -276,6 +278,45 @@ type FolderRouter struct {
 	limits   []methodLimit          // router.ratelimit() rules — this folder AND every descendant
 	assetErr error                  // first fatal .assets() conflict, surfaced as a generation error
 	unknown  []string               // methods the chain called that this engine does not have
+
+	// router.transition(): how <content /> changes on a move between pages; inherited down the chain
+	transition string
+	// router.colors() and router.fonts() of this folder, every call of the file added up. The site
+	// root's become the site's CSS configuration (publishSitePalette); a branch's are merged over the
+	// site's for its routes and the ones below (routeCSS).
+	colors map[string]value.Value
+	fonts  map[string]value.Value
+	// router.gradients() of this folder, every call of the file added up, as written: each route's .ui
+	// pages read the gradients of the folders down to it, the nearest winning per name (routeStyleOf,
+	// router_ui_gradients.go)
+	gradients map[string]value.Value
+	// ui says the folder's router file is router.work: router.highlight reads Kitwork UI's grammar there
+	// (router_ui_highlight.go) and the template's in router.kitwork.js
+	ui bool
+	// router.highlight() of this folder in router.work, every call of the file added up, as written, and
+	// where the call that set each kind is (highlightAt): each route's .ui pages read the kinds of the
+	// folders down to it, the nearest winning per kind (routeStyleOf, router_ui_highlight.go)
+	highlight   map[string]value.Value
+	highlightAt map[string]stylesheet.Source
+	// callSite is where the call being made is in the router file, the place the VM gives it; set only
+	// while the router runs (runFolderRouter), nil once it has: a call at request time has no place
+	callSite func() runtime.SourceLocation
+	// router.appearance(): "system", "light" or "dark", the mode a page shows before the visitor
+	// chooses; "" when this folder does not say (routeAppearance: inherited down the chain)
+	appearance string
+	// router.contrast(): "warning" (the default) or "strict", how a .ui page's pair of colours short of
+	// contrast is told; "" when this folder does not say (routeContrast: inherited down the chain)
+	contrast string
+	// the old router methods the file called, each once in the order first called: router.theme()
+	// (applied as router.colors() and router.fonts()), router.drive(), router.javascript() and
+	// router.jitjs() (gone, applying nothing). compileFolder names each once at boot
+	// (removedMethodWarnings).
+	oldMethods []oldMethod
+	// router.favicon() as the URL a page links (<link rel="icon">): the nearest folder's wins
+	favicon string
+	// router.bundle(): how this folder's .ui pages deliver their CSS and their JavaScript, per part; ""
+	// for a part it does not name (routeBundle: the nearest folder that names it wins, router_ui_bundle.go)
+	bundle bundleChoice
 }
 
 // MissingMember is called for a member the folder router does not have. The chain must not break
@@ -298,6 +339,43 @@ func (f *FolderRouter) unknownMethodWarning() string {
 		return ""
 	}
 	return "router." + strings.Join(f.unknown, "(), router.") + "() is not a method of this engine's router — ignored; everything else on the chain still applies"
+}
+
+// oldMethod is a router method a site may still call that this engine renamed or removed: the call
+// keeps the chain, and the boot says what to write instead, once per file.
+type oldMethod string
+
+const (
+	renamedTheme      oldMethod = "router.theme() is now router.colors() and router.fonts() — applied"
+	removedDrive      oldMethod = "router.drive() is gone — write router.reload(false)"
+	removedJavascript oldMethod = "router.javascript() is gone — moving between pages is router.reload(false), components are found by name"
+)
+
+// removed records that the file called an old method; a second call (or router.jitjs() after
+// router.javascript(), which share their line) records nothing more.
+func (f *FolderRouter) removed(method oldMethod) {
+	if f == nil {
+		return
+	}
+	for _, seen := range f.oldMethods {
+		if seen == method {
+			return
+		}
+	}
+	f.oldMethods = append(f.oldMethods, method)
+}
+
+// removedMethodWarnings are the boot lines of the old methods the file called, one each, in the
+// order the file first called them.
+func (f *FolderRouter) removedMethodWarnings() []string {
+	if f == nil {
+		return nil
+	}
+	lines := make([]string, len(f.oldMethods))
+	for i, method := range f.oldMethods {
+		lines[i] = string(method)
+	}
+	return lines
 }
 
 func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
@@ -462,7 +540,7 @@ func (f *FolderRouter) LlmsFull(args ...value.Value) *FolderMethod {
 //	router.manifest("./manifest.json")
 //
 // Unlike the others this one must also be LINKED from <head> to have any
-// effect; jit/manifest fills a <link data-kitwork-jit="manifest"> marker where
+// effect; jit/manifest fills a <link data-kitwork-generated="manifest"> marker where
 // the author placed one, and injects the link when none is present.
 func (f *FolderRouter) Manifest(args ...value.Value) *FolderMethod {
 	method := f.output("manifest", "/manifest.json", args...)
@@ -507,19 +585,34 @@ func (f *FolderRouter) Ratelimit(args ...value.Value) *FolderRouter {
 // RateLimit is the camelCase alias (.rateLimit).
 func (f *FolderRouter) RateLimit(args ...value.Value) *FolderRouter { return f.Ratelimit(args...) }
 
-// Favicon declares the favicon: sugar for meta({ favicon }) — templates read $.meta.favicon — AND
-// registers the file (resolved inside this folder) to be served at /favicon.ico, which browsers
-// request unprompted.
+// Favicon declares the favicon: sugar for meta({ favicon }) — templates read $.meta.favicon — AND,
+// at the site root, registers the file to be served at /favicon.ico, which browsers request
+// unprompted. A path starting with / is the site's URL path (/assets/favicon.svg is the file under
+// the site root); any other path is inside this folder. A branch's favicon is the icon its pages link
+// (<link rel="icon">), never the site's /favicon.ico.
 func (f *FolderRouter) Favicon(args ...value.Value) *FolderRouter {
 	if len(args) == 0 {
 		return f
 	}
 	f.meta["favicon"] = args[0]
-	rel := strings.TrimPrefix(strings.TrimPrefix(args[0].Text(), "./"), "/")
+	written := strings.TrimSpace(args[0].Text())
+	dir, url := f.node.diskPath(), "/"+f.node.relPath()
+	if strings.HasPrefix(written, "/") {
+		dir, url = f.tenant.resolve(), "/"
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(written, "./"), "/")
 	if rel == "" {
 		return f
 	}
-	full := filepath.Join(f.node.diskPath(), filepath.FromSlash(path.Clean(rel)))
+	f.favicon = path.Join(url, path.Clean(rel))
+	if strings.Contains(written, "://") {
+		f.favicon = written // an icon on another host is linked as written
+		return f
+	}
+	if f.node.parent != nil {
+		return f
+	}
+	full := filepath.Join(dir, filepath.FromSlash(path.Clean(rel)))
 	base := f.tenant.resolve()
 	if r, err := filepath.Rel(base, full); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
 		f.tenant.presentation().SetFaviconFile(full)
@@ -634,14 +727,23 @@ func (f *FolderRouter) JitTheme(args ...value.Value) *FolderRouter { return f.Ji
 // Highlight pins the site-wide default palette for a bare {{ src.highlight() }}
 // in views — e.g. router.highlight("classic"). A page may still override per
 // call with {{ src.highlight("mono") }}; the built-in default is used otherwise.
-func (f *FolderRouter) Highlight(args ...value.Value) *FolderRouter {
+// That is the template's grammar, read in router.kitwork.js, unchanged. In
+// router.work it is Kitwork UI's: the colour of each kind of code token of the
+// .ui pages, router.highlight({ keyword: "violet", "function": { light, dark } })
+// (uiHighlight, router_ui_highlight.go). The folder's router file decides: the
+// two grammars meet on the same keys ({ keyword: "#ff0000" } is the template's
+// and no colour of .ui), so the shape of the value cannot.
+func (f *FolderRouter) Highlight(args ...value.Value) (*FolderRouter, error) {
+	if f != nil && f.ui {
+		return f.uiHighlight(args...)
+	}
 	if len(args) == 0 {
-		return f
+		return f, nil
 	}
 	// STRING: pick a named theme — router.highlight("tokyo-night").
 	if args[0].IsString() {
 		f.tenant.presentation().SetHighlightTheme(args[0].String())
-		return f
+		return f, nil
 	}
 	// MAP: a theme plus per-role tweaks, or tweaks alone on the default theme —
 	// router.highlight({ theme: "tokyo-night", keyword: "#ff0000" }). Keeping the
@@ -660,7 +762,7 @@ func (f *FolderRouter) Highlight(args ...value.Value) *FolderRouter {
 		}
 		f.tenant.presentation().SetHighlightPalette(palette)
 	}
-	return f
+	return f, nil
 }
 
 // Meta shorthands at the node-declaration level — same set as the ViewBuilder, so a static page
@@ -743,9 +845,16 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 	}
 	n.folder = fr // publish before running so TreeKitWork.Router() can reach it
 
-	routerFile := filepath.Join(n.diskPath(), "router"+extension+".js")
-	n.srcFiles = []string{routerFile} // watched even when absent — a router APPEARING is a change
-	if info, err := os.Stat(routerFile); err == nil && !info.IsDir() {
+	routerFile := RouterMarker(n.diskPath()) // router.kitwork.js, or router.work for a Kitwork UI site
+	// watched even when absent — a router APPEARING is a change
+	n.srcFiles = []string{filepath.Join(n.diskPath(), RouterFileName), filepath.Join(n.diskPath(), UIRouterFileName)}
+	if routerFile != "" {
+		fr.ui = filepath.Base(routerFile) == UIRouterFileName // router.highlight reads Kitwork UI's grammar
+		if n.parent == nil && filepath.Base(routerFile) == UIRouterFileName {
+			// A Kitwork UI site swaps only <content /> between pages by default; router.reload(true) in
+			// it loads every page whole instead.
+			t.presentation().SetDrive(true)
+		}
 		bc, err := t.compileFile(routerFile)
 		if err != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
@@ -768,6 +877,10 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 			return fmt.Errorf("router %s: %w", relative, fr.assetErr)
 		}
 		if warning := fr.unknownMethodWarning(); warning != "" {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			fmt.Printf("[router] %s: %s\n", relative, warning)
+		}
+		for _, warning := range fr.removedMethodWarnings() {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			fmt.Printf("[router] %s: %s\n", relative, warning)
 		}
@@ -795,6 +908,17 @@ func runFolderRouter(t *Tenant, n *RouteNode, bc *compiler.Bytecode) error {
 	vm.Builtins = []value.Value{treeKitwork}
 	vm.Globals = globals
 	vm.MaxEnergy = t.MaxEnergy
+	if fr := n.folder; fr != nil {
+		// a native call of the router (router.highlight) asks where it is written: the instruction the VM
+		// runs, the call, in the current frame. Only while the router runs, so no VM is kept after it.
+		fr.callSite = func() runtime.SourceLocation {
+			if vm.FrameIdx < 0 || vm.FrameIdx >= len(vm.Frames) {
+				return runtime.SourceLocation{}
+			}
+			return vm.Program().SourceAt(vm.Frames[vm.FrameIdx].LastIP)
+		}
+		defer func() { fr.callSite = nil }()
+	}
 	if result := vm.Run(); result.K == value.Invalid {
 		return fmt.Errorf("%s", result.Text())
 	}

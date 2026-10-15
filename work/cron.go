@@ -1,8 +1,6 @@
 package work
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -33,7 +31,7 @@ type CronJob struct {
 	MaxAttempts   int    // total attempt budget, default 1 — no auto-retry unless .retry(n)
 	Timezone      string // default "UTC"
 	OverlapPolicy string // skip | queue | allow — default skip
-	ContentHash   string // sha256 of the source file; lets sync skip no-op writes
+	ContentHash   string // the artifact's cache key (sources + compiler); lets sync skip no-op writes
 	OnSuccess     *value.Lambda
 	OnError       *value.Lambda
 }
@@ -277,12 +275,11 @@ func (t *Tenant) LoadCronFiles() {
 			fmt.Printf("[Cron] compile %s: %v\n", e.Name(), err)
 			continue
 		}
-		// content_hash of the source lets sync skip no-op writes to scheduler.db (see syncPersisted).
-		hash := ""
-		if raw, rerr := os.ReadFile(file); rerr == nil {
-			sum := sha256.Sum256(raw)
-			hash = hex.EncodeToString(sum[:])
-		}
+		// content_hash lets sync skip no-op writes to scheduler.db (see syncPersisted). It is the
+		// artifact's cache key, every bundled source plus the compiler fingerprint, because the stored
+		// definition is what running the file gives: an imported module or a compiler schema bump can
+		// change it without a byte of this file changing.
+		hash := bc.CacheKey()
 		// The filename (minus .kitwork.js) is the DEFAULT job identity — filesystem-is-runtime, same as
 		// routes take their identity from their path. Jobs that called cron.schedule("name") keep their
 		// explicit name; the rest inherit this stem.
@@ -313,7 +310,11 @@ func (t *Tenant) runCronFile(scheduler *cronRuntime, bc *compiler.Bytecode, stem
 	vm.Builtins = t.vm.Builtins
 	vm.Globals = globals
 	vm.MaxEnergy = t.MaxEnergy
-	vm.Run()
+	// A runtime error at the top of the file says so, as a compile error does: it would otherwise
+	// leave the schedule without a word.
+	if result := vm.Run(); result.K == value.Invalid {
+		fmt.Printf("[Cron] run %s.kitwork.js: %s\n", stem, result.Text())
+	}
 
 	scheduler.mu.Lock()
 	registered := scheduler.jobs[before:]

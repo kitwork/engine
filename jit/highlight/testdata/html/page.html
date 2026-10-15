@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quán cà phê &amp; bánh — Thực đơn</title>
+  <link rel="stylesheet" href="/_kitwork/page.css">
+  <style>
+    :root { --brand: #b45309; }
+    .menu > li:hover { color: var(--brand); font-weight: 600; }
+    @media (prefers-color-scheme: dark) { body { background: #111; } }
+  </style>
+</head>
+<body class="page" data-theme='light'>
+  <!-- Thanh điều hướng -->
+  <nav aria-label="Chính">
+    <a href="/" class=active>Trang chủ</a>
+    <a href="/menu?size=M&amp;sort=price">Thực đơn</a>
+  </nav>
+  <main>
+    <h1>Thực đơn hôm nay</h1>
+    <ul class="menu">
+      <li data-kit-text="item.name" data-price="29000">Cà phê sữa đá</li>
+      <li>Bạc xỉu &lt;mới&gt; &#9733; &#x2615;</li>
+    </ul>
+    <button type="button" disabled onclick="alert('Đã thêm')">Thêm vào giỏ</button>
+    <img src="/images/cafe.webp" alt="Ly cà phê" width="640" height="480" loading="lazy" />
+    <form method="post" action="/order">
+      <input name="email" type="email" required placeholder="ban@example.test">
+      <textarea name="note" rows="3">Ít đường, nhiều đá</textarea>
+    </form>
+  </main>
+  <script type="module">
+    const items = document.querySelectorAll(".menu li");
+    if (items.length > 0 && items[0].dataset.price < 30000) {
+      console.log(`có ${items.length} món`, "</div>");
+    }
+  </script>
+  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 12h16"/></svg>
+</body>
+</html>

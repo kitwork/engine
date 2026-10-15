@@ -13,6 +13,8 @@ package js
 // calls its services from its own component, never from markup). Before the first service comes
 // one small file, the assembly (services/assembly.js), which hands every service what KitJS used to:
 // the shell's host adapter, its file channel, and the list of service versions this engine carries.
+// On the wire a service is /_kitwork/services/<name>.<hash>.js and the assembly
+// /_kitwork/services/assembly.<hash>.js: no version in either name.
 
 import (
 	"encoding/json"
@@ -166,12 +168,14 @@ func AssemblyAsset() *Asset {
 	return cachedAsset("services:assembly", func() *Asset { return buildAsset("service", "assembly", assemblySource()) })
 }
 
-// serviceAsset is one service's file, named services/<name>@<version>.<hash>.js.
+// serviceAsset is one service's file, named /_kitwork/services/<name>.<hash>.js. The version is the
+// engine's own business, like a component's (11/10/2026): it stays in the source file's name and in
+// the assembly's list, where a service checks a sibling by it, and never reaches the wire — the hash
+// already tells two versions apart.
 func serviceAsset(name string) *Asset {
 	source := serviceSource(name)
 	if source == "" {
 		return nil
 	}
-	label := name + "@" + serviceVersion(name)
-	return cachedAsset("service:"+label, func() *Asset { return buildAsset("service", label, source) })
+	return cachedAsset("service:"+name+"@"+serviceVersion(name), func() *Asset { return buildAsset("service", name, source) })
 }

@@ -1,4 +1,4 @@
-/* toast component @v1.0.0 — a message that shows itself and leaves after three seconds.
+/* toast component — a message that shows itself and leaves after three seconds.
  *
  * Usage:
  *   <div data-kit-component="toast" data-kit-alias="$toast"></div>
@@ -35,4 +35,3 @@ var toastDef = {
 };
 
 window.kit.component("toast", toastDef);
-window.kit.component("toast@v1.0.0", toastDef);

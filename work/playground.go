@@ -71,7 +71,7 @@ func (p *Playground) Compile(codeVal value.Value) value.Value {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				retVal = value.Value{K: value.Invalid, V: fmt.Sprintf("runtime panic: %v", r)}
+				retVal = runtime.NativePanic("playground", r)
 			}
 		}()
 		retVal = vm.Run()

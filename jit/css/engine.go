@@ -851,6 +851,12 @@ func buildProp(t string, m []string, neg bool, cfg *Config) string {
 			if v, ok := aliases[m[2]]; ok {
 				val = v
 			}
+			// max-w alone has the reading width and the five breakpoint widths (Tailwind v3); without
+			// them max-w-prose and max-w-screen-lg wrote `max-width: prose;`, which a browser drops.
+			maxWidths := map[string]string{"prose": "65ch", "screen-sm": "640px", "screen-md": "768px", "screen-lg": "1024px", "screen-xl": "1280px", "screen-2xl": "1536px"}
+			if v, ok := maxWidths[m[2]]; ok && m[1] == "max-w" {
+				val = v
+			}
 		}
 		return fmt.Sprintf("%s: %s;", prop, val)
 	case "tw-color-shade":

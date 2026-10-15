@@ -1,0 +1,17 @@
+import { router } from "kitwork";
+
+router.colors({
+  brand: "#c8742c",
+  canvas: { light: "#f6f3ee", dark: "#141110" },
+  panel: { light: "#efe9e1", dark: "#1a1613" },
+  paper: { light: "#ffffff", dark: "#1f1a17" },
+  ink: { light: "#2b211b", dark: "#f3ece6" },
+  line: { light: "#e6ded5", dark: "#3a302a" },
+  success: "#2f9e63",
+  warning: "#c98a1e",
+  danger: "#e5484d"
+});
+router.reload(true);
+router.view((ctx) => {
+  ctx.title("Cổng CSS");
+});

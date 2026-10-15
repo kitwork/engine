@@ -188,8 +188,8 @@ func TestSQLiteReadQueryRejectsWritesStacksAndOtherSQLiteSurfaces(t *testing.T) 
 		"SELECT readfile('outside')",
 		"SELECT `writefile`('outside', 'blocked')",
 	} {
-		result := db.ReadQuery(value.New(statement)).Interface().(map[string]any)
-		if result["ok"] != false || result["code"] != "READ_ONLY_REQUIRED" {
+		result := sqliteInspectorResultMap(t, db.ReadQuery(value.New(statement)))
+		if result["ok"] != false || result["code"] != value.InvalidArgumentCode || result["message"] != "Only one SELECT statement is allowed" {
 			t.Errorf("statement %q returned %#v", statement, result)
 		}
 	}
@@ -202,7 +202,7 @@ func TestSQLiteReadQueryRejectsWritesStacksAndOtherSQLiteSurfaces(t *testing.T) 
 	if row[0] != float64(1) || row[1] != "kept" {
 		t.Fatalf("read-only policy allowed mutation: %#v", row)
 	}
-	if result := db.ReadQuery(value.New(map[string]any{"type": "string"})).Interface().(map[string]any); result["code"] != "INVALID_QUERY" {
+	if result := sqliteInspectorResultMap(t, db.ReadQuery(value.New(map[string]any{"type": "string"}))); result["code"] != value.InvalidArgumentCode || result["message"] != "Enter one SELECT statement" {
 		t.Fatalf("non-string SQL payload = %#v", result)
 	}
 }
@@ -218,17 +218,17 @@ func TestSQLiteReadQueryReturnsStableBoundErrors(t *testing.T) {
 	db := sqliteFor(tenant, "read-query-errors.db")
 
 	tooLong := "SELECT '" + strings.Repeat("x", sqliteReadQueryMaxSQLBytes) + "'"
-	if result := db.ReadQuery(value.New(tooLong)).Interface().(map[string]any); result["code"] != "QUERY_TOO_LARGE" {
+	if result := sqliteInspectorResultMap(t, db.ReadQuery(value.New(tooLong))); result["code"] != value.InvalidArgumentCode || !strings.Contains(result["message"].(string), "32 KiB") {
 		t.Fatalf("oversized SQL = %#v", result)
 	}
-	if result := db.ReadQuery(value.New("SELECT missing FROM nowhere")).Interface().(map[string]any); result["code"] != "SQL_ERROR" {
+	if result := sqliteInspectorResultMap(t, db.ReadQuery(value.New("SELECT missing FROM nowhere"))); result["code"] != value.DatabaseCode {
 		t.Fatalf("SQL error = %#v", result)
 	}
 	columns := make([]string, sqliteReadQueryMaxColumns+1)
 	for index := range columns {
 		columns[index] = fmt.Sprintf("%d AS c%d", index, index)
 	}
-	if result := db.ReadQuery(value.New("SELECT " + strings.Join(columns, ", "))).Interface().(map[string]any); result["code"] != "RESULT_TOO_LARGE" {
+	if result := sqliteInspectorResultMap(t, db.ReadQuery(value.New("SELECT "+strings.Join(columns, ", ")))); result["code"] != value.InvalidArgumentCode || !strings.Contains(result["message"].(string), "128 column") {
 		t.Fatalf("column bound = %#v", result)
 	}
 }

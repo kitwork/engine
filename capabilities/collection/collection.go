@@ -1,11 +1,14 @@
 package collection
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"sync"
 	"time"
@@ -108,7 +111,7 @@ func (m *Manager) Open(args ...value.Value) value.Value {
 		return collectionInvalid(m.err)
 	}
 	if len(args) == 0 || args[0].String() == "" {
-		return value.Value{K: value.Invalid, V: "collection: folder is required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "collection: folder is required")
 	}
 	name := args[0].String()
 	targetPath := name
@@ -171,7 +174,7 @@ func (h *Handle) All() value.Value { return h.Index() }
 
 func (h *Handle) Read(args ...value.Value) value.Value {
 	if len(args) == 0 {
-		return value.Value{K: value.Invalid, V: "collection: document slug is required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "collection: document slug is required")
 	}
 	document, err := h.collection.Read(args[0].String())
 	if err != nil {
@@ -184,7 +187,7 @@ func (h *Handle) Find(args ...value.Value) value.Value { return h.Read(args...) 
 
 func (h *Handle) Raw(args ...value.Value) value.Value {
 	if len(args) == 0 {
-		return value.Value{K: value.Invalid, V: "collection: document slug is required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "collection: document slug is required")
 	}
 	document, err := h.collection.Read(args[0].String())
 	if err != nil {
@@ -223,7 +226,7 @@ func (h *Handle) Skip(args ...value.Value) *CollectionQuery {
 
 func (h *Handle) Search(args ...value.Value) value.Value {
 	if len(args) == 0 || strings.TrimSpace(args[0].String()) == "" {
-		return value.Value{K: value.Invalid, V: "collection: search text is required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "collection: search text is required")
 	}
 	text := args[0].String()
 	limit := 20
@@ -233,7 +236,7 @@ func (h *Handle) Search(args ...value.Value) value.Value {
 
 	db := h.scope.DB("collection.db")
 	if db == nil {
-		return value.Value{K: value.Invalid, V: "collection: search index unavailable"}
+		return value.InvalidFailure(value.UnavailableCode, "collection: search index unavailable")
 	}
 
 	index, err := h.collection.Index()
@@ -417,8 +420,19 @@ func collectionValue(input any) value.Value {
 	return value.New(decoded)
 }
 
+// collectionInvalid is a collection's failure: a folder or document that is not there
+// INVALID_ARGUMENT, one outside the app's folder DENIED, any other failure to read it DATABASE (the
+// storage layer); the request's cancellation and a deadline as such.
 func collectionInvalid(err error) value.Value {
-	return value.Value{K: value.Invalid, V: err.Error()}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return value.InvalidFailure(value.InvalidArgumentCode, err.Error())
+	case errors.Is(err, fs.ErrPermission):
+		return value.InvalidFailure(value.DeniedCode, err.Error())
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return value.FailureOfError("", err)
+	}
+	return value.InvalidFailure(value.DatabaseCode, err.Error())
 }
 
 func Register(registry *capabilities.Registry) {

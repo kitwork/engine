@@ -1,4 +1,4 @@
-/* shortcut component @v1.0.0 — a keyboard shortcut that clicks its host.
+/* shortcut component — a keyboard shortcut that clicks its host.
  * Usage: <a href="/search" data-kit-component="shortcut" data-shortcut="mod+k">Search</a>
  *
  * The host stays an ordinary link or button: the keyboard is a second way to reach it, never the
@@ -23,4 +23,3 @@ var shortcutDef = {
 };
 
 window.kit.component("shortcut", shortcutDef);
-window.kit.component("shortcut@v1.0.0", shortcutDef);

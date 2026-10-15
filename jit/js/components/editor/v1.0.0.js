@@ -1,4 +1,4 @@
-/* editor component @v1.0.0 — rich text on a contenteditable, driven from the markup's own buttons.
+/* editor component — rich text on a contenteditable, driven from the markup's own buttons.
  *
  * Usage — every button is the grammar; the component does the editing:
  *
@@ -221,4 +221,3 @@ var editorDef = {
 };
 
 window.kit.component("editor", editorDef);
-window.kit.component("editor@v1.0.0", editorDef);

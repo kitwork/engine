@@ -1,4 +1,4 @@
-/* dropzone component @v1.0.0 — files dropped on a region, or picked, checked and listed.
+/* dropzone component — files dropped on a region, or picked, checked and listed.
  *
  * Usage — the file input carries the rules; the markup lists what came in:
  *
@@ -137,4 +137,3 @@ var dropzoneDef = {
 };
 
 window.kit.component("dropzone", dropzoneDef);
-window.kit.component("dropzone@v1.0.0", dropzoneDef);

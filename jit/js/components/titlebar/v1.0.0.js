@@ -1,4 +1,4 @@
-/* titlebar component @v1.0.0 — the window controls a page has to draw for itself.
+/* titlebar component — the window controls a page has to draw for itself.
  *
  * An app opened with app.desktop({ chrome: "html" }) gets a window with NO frame of its own: no
  * close button, no drag strip, nothing to move it by. The page draws that bar, and this component
@@ -110,4 +110,3 @@ var titlebarDef = {
 };
 
 window.kit.component("titlebar", titlebarDef);
-window.kit.component("titlebar@v1.0.0", titlebarDef);

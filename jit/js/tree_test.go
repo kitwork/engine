@@ -7,11 +7,11 @@ import (
 
 func TestTreeIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<ul role="tree" data-kit-component="tree"><li data-kit-element="item" data-id="a">a</li></ul>`)
-	if !strings.Contains(out, `/kit/components/tree@`) {
+	if !strings.Contains(out, `/_kitwork/components/tree.`) {
 		t.Fatalf("tree was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"tree"}), `component("tree@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"tree"}); !strings.Contains(src, `component("tree", `) || strings.Contains(src, `component("tree@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

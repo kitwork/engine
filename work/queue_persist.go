@@ -310,8 +310,7 @@ func (t *Tenant) runQueueJob(worker *queueRuntime, claimed queuestore.ClaimedJob
 		worker.store.RecordSummary(appID, claimed.Name, "failed")
 	}
 	if handler.OnError != nil {
-		errObj := value.New(map[string]value.Value{"message": value.New(runErr.Error())})
-		_, _ = t.runInQueueVM(handler, handler.OnError, []value.Value{job, errObj})
+		_, _ = t.runInQueueVM(handler, handler.OnError, []value.Value{job, jobErrorObject(runErr)})
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const themedPage = `<html><head><script data-kitwork-jit="theme">x</script></head><body></body></html>`
+const themedPage = `<html><head><script data-kitwork-generated="appearance">x</script></head><body></body></html>`
 const plainPage = `<html><head></head><body></body></html>`
 
 // The hash must be the hash of the script the engine actually injects. Computed here from Render's
@@ -15,11 +15,11 @@ const plainPage = `<html><head></head><body></body></html>`
 // other is caught.
 func TestPrepaintHashMatchesTheInjectedScript(t *testing.T) {
 	out := Force(`<html><head></head><body></body></html>`)
-	start := strings.Index(out, `<script data-kitwork-jit="theme">`)
+	start := strings.Index(out, `<script data-kitwork-generated="appearance">`)
 	if start < 0 {
 		t.Fatal("Force did not inject the pre-paint")
 	}
-	start += len(`<script data-kitwork-jit="theme">`)
+	start += len(`<script data-kitwork-generated="appearance">`)
 	end := strings.Index(out[start:], "</script>")
 	if end < 0 {
 		t.Fatal("unterminated pre-paint script")
@@ -103,5 +103,27 @@ func TestAllowInCSPIsIdempotent(t *testing.T) {
 	}
 	if strings.Count(twice, "sha256-") != 1 {
 		t.Fatalf("the hash must appear once, got %q", twice)
+	}
+}
+
+// A page rendered before router.theme() became router.appearance() (11/10/2026) — or before the
+// data-kitwork-jit rename — carries the pre-paint under its old marker. The policy for it is
+// written the same way; a page with none of the three gains nothing.
+func TestAllowInCSPSeesThePrepaintUnderEveryMarker(t *testing.T) {
+	hash := PrepaintHash()
+	for _, marker := range []string{
+		`data-kitwork-generated="appearance"`,
+		`data-kitwork-generated="theme"`,
+		`data-kitwork-jit="theme"`,
+	} {
+		page := `<html><head><script ` + marker + `>x</script></head><body></body></html>`
+		if got, want := AllowInCSP("script-src 'self'", page), "script-src 'self' "+hash; got != want {
+			t.Errorf("%s:\n  got  %q\n  want %q", marker, got, want)
+		}
+	}
+	// control: a generated script of another kind is not the pre-paint
+	other := `<html><head><script data-kitwork-generated="js">x</script></head><body></body></html>`
+	if got := AllowInCSP("script-src 'self'", other); got != "script-src 'self'" {
+		t.Errorf("a page without the pre-paint must keep its policy, got %q", got)
 	}
 }

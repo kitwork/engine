@@ -36,7 +36,7 @@ func (t *Tenant) serveProxy(vm *runtime.VM, bc *compiler.Bytecode, method *Folde
 	if target.K == value.Func {
 		target = t.execTree(vm, bc, lambdaOf(target), ctxObj)
 		if target.K == value.Invalid {
-			return fmt.Errorf("proxy target handler failed: %v", target.V)
+			return &stageFailure{text: fmt.Sprintf("proxy target handler failed: %v", target.V), failure: target, run: true}
 		}
 	}
 	url := strings.TrimSpace(target.Text())
@@ -54,7 +54,13 @@ func (t *Tenant) serveProxy(vm *runtime.VM, bc *compiler.Bytecode, method *Folde
 	}
 	resp := req.Fire()
 	if resp.Error != "" {
-		return fmt.Errorf("proxy %s: %s", url, resp.Error)
+		// the log keeps the URL whole; a .error() handler reads the request's failure as a program
+		// reads one: its code (NETWORK, TIMEOUT, DENIED…), a message with no query string
+		code := resp.Code
+		if code == "" {
+			code = value.NetworkCode
+		}
+		return &stageFailure{text: fmt.Sprintf("proxy %s: %s", url, resp.Error), failure: value.InvalidFailure(code, "proxy: "+resp.Error)}
 	}
 
 	// 3. Replay the upstream bytes under the upstream's OWN media type — an image must not come back

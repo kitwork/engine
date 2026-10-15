@@ -20,11 +20,11 @@ func TestMenuIsShippedWhenUsed(t *testing.T) {
 	html := `<div data-kit-component="menu"><button data-kit-click="toggle()">m</button></div>`
 	out := deliver(html)
 
-	if !strings.Contains(out, `/kit/components/menu@`) {
+	if !strings.Contains(out, `/_kitwork/components/menu.`) {
 		t.Fatalf("menu was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"menu"}), `component("menu@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"menu"}); !strings.Contains(src, `component("menu", `) || strings.Contains(src, `component("menu@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 
@@ -32,7 +32,7 @@ func TestMenuIsShippedWhenUsed(t *testing.T) {
 func TestMenuIsAbsentWhenUnused(t *testing.T) {
 	out := deliver(`<dialog data-kit-component="dialog"><button data-kit-click="close()">x</button></dialog>`)
 
-	if strings.Contains(out, `/kit/components/menu@`) {
+	if strings.Contains(out, `/_kitwork/components/menu.`) {
 		t.Fatal("menu shipped to a page that never mentions it")
 	}
 }

@@ -2,8 +2,10 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 
 	"github.com/kitwork/engine/capabilities"
+	"github.com/kitwork/engine/runtime"
 	query "github.com/kitwork/engine/utilities/query"
 	"github.com/kitwork/engine/value"
 )
@@ -66,7 +68,7 @@ func (d *DatabaseAdapter) NewQuery() *query.Query {
 
 func (d *DatabaseAdapter) Table(args ...value.Value) value.Value {
 	if len(args) == 0 {
-		return value.Value{K: value.Invalid, V: "database: table name required"}
+		return value.InvalidFailure(value.InvalidArgumentCode, "database: table name required")
 	}
 	tableName := args[0].Text()
 	q := d.NewQuery().Table(tableName)
@@ -143,11 +145,11 @@ func (d *DatabaseAdapter) Atomic(args ...value.Value) value.Value {
 	}
 	dbConn := d.DB()
 	if dbConn == nil {
-		return value.Value{K: value.Invalid, V: "database not connected"}
+		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 	tx, err := dbConn.Begin()
 	if err != nil {
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return query.DatabaseFailure("database: begin", err)
 	}
 
 	txAdapter := &DatabaseAdapter{
@@ -171,7 +173,13 @@ func (d *DatabaseAdapter) Atomic(args ...value.Value) value.Value {
 			_, err := runtimeSeam.Execute(nil, lambda, []value.Value{txVal})
 			if err != nil {
 				tx.Rollback()
-				return value.Value{K: value.Invalid, V: err.Error()}
+				// the callback's own failure, handed on as it is, as work's db.atomic does: safe reads
+				// its message, code and place, not a message led by the place and the stack
+				var diagnostic *runtime.Diagnostic
+				if errors.As(err, &diagnostic) {
+					return diagnostic.Failure()
+				}
+				return value.FailureOfError("database.atomic", err)
 			}
 		}
 	} else {
@@ -185,7 +193,7 @@ func (d *DatabaseAdapter) Atomic(args ...value.Value) value.Value {
 
 	if err := tx.Commit(); err != nil {
 		tx.Rollback()
-		return value.Value{K: value.Invalid, V: err.Error()}
+		return query.DatabaseFailure("database: commit", err)
 	}
 
 	return result

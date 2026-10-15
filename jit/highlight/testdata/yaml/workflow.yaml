@@ -1,0 +1,126 @@
+# Kiểm thử engine trên mỗi lần đẩy.
+%YAML 1.2
+---
+name: engine
+on:
+  push:
+    branches: [master]
+    paths-ignore: ['docs/**', "*.md"]
+  pull_request: {}
+  schedule:
+    - cron: '30 2 * * 1'
+env:
+  GO_VERSION: "1.26"
+  PORT: 8107
+  RATIO: 0.75
+  ENABLED: true
+  DISABLED: False
+  NOTHING: null
+  TILDE: ~
+  INFINITY: -.inf
+  HEX: 0x1F
+  OCTAL: 0o17
+  QUOTED: 'it''s quoted'
+  ESCAPED: "tab\tand \"quote\" and é"
+  URL: https://kitwork.io/docs?lang=vi#top
+  TIME: 09:30
+  "quoted key": value
+  'single key': value
+defaults: &defaults
+  runs-on: ubuntu-latest
+  timeout-minutes: 30
+  permissions: {contents: read, checks: write}
+jobs:
+  test:
+    <<: *defaults
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        go: ['1.25', '1.26']
+        include:
+          - os: windows-latest
+            shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # toàn bộ lịch sử
+      - name: Cài Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+      - name: Kiểm thử
+        run: |
+          cd engine
+          go test ./... -count=1
+
+          echo "xong: $GITHUB_SHA"
+      - name: Ghi chú
+        run: >-
+          một dòng dài
+          được gấp lại
+      - name: Giữ dòng trống cuối
+        run: |+
+          dòng một
+
+      - ? complex key
+        : complex value
+      - [nested, [deeper, {k: v}]]
+  lint:
+    <<: *defaults
+    needs: [test]
+    if: github.event_name == 'push' && !contains(github.ref, 'refs/tags')
+    steps:
+      - run: go vet ./...
+      - run: |
+          gofmt -l . | tee /tmp/unformatted
+          test ! -s /tmp/unformatted
+tagged: !!str 2026-10-12
+custom: !kitwork/site kitwork.localhost
+verbatim: !<tag:yaml.org,2002:str> plain
+binary: !!binary |
+  R0lGODlhDAAMAIQAAP//9/X17unp5WZmZgAAAOfn515eXvPz7Y6OjuDg4J+fn5
+date: 2026-10-12T09:30:00+07:00
+multiline plain: this value
+  goes on to the next line
+list:
+  - 1
+  - -2.5e3
+  - 0x1F
+  - +12
+  - 1.
+  - .5
+  - "Tiếng Việt"
+  - not: [a, number]
+  - - nested
+    - sequence
+empty:
+...
+---
+# Tài liệu thứ hai: cấu hình site.
+site: &site
+  domain: kitwork.localhost
+  port: 8107
+  tls: off
+  aliases:
+    - www.kitwork.localhost
+    - kitwork.test
+mirror:
+  <<: *site
+  domain: mirror.kitwork.localhost
+routes:
+  - path: /
+    page: index.ui
+  - path: /docs/:slug
+    page: docs/page.ui
+    cache: { seconds: 300, vary: [Accept-Language] }
+notes: >
+  Một đoạn văn được gấp,
+  nối thành một dòng.
+
+  Đoạn thứ hai.
+footer: "© 2026"
+--- |
+  a document that is only a block scalar
+...

@@ -32,8 +32,8 @@ func TestPreparePrecomputesStaticPresentation(t *testing.T) {
 		t.Fatalf("prepared presentation changed output\nprepared:\n%s\nlive:\n%s", preparedOutput, liveOutput)
 	}
 	for _, marker := range []string{
-		`data-kitwork-jit="css"`,
-		`data-kitwork-jit="material"`,
+		`data-kitwork-generated="css"`,
+		`data-kitwork-generated="material"`,
 		".p-4",
 		"Hello Kitwork",
 	} {

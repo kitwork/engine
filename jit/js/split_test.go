@@ -7,11 +7,11 @@ import (
 
 func TestSplitIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="split"><div role="separator" data-kit-element="handle"></div></div>`)
-	if !strings.Contains(out, `/kit/components/split@`) {
+	if !strings.Contains(out, `/_kitwork/components/split.`) {
 		t.Fatalf("split was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"split"}), `component("split@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"split"}); !strings.Contains(src, `component("split", `) || strings.Contains(src, `component("split@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

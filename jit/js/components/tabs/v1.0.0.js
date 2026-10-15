@@ -1,4 +1,4 @@
-/* tabs component @v1.0.0 — the keyboard half of a tablist.
+/* tabs component — the keyboard half of a tablist.
  *
  * Usage — the markup declares every state a reader can see, the component owns the keyboard:
  *
@@ -124,4 +124,3 @@ function focusTab(scope, element) {
 }
 
 window.kit.component("tabs", tabsDef);
-window.kit.component("tabs@v1.0.0", tabsDef);

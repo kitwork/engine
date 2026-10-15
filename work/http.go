@@ -10,6 +10,11 @@ import (
 
 var AllowLocal bool
 
+// Minify is MINIFY=true of the host env, set once at boot: templates and the head of a .ui page are
+// minified as in production while AllowLocal stays true (the engine's minifies). Only minification:
+// what else developing means (a .ui page's warnings, a 500's diagnostic) still follows AllowLocal.
+var Minify bool
+
 // NativeShell is true when this process serves an app that declared app.desktop() or app.mobile().
 // Only then can a page reach a WebView handle, so only then is it worth sending the bridge and the
 // capability proxies that ride it. It is a property of the PROCESS, not of one site: the shell is

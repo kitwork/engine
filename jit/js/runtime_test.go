@@ -17,13 +17,18 @@ import (
 //
 // `theme` was deleted on 23/09, when markup called kit.theme directly, and returned on 03/10 as the
 // page's view of kit.theme, once markup stopped calling kit. `progressbar` is the view of kit.progress.
+//
+// `dropdown` returned on 11/10 for Kitwork UI, where it is a built-in component the engine writes
+// from <box component="dropdown" as="$account"> (docs/components/dropdown.md): the page reaches it through its alias,
+// and the kernel registers an alias only on a component host. A hand-written page still opens a panel
+// with a scope flag and a show. `appearance` is the theme contract under the name Kitwork UI gives it.
 func TestHasComponent(t *testing.T) {
-	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast", "menu", "scrolled", "theme", "progressbar"} {
+	for _, n := range []string{"clipboard", "dialog", "shortcut", "sidebar", "toast", "menu", "scrolled", "theme", "progressbar", "appearance", "dropdown"} {
 		if !HasComponent(n) {
 			t.Errorf("expected component module %q", n)
 		}
 	}
-	for _, gone := range []string{"toggle", "tab", "dismiss", "get", "more", "submit", "copy", "dropdown"} {
+	for _, gone := range []string{"toggle", "tab", "dismiss", "get", "more", "submit", "copy"} {
 		if HasComponent(gone) {
 			t.Errorf("%q was deleted: the grammar or the platform covers it", gone)
 		}
@@ -63,14 +68,14 @@ func TestDeliverBringsOnlyUsed(t *testing.T) {
 	out := deliver(html)
 
 	// count the OPEN TAG precisely — the kernel source itself mentions the marker (mergeHead).
-	if strings.Count(out, `<script data-kitwork-jit="runtime"`) != 1 {
+	if strings.Count(out, `<script data-kitwork-generated="runtime"`) != 1 {
 		t.Errorf("expected exactly one runtime script: %s", out)
 	}
-	si := strings.Index(out, `<script data-kitwork-jit="runtime"`)
+	si := strings.Index(out, `<script data-kitwork-generated="runtime"`)
 	if hi := strings.Index(out, "</head>"); si < 0 || si > hi {
 		t.Errorf("the runtime should be delivered before </head>: %s", out)
 	}
-	if !strings.Contains(out, `/kit/components/dialog@`) || !strings.Contains(out, `/kit/components/toast@`) {
+	if !strings.Contains(out, `/_kitwork/components/dialog.`) || !strings.Contains(out, `/_kitwork/components/toast.`) {
 		t.Errorf("both used components expected: %s", out)
 	}
 	if strings.Contains(out, `clipboard`) {
@@ -89,7 +94,7 @@ func TestDeliverNothingWithoutGrammar(t *testing.T) {
 	// A component nobody has is still a host the kernel reports by name, so the page gets the kernel
 	// — and no component file.
 	unknown := `<head></head><body><div data-kit-component="zzz"></div></body>`
-	if out := deliver(unknown); strings.Contains(out, "/kit/components/") || !strings.Contains(out, "/kit/kernel.") {
+	if out := deliver(unknown); strings.Contains(out, "/_kitwork/components/") || !strings.Contains(out, "/_kitwork/kernel.") {
 		t.Errorf("an unknown component brings the kernel and no component file, got: %s", out)
 	}
 	// The retired verb attribute is just an attribute now: it brings nothing.
@@ -104,13 +109,13 @@ func TestDeliverNothingWithoutGrammar(t *testing.T) {
 func TestDeliverBringsComponents(t *testing.T) {
 	htmlComp := `<html><head></head><body><div data-kit-component="clipboard"></div></body></html>`
 	outComp := deliver(htmlComp)
-	if !strings.Contains(outComp, `/kit/components/clipboard@`) {
+	if !strings.Contains(outComp, `/_kitwork/components/clipboard.`) {
 		t.Errorf("expected the clipboard module to be injected, got: %s", outComp)
 	}
-	if !strings.Contains(ModulesJS([]string{"component:clipboard"}), `component("clipboard@v2.0.0"`) {
+	if !strings.Contains(ModulesJS([]string{"component:clipboard"}), "copyResetTimer") { // v2.0.0's, not v1.0.0's
 		t.Error("a bare name must resolve to the latest version (v2.0.0)")
 	}
-	if out := deliver(`<html><head></head><body><div data-kit-component="copy"></div></body></html>`); strings.Contains(out, "/kit/components/") {
+	if out := deliver(`<html><head></head><body><div data-kit-component="copy"></div></body></html>`); strings.Contains(out, "/_kitwork/components/") {
 		t.Errorf("copy is not a name any more, nothing may be injected for it: %s", out)
 	}
 	if ModulesJS([]string{"component:copy"}) != "" {
@@ -124,8 +129,8 @@ func TestDeliverBringsComponents(t *testing.T) {
 func TestDeliverBringsVersionedComponents(t *testing.T) {
 	html := `<html><head></head><body><div data-kit-component="clipboard@v1.0.0"></div></body></html>`
 	out := deliver(html)
-	if !strings.Contains(out, `/kit/components/clipboard@1.0.0.`) {
-		t.Errorf("expected versioned clipboard component (v1.0.0) to be injected, got: %s", out)
+	if v1 := componentAsset("clipboard@v1.0.0", nil); !strings.Contains(out, `src="`+v1.Path+`"`) || strings.Contains(out, `/components/clipboard@`) {
+		t.Errorf("expected clipboard v1.0.0's file, under the component's name alone, got: %s", out)
 	}
 }
 

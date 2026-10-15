@@ -79,11 +79,11 @@ func TestEveryCatalogueComponentIsReadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if names, ok := ComponentNames(nil, nil)(entry.Name()); !ok || len(names) == 0 {
+		if names, ok := ComponentNames(nil)(entry.Name()); !ok || len(names) == 0 {
 			t.Errorf("%s: its names cannot be read, so nothing written against it is checked", entry.Name())
 		}
 	}
-	sidebar, _ := ComponentNames(nil, nil)("sidebar")
+	sidebar, _ := ComponentNames(nil)("sidebar")
 	if !contains(sidebar, "closeDrawer") || contains(sidebar, "close") {
 		t.Errorf("sidebar names = %v", sidebar)
 	}
@@ -100,7 +100,7 @@ func TestACallToAMissingMethodIsReportedAtRender(t *testing.T) {
 		"stepper":   `kit.component("stepper", { amount: 0, add: function () { this.amount++; } });`,
 	}
 	check := func(html string) string {
-		return capturedCheck(t, html, ComponentNames(site, map[string]string{"dialog": "2.0.0"}))
+		return capturedCheck(t, html, ComponentNames(site))
 	}
 
 	report := check(page(`<button data-kit-click="close()">x</button>`))
@@ -132,7 +132,7 @@ func TestACallThroughAnAliasIsCheckedAgainstItsHost(t *testing.T) {
 			`<nav>` + outside + `</nav></body></html>`
 	}
 	site := fakeSite{"workbench": `kit.component("workbench", { init: function () { var k = "x"; this[k] = 1; } });`}
-	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site, nil)) }
+	check := func(html string) string { return capturedCheck(t, html, ComponentNames(site)) }
 
 	for _, call := range []string{`$sidebar.close()`, `open ? $sidebar.close() : 0`, `$sidebar . close()`, `$sidebar?.close()`} {
 		report := check(page(`<button data-kit-click="` + call + `">x</button>`))

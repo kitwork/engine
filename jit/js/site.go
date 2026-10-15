@@ -16,7 +16,8 @@ package js
 // site, so its file IS the contract — change the contract and change the name. That also keeps the
 // runtime honest: `name@1.2.0` can only ever mean an engine component.
 //
-// Only pages that name one get it, as a file of its own: /kit/components/<name>.<hash>.js.
+// Only pages that name one get it, as a file of its own: /_kitwork/components/<name>.<hash>.js — the
+// same shape a catalogue component's file has, since a name on the wire never carries a version.
 type Site interface {
 	// Component returns the module source for a tenant component, or "" when the site has none by
 	// that name. Implementations are read at generation time and frozen, so a request never reads

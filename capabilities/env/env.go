@@ -39,6 +39,11 @@ func (e *envVars) OnInvoke(method string, args ...value.Value) value.Value {
 		}
 		return value.Value{K: value.Nil}
 	}
+	// env.API_KEY() calls a value, not a method: the not-a-function runtime error (14/10/2026), as
+	// work's env answers it.
+	if method != "" {
+		return value.NotAFunction(method, e.OnGet(method))
+	}
 	return value.Value{K: value.Nil}
 }
 

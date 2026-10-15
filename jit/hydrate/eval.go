@@ -9,7 +9,7 @@ import (
 )
 
 // evalBudget caps how many IR nodes one Eval may visit — the same gas idea as the backend VM's
-// MaxEnergy, built in from day one so this walker can later serve capsule-style evaluation safely.
+// MaxEnergy, built in from day one so no expression can run unbounded.
 const evalBudget = 10000
 
 var errBudget = errors.New("hydrate: evaluation budget exceeded")
@@ -20,6 +20,10 @@ type Lambda struct {
 	Params []string
 	Body   any
 }
+
+// Func is a helper the host places in a scope (Kitwork UI's money, date…). Calling it by name from
+// an expression runs it with the evaluated arguments; the client side has its own copy of each.
+type Func func(args []any) any
 
 // Eval walks a compiled IR node against scope — the Go twin of the composed client walker.
 // One IR, two ends: the client walks it to render and react, the server walks the SAME data for
@@ -149,6 +153,18 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		if g, ok := o.(globalRef); ok {
 			return callGlobalMethod(g, name, args), nil
 		}
+		// A call reaches an object's own key only when the key holds a function, as in the VM
+		// (value.CallsOwn) and in JavaScript: { add: (x) => x + 1 }.add(1) is 2. An own key holding
+		// data never answers a call; an object has no methods here, so that call is nil, as on an
+		// object without the key.
+		if m, ok := o.(map[string]any); ok {
+			switch own := m[name].(type) {
+			case *Lambda:
+				return invokeLambda(own, args, scope, budget)
+			case Func:
+				return own(args), nil
+			}
+		}
 		return call(o, name, args), nil
 	case "{}":
 		pairs, _ := arr[1].([]any)
@@ -213,6 +229,9 @@ func eval(x any, scope map[string]any, budget *int) (any, error) {
 		}
 		if g, ok := callee.(globalRef); ok {
 			return callGlobal(g, args), nil
+		}
+		if fn, ok := callee.(Func); ok { // a server-side helper the host put in scope (money, date…)
+			return fn(args), nil
 		}
 		lam, ok := callee.(*Lambda)
 		if !ok {

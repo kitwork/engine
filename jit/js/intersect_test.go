@@ -18,13 +18,13 @@ import (
 // reason alone, the kernel.
 func TestIntersectIsDeliveredWhereWritten(t *testing.T) {
 	roles, paths := deliveredFiles(t, Deliver(`<html><head></head><body><section data-kit-intersect:once="n++"></section></body></html>`, nil, Options{}))
-	if strings.Join(roles, ",") != "runtime,directive" || !strings.HasPrefix(paths[1], "/kit/directives/intersect.") {
+	if strings.Join(roles, ",") != "runtime,directive" || !strings.HasPrefix(paths[1], "/_kitwork/directives/intersect.") {
 		t.Fatalf("a page with data-kit-intersect: roles %v paths %v", roles, paths)
 	}
 	if asset, exact := AssetAt(paths[1], nil); asset == nil || !exact {
 		t.Errorf("%s does not round-trip through AssetAt", paths[1])
 	}
-	if asset, _ := AssetAt("/kit/directives/nope."+strings.Repeat("0", hashLength)+".js", nil); asset != nil {
+	if asset, _ := AssetAt("/_kitwork/directives/nope."+strings.Repeat("0", hashLength)+".js", nil); asset != nil {
 		t.Error("an unknown directive must not resolve")
 	}
 	if out := Deliver(`<html><head></head><body><pre><code>data-kit-intersect="n++"</code></pre></body></html>`, nil, Options{}); strings.Contains(out, "<script") {

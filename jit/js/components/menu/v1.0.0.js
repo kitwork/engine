@@ -1,4 +1,4 @@
-/* menu component @v1.0.0 — the keyboard half of a menu button.
+/* menu component — the keyboard half of a menu button.
  *
  * NOT the deleted `dropdown`. That one opened and closed a panel, which is the grammar, and it
  * went on 22/09 with toggle/tab/dismiss for exactly that reason. This is the half the grammar
@@ -182,4 +182,3 @@ var menuDef = {
 };
 
 window.kit.component("menu", menuDef);
-window.kit.component("menu@v1.0.0", menuDef);

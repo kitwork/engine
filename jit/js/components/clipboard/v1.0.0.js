@@ -1,5 +1,6 @@
-/* clipboard component @v1.0.0 — copy text to clipboard with 1s feedback.
- * Usage: <div data-kit-component="clipboard"> · <div data-kit-component="clipboard@v1.0.0">
+/* clipboard component — copy text to clipboard with 1s feedback.
+ * Usage: <div data-kit-component="clipboard@v1.0.0"> — only a template page that names this version
+ * gets this file; data-kit-component="clipboard" gets the latest.
  */
 var clipboardDef = {
   copied: false,
@@ -14,4 +15,3 @@ var clipboardDef = {
 };
 
 window.kit.component("clipboard", clipboardDef);
-window.kit.component("clipboard@v1.0.0", clipboardDef);

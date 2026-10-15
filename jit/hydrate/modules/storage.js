@@ -5,7 +5,14 @@
   var kit = window.kit || window.kitwork;
   if (!kit || !kit.module || !kit.service || kit.has("storage")) return;
 
-  var native = kit.module("native");
+  // Looked up when used: the web kernel has no native module (KernelFile(false)).
+  var native = {
+    get available() {
+      var bridge = kit.module("native");
+      return !!(bridge && bridge.available);
+    },
+    call: function (name, args) { return kit.module("native").call(name, args); }
+  };
   var prefix = "kitwork:";
 
   function storageKey(key) {

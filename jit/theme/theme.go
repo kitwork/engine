@@ -1,18 +1,27 @@
 // Package theme is the JIT appearance pre-paint: the first-paint half of the
-// appearance service and its versioned theme adapter.
+// appearance service (kit.appearance) and its versioned theme adapter.
 //
-// A tiny synchronous script must run in <head> before first paint to apply the saved theme, or the
-// deferred browser runtime can reveal the wrong palette briefly. Render injects that script when
-// it sees the theme component or a supported legacy theme reference. Force is used when the site
-// declared its dark at the root (router.css({ darkMode: ["class"] }) / router.themes({ dark: true })).
+// A tiny synchronous script must run in <head> before first paint to apply the light/dark mode, or
+// the deferred browser runtime can reveal the wrong palette briefly. Render injects that script when
+// it sees the appearance or theme component or a supported legacy theme reference. Force is used
+// when the site declared its dark at the root (router.css({ darkMode: ["class"] }) /
+// router.themes({ dark: true })).
 //
 // A page may instead place an explicit marker to control the exact position:
 //
-//	<script data-kitwork-jit="theme"></script>
+//	<script data-kitwork-generated="appearance"></script>
+//
+// The marker was data-kitwork-generated="theme" until the light/dark service became kit.appearance
+// (11/10/2026), and data-kitwork-jit="theme" before 10/10/2026. A template or a cached page may carry
+// either, so all three pin the slot and are rewritten to today's name.
 //
 // When the marker is present it is filled in place (author wins); otherwise the script is injected
-// at the very TOP of <head> -- the earliest point, before any stylesheet. Either way it reads the
-// same bare "theme" localStorage key appearance@1.0.0 owns, so pre-paint and runtime stay in sync.
+// at the very TOP of <head> -- the earliest point, before any stylesheet. Either way it decides the
+// mode by the rule kit.appearance (alias kit.theme) follows, so pre-paint and runtime stay in sync:
+// the visitor's choice in localStorage "appearance", or in the older "theme" key when "appearance"
+// holds no choice (a choice saved before the rename survives it); with no choice stored, the mode
+// the site shows before the visitor chooses — router.appearance(), written on the page as
+// <html data-kitwork-appearance="light|dark"> (nothing for "system") — and with neither, the device.
 // Dark = the `.dark` class on <html>, matching jitcss darkMode:['class'] and the dark: variant;
 // color-scheme is applied at the same time so browser-native controls do not flash the wrong mode.
 package theme
@@ -25,25 +34,52 @@ import (
 	"github.com/kitwork/engine/jit/internal/htmlattr"
 )
 
-// prepaint runs before paint: an explicit stored light/dark mode wins; missing, invalid, or
-// "system" follows the OS preference. Storage failures must not skip matchMedia. Kept inline and
-// synchronous on purpose: a deferred runtime cannot prevent the flash. The resolved mode lands
-// twice on <html>: the `dark` class (Tailwind's darkMode: ['class'], every existing site) and
-// data-theme="light|dark" — the attribute is the selector router.themes() modes are scoped under,
-// so a site may write darkMode: ['class', '[data-theme="dark"]'] and later add a mode without a
-// class per mode.
-const prepaintBody = `(function(){var r=document.documentElement,c=r.classList,m="system";` +
-	`try{var t=localStorage.getItem("theme");t=t&&t.toLowerCase();if(t==="light"||t==="dark"||t==="system")m=t}catch(e){}` +
+// prepaint runs before paint and decides the mode in three steps — the rule the kernel's
+// kit.appearance follows too (jit/hydrate/modules/web.js), so the first paint and the runtime never
+// disagree:
+//
+//  1. the visitor's choice: localStorage "appearance", or the older "theme" key only when
+//     "appearance" holds none of the three words (light, dark, system);
+//  2. with no choice stored, the site's default: <html data-kitwork-appearance>, which the server
+//     writes from router.appearance() when the route's mode is not "system";
+//  3. otherwise "system".
+//
+// "system" — stored, defaulted, or neither — follows the OS preference. A stored "system" is a
+// choice like the other two, so a visitor can follow the device on a site whose default is dark.
+// A storage failure must skip neither the default nor matchMedia. The default is read off the page,
+// never written into the script, so the body stays ONE constant and one CSP hash (csp.go) serves
+// every site. Kept inline and synchronous on purpose: a deferred runtime cannot prevent the flash.
+// The resolved mode lands twice on <html>: the `dark` class (Tailwind's darkMode: ['class'], every
+// existing site) and data-theme="light|dark" — the attribute is the selector router.themes() modes
+// are scoped under, so a site may write darkMode: ['class', '[data-theme="dark"]'] and later add a
+// mode without a class per mode. A Kitwork UI page with a backdrop writes its <meta name="theme-color">
+// before the pre-paint, each carrying the colour of both modes (data-kitwork-light, data-kitwork-dark):
+// the mode shown sets its content and drops its media, so the browser's bar follows a visitor's choice
+// of the other mode than the device's, as kit.appearance does again when the choice changes.
+const prepaintBody = `(function(){var r=document.documentElement,c=r.classList,m="";` +
+	`function v(t){t=t&&t.toLowerCase();return t==="light"||t==="dark"||t==="system"?t:""}` +
+	`try{var s=localStorage;m=v(s.getItem("appearance"))||v(s.getItem("theme"))}catch(e){}` +
+	`m=m||v(r.getAttribute("data-kitwork-appearance"))||"system";` +
 	`if(m==="system"){try{m=typeof matchMedia==="function"&&matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){m="light"}}` +
-	`if(m==="dark")c.add("dark");else c.remove("dark");try{r.setAttribute("data-theme",m);r.style.colorScheme=m}catch(e){}})();`
+	`if(m==="dark")c.add("dark");else c.remove("dark");try{r.setAttribute("data-theme",m);r.style.colorScheme=m;` +
+	`document.querySelectorAll('meta[name="theme-color"][data-kitwork-'+m+']').forEach(function(n){n.setAttribute("content",n.getAttribute("data-kitwork-"+m));n.removeAttribute("media")})}catch(e){}})();`
 
-const prepaint = `<script data-kitwork-jit="theme">` + prepaintBody + `</script>`
+// prepaintMarker is the attribute the engine writes on its pre-paint today.
+const prepaintMarker = `data-kitwork-generated="appearance"`
+
+const prepaint = `<script ` + prepaintMarker + `>` + prepaintBody + `</script>`
+
+// prepaintMarkers is every spelling a rendered page may carry the engine's pre-paint under: today's,
+// the one before the light/dark service became kit.appearance (11/10/2026), and the one before the
+// data-kitwork-jit → data-kitwork-generated rename (10/10/2026).
+var prepaintMarkers = []string{prepaintMarker, `data-kitwork-generated="theme"`, `data-kitwork-jit="theme"`}
 
 // The matchers intentionally accept ordinary HTML spelling differences. Rendering must not flash
 // merely because an author used single quotes, uppercase attribute names, or whitespace around an
-// expression member operator.
+// expression member operator. The marker's value is "appearance" (today) or "theme" (before
+// 11/10/2026), under data-kitwork-generated or the older data-kitwork-jit.
 var (
-	markerRe    = regexp.MustCompile(`(?is)(?:<script[^>]*\bdata-kit(?:work)?-jit\s*=\s*(?:"theme"|'theme')[^>]*>|<script[^>]*\bdata-kit(?:work)?-jit\s*=\s*theme(?:\s+[^>]*)?/?>).*?</script>`)
+	markerRe    = regexp.MustCompile(`(?is)(?:<script[^>]*\bdata-kit(?:work)?-(?:generated|jit)\s*=\s*(?:"(?:appearance|theme)"|'(?:appearance|theme)')[^>]*>|<script[^>]*\bdata-kit(?:work)?-(?:generated|jit)\s*=\s*(?:appearance|theme)(?:\s+[^>]*)?/?>).*?</script>`)
 	componentRe = regexp.MustCompile(`(?is)\bdata-kit(?:work)?-component\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))`)
 	apiRe       = regexp.MustCompile(`(?i)(?:\bkit|\$app)\s*\.\s*(?:appearance|theme)\b|\btoggleTheme\b`)
 	headOpenRe  = regexp.MustCompile(`(?is)<head(?:\s[^>]*)?>`)
@@ -81,19 +117,25 @@ func Canonicalize(source string) string {
 
 // usesTheme reports whether the page references the appearance system. app@1 always closes
 // appearance@1 into its exact graph, so an app host needs the same pre-paint even when no toggle is
-// present in this particular document. The other forms keep the component adapter and historical
-// trusted-JavaScript spellings working. (The jitjs verb `data-kit-action="theme"` is gone, 22/09.)
+// present in this particular document. appearance is the light/dark toggle of a Kitwork UI page
+// (component="appearance", written data-kitwork-component="appearance"), theme its template-page component. The
+// other forms keep the component adapter and historical trusted-JavaScript spellings working. (The
+// jitjs verb `data-kit-action="theme"` is gone, 22/09.)
 func usesTheme(source string) bool {
-	return componentValueIs(componentRe, source, "app", "theme") || apiRe.MatchString(source)
+	return componentValueIs(componentRe, source, "app", "theme", "appearance") || apiRe.MatchString(source)
 }
 
 // componentValueIs accepts the client-owned unversioned spelling and the
-// server-owned name@exact-version spelling. Exact SemVer validation belongs
-// to the KitJS scanner; this pre-paint detector only needs the base identity
-// and must not miss an already validated managed host.
+// server-owned name@exact-version spelling, and the grouped form's alias tail
+// ("appearance: $theme"). Exact SemVer validation belongs to the KitJS scanner;
+// this pre-paint detector only needs the base identity and must not miss an
+// already validated managed host.
 func componentValueIs(pattern *regexp.Regexp, source string, expected ...string) bool {
 	for _, match := range pattern.FindAllStringSubmatch(source, -1) {
 		value := matchedAttributeValue(match)
+		if separator := strings.IndexByte(value, ':'); separator >= 0 {
+			value = strings.TrimFunc(value[:separator], isECMAScriptSpace)
+		}
 		if separator := strings.IndexByte(value, '@'); separator >= 0 {
 			value = value[:separator]
 		}

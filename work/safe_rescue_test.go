@@ -18,8 +18,8 @@ func TestSafeRescuesAHardFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(`
 import { router } from "kitwork";
 router.get((ctx) => {
-	const check = fail("boom").safe();
-	return ctx.json({ rescued: !check.ok, error: check.error });
+	const check = safe(() => fail("boom"));
+	return ctx.json({ rescued: check.error != null, error: check.error.message, code: check.error.code, at: check.error.at });
 });
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -38,11 +38,14 @@ router.get((ctx) => {
 	var body struct {
 		Rescued bool   `json:"rescued"`
 		Error   string `json:"error"`
+		Code    string `json:"code"`
+		At      string `json:"at"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode safe() response: %v", err)
 	}
-	if !body.Rescued || body.Error != "boom" {
+	// fail is always FAIL, and at is where fail was called, in the file's own name
+	if !body.Rescued || body.Error != "boom" || body.Code != "FAIL" || body.At != "router.kitwork.js:4:27" {
 		t.Errorf("safe() response = %#v", body)
 	}
 }

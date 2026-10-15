@@ -271,7 +271,7 @@ func TestBrowserShortcutComponentClicksItsHost(t *testing.T) {
   </script>
 </body></html>`
 	rendered := deliver(page)
-	if !strings.Contains(rendered, "/kit/components/shortcut@") {
+	if !strings.Contains(rendered, "/_kitwork/components/shortcut.") {
 		t.Fatalf("Deliver should bring the shortcut component:\n%s", rendered)
 	}
 	runKernelPage(t, browser, page, scanComponents(page, nil))
@@ -499,7 +499,7 @@ func TestBrowserCatalogueComponentsHoldTheirContract(t *testing.T) {
   </script>
 </body></html>`
 	rendered := deliver(page)
-	for _, want := range []string{"/kit/components/clipboard@", "/kit/components/sidebar@", "/kit/components/toast@"} {
+	for _, want := range []string{"/_kitwork/components/clipboard.", "/_kitwork/components/sidebar.", "/_kitwork/components/toast."} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("Deliver should bring %s:\n%s", want, rendered)
 		}
@@ -689,7 +689,7 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
   })().catch(function (error) { var root = document.documentElement; if (!root.hasAttribute("data-kit-test")) { root.setAttribute("data-kit-test", "failed"); root.setAttribute("data-kit-test-error", String(error && error.message || error)); } });
   </script>
 </body></html>`
-	if !strings.Contains(deliver(page), "/kit/components/tabs@") {
+	if !strings.Contains(deliver(page), "/_kitwork/components/tabs.") {
 		t.Fatal("Deliver should bring the tabs component")
 	}
 	runKernelPage(t, browser, page, scanComponents(page, nil))

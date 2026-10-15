@@ -1,0 +1,21 @@
+<!-- Trang thực đơn của quán: markup .ui, biểu thức trong {{ }}. -->
+<page title="Thực đơn — {{ site.name }}" layout="main">
+  <header>
+    <h1>{{ site.name }}</h1>
+    <text>{{ drinks.length }} món · {{ basket.count > 0 ? "có " + basket.count + " món trong giỏ" : "giỏ trống" }}</text>
+  </header>
+
+  <list each="drink of drinks" key="{{ drink.id }}">
+    <product-card name="{{ drink.name }}" price="{{ format.money(drink.price) }}" />
+    <box component="basket" as="$basket" class="card padding-x-4 max-width-640px">
+      <button click="$basket.add(drink.id)" disabled="{{ !drink.available }}">Thêm</button>
+      <text show="{{ drink.tags.includes('mới') }}">Mới</text>
+    </box>
+  </list>
+
+  <code language="javascript">const total = items.reduce((sum, item) => sum + item.price, 0);</code>
+  <icon value="coffee" alt="Cà phê" />
+  <text>Giá đã gồm thuế {{ (tax * 100).toFixed(0) }}% &amp; phí — {{ `ngày ${today}` }}</text>
+  <text>{{ user?.name ?? "khách" }}</text>
+  <box component="terminal" shell="bash">go run . --port {{ env.PORT || 8107 }}</box>
+</page>

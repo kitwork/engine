@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -12,13 +13,32 @@ import (
 	"time"
 )
 
+// progressbarHostForTest is the host ui.ProgressbarMarkup writes (this package cannot import ui: ui
+// imports it), with the line's colour inline so the proof needs no CSS pass.
+const progressbarHostForTest = `<div style="position:fixed;left:0;right:0;top:0;height:0;z-index:50;pointer-events:none" data-kitwork-component="progressbar"` +
+	` data-kitwork-bind="show: active; aria-valuenow: value" hidden role="progressbar" aria-label="Loading the next page" aria-valuemin="0" aria-valuemax="100"` +
+	` data-kitwork-style="top: top"><div style="height:1px;background:#c8742c" data-kitwork-style="width: value + '%'"></div></div>`
+
+// progressbarComponentFile is the catalogue's progressbar, read from its source, wrapped as the
+// engine wraps a component file.
+func progressbarComponentFile(t *testing.T) []byte {
+	source, err := os.ReadFile(filepath.Join("..", "js", "components", "progressbar", "v1.0.0.js"))
+	if err != nil {
+		t.Fatalf("the progressbar component: %v", err)
+	}
+	return []byte(";(function () {\n" + string(source) + "\n})();")
+}
+
 // A desktop window opened with app.desktop({ chrome: "html" }) draws its own title bar, marked
-// data-kit-drag="true". Drive's progress bar goes under it, where a browser's own progress sits,
+// data-kit-drag="true". The bar between pages goes under it, where a browser's own progress sits,
 // instead of across the window's controls. A drag region that does not touch the top edge is not a
 // title bar, and a page without one keeps the bar at the very top.
 //
-// The proof is a real Chrome: the next page answers 500ms late, so the navigation is slow enough
-// for the bar to show, and the page records where the bar landed.
+// The bar is the progressbar COMPONENT (Drive draws none of its own since 10/10/2026), so this is the
+// whole chain: Drive reports the move to kit.progress, the component shows, and its top getter puts
+// the host under the title bar. The host is the one the engine writes (ui.ProgressbarMarkup), the
+// component file is the catalogue's own. A real Chrome; the next page answers 500ms late, so the move
+// is slow enough for the bar to show, and the page records where the bar landed.
 func TestBrowserDriveProgressSitsUnderTheTitleBar(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the Drive progress browser proof in short mode")
@@ -53,10 +73,13 @@ func driveBarTop(t *testing.T, browser, chrome string) string {
 		case "/kit/kernel.js", "/kit/drive.js":
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write([]byte(pageRuntimeFile(request.URL.Path)))
+		case "/kit/progressbar.js":
+			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = response.Write(progressbarComponentFile(t))
 		case "/":
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = response.Write([]byte(`<!doctype html><html data-kit-hydrate="v1"><head><meta charset="utf-8"><title>start</title></head>` +
-				`<body style="margin:0">` + chrome + `<main><a id="next" href="/next">next</a></main>` +
+				`<body style="margin:0">` + progressbarHostForTest + chrome + `<main><a id="next" href="/next">next</a></main>` +
 				// A slow server, on the page's own clock: the answer comes 500ms later. A response held
 				// open on the wire would stop headless Chrome's virtual clock, and the bar's 120ms
 				// timer with it.
@@ -71,15 +94,15 @@ func driveBarTop(t *testing.T, browser, chrome string) string {
 				 window.addEventListener("load", function () {
 				   setTimeout(function () { document.getElementById("next").click(); }, 60);
 				   (function watch() {
-				     var bar = document.querySelector('[data-kitwork-ui="progress"]');
-				     if (bar && bar.style.opacity === "1") {
-				       document.documentElement.setAttribute("data-bar-top", String(Math.round(bar.getBoundingClientRect().top)));
+				     var host = document.querySelector('[data-kitwork-component="progressbar"]');
+				     if (host && !host.hidden && window.kit.progress.active) {
+				       document.documentElement.setAttribute("data-bar-top", String(Math.round(host.getBoundingClientRect().top)));
 				       return;
 				     }
 				     setTimeout(watch, 20);
 				   })();
 				 });</script>` +
-				pageRuntimeTags + `</body></html>`))
+				pageRuntimeTags + `<script src="/kit/progressbar.js" defer></script></body></html>`))
 		default:
 			http.NotFound(response, request)
 		}

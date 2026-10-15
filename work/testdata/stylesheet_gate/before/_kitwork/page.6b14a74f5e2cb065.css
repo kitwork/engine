@@ -1,0 +1,78 @@
+summary::-webkit-details-marker{display:none}
+:where(h1,h2,h3,h4,h5,h6){text-wrap:balance}:where(p){text-wrap:pretty}
+
+
+:root { --kitwork-brand: #c8742c; --kitwork-brand-rgb: 200, 116, 44; }
+:root { --color-black: 0, 0, 0; --color-blue: 66, 66, 255; --color-brand: 200, 116, 44; --color-brand-accent: 247, 118, 142; --color-brand-deep: 148, 78, 8; --color-brand-light: 255, 117, 143; --color-brand-on: 32, 18, 8; --color-brand-soft: 246, 215, 193; --color-brand-wash: 255, 236, 223; --color-canvas: 246, 243, 238; --color-canvas-dark: 20, 17, 16; --color-danger: 229, 72, 77; --color-danger-deep: 193, 13, 41; --color-danger-on: 38, 13, 13; --color-danger-soft: 255, 209, 206; --color-danger-wash: 255, 235, 233; --color-dark: 18, 18, 18; --color-darkviolet: 148, 0, 211; --color-deeppink: 255, 20, 147; --color-deepskyblue: 0, 191, 255; --color-default: 226, 232, 246; --color-elegant: 36, 36, 36; --color-ghost: 248, 248, 255; --color-gold: 255, 217, 0; --color-gray: 128, 128, 128; --color-info: 34, 136, 255; --color-ink: 43, 33, 27; --color-ink-dark: 243, 236, 230; --color-ink-soft: 107, 93, 82; --color-ink-soft-dark: 184, 170, 158; --color-kitwork: 248, 34, 68; --color-lavender: 230, 230, 250; --color-light: 242, 244, 246; --color-lime: 0, 255, 0; --color-line: 230, 222, 213; --color-line-dark: 58, 48, 42; --color-orangered: 255, 69, 0; --color-panel: 239, 233, 225; --color-panel-dark: 26, 22, 19; --color-paper: 255, 255, 255; --color-paper-dark: 31, 26, 23; --color-peace: 136, 102, 255; --color-positive: 136, 36, 255; --color-primary: 66, 66, 255; --color-profession: 22, 22, 27; --color-red: 255, 0, 0; --color-special: 36, 2, 36; --color-stylish: 36, 36, 66; --color-success: 47, 158, 99; --color-success-deep: 4, 113, 64; --color-success-on: 10, 26, 16; --color-success-soft: 199, 232, 209; --color-success-wash: 227, 246, 233; --color-unique: 2, 36, 66; --color-warning: 201, 138, 30; --color-warning-deep: 127, 84, 2; --color-warning-on: 30, 20, 6; --color-warning-soft: 241, 218, 189; --color-warning-wash: 251, 238, 221; --color-white: 255, 255, 255; }
+.dark { --color-brand: 215, 149, 101; --color-brand-deep: 210, 133, 71; --color-brand-on: 30, 19, 12; --color-brand-soft: 50, 36, 27; --color-brand-wash: 32, 24, 19; --color-canvas: 20, 17, 16; --color-danger: 239, 121, 118; --color-danger-deep: 238, 96, 96; --color-danger-on: 35, 16, 15; --color-danger-soft: 56, 32, 31; --color-danger-wash: 36, 22, 21; --color-info: 101, 166, 253; --color-ink: 243, 236, 230; --color-ink-soft: 184, 170, 158; --color-line: 58, 48, 42; --color-panel: 26, 22, 19; --color-paper: 31, 26, 23; --color-success: 105, 180, 133; --color-success-deep: 76, 170, 116; --color-success-on: 14, 25, 18; --color-success-soft: 29, 44, 34; --color-success-wash: 21, 28, 23; --color-warning: 218, 169, 101; --color-warning-deep: 212, 154, 67; --color-warning-on: 28, 21, 10; --color-warning-soft: 48, 38, 25; --color-warning-wash: 30, 25, 18; }
+*, ::before, ::after { box-sizing: border-box; border-width: 0; border-style: solid; border-color: currentColor; }
+*, ::before, ::after { --kitwork-ring-inset: ; --kitwork-shadow-color: initial; --kitwork-ring-offset-width: 0px; --kitwork-ring-offset-color: #fff; --kitwork-ring-color: rgb(59 130 246 / 0.5); --kitwork-ring-offset-shadow: 0 0 #0000; --kitwork-ring-shadow: 0 0 #0000; --kitwork-shadow: 0 0 #0000; }
+*, ::before, ::after { --kitwork-blur: ; --kitwork-brightness: ; --kitwork-contrast: ; --kitwork-grayscale: ; --kitwork-hue-rotate: ; --kitwork-invert: ; --kitwork-saturate: ; --kitwork-sepia: ; --kitwork-drop-shadow: ; --kitwork-backdrop-blur: ; --kitwork-backdrop-brightness: ; --kitwork-backdrop-contrast: ; --kitwork-backdrop-grayscale: ; --kitwork-backdrop-hue-rotate: ; --kitwork-backdrop-invert: ; --kitwork-backdrop-opacity: ; --kitwork-backdrop-saturate: ; --kitwork-backdrop-sepia: ; --kitwork-ordinal: ; --kitwork-slashed-zero: ; --kitwork-numeric-figure: ; --kitwork-numeric-spacing: ; --kitwork-numeric-fraction: ; --kitwork-translate-x: 0; --kitwork-translate-y: 0; --kitwork-rotate: 0; --kitwork-skew-x: 0; --kitwork-skew-y: 0; --kitwork-scale-x: 1; --kitwork-scale-y: 1; --kitwork-scroll-snap-strictness: proximity; --kitwork-border-spacing-x: 0; --kitwork-border-spacing-y: 0; --kitwork-divide-x-reverse: 0; --kitwork-divide-y-reverse: 0; --kitwork-space-x-reverse: 0; --kitwork-space-y-reverse: 0; --kitwork-content: ""; }
+html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }
+body { margin: 0; line-height: inherit; }
+a { color: inherit; text-decoration: inherit; }
+ol, ul, menu { list-style: none; margin: 0; padding: 0; }
+blockquote, dl, dd, h1, h2, h3, h4, h5, h6, hr, figure, p, pre { margin: 0; }
+button, input, optgroup, select, textarea { font: inherit; color: inherit; margin: 0; padding: 0; }
+button, [type=button], [type=reset], [type=submit] { -webkit-appearance: button; background-color: transparent; background-image: none; }
+button, [role=button] { cursor: pointer; }
+img, svg, video, canvas, audio, iframe, embed, object { display: block; vertical-align: middle; }
+[hidden] { display: none !important; }
+.absolute { position: absolute; }
+.bg-brand { background-color: rgb(var(--color-brand, 200, 116, 44)); }
+.bg-paper { background-color: rgb(var(--color-paper, 255, 255, 255)); }
+.bg-success-soft { background-color: rgb(var(--color-success-soft, 199, 232, 209)); }
+.cursor-pointer { cursor: pointer; }
+.disabled\:opacity-50:disabled { opacity: 0.50; }
+.flex { display: flex; }
+.flex-1 { flex: 1 1 0%; }
+.flex-col { flex-direction: column; }
+.flex-row { flex-direction: row; }
+.focus-visible\:outline:focus-visible { outline-style: solid; }
+.focus-visible\:outline-2:focus-visible { outline-width: 2px; }
+.focus-visible\:outline-brand:focus-visible { outline-color: rgb(var(--color-brand, 200, 116, 44)); }
+.focus-visible\:outline-offset-2:focus-visible { outline-offset: 2px; }
+.font-medium { font-weight: 500; }
+.group[open] .group-open\:rotate-180 { --kitwork-rotate: 180deg; transform: translate(var(--kitwork-translate-x), var(--kitwork-translate-y)) rotate(var(--kitwork-rotate)) skewX(var(--kitwork-skew-x)) skewY(var(--kitwork-skew-y)) scaleX(var(--kitwork-scale-x)) scaleY(var(--kitwork-scale-y)); }
+.hidden { display: none; }
+.hover\:bg-brand:hover { background-color: rgb(var(--color-brand, 200, 116, 44)); }
+.hover\:opacity-80:hover { opacity: 0.80; }
+.inline-flex { display: inline-flex; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-start { justify-content: flex-start; }
+.line-clamp-2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.list-none { list-style-type: none; }
+.min-h-screen { min-height: 100vh; }
+.min-w-48 { min-width: 12rem; }
+.relative { position: relative; }
+.shadow-lg { --kitwork-shadow: 0 10px 15px -3px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1)), 0 4px 6px -4px var(--kitwork-shadow-color, rgb(0 0 0 / 0.1)); box-shadow: var(--kitwork-ring-offset-shadow), var(--kitwork-ring-shadow), var(--kitwork-shadow); }
+.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+.text-success-deep { color: rgb(var(--color-success-deep, 4, 113, 64)); }
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.w-fit { width: fit-content; }
+.z-50 { z-index: 50; }
+.border { border-width: 1px; border-style: solid; }
+.border-line { border-color: rgb(var(--color-line, 230, 222, 213)); }
+.gap-1 { gap: 0.25rem; }
+.gap-2 { gap: 0.5rem; }
+.gap-4 { gap: 1rem; }
+.p-4 { padding: 1rem; }
+.rounded-full { border-radius: 9999px; }
+.rounded-md { border-radius: 0.375rem; }
+.rounded-xl { border-radius: 0.75rem; }
+.transition-transform { transition-property: transform; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 150ms; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.px-3 { padding-left: 0.75rem; padding-right: 0.75rem; }
+.py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+.py-2 { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.left-0 { left: 0px; }
+.mt-2 { margin-top: 0.5rem; }
+.right-0 { right: 0px; }
+.top-0 { top: 0px; }
+.top-full { top: 100%; }
+@media (min-width: 768px) {
+	.md\:block { display: block; }
+	.md\:flex-row { flex-direction: row; }
+	.md\:inline { display: inline; }
+}

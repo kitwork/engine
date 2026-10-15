@@ -19,14 +19,25 @@
   //   :margin(x)    grow or shrink the screen before the test, as CSS margin: :margin(-20%)
   // A browser without IntersectionObserver answers "on screen" once: content that waits to be seen
   // must never wait forever.
+  //
+  // A Kitwork UI page writes the same thing as pairs of data-kitwork-event: intersect-enter[.mods]
+  // and intersect-leave[.mods] ("intersect-enter.once: start(); intersect-leave: stop()"). Each pair
+  // is watched like an attribute and dispatched under the pair's own name, which is the event the
+  // kernel listens for; its modifiers follow '.' (a dot inside margin(…) is the argument's, as in
+  // margin(-1.5rem)), and intersect-leave means :leave. A pair's name has no '%' or space, so a
+  // percentage margin is the hand-written form's alone.
   var kit = window.kit;
   if (!kit || kit.intersect) return;
   var HEAD = "data-kit-intersect";
-  var watching = new WeakMap(); // element → { attribute name: observer }
+  var watching = new WeakMap(); // element → { attribute or pair name: observer }
+
+  function modifiersOf(name) {
+    return name.split(name.indexOf(HEAD) === 0 ? ":" : /\.(?![^(]*\))/).slice(1);
+  }
 
   function optionsOf(name) {
     var options = { threshold: 0 };
-    name.split(":").slice(1).forEach(function (modifier) {
+    modifiersOf(name).forEach(function (modifier) {
       if (modifier === "half") options.threshold = 0.5;
       else if (modifier === "full") options.threshold = 0.99;
       else if (/^margin\(.+\)$/.test(modifier)) options.rootMargin = modifier.slice(7, -1);
@@ -39,7 +50,8 @@
   }
 
   function watch(element, name) {
-    var leave = /:leave(:|$)/.test(name), once = /:once(:|$)/.test(name);
+    var modifiers = modifiersOf(name);
+    var leave = modifiers.indexOf("leave") >= 0 || name.indexOf("intersect-leave") === 0, once = modifiers.indexOf("once") >= 0;
     if (typeof window.IntersectionObserver !== "function") {
       if (!leave) announce(element, name);
       return null;
@@ -68,6 +80,12 @@
     if (!root || root.nodeType !== 1) return;
     [root].concat(Array.prototype.slice.call(root.querySelectorAll("*"))).forEach(function (element) {
       var names = element.getAttributeNames().filter(function (name) { return name.indexOf(HEAD) === 0; });
+      // (a value the kernel cannot read is reported there; here it watches nothing)
+      try {
+        kit.internal.grouped.pairs(element.getAttribute("data-kitwork-event") || "").forEach(function (pair) {
+          if (/^intersect-(enter|leave)(\.|$)/.test(pair[0])) names.push(pair[0]);
+        });
+      } catch (error) { }
       var current = watching.get(element);
       if (!names.length && !current) return;
       if (!current) {

@@ -67,6 +67,11 @@ func (w *KitWork) Cache() *GeneralCache {
 	return &GeneralCache{tenant: w.tenant}
 }
 
+// Safe is the global safe, which the "kitwork" module exports as well (14/10/2026): import { safe }
+// from "kitwork", the habit of import { log }, is const { safe } = kitwork(), and declares safe as this
+// same function. Without it the import gave null and every call of safe was a NOT_A_FUNCTION error.
+func (w *KitWork) Safe() value.Value { return value.NewSafeFunction() }
+
 // KitWork is the per-tenant capability surface returned by kitwork() in the VM.
 // Every capability is a METHOD on *KitWork, so they must all live in package work
 // (Go requires methods in the type's package) — that's why this package is large.
@@ -141,13 +146,12 @@ func (t *Tenant) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer requestScope.Close()
 
-	// The page JavaScript: one file per part under /kit/ (kitassets.go). The one-response /kit.js
-	// went on 03/10 — no page asked for it any more, and it carried none of the directive files.
-	if t.serveKitAssetIf(w, r) {
-		return
-	}
-	// /jitfonts/* — vendored woff2 served straight off the embedded FS.
-	if serveFontIf(w, r) {
+	// Everything the engine serves for itself lives under /_kitwork/ (kitassets.go): the page
+	// JavaScript, one file per part, and the vendored woff2 (/_kitwork/fonts/…, straight off the
+	// embedded FS). It is answered here, before the folder tree, so nothing under it is ever a
+	// tenant's file; the names used before (/kit/…, /jitfonts/…) still answer. The one-response
+	// /kit.js went on 03/10 — no page asked for it any more, and it carried none of the directive files.
+	if t.serveEngineIf(w, r) {
 		return
 	}
 	// /_db/query — authenticated read-only SQL over HTTP. Off unless a database declaration exposes it.

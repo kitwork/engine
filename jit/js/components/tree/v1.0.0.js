@@ -1,4 +1,4 @@
-/* tree component @v1.0.0 — the keyboard half of a tree view.
+/* tree component — the keyboard half of a tree view.
  *
  * Usage — the markup declares every state a reader can see; the component moves focus:
  *
@@ -193,4 +193,3 @@ var treeDef = {
 };
 
 window.kit.component("tree", treeDef);
-window.kit.component("tree@v1.0.0", treeDef);

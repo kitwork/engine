@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ func (c *Chromedp) Screenshot(urlVal value.Value, options value.Value) value.Val
 
 func (co *ChromeOptions) Capture() value.Value {
 	if co.err != nil {
-		return value.Value{K: value.Invalid, V: co.err.Error()}
+		return failure(co.err)
 	}
 	return runScreenshotCapture(co.url, co.width, co.height, co.delay, co.timeout)
 }
@@ -72,7 +73,7 @@ func runScreenshotCapture(urlStr string, width, height int, delay, timeout time.
 	defer globalChromeMu.Unlock()
 
 	if globalChromeCtx == nil {
-		return value.Value{K: value.Invalid, V: "chrome not initialized"}
+		return value.InvalidFailure(value.UnavailableCode, "chrome not initialized")
 	}
 	if timeout <= 0 {
 		timeout = 15 * time.Second
@@ -98,14 +99,24 @@ func runScreenshotCapture(urlStr string, width, height int, delay, timeout time.
 		return screenshotErr(err)
 	}
 	if len(buf) == 0 {
-		return value.Value{K: value.Invalid, V: "empty screenshot (page did not render in time)"}
+		return value.InvalidFailure(value.TimeoutCode, "empty screenshot (page did not render in time)")
 	}
 	return value.New(buf)
 }
 
 func screenshotErr(err error) value.Value {
-	if strings.Contains(err.Error(), "exec:") {
-		return value.Value{K: value.Invalid, V: "exec: Google Chrome not found"}
+	return failure(err)
+}
+
+// failure is a failure of Chrome as the program sees it: UNAVAILABLE when Chrome is not there, the
+// request's cancellation and TIMEOUT as such, NETWORK for any other (the page did not load, the tab
+// went away).
+func failure(err error) value.Value {
+	switch {
+	case strings.Contains(err.Error(), "exec:"):
+		return value.InvalidFailure(value.UnavailableCode, "exec: Google Chrome not found")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return value.FailureOfError("", err)
 	}
-	return value.Value{K: value.Invalid, V: err.Error()}
+	return value.InvalidFailure(value.NetworkCode, err.Error())
 }

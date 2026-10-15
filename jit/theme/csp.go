@@ -30,8 +30,10 @@ var (
 )
 
 // PrepaintHash is the CSP source expression for the inline pre-paint this package injects, e.g.
-// `'sha256-7DTo+ePXU5XBhJeEF7glQskJ3hjmKB0WvugP+YkEqzg='`. A site that builds its policy by hand
-// can read it instead of copying a digest that would go stale the moment the script changes.
+// `'sha256-NNq1CVJf/X9SDwdS1Haa8Eox6R9JbnZDeAsa3Nbha/g='`. A site that builds its policy by hand
+// can read it instead of copying a digest that would go stale the moment the script changes. It is
+// the same for every site and every page: the site's default mode (router.appearance) is read off
+// <html data-kitwork-appearance> by the script, never written into it.
 func PrepaintHash() string {
 	prepaintHashOnce.Do(func() {
 		sum := sha256.Sum256([]byte(prepaintBody))
@@ -42,9 +44,10 @@ func PrepaintHash() string {
 
 // AllowInCSP returns the policy the response should carry so the pre-paint in this page can run.
 // It is a no-op for a page without the pre-paint, for an empty policy, and for a policy that
-// already allows the script — by hash or by 'unsafe-inline'.
+// already allows the script — by hash or by 'unsafe-inline'. The page carries the pre-paint under
+// today's marker, data-kitwork-generated="appearance", or one of the two it had before.
 func AllowInCSP(policy, html string) string {
-	if policy == "" || !strings.Contains(html, `data-kitwork-jit="theme"`) {
+	if policy == "" || !carriesPrepaint(html) {
 		return policy
 	}
 	hash := PrepaintHash()
@@ -102,4 +105,15 @@ func directiveValue(directive string) string {
 		return ""
 	}
 	return strings.Join(fields[1:], " ")
+}
+
+// carriesPrepaint reports whether the rendered page holds the engine's pre-paint, under any of the
+// marker spellings a page has carried it under.
+func carriesPrepaint(html string) bool {
+	for _, marker := range prepaintMarkers {
+		if strings.Contains(html, marker) {
+			return true
+		}
+	}
+	return false
 }

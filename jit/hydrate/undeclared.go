@@ -75,9 +75,10 @@ type boundary struct {
 	// say which component lacks the name, and what it does have.
 	component string
 	names     []string
-	// literal is the keys a data-kit-scope literal on a component host sets: parameters, each one a
-	// name the component must have.
-	literal []string
+	// literal is the keys a data-kit-scope literal (or a data-kitwork-scope) on a component host
+	// sets: parameters, each one a name the component must have. literalFrom is the attribute.
+	literal     []string
+	literalFrom string
 }
 
 // aliasRead is `$alias.member` in an expression, checked against the alias's host once the whole
@@ -117,8 +118,8 @@ func undeclaredWarningsWith(html string, components ComponentNames) []string {
 	var lines []string
 	for _, stray := range scan.strayParameters {
 		host := stray.boundary
-		lines = append(lines, fmt.Sprintf("data-kit-scope sets %q on component %s, which %s does not have — a parameter it never reads (%s has: %s). State of the page's own belongs on a data-kit-scope inside the host. In %s",
-			stray.name, host.component, host.component, host.component, strings.Join(host.names, ", "), stray.tag))
+		lines = append(lines, fmt.Sprintf("%s sets %q on component %s, which %s does not have — a parameter it never reads (%s has: %s). State of the page's own belongs on a %s inside the host. In %s",
+			stray.attribute, stray.name, host.component, host.component, host.component, strings.Join(host.names, ", "), stray.attribute, stray.tag))
 	}
 	for _, read := range scan.aliasReads {
 		host := scan.aliases[read.alias]
@@ -188,7 +189,7 @@ type undeclaredScan struct {
 	aliasReads []aliasRead
 	// parameters a component host's literal sets that its component does not have
 	strayParameters []undeclaredRead
-	aliases    map[string]*boundary // alias → its component host; nil when two hosts claim it
+	aliases         map[string]*boundary // alias → its component host; nil when two hosts claim it
 }
 
 func scanUndeclaredNames(html string, components ComponentNames) (scan undeclaredScan, ok bool) {
@@ -235,7 +236,8 @@ func scanUndeclaredNames(html string, components ComponentNames) (scan undeclare
 				continue
 			}
 			depth--
-			for len(stack) > 1 && stack[len(stack)-1].depth > depth {
+			// a boundary holds the depth its tag opened at, so the close back to that depth ends it
+			for len(stack) > 1 && stack[len(stack)-1].depth >= depth {
 				stack = stack[:len(stack)-1]
 			}
 			continue
@@ -262,11 +264,10 @@ func scanUndeclaredNames(html string, components ComponentNames) (scan undeclare
 			// data-kit-scope inside the host. Only a component whose names are known is checked.
 			for _, key := range opened.literal {
 				if !containsName(opened.names, key) {
-					scan.strayParameters = append(scan.strayParameters, undeclaredRead{name: key, attribute: "data-kit-scope", tag: shortTag(tag), boundary: opened})
+					scan.strayParameters = append(scan.strayParameters, undeclaredRead{name: key, attribute: opened.literalFrom, tag: shortTag(tag), boundary: opened})
 				}
 			}
-			if alias, has := attributeValue(tag, "data-kit-alias"); has && opened.component != "" {
-				alias = strings.TrimSpace(authoredAttribute(alias))
+			if alias := boundaryAlias(tag); alias != "" && opened.component != "" {
 				if _, claimed := scan.aliases[alias]; claimed {
 					scan.aliases[alias] = nil // two hosts, one handle: the kernel keeps the last; say nothing
 				} else {
@@ -314,34 +315,73 @@ func pageScopeIsWritten(html string) bool {
 // readBoundary returns the boundary a tag opens, or nil when it opens none. A component host whose
 // names cannot be read opens an OPAQUE boundary: the scan keeps walking so nesting stays right, but
 // nothing inside it is ever reported.
+//
+// Both forms open one: data-kit-scope (a comma literal) and data-kit-component, or the engine's
+// data-kitwork-scope ("name: value; …") and data-kitwork-component ("name[@version][: $alias]").
 func readBoundary(tag string, depth int, components ComponentNames) *boundary {
 	scope, hasScope := attributeValue(tag, "data-kit-scope")
 	component, isComponent := attributeValue(tag, "data-kit-component")
-	if !hasScope && !isComponent {
+	groupedScope, hasGroupedScope := attributeValue(tag, "data-kitwork-scope")
+	groupedComponent, isGroupedComponent := attributeValue(tag, "data-kitwork-component")
+	if !hasScope && !isComponent && !hasGroupedScope && !isGroupedComponent {
 		return nil
 	}
 	declared := map[string]bool{}
 	var literal []string
+	literalFrom := "data-kit-scope"
 	if hasScope {
 		for _, match := range scopeLiteralKeyRe.FindAllStringSubmatch("{"+authoredAttribute(scope)+"}", -1) {
 			declared[match[1]] = true
 			literal = append(literal, match[1])
 		}
 	}
-	opened := &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: isComponent}
-	if isComponent && components != nil {
-		component = strings.TrimSpace(authoredAttribute(component))
-		if names, known := components(component); known {
-			for _, name := range names {
-				declared[name] = true
+	// A grouped scope that does not split declares nothing anyone can be sure of, so what it holds
+	// stays unknown — the verify pass names the mistake itself.
+	unreadable := false
+	if hasGroupedScope {
+		pairs, err := Pairs(authoredAttribute(groupedScope))
+		unreadable = err != nil
+		literalFrom = "data-kitwork-scope"
+		for _, pair := range pairs {
+			declared[pair.Name] = true
+			literal = append(literal, pair.Name)
+		}
+	}
+	opened := &boundary{tag: tagName(tag), depth: depth, declared: declared, opaque: isComponent || isGroupedComponent || unreadable}
+	name := ""
+	switch {
+	case isComponent:
+		name = strings.TrimSpace(authoredAttribute(component))
+	case isGroupedComponent:
+		name, _, _ = ComponentValue(authoredAttribute(groupedComponent))
+	}
+	if name != "" && components != nil && !unreadable {
+		if names, known := components(name); known {
+			for _, n := range names {
+				declared[n] = true
 			}
 			opened.opaque = false
-			opened.component = component
+			opened.component = name
 			opened.names = names
 			opened.literal = literal
+			opened.literalFrom = literalFrom
 		}
 	}
 	return opened
+}
+
+// boundaryAlias is the $alias a component host registers: its data-kit-alias, or the part of its
+// data-kitwork-component after the ':'. "" when it has none.
+func boundaryAlias(tag string) string {
+	if alias, has := attributeValue(tag, "data-kit-alias"); has {
+		return strings.TrimSpace(authoredAttribute(alias))
+	}
+	if value, has := attributeValue(tag, "data-kitwork-component"); has {
+		if _, alias, err := ComponentValue(authoredAttribute(value)); err == nil {
+			return alias
+		}
+	}
+	return ""
 }
 
 // collectTagNames records what this tag declares into its boundary, and what it reads for checking.
@@ -382,19 +422,65 @@ func collectTagNames(tag string, current *boundary, reads *[]undeclaredRead, ali
 		if !has || strings.TrimSpace(value) == "" {
 			continue
 		}
-		names, err := ReadNamesAttribute(value)
+		recordReads(authoredAttribute(value), attribute, tag, current, reads, aliasReads)
+	}
+	collectGroupedNames(tag, current, reads, aliasReads)
+}
+
+// recordReads notes every scope name an expression reads, and every $alias.member, for checking once
+// the whole document is scanned. label is what a report calls the expression's place.
+func recordReads(expression, label, tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
+	names, err := ReadNames(expression)
+	if err != nil {
+		return // a malformed expression is already reported by the verify pass
+	}
+	for _, match := range aliasMemberRe.FindAllStringSubmatch(withoutStringLiterals(expression), -1) {
+		*aliasReads = append(*aliasReads, aliasRead{alias: match[1], member: match[2], attribute: label, tag: shortTag(tag)})
+	}
+	for _, name := range names {
+		if reservedReadNames[name] || strings.HasPrefix(name, "$") {
+			continue
+		}
+		*reads = append(*reads, undeclaredRead{name: name, attribute: label, tag: shortTag(tag), boundary: current})
+	}
+}
+
+// collectGroupedNames is collectTagNames for the grouped attributes. data-kitwork-for binds its item
+// and index, and a two-way `value: name` or `checked: name` in data-kitwork-bind writes its name into
+// the boundary as data-kit-model does — both declare. Every bind, class, style and event pair, and the
+// if, reads. (A scope's values, and a for's list, are not read-checked, as their data-kit-* forms are
+// not.)
+func collectGroupedNames(tag string, current *boundary, reads *[]undeclaredRead, aliasReads *[]aliasRead) {
+	if !strings.Contains(tag, "data-kitwork-") {
+		return
+	}
+	if value, has := attributeValue(tag, "data-kitwork-for"); has {
+		if item, index, _, _, err := ForValue(authoredAttribute(value)); err == nil {
+			current.declared[item] = true
+			if index != "" {
+				current.declared[index] = true
+			}
+		}
+	}
+	for _, attribute := range []string{"data-kitwork-bind", "data-kitwork-class", "data-kitwork-style", "data-kitwork-event"} {
+		value, has := attributeValue(tag, attribute)
+		if !has {
+			continue
+		}
+		pairs, err := Pairs(authoredAttribute(value))
 		if err != nil {
-			continue // a malformed expression is already reported by the verify pass
+			continue // the verify pass names it
 		}
-		for _, match := range aliasMemberRe.FindAllStringSubmatch(withoutStringLiterals(authoredAttribute(value)), -1) {
-			*aliasReads = append(*aliasReads, aliasRead{alias: match[1], member: match[2], attribute: attribute, tag: shortTag(tag)})
-		}
-		for _, name := range names {
-			if reservedReadNames[name] || strings.HasPrefix(name, "$") {
+		for _, pair := range pairs {
+			if attribute == "data-kitwork-bind" && (pair.Name == "value" || pair.Name == "checked") && bareNameRe.MatchString(pair.Value) {
+				current.declared[pair.Value] = true
 				continue
 			}
-			*reads = append(*reads, undeclaredRead{name: name, attribute: attribute, tag: shortTag(tag), boundary: current})
+			recordReads(pair.Value, attribute+" "+pair.Name, tag, current, reads, aliasReads)
 		}
+	}
+	if value, has := attributeValue(tag, "data-kitwork-if"); has && strings.TrimSpace(value) != "" {
+		recordReads(authoredAttribute(value), "data-kitwork-if", tag, current, reads, aliasReads)
 	}
 }
 

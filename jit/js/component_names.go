@@ -30,10 +30,19 @@ import (
 //     not a Symbol constant of the file, `scope[TREE] = …`, which is a private slot no markup reads;
 //   - JavaScript the scanner does not follow (an unclosed string, comment or bracket).
 
-// ComponentNames is hydrate.ComponentNames for one site: its own _components, and the catalogue
-// versions it pins with router.javascript({ components }).
-func ComponentNames(site Site, versions map[string]string) hydrate.ComponentNames {
+// ComponentNames is hydrate.ComponentNames for one site: its own _components, and the catalogue.
+// It takes a component as either form writes it — "dialog", "dialog@v2.0.0" (a template page may
+// still name a version), or a data-kitwork-component value with its alias, "theme: $theme" — and
+// answers for the component, never the alias.
+func ComponentNames(site Site) hydrate.ComponentNames {
 	return func(component string) ([]string, bool) {
+		if strings.Contains(component, ":") {
+			named, _, err := hydrate.ComponentValue(component)
+			if err != nil {
+				return nil, false
+			}
+			component = named
+		}
 		name, version, _ := strings.Cut(strings.TrimSpace(component), "@")
 		if !componentNameRe.MatchString(name) {
 			return nil, false
@@ -41,8 +50,6 @@ func ComponentNames(site Site, versions map[string]string) hydrate.ComponentName
 		key := name
 		if version != "" {
 			key = name + "@v" + strings.TrimPrefix(version, "v")
-		} else if pinned, ok := versions[name]; ok && HasComponent(name+"@v"+strings.TrimPrefix(pinned, "v")) {
-			key = name + "@v" + strings.TrimPrefix(pinned, "v")
 		}
 		source := componentSource(key, site)
 		if source == "" {

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kitwork/engine/work"
 )
 
 // Prewarm must discover every root/<identity>/<domain>/router.kitwork.js (the tenant marker) and
@@ -44,6 +46,36 @@ func TestPrewarmAndDiscover(t *testing.T) {
 	engine.mu.RUnlock()
 	if !okL || !okA {
 		t.Fatalf("expected both tenants cached (localhost=%v alpha.local=%v)", okL, okA)
+	}
+}
+
+func TestPrewarmDomainWarmsOnlySelectedSite(t *testing.T) {
+	root := t.TempDir()
+	for _, domain := range []string{"primary.example.com", "second.example.com"} {
+		directory := filepath.Join(root, "identity", domain)
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte(`const ready = true;`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	engine := New(root, 0, false, "primary.example.com")
+	t.Cleanup(engine.Close)
+	if err := engine.SetRootLayout(work.RootLayoutMultiTenant); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.PrewarmDomain("PRIMARY.Example.COM."); err != nil {
+		t.Fatal(err)
+	}
+
+	engine.mu.RLock()
+	_, primaryWarm := engine.cache["primary.example.com"]
+	_, secondWarm := engine.cache["second.example.com"]
+	engine.mu.RUnlock()
+	if !primaryWarm || secondWarm {
+		t.Fatalf("warm cache: primary=%t second=%t", primaryWarm, secondWarm)
 	}
 }
 

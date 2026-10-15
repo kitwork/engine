@@ -2,10 +2,13 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	stdhttp "net/http"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -142,7 +145,8 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 
 	req, err := stdhttp.NewRequest(method, url, bodyReader)
 	if err != nil {
-		return value.New(Response{Status: 0, Error: err.Error()})
+		// a URL that is not one: the program's argument
+		return value.New(Response{Status: 0, Error: shownError(err), Code: value.InvalidArgumentCode})
 	}
 
 	for k, v := range h.headers {
@@ -182,7 +186,7 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 		if snap, ok := staleFallback(key, wantPersist, h.persistStore); ok {
 			return storedResponse(snap, true)
 		}
-		return value.New(Response{Status: 0, Error: err.Error()})
+		return value.New(Response{Status: 0, Error: shownError(err), Code: failureCode(err)})
 	}
 	defer resp.Body.Close()
 
@@ -192,10 +196,11 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 	}
 	resBody, readErr := io.ReadAll(responseReader)
 	if readErr != nil {
-		return value.New(Response{Status: 0, Error: readErr.Error()})
+		return value.New(Response{Status: 0, Error: shownError(readErr), Code: failureCode(readErr)})
 	}
 	if h.maxBytes > 0 && int64(len(resBody)) > h.maxBytes {
-		return value.New(Response{Status: 0, Error: "http: response body exceeds max bytes"})
+		// an answer from outside past the limit the program set
+		return value.New(Response{Status: 0, Error: "http: response body exceeds max bytes", Code: value.InvalidInputCode})
 	}
 	// Keep the upstream's media type: a cached/proxied copy must replay under the ORIGINAL type.
 	// Fall back to sniffing the bytes when the server sent none (stdlib, no dependency).
@@ -223,6 +228,55 @@ func (h *HTTP) do(method, url string, body value.Value) value.Value {
 		Body:        value.New(resBody),
 		ContentType: contentType,
 	})
+}
+
+// failureCode is the code of a request that got no answer (14/10/2026): DENIED when the SSRF guard
+// refused the address, EXECUTION_CANCELLED when the request was cancelled (nothing catches it),
+// TIMEOUT past its time limit, NETWORK for any other.
+func failureCode(err error) string {
+	var denied *deniedAddress
+	var timeout interface{ Timeout() bool }
+	switch {
+	case errors.As(err, &denied):
+		return value.DeniedCode
+	case errors.Is(err, context.Canceled):
+		return value.CancelledCode
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
+		return value.TimeoutCode
+	}
+	return value.NetworkCode
+}
+
+// shownError is the text of a request's failure as the program reads it (error.message, which a site
+// may hand a browser): Go names the URL in it, and a URL can carry a secret, so the URL loses its user
+// information, query and fragment ("Get \"https://api.example.com/v1\": dial tcp …").
+func shownError(err error) string {
+	var failed *neturl.Error
+	if errors.As(err, &failed) {
+		shown := *failed
+		shown.URL = shownURL(failed.URL)
+		return shown.Error()
+	}
+	return err.Error()
+}
+
+// shownURL is raw without its user information, query and fragment. raw may not parse (the error of
+// a URL that is not one), so it is cut as text.
+func shownURL(raw string) string {
+	if cut := strings.IndexAny(raw, "?#"); cut >= 0 {
+		raw = raw[:cut]
+	}
+	if scheme := strings.Index(raw, "://"); scheme >= 0 {
+		rest := raw[scheme+3:]
+		authority := rest
+		if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+			authority = rest[:slash]
+		}
+		if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+			raw = raw[:scheme+3] + rest[at+1:]
+		}
+	}
+	return raw
 }
 
 // staleFallback returns an expired-but-present disk copy when the live request failed.

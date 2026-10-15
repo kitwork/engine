@@ -39,7 +39,7 @@ var componentFileRe = regexp.MustCompile(`^[a-z][a-z0-9-]*\.js$`)
 // maxSiteComponentBytes bounds ONE component file.
 //
 // Not the shared runtime: a site's component does not ride with the kernel. The page gets a file for
-// what its markup names (/kit/components/<name>.<hash>.js), so a page that names nothing is
+// what its markup names (/_kitwork/components/<name>.<hash>.js), so a page that names nothing is
 // served the kernel alone — 48 KB. What this bounds is the single response for the page that does
 // name it, and the memory the generation holds it in.
 //

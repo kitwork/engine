@@ -1,0 +1,35 @@
+<content gap="4" padding="4">
+  <box id="align" flex="column" medium:flex="row" align="top" gap="2">
+    <text size="huge">Một</text>
+    <text>hai</text>
+  </box>
+  <text id="lines" lines="2" show="false" medium:show="true">Một dòng chữ dài của quán cà phê, đọc cho đến hết. Một dòng chữ dài của quán cà phê, đọc cho đến hết. Một dòng chữ dài của quán cà phê, đọc cho đến hết. Một dòng chữ dài của quán cà phê, đọc cho đến hết. Một dòng chữ dài của quán cà phê, đọc cho đến hết. Một dòng chữ dài của quán cà phê, đọc cho đến hết.</text>
+  <box flex="row"><button id="button-show" show="false" medium:show="true">Nút</button></box>
+  <card id="card" background="brand" radius="full" padding="4" color="brand.on"><text>thẻ</text></card>
+  <card id="card-plain" padding="4"><text>thẻ</text></card>
+  <accordion id="outer" open="true">
+    <box click="toggle()" flex="row" gap="2"><text>Ngoài</text><icon value="chevron-down" open:rotate="180"></icon></box>
+    <accordion id="inner">
+      <box click="toggle()" flex="row" gap="2"><text>Trong</text><icon value="chevron-down" open:rotate="180"></icon></box>
+      <text>x</text>
+    </accordion>
+  </accordion>
+  <box flex="row" gap="2">
+    <button id="disabled" disabled="true" hover:opacity="80" disabled:opacity="50">Khoá</button>
+    <button id="hovered" hover:opacity="80">Rê</button>
+    <button id="gated" hover:background="brand" hover:color="brand.on">Nền</button>
+  </box>
+  <box flex="row" gap="2">
+    <badge id="badge" color="success" background="paper"><text>Đã giao</text></badge>
+    <badge id="badge-plain" color="success"><text>Đã giao</text></badge>
+  </box>
+  <box component="dropdown" flex="row">
+    <button click="toggle()">Mở</button>
+    <popover id="popover" place="below-start"><badge place="top-end"><text>3</text></badge><text>thực đơn</text></popover>
+  </box>
+  <box flex="row" gap="2">
+    <icon id="icon-text" value="coffee"></icon>
+    <link id="link" value="/x"><icon value="coffee"></icon><text>Đi</text></link>
+    <button id="button-icon"><icon value="coffee"></icon><text>Mua</text></button>
+  </box>
+</content>

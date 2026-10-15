@@ -11,14 +11,14 @@ import (
 
 func TestComboboxIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="combobox"><input role="combobox"></div>`)
-	if !strings.Contains(out, `/kit/components/combobox@`) {
+	if !strings.Contains(out, `/_kitwork/components/combobox.`) {
 		t.Fatalf("combobox was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"combobox"}), `component("combobox@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"combobox"}); !strings.Contains(src, `component("combobox", `) || strings.Contains(src, `component("combobox@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 	// CONTROL: only what is used.
-	if strings.Contains(deliver(`<dialog data-kit-component="dialog"></dialog>`), `/kit/components/combobox@`) {
+	if strings.Contains(deliver(`<dialog data-kit-component="dialog"></dialog>`), `/_kitwork/components/combobox.`) {
 		t.Error("combobox shipped to a page that never mentions it")
 	}
 }

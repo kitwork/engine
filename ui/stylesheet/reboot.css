@@ -1,0 +1,288 @@
+/* reboot.<hash>.css: the ground of every .ui page. The same bytes for every site, branch and page;
+   it changes only with the engine. It names tokens (var(--ink)) but never holds their values:
+   those are colors.<hash>.css (router.colors) and fonts.<hash>.css (router.fonts).
+   Layers decide precedence, not selector weight or file order:
+     reboot   - browser differences and accessibility floors
+     elements - how each Kitwork element looks before the author writes anything
+     page     - the classes the author's attributes became (page.<hash>.css)
+     show     - show="false" medium:show="true": hiding by width beats any display a class sets
+   Every engine stylesheet of a .ui page starts with this same statement, so the order holds
+   whatever order Drive leaves the <link>s in. Every selector here weighs nothing (* and :where()),
+   so inside a layer only the order below decides. Media queries are min-width, never the range
+   syntax (width >= 640px), which would raise the browser floor to Safari 16.4. */
+@layer reboot, elements, page, show;
+
+@layer reboot {
+  /* Space in .ui is only gap and padding, written where it is wanted: no element brings margin or
+     padding of its own. A border is solid once it has a width, so a class states width and colour. */
+  *, ::before, ::after { box-sizing: border-box; margin: 0; padding: 0; border: 0 solid; }
+
+  /* Running text at 1.5; no text inflation after a phone rotates (100%, not none, keeps the reader's
+     own text size); long words wrap instead of widening the page; checkbox, radio, range and progress
+     take the brand. The page is on the palette even when page.ui writes no colour. */
+  :where(html) {
+    line-height: 1.5; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; tab-size: 4;
+    overflow-wrap: break-word; accent-color: var(--brand);
+    font-family: var(--font-body, system-ui, sans-serif); color: var(--ink); background: var(--canvas);
+  }
+
+  /* Media never overflows the box it sits in. An image keeps its ratio: the engine writes the width
+     and height it reads from a local file, so the browser reserves the room before it loads. */
+  :where(img, picture, video, canvas, svg) { display: block; max-inline-size: 100%; }
+  :where(img, video) { block-size: auto; }
+
+  /* Controls speak the page's type, not the browser's system font. */
+  :where(button, input, select, textarea) { font: inherit; color: inherit; letter-spacing: inherit; }
+  :where(button) { background: none; cursor: pointer; }
+  :where(button:disabled, [aria-disabled="true"]) { cursor: default; }
+  /* A disabled control reads as one: its words at half the colour around it, as a browser greys them
+     before color: inherit above (a neutral button's fill also fades, to ink/4: compile.go,
+     neutralSteps). A colour the author writes on it wins through the layers; WCAG asks no contrast of
+     a disabled control. */
+  :where(button:disabled, input:disabled, select:disabled, textarea:disabled, [aria-disabled="true"]) {
+    color: color-mix(in oklab, currentColor 50%, transparent);
+  }
+  :where(textarea) { resize: vertical; }
+  /* Not :where(::placeholder): a pseudo-element cannot sit inside :where(), the rule would match
+     nothing (measured: the browser's grey stayed). In this layer its weight does not matter. */
+  ::placeholder { opacity: 1; color: color-mix(in oklab, currentColor 70%, var(--paper)); }
+
+  /* A link is styled by what is written on it; code uses the site's code face at the size around it. */
+  :where(a) { color: inherit; text-decoration: inherit; }
+  :where(code, kbd, samp, pre) { font-family: var(--font-code, ui-monospace, monospace); font-size: 1em; }
+  :where(pre) { overflow-x: auto; }
+
+  /* list and accordion: no markers; the engine writes role="list" (Safari drops list semantics
+     without markers) and the author draws the accordion's icon. */
+  :where(ul, ol) { list-style: none; }
+  :where(summary) { list-style: none; cursor: pointer; }
+  :where(summary)::-webkit-details-marker { display: none; }
+
+  /* A live show="..." is the hidden attribute. !important in the first layer outranks every later
+     layer; hidden="until-found" keeps find-in-page. */
+  :where([hidden]:not([hidden="until-found"])) { display: none !important; }
+
+  /* The keyboard focus ring, always drawn (KITWORK_UI 7). outline survives forced colours and never
+     moves layout. --kitwork-focus is the brand where it reaches 3:1 on canvas and paper, else ink:
+     the engine decides it per mode in colors.<hash>.css. */
+  :where(:focus-visible) { outline: 2px solid var(--kitwork-focus, var(--brand)); outline-offset: 2px; }
+
+  /* Top-layer surfaces keep the browser's centring but not its colours. The scrim is the fixed
+     black/50 of the spec: ::backdrop did not inherit custom properties before Chrome 122,
+     Safari 17.4, Firefox 120. */
+  :where(dialog, [popover]) { margin: auto; color: inherit; background: none; }
+  :where(dialog)::backdrop { background: rgb(0 0 0 / 50%); }
+
+  /* Less motion when the reader asked for it. 0.01ms, not 0: animationend and transitionend still
+     fire. !important in the first layer: nothing later brings the motion back. */
+  @media (prefers-reduced-motion: reduce) {
+    *, ::before, ::after {
+      animation-duration: 0.01ms !important; animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important; scroll-behavior: auto !important;
+    }
+  }
+
+  /* Forced colours (Windows contrast themes). Icons are a mask over background-color: currentColor,
+     and that background keeps the page's own ink, so on a dark contrast theme the icon vanishes.
+     Paint it in the system's text colour for where it stands. */
+  @media (forced-colors: active) {
+    :where([class^="icon-"], [class*=" icon-"], [class^="logo-"], [class*=" logo-"]) {
+      forced-color-adjust: none; background-color: CanvasText !important;
+    }
+    :where(a) :where([class^="icon-"], [class*=" icon-"]) { background-color: LinkText !important; }
+    :where(button) :where([class^="icon-"], [class*=" icon-"]) { background-color: ButtonText !important; }
+    :where(button:disabled) :where([class^="icon-"], [class*=" icon-"]) { background-color: GrayText !important; }
+  }
+}
+
+@layer elements {
+  /* Direction. Every element that lays out children carries exactly one of flex-row, flex-column
+     (the compiler writes the element's default when flex is not written) or grid. align and space
+     only set --kitwork-* variables; the direction maps them onto the flex axes, so medium:flex="row"
+     re-maps the same align with no other class. Each container starts from nothing (this rule comes
+     first), so it reads only its own align and space. */
+  :where(.flex-row, .flex-column) {
+    display: flex; --kitwork-horizontal: initial; --kitwork-vertical: initial; --kitwork-space: initial;
+  }
+  :where(a, button, label, span):where(.flex-row, .flex-column) { display: inline-flex; }
+  :where(.flex-row) {
+    flex-direction: row;
+    justify-content: var(--kitwork-space, var(--kitwork-horizontal, normal));
+    align-items: var(--kitwork-vertical, normal);
+  }
+  :where(.flex-column) {
+    flex-direction: column;
+    justify-content: var(--kitwork-space, var(--kitwork-vertical, normal));
+    align-items: var(--kitwork-horizontal, normal);
+  }
+  :where(.grid) {
+    display: grid; --kitwork-horizontal: initial; --kitwork-vertical: initial; --kitwork-space: initial;
+    justify-items: var(--kitwork-horizontal, normal); align-items: var(--kitwork-vertical, normal);
+  }
+  /* Below small (a phone), a flex item holding a code block may grow narrower than the block's longest
+     line: the block scrolls (pre above) instead of pushing the row past the screen. From small up the
+     browser's own minimum holds, so a code panel beside a long text keeps its lines whole rather than
+     sharing the shrink. Only .flex-row: a row by width (medium:flex-row) is a row from small up only.
+     :has() in a forgiving :where(): a browser without it keeps the row as wide as the line. */
+  :where(.flex-row > :has(pre)) { min-inline-size: 0; }
+  @media (min-width: 640px) { :where(.flex-row > :has(pre)) { min-inline-size: auto; } }
+
+  /* pin="top|bottom" (page.css): the element sticks to that edge while the page scrolls under it. A
+     jump to an #anchor stops clear of it, about a header's height, measured from the edge it is
+     pinned to. :has() in a forgiving :where(): a browser without it keeps the jump at the edge. */
+  :where(html:has(.pin-top, [class*=":pin-top"])) { scroll-padding-block-start: 6rem; }
+  :where(html:has(.pin-bottom, [class*=":pin-bottom"])) { scroll-padding-block-end: 6rem; }
+
+  /* The parent of a child written with place="..." (the compiler writes it). Zero weight and before
+     popover, so a popover that holds a placed child stays absolute (also a containing block). */
+  :where(.place-anchor) { position: relative; }
+
+  /* page and content: the regions stack at least as tall as the small viewport (vh first for
+     browsers before svh), and content takes the room left. */
+  :where(body) { min-block-size: 100vh; min-block-size: 100svh; }
+  :where(main) { flex: 1; }
+
+  /* text heading="1...6", sized by level. A written size or weight wins through the layer. 1.25, not
+     tighter: Vietnamese capitals stack two marks. */
+  :where(h1, h2, h3, h4, h5, h6) { font-size: 1rem; font-weight: 600; line-height: 1.25; text-wrap: balance; }
+  :where(h1) { font-size: 1.875rem; letter-spacing: -0.04em; }
+  :where(h2) { font-size: 1.5rem; letter-spacing: -0.03em; }
+  :where(h3) { font-size: 1.125rem; letter-spacing: -0.02em; }
+  @media (min-width: 640px) { :where(h1) { font-size: 2.25rem; } }
+  /* how a paragraph's lines break when wrap is not written (KITWORK_UI 7, "wrap trên chữ"): no last
+     line of one lonely word; a browser without text-wrap breaks lines as it always did */
+  :where(p) { text-wrap: pretty; }
+
+  /* link and button lay out a row, centred across (the compiler writes flex-row on them). No element
+     has a border of its own (border="line" draws one where the author wants it). A button with nothing
+     written about its fill or its edge is neutral and usable: the compiler gives it a translucent fill
+     of ink, ink/6, deeper under the pointer (ink/10) and while pressed (ink/14), fainter while disabled
+     (ink/4) (compile.go, neutralButton). Translucent, as a system's fills are, so the button shows on
+     the grounds a page is made of: the canvas, a card's paper, the panel, a page's backdrop. Not on a
+     band painted ink, or near it (brand+15, midnightblue): ink over ink is ink, no fill shows, and the
+     author writes a background or a border there.
+     Its edge is 1px and transparent: every button has the same box, with or without border="line", and
+     a Windows contrast theme, which repaints every background, draws that edge in the system's colour,
+     so a button still shows where it is. Its corners are radius="small". */
+  :where(a, button) { --kitwork-vertical: center; }
+  :where(button) {
+    --kitwork-horizontal: center;
+    padding: 0.5rem 0.75rem; border: 1px solid transparent; border-radius: 0.375rem;
+  }
+
+  /* fields, on radius="small" like a neutral button: a translucent fill of ink, ink/5, so a field shows
+     on the grounds a page is made of (the canvas, a card, the panel, a backdrop; not a band painted ink,
+     as for a button), no border, and the same transparent edge (a contrast theme draws it). With focus
+     the fill deepens to ink/8, under the focus ring.
+     WCAG 1.4.11 asks what identifies a field to stand 3:1 from what is around it, and these fills do
+     not reach it (ink/5 stands 1.10:1 from Kit Design's canvas in light and in dark, its line 1.13:1):
+     where that matters the author writes a border in a colour that reaches it (border="ink-50": 3.43:1
+     on that canvas in light, 3.35:1 in dark), as border="line" draws a quiet one. A button needs no
+     such edge: its words name it, and they are measured at 4.5:1. Below color-mix (Chrome 111, Safari
+     16.2) the fills are not drawn, as every /N is (the floor of KITWORK_UI). */
+  :where(input:not([type="checkbox"], [type="radio"]), select, textarea) {
+    min-inline-size: 0; padding: 0.5rem 0.75rem;
+    border: 1px solid transparent; border-radius: 0.375rem; background: color-mix(in srgb, var(--ink) 5%, transparent);
+  }
+  :where(input:not([type="checkbox"], [type="radio"]):focus, select:focus, textarea:focus) {
+    background: color-mix(in srgb, var(--ink) 8%, transparent);
+  }
+  :where(.field) { gap: 0.25rem; }
+  :where(.hint) { font-size: 0.875rem; color: color-mix(in oklab, var(--ink) 70%, var(--canvas)); }
+  /* the hint's words are ink-30. The error's words are the engine colour --kitwork-error, which
+     colors.<hash>.css writes per mode: danger made stronger as far as it must to read 4.5:1 on canvas,
+     paper and panel in that mode, danger+25 in light (danger itself is a fill, 3.7:1 on Kit Design's
+     canvas), danger itself in dark on the palettes measured (engine_colour.go, looks.go) */
+  :where(.error) { font-size: 0.875rem; color: var(--kitwork-error); }
+
+  /* input type="switch" (a checkbox with role="switch"); a plain checkbox again in forced colours. */
+  :where(input[role="switch"]) {
+    appearance: none; inline-size: 2.25rem; block-size: 1.25rem; border-radius: 999px; cursor: pointer;
+    background: var(--line) radial-gradient(circle, var(--paper) 0.4375rem, transparent 0.5rem) no-repeat 0 50% / 1.25rem 1.25rem;
+    transition: background-position 0.15s, background-color 0.15s;
+  }
+  :where(input[role="switch"]:checked) { background-color: var(--brand); background-position: 100% 50%; }
+  :where(input[role="switch"]:dir(rtl)) { background-position: 100% 50%; }
+  :where(input[role="switch"]:checked:dir(rtl)) { background-position: 0 50%; }
+  @media (forced-colors: active) { :where(input[role="switch"]) { appearance: auto; } }
+
+  /* image: aspect-ratio="16/9" gives the box its shape, and the picture covers it unless fit is
+     written (fit="contain" in the page layer wins). Any aspect-ratio class, prefixed or not. */
+  :where(img[class*="aspect-ratio-"]) { object-fit: cover; }
+
+  /* surfaces, none with a border. A badge's colour="..." sets --kitwork-tint (page.css), so a written
+     background wins. A popover floats on its shadow, not on a hairline; its edge is 1px and transparent,
+     as a button's: a contrast theme drops the shadow and repaints the paper as the page's Canvas, and
+     draws that edge in the system's colour, so an open menu still ends somewhere. */
+  :where(.card) { background: var(--paper); border-radius: 0.75rem; }
+  :where(.badge) {
+    --kitwork-vertical: center;
+    inline-size: fit-content; gap: 0.25rem; padding: 0.125rem 0.5rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 500; background-color: var(--kitwork-tint);
+  }
+  :where(.popover) {
+    position: absolute; inset-block: 100% auto; inset-inline: 0 auto; margin-block-start: 0.5rem; z-index: 50;
+    min-inline-size: 12rem; background: var(--paper); border: 1px solid transparent; border-radius: 0.75rem;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
+  }
+
+  /* material="glass" (page.css) is made of the frame's own background, which a background class
+     hands over on a page that has a material: as written in --kitwork-background (what shows where
+     the browser cannot blur, and what material="none" gives back) and without its /N in
+     --kitwork-glass (the glass); paper when there is none. Every frame with a material, prefixed or
+     not, starts from nothing, so it never takes the colour of the frame around it; a card and a
+     popover start from their paper. */
+  :where([class^="material-"], [class*=" material-"], [class*=":material-"]) {
+    --kitwork-background: initial; --kitwork-glass: initial;
+  }
+  :where(.card, .popover):where([class^="material-"], [class*=" material-"], [class*=":material-"]) {
+    --kitwork-background: var(--paper); --kitwork-glass: var(--paper);
+  }
+
+  /* quote as a block: set apart by a faint translucent fill of ink behind it, ink/4, not by a rule on
+     its edge, so it stands apart on any ground. Its edge is 1px and transparent: a contrast theme
+     repaints the fill as the page's Canvas and draws that edge in the system's colour, so the quote
+     stays apart from the paragraphs around it. */
+  :where(blockquote) {
+    gap: 0.5rem; padding: 1rem; border: 1px solid transparent; border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--ink) 4%, transparent);
+  }
+
+  /* breadcrumb */
+  :where(.breadcrumb) { flex-wrap: wrap; --kitwork-vertical: center; }
+  :where(.breadcrumb > li) { --kitwork-vertical: center; }
+
+  /* the hosts the engine writes for Kitwork's own components */
+  :where(.progressbar) {
+    position: fixed; inset-block-start: 0; inset-inline: 0; z-index: 50; block-size: 0; pointer-events: none;
+  }
+  :where(.progressbar > *) { transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
+  :where(.toast) {
+    position: fixed; inset-block-end: 1rem; inset-inline-end: 1rem; z-index: 50;
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  /* a region a screen reader speaks (<reader>, a terminal's status): never seen, so never in what a
+     reader selects and copies around it either */
+  :where(.reader) {
+    position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap; -webkit-user-select: none; user-select: none;
+  }
+  /* terminal (ui/terminal.go): the author draws it; the engine writes only the prompt before each
+     command (.code-prompt, a rule of the page's code) and its status region (.reader above). While a
+     terminal types, what is not typed yet is painted transparent and the next character sits under a
+     block caret, a middle tone of ink that shows on a light ground and on a dark one: CSS Custom
+     Highlight ranges the terminal component names, so the text never leaves the page. */
+  ::highlight(kitwork-terminal-untyped) { color: transparent; }
+  ::highlight(kitwork-terminal-caret) { color: transparent; background-color: color-mix(in oklab, var(--ink) 50%, var(--canvas)); }
+
+  /* Print: as long as the content, no floating chrome on every sheet, a heading stays with its text.
+     Last in this layer, so it overrides the looks above (the reboot layer could not: .toast's display
+     and body's min-block-size above would win over it). Dark tokens are declared for screens only, so
+     paper is always light. */
+  @media print {
+    :where(body) { min-block-size: auto; }
+    :where(.progressbar, .toast) { display: none; }
+    :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+    :where(img, blockquote, li, .card) { break-inside: avoid; }
+  }
+}

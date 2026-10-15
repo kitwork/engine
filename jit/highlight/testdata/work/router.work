@@ -1,0 +1,113 @@
+// Router của quán cà phê: tập con JavaScript mà máy ảo Kitwork chạy.
+import { router, database, env, log } from "kitwork";
+import { normalize, slugOf } from "./_core/normalize.kitwork.js";
+import { receipt } from "./_core/receipt.kitwork.js";
+
+const PAGE_SIZE = env.PAGE_SIZE || 20;
+const OPEN_HOUR = env.OPEN_HOUR || 7;
+const CLOSE_HOUR = env.CLOSE_HOUR || 22;
+const SIZES = ["S", "M", "L"];
+const SURCHARGE = { S: 0, M: 4000, L: 6000 };
+const TAX = 0.08;
+const MAX_QUANTITY = 20;
+
+router.reload(false);
+
+router
+  .favicon("_assets/favicon.ico")
+  .assets("/assets/*", "_assets")
+  .language("vi")
+  .title("Quán cà phê — thực đơn hôm nay")
+  .meta({ site: "Quán cà phê", type: "website", locale: "vi_VN" });
+
+function priceOf(drink, size) {
+  const extra = SURCHARGE[size] || 0;
+  return size === "L" ? drink.price + extra : drink.price + extra / 2 * 2;
+}
+
+function isOpen(hour) {
+  return hour >= OPEN_HOUR && hour < CLOSE_HOUR;
+}
+
+function lineTotal(line) {
+  return Math.round(line.price * line.quantity * (1 + TAX));
+}
+
+const toCard = row => ({
+  id: row.id,
+  slug: slugOf(row.name),
+  name: normalize(row.name),
+  price: priceOf(row, "M"),
+  tags: row.tags || [],
+});
+
+router.get("/", ctx => {
+  const hour = new Date().getHours();
+  return ctx.view("home", { open: isOpen(hour), hour: hour, title: `Mở cửa ${OPEN_HOUR}h–${CLOSE_HOUR}h` });
+});
+
+router.get("/menu", ctx => {
+  const page = Number(ctx.query.page || 1);
+  const { value: rows = [] } = safe(() => database.table("drinks")
+    .where("available", true)
+    .orderBy("name")
+    .limit(PAGE_SIZE)
+    .offset((page - 1) * PAGE_SIZE));
+  const drinks = rows.map(toCard);
+  let cheapest = null;
+  for (let i = 0; i < drinks.length; i++) {
+    if (cheapest === null || drinks[i].price < cheapest.price) {
+      cheapest = drinks[i];
+    }
+  }
+  return ctx.view("menu", { drinks, cheapest, page, note: `trang ${page}/${Math.ceil(rows.length / PAGE_SIZE)}` });
+});
+
+router.get("/menu/:slug", ctx => {
+  const { value: drink } = safe(() => database.table("drinks").where("slug", ctx.params.slug).first());
+  if (!drink) {
+    return ctx.notfound();
+  }
+  return ctx.view("drink", { drink: toCard(drink), sizes: SIZES });
+});
+
+router.post("/order", ctx => {
+  const body = ctx.jsonBody();
+  const lines = [];
+  for (const item of body.items || []) {
+    if (!SIZES.includes(item.size)) {
+      return ctx.status(400).json({ error: `kích cỡ "${item.size}" không có` });
+    }
+    const quantity = Math.min(Number(item.quantity || 1), MAX_QUANTITY);
+    const { value: drink } = safe(() => database.table("drinks").where("id", item.id).first());
+    lines.push({ id: item.id, size: item.size, quantity: quantity, price: priceOf(drink, item.size) });
+  }
+  let sum = 0;
+  for (const line of lines) {
+    sum += lineTotal(line);
+  }
+  const order = { lines, sum, paid: false, note: body.note || null, at: Date.now() };
+  database.table("orders").insert(order);
+  log.info("đơn mới", order.sum);
+  return ctx.json({ ok: true, total: sum, receipt: receipt(order) });
+});
+
+router.get("/status/:code", ctx => {
+  const code = ctx.params.code;
+  let label = "";
+  switch (code) {
+    case "open":
+      label = "Đang mở";
+      break;
+    case "paused":
+      label = "Tạm nghỉ";
+      break;
+    default:
+      label = "Đã đóng";
+  }
+  return ctx.text(label);
+});
+
+router.get("/health", ctx => ctx.json({ ok: true, version: env.VERSION || "dev", ratio: 3 / 4 }));
+
+export { priceOf, isOpen, toCard };

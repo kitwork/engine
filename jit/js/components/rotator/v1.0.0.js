@@ -1,4 +1,4 @@
-/* rotator component @v1.0.0 — the clock of a region that advances itself.
+/* rotator component — the clock of a region that advances itself.
  *
  * Usage — the markup draws the items and what shows; the component only keeps time:
  *
@@ -132,4 +132,3 @@ var rotatorDef = {
 };
 
 window.kit.component("rotator", rotatorDef);
-window.kit.component("rotator@v1.0.0", rotatorDef);

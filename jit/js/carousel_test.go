@@ -7,11 +7,11 @@ import (
 
 func TestCarouselIsShippedWhenUsed(t *testing.T) {
 	out := deliver(`<div data-kit-component="carousel"><div data-kit-element="track"></div></div>`)
-	if !strings.Contains(out, `/kit/components/carousel@`) {
+	if !strings.Contains(out, `/_kitwork/components/carousel.`) {
 		t.Fatalf("carousel was not injected for markup that uses it:\n%s", out)
 	}
-	if !strings.Contains(ModulesJS([]string{"carousel"}), `component("carousel@v1.0.0"`) {
-		t.Error("versioned registration missing")
+	if src := ModulesJS([]string{"carousel"}); !strings.Contains(src, `component("carousel", `) || strings.Contains(src, `component("carousel@`) {
+		t.Error("the file must register the bare name, and only it")
 	}
 }
 

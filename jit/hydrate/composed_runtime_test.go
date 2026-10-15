@@ -11,10 +11,10 @@ func composedRuntime() string {
 }
 
 // pageRuntimeTags is how a page of a site with router.drive() loads the runtime: the kernel's file,
-// flagged for Drive, then Drive's — both deferred, in that order (jit/js Deliver). A browser proof
+// then Drive's — both deferred, in that order (jit/js Deliver). A browser proof
 // serves the two files at these names with pageRuntimeFile.
-const pageRuntimeTags = `<script data-kitwork-jit="runtime" data-kitwork-drive src="/kit/kernel.js" defer></script>` +
-	`<script data-kitwork-jit="drive" src="/kit/drive.js" defer></script>`
+const pageRuntimeTags = `<script data-kitwork-generated="runtime" src="/kit/kernel.js" defer></script>` +
+	`<script data-kitwork-generated="drive" src="/kit/drive.js" defer></script>`
 
 func pageRuntimeFile(path string) string {
 	if path == "/kit/drive.js" {

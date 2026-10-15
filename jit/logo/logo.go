@@ -1,6 +1,6 @@
 // Package logo is Kitwork's JIT brand-logo engine — a sibling of jit/icons that does for BRAND
 // LOGOS what jit/icons does for UI icons. Write `<i class="logo-github"></i>`; Render scans used
-// `logo-<name>` classes and injects ONE inline `<style data-kitwork-jit="logo">` with a CSS-mask
+// `logo-<name>` classes and injects ONE inline `<style data-kitwork-generated="logo">` with a CSS-mask
 // rule for only the logos the page uses — monoline single-colour, themeable with `color`.
 //
 // Same mask technique as jit/icons, but logos are FILLED single-path silhouettes (Simple Icons),
@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	css "github.com/kitwork/engine/jit/css"
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
 // set maps a logo name → inner SVG (a filled <path>, 0 0 24 24). Brand/fallback set; Simple Icons
@@ -141,11 +142,15 @@ func Names() []string {
 const (
 	classPrefix = "logo-"
 	brandSuffix = "-brand" // `logo-<slug>-brand` sugar: the shape painted in its own brand colour.
-	styleMarker = `data-kitwork-jit="logo"`
+	styleMarker = `data-kitwork-generated="logo"`
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-var classAttrRe = regexp.MustCompile(`class="([^"]*)"`)
+
+// classAttrRe captures the static class="…" attribute only. The leading white space keeps it off
+// every attribute that ENDS in class: data-kitwork-class="logo-github: connected" is a list of pairs
+// whose keys hydrate.ToggledClasses reads and whose values are conditions, not classes (as jit/css).
+var classAttrRe = regexp.MustCompile(`(?:^|\s)class="([^"]*)"`)
 
 // uriEncode escapes the characters that matter inside a CSS url("data:image/svg+xml,…").
 var uriEncode = strings.NewReplacer("%", "%25", "#", "%23", "<", "%3C", ">", "%3E")
@@ -246,26 +251,35 @@ func CSS(tokens []string) string {
 func scan(html string) []string {
 	seen := make(map[string]bool)
 	var out []string
+	add := func(tok string) {
+		if !strings.HasPrefix(tok, classPrefix) {
+			return
+		}
+		name := tok[len(classPrefix):]
+		if name == "" || seen[name] || !nameRe.MatchString(name) {
+			return
+		}
+		// A logo slug wins outright; otherwise accept `<slug>-brand` if the slug is a logo.
+		if Has(name) || (strings.HasSuffix(name, brandSuffix) && Has(strings.TrimSuffix(name, brandSuffix))) {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
 	for _, m := range classAttrRe.FindAllStringSubmatch(html, -1) {
 		for _, tok := range htmlattr.ClassTokens(m[1]) {
-			if !strings.HasPrefix(tok, classPrefix) {
-				continue
-			}
-			name := tok[len(classPrefix):]
-			if name == "" || seen[name] || !nameRe.MatchString(name) {
-				continue
-			}
-			// A logo slug wins outright; otherwise accept `<slug>-brand` if the slug is a logo.
-			if Has(name) || (strings.HasSuffix(name, brandSuffix) && Has(strings.TrimSuffix(name, brandSuffix))) {
-				seen[name] = true
-				out = append(out, name)
-			}
+			add(tok)
 		}
+	}
+	// A logo the kernel toggles in — data-kitwork-class="logo-github: connected" — needs its rule
+	// on the page before the class arrives.
+	for _, tok := range hydrate.ToggledClasses(html) {
+		add(tok)
 	}
 	return out
 }
 
-// SiteCSS is the whole-tenant form — the union of logos used across many templates (for /jitlogo).
+// SiteCSS is the whole-tenant form — the union of logos used across many templates. No route serves
+// it today: the /jitlogo route of router.logo() went with the tree router (09/07/2026).
 func SiteCSS(htmls ...string) string {
 	seen := make(map[string]bool)
 	var all []string
@@ -280,7 +294,7 @@ func SiteCSS(htmls ...string) string {
 	return CSS(all)
 }
 
-// Render scans html for used logo-<name> classes and injects ONE <style data-kitwork-jit="logo">
+// Render scans html for used logo-<name> classes and injects ONE <style data-kitwork-generated="logo">
 // before </head>. The markup is left untouched. A cheap no-op when no logos are used.
 func Render(html string) string {
 	if !strings.Contains(html, classPrefix) {

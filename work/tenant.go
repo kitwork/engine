@@ -43,6 +43,23 @@ const (
 // conventions all key off it.
 const RouterFileName = "router" + extension + ".js"
 
+// UIRouterFileName is the router of a site written in Kitwork UI: router.work holds the logic (the
+// .work language) beside the .ui interface files. It marks a site exactly like RouterFileName.
+const UIRouterFileName = "router.work"
+
+// RouterMarker returns the router file that makes dir a site (router.kitwork.js or router.work), or
+// "" when there is none. When both exist router.kitwork.js wins, so an existing site never changes
+// meaning because a router.work appeared beside it.
+func RouterMarker(dir string) string {
+	for _, name := range []string{RouterFileName, UIRouterFileName} {
+		file := filepath.Join(dir, name)
+		if info, err := os.Stat(file); err == nil && !info.IsDir() {
+			return file
+		}
+	}
+	return ""
+}
+
 // AppScope retains only compatibility metadata used by Tenant adapters.
 // Identity-wide resources live on app.Runtime.
 type AppScope struct {
@@ -451,7 +468,7 @@ func (t *Tenant) resolveBase() string {
 		filepath.Join(root, SitesDirName, t.entity.Domain),
 		filepath.Join(root, "test", t.entity.Domain),
 	} {
-		if _, err := os.Stat(filepath.Join(candidate, RouterFileName)); err == nil {
+		if RouterMarker(candidate) != "" {
 			return candidate
 		}
 	}
@@ -521,6 +538,9 @@ func (t *Tenant) serveViewStatic(w http.ResponseWriter, r *http.Request) bool {
 func (t *Tenant) RouterFile(filenames ...string) string {
 	if len(filenames) > 0 {
 		return t.resolve(filenames[0])
+	}
+	if marker := RouterMarker(t.resolve()); marker != "" {
+		return marker
 	}
 	return t.resolve(RouterFileName)
 }
@@ -684,7 +704,7 @@ func DiscoverLegacySites(root string) []string {
 
 	var legacy []string
 	check := func(dir, label string) {
-		if _, err := os.Stat(filepath.Join(dir, RouterFileName)); err == nil {
+		if RouterMarker(dir) != "" {
 			return
 		}
 		if info, err := os.Stat(filepath.Join(dir, "app.kitwork.js")); err == nil && !info.IsDir() {
