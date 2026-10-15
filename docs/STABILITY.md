@@ -148,6 +148,16 @@ Current enforcement:
 - A site generation is prepared before publication, activates monotonically,
   cannot be reactivated after replacement, and retires only after all accepted
   request leases drain.
+- Readiness prewarm uses the ordinary generation prepare/activate path. The
+  default remains request-driven; `app.prewarm()` selects the configured
+  primary hostname, while exact-domain and `"*"` policies consume the resolved
+  root layout. A selected site that cannot prepare prevents a ready web
+  listener. Prewarm does not create a second generation owner or bypass idle
+  eviction.
+- Cold preparation is singleflight per canonical domain. Unrelated domains may
+  prepare concurrently, while activation and cache publication remain atomic.
+  Shutdown rejects new owners, drains accepted preparations, and cannot
+  publish a generation after the engine has been marked closed.
 - Route declarations are prepared before generation activation. The published
   JIT, theme, favicon, and asset snapshot is immutable for every request pinned
   to that generation.
@@ -448,7 +458,7 @@ fresh, reused, and pooled VM boundaries:
 
 ```text
 go test ./conformance -run TestLanguageConformanceCorpus -count=1
-go test ./compatibility -run TestVMV2CompatibilityArchive -count=1
+go test ./compatibility -run TestVMCompatibilityArchive -count=1
 go test ./runtime -run ^TestVMFaultGauntlet -count=1
 go test ./runtime -run 'TestRuntimeLimits|TestRuntimeStructuralLimitBoundaries|TestRuntimeEnergyBoundary|TestRuntimeCallDepth' -count=1
 ```
@@ -504,7 +514,7 @@ requests each. `KITWORK_CONTENTION_WORKERS` and
 New execution surfaces, multi-node placement, and transport backbones must wait
 until app isolation, capability permissions, cancellation, request-path
 performance, rendering, and production contract tests are stable. Logic
-capsules remain a parked experiment rather than an active stability milestone.
+capsules are dropped; the tunnel that replaces them is a design, not a stability milestone.
 
 ## 8. Preflight parity
 

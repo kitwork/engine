@@ -135,6 +135,9 @@ type VarStatement struct {
 	// Function: function f() {…}, which declares f as a variable a program may assign, as in
 	// JavaScript; any other const may not be (scope.go).
 	Function bool
+	// KitworkSafe: an import of "kitwork" that binds the name safe to the module's safe, the global
+	// itself, so the bundle has no safe of its own and checkSafeCall stays on (14/10/2026).
+	KitworkSafe bool
 }
 
 func (vs *VarStatement) statementNode() {}
@@ -274,6 +277,16 @@ type BreakStatement struct {
 
 func (bs *BreakStatement) statementNode() {}
 func (bs *BreakStatement) String() string { return "break;" }
+
+// ContinueStatement goes on with the next iteration of the nearest bounded loop: after the counting
+// for's update, or with for…of's next item, as in JavaScript (14/10/2026). Labels are not part of the
+// Kitwork subset.
+type ContinueStatement struct {
+	Token Token
+}
+
+func (cs *ContinueStatement) statementNode() {}
+func (cs *ContinueStatement) String() string { return "continue;" }
 
 // SwitchCase keeps source order because JavaScript switch bodies may fall
 // through. Test is nil for the single default clause.
@@ -553,7 +566,19 @@ type AssignmentExpression struct {
 	Token Token
 	Name  Expression // Thường là Identifier hoặc IndexExpression
 	Value Expression
+	// Update marks x++, x--, ++x, --x, which the parser lowers to x = x ± 1: as a value, x++ is the old x
+	// and ++x the new one (14/10/2026; both gave the new x, and on a member the object).
+	Update UpdateKind
 }
+
+// UpdateKind tells ++ and -- before their operand from ++ and -- after it.
+type UpdateKind uint8
+
+const (
+	NotAnUpdate UpdateKind = iota
+	PrefixUpdate
+	PostfixUpdate
+)
 
 func (ae *AssignmentExpression) expressionNode() {}
 func (ae *AssignmentExpression) String() string {

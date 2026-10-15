@@ -1,8 +1,13 @@
 # VM Compatibility Archive
 
-This directory preserves executable evidence for the frozen Kitwork VM v2
+This directory preserves executable evidence for the frozen Kitwork VM
 contract. Normal tests load the committed `.kwpb` Program binaries directly;
 they do not compile the adjacent sources.
+
+`testdata/v3` is the archive of bytecode 3 (14/10/2026: seven wide forms and a
+2 MiB program limit), made by compiler schema 8 from the cases `testdata/v2`
+holds. `testdata/v2` is bytecode 2's evidence, kept unchanged; the current
+runtime refuses its Programs by their version, and a test proves it.
 
 The `.kwpb` files are internal compatibility fixtures, not a public storage or
 distribution format. Compiler `.kwbc` artifacts are intentionally excluded:
@@ -11,7 +16,7 @@ they are short-lived cache entries tied to the current compiler fingerprint.
 ## Verify
 
 ```text
-go test ./compatibility -run TestVMV2CompatibilityArchive -count=1
+go test ./compatibility -run TestVMCompatibilityArchive -count=1
 ```
 
 Each case proves source provenance, binary SHA-256, Program checksum, verifier
@@ -20,7 +25,7 @@ hygiene, and pool hygiene.
 
 ## Update
 
-Expectations in `testdata/v2/manifest.json` are authored by hand. Generate a new
+Expectations in `testdata/v3/manifest.json` are authored by hand. Generate a new
 archive only after reviewing those expectations:
 
 ```text

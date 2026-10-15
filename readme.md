@@ -179,7 +179,7 @@ const makeUser = (id) => { id: id, role: "member" };
 ```
 
 #### 5. Bounded Control Flow
-`switch` follows JavaScript case matching and fallthrough without adding a VM opcode. `break;` exits the nearest `switch` or bounded `for` loop; labels and `continue` remain outside the subset.
+`switch` follows JavaScript case matching and fallthrough without adding a VM opcode. `break;` exits the nearest `switch` or bounded `for` loop and `continue;` goes on with the nearest bounded `for` loop (14/10/2026); labels remain outside the subset.
 ```javascript
 switch (status) {
 case "draft":
@@ -187,7 +187,7 @@ case "review":
     publish(status);
     break;
 default:
-    log.info("nothing to publish");
+    console.log("nothing to publish");
 }
 ```
 
@@ -203,7 +203,7 @@ import { formatCurrency } from "./_core/utils.js"
 | Removed Language Feature | Architectural Rationale | Recommended Alternative Pattern |
 | :--- | :--- | :--- |
 | `while`, `do-while` | Eliminates infinite / unbounded compute loops on host threads | `.map()`, `.filter()`, `.find()`, `.reduce()` |
-| `try` / `catch` / `throw` | Avoids hidden control-flow jumps; forces explicit error returns | Explicit checks, `safe()` wrappers, `.catch()` |
+| `try` / `catch` / `throw` | Avoids hidden control-flow jumps; forces explicit error returns | Explicit checks, `safe(() => …)` giving `{ value, error }` |
 | `class` / `this` | Data remains pure data; behavior is composition of functions | Object literals and factory arrow functions |
 
 ---
@@ -247,12 +247,11 @@ The host engine boots via `engine.Run()`, reading an executable JavaScript manif
 ### Host Manifest (`app.kitwork.js`)
 
 ```javascript
-import { server, env } from "kitwork"
+import { app, env } from "kitwork"
 
-server
-  .port(env.PORT || 8080)
+app
+  .website(env.APP_HOST || "kitwork.io")
   .root(env.ROOT || "apps")
-  .hostname(env.HOSTNAME || "kitwork.io")
   .hotReload(true)
   .allowLocal(env.ALLOW_LOCAL || false)
   .trustProxy(env.TRUST_PROXY || false)
@@ -271,21 +270,23 @@ server
     level: env.LOG_LEVEL || "info",
     format: "text",
     logfile: "logs/engine.log"
-  });
-
-server.run().catch((err) => console.log("Host boot error:", err));
+  })
+  .run(env.PORT || 8080);
 ```
 
 ### Fluent Server Builder API Reference
 
 | Method | Type | Description |
 | :--- | :--- | :--- |
+| `.website(hostname)` | `String \| Object` | Declares the website surface and its primary hostname or host policies. |
+| `.desktop(options)` | `Object` | Declares native app identity and a flat logical-pixel window configuration. |
 | `.port(number)` | `Number \| String` | Sets host HTTP listening port (default: `8080`). |
 | `.root(path)` | `String` | Selects `app/` (one app) or `apps/` (multiple tenant identities). When omitted, Kitwork detects the one that exists. |
 | `.hostname(domain)` | `String` | Primary host cluster domain. |
 | `.hotReload(bool)` | `Boolean` | Enables filesystem watcher & instant bytecode replacement. |
 | `.allowLocal(bool)` | `Boolean` | Bypasses ACME/AutoSSL certificate acquisition for offline local dev. |
 | `.trustProxy(bool)` | `Boolean` | Trust `X-Forwarded-For` and `X-Real-IP` HTTP headers from reverse proxies. |
+| `.prewarm(domain, ...)` | `String... \| Boolean` | Prepares the primary, selected, or `"*"` sites before the web host reports ready; `false` keeps lazy loading. |
 | `.rateLimit(opts)` | `Object` | Sets global host rate limits: `{ rate, ip, browser, user, period }`. |
 | `.database(path, opts?)` | `String, Object?` | Opens a KitDB file/root owned by this runtime. |
 | `.postgresql(alias, source)` | `String, String \| Object` | Declares an external PostgreSQL connection. |
@@ -298,7 +299,7 @@ server.run().catch((err) => console.log("Host boot error:", err));
 | `.canonical(mode)` | `String` | Configures auto-redirects: `"apex"` (www ➔ apex) or `"www"` (apex ➔ www). |
 | `.redirects(map)` | `Object` | Static domain redirect mapping: `{ "old.com": "new.com" }`. |
 | `.logger(opts)` | `Object` | Configures structured logging: `{ level, format, logfile }`. |
-| `.run(port?)` | `Promise` | Evaluates server manifest and starts network listeners. |
+| `.run(port?)` | `Void` | Terminal operation that starts the Kitwork server; an omitted port defaults to `8080`. |
 
 With `allowLocal: true`, a production-shaped local URL resolves without a
 hosts-file entry: `kitwork.io.localhost:8080` serves the `kitwork.io` site.
@@ -320,6 +321,53 @@ All domains under `app/` share one App Runtime and its `_cron/`, `_queue/`,
 `_core/`, and `.data/` resources. Under `apps/`, the identity directory owns
 those resources. If `.root(...)` is omitted and both `app/` and `apps/` exist,
 startup fails with an explicit ambiguity error instead of selecting one.
+
+### Web Prewarm
+
+Sites load on demand by default. `app.website("kitwork.io").run(8080)` makes the
+declared primary hostname an implicit readiness target. An explicit policy can
+override that default or prepare additional hostnames before Kitwork prints its
+ready banner:
+
+```javascript
+app.prewarm()
+app.prewarm("kitwork.io", "docs.kitwork.io")
+app.prewarm("*")
+app.prewarm(false)
+```
+
+No arguments means the primary hostname. `"*"` means every site discovered
+under the selected root and must be the only argument. Explicit preparation
+failures stop readiness instead of publishing a host whose selected site is not
+usable. Sites not selected remain lazy, and prewarm does not prevent later
+idle eviction. Prefer exact domains because each prepared generation retains
+its route, template, and presentation graph in memory. Router top-level code
+runs as part of preparation, including any top-level database or outbound side
+effects; request handlers do not run.
+
+### Desktop Surface
+
+Desktop identity and window behavior belong to one flat declaration:
+
+```javascript
+app.desktop({
+  name: "Kitwork Studio",
+  icon: "./assets/icon.png",
+  width: 1280,
+  height: 820,
+  minWidth: 960,
+  minHeight: 640,
+  native: true,
+  resizable: true,
+  center: true,
+})
+```
+
+`title` may override the window title and otherwise defaults to `name`.
+`native: true` selects the operating-system title bar; `false` leaves chrome
+to the HTML application. Dimensions are logical pixels. Historical
+`app.title()`, `app.icon()`, `app.chrome()`, `app.window()`, and nested
+`desktop({ chrome, window })` declarations remain compatibility inputs.
 
 ### Host Gateway
 
@@ -349,7 +397,7 @@ gateway-only manifest can omit both `domain` and an app root:
 app.gateway({ target: "http://127.0.0.1:3000" })
 ```
 
-Domainless targets form the default pool and are rejected when `app.web()` is
+Domainless targets form the default pool and are rejected when `app.website()` is
 also declared, so a gateway cannot silently shadow the web surface. Gateway
 targets may use private VPC addresses because they are trusted host manifest
 configuration, not tenant-controlled outbound requests.
@@ -433,7 +481,7 @@ single file as `default`, so plain `database` calls use it automatically. A
 positive `port` exposes the same independent KitDB engine through its
 PostgreSQL-compatible listener while internal calls still take the native
 path. `kitsql: true` exposes `/_kitsql/v1/query` on the existing Kitwork web
-listener; it requires `password` and `app.web(...)`. Local HTTP is accepted
+listener; it requires `password` and `app.website(...)`. Local HTTP is accepted
 only on loopback, while remote KitSQL requires HTTPS. All three surfaces use
 one owned engine and one transaction history; they do not create database
 copies. `cache: "1m"` applies one duration to select, search, and analytics;
@@ -441,7 +489,7 @@ the object form assigns separate policies. Cache entries are bounded and tied
 to the latest committed KitDB transaction, so a write invalidates old results.
 Use `PRAGMA cache_status` through any SQL client to inspect cache residency,
 hits, misses, bypasses, and evictions. `app.database(...)` may run by itself;
-without `app.web(...)`, Kitwork starts no HTTP router, scheduler, TLS, or web
+without `app.website(...)` or `app.run(...)`, Kitwork starts no HTTP router, scheduler, TLS, or web
 listener.
 External resources use provider-specific declarations or the generic connector:
 
@@ -709,7 +757,7 @@ and pooled VM boundaries:
 ```bash
 cd engine
 go test ./conformance -run TestLanguageConformanceCorpus -count=1
-go test ./compatibility -run TestVMV2CompatibilityArchive -count=1
+go test ./compatibility -run TestVMCompatibilityArchive -count=1
 go test ./runtime -run ^TestVMFaultGauntlet -count=1
 ```
 

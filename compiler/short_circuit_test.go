@@ -128,9 +128,10 @@ func TestLogicalConditionShortCircuits(t *testing.T) {
 	}
 }
 
-// The bytes matter: one program is at most 65,535 bytes, and the largest app bundle was 1,905 bytes
-// under it. A constant or a name on the right keeps AND/OR (1 byte); a condition jumps on each side
-// (no DUP, no POP); only a value made from a right side that runs takes DUP/FALSE/POP.
+// The bytes matter: one program was at most 65,535 bytes until bytecode 3 (2 MiB since), and the
+// largest app bundle was 1,905 bytes under it. A constant or a name on the right keeps AND/OR
+// (1 byte); a condition jumps on each side (no DUP, no POP); only a value made from a right side
+// that runs takes DUP/FALSE/POP.
 func TestLogicalLoweringKeepsBytecodeSmall(t *testing.T) {
 	compile := func(source string) map[runtime.Opcode]int {
 		bytecode, err := CompileSource(source)

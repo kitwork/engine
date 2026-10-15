@@ -56,19 +56,25 @@ const result = [first([0, 3, 4]), first([0]), nested([[1], [2, 5]]), nested([[1]
 	}
 }
 
-// continue is a compile error saying how to write the loop (14/10/2026): it was a name nothing
-// declares, so continue; did nothing and the rest of the body ran. CONTROL: it stays a property name.
-func TestContinueIsACompileError(t *testing.T) {
-	for _, source := range []string{
-		"const out = [];\nfor (const x of [1, 2, 3]) {\n  if (x == 1) { continue; }\n  out.push(x);\n}",
-		"for (let i = 0; i < 3; i++) {\n  if (i == 1) { continue }\n}",
+// continue goes on with the nearest loop (14/10/2026; until then a compile error, and before that a
+// name nothing declares, so continue; did nothing). Outside a loop, in a switch alone or in a function
+// made in a loop, it is a compile error at its place, JavaScript's SyntaxError; a label is not part of
+// the subset. CONTROL: it stays a property name. What continue does is compared with JavaScript in
+// javascript_parity_test.go.
+func TestContinueOutsideALoopIsACompileError(t *testing.T) {
+	for _, c := range []struct{ source, want string }{
+		{"const x = 1;\ncontinue;", "<source>:2:1: 'continue' chỉ hợp lệ bên trong vòng for"},
+		{"switch (1) {\ncase 1:\n  continue;\n}", "<source>:3:3: 'continue' chỉ hợp lệ bên trong vòng for (một switch không có vòng for bao ngoài thì không)"},
+		{"for (const x of [1]) {\n  const f = () => { continue; };\n}", "<source>:2:21: 'continue' chỉ hợp lệ bên trong vòng for"},
+		{"for (const x of [1]) {\n  continue outer;\n}", "Kitwork không hỗ trợ continue có nhãn; hãy dùng 'continue;'"},
+		{"const r = continue;", "<source>:1:11: continue là từ khoá của ngôn ngữ, không làm tên biến được"},
 	} {
-		if got := compileError(source); !strings.Contains(got, "<source>:") || !strings.Contains(got, "Kitwork chưa có continue: viết phần còn lại của thân vòng trong if") {
-			t.Errorf("%q = %q, want the continue error at file:line:column", source, got)
+		if got := compileError(c.source); !strings.Contains(got, c.want) {
+			t.Errorf("%q = %q\nwant %s", c.source, got, c.want)
 		}
 	}
-	if got := compileError("const out = [];\nfor (const x of [1]) {\n  if (x == 1) { continue; }\n}"); !strings.HasPrefix(strings.TrimPrefix(got, "assemble error: "), "<source>:3:17:") {
-		t.Errorf("the place of continue = %q, want <source>:3:17", got)
+	if got, want := runOwnKey(t, "const out = [];\nfor (const x of [1, 2, 3]) {\n  if (x == 1) { continue; }\n  out.push(x);\n}\nconst result = out;", nil), "[2,3]"; got != want {
+		t.Fatalf("continue in a loop = %s, want %s", got, want)
 	}
 	if got, want := runOwnKey(t, "const o = { continue: 1 }\nconst result = [o.continue, o[\"continue\"]]", nil), "[1,1]"; got != want {
 		t.Fatalf("CONTROL: continue as a key = %s, want %s", got, want)
@@ -138,13 +144,12 @@ func TestCommaOperatorIsACompileError(t *testing.T) {
 	}
 }
 
-// typeof, instanceof, delete, in and for…in are compile errors saying how to write them (14/10/2026):
-// each was a name nothing declares, and the rest of the line another statement. CONTROL: they stay
-// property names, and o.delete("k") is the method.
+// instanceof, delete, in and for…in are compile errors saying how to write them (14/10/2026): each was a
+// name nothing declares, and the rest of the line another statement. typeof was one of them until it
+// was made the same day (javascript_parity_test.go). CONTROL: they stay property names, and
+// o.delete("k") is the method.
 func TestWordsKitworkLacksAreCompileErrors(t *testing.T) {
 	for _, c := range []struct{ source, want string }{
-		{"const x = \"s\";\nconst r = typeof x === \"string\";", "<source>:2:11: Kitwork chưa có typeof"},
-		{"const x = 1;\nif (typeof x === \"number\") {}", "<source>:2:5: Kitwork chưa có typeof"},
 		{"const r = [] instanceof Array;", "<source>:1:14: Kitwork chưa có instanceof"},
 		{"const o = { a: 1 };\ndelete o.a;", "<source>:2:1: Kitwork chưa có delete: bỏ một khoá thì o.delete(\"khoá\")"},
 		{"const o = { a: 1 };\nconst r = \"a\" in o;", "<source>:2:15: Kitwork chưa có toán tử in"},

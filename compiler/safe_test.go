@@ -104,14 +104,17 @@ func TestSafeOfWhatIsNotAFunctionIsACompileError(t *testing.T) {
 }
 
 // The check is off when the bundle declares or assigns a name safe anywhere: that safe is the
-// author's own, as any global can be shadowed (const fail = 3 runs). import { safe } from "kitwork"
-// declares it too, as this same global.
+// author's own, as any global can be shadowed (const fail = 3 runs). So is a safe imported from
+// another module, or another export of "kitwork" imported as safe. import { safe } from "kitwork" is
+// not: TestImportingTheGlobalSafeKeepsTheCheck.
 func TestTheBundlesOwnSafeTurnsTheCheckOff(t *testing.T) {
 	for _, source := range []string{
 		"const safe = (x) => x; const r = safe(load());",
 		"const f = (safe) => safe(load()); const r = f((x) => x);",
 		"safe = (x) => x; const r = safe(load());",
-		"import { safe } from \"kitwork\"; const r = safe(load());",
+		"import { fail as safe } from \"kitwork\"; const r = safe(load());",
+		"import { safe } from \"kitwork/http\"; const r = safe(load());",
+		"import { safe, router } from \"kitwork\"; const g = () => { const safe = (x) => x; return safe(1); }; const r = safe(load());",
 		"const g = () => { let safe = 1; return safe; }; const r = safe(load());",
 	} {
 		if _, err := CompileSource(source); err != nil {
@@ -130,6 +133,32 @@ func TestTheBundlesOwnSafeTurnsTheCheckOff(t *testing.T) {
 	if _, err := CompileFile(filepath.Join(filepath.Dir(entry), "good.kitwork.js")); err == nil ||
 		!strings.Contains(err.Error(), "good.kitwork.js:1:11: safe nhận một hàm") {
 		t.Fatalf("control, a bundle with no safe of its own: %v", err)
+	}
+}
+
+// import { safe } from "kitwork" binds the global safe itself (kitwork().safe), not a safe of the
+// bundle's own, so safe(<not a function>) stays the compile error after it (14/10/2026; the import turned
+// the check off for the whole bundle). Every form of that import: alone, beside others, beside an
+// aliased one, and in a module the entry imports. CONTROL: a function given to it compiles.
+func TestImportingTheGlobalSafeKeepsTheCheck(t *testing.T) {
+	for _, c := range []struct{ source, at string }{
+		{"import { safe } from \"kitwork\";\nconst r = safe(load());", "<source>:2:11: safe nhận một hàm: viết safe(() => load())"},
+		{"import { router, safe } from \"kitwork\";\nconst r = safe(1);", "<source>:2:11: safe nhận một hàm: viết safe(() => 1)"},
+		{"import { safe, fail as stop } from \"kitwork\";\nconst r = safe({ a: 1 });", "<source>:2:11: safe nhận một hàm: viết safe(() => ({ a: 1 }))"},
+	} {
+		if _, err := CompileSource(c.source); err == nil || !strings.Contains(err.Error(), c.at) {
+			t.Errorf("%q: %v, want %s", c.source, err, c.at)
+		}
+	}
+	entry := writeTenant(t, map[string]string{
+		"app.kitwork.js": "import { wrap } from \"./lib.kitwork.js\";\nconst r = safe(load());\n",
+		"lib.kitwork.js": "import { safe } from \"kitwork\";\nexport const wrap = (f) => safe(f);\n",
+	})
+	if _, err := CompileFile(entry); err == nil || !strings.Contains(err.Error(), "app.kitwork.js:2:11: safe nhận một hàm") {
+		t.Fatalf("a module importing the global safe: %v, want the check on in the entry", err)
+	}
+	if _, err := CompileSource("import { safe } from \"kitwork\";\nconst r = safe(() => load());"); err != nil {
+		t.Fatalf("CONTROL: safe(() => …) after the import: %v", err)
 	}
 }
 

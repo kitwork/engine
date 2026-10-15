@@ -50,7 +50,16 @@ import (
 // comma operator, { a = 1 } outside a pattern and code nested past 1000 levels are compile errors;
 // let y; and a block standing alone compile. A cached artifact of schema 7 holds a template compiled
 // as a sum: the bump retires it. No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 8
+//
+// 9 (14/10/2026, "đồng ý hết"): x++ used as a value is the old x (read, update, POP) and ++o.x the new
+// o.x (update, POP, read); as a statement or a for's update both compile as before, byte for byte.
+// continue compiles to a JUMP to the counting for's update or for…of's next item; typeof x to x; PUSH
+// "#typeof"; INVOKE 0, which the VM answers (runtime.TypeofMethod). A SET of o.x = v and o[k] = v
+// records the dot or bracket, so the debug table of a program with such a write moved. The VM's
+// truthiness (a negative number is true) and a[i] = v past the end (nulls between) changed with it,
+// and need no recompile. A cached artifact of schema 8 gives x++ the new value: the bump retires it.
+// No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 9
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

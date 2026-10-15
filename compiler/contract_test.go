@@ -5,16 +5,22 @@ import (
 	"testing"
 )
 
-func TestCompilerV8GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 8 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v8", CompilerSchemaVersion)
+func TestCompilerV9GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 9 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v9", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
-	// form). A schema-8 artifact of bytecode 2 is not reused.
-	const expectedFingerprint = "5fbf4f10a82a5a6d4a7f3c1f2a5c727ccef765a7947729a5b2430e0a8964db55"
+	// form). A schema-8 artifact of bytecode 2 is not reused. Schema 9 (the same day) moved the fingerprint
+	// alone: no fixture before it uses x++ as a value, typeof, continue, or a write to a member or an index.
+	const expectedFingerprint = "a7a9f8ffe16e9318e7356a4944f3d92a057da79e0b61b530e136038986c9e2b6"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 8 on bytecode 3 gave x++ the new value: its artifacts are not reused
+	const schema8 = "5fbf4f10a82a5a6d4a7f3c1f2a5c727ccef765a7947729a5b2430e0a8964db55"
+	if stamped := compilerFingerprintFor(8); hex.EncodeToString(stamped[:]) != schema8 || Fingerprint() == schema8 {
+		t.Fatalf("schema 8 on bytecode 3 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema8)
 	}
 	const schema8OnBytecode2 = "be7e49394fb709e1b0adeba3731263930c05631b609763361a95ccd89a276ef9"
 	if stamped := bytecode2FingerprintFor(8); hex.EncodeToString(stamped[:]) != schema8OnBytecode2 || Fingerprint() == schema8OnBytecode2 {
@@ -162,6 +168,14 @@ var result = made.map((read) => read());
 			name:     "template-text",
 			source:   "const a = 1;\nconst b = 2;\nvar result = [`${a}${b}`, [a, b].length - 1];",
 			checksum: "cea3b73739bf43697f8d9061a2debd81317deab1043d26150cef47cf3ee1a1e9",
+		},
+		{
+			// Schema 9: count++ as a value is the old count (read, update, POP), ++count the new one,
+			// continue jumps to for…of's next item, typeof is PUSH "#typeof"; INVOKE 0, and -1 is true.
+			// Gives [0, 2, "number", "undefined", [1, 3], -1].
+			name:     "update-continue-typeof",
+			source:   "let count = 0;\nconst next = () => count++;\nconst seen = [];\nfor (const item of [1, 2, 3, 4]) {\n\tif (item % 2 == 0) { continue; }\n\tseen.push(item);\n}\nvar result = [next(), ++count, typeof count, typeof missing, seen, -1 || 5];\n",
+			checksum: "c03f86cbe4bbefa1df69dfda1f5f5df87e04f6b4c16a4d3f09a194d2a9f9f4d1",
 		},
 	}
 

@@ -77,6 +77,7 @@ type Parser struct {
 	exports    []string // tên export qua `export const/function` / `export { }`
 	hasDefault bool     // có `export default …` (đã hạ về const DefaultExportName)
 	breakDepth int      // switch/loop nesting; function bodies reset this boundary
+	loopDepth  int      // loop nesting, what continue needs; function bodies reset it too
 
 	// text là toàn bộ nguồn mà Token.Position đếm vào — để báo lỗi dạng file:dòng:cột. Parser con của
 	// một ${…} trong template nhận text của file chứa nó.
@@ -198,6 +199,8 @@ func (p *Parser) parseStatement() Statement {
 		switch p.curToken.Value.Text() {
 		case "break":
 			return p.parseBreakStatement()
+		case "continue":
+			return p.parseContinueStatement()
 		case "case", "default":
 			p.addError(fmt.Sprintf("'%s' chỉ hợp lệ bên trong switch", p.curToken.Value.Text()))
 			return nil
@@ -721,26 +724,37 @@ func (p *Parser) parseImportStatement() Statement {
 			return nil
 		}
 		if isKitworkSpecifier(spec) {
+			// import { safe } from "kitwork" binds the global safe itself (kitwork().safe), not a safe
+			// of the bundle's own, so checkSafeCall stays on (14/10/2026)
+			globalSafe := func(s ImportSpec) bool {
+				return kitworkSubpath(spec) == "" && s.Imported == "safe" && s.Local == "safe"
+			}
 			if !hasAlias(specs) {
 				// → const { a, b } = kitwork()   (or kitwork().<sub> for a subpath specifier)
 				names := make([]*Identifier, len(specs))
+				kitworkSafe := false
 				for i, s := range specs {
 					names[i] = &Identifier{
 						Token: tokenWithValue(importTok, Ident, value.NewString(s.Local)),
 						Value: s.Local,
 					}
+					kitworkSafe = kitworkSafe || globalSafe(s)
 				}
 				return &VarStatement{
 					Token:        constToken(importTok),
 					Names:        names,
 					DestructMode: DestructObject,
 					Value:        p.kitworkModule(spec, importTok),
+					KitworkSafe:  kitworkSafe,
 				}
 			}
 			// có alias → nhóm `const local = kitwork().imported`
 			stmts := make([]Statement, len(specs))
 			for i, s := range specs {
 				stmts[i] = memberConst(s.Local, p.kitworkModule(spec, importTok), s.Imported, importTok)
+				if globalSafe(s) {
+					stmts[i].(*VarStatement).KitworkSafe = true
+				}
 			}
 			return &GroupStatement{Statements: stmts}
 		}
@@ -878,6 +892,39 @@ func (p *Parser) parseBreakStatement() Statement {
 	return stmt
 }
 
+// parseContinueStatement reads continue; (14/10/2026; it was the compile error "Kitwork chưa có
+// continue"): the nearest loop goes on with its next iteration, the counting for after its update, as in
+// JavaScript. Outside a loop (a switch alone, a function made in a loop) it is JavaScript's SyntaxError.
+func (p *Parser) parseContinueStatement() Statement {
+	stmt := &ContinueStatement{Token: p.curToken}
+	if p.loopDepth == 0 {
+		p.addError("'continue' chỉ hợp lệ bên trong vòng for (một switch không có vòng for bao ngoài thì không), như JavaScript")
+	}
+	if p.peekTokenIs(Semicolon) {
+		p.nextToken()
+		return stmt
+	}
+	// a line break ends it, as JavaScript inserts the semicolon there: a label would stay on its line
+	if p.peekTokenIs(RightBrace) || p.peekTokenIs(EOF) || p.lineBreakBeforePeek() ||
+		isContextualToken(p.peekToken, "case") ||
+		isContextualToken(p.peekToken, "default") {
+		return stmt
+	}
+	p.addError("Kitwork không hỗ trợ continue có nhãn; hãy dùng 'continue;'")
+	return stmt
+}
+
+// lineBreakBeforePeek reports a line break (a comment's included) between the current token and the
+// next one.
+func (p *Parser) lineBreakBeforePeek() bool {
+	start := int(p.curToken.Position-p.l.base) + int(p.curToken.Length)
+	end := int(p.peekToken.Position - p.l.base)
+	if start < 0 || end > len(p.l.input) || start > end {
+		return false
+	}
+	return strings.IndexByte(string(p.l.input[start:end]), '\n') >= 0
+}
+
 func (p *Parser) parseSwitchStatement() Statement {
 	stmt := &SwitchStatement{Token: p.curToken, Cases: []SwitchCase{}}
 	if !p.expectPeek(LeftParen) {
@@ -979,10 +1026,17 @@ func (p *Parser) parseBreakableBlock() *BlockStatement {
 	return p.parseBlockStatement()
 }
 
+// parseLoopBody reads the body of a for, where break and continue are allowed.
+func (p *Parser) parseLoopBody() *BlockStatement {
+	p.loopDepth++
+	defer func() { p.loopDepth-- }()
+	return p.parseBreakableBlock()
+}
+
 func (p *Parser) parseFunctionBlock() *BlockStatement {
-	outerBreakDepth := p.breakDepth
-	p.breakDepth = 0
-	defer func() { p.breakDepth = outerBreakDepth }()
+	outerBreakDepth, outerLoopDepth := p.breakDepth, p.loopDepth
+	p.breakDepth, p.loopDepth = 0, 0
+	defer func() { p.breakDepth, p.loopDepth = outerBreakDepth, outerLoopDepth }()
 	return p.parseBlockStatement()
 }
 
@@ -1066,8 +1120,12 @@ func (p *Parser) closeChain(e Expression) Expression {
 }
 
 func (p *Parser) parseIdentifier() Expression {
-	// break/case/default chỉ có nghĩa ở đầu câu lệnh (parseStatement, switch). Ở chỗ biểu thức chúng là
-	// đọc hoặc gán một biến không khai báo được (default = 5, [case], ${break}), nên cũng là lỗi từ khoá.
+	if operatorWords[p.curToken.Value.Text()] {
+		return p.parseTypeofExpression()
+	}
+	// break/case/default/continue chỉ có nghĩa ở đầu câu lệnh (parseStatement, switch). Ở chỗ biểu thức
+	// chúng là đọc hoặc gán một biến không khai báo được (default = 5, [case], ${break}), nên cũng là lỗi
+	// từ khoá.
 	if message, notYet := notYetWords[p.curToken.Value.Text()]; notYet {
 		p.addErrorAt(p.curToken, message)
 		return nil
@@ -1077,6 +1135,20 @@ func (p *Parser) parseIdentifier() Expression {
 		return nil
 	}
 	return &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
+}
+
+// parseTypeofExpression reads typeof x (14/10/2026; it was the compile error "Kitwork chưa có typeof"):
+// JavaScript's name of x's kind, a string, bound as tightly as ! and - are (typeof a.b is typeof (a.b),
+// typeof x === "string" compares the string). Standing where a name would (typeof = 1, (typeof) => …)
+// it is the keyword error.
+func (p *Parser) parseTypeofExpression() Expression {
+	if p.peekTokenIs(Comma) || p.peekTokenIs(RightParen) || p.peekTokenIs(FatArrow) || p.peekTokenIs(Assign) ||
+		p.peekTokenIs(RightBracket) || p.peekTokenIs(RightBrace) || p.peekTokenIs(Semicolon) || p.peekTokenIs(EOF) ||
+		p.peekTokenIs(Colon) {
+		p.reservedNameError(p.curToken, p.curToken.Value.Text())
+		return nil
+	}
+	return p.parsePrefixExpression()
 }
 
 func (p *Parser) parseLiteral() Expression {
@@ -1426,31 +1498,33 @@ func (p *Parser) parseCompoundAssignment(left Expression) Expression {
 	}
 }
 
-// updateExpression dựng `target = target ± 1` dùng chung cho ++ và --.
-func updateExpression(tok Token, target Expression) Expression {
+// updateExpression dựng `target = target ± 1` dùng chung cho ++ và --, đánh dấu trước hay sau toán hạng:
+// compiler cho x++ giá trị cũ, ++x giá trị mới khi giá trị được dùng (14/10/2026).
+func updateExpression(tok Token, target Expression, kind UpdateKind) Expression {
 	op := "+"
 	if tok.Kind == MinusMinus {
 		op = "-"
 	}
 	one := &Literal{Token: Token{Kind: Number}, Value: value.New(1)}
 	return &AssignmentExpression{
-		Token: tok,
-		Name:  target,
-		Value: &InfixExpression{Token: tok, Left: target, Operator: op, Right: one},
+		Token:  tok,
+		Name:   target,
+		Value:  &InfixExpression{Token: tok, Left: target, Operator: op, Right: one},
+		Update: kind,
 	}
 }
 
-// parsePostfixUpdate xử lý `i++` / `i--`.
-// Lưu ý: biểu thức trả về giá trị MỚI (khác JS trả giá trị cũ) — dùng như
-// câu lệnh độc lập thì hành vi giống hệt JS.
+// parsePostfixUpdate xử lý `i++` / `i--`: giá trị là i CŨ, như JavaScript (14/10/2026; trước đó là giá trị
+// mới, để tiết kiệm byte khi bundle lớn nhất sát trần 65 535 byte của bytecode 2). Làm câu lệnh hay bước
+// nhảy của for thì giá trị bị bỏ, và mã dịch ra y như trước.
 func (p *Parser) parsePostfixUpdate(left Expression) Expression {
 	if !p.assignable(left, p.curToken) {
 		return nil
 	}
-	return updateExpression(p.curToken, left)
+	return updateExpression(p.curToken, left, PostfixUpdate)
 }
 
-// parsePrefixUpdate xử lý `++i` / `--i`.
+// parsePrefixUpdate xử lý `++i` / `--i`: giá trị là i MỚI.
 func (p *Parser) parsePrefixUpdate() Expression {
 	tok := p.curToken
 	p.nextToken()
@@ -1458,7 +1532,7 @@ func (p *Parser) parsePrefixUpdate() Expression {
 	if !p.assignable(target, tok) {
 		return nil
 	}
-	return updateExpression(tok, target)
+	return updateExpression(tok, target, PrefixUpdate)
 }
 
 // parseReservedKeyword báo lỗi biên dịch thân thiện cho các từ khóa bị loại bỏ
@@ -1607,7 +1681,7 @@ func (p *Parser) parseCountedFor(forTok, declTok Token, counter *Identifier) Sta
 	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
-	stmt.Body = p.parseBreakableBlock()
+	stmt.Body = p.parseLoopBody()
 	return stmt
 }
 
@@ -1623,7 +1697,7 @@ func (p *Parser) parseForOf(forTok Token, item *Identifier) Statement {
 	if !p.expectPeek(LeftBrace) {
 		return nil
 	}
-	stmt.Body = p.parseBreakableBlock()
+	stmt.Body = p.parseLoopBody()
 	return stmt
 }
 
@@ -1700,8 +1774,9 @@ func (p *Parser) parseObjectLiteral() Expression {
 				keyToken := tokenWithValue(p.curToken, String, value.NewString(word))
 				keyToken.Length = p.curToken.Length
 				key = &Literal{Token: keyToken, Value: keyToken.Value}
-			} else if p.curTokenIs(Ident) && (statementWords[p.curToken.Value.Text()] || notYetWords[p.curToken.Value.Text()] != "") && p.peekTokenIs(Colon) {
-				// break/case/default trước ':' cũng là tên thuộc tính. parseIdentifier từ chối chúng, nên dựng
+			} else if p.curTokenIs(Ident) && languageWord(p.curToken.Value.Text()) && p.peekTokenIs(Colon) {
+				// break/case/default/continue/typeof trước ':' cũng là tên thuộc tính. parseIdentifier từ chối
+				// hay đọc khác chúng, nên dựng
 				// thẳng đúng nút Identifier nó vẫn trả về trước đây: bytecode không đổi.
 				key = &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
 			} else if word, reserved := p.reservedWord(p.curToken); reserved && p.peekTokenIs(LeftParen) {
@@ -2100,18 +2175,25 @@ func (p *Parser) location(tok Token) string {
    (const/let, tham số, tên hàm, biến đếm for, tên import, viết tắt { x }) thì từ khoá là lỗi biên dịch.
    ============================================================================= */
 
-// statementWords là các chữ parser cho nghĩa riêng ở đầu câu lệnh (break;, case …:, default:). Lexer để
-// chúng là identifier nên vẫn làm tên thuộc tính được, nhưng một biến mang tên đó không bao giờ dùng
-// được, nên chúng cũng không làm tên biến.
-var statementWords = map[string]bool{"break": true, "case": true, "default": true}
+// statementWords là các chữ parser cho nghĩa riêng ở đầu câu lệnh (break;, continue;, case …:, default:).
+// Lexer để chúng là identifier nên vẫn làm tên thuộc tính được, nhưng một biến mang tên đó không bao giờ
+// dùng được, nên chúng cũng không làm tên biến.
+var statementWords = map[string]bool{"break": true, "case": true, "default": true, "continue": true}
+
+// operatorWords là các chữ parser đọc thành toán tử đứng trước toán hạng: typeof x (14/10/2026). Như
+// statementWords, chúng làm tên thuộc tính được ({ typeof: 1 }, o.typeof), tên biến thì không.
+var operatorWords = map[string]bool{"typeof": true}
+
+// languageWord: một chữ lexer để là identifier mà parser cho nghĩa riêng, nên không làm tên biến.
+func languageWord(word string) bool {
+	return statementWords[word] || operatorWords[word] || notYetWords[word] != ""
+}
 
 // notYetWords are JavaScript words Kitwork does not have yet (14/10/2026): each was a name nothing
-// declares, so continue; did nothing, typeof x === "s" read null and the rest of the line as another
-// statement, delete o.a left o as it was. Each is a compile error saying how to write it. They stay
-// property names: o.delete("a"), { in: 1 }, and are no variable names.
+// declares, so delete o.a left o as it was and the rest of the line was another statement. Each is a
+// compile error saying how to write it. They stay property names: o.delete("a"), { in: 1 }, and are no
+// variable names. continue and typeof were here until they were made (14/10/2026, the same day).
 var notYetWords = map[string]string{
-	"continue":   "Kitwork chưa có continue: viết phần còn lại của thân vòng trong if (…) { … }, hoặc lọc trước bằng .filter()",
-	"typeof":     "Kitwork chưa có typeof: một mảng thì Array.isArray(x), một số nguyên thì Number.isInteger(x), null thì x == null",
 	"instanceof": "Kitwork chưa có instanceof (không có lớp): một mảng thì Array.isArray(x)",
 	"delete":     "Kitwork chưa có delete: bỏ một khoá thì o.delete(\"khoá\") (sửa o), hoặc o.omit(\"khoá\") (object mới)",
 	"in":         "Kitwork chưa có toán tử in: hỏi một khoá thì o.has(\"khoá\")",
@@ -2153,7 +2235,7 @@ func (p *Parser) wordOf(tok Token) string {
 func (p *Parser) reservedWord(tok Token) (string, bool) {
 	if tok.Kind == Ident {
 		word := tok.Value.Text()
-		return word, statementWords[word] || notYetWords[word] != ""
+		return word, languageWord(word)
 	}
 	return p.keywordSpelling(tok)
 }

@@ -52,6 +52,10 @@ verified boundary and tax every request.
   constant-pool, verified-stack, call-depth, default-energy, cleanup, and
   cancellation limits. `runtime.Limits()` returns a detached read-only
   snapshot; there is no API for tenant code to widen structural limits.
+  Bytecode 3 (14/10/2026) raised the program to 2 MiB of code (from 65,535
+  bytes), 1,048,576 constants (from 65,536) and a 64 MiB envelope (from 16 MiB),
+  with seven wide forms for a three-byte constant index or jump address
+  (`docs/BYTECODE.md`, "Wide forms").
 - Every instruction has one canonical `InstructionSpec`.
 - Operand width, stack effect, and energy come from that spec.
 - Cancellation accounting is VM-wide. Nested `ExecuteLambda` calls cannot
@@ -95,24 +99,52 @@ interpreter.
 
 ## Application failure boundary
 
-Host capabilities represent expected application failures with the bounded
-`value.Failure` envelope: one stable `Code` and one human-readable `Message`.
-They construct it through `value.WithFailure` when partial data remains useful
-or `value.InvalidFailure` when execution cannot continue. New capability code
-must not attach arbitrary maps directly to `Value.ErrorVal`.
+Host capabilities represent application failures with the bounded
+`value.Failure` envelope: one `Code` from a closed set, one human-readable
+`Message`, and for `PARTIAL` only the `Progress` of a bulk write that stopped
+midway. They construct it through `value.InvalidFailure` (or
+`value.PartialFailure`); a failure ends the run unless the program reads it with
+`safe(() => …)`. Since 14/10/2026 no value carries a failure attached to its
+data (`value.WithFailure` is gone): `database.entity()` failing is `DATABASE`,
+`createMany` stopping midway `PARTIAL`, an HTTP request that got no answer
+`NETWORK`, `TIMEOUT` or `DENIED`, a failed SQLite inspector read `DATABASE`,
+`TIMEOUT`, `UNAVAILABLE`, `CONFLICT`, `INVALID_ARGUMENT` or `UNSUPPORTED`. New capability code must not assign `Value.ErrorVal`
+directly.
+
+The closed set is `FAIL` (`fail("…")`, the only code a program can raise),
+`NOT_A_FUNCTION`, `TYPE`, `INVALID_ARGUMENT`, `INVALID_INPUT`, `UNAVAILABLE`,
+`UNSUPPORTED`, `DATABASE`, `CONFLICT`, `PARTIAL`, `TIMEOUT`, `NETWORK`, `DENIED`,
+and `ERROR`, the fallback of a failure made without a code.
+`value.ClosedCode` reads any other code as `ERROR`, and
+`value/failure_ratchet_test.go` counts the places that still make a failure
+without a code: the count may only go down.
 
 When an unhandled application failure crosses the interpreter boundary, the VM
 creates a `RUNTIME_ERROR` diagnostic and preserves the application code in
-`Diagnostic.CauseCode`. The diagnostic code continues to describe what the VM
-did; the cause code describes what the host capability reported. `.safe()` may
-rescue only `RUNTIME_ERROR` and exposes the preserved cause as `check.code`.
-Energy exhaustion, cancellation, stack overflow, Program mismatch, VM stop,
-and native panic remain terminal and cannot be hidden by `.safe()`.
+`Diagnostic.CauseCode` (and the progress in `Diagnostic.Progress`). The
+diagnostic code continues to describe what the VM did; the cause code describes
+what the host capability reported. Two host failures are not runtime errors: one
+whose code is `value.CancelledCode`, or any one while the VM's context is done,
+is `EXECUTION_CANCELLED`; one whose code names a terminal diagnostic (a host that
+wrapped a nested run's `ENERGY_LIMIT` as a Go error) is that diagnostic.
+
+`safe` is a global function (`value.SafeFunction`) that `CALL` runs on the VM
+itself (`runtime/safe.go`): it calls its one argument with no arguments through
+`ExecuteLambda`, in a frame of its own on the same energy and limits, and gives a
+plain map `{ value, error }`, `error` null or `{ message, code, at }` (`at` is
+`file:line:column` of the innermost frame at the failing instruction, the column
+in characters), with `progress` for `PARTIAL`. It rescues only `RUNTIME_ERROR`.
+Energy exhaustion, cancellation, stack overflow, Program mismatch, no Program,
+VM stop, unknown opcode, truncated bytecode and native panic remain terminal and
+pass through every `safe`. A diagnostic's text (message led by its place, then
+the stack) is written only when something reads it (`value.Value.Text`), so a
+failure `safe` catches never pays for the formatting. A committed effect fails
+the `COMMIT` through `CommitResult.Failure`. `x.safe()`, the compiler lowering it
+replaced, is a compile error since compiler schema 7.
 
 The failure envelope changes neither VM v2 opcodes nor Program encoding.
-Legacy `{code, message}` error maps remain readable during migration, but all
-engine producers use the typed form. Determinism and fault-gauntlet fingerprints
-include `CauseCode` so a reused or pooled VM cannot silently lose or inherit it.
+Determinism and fault-gauntlet fingerprints include `CauseCode` so a reused or
+pooled VM cannot silently lose or inherit it.
 
 ## Observability
 
@@ -200,14 +232,17 @@ than this pure language corpus.
 
 ## Frozen VM compatibility archive
 
-`compatibility/testdata/v2` stores representative Program binaries produced by
-the pre-schema-v3 VM v2/compiler v2 tuple. Unlike compiler `.kwbc` cache entries, these
-`.kwpb` files contain the Program envelope only and are committed exclusively
-as internal test evidence. Normal archive tests never compile their adjacent
-sources.
+`compatibility/testdata/v3` stores representative Program binaries of bytecode 3,
+produced on 14/10/2026 by compiler schema 8 from the same hand-authored cases as
+`compatibility/testdata/v2` (bytecode 2, compiler schema 2). Bytecode 3 refuses
+the v2 binaries by their version, and the v2 archive stays as that version's
+evidence (`TestVMCompatibilityArchiveOfBytecode2IsRefusedByItsVersion`). Unlike compiler
+`.kwbc` cache entries, these `.kwpb` files contain the Program envelope only and
+are committed exclusively as internal test evidence. Normal archive tests never
+compile their adjacent sources.
 
 ```text
-go test ./compatibility -run TestVMV2CompatibilityArchive -count=1
+go test ./compatibility -run TestVMCompatibilityArchive -count=1
 ```
 
 Each case freezes source and binary hashes, Program checksum, verifier profile,
@@ -308,8 +343,9 @@ Allocation regression tests enforce these workload-level budgets:
 - arithmetic dispatch: zero allocations;
 - 100 internal lambda calls: at most 6 allocations;
 - map/filter/reduce callback chain: at most 25 allocations;
-- protected `.safe()` success: at most 12 allocations;
-- typed application-failure rescue: at most 30 allocations;
+- `safe(() => …)` success: at most 12 allocations (8 measured on 14/10/2026);
+- typed application-failure rescue by `safe`: at most 30 allocations (21
+  measured, with the diagnostic's text never written);
 - 128-item script array growth: at most 24 allocations;
 - 64-node script object chain: at most 160 allocations;
 - two 16 KiB native buffers: at most 24 allocations;

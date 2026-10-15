@@ -67,7 +67,7 @@ func TestVMContract(t *testing.T) {
 
 	const expectedInstructionSetChecksum = "f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678"
 	if got := InstructionSetChecksum(); got != expectedInstructionSetChecksum {
-		t.Fatalf(
+		t.Errorf(
 			"instruction contract checksum = %q, want %q",
 			got,
 			expectedInstructionSetChecksum,
@@ -78,7 +78,7 @@ func TestVMContract(t *testing.T) {
 	// stack effect or energy of them changed.
 	const bytecode2InstructionSetChecksum = "10872c964d1c5c284b8ec4fd1acc429e31568151dc03d17a77d1da76774c7e91"
 	if got := instructionSetChecksum(2, int(PUSH_WIDE)); got != bytecode2InstructionSetChecksum {
-		t.Fatalf("bytecode 2's slots hash to %q, want bytecode 2's checksum %q", got, bytecode2InstructionSetChecksum)
+		t.Errorf("bytecode 2's slots hash to %q, want bytecode 2's checksum %q", got, bytecode2InstructionSetChecksum)
 	}
 
 	// Each wide form is its instruction with a three-byte operand.

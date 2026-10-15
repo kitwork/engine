@@ -10,14 +10,44 @@ import (
 	"github.com/kitwork/engine/runtime"
 )
 
-func TestVMV2CompatibilityArchive(t *testing.T) {
-	if err := VerifyArchive(filepath.Join("testdata", "v2", "manifest.json")); err != nil {
+// currentArchive is the archive of this runtime's bytecode version (testdata/v3 since 14/10/2026).
+var currentArchive = filepath.Join("testdata", "v3", "manifest.json")
+
+func TestVMCompatibilityArchive(t *testing.T) {
+	if err := VerifyArchive(currentArchive); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestVMV2CompatibilityArchiveAcrossReusedAndPooledVMs(t *testing.T) {
+// Bytecode 3 refuses bytecode 2's Programs by their version before anything reads their code: a
+// runtime takes only the version it is. The v2 archive stays as that version's evidence.
+func TestVMCompatibilityArchiveOfBytecode2IsRefusedByItsVersion(t *testing.T) {
 	path := filepath.Join("testdata", "v2", "manifest.json")
+	if err := VerifyArchive(path); err == nil ||
+		!strings.Contains(err.Error(), `archive = "vm-v2", want vm-v3`) {
+		t.Fatalf("v2 archive error = %v", err)
+	}
+	manifest, err := ReadManifest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fixture := range manifest.Cases {
+		encoded, err := os.ReadFile(filepath.Join(filepath.Dir(path), filepath.FromSlash(fixture.Program)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if digest(encoded) != fixture.ProgramSHA256 {
+			t.Fatalf("%s: the v2 evidence changed", fixture.Name)
+		}
+		if _, err := runtime.UnmarshalProgram(encoded); err == nil ||
+			!strings.Contains(err.Error(), "bytecode version 2 is incompatible with 3") {
+			t.Fatalf("%s: decode error = %v", fixture.Name, err)
+		}
+	}
+}
+
+func TestVMCompatibilityArchiveAcrossReusedAndPooledVMs(t *testing.T) {
+	path := currentArchive
 	manifest, err := ReadManifest(path)
 	if err != nil {
 		t.Fatal(err)
@@ -68,8 +98,8 @@ func TestVMV2CompatibilityArchiveAcrossReusedAndPooledVMs(t *testing.T) {
 	}
 }
 
-func TestVMV2CompatibilityArchiveRejectsTamperedProgram(t *testing.T) {
-	manifestPath := filepath.Join("testdata", "v2", "manifest.json")
+func TestVMCompatibilityArchiveRejectsTamperedProgram(t *testing.T) {
+	manifestPath := currentArchive
 	manifest, err := ReadManifest(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -98,8 +128,8 @@ func TestVMV2CompatibilityArchiveRejectsTamperedProgram(t *testing.T) {
 	}
 }
 
-func TestVMV2CompatibilityManifestRejectsPathEscape(t *testing.T) {
-	manifest, err := ReadManifest(filepath.Join("testdata", "v2", "manifest.json"))
+func TestVMCompatibilityManifestRejectsPathEscape(t *testing.T) {
+	manifest, err := ReadManifest(currentArchive)
 	if err != nil {
 		t.Fatal(err)
 	}

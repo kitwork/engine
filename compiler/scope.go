@@ -70,6 +70,8 @@ type binding struct {
 	environment bool
 	// constant: declared with const (a function declaration aside), so never assigned (constantWritten).
 	constant bool
+	// kitworkSafe: import { safe } from "kitwork", which binds the global safe itself.
+	kitworkSafe bool
 }
 
 type lexicalScope struct {
@@ -170,10 +172,11 @@ func (c *Compiler) resolveObserved(
 }
 
 // declaresName reports whether a program declares name anywhere (a const, a let, a parameter, a
-// function, an import, a loop variable) or assigns it without a declaration (var name = …).
+// function, an import, a loop variable) or assigns it without a declaration (var name = …). An import of
+// "kitwork" that binds safe to the global safe declares no safe of the program's own (14/10/2026).
 func declaresName(result *resolution, name string) bool {
 	for _, declared := range result.bindings {
-		if declared.name == name {
+		if declared.name == name && !declared.kitworkSafe {
 			return true
 		}
 	}
@@ -235,8 +238,12 @@ func (r *resolver) hoist(statements []Statement) {
 				kind = bindingLet
 			}
 			for _, name := range node.Names {
-				if declared := r.declare(name, kind); declared != nil && node.Function {
+				declared := r.declare(name, kind)
+				if declared != nil && node.Function {
 					declared.constant = false
+				}
+				if declared != nil && node.KitworkSafe && name.Value == "safe" {
+					declared.kitworkSafe = true
 				}
 			}
 		case *GroupStatement:
@@ -378,7 +385,7 @@ func (r *resolver) statement(statement Statement) {
 		r.block(node)
 	case *ReturnStatement:
 		r.expression(node.ReturnValue)
-	case *BreakStatement, *ImportStatement:
+	case *BreakStatement, *ContinueStatement, *ImportStatement:
 	case *SwitchStatement:
 		r.switchStatement(node)
 	case *ForStatement:

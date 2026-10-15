@@ -12,21 +12,25 @@ import (
 )
 
 // The reserved words of the language: every keyword of the lexer plus the words the parser gives a
-// meaning at the start of a statement. The tables below run over this list, and
-// TestReservedWordListIsPinned holds it equal to the parser's own maps, so a keyword added or removed
-// shows up as a red test that names it, not as a word nobody checked.
+// meaning at the start of a statement (continue since 14/10/2026) or before an operand (typeof, the same
+// day). The tables below run over this list, and TestReservedWordListIsPinned holds it equal to the
+// parser's own maps, so a keyword added or removed shows up as a red test that names it, not as a word
+// nobody checked.
 var pinnedReservedWords = []string{
-	"break", "case", "catch", "class", "const", "default", "do", "else", "export", "false",
+	"break", "case", "catch", "class", "const", "continue", "default", "do", "else", "export", "false",
 	"finally", "for", "function", "if", "import", "let", "new", "null", "return", "switch",
-	"throw", "true", "try", "undefined", "void", "while",
+	"throw", "true", "try", "typeof", "undefined", "void", "while",
 }
 
 func reservedWords() []string {
-	words := make([]string, 0, len(Keywords)+len(statementWords))
+	words := make([]string, 0, len(Keywords)+len(statementWords)+len(operatorWords))
 	for word := range Keywords {
 		words = append(words, word)
 	}
 	for word := range statementWords {
+		words = append(words, word)
+	}
+	for word := range operatorWords {
 		words = append(words, word)
 	}
 	sort.Strings(words)
@@ -85,7 +89,7 @@ func resultJSON(t *testing.T, source string) string {
 // identifiers in Kitwork, reserved in JavaScript) always compiled this way.
 func TestReservedWordIsAPropertyName(t *testing.T) {
 	reserved := pinnedReservedWords
-	controls := []string{"delete", "var", "this", "typeof", "in", "of", "as", "from", "name"}
+	controls := []string{"delete", "var", "this", "in", "of", "as", "from", "name"}
 	for _, word := range append(append([]string{}, reserved...), controls...) {
 		word := word
 		t.Run(word, func(t *testing.T) {

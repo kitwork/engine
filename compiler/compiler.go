@@ -52,6 +52,10 @@ type Compiler struct {
 type compilerBreakFrame struct {
 	cleanup int
 	jumps   []int
+	// loop: a for, which continue goes on with; a switch is not one. continues are its continue jumps,
+	// patched to where the loop goes on (14/10/2026).
+	loop      bool
+	continues []int
 }
 
 // chainJumps collects the exits of one optional chain. A ?. that finds null jumps with that null as
@@ -147,6 +151,8 @@ func getNodePosition(node Node) int32 {
 	case *ReturnStatement:
 		return n.Token.Position
 	case *BreakStatement:
+		return n.Token.Position
+	case *ContinueStatement:
 		return n.Token.Position
 	case *SwitchStatement:
 		return n.Token.Position
@@ -260,6 +266,8 @@ func getNodeSource(node Node) string {
 	case *ReturnStatement:
 		return n.Token.Source
 	case *BreakStatement:
+		return n.Token.Source
+	case *ContinueStatement:
 		return n.Token.Source
 	case *SwitchStatement:
 		return n.Token.Source
@@ -499,7 +507,7 @@ func (c *Compiler) Compile(node Node) error {
 		}
 
 	case *ExpressionStatement:
-		if err := c.Compile(n.Expression); err != nil {
+		if err := c.compileEffect(n.Expression); err != nil {
 			return err
 		}
 		switch n.Expression.(type) {
@@ -573,6 +581,12 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(runtime.POP)
 			nullIndex := c.addConstant(value.NewNull())
 			c.emitIndex(runtime.PUSH, nullIndex)
+		case "typeof":
+			// typeof x: x; PUSH "#typeof"; INVOKE 0, which the VM answers before any key or method of x
+			// (runtime.TypeofMethod, 14/10/2026). A name nothing declares reads null: "undefined", no error.
+			typeofIndex := c.addConstant(value.NewString(runtime.TypeofMethod))
+			c.emitIndex(runtime.PUSH, typeofIndex)
+			c.emit(runtime.INVOKE, 0)
 		}
 
 	case *Literal:
@@ -615,46 +629,26 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(runtime.POP)
 
 	case *AssignmentExpression:
-		if id, ok := n.Name.(*Identifier); ok {
-			nameFunction(n.Value, id.Value)
-			if err := c.assignName(id, n.Value); err != nil {
+		_, name := n.Name.(*Identifier)
+		switch {
+		case n.Update == PostfixUpdate:
+			// x++ as a value is the old x (14/10/2026): read it, update, drop what the update left
+			if err := c.Compile(n.Name); err != nil {
 				return err
 			}
-		} else if mem, ok := n.Name.(*MemberExpression); ok {
-			nameFunction(n.Value, mem.String())
-			if err := c.Compile(mem.Object); err != nil {
+			if err := c.compileAssignment(n); err != nil {
 				return err
 			}
-			propIndex := c.addConstant(value.NewString(mem.Property.Value))
-			c.emitIndex(runtime.PUSH, propIndex)
-			if err := c.Compile(n.Value); err != nil {
+			c.emit(runtime.POP)
+		case n.Update == PrefixUpdate && !name:
+			// ++o.x as a value is the new o.x, not the object SET leaves: update, drop it, read again
+			if err := c.compileAssignment(n); err != nil {
 				return err
 			}
-			c.emit(runtime.SET)
-		} else if index, ok := n.Name.(*IndexExpression); ok {
-			nameFunction(n.Value, index.String())
-			if err := c.Compile(index.Left); err != nil {
-				return err
-			}
-			if err := c.Compile(index.Index); err != nil {
-				return err
-			}
-			if err := c.Compile(n.Value); err != nil {
-				return err
-			}
-			c.emit(runtime.SET)
-		} else if pattern, ok := n.Name.(*BindingPattern); ok {
-			// ({ a, b: c } = o), [a, b] = arr: the value stays on the stack as the expression's result.
-			if err := c.Compile(n.Value); err != nil {
-				return err
-			}
-			if err := c.compilePattern(pattern); err != nil {
-				return err
-			}
-		} else {
-			location := c.getSourceLocation(n.Token.Source, n.Token.Position)
-			return fmt.Errorf("%s:%d:%d: không gán được vào %s: vế trái của = là một tên, o.x, o[k] hay một mẫu tách { … }, [ … ]",
-				location.File, location.Line, location.Column, n.Name.String())
+			c.emit(runtime.POP)
+			return c.Compile(n.Name)
+		default:
+			return c.compileAssignment(n)
 		}
 
 	case *TernaryExpression:
@@ -702,6 +696,9 @@ func (c *Compiler) Compile(node Node) error {
 	case *BreakStatement:
 		return c.compileBreakStatement()
 
+	case *ContinueStatement:
+		return c.compileContinueStatement()
+
 	case *ForStatement:
 		if err := c.Compile(n.Iterable); err != nil {
 			return err
@@ -716,16 +713,18 @@ func (c *Compiler) Compile(node Node) error {
 		}
 		c.storeName(n.Item)
 		c.emit(runtime.POP)
-		c.pushBreakFrame(2)
+		c.pushLoopFrame(2)
 		bodyErr := c.Compile(n.Body)
-		breakJumps := c.popBreakFrame()
+		frame := c.popFrame()
 		if bodyErr != nil {
 			return bodyErr
 		}
+		// continue goes on with the next item, as the end of the body does
+		c.patchJumps(frame.continues, loopStart)
 		c.emitJumpTo(runtime.JUMP, loopStart)
 		loopEnd := len(c.instructions)
 		c.patchJump(exitJump, loopEnd)
-		c.patchBreakJumps(breakJumps, loopEnd)
+		c.patchBreakJumps(frame.jumps, loopEnd)
 
 	case *ForRangeStatement:
 		// Counting loop, compiled to a plain condition-jump — bounded by construction because the
@@ -754,25 +753,28 @@ func (c *Compiler) Compile(node Node) error {
 		if environment != "" && !counterInObject {
 			c.newIteration(environment)
 		}
-		c.pushBreakFrame(0)
+		c.pushLoopFrame(0)
 		bodyErr := c.Compile(n.Body)
-		breakJumps := c.popBreakFrame()
+		frame := c.popFrame()
 		if bodyErr != nil {
 			return bodyErr
 		}
+		// continue goes on where the end of the body does: the counter's copy, then the update
+		c.patchJumps(frame.continues, len(c.instructions))
 		if counterInObject {
 			// the next iteration gets its own counter before the update changes it
 			c.nextIteration(environment, counter.slot)
 		}
-		//   update: i = i + 1      (AssignmentExpression leaves its value on the stack → POP it)
-		if err := c.Compile(n.Update); err != nil {
+		//   update: i = i + 1      (AssignmentExpression leaves its value on the stack → POP it; i++ is the
+		//   assignment alone, its old value is not read)
+		if err := c.compileEffect(n.Update); err != nil {
 			return err
 		}
 		c.emit(runtime.POP)
 		c.emitJumpTo(runtime.JUMP, loopStart)
 		loopEnd := len(c.instructions)
 		c.patchJump(exitJump, loopEnd)
-		c.patchBreakJumps(breakJumps, loopEnd)
+		c.patchBreakJumps(frame.jumps, loopEnd)
 
 	case *BlockStatement:
 		for _, s := range n.Statements {
@@ -981,6 +983,65 @@ func (c *Compiler) Compile(node Node) error {
 	return nil
 }
 
+// compileAssignment compiles target = value, leaving what the assignment gives on the stack: the value for
+// a name and a pattern, the object for o.x = v and o[k] = v (SET leaves its target). A SET that fails (an
+// array's key that is no index) fails at the target's dot or bracket (14/10/2026).
+func (c *Compiler) compileAssignment(n *AssignmentExpression) error {
+	if id, ok := n.Name.(*Identifier); ok {
+		nameFunction(n.Value, id.Value)
+		return c.assignName(id, n.Value)
+	} else if mem, ok := n.Name.(*MemberExpression); ok {
+		nameFunction(n.Value, mem.String())
+		if err := c.Compile(mem.Object); err != nil {
+			return err
+		}
+		propIndex := c.addConstant(value.NewString(mem.Property.Value))
+		c.emitIndex(runtime.PUSH, propIndex)
+		if err := c.Compile(n.Value); err != nil {
+			return err
+		}
+		c.at(mem.Token.Source, mem.Token.Position)
+		c.emit(runtime.SET)
+	} else if index, ok := n.Name.(*IndexExpression); ok {
+		nameFunction(n.Value, index.String())
+		if err := c.Compile(index.Left); err != nil {
+			return err
+		}
+		if err := c.Compile(index.Index); err != nil {
+			return err
+		}
+		if err := c.Compile(n.Value); err != nil {
+			return err
+		}
+		c.at(index.Token.Source, index.Token.Position)
+		c.emit(runtime.SET)
+	} else if pattern, ok := n.Name.(*BindingPattern); ok {
+		// ({ a, b: c } = o), [a, b] = arr: the value stays on the stack as the expression's result.
+		if err := c.Compile(n.Value); err != nil {
+			return err
+		}
+		if err := c.compilePattern(pattern); err != nil {
+			return err
+		}
+	} else {
+		location := c.getSourceLocation(n.Token.Source, n.Token.Position)
+		return fmt.Errorf("%s:%d:%d: không gán được vào %s: vế trái của = là một tên, o.x, o[k] hay một mẫu tách { … }, [ … ]",
+			location.File, location.Line, location.Column, n.Name.String())
+	}
+	return nil
+}
+
+// compileEffect compiles an expression whose value is dropped (a statement, a for's update): x++ and ++x
+// are then the assignment alone, the code they always compiled to, as the old or new value is not read.
+func (c *Compiler) compileEffect(e Expression) error {
+	if update, ok := e.(*AssignmentExpression); ok && update.Update != NotAnUpdate {
+		// where Compile would put it, so the debug table is the one it always was
+		c.at(update.Token.Source, update.Token.Position)
+		return c.compileAssignment(update)
+	}
+	return c.Compile(e)
+}
+
 // compileFunctionLiteral jumps over the function's code and pushes it as a value, which the VM makes a
 // closure of the frame running.
 func (c *Compiler) compileFunctionLiteral(n *FunctionLiteral) error {
@@ -1079,7 +1140,7 @@ func (c *Compiler) compileSwitchStatement(statement *SwitchStatement) error {
 	}
 
 	bodyPositions := make([]int, len(statement.Cases))
-	c.pushBreakFrame(0)
+	c.pushBreakFrame(compilerBreakFrame{})
 	var bodyErr error
 	for index, clause := range statement.Cases {
 		bodyPositions[index] = len(c.instructions)
@@ -1093,7 +1154,7 @@ func (c *Compiler) compileSwitchStatement(statement *SwitchStatement) error {
 			break
 		}
 	}
-	breakJumps := c.popBreakFrame()
+	breakJumps := c.popFrame().jumps
 	if bodyErr != nil {
 		return bodyErr
 	}
@@ -1210,9 +1271,10 @@ func (c *Compiler) compileChain(expression Expression) error {
 //
 // A right side that is a constant or a name can neither fail nor change anything, so running it
 // anyway is the same program: there the compiler keeps AND/OR, one byte instead of five. With the
-// condition form (compileCondition) that keeps the largest bundles under the 65,535-byte limit of one
-// program: apptop.vn's app/{host} route was 63,630 bytes with 654 of these operators, 310 of them with
-// such a right side, and is 64,550 bytes now (every operator in the jump form would make it 66,246).
+// condition form (compileCondition) that kept the largest bundles under bytecode 2's 65,535-byte limit
+// of one program (bytecode 3 holds 2 MiB): apptop.vn's app/{host} route was 63,630 bytes with 654 of
+// these operators, 310 of them with such a right side, and was 64,550 bytes after (every operator in
+// the jump form would have made it 66,246).
 func (c *Compiler) compileLogical(n *InfixExpression) error {
 	if err := c.Compile(n.Left); err != nil {
 		return err
@@ -1384,15 +1446,40 @@ func (c *Compiler) compileBreakStatement() error {
 	return nil
 }
 
-func (c *Compiler) pushBreakFrame(cleanup int) {
-	c.breakFrames = append(c.breakFrames, compilerBreakFrame{cleanup: cleanup})
+// compileContinueStatement jumps to where the nearest loop goes on (14/10/2026): its frame patches the
+// jump once that place is known. The frames left on the way are switches, whose values (none) go first,
+// as a break drops them; the loop's own (for…of's iterable and index) stay for its next iteration.
+func (c *Compiler) compileContinueStatement() error {
+	for index := len(c.breakFrames) - 1; index >= 0; index-- {
+		if !c.breakFrames[index].loop {
+			continue
+		}
+		for _, frame := range c.breakFrames[index+1:] {
+			for cleanup := 0; cleanup < frame.cleanup; cleanup++ {
+				c.emit(runtime.POP)
+			}
+		}
+		jump := c.emitJump(runtime.JUMP)
+		c.breakFrames[index].continues = append(c.breakFrames[index].continues, jump)
+		return nil
+	}
+	return fmt.Errorf("compiler: continue outside a bounded loop")
 }
 
-func (c *Compiler) popBreakFrame() []int {
+func (c *Compiler) pushBreakFrame(frame compilerBreakFrame) {
+	c.breakFrames = append(c.breakFrames, frame)
+}
+
+// pushLoopFrame opens a for's frame: break leaves it, dropping cleanup values; continue goes on with it.
+func (c *Compiler) pushLoopFrame(cleanup int) {
+	c.pushBreakFrame(compilerBreakFrame{cleanup: cleanup, loop: true})
+}
+
+func (c *Compiler) popFrame() compilerBreakFrame {
 	last := len(c.breakFrames) - 1
-	jumps := c.breakFrames[last].jumps
+	frame := c.breakFrames[last]
 	c.breakFrames = c.breakFrames[:last]
-	return jumps
+	return frame
 }
 
 func (c *Compiler) patchBreakJumps(jumps []int, target int) {

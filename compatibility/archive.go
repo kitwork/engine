@@ -19,7 +19,9 @@ import (
 
 const (
 	ManifestSchemaVersion uint16 = 1
-	DefaultManifestPath          = "compatibility/testdata/v2/manifest.json"
+	// DefaultManifestPath is the archive of the current bytecode version. Bytecode 3 (14/10/2026)
+	// started testdata/v3; testdata/v2 stays as bytecode 2's evidence, which this runtime refuses.
+	DefaultManifestPath = "compatibility/testdata/v3/manifest.json"
 )
 
 // Manifest records immutable Program binaries and the contract that produced
@@ -285,8 +287,8 @@ func validateManifest(root string, manifest Manifest, generated bool) error {
 			ManifestSchemaVersion,
 		)
 	}
-	if manifest.Archive != "vm-v2" {
-		return fmt.Errorf("VM compatibility archive = %q, want vm-v2", manifest.Archive)
+	if want := fmt.Sprintf("vm-v%d", runtime.BytecodeVersion); manifest.Archive != want {
+		return fmt.Errorf("VM compatibility archive = %q, want %s", manifest.Archive, want)
 	}
 	if len(manifest.Cases) < 5 {
 		return fmt.Errorf("VM compatibility archive has only %d cases", len(manifest.Cases))

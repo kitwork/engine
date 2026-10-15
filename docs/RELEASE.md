@@ -84,8 +84,8 @@ journey therefore cannot be mistaken for crash-safety evidence, and neither
 step alone is a claim about dishonest storage hardware or unsupported network
 filesystems.
 
-The first gate loads the committed VM v2 compatibility archive without
-recompiling its sources and requires each historical Program to decode, verify,
+The first gate loads the committed VM compatibility archive (`testdata/v3`
+since bytecode 3, 14/10/2026) without recompiling its sources and requires each historical Program to decode, verify,
 execute, and re-encode unchanged. The next gate runs the manifest-driven VM
 fault gauntlet: malformed envelopes and Programs must be rejected
 deterministically, execution failures must publish stable diagnostics, and both
@@ -200,7 +200,7 @@ A release candidate is ready for controlled rollout only when:
 - the release gate passes on Windows and Linux for the same commit;
 - VM v2 and current compiler-schema contract checks remain unchanged or have an explicit
   reviewed version migration;
-- the VM v2 compatibility archive, VM fault gauntlet, language conformance, and
+- the VM compatibility archive, VM fault gauntlet, language conformance, and
   bytecode inspector contracts pass unchanged;
 - runtime limit boundaries and the limit snapshot in release evidence match the
   reviewed policy;

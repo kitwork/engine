@@ -1,6 +1,6 @@
-// Kitwork has no continue yet (14/10/2026): it was a name nothing declares, and the body went on.
-for (const x of [1, 2]) {
-    if (x == 1) {
-        continue;
-    }
+// continue belongs to a loop (14/10/2026): in a switch with no loop around it, it is JavaScript's
+// SyntaxError. In a loop it goes on with the next iteration (loops/continue.kitwork.js).
+switch (1) {
+case 1:
+    continue;
 }

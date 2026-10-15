@@ -322,13 +322,11 @@ func (vm *VM) execute(floor int) value.Value {
 			if target.IsMap() {
 				target.V.(map[string]value.Value)[key.Text()] = item
 			} else if target.IsArray() {
-				items := target.V.(*[]value.Value)
-				// a[i] = v sets item i, as in JavaScript (14/10/2026: it appended v whatever i was); the
-				// key one past the last item adds one, which is how an array literal fills itself
-				if index := key.N; key.K == value.Number && index >= 0 && index < float64(len(*items)) && index == float64(int(index)) {
-					(*items)[int(index)] = item
-				} else {
-					*items = append(*items, item)
+				// a[i] = v sets item i as JavaScript does: the length appends, past it the gap is null, a key
+				// that is no index is a failure (array_item.go, 14/10/2026)
+				if failure := vm.setArrayItem(target, key, item, opIP); failure.K == value.Invalid {
+					vm.push(failure)
+					break
 				}
 			}
 			vm.push(target)
@@ -678,6 +676,12 @@ func (vm *VM) executeInvoke(frame *Frame) {
 	count := int(vm.program.code[frame.IP])
 	frame.IP++
 	method := vm.pop().Text()
+
+	// typeof x: answered before any key or method of x (TypeofMethod, array_item.go)
+	if method == TypeofMethod && count == 0 {
+		vm.push(value.NewString(vm.pop().TypeOf()))
+		return
+	}
 
 	targetIndex := len(vm.Stack) - count - 1
 	if targetIndex >= frame.StackBase &&
