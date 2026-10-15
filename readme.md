@@ -1,800 +1,619 @@
 # Kitwork Engine
 
-> **"The cloud became an estate to operate. Kitwork is a disagreement."**
+Kitwork runs an application from a folder, and is built so that the host stays up when the code in
+that folder was written by someone else, or by an AI.
 
-[![Go Version](https://img.shields.io/badge/go-1.26+-black?style=flat-square&logo=go)](https://golang.org)
-[![License](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](#license--sponsorship)
-[![VM Throughput](https://img.shields.io/badge/instruction-~27ns-green?style=flat-square)](#performance--benchmarks)
-[![Cold Boot](https://img.shields.io/badge/cold%20boot-%3C10ms-green?style=flat-square)](#performance--benchmarks)
-[![Architecture](https://img.shields.io/badge/architecture-sovereign--vm-orange?style=flat-square)](#ownership-hierarchy--execution-model)
+Kitwork treats an application as a blueprint. The `.ui` and `.work` files say what the application
+is: its pages, its routes, its data, what may happen on it. They do not say where any of it runs.
+The engine compiles that blueprint into one intermediate form, verified and fingerprinted bytecode
+for the logic and a compiled page tree for the interface, and every target reads that form, never
+the source: the server that renders HTML today, the kernel in the browser, the desktop and mobile
+shells. A new target is a new reader of the same form, not a rewrite of the application. The
+language is bounded so that form can be run for a stranger, and the engine decides itself which
+part runs on the server and which in the browser.
 
-**Kitwork Engine is cloud infrastructure compiled into a single, sovereign Go binary.** It executes a deliberately-constrained JavaScript subset (**Kit JS dialect**) on a custom stack-based bytecode VM — featuring energy metering, strict multi-tenant sandboxing, atomic generation hot reload, filesystem-routed API & SSR rendering, fluent SQL query building, zero-build JIT assets (CSS, Icons, Logos), automatic TLS, built-in rate limiting, semantic RSS/Sitemap generation, and real-time SSE streaming.
+Everything in the engine exists to keep a small set of promises to the host: a capability can be
+used only where it was granted; logic runs in a sandbox; one tenant cannot reach another; whatever
+crosses a boundary is checked and limited; and every step costs energy, so nothing runs forever.
+The subset of JavaScript is the first of those fences, not a limitation: a loop must count toward
+a bound or walk a list, there is no `try` to swallow an error, and what the grammar cannot catch,
+the energy budget does. Files and outbound requests are reached only through the engine, which
+confines them to the site that asked; databases are reached only by an alias the host declared.
+One process can therefore hold many applications, each request running in a machine leased for it
+and wiped afterwards, without a container or a second runtime between them.
 
-One engine process hosts unlimited tenants and domains. Deploying a new website or backend service is as simple as dropping a directory into place.
+Kitwork is for one person who owns the application and the machine it runs on, and runs more of
+them than one person is supposed to manage alone: sites, APIs, data and background work, written
+by them, by someone they trust less, or by an AI. It is not a Node.js replacement and does not run
+npm packages, and it is the wrong tool for long computations inside a request.
 
----
+This is a pre-1.0 engine in active stabilization. The author's own sites run on it. What is done
+and what is not is listed below, and nothing in this file claims more than the tests prove.
 
-## 📋 Table of Contents
+## Contents
 
-1. [The Philosophy & Contract](#the-philosophy--contract)
-2. [Why a Custom VM?](#why-a-custom-vm)
-3. [Ownership Hierarchy & Execution Model](#ownership-hierarchy--execution-model)
-4. [Engine Architectural Invariants](#engine-architectural-invariants)
-5. [The Kit JS Language Subset](#the-kit-js-language-subset)
-6. [Engine Package Map](#engine-package-map)
-7. [Host Bootstrap & Server Configuration](#host-bootstrap--server-configuration)
-8. [Routing, Lifecycle & Parameter Injection](#routing-lifecycle--parameter-injection)
-9. [HTML View Engine & Layout Slots](#html-view-engine--layout-slots)
-10. [Industrial Query Builder](#industrial-query-builder)
-11. [JIT Engine Suite](#jit-engine-suite)
-12. [Security Model](#security-model)
-13. [Performance & Benchmarks](#performance--benchmarks)
-14. [Preflight Verification & CLI](#preflight-verification--cli)
-15. [License & Sponsorship](#license--sponsorship)
+- An application
+- Run it
+- The manifest
+- The language
+- Pages
+- Routes
+- Data
+- Background work
+- The page's own assets
+- The browser side
+- Network
+- What happens to a request
+- What the engine enforces
+- What decides every choice
+- What is not done
+- Where it is going
+- Verify it
+- The repository
+- Read next
+- License
 
----
-
-## 🏛️ The Philosophy & Contract
-
-Traditional cloud deployment stacks accumulate complexity: Redis for caching, RabbitMQ for queues, Node/V8 for execution, NGINX for ingress, and Kubernetes for orchestration. Teams end up operating heavy machinery instead of shipping software.
-
-Kitwork collapses that entire infrastructure estate into **one binary with one strict execution philosophy**:
-
-### The Five Falsifiable Rules
-
-1. **What is supported behaves exactly like JavaScript.** No "almost" edge cases or subtle semantics drift.
-2. **What is removed fails at compile time with clear guidance.** Absence is an explicit design statement, never a runtime surprise.
-3. **Every workload is bounded.** All opcodes consume energy; infinite loops cannot compile or execute.
-4. **One binary is the complete platform.** If a feature requires an external runtime service to operate, it does not ship.
-5. **State outlives machines.** Transient Node RAM holds nothing precious; ACID-compliant database storage is the single source of truth.
-
----
-
-## ⚡ Why a Custom VM?
-
-Running untrusted multi-tenant code safely and efficiently is the core challenge of modern cloud execution:
-
-| Approach | Isolation Level | Cold Boot | Memory Footprint | Unbounded Code Guard? |
-| :--- | :--- | :--- | :--- | :--- |
-| **Containers / microVMs** | OS / Hypervisor | 100ms – seconds | Hundreds of MBs / tenant | ❌ No — full OS execution inside |
-| **Embedded V8 / Goja** | Interpreter / Heap | Milliseconds | Tens of MBs / tenant | ❌ No — requires external watchdog timers |
-| **Kitwork Engine VM** | **Bytecode & Stack** | **< 10ms** | **Single Go process** | **✅ Yes — unbounded constructs fail at compile time** |
-
-Because Kitwork owns the complete pipeline — lexer, parser, native ESM bundler, bytecode compiler, opcodes, stack VM, and capability manager — safety is an inherent property of the **language definition**, not an external sandbox wrapper around a general-purpose engine.
-
----
-
-## 🏗️ Ownership Hierarchy & Execution Model
-
-The production engine enforces a strict multi-tier ownership model to guarantee isolation, hot reloading safety, and zero-copy performance:
+## An application
 
 ```text
-Host / Engine (Process)
-  └── AppRegistry
-        └── AppRuntime (Identity scope)
-              ├── Database Pool & Connections
-              ├── Task Group & Scheduler (Cron)
-              ├── App-scoped Capabilities (LifetimeApp)
-              └── SiteRuntime (Domain scope)
-                    ├── Persistent Cache & SSE Broker
-                    └── Generation (Version / Monotonic State)
-                          ├── Executable Route Graph & Programs
-                          ├── Prepared HTML Render Plan & Template Snapshot
-                          ├── Immutable Environment (.env) & Source Manifest
-                          ├── JIT CSS / Icon / Logo / Asset Snapshots
-                          └── RequestScope (Per-request context)
-                                ├── VM Lease (from sync.Pool)
-                                ├── Energy Meter & Stack Depth Guard
-                                └── LifetimeRequest Capabilities
+app/
+  router.work                 the rules of the site and what / shows
+  page.ui                     the frame around every page
+  content.ui                  the page at /
+  api/hello/router.work       the route /api/hello, JSON only
+  api/notes/router.work       the route /api/notes, writes to the site's own database
+  assets/                     static files, served as they are at /assets/…
+  .data/                      made by the engine: app.db and whatever else the site keeps
 ```
 
-### Resource Isolation & Lifecycle Boundaries
+The folder tree is the URL space. A folder is a route; a `router.work` inside it says what the
+route does; a `content.ui` beside it is the page. Parameters are folder names: `{id[number]}`,
+`{slug[string]}`, `{slug(regex)}` and `{...rest}`.
 
-- **Host Engine:** Owns listeners, AutoSSL/TLS, signal handling, shared VM pool, and app registry.
-- **App Runtime (`app.Runtime`):** One per `app/` root or tenant identity (`apps/<identity>`). Manages database connections, background tasks (`go(fn)`), cron schedules, and `LifetimeApp` capabilities.
-- **Site Runtime (`site.Runtime`):** One per domain. In a multi-domain app, sibling `app/<domain>` sites share the root App Runtime; in multi-tenant mode, sites live at `apps/<identity>/<domain>`.
-- **Generation (`site.Generation`):** An immutable, monotonic version snapshot of a site. Owns compiled route bytecode, parsed render plans, `.env` snapshots, and `LifetimeSite` capabilities. Requests pin a generation for their entire lifecycle.
-- **Request Scope (`request.Scope`):** Created per HTTP request. Manages cancellation context, authentication claims, `LifetimeRequest` capability instances, and temporary VM leases.
-- **VM Lease:** Reclaimed stack VMs allocated from `sync.Pool`. VMs carry zero app or site state between requests (`ResetForPool` / `FastReset`).
+```js
+// app/router.work
+import { router } from "kitwork";
 
----
+router.language("en");
 
-## 🛡️ Engine Architectural Invariants
-
-The Kitwork Engine enforces seven structural stability invariants verified by continuous contract tests:
-
-### 1. App and Site Isolation
-Pooled VMs must never leak root scopes, closures, variables, or gas limits between execution cycles. Database connections are owned by the parent `AppRuntime` and shared across sibling sites under the same identity. Evicting a site domain closes only that site, leaving sibling sites and identity-wide database pools active.
-
-### 2. Energy and Bounded Execution
-Every bytecode instruction consumes energy tracked against `MaxEnergy`. `InstructionSpec` defines canonical opcode widths, stack impacts, and energy costs. Script execution checks context cancellation within at most 64 opcodes. Call stack recursion is hard-capped at 64 frames to prevent Go runtime stack overflow.
-
-### 3. Capability Lifetimes
-Capabilities declare explicit dependency scopes:
-- `LifetimeTransient`: Fresh instance per resolution (e.g. VietQR builders, HTTP request builders).
-- `LifetimeRequest`: Shared within a single `request.Scope`.
-- `LifetimeSite`: Bound to the active `site.Generation`; closed when requests drain during generation retirement.
-- `LifetimeApp`: Identity-wide instance shared by schedulers and sibling domains; closed on app unload.
-- `LifetimeSingleton`: Process-wide instance bound to host shutdown.
-
-### 4. Detached Background Work (`kitwork().go(fn)`)
-Background functions snapshot their lexical closure chain, builtins, top-level variables, and energy limits prior to returning. Detached work is managed by the `AppRuntime` task group, allowing site generation reloads without aborting background execution.
-
-### 5. Atomic Monotonic Generation Swaps
-Site file modifications trigger background compilation of a candidate `site.Generation`. If compilation or rendering setup fails, the candidate is safely discarded while the active generation continues serving without interruption.
-
-### 6. Zero-Allocation Fast Path
-Static assets (`/assets/*`, `.txt`, `.ico`, pre-rendered files) are served straight from disk using `io.Copy` zero-copy streams, completely bypassing VM allocation and script parsing.
-
-### 7. Deferred Effect Boundaries (`value.Committer`)
-The `COMMIT` opcode acts as the boundary for builders that accumulate configuration state (e.g. `http.get(url).cache("5m").persist("1d")`). Committing executing chains is idempotent and side-effect free.
-
----
-
-## 🔤 The Kit JS Language Subset
-
-To ensure microsecond startup times and absolute host security, Kitwork Engine executes a strict subset of JavaScript:
-
-### Core Dialect Rules
-
-#### 1. Arrow Functions ONLY (No `function` Keyword)
-The `function` keyword is removed from the lexer and parser. All functions must use arrow syntax:
-```javascript
-// ✅ CORRECT
-const add = (a, b) => a + b;
-export const handleRequest = (ctx) => ctx.json({ ok: true });
-
-// ❌ COMPILE ERROR
-function add(a, b) { return a + b; }
+router.view((ctx) => {
+  const greeting = "Hello from a folder";
+  ctx.title("Example");
+});
 ```
 
-#### 2. Multi-Level Scope Closures
-Nested arrow functions capture outer lexical block scopes across arbitrary nesting depths:
-```javascript
-const filterUsers = (query) => {
-    const matched = [];
-    departments.forEach((dept) => {
-        dept.members.forEach((user) => {
-            if (user.name.indexOf(query) !== -1) {
-                matched.push(user); // Captures `matched` across 2 scope boundaries
-            }
-        });
-    });
-    return matched;
-};
+```html
+<!-- app/content.ui -->
+<content padding="6" gap="4">
+  <text heading="1">{{ greeting }}</text>
+  <text color="ink-30">Rendered on the server from a .ui file.</text>
+</content>
 ```
 
-#### 3. Trailing Comma Discipline
-- **Arrays REJECT trailing commas:** `[1, 2, 3,]` throws a compile-time syntax error.
-- **Objects ALLOW trailing commas:** `{ a: 1, b: 2, }` is valid.
+```js
+// app/api/notes/router.work
+import { router, sqlite } from "kitwork";
 
-#### 4. Parenthesized Arrow Return Objects
-Implicit object returns from arrow functions must be parenthesized to avoid block statement ambiguity:
-```javascript
-// ✅ CORRECT
-const makeUser = (id) => ({ id: id, role: "member" });
-
-// ❌ COMPILE ERROR
-const makeUser = (id) => { id: id, role: "member" };
+router.get((ctx) => {
+  sqlite.exec("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT)");
+  sqlite.table("notes").create({ text: ctx.query("text") || "hello" });
+  return ctx.json(sqlite.table("notes").sort("id", "asc").list());
+});
 ```
 
-#### 5. Bounded Control Flow
-`switch` follows JavaScript case matching and fallthrough without adding a VM opcode. `break;` exits the nearest `switch` or bounded `for` loop and `continue;` goes on with the nearest bounded `for` loop (14/10/2026); labels remain outside the subset.
-```javascript
-switch (status) {
-case "draft":
-case "review":
-    publish(status);
-    break;
-default:
-    console.log("nothing to publish");
+A view declares the data a page reads; a `const` is printed into the HTML and never shipped as
+script. The `.ui` file names elements by what they are (`content`, `text`, `button`, `card`) and
+describes them by intent (`padding`, `gap`, `heading`, `color`); the engine chooses the HTML tag,
+writes the CSS those attributes need and nothing else, and checks at compile time that every text
+reads against its background. A `page.ui` with `<content />` in it is the frame every page is
+placed in. The database the notes route writes to is `app/.data/app.db`, made on first use: copy the
+folder and the data goes with it.
+
+Source files are never served. Asking for `/router.work` or `/content.ui` is a 404.
+
+## Run it
+
+The smallest host is one Go file and one manifest.
+
+```go
+// main.go
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/kitwork/engine"
+)
+
+func main() {
+	if err := engine.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "kitwork:", err)
+		os.Exit(1)
+	}
 }
 ```
 
-#### 6. Native Import Resolution (ESM)
-Modules are resolved directly by the engine's built-in bundler without Node.js or external toolchains:
-```javascript
-import { router, database } from "kitwork"
-import { formatCurrency } from "./_core/utils.js"
-```
-
-### Deliberately Removed Language Constructs
-
-| Removed Language Feature | Architectural Rationale | Recommended Alternative Pattern |
-| :--- | :--- | :--- |
-| `while`, `do-while` | Eliminates infinite / unbounded compute loops on host threads | `.map()`, `.filter()`, `.find()`, `.reduce()` |
-| `try` / `catch` / `throw` | Avoids hidden control-flow jumps; forces explicit error returns | Explicit checks, `safe(() => …)` giving `{ value, error }` |
-| `class` / `this` | Data remains pure data; behavior is composition of functions | Object literals and factory arrow functions |
-
----
-
-## 🗺️ Engine Package Map
-
-The `engine/` repository is organized into focused Go packages maintaining zero third-party framework dependencies:
-
-```text
-engine/
-├── app/          # AppRuntime, tenant identity isolation, AppRegistry & VM pooling
-├── builtins/     # JS standard library (Math, Date, String, Array, JSON, Console, etc.)
-├── capabilities/ # Dependency injection, permissions & capability lifetime management
-├── cmd/          # Engine CLI commands (kitwork check, preflight reports)
-├── compiler/     # Lexer, Parser, AST transformation, Bytecode emitter, ESM bundler
-├── config/       # Host configuration parser, YAML/JS manifest reader
-├── core/         # Core engine orchestrator, Engine, ServeHTTP, Preflight Check pipeline
-├── database/     # Industrial Query Builder, AST-to-SQL compiler (SQLite, Postgres, MySQL)
-├── dns/          # AutoSSL Let's Encrypt manager, HostPolicy domain verifier
-├── domain/       # Host domain matchers, canonical redirects, site discovery
-├── host/         # OS host environment adapters & network detection
-├── id/           # ShortBase32, CUID, and KSUID identifier generators
-├── jit/          # Zero-build JIT engines (CSS atomic compiler, Icons, Logos, Components, JS)
-├── logger/       # Structured slog handler with format & file outputs
-├── render/       # HTML View Engine (.kitwork.html), @slot resolver, template compiler
-├── request/      # Scope context, HTTP payload reader, parameter injection
-├── runtime/      # Stack VM, opcode specifications, program verification, energy accounting
-├── security/     # SSRF IP sanitizer, JWT signer/verifier, rate limiters
-├── site/         # SiteRuntime, monotonic Generation lifecycle, SSE broker, RAM/Disk caches
-├── utilities/    # VietQR/Napas QR generator, SVG, HTTP client, Gzip/Brotli compression
-├── value/        # Value types (NaN-boxed / tagged union model), Committer interface
-└── work/         # Tenant compatibility facade, request lifecycle handlers, scheduler adapter
-```
-
----
-
-## ⚙️ Host Bootstrap & Server Configuration
-
-The host engine boots via `engine.Run()`, reading an executable JavaScript manifest (`app.kitwork.js` or `server.kitwork.js`).
-
-### Host Manifest (`app.kitwork.js`)
-
-```javascript
-import { app, env } from "kitwork"
+```js
+// app.kitwork.js
+import { app, env } from "kitwork";
 
 app
-  .website(env.APP_HOST || "kitwork.io")
-  .root(env.ROOT || "apps")
-  .hotReload(true)
-  .allowLocal(env.ALLOW_LOCAL || false)
-  .trustProxy(env.TRUST_PROXY || false)
-  .rateLimit({ rate: 2000, ip: 120, browser: 240, period: "1s" })
-  .database({
-    alias: "system",
-    type: env.DB_TYPE || "postgres",
-    host: env.DB_HOST || "localhost",
-    port: env.DB_PORT || 5432,
-    user: env.DB_USER || "postgres",
-    password: env.DB_PASSWORD || "secret",
-    name: env.DB_NAME || "kitwork_db",
-    sslmode: "disable"
-  })
-  .logger({
-    level: env.LOG_LEVEL || "info",
-    format: "text",
-    logfile: "logs/engine.log"
-  })
+  .root("app")
+  .website({ hostname: "example.localhost", allowLocal: true, hotReload: true })
   .run(env.PORT || 8080);
 ```
 
-### Fluent Server Builder API Reference
-
-| Method | Type | Description |
-| :--- | :--- | :--- |
-| `.website(hostname)` | `String \| Object` | Declares the website surface and its primary hostname or host policies. |
-| `.desktop(options)` | `Object` | Declares native app identity and a flat logical-pixel window configuration. |
-| `.port(number)` | `Number \| String` | Sets host HTTP listening port (default: `8080`). |
-| `.root(path)` | `String` | Selects `app/` (one app) or `apps/` (multiple tenant identities). When omitted, Kitwork detects the one that exists. |
-| `.hostname(domain)` | `String` | Primary host cluster domain. |
-| `.hotReload(bool)` | `Boolean` | Enables filesystem watcher & instant bytecode replacement. |
-| `.allowLocal(bool)` | `Boolean` | Bypasses ACME/AutoSSL certificate acquisition for offline local dev. |
-| `.trustProxy(bool)` | `Boolean` | Trust `X-Forwarded-For` and `X-Real-IP` HTTP headers from reverse proxies. |
-| `.prewarm(domain, ...)` | `String... \| Boolean` | Prepares the primary, selected, or `"*"` sites before the web host reports ready; `false` keeps lazy loading. |
-| `.rateLimit(opts)` | `Object` | Sets global host rate limits: `{ rate, ip, browser, user, period }`. |
-| `.database(path, opts?)` | `String, Object?` | Opens a KitDB file/root owned by this runtime. |
-| `.postgresql(alias, source)` | `String, String \| Object` | Declares an external PostgreSQL connection. |
-| `.mysql(alias, source)` | `String, String \| Object` | Declares an external MySQL connection when its driver is linked. |
-| `.sqlite(alias, source)` | `String, String \| Object` | Declares a local SQLite compatibility connection. |
-| `.redis(alias, source)` | `String, String \| Object` | Declares Redis when its runtime connector is linked. |
-| `.connect(alias, source)` | `String, String \| Object` | Declares a generic external connector by URL scheme, type, or driver. |
-| `.gateway(target, ...)` | `Object...` | Declares host-owned reverse-proxy targets with `{ domain?, target, weight? }`. |
-| `.proxy(config, ...)` | `Object...` | Opens host-owned HTTP or SOCKS5 forward-proxy listeners. |
-| `.canonical(mode)` | `String` | Configures auto-redirects: `"apex"` (www ➔ apex) or `"www"` (apex ➔ www). |
-| `.redirects(map)` | `Object` | Static domain redirect mapping: `{ "old.com": "new.com" }`. |
-| `.logger(opts)` | `Object` | Configures structured logging: `{ level, format, logfile }`. |
-| `.run(port?)` | `Void` | Terminal operation that starts the Kitwork server; an omitted port defaults to `8080`. |
-
-With `allowLocal: true`, a production-shaped local URL resolves without a
-hosts-file entry: `kitwork.io.localhost:8080` serves the `kitwork.io` site.
-Plain `localhost:8080` serves the configured `.hostname(...)`. Existing exact
-`*.localhost` site folders remain compatible, while production keeps exact
-hostname routing and never strips the `.localhost` suffix. Local authorities
-also stay local instead of applying production domain redirects.
-
-The root folder is a contract, not a database-dependent heuristic:
+```bash
+go run .
+```
 
 ```text
-app/router.kitwork.js                  one app, one site
-app/<domain>/router.kitwork.js         one app, multiple domain sites
-apps/<identity>/<domain>/router.kitwork.js
-                                        multiple isolated tenant apps
+$ curl "http://localhost:8080/api/notes?text=first"
+[{"id":1,"text":"first"}]
 ```
 
-All domains under `app/` share one App Runtime and its `_cron/`, `_queue/`,
-`_core/`, and `.data/` resources. Under `apps/`, the identity directory owns
-those resources. If `.root(...)` is omitted and both `app/` and `apps/` exist,
-startup fails with an explicit ambiguity error instead of selecting one.
+With `allowLocal` on there is no TLS, `localhost` means the configured hostname, and
+`<domain>.localhost` reaches a site by its folder name. With `allowLocal` off, the host also
+answers on 443 with certificates it obtains itself through ACME and keeps under `./certs`. With
+`hotReload` on, saving a file prepares a new generation and swaps it in; without it, restart.
 
-### Web Prewarm
+Put two tenants under `apps/` and break one of them with a `while`. The broken site answers an
+error, and the log names the line that wrote it; the other site keeps answering; the host never
+went down. That is the first promise of this file in one test.
 
-Sites load on demand by default. `app.website("kitwork.io").run(8080)` makes the
-declared primary hostname an implicit readiness target. An explicit policy can
-override that default or prepare additional hostnames before Kitwork prints its
-ready banner:
+The reference host in the Kitwork repository wraps this library in a command line: `new` scaffolds
+a tenant, `dev` runs with `allowLocal` on, `check` compiles every site through the production
+pipeline and reports every failure without opening a listener, `profile` reports the bytecode of
+every program, and `inspect` explains one program instruction by instruction.
 
-```javascript
-app.prewarm()
-app.prewarm("kitwork.io", "docs.kitwork.io")
-app.prewarm("*")
-app.prewarm(false)
+## The manifest
+
+The manifest is written in the same subset and evaluated once at boot, in a machine that knows only
+`app` and `env`; it keeps the `.kitwork.js` name for now. It declares four kinds of things, and the
+engine starts only what was declared.
+
+```js
+import { app, env } from "kitwork";
+
+app
+  .root("apps")
+  .logger({ level: env.LOG_LEVEL || "info", format: "json", logfile: "logs/app.log" })
+  .website({
+    hostname: "example.com",
+    domains: ["example.com", "www.example.com"],
+    canonical: "apex",
+    rateLimit: { rate: 2000, ip: 120, browser: 240, period: "1s" },
+    bytecodeCache: true
+  })
+  .database("./.database/", { memory: "64mb", warm: ["shop"] })
+  .postgresql("system", { host: env.DB_HOST, port: 5432, user: env.DB_USER, password: env.DB_PASSWORD, name: "kitwork" })
+  .desktop({ name: "Example", width: 1200, height: 820 })
+  .prewarm("*")
+  .run(env.PORT || 8080);
 ```
 
-No arguments means the primary hostname. `"*"` means every site discovered
-under the selected root and must be the only argument. Explicit preparation
-failures stop readiness instead of publishing a host whose selected site is not
-usable. Sites not selected remain lazy, and prewarm does not prevent later
-idle eviction. Prefer exact domains because each prepared generation retains
-its route, template, and presentation graph in memory. Router top-level code
-runs as part of preparation, including any top-level database or outbound side
-effects; request handlers do not run.
+- Host configuration: `root` chooses the layout, `logger` the log level, format and rotation.
+- Surfaces, what the app offers: `website` (hostname, domains, canonical host, redirects, rate
+  limits, trust of a proxy's forwarded headers, bytecode cache, hot reload), `database` (a KitDB file
+  or a managed root the app owns, optionally on a PostgreSQL wire port), `desktop` and `mobile`
+  (declared here, opened by a separate shell), `gateway` (weighted reverse-proxy targets), `proxy`
+  (HTTP or SOCKS5 forward-proxy listeners).
+- Connections, what the app consumes, always alias first: `postgresql`, `sqlite`, `connect`; `mysql`
+  and `redis` are accepted by the manifest but have no driver linked in this build.
+- Lifecycle: `prewarm` (the primary hostname by default, named domains, or `"*"` for every site) and
+  `run`, the last call, which opens the listener.
 
-### Desktop Surface
+`env.KEY` reads the host's `.env` and then the real environment, which wins, and coerces numbers and
+booleans; `env.require("KEY")` stops the boot when the key is missing. Do not name a key after an
+operating-system variable such as `PATH` or `HOME`. A manifest with no `website` and no `run` starts
+no listener: a `database` surface alone is a complete manifest.
 
-Desktop identity and window behavior belong to one flat declaration:
+Three layouts are recognised: one site at the root (`app/router.work`), one application with a
+folder per domain (`app/<domain>/`), or many tenants (`apps/<identity>/<domain>/`). Within an
+application the domains share its declared connections and background work; each domain keeps its
+own `.data` and its own `.env`. `docs/APP.md` lists every option.
 
-```javascript
-app.desktop({
-  name: "Kitwork Studio",
-  icon: "./assets/icon.png",
-  width: 1280,
-  height: 820,
-  minWidth: 960,
-  minHeight: 640,
-  native: true,
-  resizable: true,
-  center: true,
-})
-```
+## The language
 
-`title` may override the window title and otherwise defaults to `name`.
-`native: true` selects the operating-system title bar; `false` leaves chrome
-to the HTML application. Dimensions are logical pixels. Historical
-`app.title()`, `app.icon()`, `app.chrome()`, `app.window()`, and nested
-`desktop({ chrome, window })` declarations remain compatibility inputs.
+What is accepted behaves as it does in JavaScript, and where Kitwork differs on purpose (one `null`
+for both `null` and `undefined`, a division by zero that gives `null`) the language guide says so:
+`const` and `let` with block scope, arrow functions and `function`, objects and arrays,
+destructuring, template strings, `switch`, `?.` and `??`, `typeof`, `++`. Imports are native:
+`"kitwork"` gives the host capabilities, a relative path gives another file, and the engine
+bundles them itself. There are no promises, no `async` and no `await`: the language is
+synchronous, and the engine waits for I/O itself.
 
-### Host Gateway
+What is removed is removed at compile time, most of it with a message that says what to write
+instead:
 
-`app.gateway(target, ...)` maps incoming domains to operator-controlled HTTP or
-HTTPS targets without loading a tenant VM:
+- `while`, `do`, and any `for` that is not a counted loop or a walk over a list;
+- `try`, `catch`, `finally`, `throw`;
+- `class`, labels, regular expression literals;
+- an unbounded program: a run has an energy budget, and the call stack is capped at 64 frames.
 
-```javascript
-import { app } from "kitwork"
+A failure is a value. Anything that goes wrong inside a call, from a query the database refused
+to a request that got no answer, is a failure: unread, it stops the handler and is logged; read
+with `safe`, it is data:
 
-app.gateway(
-  { domain: "api.example.com", target: "http://node-a:3000", weight: 2, health: "/health" },
-  { domain: "api.example.com", target: "http://node-b:3000", weight: 1, health: "/health" }
-)
-```
+```js
+// app/api/upstream/router.work
+import { router, http, safe } from "kitwork";
 
-Each object is one target. `target` is required, `weight` defaults to `1`, and
-equal weights produce round-robin distribution. `health` optionally enables an
-active HTTP health check at that target path. Passive upstream failures are
-tracked even without it; after three consecutive failures the published pool
-skips the target for a bounded cooldown and then permits a recovery probe.
-Per-target request, response, failure, availability, and health counters are
-available as a bounded host snapshot. The gateway manager can atomically
-publish a validated replacement while the previous snapshot drains. A
-gateway-only manifest can omit both `domain` and an app root:
-
-```javascript
-app.gateway({ target: "http://127.0.0.1:3000" })
-```
-
-Domainless targets form the default pool and are rejected when `app.website()` is
-also declared, so a gateway cannot silently shadow the web surface. Gateway
-targets may use private VPC addresses because they are trusted host manifest
-configuration, not tenant-controlled outbound requests.
-
-### Host Forward Proxies
-
-`app.proxy(config, ...)` opens independent HTTP or SOCKS5 forward-proxy
-listeners without loading a tenant VM:
-
-```javascript
-import { app, env } from "kitwork"
-
-app.proxy(
-  {
-    port: 8888,
-    username: env.PROXY_USERNAME,
-    password: env.PROXY_PASSWORD,
-  },
-  {
-    protocol: "socks5",
-    host: "127.0.0.1",
-    port: 1080,
-  },
-)
-```
-
-`protocol` defaults to `http` and `host` defaults to `127.0.0.1`. HTTP
-listeners support ordinary absolute-form requests and HTTPS tunneling through
-`CONNECT`; SOCKS5 listeners support the CONNECT command with no-auth or
-username/password authentication. A non-loopback bind is rejected unless both
-credentials are configured, preventing an accidental public open proxy.
-
-Destinations in loopback, private, link-local, multicast, carrier-grade NAT,
-and reserved documentation ranges are denied by default after DNS resolution.
-An operator may set `allowPrivate: true` for intentional loopback/private VPC
-access; link-local and special-purpose destinations remain denied. Each
-listener is bounded to 1,024 active connections, strips proxy and forwarded
-identity headers before ordinary HTTP forwarding, and drains with the host.
-Proxy-only manifests need no `app/` or `apps/` root.
-
-HTTP Basic and SOCKS5 username/password authentication do not encrypt the
-client-to-proxy connection. Public listeners must therefore run inside a
-trusted network, VPN, or TLS tunnel in addition to requiring credentials.
-
-The current contract is static manifest configuration. Repeated
-`app.proxy(config, ...)` calls append to the same immutable listener
-collection. A database-backed registry and reconciler belong to the future
-control plane and are not silently inferred from a configured database.
-
-### Host-Owned KitDB
-
-Kitwork can own a standalone KitDB file or managed database directory in the
-same process as its web, desktop, and mobile surfaces. The options remain flat:
-
-```javascript
-import { app, env } from "kitwork"
-
-app.database({
-  alias: "shop",
-  path: "./data.kitdb",
-  host: "127.0.0.1",
-  port: 5445,
-  user: "kitdb",
-  password: env.DB_PASSWORD,
-  kitsql: true,
-  memory: "128mb",
-  concurrency: 6,
-  warm: true,
-  cache: {
-    select: "2m",
-    search: "30s",
-    analytics: "5m",
-    memory: "16mb",
-  },
-})
-```
-
-Omit `port` for native in-process access only, then use
-`database.connection("shop")` from Kitwork code. Omitting `alias` publishes a
-single file as `default`, so plain `database` calls use it automatically. A
-positive `port` exposes the same independent KitDB engine through its
-PostgreSQL-compatible listener while internal calls still take the native
-path. `kitsql: true` exposes `/_kitsql/v1/query` on the existing Kitwork web
-listener; it requires `password` and `app.website(...)`. Local HTTP is accepted
-only on loopback, while remote KitSQL requires HTTPS. All three surfaces use
-one owned engine and one transaction history; they do not create database
-copies. `cache: "1m"` applies one duration to select, search, and analytics;
-the object form assigns separate policies. Cache entries are bounded and tied
-to the latest committed KitDB transaction, so a write invalidates old results.
-Use `PRAGMA cache_status` through any SQL client to inspect cache residency,
-hits, misses, bypasses, and evictions. `app.database(...)` may run by itself;
-without `app.website(...)` or `app.run(...)`, Kitwork starts no HTTP router, scheduler, TLS, or web
-listener.
-External resources use provider-specific declarations or the generic connector:
-
-```javascript
-app.postgresql({ alias: "system", url: env.POSTGRESQL_URL })
-app.sqlite({ alias: "legacy", name: "./legacy.sqlite" })
-app.connect({ alias: "remote-kitdb", url: env.KITSQL_URL })
-app.connect({
-  alias: "warehouse",
-  type: "postgresql",
-  host: env.WAREHOUSE_HOST,
-  name: "events",
-})
-```
-
-`app.mysql(...)` and `app.redis(...)` share the same manifest registry, but a
-distribution must link their runtime connector before use. The existing
-`.database({ alias, type, ... })` form remains compatibility syntax.
-
-The three KitDB access paths are deliberately separate:
-
-- Native `app.database(...)` is the zero-network path for the owning process.
-- `kitsql://user:password@host/database` is KitDB's first-party remote protocol.
-- `postgresql://...` is the compatibility path for PostgreSQL tools and drivers.
-
-KitSQL v1 carries typed values over HTTPS and integrates with Go's
-`database/sql`. Each request is one atomic SQL execution. Session transactions
-across multiple requests are intentionally not claimed by v1; use native or
-PostgreSQL compatibility when a client needs `BEGIN`/`COMMIT` today. See
-`kitdb/KITSQL.md` for the protocol contract and limits.
-
-A managed root exposes each registered database by its logical name:
-
-```javascript
-app.database("./.kitdb/", {
-  memory: "256mb",
-  concurrency: 6,
-  warm: ["shop"],
-})
-
-const shop = database.connection("shop")
-```
-
-Managed-root connections are lazy and use the same node leases as the
-PostgreSQL listener. A cold database releases its active session after the
-query; the bounded node may retain its engine as idle or evict it under LRU
-pressure. Two roots exposing the same logical name fail as ambiguous. The
-virtual maintenance database is not exposed to application code. New managed
-roots store their authoritative database catalog in `.catalog/data.kitdb`.
-
-Fixed `app.database(...)` resources and external connections share one
-case-insensitive alias namespace. Duplicate declarations fail before a database
-is opened. Because managed-root member names are dynamic, a collision with an
-external connection fails closed when that name is resolved.
-
----
-
-## 🚦 Routing, Lifecycle & Parameter Injection
-
-Routes are declared in `router.kitwork.js` under the selected app or domain root.
-
-### Request Handler Injection
-
-Kitwork handlers feature **Dynamic Parameter Injection**. The VM inspects arrow function parameter names and automatically injects matching capabilities:
-
-```javascript
-import { router, database } from "kitwork"
-
-const db = database.connection("system")
-
-// Inject `ctx` (Unified Context)
-router.get("/api/status").handle((ctx) => {
-    return ctx.json({ status: "online", timestamp: Date.now() });
-});
-
-// Inject `req` and `res` individually
-router.get("/api/users/:id").handle((res, req) => {
-    const userId = req.params("id");
-    const user = db.user.find(userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-    return res.json({ user: user });
-});
-
-// Inject `sse` (Server-Sent Events Broker)
-router.get("/api/events").handle((sse) => {
-    return sse.connect({ channel: "updates" });
-});
-
-// Catch error handler with `err` and `res`
-router.get("/api/legacy").catch((err, res) => {
-    return res.status(500).json({ success: false, message: err });
+router.get((ctx) => {
+  const { value: response, error } = safe(() => http.timeout(2000).get("https://example.com/feed"));
+  if (error) return ctx.status(502).json({ code: error.code, message: error.message });
+  return ctx.json(response.json());
 });
 ```
 
-### Injected Parameter Index
+`error` is `null` or `{ message, code, at }`, where `code` comes from a closed set (`NETWORK`,
+`TIMEOUT`, `DATABASE`, `CONFLICT`, `DENIED`, …) and `at` is the file, line and column of the
+failure. The limits of the host, energy, cancellation and stack depth, cannot be caught.
 
-- **`ctx` / `context`:** Unified context wrapper providing `.json()`, `.html()`, `.text()`, `.redirect()`, `.status()`, `.params()`, `.query()`, `.cookie()`, `.body()`.
-- **`req` / `request`:** Request reader for headers, method, path, IP, and query parameters.
-- **`res` / `response`:** Direct HTTP response writer.
-- **`sse`:** Server-Sent Events broker helper.
-- **`err` / `error` / `e`:** Captured execution error payload (for `.catch()` blocks).
+The compiler and the `.ui` checker speak Vietnamese today. A `while` anywhere in a site stops that
+site from starting, at the line that wrote it:
 
----
+```text
+compile router api/loop/router.work: router.work:5:3: Kitwork không hỗ trợ vòng điều kiện tuỳ ý 'while' …
+```
 
-## 🖼️ HTML View Engine & Layout Slots
+What `"kitwork"` gives a `.work` file: `router` and `safe`; `database`, `sqlite` and `collection`
+for data; `http`, `fetch` and `webhook` for the network; `file`, `path` and `cache`; `env` and
+`log`; `go` for detached work; `jwt`, `qrcode`, `napas`, `shortbase`, `insights`, `palette`,
+`pigment` and `playground` as helpers. The globals are the familiar ones: `Math`, `Date`, `JSON`,
+`console`, `Object`, `Number`, `BigInt`, `String`, `Boolean`, `Array`, `parseInt`, `parseFloat`,
+plus `fail` and `safe`. The host repository's `kitwork.d.ts` describes each for an editor.
 
-Kitwork HTML views (`.kitwork.html`) separate rendering into **Assembly** (layout slot inheritance) and **Binding** (data interpolation).
+## Pages
 
-### Layout Shell and `@name` Slots
+A page is a `.ui` file. It is close to HTML and is not HTML: the elements are Kitwork's, named by
+role, and the attributes describe intent, never shape. The engine writes the HTML, the CSS and the
+`<head>`.
 
-Layout slot tokens like `{{ @head }}` or `{{ @sidebar }}` resolve modular partial files with directory inheritance fallbacks:
+```text
+app/
+  page.ui          <page> … <header /> <content /> <footer /> </page>: the frame
+  header.ui        a region, called by its tag from page.ui; nearest wins down the tree
+  navbar.ui        a region: links only
+  footer.ui
+  content.ui       the page of this folder, placed into <content />
+  notfound.ui      what <content /> shows when no route matches
+  surface-card.ui  a piece with no logic, called as <surface-card for="…" />
+  docs/content.ui  the page at /docs, framed by the nearest page.ui above it
+```
+
+The vocabulary, in families: `page`, `section`, `box`, `grid`, `card` for layout; `text`, `code`,
+`quote`, `time`, `link`, `icon`, `image` for content; `list` and `item`; `input`, `button`,
+`field`, `label`, `hint`, `error` for forms; `accordion`, `breadcrumb`, `popover`, `reader` as
+elements with behaviour of their own. Layout is attributes on any container: `flex="row"`, `gap`,
+`align`, `space`, `wrap`, `padding` and its edges, `container` and `max-width` on a width scale
+(`small` to `huge`), `pin="top"` to hold a frame at the screen edge while the page scrolls. There
+is no `display`, no `position`, no `z-index`, no `margin`, no `span`: each of those names a shape
+on one target, and the measure for every word in `.ui` is whether it still means something when
+the target is not the web.
+
+Values and structure:
 
 ```html
-<!-- views/index.kitwork.html (Layout Shell) -->
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <title>{{ $.siteTitle }}</title>
-  {{ @head }}
-</head>
-<body>
-  <header>{{ @navbar }}</header>
-  <main>{{ @page }}</main>
-  <aside>{{ @sidebar }}</aside>
-  <footer>{{ @footer }}</footer>
-</body>
-</html>
+<grid if="products.length > 0" columns="1" small:columns="2" gap="4">
+  <product-card for="product of products; key: product.id" />
+</grid>
+<text if="products.length == 0">Nothing on the menu today.</text>
+<text show="open">Shown or hidden, state kept.</text>
 ```
 
-### Clean Slot Resolution Hierarchy
-When rendering a slot `{{ @sidebar }}`, the engine searches:
-1. `views/sidebar.kitwork.html` in the current folder.
-2. Parent directories up to the tenant views root.
-3. Legacy `_sidebar_.kitwork.html` fallbacks.
+`{{ }}` inserts a value, escaped; `if` removes an element, `show` hides it; `for` walks a list with
+its key in the same attribute. A prefix in front of an attribute makes it conditional on width
+(`small:` `medium:` `large:` `wide:` `huge:`) or on a state (`hover:` `pressed:` `focus:`
+`disabled:` `scrolled:`): `scrolled:shadow="small"` on a pinned header is a shadow that appears
+once the page has scrolled.
 
-### Template Expression Syntax
+Three forms of markup, and only three: an element of Kitwork is written by its tag; a piece with no
+logic is a `.ui` file of the site, called by its file name as a tag and reading the context where it
+is called; a thing with logic is a component, written as `component="name"` on an element
+(`<box component="dropdown" as="$menu">`). Has logic, then component; only markup, then layout.
 
-```html
-<!-- Data Interpolation -->
-<h1>Welcome, {{ user.name }}</h1>
-<p>Site: {{ $.siteName }}</p> <!-- `$.` accesses global root data -->
+The folder's `router.work` sets what flows down to every page under it: `router.colors` (the
+palette as tokens, each a colour or a `{ light, dark }` pair), `router.fonts` (typefaces by role),
+`router.appearance` (`system`, `light` or `dark` before the visitor chooses), `router.highlight`
+(the colours of code), `router.gradients`, `router.language`, `router.meta`, `router.favicon`,
+`router.reload(false)` with `.transition("fade")` for moving between pages without a reload, and
+`router.bundle` for how CSS and script are delivered. Colours are named by role (`brand`, `canvas`,
+`paper`, `ink`, `line`) and shaded by arithmetic (`ink-30` lighter, `brand+15` darker, `ink/80`
+translucent); every text is measured against its background in both modes at compile time, and a
+pair under the contrast threshold is reported at its file, line and column. Code inside `<code
+language="go">` is highlighted on the server. A `<page background="cirrus">` paints a gradient
+backdrop; `material="glass"` on a frame is frosted glass over whatever scrolls beneath it.
 
-<!-- Conditional Branches -->
-{{ if user.is_admin }}
-  <span class="badge">Admin</span>
-{{ else }}
-  <span class="badge">Member</span>
-{{ end }}
+Static files are served from `assets/` at the same path. Source files and dot-folders are never
+reachable from outside: not `.work`, not `.ui`, not `.data`.
 
-<!-- Loops -->
-<ul>
-  {{ for item in products }}
-    <li>{{ item.name }} - ${{ item.price }}</li>
-  {{ end }}
-</ul>
+The first way to write a page, `.kitwork.html` templates with `{{ }}` expressions, `if`, `for` and
+`let`, assembled from a shell and named slots (`@page`, `@header`, `@navbar`, `@footer` and the
+rest) found by walking up the folder tree, with `data-kit-*` attributes read by the browser kernel,
+is still served and is being rewritten into `.ui`.
 
-<!-- Local Variable Bindings -->
-{{ let is_active = user.status == "active" }}
+## Routes
+
+A folder's `router.work` declares the methods of its own path: `get`, `post`, `put`, `patch`,
+`delete`, `notfound`, `proxy`, and `view` for a page. Each method is a chain, read top to bottom:
+
+```js
+import { router, sqlite } from "kitwork";
+
+router
+  .get((ctx) => ctx.json({ items: sqlite.table("items").list() }))
+  .guard((ctx) => Boolean(ctx.cookie("session")))
+  .cache("5m")
+  .limit({ rate: 30, per: "1m" });
 ```
 
----
+- On a method: `guard` runs first and may block or answer; `handle` or the callable itself;
+  `success`, `error` and `finally` after it; `cache(expiry)` keeps the response in RAM for the
+  generation; `persist(expiry)` keeps it on disk for the site; both are keyed by method, path and
+  query, so neither suits a personalised page; `limit` adds a rate rule.
+- On a folder, inherited by everything below it: `guard`, `error`, `notfound`, `meta`, `title`,
+  `description`, `language`, `favicon`, `assets`, `rateLimit`, `database` (the alias `ctx.database`
+  reads), and the cached declarations `rss`, `sitemap` and `proxy`.
+- `ctx` carries the request: `params`, `query`, `header`, `cookie`, `body`, `ip`, `method`,
+  `path`; and the answer: `json`, `text`, `html`, `file`, `redirect`, `status`, `type`,
+  `setCookie`; and for a page, `bind`, `title`, `meta`. The `error` hook receives
+  `{ message, code, at }`.
 
-## 🗄️ Industrial Query Builder
+Match precedence is exact, typed, regex, plain dynamic, then splat. Rate limits count per IP, per
+client, per user or site-wide, by second, minute, hour or day; loopback and private addresses are
+exempt. Without a `router.assets` allow-list, every non-source file under a template site is
+public.
 
-The Kitwork Query Builder translates JavaScript lambda expressions into parameterized SQL queries executed without reflection overhead.
+## Data
 
-```javascript
-import { database } from "kitwork"
+Four doors, each explicit:
 
-const db = database.connection("system")
+- `sqlite`: the site's own file at `.data/app.db`, confined to `.data`; `sqlite.open("other.db")`
+  for another file there, `sqlite.memory()` for none; `exec` for DDL, `table(name)` for the builder.
+- `database.connect("alias")` or `router.database("alias")` with `ctx.database`: a connection the
+  manifest declared, PostgreSQL or SQLite, or a database inside the KitDB root the app owns. A site
+  never supplies a connection string.
+- `database.entity()`: the system database, every query scoped to the app's identity by the engine.
+- `collection.open("name")`: Markdown documents under `_collection/<name>`, with a full-text index.
 
-// 1. Fetch with Magic Lambda Filtering
-const activeUsers = db.user
-    .where(u => u.status == "active")
-    .where(u => u.age >= 18)
-    .sort(u => u.created_at, "desc")
-    .take(20);
+The query builder is the same on every door: `table`, `select`, `where` (`("age", ">", 18)`, an
+object, or a lambda), `and`, `or`, `in`, `isNull`, `orderBy` or `sort`, `limit`, `skip`, joins,
+`groupBy`, `having`; terminals `first`, `find`, `list`, `count`, `sum`, `avg`, `max`, `exists`;
+writes `create`, `update`, `delete` and `remove`. Values travel as parameters. An update or a delete
+that names no row is refused.
 
-// 2. Automatic Set Inclusion (Auto-IN)
-// SQL: SELECT * FROM products WHERE id IN (10, 20, 30);
-const products = db.products.where(p => p.id == [10, 20, 30]).list();
+KitDB is an embedded relational database written in Go and incubated in this repository, with its
+own storage, write-ahead log, checkpoints, verified backup and point-in-time recovery, one writer
+per database, a loopback-only cleartext PostgreSQL wire profile so ordinary tools can connect, and
+a 1.0 release contract still at release-candidate stage. The app's `database` surface opens one file
+or a managed root of them; `kitdb/README.md` says exactly what is supported and what is not.
 
-// 3. Pattern Matching (Auto-LIKE)
-// SQL: SELECT * FROM customers WHERE email LIKE '%@kitwork.io';
-const team = db.customers.where(c => c.email == "%@kitwork.io").list();
+## Background work
 
-// 4. Strict Mutations (Requires .where() clause)
-const updated = db.user
-    .where(u => u.id == 42)
-    .update({ login_count: 5 });
+Durable schedules and jobs exist in the engine today, stored in the application's SQLite files or
+in the system PostgreSQL when one is connected, with deduplication keys, retry budgets and replay
+of failed jobs; a retried handler runs again, so it must be idempotent. How an author declares them
+is being redesigned, so this file does not teach it yet. `go(fn)` runs detached work that may be
+lost on restart, on purpose. Server-sent events go through a broker that outlives the request:
 
-// 5. Data Aggregates
-const totalSales = db.orders.where(o => o.status == "paid").sum("total");
+```js
+router.get((ctx, sse) => sse.connect({ channel: "orders", retry: 3000 }));
 ```
 
----
+## The page's own assets
 
-## 🎨 JIT Engine Suite
+The engine writes only what a page uses: its CSS from the attributes it wrote (utility classes in
+the Tailwind vocabulary on a template page), icons from the vendored Tabler set and brand marks
+from Simple Icons as CSS masks, `@font-face` for the subset fonts it embeds (Google Sans Flex,
+Google Sans Code, JetBrains Mono, Outfit, Fira Code), and server-side syntax highlighting (Go,
+JavaScript, SQL, bash, YAML and the Kitwork files among them). Nothing is built ahead of time, and a
+page never loads anything from a CDN.
 
-Kitwork features built-in Just-In-Time (JIT) presentation compilers that generate CSS, icons, and client interactions on-the-fly without Node.js or build steps:
+Every static file carries an `ETag` and `Last-Modified`; a file whose name carries the hash of its
+bytes is cached for a year, any other for an hour in production.
 
-- **JIT CSS:** Zero-config utility CSS generator parsing HTML view utility classes.
-- **JIT Icons & Logos:** Automatically renders SVG masks for Tabler icons (`<i class="icon-user">`) and Simple Icons brand logos (`<i class="logo-github">`). Served inline or cached via `/jiticons` / `/jitlogo`.
-- **JIT Components:** Material styling abstractions (`.button`, `.card`, `.prose`).
-- **JIT JS & Hydrate:** Declarative client behavior kernel driven by `data-kitwork-action` verbs (`toggle`, `dialog`, `tab`, `copy`, `theme`) and `$ page scope` state synchronization.
+## The browser side
 
----
+One kernel reads the attributes the engine wrote for a `.ui` page, or the `data-kit-*` attributes
+an author wrote on a template page, and mounts named components from the engine's catalogue
+(dialog, tabs, toast, calendar, clipboard, …). Each part is one file under `/_kitwork/`, named by
+its content hash, delivered only to the pages that use it, cached as immutable. Drive swaps pages in
+place instead of reloading, keeping what the frame holds open; a `.ui` site has it on, a template
+site asks with `router.reload(false)`.
 
-## 🔒 Security Model
+## Network
 
-| Security Layer | Enforcement Mechanism |
-| :--- | :--- |
-| **Language Sandbox** | Unbounded loops, eval, and arbitrary class instances rejected at compile time. |
-| **Energy Accounting** | Every VM opcode decrements energy; execution aborts upon reaching `MaxEnergy`. |
-| **Stack Sentinel** | Execution depth hard-capped at 64 call frames; prevents host goroutine stack overflow. |
-| **SSRF Shield** | Outbound `http` requests block loopback (`127.0.0.1`), private RFC1918 IPs, and AWS metadata endpoints. |
-| **SQL Safety** | Parameterized queries enforced; `.update()` and `.delete()` without `.where()` fail strictly. |
-| **Environment Isolation** | VMs read only the `.env` inside their resolved `app/`, `app/<domain>`, or `apps/<identity>/<domain>` site root. |
-| **Rate Limiting** | Host-level & tenant-level token bucket rate limiters per IP, User, Browser fingerprint, or endpoint. |
+Certificates through ACME, host rate limits, canonical host and redirect rules, a weighted
+reverse-proxy gateway with health checks, HTTP and SOCKS5 forward proxies that refuse a public bind
+without credentials, and a guard that refuses outbound requests to loopback and private addresses
+(lifted while `allowLocal` is on). Behind a proxy the engine ignores forwarded headers unless
+`trustProxy` says otherwise.
 
----
+## What happens to a request
 
-## 📊 Performance & Benchmarks
+```text
+source  ->  compiler  ->  verified Program  ->  generation  ->  VM lease  ->  response
+```
 
-Benchmarked on an Intel i7-11850H (8 Cores / 16 Threads) running Go microbenchmarks (`work/bench_core_test.go`) and `k6` HTTP load scenarios against live tenant routes:
+Every file is compiled before a site is activated, and every Program is verified before it is
+published: unknown opcodes, bad jumps, stack underflow and inconsistent control flow are refused
+there, not discovered while serving. The route graph, pages, environment and generated assets of
+a site are frozen together as one generation. A request pins a generation and leases a machine
+from a pool; the machine is wiped before it serves anyone else.
 
-| Metric | Measured Engine Performance |
-| :--- | :--- |
-| **VM Execution Speed** | ~36,500,000 instructions / sec |
-| **Instruction Latency** | ~27 nanoseconds / instruction |
-| **HTTP Throughput (k6)** | **33,287 requests / sec** (200 concurrent VUs) |
-| **Latency Under Load** | **p50: 3.5 ms** · **p95: 18.8 ms** |
-| **Success Rate** | **100.00%** (0 errors across 499,510 requests) |
-| **Full Tenant Cold Boot** | **9.8 ms** (ESM resolution + AST compile + route tree + render plan) |
-| **Script Pipeline Cold Boot** | **1.7 ms** (Lex ➔ Parse ➔ Compile ➔ VM Execute) |
+When a file changes and hot reload is on, the engine prepares a complete new generation in the
+background and swaps it in atomically. A candidate that fails to compile is discarded and the old
+one keeps serving. Static files never enter a machine at all: they are streamed from disk.
 
----
+```text
+Host
+  App runtime (identity)     connections, background work, detached work
+    Site runtime (domain)    persisted cache, rate limits, event streams
+      Generation (version)   compiled routes, pages, env, assets
+        Request scope        cancellation, leased VM, request capabilities
+```
 
-## 🧪 Preflight Verification & CLI
+Every response carries an `X-Request-Id`. A runtime failure is logged with the request, the site,
+the generation, the Program fingerprint and the source position.
 
-Before deploying tenant code to production, run preflight validation to verify routes, imports, environment variables, and HTML templates without starting a network listener:
+## What the engine enforces
+
+What a stranger's code cannot do, and the mechanism that stops it:
+
+- Run forever: no `while`, loops bounded by the grammar, an energy budget on every run, a cap on
+  call depth.
+- Run unverified bytecode: every Program is copied, verified and fingerprinted before publication,
+  and a cached artifact is verified again when loaded.
+- Keep anything between requests: the machine is wiped before it goes back to the pool, and
+  retention is measured by a campaign in the release gate.
+- Read another site's files, environment or database file: paths are resolved inside the site,
+  `.env` is per site, SQLite is confined to `.data`, and a connection exists only under an alias
+  the host declared.
+- Reach the host's own network: outbound requests to loopback, private and link-local addresses
+  are refused at dial time.
+- Inject SQL: values are bound as parameters; an update or a delete with no condition is refused.
+- Serve its own source: `.work`, `.ui`, `.kitwork.js` and `.kitwork.html` are never served.
+- Flood the host: rate limits per IP, client, user or site; one request id per response for the
+  log.
+
+What it does not do yet, said plainly: there is no authorization policy on a request (the seam
+exists, nothing ships with it); the PostgreSQL wire profile of KitDB is loopback-only and
+cleartext; identifiers in the query builder are quoted, not validated, so a table or column name
+must come from your code, never from a request; and the whole design treats a volumetric attack as
+the job of the layer in front, not of the engine.
+
+## What decides every choice
+
+The same few rules recur in every design document and every contract test, and they settle most
+arguments before they start.
+
+- The blueprint outlives the executor. A word in `.ui` or `.work` may be added, never change its
+  meaning; the engine will be replaced more than once.
+- The executor must prove itself. A guarantee without a test that goes red when the mechanism is
+  switched off is not a guarantee.
+- No sealed magic. Where the engine decides, it says what it decided: which function runs where,
+  which fields reach the browser, where a component came from.
+- Refuse rather than guess. A missing intent, an unknown word, a web-only trick on another target
+  is an error with a suggestion, not a silent default.
+- Authority flows down, never up. The manifest outranks a folder's router, which outranks a
+  component, which outranks a shared function; a file uses only the powers of its own level.
+- State outlives machines. Files are the truth, the database is the index and the journal, and a
+  query that returns nothing is not evidence that the database is healthy.
+- One node before many, the web before native, correct before fast. Each step waits for the
+  evidence of the one before it.
+- AI proposes, deterministic code commits. A model may write the application or suggest a plan;
+  the engine's checks, limits and durability never depend on it.
+
+## What is not done
+
+- The browser half of `.ui`. A `click="count = count + 1"` on a button compiles, and nothing
+  happens in the browser yet: events are parsed and dropped, two-way binding, `var` state and the
+  generated page script are being built. `check` and `profile` do not read `router.work` yet. The
+  specification, `docs/KITWORK_UI.md` in the Kitwork repository, is a design document, not an API.
+- The intermediate form of the interface. The bytecode of the logic is a frozen contract, with a
+  version, a fingerprint and an archive of old programs that must still run; the compiled page tree
+  is not yet, and changes with the engine.
+- The tunnel. Server functions called from the page by name, with the checks that make that safe.
+  Designed, not implemented. The earlier idea of shipping client logic to the server was dropped.
+- Background work as an author writes it. Today it lives in two folders, `_cron/` and `_queue/`,
+  one `.kitwork.js` file per schedule or handler; that surface is being rethought and will change.
+- Clustering. `CLUSTER.MD` and `backbone.md` are designs. Nothing coordinates two engine processes
+  today; only the PostgreSQL-backed schedule and queue stores were written with that in mind.
+- Desktop and mobile. The manifest declares them; the desktop declaration is validated at boot and
+  the mobile one by the native build tooling. A separate shell, not in this repository, opens the
+  window.
+- Authorization on the request. The engine has the seam for a host to attach a principal and its
+  permissions to a request; no policy ships with it, and `database.system()` stays inert until one
+  does.
+- A standalone `kitwork` binary. This repository is the library; the command line lives in the host.
+
+## Where it is going
+
+In this order, and each step only after the one before it has evidence.
+
+- Near. The `.ui` blueprint running end to end in the browser; the tunnel; values kept in step with
+  the server through KitDB's ordered history; then the old templates, directives and folders
+  removed in one sweep.
+- Middle. A second renderer, small and real, to prove the vocabulary carries no shape of HTML; a
+  native bridge granted by capability; KitDB embedded in an app as its replica; nodes composed, each
+  owning a bounded part, with no shared giant database.
+- Far. An engine written in another language that is valid because it passes the same contract
+  suite; renderers for native widgets or a canvas, some of them written by a model and trusted the
+  same way; and the blueprint itself as what an agent reads to understand and operate an
+  application, the way a screen reader reads the accessibility tree.
+
+## Verify it
+
+Go 1.26 is required.
 
 ```bash
-# Verify the entire host engine setup and all tenant applications
-go run . check
+go build ./... && go vet ./... && go test ./... && go test -race ./...
 ```
 
-Profile every executable Program or inspect one source instruction by
-instruction without executing tenant code:
-
 ```bash
-go run . profile --json
-go run . inspect apps/<identity>/<domain>/router.kitwork.js
-go run . inspect apps/<identity>/<domain>/router.kitwork.js --json
-```
-
-`check` and `profile` use the same resolved `app/` or `apps/` layout as the
-running host. Their reports therefore include only executable sites and each
-app's own `_cron`/`_queue` sources, and the JSON profile records that layout.
-
-The language conformance corpus independently verifies accepted behavior,
-structured diagnostics, and rejected syntax across artifact, fresh, reused,
-and pooled VM boundaries:
-
-```bash
-cd engine
-go test ./conformance -run TestLanguageConformanceCorpus -count=1
-go test ./compatibility -run TestVMCompatibilityArchive -count=1
-go test ./runtime -run ^TestVMFaultGauntlet -count=1
-```
-
-Inside the `engine/` directory, run the repeatable verification gate:
-
-```bash
-cd engine
 go run ./cmd/releasegate --mode verify --report .artifacts/verify.json
 ```
 
-VM v2 compatibility is frozen in [`docs/VM_V2_FREEZE.md`](docs/VM_V2_FREEZE.md)
-and backed by committed Program evidence in [`compatibility/`](compatibility/).
-The complete cross-platform release gate, 24 to 72 hour canary, and promotion
-criteria are documented in [`docs/RELEASE.md`](docs/RELEASE.md). Operational
-snapshots and private diagnostic bundles are specified in
-[`docs/DIAGNOSTICS.md`](docs/DIAGNOSTICS.md).
+The verification gate loads a committed archive of compiled Programs and requires each to decode,
+verify, execute and re-encode unchanged; runs a corpus of malformed Programs and execution faults
+that must be rejected or recovered deterministically; compiles the language conformance corpus
+in fresh, reused and pooled machines; and runs on Windows and Linux in CI, with the browser proofs
+on Linux. The release gate adds multi-process cache and memory retention campaigns; a 24-hour
+canary is run separately before a release. Some browser proofs skip when Chrome or Node is not
+installed. `docs/RELEASE.md` is the procedure; `docs/STABILITY.md` is the contract every change is
+held to.
 
----
+Performance is recorded, not advertised. `BENCHMARK.md` holds the measurements with the machine and
+the command that produced each one, and the rule for comparing them: same benchmark, same payload,
+same machine state, five runs. Allocation budgets fail CI; latency does not.
 
-## 📄 License & Sponsorship
+The engine builds with `CGO_ENABLED=0`. It is not dependency-free: it uses about a dozen Go modules,
+all of them pure Go, for SQLite, PostgreSQL, ACME, YAML, minification, QR codes, images, XML, log
+rotation and screenshots.
 
-Kitwork Engine is dual-licensed software maintained by the Kitwork Foundation:
+## The repository
 
-- **Open Source License:** **GNU Affero General Public License v3.0 (AGPL-3.0)** — see [`LICENSE`](LICENSE).
-- **Commercial License:** For proprietary closed-source deployments, enterprise embedding, or custom licensing, contact **[support@kitwork.org](mailto:support@kitwork.org)**.
+- `compiler`, `runtime`, `value`, `builtins`, `conformance`, `compatibility`: the language, from
+  text to verified bytecode to the machine, and the corpora that freeze them.
+- `core`, `app`, `site`, `request`, `work`: the host, the ownership hierarchy, routes, lifecycle,
+  caches, schedules, queues and events.
+- `render`, `ui`, `jit`: templates, the `.ui` compiler and its stylesheet, the CSS, icon, logo, font,
+  highlight, kernel and component generators.
+- `kitdb`, `database`, `search`, `utilities`, `capabilities`: data, connections, the search engine,
+  the HTTP client and the helpers, and the capability lifetimes.
+- `domain`, `gateway`, `proxies`: ACME, the reverse proxy, the forward proxies.
+- `cmd`: `releasegate`, `canary`, `vmcompat` and the KitDB tools. The root files of the module hold
+  `Run`, `Check`, `Profile`, `InspectFile` and the manifest reader.
 
-**Your applications are yours.** The AGPL covers the engine, not the code you run on it. The
-[Application Exception](LICENSE-EXCEPTION.md) states this in writing: `.kitwork.js` modules,
-templates, assets and everything the engine generates from them — including pages served to your
-visitors — are separate works you license however you like. What AGPL section 13 asks for is the
-other case: if you **modify the engine itself** and offer that modified engine over a network,
-publish those modifications.
+## Read next
 
-Components meant to be copied into your own codebase are deliberately permissive rather than AGPL:
-`@kitwork/kitjs` (the client kernel) and `kitwork.d.ts` (editor type definitions) are MIT.
+- `docs/RUNTIME_ARCHITECTURE.md`: who owns what, from the host down to a request.
+- `docs/STABILITY.md`: the invariants and the commands that prove them.
+- `docs/BYTECODE.md` and `docs/VM.md`: the instruction format, the verifier, the machine.
+- `docs/APP.md`: every manifest method.
+- `docs/PUBLISHING.md`: RSS, sitemaps and typed responses.
+- `docs/RELEASE.md` and `docs/DIAGNOSTICS.md`: how a release is qualified and observed.
+- `kitdb/README.md`, `kitdb/RELEASE_1_0.md`, `kitdb/VISION.md`: the database, the exact claim it
+  makes, and where it is going.
+- `CONTRIBUTING.md`: the rules that catch people, and why.
 
-Contributions are welcome — start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Because of the
-commercial half of the dual licence, a first contribution needs the agreement in [`CLA.md`](CLA.md).
+The Kitwork repository holds the `.ui` specification (`docs/KITWORK_UI.md`), the type definitions
+for editors (`kitwork.d.ts`), the task-specific guides under `.claude/skills/`, an example site
+written in `.ui` (`docs/examples/kitwork`), and the author's sites. The ideas behind the engine,
+thirty of them in reading order, are published at huynhnhanquoc.com/concepts.
 
-**Created by Huỳnh Nhân Quốc** · Kitwork Foundation · [Sponsor on GitHub](https://github.com/sponsors/huynhnhanquoc)
+## License
+
+The engine is licensed under the GNU Affero General Public License, version 3 (`LICENSE`), with
+a commercial licence offered alongside for organisations that cannot ship AGPL software.
+`LICENSE-EXCEPTION.md` states the intended rule that an application the engine runs is a separate
+work, and `CLA.md` is the contributor agreement; both are drafts and not yet in force. The editor
+type definitions in the Kitwork repository are MIT, so that what you copy into your own code stays
+permissive.
+
+Security issues go to support@kitwork.org, not to a public issue. A tenant escape, a way past the
+energy ceiling, or a path out of a site's own directory is the class that matters most.
+
+Kitwork is written by Huỳnh Nhân Quốc (`FOUNDER.md`).
