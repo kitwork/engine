@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/utilities/sse"
 	"github.com/kitwork/engine/value"
@@ -73,6 +74,11 @@ type Router struct {
 	failed  bool
 
 	requestID string
+	// node is the route folder this request resolved to (serveTree). The folder rules ctx reads at
+	// request time, router.database among them, are resolved from it up to the site root.
+	node *RouteNode
+	// requestScope owns the request: a database handle made for it (ctx.database) is bound to it.
+	requestScope *requestscope.Scope
 
 	// Cache configuration
 	cacheTTL       time.Duration
@@ -238,8 +244,9 @@ func (r *Router) responder(w http.ResponseWriter) {
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
 	case "json":
-		// encoded before the status goes out: a value JSON cannot carry (NaN, Infinity) is a failure
-		// of the request, answered as one, not a 200 with an error after it
+		// encoded before the status goes out: a value JSON cannot carry (an object that holds itself) is
+		// a failure of the request, answered as one, not a 200 with an error after it. NaN and Infinity
+		// are null since 15/10/2026, as JSON.stringify writes them (value.MarshalJSON)
 		b, err := json.Marshal(r.response.Data())
 		if err != nil {
 			r.err = uncaught("không viết được câu trả lời thành JSON: " + err.Error())

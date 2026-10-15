@@ -89,6 +89,9 @@ func (t *Tenant) serveTree(
 		}
 	}
 
+	reqRouter.node = match.Node
+	reqRouter.requestScope = requestScope
+
 	// savMethod (set once a cacheable method resolves) makes finalize persist the response.
 	var savMethod *FolderMethod
 	var savKey string

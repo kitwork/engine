@@ -69,6 +69,15 @@ func (v Value) Invoke(name string, args ...Value) Value {
 	// A Go method without arguments is a getter that Get has already called: attr is its result. A
 	// failure passes on as it is. Anything else is data, or nothing, and data never answers a call:
 	// { x: 3 }.x() is an error, as in JavaScript; until 14/10/2026 it gave 3.
+	// A getter whose result is a callable proxy is called with the arguments, as obj.f(args) in
+	// JavaScript reads f and calls it: ctx.database("ledger") reads the request's database handle and
+	// calls it for another one (15/10/2026). Without arguments the proxy itself answers, as any
+	// getter's result does below.
+	if attr.K == Proxy && len(args) > 0 {
+		if handler, ok := attr.V.(ProxyHandler); ok {
+			return handler.OnInvoke("", args...)
+		}
+	}
 	if attr.K == Invalid || v.hasGoMethod(name) {
 		return attr
 	}
