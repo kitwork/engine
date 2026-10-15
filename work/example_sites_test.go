@@ -277,13 +277,21 @@ func TestExampleSourcesUseTheOperators(t *testing.T) {
 			t.Errorf("CONTROL: %s bị coi là cách viết cũ (%q)", now, m)
 		}
 	}
-	roots := []string{filepath.Join("..", "conformance", "testdata", "ui")}
+	type sourceRoot struct {
+		path     string
+		minFiles int
+	}
+	// The engine-owned corpus has 19 sources. Require those independently:
+	// optional examples must neither supply missing fixtures nor be required
+	// for an engine-only checkout to pass.
+	roots := []sourceRoot{{filepath.Join("..", "conformance", "testdata", "ui"), 19}}
 	if _, err := os.Stat(examplesRoot); err == nil {
-		roots = append(roots, examplesRoot)
+		roots = append(roots, sourceRoot{examplesRoot, 1})
 	}
 	files := 0
 	for _, root := range roots {
-		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		rootFiles := 0
+		err := filepath.WalkDir(root.path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -301,6 +309,7 @@ func TestExampleSourcesUseTheOperators(t *testing.T) {
 				return err
 			}
 			files++
+			rootFiles++
 			for i, line := range strings.Split(string(data), "\n") {
 				for _, at := range old.FindAllStringSubmatchIndex(line, -1) {
 					m := make([]string, 4)
@@ -322,9 +331,9 @@ func TestExampleSourcesUseTheOperators(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	if files < 20 {
-		t.Fatalf("chỉ đọc được %d tệp .ui/.work từ %v", files, roots)
+		if rootFiles < root.minFiles {
+			t.Errorf("chỉ đọc được %d tệp .ui/.work từ %s, cần ít nhất %d", rootFiles, root.path, root.minFiles)
+		}
 	}
 	t.Logf("%d tệp .ui/.work đọc từ %v", files, roots)
 }
