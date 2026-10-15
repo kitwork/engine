@@ -53,5 +53,5 @@
 ## 5. Unconfirmed Areas Requiring Empirical Validation
 
 1. **Multi-Node Cluster Placement**: Code references tenant placement and cluster migration, but multi-node clustering remains unimplemented in current engine code.
-2. **Capsule Write Permissions (Tier ③ Write Grants)**: Read-only logic capsules are documented in RFCs; write/delete identity capability grants require further production validation.
+2. **Tunnel (server actions)**: Logic capsules (Tier ③) were dropped on 07/10/2026; the tunnel that replaces them (client sends input to server-compiled functions, never code) is a design, not implemented.
 3. **Extreme Load Lock Contention**: `Engine.mu` read-lock overhead under 100,000+ concurrent requests requires verification via multi-threaded load tests.

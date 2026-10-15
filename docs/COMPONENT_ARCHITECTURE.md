@@ -138,9 +138,11 @@ mặc định của blueprint → literal trên host → `seed` → `init(contex
 
 ## 8. Giao
 
-Mỗi phần một file `/kit/<phần>.<hash>.js`, cache vĩnh viễn; trang chỉ nhận thứ nó dùng (kernel, Drive
-nếu site bật, mỗi directive/dịch vụ/component nó gọi tên). Site ghim version bằng
-`router.javascript({ components: { tên: "x.y.z" } })`. Kernel lõi có ngân sách 12 288 byte gzip:
+Mỗi phần một file dưới `/_kitwork/`, tên theo vai trò và hash của nội dung (`/_kitwork/kernel.<hash>.js`,
+`/_kitwork/drive.<hash>.js`, `/_kitwork/components/<tên>.<hash>.js`…), cache vĩnh viễn; trang chỉ nhận thứ nó dùng
+(kernel, Drive nếu site bật bằng `router.reload(false)`, mỗi directive/dịch vụ/component nó gọi tên). Không version
+trên dây (11/10/2026): component tìm theo tên, bản mới nhất được giao; ghim bằng `router.javascript()` đã gỡ cùng
+hàm đó (đường `/kit/…` cũ vẫn trả lời file hôm nay, không cache). Kernel lõi có ngân sách 12 288 byte gzip:
 máy móc ít trang dùng là file riêng, không phải byte kernel.
 
 ## 9. Định nghĩa "xong"

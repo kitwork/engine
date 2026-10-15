@@ -12,7 +12,7 @@ server.run({ port: env.int("PORT", 3000), root: "./tenants" });
 ## Hoạt động thế nào
 1. `engine.Run("server.kitwork.js")` thấy đuôi `.js` → gọi `evalConfigJS`.
 2. Chạy file trong **VM setup tối giản**: builtin chỉ có `server` + `env`
-   (KHÔNG router/database/runtime của tenant — và `env` **không** lộ cho tenant/capsule
+   (KHÔNG router/database/runtime của tenant — và `env` **không** lộ cho tenant
    vì chứa secret).
 3. `server.run(obj)` **bắt** object config (builtin bàn giao, không tự phục vụ).
 4. Object → `map[string]interface{}` qua `json.Marshal` của `value.Value` → đẩy vào

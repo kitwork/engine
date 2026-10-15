@@ -1,7 +1,7 @@
 # Kitwork Runtime Architecture
 
 This document is the source of truth for the production ownership model.
-`ARCHITECTURE.md` remains the historical three-tier and logic-capsule RFC.
+`ARCHITECTURE.md` remains the historical three-tier RFC; its logic capsules are dropped.
 
 ## Ownership hierarchy
 
@@ -107,6 +107,21 @@ treats the compatibility `sites/` tree or a router at the identity level as an
 executable site. A router placed above the domain level in `apps/` is rejected
 at bootstrap with the expected path shape instead of becoming a request-time
 404.
+
+Sites remain request-driven unless the manifest declares a prewarm policy.
+`app.prewarm()` selects the primary hostname; the manifest may instead select
+exact domains or all discovered sites with `"*"`. Selected generations prepare
+and activate before the web listener opens. Selection changes when work runs,
+not generation ownership: the same route, template, presentation, and
+activation pipeline is used, and ordinary idle eviction may later retire an
+unused prewarmed site.
+
+Cold preparation is singleflight per canonical domain. Concurrent requests for
+one domain share its result, while different domains may prepare concurrently
+without holding the host ownership lock through compilation, render/JIT
+preparation, or router initialization. Activation and cache publication remain
+one short host-owned decision. Shutdown first rejects new preparations, waits
+for accepted preparations to finish cleanup, and prevents their publication.
 
 ## Request host resolution
 
@@ -394,6 +409,6 @@ VMs, Programs, and retired generations reach a post-warm-up heap plateau.
 Prepared template-expression evaluation has its own deterministic allocation
 gate. The next architecture work is continued lifecycle hardening driven by
 bounded runtime signals and production profiles, without adding another
-runtime layer. Logic capsules are a parked experimental RFC; they are not the
-next layer and must not create a parallel runtime or influence current public
-APIs.
+runtime layer. Logic capsules are dropped (replaced by the tunnel design: the client
+sends input to server-compiled functions, never code); nothing may create a
+parallel runtime or influence current public APIs.

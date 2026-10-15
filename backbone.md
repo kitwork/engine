@@ -83,7 +83,7 @@ type Bus interface {
 *   *Benefit*: Decouples the JScript VM from networking details. Upgrading the underlying network doesn't require modifying JScript VM routes.
 
 ### Invariant B: Identity-First Cryptography & TLS 1.3 Peer Verification
-Node identity, peer authentication, and code-execution permissions (Capsule verification) are unified under the same asymmetric cryptographic keys (Ed25519).
+Node identity, peer authentication, and code-execution permissions are unified under the same asymmetric cryptographic keys (Ed25519).
 *   **CA-less Peer Verification**: Since nodes connect directly via IP:Port without conventional SSL certs signed by public Certificate Authorities (CAs), Kitwork implements self-signed certificates paired with custom **`VerifyPeerCertificate`** callbacks in TLS 1.3. This pins node identities by verifying signature authenticity against the public Ed25519 key registered in the Control Plane.
 
 ### Invariant C: Unicast Routing & Address Resolution
@@ -101,10 +101,10 @@ The local Bus is per-tenant, but across the cluster every channel **must be name
 Every endpoint resolves through one URI, so the Bus can choose the route (in-process / S2S / S2C / P2P) from the address alone:
 
 ```
-kw://<node>/<tenant>/<kind>/<id>      kind ∈ { channel, client, capsule, node }
+kw://<node>/<tenant>/<kind>/<id>      kind ∈ { channel, client, node }
 ```
 
-The Control Plane's location registry (Invariant C) maps `client`/`capsule` ids to their current host node.
+The Control Plane's location registry (Invariant C) maps `client` ids to their current host node.
 
 ---
 

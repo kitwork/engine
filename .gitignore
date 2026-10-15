@@ -27,6 +27,7 @@ config/smtp/mail.yaml
 .tmp
 .gochche-*
 .gocache.*
+.testtmp
 
 .gocache-codex
 .gocache*

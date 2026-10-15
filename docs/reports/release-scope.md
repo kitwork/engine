@@ -22,7 +22,7 @@ This document establishes the official component scope classification for Kitwor
 | **Cron Scheduler & Queue** | **Beta** | Public (JS API) | [engine/work/cron.go](file:///d:/project/kitwork/engine/work/cron.go), [queue.go](file:///d:/project/kitwork/engine/work/queue.go) | `cron_persist_test.go`, `queue_test.go` | **Yes** |
 | **SSE Broker** | **Beta** | Public (JS API) | [engine/work/sse.go](file:///d:/project/kitwork/engine/work/sse.go) | `sse_test.go`, `sse_lifecycle_test.go` | **Yes** |
 | **Kitwork Drive / Hydrate** | **Experimental** | Public (JS API) | [engine/jit/hydrate/render.go](file:///d:/project/kitwork/engine/jit/hydrate/render.go) | `jithydrate_test.go` | **Opt-in Experimental** |
-| **Logic Capsules (Tier ③)** | **Incomplete** | Concept / RFC | [engine/docs/ARCHITECTURE.md](file:///d:/project/kitwork/engine/docs/ARCHITECTURE.md) | None | **No (Excluded from RC1)** |
+| **Logic Capsules (Tier ③)** | **Dropped** | Replaced by the tunnel design | [engine/docs/ARCHITECTURE.md](file:///d:/project/kitwork/engine/docs/ARCHITECTURE.md) | None | **No (Excluded from RC1)** |
 | **Multi-Node Cluster** | **Incomplete** | Concept / RFC | [engine/CLUSTER.MD](file:///d:/project/kitwork/engine/CLUSTER.MD) | None | **No (Excluded from RC1)** |
 | **Legacy `.result()` Method** | **Deprecated** | Public | [engine/value/result_test.go](file:///d:/project/kitwork/engine/value/result_test.go#L120) | `result_test.go` | **No (Removed)** |
 
@@ -47,7 +47,7 @@ This document establishes the official component scope classification for Kitwor
 - **SSE Broker Stream Replay**: Server-Sent Events broker with reconnect buffer history.
 
 ### 2.4 Incomplete / Excluded from RC1
-- **Tier ③ Logic Capsules**: Untrusted client-sent logic execution under signed identity grants (RFC phase).
+- **Tier ③ Logic Capsules**: Dropped (07/10/2026). Client-sent logic will not be executed; the tunnel design replaces it.
 - **Multi-Node Cluster Migration**: Cross-server tenant migration and state replication.
 
 ---

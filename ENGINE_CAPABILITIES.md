@@ -16,8 +16,8 @@ work("user.create")
         if (!req.body().name) fail("Missing Name");
         return db.user.insert(req.body());
     })
-    .done((res) => log(`Thành công: ${res.id}`))
-    .fail((err) => log(`Lỗi hệ thống: ${err}`));
+    .done((res) => console.log(`Thành công: ${res.id}`))
+    .fail((err) => console.log(`Lỗi hệ thống: ${err}`));
 ```
 
 ---

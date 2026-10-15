@@ -1,4 +1,4 @@
-// Tier ③ — capsule. LOGIC ONLY, shipped to the browser; no HTML here.
+// Tier ③ — capsule (HISTORICAL: capsules were dropped 07/10/2026). LOGIC ONLY, shipped to the browser; no HTML here.
 import { kit, db } from "kitwork/client"
 
 // Hydrate the SSR-rendered list, then filter LIVE via a logic capsule.

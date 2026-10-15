@@ -5,7 +5,7 @@ refactored from the central `app.kitwork.js` into the folder-module convention f
 [`../ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 > ⚠️ **Paper prototype.** These files won't *run* yet — the engine doesn't support folder
-> mount / `ctx` injection / `kit.run()` capsules. The point is to **see and feel** the
+> mount / `ctx` injection / `kit.run()` capsules (capsules are now dropped; kept as history). The point is to **see and feel** the
 > structure before committing engine work. Built on a copy, nothing live was touched.
 
 Defaults used (rename trivially later): `app/`, `public/`, `index.kitwork.js`, `client.kitwork.js`.

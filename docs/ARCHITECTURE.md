@@ -6,9 +6,11 @@
 > `page.kitwork.html` in each route folder. Treat the capsule sections as an RFC
 > and use `docs/STABILITY.md` as the contract for current engine work.
 >
-> **Decision:** logic capsules are a parked experiment, not an active roadmap item.
-> They must not shape current public APIs. Trusted server actions plus SSR and
-> Hydrate are the production model unless the experiment is explicitly reopened.
+> **Decision (07/10/2026):** logic capsules are **dropped**, not parked. The client
+> never sends code or a bundle of logic. Calls from the UI to server logic go through
+> the **tunnel** (đường ống): input plus the hash of a server-compiled function, past
+> session, CSRF, guard, type/size, rate-limit and gas checks. See `docs/KITWORK_UI.md`
+> §15 in the root repo. The capsule sections below are kept only as history.
 
 ---
 

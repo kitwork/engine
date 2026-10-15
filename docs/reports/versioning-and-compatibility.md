@@ -12,7 +12,7 @@ This document defines the formal semantic versioning rules, compatibility guaran
   ├── 2. Kitwork JS Subset Language Spec (SemVer)
   ├── 3. Bytecode Format Version (Frozen BytecodeVersion = 2)
   ├── 4. Storage Encoding Version (ProgramEncodingVersion = 1)
-  └── 5. Compiler Schema Version (CompilerSchemaVersion = 2)
+  └── 5. Compiler Schema Version (CompilerSchemaVersion = 4)
 ```
 
 ---
@@ -56,5 +56,5 @@ This document defines the formal semantic versioning rules, compatibility guaran
 4. Remove the API only on major version releases (v2.0.0).
 
 ### 3.2 Experimental API Policy
-- Features classified as **Experimental** (e.g. Kit JS Hydrate, SPA morphing, or read-only Logic Capsules) are opt-in and explicitly tagged in documentation.
+- Features classified as **Experimental** (e.g. Kit JS Hydrate or SPA morphing) are opt-in and explicitly tagged in documentation.
 - Experimental APIs are exempt from SemVer stability guarantees until promoted to **Beta** or **Stable**.
