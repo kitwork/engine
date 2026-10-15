@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/kitwork/engine/ui"
+	"github.com/kitwork/engine/ui/stylesheet"
 )
 
 // scrolledBrowserFiles is a site with Drive on whose / and /hai carry a pinned bar that floats up once
@@ -41,7 +44,9 @@ router.reload(false);
 // scrolledProbe reads the state after the frames a change needs to reach the flag and the bar's short
 // transition to end: the flag on <html>, the bar's and the plain box's shadows in words (none, or small
 // when it is the small shadow), and how far the page is scrolled (read through pageYOffset, which the
-// spy below leaves alone). It also says what the script made, the mark, and spies on the script: every
+// spy below leaves alone). It also says what the script made, the mark, and where among the children
+// of <html> it went (order: their names, an engine element with its data-kitwork-generated in
+// brackets), and spies on the script: every
 // read of scrollY or scrollTop whose stack runs through /_kitwork/scrolled. is written down with where
 // it ran — in an animation frame ("frame"), in an event (its type, "scroll"), or straight in the
 // script's own run ("script"), the read that makes the browser lay the page out before it paints.
@@ -68,6 +73,11 @@ const scrolledProbe = `
     return "parent=" + element.parentNode.nodeName.toLowerCase() + " " + style.position + " " + style.visibility +
       " aria-hidden=" + element.getAttribute("aria-hidden") + " focusable=" + focusable +
       " box=" + Math.round(box.left) + "," + Math.round(box.top + window.pageYOffset) + " " + Math.round(box.width) + "x" + Math.round(box.height);
+  }
+  function order() {
+    return Array.prototype.map.call(document.documentElement.children, function (element) {
+      return element.nodeName.toLowerCase() + (element.hasAttribute("data-kitwork-generated") ? "[" + element.getAttribute("data-kitwork-generated") + "]" : "");
+    }).join(",");
   }
   var reads = [], frameDepth = 0, request = window.requestAnimationFrame;
   window.requestAnimationFrame = function (callback) {
@@ -122,6 +132,7 @@ const scrolledFromTheTop = `<script>
       var bar = getComputedStyle(document.getElementById("bar"));
       log.loaded = words();
       log.mark = mark();
+      log.order = order();
       log.transition = bar.transitionProperty + " " + bar.transitionDuration + " plain=" + getComputedStyle(document.getElementById("plain")).transitionDuration;
       walk(log, [["top", 0], ["wobble", 4], ["edge", 8], ["past", 9], ["scrolled", 600]], function () {
         document.addEventListener("kitwork:load", function () {
@@ -165,7 +176,9 @@ const scrolledWithoutObserver = `<script>
 // scrolledWithAnElementRoot is the controller of the walk on /?element-root, a browser whose
 // IntersectionObserver takes only an element for a root (before 2020): given the document, it throws,
 // once. The script falls back to the implicit root and the flag follows the page as on /: set at the
-// start when the page is already scrolled, off at the top and at 8px, on at 9px.
+// start when the page is already scrolled, off at the top and at 8px, on at 9px; and, the page made
+// wider than the window, off at its top scrolled 200px to the side (the implicit root reaches past
+// both sides too).
 const scrolledWithAnElementRoot = `<script>
 (function () {` + scrolledProbe + `
   var log = {}, browserObserver = window.IntersectionObserver, refused = 0;
@@ -176,12 +189,70 @@ const scrolledWithAnElementRoot = `<script>
     }
     return new browserObserver(callback, options);
   };
+  var wide = document.createElement("div");
+  wide.style.cssText = "width:3000px;height:1px";
+  document.body.appendChild(wide);
   window.scrollTo(0, 600);
   window.addEventListener("load", function () {
     settle(function () {
       log.loaded = words() + " refused=" + refused;
       log.mark = mark();
-      walk(log, [["top", 0], ["edge", 8], ["past", 9]], function () { log.reads = readWords(); send(log); });
+      walk(log, [["top", 0], ["edge", 8], ["past", 9]], function () {
+        window.scrollTo(200, 0);
+        settle(function () {
+          log.sideways = words() + " x=" + Math.round(window.pageXOffset);
+          log.reads = readWords();
+          send(log);
+        });
+      });
+    });
+  });
+})();
+</script>`
+
+// scrolledSideways is the controller of the walk on /?wide: the page gets a box 3000px wide, so it
+// scrolls sideways in a window 1000px wide. A scroll to the side is not a scroll away from the top: at
+// the top, 2px, 200px and 2000px to the side, the flag stays off; 9px down it is on, and back at the
+// top, still 200px to the side, off again (a strip 1px wide at the left of the page leaves the view
+// after 2px to the side, and while it is out the observer has nothing to say about the top).
+const scrolledSideways = `<script>
+(function () {` + scrolledProbe + `
+  var log = {};
+  var wide = document.createElement("div");
+  wide.style.cssText = "width:3000px;height:1px";
+  document.body.appendChild(wide);
+  var steps = [["top", 0, 0], ["nudged", 2, 0], ["sideways", 200, 0], ["sidewaysPast", 200, 9], ["sidewaysBack", 200, 0], ["far", 2000, 0]];
+  function next() {
+    if (!steps.length) { log.reads = readWords(); send(log); return; }
+    var step = steps.shift();
+    window.scrollTo(step[1], step[2]);
+    settle(function () { log[step[0]] = words() + " x=" + Math.round(window.pageXOffset); next(); });
+  }
+  window.addEventListener("load", function () {
+    settle(function () {
+      var page = document.documentElement;
+      log.width = "scrollWidth=" + page.scrollWidth + (page.scrollWidth > page.clientWidth ? " wider than the window" : " no wider than the window");
+      next();
+    });
+  });
+})();
+</script>`
+
+// scrolledAlone is the controller of the walk on /alone: / as Page.Document writes it with no head
+// from the engine (a page shown on its own), its stylesheets and the scrolled script inline at the end
+// of <head>, a classic script the parser runs where it meets it, before <body> exists. The mark goes
+// into <html> there, before <body>, and the flag follows the page as on /: on when the page is already
+// scrolled at the start, off at the top and at 8px, on at 9px.
+const scrolledAlone = `<script>
+(function () {` + scrolledProbe + `
+  var log = {};
+  window.scrollTo(0, 600);
+  window.addEventListener("load", function () {
+    settle(function () {
+      log.loaded = words();
+      log.mark = mark();
+      log.order = order();
+      walk(log, [["top", 0], ["edge", 8], ["past", 9]], function () { send(log); });
     });
   });
 })();
@@ -276,7 +347,13 @@ const scrolledArriving = `<script>
 //     while the page around the frame scrolls the frame's top out of the window, and follows its own
 //     scroll: the observer measures the page's own viewport, as scrollY did;
 //   - in a browser that refuses a document for a root (/?element-root) the script still makes its
-//     mark and the flag follows the page, by the implicit root, with no read of the scroll position.
+//     mark and the flag follows the page, by the implicit root, with no read of the scroll position;
+//   - a page that scrolls sideways (/?wide, a box 3000px wide) keeps its flag off at its top however
+//     far it is scrolled to the side, on 9px down and off back at the top, still to the side: only the
+//     distance from the top counts, as with scrollY;
+//   - a page shown on its own (/alone, Page.Document with no head from the engine), the script inline
+//     at the end of <head>, puts its one mark into <html> before <body>, where the deferred script puts
+//     it after; the flag follows the page there the same way.
 func TestBrowserScrolledFollowsThePage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the scrolled browser proof in short mode")
@@ -291,6 +368,12 @@ func TestBrowserScrolledFollowsThePage(t *testing.T) {
 		if got := scrolledTagRe.MatchString(body); got != links {
 			t.Fatalf("the site is not the walk's: %s links the scrolled script: %v, want %v", page, got, links)
 		}
+	}
+	_, home := compiledHome(t, tenant)
+	alone := home.page.Document(ui.Request{Path: "/"})
+	if inline := strings.Index(alone, "<script>\n"+string(stylesheet.ScrolledScript().JavaScript)+"</script>\n"); inline < 0 ||
+		inline > strings.Index(alone, "</head>") || scrolledTagRe.MatchString(alone) || !strings.Contains(alone, "</body>") {
+		t.Fatalf("the page on its own is not the walk's: the scrolled script is not inline in its <head>:\n%.3000s", alone)
 	}
 
 	var serving sync.Mutex
@@ -315,6 +398,12 @@ func TestBrowserScrolledFollowsThePage(t *testing.T) {
 			_, _ = io.WriteString(response, scrolledAroundAFrame)
 			return
 		}
+		if path == "/alone" {
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			at := strings.LastIndex(alone, "</body>")
+			_, _ = io.WriteString(response, alone[:at]+scrolledAlone+alone[at:])
+			return
+		}
 		forward := request.Clone(request.Context())
 		forward.Host = "localhost"
 		forward.Header.Del("Accept-Encoding") // the controller goes into the document as text
@@ -335,6 +424,9 @@ func TestBrowserScrolledFollowsThePage(t *testing.T) {
 		}
 		if path == "/" && request.URL.RawQuery == "element-root" {
 			controller = scrolledWithAnElementRoot
+		}
+		if path == "/" && request.URL.RawQuery == "wide" {
+			controller = scrolledSideways
 		}
 		if path == "/" && request.URL.RawQuery == "framed" {
 			controller = "" // the page around the frame walks it
@@ -365,6 +457,7 @@ func TestBrowserScrolledFollowsThePage(t *testing.T) {
 	check("from the top", runBrowser(t, browser, server.URL+"/", "scrolled from the top", 1000, "", reports), map[string]string{
 		"loaded":        "flag=on bar=small plain=none at=600",
 		"mark":          mark,
+		"order":         "head,body,div[scrolled]",
 		"transition":    "box-shadow 0.15s plain=0s",
 		"top":           "flag=off bar=none plain=none at=0",
 		"wobble":        "flag=off bar=none plain=none at=4",
@@ -394,18 +487,37 @@ func TestBrowserScrolledFollowsThePage(t *testing.T) {
 		"reads":  "first=scrollY@frame where=frame,scroll",
 	})
 	check("a root that must be an element", runBrowser(t, browser, server.URL+"/?element-root", "scrolled with an element root", 1000, "", reports), map[string]string{
-		"loaded": "flag=on bar=small plain=none at=600 refused=1",
-		"mark":   mark,
-		"top":    "flag=off bar=none plain=none at=0",
-		"edge":   "flag=off bar=none plain=none at=8",
-		"past":   "flag=on bar=small plain=none at=9",
-		"reads":  "none",
+		"loaded":   "flag=on bar=small plain=none at=600 refused=1",
+		"mark":     mark,
+		"top":      "flag=off bar=none plain=none at=0",
+		"edge":     "flag=off bar=none plain=none at=8",
+		"past":     "flag=on bar=small plain=none at=9",
+		"sideways": "flag=off bar=none plain=none at=0 x=200",
+		"reads":    "none",
 	})
 	check("in a frame", runBrowser(t, browser, server.URL+"/around", "scrolled in a frame", 1000, "", reports), map[string]string{
 		"top":           "flag=off frame=0 around=0",
 		"aroundPast":    "flag=off frame=0 around=300",
 		"frameScrolled": "flag=on frame=600 around=300",
 		"frameBack":     "flag=off frame=0 around=300",
+	})
+	check("sideways", runBrowser(t, browser, server.URL+"/?wide", "scrolled sideways", 1000, "", reports), map[string]string{
+		"width":        "scrollWidth=3000 wider than the window",
+		"top":          "flag=off bar=none plain=none at=0 x=0",
+		"nudged":       "flag=off bar=none plain=none at=0 x=2",
+		"sideways":     "flag=off bar=none plain=none at=0 x=200",
+		"sidewaysPast": "flag=on bar=small plain=none at=9 x=200",
+		"sidewaysBack": "flag=off bar=none plain=none at=0 x=200",
+		"far":          "flag=off bar=none plain=none at=0 x=2000",
+		"reads":        "none",
+	})
+	check("on its own", runBrowser(t, browser, server.URL+"/alone", "scrolled on its own", 1000, "", reports), map[string]string{
+		"loaded": "flag=on bar=small plain=none at=600",
+		"mark":   mark,
+		"order":  "head,div[scrolled],body",
+		"top":    "flag=off bar=none plain=none at=0",
+		"edge":   "flag=off bar=none plain=none at=8",
+		"past":   "flag=on bar=small plain=none at=9",
 	})
 	serving.Lock()
 	defer serving.Unlock()

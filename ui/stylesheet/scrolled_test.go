@@ -194,10 +194,11 @@ func TestScrolledTransitionListsOnlyItsProperties(t *testing.T) {
 // its mark, a hidden strip 1px wide over the page's top 8px that it puts beside <body>, leaves or
 // comes back into view. The observer's root is the document, this page's own viewport (a page in a
 // frame is not scrolled when the page around the frame is), the implicit root only where a browser
-// refuses a document. The observer's branch reads no scroll position and no box and listens to no
-// scroll; only the branch for a browser without IntersectionObserver does, its first read in an
-// animation frame, never in the script's own run. (Its behaviour in a browser:
-// TestBrowserScrolledFollowsThePage.)
+// refuses a document; either root reaches 100000px past both sides of the viewport (15/10/2026), so a
+// page scrolled to the side is not scrolled from its top. The observer's branch reads no scroll
+// position and no box and listens to no scroll; only the branch for a browser without
+// IntersectionObserver does, its first read in an animation frame, never in the script's own run.
+// (Its behaviour in a browser: TestBrowserScrolledFollowsThePage.)
 func TestScrolledScript(t *testing.T) {
 	script := ScrolledScript()
 	sum := sha256.Sum256(script.JavaScript)
@@ -213,9 +214,10 @@ func TestScrolledScript(t *testing.T) {
 		`mark.style.cssText = "position:absolute;top:0;left:0;width:1px;height:8px;visibility:hidden";`,
 		"root.appendChild(mark);",
 		"flag(!entries[entries.length - 1].isIntersecting);\n",
-		// measured against this page's own viewport; the implicit root only where a document is refused
-		"try {\nobserver = new IntersectionObserver(report, { root: document });\n} catch (error) {\n" +
-			"observer = new IntersectionObserver(report);\n}\nobserver.observe(mark);\nreturn;\n}\n",
+		// measured against this page's own viewport, the implicit root only where a document is refused;
+		// either way reaching far past both sides, so a scroll to the side is not a scroll from the top
+		"try {\nobserver = new IntersectionObserver(report, { root: document, rootMargin: \"0px 100000px\" });\n} catch (error) {\n" +
+			"observer = new IntersectionObserver(report, { rootMargin: \"0px 100000px\" });\n}\nobserver.observe(mark);\nreturn;\n}\n",
 		// the browser without it: a passive listener and a first read in an animation frame
 		`(window.scrollY || root.scrollTop || 0) > 8`,
 		`window.addEventListener("scroll", update, { passive: true });`, "\nwindow.requestAnimationFrame(update);\n",

@@ -21,7 +21,15 @@
 // on). A browser that takes only an element for a root (before 2020) throws; it falls back to the
 // implicit root, right for every page that is not in a frame.
 //
-// The mark is the script's own element, a child of <html> after <body>, placed absolutely at the top
+// The root reaches 100000px past each side of the viewport (rootMargin "0px 100000px"), so only the
+// page's distance from its top counts, as with scrollY: a page wider than its window, scrolled to the
+// side, keeps the strip in the root, and the flag off at the top. Without it a strip 1px wide at the
+// left of the page leaves the viewport 2px to the side: the flag came on at the top, and while the strip
+// was out the observer had nothing more to say about the top (15/10/2026).
+//
+// The mark is the script's own element, a child of <html> (after <body> when the script is deferred,
+// as the engine links it; before <body> when Page.Document, with no head from the engine, writes the
+// script inline at the end of <head>, where it runs before <body> exists), placed absolutely at the top
 // of the page (its containing block is the initial one, whatever <body> does), hidden and outside the
 // accessibility tree: it takes no room, catches no pointer, is never focused and never printed. The
 // script makes it, not the engine, because it must outlive every Drive move: Drive changes <main>
@@ -52,9 +60,9 @@
     };
     var observer;
     try {
-      observer = new IntersectionObserver(report, { root: document });
+      observer = new IntersectionObserver(report, { root: document, rootMargin: "0px 100000px" });
     } catch (error) {
-      observer = new IntersectionObserver(report);
+      observer = new IntersectionObserver(report, { rootMargin: "0px 100000px" });
     }
     observer.observe(mark);
     return;
