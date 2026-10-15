@@ -1,0 +1,7 @@
+import { router, http, safe } from "kitwork";
+
+router.get((ctx) => {
+  const { value: response, error } = safe(() => http.timeout(2000).get("https://example.com/feed"));
+  if (error) return ctx.status(502).json({ code: error.code, message: error.message });
+  return ctx.json(response.json());
+});

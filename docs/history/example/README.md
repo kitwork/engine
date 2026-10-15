@@ -1,3 +1,5 @@
+> History. This is the paper prototype of the folder convention, from before the engine could run it; it never ran. The listing that runs today is `examples/hello`, the one in `readme.md`.
+
 # Example — Phase 1 convention (paper prototype)
 
 A concrete **before → after** for two real `kitwork.io` routes (`/users` and `/api/gold`),

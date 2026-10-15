@@ -1,0 +1,3 @@
+import { router } from "kitwork";
+
+router.get((ctx) => ctx.json({ ok: true, name: ctx.query("name") || "world" }));

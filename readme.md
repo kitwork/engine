@@ -113,7 +113,7 @@ Source files are never served. Asking for `/router.work` or `/content.ui` is a 4
 
 ## Run it
 
-The smallest host is one Go file and one manifest.
+The smallest host is one Go file and one manifest. `examples/hello` in this repository holds both, with the application above, ready to run.
 
 ```go
 // main.go

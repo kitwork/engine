@@ -1,3 +1,5 @@
+> History. This tenant is written against the old route API, `router.get("/hello").handle(…)` in a `.kitwork.js`; routes are now a folder with a `router.work`. The listing that runs today is `examples/hello`, the one in `readme.md`.
+
 # Runnable modular tenant (works TODAY)
 
 A real, working tenant assembled from modules via `import`/`export` — using the
