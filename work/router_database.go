@@ -30,8 +30,8 @@ func (f *FolderRouter) Database(args ...value.Value) (*FolderRouter, error) {
 	if f == nil {
 		return f, nil
 	}
-	if !databaseDeclared(name) {
-		return f, fmt.Errorf(`router.database: không có database tên "%s"; khai nó trong manifest (app.database cho KitDB, app.postgresql hay app.connect cho database ngoài) rồi mới chọn ở đây`, name)
+	if err := databaseDeclared(name); err != nil {
+		return f, err
 	}
 	if f.database != "" {
 		return f, fmt.Errorf(`router.database("%s"): thư mục này đã chọn "%s"; một thư mục một mặc định, database khác gọi bằng ctx.database("%s")`, name, f.database, name)
@@ -40,15 +40,24 @@ func (f *FolderRouter) Database(args ...value.Value) (*FolderRouter, error) {
 	return f, nil
 }
 
-// databaseDeclared reports whether the host declared a database under alias: an external connection
-// of the manifest, or a database a managed KitDB root publishes. Resolving an owned alias may open
-// that database, which the declaration would do anyway at the first request.
-func databaseDeclared(alias string) bool {
-	if _, ok := database.Configs[alias]; ok {
-		return true
+// databaseDeclared checks that the host declared exactly one database under alias: an external
+// connection of the manifest, or a database a managed KitDB root publishes. A name both declare —
+// .postgresql("system") beside a .database/system/ folder — is refused here, at boot, naming both,
+// rather than at the first request (resolveAlias refuses it too, so nothing is ever chosen by luck).
+// Resolving an owned alias may open that database, which the declaration would do anyway.
+func databaseDeclared(alias string) error {
+	_, external := database.Configs[alias]
+	owned, err := database.ResolveOwned(alias)
+	if err != nil {
+		return fmt.Errorf(`router.database("%s"): %w`, alias, err)
 	}
-	connection, err := database.ResolveOwned(alias)
-	return err == nil && connection != nil
+	if external && owned != nil {
+		return fmt.Errorf(`router.database("%s"): tên này có ở hai chỗ, một database ngoài trong manifest (app.postgresql/app.connect) và một thư mục trong managed root của app.database; đổi tên một bên`, alias)
+	}
+	if !external && owned == nil {
+		return fmt.Errorf(`router.database: không có database tên "%s"; khai nó trong manifest (app.database cho KitDB, app.postgresql hay app.connect cho database ngoài) rồi mới chọn ở đây`, alias)
+	}
+	return nil
 }
 
 // routeDatabase is one route's default database: the router.database() of the nearest folder from

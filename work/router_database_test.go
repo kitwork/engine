@@ -215,3 +215,20 @@ router.view((ctx) => {
 		t.Fatalf("a .work view reads ctx.database: code=%d body=%s", page.Code, page.Body.String())
 	}
 }
+
+// A name the manifest declares for an external database and a managed root also publishes is refused
+// at boot, naming both, so nothing is ever chosen by luck at the first request.
+func TestRouterDatabaseRefusesANameDeclaredTwice(t *testing.T) {
+	ownedSQLite(t, "system", "users", 1)
+	hostdatabase.Configs["system"] = hostdatabase.Config{Alias: "system", Type: "postgres"}
+	t.Cleanup(func() { delete(hostdatabase.Configs, "system") })
+	_, err := bootDatabaseTenant(t, map[string]string{
+		"filesystem.kitwork": "",
+		"router.kitwork.js": `import { router } from "kitwork";
+router.database("system");
+router.get((ctx) => ctx.json({ ok: true }));`,
+	})
+	if err == nil || !strings.Contains(err.Error(), `"system"`) || !strings.Contains(err.Error(), "hai chỗ") {
+		t.Fatalf("a name declared by both the manifest and a managed root must fail the boot naming both: %v", err)
+	}
+}
