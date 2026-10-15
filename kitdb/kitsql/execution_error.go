@@ -7,9 +7,11 @@ import (
 
 	"github.com/kitwork/engine/kitdb"
 	"github.com/kitwork/engine/kitdb/node"
+	"github.com/kitwork/engine/kitdb/pgwire"
 )
 
 func executionError(err error) (int, string) {
+	var permission *pgwire.Error
 	switch {
 	case errors.Is(err, kitdb.ErrDurabilityUncertain):
 		return http.StatusInternalServerError, "KSQL_DURABILITY"
@@ -27,6 +29,8 @@ func executionError(err error) (int, string) {
 		return http.StatusRequestTimeout, "KSQL_CANCELLED"
 	case errors.Is(err, kitdb.ErrClosed), errors.Is(err, kitdb.ErrUnavailable), errors.Is(err, node.ErrClosed):
 		return http.StatusServiceUnavailable, "KSQL_UNAVAILABLE"
+	case errors.As(err, &permission) && permission != nil && permission.Code == "42501":
+		return http.StatusForbidden, "KSQL_FORBIDDEN"
 	default:
 		return http.StatusBadRequest, "KSQL_EXECUTION"
 	}

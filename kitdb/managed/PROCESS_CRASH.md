@@ -7,6 +7,20 @@ existing demo servers and production databases are never selected.
 
 ## Run on Windows
 
+The mandatory normal/race integration is also available through the existing
+release runner:
+
+```text
+go run ./cmd/releasegate --mode kitdb-auth --report .artifacts/kitdb-auth.json --timeout 20m
+```
+
+That profile explicitly enables the workload, checks required test/subtest PASS
+events and validates a fresh process report containing the server SHA256 and six
+case outcomes. `KITDB_PROCESS_CRASH_REPORT` is an optional engine-relative JSON
+path for standalone test invocations; the gate sets separate normal/race paths.
+Its enclosing schema-3 report embeds the evidence rather than only linking a
+mutable sidecar. See [releasegate](../../cmd/releasegate/README.md).
+
 From the engine directory in PowerShell:
 
 ```powershell

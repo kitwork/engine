@@ -156,6 +156,7 @@ and `Retryable()`. Execution errors preserve these distinctions:
 | `KSQL_UNAVAILABLE` | 503 | Database is closed or unavailable |
 | `KSQL_DURABILITY` | 500 | Durability outcome is uncertain |
 | `KSQL_EXECUTION` | 400 | Other SQL execution failures |
+| `KSQL_FORBIDDEN` | 403 | Database access or SQL statement permission denied (SQLSTATE 42501) |
 
 HTTP admission still returns `KSQL_BUSY` with status 429. After stream headers
 have been sent, a terminal error frame carries the code rather than changing

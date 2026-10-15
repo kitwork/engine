@@ -108,6 +108,19 @@ KitDB 1.0 does not claim:
 
 ## Executable gates
 
+For account/local-role regression, concurrent writes and real standalone crash
+recovery (normal and race, including the child executable), run the focused
+development profile:
+
+```text
+go run ./cmd/releasegate --mode kitdb-auth --report .artifacts/kitdb-auth.json --timeout 20m
+```
+
+The broader verify/release modes also include these mandatory normal/race steps
+respectively. Required test skips or missing test events fail closed. Report
+schema 3 distinguishes planned/unrun/failed/skipped steps and embeds the fresh
+standalone server SHA256. See [releasegate](../cmd/releasegate/README.md).
+
 Run the fast KitDB gate during development:
 
 ```text

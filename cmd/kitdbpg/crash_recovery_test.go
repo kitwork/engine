@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -27,17 +28,50 @@ import (
 
 const crashPassword = "Crash-lab-only-2026!"
 
+type processCrashReport struct {
+	SchemaVersion int                `json:"schema_version"`
+	OS            string             `json:"os"`
+	Arch          string             `json:"arch"`
+	BinarySHA256  string             `json:"binary_sha256"`
+	ChildRace     bool               `json:"child_race"`
+	Cases         []processCrashCase `json:"cases"`
+	Success       bool               `json:"success"`
+}
+
+type processCrashCase struct {
+	Name    string `json:"name"`
+	Success bool   `json:"success"`
+}
+
 // This opt-in campaign builds and kills the real server, never the test runner
 // or a server discovered by port/PID. No production fault hooks are needed.
 func TestStandaloneRestrictedWriteCrashRecovery(t *testing.T) {
 	if os.Getenv("KITDB_PROCESS_CRASH") != "1" {
 		t.Skip("set KITDB_PROCESS_CRASH=1 to build and hard-stop standalone servers")
 	}
+	report := processCrashReport{SchemaVersion: 1, OS: runtime.GOOS, Arch: runtime.GOARCH}
+	if path := os.Getenv("KITDB_PROCESS_CRASH_REPORT"); path != "" {
+		t.Cleanup(func() {
+			report.Success = !t.Failed() && len(report.Cases) == 6
+			path = filepath.Join("..", "..", path)
+			data, err := json.MarshalIndent(report, "", "  ")
+			if err == nil {
+				err = os.MkdirAll(filepath.Dir(path), 0700)
+			}
+			if err == nil {
+				err = os.WriteFile(path, append(data, '\n'), 0600)
+			}
+			if err != nil {
+				t.Errorf("write process crash evidence: %v", err)
+			}
+		})
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	executable := filepath.Join(t.TempDir(), "kitdbpg-crash.exe")
 	buildArgs := []string{"build", "-o", executable}
 	childRace := os.Getenv("KITDB_PROCESS_CRASH_RACE") == "1"
+	report.ChildRace = childRace
 	if childRace {
 		buildArgs = append(buildArgs, "-race")
 	}
@@ -58,8 +92,9 @@ func TestStandaloneRestrictedWriteCrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("standalone executable SHA256=%x child_race=%t (current worktree, not a clean commit)", hash.Sum(nil), childRace)
+	report.BinarySHA256 = fmt.Sprintf("%x", hash.Sum(nil))
 	for _, scenario := range []string{"commit_ack", "staged_batch", "grant_ack", "revoke_ack", "commit_not_forwarded", "commit_reply_withheld"} {
-		t.Run(scenario, func(t *testing.T) {
+		passed := t.Run(scenario, func(t *testing.T) {
 			root := crashRoot(t)
 			server := startCrashServer(t, ctx, executable, root)
 			admin := crashClient(t, ctx, server.address, "admin")
@@ -209,6 +244,7 @@ func TestStandaloneRestrictedWriteCrashRecovery(t *testing.T) {
 			ledger("verified", scenario)
 			t.Logf("PASS fault=%s recovered_rows=%d role_identity_preserved=true client_ledger_synced=true child_processes_reaped=true", scenario, wantRows)
 		})
+		report.Cases = append(report.Cases, processCrashCase{Name: scenario, Success: passed})
 	}
 }
 

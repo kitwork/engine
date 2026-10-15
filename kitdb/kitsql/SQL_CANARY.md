@@ -1,5 +1,9 @@
 # SQL Canary Harness
 
+Managed-root accounts, database-local roles and live permission phases are
+covered by the companion [authorization canary](SQL_CANARY_AUTH.md). It reuses
+these oracles without changing this original smoke/pressure fixture.
+
 The first gate is a finite, opt-in smoke test in `sql_canary_test.go`. It uses
 native SQL, PostgreSQL wire over real loopback TCP, and KitSQL HTTP over real
 loopback TCP. All three share one relational engine attached to one managed

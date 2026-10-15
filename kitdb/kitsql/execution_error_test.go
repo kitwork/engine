@@ -10,6 +10,7 @@ import (
 
 	"github.com/kitwork/engine/kitdb"
 	"github.com/kitwork/engine/kitdb/node"
+	"github.com/kitwork/engine/kitdb/pgwire"
 )
 
 func TestExecutionErrorClassification(t *testing.T) {
@@ -34,6 +35,10 @@ func TestExecutionErrorClassification(t *testing.T) {
 		{kitdb.ErrClosed, 503, "KSQL_UNAVAILABLE", false},
 		{errors.Join(kitdb.ErrDurabilityUncertain, kitdb.ErrUnavailable), 500, "KSQL_DURABILITY", false},
 		{errors.New("invalid SQL"), 400, "KSQL_EXECUTION", false},
+		{pgwire.NewError("42501", "permission denied"), 403, "KSQL_FORBIDDEN", false},
+		{pgwire.NewError("42601", "permission denied"), 400, "KSQL_EXECUTION", false},
+		{errors.New("42501 permission denied"), 400, "KSQL_EXECUTION", false},
+		{errors.Join(kitdb.ErrDurabilityUncertain, pgwire.NewError("42501", "denied")), 500, "KSQL_DURABILITY", false},
 	} {
 		t.Run(test.code+test.err.Error(), func(t *testing.T) {
 			err := fmt.Errorf("wrapped: %w", test.err)

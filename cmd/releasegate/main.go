@@ -25,23 +25,29 @@ import (
 	"github.com/kitwork/engine/work"
 )
 
-const releaseReportSchemaVersion = 2
+const releaseReportSchemaVersion = 3
 
 type gateStep struct {
-	Name    string
-	Command []string
-	Env     map[string]string
+	Name          string
+	Command       []string
+	Env           map[string]string
+	RequiredTests []testRequirement
+	CrashReport   string
 }
 
 type stepResult struct {
-	Name        string            `json:"name"`
-	Command     []string          `json:"command"`
-	Environment map[string]string `json:"environment,omitempty"`
-	PlannedOnly bool              `json:"planned_only,omitempty"`
-	StartedAt   time.Time         `json:"started_at"`
-	DurationMS  int64             `json:"duration_ms"`
-	Success     bool              `json:"success"`
-	Error       string            `json:"error,omitempty"`
+	Name         string            `json:"name"`
+	Command      []string          `json:"command"`
+	Environment  map[string]string `json:"environment,omitempty"`
+	PlannedOnly  bool              `json:"planned_only,omitempty"`
+	StartedAt    time.Time         `json:"started_at"`
+	DurationMS   int64             `json:"duration_ms"`
+	Success      bool              `json:"success"`
+	Error        string            `json:"error,omitempty"`
+	Status       string            `json:"status"`
+	SkippedTests *int              `json:"skipped_tests,omitempty"`
+	Tests        []testEvidence    `json:"required_tests,omitempty"`
+	Crash        *crashEvidence    `json:"process_crash,omitempty"`
 }
 
 type compatibilityReport struct {
@@ -72,12 +78,13 @@ type releaseReport struct {
 	DirtyEntries    int                 `json:"dirty_entries"`
 	RepositoryError string              `json:"repository_error,omitempty"`
 	Success         bool                `json:"success"`
+	Status          string              `json:"status"`
 	Failure         string              `json:"failure,omitempty"`
 	Steps           []stepResult        `json:"steps"`
 }
 
 func main() {
-	mode := flag.String("mode", "verify", "verification mode: verify or release")
+	mode := flag.String("mode", "verify", "verification mode: verify, release, kitdb-verify, kitdb-release, or kitdb-auth")
 	reportPath := flag.String("report", "", "optional JSON report path")
 	requireClean := flag.Bool("require-clean", false, "fail before running when git has changes")
 	dryRun := flag.Bool("dry-run", false, "print the plan without executing it")
@@ -120,6 +127,10 @@ func main() {
 	}
 
 	if *requireClean && (dirty || repositoryErr != nil) {
+		report.Status = "failed"
+		for _, step := range steps {
+			report.Steps = append(report.Steps, unrunStep(step, "not_run", "clean working tree required"))
+		}
 		if repositoryErr != nil {
 			report.Failure = "cannot verify clean working tree: " + repositoryErr.Error()
 		} else {
@@ -134,14 +145,11 @@ func main() {
 	if *dryRun {
 		for index, step := range steps {
 			fmt.Printf("%2d. %-28s %s\n", index+1, step.Name, formatGateCommand(step))
-			report.Steps = append(report.Steps, stepResult{
-				Name:        step.Name,
-				Command:     append([]string(nil), step.Command...),
-				Environment: cloneEnvironment(step.Env),
-				PlannedOnly: true,
-			})
+			result := unrunStep(step, "planned", "")
+			result.PlannedOnly = true
+			report.Steps = append(report.Steps, result)
 		}
-		report.Success = true
+		report.Status = "planned"
 		finishReleaseReport(&report, startedAt)
 		if err := writeReleaseReport(*reportPath, report); err != nil {
 			fmt.Fprintln(os.Stderr, "releasegate:", err)
@@ -155,19 +163,15 @@ func main() {
 	ctx, stopSignal := signal.NotifyContext(timeoutContext, os.Interrupt)
 	defer stopSignal()
 
-	for index, step := range steps {
-		fmt.Printf("\n[%d/%d] %s\n", index+1, len(steps), step.Name)
-		result := runGateStep(ctx, root, step)
-		report.Steps = append(report.Steps, result)
-		if !result.Success {
-			report.Failure = result.Name + ": " + result.Error
-			break
-		}
-	}
+	report.Steps, report.Failure = runGatePlan(ctx, root, steps)
 	report.Success = report.Failure == "" && len(report.Steps) == len(steps)
 	if ctx.Err() != nil && report.Failure == "" {
 		report.Failure = ctx.Err().Error()
 		report.Success = false
+	}
+	report.Status = "passed"
+	if !report.Success {
+		report.Status = "failed"
 	}
 	finishReleaseReport(&report, startedAt)
 
@@ -186,6 +190,10 @@ func main() {
 func releasePlan(mode string) ([]gateStep, error) {
 	verify := []gateStep{
 		kitDBCompatibilityStep(),
+		kitDBAuthorizationStep(false),
+		kitDBWriteCampaignStep(false),
+		kitDBProcessCrashStep(false),
+		kitDBSQLAuthorizationCanaryStep(false),
 		{
 			Name:    "VM compatibility archive",
 			Command: []string{"go", "test", "./compatibility", "-run", "^TestVMCompatibilityArchive", "-count=1"},
@@ -234,6 +242,8 @@ func releasePlan(mode string) ([]gateStep, error) {
 	case "kitdb-release":
 		plan := kitDBVerifyPlan()
 		return append(plan, kitDBReleaseCampaigns()...), nil
+	case "kitdb-auth":
+		return []gateStep{kitDBAuthorizationStep(false), kitDBWriteCampaignStep(false), kitDBProcessCrashStep(false), kitDBSQLAuthorizationCanaryStep(false), kitDBAuthorizationStep(true), kitDBWriteCampaignStep(true), kitDBProcessCrashStep(true), kitDBSQLAuthorizationCanaryStep(true)}, nil
 	case "release":
 		plan := append(verify,
 			gateStep{
@@ -289,7 +299,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 		return append(plan, kitDBReleaseCampaigns()...), nil
 	default:
 		return nil, fmt.Errorf(
-			"unknown mode %q; use verify, release, kitdb-verify, or kitdb-release",
+			"unknown mode %q; use verify, release, kitdb-verify, kitdb-release, or kitdb-auth",
 			mode,
 		)
 	}
@@ -328,6 +338,10 @@ func kitDBCommerceJourneyStep() gateStep {
 func kitDBVerifyPlan() []gateStep {
 	return []gateStep{
 		kitDBCompatibilityStep(),
+		kitDBAuthorizationStep(false),
+		kitDBWriteCampaignStep(false),
+		kitDBProcessCrashStep(false),
+		kitDBSQLAuthorizationCanaryStep(false),
 		{
 			Name:    "KitDB kernel/node suite",
 			Command: []string{"go", "test", "./kitdb/...", "-count=1", "-timeout=20m"},
@@ -343,6 +357,7 @@ func kitDBVerifyPlan() []gateStep {
 		{
 			Name:    "KitDB operator suite",
 			Command: []string{"go", "test", "./cmd/kitdb", "./cmd/kitdbcanary", "./cmd/kitdbimport", "./cmd/kitdbpg", "./cmd/kitdbdist", "-count=1"},
+			Env:     map[string]string{"KITDB_PROCESS_CRASH": "0", "KITDB_PROCESS_CRASH_RACE": "0", "KITDB_PROCESS_CRASH_REPORT": ""},
 		},
 		{
 			Name:    "KitDB command build",
@@ -372,6 +387,10 @@ func kitDBVerifyPlan() []gateStep {
 
 func kitDBReleaseCampaigns() []gateStep {
 	return []gateStep{
+		kitDBAuthorizationStep(true),
+		kitDBWriteCampaignStep(true),
+		kitDBProcessCrashStep(true),
+		kitDBSQLAuthorizationCanaryStep(true),
 		{
 			Name:    "KitDB commerce hard-crash matrix",
 			Command: []string{"go", "test", "./cmd/kitdbdist", "-run", "^TestKitDBCommerceNativeJourney$", "-count=10", "-timeout=20m", "-v"},
@@ -429,33 +448,6 @@ func kitDBReleaseCampaigns() []gateStep {
 			},
 		},
 	}
-}
-
-func runGateStep(ctx context.Context, root string, step gateStep) stepResult {
-	startedAt := time.Now().UTC()
-	result := stepResult{
-		Name:        step.Name,
-		Command:     append([]string(nil), step.Command...),
-		Environment: cloneEnvironment(step.Env),
-		StartedAt:   startedAt,
-	}
-	if len(step.Command) == 0 {
-		result.Error = "empty command"
-		return result
-	}
-
-	command := exec.CommandContext(ctx, step.Command[0], step.Command[1:]...)
-	command.Dir = root
-	command.Env = environmentWith(os.Environ(), step.Env)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	err := command.Run()
-	result.DurationMS = time.Since(startedAt).Milliseconds()
-	result.Success = err == nil
-	if err != nil {
-		result.Error = err.Error()
-	}
-	return result
 }
 
 func environmentWith(base []string, overlay map[string]string) []string {
