@@ -66,6 +66,106 @@ Connect with a PostgreSQL client using host `127.0.0.1`, port `5433`, database
 The listener is loopback-only. See `POSTGRES_COMPATIBILITY.md` for the supported
 SQL/protocol profile. Stop the server before running offline `doctor`.
 
+## Multiple Databases And Users
+
+Single-file mode above uses one listener credential. For separate users,
+database grants and portable local roles, initialize a managed root instead.
+This example uses PowerShell 7, a fresh `node` directory, and the unpacked
+executables in the current directory:
+
+```powershell
+New-Item -ItemType Directory -Path ./node/shop -ErrorAction Stop
+./kitdb.exe init-root ./node
+./kitdb.exe query --create ./node/shop/data.kitdb "CREATE TABLE articles(id BIGINT PRIMARY KEY,title TEXT)"
+./kitdb.exe query ./node/shop/data.kitdb "INSERT INTO articles VALUES(1,'First public article')"
+./kitdb.exe register-database ./node shop shop
+```
+
+Check each command's exit code before continuing. Bootstrap the root's first
+administrator offline. The password comes from the process environment, not a
+command argument; do not store it in a script, transcript or source control:
+
+```powershell
+$env:KITDB_AUTH_PASSWORD = Read-Host 'New KitDB admin password' -MaskInput
+try {
+    ./kitdb.exe auth-init ./node admin
+    if ($LASTEXITCODE -ne 0) { throw 'Administrator bootstrap failed' }
+} finally {
+    Remove-Item Env:KITDB_AUTH_PASSWORD -ErrorAction SilentlyContinue
+}
+./kitdb.exe auth-list ./node
+./kitdbpg.exe -root ./node -listen 127.0.0.1:5433 -verify-on-open
+```
+
+Connect using database `shop`, user `admin`, the bootstrap password and
+`sslmode=disable`. This is a local cleartext transport profile, not a public
+Internet endpoint. A new user has no database rights until explicitly granted.
+Run the following as the administrator in that connection:
+
+```sql
+CREATE USER reader WITH PASSWORD 'replace-with-a-unique-test-password';
+GRANT CONNECT ON DATABASE shop TO reader;
+CREATE ROLE article_reader;
+GRANT SELECT ON TABLE articles TO ROLE article_reader;
+GRANT ROLE article_reader ON DATABASE shop TO reader;
+
+SELECT role_name, role_id FROM kitdb_catalog.roles;
+SELECT * FROM kitdb_catalog.role_members;
+SELECT * FROM kitdb_catalog.table_grants;
+```
+
+The SQL password is only a placeholder. Applications should bind it as `$1`
+with their PostgreSQL driver rather than concatenate it into SQL. Do not enable
+query logging or save SQL-editor history containing real passwords.
+
+Reconnect as `reader`: `SELECT * FROM articles` should work; `INSERT` and
+`CREATE TABLE` should fail with SQLSTATE `42501`. An incorrect password should
+fail authentication with `28P01`, not be counted as a permission-denial test.
+To allow selected writes, grant `INSERT`, `UPDATE` or `DELETE` on the table to
+the local role; this does not grant schema changes or administrator rights.
+
+The ownership boundary is deliberate:
+
+- `node/.catalog/` owns root logins, password verifiers, database registrations,
+  database access grants and user-to-local-role mappings.
+- `node/shop/data.kitdb` owns the database's data, schema, local roles and table
+  permissions. Back up and restore it using the operator commands, not by
+  copying a file from a live writer.
+- Copying or restoring one database does not copy the root's accounts or grant
+  access to a same-named user in another root. The destination administrator
+  must explicitly grant database access and map the restored role.
+- Direct-file CLI operations are trusted offline operator access, not SQL
+  sessions; they are not constrained by SQL user permissions. Protect the
+  filesystem and restrict access to the operator executables accordingly.
+
+`init-root`, `register-database`, `auth-init`, `auth-user`, `auth-list`, and
+`root-catalog` require offline root ownership. Stop the root server before
+running them. Online account management goes through the authenticated SQL
+administrator; never open a second offline owner while a server is running.
+
+### Restore Into Another Root
+
+Stop the source server and all other writers first. Use fresh destination paths:
+
+```powershell
+./kitdb.exe verify ./node/shop/data.kitdb
+./kitdb.exe backup ./node/shop/data.kitdb ./shop-backup.kitdb
+New-Item -ItemType Directory -Path ./restored-node/shop -ErrorAction Stop
+./kitdb.exe init-root ./restored-node
+./kitdb.exe restore ./shop-backup.kitdb ./restored-node/shop/data.kitdb
+./kitdb.exe verify ./restored-node/shop/data.kitdb
+./kitdb.exe register-database ./restored-node shop shop
+```
+
+Check every exit code. Bootstrap a fresh destination administrator with
+`auth-init` as above, then start `kitdbpg -root ./restored-node`. Recreate the
+destination login and grant `CONNECT` plus `ROLE article_reader` explicitly.
+The role and its table permissions already belong to the restored database;
+do not recreate the role merely to connect a new root user to it. Verify both
+allowed reads and denied writes using a fresh reader connection. Keep the
+source and destination independent; do not copy the old `.catalog` merely to
+make a restored database accessible.
+
 ## Verify The Delivered Executables
 
 From the source checkout, set `KITDB_DIST_DIRECTORY` to the unpacked native
@@ -79,6 +179,36 @@ This verifies file checksums and all three binary identities, then exercises
 standalone SQL, search, PostgreSQL-protocol transactions, an
 independent doctor backup/restore drill, and a short storage canary using the
 actual executables in a disposable database directory.
+
+The required `authorization-portability` subtest also uses those delivered
+executables. It bootstraps an isolated managed root, creates password users via
+SQL, grants database access and local table roles, and checks exact `28P01`
+authentication failures and `42501` permission denials. After a hard server
+restart, accounts, acknowledged rows and grants must survive. An independent
+backup/restore preserves exact article rows and local role identity, but does
+not transfer root logins or mappings: a same-named destination user with CONNECT
+only cannot read until explicitly mapped. The restored database must remain
+writable by its administrator. Finally all three child servers are reaped and
+offline CLI commands reacquire both roots and verify both databases.
+
+Set `KITDB_NATIVE_REPORT` to a NEW JSON path to retain structured qualification
+evidence (relative paths resolve from the module root):
+
+```powershell
+$env:KITDB_DIST_DIRECTORY = 'C:/test/kitdb-unpacked'
+$env:KITDB_NATIVE_REPORT = '.artifacts/kitdb-native-journey.json'
+go test ./cmd/kitdbdist -run '^TestKitDBDistributionNativeJourney$' -count=1 -json -timeout=5m
+```
+
+The report records candidate/manifest identity, all three mandatory subtests,
+ten authorization stages, success, and `stable_release_qualified=false`.
+Filtered, failed or skipped mandatory subtests cannot qualify. A configured
+report without a binary directory fails rather than skipping; an existing
+report path is refused, so retain each run separately. Ordinary source-only
+`go test` still skips this opt-in journey when neither variable is configured.
+The RC workflow requests the report, checks its commit against checkout HEAD,
+and retains it beside the raw Go JSON events. These are bounded tests, not a
+24-hour storage run or a stable-release admission decision.
 
 The `mixed-application` subtest adds two concurrent transaction writers and
 three readers (snapshot totals, composite-key JOIN, and SEARCH aggregates).

@@ -122,6 +122,9 @@ func TestArchiveHashesPayloadAndRefusesOverwrite(t *testing.T) {
 func TestKitDBDistributionNativeJourney(t *testing.T) {
 	dir := os.Getenv("KITDB_DIST_DIRECTORY")
 	if dir == "" {
+		if os.Getenv("KITDB_NATIVE_REPORT") != "" {
+			t.Fatal("KITDB_NATIVE_REPORT requires KITDB_DIST_DIRECTORY; qualification cannot skip")
+		}
 		t.Skip("set KITDB_DIST_DIRECTORY to an unpacked native RC bundle")
 	}
 	dir, err := filepath.Abs(dir)
@@ -139,6 +142,7 @@ func TestKitDBDistributionNativeJourney(t *testing.T) {
 	if report.Format != "kitdb-distribution/v1" || report.Target != runtime.GOOS+"/"+runtime.GOARCH || report.CGOEnabled {
 		t.Fatalf("invalid native manifest: %+v", report)
 	}
+	evidence := beginNativeEvidence(t, report, filepath.Join(dir, "manifest.json"))
 	for _, file := range report.Files {
 		if filepath.Base(file.Name) != file.Name {
 			t.Fatal("non-local manifest entry")
@@ -241,9 +245,12 @@ func TestKitDBDistributionNativeJourney(t *testing.T) {
 	}
 	hash := sha256.Sum256(data)
 	t.Logf("native bundle %s commit=%s passed SQL/search/pgwire/doctor/canary, canary sha256=%s", report.Version, report.Commit, hex.EncodeToString(hash[:]))
-	t.Run("mixed-application", func(t *testing.T) { exerciseApplicationBinaries(t, binary) })
-	t.Run("commerce-objects", func(t *testing.T) {
+	runNativeSubtest(t, evidence, "mixed-application", func(t *testing.T) { exerciseApplicationBinaries(t, binary) })
+	runNativeSubtest(t, evidence, "commerce-objects", func(t *testing.T) {
 		exerciseCommerceBinaries(t, binary, &commerceEvidence{})
+	})
+	runNativeSubtest(t, evidence, "authorization-portability", func(t *testing.T) {
+		exerciseAuthorizationBinaries(t, binary, &evidence.AuthorizationChecks)
 	})
 }
 

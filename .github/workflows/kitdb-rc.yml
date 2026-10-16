@@ -47,10 +47,16 @@ jobs:
         shell: pwsh
         run: |
           $env:KITDB_DIST_DIRECTORY = Join-Path (Get-Location) ".artifacts/kitdb-dist/kitdb-$($env:KITDB_RC_VERSION)-${{ matrix.suffix }}"
+          $env:KITDB_NATIVE_REPORT = '.artifacts/kitdb-native-journey.json'
           go test ./cmd/kitdbdist -run '^TestKitDBDistributionNativeJourney$' -count=1 -json -timeout 5m > .artifacts/kitdb-native-journey.jsonl
           $result = $LASTEXITCODE
           Get-Content .artifacts/kitdb-native-journey.jsonl
-          exit $result
+          if ($result -ne 0) { exit $result }
+          $report = Get-Content -Raw $env:KITDB_NATIVE_REPORT | ConvertFrom-Json
+          $commit = git rev-parse HEAD
+          if (-not $report.success -or $report.commit -ne $commit -or $report.stable_release_qualified) {
+            throw 'Packaged journey did not qualify the expected candidate'
+          }
       - name: Upload candidate and evidence for review
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,6 +66,7 @@ jobs:
             .artifacts/kitdb-release.json
             .artifacts/kitdb-canary-smoke.json
             .artifacts/kitdb-native-journey.jsonl
+            .artifacts/kitdb-native-journey.json
             .artifacts/kitdb-dist/*.zip
             .artifacts/kitdb-dist/SHA256SUMS
           include-hidden-files: true
