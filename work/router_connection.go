@@ -47,7 +47,7 @@ func (c *folderConnection) describe() string {
 // boot, listing the names there are.
 func (f *FolderRouter) Connection(args ...value.Value) (*FolderRouter, error) {
 	if len(args) == 1 && args[0].IsMap() {
-		return f, fmt.Errorf(`router.connection nhận tên một kết nối host đã khai trong app.work: router.connection("system"); tenant tự nối bằng cấu hình thì viết router.connect({ postgresql: environment.require("DATABASE_URL") })`)
+		return f, fmt.Errorf(`router.connection nhận tên một kết nối host đã khai trong app.work: router.connection("system"); tenant tự nối bằng cấu hình thì viết router.connect({ postgresql: environment.DATABASE_URL })`)
 	}
 	if len(args) != 1 || !args[0].IsString() || strings.TrimSpace(args[0].String()) == "" {
 		return f, fmt.Errorf(`router.connection nhận tên một kết nối host đã khai trong app.work: router.connection("system"), hay router.connection("application") cho database của chính app`)
@@ -71,8 +71,8 @@ func (f *FolderRouter) Connection(args ...value.Value) (*FolderRouter, error) {
 // Connect plugs this folder's ctx.database into a connection the tenant writes itself, with its
 // own credentials from its own environment, no host declaration needed:
 //
-//	router.connect({ postgresql: environment.require("DATABASE_URL") });   // this folder's ctx.database
-//	router.connect("crm", { postgresql: environment.require("CRM_URL") }); // reachable as ctx.database("crm")
+//	router.connect({ postgresql: environment.DATABASE_URL });   // this folder's ctx.database
+//	router.connect("crm", { postgresql: environment.CRM_URL }); // reachable as ctx.database("crm")
 //
 // A connection is a provider keyed by a URL or a path (postgresql, mysql, kitsql, redis, sqlite —
 // a sqlite path stays inside the tenant's folder), or the manifest's option object (type/url/host/
@@ -91,7 +91,7 @@ func (f *FolderRouter) Connect(args ...value.Value) (*FolderRouter, error) {
 			return f, fmt.Errorf(`router.connect("", { … }): tên kết nối không được rỗng; không đặt tên thì viết router.connect({ … })`)
 		}
 	case len(args) >= 1 && args[0].IsString():
-		return f, fmt.Errorf(`router.connect nhận cấu hình nối do tenant viết: router.connect({ postgresql: environment.require("DATABASE_URL") }); chọn kết nối host đã khai thì viết router.connection("%s")`, strings.TrimSpace(args[0].String()))
+		return f, fmt.Errorf(`router.connect nhận cấu hình nối do tenant viết: router.connect({ postgresql: environment.DATABASE_URL }); chọn kết nối host đã khai thì viết router.connection("%s")`, strings.TrimSpace(args[0].String()))
 	default:
 		return f, fmt.Errorf(`router.connect nhận cấu hình nối: router.connect({ postgresql: url }) hay router.connect("tên", { … })`)
 	}
@@ -130,7 +130,7 @@ func (f *FolderRouter) Connect(args ...value.Value) (*FolderRouter, error) {
 func tenantConnectionConfig(t *Tenant, name string, source value.Value) (*database.Config, error) {
 	fields := source.Map()
 	if len(fields) == 0 {
-		return nil, fmt.Errorf(`router.connect({ }): cấu hình rỗng; viết router.connect({ postgresql: environment.require("DATABASE_URL") })`)
+		return nil, fmt.Errorf(`router.connect({ }): cấu hình rỗng; viết router.connect({ postgresql: environment.DATABASE_URL })`)
 	}
 	for key, item := range fields {
 		provider := canonicalConnector(key)
@@ -141,7 +141,7 @@ func tenantConnectionConfig(t *Tenant, name string, source value.Value) (*databa
 			return nil, fmt.Errorf(`router.connect({ %s: … }): dạng ngắn chỉ có một khoá là nhà cung cấp; thêm tuỳ chọn thì viết dạng đầy đủ { type: "%s", url: …, max_open: … }`, key, provider)
 		}
 		if !item.IsString() || strings.TrimSpace(item.Text()) == "" {
-			return nil, fmt.Errorf(`router.connect({ %s: … }): giá trị là một URL hay đường dẫn trong dấu nháy, thường từ environment.require(…)`, key)
+			return nil, fmt.Errorf(`router.connect({ %s: … }): giá trị là một URL hay đường dẫn trong dấu nháy, từ environment: environment.DATABASE_URL`, key)
 		}
 		text := strings.TrimSpace(item.Text())
 		config := &database.Config{Alias: name, Type: provider}
