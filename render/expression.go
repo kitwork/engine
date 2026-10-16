@@ -28,6 +28,12 @@ const (
 	expressionDivide
 	expressionModulo
 	expressionMethod
+	// the kinds only a {{ if }} condition writes (condition.go): !a, -a, +a, and a key of a value that
+	// is no path ("text".length, a.b().c)
+	expressionNot
+	expressionNegate
+	expressionNumber
+	expressionMember
 )
 
 type expression struct {
@@ -357,23 +363,30 @@ func resolveExpression(
 		return value.Value{}
 	}
 
+	// A failure an operand meets is the expression's failure, as it ends a script's run before the
+	// operator (16/10/2026, with E3): {{ item.nope() == 3 }} and {{ item.nope() || "x" }} say why, where
+	// they wrote false and x, and so does a condition. The arithmetic operators already passed one on.
 	switch compiled.kind {
 	case expressionLiteral:
 		return compiled.value
 	case expressionTernary:
-		if resolveExpression(compiled.left, data, scope).Truthy() {
+		test := resolveExpression(compiled.left, data, scope)
+		if test.K == value.Invalid {
+			return test
+		}
+		if test.Truthy() {
 			return resolveExpression(compiled.right, data, scope)
 		}
 		return resolveExpression(compiled.alt, data, scope)
 	case expressionNullish:
 		left := resolveExpression(compiled.left, data, scope)
-		if left.IsBlank() {
+		if left.K == value.Nil {
 			return resolveExpression(compiled.right, data, scope)
 		}
 		return left
 	case expressionOr:
 		left := resolveExpression(compiled.left, data, scope)
-		if !left.Truthy() {
+		if left.K != value.Invalid && !left.Truthy() {
 			return resolveExpression(compiled.right, data, scope)
 		}
 		return left
@@ -383,6 +396,20 @@ func resolveExpression(
 			return resolveExpression(compiled.right, data, scope)
 		}
 		return left
+	case expressionNot:
+		operand := resolveExpression(compiled.left, data, scope)
+		if operand.K == value.Invalid {
+			return operand
+		}
+		return value.New(!operand.Truthy())
+	case expressionNegate:
+		// -a as the VM compiles it: a * -1, so a text or an object is a TYPE failure there too
+		return resolveExpression(compiled.left, data, scope).Mul(value.New(-1))
+	case expressionNumber:
+		// +a as the VM compiles it (STEP 0): the number JavaScript's ToNumber makes of a
+		return value.ToNumber(resolveExpression(compiled.left, data, scope))
+	case expressionMember:
+		return traverse(resolveExpression(compiled.left, data, scope), compiled.parts)
 	case expressionPath:
 		return resolvePath(compiled.parts, data, scope)
 	case expressionMethod:
@@ -411,7 +438,13 @@ func resolveExpression(
 	}
 
 	left := resolveExpression(compiled.left, data, scope)
+	if left.K == value.Invalid {
+		return left
+	}
 	right := resolveExpression(compiled.right, data, scope)
+	if right.K == value.Invalid {
+		return right
+	}
 	switch compiled.kind {
 	case expressionEqual:
 		return value.New(left.Equal(right))

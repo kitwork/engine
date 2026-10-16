@@ -11,14 +11,14 @@ same exact commit has not completed the release campaign on Linux.
 
 Frozen compatibility identity:
 
-- bytecode version: `3`;
+- bytecode version: `4`;
 - Program encoding version: `1`;
 - artifact version: `1`;
-- compiler schema: `9`;
+- compiler schema: `11`;
 - instruction-set checksum:
-  `f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678`;
+  `ac0cab56f20c203825f2564a935756a8a3ce5110d86499a97fcaffc49f51b9da`;
 - compiler fingerprint:
-  `a7a9f8ffe16e9318e7356a4944f3d92a057da79e0b61b530e136038986c9e2b6`.
+  `de39cf778611ad4470b339dda95d37586b7c0e91f6d64989877df3b34e791450`.
 
 The bytecode version went from 2 to 3 on 14/10/2026 by the owner's decision ("đồng ý
 hết"): seven wide forms (a three-byte constant index or jump address) and a program of up
@@ -35,6 +35,22 @@ works in both loops, and `typeof` compiles to an `INVOKE` the VM answers. At run
 without an opcode change, a negative number is true and `a[i] = v` past the end pads with
 null (a key that is no index fails). No opcode, operand or bytecode version changed. The
 campaign must run again for the schema 9 identity.
+
+The compiler schema went from 9 to 10 on 15/10/2026 with the review of schema 9: the object
+and key of an update or a compound assignment run once, and a line break before `++` or `--`
+ends the expression. At run time, without an opcode change, a number key of an object reads
+its text (`o[7]` is `o["7"]`), a fractional index reads null, a fraction or Infinity is no array
+index however far past the end, and the verifier keeps one jump width per program. No opcode,
+operand or bytecode version changed. The campaign must run again for the schema 10 identity.
+
+The bytecode version went from 3 to 4 and the compiler schema from 10 to 11 on 15/10/2026 by
+the owner's decisions ("đồng ý hết, làm luôn đi"): `STEP` (slot 40) makes a number of what
+`++` and `--` step, as JavaScript's ToNumber does, at the energy `PUSH 1; ADD` cost; `DIV` and
+`MOD` follow IEEE 754 (Infinity, NaN; they gave null); a `SET` through null, a string, a
+number, a boolean or a function is the runtime error `TYPE` (it was dropped). Bytecode 3's
+instructions keep their slots, operands, stack effects and energy; the compatibility archive
+moved to `testdata/v4`. The campaign must run again for the bytecode 4 identity; the evidence
+below was gathered before it.
 
 The compiler schema went from 7 to 8 on 14/10/2026 with the review of schemas 5 to 7:
 a template that starts with two values or is one value joins text, a return inside
@@ -145,6 +161,6 @@ Promote this candidate only after all of the following are true for one commit:
 4. Confirm both reports contain the same compatibility identity above.
 5. Complete the controlled deployment canary described in `docs/RELEASE.md`.
 
-Until then, preserve VM v2 opcodes and compiler schema v9. Fix observed
+Until then, preserve VM v2 opcodes and compiler schema v10. Fix observed
 qualification failures; do not add execution features to make the candidate
 look more complete.

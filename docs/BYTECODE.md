@@ -152,10 +152,16 @@ The compiler writes the narrow form unless it cannot:
   the same program); a jump whose address fits stays narrow in a program that never
   needs one wide.
 
-The verifier keeps one encoding per program: a wide constant index of 65,535 or
-less is `INVALID_OPERAND`, and so is a wide jump in a program of 65,535 bytes or
-less. So a program that fits two-byte operands holds no wide form and is the
-same bytes it was in bytecode 2; only its envelope's version and checksum moved.
+The verifier keeps one encoding per program, the compiler's: a wide constant
+index of 65,535 or less is `INVALID_OPERAND`, and so is a wide jump in a program
+of 65,535 bytes or less. In a longer program (since 15/10/2026; until then any
+wide jump there was read) the jumps share one width, and they are wide only when
+the same program written with two-byte jumps, each one byte shorter and every
+address after it one byte lower, has an address past 65,535
+(`validateJumpWidths`); two widths in one program, or wide jumps whose two-byte
+program fits, are `INVALID_OPERAND`. So a program that fits two-byte operands holds
+no wide form and is the same bytes it was in bytecode 2; only its envelope's
+version and checksum moved.
 Over the 1,114 programs under apps and docs/examples that compiled on 14/10/2026,
 every instruction stream, constant pool and debug table is unchanged. A program
 past `MaxBytecodeSize` is a compile error at the place it crosses the limit
@@ -170,8 +176,51 @@ bytes, so 16 copies compile to 1,209,855 bytes (218,739 constants, envelope
 copies are past the limit (measured 15/10/2026). A program at 2 MiB references at
 most about 540,000 constants, so the constant limit is not met first, and its
 envelope at apptop.vn's ratio (about 15 bytes per byte of code, mostly the debug
-table's file names) is about 32 MB, inside 64 MiB. `runtime/limits.go` fails to
-compile if a limit grows past what three bytes address.
+table's file names) is about 32 MB, inside 64 MiB. That ratio is not a bound: the
+envelope writes each debug entry's file name, so a module with a position every 2
+or 3 bytes of code on a path of some 70 characters passes 64 MiB under 2 MiB of
+code. Such a program ran, but `MarshalBinary` refused it, so it was never cached
+and `kitwork check`, `profile` and `inspect` failed on it; since 15/10/2026 the
+compiler counts the envelope (`Program.EncodedSize`) and refuses it at the debug
+entry where it crosses (`…: chương trình lưu ra … byte (mã, hằng và bảng vị trí,
+mỗi mục ghi tên tệp của nó), quá giới hạn 67108864 byte …`), and the encoder's
+error names the envelope (`encode program: envelope exceeds 67108864 bytes`) rather
+than a string. `runtime/limits.go` fails to compile if a limit grows past what
+three bytes address.
+
+### STEP (bytecode 4, 15/10/2026)
+
+`++` and `--` make a number of what they step, as JavaScript's ToNumber does, then
+step it (the owner's L3): `"5"++` is 6, `null--` is -1, `true++` is 2, `"a"++` is
+NaN, a date made by `new Date()` steps from its time value in milliseconds. Bytecode
+3 lowered `x++` to `x = x + 1` (`LOAD x; PUSH 1; ADD; STORE x`), and `ADD` joins a
+string (`"5"++` was `"51"`) while `SUB` refuses null, a boolean or a date, so the
+rule needs an instruction of its own. Bytecode 4 appends one after the wide forms:
+
+```text
+STEP m   (slot 40, one-byte operand, 1 in, 1 out, energy 3)
+  m = 0  ToNumber(v)          the old value x++ and x-- give
+  m = 1  ToNumber(v) + 1      what ++ writes
+  m = 2  ToNumber(v) - 1      what -- writes
+```
+
+ToNumber is `value.ToNumber`: a number is itself, null 0, true 1, false 0, a string
+read as `Number(text)` reads it in JavaScript (`value.StringToNumber`: white space
+around, `0x`/`0o`/`0b`, `Infinity`; anything else NaN), an engine time or duration
+its milliseconds; an object whose `valueOf` is a function of the engine (a date) is
+the number that `valueOf` gives (the VM calls it through its native boundary), and
+any other object, an array, a function or a host value is NaN. A `valueOf` the
+program wrote is never called. A failure stays the failure.
+
+The compiler writes `x; STEP 1` where it wrote `x; PUSH 1; ADD` (`STEP 2` for
+`SUB`), so a dropped update is the assignment it was with one instruction fewer, two
+bytes shorter, and the same energy (`STEP` costs 3, `PUSH` 1 and `ADD` 2):
+`compatibility/testdata/v4` holds the v3 cases, which spend the energy they spent,
+and `compiler.TestADroppedUpdateIsTheAssignmentWithOneStep` compares the
+instruction lists. `x++` used as a value reads `x; STEP 0` first. The verifier
+refuses a step above 2 (`INVALID_OPERAND`). Every instruction of bytecode 3 keeps its
+slot, operand, stack effect and energy (`TestVMContract` hashes the 40 slots back
+to bytecode 3's checksum).
 
 `runtime.InstructionSpec` is the single source of truth for:
 
@@ -201,7 +250,8 @@ exhausted: collection + index -> empty, then jump
 ```
 
 Three meanings changed on 14/10/2026 (compiler schema 9, the owner's "đồng ý hết")
-without an opcode, operand, stack effect or energy change:
+without an opcode, an operand or a stack effect, and with no energy change but the
+per-null charge of `SET` below:
 
 - **Truth.** `TRUE`, `FALSE`, `AND`, `OR`, `NOT` and the array callbacks read
   `value.Truthy`, which is JavaScript's: a number (a time and a duration too) is
@@ -210,13 +260,45 @@ without an opcode, operand, stack effect or energy change:
   replaces or appends; past the length the gap is padded with null, one unit of
   energy per null charged before the array grows (`ENERGY_LIMIT` when the run
   cannot pay), and more than `runtime.MaxArrayGap` (1,048,576) nulls is the
-  `INVALID_ARGUMENT` failure; any other key (negative, fractional, NaN, a string,
-  a boolean, null) is the `UNSUPPORTED` failure. It appended the item before.
+  `INVALID_ARGUMENT` failure; any other key (negative, fractional, NaN, Infinity,
+  a string, a boolean, null, and `length`) is the `UNSUPPORTED` failure, however
+  far past the end (since 15/10/2026: a fraction or Infinity past the gap limit
+  was `INVALID_ARGUMENT`). It appended the item before.
 - **`INVOKE` of `#typeof`** with no argument (`runtime.TypeofMethod`) is answered
   by the VM before any key, method or proxy of the target, with JavaScript's typeof
   (`value.TypeOf`; null is `"undefined"`). `typeof x` compiles to
   `x; PUSH "#typeof"; INVOKE 0`; a source cannot write `#` after a dot, so nothing
   else reaches it.
+
+One more on 15/10/2026 (compiler schema 10), again without an opcode, an operand,
+a stack effect or an energy change:
+
+- **`GET` with a number key.** On an object the key is read as its text, the key
+  `SET` writes (`o[7]` is `o["7"]`; it read null, so `o[k]++` lost the count). On
+  anything else a key that is no whole number (a fraction, NaN, Infinity) reads
+  null, as JavaScript reads undefined and as `SET` refuses it; it read the item of
+  the whole part (`a[1.5]` was `a[1]`).
+
+Schema 10 also lowers an update or a compound assignment whose object or key does
+more than read (`a[i++]++`, `get().n += 1`) through hidden slots, so each runs
+once: `object; STORE #o; POP; key; STORE #k; POP`, then the assignment on
+`LOAD #o` and `LOAD #k`. These are existing instructions; an update whose object
+and key only read compiles as before.
+
+Two more on 15/10/2026 (bytecode 4, the owner's L1 and L2), without an operand, a
+stack effect or an energy change, and with no recompile needed:
+
+- **`DIV` and `MOD`** follow IEEE 754 as JavaScript does: `1 / 0` is Infinity,
+  `-1 / 0` -Infinity, `0 / 0` and `x % 0` NaN (`value.Div`, `value.Mod`). Both
+  gave null. Infinity equals itself and NaN is ordered with nothing (`NaN <= 1` is
+  false), they print `Infinity`, `-Infinity` and `NaN`, and JSON writes them null.
+  KitSQL keeps SQL's NULL for a division by zero.
+- **`SET` of a target that cannot hold properties** (null, a number, a boolean, a
+  string, a function, a time, a duration, bytes) is the runtime error `TYPE`, as
+  JavaScript's TypeError (`runtime/property_write.go`), at the write's dot or
+  bracket: `không ghi được o.name.x: o.name là chuỗi, không phải object hay mảng`.
+  It dropped the write. A host value (a `Struct`, a `Proxy`, any other Go value)
+  still drops it without an error; an object and an array are unchanged.
 
 `RETURN` and `HALT` are terminal and may retain zero or one value. More than one
 value at a terminal is invalid bytecode. `COMMIT` observes the top value without
@@ -236,7 +318,7 @@ logic:
 1. Decode every instruction and reject unknown, reserved, unsupported, or
    truncated opcodes.
 2. Validate opcode-specific operands, constant indexes and types, jump targets,
-   collection kinds, and comparison modes.
+   collection kinds, comparison modes, and steps.
 3. Validate every lambda constant address against decoded instruction
    boundaries.
 4. Walk control flow from the program entry and every lambda entry, proving
@@ -269,11 +351,13 @@ reserved so a future opcode can never reinterpret old bytecode.
 The VM contract is frozen by `runtime/contract_test.go` (`TestVMContract`; it was
 `TestVMV2Contract` until bytecode 3). The test fixes:
 
-- `BytecodeVersion == 3` (2 until 14/10/2026);
-- every opcode numeric slot, including `_RESERVED`, the seven wide forms and
-  `_LIMIT`;
+- `BytecodeVersion == 4` (3 until 15/10/2026, 2 until 14/10/2026);
+- every opcode numeric slot, including `_RESERVED`, the seven wide forms, `STEP`
+  and `_LIMIT`;
 - the complete instruction metadata checksum, and that the slots bytecode 2 had
-  still hash, with version 2, to bytecode 2's checksum;
+  still hash, with version 2, to bytecode 2's checksum, and the slots bytecode 3
+  had, with version 3, to bytecode 3's;
+- `STEP`'s operand, stack effect and energy (that of `PUSH` and `ADD`);
 - `ProgramEncodingVersion == 1`.
 
 Version ownership is deliberately separate:
@@ -289,7 +373,9 @@ Updating the VM golden checksum without a deliberate version decision is a
 release failure, not routine test maintenance. Bytecode 3 is such a decision: a
 runtime of bytecode 2 cannot run a wide instruction, so the version moved, and
 `UnmarshalProgram` refuses a bytecode 2 envelope (a cached artifact is also refused
-by its compiler fingerprint and compiled again).
+by its compiler fingerprint and compiled again). Bytecode 4 is another: a runtime
+of bytecode 3 does not know `STEP`, so the version moved, and a bytecode 3 envelope
+is refused the same way.
 
 ## Change rule
 

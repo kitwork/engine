@@ -85,11 +85,12 @@ func (a Value) Mul(b Value) Value {
 	return typeFailure("*", a, b)
 }
 
+// Div and Mod follow IEEE 754 as JavaScript does (15/10/2026): 1 / 0 is Infinity, -1 / 0 is -Infinity,
+// 0 / 0 and x % 0 are NaN. Until then a division or a remainder by zero was null, which is false, so
+// `total / count || 0` hid the zero; JavaScript's Infinity is true. KitSQL keeps SQL's NULL for it
+// (work/kitdb_remote_expression.go), since SQL is not JavaScript.
 func (a Value) Div(b Value) Value {
 	if a.K == Number && b.K == Number {
-		if b.N == 0 {
-			return Value{K: Nil}
-		}
 		return Value{K: Number, N: a.N / b.N}
 	}
 	return typeFailure("/", a, b)
@@ -97,9 +98,7 @@ func (a Value) Div(b Value) Value {
 
 func (a Value) Mod(b Value) Value {
 	if a.K == Number && b.K == Number {
-		if b.N == 0 {
-			return Value{K: Nil}
-		}
+		// math.Mod is JavaScript's %: the sign of the dividend, NaN for x % 0 and Infinity % x, x % Infinity is x
 		return Value{K: Number, N: math.Mod(a.N, b.N)}
 	}
 	return typeFailure("%", a, b)
@@ -173,11 +172,10 @@ type equalityPair struct {
 func equalScalar(a, b Value) bool {
 	switch a.K {
 	case Number:
-		diff := a.N - b.N
-		if diff < 0 {
-			diff = -diff
-		}
-		return diff < 1e-12
+		// exactly, as JavaScript's === compares two numbers (IEEE 754): 0.1 + 0.2 === 0.3 is false, NaN
+		// equals nothing, -0 === 0. Two numbers less than 1e-12 apart were equal until 16/10/2026 (the
+		// owner's E1), so 1e-13 === 0 was true; switch, includes, indexOf and lastIndexOf follow ===.
+		return a.N == b.N
 	case Bool, Time, Duration:
 		return a.N == b.N
 	case String:
@@ -247,7 +245,15 @@ func (a Value) Less(b Value) bool {
 	return false
 }
 
-func (a Value) NotEqual(b Value) bool     { return !a.Equal(b) }
-func (a Value) Greater(b Value) bool      { return b.Less(a) }
-func (a Value) LessEqual(b Value) bool    { return !b.Less(a) }
-func (a Value) GreaterEqual(b Value) bool { return !a.Less(b) }
+func (a Value) NotEqual(b Value) bool { return !a.Equal(b) }
+func (a Value) Greater(b Value) bool  { return b.Less(a) }
+
+// LessEqual and GreaterEqual are false when either side is NaN, as in JavaScript (15/10/2026): NaN is
+// ordered with nothing, so "not greater" does not make it "less or equal" (NaN <= 1 was true).
+func (a Value) LessEqual(b Value) bool    { return !b.Less(a) && !unordered(a, b) }
+func (a Value) GreaterEqual(b Value) bool { return !a.Less(b) && !unordered(a, b) }
+
+// unordered reports a NaN on either side.
+func unordered(a, b Value) bool {
+	return (a.K == Number && a.N != a.N) || (b.K == Number && b.N != b.N)
+}

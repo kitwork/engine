@@ -242,7 +242,8 @@ func TestKitDBCommerceGateCannotBeOmitted(t *testing.T) {
 
 func TestCompatibilityReportMatchesRuntime(t *testing.T) {
 	report := currentCompatibilityReport()
-	if report.BytecodeVersion != 3 ||
+	// bytecode 4 since 15/10/2026 (STEP)
+	if report.BytecodeVersion != 4 ||
 		report.ProgramEncodingVersion != 1 ||
 		report.ArtifactVersion != compiler.BytecodeArtifactVersion ||
 		report.CompilerSchemaVersion != compiler.CompilerSchemaVersion ||

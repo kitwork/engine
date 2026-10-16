@@ -68,8 +68,8 @@ func TestEvalPageScopeDollar(t *testing.T) {
 
 // Blueprint values: a lambda is code-as-data walked by the same budgeted walker — no eval, no loops.
 func TestEvalBlueprint(t *testing.T) {
-	// object + array literals evaluate their values
-	if v := compileEval(t, "{ a: 1 + 1, b: 'x' }", map[string]any{}); v.(map[string]any)["a"] != 2.0 {
+	// object + array literals evaluate their values; an object keeps its keys in the order written
+	if v := compileEval(t, "{ a: 1 + 1, b: 'x' }", map[string]any{}); func() any { a, _ := v.(*Object).Get("a"); return a }() != 2.0 {
 		t.Errorf("object literal: %#v", v)
 	}
 	if v := compileEval(t, "[qty, 2]", map[string]any{"qty": 3.0}); v.([]any)[0] != 3.0 {
@@ -91,9 +91,10 @@ func TestEvalBlueprint(t *testing.T) {
 	if _, leaked := s2["x"]; leaked {
 		t.Error("param x must not leak into the caller scope")
 	}
-	// calling a non-lambda yields nil (parity with the client returning undefined)
-	if v := compileEval(t, "notafn()", map[string]any{"notafn": 5.0}); v != nil {
-		t.Errorf("calling a non-lambda should be nil, got %#v", v)
+	// calling a non-lambda yields undefined, as the client returns it (16/10/2026: nil, the server's one
+	// value for null and undefined)
+	if v := compileEval(t, "notafn()", map[string]any{"notafn": 5.0}); v != Undefined {
+		t.Errorf("calling a non-lambda should be undefined, got %#v", v)
 	}
 }
 
@@ -125,8 +126,9 @@ func TestEvalLogicalOperatorsShortCircuit(t *testing.T) {
 }
 
 // Sandbox: the walker must never reach the Function constructor (i.e. eval) or prototype pollution,
-// so constructor/__proto__/prototype resolve to nil in reads, calls and writes. This is what makes
-// "no eval" true by construction.
+// so constructor/__proto__/prototype resolve to undefined in reads, calls and writes, as in the kernel
+// (16/10/2026: nil, the server's one value for null and undefined). This is what makes "no eval" true by
+// construction.
 func TestEvalSandboxBlocksConstructor(t *testing.T) {
 	cases := []string{
 		"''.constructor",                  // → String, must be nil
@@ -144,8 +146,8 @@ func TestEvalSandboxBlocksConstructor(t *testing.T) {
 	}
 	for _, expr := range cases {
 		v := compileEval(t, expr, map[string]any{"x": map[string]any{}})
-		if v != nil {
-			t.Errorf("sandbox breach: %q returned %#v, want nil", expr, v)
+		if v != Undefined {
+			t.Errorf("sandbox breach: %q returned %#v, want undefined", expr, v)
 		}
 	}
 	// a write to a blocked target is a no-op (no prototype pollution)

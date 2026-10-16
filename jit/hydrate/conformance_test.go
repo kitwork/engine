@@ -77,22 +77,18 @@ func TestConformanceServer(t *testing.T) {
 			t.Errorf("%s: eval %q: %v", c.Name, c.Src, err)
 			continue
 		}
-		if g, w := canonicalJSON(t, got), canonicalJSON(t, c.Want); g != w {
+		// compared as data, keys in any order, as the client's canon compares (Plain: an object the
+		// expression made is a map, undefined is null)
+		if g, w := canonicalJSON(t, Plain(got)), canonicalJSON(t, c.Want); g != w {
 			t.Errorf("%s: eval(%q) = %s, want %s", c.Name, c.Src, g, w)
 		}
 	}
 }
 
-// TestConformanceClientMatchesServer runs the SAME corpus through the composed client runtime in
-// node (window.kit.compile + window.kit.run) and asserts each result equals the same expected value.
-// Because both TestConformanceServer and this test check against the corpus's `want`, agreement here
-// means the client walker and the Go evaluator computed the same thing — the conformance guarantee.
-func TestConformanceClientMatchesServer(t *testing.T) {
-	node := requireNode(t)
-
-	// A DOM shim just complete enough for kernel.js to boot in node (it wires one MutationObserver
-	// and a few delegated listeners at load time). Mirrors bridge_test.go's shim.
-	const setup = `
+// conformanceSetup is a DOM shim just complete enough for kernel.js to boot in node (it wires one
+// MutationObserver and a few delegated listeners at load time). Mirrors bridge_test.go's shim; the
+// parity corpus (parity_corpus_test.go) runs on it too.
+const conformanceSetup = `
 global.window = { addEventListener: function () {}, removeEventListener: function () {} };
 var storage = Object.create(null);
 global.document = {
@@ -117,6 +113,13 @@ global.CustomEvent = function () {};
 window.document = document; window.navigator = navigator; window.localStorage = localStorage;
 window.history = history; window.location = location;
 `
+
+// TestConformanceClientMatchesServer runs the SAME corpus through the composed client runtime in
+// node (window.kit.compile + window.kit.run) and asserts each result equals the same expected value.
+// Because both TestConformanceServer and this test check against the corpus's `want`, agreement here
+// means the client walker and the Go evaluator computed the same thing — the conformance guarantee.
+func TestConformanceClientMatchesServer(t *testing.T) {
+	node := requireNode(t)
 
 	// The corpus is injected verbatim so the client reads exactly the bytes the Go side read.
 	assertions := `
@@ -153,7 +156,7 @@ if (failures.length) { console.error(failures.join("\n")); process.exitCode = 1;
 else console.log("conformance: " + CORPUS.length + " cases — client agrees with server");
 `
 
-	script := setup + "\n" + composedRuntime() + "\n" + assertions
+	script := conformanceSetup + "\n" + composedRuntime() + "\n" + assertions
 	path := filepath.Join(t.TempDir(), "conformance.test.js")
 	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
 		t.Fatal(err)

@@ -28,8 +28,35 @@ func TestModuloSupportsFractionalNumbers(t *testing.T) {
 	}
 }
 
-func TestModuloByZeroReturnsNil(t *testing.T) {
-	if got := New(42).Mod(New(0)); got.K != Nil {
-		t.Fatalf("42 %% 0 = %#v, want nil", got)
+// A division or a remainder by zero follows IEEE 754 as JavaScript does (15/10/2026; it was null): the
+// rows are what node gives. CONTROL: a division by a number that is not zero is the quotient.
+func TestDivisionByZeroIsInfinityOrNaN(t *testing.T) {
+	negativeZero := math.Copysign(0, -1)
+	for _, row := range []struct {
+		name        string
+		left, right float64
+		divide      bool
+		want        string
+	}{
+		{"one by zero", 1, 0, true, "Infinity"},
+		{"minus one by zero", -1, 0, true, "-Infinity"},
+		{"one by minus zero", 1, negativeZero, true, "-Infinity"},
+		{"zero by zero", 0, 0, true, "NaN"},
+		{"remainder by zero", 42, 0, false, "NaN"},
+		{"negative remainder by zero", -5, 0, false, "NaN"},
+		{"remainder of infinity", math.Inf(1), 2, false, "NaN"},
+		{"remainder by infinity", 5, math.Inf(1), false, "5"},
+		{"CONTROL: six by four", 6, 4, true, "1.5"},
+		{"CONTROL: seven remainder three", 7, 3, false, "1"},
+	} {
+		var got Value
+		if row.divide {
+			got = New(row.left).Div(New(row.right))
+		} else {
+			got = New(row.left).Mod(New(row.right))
+		}
+		if got.K != Number || got.Text() != row.want {
+			t.Errorf("%s: %v, %v = %#v (%q), want the number %s", row.name, row.left, row.right, got, got.Text(), row.want)
+		}
 	}
 }

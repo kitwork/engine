@@ -41,8 +41,9 @@ type devtools struct {
 var devtoolsListening = regexp.MustCompile(`DevTools listening on ws://([^/\s]+)/`)
 
 // openDevtools starts a headless browser on url, the window width by height, in the light scheme with
-// blink's settings, and connects to its page. The browser ends with the test.
-func openDevtools(t *testing.T, browser, url string, width, height int, settings string) *devtools {
+// blink's settings and any further flags (--force-renderer-accessibility: the whole accessibility tree,
+// as a running screen reader has it), and connects to its page. The browser ends with the test.
+func openDevtools(t *testing.T, browser, url string, width, height int, settings string, flags ...string) *devtools {
 	t.Helper()
 	blink := "preferredColorScheme=1"
 	if settings != "" {
@@ -51,7 +52,8 @@ func openDevtools(t *testing.T, browser, url string, width, height int, settings
 	arguments := []string{"--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage", "--hide-scrollbars",
 		"--disable-background-networking", "--disable-default-apps", "--disable-extensions", "--disable-sync", "--no-first-run",
 		"--remote-debugging-port=0", "--remote-allow-origins=*", fmt.Sprintf("--window-size=%d,%d", width, height),
-		"--user-data-dir=" + filepath.Join(t.TempDir(), "profile"), "--blink-settings=" + blink, url}
+		"--user-data-dir=" + filepath.Join(t.TempDir(), "profile"), "--blink-settings=" + blink}
+	arguments = append(append(arguments, flags...), url)
 	if runtime.GOOS == "windows" {
 		arguments = append(arguments, "--disable-breakpad", "--disable-crashpad-for-testing")
 	}

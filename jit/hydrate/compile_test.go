@@ -23,12 +23,13 @@ func TestCompileJSON(t *testing.T) {
 		{"{ count: 5, open: false }", `["{}",[["count",["#",5]],["open",["#",false]]]]`},
 		{"{ count: 5, }", `["{}",[["count",["#",5]]]]`}, // objects allow a trailing comma
 		{"[1, 'a', qty]", `["[]",[["#",1],["#","a"],["$","qty"]]]`},
-		{"() => count = count + 1", `["=>",[],["=","count",["+",["$","count"],["#",1]]]]`},
-		{"(x, y) => x + y", `["=>",["x","y"],["+",["$","x"],["$","y"]]]`},
+		// a lambda keeps its source as written, its text as JavaScript gives a function's (16/10/2026)
+		{"() => count = count + 1", `["=>",[],["=","count",["+",["$","count"],["#",1]]],"() => count = count + 1"]`},
+		{"(x, y) => x + y", `["=>",["x","y"],["+",["$","x"],["$","y"]],"(x, y) => x + y"]`},
 		{"a = 1; b = a + 1", `[";",["=","a",["#",1]],["=","b",["+",["$","a"],["#",1]]]]`},
 		{"inc()", `["call",["$","inc"],[]]`},
 		{"add(1, 2)", `["call",["$","add"],[["#",1],["#",2]]]`},
-		{"{ count: 5, inc: () => count = count + 1 }", `["{}",[["count",["#",5]],["inc",["=>",[],["=","count",["+",["$","count"],["#",1]]]]]]]`},
+		{"{ count: 5, inc: () => count = count + 1 }", `["{}",[["count",["#",5]],["inc",["=>",[],["=","count",["+",["$","count"],["#",1]]],"() => count = count + 1"]]]]`},
 		// regressions: the arrow lookahead must NOT swallow a plain parenthesized expression,
 		// and the method-call path must survive next to bare-call.
 		{"(a + b) * c", `["*",["+",["$","a"],["$","b"]],["$","c"]]`},

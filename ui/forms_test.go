@@ -547,7 +547,7 @@ func TestInputsSeedTheInstance(t *testing.T) {
 		{[]any{1.0, "a"}, "[1, 'a']"},
 		{map[string]any{"b": 1.0, "a": true}, "{'a': true, 'b': 1}"},
 	} {
-		got := literal(c.value, 0)
+		got := literal(c.value)
 		if got != c.want {
 			t.Errorf("literal(%v) = %s, want %s", c.value, got, c.want)
 		}
@@ -557,7 +557,7 @@ func TestInputsSeedTheInstance(t *testing.T) {
 			continue
 		}
 		// it reads back as the value the server read
-		if back, err := hydrate.Eval(ir, map[string]any{}); err != nil || literal(back, 0) != got {
+		if back, err := hydrate.Eval(ir, map[string]any{}); err != nil || literal(back) != got {
 			t.Errorf("%s reads back as %v (%v)", got, back, err)
 		}
 	}

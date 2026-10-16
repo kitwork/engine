@@ -6,26 +6,32 @@ cannot silently reinterpret already compiled code or move a numeric opcode.
 
 ## Frozen tuple
 
-- bytecode version: `3` (`2` until 14/10/2026, see "Bytecode 3" below);
+- bytecode version: `4` (`3` until 15/10/2026 and `2` until 14/10/2026, see "Bytecode 3" and
+  "Bytecode 4" below);
 - Program binary envelope: `1`;
 - bytecode artifact envelope: `1`;
-- compiler schema: `9` (`8` until the afternoon of 14/10/2026, see "Schema 9" below);
+- compiler schema: `11` (`10` until the evening of 15/10/2026, `9` until its morning and `8` until
+  the afternoon of 14/10/2026, see "Schema 9", "Schema 10" and "Bytecode 4" below);
 - instruction-set checksum:
-  `f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678`
-  (bytecode 2: `10872c964d1c5c284b8ec4fd1acc429e31568151dc03d17a77d1da76774c7e91`);
+  `ac0cab56f20c203825f2564a935756a8a3ce5110d86499a97fcaffc49f51b9da`
+  (bytecode 3: `f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678`;
+  bytecode 2: `10872c964d1c5c284b8ec4fd1acc429e31568151dc03d17a77d1da76774c7e91`);
 - compiler fingerprint:
-  `a7a9f8ffe16e9318e7356a4944f3d92a057da79e0b61b530e136038986c9e2b6`
-  (schema 8 on bytecode 3: `5fbf4f10a82a5a6d4a7f3c1f2a5c727ccef765a7947729a5b2430e0a8964db55`;
+  `de39cf778611ad4470b339dda95d37586b7c0e91f6d64989877df3b34e791450`
+  (schema 10 on bytecode 3: `308eee4d8c849346f04f0b247289f1327411c01686ee1e12c5da91bc27a3eeb9`;
+  schema 9 on bytecode 3: `a7a9f8ffe16e9318e7356a4944f3d92a057da79e0b61b530e136038986c9e2b6`;
+  schema 8 on bytecode 3: `5fbf4f10a82a5a6d4a7f3c1f2a5c727ccef765a7947729a5b2430e0a8964db55`;
   schema 8 on bytecode 2: `be7e49394fb709e1b0adeba3731263930c05631b609763361a95ccd89a276ef9`).
 
 `runtime.TestVMContract` (`TestVMV2Contract` until bytecode 3) freezes every opcode
-number, including the retired `_RESERVED` slot and the seven wide forms, the
+number, including the retired `_RESERVED` slot, the seven wide forms and `STEP`, the
 complete instruction metadata checksum, and that the slots bytecode 2 had still hash,
-with version 2, to bytecode 2's checksum.
-`compiler.TestCompilerV9GoldenContract` (`TestCompilerV8GoldenContract` until schema 9) freezes representative arithmetic,
+with version 2, to bytecode 2's checksum, and the slots bytecode 3 had, with version 3,
+to bytecode 3's.
+`compiler.TestCompilerV11GoldenContract` (`V10` until schema 11, `V9` until schema 10, `V8` until schema 9) freezes representative arithmetic,
 closure/callback, bounded-loop, switch/fallthrough, `safe(() => …)` (a success
 and a failure), reserved words as keys, short-circuit/null-test, destructuring,
-block-scope, closure-per-iteration, template-text and update/continue/typeof Programs and validates their artifact round
+block-scope, closure-per-iteration, template-text, update/continue/typeof, update-once/line-break and step/division-by-zero Programs and validates their artifact round
 trips. Compiler
 schema v2 added `switch`, `case`, `default`, and scoped `break`; schema v3 added protected `.safe()` evaluation;
 schema v4 (13/10/2026) made reserved words property names, which changed what
@@ -84,7 +90,14 @@ update compiles as before. Of the 1,114 compiling sources under apps and docs/ex
 none changed its instructions or constants and 233 changed only the debug table (the
 places of `SET`); with those two lines undone all 1,114 compile identically to schema 8,
 debug table included. A schema-8 artifact gives `x++` the new value: the bump retires it.
-No opcode or operand changed. Schema 3 artifacts carry the fingerprint
+No opcode or operand changed. Schema 10 (15/10/2026, the review of schema 9) evaluates the
+object and key of an update or a compound assignment once when they do more than read
+(`a[i++]++`, `get().n += 1`: `object; STORE #o; POP; key; STORE #k; POP`, then the assignment
+on `LOAD #o` and `LOAD #k`), and ends an expression at a line break before `++` or `--`
+(`x` then `++y` is `x; ++y`). Of the 1,114 compiling sources, none changed its instructions,
+constants or debug table. A schema-9 artifact reads one item of `a[i++]++` and writes
+another: the bump retires it. No opcode or operand changed. Schema 11 (15/10/2026) lowers `++` and
+`--` to `STEP` on bytecode 4 (below). Schema 3 artifacts carry the fingerprint
 `f0c6c9255af80f7d2109348a23f49281ca50935b9bb8e41cbcf4970d7fcd4c07`;
 `compiler.TestFileCacheRefusesArtifactsOfSchema3` proves the cache refuses and
 replaces them.
@@ -93,9 +106,10 @@ same corpus in six fresh OS processes and requires identical Program checksums,
 artifact hashes, source fingerprints, cache keys, and encoded sizes. This
 catches nondeterministic emitter behavior that one warm process can hide.
 `compatibility.TestVMCompatibilityArchive` does not compile source. It loads the
-committed bytecode 3 Program binaries of `compatibility/testdata/v3` (compiler schema 8,
-the hand-authored cases of `testdata/v2`, whose bytecode 2 binaries the current runtime
-refuses by their version and keeps as evidence), verifies their source and binary hashes,
+committed bytecode 4 Program binaries of `compatibility/testdata/v4` (compiler schema 11,
+the hand-authored cases of `testdata/v3` and `testdata/v2` and one more, `step`; the
+bytecode 3 and bytecode 2 binaries of those archives the current runtime refuses by their
+version and keeps as evidence), verifies their source and binary hashes,
 decodes and verifies them, executes their recorded semantics, and requires a
 byte-identical re-encode. A second test repeats execution across reused and
 pooled VMs. Together these tests prove that today's runtime still understands
@@ -111,7 +125,9 @@ Bytecode 3 appends seven wide forms after `_RESERVED` (`PUSH_WIDE` 33, `LOAD_WID
 each is its instruction with a three-byte operand, the same stack effect and energy.
 The compiler writes them only where the narrow form cannot do (a constant index past
 65,535; every jump of a program once one jump's address passes 65,535), and the verifier
-refuses them elsewhere, so a program that fits is the same bytes as in bytecode 2. The
+refuses them elsewhere (for jumps since 15/10/2026: before, only a wide jump in a program of
+65,535 bytes or less was refused, so a longer program could mix the widths or jump wide where
+its two-byte program fits), so a program that fits is the same bytes as in bytecode 2. The
 limits are 2 MiB of code, 1,048,576 constants and a 64 MiB envelope (`docs/BYTECODE.md`,
 "Wide forms"). No bytecode 2 opcode, operand, stack effect, energy or meaning changed,
 and the compiler schema stays 8: its fingerprint already hashes the bytecode version and
@@ -119,6 +135,26 @@ the instruction-set checksum, so every cached artifact is compiled again. Of the
 sources under apps and docs/examples that compiled before, every one compiles to the same
 instructions, constants and debug table; only the version and the checksums moved. The
 qualification campaign must run again for the bytecode 3 identity.
+
+### Bytecode 4 (15/10/2026)
+
+The owner's decisions of 15/10/2026 ("đồng ý hết, làm luôn đi"), each as in JavaScript. L3
+needed an instruction: `++` and `--` make a number of what they step (JavaScript's
+ToNumber: `"5"++` is 6, `null--` -1, `true++` 2, `"a"++` NaN, a date from its time value),
+where `x = x + 1` joined a string and `x - 1` refused null, a boolean or a date. Bytecode 4
+appends `STEP` (slot 40; `_LIMIT` is 41) with a one-byte step: 0 the number alone (the
+old value of `x++`), 1 plus one, 2 minus one (`docs/BYTECODE.md`, "STEP"). Compiler schema
+11 writes `x; STEP 1` where schema 10 wrote `x; PUSH 1; ADD`: two bytes and one
+instruction fewer, the same energy (`STEP` costs 3, `PUSH` and `ADD` 1 and 2), so every
+case of `testdata/v3` spends in `testdata/v4` the energy it spent
+(`compatibility.TestBytecode4SpendsTheEnergyBytecode3Spent`). No instruction of bytecode 3
+changed its slot, operand, stack effect or energy. Two meanings changed with it and need no
+recompile: `DIV` and `MOD` follow IEEE 754 (Infinity, -Infinity, NaN; they gave null), and a
+`SET` through a value that cannot hold properties (null, a number, a boolean, a string, a
+function, a time, a duration, bytes) is the runtime error `TYPE` (it dropped the write; a
+host value still drops it). A runtime of bytecode 3 does not know `STEP`, so the version
+moved; a bytecode 3 envelope and a schema-10 artifact are refused and compiled again. The
+qualification campaign must run again for the bytecode 4 identity.
 
 ## What is compatible
 

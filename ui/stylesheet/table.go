@@ -125,6 +125,7 @@ func init() {
 		{name: "span", read: readWhole(1, 12, "span là số cột thẻ trải qua, số nguyên từ 1 đến 12", func(n string) string { return "grid-column:span " + n + "/span " + n }), domain: list(wholeRange(1, 12))},
 		{name: "place", read: readPlace, domain: list(placeWords)},
 		{name: "pin", read: readPin, domain: words("top", "bottom", "none")},
+		{name: "lazy", read: readLazy, domain: words("true", "false")},
 		{name: "container", read: readContainer, domain: list(widthWords)},
 		{name: "width", read: readSize("inline-size", true), domain: sizeDomain(true)},
 		{name: "min-width", read: readSize("min-inline-size", true), domain: sizeDomain(true)},
@@ -484,6 +485,7 @@ var misnamed = map[string]struct{ suggestion, message string }{
 	"flex-wrap":             {"wrap", "xuống dòng khi hết chỗ là wrap (true, false)"},
 	"overflow":              {"scroll", "vùng cuộn là scroll (x, y)"},
 	"grid-template-columns": {"columns", "số cột của lưới là columns"},
+	"content-visibility":    {"lazy", "bỏ qua phần ở xa màn hình là lazy (true, hoặc chiều cao ước lượng: 400px)"},
 }
 
 // notPresentation refuses a name the table does not read, and says what to write when it is the
@@ -874,6 +876,61 @@ func readPin(_ *Table, in Intent, v string) (reading, *Problem) {
 	case "false":
 		p.Suggestion = "none"
 		p.Message = "pin=\"false\": pin nhận top, bottom hoặc none (không ghim là none)"
+	}
+	return reading{}, p
+}
+
+// lazyEstimate is the height lazy="true" keeps for an element the browser has not drawn yet: a block of
+// a page, a little over half a phone's screen. A height written (lazy="2800px") replaces it.
+const lazyEstimate = "500px"
+
+// lazyHeight is a height lazy estimates: a number above 0 with a unit of the element's own or of the
+// screen. Not %: an estimate is the element's height, not a part of its parent's.
+var lazyHeight = regexp.MustCompile(`^(\d+(?:\.\d+)?)(px|rem|em|vw|vh|dvh)$`)
+
+// readLazy reads lazy: while the element is far from the screen, the browser does not lay out or paint
+// what it holds (content-visibility:auto) and keeps its room with an estimated height, then, once it
+// has drawn it, with the size it last had (contain-intrinsic-size: auto <estimate>). What it holds stays
+// in the page: find in page, a jump to an anchor inside, a screen reader and print all reach it. true
+// estimates lazyEstimate; a height estimates that height; false draws it as always, to undo lazy from a
+// width on (lazy="true" large:lazy="false"). The estimate is the height only: in a column the element
+// takes its width from its parent as always; where its width comes from what it holds (a centred column,
+// a row), it is 0 until first drawn, never an estimate that could overflow a phone, then the width it
+// last had. Print draws everything (@media print), whatever a browser does with content-visibility
+// there. A width prefix moves it; a state does not.
+func readLazy(_ *Table, in Intent, v string) (reading, *Problem) {
+	if strings.TrimSpace(in.State) != "" {
+		return reading{}, problem(in, "lazy không đổi theo trạng thái; theo độ rộng thì viết medium:lazy=\""+v+"\"")
+	}
+	estimate := ""
+	switch m := lazyHeight.FindStringSubmatch(v); {
+	case v == "true":
+		estimate = lazyEstimate
+	case v == "false":
+		return reading{declarations: "content-visibility:visible;contain-intrinsic-size:none"}, nil
+	case m != nil:
+		if f, _ := strconv.ParseFloat(m[1], 64); f == 0 {
+			return reading{}, problem(in, "lazy=\""+v+"\": chiều cao ước lượng phải lớn hơn 0 (400px, 25rem, 100vh); không ước lượng thì viết lazy=\"true\"")
+		}
+		estimate = v
+	}
+	if estimate != "" {
+		return reading{declarations: "content-visibility:auto;contain-intrinsic-inline-size:auto none;contain-intrinsic-block-size:auto " + estimate,
+			scoped: []scopedRule{{wrap: "@media print", declarations: "content-visibility:visible"}}}, nil
+	}
+	p := problem(in, "lazy nhận true, false hoặc chiều cao ước lượng có đơn vị (px, rem, em, vw, vh, dvh: 400px, 25rem), không có \""+v+"\"")
+	switch {
+	case plainNumber.MatchString(v):
+		p.Suggestion = v + "px"
+		p.Message = "lazy=\"" + v + "\": chiều cao ước lượng cần đơn vị: lazy=\"" + v + "px\" (px, rem, em, vw, vh, dvh)"
+	case strings.HasSuffix(v, "%") && plainNumber.MatchString(strings.TrimSuffix(v, "%")):
+		p.Message = "lazy=\"" + v + "\": chiều cao ước lượng là của chính phần tử, không theo khung cha: viết px, rem, em, vw, vh hoặc dvh (400px, 25rem, 100vh)"
+	case v == "auto":
+		p.Suggestion = "true"
+		p.Message = "lazy=\"auto\": lazy nhận true, false hoặc chiều cao ước lượng (400px); bỏ qua phần ở xa màn hình là lazy=\"true\""
+	case v == "visible":
+		p.Suggestion = "false"
+		p.Message = "lazy=\"visible\": lazy nhận true, false hoặc chiều cao ước lượng (400px); luôn vẽ là lazy=\"false\""
 	}
 	return reading{}, p
 }

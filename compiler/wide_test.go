@@ -214,3 +214,63 @@ func itoa(number int) string {
 		}
 	}
 }
+
+// A program whose envelope passes MaxProgramBinarySize with its code under MaxBytecodeSize is a compile
+// error at the place it crosses (15/10/2026): the debug table writes each entry's file name, so a module
+// with many positions on a long path did, and it ran but was never cached and failed every check.
+// CONTROL: the same module on a short path compiles, and its artifact is valid.
+func TestAProgramPastTheEnvelopeIsACompileErrorAtItsPlace(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("let p = 0;\n")
+	for line := 0; line < 3000; line++ {
+		source.WriteString("p = p - 1 - 2 - 3;\n")
+	}
+	compile := func(name string) (*Bytecode, error) {
+		t.Helper()
+		program, err := parseProgramSource(source.String(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := newCompilerWithSources(map[string]string{name: source.String()})
+		if err := c.Compile(program); err != nil {
+			return nil, err
+		}
+		return c.ByteCodeResult()
+	}
+
+	short := "m.kitwork.js"
+	control, err := compile(short)
+	if err != nil {
+		t.Fatalf("CONTROL: %v", err)
+	}
+	if err := ValidateArtifact(control); err != nil {
+		t.Fatalf("CONTROL: %v", err)
+	}
+	data, err := control.Program.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	long := strings.Repeat("folder/", 1500) + short
+	entries := control.Program.DebugEntries()
+	fixed := len(data) - len(entries)*(16+len(short))
+	size := fixed + len(entries)*(16+len(long))
+	crossing := 0
+	for fixed+(crossing+1)*(16+len(long)) <= runtime.MaxProgramBinarySize {
+		crossing++
+	}
+	if crossing >= len(entries) {
+		t.Fatalf("the envelope fits: %d bytes", size)
+	}
+	_, err = compile(long)
+	at := entries[crossing].SourceLocation
+	want := long + ":" + itoa(int(at.Line)) + ":" + itoa(int(at.Column)) + ": chương trình lưu ra " + itoa(size) +
+		" byte (mã, hằng và bảng vị trí, mỗi mục ghi tên tệp của nó), quá giới hạn 67108864 byte của một chương trình (đến đây thì vượt)"
+	if err == nil || !strings.HasPrefix(err.Error(), want) {
+		got := "<nil>"
+		if err != nil {
+			got = strings.TrimPrefix(err.Error(), long[:len(long)-len(short)])
+		}
+		t.Fatalf("error = …%.300s\nwant  …%.300s", got, want[len(long)-len(short):])
+	}
+}

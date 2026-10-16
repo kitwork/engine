@@ -347,14 +347,14 @@ func (cq *CollectionQuery) OrderBy(args ...value.Value) *CollectionQuery {
 
 func (cq *CollectionQuery) Limit(args ...value.Value) *CollectionQuery {
 	if len(args) > 0 {
-		cq.spec.LimitN = int(args[0].N)
+		cq.spec.LimitN = args[0].Int() // NaN is 0 (no limit), Infinity the largest int (15/10/2026)
 	}
 	return cq
 }
 
 func (cq *CollectionQuery) Skip(args ...value.Value) *CollectionQuery {
 	if len(args) > 0 {
-		cq.spec.SkipN = int(args[0].N)
+		cq.spec.SkipN = args[0].Int()
 	}
 	return cq
 }

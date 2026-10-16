@@ -449,6 +449,9 @@ type InfixExpression struct {
 	Left     Expression
 	Operator string
 	Right    Expression
+	// Step marks the x ± 1 the parser lowers x++, x--, ++x and --x to: the compiler makes a number of
+	// x before it steps, as JavaScript's ++ does (runtime.STEP, 15/10/2026), where + joins a string.
+	Step bool
 }
 
 func (ie *InfixExpression) expressionNode() {}

@@ -59,7 +59,21 @@ import (
 // truthiness (a negative number is true) and a[i] = v past the end (nulls between) changed with it,
 // and need no recompile. A cached artifact of schema 8 gives x++ the new value: the bump retires it.
 // No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 9
+//
+// 10 (15/10/2026, the review of 9): an update or a compound assignment of a member or an item whose object
+// or key does more than read (a[i++]++, get().n += 1) evaluates them once, into hidden slots (#N), as
+// JavaScript does; one whose object and key only read compiles as before, byte for byte. A line break
+// before ++ or -- ends the expression (x\n++y is x; ++y, as JavaScript reads it; it was x++; y). A cached
+// artifact of schema 9 reads one item of a[i++]++ and writes another: the bump retires it. No opcode or
+// operand changed.
+//
+// 11 (15/10/2026, the owner's L1 to L3, on bytecode 4): x++, x--, ++x and --x lower to STEP, which makes
+// a number of x as JavaScript's ToNumber does, then steps it (x; STEP 1 where x; PUSH 1; ADD was), and
+// x++ used as a value makes the old x a number (x; STEP 0). The opcode is new, so bytecode 4 moved the
+// fingerprint already; the schema moves with it because the lowering changed too, so an artifact of
+// schema 10 is retired by both. Division by zero (Infinity, NaN) and a write through null or a string
+// (the runtime error TYPE) are the VM's and need no recompile.
+const CompilerSchemaVersion uint16 = 11
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

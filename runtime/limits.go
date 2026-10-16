@@ -3,7 +3,10 @@ package runtime
 const (
 	// MaxProgramBinarySize bounds the complete persisted Program envelope. Its debug table writes each
 	// entry's file name, so a route bundle's envelope is about 15 times its code (apptop.vn 14/10/2026:
-	// 993,905 bytes for 65,038): 64 MiB holds a Program at MaxBytecodeSize with room to spare.
+	// 993,905 bytes for 65,038), and 64 MiB holds such a bundle at MaxBytecodeSize. It does not hold every
+	// program under that limit: a module with a position every 2 or 3 bytes of code, on a path of some 70
+	// characters, passes it first. The compiler refuses such a program where it crosses
+	// (Program.EncodedSize, 15/10/2026; until then it ran, but was never cached and failed every check).
 	MaxProgramBinarySize = 64 << 20
 	// MaxBytecodeSize is the largest verified instruction stream in one Program: 2 MiB (bytecode 3,
 	// 14/10/2026; it was 65,535, the reach of a two-byte jump, and apptop.vn's largest route compiled

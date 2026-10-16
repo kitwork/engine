@@ -1,6 +1,7 @@
 package work
 
 import (
+	"math"
 	"strconv"
 
 	"github.com/kitwork/engine/utilities/napas"
@@ -28,6 +29,12 @@ func (n *Napas) Amount(v value.Value) *Napas {
 		n.core.Amount(v.Text())
 	case value.Number:
 		val := v.N
+		if val != val || math.IsInf(val, 0) {
+			// a number that is not finite is not read, as a value that is no number (null, true) is not:
+			// an EMV amount is digits, and parseInt("abc") is NaN since 16/10/2026 (the owner's E2), which
+			// went into the payload as the amount "NaN" (5403NaN)
+			break
+		}
 		var amt string
 		if val == float64(int64(val)) {
 			amt = strconv.FormatInt(int64(val), 10)

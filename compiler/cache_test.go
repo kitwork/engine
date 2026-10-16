@@ -135,6 +135,15 @@ func bytecode2FingerprintFor(schema uint16) [sha256.Size]byte {
 	return compilerFingerprintWith(schema, 2, 1, bytecode2InstructionSetChecksum)
 }
 
+// bytecode3InstructionSetChecksum is the instruction contract of bytecode 3, which every engine from
+// 14/10/2026 to bytecode 4 (15/10/2026, STEP) stamped into its compiler fingerprint.
+const bytecode3InstructionSetChecksum = "f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678"
+
+// bytecode3FingerprintFor is the fingerprint a compiler of this schema stamped on bytecode 3.
+func bytecode3FingerprintFor(schema uint16) [sha256.Size]byte {
+	return compilerFingerprintWith(schema, 3, 1, bytecode3InstructionSetChecksum)
+}
+
 // Schema 4 changed what some source compiles to (reserved words as keys). A cache a schema-3 engine
 // wrote must never run: the current engine looks for it under another name, and an artifact with the
 // schema-3 stamp is refused and replaced even when it sits under the current name.

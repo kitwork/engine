@@ -95,6 +95,8 @@ func NewFunc(fn func(args ...Value) Value) Value {
 type FuncObject struct {
 	Fn    func(args ...Value) Value
 	Props map[string]Value
+	// date marks the valueOf of a date made by new Date() (NewDateValueOf)
+	date *dateMark
 }
 
 func NewFuncObject(fn func(args ...Value) Value, props map[string]Value) Value {

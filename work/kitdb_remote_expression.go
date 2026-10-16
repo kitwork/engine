@@ -876,6 +876,11 @@ func evaluateKitSQLBinary(expression *kitSQLExpression, resolve kitSQLExpression
 		if left.K != value.Number || right.K != value.Number {
 			return value.Value{}, fmt.Errorf("kitdb SQL: %s requires numeric operands", operator)
 		}
+		if (operator == "/" || operator == "%") && right.N == 0 {
+			// SQL's NULL, as SQLite gives it: a script's 1 / 0 is Infinity since 15/10/2026 (value.Div),
+			// and SQL is not JavaScript
+			return value.NewNil(), nil
+		}
 		var result value.Value
 		switch operator {
 		case "+":

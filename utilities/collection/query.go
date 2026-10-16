@@ -66,6 +66,16 @@ func (q Query) Apply(entries []IndexEntry) []IndexEntry {
 
 func (f Filter) match(e IndexEntry) bool {
 	got := fieldOf(e, f.Field)
+	if notANumber(got) || notANumber(f.Value) {
+		// NaN equals nothing and is ordered with nothing, as in JavaScript (16/10/2026, the owner's E1):
+		// compareValues gives 0 for NaN beside any number, so views = NaN matched every number
+		switch f.Op {
+		case "", "=", "==", ">", ">=", "<", "<=":
+			return false
+		case "!=":
+			return true
+		}
+	}
 	switch f.Op {
 	case "", "=", "==":
 		return compareValues(got, f.Value) == 0
@@ -148,7 +158,7 @@ func containsValue(haystack, needle any) bool {
 	switch h := haystack.(type) {
 	case []any:
 		for _, item := range h {
-			if compareValues(item, needle) == 0 {
+			if !notANumber(item) && !notANumber(needle) && compareValues(item, needle) == 0 {
 				return true
 			}
 		}
@@ -158,6 +168,12 @@ func containsValue(haystack, needle any) bool {
 	default:
 		return false
 	}
+}
+
+// notANumber reports v the number NaN.
+func notANumber(v any) bool {
+	n, ok := toFloat(v)
+	return ok && n != n
 }
 
 func toFloat(v any) (float64, bool) {

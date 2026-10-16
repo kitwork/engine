@@ -100,6 +100,9 @@ var instructionTable = [256]InstructionSpec{
 	TRUE_WIDE:  instruction("TRUE_WIDE", []uint8{3}, 1, 0, 3),
 	FALSE_WIDE: instruction("FALSE_WIDE", []uint8{3}, 1, 0, 3),
 	ITER_WIDE:  instruction("ITER_WIDE", []uint8{3}, 2, 3, 15),
+
+	// STEP costs what the PUSH 1; ADD it replaces in x++ cost, so no program's energy moved (bytecode 4)
+	STEP: instruction("STEP", []uint8{1}, 1, 1, 3),
 }
 
 // LookupInstruction returns metadata only for opcodes implemented by the VM.

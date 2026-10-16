@@ -3,14 +3,12 @@ package ui
 import (
 	"encoding/json"
 	"html"
-	"math"
-	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/kitwork/engine/jit/highlight"
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
 // A compiled page is a tree of ops. Everything that does not depend on data is joined into static
@@ -226,17 +224,22 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		return
 	}
 	hidden := o.callerShow != nil && !truthy(o.callerShow.eval(scope))
+	// each value that goes in is read once (16/10/2026: an input the kernel is handed as a literal was
+	// read twice, once for the literal and once for the instance)
+	var values []any
+	if len(o.bindings) > 0 {
+		values = make([]any, len(o.bindings))
+		for i, b := range o.bindings {
+			values[i] = b.in.value(scope)
+		}
+	}
 	var inputs string
 	if len(o.inputs) > 0 {
-		inputs = o.inputPairs(scope)
+		inputs = o.inputPairs(scope, values)
 	}
 	if len(o.bindings) > 0 {
 		saved := make([]any, len(o.bindings))
 		had := make([]bool, len(o.bindings))
-		values := make([]any, len(o.bindings))
-		for i, b := range o.bindings {
-			values[i] = b.in.value(scope)
-		}
 		for i, b := range o.bindings {
 			saved[i], had[i] = scope[b.name]
 			scope[b.name] = values[i]
@@ -334,7 +337,9 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		if a.image && !safeImage(stringify(v)) {
 			continue
 		}
-		writeAttr(&r.b, a.name, stringify(v))
+		if text, ok := attributeText(a.name, v); ok {
+			writeAttr(&r.b, a.name, text)
+		}
 	}
 	if o.optionValue != nil && len(r.selects) > 0 {
 		if stringify(r.selects[len(r.selects)-1]) == o.optionValue.render(scope) {
@@ -390,97 +395,70 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 }
 
 // inputPairs are an instance's inputs in the grouped form the kernel seeds it from
-// (data-kitwork-scope="open: true; label: 'Tài khoản'"): page data as a literal, read now.
-func (o *elemOp) inputPairs(scope map[string]any) string {
+// (data-kitwork-scope="open: true; label: 'Tài khoản'"): a value that follows live state as its
+// expression, which the kernel runs in the scope around the host; page data as a literal of the value
+// the server read (values, one for each of o.bindings). A value no literal writes exactly (an
+// iterator, a value that holds itself, a host's Go function) is replaced in values by what its literal
+// reads back as, so the server paints the instance from the value the browser starts it from
+// (16/10/2026: NaN, undefined, a lambda were null in the browser and themselves on the server).
+func (o *elemOp) inputPairs(scope map[string]any, values []any) string {
 	pairs := make([]string, 0, len(o.inputs))
 	for _, in := range o.inputs {
 		value := in.source
 		if value == "" {
-			value = literal(in.in.value(scope), 0)
+			at := -1
+			for i, b := range o.bindings {
+				if b.in == in.in {
+					at = i
+					break
+				}
+			}
+			var v any
+			if at >= 0 {
+				v = values[at]
+			} else {
+				v = in.in.value(scope)
+			}
+			text, exact := hydrate.Literal(v)
+			if !exact && at >= 0 {
+				if ir, err := hydrate.Compile(text); err == nil {
+					if back, err := hydrate.Eval(ir, scope); err == nil {
+						values[at] = back
+					}
+				}
+			}
+			value = text
 		}
 		pairs = append(pairs, in.name+": "+value)
 	}
 	return strings.Join(pairs, "; ")
 }
 
-// literal writes a value as an expression of the grammar the kernel reads: what the server read from
-// the page's data, handed to the browser as it is. Past a depth, or for what has no literal (a
-// function), it is null.
-func literal(v any, depth int) string {
-	return literalWithin(v, depth, nil)
+// literal writes a value as an expression of the grammar the kernel reads back as that value
+// (hydrate.Literal).
+func literal(v any) string {
+	text, _ := hydrate.Literal(v)
+	return text
 }
 
-// literalID is what an object or array is: its map, or its slice's first element and length.
-type literalID struct {
-	pointer uintptr
-	length  int
-}
-
-// literalWithin is literal inside the objects and arrays on path, the ones v sits in. One of them met
-// again is a value that holds itself — {{ x = $ }} puts the page's scope into itself — and it is null
-// there: before, it was written again to the depth bound, and each key back to itself doubled what was
-// written at every level, three of them some 15 GB for one request (14/10/2026).
-func literalWithin(v any, depth int, path []literalID) string {
-	if depth > 16 {
-		return "null"
+// attributeText is what an attribute holds for its value, and whether it is there, as the kernel writes
+// it (writeBinding): an attribute the element has no property of that very name for — a name with a
+// hyphen (aria-label, aria-expanded), datetime, inputmode — goes through setAttribute, so it is left
+// out for null and undefined, and, but for aria-*, for false, and is empty for true; any other is set as
+// the property, which holds the value's text, "" for null and undefined (16/10/2026: alt="{{ x ? 'x' :
+// null }}" wrote aria-label="" and the kernel then took the attribute away).
+func attributeText(name string, v any) (string, bool) {
+	if !strings.Contains(name, "-") && name != "datetime" && name != "inputmode" {
+		return stringify(v), true
 	}
-	var id literalID
-	switch t := v.(type) {
-	case []any:
-		if len(t) > 0 {
-			id = literalID{pointer: reflect.ValueOf(t).Pointer(), length: len(t)}
-		}
-	case map[string]any:
-		if t != nil {
-			id = literalID{pointer: reflect.ValueOf(t).Pointer(), length: -1}
-		}
+	aria := strings.HasPrefix(name, "aria-")
+	switch {
+	case v == nil || v == hydrate.Undefined, v == false && !aria:
+		return "", false
+	case v == true && !aria:
+		return "", true
 	}
-	if id != (literalID{}) {
-		for _, on := range path {
-			if on == id {
-				return "null"
-			}
-		}
-		path = append(path, id)
-	}
-	switch t := v.(type) {
-	case nil:
-		return "null"
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case float64:
-		if math.IsNaN(t) || math.IsInf(t, 0) {
-			return "null"
-		}
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(t)
-	case int64:
-		return strconv.FormatInt(t, 10)
-	case string:
-		return quoteString(t)
-	case []any:
-		parts := make([]string, len(t))
-		for i, x := range t {
-			parts[i] = literalWithin(x, depth+1, path)
-		}
-		return "[" + strings.Join(parts, ", ") + "]"
-	case map[string]any:
-		keys := make([]string, 0, len(t))
-		for k := range t {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		parts := make([]string, len(keys))
-		for i, k := range keys {
-			parts[i] = quoteString(k) + ": " + literalWithin(t[k], depth+1, path)
-		}
-		return "{" + strings.Join(parts, ", ") + "}"
-	}
-	return "null"
+	return stringify(v), true
 }
 
 func (o *elemOp) renderChildren(r *run, scope map[string]any) {

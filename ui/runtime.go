@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/kitwork/engine/jit/hydrate"
 )
 
 // Inside a Kitwork component the kernel runs (appearance, dropdown) the page is live before the page
@@ -644,18 +646,16 @@ func classPairName(class string) bool {
 }
 
 // interpolationOnClient is the expression an interpolation becomes on the client — one {{ }} as it is,
-// text around it joined with + — and whether it runs there.
+// more than one part the joined expression the server prints too, the parts in a list joined with an
+// empty separator (16/10/2026: (a) + ' text' + (b), whose + added numbers and booleans) — and whether it
+// runs there.
 func (s *frame) interpolationOnClient(n *Node, in *interpolation) (string, bool, error) {
 	if in == nil {
 		return "", false, nil
 	}
-	var parts []string
 	client := false
 	for _, p := range in.parts {
 		if p.e == nil {
-			if p.text != "" {
-				parts = append(parts, quoteString(p.text))
-			}
 			continue
 		}
 		on, err := s.onClient(p.e, n, nil)
@@ -663,18 +663,20 @@ func (s *frame) interpolationOnClient(n *Node, in *interpolation) (string, bool,
 			return "", false, err
 		}
 		client = client || on
-		parts = append(parts, "("+p.e.source+")")
 	}
 	if e := in.single(); e != nil {
 		return e.source, client, nil
 	}
-	return strings.Join(parts, " + "), client, nil
+	if in.joined == nil {
+		return "", false, nil
+	}
+	return in.joined.source, client, nil
 }
 
 // quoteString writes a string literal for an expression: single quotes, the way the grammar's strings
 // are written in markup.
 func quoteString(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(s) + "'"
+	return "'" + hydrate.QuoteText(s) + "'"
 }
 
 // hasTopLevelSemicolon reports a ';' outside strings and brackets: two statements, which the grouped

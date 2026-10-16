@@ -266,7 +266,8 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		root.Attrs = append(append([]Attr(nil), def.root.Attrs...), extra...)
 		// an alias written inside a component's .ui is its instance's own, unseen by the page
 		rootCtx := ctx{inline: cx.inline, file: root.File, breadcrumb: cx.breadcrumb, kept: cx.kept, scope: inner, forAt: inside.forAt,
-			aliases: &aliasFrame{owner: def.name, set: map[string]string{}, parent: cx.aliases}, pageBackground: cx.pageBackground, paint: cx.paint}
+			aliases: &aliasFrame{owner: def.name, set: map[string]string{}, parent: cx.aliases}, pageBackground: cx.pageBackground, paint: cx.paint,
+			onScreen: cx.onScreen, lazyAround: cx.lazyAround}
 		return c.element(&root, rootCtx, site)
 	}
 	// what is written on the host and inside it reads the component's names first

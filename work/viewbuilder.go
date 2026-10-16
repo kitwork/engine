@@ -2,6 +2,7 @@ package work
 
 import (
 	"encoding/json"
+	"net/http"
 
 	"github.com/kitwork/engine/value"
 )
@@ -136,7 +137,23 @@ func (vb *ViewBuilder) flush() {
 		notfoundMode = true
 	}
 
-	html := rd.BindPage(page, notfoundMode, value.Value{K: value.Map, V: binding})
+	html, missing := rd.BindPage(page, notfoundMode, value.Value{K: value.Map, V: binding})
+	if missing != nil {
+		// no shell (index.kitwork.html) to put the page in, or neither the page nor a not-found page:
+		// the error names a path of the server
+		rd.answerMissing(r, html, missing)
+		return
+	}
+	if html.K == value.Invalid {
+		// a template whose own text does not prepare, a page a handler chose (ctx.view("page")) or a
+		// not-found page: the request fails as a page that does not compile, the message whole in the log
+		// and, while developing, in the answer; in production the answer is the status and the request id
+		// (16/10/2026: the message was the page, in production too)
+		err := uncaught(html.Text())
+		r.tenant.recordFailure(r, "view", err)
+		r.fail(err, http.StatusInternalServerError)
+		return
+	}
 	if notfound {
 		c.Response().HTML(html, 404)
 	} else {

@@ -12,9 +12,11 @@
 //	[op, left, right]        binary: + - * / % > < >= <= == != === !== && || ??
 //	                         (== and != coerce like JavaScript; === and !== are strict; ?? takes
 //	                         the right side only when the left is null or undefined)
-//	                         a?.b, a?.[k] and f?.() compile to the plain ".", "idx" and "call":
-//	                         every access is already null-safe, so the ? adds nothing to keep
-//	["u!", e] / ["u-", e]    unary not / negate
+//	                         a?.b, a?.[k] and f?.() compile to the plain ".", "idx" and "call"
+//	                         (o.m?.() to "()"): every access is already null-safe, so the ? adds
+//	                         nothing to keep
+//	["u!", e] / ["u-", e]    unary not / negate; ["u+", e] is Number(e), as +e in JavaScript
+//	                         (16/10/2026)
 //	["?", c, a, b]           ternary c ? a : b
 //	["=", "name", value]     assignment to a scope variable (lexical: owner scope, else nearest)
 //	["=$", "name", value]    assignment to the PAGE scope: $.name = value — the same $ the
@@ -28,14 +30,18 @@
 //	                         accepts: a name, or $.name.
 //	[".", obj, "name"]       member access obj.name
 //	["idx", obj, key]        index access obj[key] — key is an expression (number or string)
-//	["()", obj, "name", []]  method call obj.name(args...)
+//	["()", obj, "name", []]  method call obj.name(args...); ["()", obj, key, []] with key an
+//	                         expression is obj[key](args...) (16/10/2026)
 //	["{}", [[k, v], …]]      object literal { count: 5, open: false } — a BLUEPRINT, parsed not
 //	                         eval'd (objects allow a trailing comma, matching the server language)
 //	["[]", [e, …]]           array literal [1, 2, 3] (arrays REJECT a trailing comma, ditto)
 //	[";", e1, e2, …]         sequence: count = 5; open = true — evaluates left to right,
 //	                         yields the last value
-//	["=>", [params], body]   lambda: () => count = count + 1 — a NAMED IR TREE, i.e. code-as-data.
+//	["=>", [params], body, source]
+//	                         lambda: () => count = count + 1 — a NAMED IR TREE, i.e. code-as-data.
 //	                         The body is this same grammar; parens are required around params.
+//	                         source is the lambda as written, its text as JavaScript gives a
+//	                         function's (16/10/2026)
 //	["call", callee, [args]] bare call: inc() — callee must evaluate to a lambda value
 //
 // The line the grammar never crosses is ARBITRARY CODE: a lambda here is not JavaScript — it is a
@@ -49,11 +55,18 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
+
+	"github.com/kitwork/engine/value"
 )
 
 type tok struct {
 	t string // "num" | "str" | "id" | "op" | "eof"
 	v string
+	// at is where the token starts in the source, so a lambda keeps its source as written (16/10/2026,
+	// as the kernel's tokens keep p)
+	at int
 }
 
 func isIDStart(c byte) bool {
@@ -79,30 +92,22 @@ func lex(s string) ([]tok, error) {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			i++
 		case isDigit(c) || (c == '.' && i+1 < n && isDigit(s[i+1])):
-			j := i
-			dot := false
-			for j < n {
-				if isDigit(s[j]) {
-					j++
-					continue
-				}
-				if s[j] == '.' && !dot {
-					dot = true
-					j++
-					continue
-				}
-				break
-			}
-			out = append(out, tok{"num", s[i:j]})
+			// A number as JavaScript writes one — 12, 1.5, .5, 5., 1e-13, 2E3, 0x1f, 0o17, 0b101 — and
+			// read as Number reads it (16/10/2026: 1e-13 and 0x1f were refused, on both ends). The kernel's
+			// lex reads the same with one regular expression.
+			j := numberEnd(s, i)
+			out = append(out, tok{"num", s[i:j], i})
 			i = j
 		case c == '"' || c == '\'':
 			// A string reads its escapes the way JavaScript does: \n \t \r \b \f \v \0, \' \" \\,
-			// \uXXXX, and any other escaped character stands for itself. Before 30/09 there were
-			// none — 'a\nb' was five characters, value.split('\n') split on a backslash, and
-			// 'it\'s' ended at the escaped quote and failed to parse.
+			// \xHH, \uXXXX, \u{X…}, and any other escaped character stands for itself. Before 30/09 there
+			// were none — 'a\nb' was five characters, value.split('\n') split on a backslash, and
+			// 'it\'s' ended at the escaped quote and failed to parse. \xHH and \u{X…} came 16/10/2026,
+			// with a string as JavaScript's UTF-16 units: '\ud83d\ude00' is '😀', and '\ud800' keeps its
+			// lone half (jstext.go).
 			q := c
 			j := i + 1
-			var b strings.Builder
+			var u []uint16
 			closed := false
 			for j < n {
 				ch := s[j]
@@ -111,57 +116,77 @@ func lex(s string) ([]tok, error) {
 					break
 				}
 				if ch != '\\' || j+1 >= n {
-					b.WriteByte(ch)
-					j++
+					r, size := utf8.DecodeRuneInString(s[j:])
+					if r >= 0x10000 {
+						hi, lo := utf16.EncodeRune(r)
+						u = append(u, uint16(hi), uint16(lo))
+					} else {
+						u = append(u, uint16(r))
+					}
+					j += size
 					continue
 				}
 				j++
-				switch e := s[j]; e {
-				case 'n':
-					b.WriteByte('\n')
-				case 't':
-					b.WriteByte('\t')
-				case 'r':
-					b.WriteByte('\r')
-				case 'b':
-					b.WriteByte('\b')
-				case 'f':
-					b.WriteByte('\f')
-				case 'v':
-					b.WriteByte('\v')
-				case '0':
-					b.WriteByte(0)
-				case 'u':
-					if j+4 < n {
-						if code, err := strconv.ParseUint(s[j+1:j+5], 16, 32); err == nil {
-							b.WriteRune(rune(code))
-							j += 4
-							break
-						}
+				if code, width, ok := hexEscape(s[j:]); ok {
+					if code > 0x10FFFF {
+						return nil, errors.New("hydrate: undefined Unicode code-point")
 					}
-					b.WriteByte('u')
+					if code >= 0x10000 {
+						hi, lo := utf16.EncodeRune(rune(code))
+						u = append(u, uint16(hi), uint16(lo))
+					} else {
+						u = append(u, uint16(code))
+					}
+					j += width
+					continue
+				}
+				switch e := s[j]; e {
+				case '\n':
+					// a backslash at the end of a line continues the string on the next, as in JavaScript
+				case 'n':
+					u = append(u, '\n')
+				case 't':
+					u = append(u, '\t')
+				case 'r':
+					u = append(u, '\r')
+				case 'b':
+					u = append(u, '\b')
+				case 'f':
+					u = append(u, '\f')
+				case 'v':
+					u = append(u, '\v')
+				case '0':
+					u = append(u, 0)
 				default:
-					b.WriteByte(e) // \' \" \\ \/ and anything else: the character itself
+					// \' \" \\ \/ and anything else: the character itself
+					r, size := utf8.DecodeRuneInString(s[j:])
+					if r >= 0x10000 {
+						hi, lo := utf16.EncodeRune(r)
+						u = append(u, uint16(hi), uint16(lo))
+					} else {
+						u = append(u, uint16(r))
+					}
+					j += size - 1
 				}
 				j++
 			}
 			if !closed {
 				return nil, errors.New("hydrate: unterminated string")
 			}
-			out = append(out, tok{"str", strMark + b.String()})
+			out = append(out, tok{"str", strMark + fromUnits(u), i})
 			i = j + 1
 		case isIDStart(c):
 			j := i
 			for j < n && isIDPart(s[j]) {
 				j++
 			}
-			out = append(out, tok{"id", s[i:j]})
+			out = append(out, tok{"id", s[i:j], i})
 			i = j
 		default:
 			// Longest match first: `===` must not lex as `==` + `=`.
 			if i+2 < n {
 				if three := s[i : i+3]; three == "===" || three == "!==" {
-					out = append(out, tok{"op", three})
+					out = append(out, tok{"op", three, i})
 					i += 3
 					continue
 				}
@@ -170,20 +195,99 @@ func lex(s string) ([]tok, error) {
 				if two := s[i : i+2]; two == "==" || two == "!=" || two == ">=" || two == "<=" || two == "&&" || two == "||" || two == "=>" || two == "++" || two == "--" || two == "??" ||
 					// ?. is optional chaining — unless a digit follows: a ? .5 : 1 is a ternary.
 					(two == "?." && !(i+2 < n && s[i+2] >= '0' && s[i+2] <= '9')) {
-					out = append(out, tok{"op", two})
+					out = append(out, tok{"op", two, i})
 					i += 2
 					continue
 				}
 			}
 			if strings.IndexByte("+-*/%<>!?:().,={}[];", c) >= 0 {
-				out = append(out, tok{"op", string(c)})
+				out = append(out, tok{"op", string(c), i})
 				i++
 				continue
 			}
 			return nil, errors.New("hydrate: unexpected character '" + string(c) + "'")
 		}
 	}
-	return append(out, tok{"eof", ""}), nil
+	return append(out, tok{"eof", "", n}), nil
+}
+
+// numberEnd is where the number that starts at i ends, as the kernel's
+// /^(0x[\da-f]+|0o[0-7]+|0b[01]+|(\d+\.?\d*|\.\d+)(e[+-]?\d+)?)/i reads it.
+func numberEnd(s string, i int) int {
+	n := len(s)
+	if i+2 < n && s[i] == '0' {
+		var digit func(byte) bool
+		switch s[i+1] {
+		case 'x', 'X':
+			digit = func(c byte) bool { return isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F' }
+		case 'o', 'O':
+			digit = func(c byte) bool { return c >= '0' && c <= '7' }
+		case 'b', 'B':
+			digit = func(c byte) bool { return c == '0' || c == '1' }
+		}
+		if digit != nil && digit(s[i+2]) {
+			j := i + 2
+			for j < n && digit(s[j]) {
+				j++
+			}
+			return j
+		}
+	}
+	j := i
+	for j < n && isDigit(s[j]) {
+		j++
+	}
+	if j < n && s[j] == '.' {
+		j++
+		for j < n && isDigit(s[j]) {
+			j++
+		}
+	}
+	if j < n && (s[j] == 'e' || s[j] == 'E') {
+		k := j + 1
+		if k < n && (s[k] == '+' || s[k] == '-') {
+			k++
+		}
+		if k < n && isDigit(s[k]) {
+			for k < n && isDigit(s[k]) {
+				k++
+			}
+			j = k
+		}
+	}
+	return j
+}
+
+// hexEscape reads the escape after a backslash that names a code point: xHH, uXXXX or u{X…}, and how
+// many bytes it took, as the kernel's /^(?:x([\da-f]{2})|u([\da-f]{4})|u\{([\da-f]+)\})/i does.
+func hexEscape(s string) (uint64, int, bool) {
+	hex := func(t string) bool {
+		for i := 0; i < len(t); i++ {
+			c := t[i]
+			if !(isDigit(c) || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') {
+				return false
+			}
+		}
+		return t != ""
+	}
+	switch {
+	case len(s) >= 3 && s[0] == 'x' && hex(s[1:3]):
+		code, _ := strconv.ParseUint(s[1:3], 16, 64)
+		return code, 3, true
+	case len(s) >= 5 && s[0] == 'u' && hex(s[1:5]):
+		code, _ := strconv.ParseUint(s[1:5], 16, 64)
+		return code, 5, true
+	case len(s) >= 3 && s[0] == 'u' && s[1] == '{':
+		end := strings.IndexByte(s, '}')
+		if end > 2 && hex(s[2:end]) {
+			code, err := strconv.ParseUint(s[2:end], 16, 64)
+			if err != nil {
+				code = 0x110000 // past every code point: an error, as String.fromCodePoint throws
+			}
+			return code, end + 1, true
+		}
+	}
+	return 0, 0, false
 }
 
 var precedence = map[string]int{
@@ -191,6 +295,7 @@ var precedence = map[string]int{
 }
 
 type parser struct {
+	src  string
 	toks []tok
 	pos  int
 	// depth is how deep the parser recurses now (nestingLimit).
@@ -241,7 +346,7 @@ func tooDeep(node any) bool {
 
 func (p *parser) peek() tok {
 	if p.pos >= len(p.toks) {
-		return tok{"eof", ""}
+		return tok{"eof", "", 0}
 	}
 	return p.toks[p.pos]
 }
@@ -374,7 +479,7 @@ func (p *parser) binary(min int) (any, error) {
 }
 
 func (p *parser) unary() (any, error) {
-	if v := p.peek().v; v == "++" || v == "--" || v == "!" || v == "-" {
+	if v := p.peek().v; v == "++" || v == "--" || v == "!" || v == "-" || v == "+" {
 		// an operator before an operand nests one level, as a parenthesis does (assign)
 		if err := p.enter(); err != nil {
 			return nil, err
@@ -389,7 +494,8 @@ func (p *parser) unary() (any, error) {
 		}
 		return updateNode(v, target, true)
 	}
-	if v := p.peek().v; v == "!" || v == "-" {
+	if v := p.peek().v; v == "!" || v == "-" || v == "+" {
+		// +x is Number(x), as in JavaScript (16/10/2026, the owner's E2)
 		p.next()
 		e, err := p.unary()
 		if err != nil {
@@ -439,32 +545,34 @@ func (p *parser) postfix() (any, error) {
 			if p.peek().t != "id" {
 				return nil, errors.New("hydrate: ?. needs a name, [ or ( after it")
 			}
-			p.toks[p.pos-1] = tok{"op", "."}
+			p.toks[p.pos-1] = tok{"op", ".", p.toks[p.pos-1].at}
 			p.pos--
 		}
 		if p.peek().v == "." {
 			p.next()
-			name := p.next().v
-			if p.peek().v == "(" {
-				p.next()
-				args, err := p.callArgs()
-				if err != nil {
-					return nil, err
-				}
-				e = []any{"()", e, name, args}
-			} else {
-				e = []any{".", e, name}
+			// a name follows a dot, as in JavaScript: o., o.) and o.'a' are refused (16/10/2026: o. read
+			// member "" here and threw in the kernel, so {{ user. }} compiled and printed nothing)
+			if p.peek().t != "id" {
+				return nil, errors.New("hydrate: . needs a name after it")
 			}
+			e = []any{".", e, p.next().v}
 			continue
 		}
-		// bare call: inc(), add(1, 2) — the callee is whatever expression came before.
+		// a call: of a member it keeps what the member was read from as this, however it was read —
+		// o.m(), o[k](), o.m?.() and (o.m)() call m on o, as JavaScript does (16/10/2026: o[k]() and
+		// o.m?.() called it bare, on the scope); a computed key rides as its expression. Anything else
+		// is a bare call: inc(), add(1, 2) — the callee is whatever expression came before.
 		if p.peek().v == "(" {
 			p.next()
 			args, err := p.callArgs()
 			if err != nil {
 				return nil, err
 			}
-			e = []any{"call", e, args}
+			if node, ok := e.([]any); ok && len(node) == 3 && (node[0] == "." || node[0] == "idx") {
+				e = []any{"()", node[1], node[2], args}
+			} else {
+				e = []any{"call", e, args}
+			}
 			continue
 		}
 		// a[b]: the key is any expression — items[1], items[i], map[key] — the same read as a.name once
@@ -525,11 +633,8 @@ func (p *parser) primary() (any, error) {
 	switch t.t {
 	case "num":
 		p.next()
-		f, err := strconv.ParseFloat(t.v, 64)
-		if err != nil {
-			return nil, errors.New("hydrate: bad number '" + t.v + "'")
-		}
-		return []any{"#", f}, nil
+		// as Number reads the text: past the largest number Infinity, as the kernel's Number(t.v)
+		return []any{"#", value.StringToNumber(t.v)}, nil
 	case "str":
 		p.next()
 		return []any{"#", strings.TrimPrefix(t.v, strMark)}, nil
@@ -552,7 +657,9 @@ func (p *parser) primary() (any, error) {
 				if err != nil {
 					return nil, err
 				}
-				return []any{"=>", params, body}, nil
+				// the lambda as written, from its ( to the end of its body: its text, as JavaScript's
+				source := strings.TrimSpace(p.src[t.at:p.peek().at])
+				return []any{"=>", params, body, source}, nil
 			}
 			p.next()
 			e, err := p.assign()
@@ -657,12 +764,17 @@ func (p *parser) tryArrowParams() ([]any, bool) {
 }
 
 // Compile parses a hydrate expression and returns its IR tree (marshalable to a compact JSON array).
+// A carriage return reads as a line feed, as the browser's HTML parser hands the kernel an attribute
+// (16/10/2026: a .ui file saved with CRLF gave a string, and a lambda's text, a \r the browser has not).
 func Compile(expr string) (any, error) {
+	if strings.Contains(expr, "\r") {
+		expr = strings.ReplaceAll(strings.ReplaceAll(expr, "\r\n", "\n"), "\r", "\n")
+	}
 	toks, err := lex(expr)
 	if err != nil {
 		return nil, err
 	}
-	p := &parser{toks: toks}
+	p := &parser{src: expr, toks: toks}
 	node, err := p.sequence()
 	if err != nil {
 		return nil, err

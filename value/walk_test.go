@@ -266,9 +266,14 @@ func TestJSONWritesEveryValueAsBefore(t *testing.T) {
 			t.Errorf("value %d (%s): got %s, %v; before %s, %v", i, item.K, got, gotErr, want, wantErr)
 		}
 	}
-	// NaN has no JSON, inside an object as at the top
-	if _, err := json.Marshal(New(map[string]Value{"x": New(math.NaN())})); err == nil {
-		t.Error("NaN inside an object was written")
+	// NaN, Infinity and -Infinity are null, inside an object as at the top, as JSON.stringify writes them
+	// (15/10/2026; encoding/json refused them)
+	got, err := json.Marshal(New(map[string]Value{"x": New(math.NaN()), "y": New(math.Inf(1)), "z": New([]Value{New(math.Inf(-1))})}))
+	if err != nil || string(got) != `{"x":null,"y":null,"z":[null]}` {
+		t.Errorf("NaN and the infinities inside an object: %s, %v", got, err)
+	}
+	if got, err := json.Marshal(New(math.NaN())); err != nil || string(got) != "null" {
+		t.Errorf("NaN alone: %s, %v", got, err)
 	}
 }
 

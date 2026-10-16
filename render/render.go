@@ -49,7 +49,9 @@ type Config struct {
 	// message, and the page writes nothing in its place. nil writes the message where the value would
 	// stand. The engine passes nil while developing (AllowLocal) and, in production, a hook that logs
 	// it: a visitor never reads an engine's message in a page (14/10/2026), as a 500 shows them only
-	// the status and the request id.
+	// the status and the request id. It hears a {{ layout "name" }} whose file cannot be read the same
+	// way, and with it set a page with neither its page nor a not-found page carries no <!-- 404: path -->
+	// comment, which names a path of the server (16/10/2026).
 	ExpressionFailed func(expression, message string)
 }
 
@@ -93,6 +95,8 @@ type Render struct {
 	expressionFailed     func(expression, message string) // see Config.ExpressionFailed
 	program              *node
 	prepareError         string
+	templateFailed       bool   // prepareError is the template's own text failing, not a missing shell
+	missingPage          string // a {{ @page }} with neither its page nor a not-found page: the page looked for (NoPageError)
 	presentationPrepared bool
 	minifyPrepared       bool
 }
@@ -237,18 +241,25 @@ func (r *Render) dir() string {
 	return r.directory
 }
 
-func (r *Render) tmpl(data any) string {
+// tmpl renders data; failed says the template's own text did not prepare, and the text is then why;
+// noShell says no shell (index.kitwork.html) stands above the page to put it in, and the text then
+// names the shell looked for (NoShellError); missingPage names the page a {{ @page }} looked for when
+// neither it nor a not-found page is there, and the page renders with nothing in its place (NoPageError).
+func (r *Render) tmpl(data any) (rendered string, failed bool, noShell bool, missingPage string) {
 	// 1. GIAI ĐOẠN ASSEMBLY: Ráp nối các file mẫu thành một template lớn duy nhất
 	// Bắt đầu từ file Shell (index.html)
 	program := r.program
 	prepareError := r.prepareError
+	templateFailed := r.templateFailed
+	missingPage = r.missingPage
 	presentationPrepared := r.presentationPrepared
 	minifyPrepared := r.minifyPrepared
 	if program == nil && prepareError == "" {
-		program, presentationPrepared, minifyPrepared, prepareError = r.compileTemplate(false)
+		program, presentationPrepared, minifyPrepared, prepareError, templateFailed, missingPage = r.compileTemplate(false)
 	}
 	if prepareError != "" {
-		return prepareError
+		// the one failure of compileTemplate that is not the template's own text is a shell it could not read
+		return prepareError, templateFailed, !templateFailed, ""
 	}
 
 	// Đệ quy nạp các thành phần lồng nhau (layouts, includes, page)
@@ -296,7 +307,7 @@ func (r *Render) tmpl(data any) string {
 			}
 		}
 	}
-	return out
+	return out, false, false, missingPage
 }
 
 // applyStaticPresentation performs source-driven JIT work. Prepared renders run
@@ -404,6 +415,8 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 	presentationPrepared bool,
 	minifyPrepared bool,
 	prepareError string,
+	templateFailed bool,
+	missingPage string,
 ) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -411,14 +424,22 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 			presentationPrepared = false
 			minifyPrepared = false
 			prepareError = fmt.Sprintf("template parse error: %v", recovered)
+			templateFailed = true
+			missingPage = ""
 		}
 	}()
 	indexPath := r.getIndexPath()
 	shellRaw, err := r.readFile(indexPath)
 	if err != nil {
-		return nil, false, false, fmt.Sprintf("[Error reading index: %v]", indexPath)
+		// no shell: not the template's own text (templateFailed false), and the text names the shell looked
+		// for, an absolute path on the server (NoShellError)
+		return nil, false, false, fmt.Sprintf("[Error reading index: %v]", indexPath), false, ""
 	}
-	fullTemplate := r.assemble(string(shellRaw), filepath.Dir(indexPath), 0)
+	var notes assembly
+	fullTemplate := r.assemble(string(shellRaw), indexPath, 0, &notes)
+	if notes.failure != "" {
+		return nil, false, false, notes.failure, true, ""
+	}
 	if preparePresentation && !hasDynamicPresentation(fullTemplate) {
 		fullTemplate = r.applyStaticPresentation(fullTemplate)
 		presentationPrepared = true
@@ -432,7 +453,7 @@ func (r *Render) compileTemplate(preparePresentation bool) (
 			}
 		}
 	}
-	return parse(specializeTokens(fullTemplate)), presentationPrepared, minifyPrepared, ""
+	return parse(specializeTokens(fullTemplate)), presentationPrepared, minifyPrepared, "", false, notes.missingPage
 }
 
 // Prepare assembles and parses this render path once. The returned Render is
@@ -442,8 +463,8 @@ func (r *Render) Prepare() *Render {
 		return nil
 	}
 	prepared := *r
-	prepared.program, prepared.presentationPrepared, prepared.minifyPrepared, prepared.prepareError =
-		prepared.compileTemplate(true)
+	prepared.program, prepared.presentationPrepared, prepared.minifyPrepared, prepared.prepareError,
+		prepared.templateFailed, prepared.missingPage = prepared.compileTemplate(true)
 	return &prepared
 }
 
@@ -913,15 +934,37 @@ func (r *Render) PreparationError() error {
 	return fmt.Errorf("%s", r.prepareError)
 }
 
-func (r *Render) assemble(content string, currentDir string, depth int) string {
+// TemplateError is PreparationError when the failure is in the template's own text (a {{ if }} whose
+// condition cannot be read, a template that does not parse); nil when it prepared, or when its one
+// failure is that there is no shell (index.kitwork.html) to put a page in, as for a site that serves no
+// template.
+func (r *Render) TemplateError() error {
+	if r == nil || !r.templateFailed {
+		return nil
+	}
+	return r.PreparationError()
+}
+
+// assembly is what assemble finds on its way through a template and the files it names.
+type assembly struct {
+	failure     string // the first {{ if }} whose condition cannot be read: file:line:column: why
+	missingPage string // the first {{ @page }} with neither its page nor a not-found page: the page looked for
+}
+
+// assemble puts together the template of file (content) and the files it names. A {{ if }} whose
+// condition cannot be read sets notes.failure, the first one only, to its place and why
+// (file:line:column: …), and the template does not prepare, as a script that does not compile. A
+// {{ @page }} with neither its page nor a not-found page sets notes.missingPage (NoPageError).
+func (r *Render) assemble(content string, file string, depth int, notes *assembly) string {
 	if depth > 10 { // Giới hạn đệ quy để tránh treo hệ thống
 		return "<!-- Error: Template recursion too deep -->"
 	}
+	currentDir := filepath.Dir(file)
 
 	tokens := specializeTokens(content)
 	var sb strings.Builder
 
-	for _, t := range tokens {
+	for index, t := range tokens {
 		if strings.HasPrefix(t, "{{") && strings.HasSuffix(t, "}}") {
 			tag := strings.TrimSpace(t[2 : len(t)-2])
 			parts := strings.Fields(tag)
@@ -949,15 +992,24 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 				}
 				if raw, err := r.readFile(pagePath); err == nil {
 
-					sb.WriteString(r.assemble(string(raw), filepath.Dir(pagePath), depth+1))
+					sb.WriteString(r.assemble(string(raw), pagePath, depth+1, notes))
 				} else {
 
 					nfPath := r.getNotFoundPath()
 					if raw, err := r.readFile(nfPath); err == nil {
 
-						sb.WriteString(r.assemble(string(raw), filepath.Dir(nfPath), depth+1))
+						sb.WriteString(r.assemble(string(raw), nfPath, depth+1, notes))
 					} else {
-						sb.WriteString(fmt.Sprintf("<!-- 404: %v -->", pagePath))
+						// neither: the page renders with nothing here, and Page says which page it looked for
+						// (NoPageError), for the server to log or to fail the request with
+						if notes.missingPage == "" {
+							notes.missingPage = pagePath
+						}
+						if r.expressionFailed == nil {
+							// while developing, the page looked for: an absolute path of the server, which no page
+							// carries in production (Config.ExpressionFailed is set there), minified or not
+							sb.WriteString(fmt.Sprintf("<!-- 404: %v -->", pagePath))
+						}
 					}
 
 				}
@@ -989,7 +1041,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 				}
 				if pathVal != "" {
 					if raw, err := r.readFile(pathVal); err == nil {
-						sb.WriteString(r.assemble(string(raw), filepath.Dir(pathVal), depth+1))
+						sb.WriteString(r.assemble(string(raw), pathVal, depth+1, notes))
 						found = true
 					}
 				}
@@ -1005,7 +1057,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 						for _, fname := range slotFiles(base) {
 							fullPath := filepath.Join(dir, fname)
 							if raw, err := r.readFile(fullPath); err == nil {
-								sb.WriteString(r.assemble(string(raw), filepath.Dir(fullPath), depth+1))
+								sb.WriteString(r.assemble(string(raw), fullPath, depth+1, notes))
 								found = true
 								break
 							}
@@ -1026,7 +1078,7 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					for _, fname := range slotFiles(base) {
 						globalPath := r.resolve("views", fname)
 						if raw, err := r.readFile(globalPath); err == nil {
-							sb.WriteString(r.assemble(string(raw), filepath.Dir(globalPath), depth+1))
+							sb.WriteString(r.assemble(string(raw), globalPath, depth+1, notes))
 							found = true
 							break
 						}
@@ -1053,13 +1105,19 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 					raw, err = r.readFile(includePath)
 				}
 				if err != nil {
-					sb.WriteString(fmt.Sprintf("[Error: %v]", err))
+					layoutFailed(r.expressionFailed, &sb, tag, err)
 					continue
 				}
-				sb.WriteString(r.assemble(string(raw), filepath.Dir(includePath), depth+1))
+				sb.WriteString(r.assemble(string(raw), includePath, depth+1, notes))
 
 			default:
 				// Các tag khác như if, for, biến... giữ nguyên để giai đoạn Bind xử lý
+				if cmd == "if" && notes.failure == "" {
+					condition, at := ifCondition(t)
+					if _, unreadable := compileCondition(condition); unreadable != nil {
+						notes.failure = r.templateName(file) + ":" + sourceLocation(tokens, index, at+unreadable.at) + ": " + unreadable.describe(condition)
+					}
+				}
 				sb.WriteString(t)
 			}
 		} else {
@@ -1068,6 +1126,17 @@ func (r *Render) assemble(content string, currentDir string, depth int) string {
 		}
 	}
 	return sb.String()
+}
+
+// templateName is how a template file is named in a message: relative to the render's base, as the
+// compiler names a script relative to its entry's folder, never the machine's absolute path; its name
+// alone when it has no path from there.
+func (r *Render) templateName(file string) string {
+	relative, err := filepath.Rel(r.base, file)
+	if err != nil || r.base == "" || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return filepath.Base(file)
+	}
+	return filepath.ToSlash(relative)
 }
 
 // slotFiles returns the partial-file candidates for a layout slot, newest convention first:
@@ -1104,14 +1173,65 @@ func (r *Render) Exists(name string) bool {
 	return false
 }
 
+// Bind renders data. A template whose own text does not prepare (TemplateError) gives a failure that
+// says why, never a page: the request that asked for it fails as a page that does not compile, the
+// message whole in the log and, while developing, in the answer (16/10/2026: the message was the page,
+// in production too). Its code is INVALID_ARGUMENT, a page named that the engine cannot prepare; no
+// program reads it, for the request ends there. With no shell (index.kitwork.html) to put the page in,
+// the page is the text of NoShellError, which names a path of the server: a server answering visitors
+// renders with Page, which gives that case apart.
 func (r *Render) Bind(data value.Value) value.Value {
-	return value.New(r.tmpl(data))
+	page, _ := r.bind(data)
+	return page
 }
+
+func (r *Render) bind(data value.Value) (value.Value, error) {
+	rendered, failed, noShell, missingPage := r.tmpl(data)
+	if failed {
+		return value.InvalidFailure(value.InvalidArgumentCode, rendered), nil
+	}
+	if noShell {
+		return value.New(rendered), &NoShellError{text: rendered}
+	}
+	if missingPage != "" {
+		return value.New(rendered), &NoPageError{page: missingPage}
+	}
+	return value.New(rendered), nil
+}
+
+// NoPageError is a page that rendered with nothing where its {{ @page }} stands: neither the page looked
+// for nor a not-found page is there, at an unknown path of a site with no not-found page or at a page a
+// handler chose that does not exist. The page carries no path of the server in production (while
+// developing a <!-- 404: path --> comment stands there); the text names the page looked for, an absolute
+// path on the server, for the log and, while developing, the answer (16/10/2026: in production a chosen
+// page that does not exist answered 200 with nothing in it, and nothing was said).
+type NoPageError struct{ page string }
+
+func (e *NoPageError) Error() string {
+	return "không có trang " + e.page + ", cũng không có trang not-found"
+}
+
+// NoShellError is why a page did not render: no shell (index.kitwork.html) stands above it to put it
+// in, as in a site that serves no template, at an unknown path or at a page a handler chose. Its text
+// names the shell looked for, an absolute path on the server, for the log and, while developing, the
+// answer; a visitor in production never reads it (16/10/2026: it was the whole page of every such 404,
+// in production too).
+type NoShellError struct{ text string }
+
+func (e *NoShellError) Error() string { return e.text }
 
 // BindPage renders like Bind but with a per-request page override and notfound flag, on a COPY —
 // so callers never mutate the shared render or touch its unexported fields (page = "" keeps the
 // render's own page). Used by the tree view lifecycle.
 func (r *Render) BindPage(page string, notfoundMode bool, data value.Value) value.Value {
+	rendered, _ := r.Page(page, notfoundMode, data)
+	return rendered
+}
+
+// Page renders as BindPage does and gives apart a page that has no shell to stand in: err is then a
+// *NoShellError, and the value is its text, the page BindPage gives. A page with neither its page nor a
+// not-found page gives a *NoPageError, and the value is the page with nothing in its place.
+func (r *Render) Page(page string, notfoundMode bool, data value.Value) (value.Value, error) {
 	rc := *r
 	if page != "" && page != rc.page {
 		rc.page = page
@@ -1127,7 +1247,7 @@ func (r *Render) BindPage(page string, notfoundMode bool, data value.Value) valu
 		rc.minifyPrepared = false
 	}
 	rc.notfoundMode = notfoundMode
-	return rc.Bind(data)
+	return rc.bind(data)
 }
 
 // Render service entry point
@@ -1211,11 +1331,12 @@ const (
 )
 
 type node struct {
-	typ         nodeType
-	val         string   // Variable name or Condition
-	args        []string // Arguments for comparison
-	expr        *expression
-	condition   ifCondition
+	typ  nodeType
+	val  string // Variable name or Condition
+	expr *expression
+	// failure is why the condition of a {{ if }} cannot be read (compileCondition), with where it
+	// stands in the template; the node renders it as a failed expression (conditionFailed)
+	failure     string
 	raw         bool
 	keyVar      string // "i" in range i, v := list
 	valVar      string // "v" in range i, v := list
@@ -1223,16 +1344,6 @@ type node struct {
 	alt         []*node // Else block
 	parsingElse bool    // Parsing state
 	staticBytes int
-}
-
-type ifCondition struct {
-	modulo       bool
-	moduloBy     int
-	moduloTarget int
-	operator     string
-	targetRaw    string
-	targetNumber float64
-	targetIsNum  bool
 }
 
 func specializeTokens(tmpl string) []string {
@@ -1288,7 +1399,7 @@ func parse(tokens []string) *node {
 	root := &node{typ: nodeRoot}
 	stack := []*node{root}
 
-	for _, t := range tokens {
+	for index, t := range tokens {
 		current := stack[len(stack)-1]
 
 		if strings.HasPrefix(t, "{{") && strings.HasSuffix(t, "}}") {
@@ -1303,10 +1414,15 @@ func parse(tokens []string) *node {
 
 			switch cmd {
 			case "if":
-				n := &node{typ: nodeIf, val: parts[1], expr: compileExpression(parts[1])}
-				if len(parts) > 2 {
-					n.args = parts[2:]
-					n.condition = compileIfCondition(n.args)
+				// the whole condition, one expression (condition.go); one that cannot be read fails where
+				// it stands when it renders. A prepared template never gets here with one: assemble
+				// refuses it first, naming its file.
+				condition, at := ifCondition(t)
+				n := &node{typ: nodeIf, val: condition}
+				if compiled, failure := compileCondition(condition); failure != nil {
+					n.failure = sourceLocation(tokens, index, at+failure.at) + ": " + failure.describe(condition)
+				} else {
+					n.expr = compiled
 				}
 				addChild(current, n)
 				stack = append(stack, n)
@@ -1388,34 +1504,6 @@ func parse(tokens []string) *node {
 	}
 	root.staticBytes = countStaticBytes(root)
 	return root
-}
-
-func compileIfCondition(args []string) ifCondition {
-	if len(args) >= 4 && args[0] == "%" {
-		var moduloBy float64
-		var moduloTarget float64
-		_, _ = fmt.Sscanf(args[1], "%f", &moduloBy)
-		_, _ = fmt.Sscanf(args[3], "%f", &moduloTarget)
-		return ifCondition{
-			modulo:       true,
-			moduloBy:     int(moduloBy),
-			moduloTarget: int(moduloTarget),
-			operator:     args[2],
-		}
-	}
-	if len(args) < 2 {
-		return ifCondition{}
-	}
-
-	targetRaw := strings.Trim(args[1], `"'`)
-	var targetNumber float64
-	parsed, _ := fmt.Sscanf(targetRaw, "%f", &targetNumber)
-	return ifCondition{
-		operator:     args[0],
-		targetRaw:    targetRaw,
-		targetNumber: targetNumber,
-		targetIsNum:  parsed == 1,
-	}
 }
 
 func countStaticBytes(n *node) int {
@@ -1551,54 +1639,17 @@ func evalInto(
 		writeResolvedValue(output, resolved, !n.raw)
 
 	case nodeIf:
-		val := resolveExpression(n.expr, data, scope)
-		truthy := val.Truthy()
-		condition := n.condition
-
-		if condition.modulo {
-			truthy = false
-			if val.IsNumeric() {
-				if condition.moduloBy != 0 {
-					current := int(val.Float())
-					remainder := current % condition.moduloBy
-					switch condition.operator {
-					case "==":
-						truthy = remainder == condition.moduloTarget
-					case "!=":
-						truthy = remainder != condition.moduloTarget
-					}
-				}
-			}
-		} else if condition.operator != "" {
-			if val.IsNumeric() {
-				if condition.targetIsNum {
-					current := val.Float()
-					switch condition.operator {
-					case "==":
-						truthy = current == condition.targetNumber
-					case "!=":
-						truthy = current != condition.targetNumber
-					case ">":
-						truthy = current > condition.targetNumber
-					case "<":
-						truthy = current < condition.targetNumber
-					case ">=":
-						truthy = current >= condition.targetNumber
-					case "<=":
-						truthy = current <= condition.targetNumber
-					}
-				}
-			} else {
-				switch condition.operator {
-				case "==":
-					truthy = val.String() == condition.targetRaw
-				case "!=":
-					truthy = val.String() != condition.targetRaw
-				}
-			}
+		if n.failure != "" {
+			conditionFailed(n, n.failure, scope, output)
+			return
+		}
+		condition := resolveExpression(n.expr, data, scope)
+		if condition.K == value.Invalid {
+			conditionFailed(n, condition.Text(), scope, output)
+			return
 		}
 
-		if truthy {
+		if condition.Truthy() {
 			renderChildrenInto(n.children, data, scope, output)
 		} else {
 			renderChildrenInto(n.alt, data, scope, output)
@@ -1692,7 +1743,7 @@ func evalInto(
 				content, err = readScopedTemplate(scope, fullPath)
 			}
 			if err != nil {
-				output.WriteString(fmt.Sprintf("[Error: %v]", err))
+				layoutFailed(scope.failure(), output, `layout "`+n.val+`"`, err)
 				return
 			}
 		}
@@ -1704,6 +1755,32 @@ func evalInto(
 
 		evalInto(prog, data, &newScope, output)
 	}
+}
+
+// conditionFailed is a {{ if }} whose condition failed, cannot be read (failure) or met a failure (a
+// method that is not a function, "a" - 1), as a {{ expression }} that fails: neither branch renders;
+// while developing the message stands in their place, in production the page writes nothing there and
+// the message goes to the log (Config.ExpressionFailed). A script's run ends at such a failure; until
+// 16/10/2026 a failed condition was false and its else branch rendered, with nothing said.
+func conditionFailed(n *node, message string, scope *renderScope, output *strings.Builder) {
+	if failed := scope.failure(); failed != nil {
+		failed("if "+n.val, message)
+		return
+	}
+	writeEscapedString(output, message)
+}
+
+// layoutFailed is a {{ layout "name" }} whose file cannot be read, as a {{ expression }} that fails:
+// while developing the error stands in its place, as it always did (read from the disk, it names the
+// absolute path looked for); in production the page writes nothing there and the error goes to the log
+// (Config.ExpressionFailed), for a page never carries a path of the server or a Go error (16/10/2026:
+// "[Error: …]" was in the page, in production too).
+func layoutFailed(failed func(expression, message string), output *strings.Builder, tag string, err error) {
+	if failed != nil {
+		failed(tag, err.Error())
+		return
+	}
+	output.WriteString(fmt.Sprintf("[Error: %v]", err))
 }
 
 func writeResolvedValue(output *strings.Builder, resolved value.Value, escape bool) {

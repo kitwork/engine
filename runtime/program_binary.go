@@ -63,6 +63,51 @@ func (p *Program) MarshalBinary() ([]byte, error) {
 	return data, nil
 }
 
+// EncodedSize is the length MarshalBinary gives the program, counted without writing it, and the index of
+// the first debug entry that ends past MaxProgramBinarySize: len(DebugEntries()) when the envelope fits,
+// -1 when the code and the constants alone do not. The debug table writes each entry's file name, so a
+// dense module with a long path can pass the envelope while its code is under MaxBytecodeSize: the
+// compiler refuses such a program where it crosses (15/10/2026; until then it compiled and ran, and was
+// neither cached nor checked).
+func (p *Program) EncodedSize() (size int, crossing int) {
+	if p == nil {
+		return 0, 0
+	}
+	size = len(programBinaryMagic) + 2 + 2 + len(p.checksum) + 4 + 4 + 4 + len(p.code)
+	for _, constant := range p.constants {
+		size += encodedConstantSize(constant)
+	}
+	crossing = len(p.debug.entries)
+	if size > MaxProgramBinarySize {
+		crossing = -1
+	}
+	for index, entry := range p.debug.entries {
+		size += 4 + 4 + len(p.debug.files[entry.fileID]) + 4 + 4
+		if crossing == len(p.debug.entries) && size > MaxProgramBinarySize {
+			crossing = index
+		}
+	}
+	return size, crossing
+}
+
+// encodedConstantSize is what appendBinaryConstant writes for a constant.
+func encodedConstantSize(constant value.Value) int {
+	size := 1 + 1 + 8
+	switch constant.K {
+	case value.String:
+		text, _ := constant.V.(string)
+		size += 4 + len(text)
+	case value.Func:
+		if lambda, ok := constant.V.(*value.Lambda); ok && lambda != nil {
+			size += 4 + 4 + len(lambda.Name) + 4 + len(lambda.SourceFile) + 4 + 4 + 2
+			for _, parameter := range lambda.Params {
+				size += 4 + len(parameter)
+			}
+		}
+	}
+	return size
+}
+
 // UnmarshalProgram restores a local cached Program. The returned Program is a
 // new immutable owner; no slice or object points into data.
 func UnmarshalProgram(data []byte) (*Program, error) {
@@ -239,10 +284,12 @@ func appendBinaryConstant(data []byte, constant value.Value) ([]byte, error) {
 }
 
 func appendBinaryString(data []byte, text string) ([]byte, error) {
-	if uint64(len(text)) > math.MaxUint32 ||
-		len(text) > MaxProgramBinarySize ||
-		len(data) > MaxProgramBinarySize-4-len(text) {
+	if uint64(len(text)) > math.MaxUint32 || len(text) > MaxProgramBinarySize {
 		return nil, fmt.Errorf("encode program: string is too large")
+	}
+	if len(data) > MaxProgramBinarySize-4-len(text) {
+		// the envelope is past its limit, not the string (15/10/2026: both said "string is too large")
+		return nil, fmt.Errorf("encode program: envelope exceeds %d bytes", MaxProgramBinarySize)
 	}
 	data = appendUint32(data, uint32(len(text)))
 	data = append(data, text...)

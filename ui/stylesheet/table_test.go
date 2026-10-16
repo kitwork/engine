@@ -84,9 +84,9 @@ func TestHeaderExample(t *testing.T) {
 }
 
 // specAttributes are the presentation attributes of KITWORK_UI §7 and §8, with K's additions: the
-// padding axes and sides, raw sizes, aspect-ratio and fit; and M's material.
+// padding axes and sides, raw sizes, aspect-ratio and fit; M's material; and lazy (15/10/2026).
 var specAttributes = []string{
-	"flex", "wrap", "align", "space", "gap", "columns", "span", "place", "pin", "container",
+	"flex", "wrap", "align", "space", "gap", "columns", "span", "place", "pin", "lazy", "container",
 	"width", "min-width", "max-width", "height", "min-height", "max-height", "aspect-ratio", "fit",
 	"padding", "padding-x", "padding-y", "padding-top", "padding-bottom", "padding-left", "padding-right",
 	"padding-start", "padding-end", "scroll", "lines", "background", "material", "border", "radius",
@@ -114,6 +114,8 @@ func valuesToTry(table *Table, name string) []string {
 		out = append(out, "640px", "50%", "68ch", "12.5rem", "2em", "100vw", "100vh", "100dvh", "0px")
 	case "aspect-ratio":
 		out = append(out, "1/1", "5/4", "1200/630")
+	case "lazy":
+		out = append(out, "400px", "2860px", "25rem", "1.5em", "100vh", "80dvh", "150vw")
 	case "color", "background", "border":
 		out = append(out, "ink-30", "paper/80", "ink-30/50", "black/50", "white", "brand+15", "success-85", "brand+20/40", "brand.on-20")
 	case "opacity":

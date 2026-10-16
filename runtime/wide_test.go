@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kitwork/engine/value"
@@ -132,32 +133,61 @@ func TestVerifyRefusesAWideFormTheNarrowOneWouldDo(t *testing.T) {
 		}
 	})
 
-	t.Run("a wide jump in a program of 65,535 bytes is refused, of 65,536 it is read", func(t *testing.T) {
-		for _, op := range []Opcode{JUMP_WIDE, TRUE_WIDE, FALSE_WIDE, ITER_WIDE} {
-			program := func(length int) []byte {
-				var code []byte
-				switch op {
-				case TRUE_WIDE, FALSE_WIDE:
-					code = []byte{byte(PUSH), 0, 0}
-				case ITER_WIDE:
-					code = []byte{byte(MAKE), 1, byte(PUSH), 0, 0}
-				}
-				code = append(code, wide(op, 0)...)
-				operand := len(code) - 3
-				if op == ITER_WIDE {
-					// the iteration that goes on holds three values more: drop them
-					code = append(code, byte(POP), byte(POP), byte(POP))
-				}
-				target := len(code)
-				code[operand], code[operand+1], code[operand+2] = byte(target>>16), byte(target>>8), byte(target)
-				for len(code) < length-1 {
-					code = append(code, byte(HALT))
-				}
-				return append(code, byte(RETURN))
-			}
-			expect(t, program(MaxNarrowOperand), constants, VerifyInvalidOperand)
-			expect(t, program(MaxNarrowOperand+1), constants, "")
+	// A jump to a HALT at target, in a program of length bytes. Written in two bytes the jump is one byte
+	// shorter, so the HALT it goes to is at target - 1.
+	jumpTo := func(op Opcode, length, target int) []byte {
+		var code []byte
+		switch op {
+		case TRUE_WIDE, FALSE_WIDE:
+			code = []byte{byte(PUSH), 0, 0}
+		case ITER_WIDE:
+			code = []byte{byte(MAKE), 1, byte(PUSH), 0, 0}
 		}
+		code = append(code, wide(op, target)...)
+		if op == ITER_WIDE {
+			// the iteration that goes on holds three values more: drop them
+			code = append(code, byte(POP), byte(POP), byte(POP))
+		}
+		for len(code) < length-1 {
+			code = append(code, byte(HALT))
+		}
+		return append(code, byte(RETURN))
+	}
+
+	t.Run("a wide jump in a program of 65,535 bytes is refused", func(t *testing.T) {
+		for _, op := range []Opcode{JUMP_WIDE, TRUE_WIDE, FALSE_WIDE, ITER_WIDE} {
+			expect(t, jumpTo(op, MaxNarrowOperand, MaxNarrowOperand-2), constants, VerifyInvalidOperand)
+		}
+	})
+
+	// 15/10/2026: the length alone is not enough, as the compiler writes jumps wide only when the program
+	// with two-byte jumps has an address two bytes cannot hold. CONTROL: one byte further, it is read.
+	refusedFor := func(t *testing.T, code []byte, reason string) {
+		t.Helper()
+		var verifyError *VerifyError
+		if err := Verify(code, constants); !errors.As(err, &verifyError) || verifyError.Code != VerifyInvalidOperand ||
+			!strings.Contains(verifyError.Detail, reason) {
+			t.Fatalf("verify error = %v, want %s: %s", err, VerifyInvalidOperand, reason)
+		}
+	}
+	t.Run("a wide jump is read only where its two-byte program reaches past 65,535", func(t *testing.T) {
+		for _, op := range []Opcode{JUMP_WIDE, TRUE_WIDE, FALSE_WIDE, ITER_WIDE} {
+			long := MaxNarrowOperand + 10
+			refusedFor(t, jumpTo(op, long, 20), "every address fits two bytes")
+			refusedFor(t, jumpTo(op, long, MaxNarrowOperand+1), "every address fits two bytes")
+			expect(t, jumpTo(op, long, MaxNarrowOperand+2), constants, "")
+		}
+	})
+
+	// 15/10/2026: the compiler writes every jump of a program in one width. CONTROL: both wide, it is read.
+	t.Run("two-byte and three-byte jumps in one program are refused", func(t *testing.T) {
+		long := MaxNarrowOperand + 10
+		mixed := append([]byte{byte(JUMP), 0, 3}, jumpTo(JUMP_WIDE, long-3, MaxNarrowOperand+5-3)...)
+		copy(mixed[3:7], wide(JUMP_WIDE, MaxNarrowOperand+5))
+		refusedFor(t, mixed, "two-byte and three-byte jumps")
+		both := append(wide(JUMP_WIDE, 4), mixed[3:]...)
+		copy(both[4:8], wide(JUMP_WIDE, MaxNarrowOperand+6))
+		expect(t, both, constants, "")
 	})
 
 	t.Run("a wide jump into an operand or past the end is refused", func(t *testing.T) {

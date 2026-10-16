@@ -81,7 +81,20 @@ const (
 	FALSE_WIDE
 	ITER_WIDE
 
+	// STEP (bytecode 4, 15/10/2026): ++ and -- make a number of what they step, as JavaScript's
+	// ToNumber does ("5" is 5, null is 0, "a" is NaN), then step it. Its one-byte operand is the step:
+	// StepNumber, StepIncrement or StepDecrement. x ± 1 joined a string ("5"++ was "51") and refused
+	// null, a boolean or a date for --.
+	STEP
+
 	_LIMIT // One past the final assigned opcode slot; never execute it.
+)
+
+// The operand of STEP.
+const (
+	StepNumber    = 0 // the value made a number, unstepped: what x++ and x-- give as a value
+	StepIncrement = 1 // the value made a number, plus one: what ++ writes
+	StepDecrement = 2 // the value made a number, minus one: what -- writes
 )
 
 // Wide is the three-byte form of PUSH, LOAD, STORE, JUMP, TRUE, FALSE and ITER; any other opcode is

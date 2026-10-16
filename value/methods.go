@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
+	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -31,6 +32,11 @@ func (v Value) ToString(args ...Value) Value {
 
 		// Numeric Formatting (Pattern vs Printf)
 		if v.IsNumeric() {
+			if text, nonFinite := NonFiniteText(v.N); nonFinite && v.K == Number {
+				// NaN, Infinity and -Infinity are words, whatever the pattern: Go wrote "+,Inf." for
+				// "#,##0.00" and "%!d(float64=+Inf)" for "%d" (15/10/2026)
+				return NewString(text)
+			}
 			if strings.Contains(format, "%") {
 				return NewString(fmt.Sprintf(format, v.Interface()))
 			}
@@ -47,7 +53,10 @@ func (v Value) ToString(args ...Value) Value {
 	v.K = String
 	return v
 }
-func (v Value) Integer(_ ...Value) Value { v.N = float64(int64(v.N)); v.K = Number; return v }
+
+// Integer is the number without its fraction; NaN and the infinities stay themselves (int64(n) made them
+// -9223372036854775808; 15/10/2026).
+func (v Value) Integer(_ ...Value) Value { v.N = math.Trunc(v.N) + 0; v.K = Number; return v }
 func (v Value) ToFloat(_ ...Value) Value { v.K = Number; return v }
 func (v Value) Length(_ ...Value) Value {
 	// String đếm theo rune — đồng bộ với thuộc tính .length
@@ -192,10 +201,10 @@ func (v Value) Slice(args ...Value) Value {
 	start := 0
 	end := length
 	if len(args) > 0 && args[0].K == Number {
-		start = normalizeSliceIndex(int(args[0].N), length)
+		start = normalizeSliceIndex(args[0].Int(), length)
 	}
 	if len(args) > 1 && args[1].K == Number {
-		end = normalizeSliceIndex(int(args[1].N), length)
+		end = normalizeSliceIndex(args[1].Int(), length)
 	}
 	if start >= end {
 		return Value{K: String, V: ""}
@@ -221,10 +230,10 @@ func (v Value) Substring(args ...Value) Value {
 	start := 0
 	end := length
 	if len(args) > 0 && args[0].K == Number {
-		start = clamp(int(args[0].N))
+		start = clamp(args[0].Int())
 	}
 	if len(args) > 1 && args[1].K == Number {
-		end = clamp(int(args[1].N))
+		end = clamp(args[1].Int())
 	}
 	if start > end {
 		start, end = end, start
@@ -243,7 +252,7 @@ func (v Value) IndexOf(args ...Value) Value {
 
 	fromRune := 0
 	if len(args) > 1 && args[1].K == Number {
-		fromRune = normalizeSliceIndex(int(args[1].N), len([]rune(s)))
+		fromRune = normalizeSliceIndex(args[1].Int(), len([]rune(s)))
 	}
 
 	runes := []rune(s)
@@ -273,7 +282,7 @@ func (v Value) LastIndexOf(args ...Value) Value {
 func (v Value) CharAt(args ...Value) Value {
 	idx := 0
 	if len(args) > 0 && args[0].K == Number {
-		idx = int(args[0].N)
+		idx = args[0].Int()
 	}
 	runes := []rune(v.Text())
 	if idx < 0 || idx >= len(runes) {
@@ -283,11 +292,11 @@ func (v Value) CharAt(args ...Value) Value {
 }
 
 // CharCodeAt — code point của ký tự tại vị trí (với ký tự BMP trùng UTF-16
-// code unit của JS). Ngoài phạm vi trả Nil (JS trả NaN — VM không có NaN).
+// code unit của JS). Ngoài phạm vi trả Nil (JS trả NaN; Kitwork giữ null như trước khi có NaN).
 func (v Value) CharCodeAt(args ...Value) Value {
 	idx := 0
 	if len(args) > 0 && args[0].K == Number {
-		idx = int(args[0].N)
+		idx = args[0].Int()
 	}
 	runes := []rune(v.Text())
 	if idx < 0 || idx >= len(runes) {
@@ -300,7 +309,7 @@ func (v Value) CharCodeAt(args ...Value) Value {
 func (v Value) StrAt(args ...Value) Value {
 	idx := 0
 	if len(args) > 0 && args[0].K == Number {
-		idx = int(args[0].N)
+		idx = args[0].Int()
 	}
 	runes := []rune(v.Text())
 	if idx < 0 {
@@ -320,13 +329,14 @@ const maxRepeatBytes = 1 << 23 // 8 MB
 func (v Value) Repeat(args ...Value) Value {
 	count := 0
 	if len(args) > 0 && args[0].K == Number {
-		count = int(args[0].N)
+		count = args[0].Int()
 	}
 	if count <= 0 {
 		return Value{K: String, V: ""}
 	}
 	s := v.Text()
-	if len(s)*count > maxRepeatBytes {
+	// count may be the largest int (Infinity, JavaScript's RangeError): len(s)*count would overflow
+	if s != "" && count > maxRepeatBytes/len(s) {
 		return InvalidFailure(InvalidArgumentCode, "repeat: result too large (max 8MB)")
 	}
 	return Value{K: String, V: strings.Repeat(s, count)}
@@ -350,7 +360,7 @@ func (v Value) PadStart(args ...Value) Value {
 	s := v.Text()
 	target := 0
 	if len(args) > 0 && args[0].K == Number {
-		target = int(args[0].N)
+		target = args[0].Int()
 	}
 	gap := target - len([]rune(s))
 	if gap <= 0 {
@@ -371,7 +381,7 @@ func (v Value) PadEnd(args ...Value) Value {
 	s := v.Text()
 	target := 0
 	if len(args) > 0 && args[0].K == Number {
-		target = int(args[0].N)
+		target = args[0].Int()
 	}
 	gap := target - len([]rune(s))
 	if gap <= 0 {
@@ -418,7 +428,7 @@ func (v Value) Push(args ...Value) Value {
 func (v Value) ItemAt(args ...Value) Value {
 	if ptr, ok := v.V.(*[]Value); ok && len(args) > 0 {
 		a := *ptr
-		idx := int(args[0].N)
+		idx := args[0].Int()
 		if idx < 0 {
 			idx = len(a) + idx
 		}
@@ -478,11 +488,10 @@ func (v Value) Compact(_ ...Value) Value {
 func (v Value) Unique(_ ...Value) Value {
 	if ptr, ok := v.V.(*[]Value); ok {
 		a := *ptr
-		seen := make(map[any]bool)
+		seen := make(map[uniqueKey]bool)
 		res := make([]Value, 0)
 		for _, item := range a {
-			// Basic uniqueness by interface value
-			key := item.Interface()
+			key := makeUniqueKey(item)
 			if !seen[key] {
 				seen[key] = true
 				res = append(res, item)
@@ -491,6 +500,56 @@ func (v Value) Unique(_ ...Value) Value {
 		*ptr = res
 	}
 	return v
+}
+
+// uniqueKey is the key unique() keeps one item of, the rule unique(cb) keys its callback's value by
+// (runtime makeArrayUniqueKey): JavaScript's SameValueZero, so NaN is one key and 0 and -0 are one, a
+// text is its text, and a list, an object or a function is itself, by reference. unique() keyed the
+// item's Go value until 16/10/2026: NaN was never the same as NaN, and a list or an object as an item
+// failed the program ("hash of unhashable type").
+type uniqueKey struct {
+	kind     Kind
+	number   float64
+	identity any
+}
+
+func makeUniqueKey(item Value) uniqueKey {
+	key := uniqueKey{kind: item.K, number: item.N}
+	switch item.K {
+	case Number:
+		if item.N != item.N {
+			key.identity = "NaN"
+			key.number = 0
+		}
+	case String:
+		key.identity = item.Text()
+	case Bytes:
+		key.identity = string(item.Bytes())
+	case Array, Map, Func, Proxy:
+		key.identity = uniqueIdentity(item.V)
+	default:
+		if item.V != nil {
+			if reflect.TypeOf(item.V).Comparable() {
+				key.identity = item.V
+			} else {
+				key.identity = uniqueIdentity(item.V)
+			}
+		}
+	}
+	return key
+}
+
+// uniqueIdentity is the address a reference holds, 0 for a value that holds none.
+func uniqueIdentity(item any) uintptr {
+	if item == nil {
+		return 0
+	}
+	reflected := reflect.ValueOf(item)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Pointer, reflect.Slice, reflect.UnsafePointer:
+		return reflected.Pointer()
+	}
+	return 0
 }
 
 func (v Value) Reverse(_ ...Value) Value {
@@ -518,7 +577,7 @@ func (v Value) Random(args ...Value) Value {
 		a := *ptr
 		count := 1
 		if len(args) > 0 {
-			count = int(args[0].N)
+			count = args[0].Int()
 		}
 
 		if count <= 1 {
@@ -565,7 +624,7 @@ func (v Value) Join(args ...Value) Value {
 func (v Value) ToFixed(args ...Value) Value {
 	digits := 0
 	if len(args) > 0 && args[0].K == Number {
-		digits = int(args[0].N)
+		digits = args[0].Int()
 	}
 	if digits < 0 {
 		digits = 0
@@ -573,7 +632,9 @@ func (v Value) ToFixed(args ...Value) Value {
 	if digits > 100 {
 		digits = 100
 	}
-	return NewString(strconv.FormatFloat(v.N, 'f', digits, 64))
+	// JavaScript's rounding, ties away from zero, and its text of NaN, the infinities and 1e21 up
+	// (FixedText; 15/10/2026: Go rounded a tie to even, (1.25).toFixed(1) was "1.2")
+	return NewString(FixedText(v.N, digits))
 }
 
 /* ---------------------------------------------------------------------------
@@ -589,10 +650,10 @@ func (v Value) ArraySlice(args ...Value) Value {
 	start := 0
 	end := length
 	if len(args) > 0 && args[0].K == Number {
-		start = normalizeSliceIndex(int(args[0].N), length)
+		start = normalizeSliceIndex(args[0].Int(), length)
 	}
 	if len(args) > 1 && args[1].K == Number {
-		end = normalizeSliceIndex(int(args[1].N), length)
+		end = normalizeSliceIndex(args[1].Int(), length)
 	}
 	if start >= end {
 		return New([]Value{})
@@ -607,21 +668,56 @@ func (v Value) ArrayIndexOf(args ...Value) Value {
 	if len(args) == 0 {
 		return Value{K: Number, N: -1}
 	}
-	for i, item := range v.Array() {
-		if item.Equal(args[0]) {
+	a := v.Array()
+	for i := fromIndex(args, len(a)); i < len(a); i++ {
+		if a[i].Equal(args[0]) {
 			return Value{K: Number, N: float64(i)}
 		}
 	}
 	return Value{K: Number, N: -1}
 }
 
-// ArrayLastIndexOf — chỉ số của lần xuất hiện cuối, -1 nếu không có.
+// fromIndex is where indexOf and includes start in an array of length items: JavaScript's fromIndex,
+// a negative one counting from the end, Infinity past the end (15/10/2026: it was not read, and
+// [1, 2, 1].indexOf(1, 1) was 0). It is made a number as JavaScript makes it (searchIndex): "1" is 1,
+// NaN and "x" are 0 (16/10/2026: an argument that was no number was not read, so
+// [1, 2, 1].indexOf(1, "1") was 0 where JavaScript gives 2).
+func fromIndex(args []Value, length int) int {
+	if len(args) < 2 {
+		return 0
+	}
+	return normalizeSliceIndex(searchIndex(args[1]).Int(), length)
+}
+
+// searchIndex is the index a search reads in v: JavaScript's ToNumber (ToNumber), then without its
+// fraction (Int); what ToNumber cannot make a number of is 0.
+func searchIndex(v Value) Value {
+	if n := ToNumber(v); n.K == Number {
+		return n
+	}
+	return Value{K: Number}
+}
+
+// ArrayLastIndexOf — chỉ số của lần xuất hiện cuối, -1 nếu không có. It searches back from fromIndex,
+// as JavaScript's lastIndexOf: the last item when there is none, a negative one counting from the end,
+// one past the end the last item, NaN 0, and one before the start (-Infinity) nothing (16/10/2026:
+// fromIndex was not read, so [1, 2, 1].lastIndexOf(1, 1) was 2 where JavaScript gives 0).
 func (v Value) ArrayLastIndexOf(args ...Value) Value {
 	if len(args) == 0 {
 		return Value{K: Number, N: -1}
 	}
 	a := v.Array()
-	for i := len(a) - 1; i >= 0; i-- {
+	start := len(a) - 1
+	if len(args) > 1 {
+		n := ToIntegerOrInfinity(searchIndex(args[1]).N)
+		if n < 0 {
+			n += float64(len(a))
+		}
+		if n < float64(start) {
+			start = int(math.Max(n, -1))
+		}
+	}
+	for i := start; i >= 0; i-- {
 		if a[i].Equal(args[0]) {
 			return Value{K: Number, N: float64(i)}
 		}
@@ -634,8 +730,11 @@ func (v Value) ArrayIncludes(args ...Value) Value {
 	if len(args) == 0 {
 		return FALSE
 	}
-	for _, item := range v.Array() {
-		if item.Equal(args[0]) {
+	// JavaScript's SameValueZero: as === but NaN is NaN ([NaN].includes(NaN) is true; 15/10/2026)
+	nan := args[0].K == Number && args[0].N != args[0].N
+	a := v.Array()
+	for i := fromIndex(args, len(a)); i < len(a); i++ {
+		if a[i].Equal(args[0]) || nan && a[i].K == Number && a[i].N != a[i].N {
 			return TRUE
 		}
 	}
@@ -776,7 +875,7 @@ func (v Value) Chunk(args ...Value) Value {
 	if len(args) == 0 {
 		return v
 	}
-	size := int(args[0].N)
+	size := args[0].Int()
 	if size <= 0 {
 		return Value{K: Array, V: &[]Value{}}
 	}

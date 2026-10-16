@@ -66,14 +66,14 @@ func failureSite(t *testing.T, developing bool, routers map[string]string) (ask 
 
 // failingRouters are routes whose error nothing catches, each with what its diagnostic says: a JSON
 // handler, a plain handler, a guard before the handler, a handler that set a status before it failed,
-// a JSON value JSON cannot carry, a generated output, and the .error() lifecycle: a handler that
-// answers nothing and one that fails itself.
+// a write through null (15/10/2026; this was a JSON value JSON cannot carry, which is null since), a
+// generated output, and the .error() lifecycle: a handler that answers nothing and one that fails itself.
 var failingRouters = map[string]struct{ path, said string }{
 	"json":        {"/json", "order.total không phải hàm"},
 	"plain":       {"/plain", "boom-plain"},
 	"guard":       {"/guard", "boom-guard"},
 	"afterstatus": {"/afterstatus", "boom-status"},
-	"encode":      {"/encode", "không viết được câu trả lời thành JSON: JSON không có số +Inf"},
+	"write":       {"/write", "không ghi được order.total: order là null, không phải object hay mảng"},
 	"output":      {"/broken.xml", "requires title, description, and link"},
 	"silent":      {"/silent", "boom-silent"},
 	"errorfails":  {"/errorfails", "boom-handler"},
@@ -85,12 +85,15 @@ var failureRouters = map[string]string{
 	"plain":       "import { router } from \"kitwork\";\nrouter.get(() => {\n  fail(\"boom-plain\");\n  return \"reached\";\n});\n",
 	"guard":       "import { router } from \"kitwork\";\nrouter.guard(() => {\n  fail(\"boom-guard\");\n});\nrouter.get((ctx) => ctx.text(\"reached\"));\n",
 	"afterstatus": "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  ctx.status(201);\n  fail(\"boom-status\");\n});\n",
-	"encode":      "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  let ratio = 1;\n  for (let i = 0; i < 400; i++) {\n    ratio = ratio * 10;\n  }\n  return ctx.json({ ratio: ratio });\n});\n",
+	"write":       "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  const order = null;\n  order.total = 3;\n  return ctx.json({ reached: true });\n});\n",
 	"silent":      "import { router } from \"kitwork\";\nrouter.get(() => {\n  fail(\"boom-silent\");\n}).error((ctx, err) => {\n  const seen = err;\n});\n",
 	"errorfails":  "import { router } from \"kitwork\";\nrouter.get(() => {\n  fail(\"boom-handler\");\n}).error(() => {\n  fail(\"boom-error-handler\");\n});\n",
 	// CONTROLS: an .error() handler that answers, and an error the handler chose to show
 	"handled": "import { router } from \"kitwork\";\nrouter.get(() => {\n  fail(\"boom-handled\");\n}).error((ctx, err) => ctx.status(503).json({ handled: true }));\n",
 	"said":    "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  ctx.error(\"Thanh toán không thành công\");\n});\n",
+	// CONTROL: a number JSON has no spelling for is null in the answer, as JSON.stringify writes it
+	// (15/10/2026; it was this list's 500 "JSON không có số +Inf")
+	"infinity": "import { router } from \"kitwork\";\nrouter.get((ctx) => {\n  let ratio = 1;\n  for (let i = 0; i < 400; i++) {\n    ratio = ratio * 10;\n  }\n  return ctx.json({ ratio: ratio, empty: 0 / 0 });\n});\n",
 }
 
 // In production a request whose error nothing caught answers 500 with the status and the request id
@@ -164,6 +167,9 @@ func TestUncaughtErrorShowsVisitorsOnlyTheRequestIDInProduction(t *testing.T) {
 	}
 	if said := ask("/said", "", "req-said"); said.Code != http.StatusInternalServerError || said.Body.String() != "Thanh toán không thành công" {
 		t.Errorf("CONTROL: ctx.error(\"…\") = %d %q, want its words", said.Code, said.Body.String())
+	}
+	if infinity := ask("/infinity", "", "req-infinity"); infinity.Code != http.StatusOK || infinity.Body.String() != `{"empty":null,"ratio":null}` {
+		t.Errorf("CONTROL: ctx.json of Infinity and NaN = %d %q, want 200 with null for each", infinity.Code, infinity.Body.String())
 	}
 }
 

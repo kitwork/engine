@@ -24,9 +24,10 @@ const TypeofMethod = "#typeof"
 //   - a whole number past the length pads the gap with null, as JavaScript leaves holes that read
 //     undefined (Kitwork's null): [1, 2] with a[4] = 5 is [1, 2, null, null, 5]. Each null costs one unit
 //     of energy, and more than MaxArrayGap of them is the INVALID_ARGUMENT failure;
-//   - any other key (a negative or fractional number, NaN, a string, "2" included, a boolean, null) is the
-//     UNSUPPORTED failure: JavaScript keeps such a value as a property of the array object, and an array
-//     of Kitwork has none (a read of a["2"] or a.x gives null), so the value would be lost.
+//   - any other key (a negative or fractional number, NaN, Infinity, a string, "2" included, a boolean,
+//     null, and length: a.length = n) is the UNSUPPORTED failure, however far past the end: JavaScript
+//     keeps such a value as a property of the array object, and an array of Kitwork has none (a read of
+//     a["2"], a.x or a[1.5] gives null, GET), so the value would be lost.
 //
 // It returns a failure (an Invalid value) or null. The message never shows the key or the value: either
 // may be a secret a request carried.
@@ -35,13 +36,13 @@ func (vm *VM) setArrayItem(target value.Value, key, item value.Value, ip int) va
 	length := float64(len(*items))
 	index := key.N
 	switch {
-	case key.K != value.Number || index != index || index < 0:
+	case key.K != value.Number || index != index || index < 0 || math.IsInf(index, 1) || math.Trunc(index) != index:
+		// not an index, however large: 1048578.5 and Infinity too, which past the gap limit were the gap's
+		// failure (15/10/2026)
 		return notAnArrayIndex(key)
 	case index-length > MaxArrayGap:
 		return value.InvalidFailure(value.InvalidArgumentCode,
 			"chỉ số cách cuối mảng hơn 1048576 phần tử, mảng sẽ phải đệm ngần ấy null: cần khoá thưa như vậy thì dùng object { }")
-	case math.Trunc(index) != index:
-		return notAnArrayIndex(key)
 	case index < length:
 		(*items)[int(index)] = item
 	case index == length:
@@ -68,6 +69,8 @@ func notAnArrayIndex(key value.Value) value.Value {
 		what = "NaN"
 	case key.N < 0:
 		what = "số âm"
+	case math.IsInf(key.N, 1):
+		what = "vô cực"
 	default:
 		what = "số không nguyên"
 	}

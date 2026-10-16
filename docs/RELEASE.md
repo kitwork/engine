@@ -84,8 +84,8 @@ journey therefore cannot be mistaken for crash-safety evidence, and neither
 step alone is a claim about dishonest storage hardware or unsupported network
 filesystems.
 
-The first gate loads the committed VM compatibility archive (`testdata/v3`
-since bytecode 3, 14/10/2026) without recompiling its sources and requires each historical Program to decode, verify,
+The first gate loads the committed VM compatibility archive (`testdata/v4`
+since bytecode 4, 15/10/2026; `testdata/v3` from bytecode 3, 14/10/2026) without recompiling its sources and requires each historical Program to decode, verify,
 execute, and re-encode unchanged. The next gate runs the manifest-driven VM
 fault gauntlet: malformed envelopes and Programs must be rejected
 deterministically, execution failures must publish stable diagnostics, and both

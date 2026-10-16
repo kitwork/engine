@@ -234,7 +234,9 @@ Object.keys(o)  Object.values(o)  Object.entries(o)   // ⚠️ thứ tự key K
 Object.assign(target, src1, src2)   // mutate target, trả về target (chuẩn JS)
 Object.fromEntries(pairs)
 
-Number("42.5")        // 42.5 · chuỗi không phải số → null (JS trả NaN, VM không có NaN)
+Number("42.5")        // 42.5 · chuỗi không phải số → NaN, như JS (16/10/2026; trước đó là null)
++"42.5"                // 42.5 · dấu + đứng trước là Number(x)
+parseInt("12px")      // 12 · "0x1f" → 31 · không có chữ số → NaN · parseFloat("3.5px") → 3.5
 Number.parseInt("99.9")   Number.parseFloat(s)
 Number.isInteger(7)       Number.isFinite(x)
 Number.MAX_SAFE_INTEGER   Number.MIN_SAFE_INTEGER   Number.EPSILON

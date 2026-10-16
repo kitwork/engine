@@ -16,6 +16,7 @@ func TestInstructionSpecsCoverExecutableOpcodes(t *testing.T) {
 		MAKE, SET, MERGE,
 		CALL, INVOKE, RETURN, DEFER, SPAWN, COMMIT,
 		PUSH_WIDE, LOAD_WIDE, STORE_WIDE, JUMP_WIDE, TRUE_WIDE, FALSE_WIDE, ITER_WIDE,
+		STEP,
 	}
 
 	for _, op := range executable {
@@ -124,6 +125,28 @@ func TestVerifyRejectsMalformedBytecode(t *testing.T) {
 				byte(RETURN),
 			},
 			want: VerifyInvalidOperand,
+		},
+		// STEP (bytecode 4, 15/10/2026): a step the compiler never writes, nothing to step, no operand
+		{
+			name: "invalid step",
+			code: []byte{
+				byte(PUSH), 0, 0,
+				byte(STEP), StepDecrement + 1,
+				byte(RETURN),
+			},
+			constants: []value.Value{value.New(1)},
+			want:      VerifyInvalidOperand,
+		},
+		{
+			name: "step of nothing",
+			code: []byte{byte(STEP), StepIncrement, byte(RETURN)},
+			want: VerifyStackUnderflow,
+		},
+		{
+			name:      "step without its operand",
+			code:      []byte{byte(PUSH), 0, 0, byte(STEP)},
+			constants: []value.Value{value.New(1)},
+			want:      VerifyTruncatedOperand,
 		},
 	}
 

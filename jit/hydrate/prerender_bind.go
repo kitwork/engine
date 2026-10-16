@@ -57,7 +57,7 @@ func PreRenderBind(htmlStr string, state map[string]map[string]any) string {
 			if err != nil {
 				continue
 			}
-			attrs[strings.ToLower(bm[1])] = value
+			attrs[strings.ToLower(bm[1])] = Plain(value) // undefined is null: the attribute is removed
 		}
 		if len(attrs) == 0 {
 			return tag
@@ -124,18 +124,10 @@ func applyBoundAttrs(tag string, attrs map[string]any) string {
 	return inner + ">"
 }
 
-// attrText renders a value the way the client's setAttribute would.
+// attrText renders a value the way the client's setAttribute would: String(v), a list its items
+// joined, an object "[object Object]" (Text; 16/10/2026: a list or an object was "").
 func attrText(v any) string {
-	switch t := v.(type) {
-	case string:
-		return t
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(t)
-	default:
-		return ""
-	}
+	return Text(v)
 }
 
 // safeAttrName keeps a computed key from becoming markup. An expression could name anything; only

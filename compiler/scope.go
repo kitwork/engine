@@ -119,6 +119,15 @@ type resolution struct {
 	functions []*functionScope
 	// declaresSafe: the program declares or assigns a name safe somewhere (checkSafeCall).
 	declaresSafe bool
+	// once gives an update or a compound assignment of a member or an item whose object or key does
+	// more than read (a[i++]++, get().n += 1) the slots they are kept in, so each runs once
+	// (evaluateOnce, 15/10/2026).
+	once map[*AssignmentExpression]onceSlots
+}
+
+// onceSlots are the slots of an assignment's object and key; "" for one that is compiled where it is.
+type onceSlots struct {
+	object, key string
 }
 
 type resolver struct {
@@ -131,6 +140,8 @@ type resolver struct {
 	err      error
 	// foreignWrites lists the names written from a function other than the one declaring them.
 	foreignWrites []*Identifier
+	// onces lists, in source order, the assignments that get onceSlots once every other slot is given.
+	onces []*AssignmentExpression
 	// observe, when set, sees every name read or written, where, and what it resolved to (nil: no
 	// declaration around). Scans of the apps use it; compiling does not.
 	observe func(name *Identifier, write bool, found *binding, scope *lexicalScope)
@@ -154,6 +165,7 @@ func (c *Compiler) resolveObserved(
 			environments: map[*FunctionLiteral][]string{},
 			copies:       map[*FunctionLiteral][]*binding{},
 			temps:        map[*Identifier]string{},
+			once:         map[*AssignmentExpression]onceSlots{},
 		},
 	}
 	r.enterFunction(nil)
@@ -167,6 +179,7 @@ func (c *Compiler) resolveObserved(
 	}
 	r.assignSlots()
 	r.assignEnvironments()
+	r.assignOnce()
 	r.result.declaresSafe = declaresName(r.result, "safe")
 	return r.result, nil
 }
@@ -513,6 +526,9 @@ func (r *resolver) expression(expression Expression) {
 	case *AssignmentExpression:
 		r.target(node.Name)
 		r.expression(node.Value)
+		if object, key := onceParts(node); object || key {
+			r.onces = append(r.onces, node)
+		}
 	case *BindingPattern:
 		r.target(node)
 	case *ArrayLiteral:
@@ -653,6 +669,47 @@ func (r *resolver) heldAround(function *functionScope, name string) bool {
 func (r *resolver) slot(name string, mark byte) string {
 	r.next++
 	return name + string(mark) + strconv.Itoa(r.next)
+}
+
+// assignOnce gives each assignment of r.onces its slots, after every other slot, so the slots of a program
+// without such an assignment keep their names. A node resolved twice (the target of an update is also
+// the left side of its value) gets its slots once.
+func (r *resolver) assignOnce() {
+	for _, node := range r.onces {
+		if _, given := r.result.once[node]; given {
+			continue
+		}
+		object, key := onceParts(node)
+		var slots onceSlots
+		if object {
+			slots.object = r.slot("", runtime.SlotBlockMark)
+		}
+		if key {
+			slots.key = r.slot("", runtime.SlotBlockMark)
+		}
+		r.result.once[node] = slots
+	}
+}
+
+// onceParts tells which parts of an update or a compound assignment of a member or an item are kept in a
+// slot: the key when it does more than read, and then the object too, which JavaScript evaluates before
+// the key; the object alone when only it does. A plain assignment (a[f()] = v) evaluates its target once
+// already.
+func onceParts(node *AssignmentExpression) (object, key bool) {
+	infix, ok := node.Value.(*InfixExpression)
+	if !ok || infix.Left != node.Name {
+		return false, false
+	}
+	switch target := node.Name.(type) {
+	case *MemberExpression:
+		return !readsOnly(target.Object), false
+	case *IndexExpression:
+		if !readsOnly(target.Index) {
+			return true, true
+		}
+		return !readsOnly(target.Left), false
+	}
+	return false, false
 }
 
 // assignEnvironments puts every variable of an iteration that a closure reaches in its loop's

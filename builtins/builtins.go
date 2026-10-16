@@ -1,6 +1,8 @@
 package builtins
 
 import (
+	"math"
+
 	"github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/value"
 )
@@ -33,6 +35,12 @@ var builtins = map[string]func() value.Value{
 			return value.Value{K: value.Nil}
 		})
 	},
+	// 15/10/2026 (the owner's L2): a division by zero gives Infinity or NaN, so a program can name and
+	// test them, as in JavaScript
+	"Infinity": func() value.Value { return value.New(math.Inf(1)) },
+	"NaN":      func() value.Value { return value.New(math.NaN()) },
+	"isNaN":    IsNaN,
+	"isFinite": IsFinite,
 }
 
 func InjectJSCompat(globals map[string]value.Value) {

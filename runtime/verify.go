@@ -113,6 +113,9 @@ func verifyAndProfile(code []byte, constants []value.Value) (ProgramProfile, err
 	if err := validateOperands(instructions, constants, boundaries, len(code)); err != nil {
 		return ProgramProfile{}, err
 	}
+	if err := validateJumpWidths(instructions, byIP, len(code)); err != nil {
+		return ProgramProfile{}, err
+	}
 
 	entries := []int{0}
 	for i, constant := range constants {
@@ -280,6 +283,16 @@ func validateOperands(
 				)
 			}
 
+		case STEP:
+			if ins.operands[0] > StepDecrement {
+				return verifyError(
+					VerifyInvalidOperand,
+					ins.ip,
+					ins.encoded,
+					fmt.Sprintf("step %d is not supported", ins.operands[0]),
+				)
+			}
+
 		case MAKE:
 			if ins.operands[0] > 1 {
 				return verifyError(
@@ -292,6 +305,73 @@ func validateOperands(
 		}
 	}
 	return nil
+}
+
+// validateJumpWidths keeps one encoding per program for its jumps (15/10/2026; until then only a wide
+// jump in a program of 65,535 bytes or less was refused). The compiler writes every jump of a program in
+// two bytes, or every jump in three when one address of the two-byte program would not fit two bytes
+// (compiler.go, patchJump). So the widths do not mix, and wide jumps stand only where the same program
+// with two-byte jumps, each one byte shorter and every address after it one byte lower, has an address
+// past MaxNarrowOperand.
+func validateJumpWidths(instructions []decodedInstruction, byIP map[int]int, codeLen int) error {
+	var wide, narrow *decodedInstruction
+	for index := range instructions {
+		ins := &instructions[index]
+		if !isJumpInstruction(ins.op) {
+			continue
+		}
+		if ins.encoded.IsWide() {
+			if wide == nil {
+				wide = ins
+			}
+		} else if narrow == nil {
+			narrow = ins
+		}
+	}
+	if wide == nil {
+		return nil
+	}
+	if narrow != nil {
+		later := wide
+		if narrow.ip > wide.ip {
+			later = narrow
+		}
+		return verifyError(
+			VerifyInvalidOperand,
+			later.ip,
+			later.encoded,
+			"two-byte and three-byte jumps in one program, which the compiler writes in one width",
+		)
+	}
+	// before[i] counts the jumps of instructions[:i]: written in two bytes, an address loses one byte for each
+	before := make([]int, len(instructions)+1)
+	jumps := 0
+	for index, ins := range instructions {
+		before[index] = jumps
+		if isJumpInstruction(ins.op) {
+			jumps++
+		}
+	}
+	before[len(instructions)] = jumps
+	for _, ins := range instructions {
+		if !isJumpInstruction(ins.op) {
+			continue
+		}
+		target := int(ins.operands[0])
+		at := len(instructions)
+		if target < codeLen {
+			at = byIP[target]
+		}
+		if target-before[at] > MaxNarrowOperand {
+			return nil
+		}
+	}
+	return verifyError(
+		VerifyInvalidOperand,
+		wide.ip,
+		wide.encoded,
+		"wide jumps in a program whose every address fits two bytes when its jumps are written in two bytes",
+	)
 }
 
 type stackState struct {

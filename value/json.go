@@ -3,7 +3,6 @@ package value
 import (
 	"encoding/json"
 	"sort"
-	"strconv"
 	"time"
 )
 
@@ -24,12 +23,14 @@ func (v Value) MarshalJSON() ([]byte, error) {
 		}
 		return []byte("false"), nil
 	case Number:
-		// Use standard number formatting
-		if v.N == float64(int64(v.N)) {
-			// Integer case
-			return json.Marshal(int64(v.N))
+		if _, nonFinite := NonFiniteText(v.N); nonFinite {
+			// NaN, Infinity and -Infinity are null, as JSON.stringify writes them (15/10/2026): JSON has
+			// no spelling for them, and encoding/json refused them, so ctx.json of one answered 500
+			return []byte("null"), nil
 		}
-		return json.Marshal(v.N)
+		// as JSON.stringify writes a number, which is String(n) (AppendNumber): a whole number past 2^53
+		// has JavaScript's digits (2 ** 60 is 1152921504606847000), not every digit of the int64
+		return AppendNumber(nil, v.N), nil
 	case String:
 		return json.Marshal(v.V.(string))
 	case Time:
@@ -140,8 +141,8 @@ func (w *walk) appendJSONItem(dst []byte, item Value, key string, index int) ([]
 		}
 		return append(dst, "false"...), nil
 	case Number:
-		if item.N == float64(int64(item.N)) {
-			return strconv.AppendInt(dst, int64(item.N), 10), nil
+		if _, nonFinite := NonFiniteText(item.N); !nonFinite {
+			return AppendNumber(dst, item.N), nil
 		}
 	case String:
 		if text, ok := item.V.(string); ok && plainJSONString(text) {

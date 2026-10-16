@@ -1,8 +1,10 @@
 package work
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"time"
@@ -50,6 +52,10 @@ type plannedRenderer struct {
 	page     *render.Render
 	notfound *render.Render
 	health   *RuntimeHealth
+	// noShellLogged keeps the log of a not-found with no shell to one record for the route and the
+	// generation (answerMissing); noPageLogged does the same for one with no not-found page
+	noShellLogged sync.Once
+	noPageLogged  sync.Once
 }
 
 func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
@@ -150,6 +156,12 @@ func newRenderPlan(t *Tenant, tree *RouteTree) (*RenderPlan, error) {
 			}
 		}
 		notfoundRender := render.New(notfoundConfig).Prepare()
+		// the not-found page prepares with the generation, as the page does: one whose own text does not
+		// prepare keeps the site from starting (16/10/2026: it answered every 404 with its message, in
+		// production too). A site with no shell (index.kitwork.html) answers its 404s as it did.
+		if err := notfoundRender.TemplateError(); err != nil {
+			return nil, fmt.Errorf("prepare not-found template for route %q: %w", relative, err)
+		}
 		plan.renderers[relative] = &plannedRenderer{
 			base:     baseRender,
 			page:     pageRender,
@@ -212,27 +224,87 @@ func (p *RenderPlan) Close() {
 	}
 }
 
-func (r *plannedRenderer) BindPage(page string, notfound bool, data value.Value) value.Value {
+// BindPage renders a page of the route. err is a *render.NoShellError when no shell
+// (index.kitwork.html) stands above the page to put it in: there is no page then; a *render.NoPageError
+// when neither the page nor a not-found page is there: the page has nothing in it (answerMissing).
+func (r *plannedRenderer) BindPage(page string, notfound bool, data value.Value) (value.Value, error) {
 	if r == nil {
-		return value.New("")
+		return value.New(""), nil
 	}
 	if r.health == nil {
 		return r.bindPage(page, notfound, data)
 	}
 	started := time.Now()
-	output := r.bindPage(page, notfound, data)
+	output, err := r.bindPage(page, notfound, data)
 	prepared := page == "" && ((!notfound && r.page.PresentationPrepared()) ||
 		(notfound && r.notfound.PresentationPrepared()))
 	r.health.RecordRender(time.Since(started), prepared)
-	return output
+	return output, err
 }
 
-func (r *plannedRenderer) bindPage(page string, notfound bool, data value.Value) value.Value {
+func (r *plannedRenderer) bindPage(page string, notfound bool, data value.Value) (value.Value, error) {
 	if page == "" {
 		if notfound {
-			return r.notfound.Bind(data)
+			return r.notfound.Page("", true, data)
 		}
-		return r.page.Bind(data)
+		return r.page.Page("", false, data)
 	}
-	return r.base.BindPage(page, notfound, data)
+	return r.base.Page(page, notfound, data)
+}
+
+// answerMissing answers a request whose page is missing: no shell (index.kitwork.html) above it to stand
+// in (render.NoShellError), as in a site that serves no template, or neither the page nor a not-found page
+// (render.NoPageError); at an unknown path or at a page a handler chose (ctx.view). page is what render
+// gave instead, and err names what was looked for, an absolute path on the server.
+//
+// A page a handler chose fails the request as a page that does not compile: 500, err in the log with the
+// request id, and in the answer only while developing (16/10/2026: with no shell it answered 200 with the
+// shell's path as the page; with no page, 200 with nothing in it, and nothing was said).
+//
+// A not-found answers 404 with page while developing, as it always did. In production a visitor never
+// reads a path of the server (14/10/2026): with no shell the answer is the engine's plain 404, as a Kitwork
+// UI site with no not-found page gives (16/10/2026: the shell's path was the whole 404 page, in production
+// too); with no not-found page it is the shell with nothing in it, as before. The log says what was looked
+// for, once for the route and the generation, for every unknown path of such a site is a 404 and scanners
+// ask many.
+func (r *plannedRenderer) answerMissing(router *Router, page value.Value, err error) {
+	if !router.isNotfound {
+		failure := uncaught(err.Error())
+		router.tenant.recordFailure(router, "view", failure)
+		router.fail(failure, http.StatusInternalServerError)
+		return
+	}
+	var noPage *render.NoPageError
+	if errors.As(err, &noPage) {
+		if !AllowLocal {
+			r.noPageLogged.Do(func() { logMissingPage(router, "Kitwork not-found page is not there", err) })
+		}
+		router.response.HTML(page, http.StatusNotFound)
+		return
+	}
+	if AllowLocal {
+		router.response.HTML(page, http.StatusNotFound)
+		return
+	}
+	r.noShellLogged.Do(func() { logMissingPage(router, "Kitwork not-found page has no shell", err) })
+	router.response.Text(value.New("Not Found"), http.StatusNotFound)
+}
+
+// logMissingPage is the one record of a not-found whose page is missing, for the route and the
+// generation (answerMissing).
+func logMissingPage(router *Router, message string, err error) {
+	generation := uint64(0)
+	if current := router.tenant.SiteGeneration(); current != nil {
+		generation = current.Version()
+	}
+	slog.WarnContext(
+		router.request.Context(),
+		message,
+		"request_id", router.requestID,
+		"app", router.tenant.AppID(),
+		"site", router.tenant.Domain(),
+		"generation", generation,
+		"path", router.request.URL.Path,
+		"message", err.Error(),
+	)
 }

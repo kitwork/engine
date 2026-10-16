@@ -2,8 +2,8 @@ package value
 
 import (
 	"encoding/json"
+	"math"
 	"sort"
-	"strconv"
 	"time"
 	"unsafe"
 )
@@ -131,11 +131,7 @@ func (v Value) appendScalar(b []byte) []byte {
 		s, _ := v.V.(string)
 		return append(b, s...)
 	case Number:
-		i := int64(v.N)
-		if v.N == float64(i) {
-			return strconv.AppendInt(b, i, 10)
-		}
-		return strconv.AppendFloat(b, v.N, 'g', -1, 64)
+		return AppendNumber(b, v.N)
 	case Bool:
 		if v.N > 0 {
 			return append(b, "true"...)
@@ -223,8 +219,23 @@ func (v Value) interfaceScalar() any {
 	}
 }
 
-func (v Value) Int() int       { return int(v.N) }
-func (v Value) Int64() int64   { return int64(v.N) }
+// Int is v's number as a position, a length or a count takes it: JavaScript's ToIntegerOrInfinity (NaN
+// is 0, the fraction dropped), clamped to what an int holds. Go's int(n) of NaN, an infinity or a number
+// past the range is -9223372036854775808 on amd64, which a division by zero reached once it gave
+// Infinity and NaN ("7".padStart(1 / 0) panicked making its padding; 15/10/2026, the review of L2).
+func (v Value) Int() int {
+	i := saturatedInt64(v.N)
+	switch {
+	case i > math.MaxInt:
+		return math.MaxInt
+	case i < math.MinInt:
+		return math.MinInt
+	}
+	return int(i)
+}
+
+// Int64 is Int as an int64.
+func (v Value) Int64() int64   { return saturatedInt64(v.N) }
 func (v Value) Float() float64 { return v.N }
 
 func (v Value) Bytes() []byte {

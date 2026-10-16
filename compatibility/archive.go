@@ -20,8 +20,9 @@ import (
 const (
 	ManifestSchemaVersion uint16 = 1
 	// DefaultManifestPath is the archive of the current bytecode version. Bytecode 3 (14/10/2026)
-	// started testdata/v3; testdata/v2 stays as bytecode 2's evidence, which this runtime refuses.
-	DefaultManifestPath = "compatibility/testdata/v3/manifest.json"
+	// started testdata/v3, bytecode 4 (15/10/2026, STEP) testdata/v4; testdata/v2 and testdata/v3 stay
+	// as their versions' evidence, which this runtime refuses.
+	DefaultManifestPath = "compatibility/testdata/v4/manifest.json"
 )
 
 // Manifest records immutable Program binaries and the contract that produced

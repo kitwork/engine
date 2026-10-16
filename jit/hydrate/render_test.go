@@ -281,11 +281,12 @@ func TestRuntimeEmbedded(t *testing.T) {
 		// scopes: the boundary attribute, the resolver, and the page-scope opcode
 		"data-kit-scope", "scopeFor", `"=$"`,
 		// blueprint grammar: object/array/lambda/sequence/call ops + tools + boundary modes
-		`"{}"`, `"[]"`, `"=>"`, `"call"`, "function KitLambda", "tryArrowParams", "boundaryScope", "kit.run",
+		`"{}"`, `"[]"`, `"=>"`, `"call"`, "function lambda(x, s)", "tryArrowParams", "boundaryScope", "kit.run",
 		// registered components: register fn, activation attr, blueprint registry, method this-bind
-		"kit.component", "data-kit-component", "seedComponent", "fn.apply(s, callbacks(fargs, s))",
-		// a lambda handed to a native method becomes a callback that walks its tree in the caller scope
-		"function callbacks", "function invokeLambda",
+		"kit.component", "data-kit-component", "seedComponent", ".test(fn) ? undefined : s, fargs)",
+		// a lambda is a function a native method calls back, walking its tree in the calling scope; every
+		// call counts against one depth (16/10/2026: the lambda was an object wrapped at each native call)
+		"function call(fn, self, args)", "function invokeLambda", "calling || s",
 		// a component registered after boot still paints
 		"scheduleRender",
 		"kit.platform", "kit.bridge", `Object.defineProperty(kit, "isNative"`,

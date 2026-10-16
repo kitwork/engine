@@ -526,6 +526,21 @@ func (c *Compiler) Compile(node Node) error {
 		case "&&", "||", "??":
 			return c.compileLogical(n)
 		}
+		if n.Step {
+			// x ± 1 of ++ and --: x; STEP 1 (or 2), the number JavaScript's ToNumber makes of x, stepped
+			// (bytecode 4, 15/10/2026). It replaces x; PUSH 1; ADD, so "5"++ is 6, not "51", and costs
+			// the same energy.
+			if err := c.Compile(n.Left); err != nil {
+				return err
+			}
+			c.at(n.Token.Source, n.Token.Position)
+			step := runtime.StepIncrement
+			if n.Operator == "-" {
+				step = runtime.StepDecrement
+			}
+			c.emit(runtime.STEP, byte(step))
+			return nil
+		}
 		err := c.Compile(n.Left)
 		if err != nil {
 			return err
@@ -576,6 +591,11 @@ func (c *Compiler) Compile(node Node) error {
 			c.emit(runtime.MUL)
 		case "!":
 			c.emit(runtime.NOT)
+		case "+":
+			// +x: x; STEP 0, the number JavaScript's ToNumber makes of x, as Number(x) (16/10/2026, the
+			// owner's E2): +"5" is 5, +"" 0, +"abc" NaN, +[5] 5. STEP 0 is what x++ used as a value already
+			// makes of the old x, so no opcode is new
+			c.emit(runtime.STEP, runtime.StepNumber)
 		case "void":
 			// void expr — bỏ kết quả biểu thức, trả về null (esbuild sinh `void 0`)
 			c.emit(runtime.POP)
@@ -629,13 +649,22 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(runtime.POP)
 
 	case *AssignmentExpression:
+		// a[i++]++, get().n += 1: the object and key run once, into their slots (15/10/2026)
+		once, err := c.evaluateOnce(n)
+		if err != nil {
+			return err
+		}
+		n = once
 		_, name := n.Name.(*Identifier)
 		switch {
 		case n.Update == PostfixUpdate:
-			// x++ as a value is the old x (14/10/2026): read it, update, drop what the update left
+			// x++ as a value is the old x (14/10/2026): read it, update, drop what the update left. The
+			// old x is made a number, as JavaScript's x++ gives it (STEP 0, 15/10/2026): "5"++ gives 5.
 			if err := c.Compile(n.Name); err != nil {
 				return err
 			}
+			c.at(n.Token.Source, n.Token.Position)
+			c.emit(runtime.STEP, runtime.StepNumber)
 			if err := c.compileAssignment(n); err != nil {
 				return err
 			}
@@ -1037,9 +1066,70 @@ func (c *Compiler) compileEffect(e Expression) error {
 	if update, ok := e.(*AssignmentExpression); ok && update.Update != NotAnUpdate {
 		// where Compile would put it, so the debug table is the one it always was
 		c.at(update.Token.Source, update.Token.Position)
-		return c.compileAssignment(update)
+		once, err := c.evaluateOnce(update)
+		if err != nil {
+			return err
+		}
+		return c.compileAssignment(once)
 	}
 	return c.Compile(e)
+}
+
+// evaluateOnce runs the object and the key of an update or a compound assignment of a member or an item
+// once, into the slots scope.go gave them (onceParts), and gives back the assignment on those slots, as
+// JavaScript evaluates them once (15/10/2026). Until then the target was compiled where it is read and
+// where it is written, and once more for x++ or ++x used as a value, so a[i++]++ read one item and wrote
+// another. An assignment whose object and key only read (a[i]++, o.n += 1) is given back as it is: its
+// code did not change.
+//
+//	object; STORE #o; POP; [key; STORE #k; POP]; <the assignment, reading LOAD #o and LOAD #k>
+func (c *Compiler) evaluateOnce(n *AssignmentExpression) (*AssignmentExpression, error) {
+	if c.scopes == nil {
+		return n, nil
+	}
+	slots, ok := c.scopes.once[n]
+	if !ok {
+		return n, nil
+	}
+	keep := func(e Expression, slot string, at Token) (Expression, error) {
+		if slot == "" {
+			return e, nil
+		}
+		if err := c.Compile(e); err != nil {
+			return nil, err
+		}
+		c.emitName(runtime.STORE, slot)
+		c.emit(runtime.POP)
+		return &Identifier{Token: at, Value: slot}, nil
+	}
+	var target Expression
+	switch name := n.Name.(type) {
+	case *MemberExpression:
+		object, err := keep(name.Object, slots.object, name.Token)
+		if err != nil {
+			return nil, err
+		}
+		target = &MemberExpression{Token: name.Token, Object: object, Property: name.Property}
+	case *IndexExpression:
+		object, err := keep(name.Left, slots.object, name.Token)
+		if err != nil {
+			return nil, err
+		}
+		key, err := keep(name.Index, slots.key, name.Token)
+		if err != nil {
+			return nil, err
+		}
+		target = &IndexExpression{Token: name.Token, Left: object, Index: key}
+	default:
+		return n, nil
+	}
+	infix := n.Value.(*InfixExpression)
+	return &AssignmentExpression{
+		Token:  n.Token,
+		Name:   target,
+		Value:  &InfixExpression{Token: infix.Token, Left: target, Operator: infix.Operator, Right: infix.Right, Step: infix.Step},
+		Update: n.Update,
+	}, nil
 }
 
 // compileFunctionLiteral jumps over the function's code and pushes it as a value, which the VM makes a
@@ -1382,6 +1472,35 @@ func plainOperand(e Expression) bool {
 	return false
 }
 
+// readsOnly is an expression that reads and does nothing else: a name, a literal, a member or an item of
+// such, an operator, a ternary or a template of such. Evaluated twice it gives the same value, so the
+// object and key of an update or a compound assignment of such need no slot (evaluateOnce). A call, an
+// assignment, an update or a function made is more than a read.
+func readsOnly(e Expression) bool {
+	switch n := e.(type) {
+	case *Identifier, *Literal:
+		return true
+	case *MemberExpression:
+		return !n.Optional && readsOnly(n.Object)
+	case *IndexExpression:
+		return !n.Optional && readsOnly(n.Left) && readsOnly(n.Index)
+	case *InfixExpression:
+		return readsOnly(n.Left) && readsOnly(n.Right)
+	case *PrefixExpression:
+		return readsOnly(n.Right)
+	case *TernaryExpression:
+		return readsOnly(n.Condition) && readsOnly(n.Consequence) && readsOnly(n.Alternative)
+	case *TemplateLiteral:
+		for _, part := range n.Parts {
+			if !readsOnly(part) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // compilePattern destructures the value on top of the stack, which stays there: each element reads its
 // key (an index in an array pattern) as a member read does, takes its default when what it read is null
 // or missing, then stores a variable or destructures further.
@@ -1533,6 +1652,19 @@ func (c *Compiler) ByteCodeResult() (*Bytecode, error) {
 			)
 		}
 		return nil, fmt.Errorf("compiler produced invalid bytecode: %w", err)
+	}
+	// What a cache or a check stores is the envelope, whose debug table writes each entry's file name: a
+	// dense module on a long path passes MaxProgramBinarySize with its code under the limit. Such a
+	// program ran, but was never cached and failed every check (15/10/2026).
+	if size, crossing := program.EncodedSize(); size > runtime.MaxProgramBinarySize {
+		location, reached := c.debugLocationAt(0), "mã và hằng của nó đã vượt"
+		if entries := program.DebugEntries(); crossing >= 0 && crossing < len(entries) {
+			location, reached = entries[crossing].SourceLocation, "đến đây thì vượt"
+		}
+		return nil, fmt.Errorf(
+			"%s: chương trình lưu ra %d byte (mã, hằng và bảng vị trí, mỗi mục ghi tên tệp của nó), quá giới hạn %d byte của một chương trình (%s): chia bớt mã ra module, để mỗi route chỉ import phần nó dùng, hay đặt module ở đường dẫn ngắn hơn",
+			locationText(location), size, runtime.MaxProgramBinarySize, reached,
+		)
 	}
 	return &Bytecode{
 		Program:             program,

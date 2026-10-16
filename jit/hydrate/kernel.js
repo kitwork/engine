@@ -81,7 +81,7 @@
     return value;
   };
   kit.has = function (name) {
-    return Object.prototype.hasOwnProperty.call(modules, name);
+    return has(modules, name);
   };
 
   // Platform capabilities are services, separate from the runtime's control API, and JavaScript
@@ -99,13 +99,13 @@
   function validServiceName(name) {
     return /^[A-Za-z][A-Za-z0-9]*$/.test(name) &&
       (!blockedKey(name) || name === "window") &&
-      !Object.prototype.hasOwnProperty.call(reservedServiceNames, name);
+      !has(reservedServiceNames, name);
   }
 
   kit.service = function (name, value) {
     name = String(name || "");
     if (arguments.length === 1) {
-      return Object.prototype.hasOwnProperty.call(services, name) ? services[name] : undefined;
+      return has(services, name) ? services[name] : undefined;
     }
     if (!validServiceName(name)) throw new Error("kit: invalid or reserved service name '" + name + "'");
 
@@ -144,45 +144,45 @@
     while (i < n) {
       var c = s[i];
       if (c === " " || c === "\t" || c === "\n" || c === "\r") { i++; continue; }
-      if ((c >= "0" && c <= "9") || (c === "." && i + 1 < n && s[i + 1] >= "0" && s[i + 1] <= "9")) {
-        var j = i, dot = false;
-        while (j < n) {
-          if (s[j] >= "0" && s[j] <= "9") { j++; continue; }
-          if (s[j] === "." && !dot) { dot = true; j++; continue; }
-          break;
-        }
-        out.push({ t: "num", v: s.slice(i, j) }); i = j; continue;
-      }
+      // A number as JavaScript writes one — 12, 1.5, .5, 5., 1e-13, 2E3, 0x1f, 0o17, 0b101 — read by
+      // Number() (16/10/2026: 1e-13 and 0x1f were refused on both ends). Every token keeps where it
+      // starts (p), so a lambda keeps its source as written.
+      var num = /^(0x[\da-f]+|0o[0-7]+|0b[01]+|(\d+\.?\d*|\.\d+)(e[+-]?\d+)?)/i.exec(s.slice(i));
+      if (num) { out.push({ t: "num", v: num[0], p: i }); i += num[0].length; continue; }
       if (c === "'" || c === '"') {
         // Escapes as JavaScript reads them (the Go twin's lex says why they came): \n \t \r \b \f
-        // \v \0, \uXXXX, and any other escaped character stands for itself — \' \" \\ included.
+        // \v \0, \xHH, \uXXXX, \u{X…} and a line continuation (16/10/2026: \x41 and \u{1F600} were the letters
+        // x41 and u{1F600}), and any other escaped character stands for itself — \' \" \\ included.
         var q = c, k = i + 1, text = "", closed = false;
         while (k < n) {
           var ch = s[k];
           if (ch === q) { closed = true; break; }
           if (ch !== "\\" || k + 1 >= n) { text += ch; k++; continue; }
-          var e = s[++k];
-          if (e === "u" && /^[0-9a-fA-F]{4}$/.test(s.slice(k + 1, k + 5))) { text += String.fromCharCode(parseInt(s.slice(k + 1, k + 5), 16)); k += 5; continue; }
-          text += ({ n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0" })[e] || e;
+          var e = s[++k], hex = /^(?:x([\da-f]{2})|u([\da-f]{4})|u\{([\da-f]+)\})/i.exec(s.slice(k));
+          if (hex) { text += String.fromCodePoint(parseInt(hex[1] || hex[2] || hex[3], 16)); k += hex[0].length; continue; }
+          // a backslash at the end of a line continues the string on the next, as in JavaScript
+          var esc = { n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0", "\n": "" };
+          text += e in esc ? esc[e] : e;
           k++;
         }
         if (!closed) throw new Error("hydrate: unterminated string");
         // "\0" leads a string's value so '!' or '(' is never taken for the operator it spells.
-        out.push({ t: "str", v: "\0" + text }); i = k + 1; continue;
+        out.push({ t: "str", v: "\0" + text, p: i }); i = k + 1; continue;
       }
       if (/[A-Za-z_$]/.test(c)) {
         var m = i; while (m < n && /[A-Za-z0-9_$]/.test(s[m])) m++;
-        out.push({ t: "id", v: s.slice(i, m) }); i = m; continue;
+        out.push({ t: "id", v: s.slice(i, m), p: i }); i = m; continue;
       }
       var two = s.slice(i, i + 2);
       var three = s.slice(i, i + 3); // longest match first: `===` must not lex as `==` + `=`
-      if (three === "===" || three === "!==") { out.push({ t: "op", v: three }); i += 3; continue; }
+      if (three === "===" || three === "!==") { out.push({ t: "op", v: three, p: i }); i += 3; continue; }
       if (two === "==" || two === "!=" || two === ">=" || two === "<=" || two === "&&" || two === "||" || two === "=>" || two === "++" || two === "--" || two === "??" ||
-        (two === "?." && !/[0-9]/.test(s.charAt(i + 2)))) { out.push({ t: "op", v: two }); i += 2; continue; }
-      if ("+-*/%<>!?:().,={}[];".indexOf(c) >= 0) { out.push({ t: "op", v: c }); i++; continue; }
+        (two === "?." && !/[0-9]/.test(s.charAt(i + 2)))) { out.push({ t: "op", v: two, p: i }); i += 2; continue; }
+      if ("+-*/%<>!?:().,={}[];".indexOf(c) >= 0) { out.push({ t: "op", v: c, p: i }); i++; continue; }
       throw new Error("hydrate: unexpected character '" + c + "'");
     }
-    out.push({ t: "eof", v: "" });
+    out.push({ t: "eof", v: "", p: i });
+    out.s = s;
     return out;
   }
 
@@ -219,7 +219,7 @@
     function unary() {
       var v = peek().v;
       if (v === "++" || v === "--") { next(); return update(v, unary(), true); }
-      if (v === "!" || v === "-") { next(); return ["u" + v, unary()]; }
+      if (v === "!" || v === "-" || v === "+") { next(); return ["u" + v, unary()]; }
       return postfix();
     }
     // ++/-- take the targets `=` takes — a name, or $.name — and nothing else: obj.count++ is out
@@ -242,13 +242,13 @@
       for (; ;) {
         // a?.b, a?.[k], f?.() read as a.b, a[k], f(): every access is null-safe already.
         if (peek().v === "?.") { next(); if (peek().v !== "(" && peek().v !== "[") { pos--; toks[pos] = { t: "op", v: "." }; } continue; }
-        if (peek().v === ".") {
-          next(); var name = next().v;
-          if (peek().v === "(") { next(); e = ["()", e, name, callArgs()]; }
-          else e = [".", e, name];
-          continue;
-        }
-        if (peek().v === "(") { next(); e = ["call", e, callArgs()]; continue; }
+        // A name follows a dot, as in JavaScript: o., o.) and o.'a' are refused (16/10/2026: o. read
+        // member "" on the server and threw here on .v of nothing).
+        if (peek().v === ".") { next(); if (peek().t !== "id") eat("name"); e = [".", e, next().v]; continue; }
+        // A call of a member keeps what it was read from as this, however it was read: o.m(), o[k](),
+        // o.m?.() and (o.m)() all call m on o, as JavaScript does (16/10/2026: o[k]() and o.m?.()
+        // called it on the scope). A computed key rides as its expression.
+        if (peek().v === "(") { next(); e = e[0] === "." || e[0] === "idx" ? ["()", e[1], e[2], callArgs()] : ["call", e, callArgs()]; continue; }
         // a[b]: the key is any expression — items[1], items[i], map[key]. Same read as a.name once
         // the key is known; a blocked name reads as undefined, as it does after a dot.
         if (peek().v === "[") { next(); var key = assign(); eat("]"); e = ["idx", e, key]; continue; }
@@ -279,7 +279,7 @@
     }
     function primary() {
       var t = peek();
-      if (t.t === "num") { next(); return ["#", parseFloat(t.v)]; }
+      if (t.t === "num") { next(); return ["#", Number(t.v)]; }
       if (t.t === "str") { next(); return ["#", t.v.slice(1)]; }
       if (t.t === "id") {
         next();
@@ -290,7 +290,7 @@
       }
       if (t.v === "(") {
         var params = tryArrowParams();
-        if (params) return ["=>", params, assign()];
+        if (params) return ["=>", params, assign(), toks.s.slice(t.p, peek().p).trim()];
         next(); var e = assign(); eat(")"); return e;
       }
       if (t.v === "{") {
@@ -365,48 +365,62 @@
   expressionGlobals.decodeURIComponent = decodeURIComponent;
   expressionGlobals.isNaN = isNaN;
   expressionGlobals.isFinite = isFinite;
+  function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  // A name reads what a scope OWNS, never what Object.prototype lends it: a bare constructor read the
+  // Object function through the plain page object, and with it Object.getPrototypeOf and assign
+  // (16/10/2026); toString and valueOf read functions the server has not.
   function globalOrZero(k) {
-    return Object.prototype.hasOwnProperty.call(expressionGlobals, k) ? expressionGlobals[k] : 0;
+    return has(expressionGlobals, k) ? expressionGlobals[k] : 0;
   }
-  // A lambda VALUE is a KitLambda, and only the "=>" op makes one. JSON.parse, a seed and the literal
-  // grammar make plain objects, so no data can pass for a lambda and run a tree it wrote: the old
-  // { __kitLambda: true } mark was a key any JSON could carry (14/10/2026).
-  function KitLambda(params, body) { this.params = params; this.body = body; }
-  // invokeLambda runs a lambda VALUE. Params overlay the calling scope; writes to NON-param keys
-  // flow back out (lexical). It is the one way a lambda runs: a bare inc() and a callback inside
-  // filter() go through here alike, so the two cannot drift apart.
-  function invokeLambda(fn, args, s) {
+  // A value that is not there (undefined: a member nobody set) is null to Number, isNaN, isFinite, Math,
+  // ++ and unary +, as on the server, whose scope has one value for both: Number(o.missing) is 0 on both
+  // sides, as the VM's Number of its one null (16/10/2026, the owner's E2). parseInt, parseFloat and the
+  // methods of Number read it as null too, whose text is the server's "null": parseInt(o.missing, 36) was
+  // 86464843759093 here, the text "undefined", and 1112745 on the server and in the VM (16/10/2026).
+  function present(v) { return v === undefined ? null : v; }
+  function toNumber(v) { return Number(present(v)); }
+  // A lambda VALUE is a function, and only the "=>" op makes one: JSON.parse, a seed and the literal
+  // grammar make no functions, so no data can pass for a lambda and run a tree it wrote (14/10/2026).
+  // Being a function, a native method calls it as JavaScript does (items.filter((x) => x.done)), one
+  // lambda keeps one identity ([f].includes(f)), JSON leaves it out, and its text is its source as
+  // written, x[3]. 16/10/2026: a lambda was an object that a native call wrapped in a new function
+  // each time, so [f].includes(f) was false, String(f) printed the kernel's own wrapper and
+  // JSON.stringify({ f: f }) its tree; eval.go's lambda answers as this one does.
+  // It runs in the scope of the expression that calls it — calling, the scope of the innermost run —
+  // and, called from outside any expression (a component's timer), in the scope that made it. Its
+  // toString is String.prototype.valueOf bound to the source: a native function, so reading it gives no
+  // kernel source either; its length is how many parameters it names, as an arrow function's is, its
+  // name "". It is invokeLambda bound, so Function.prototype.toString of it is a bound function's
+  // "function () { [native code] }" (16/10/2026: it printed this wrapper's source) and it has no
+  // prototype, as an arrow function has none; eval.go answers the same.
+  function lambda(x, s) {
+    return Object.defineProperties(invokeLambda.bind(0, x, s), { toString: { value: "".valueOf.bind(x[3]) }, length: { value: x[1].length }, name: { value: "" } });
+  }
+  // invokeLambda runs a lambda: bound to its tree and the scope that made it, its arguments after
+  // those two. Params overlay the calling scope, on an object with no prototype so a
+  // parameter list never lends toString; writes to NON-param keys flow back out (lexical).
+  function invokeLambda(x, s) {
+    var args = arguments;
+    s = calling || s;
+    if (!x[1].length) return run(x[2], s);
+    var local = Object.create(null);
+    for (var pi = 0; pi < x[1].length; pi++) local[x[1][pi]] = args[pi + 2];
+    return run(x[2], new Proxy(local, {
+      get: function (t, k) { return k in t ? t[k] : s[k]; },
+      set: function (t, k, v2) { if (k in t) t[k] = v2; else s[k] = v2; return true; }
+    }));
+  }
+  // call is every call an expression makes, of a lambda or a native function: callDepth bounds how
+  // deep they nest (64), the guard against exhausting the browser stack. eval.go counts the same.
+  function call(fn, self, args) {
     if (callDepth >= 64) throw new Error("hydrate: call depth exceeded");
     callDepth++;
-    try {
-      if (!fn.params.length) return run(fn.body, s);
-      var local = {};
-      for (var pi = 0; pi < fn.params.length; pi++) local[fn.params[pi]] = args[pi];
-      var overlay = new Proxy(local, {
-        get: function (t, k) { return k in t ? t[k] : s[k]; },
-        set: function (t, k, v2) { if (k in t) t[k] = v2; else s[k] = v2; return true; }
-      });
-      return run(fn.body, overlay);
-    } finally { callDepth--; }
-  }
-  // callbacks turns every lambda VALUE in an argument list into a real function before a native
-  // method sees it. A lambda is a compiled tree, not a function, so items.filter((x) => x.done)
-  // used to throw "object is not a function" — the grammar parsed it and the runtime could not
-  // run it. The function it becomes only walks that tree again, in the caller's scope; it runs
-  // inside the same run(), so every step still counts against the expression's one budget.
-  function callbacks(args, s) {
-    for (var ci = 0; ci < args.length; ci++) {
-      if (args[ci] instanceof KitLambda) {
-        args[ci] = (function (fn) {
-          return function () { return invokeLambda(fn, Array.prototype.slice.call(arguments), s); };
-        })(args[ci]);
-      }
-    }
-    return args;
+    try { return fn.apply(self, args); } finally { callDepth--; }
   }
   var evalDepth = 0;
   var evalRemaining = 0;
   var callDepth = 0;
+  var calling;
   // blockedKey seals the ONLY member names that can reach code execution — `.constructor` leads to
   // Function (i.e. eval), and __proto__/prototype enable prototype pollution. Denying them in every
   // read / call / write makes "no eval" true BY CONSTRUCTION (not merely blocked by CSP).
@@ -417,15 +431,21 @@
       k === "ownerDocument" || k === "defaultView" || k === "contentWindow" ||
       k === "window" || k === "parent" || k === "top" || k === "self" || k === "globalThis";
   }
+  // propertyKey is a key as JavaScript makes it of a value: a number itself, anything else its text, so
+  // keys[null] reads keys["null"] (16/10/2026: it read nothing); o[k] and o[k]() read alike.
+  function propertyKey(k) { return typeof k === "number" ? k : String(k); }
   function run(x, s) {
     if (evalDepth === 0) evalRemaining = 10000;
     evalRemaining--;
     if (evalRemaining < 0) throw new Error("hydrate: evaluation budget exceeded");
     evalDepth++;
+    var was = calling;
+    calling = s;
     try {
       return walk(x, s);
     } finally {
       evalDepth--;
+      calling = was;
     }
   }
   function walk(x, s) {
@@ -438,7 +458,7 @@
     if (op === "++" || op === "--" || op === "++$" || op === "--$") {
       if (blockedKey(x[1])) return undefined;
       var home = op.length === 3 ? s["$"] : s; // the page-scope form writes where $.name = v does
-      var was = Number(home[x[1]]);
+      var was = toNumber(home[x[1]]);
       var now = op.charAt(0) === "+" ? was + 1 : was - 1;
       home[x[1]] = now;
       return x[2] ? now : was;
@@ -450,7 +470,7 @@
       return obj;
     }
     if (op === "[]") { return x[1].map(function (y) { return run(y, s); }); }
-    if (op === "=>") { return new KitLambda(x[1], x[2]); }
+    if (op === "=>") return lambda(x, s);
     if (op === ";") {
       var sv;
       for (var si = 1; si < x.length; si++) sv = run(x[si], s);
@@ -459,41 +479,34 @@
     if (op === "call") {
       var fn = run(x[1], s);
       var fargs = x[2].map(function (y) { return run(y, s); });
-      if (callDepth >= 64) throw new Error("hydrate: call depth exceeded");
-      if (fn instanceof KitLambda) return invokeLambda(fn, fargs, s);
-      // A registered component method — real JS the developer wrote — called with `this` = the
-      // component scope, so `this.count` reads/writes its state. Still no eval: it's a function
-      // reference, not a compiled string. (Server-side there are no registered methods, so its
-      // walker returns nil here — the divergence is intentional and safe.)
-      if (typeof fn === "function") {
-        callDepth++;
-        try { return fn.apply(s, callbacks(fargs, s)); } finally { callDepth--; }
-      }
-      return undefined;
+      if (fn === Number || fn === isNaN || fn === isFinite || fn === parseInt || fn === parseFloat) fargs = fargs.map(present);
+      // A lambda, or a registered component method — real JS the developer wrote — called with `this`
+      // = the component scope, so `this.count` reads/writes its state. Still no eval: it's a function
+      // reference, not a compiled string. A built-in function called bare (f = l.push; f(3)) gets no
+      // this, as in JavaScript (16/10/2026: it got the scope, and push wrote "0" and "length" into it).
+      return typeof fn === "function" ? call(fn, /\[native code]\s*}$/.test(fn) ? undefined : s, fargs) : undefined;
     }
     if (op === "?") return run(x[1], s) ? run(x[2], s) : run(x[3], s);
     if (op === "idx") {
       var io = run(x[1], s), ik = run(x[2], s);
-      if (io == null || ik == null) return undefined;
-      var ikey = typeof ik === "number" ? ik : String(ik);
-      if (typeof ikey === "string" && blockedKey(ikey)) return undefined;
-      return io[ikey];
+      return io == null || blockedKey(ik = propertyKey(ik)) ? undefined : io[ik];
     }
     if (op === ".") {
       var o = run(x[1], s);
       return (o == null || blockedKey(x[2])) ? undefined : o[x[2]];
     }
     if (op === "()") {
-      var oo = run(x[1], s);
-      if (oo == null || blockedKey(x[2])) return undefined;
+      var oo = run(x[1], s), mk = x[2] instanceof Array ? run(x[2], s) : x[2];
+      if (oo == null || blockedKey(mk = propertyKey(mk))) return undefined;
       var a = x[3].map(function (y) { return run(y, s); });
-      var member = oo[x[2]];
-      // A member holding a lambda VALUE is called, as on the server and in the VM: { add: (x) => x + 1 }.add(1).
-      if (member instanceof KitLambda) return invokeLambda(member, a, s);
-      return typeof member === "function" ? member.apply(oo, callbacks(a, s)) : undefined;
+      if (oo === Math || oo === Number) a = a.map(present);
+      var member = oo[mk];
+      // A member holding a lambda is called as a function, as on the server and in the VM: { add: (x) => x + 1 }.add(1).
+      return typeof member === "function" ? call(member, oo, a) : undefined;
     }
     if (op === "u!") return !run(x[1], s);
     if (op === "u-") return -run(x[1], s);
+    if (op === "u+") return toNumber(run(x[1], s));
     var l = run(x[1], s);
     if (op === "&&") return l ? run(x[2], s) : l;
     if (op === "||") return l ? l : run(x[2], s);
@@ -680,7 +693,7 @@
     get: function (t, k) {
       if (k === "$") return t;
       if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
-      return k in t ? t[k] : globalOrZero(k);
+      return has(t, k) ? t[k] : globalOrZero(k);
     },
     set: function (t, k, v) {
       t[k] = v;
@@ -716,7 +729,7 @@
   // change. Plain values are cloned so two instances never share one array.
   function seedComponent(target, def) {
     for (var k in def) {
-      if (!Object.prototype.hasOwnProperty.call(def, k)) continue;
+      if (!has(def, k)) continue;
       var descriptor = Object.getOwnPropertyDescriptor(def, k);
       if (descriptor && (descriptor.get || descriptor.set)) {
         Object.defineProperty(target, k, {
@@ -940,8 +953,8 @@
     try {
       var proxy = scopeFor(b);
       var result;
-      if (typeof fn === "function") result = fn.call(proxy, contextOf(b));
-      else if (fn instanceof KitLambda) result = run(fn, proxy);
+      // a call the component's scope makes: a JS init gets this = the scope, a lambda init runs in it
+      if (typeof fn === "function") result = run(["call", ["#", fn], [["#", contextOf(b)]]], proxy);
       observeEffect(result, proxy);
     } catch (e) { reportError(e, b, "init"); }
   }
@@ -1065,7 +1078,7 @@
         if (k === "$") return raw;
         if (k in aliases) return aliases[k]; // kit / $app / $sidebar … → a public surface or component handle
         var objs = chainFor(b);
-        for (var i = 0; i < objs.length; i++) { if (k in objs[i]) return objs[i][k]; }
+        for (var i = 0; i < objs.length; i++) { if (has(objs[i], k)) return objs[i][k]; }
         return globalOrZero(k);
       },
       set: function (t, k, v) {
@@ -1198,7 +1211,7 @@
       return out;
     }
     if (typeof v === "object") {
-      for (var k in v) if (Object.prototype.hasOwnProperty.call(v, k) && v[k]) classNames(k, out);
+      for (var k in v) if (has(v, k) && v[k]) classNames(k, out);
       return out;
     }
     return out;
@@ -1391,7 +1404,7 @@
     if (seen.indexOf(v) >= 0) throw new Error("hydrate: circular seed data");
     seen.push(v);
     for (var k in v) {
-      if (!Object.prototype.hasOwnProperty.call(v, k)) continue;
+      if (!has(v, k)) continue;
       if (blockedKey(k)) throw new Error("hydrate: blocked seed key '" + k + "'");
       checkSeedData(v[k], seen);
     }
@@ -1978,7 +1991,7 @@
     return new Proxy(s, {
       get: function (target, key) {
         if (key === "$") return target;
-        return key in target ? target[key] : globalOrZero(key);
+        return has(target, key) ? target[key] : globalOrZero(key);
       },
       set: function (target, key, value) {
         target[key] = value;

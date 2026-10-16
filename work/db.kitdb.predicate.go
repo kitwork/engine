@@ -134,6 +134,14 @@ func kitDBEvaluatePredicateCondition(condition query.Condition, resolve kitDBPre
 	if left.IsNil() || right.IsNil() {
 		return kitDBUnknown, nil
 	}
+	if kitDBUnordered(left, right) {
+		switch operator {
+		case "", "=", "==", "===", ">", ">=", "<", "<=":
+			return kitDBFalse, nil
+		case "!=", "!==", "<>":
+			return kitDBTrue, nil
+		}
+	}
 	comparison := kitDBCompareValues(left, right)
 	switch operator {
 	case "", "=", "==", "===":
@@ -173,7 +181,7 @@ func kitDBEvaluateIn(left value.Value, kind string, collection value.Value) (kit
 		if kind != "" {
 			candidate = coerceWrite(kind, candidate)
 		}
-		if kitDBCompareValues(left, candidate) == 0 {
+		if kitDBSame(left, candidate) {
 			return kitDBTrue, nil
 		}
 	}
@@ -199,7 +207,8 @@ func kitDBEvaluateBetween(left value.Value, kind string, bounds value.Value) (ki
 		upper = coerceWrite(kind, upper)
 	}
 	return kitDBBooleanTruth(
-		kitDBCompareValues(left, lower) >= 0 && kitDBCompareValues(left, upper) <= 0,
+		!kitDBUnordered(left, lower) && !kitDBUnordered(left, upper) &&
+			kitDBCompareValues(left, lower) >= 0 && kitDBCompareValues(left, upper) <= 0,
 	), nil
 }
 

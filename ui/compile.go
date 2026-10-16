@@ -69,7 +69,80 @@ type ctx struct {
 	// terminal is the terminal around whose commands every <code> here is (terminal.go): set inside a
 	// terminal's host, nil outside one and inside any component nested in it
 	terminal *terminalScope
+	// onScreen says, by width (0 the narrowest, then stylesheet.Widths()), why everything here is always
+	// on the screen at that width, so lazy can skip nothing there (a frame pinned to an edge around at
+	// that width, an overlay, a popover), with where that is; nil or "" elsewhere
+	onScreen []string
+	// lazyAround is the nearest frame around that writes lazy: what floats out of it (a popover, a part
+	// placed below or above its parent) is cut at its edge, and a toast's fixed stack is placed by it
+	lazyAround *lazyHolder
 }
+
+// lazyHolder is a frame that writes lazy, for the warning of what it holds that lazy breaks: its file,
+// its lazy attribute, and whether it was told (once).
+type lazyHolder struct {
+	file string
+	attr *Attr
+	told bool
+}
+
+// lazyAt is one lazy attribute an element writes: from the width its prefix names (0 for none) on, it
+// skips the element while far from the screen, or does not (lazy="false").
+type lazyAt struct {
+	width int
+	skips bool
+	attr  *Attr
+}
+
+// widthSlots is the widths an attribute can be written for: none (0) and each width word.
+var widthSlots = len(stylesheet.Widths()) + 1
+
+// pinAttrAt is the pin attribute that pins the element to an edge at a width: the one written for the
+// widest prefix not above it, the later at the same width (as the stylesheet orders them); nil when it
+// does not pin there (none written, or pin="none").
+func pinAttrAt(pins []pinAt, width int) *Attr {
+	var in *pinAt
+	for i := range pins {
+		if pins[i].width <= width && (in == nil || pins[i].width >= in.width) {
+			in = &pins[i]
+		}
+	}
+	if in == nil || !in.on {
+		return nil
+	}
+	return in.attr
+}
+
+// lazyAttrAt is the lazy attribute that skips the element at a width, as pinAttrAt reads pins; nil when
+// it does not skip there.
+func lazyAttrAt(lazies []lazyAt, width int) *Attr {
+	var in *lazyAt
+	for i := range lazies {
+		if lazies[i].width <= width && (in == nil || lazies[i].width >= in.width) {
+			in = &lazies[i]
+		}
+	}
+	if in == nil || !in.skips {
+		return nil
+	}
+	return in.attr
+}
+
+// tellLazyAround warns, once, at the lazy attribute of the frame around, that it holds what lazy breaks
+// (what, where): content-visibility:auto cuts what is drawn outside the frame, and a fixed child is
+// placed by the frame, not by the screen. The page draws lazy as written.
+func (c *compiler) tellLazyAround(cx ctx, what string, at *Node, why string) {
+	holder := cx.lazyAround
+	if holder == nil || holder.told {
+		return
+	}
+	holder.told = true
+	c.warn(holder.file, holder.attr.Line, holder.attr.Column, fmt.Sprintf("%s=\"%s\": khung này giữ %s ở %s:%d:%d; %s: đặt lazy trên khung bên trong không giữ nó, hoặc đưa nó ra ngoài khung lazy (trang vẫn vẽ lazy như đã viết)",
+		holder.attr.Name, strings.TrimSpace(holder.attr.Value), what, at.File, at.Line, at.Column, why))
+}
+
+// lazyCuts is why lazy breaks what floats out of the frame (a popover, a part placed outside its parent).
+const lazyCuts = "lazy cắt những gì vẽ ra ngoài khung (content-visibility:auto chứa cả phần vẽ trong khung), nên phần nổi ra ngoài mép khung bị cắt mất"
 
 // forSite is where a for is written: on an element, or on the call that brings a component's file in.
 type forSite struct {
@@ -826,6 +899,11 @@ type attrPlan struct {
 	// element to an edge (top, bottom, or a value from data), so it needs a background of its own
 	pin    *Attr
 	pinned bool
+	// lazy is the first lazy written that skips (any value but "false"), with or without a prefix; lazies
+	// every lazy written, by the width each starts at
+	lazy    *Attr
+	lazies  []lazyAt
+	outside *Attr // a place outside the parent (below…, above…), which lazy around cuts
 	// id is the anchor the author wrote (KITWORK_UI §7, "Neo: id"), already checked by anchor()
 	id string
 	// paints are the colour, ground and type the element writes, and places the widths a place it
@@ -940,6 +1018,9 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 		if base == "place" {
 			p.hasPlace = true
 			p.places = append(p.places, narrowest(pre.widths))
+			if v := strings.TrimSpace(a.Value); p.outside == nil && (strings.HasPrefix(v, "below") || strings.HasPrefix(v, "above")) {
+				p.outside = a
+			}
 		}
 		// pin or material on a tag the house does not give them to: the value is read first (a word the
 		// stylesheet refuses is that error), then the page draws what is written and a warning says where
@@ -956,10 +1037,18 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 			if v == "top" || v == "bottom" || strings.Contains(v, "{{") {
 				p.pinned = true
 			}
-			p.pins = append(p.pins, pinAt{width: narrowest(pre.widths), on: v != "none"})
+			p.pins = append(p.pins, pinAt{width: narrowest(pre.widths), on: v != "none", attr: a})
 		}
 		if base == "material" && !materialFrame(el.tag) {
 			misplaced = materialRefused(el.tag) + " (trang vẫn vẽ material như đã viết)"
+		}
+		if base == "lazy" {
+			skips := strings.TrimSpace(a.Value) != "false"
+			if p.lazy == nil && skips {
+				p.lazy = a
+			}
+			p.lazies = append(p.lazies, lazyAt{width: narrowest(pre.widths), skips: skips, attr: a})
+			misplaced = lazyMisplaced(el.tag)
 		}
 		if !presentationName(base) {
 			if chain != "" {
@@ -1135,6 +1224,35 @@ func pinnable(tag string) bool {
 	return info.kind == kindContainer || info.kind == kindGrid
 }
 
+// lazyOnScreen are the tags that are always on the screen, each with why: the browser never skips them,
+// so lazy there does nothing.
+var lazyOnScreen = map[string]string{
+	"page":    "cả trang luôn ở trên màn hình",
+	"content": "vùng nội dung luôn có phần ở trên màn hình",
+	"overlay": "lớp nổi luôn ở trên màn hình",
+	"popover": "khung nổi ở trên màn hình khi mở",
+}
+
+// lazyMisplaced is the warning of lazy on a tag it does nothing for, "" for a frame in the page's flow
+// (box, section, card, grid, list, form, footer…: where pin goes too). The page draws lazy as written.
+func lazyMisplaced(tag string) string {
+	if why, ok := lazyOnScreen[tag]; ok {
+		message := "lazy trên <" + tag + ">: " + why + ", trình duyệt không bao giờ bỏ qua nó"
+		if tag == "page" || tag == "content" {
+			message += "; đặt lazy trên từng phần ở xa màn hình bên trong (section, grid, card…)"
+		}
+		return message + " (trang vẫn vẽ lazy như đã viết)"
+	}
+	if pinnable(tag) {
+		return ""
+	}
+	message := "lazy bỏ qua một khung ở xa màn hình (section, box, card, grid, list, footer…); <" + tag + "> không phải khung"
+	if tag == "image" {
+		message = "lazy bỏ qua một khung ở xa màn hình (section, box, card, grid, list, footer…); ảnh đã tự tải khi tới gần màn hình (loading=\"lazy\")"
+	}
+	return message + " (trang vẫn vẽ lazy như đã viết)"
+}
+
 // materialFrame reports whether material goes on a tag (decision M): a frame, one that lays out
 // children and takes a background (box, card, section, grid, list, form, the regions, popover…). Not
 // <page>, behind which nothing lies to see through; not text, a control, an image or an icon.
@@ -1208,6 +1326,37 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	p, err := c.attributes(n, el)
 	if err != nil {
 		return nil, err
+	}
+	// lazy on what is always on the screen skips nothing: a frame pinned to an edge, or anything inside
+	// one, an overlay or a popover (lazyMisplaced already told of the tags always on it themselves). Told
+	// at the first width where lazy skips and the element is on the screen, with the lazy and the pin in
+	// effect there: lazy="true" large:lazy="false" beside large:pin="top" skips below large, where nothing
+	// pins it, and is told nothing (15/10/2026: any pin at any width was told, citing the first pin
+	// written, pin="none" too)
+	if p.lazy != nil && lazyOnScreen[n.Tag] == "" {
+		for width := 0; width < widthSlots; width++ {
+			lazy := lazyAttrAt(p.lazies, width)
+			if lazy == nil {
+				continue
+			}
+			why := ""
+			if pin := pinAttrAt(p.pins, width); pin != nil {
+				why = fmt.Sprintf("nó được ghim vào mép màn hình, pin ở %s:%d:%d", n.File, pin.Line, pin.Column)
+			} else if width < len(cx.onScreen) {
+				why = cx.onScreen[width]
+			}
+			if why != "" {
+				c.warn(n.File, lazy.Line, lazy.Column, fmt.Sprintf("%s=\"%s\": phần tử này luôn ở trên màn hình (%s), trình duyệt không bao giờ bỏ qua nó: lazy ở đây không bớt được gì",
+					lazy.Name, strings.TrimSpace(lazy.Value), why))
+				break
+			}
+		}
+	}
+	// what floats out of a lazy frame around is cut at its edge (KITWORK_UI §7, 15/10/2026)
+	if n.Tag == "popover" {
+		c.tellLazyAround(cx, "<popover>", n, lazyCuts)
+	} else if p.outside != nil {
+		c.tellLazyAround(cx, fmt.Sprintf("<%s %s=\"%s\"> (đặt ra ngoài cha)", n.Tag, p.outside.Name, strings.TrimSpace(p.outside.Value)), n, lazyCuts)
 	}
 	// <page background="cirrus">: the background goes on a layer fixed to the screen (backdrop.go)
 	backdrop, err := c.pageBackdrop(n, p)
@@ -1320,6 +1469,35 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 			childCtx.pageBackground = pageBackgroundOf(n)
 		}
 		childCtx.scope = scope
+		// what holds it keeps it on the screen, at the widths it does: lazy inside skips nothing there
+		// (the outermost reason is kept)
+		var reasons []string
+		for width := 0; width < widthSlots; width++ {
+			why := ""
+			switch {
+			case n.Tag == "overlay":
+				why = fmt.Sprintf("nằm trong <overlay> ở %s:%d:%d, lớp nổi trên màn hình", n.File, n.Line, n.Column)
+			case n.Tag == "popover":
+				why = fmt.Sprintf("nằm trong <popover> ở %s:%d:%d, nổi trên màn hình khi mở", n.File, n.Line, n.Column)
+			default:
+				if pin := pinAttrAt(p.pins, width); pin != nil {
+					why = fmt.Sprintf("nằm trong khung ghim vào mép màn hình, pin ở %s:%d:%d", n.File, pin.Line, pin.Column)
+				}
+			}
+			if why != "" && (width >= len(cx.onScreen) || cx.onScreen[width] == "") {
+				if reasons == nil {
+					reasons = make([]string, widthSlots)
+					copy(reasons, cx.onScreen)
+				}
+				reasons[width] = why
+			}
+		}
+		if reasons != nil {
+			childCtx.onScreen = reasons
+		}
+		if p.lazy != nil && lazyOnScreen[n.Tag] == "" && lazyMisplaced(n.Tag) == "" {
+			childCtx.lazyAround = &lazyHolder{file: n.File, attr: p.lazy}
+		}
 		if n.Tag == "field" {
 			childCtx.field = &fieldIDs{control: fmt.Sprintf("kitwork-field-%d", c.next("field"))}
 			if hasChild(n, "hint") {
@@ -2920,6 +3098,8 @@ func (c *compiler) toast(n *Node, cx ctx) (op, error) {
 		}
 	}
 	var b strings.Builder
+	// a lazy frame around places the toast's fixed stack by itself, not by the screen (15/10/2026)
+	c.tellLazyAround(cx, "<"+n.Tag+" component=\"toast\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
 	b.WriteString(`<div class="toast"`) // the stack on the bottom end corner, reboot.css's
 	writeHost(&b, site)
 	b.WriteString(` role="status" aria-live="polite"></div>`)

@@ -27,6 +27,8 @@ func expressionSource(compiled *expression) string {
 			call = "(…)"
 		}
 		return expressionSource(compiled.left) + "." + compiled.parts[0] + call
+	case expressionMember:
+		return expressionSource(compiled.left) + "." + strings.Join(compiled.parts, ".")
 	}
 	return "(…)"
 }

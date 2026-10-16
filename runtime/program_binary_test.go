@@ -24,8 +24,9 @@ func TestProgramBinaryGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Bytecode 3 (14/10/2026): only the version (0002 → 0003) and the checksum after it moved; the
-	// envelope, the code and the constant are those bytecode 2 wrote.
-	const expected = "4b575042000100031b74a5aab6b7c1e59dffa8f8a9a5f48f0dbb3832db8c7ef4d24bfccb008349fe0000000400000001000000000000001b02004045000000000000"
+	// envelope, the code and the constant are those bytecode 2 wrote. Bytecode 4 (15/10/2026) the same
+	// again: the version (0003 → 0004) and the checksum.
+	const expected = "4b5750420001000493dd074bb273e70d745438f926533c2af190725163dc4bdb3ff9035e8bf005280000000400000001000000000000001b02004045000000000000"
 	if got := hex.EncodeToString(encoded); got != expected {
 		t.Fatalf("encoded Program changed:\n got %s\nwant %s", got, expected)
 	}
@@ -200,4 +201,55 @@ func FuzzUnmarshalProgram(f *testing.F) {
 			t.Fatalf("accepted unverifiable program: %v", verifyErr)
 		}
 	})
+}
+
+// EncodedSize counts what MarshalBinary writes, without writing it (15/10/2026): the compiler refuses a
+// program whose envelope is past MaxProgramBinarySize where it crosses. Its debug table writes each
+// entry's file name, so 140 entries in a file named with 1 MiB pass 64 MiB with 280 bytes of code, and the
+// encoder's error names the envelope, not a string. CONTROL: the same program in a file without a name.
+func TestEncodedSizeIsWhatMarshalBinaryWrites(t *testing.T) {
+	program := func(file string) *Program {
+		t.Helper()
+		var code []byte
+		var entries []DebugEntry
+		for index := 0; index < 70; index++ {
+			entries = append(entries,
+				DebugEntry{IP: len(code), SourceLocation: SourceLocation{File: file, Line: int32(index + 1), Column: 1}},
+				DebugEntry{IP: len(code) + 3, SourceLocation: SourceLocation{File: file, Line: int32(index + 1), Column: 5}})
+			code = append(code, byte(PUSH), 0, 1, byte(POP))
+		}
+		code = append(code, byte(PUSH), 0, 0, byte(RETURN))
+		lambda := value.New(&value.Lambda{Address: 0, Name: "answer", SourceFile: "router.kitwork.js", SourceLine: 2, Params: []string{"input", "limit"}})
+		built, err := NewProgramWithDebug(code, []value.Value{value.New(42), value.New("text"), lambda}, entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return built
+	}
+
+	small := program("")
+	data, err := small.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size, crossing := small.EncodedSize(); size != len(data) || crossing != len(small.DebugEntries()) {
+		t.Fatalf("CONTROL: EncodedSize = %d crossing %d, MarshalBinary wrote %d bytes for %d entries",
+			size, crossing, len(data), len(small.DebugEntries()))
+	}
+
+	name := strings.Repeat("d", 1<<20)
+	large := program(name)
+	entries := len(large.DebugEntries())
+	fixed := len(data) - entries*16
+	want := fixed + entries*(16+len(name))
+	crossing := 0
+	for fixed+(crossing+1)*(16+len(name)) <= MaxProgramBinarySize {
+		crossing++
+	}
+	if size, at := large.EncodedSize(); size != want || at != crossing {
+		t.Fatalf("EncodedSize = %d crossing %d, want %d crossing %d", size, at, want, crossing)
+	}
+	if _, err := large.MarshalBinary(); err == nil || err.Error() != "encode program: envelope exceeds 67108864 bytes" {
+		t.Fatalf("encode error = %v, want the envelope's limit", err)
+	}
 }

@@ -3,10 +3,11 @@ package runtime
 import "testing"
 
 // TestVMContract freezes the instruction contract: bytecode 3 (14/10/2026) is bytecode 2's 33 slots,
-// unchanged, and seven wide forms after the reserved one.
+// unchanged, and seven wide forms after the reserved one; bytecode 4 (15/10/2026) is bytecode 3's 40
+// slots, unchanged, and STEP.
 func TestVMContract(t *testing.T) {
-	if BytecodeVersion != 3 {
-		t.Fatalf("BytecodeVersion = %d, want frozen bytecode 3", BytecodeVersion)
+	if BytecodeVersion != 4 {
+		t.Fatalf("BytecodeVersion = %d, want frozen bytecode 4", BytecodeVersion)
 	}
 	if ProgramEncodingVersion != 1 {
 		t.Fatalf("ProgramEncodingVersion = %d, want 1", ProgramEncodingVersion)
@@ -57,7 +58,8 @@ func TestVMContract(t *testing.T) {
 		{"TRUE_WIDE", TRUE_WIDE, 37},
 		{"FALSE_WIDE", FALSE_WIDE, 38},
 		{"ITER_WIDE", ITER_WIDE, 39},
-		{"_LIMIT", _LIMIT, 40},
+		{"STEP", STEP, 40},
+		{"_LIMIT", _LIMIT, 41},
 	}
 	for _, opcode := range opcodes {
 		if opcode.got != opcode.want {
@@ -65,7 +67,7 @@ func TestVMContract(t *testing.T) {
 		}
 	}
 
-	const expectedInstructionSetChecksum = "f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678"
+	const expectedInstructionSetChecksum = "ac0cab56f20c203825f2564a935756a8a3ce5110d86499a97fcaffc49f51b9da"
 	if got := InstructionSetChecksum(); got != expectedInstructionSetChecksum {
 		t.Errorf(
 			"instruction contract checksum = %q, want %q",
@@ -81,8 +83,27 @@ func TestVMContract(t *testing.T) {
 		t.Errorf("bytecode 2's slots hash to %q, want bytecode 2's checksum %q", got, bytecode2InstructionSetChecksum)
 	}
 
+	// The slots bytecode 3 had hash, with version 3, to bytecode 3's checksum: STEP changed none of them.
+	const bytecode3InstructionSetChecksum = "f98baae0b65716b886b0786a06a9316ae7baf4ff7ab93b8cd87149a344df1678"
+	if got := instructionSetChecksum(3, int(STEP)); got != bytecode3InstructionSetChecksum {
+		t.Errorf("bytecode 3's slots hash to %q, want bytecode 3's checksum %q", got, bytecode3InstructionSetChecksum)
+	}
+
+	// STEP takes the value it steps and gives the number, with a one-byte step, and costs what the
+	// PUSH 1; ADD of x = x + 1 cost, so an update's energy did not move.
+	step, ok := LookupInstruction(STEP)
+	push, _ := LookupInstruction(PUSH)
+	add, _ := LookupInstruction(ADD)
+	if !ok || step.Name != "STEP" || len(step.OperandWidths) != 1 || step.OperandWidths[0] != 1 ||
+		step.StackIn != 1 || step.StackOut != 1 || step.Energy != push.Energy+add.Energy {
+		t.Fatalf("STEP = %+v, want one one-byte operand, 1 in, 1 out and the energy of PUSH and ADD", step)
+	}
+	if StepNumber != 0 || StepIncrement != 1 || StepDecrement != 2 {
+		t.Fatalf("STEP's operands = %d, %d, %d, want frozen 0, 1, 2", StepNumber, StepIncrement, StepDecrement)
+	}
+
 	// Each wide form is its instruction with a three-byte operand.
-	for op := PUSH_WIDE; op < _LIMIT; op++ {
+	for op := PUSH_WIDE; op <= ITER_WIDE; op++ {
 		wide, ok := LookupInstruction(op)
 		narrow, narrowOK := LookupInstruction(op.Narrow())
 		if !ok || !narrowOK || op.Narrow() == op || op.Narrow().Wide() != op || !op.IsWide() {

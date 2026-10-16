@@ -1261,6 +1261,19 @@ func kitDBCompareValues(left, right value.Value) int {
 	return bytes.Compare(leftJSON, rightJSON)
 }
 
+// kitDBUnordered reports a NaN on either side of a condition. NaN equals nothing and is ordered with
+// nothing, as in JavaScript (16/10/2026, the owner's E1): =, <, >, <= and >= are false and != is true,
+// in the flat conditions, the predicates, IN and BETWEEN alike. kitDBCompareValues gives 0 for NaN
+// beside any number, so where(age = Number("abc")) matched every age and <= NaN every row.
+func kitDBUnordered(left, right value.Value) bool {
+	return left.K == value.Number && left.N != left.N || right.K == value.Number && right.N != right.N
+}
+
+// kitDBSame reports left and right equal for a condition: kitDBCompareValues gives 0 and neither is NaN.
+func kitDBSame(left, right value.Value) bool {
+	return !kitDBUnordered(left, right) && kitDBCompareValues(left, right) == 0
+}
+
 func kitDBCompareFloat(left, right float64) int {
 	switch {
 	case left < right:
@@ -2017,6 +2030,14 @@ func (t *SchemaTable) kitDBConditionMatches(row map[string]value.Value, conditio
 		right = coerceWrite(spec.kind, kitDBAnyValue(condition.Value))
 	}
 	operator := strings.ToLower(strings.TrimSpace(condition.Operator))
+	if kitDBUnordered(left, right) {
+		switch operator {
+		case "", "=", "==", "===", ">", ">=", "<", "<=":
+			return false, nil
+		case "!=", "!==", "<>":
+			return true, nil
+		}
+	}
 	switch operator {
 	case "", "=", "==", "===":
 		return kitDBCompareValues(left, right) == 0, nil
@@ -2056,7 +2077,7 @@ func kitDBAnyValue(input any) value.Value {
 func kitDBContains(collection, item value.Value) bool {
 	if collection.K == value.Array {
 		for _, candidate := range collection.Array() {
-			if kitDBCompareValues(candidate, item) == 0 {
+			if kitDBSame(candidate, item) {
 				return true
 			}
 		}
@@ -2066,7 +2087,7 @@ func kitDBContains(collection, item value.Value) bool {
 	reflected := reflect.ValueOf(raw)
 	if reflected.IsValid() && (reflected.Kind() == reflect.Array || reflected.Kind() == reflect.Slice) {
 		for index := 0; index < reflected.Len(); index++ {
-			if kitDBCompareValues(value.New(reflected.Index(index).Interface()), item) == 0 {
+			if kitDBSame(value.New(reflected.Index(index).Interface()), item) {
 				return true
 			}
 		}

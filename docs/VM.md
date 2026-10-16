@@ -55,7 +55,13 @@ verified boundary and tax every request.
   Bytecode 3 (14/10/2026) raised the program to 2 MiB of code (from 65,535
   bytes), 1,048,576 constants (from 65,536) and a 64 MiB envelope (from 16 MiB),
   with seven wide forms for a three-byte constant index or jump address
-  (`docs/BYTECODE.md`, "Wide forms").
+  (`docs/BYTECODE.md`, "Wide forms"). The envelope writes each debug entry's
+  file name, so a module with many positions on a long path passes 64 MiB under
+  2 MiB of code: the compiler refuses such a program at the entry where it
+  crosses (`Program.EncodedSize`, 15/10/2026; it ran, but was never cached).
+  Bytecode 4 (15/10/2026) appended `STEP`, which makes a number of what `++` and
+  `--` step (JavaScript's ToNumber) at the energy `PUSH 1; ADD` cost
+  (`docs/BYTECODE.md`, "STEP").
 - Every instruction has one canonical `InstructionSpec`.
 - Operand width, stack effect, and energy come from that spec.
 - Cancellation accounting is VM-wide. Nested `ExecuteLambda` calls cannot
@@ -232,11 +238,15 @@ than this pure language corpus.
 
 ## Frozen VM compatibility archive
 
-`compatibility/testdata/v3` stores representative Program binaries of bytecode 3,
-produced on 14/10/2026 by compiler schema 8 from the same hand-authored cases as
-`compatibility/testdata/v2` (bytecode 2, compiler schema 2). Bytecode 3 refuses
-the v2 binaries by their version, and the v2 archive stays as that version's
-evidence (`TestVMCompatibilityArchiveOfBytecode2IsRefusedByItsVersion`). Unlike compiler
+`compatibility/testdata/v4` stores representative Program binaries of bytecode 4,
+produced on 15/10/2026 by compiler schema 11 from the hand-authored cases of
+`compatibility/testdata/v3` (bytecode 3, compiler schema 8, 14/10/2026) and one
+more that runs `STEP`; v3 came from the cases of `compatibility/testdata/v2`
+(bytecode 2, compiler schema 2). Bytecode 4 refuses the v2 and v3 binaries by
+their version, and those archives stay as their versions' evidence
+(`TestVMCompatibilityArchiveOfBytecode2IsRefusedByItsVersion`,
+`TestVMCompatibilityArchiveOfBytecode3IsRefusedByItsVersion`); every v3 case spends
+in v4 the energy it spent in v3 (`TestBytecode4SpendsTheEnergyBytecode3Spent`). Unlike compiler
 `.kwbc` cache entries, these `.kwpb` files contain the Program envelope only and
 are committed exclusively as internal test evidence. Normal archive tests never
 compile their adjacent sources.

@@ -18,7 +18,13 @@ import (
 // and a 2 MiB program limit (it was 65,535 bytes, the reach of a two-byte jump). A bytecode 2 program
 // is the same bytes in bytecode 3 and means the same; a runtime of 2 cannot run a wide program, which
 // is why the version moved.
-const BytecodeVersion uint16 = 3
+//
+// 4 (15/10/2026, the owner's L3): STEP, one instruction with a one-byte operand, makes a number of what
+// ++ and -- step, as JavaScript's ToNumber does, and steps it. x++ was x = x + 1 (LOAD x; PUSH 1; ADD;
+// STORE x), so "5"++ joined "51" and null-- failed; it is LOAD x; STEP 1; STORE x, two bytes shorter and
+// the same energy (STEP costs 3, PUSH 1 and ADD cost 3). A runtime of 3 refuses STEP as an unknown
+// opcode, which is why the version moved; no other instruction changed.
+const BytecodeVersion uint16 = 4
 
 // Program is an immutable, verified unit of Kitwork execution.
 //

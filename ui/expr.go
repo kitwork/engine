@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"math"
-	"strconv"
 	"strings"
 
 	"github.com/kitwork/engine/jit/hydrate"
@@ -143,6 +141,17 @@ func (e *expr) eval(scope map[string]any) any {
 	return v
 }
 
+// text is what the page writes of the expression, as the browser's kernel writes it (hydrate.EvalText):
+// nothing for null and undefined, else String(v) — a list its items joined, an object "[object Object]".
+// An expression that fails writes nothing, which the browser then leaves as it is.
+func (e *expr) text(scope map[string]any) string {
+	s, err := hydrate.EvalText(e.ir, scope)
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
 // part is a piece of interpolated text: either literal text or an expression.
 type part struct {
 	text string
@@ -152,6 +161,10 @@ type part struct {
 // interpolation is a string that may hold {{ }}: "Giá cũ {{ money(p) }}".
 type interpolation struct {
 	parts []part
+	// joined is the one expression a value of more than one part is, the way the kernel is handed it
+	// and the server prints it: [(a), ' text', (b)].join(''), each part's text joined (nil for a single
+	// {{ }} and for a value with none)
+	joined *expr
 }
 
 // single returns the expression when the whole value is exactly one {{ }} (whitespace around it does
@@ -190,15 +203,22 @@ func (i *interpolation) literal() string {
 	return b.String()
 }
 
-// render joins the parts as text; null and undefined print as "".
+// render joins the parts as text; null and undefined print as "". A value of more than one part is its
+// joined expression, which the kernel runs as it is: every part read, then each written as
+// Array.prototype.join writes an item (String(v), null and undefined ""), in one evaluation, as the
+// browser does (16/10/2026: the kernel was handed (a) + (b), which added 1 and 2 to 3 and true and
+// true to 2 where the server had printed "12" and "truetrue").
 func (i *interpolation) render(scope map[string]any) string {
+	if i.joined != nil {
+		return i.joined.text(scope)
+	}
 	var b strings.Builder
 	for _, p := range i.parts {
 		if p.e == nil {
 			b.WriteString(p.text)
 			continue
 		}
-		b.WriteString(stringify(p.e.eval(scope)))
+		b.WriteString(p.e.text(scope))
 	}
 	return b.String()
 }
@@ -220,7 +240,7 @@ func parseInterpolation(source string, at *Node, attr *Attr) (*interpolation, er
 			if rest != "" {
 				out.parts = append(out.parts, part{text: unescapeBraces(rest)})
 			}
-			return out, nil
+			return out, out.join()
 		}
 		if start > 0 && rest[start-1] == '\\' { // \{{ writes a literal {{
 			out.parts = append(out.parts, part{text: rest[:start-1] + "{{"})
@@ -249,30 +269,35 @@ func parseInterpolation(source string, at *Node, attr *Attr) (*interpolation, er
 
 func unescapeBraces(s string) string { return s }
 
-// stringify prints a value the way JavaScript string concatenation would, except that null and
-// undefined print as "" (a missing name never shows "undefined" on a page).
-func stringify(v any) string {
-	switch t := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return t
-	case bool:
-		if t {
-			return "true"
-		}
-		return "false"
-	case float64:
-		if math.IsNaN(t) {
-			return "NaN"
-		}
-		return strconv.FormatFloat(t, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(t)
-	case int64:
-		return strconv.FormatInt(t, 10)
+// join makes the joined expression of a value of more than one part (interpolation.joined).
+func (i *interpolation) join() error {
+	if i.static() || i.single() != nil {
+		return nil
 	}
-	return ""
+	items := make([]string, 0, len(i.parts))
+	for _, p := range i.parts {
+		if p.e == nil {
+			items = append(items, quoteString(p.text))
+		} else {
+			items = append(items, "("+p.e.source+")")
+		}
+	}
+	source := "[" + strings.Join(items, ", ") + "].join('')"
+	ir, err := hydrate.Compile(source)
+	if err != nil {
+		return err // each part compiled on its own, so the whole does
+	}
+	i.joined = &expr{source: source, ir: ir}
+	return nil
+}
+
+// stringify prints a value the way the browser's kernel writes it into the page, which is JavaScript's
+// String(v), except that null and undefined print as "" (a missing name never shows "undefined" on a
+// page): a number as JavaScript writes it ("1e+21", -0 as "0"; 15/10/2026), a list its items joined by
+// commas, an object "[object Object]", a lambda its source (hydrate.Text). 16/10/2026: a list or an
+// object printed "" here and "1,2" or "[object Object]" in the browser, the text flashing as it hydrated.
+func stringify(v any) string {
+	return hydrate.Text(v)
 }
 
 func truthy(v any) bool { return hydrate.Truthy(v) }

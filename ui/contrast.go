@@ -71,6 +71,7 @@ type paint struct {
 type pinAt struct {
 	width int
 	on    bool
+	attr  *Attr // the pin attribute written, for a message (lazyOnScreen)
 }
 
 // paintIntent is one attribute that decides colour, ground or type (color, background, material,

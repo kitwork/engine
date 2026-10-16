@@ -9,7 +9,11 @@ import (
 
 // FileCache is an opt-in, directory-scoped bytecode artifact cache.
 // A caller owns its directory and lifecycle. Cache read/write failures never
-// prevent source compilation; malformed or stale artifacts are replaced.
+// prevent source compilation; a malformed or stale artifact under the current
+// name is replaced. An artifact of another compiler fingerprint (an older schema
+// or bytecode version) or of an earlier source lives under another name: it is
+// never read, replaced or removed, so the directory grows with each schema bump
+// and each source edit until its owner clears it (15/10/2026).
 type FileCache struct {
 	directory string
 	mu        sync.Mutex

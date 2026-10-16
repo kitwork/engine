@@ -115,6 +115,8 @@ func NewParser(l *Lexer) *Parser {
 	p.registerPrefix(Template, p.parseTemplateLiteral)
 	p.registerPrefix(LogicalNot, p.parsePrefixExpression)
 	p.registerPrefix(Minus, p.parsePrefixExpression)
+	// +x makes a number of x as Number(x) does (16/10/2026, the owner's E2; it did not parse)
+	p.registerPrefix(Plus, p.parsePrefixExpression)
 	p.registerPrefix(LeftParen, p.parseGroupedExpression)
 	p.registerPrefix(If, p.parseIfExpression)
 	// p.registerPrefix(For, p.parseForStatement)
@@ -1077,6 +1079,11 @@ func (p *Parser) parseExpression(precedence int) Expression {
 	leftExp := prefix()
 
 	for !p.peekTokenIs(Semicolon) && precedence < p.peekPrecedence() {
+		if (p.peekTokenIs(PlusPlus) || p.peekTokenIs(MinusMinus)) && p.lineBreakBeforePeek() {
+			// x\n++y is x; ++y: a line break before ++ or -- ends the expression, as JavaScript inserts the
+			// semicolon there (15/10/2026; it was x++; y, an update of the wrong variable)
+			break
+		}
 		infix := p.infixParseFns[p.peekToken.Kind]
 		if infix == nil {
 			return p.closeChain(leftExp)
@@ -1509,7 +1516,7 @@ func updateExpression(tok Token, target Expression, kind UpdateKind) Expression 
 	return &AssignmentExpression{
 		Token:  tok,
 		Name:   target,
-		Value:  &InfixExpression{Token: tok, Left: target, Operator: op, Right: one},
+		Value:  &InfixExpression{Token: tok, Left: target, Operator: op, Right: one, Step: true},
 		Update: kind,
 	}
 }
@@ -1518,10 +1525,34 @@ func updateExpression(tok Token, target Expression, kind UpdateKind) Expression 
 // mới, để tiết kiệm byte khi bundle lớn nhất sát trần 65 535 byte của bytecode 2). Làm câu lệnh hay bước
 // nhảy của for thì giá trị bị bỏ, và mã dịch ra y như trước.
 func (p *Parser) parsePostfixUpdate(left Expression) Expression {
-	if !p.assignable(left, p.curToken) {
+	if !p.assignable(left, p.curToken) || !p.updatable(left, p.curToken) {
 		return nil
 	}
 	return updateExpression(p.curToken, left, PostfixUpdate)
+}
+
+// updatable refuses ++ or -- of an update (++x++, (x++)++, --x--) in the words the source wrote: it was
+// told of the lowering, "không gán được vào (x = (x + 1)): vế trái của = …", an = the author never wrote
+// (15/10/2026).
+func (p *Parser) updatable(target Expression, operator Token) bool {
+	update, ok := target.(*AssignmentExpression)
+	if !ok || update.Update == NotAnUpdate {
+		return true
+	}
+	inner := "++"
+	if update.Token.Kind == MinusMinus {
+		inner = "--"
+	}
+	written := inner + update.Name.String()
+	if update.Update == PostfixUpdate {
+		written = update.Name.String() + inner
+	}
+	verb := "tăng"
+	if operator.Kind == MinusMinus {
+		verb = "giảm"
+	}
+	p.addErrorAt(operator, fmt.Sprintf("không %s được %s: ++ và -- chỉ dùng trên một tên, o.x hay o[k], không trên một ++ hay -- khác", verb, written))
+	return false
 }
 
 // parsePrefixUpdate xử lý `++i` / `--i`: giá trị là i MỚI.
@@ -1529,7 +1560,7 @@ func (p *Parser) parsePrefixUpdate() Expression {
 	tok := p.curToken
 	p.nextToken()
 	target := p.parseExpression(PREFIX)
-	if !p.assignable(target, tok) {
+	if !p.assignable(target, tok) || !p.updatable(target, tok) {
 		return nil
 	}
 	return updateExpression(tok, target, PrefixUpdate)

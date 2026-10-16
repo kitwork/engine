@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"math"
 	"reflect"
 
 	"github.com/kitwork/engine/value"
@@ -226,10 +227,17 @@ func (vm *VM) execute(floor int) value.Value {
 		case GET:
 			key := vm.pop()
 			target := vm.pop()
-			if key.K == value.Number {
-				vm.push(target.At(int(key.N)))
-			} else {
+			switch {
+			case key.K != value.Number || target.IsMap():
+				// a number key of an object reads its text, the key o[k] = v writes: o[7] is o["7"], as in
+				// JavaScript (15/10/2026; it read null, so o[k]++ and counting by a number lost the count)
 				vm.push(vm.nativeProperty(target, key.Text()))
+			case math.Trunc(key.N) != key.N || math.IsInf(key.N, 0):
+				// a[1.5], a[NaN], a[Infinity] name no item: null, as JavaScript gives undefined, and as
+				// a[1.5] = v is refused (array_item.go). It read a[1], cutting the fraction (15/10/2026).
+				vm.push(value.Value{K: value.Nil})
+			default:
+				vm.push(target.At(int(key.N)))
 			}
 
 		case DUP:
@@ -259,6 +267,25 @@ func (vm *VM) execute(floor int) value.Value {
 		case MOD:
 			right, left := vm.pop(), vm.pop()
 			vm.push(left.Mod(right))
+
+		case STEP:
+			// ++ and --: the value made a number (JavaScript's ToNumber), then stepped (bytecode 4)
+			mode := vm.program.code[frame.IP]
+			frame.IP++
+			last := len(vm.Stack) - 1
+			number := vm.Stack[last]
+			if number.K != value.Number {
+				number = vm.toNumber(number)
+			}
+			if number.K == value.Number {
+				switch mode {
+				case StepIncrement:
+					number = value.Value{K: value.Number, N: number.N + 1}
+				case StepDecrement:
+					number = value.Value{K: value.Number, N: number.N - 1}
+				}
+			}
+			vm.Stack[last] = number
 
 		case AND:
 			right, left := vm.pop(), vm.pop()
@@ -328,6 +355,11 @@ func (vm *VM) execute(floor int) value.Value {
 					vm.push(failure)
 					break
 				}
+			} else if cannotHoldProperties(target.K) {
+				// null.x = 1, s[0] = "x": the runtime error TYPE, as JavaScript's TypeError (15/10/2026,
+				// property_write.go); a value of the host still drops the write
+				vm.push(vm.writeThroughNonHolder(opIP, target))
+				break
 			}
 			vm.push(target)
 

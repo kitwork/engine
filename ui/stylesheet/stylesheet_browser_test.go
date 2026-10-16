@@ -81,7 +81,7 @@ func TestBrowserStylesheetsHoldInABrowser(t *testing.T) {
 	for _, name := range Attributes() {
 		for _, value := range valuesToTry(table, name) {
 			for _, in := range []Intent{{Name: name, Value: value}, {Width: "large", Name: name, Value: value}, {State: "focus", Name: name, Value: value}} {
-				if (name == "show" || name == "pin") && in.State != "" { // neither changes with a state
+				if (name == "show" || name == "pin" || name == "lazy") && in.State != "" { // none changes with a state
 					continue
 				}
 				if _, err := table.Class(&rules, in); err != nil {
