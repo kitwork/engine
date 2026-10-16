@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -127,4 +128,17 @@ func ResolveOwned(alias string) (*sql.DB, error) {
 func LookupOwned(alias string) *sql.DB {
 	connection, _ := ResolveOwned(alias)
 	return connection
+}
+
+// OwnedNames lists the aliases published with RegisterOwned, sorted. Databases a resolver publishes
+// lazily (a managed root's folders) are not enumerated here; they are named on disk.
+func OwnedNames() []string {
+	ownedDatabases.RLock()
+	names := make([]string, 0, len(ownedDatabases.connections))
+	for alias := range ownedDatabases.connections {
+		names = append(names, alias)
+	}
+	ownedDatabases.RUnlock()
+	sort.Strings(names)
+	return names
 }
