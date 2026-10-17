@@ -93,7 +93,7 @@ func uiTagNameByte(character byte) bool {
 var uiConditionWords = newWordSet(
 	"website", "desktop", "mobile", "ios", "android", "windows", "macos", "linux",
 	"small", "medium", "large", "wide", "huge",
-	"open", "active", "scrolled", "hover", "focus", "pressed", "disabled",
+	"open", "active", "selected", "scrolled", "hover", "focus", "pressed", "disabled",
 )
 
 // braces reads at a '{' before limit: {{ expression }}, or \{{ and a lone '{' as

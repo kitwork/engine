@@ -157,11 +157,16 @@ func ScrolledScript() Script {
 // ElementWords are the classes the engine writes without any attribute and reboot.css styles: the
 // direction of a container, the parent of a placed child, the .ui tag word where several tags share
 // one HTML element, and the parts of the hosts it writes for Kitwork's own components (the
-// progressbar, the reader, the toast). No page rule exists for them.
+// progressbar, the reader, the toast and the network, where each stands and how its notice comes and
+// goes). No page rule exists for them.
 func ElementWords() []string {
 	return []string{
 		"badge", "breadcrumb", "card", "error", "field", "flex-column", "flex-row", "grid", "hint",
 		"place-anchor", "popover", "progressbar", "reader", "toast",
+		"toast-bottom-end", "toast-bottom", "toast-bottom-start", "toast-top-end", "toast-top", "toast-top-start",
+		"network",
+		"network-bottom-end", "network-bottom", "network-bottom-start", "network-top-end", "network-top", "network-top-start",
+		"transition-fade", "transition-none",
 	}
 }
 

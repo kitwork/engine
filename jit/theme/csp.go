@@ -47,10 +47,20 @@ func PrepaintHash() string {
 // already allows the script — by hash or by 'unsafe-inline'. The page carries the pre-paint under
 // today's marker, data-kitwork-generated="appearance", or one of the two it had before.
 func AllowInCSP(policy, html string) string {
-	if policy == "" || !carriesPrepaint(html) {
+	if !carriesPrepaint(html) {
 		return policy
 	}
-	hash := PrepaintHash()
+	return AllowHashInCSP(policy, PrepaintHash())
+}
+
+// AllowHashInCSP returns the policy with one more inline script of the engine's allowed by its hash
+// (a 'sha256-…' source expression): the appearance pre-paint's, or another pre-paint whose body is a
+// constant too (the kept tab of a Kitwork UI tabs, ui.TabsPrepaintHash). The same refusals hold: no
+// policy, nothing added; a policy that allows 'unsafe-inline', or already the hash, unchanged.
+func AllowHashInCSP(policy, hash string) string {
+	if policy == "" {
+		return policy
+	}
 	if strings.Contains(policy, hash) {
 		return policy
 	}

@@ -120,6 +120,9 @@ func (c *compiler) code(n *Node, cx ctx, site *callSite) (op, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := c.componentEventsHere(n, p.events, site); err != nil { // offline off the network's host (host.go)
+		return nil, err
+	}
 	var language *codeLanguage
 	for _, name := range p.order {
 		a := p.semantic[name]
@@ -187,6 +190,7 @@ func (c *compiler) code(n *Node, cx ctx, site *callSite) (op, error) {
 	if site != nil {
 		mergeCallSite(outer, site)
 	}
+	c.notePanel(n, p, nil, cx) // a <code> is no panel of a tab: told once the page is compiled (tabs.go)
 	return outer, nil
 }
 

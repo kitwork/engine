@@ -23,7 +23,9 @@
  *            (shown: one a show hides is neither copied nor typed) — never a prompt (outside the
  *            <code>), a <text>, nor the code of a nested component. It says what
  *            it did, politely, in the status region (in the page's language: Vietnamese for vi or a
- *            page that names none, English otherwise); the author writes no status markup. A copy
+ *            page that names none, English otherwise): the commands, or the code when every <code>
+ *            copied is a file's, written with no prompt (a tab of a tabs in the bar); the author
+ *            writes no status markup. A copy
  *            while the last one is still said empties the region first, so it is heard again.
  *            Typing that has not finished finishes first.
  *   copied   true for two seconds after the commands reached the clipboard, then false
@@ -50,7 +52,15 @@
  * at once under prefers-reduced-motion, in forced colours (where a
  * highlight's transparent text would show as a selection), in a browser without the Highlight API,
  * before printing and after a copy. A command wider than its <pre> scrolls after the caret, and back to
- * its prompt once entered.
+ * its prompt once entered (a <pre> a switch has hidden goes back as it is drawn again).
+ *
+ * Typing plays once, on what is shown. When a show inside the host puts other code in sight (a tab of
+ * a tabs in the bar, docs/components/tabs.md) and nobody made that switch — no click and no key on the
+ * page since the terminal started: a tab the viewer's browser remembered, restored as the kernel
+ * starts — before anyone has seen the terminal typing (no frame of its clock has run), typing plans
+ * again for the code now shown. Any other switch is the viewer's own: typing finishes, so the code
+ * switched to is there at once — even before the clock has run (the bar on screen, less than half of
+ * the terminal) or during the wait before the first character.
  */
 var TERMINAL = Symbol("kit:terminal");
 var UNTYPED = "kitwork-terminal-untyped";
@@ -66,9 +76,12 @@ var WAITS = 0.3;
 var CHARACTER_LEAST = 0.5;
 var CHARACTER_MOST = 1.5;
 
+// what a copy says: of commands, and of code, when every <code> copied is a file's (no prompt)
 var WORDS = {
-  vi: { copied: "Đã chép lệnh vào bộ nhớ tạm", failed: "Không chép được lệnh" },
-  en: { copied: "Copied the commands to the clipboard", failed: "Could not copy the commands" }
+  vi: { copied: "Đã chép lệnh vào bộ nhớ tạm", failed: "Không chép được lệnh",
+    codeCopied: "Đã chép mã vào bộ nhớ tạm", codeFailed: "Không chép được mã" },
+  en: { copied: "Copied the commands to the clipboard", failed: "Could not copy the commands",
+    codeCopied: "Copied the code to the clipboard", codeFailed: "Could not copy the code" }
 };
 
 // ownOf is what an instance keeps for itself, unseen by markup (a Symbol is never a name)
@@ -85,7 +98,9 @@ var terminalDef = {
     var context = window.kit.context(this);
     var own = ownOf(this);
     if (own.typist) finish(own.typist);
-    var text = shown(context).map(function (code) { return code.textContent; }).join("\n");
+    var codes = shown(context);
+    var text = codes.map(function (code) { return code.textContent; }).join("\n");
+    var files = codes.length > 0 && !codes.some(prompted);
     // where the focus is (the button pressed): a clipboard without navigator.clipboard copies through
     // a textarea it selects and takes out, which leaves the focus nowhere, so it is given back
     var before = document.activeElement;
@@ -100,7 +115,7 @@ var terminalDef = {
       if (before && before !== now && before.isConnected && (!now || now === document.body) && typeof before.focus === "function") {
         before.focus({ preventScroll: true });
       }
-      said(self, own, context.host, worked);
+      said(self, own, context.host, worked, files);
     };
     return written.then(function () { settle(true); }, function () { settle(false); });
   },
@@ -117,13 +132,19 @@ var terminalDef = {
     var motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     var forced = window.matchMedia("(forced-colors: active)");
     if (motion.matches || forced.matches) return;
-    var plan = planOf(shown(context), total);
+    var commands = shown(context);
+    var plan = planOf(commands, total);
     if (!plan) return;
     var typist = own.typist = {
       host: context.host, stops: plan.stops, index: 0, elapsed: 0, since: -1, last: 0, period: 1000 / 60,
-      running: false, frame: 0,
-      done: false, scrolled: [], untyped: new Range(), caret: new Range(), observer: null
+      running: false, frame: 0, commands: commands, touched: false,
+      done: false, scrolled: [], untyped: new Range(), caret: new Range(), observer: null, shows: null
     };
+    // a click (a mouse, a tap, Enter or Space, a screen reader) or a key anywhere on the page since the
+    // terminal started: a switch after it is the reader's own, never a restore
+    var touched = function () { typist.touched = true; };
+    context.listen(document, "click", touched, true);
+    context.listen(document, "keydown", touched, true);
     context.listen(motion, "change", function () { if (motion.matches) finish(typist); });
     context.listen(forced, "change", function () { if (forced.matches) finish(typist); });
     context.listen(window, "beforeprint", function () { finish(typist); });
@@ -142,6 +163,24 @@ var terminalDef = {
       watch();
     }, { threshold: [0, 0.25, 0.5, 0.75, 1] });
     typist.observer.observe(context.host);
+    // a show inside the host that puts other code in sight: plan again for a switch nobody made (no
+    // click, no key: a restore) while no frame of typing has run (unseen), finish for any other
+    typist.shows = new MutationObserver(function () {
+      var now = shown(context);
+      if (typist.done || same(now, typist.commands)) return;
+      var unseen = !typist.touched && typist.index === 0 && typist.since < 0 && typist.elapsed === 0;
+      var again = unseen ? planOf(now, total) : null;
+      if (!again) {
+        finish(typist);
+        return;
+      }
+      typist.commands = now;
+      typist.stops = again.stops;
+      typist.elapsed = 0;
+      typist.since = -1;
+      paint(typist, again.start, again.stops[0]);
+    });
+    typist.shows.observe(context.host, { attributes: true, attributeFilter: ["hidden"], subtree: true });
     // last: anything above that throws leaves the text as the HTML has it, shown
     paint(typist, plan.start, plan.stops[0]);
     watch();
@@ -149,8 +188,8 @@ var terminalDef = {
 };
 
 // said tells what a copy did: copied for SAID, and the sentence in the status region a beat after it
-// is emptied.
-function said(scope, own, host, worked) {
+// is emptied — of the code when files, of the commands otherwise.
+function said(scope, own, host, worked, files) {
   clearTimeout(own.reset);
   clearTimeout(own.saying);
   scope.copied = worked;
@@ -158,7 +197,8 @@ function said(scope, own, host, worked) {
   if (region) {
     region.textContent = "";
     own.saying = setTimeout(function () {
-      region.textContent = wordsOf(host)[worked ? "copied" : "failed"];
+      var words = wordsOf(host);
+      region.textContent = files ? (worked ? words.codeCopied : words.codeFailed) : (worked ? words.copied : words.failed);
     }, BEAT);
   }
   own.reset = setTimeout(function () {
@@ -175,6 +215,23 @@ function shown(context) {
   var commands = context.owned("code");
   if (!context.host.getClientRects().length) return commands;
   return commands.filter(function (code) { return code.getClientRects().length > 0; });
+}
+
+// prompted reports whether a command has a prompt before it, the engine's <span class="code-prompt">
+// with text: a command typed in a shell, where a file's code has none (an empty one is a file's whose
+// language came from data)
+function prompted(code) {
+  var before = code.previousElementSibling;
+  return !!before && before.classList.contains("code-prompt") && before.textContent !== "";
+}
+
+// same reports whether two lists of commands are the same commands in the same order
+function same(a, b) {
+  if (a.length !== b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
 }
 
 // regionOf is the polite status region the engine writes last in the host
@@ -299,9 +356,22 @@ function follow(typist, scroller) {
 }
 
 // rewind scrolls every <pre> that followed the caret back to its start, so an entered command reads
-// from its prompt
+// from its prompt. A <pre> that is not drawn (the panel of a tab switched away from) cannot scroll, and
+// the browser gives it back where it was when it is drawn again: it goes back to its start then, after
+// that layout and before its paint (a ResizeObserver's time).
 function rewind(typist) {
-  typist.scrolled.forEach(function (scroller) { scroller.scrollLeft = 0; });
+  typist.scrolled.forEach(function (scroller) {
+    if (scroller.getClientRects().length) {
+      scroller.scrollLeft = 0;
+      return;
+    }
+    var drawn = new ResizeObserver(function () {
+      if (!scroller.getClientRects().length) return;
+      drawn.disconnect();
+      scroller.scrollLeft = 0;
+    });
+    drawn.observe(scroller);
+  });
   typist.scrolled = [];
 }
 
@@ -364,6 +434,7 @@ function finish(typist) {
   cancelAnimationFrame(typist.frame);
   typist.frame = 0;
   if (typist.observer) typist.observer.disconnect();
+  if (typist.shows) typist.shows.disconnect();
   paint(typist, null, null);
   rewind(typist);
 }

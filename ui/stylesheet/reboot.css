@@ -59,8 +59,16 @@
   :where(summary)::-webkit-details-marker { display: none; }
 
   /* A live show="..." is the hidden attribute. !important in the first layer outranks every later
-     layer; hidden="until-found" keeps find-in-page. */
-  :where([hidden]:not([hidden="until-found"])) { display: none !important; }
+     layer; hidden="until-found" keeps find-in-page. Not an element whose live show has a width that
+     shows it (show="$files.selected == 'page'" medium:show="true": a tab's panel on a phone, side by
+     side with the others from medium): the show layer hides that one (below), where its width's
+     class, which weighs more, shows it from that width whatever the data says. */
+  :where([hidden]:not([hidden="until-found"], [class*=":show-true"])) { display: none !important; }
+
+  /* A blueprint the kernel makes rows of (data-kitwork-for: a toast's notice, ui/toast.go) is never
+     drawn: the kernel takes it out of the page as it starts and draws a row of it for each item. Without
+     JavaScript nothing is drawn of it either. */
+  :where([data-kitwork-for]) { display: none !important; }
 
   /* The keyboard focus ring, always drawn (KITWORK_UI 7). outline survives forced colours and never
      moves layout. --kitwork-focus is the brand where it reaches 3:1 on canvas and paper, else ink:
@@ -257,10 +265,70 @@
     position: fixed; inset-block-start: 0; inset-inline: 0; z-index: 50; block-size: 0; pointer-events: none;
   }
   :where(.progressbar > *) { transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
-  :where(.toast) {
-    position: fixed; inset-block-end: 1rem; inset-inline-end: 1rem; z-index: 50;
-    display: flex; flex-direction: column; gap: 0.5rem;
+  /* toast (ui/toast.go): the stack the author draws, fixed at the edge or corner its place names, over
+     the content and a pinned header, with the popover (50). Its room around the notices is padding, not
+     a distance from the edge, so a notice's shadow is not cut where the stack scrolls; that room keeps
+     to the safe area (an app drawn edge to edge). The stack lets a click through; a notice takes it.
+     Under 640px it spans the screen at its top or bottom edge; from 640px a notice is 24rem wide. A
+     network written with place (ui/network.go) floats the same way, at the same six places. */
+  :where(.toast, .network) {
+    position: fixed; z-index: 50; inset-inline: 0; max-block-size: 100dvh; overflow-y: auto;
+    overscroll-behavior: contain; pointer-events: none;
+    padding: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.5rem)) max(0.75rem, calc(env(safe-area-inset-right, 0px) + 0.5rem))
+      max(0.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem)) max(0.75rem, calc(env(safe-area-inset-left, 0px) + 0.5rem));
   }
+  :where(.toast-bottom-end, .toast-bottom, .toast-bottom-start, .network-bottom-end, .network-bottom, .network-bottom-start) { inset-block-end: 0; }
+  :where(.toast-top-end, .toast-top, .toast-top-start, .network-top-end, .network-top, .network-top-start) { inset-block-start: 0; }
+  @media (min-width: 640px) {
+    :where(.toast, .network) {
+      inline-size: 26rem; max-inline-size: 100%;
+      padding: max(1rem, calc(env(safe-area-inset-top, 0px) + 0.5rem)) max(1rem, calc(env(safe-area-inset-right, 0px) + 0.5rem))
+        max(1rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem)) max(1rem, calc(env(safe-area-inset-left, 0px) + 0.5rem));
+    }
+    :where(.toast-bottom-end, .toast-top-end, .network-bottom-end, .network-top-end) { inset-inline: auto 0; }
+    :where(.toast-bottom-start, .toast-top-start, .network-bottom-start, .network-top-start) { inset-inline: 0 auto; }
+    :where(.toast-bottom, .toast-top, .network-bottom, .network-top) { inset-inline: 0; margin-inline: auto; }
+  }
+  /* A network notice and the toast's at the same edge cover each other where their columns meet: under
+     52rem two corners' 26rem columns do, and under 640px both span the screen. There, while the toast
+     holds a notice at the edge a network notice sits at, the network's goes to the other edge; it comes
+     back when the toast is empty. :has() in a forgiving :where(): a browser without it keeps both at
+     the edge. */
+  @media (max-width: 51.99rem) {
+    :where(html:has(:is(.toast-bottom-end, .toast-bottom, .toast-bottom-start) > [data-kit-key]:not([data-leaving])))
+      :where(.network-bottom-end, .network-bottom, .network-bottom-start) { inset-block: 0 auto; }
+    :where(html:has(:is(.toast-top-end, .toast-top, .toast-top-start) > [data-kit-key]:not([data-leaving])))
+      :where(.network-top-end, .network-top, .network-top-start) { inset-block: auto 0; }
+  }
+  /* A notice: it takes the click, a finger dragged across it is the toast's (up and down still scrolls),
+     and a transparent edge a contrast theme draws. A long unbroken word (an address, a file name) breaks
+     anywhere: its width is no floor for the notice's row (break-word would be), so the dismiss button
+     stays inside the notice on the narrowest screen.
+     How it comes and goes is the host's transition (ui/transition.go). slide, the default of a placed
+     host, comes in with a fade and half a rem from its edge and goes back to it; fade (transition-fade,
+     a host in the flow too) comes and goes in place; none (transition-none) is at once. Going is drawn
+     while the notice leaves: the toast's data-leaving (bound by the engine), or a notice hidden by show,
+     whose display turns to none only at the end (allow-discrete). With less motion asked for, the
+     reboot's rule makes all of it instant. */
+  :where(.toast > *, .network > *) {
+    pointer-events: auto; touch-action: pan-y; border: 1px solid transparent; overflow-wrap: anywhere;
+  }
+  :where(.toast > *, .network > *, .transition-fade > *) {
+    transition: opacity 0.2s ease-out, translate 0.2s ease-out, display 0.2s allow-discrete;
+  }
+  @starting-style {
+    :where(.toast > *, .network > *) { opacity: 0; translate: 0 0.5rem; }
+    :where(.toast-top-end > *, .toast-top > *, .toast-top-start > *, .network-top-end > *, .network-top > *, .network-top-start > *) { translate: 0 -0.5rem; }
+    :where(.transition-fade > *) { opacity: 0; translate: none; }
+  }
+  :where(.toast > [data-leaving], .network > [hidden], .transition-fade > [hidden]) {
+    opacity: 0; translate: 0 0.5rem; transition-duration: 0.15s;
+  }
+  :where(.toast-top-end, .toast-top, .toast-top-start, .network-top-end, .network-top, .network-top-start) > :where([data-leaving], [hidden]) {
+    translate: 0 -0.5rem;
+  }
+  :where(.transition-fade > [data-leaving], .transition-fade > [hidden]) { translate: none; }
+  :where(.transition-none > *) { transition: none; }
   /* a region a screen reader speaks (<reader>, a terminal's status): never seen, so never in what a
      reader selects and copies around it either */
   :where(.reader) {
@@ -276,13 +344,23 @@
   ::highlight(kitwork-terminal-caret) { color: transparent; background-color: color-mix(in oklab, var(--ink) 50%, var(--canvas)); }
 
   /* Print: as long as the content, no floating chrome on every sheet, a heading stays with its text.
-     Last in this layer, so it overrides the looks above (the reboot layer could not: .toast's display
+     Last in this layer, so it overrides the looks above (the reboot layer could not: .toast's position
      and body's min-block-size above would win over it). Dark tokens are declared for screens only, so
      paper is always light. */
   @media print {
     :where(body) { min-block-size: auto; }
     :where(.progressbar, .toast) { display: none; }
+    :where(.network) { display: none; }
     :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
     :where(img, blockquote, li, .card) { break-inside: avoid; }
   }
+}
+
+@layer show {
+  /* The hidden attribute of a live show that has a width that shows it (reboot, above). It weighs
+     nothing, so medium:show-true (display:revert-layer: the display the element's own classes give)
+     wins from medium; below, and with no width that shows it, the data decides. A text has no display
+     of its own to give back: the browser's [hidden] keeps it hidden at every width (show_width.go
+     tells its author). */
+  :where([hidden]:not([hidden="until-found"])) { display: none; }
 }

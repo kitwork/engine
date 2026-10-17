@@ -103,7 +103,11 @@
     <div class="flex-row gap-4"><a class="size-small color-ink-30 hover:color-ink" href="/ve-chung-toi" data-kitwork-current="">Về chúng tôi</a><a class="size-small color-ink-30 hover:color-ink" href="/dieu-khoan" data-kitwork-current="">Điều khoản</a><a class="size-small color-ink-30 hover:color-ink" href="/tai-app" data-kitwork-current="">Tải ứng dụng</a></div>
   </footer>
   <div class="flex-column">
-    <div class="toast" data-kitwork-component="toast: $toast" role="status" aria-live="polite"></div>
+    <div class="flex-column gap-2 toast toast-bottom-end" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1" data-kitwork-scope="place: &#39;bottom-end&#39;; limit: 3">
+      <div class="card flex-row align-top-start gap-3 padding-3 shadow-large" data-kitwork-for="notice of notices; key: notice.id" data-kitwork-bind="data-leaving: notice.leaving"><i class="color-success icon-circle-check" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;success&#39;" hidden></i><i class="color-danger icon-alert-circle" aria-hidden="true" data-kitwork-bind="show: notice.tone == &#39;danger&#39;" hidden></i>
+        <p data-kitwork-bind="text: notice.message"></p>
+        <button class="flex-row background-ink/6 hover:background-ink/10 pressed:background-ink/14 disabled:background-ink/4 padding-1" type="button" data-kitwork-event="click: dismiss(notice.id)"><i class="icon-x" role="img" aria-label="Đóng thông báo"></i></button>
+      </div><span class="reader" role="status" aria-atomic="false"></span><span class="reader" role="alert" aria-atomic="false"></span></div>
   </div>
   <div class="reader" data-kitwork-component="reader" data-kitwork-bind="text: text" aria-live="polite" aria-atomic="true"></div>
 </body>

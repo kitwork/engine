@@ -471,7 +471,7 @@ func TestValidationNamesTheWordAndTheValidOnes(t *testing.T) {
 		{Intent{Name: "italic", Value: "yes"}, []string{`"yes"`, "true hoặc false"}, ""},
 		{Intent{Name: "case", Value: "title"}, []string{`"title"`, "upper", "lower"}, ""},
 		{Intent{Width: "tablet", Name: "gap", Value: "4"}, []string{"tablet", "small, medium, large, wide, huge"}, ""},
-		{Intent{State: "checked", Name: "gap", Value: "4"}, []string{"checked", "open, active, scrolled, hover, focus, pressed, disabled"}, ""},
+		{Intent{State: "checked", Name: "gap", Value: "4"}, []string{"checked", "open, active, selected, scrolled, hover, focus, pressed, disabled"}, ""},
 		{Intent{State: "hover,hover", Name: "gap", Value: "4"}, []string{"hover", "hai lần"}, ""},
 		{Intent{State: "hover", Name: "show", Value: "true"}, []string{"hover", "trạng thái", "medium:show"}, ""},
 		{Intent{Name: "show", Value: "unread > 0"}, []string{`"unread > 0"`, "true hoặc false"}, ""},

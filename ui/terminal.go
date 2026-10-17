@@ -30,7 +30,8 @@ import (
 // <code> inside a terminal is a command, wherever it sits in the host — in a bar the author draws too —
 // except inside a component nested in it, whose code is its own. Before each command the engine writes
 // a prompt chosen from the command's language (terminalPrompts: "$ " for bash and for a command that
-// names none), as <span class="code-prompt">, muted and never selected (stylesheet.CodeLook), outside
+// names none, none for a file's language, work or ui in a tab of the bar), as <span
+// class="code-prompt">, muted and never selected (stylesheet.CodeLook), outside
 // the <code>: a block is <pre><span class="code-prompt">$ </span><code>…</code></pre>, a command in a
 // line is <span><span class="code-prompt">$ </span><code>…</code></span>. A command keeps the colours
 // of its language (code.go). A <text> is whatever the author wants it to be (what a command printed, a
@@ -51,21 +52,21 @@ import (
 // (the CSS Custom Highlight API), so a screen reader, a reader without JavaScript and find in page have
 // every line at once.
 
-// terminalPrompts are the prompts written before a command, by the command's language; a language
-// not here, and a command that names none, takes "$ ".
+// terminalPrompts are the prompts written before a command, by the language of the shell it is typed
+// in; a command that names no language takes "$ ". Any other language (work, ui, go, html, javascript,
+// json, yaml, text…) is a file's, not a shell's: its code is a file shown in the terminal (a tab of a
+// tabs in the bar, 16/10/2026), and has no prompt (until then every other language took "$ ").
 var terminalPrompts = map[string]string{
+	"":           "$ ",
 	"bash":       "$ ",
 	"powershell": "PS> ",
 	"python":     ">>> ",
 	"sql":        "sql> ",
 }
 
-// terminalPrompt is the prompt written before a command in language.
+// terminalPrompt is the prompt written before a command in language, "" for a file's language.
 func terminalPrompt(language string) string {
-	if prompt, ok := terminalPrompts[language]; ok {
-		return prompt
-	}
-	return "$ "
+	return terminalPrompts[language]
 }
 
 // typingLongest is the longest typing that runs without a word from the author: motion that starts by
@@ -170,13 +171,14 @@ func (c *compiler) terminalTyping(n *Node, a *Attr) (float64, error) {
 	if m == nil {
 		return 0, errAttr(n, a, `typing="%s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`, a.Value)
 	}
-	number, err := strconv.ParseFloat(m[1], 64)
-	if err != nil || math.IsInf(number, 0) {
-		return 0, errAttr(n, a, `typing="%s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`, a.Value)
-	}
-	ms := number
+	// seconds are read as the digits times 10³ in one rounding (4.03s is 4030, not 4030.0000000000005)
+	digits := m[1]
 	if m[2] == "s" {
-		ms = number * 1000
+		digits += "e3"
+	}
+	ms, err := strconv.ParseFloat(digits, 64)
+	if err != nil || math.IsInf(ms, 0) {
+		return 0, errAttr(n, a, `typing="%s" không phải một thời lượng: viết typing="3s" hoặc typing="800ms" (tổng thời gian gõ mọi lệnh)`, a.Value)
 	}
 	if ms == 0 {
 		return 0, errAttr(n, a, `typing="%s" là không giây: không gõ thì bỏ typing; gõ thì viết một thời lượng như typing="3s"`, a.Value)
@@ -248,6 +250,9 @@ func (c *compiler) command(n *Node, cx ctx, site *callSite) (op, error) {
 		} else {
 			language.name = value
 			text = &staticOp{s: html.EscapeString(terminalPrompt(value))}
+			if terminalPrompt(value) == "" {
+				return o, nil // a file's code, typed in no shell: no prompt (terminalPrompts)
+			}
 		}
 	}
 	around := "pre"
@@ -292,7 +297,8 @@ func (c *compiler) command(n *Node, cx ctx, site *callSite) (op, error) {
 	return &wrapper, nil
 }
 
-// promptOp writes the prompt of a command whose language comes from {{ }}, read when the page renders.
+// promptOp writes the prompt of a command whose language comes from {{ }}, read when the page renders
+// (nothing for a file's language: its <span> stays, empty).
 type promptOp struct {
 	language *interpolation
 }

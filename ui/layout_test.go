@@ -159,9 +159,9 @@ func TestLayoutWrittenAsAComponent(t *testing.T) {
 		mustFail(t, with(c.content, c.more), where("content.ui", c.content, "component="), c.says)
 	}
 	// a component Kitwork has not built yet is not offered by its path
-	got := compileError(t, with(`<content><box component="tabs"><text>x</text></box></content>`, map[string]string{"/site/tabs.ui": `<box><text>x</text></box>`}))
-	if !strings.Contains(got, "tabs là layout (chỉ có giao diện, không có logic): viết <tabs />") || strings.Contains(got, "kitwork/components/tabs") {
-		t.Errorf("a site tabs.ui written component=: %s", got)
+	got := compileError(t, with(`<content><box component="tooltip"><text>x</text></box></content>`, map[string]string{"/site/tooltip.ui": `<box><text>x</text></box>`}))
+	if !strings.Contains(got, "tooltip là layout (chỉ có giao diện, không có logic): viết <tooltip />") || strings.Contains(got, "kitwork/components/tooltip") {
+		t.Errorf("a site tooltip.ui written component=: %s", got)
 	}
 	// a branch's file too: <dropdown /> there is the branch's layout
 	mustContain(t, renderAt(t, memorySite("", map[string]string{

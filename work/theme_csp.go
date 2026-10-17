@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	theme "github.com/kitwork/engine/jit/theme"
+	"github.com/kitwork/engine/ui"
 )
 
 // allowThemePrepaint lets the engine's own anti-flash script run under the site's own policy.
@@ -13,13 +14,18 @@ import (
 // script there, so the engine declares it — by hash, which permits exactly that one script. It adds
 // nothing when the page has no pre-paint, when the site sent no policy, or when the policy already
 // allows inline scripts (adding a hash there would switch 'unsafe-inline' off and break the site's
-// own scripts).
+// own scripts). A Kitwork UI page whose tabs persist their choice carries a second pre-paint
+// (ui/tabs.go), declared the same way by its own hash.
 func allowThemePrepaint(header http.Header, html []byte) {
 	policy := header.Get("Content-Security-Policy")
 	if policy == "" {
 		return
 	}
-	if updated := theme.AllowInCSP(policy, string(html)); updated != policy {
+	updated := theme.AllowInCSP(policy, string(html))
+	if ui.CarriesTabsPrepaint(string(html)) {
+		updated = theme.AllowHashInCSP(updated, ui.TabsPrepaintHash())
+	}
+	if updated != policy {
 		header.Set("Content-Security-Policy", updated)
 	}
 }

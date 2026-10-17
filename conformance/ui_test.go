@@ -408,7 +408,8 @@ func tailwindWords(body string) []string {
 	var found []string
 	for _, m := range classAttribute.FindAllStringSubmatch(body, -1) {
 		for _, c := range strings.Fields(m[1]) {
-			if !seen[c] && tailwindPatterns.MatchString(c) {
+			// the engine's own words (transition-fade, transition-none) are reboot.css's, never Tailwind's
+			if !seen[c] && !elementWord(c) && tailwindPatterns.MatchString(c) {
 				seen[c] = true
 				found = append(found, c)
 			}

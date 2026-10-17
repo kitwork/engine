@@ -52,7 +52,7 @@ type pairValue struct{ name, light, dark string }
 // rule is one CSS rule and its place in the fixed order.
 type rule struct {
 	layer int // 0 page, 1 show
-	state int // 0 none, then open, active, scrolled, hover, focus, pressed, disabled
+	state int // 0 none, then open, active, selected, scrolled, hover, focus, pressed, disabled
 	width int // 0 none, then small … huge
 	// origin is the width the class's own condition starts at; below width when the rule is a step a
 	// narrower class carries to a wider screen (a heading's size growing from small)

@@ -435,7 +435,7 @@ func conditionsOf(f *paint) []cond {
 			out = append(out, cond{width: w})
 		}
 	}
-	for _, state := range []string{"open", "active", "scrolled", "hover", "focus", "pressed"} {
+	for _, state := range []string{"open", "active", "selected", "scrolled", "hover", "focus", "pressed"} {
 		list := writers[state]
 		if len(list) == 0 {
 			continue

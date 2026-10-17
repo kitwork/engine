@@ -80,16 +80,18 @@ var tailwindWidth = map[string]bool{
 // stateWords are the state prefixes in the fixed order of the stylesheet: a later state wins over an
 // earlier one while both hold (a hovered button that is disabled looks disabled; a header the page
 // has scrolled under still lights up under the pointer).
-var stateWords = []string{"open", "active", "scrolled", "hover", "focus", "pressed", "disabled"}
+var stateWords = []string{"open", "active", "selected", "scrolled", "hover", "focus", "pressed", "disabled"}
 
 // stateSelector is how each state reaches CSS. It sits inside :where(), so every page rule weighs
 // exactly one class and only the order decides. pressed is CSS :active; Kitwork's active: is the link
-// of the page being viewed (aria-current); open follows the nearest element that opens, so the chevron
-// of a closed accordion nested in an open one stays closed; scrolled is the page scrolled away from
-// its top, one flag on <html> (data-kitwork-scrolled) that scrolled.<hash>.js keeps (ScrolledScript).
+// of the page being viewed (aria-current); selected is the tab chosen (aria-selected, which the engine
+// binds and the tabs pre-paint sets, 16/10/2026); open follows the nearest element that opens, so the
+// chevron of a closed accordion nested in an open one stays closed; scrolled is the page scrolled away
+// from its top, one flag on <html> (data-kitwork-scrolled) that scrolled.<hash>.js keeps (ScrolledScript).
 var stateSelector = map[string]string{
 	"open":     ":where(:is(details[open],[aria-expanded=true]) *):not(:where(details:not([open]),[aria-expanded=false]) *)",
 	"active":   ":where([aria-current]:not([aria-current=false]))",
+	"selected": ":where([aria-selected=true])",
 	"scrolled": ":where(:root[data-kitwork-scrolled] *)",
 	"hover":    ":where(:hover)",
 	"focus":    ":where(:focus-visible)",

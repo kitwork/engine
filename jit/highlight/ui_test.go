@@ -157,14 +157,14 @@ func TestUIConditionWords(t *testing.T) {
 	for _, word := range []string{
 		"website", "desktop", "mobile", "ios", "android", "windows", "macos", "linux",
 		"small", "medium", "large", "wide", "huge",
-		"open", "active", "scrolled", "hover", "focus", "pressed", "disabled",
+		"open", "active", "selected", "scrolled", "hover", "focus", "pressed", "disabled",
 	} {
 		if !uiConditionWords.has(word) {
 			t.Errorf("%q is a condition of KITWORK_UI §8 but not one here", word)
 		}
 	}
-	if len(uiConditionWords) != 20 {
-		t.Errorf("%d condition words, want the 20 of KITWORK_UI §8", len(uiConditionWords))
+	if len(uiConditionWords) != 21 {
+		t.Errorf("%d condition words, want the 21 of KITWORK_UI §8", len(uiConditionWords))
 	}
 	for _, group := range []string{"", "+", "hover+", ",hover", "hover,,focus", "tablet", "click", "md"} {
 		if uiIsConditionGroup(group) {

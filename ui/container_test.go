@@ -55,7 +55,7 @@ func TestPageContainerCapsEachRegionNotTheBody(t *testing.T) {
 		"/site/navbar.ui":  `<navbar flex="row" gap="6"><link value="/">Thực đơn</link></navbar>`,
 		"/site/content.ui": `<content padding="6"><text>Thực đơn</text></content>`,
 		"/site/footer.ui":  `<footer padding="6"><text>Địa chỉ</text></footer>`,
-		"/site/overlay.ui": `<overlay><box component="toast" as="$toast" /></overlay>`,
+		"/site/overlay.ui": `<overlay>` + toastStack(` as="$toast"`) + `</overlay>`,
 	}
 	const cap = "container-wide"
 	html := renderAt(t, memorySite("", files), ".", "/", nil)

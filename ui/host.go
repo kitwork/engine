@@ -67,6 +67,52 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 			return nil, err
 		}
 	}
+	// the tabs' own word (persist) leaves the host the same way: the engine reads it into the name the
+	// choice is kept under once it knows the tabs (tabs.go)
+	persist := ""
+	if def.kitwork != nil && def.name == "tabs" {
+		var err error
+		if n, persist, err = c.tabsWords(n); err != nil {
+			return nil, err
+		}
+	}
+	// the toast's own words (place, limit, alt) leave the host the same way, and the blueprint of a
+	// notice is found inside it before anything compiles (toast.go)
+	var toast *toastScope
+	if def.kitwork != nil && def.name == "toast" {
+		var err error
+		if n, toast, err = c.toastHost(n, attr); err != nil {
+			return nil, err
+		}
+		// a lazy frame around places the stack, fixed, by itself and not by the screen (15/10/2026); a
+		// glass frame does too (its backdrop-filter)
+		c.tellLazyAround(cx, "<"+n.Tag+" component=\"toast\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
+		if glass := glassAround(cx.paint); glass != nil {
+			c.warn(n.File, attr.Line, attr.Column, fmt.Sprintf("toast trong khung kính (material ở %s:%d:%d) bám theo khung đó, không theo màn hình: kính giữ phần cố định bên trong theo chính nó; đặt toast ngoài khung kính, như trong overlay.ui",
+				glass.node.File, glass.attr.Line, glass.attr.Column))
+		}
+	}
+	// the network's own words (place, delay, duration) leave the host the same way (network.go); placed,
+	// it is fixed to the screen like the toast, and a frame around that holds what is fixed is told the
+	// same way
+	var network *networkSpec
+	if def.kitwork != nil && def.name == "network" {
+		if info.region {
+			// a region keeps its own role (a landmark), and a placed one would pin the region itself
+			return nil, errAttr(n, attr, "%s không đặt trên vùng <%s>: đặt nó trên một thẻ bên trong (%s)", def.name, n.Tag, hostList(def.kitwork.hosts))
+		}
+		var err error
+		if n, network, err = c.networkHost(n); err != nil {
+			return nil, err
+		}
+		if network.place != "" {
+			c.tellLazyAround(cx, "<"+n.Tag+" component=\"network\" place=\""+network.place+"\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
+			if glass := glassAround(cx.paint); glass != nil {
+				c.warn(n.File, attr.Line, attr.Column, fmt.Sprintf("network có place trong khung kính (material ở %s:%d:%d) bám theo khung đó, không theo màn hình: kính giữ phần cố định bên trong theo chính nó; đặt network ngoài khung kính, như trong overlay.ui",
+					glass.node.File, glass.attr.Line, glass.attr.Column))
+			}
+		}
+	}
 	if def.hasUI() {
 		if root := def.rootTag(); n.Tag != root {
 			return nil, errAttr(n, attr, "%s dựng một <%s>: viết %s", def.what(c.site), root, suggestion(root, def, n))
@@ -79,7 +125,7 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 				def.name, def.what(c.site), path.Base(def.what(c.site)))
 		}
 	} else {
-		if len(n.SignificantChildren()) == 0 {
+		if len(n.SignificantChildren()) == 0 && (def.kitwork == nil || !def.kitwork.empty) {
 			return nil, errAt(n, "%s không có giao diện: nội dung bên trong thẻ là giao diện của nó (<%s component=\"%s\">…</%s>)", def.name, n.Tag, def.name, n.Tag)
 		}
 		if def.kitwork != nil && !def.kitwork.hosts[n.Tag] && !info.region {
@@ -87,8 +133,21 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		}
 	}
 	site := &callSite{def: def, state: def.state}
+	if network != nil {
+		site.network = network
+		site.classes = append(site.classes, network.classes()...)
+		site.inputs = append(site.inputs, network.inputs()...) // delay and duration, as written (network.go)
+		if network.place != "" {
+			site.places = append(site.places, 0) // fixed over whatever the page holds there, at every width (contrast.go)
+		}
+	}
 	host := *n // the host as the author wrote it, without the call's words (a component without a UI)
 	host.Attrs = nil
+	if def.kitwork != nil && def.kitwork.empty && len(n.SignificantChildren()) == 0 && !writesAttribute(n, "show") {
+		// written empty, it is heard and never seen: it takes no room in the page's flow (a gap of a
+		// row around it, a line of a list), and the kernel still starts it
+		host.Attrs = append(host.Attrs, Attr{Name: "show", Value: "false", Line: attr.Line, Column: attr.Column})
+	}
 	var extra []Attr // static show on a call of a component with a UI: merged into the root
 	var asAttr, forAttr *Attr
 	var outside []outsideExpr
@@ -179,6 +238,10 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 				return nil, errAttr(n, a, "source chỉ dành cho vùng; chỉ rõ nguồn của component bằng đường dẫn: component=\".components/%s\"", def.name)
 			}
 			if _, declared := def.state[name]; !declared {
+				if message := c.webWord(n, a); message != "" {
+					// a word of the web (onoffline, href, class) is told the .ui word, as on any tag (compile.go)
+					return nil, errAttr(n, a, "%s", message)
+				}
 				return nil, errAttr(n, a, "%s không phải thuộc tính của <%s>, và %s không khai %s", a.Name, n.Tag, def.name, name)
 			}
 			in, err := c.inputValue(n, a, site)
@@ -257,8 +320,40 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 	inside := cx
 	inside.scope = inner
 	inside.terminal = nil // a component's code is its own, never a command of a terminal around it
+	inside.tabs = nil     // nor is its button a tab of a tabs around it
+
+	// nor is it a notice of a toast around it
+	inside.toast, inside.toastRow = nil, false
+	if toast != nil {
+		// the stack: its blueprint of a notice is one of the children, its place and limit go in (toast.go)
+		toast.alias, toast.aliases = site.alias, inside.aliases
+		site.toast, inside.toast = toast, toast
+		site.classes = append(site.classes, toast.classes()...)
+		site.inputs = append(site.inputs, toast.inputs()...)
+		if site.alias == "" {
+			c.warn(n.File, attr.Line, attr.Column, `toast không có as: trang không gọi được show; viết as="$toast" trên thẻ chủ rồi gọi $toast.success('Đã lưu.') ở bất cứ đâu`)
+		}
+	}
 	if forAttr != nil {
 		inside.forAt = &forSite{node: n, attr: forAttr}
+	}
+	if def.kitwork != nil && def.name == "tabs" {
+		// the tablist: its tabs by name, the first chosen unless the call chose one (tabs.go)
+		tabs, err := c.tabsHost(n, site, inside, persist)
+		if err != nil {
+			return nil, err
+		}
+		site.tabs, inside.tabs = tabs, tabs
+	}
+	if site.alias != "" && def.delivered() && cx.aliases != nil {
+		// read on the server as the instance starts: $files.selected before the kernel runs — page-wide
+		// for the page's aliases (page.go), inside the instance for one in a component's own .ui
+		start := aliasStart{alias: site.alias, state: site.state, bindings: site.bindings}
+		if cx.aliases.owner == "" {
+			c.aliasStarts = append(c.aliasStarts, start)
+		} else {
+			cx.aliases.starts = append(cx.aliases.starts, start)
+		}
 	}
 
 	if def.hasUI() {
@@ -268,7 +363,13 @@ func (c *compiler) componentCall(n *Node, cx ctx, outer *callSite) (op, error) {
 		rootCtx := ctx{inline: cx.inline, file: root.File, breadcrumb: cx.breadcrumb, kept: cx.kept, scope: inner, forAt: inside.forAt,
 			aliases: &aliasFrame{owner: def.name, set: map[string]string{}, parent: cx.aliases}, pageBackground: cx.pageBackground, paint: cx.paint,
 			onScreen: cx.onScreen, lazyAround: cx.lazyAround}
-		return c.element(&root, rootCtx, site)
+		made, err := c.element(&root, rootCtx, site)
+		if o, ok := made.(*elemOp); ok && err == nil {
+			// its own aliases read as they start, in the instance's names (a root folded to static HTML
+			// reads none)
+			o.aliases = rootCtx.aliases.starts
+		}
+		return made, err
 	}
 	// what is written on the host and inside it reads the component's names first
 	if err := c.checkReads(&host, inside, nil); err != nil {
@@ -450,8 +551,6 @@ func logicFileName(c *compiler, def *componentDef) string {
 // kitworkUI compiles a call of one of Kitwork's components that bring their own UI.
 func (c *compiler) kitworkUI(n *Node, cx ctx, def *componentDef) (op, error) {
 	switch def.name {
-	case "toast":
-		return c.toast(n, cx)
 	case "progressbar":
 		return c.progressbar(n, cx)
 	}
@@ -622,6 +721,7 @@ func (c *compiler) checkNames(n *Node, a *Attr, e *expr, scope *frame, aliases *
 		if strings.HasPrefix(name, "$") {
 			if aliasName(name) && aliases != nil {
 				c.aliasUses = append(c.aliasUses, aliasUse{name: name, frame: aliases, node: n, attr: a})
+				c.noteAliasExpr(n, a, e, aliases) // a call through the toast's alias is checked (toast.go)
 			}
 			continue
 		}
@@ -668,4 +768,36 @@ func (c *compiler) errUse(use aliasUse) error {
 		return errAttr(use.node, use.attr, "%s", message)
 	}
 	return errAt(use.node, "%s", message)
+}
+
+// componentEventsHere refuses an event only a Kitwork component sends (componentEvents) on any tag
+// but that component's host: <box offline="…"> would wait for an event nothing ever sends there. A
+// component of the site with that component's name is the site's, and sends none of them either. The
+// host it says to write carries the event alone, with its modifiers (click,offline:once → offline:once).
+func (c *compiler) componentEventsHere(n *Node, events []Attr, site *callSite) error {
+	for i := range events {
+		a := &events[i]
+		head, modifiers, _ := strings.Cut(a.Name, ":")
+		for _, event := range strings.Split(head, ",") {
+			event = strings.TrimSpace(event)
+			owner := componentEvents[event]
+			if owner == "" {
+				continue
+			}
+			if site != nil && site.def != nil && site.def.name == owner {
+				if site.def.kitwork != nil {
+					continue
+				}
+				return errAttr(n, a, "%s là sự kiện của %s của Kitwork; %s ở đây là component của site (%s), không gửi sự kiện đó: đặt tên khác cho component này",
+					event, owner, owner, site.def.logicPlace(c.site))
+			}
+			written := event
+			if modifiers != "" {
+				written += ":" + modifiers
+			}
+			return errAttr(n, a, "%s là sự kiện của component %s, chỉ thẻ chủ của nó nghe được: <box component=\"%s\" %s=\"…\" />",
+				event, owner, owner, written)
+		}
+	}
+	return nil
 }

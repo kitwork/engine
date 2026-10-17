@@ -671,8 +671,9 @@ func TestBrowserTabsComponentIsDrivenByTheKeyboard(t *testing.T) {
     await arrow("ArrowRight");
     assert(document.activeElement === byId("tab-guide"), "an unnamed tab must be skipped, focus went to " + (document.activeElement.textContent || "").slice(0, 16));
 
-    // the public surface is the contract: everything else lives behind a Symbol
-    assert(Object.keys(window.kit.blueprints.tabs).join(",") === "current,select,next,previous,first,last,init",
+    // the public surface is the contract: everything else lives behind a Symbol (v1.1.0, 16/10/2026,
+    // added selected — the same name current holds — and persist for Kitwork UI's tabs)
+    assert(Object.keys(window.kit.blueprints.tabs).join(",") === "selected,current,persist,select,next,previous,first,last,init",
       "the surface must stay short, got " + Object.keys(window.kit.blueprints.tabs).join(","));
 
     // a vertical tablist answers to the arrows a screen reader announces for it

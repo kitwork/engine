@@ -123,8 +123,10 @@ func TestTerminalIsWhatTheAuthorWrote(t *testing.T) {
 }
 
 // The prompt before a command follows the command's language: "$ " for bash and for a command that
-// names none, "PS> " for powershell, ">>> " for python, "sql> " for sql, "$ " for any other. A command
-// keeps the colours of its language. A language from data decides the prompt when the page renders. In
+// names none, "PS> " for powershell, ">>> " for python, "sql> " for sql, and none for a file's language
+// (go, text, work, ui…: a file shown in the terminal, a tab of a tabs in its bar; until 16/10/2026 they
+// took "$ "). A command keeps the colours of its language. A language from data decides the prompt when
+// the page renders (a file's: the prompt's span stays, empty). In
 // a line the prompt and the command are one <span>, which takes what the <code> was given (its look,
 // its for), so the prompt comes and goes with the command. CONTROL: a <code> outside a terminal has no
 // prompt.
@@ -135,8 +137,10 @@ func TestTerminalPromptFollowsTheLanguage(t *testing.T) {
 		{`language="powershell"`, "PS&gt; ", ` class="language-powershell"`},
 		{`language="python"`, "&gt;&gt;&gt; ", ` class="language-python"`},
 		{`language="sql"`, "sql&gt; ", ` class="language-sql"`},
-		{`language="go"`, "$ ", ` class="language-go"`},
-		{`language="text"`, "$ ", ` class="language-text"`},
+		{`language="go"`, "", ` class="language-go"`},
+		{`language="text"`, "", ` class="language-text"`},
+		{`language="work"`, "", ` class="language-work"`},
+		{`language="ui"`, "", ` class="language-ui"`},
 	} {
 		command := `select 1`
 		body := terminalPage(t, `<content><box component="terminal"><code `+c.language+`>`+command+`</code></box></content>`).Render(Request{Path: "/"})
@@ -147,11 +151,16 @@ func TestTerminalPromptFollowsTheLanguage(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		mustContain(t, body, `<pre><span class="code-prompt">`+c.prompt+`</span><code`+c.class+`>`+coloured+`</code></pre>`)
+		prompt := `<span class="code-prompt">` + c.prompt + `</span>`
+		if c.prompt == "" {
+			prompt = ""
+			mustNotContain(t, body, "code-prompt")
+		}
+		mustContain(t, body, `<pre>`+prompt+`<code`+c.class+`>`+coloured+`</code></pre>`)
 	}
 	// from data: the prompt of the value the page renders with
 	page := terminalPage(t, `<content><box component="terminal"><code language="{{ language }}">ls</code></box></content>`)
-	for language, prompt := range map[string]string{"powershell": "PS&gt; ", "python": "&gt;&gt;&gt; ", "bash": "$ ", "go": "$ "} {
+	for language, prompt := range map[string]string{"powershell": "PS&gt; ", "python": "&gt;&gt;&gt; ", "bash": "$ ", "go": "", "work": ""} {
 		body := page.Render(Request{Path: "/", Scope: map[string]any{"language": language}})
 		mustContain(t, body, `<pre><span class="code-prompt">`+prompt+`</span><code class="language-`+language+`">`)
 	}
@@ -245,6 +254,7 @@ func TestTerminalTypingIsADuration(t *testing.T) {
 		`typing="3s"`:    ` data-kitwork-scope="typing: 3000"`,
 		`typing="800ms"`: ` data-kitwork-scope="typing: 800"`,
 		`typing="1.5s"`:  ` data-kitwork-scope="typing: 1500"`,
+		`typing="4.03s"`: ` data-kitwork-scope="typing: 4030"`, // one rounding: never 4030.0000000000005
 		`typing="5s"`:    ` data-kitwork-scope="typing: 5000"`,
 		``:               ``,
 	} {

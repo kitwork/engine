@@ -53,6 +53,11 @@ var groupedEventTypes = map[string]string{
 	"intersect-enter": "", "intersect-leave": "", "ready": "",
 }
 
+// ComponentEvents are the events Kitwork's own components send (context.emit), each with its component:
+// the kernel listens for them as for any custom event, and only the host of that component hears them
+// (ui refuses them anywhere else). Known here, they are no note on every page that writes them.
+var ComponentEvents = map[string]string{"online": "network", "offline": "network"}
+
 const groupedEventVocabulary = "click, double-click, context-menu, click-outside, keydown, keyup, input, change, submit, " +
 	"focus-in, focus-out, pointer-down, pointer-up, pointer-enter, pointer-leave, scroll, load, error, toggle, " +
 	"intersect-enter, intersect-leave, ready"
@@ -322,7 +327,7 @@ func groupedEventProblem(name string) (problem string, fatal bool) {
 	if err := checkModifierPipeline(dom, modifiers, "."); err != nil {
 		return label + ": " + err.Error(), true
 	}
-	if !known {
+	if !known && ComponentEvents[event] == "" {
 		return fmt.Sprintf("%s: %q is not an event the kernel knows (%s) — it listens for a custom event of that name, which only a component's context.emit fires", label, event, groupedEventVocabulary), false
 	}
 	return "", false

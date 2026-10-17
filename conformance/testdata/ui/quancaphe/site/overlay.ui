@@ -1,3 +1,10 @@
 <overlay>
-  <box component="toast" as="$toast" />
+  <box component="toast" as="$toast" gap="2">
+    <card for="notice of notices; key: notice.id" flex="row" align="top-start" gap="3" padding="3" shadow="large">
+      <icon show="notice.tone == 'success'" value="circle-check" color="success" />
+      <icon show="notice.tone == 'danger'" value="alert-circle" color="danger" />
+      <text>{{ notice.message }}</text>
+      <button click="dismiss(notice.id)" padding="1"><icon value="x" alt="Đóng thông báo" /></button>
+    </card>
+  </box>
 </overlay>

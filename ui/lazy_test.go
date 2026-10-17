@@ -137,7 +137,7 @@ func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
 			`lazy="true": khung này giữ <popover> ở content.ui:1:`},
 		{"a popover in a footer lazy below large", `<content><footer lazy="true" large:lazy="false">` + dropdown + `</footer></content>`, `lazy="true"`,
 			`lazy="true": khung này giữ <popover> ở content.ui:1:`},
-		{"a toast", `<content><section lazy="600px"><box component="toast" as="$toast" /></section></content>`, `lazy="600px"`,
+		{"a toast", `<content><section lazy="600px">` + toastStack(` as="$toast"`) + `</section></content>`, `lazy="600px"`,
 			`lazy="600px": khung này giữ <box component="toast"> ở content.ui:1:`},
 		{"a part placed below its parent", `<content><section lazy="true"><box><box place="below-start"><text>gợi ý</text></box></box></section></content>`, `lazy="true"`,
 			`lazy="true": khung này giữ <box place="below-start"> (đặt ra ngoài cha) ở content.ui:1:`},
@@ -169,5 +169,5 @@ func TestLazyAroundWhatFloatsIsAWarning(t *testing.T) {
 		t.Errorf("want one warning, got:\n%s", strings.Join(warned, "\n"))
 	}
 	// control: beside the lazy frame, not inside
-	compileQuiet(t, content(`<content><section lazy="true"><text>a</text></section>`+dropdown+`<box component="toast" as="$toast" /><box><box place="below-start"><text>gợi ý</text></box></box></content>`))
+	compileQuiet(t, content(`<content><section lazy="true"><text>a</text></section>`+dropdown+toastStack(` as="$toast"`)+`<box><box place="below-start"><text>gợi ý</text></box></box></content>`))
 }

@@ -187,9 +187,19 @@ type elemOp struct {
 
 	// fragment: no element of its own
 	fragment bool
+
+	// aliases are those set in a component's own .ui, on this, the instance's root: read inside it as
+	// each instance starts ($files.selected), in the instance's names (host.go, page.go)
+	aliases []aliasStart
+	// after is HTML written right after the element, whether or not it is there: the pre-paint of a
+	// group of tabs (tabs.go)
+	after string
 }
 
 func (o *elemOp) render(r *run, scope map[string]any) {
+	if o.after != "" {
+		defer r.b.WriteString(o.after)
+	}
 	if o.forEach == nil {
 		o.renderOne(r, scope)
 		return
@@ -260,6 +270,21 @@ func (o *elemOp) renderOne(r *run, scope map[string]any) {
 		defer func() {
 			for name := range o.state {
 				restore(scope, name, saved[name], had[name])
+			}
+		}()
+	}
+	if len(o.aliases) > 0 {
+		saved := make([]any, len(o.aliases))
+		had := make([]bool, len(o.aliases))
+		for i, a := range o.aliases {
+			saved[i], had[i] = scope[a.alias]
+		}
+		for _, a := range o.aliases {
+			scope[a.alias] = a.start(scope)
+		}
+		defer func() {
+			for i, a := range o.aliases {
+				restore(scope, a.alias, saved[i], had[i])
 			}
 		}()
 	}

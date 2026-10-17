@@ -38,10 +38,12 @@ var targetFamily = map[string]string{
 var widthWords = map[string]bool{"small": true, "medium": true, "large": true, "wide": true, "huge": true}
 
 // stateWords are the state prefixes. pressed is CSS :active (not Kitwork's active:, which is the link
-// of the page being viewed); open follows the nearest element that opens; scrolled holds while the
-// page is scrolled away from its top (a header that floats up: scrolled:shadow="small").
+// of the page being viewed); open follows the nearest element that opens; selected is the tab chosen
+// in a tabs (aria-selected, which the engine binds, so a tab's look follows the choice with no
+// expression, before the kernel too); scrolled holds while the page is scrolled away from its top (a
+// header that floats up: scrolled:shadow="small").
 var stateWords = map[string]bool{
-	"open": true, "active": true, "scrolled": true, "hover": true, "focus": true, "pressed": true, "disabled": true,
+	"open": true, "active": true, "selected": true, "scrolled": true, "hover": true, "focus": true, "pressed": true, "disabled": true,
 }
 
 // widthScaleWords names the width scale in order, for the error of a word outside it.

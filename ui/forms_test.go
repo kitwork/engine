@@ -38,10 +38,10 @@ func TestComponentWrittenAsATagIsAnError(t *testing.T) {
 			`dropdown có logic (component của Kitwork): viết <box component="dropdown" as="$account">…</box>`},
 		{`<content><appearance><button click="toggle()">x</button></appearance></content>`, nil,
 			`appearance có logic (component của Kitwork): viết <box component="appearance">…</box>`},
-		{`<content><toast as="$toast" /></content>`, nil, `toast có logic (component của Kitwork): viết <box component="toast" as="$toast" />`},
+		{`<content><toast as="$toast" /></content>`, nil, `toast có logic (component của Kitwork): viết <box component="toast" as="$toast">…</box>`},
 		{`<content><menu><text>x</text></menu></content>`, map[string]string{"/site/components.work": `import { component } from "kitwork"; component.define("menu", () => { var open = false; });`},
 			`menu có logic (components.work): viết <box component="menu">…</box>`},
-		{`<content><tabs><text>x</text></tabs></content>`, nil, `tabs là component của Kitwork mà engine chưa dựng được`},
+		{`<content><tooltip><text>x</text></tooltip></content>`, nil, `tooltip là component của Kitwork mà engine chưa dựng được`},
 		{`<content><dialog as="$confirm"><text>x</text></dialog></content>`, nil, `<dialog> là phần tử của Kitwork mà engine chưa dựng được`},
 		// control: a tag that is nothing at all
 		{`<content><price-tag /></content>`, nil, `không biết thẻ <price-tag>: không có trong từ vựng của Kitwork, không có layout price-tag.ui (từ thư mục của content.ui lên gốc site, rồi .components/), và không có component tên này`},
@@ -106,24 +106,26 @@ func TestComponentRootCarriesNoCallWords(t *testing.T) {
 	}
 }
 
-// Kitwork's components that bring their own UI (toast, progressbar) are called on the tag that UI is
-// built on, with their own inputs only; a site does not restyle them with a .ui of its own yet.
+// Kitwork's component that brings its own UI (progressbar) is called on the tag that UI is built on,
+// with its own inputs only; a site does not restyle it with a .ui of its own yet. The toast brought its
+// own until 17/10/2026: now the author draws the stack and its notice (toast.go), so what was its UI's
+// rule is the toast's own words, and a toast.ui beside is a piece of the site, not the toast's look.
 func TestKitworkComponentsWithTheirOwnUI(t *testing.T) {
 	for _, c := range []struct{ overlay, needle, says string }{
-		{`<overlay><box component="toast" if="ready" /></overlay>`, "if=", "toast chỉ nhận as, không nhận if"},
-		{`<overlay><box component="toast"><text>x</text></box></overlay>`, "<box", "toast không có nội dung con; thông báo gửi bằng $toast.show(…)"},
-		{`<overlay><section component="toast" /></overlay>`, "component=", `toast của Kitwork dựng một <box>: viết <box component="toast" />`},
+		{`<overlay>` + toastStack(` as="$toast" if="ready"`) + `</overlay>`, "if=", "toast luôn có mặt và có một trên mỗi trang: bỏ if"},
+		{`<overlay><box component="toast"><text>x</text></box></overlay>`, "<box", "toast cần một mẫu thông báo bên trong thẻ chủ"},
+		{`<overlay><section component="toast">` + toastNotice + `</section></overlay>`, "component=", `toast đặt trên <box>: chồng thông báo là một khung`},
 	} {
 		mustFail(t, map[string]string{"/site/page.ui": `<page><content /><overlay /></page>`, "/site/content.ui": `<content><text>x</text></content>`, "/site/overlay.ui": c.overlay},
 			where("overlay.ui", c.overlay, c.needle), c.says)
 	}
 	mustFail(t, map[string]string{"/site/page.ui": `<page><content /><overlay /></page>`, "/site/content.ui": `<content><text>x</text></content>`,
-		"/site/overlay.ui": `<overlay><box component="toast" as="$toast" /></overlay>`, "/site/toast.ui": `<box><text>x</text></box>`},
-		"toast.ui:1:1: ", "toast.ui đổi giao diện toast của Kitwork: engine chưa dựng toast từ file của site")
+		"/site/overlay.ui": `<overlay>` + toastStack(` as="$toast"`) + `</overlay>`, "/site/toast.ui": `<box><text>x</text></box>`},
+		"overlay.ui:1:15: ", "toast là layout (chỉ có giao diện, không có logic)")
 	// control: the toast as it is written
 	html := mustCompile(t, map[string]string{"/site/page.ui": `<page><content /><overlay /></page>`, "/site/content.ui": `<content><text>x</text></content>`,
-		"/site/overlay.ui": `<overlay><box component="toast" as="$toast" /></overlay>`})
-	mustContain(t, html, `<div class="toast" data-kitwork-component="toast: $toast" role="status" aria-live="polite"></div>`)
+		"/site/overlay.ui": `<overlay>` + toastStack(` as="$toast"`) + `</overlay>`})
+	mustContain(t, html, `<div class="flex-column toast toast-bottom-end" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1"`)
 }
 
 // A call of a component with a UI takes the call's words and inputs only: inputs are names the
@@ -353,7 +355,7 @@ func TestComponentValueRules(t *testing.T) {
 		{`navbar`, "navbar là vùng, không phải component: <navbar /> lấy navbar.ui"},
 		{`accordion`, "accordion là phần tử của Kitwork, không phải component: viết <accordion …>…</accordion>"},
 		{`dialog`, "dialog là phần tử của Kitwork, không phải component"},
-		{`tabs`, "tabs là component của Kitwork mà engine chưa dựng được"},
+		{`tooltip`, "tooltip là component của Kitwork mà engine chưa dựng được"},
 		{`giohang`, "không tìm thấy component giohang"},
 	} {
 		content := `<content><box component="` + c.value + `"><text>x</text></box></content>`

@@ -38,6 +38,9 @@ type Page struct {
 	// right to left: the document carries dir="rtl", so start and end flip in the browser exactly as the
 	// warnings of left and right said they would (checkSides)
 	rightToLeft bool
+	// aliases are the page's aliases of a component the browser runs: on the server $files.selected
+	// reads the instance as it starts, the value the kernel starts it from (render)
+	aliases []aliasStart
 }
 
 // element is what the class rules need to know about the element being compiled.
@@ -69,6 +72,14 @@ type ctx struct {
 	// terminal is the terminal around whose commands every <code> here is (terminal.go): set inside a
 	// terminal's host, nil outside one and inside any component nested in it
 	terminal *terminalScope
+	// tabs is the tabs host around, whose tab a <button click="select('…')"> here is (tabs.go): set
+	// inside a tabs host, nil outside one and inside any component nested in it
+	tabs *tabsScope
+	// toast is the toast host around, whose blueprint of a notice is one of its children (toast.go): set
+	// inside a toast host, nil outside one and inside any component nested in it; toastRow says the
+	// element is in that blueprint, where what reads the notice is bound (a link's value too)
+	toast    *toastScope
+	toastRow bool
 	// onScreen says, by width (0 the narrowest, then stylesheet.Widths()), why everything here is always
 	// on the screen at that width, so lazy can skip nothing there (a frame pinned to an edge around at
 	// that width, an overlay, a popover), with where that is; nil or "" elsewhere
@@ -180,6 +191,13 @@ type callSite struct {
 	// terminal is the host of a terminal: each <code> inside is a command, with a prompt before it
 	// (terminal.go); nil for every other call
 	terminal *terminalSpec
+	// tabs is the host of a tabs, the tablist (tabs.go); nil for every other call
+	tabs *tabsScope
+	// toast is the host of the toast, the stack (toast.go); nil for every other call
+	toast *toastScope
+	// network is the host of a network: where it floats, and whether it is a status region
+	// (network.go); nil for every other call
+	network *networkSpec
 }
 
 type compiler struct {
@@ -215,6 +233,17 @@ type compiler struct {
 	// anchors are the ids written on this page (page.ui, its regions, layouts, the content), each with
 	// where it was written: an id names one place, so a second one is an error
 	anchors map[string]string
+	// tabHosts are the tabs hosts of the page and tabPanels the elements whose show compares an alias's
+	// selected with a name, wired to each other once the page is compiled (tabs.go, wireTabs); aliasStarts
+	// are the page's aliases of a component the browser runs, read on the server as it starts (page.go)
+	tabHosts    []*tabsScope
+	tabPanels   []*tabPanel
+	aliasStarts []aliasStart
+	// toast is the page's toast (one a page), and aliasExprs every expression that reads an alias, so the
+	// calls through the toast's alias are checked once every as is known (toast.go, checkToastCalls)
+	toast         *toastScope
+	aliasExprs    []aliasExpr
+	aliasExprSeen map[aliasExprKey]bool
 
 	// table reads presentation attributes against the route's colour chain; rules is the page's
 	// stylesheet it records into (classes.go)
@@ -245,6 +274,9 @@ type aliasFrame struct {
 	set    map[string]string        // alias → where its as is written (file:line:col)
 	defs   map[string]*componentDef // alias → the component on whose host it is written
 	parent *aliasFrame
+	// starts are the aliases set in an instance's own .ui on the host of a component the browser runs,
+	// read on the server as each starts inside that instance (render.go); the page's are Page.aliases
+	starts []aliasStart
 }
 
 func (f *aliasFrame) find(alias string) bool {
@@ -361,6 +393,12 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 	if err := c.strayNames(); err != nil { // a component's name read outside its host (copy())
 		return nil, err
 	}
+	if err := c.wireTabs(); err != nil { // each tab and its panels, by name (tabs.go)
+		return nil, err
+	}
+	if err := c.checkToastCalls(); err != nil { // what each call through the toast's alias says (toast.go)
+		return nil, err
+	}
 	if c.hiddenText != nil { // gradient text an element under it hides (gradient.go)
 		return nil, c.hiddenText
 	}
@@ -370,7 +408,7 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 		return nil, err
 	}
 	out := c.out
-	out.root, out.rules, out.uses = root, c.rules, c.uses
+	out.root, out.rules, out.uses, out.aliases = root, c.rules, c.uses, c.aliasStarts
 	for f := range c.files {
 		out.Files = append(out.Files, f)
 	}
@@ -420,6 +458,11 @@ func (c *compiler) element(n *Node, cx ctx, site *callSite) (op, error) {
 		if each, err := parseFor(a.Value, n, a); err == nil {
 			cx.scope = rowFrame(each, cx.scope)
 			cx.forAt = &forSite{node: n, attr: a}
+			if cx.toast != nil && cx.toast.template == n {
+				// the blueprint of a notice: its rows are the kernel's, so the notice is live (toast.go)
+				cx.scope.client, cx.scope.what = true, "mẫu thông báo"
+				cx.toastRow = true
+			}
 		}
 	}
 	if err := c.checkReads(n, cx, nil); err != nil {
@@ -1327,6 +1370,9 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	if err != nil {
 		return nil, err
 	}
+	if err := c.componentEventsHere(n, p.events, site); err != nil { // offline off the network's host (host.go)
+		return nil, err
+	}
 	// lazy on what is always on the screen skips nothing: a frame pinned to an edge, or anything inside
 	// one, an overlay or a popover (lazyMisplaced already told of the tags always on it themselves). Told
 	// at the first width where lazy skips and the element is on the screen, with the lazy and the pin in
@@ -1411,7 +1457,7 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	if n.Tag == "accordions" {
 		cx.accordionName = fmt.Sprintf("accordions-%d", c.next("accordions"))
 	}
-	if containsPlaceChild(n) {
+	if c.containsPlaceChild(n) {
 		classes = append(classes, "place-anchor")
 	}
 	classes = append(classes, p.classes...)
@@ -1438,8 +1484,39 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	// (step 4), and the kernel reports a host whose component it cannot find; its names still cover
 	// the page's on the server. A layout piece has no instance and is never marked.
 	writeHost(&attrs, site)
+	if site != nil && site.tabs != nil {
+		attrs.WriteString(` role="tablist"`) // the tabs host holds the tabs (tabs.go)
+		site.tabs.o = o
+	}
+	if site != nil && site.toast != nil {
+		// the stack: a region a screen reader lists by its name, which F8 brings the focus into (toast.go)
+		attrs.WriteString(` role="region"`)
+		writeAttr(&attrs, "aria-label", c.toastRegion(site.toast))
+		attrs.WriteString(` tabindex="-1"`)
+	}
+	if site != nil && site.network != nil && site.network.status {
+		// a notice drawn inside: what shows there, and what it changes to, a screen reader says (network.go).
+		// An <li> keeps its role in its list: it is a live region by the two words role="status" means.
+		if info.html == "li" {
+			attrs.WriteString(` aria-live="polite" aria-atomic="true"`)
+		} else {
+			attrs.WriteString(` role="status"`)
+		}
+	}
+	blueprint := cx.toast != nil && cx.toast.template == n && o.forEach != nil
+	if blueprint {
+		// the blueprint of a notice: the kernel's live for, written once; the server paints no row (toast.go)
+		writeAttr(&attrs, "data-kitwork-for", toastFor(o.forEach))
+		o.forEach = nil
+	}
 	if err := c.tagAttributes(n, info, p, o, &attrs, cx); err != nil {
 		return nil, err
+	}
+	if n.Tag == "button" && cx.tabs != nil {
+		// a tab of the tabs around: role, name, and the bindings of aria-selected and tabindex (tabs.go)
+		if err := c.tabButton(n, p, o, &attrs, cx); err != nil {
+			return nil, err
+		}
 	}
 	scope := cx.scope
 	runtime, err := c.runtimeAttributes(n, p, o, scope)
@@ -1449,6 +1526,20 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 	if site != nil && site.showBind != "" {
 		runtime.binds = append(runtime.binds, site.showBind)
 	}
+	if blueprint {
+		// a notice fading out (reboot.css): the engine's binding, never the author's (toast.go)
+		runtime.binds = append(runtime.binds, "data-leaving: "+cx.toast.item+".leaving")
+	}
+	if cx.toastRow && o.href != nil {
+		// a link of a notice goes where the notice says: bound, its address checked by the toast (toast.go)
+		source, client, err := scope.interpolationOnClient(n, o.href)
+		if err != nil {
+			return nil, err
+		}
+		if client {
+			runtime.binds = append(runtime.binds, "href: "+source)
+		}
+	}
 	if n.Tag == "page" && c.layout != "" {
 		writeAttr(&attrs, "data-kitwork-layout", c.layout)
 	}
@@ -1457,6 +1548,8 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 		return nil, err
 	}
 	o.staticAttrs = anchor + attrs.String()
+	c.notePanel(n, p, o, cx) // a show that names a tab: its panel, wired once the page is compiled (tabs.go)
+	c.shownByWidth(n, p, o)  // a width that shows it beside a live show, with no display to give back (show_width.go)
 
 	if info.kind != kindVoid {
 		childCtx := cx
@@ -1530,6 +1623,11 @@ func (c *compiler) generic(n *Node, info tagInfo, cx ctx, site *callSite) (op, e
 		} else if terminal {
 			// the author's markup, each <code> a command with its prompt, then the status region (terminal.go)
 			if o.children, err = c.terminalChildren(n, childCtx); err != nil {
+				return nil, err
+			}
+		} else if site != nil && site.toast != nil {
+			// the blueprint of a notice and what the author writes around it, then the two regions (toast.go)
+			if o.children, err = c.toastChildren(n, childCtx); err != nil {
 				return nil, err
 			}
 		} else {
@@ -1652,17 +1750,20 @@ func engineWords(n *Node, info tagInfo, cx ctx) []string {
 // popover, which hangs below the start edge of what opens it even when it writes no place. A place the
 // page drops (with a warning) places nothing: a fragment builds no element, so what it holds stands
 // in n, and a reader takes no place.
-func containsPlaceChild(n *Node) bool {
+func (c *compiler) containsPlaceChild(n *Node) bool {
 	for _, ch := range n.Elements() {
 		switch ch.Tag {
 		case "popover":
 			return true
 		case "fragment":
-			if containsPlaceChild(ch) {
+			if c.containsPlaceChild(ch) {
 				return true
 			}
 			continue
 		case "reader":
+			continue
+		}
+		if c.placedOnScreen(ch) {
 			continue
 		}
 		for _, a := range ch.Attrs {
@@ -1672,6 +1773,19 @@ func containsPlaceChild(n *Node) bool {
 		}
 	}
 	return false
+}
+
+// placedOnScreen reports whether an element is the host of Kitwork's toast or network: their place is
+// an edge of the screen, not a place against the parent (toast.go, network.go). A site's own component
+// of either name places against its parent like any other.
+func (c *compiler) placedOnScreen(n *Node) bool {
+	a := attrNamed(n, "component")
+	name := strings.TrimSpace(a.Value)
+	if name != "toast" && name != "network" {
+		return false
+	}
+	def, err := c.resolve(n, a, name)
+	return err == nil && def != nil && def.kitwork != nil
 }
 
 // writesWidth reports whether an element writes its own container or max-width, with or without a prefix.
@@ -2105,11 +2219,11 @@ func (c *compiler) notHere(n *Node, a *Attr, where, hint string) (bool, error) {
 	return true, nil
 }
 
-// kitworkInput decides an attribute that a Kitwork element writing its own markup (reader, toast,
+// kitworkInput decides an attribute that a Kitwork element writing its own markup (reader,
 // progressbar) does not read, the way notHere does, except for, if, show and id: dropping those would
 // put the element where it was written not to be (or hide a reader from the screen reader), so they
-// stay the caller's error. drawn says the host is seen (the toast's stack, the progressbar's line, not
-// the reader's clipped region): presentation or an event on it would do something, which the engine
+// stay the caller's error. drawn says the host is seen (the progressbar's line, not the reader's
+// clipped region): presentation or an event on it would do something, which the engine
 // does not attach to a call of Kitwork's component yet (question 5), so dropping it would change the
 // page; its value is read first, then it is the caller's error too.
 func (c *compiler) kitworkInput(n *Node, a *Attr, drawn bool, where, hint string) (bool, error) {
@@ -2172,6 +2286,7 @@ var htmlEvents = map[string]string{
 	"mouseenter": "pointer-enter", "mouseleave": "pointer-leave", "mouseover": "pointer-enter", "mouseout": "pointer-leave",
 	"mousedown": "pointer-down", "mouseup": "pointer-up",
 	"pointerenter": "pointer-enter", "pointerleave": "pointer-leave", "pointerdown": "pointer-down", "pointerup": "pointer-up",
+	"online": "online", "offline": "offline",
 }
 
 // webWord is the error of an attribute name of the web that .ui says in a word of its own, "" for any
@@ -2653,6 +2768,9 @@ func (c *compiler) textElement(n *Node, cx ctx, site *callSite, tag string) (op,
 	if err != nil {
 		return nil, err
 	}
+	if err := c.componentEventsHere(n, p.events, site); err != nil { // offline on a text: the network's (host.go)
+		return nil, err
+	}
 	o := &elemOp{tag: tag}
 	frame := c.paintOf(n, el, p, cx, site)
 	// a heading's look by its level is reboot.css's (h1 is the heading scale's medium step, semibold,
@@ -2699,6 +2817,8 @@ func (c *compiler) textElement(n *Node, cx ctx, site *callSite, tag string) (op,
 		return nil, err
 	}
 	o.staticAttrs = anchor + attrs.String()
+	c.notePanel(n, p, o, cx) // a show that names a tab: its panel (tabs.go)
+	c.shownByWidth(n, p, o)  // a width that shows a text whose show is live does nothing (show_width.go)
 	childCtx := cx
 	childCtx.inline = true
 	childCtx.flex = false
@@ -2733,6 +2853,9 @@ func (c *compiler) quote(n *Node, cx ctx, site *callSite) (op, error) {
 	el := &element{tag: "quote", html: tag}
 	p, err := c.attributes(n, el)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.componentEventsHere(n, p.events, site); err != nil { // offline off the network's host (host.go)
 		return nil, err
 	}
 	o := &elemOp{tag: tag}
@@ -2789,6 +2912,9 @@ func (c *compiler) accordion(n *Node, cx ctx, site *callSite) (op, error) {
 	el := &element{tag: "accordion", html: "details"}
 	p, err := c.attributes(n, el)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.componentEventsHere(n, p.events, site); err != nil { // offline off the network's host (host.go)
 		return nil, err
 	}
 	o := &elemOp{tag: "details"}
@@ -2903,6 +3029,9 @@ func (c *compiler) summary(n *Node, cx ctx) (op, error) {
 	el := &element{tag: n.Tag, html: "summary"}
 	p, err := c.attributes(&header, el)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.componentEventsHere(&header, p.events, nil); err != nil { // never a component's host
 		return nil, err
 	}
 	for _, name := range p.order {
@@ -3071,41 +3200,6 @@ func writeHost(w *strings.Builder, site *callSite) {
 	writeAttr(w, "data-kitwork-component", value)
 }
 
-// toast is the page's notification stack, <box component="toast" as="$toast" />: an empty live
-// region on the bottom edge that the toast component fills when something is said ($toast.show(…)).
-// Built empty: nothing has been said yet.
-func (c *compiler) toast(n *Node, cx ctx) (op, error) {
-	if len(n.SignificantChildren()) > 0 {
-		return nil, errAt(n, "toast không có nội dung con; thông báo gửi bằng $toast.show(…)")
-	}
-	site := &callSite{def: &componentDef{name: "toast", kitwork: kitworkComponents["toast"]}}
-	for i := range n.Attrs {
-		a := &n.Attrs[i]
-		switch a.Name {
-		case "component":
-		case "as":
-			alias := strings.TrimSpace(a.Value)
-			if err := c.registerAlias(n, a, alias, cx, site.def); err != nil {
-				return nil, err
-			}
-			site.alias = alias
-		default:
-			if done, err := c.kitworkInput(n, a, true, "toast", "toast chỉ nhận as; thông báo gửi bằng $toast.show(…)"); err != nil {
-				return nil, err
-			} else if !done {
-				return nil, errAttr(n, a, "toast chỉ nhận as, không nhận %s; thông báo gửi bằng $toast.show(…)", a.Name)
-			}
-		}
-	}
-	var b strings.Builder
-	// a lazy frame around places the toast's fixed stack by itself, not by the screen (15/10/2026)
-	c.tellLazyAround(cx, "<"+n.Tag+" component=\"toast\">", n, "một khung lazy giữ phần cố định (position:fixed) bên trong theo chính nó, không theo màn hình, nên ngăn thông báo nằm ngoài màn hình")
-	b.WriteString(`<div class="toast"`) // the stack on the bottom end corner, reboot.css's
-	writeHost(&b, site)
-	b.WriteString(` role="status" aria-live="polite"></div>`)
-	return &staticOp{s: b.String()}, nil
-}
-
 // progressThickness is how thick the line is when page.ui does not say, and the most it may be: a
 // line width counts real units (px on the web, points on iOS, dp on Android), as border-width,
 // lineWidth and trackThickness do, not the spacing scale. Thickness, not height: the progressbar's
@@ -3264,6 +3358,9 @@ func (c *compiler) breadcrumbElement(n *Node, cx ctx, site *callSite) (op, error
 	el := &element{tag: "breadcrumb", html: "nav"}
 	p, err := c.attributes(n, el)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.componentEventsHere(n, p.events, site); err != nil { // offline off the network's host (host.go)
 		return nil, err
 	}
 	anchor, err := c.offAnchor(n, p, cx, "<breadcrumb>")

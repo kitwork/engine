@@ -9,6 +9,8 @@ package ui
 //   - component="name" on a tag for a piece with logic (host.go): a .work of the site or the identity,
 //     or one of Kitwork's components below.
 
+import hydrate "github.com/kitwork/engine/jit/hydrate"
+
 type tagKind uint8
 
 const (
@@ -88,7 +90,7 @@ var catalog = map[string]tagInfo{
 var plannedElements = map[string]bool{"dialog": true, "autocomplete": true, "avatar": true, "avatars": true}
 
 // kitworkComponent is one of Kitwork's own components: written component="name" on a tag the author
-// chooses (appearance, dropdown), or on the tag its own UI is built on (toast, progressbar: the call
+// chooses (appearance, dropdown, toast), or on the tag its own UI is built on (progressbar: the call
 // writes that tag, empty).
 type kitworkComponent struct {
 	// root is the tag Kitwork's own UI is built on; "" when what the author writes inside the host is
@@ -107,6 +109,9 @@ type kitworkComponent struct {
 	// its attributes, like a component without a UI; what is inside is markup of the page, compiled
 	// with that rule (terminal.go).
 	around bool
+	// empty: a component without a UI that may be written with nothing inside, because what it does
+	// is heard through its events (network: <box component="network" offline="…" />)
+	empty bool
 }
 
 // containerHosts are the tags a component that holds other content can be written on.
@@ -125,8 +130,16 @@ var kitworkComponents = map[string]*kitworkComponent{
 		state: map[string]any{"open": false, "toggle": nil, "close": nil},
 		hosts: containerHosts,
 	},
-	// the page's notification stack, filled when something is said ($toast.show(…))
-	"toast": {root: "box", state: map[string]any{"visible": false, "message": "", "show": nil, "hide": nil}},
+	// the page's stack of notices, at an edge of the screen: <box component="toast" as="$toast"> holds
+	// the blueprint of a notice the author draws, <card for="notice of notices; key: notice.id"> (toast.go).
+	// notices are those on screen, waiting how many older ones wait off it, paused whether time stands
+	// still; the page says a notice through the alias ($toast.success('Đã lưu.'))
+	"toast": {
+		state: map[string]any{"notices": []any{}, "waiting": 0.0, "paused": false,
+			"show": nil, "info": nil, "success": nil, "warning": nil, "danger": nil, "loading": nil,
+			"update": nil, "dismiss": nil, "clear": nil, "act": nil},
+		hosts: map[string]bool{"box": true},
+	},
 	// how far the move to the next page has got: first in page.ui, above the header
 	"progressbar": {root: "box", state: map[string]any{"active": false, "value": 0.0, "top": nil}},
 	// commands the author draws a window around, <box component="terminal" typing="3s">: each <code>
@@ -138,7 +151,26 @@ var kitworkComponents = map[string]*kitworkComponent{
 		around: true,
 	},
 
-	"tabs":       {planned: true},
+	// one panel at a time, chosen by its tab: <box component="tabs" as="$files"> holds the tabs, each a
+	// <button click="select('router')">; a panel anywhere on the page is an element whose show compares
+	// $files.selected with a tab's name (tabs.go). selected is the chosen tab's name (the first tab's
+	// when the page starts), persist the name the choice is kept under (kit.storage), "" for none:
+	// persist="true" is the set of the tab names, persist="shell" a name the author chose.
+	"tabs": {
+		state: map[string]any{"selected": "", "persist": "", "select": nil},
+		hosts: containerHosts,
+	},
+	// whether the page can reach the network, and the moment that changes: <box component="network"
+	// place="bottom-start"> around a notice the author draws (<card show="open">: an icon, the words,
+	// <button click="close()">), or empty with only its events (offline="…" online="…"). connected is
+	// the browser's word, true on the server's first paint; open whether the notice shows, false there;
+	// offline and online are its events (componentEvents); place, delay and duration are its own words,
+	// read off the host (network.go).
+	"network": {
+		state: map[string]any{"connected": true, "open": false, "close": nil},
+		hosts: containerHosts,
+		empty: true,
+	},
 	"tooltip":    {planned: true},
 	"loadmore":   {planned: true},
 	"pagination": {planned: true},
@@ -168,7 +200,13 @@ var events = map[string]bool{
 	"intersect-enter": true, "intersect-leave": true,
 	"submit": true, "input": true, "change": true, "scroll": true,
 	"load": true, "error": true, "toggle": true, "ready": true,
+	"online": true, "offline": true,
 }
+
+// componentEvents are the events only a Kitwork component sends, each with that component: written
+// on any other tag they would never happen, so there they are an error that names the component. The
+// kernel's check knows the same list (jit/hydrate).
+var componentEvents = hydrate.ComponentEvents
 
 // booleanAttributes are attributes whose value is "true", "false" or {{ }}; never written bare.
 var booleanAttributes = map[string]bool{

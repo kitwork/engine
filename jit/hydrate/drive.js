@@ -37,6 +37,20 @@
     var barTimer = 0, barShown = false;
     // The index of the history entry on screen (see popstate): a reload keeps the entry's own.
     var historyIndex = history.state && typeof history.state.i === "number" ? history.state.i : 0;
+    // Where the current entry sits in the session history: the Navigation API's index where the
+    // browser has one, else the index Drive stamps on every entry. shownAt and shownKey are the entry
+    // whose page is on screen and that page's address without its #fragment: a move that stays (offline)
+    // returns the address there, and a move to another #fragment of it is no move at all.
+    function position() {
+      var nav = window.navigation;
+      try { if (nav && nav.currentEntry && nav.currentEntry.index >= 0) return nav.currentEntry.index; } catch (e) { }
+      return historyIndex;
+    }
+    function documentKey() { return location.pathname + location.search; }
+    var shownAt = position(), shownKey = documentKey();
+    // The whole address (#fragment and all) of the entry Drive last saw the browser on: an entry the
+    // browser makes for a link to that same address replaces it (see popstate).
+    var address = location.href;
     function progressHost() {
       return document.querySelector('[data-kit-component="progressbar"],[data-kit-component^="progressbar@"],' +
         '[data-kitwork-component="progressbar"],[data-kitwork-component^="progressbar@"],[data-kitwork-component^="progressbar:"]');
@@ -122,9 +136,14 @@
       if (a.closest && a.closest('[data-kit-reload="true"]')) return false;
       if (a.getAttribute("data-kit-click") || clicks(a)) return false; // an expression link does not navigate
       if (!sameOrigin(a.href)) return false;
-      var u = new URL(a.href);
-      if (u.pathname === location.pathname && u.search === location.search && u.hash) return false; // in-page #anchor
+      if (inPage(a)) return false; // in-page #anchor
       return true;
+    }
+    // A link to another #fragment of the page on screen (or to the one in the address): the browser's
+    // own move, which Drive leaves to it.
+    function inPage(a) {
+      var u; try { u = new URL(a.href); } catch (e) { return false; }
+      return u.origin === location.origin && u.pathname === location.pathname && u.search === location.search && !!u.hash;
     }
 
     // Fetch a page; resolves to { html, url, layout } where url is the FINAL url (after redirects).
@@ -495,6 +514,9 @@
         runScripts(cur);
 
         if (push) history.pushState({ kitwork: true, i: ++historyIndex }, "", url);
+        shownAt = position();
+        shownKey = documentKey();
+        address = location.href;
         markCurrent();
 
         var hash = ""; try { hash = new URL(url, location.href).hash; } catch (e) { }
@@ -531,7 +553,13 @@
       progress(true);
       document.dispatchEvent(new CustomEvent("kitwork:before-visit", { detail: { url: url } }));
       var timer = watchdog = setTimeout(function () {
-        if (current()) { ctrl.abort(); location.assign(url); }
+        if (!current()) return;
+        ctrl.abort();
+        if (!stayOffline(url)) { location.assign(url); return; }
+        // the move ends here: a page fetched ahead (never given the signal) that answers late is dropped
+        inflight = null;
+        document.documentElement.classList.remove("kitwork-loading");
+        progress(false);
       }, 3000);
 
       var p = prefetch[url] || fetchPage(url, ctrl.signal);
@@ -546,7 +574,7 @@
       })
         .catch(function (err) {
           clearTimeout(timer);
-          if (current() && (!err || err.name !== "AbortError")) location.assign(url);
+          if (current() && (!err || err.name !== "AbortError") && !stayOffline(url)) location.assign(url);
         })
         .then(function () {
           if (!current()) return;
@@ -554,6 +582,20 @@
           progress(false);
           inflight = null;
         });
+    }
+
+    // Offline, a move stays where it is: the page on screen is worth more than the browser's own "no
+    // connection" page, and a component that listens (network) says why nothing moved. A move through
+    // history has already moved the address, so it goes back to the entry of the page on screen, by as
+    // many steps as it went (two quick Backs are two); returning is where that return lands, and its
+    // popstate only sets the index. Online, a move that fails loads the page whole, as before.
+    var returning = null;
+    function stayOffline(url) {
+      if (navigator.onLine !== false) return false;
+      var back = shownAt - position();
+      if (back) { returning = shownAt; history.go(back); }
+      document.dispatchEvent(new CustomEvent("kitwork:offline", { detail: { url: url } }));
+      return true;
     }
 
     // Bounded hover-prefetch cache.
@@ -567,7 +609,13 @@
     // Click navigation (delegated → survives swaps).
     listen(document, "click", function (e) {
       var a = e.target.closest && e.target.closest("a[href]");
-      if (!a || !drivable(a, e)) return;
+      if (!a) return;
+      if (!drivable(a, e)) {
+        // An in-page #anchor moves the browser to an entry after this one: this one keeps the place on
+        // the page, so Back comes back there (Drive turned the browser's own scroll restoration off).
+        if (inPage(a)) history.replaceState({ kitwork: true, y: window.scrollY, i: historyIndex }, "", location.href);
+        return;
+      }
       var dest; try { dest = new URL(a.href, location.href); } catch (x) { return; }
       e.preventDefault();
       if (dest.pathname === location.pathname && dest.search === location.search && !dest.hash) {
@@ -606,11 +654,46 @@
 
     // Preserve normal browser Back semantics and restore the scroll position recorded in history.
     // Each entry Drive pushes carries its index, so Back and Forward know which way they went: a slide
-    // moves back on Back and forward on Forward. An entry with no index (made before Drive ran) is back.
+    // moves back on Back and forward on Forward. Drive stamps the entry it starts on, so the one entry
+    // with no index is one the browser just made itself, for a #fragment link: it is the one after the
+    // entry it was made from, or that entry itself when the link named the address already there (the
+    // browser replaces the entry then, and history.length stays), and is stamped so as the browser
+    // arrives on it.
     listen(window, "popstate", function (e) {
       var to = e.state && typeof e.state.i === "number" ? e.state.i : null;
-      var forward = to !== null && to > historyIndex;
-      if (to !== null) historyIndex = to;
+      if (to === null) {
+        to = location.href === address ? historyIndex : historyIndex + 1;
+        try { history.replaceState({ kitwork: true, i: to }, "", location.href); } catch (x) { }
+      }
+      address = location.href;
+      var forward = to > historyIndex;
+      historyIndex = to;
+      if (returning !== null) {
+        var arrived = position() === returning;
+        returning = null;
+        if (arrived) return;
+      }
+      if (documentKey() === shownKey) {
+        // the page on screen under another #fragment, or none: the browser has already moved there, as
+        // it does without Drive; only the place on the page changes. A move still on its way (a quick
+        // Back before this one) goes to a page the address no longer names: it ends here.
+        if (inflight) {
+          inflight.abort();
+          inflight = null;
+          clearTimeout(watchdog);
+          document.documentElement.classList.remove("kitwork-loading");
+          progress(false);
+        }
+        shownAt = position();
+        var y = e.state && e.state.y, anchor = null;
+        if (location.hash) { try { anchor = document.getElementById(decodeURIComponent(location.hash.slice(1))); } catch (x) { } }
+        instant(function () {
+          if (typeof y === "number") window.scrollTo(0, y);
+          else if (anchor) anchor.scrollIntoView();
+          else window.scrollTo(0, 0);
+        });
+        return;
+      }
       visit(location.href, false, (e.state && e.state.y) || 0, forward);
     });
 

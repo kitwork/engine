@@ -219,9 +219,10 @@ func TestPartsRowsThatStayErrors(t *testing.T) {
 		{"layout.go:313", cart(`<content><promo /></content>`, "/site/shop/content.ui", `<content><badge-new /></content>`, "/site/shop/badge-new.ui", `<card><text>x</text></card>`, "/site/shop/badge-new.work", `export default {}`),
 			"shop/badge-new.work:1:1: ", "badge-new.work không được đọc"},
 		{"layout.go:398", cart(`<content><box><text>x</text></box></content>`, "/site/box.ui", `<box />`), "box.ui:1:1: ", "box.ui đặt tên trùng thẻ lõi <box> của Kitwork"},
-		{"component.go:325", cart(`<content><box component="toast" /></content>`, "/site/toast.ui", `<box><text>x</text></box>`), "toast.ui:1:1: ", "toast.ui đổi giao diện toast của Kitwork"},
-		{"component.go:350", cart(`<content><promo /></content>`, "/site/shop/content.ui", `<content><box component="toast" /></content>`, "/site/shop/toast.ui", `<box><text>x</text></box>`),
-			"shop/toast.ui:1:1: ", "toast.ui đổi giao diện toast của Kitwork"},
+		{"component.go:325", cart(`<content><text>x</text></content>`, "/site/page.ui", `<page><box component="progressbar" /><content /></page>`, "/site/progressbar.ui", `<box><text>x</text></box>`),
+			"progressbar.ui:1:1: ", "progressbar.ui đổi giao diện progressbar của Kitwork"},
+		{"component.go:350", cart(`<content><promo /></content>`, "/site/shop/content.ui", `<content><text>x</text></content>`, "/site/shop/page.ui", `<page><box component="progressbar" /><content /></page>`,
+			"/site/shop/progressbar.ui", `<box><text>x</text></box>`), "shop/progressbar.ui:1:1: ", "progressbar.ui đổi giao diện progressbar của Kitwork"},
 	} {
 		route := "/site"
 		if _, ok := c.files["/site/shop/content.ui"]; ok {

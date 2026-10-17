@@ -9,25 +9,24 @@ import (
 // let the page render exactly as written, a typo in a value never hides behind a warning, and a message
 // says what the author wrote. Each test holds a CONTROL.
 
-// toast and progressbar are calls of Kitwork's components whose host is drawn — the toast's stack is a
-// flex column, the progressbar's host holds the line — so presentation or an event written there would
-// do something the engine does not attach yet (question 5): an error, never "trang hiện như không viết
-// nó". The value is read first. CONTROL: a word that does nothing there (value) stays a warning.
+// The progressbar is a call of Kitwork's component whose host is drawn — it holds the line — so
+// presentation written there would do something the engine does not attach yet (question 5): an error,
+// never "trang hiện như không viết nó". The toast was one until 17/10/2026; its stack is now the author's
+// <box>, which takes what any box takes, the stack's own words read first (toast.go). The value is read
+// first. CONTROL: a word that does nothing on the reader stays a warning, and the toast draws what is
+// written on its host.
 func TestReviewToastAndProgressbarHostsAreDrawn(t *testing.T) {
-	for _, attribute := range []string{`gap="8"`, `padding="4"`, `background="brand"`, `place="top"`, `material="glass"`, `medium:gap="2"`, `click="x()"`} {
-		source := `<content><box component="toast" ` + attribute + ` /></content>`
-		name := attribute[:strings.Index(attribute, "=")]
-		mustFail(t, content(source), where("content.ui", source, attribute), "toast chỉ nhận as, không nhận "+name+"; thông báo gửi bằng $toast.show(…)")
-	}
 	bar := map[string]string{"/site/page.ui": `<page><box component="progressbar" opacity="50" /><content /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
 	mustFail(t, bar, "page.ui:1:36", "progressbar chỉ nhận color (màu của vạch), thickness (độ dày), delay (chờ bao lâu mới hiện) và alt (tên đọc được), không nhận opacity")
-	// the value is read first: a typo is the table's error
-	mustFail(t, content(`<content><box component="toast" padding="bigg" /></content>`), "content.ui:1:33", `padding theo thang khoảng cách, không có "bigg"`)
-	mustFail(t, content(`<content><box component="toast" click="x((" /></content>`), "content.ui:1:33", "biểu thức không hợp lệ: x((")
+	// the value is read first: a typo is the table's error, on the toast's host as on any box
+	mustFail(t, content(`<content>`+toastStack(` padding="bigg"`)+`</content>`), "content.ui:1:33", `padding theo thang khoảng cách, không có "bigg"`)
+	mustFail(t, content(`<content>`+toastStack(` click="x(("`)+`</content>`), "content.ui:1:33", "biểu thức không hợp lệ: x((")
+	// place is the stack's own word: an edge or a corner of the screen, not a place beside a parent
+	mustFail(t, content(`<content>`+toastStack(` place="top-end-x"`)+`</content>`), "content.ui:1:33", "place của toast là một mép hay góc màn hình")
 
-	// CONTROL: value does nothing on the toast, and the reader's clipped region draws nothing either
-	html := compileWarns(t, content(`<content><box component="toast" value="x" /></content>`), "content.ui:1:33", "value không có tác dụng trên toast")
-	mustContain(t, html, `<div class="toast" data-kitwork-component="toast" role="status" aria-live="polite"></div>`)
+	// CONTROL: the toast draws its host as written; the reader's clipped region draws nothing
+	html := compileWarns(t, content(`<content>`+toastStack(` gap="8" padding="4" background="brand" medium:gap="2" place="top"`)+`</content>`), "content.ui:1:15", "toast không có as")
+	mustContain(t, html, `<div class="flex-column gap-8 padding-4 background-brand medium:gap-2 toast toast-top" data-kitwork-component="toast" role="region"`)
 	reader := map[string]string{"/site/page.ui": `<page><content /><reader padding="4" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
 	compileWarns(t, reader, "page.ui:1:26", "padding không có tác dụng trên reader")
 }

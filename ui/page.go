@@ -65,6 +65,11 @@ func (p *Page) render(req Request) (string, []string) {
 	for name, v := range req.Scope { // the author's names win over the built-in helpers
 		scope[name] = v
 	}
+	for _, a := range p.aliases {
+		if _, taken := scope[a.alias]; !taken {
+			scope[a.alias] = a.start(scope)
+		}
+	}
 	r := &run{path: req.Path, origin: req.Origin, page: p, language: req.Language, warn: req.Warn}
 	p.root.render(r, scope)
 	extra := make([]string, 0, len(r.extra))
@@ -73,6 +78,30 @@ func (p *Page) render(req Request) (string, []string) {
 	}
 	sort.Strings(extra)
 	return r.b.String(), extra
+}
+
+// aliasStart is one alias of the page (as="$files") on the host of a component the browser runs: what
+// the instance declares as it starts and the values its call passes in. On the server an expression
+// that reads it ($files.selected, $install.copied) reads that, where the kernel would read the instance
+// it starts — so a panel of a tab, shown by $files.selected == 'router', is painted shown or hidden as
+// the kernel leaves it, wherever on the page it stands.
+type aliasStart struct {
+	alias    string
+	state    map[string]any
+	bindings []binding
+}
+
+// start is the instance as it starts: its declared state, then each value its call passes in, read in
+// the page's scope.
+func (a aliasStart) start(scope map[string]any) map[string]any {
+	out := make(map[string]any, len(a.state)+len(a.bindings))
+	for name, v := range a.state {
+		out[name] = v
+	}
+	for _, b := range a.bindings {
+		out[b.name] = b.in.value(scope)
+	}
+	return out
 }
 
 // Icons are the names of the icons the page can show whatever its data (<icon value="coffee" />,

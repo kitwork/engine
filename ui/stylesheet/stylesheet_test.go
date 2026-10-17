@@ -97,7 +97,7 @@ func TestRebootPrintRulesOverrideTheElementLooks(t *testing.T) {
 	css := string(Reboot().CSS)
 	elements := strings.Index(css, "@layer elements{")
 	print := strings.Index(css, "@media print{")
-	toast := strings.Index(css, ":where(.toast){")
+	toast := strings.Index(css, ":where(.toast,.network){")
 	body := strings.Index(css, ":where(body){min-block-size:100vh")
 	if elements < 0 || print < 0 || toast < 0 || body < 0 {
 		t.Fatalf("rules missing: elements %d print %d toast %d body %d", elements, print, toast, body)
@@ -105,7 +105,7 @@ func TestRebootPrintRulesOverrideTheElementLooks(t *testing.T) {
 	if print < elements || print < toast || print < body {
 		t.Fatalf("@media print at %d must come after the elements layer (%d), .toast (%d) and body (%d)", print, elements, toast, body)
 	}
-	if !strings.Contains(css[print:], ":where(.progressbar,.toast){display:none}") {
+	if !strings.Contains(css[print:], ":where(.progressbar,.toast){display:none}") || !strings.Contains(css[print:], ":where(.network){display:none}") {
 		t.Error("print does not hide the floating hosts")
 	}
 }

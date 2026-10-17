@@ -138,8 +138,6 @@ func TestCompileWordOnTheWrongTagIsAWarning(t *testing.T) {
 			"value không có tác dụng trên <breadcrumb>", `<nav aria-label="Vị trí trang">`, `value=`},
 		{"gap and click on a fragment", `<content><fragment if="true" gap="4"><text>x</text></fragment></content>`, `gap=`,
 			"gap không có tác dụng trên <fragment>; trang hiện như không viết nó (fragment không dựng phần tử nào", `<p>x</p>`, `gap-4`},
-		{"value on a toast", `<content><box component="toast" as="$toast" value="x" /></content>`, `value=`,
-			"value không có tác dụng trên toast", `<div class="toast" data-kitwork-component="toast: $toast" role="status" aria-live="polite"></div>`, `value=`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -170,7 +168,7 @@ func TestCompileWordOnTheWrongTagIsAWarning(t *testing.T) {
 		{content(`<content><fragment if="true" gap="bigg"><text>x</text></fragment></content>`), "content.ui:1:30", `gap theo thang khoảng cách, không có "bigg"`},
 		{content(`<content><fragment if="true" gpa="4"><text>x</text></fragment></content>`), "content.ui:1:30", "thuộc tính gpa không có trên <fragment>"},
 		{content(`<content><fragment if="true" click="x(("><text>x</text></fragment></content>`), "content.ui:1:30", "biểu thức không hợp lệ: x(("},
-		{content(`<content><box component="toast" gap="bigg" /></content>`), "content.ui:1:33", `không có "bigg"`},
+		{content(`<content>` + toastStack(` gap="bigg"`) + `</content>`), "content.ui:1:33", `không có "bigg"`},
 		{content(`<content><box value="{{ x( }}"><text>a</text></box></content>`), "content.ui:1:15", "biểu thức không hợp lệ"},
 		{map[string]string{"/site/page.ui": `<page><content /><reader gap="bigg" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}, "page.ui:1:26", `không có "bigg"`},
 		{map[string]string{"/site/page.ui": `<page><content /><reader lang="vi" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}, "page.ui:1:26", "reader chỉ nhận as, không nhận lang"},
@@ -179,7 +177,7 @@ func TestCompileWordOnTheWrongTagIsAWarning(t *testing.T) {
 	}
 	// CONTROL: what would hide, repeat or land a link is no word to drop where nothing carries it
 	mustFail(t, content(`<content><fragment if="true" show="false"><text>x</text></fragment></content>`), "content.ui:1:30", "fragment chỉ nhận for và if; show cần một phần tử thật")
-	mustFail(t, content(`<content><box component="toast" if="ready" /></content>`), "content.ui:1:33", "toast chỉ nhận as, không nhận if")
+	mustFail(t, content(`<content>`+toastStack(` if="ready"`)+`</content>`), "content.ui:1:33", "toast luôn có mặt và có một trên mỗi trang: bỏ if")
 }
 
 // A word of the web that .ui says in a word of its own stays an error, naming that word (question 2,
@@ -452,7 +450,7 @@ func TestCompileRowsThatStayErrors(t *testing.T) {
 		{map[string]string{"/site/page.ui": `<page><header /><content /></page>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/header.work": `export default {}`, "/site/content.ui": text},
 			"header.work:1:1", "vùng không có file .work"},
 		{map[string]string{"/site/page.ui": `<page><content /><reader>x</reader></page>`, "/site/content.ui": text}, "page.ui:1:18", "reader không có nội dung con"},
-		{content(`<content><box component="toast">x</box></content>`), "content.ui:1:10", "toast không có nội dung con"},
+		{content(`<content><box component="toast">x</box></content>`), "content.ui:1:10", "toast cần một mẫu thông báo bên trong thẻ chủ"},
 		{map[string]string{"/site/page.ui": `<page><box component="progressbar">x</box><content /></page>`, "/site/content.ui": text}, "page.ui:1:7", "progressbar không có nội dung con"},
 		{content(`<content><select><option>A</option></select></content>`), "content.ui:1:18", "option cần value"},
 		{content(`<content><time>hôm nay</time></content>`), "content.ui:1:10", "time cần value"},
