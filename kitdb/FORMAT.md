@@ -220,8 +220,14 @@ followed by its key and optional value:
 
 Delete mutations require a zero value size. Keys are strictly increasing in a
 segment. A writer starts a new page before the next mutation when the current
-page has 128 mutations or approximately 64 KiB of encoded bytes. One mutation
-may make a page larger than 64 KiB.
+page has 128 mutations or approximately 64 KiB of encoded bytes. Current writers
+also close a page when the leading key byte changes, keeping disjoint byte
+ranges out of one page. One mutation may make a page larger than 64 KiB.
+These are writer packing choices, not reader requirements: existing v3 pages
+may contain multiple leading bytes and remain fully readable. No format field,
+checksum or publication rule changes. Pages are packed without alignment
+padding; extra page boundaries add directory entries, not a 64 KiB allocation
+on disk per page. A segment can gain at most 255 leading-byte boundaries.
 
 The segment directory immediately follows its final page. Each variable-size
 entry is:

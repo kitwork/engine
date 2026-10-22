@@ -362,6 +362,14 @@ ordering; they do not become kernel truth.
 8. Decoded pages are immutable and the LRU's accounted bytes never exceed the
    configured per-database limit. A cache-disabled database remains correct.
 9. Every value returned to a caller is a caller-owned copy.
+10. Incremental checkpoint counts overlay keys newest-segment first, including
+    tombstones. Ordered existence probes may reuse one private checksummed page;
+    borrowed rows do not escape the probe or enter the shared LRU. Ordinary
+    point reads retain their caller-owned copies and cache behavior.
+11. Current v3 writers keep distinct leading key bytes on separate pages so
+    existing directory fences can reject unrelated ranges without I/O. Readers
+    must still accept older mixed-prefix pages. No new lookup cache or relaxed
+    page checksum is implied by this packing policy.
 
 ## WAL and recovery
 
@@ -382,9 +390,10 @@ ordering; they do not become kernel truth.
 
 ## Read snapshots
 
-1. `DB.Snapshot` captures one main generation, one copied WAL overlay, one
+1. `DB.Snapshot` captures one main generation, one copied WAL-overlay map, one
    committed transaction, and its boundary checksum while holding the database
-   state read lock.
+   state read lock. Published overlay value bytes are immutable and may be
+   shared; updates replace entries instead of changing captured values.
 2. A snapshot owns an independent read handle; replacing the live in-process
    reader during incremental checkpoint cannot invalidate it.
 3. Snapshot point reads and cursors never observe commits made after capture.
@@ -392,6 +401,12 @@ ordering; they do not become kernel truth.
    and cursor output remains in strict raw-key order.
 5. A range cursor seeks to the first candidate sparse page in every segment; it
    does not scan from the beginning merely to satisfy a later start key.
+   Both normalized bounds limit the physical page interval, including reverse
+   and key-only scans. Pages wholly outside that interval are not read; mixed
+   boundary pages still require full checksum validation and key filtering.
+   LIMIT applies after overlay/segment deduplication and tombstone suppression,
+   never as an independent per-segment truncation. Only unbounded full-main
+   iteration validates the full declared main-record count.
 6. Cursor keys and values returned to callers are copies.
 7. `Snapshot.ScanKeys` exposes no row value. Its callback receives one
    read-only key valid only until that callback returns; forward scans may

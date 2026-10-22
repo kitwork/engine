@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
+	"github.com/kitwork/engine/kitdb/internal/storagetrace"
 )
 
 // Ordinary builds compile the fault checks away. Tagged fault-lab builds
@@ -24,6 +25,7 @@ func storageWriteAt(path, point string, file *os.File, data []byte, offset int64
 }
 
 func storageSync(path, point string, file interface{ Sync() error }) error {
+	defer storagetrace.Start("kitdb.storage.sync").End()
 	if err := checkpointfault.Error(path, point); err != nil {
 		return err
 	}
@@ -38,6 +40,7 @@ func storageReplace(path, point, staging, target string) error {
 }
 
 func storageSyncDirectory(path, point, directory string) error {
+	defer storagetrace.Start("kitdb.storage.directory_sync").End()
 	if err := checkpointfault.Error(path, point); err != nil {
 		return err
 	}

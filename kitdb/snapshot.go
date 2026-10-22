@@ -10,7 +10,8 @@ import (
 const maxActiveSnapshots = 32
 
 // Snapshot is an immutable logical view at one committed transaction. It owns
-// a read handle to the captured main generation and a copy of the WAL overlay.
+// a read handle to the captured main generation and a copy of the WAL overlay
+// map. Committed value bytes are immutable and shared until readers release them.
 // Close releases that handle and must not be deferred indefinitely because an
 // active snapshot prevents full compaction of its database file.
 type Snapshot struct {
@@ -53,6 +54,7 @@ type Cursor struct {
 	limit    int
 	reverse  bool
 	keysOnly bool
+	borrowed bool
 	emitted  int
 	key      []byte
 	value    []byte
@@ -187,6 +189,10 @@ func (snapshot *Snapshot) Cursor(options RangeOptions) (*Cursor, error) {
 }
 
 func (snapshot *Snapshot) newCursor(options RangeOptions, keysOnly bool) (*Cursor, error) {
+	return snapshot.newCursorMode(options, keysOnly, false)
+}
+
+func (snapshot *Snapshot) newCursorMode(options RangeOptions, keysOnly, borrowed bool) (*Cursor, error) {
 	if snapshot == nil {
 		return nil, ErrSnapshotClosed
 	}
@@ -200,19 +206,21 @@ func (snapshot *Snapshot) newCursor(options RangeOptions, keysOnly bool) (*Curso
 	if snapshot.closed || snapshot.main == nil {
 		return nil, ErrSnapshotClosed
 	}
+	if len(end) != 0 && bytes.Compare(start, end) >= 0 {
+		return &Cursor{snapshot: snapshot, done: true}, nil
+	}
 	var iterator logicalCursorIterator
 	if options.Reverse {
-		iterator = newReverseLogicalRowIterator(snapshot.main, snapshot.overlay, end)
+		iterator = newDirectionalLogicalRowIterator(snapshot.main, snapshot.overlay, start, end, true)
+	} else if borrowed {
+		iterator = newScanRowIteratorRange(snapshot.main, snapshot.overlay, start, end)
 	} else {
-		iterator = newLogicalRowIterator(snapshot.main, snapshot.overlay, start)
+		iterator = newDirectionalLogicalRowIterator(snapshot.main, snapshot.overlay, start, end, false)
 	}
 	cursor := &Cursor{
 		snapshot: snapshot, iterator: iterator,
 		start: start, end: end, prefix: prefix, limit: options.Limit, reverse: options.Reverse,
-		keysOnly: keysOnly,
-	}
-	if len(end) != 0 && bytes.Compare(start, end) >= 0 {
-		cursor.done = true
+		keysOnly: keysOnly, borrowed: borrowed,
 	}
 	return cursor, nil
 }
@@ -284,15 +292,41 @@ func (cursor *Cursor) Next() bool {
 			cursor.done = true
 			return false
 		}
-		cursor.key = append(cursor.key[:0], key...)
-		if cursor.keysOnly {
-			cursor.value = cursor.value[:0]
+		if cursor.borrowed {
+			cursor.key, cursor.value = key, value
 		} else {
-			cursor.value = append(cursor.value[:0], value...)
+			cursor.key = append(cursor.key[:0], key...)
+			if cursor.keysOnly {
+				cursor.value = cursor.value[:0]
+			} else {
+				cursor.value = append(cursor.value[:0], value...)
+			}
 		}
 		cursor.emitted++
 		return true
 	}
+}
+
+// Scan visits rows at this snapshot. Key and value are read-only and valid
+// only during visit; callers must copy retained bytes. Returning true stops
+// successfully. Callbacks run outside the snapshot lock and may cancel/close.
+// Forward scans reuse page buffers; reverse scans retain the ordinary reader.
+func (snapshot *Snapshot) Scan(options RangeOptions, visit func(key, value []byte) (bool, error)) (CursorStats, error) {
+	if visit == nil {
+		return CursorStats{}, fmt.Errorf("kitdb: row visitor is nil")
+	}
+	cursor, err := snapshot.newCursorMode(options, false, true)
+	if err != nil {
+		return CursorStats{}, err
+	}
+	defer cursor.Close()
+	for cursor.Next() {
+		stop, err := visit(cursor.key, cursor.value)
+		if err != nil || stop {
+			return cursor.Stats(), err
+		}
+	}
+	return cursor.Stats(), cursor.Err()
 }
 
 // ScanKeys streams a bounded snapshot range without copying or retaining row
@@ -333,7 +367,7 @@ func (snapshot *Snapshot) ScanKeys(
 		snapshot.mu.RUnlock()
 		return CursorStats{}, ErrSnapshotClosed
 	}
-	iterator := newLogicalKeyIterator(snapshot.main, snapshot.overlay, start)
+	iterator := newLogicalKeyIteratorRange(snapshot.main, snapshot.overlay, start, end)
 	snapshot.mu.RUnlock()
 	emitted := 0
 	for options.Limit == 0 || emitted < options.Limit {
@@ -441,7 +475,9 @@ func (snapshot *Snapshot) Close() error {
 func cloneSnapshotOverlay(source map[string]rowMutation) map[string]rowMutation {
 	cloned := make(map[string]rowMutation, len(source))
 	for key, mutation := range source {
-		cloned[key] = rowMutation{value: bytes.Clone(mutation.value), deleted: mutation.deleted}
+		// Commits/recovery own these bytes and replace entries, never mutate
+		// published values. The copied map fixes membership and tombstones.
+		cloned[key] = mutation
 	}
 	return cloned
 }

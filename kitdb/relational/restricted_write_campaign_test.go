@@ -208,40 +208,53 @@ func TestRestrictedWriteCampaignSeeded(t *testing.T) {
 		batchCtx, batchCancel := context.WithCancel(ctx)
 		staged := make(chan int64, 1)
 		proceed := make(chan struct{})
-		finished := make(chan error, 1)
+		type terminationOutcome struct {
+			err                    error
+			before, after          error
+			commitStart, commitEnd uint64
+		}
+		var order atomic.Uint64
+		finished := make(chan terminationOutcome, 1)
 		go func(db *sql.DB) {
-			var result error
+			var result terminationOutcome
 			defer func() { finished <- result }()
 			conn, err := db.Conn(batchCtx)
 			if err != nil {
-				result = err
+				result.err = err
 				return
 			}
 			defer conn.Close()
 			batch, err := conn.BeginTx(batchCtx, nil)
 			if err != nil {
-				result = err
+				result.err = err
 				return
 			}
 			defer batch.Rollback()
 			var id int64
 			if err = batch.QueryRowContext(batchCtx, "SELECT session_id FROM kitdb_catalog.sessions WHERE transaction_state='transaction'").Scan(&id); err != nil {
-				result = err
+				result.err = err
 				return
 			}
 			for _, q := range []string{"INSERT INTO totals VALUES(1,'primary',10000) ON CONFLICT(id) DO UPDATE SET n=totals.n+excluded.n", "INSERT INTO discarded SELECT id,n FROM source_rows"} {
 				if _, err = batch.ExecContext(batchCtx, q); err != nil {
-					result = err
+					result.err = err
 					return
 				}
 			}
 			staged <- id
 			select {
 			case <-proceed:
-			case <-batchCtx.Done():
+			case <-ctx.Done():
+				result.err = ctx.Err()
+				return
 			}
-			result = batch.Commit()
+			result.before = batchCtx.Err()
+			result.commitStart = order.Add(1)
+			result.err = batch.Commit()
+			result.commitEnd = order.Add(1)
+			result.after = batchCtx.Err()
 		}(clients[index])
+		var terminationComplete uint64
 		select {
 		case id := <-staged:
 			if mode == "cancel" {
@@ -253,6 +266,9 @@ func TestRestrictedWriteCampaignSeeded(t *testing.T) {
 				}
 				waitSessionGone(t, node, id)
 			}
+			// Done closes before cancel has finished visiting child contexts.
+			// Commit must wait for the completed cancellation/kill barrier.
+			terminationComplete = order.Add(1)
 			close(proceed)
 		case err := <-finished:
 			batchCancel()
@@ -261,13 +277,21 @@ func TestRestrictedWriteCampaignSeeded(t *testing.T) {
 			batchCancel()
 			t.Fatal(ctx.Err())
 		}
-		if err = <-finished; err == nil {
-			batchCancel()
-			t.Fatal(mode, "batch committed after termination")
-		}
+		outcome := <-finished
+		t.Logf("termination mode=%s adapter=%s complete=%d commit-start=%d commit-end=%d context-before=%v context-after=%v commit-error=%v", mode, []string{"native", "pgwire"}[index], terminationComplete, outcome.commitStart, outcome.commitEnd, outcome.before, outcome.after, outcome.err)
 		batchCancel()
-		verifyTotals(admin)
-		check(admin, "SELECT COUNT(*) FROM discarded", 0)
+		if outcome.commitStart <= terminationComplete || outcome.commitEnd <= outcome.commitStart {
+			t.Errorf("%s commit crossed the termination barrier: %+v", mode, outcome)
+		}
+		if mode == "cancel" && (!errors.Is(outcome.before, context.Canceled) || !errors.Is(outcome.after, context.Canceled)) {
+			t.Errorf("cancel context was not canceled across commit: %+v", outcome)
+		}
+		if outcome.err == nil {
+			t.Errorf("%s batch committed after completed termination", mode)
+		}
+		observer := openNative("admin")
+		observeTerminatedLedger(t, ctx, observer, expected, mode+" independent connection")
+		observer.Close()
 	}
 	for _, db := range clients {
 		db.Close()
@@ -294,6 +318,7 @@ func TestRestrictedWriteCampaignSeeded(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer recovered.Close()
+	observeTerminatedLedger(t, ctx, recovered, expected, "reopened database")
 	verifyTotals(recovered)
 	check(recovered, "SELECT COUNT(*) FROM copied", 8)
 	check(recovered, "SELECT SUM(n) FROM copied", copySum)
@@ -311,4 +336,25 @@ func TestRestrictedWriteCampaignSeeded(t *testing.T) {
 		t.Fatalf("reopened drain: %+v", stats)
 	}
 	t.Logf("restart verified ledger=%v copied=%d discarded=0; owners drained", expected, copySum)
+}
+
+func observeTerminatedLedger(t *testing.T, ctx context.Context, db *sql.DB, expected [2]int64, phase string) {
+	t.Helper()
+	queries := []struct {
+		sql  string
+		want int64
+	}{
+		{"SELECT COUNT(*) FROM totals", 2},
+		{"SELECT n FROM totals WHERE id=1", expected[0]},
+		{"SELECT n FROM totals WHERE id=2", expected[1]},
+		{"SELECT COUNT(*) FROM discarded", 0},
+	}
+	for _, query := range queries {
+		var got int64
+		err := db.QueryRowContext(ctx, query.sql).Scan(&got)
+		t.Logf("termination oracle phase=%s query=%q got=%d want=%d error=%v", phase, query.sql, got, query.want, err)
+		if err != nil || got != query.want {
+			t.Errorf("%s: %s: got=%d want=%d error=%v", phase, query.sql, got, query.want, err)
+		}
+	}
 }

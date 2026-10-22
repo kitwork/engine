@@ -517,6 +517,25 @@ func (transaction *Transaction) scan(
 		transaction.dependencies.recordRange(options)
 	}
 	snapshot := transaction.snapshot
+	rowRange := len(options.Prefix) != 0 && (options.Prefix[0] == rowNamespace || options.Prefix[0] == shadowRowNamespace)
+	if len(transaction.overlay) == 0 && !options.Reverse && rowRange {
+		transaction.mu.Unlock()
+		// Reuse snapshot-local page buffers for KROW, keeping caller-owned rows.
+		// Index/metadata ranges retain the ordinary cursor path.
+		// Limit remains a relational visitor boundary, as in the overlay merge.
+		scanOptions := options
+		scanOptions.Limit = 0
+		emitted := 0
+		observed, err := snapshot.Scan(scanOptions, func(key, value []byte) (bool, error) {
+			emitted++
+			stop, err := visit(bytes.Clone(key), bytes.Clone(value))
+			return stop || options.Limit > 0 && emitted >= options.Limit, err
+		})
+		if stats != nil {
+			stats.Add(observed)
+		}
+		return err
+	}
 	overlay := make(map[string]transactionMutation, len(transaction.overlay))
 	for key, mutation := range transaction.overlay {
 		overlay[key] = transactionMutation{value: bytes.Clone(mutation.value), deleted: mutation.deleted}

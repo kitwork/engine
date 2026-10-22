@@ -18,6 +18,13 @@ second supervisor-specific cursor matrix.
 
 ## Hard-crash matrix
 
+The short [lifecycle/WAL regression gate](relational/LIFECYCLE.md) requires
+normal and race PASS evidence for exact reopen, ACK/copy verification and
+owner release; Windows additionally requires both real no-delete-share WAL
+denial recovery cases. These are returned-error regressions, not hard-crash or
+power-loss evidence. Long process/resource-user diagnostics remain manual
+opt-ins and are explicitly disabled by all release-gate plans.
+
 The separate [storage I/O failure matrix](relational/STORAGE_IO_FAULTS.md)
 uses the same explicit fault-lab build tag to return partial-write, no-space,
 sync and replace errors. It checks pre-publication recovery, conservative

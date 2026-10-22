@@ -601,9 +601,32 @@ merge, tombstones, and the captured WAL overlay. Forward scans reuse one
 checksummed page buffer per immutable segment and never copy row values. Use a
 normal Cursor whenever a key or value must survive the callback.
 
-Snapshots own independent read handles and copied WAL overlays. At most 32 may
-be active per database. They do not block commits or incremental checkpoints,
-but full compaction returns `ErrSnapshotsActive` until they close. `DB.Close`
+`Snapshot.Scan(options, visit)` is the corresponding row callback: `visit`
+receives read-only key and value bytes valid only during that call and returns
+`(stop, error)`. Forward scans reuse one checksummed page buffer per immutable
+segment plus bounded merge-output scratch, without allocating a value copy per
+row. Reverse scans use the ordinary directional reader. Both preserve the
+captured overlay, tombstones, ordering, bounds, limits and corruption checks.
+The visitor runs outside the snapshot lock; closing the snapshot in a visitor
+is permitted, and a subsequent advance reports `ErrSnapshotClosed`. Returning
+`stop=true` ends successfully without requiring another advance. Copy any
+retained bytes, or use `Cursor.Key`/`Value` for caller-owned results. Scans are
+single-caller operations; concurrent scans use independent buffers. Typed KROW
+batch analytics uses this path; WAL durability and the on-disk formats remain
+unchanged. Scratch is transient scan memory, not a new
+whole-process memory guarantee; see [memory budgets](MEMORY_BUDGET.md).
+
+`TestSnapshotScanAllocationEnvelope` caps a 2,048-row forward scan at 100
+allocations, alongside differential cursor, multi-generation/overlay, legacy
+format, checksum and callback-close tests in `scan_rows_test.go`.
+
+Snapshots own independent read handles and copied WAL-overlay maps. Committed
+value bytes are immutable and shared; writes replace entries, so old snapshots
+keep their captured values after overwrite/delete/checkpoint. Ordinary reads
+still return caller-owned copies. Admission conservatively charges each
+snapshot's full retained key/value lengths even when bytes are shared.
+At most 32 may be active per database. They do not block commits or incremental
+checkpoints, but full compaction returns `ErrSnapshotsActive` until they close. `DB.Close`
 closes any snapshots the caller forgot to release.
 
 `Snapshot.GetWithStats` and `Cursor.Stats` expose query-local main-file

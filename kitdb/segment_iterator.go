@@ -20,21 +20,23 @@ func (main *mainImage) iterator() *mainRowIterator {
 }
 
 func (main *mainImage) iteratorFrom(start []byte) *mainRowIterator {
-	iterator := &mainRowIterator{main: main, validate: len(start) == 0}
-	if main.formatVersion == mainFormatVersion {
-		iterator.merged = newGenerationMergeIteratorFrom(main, start)
-	} else {
-		iterator.physical = newPhysicalSegmentIteratorFrom(main, 0, len(main.blocks), start)
-	}
-	return iterator
+	return main.rangeIterator(start, nil, false)
 }
 
 func (main *mainImage) reverseIteratorFrom(end []byte) *mainRowIterator {
-	iterator := &mainRowIterator{main: main, validate: len(end) == 0}
-	if main.formatVersion == mainFormatVersion {
-		iterator.reverseMerged = newReverseGenerationMergeIteratorFrom(main, end)
+	return main.rangeIterator(nil, end, true)
+}
+
+func (main *mainImage) rangeIterator(start, end []byte, reverse bool) *mainRowIterator {
+	iterator := &mainRowIterator{main: main, validate: len(start) == 0 && len(end) == 0}
+	if reverse && main.formatVersion == mainFormatVersion {
+		iterator.reverseMerged = newReverseGenerationMergeIteratorRange(main, start, end)
+	} else if reverse {
+		iterator.reversePhysical = newReversePhysicalSegmentIteratorRange(main, 0, len(main.blocks), start, end)
+	} else if main.formatVersion == mainFormatVersion {
+		iterator.merged = newGenerationMergeIteratorRange(main, start, end)
 	} else {
-		iterator.reversePhysical = newReversePhysicalSegmentIteratorFrom(main, 0, len(main.blocks), end)
+		iterator.physical = newPhysicalSegmentIteratorRange(main, 0, len(main.blocks), start, end)
 	}
 	return iterator
 }
@@ -94,6 +96,7 @@ type physicalSegmentIterator struct {
 	initialRow   int
 	row          int
 	page         *rowPage
+	reusable     *rowPage
 	seek         []byte
 	started      bool
 }
@@ -103,16 +106,35 @@ func newPhysicalSegmentIterator(main *mainImage, firstBlock, blockCount int) *ph
 }
 
 func newPhysicalSegmentIteratorFrom(main *mainImage, firstBlock, blockCount int, start []byte) *physicalSegmentIterator {
-	blockOffset := 0
+	return newPhysicalSegmentIteratorRange(main, firstBlock, blockCount, start, nil)
+}
+
+// Directory fences are checksum-protected at open. Missing legacy last keys
+// cannot exclude a page, so their lower-bound search remains conservative.
+func (main *mainImage) blockRange(firstBlock, blockCount int, start, end []byte) (int, int) {
+	if len(end) != 0 && bytes.Compare(start, end) >= 0 {
+		return firstBlock, firstBlock
+	}
+	lo, hi := 0, blockCount
 	if len(start) != 0 {
-		blockOffset = sort.Search(blockCount, func(index int) bool {
+		lo = sort.Search(blockCount, func(index int) bool {
 			lastKey := main.blocks[firstBlock+index].lastKey
 			return len(lastKey) == 0 || bytes.Compare(lastKey, start) >= 0
 		})
 	}
+	if len(end) != 0 {
+		hi = sort.Search(blockCount, func(index int) bool {
+			return bytes.Compare(main.blocks[firstBlock+index].firstKey, end) >= 0
+		})
+	}
+	return firstBlock + min(lo, hi), firstBlock + hi
+}
+
+func newPhysicalSegmentIteratorRange(main *mainImage, firstBlock, blockCount int, start, end []byte) *physicalSegmentIterator {
+	lo, hi := main.blockRange(firstBlock, blockCount, start, end)
 	return &physicalSegmentIterator{
-		main: main, block: firstBlock + blockOffset, blockEnd: firstBlock + blockCount,
-		initialBlock: firstBlock + blockOffset, seek: bytes.Clone(start),
+		main: main, block: lo, blockEnd: hi,
+		initialBlock: lo, seek: bytes.Clone(start),
 	}
 }
 
@@ -121,7 +143,14 @@ func (iterator *physicalSegmentIterator) next() (mainRow, bool, error) {
 		if iterator.block >= iterator.blockEnd {
 			return mainRow{}, false, nil
 		}
-		page, err := iterator.main.readPage(iterator.block)
+		var page *rowPage
+		var err error
+		if iterator.reusable != nil {
+			page = iterator.reusable
+			err = iterator.main.readPageInto(iterator.block, page)
+		} else {
+			page, err = iterator.main.readPage(iterator.block)
+		}
 		if err != nil {
 			return mainRow{}, false, err
 		}
@@ -131,7 +160,7 @@ func (iterator *physicalSegmentIterator) next() (mainRow, bool, error) {
 		iterator.block++
 		if len(iterator.seek) != 0 {
 			iterator.row = sort.Search(len(page.rows), func(index int) bool {
-				return bytes.Compare(page.rows[index].key, iterator.seek) >= 0
+				return bytes.Compare(page.key(index), iterator.seek) >= 0
 			})
 			iterator.seek = nil
 		}
@@ -140,7 +169,7 @@ func (iterator *physicalSegmentIterator) next() (mainRow, bool, error) {
 			iterator.started = true
 		}
 	}
-	row := iterator.page.rows[iterator.row]
+	row := iterator.page.row(iterator.row)
 	iterator.row++
 	return row, true, nil
 }
@@ -200,15 +229,14 @@ func newReversePhysicalSegmentIteratorFrom(
 	firstBlock, blockCount int,
 	end []byte,
 ) *reversePhysicalSegmentIterator {
-	blockOffset := blockCount - 1
-	if len(end) != 0 {
-		blockOffset = sort.Search(blockCount, func(index int) bool {
-			return bytes.Compare(main.blocks[firstBlock+index].firstKey, end) >= 0
-		}) - 1
-	}
+	return newReversePhysicalSegmentIteratorRange(main, firstBlock, blockCount, nil, end)
+}
+
+func newReversePhysicalSegmentIteratorRange(main *mainImage, firstBlock, blockCount int, start, end []byte) *reversePhysicalSegmentIterator {
+	lo, hi := main.blockRange(firstBlock, blockCount, start, end)
 	return &reversePhysicalSegmentIterator{
-		main: main, block: firstBlock + blockOffset, blockStart: firstBlock,
-		initialBlock: firstBlock + blockOffset, row: -1, seek: bytes.Clone(end),
+		main: main, block: hi - 1, blockStart: lo,
+		initialBlock: hi - 1, row: -1, seek: bytes.Clone(end),
 	}
 }
 
@@ -227,7 +255,7 @@ func (iterator *reversePhysicalSegmentIterator) next() (mainRow, bool, error) {
 		iterator.block--
 		if len(iterator.seek) != 0 {
 			iterator.row = sort.Search(len(page.rows), func(index int) bool {
-				return bytes.Compare(page.rows[index].key, iterator.seek) >= 0
+				return bytes.Compare(page.key(index), iterator.seek) >= 0
 			}) - 1
 			iterator.seek = nil
 		}
@@ -236,7 +264,7 @@ func (iterator *reversePhysicalSegmentIterator) next() (mainRow, bool, error) {
 			iterator.started = true
 		}
 	}
-	row := iterator.page.rows[iterator.row]
+	row := iterator.page.row(iterator.row)
 	iterator.row--
 	return row, true, nil
 }
@@ -356,9 +384,12 @@ func (items *generationMergeHeap) pop() generationHeapItem {
 }
 
 type generationMergeIterator struct {
-	cursors    []generationCursor
-	items      generationMergeHeap
-	initialErr error
+	cursors     []generationCursor
+	items       generationMergeHeap
+	initialErr  error
+	borrowed    bool
+	outputKey   []byte
+	outputValue []byte
 }
 
 func newGenerationMergeIterator(main *mainImage) *generationMergeIterator {
@@ -366,9 +397,13 @@ func newGenerationMergeIterator(main *mainImage) *generationMergeIterator {
 }
 
 func newGenerationMergeIteratorFrom(main *mainImage, start []byte) *generationMergeIterator {
+	return newGenerationMergeIteratorRange(main, start, nil)
+}
+
+func newGenerationMergeIteratorRange(main *mainImage, start, end []byte) *generationMergeIterator {
 	iterator := &generationMergeIterator{cursors: make([]generationCursor, len(main.segments))}
 	for segmentIndex, segment := range main.segments {
-		cursor := generationCursor{iterator: newPhysicalSegmentIteratorFrom(main, segment.firstBlock, segment.blockCount, start)}
+		cursor := generationCursor{iterator: newPhysicalSegmentIteratorRange(main, segment.firstBlock, segment.blockCount, start, end)}
 		row, found, err := cursor.iterator.next()
 		if err != nil {
 			iterator.initialErr = err
@@ -406,6 +441,12 @@ func (iterator *generationMergeIterator) next() (mainRow, bool, error) {
 			}
 		}
 		chosen := iterator.cursors[newest].row
+		if iterator.borrowed && !chosen.deleted {
+			// Advancing a source may overwrite its reusable page.
+			iterator.outputKey = append(iterator.outputKey[:0], chosen.key...)
+			iterator.outputValue = append(iterator.outputValue[:0], chosen.value...)
+			chosen.key, chosen.value = iterator.outputKey, iterator.outputValue
+		}
 		for _, item := range duplicates[:duplicateCount] {
 			cursor := &iterator.cursors[item.segment]
 			row, found, err := cursor.iterator.next()
@@ -448,13 +489,17 @@ type reverseGenerationMergeIterator struct {
 }
 
 func newReverseGenerationMergeIteratorFrom(main *mainImage, end []byte) *reverseGenerationMergeIterator {
+	return newReverseGenerationMergeIteratorRange(main, nil, end)
+}
+
+func newReverseGenerationMergeIteratorRange(main *mainImage, start, end []byte) *reverseGenerationMergeIterator {
 	iterator := &reverseGenerationMergeIterator{
 		cursors: make([]reverseGenerationCursor, len(main.segments)),
 		items:   generationMergeHeap{reverse: true},
 	}
 	for segmentIndex, segment := range main.segments {
-		cursor := reverseGenerationCursor{iterator: newReversePhysicalSegmentIteratorFrom(
-			main, segment.firstBlock, segment.blockCount, end,
+		cursor := reverseGenerationCursor{iterator: newReversePhysicalSegmentIteratorRange(
+			main, segment.firstBlock, segment.blockCount, start, end,
 		)}
 		row, found, err := cursor.iterator.next()
 		if err != nil {

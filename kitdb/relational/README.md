@@ -378,6 +378,16 @@ parameters, strongest intersected bounds and reverse order are supported on
 the first non-equality indexed field. This reuses the existing index codec
 and active physical generation; no index rebuild or file migration is needed.
 
+Ready ordered secondary keys also contain the primary-key tuple after their
+declared fields. The planner can use that suffix for ordering. For example,
+if `id` is the primary key, an index on `(merchant)` can serve
+`WHERE merchant = 7 ORDER BY id LIMIT 100` without an in-memory Top-N sort.
+A composite primary key retains its tuple order; earlier varying index fields
+cannot be skipped. Repeated primary members already present in the index add
+no ordering. Uniform descending order uses the reverse cursor, while mixed
+directions keep the sorting fallback. This recognizes existing stored bytes:
+it does not add primary-suffix range pushdown or alter logical index metadata.
+
 Every SQL predicate is still checked against the same transaction snapshot.
 `OFFSET` counts matching rows, not raw index entries. Once an ordinary ordered
 or unordered page has enough matching rows, execution stops without hydrating
@@ -1114,6 +1124,13 @@ those values; its tag directory is built once per query. Buffered SELECT also
 retains only output and ordering fields rather than cloning an entire wide row.
 The full decoder remains authoritative for CRUD rewrites so unknown durable tags
 are preserved. This changes neither KROW nor WAL format.
+
+Forward scans of canonical or shadow KROW ranges with no transaction-local
+writes reuse snapshot-local page buffers. The relational Scan visitor still
+receives caller-owned copies, not the kernel's borrowed slices. Read dependencies,
+snapshot visibility, residual filtering and SQL result ownership are unchanged;
+reverse scans, secondary-index/metadata ranges and own-write merges keep their
+ordinary cursor path. This is not a new result cache or a zero-copy public API.
 
 Unordered queries can stop early at `LIMIT`; unsupported or over-budget syntax
 fails rather than returning a silently truncated or reinterpreted result.

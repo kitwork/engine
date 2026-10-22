@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
+
+	"github.com/kitwork/engine/kitdb/internal/storagetrace"
 )
 
 // Checkpoint publishes the latest committed state to the main database file,
@@ -143,23 +146,57 @@ func (db *DB) checkpointLocked() (uint64, error) {
 }
 
 func countMergedRecords(main *mainImage, overlay map[string]rowMutation) (uint64, error) {
+	defer storagetrace.Start("kitdb.checkpoint.count_records").End()
 	records := main.records
+	var added, removed uint64
+	keys := make([]string, 0, len(overlay))
 	for key, mutation := range overlay {
-		_, existed, err := main.get([]byte(key))
-		if err != nil {
-			return 0, err
-		}
-		switch {
-		case mutation.deleted && existed:
-			records--
-		case !mutation.deleted && !existed:
-			if records == math.MaxUint64 {
-				return 0, fmt.Errorf("kitdb: logical record count overflow")
-			}
-			records++
+		keys = append(keys, key)
+		if !mutation.deleted {
+			added++
 		}
 	}
-	return records, nil
+	sort.Strings(keys)
+	resolved := make([]bool, len(keys))
+	var scratch rowPage
+	probe := func(firstBlock, blockCount int) error {
+		for index, key := range keys {
+			if resolved[index] {
+				continue
+			}
+			row, found, err := main.lookupFromBlocks([]byte(key), firstBlock, blockCount, &scratch)
+			if err != nil {
+				return err
+			}
+			if found {
+				resolved[index] = true
+				if !row.deleted {
+					removed++
+				}
+			}
+		}
+		return nil
+	}
+	if main.formatVersion == mainFormatVersion {
+		// Newest segment decides visibility, including tombstones. Sorting probes
+		// within a segment reuses a page without retaining a cache-sized working set.
+		for index := len(main.segments) - 1; index >= 0; index-- {
+			segment := main.segments[index]
+			if err := probe(segment.firstBlock, segment.blockCount); err != nil {
+				return 0, err
+			}
+		}
+	} else if err := probe(0, len(main.blocks)); err != nil {
+		return 0, err
+	}
+	if removed > records {
+		return 0, fmt.Errorf("kitdb: logical record count underflow")
+	}
+	records -= removed
+	if added > math.MaxUint64-records {
+		return 0, fmt.Errorf("kitdb: logical record count overflow")
+	}
+	return records + added, nil
 }
 
 func (db *DB) installAppendedMain(newMain *mainImage, transaction uint64) error {

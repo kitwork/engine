@@ -220,38 +220,32 @@ func scanSnapshotBatches(ctx context.Context, snapshot *kitdbengine.Snapshot, sc
 	if err != nil {
 		return 0, stats, err
 	}
-	cursor, err := snapshot.Cursor(kitdbengine.RangeOptions{Prefix: prefix})
-	if err != nil {
-		return 0, stats, err
-	}
-	defer func() {
-		if observe {
-			stats = cursor.Stats()
-		}
-		cursor.Close()
-	}()
 	decoder, err := newBatchDecoder(schema, fields)
 	if err != nil {
 		return 0, stats, err
 	}
-	for cursor.Next() {
+	observed, err := snapshot.Scan(kitdbengine.RangeOptions{Prefix: prefix}, func(_ []byte, encoded []byte) (bool, error) {
 		if rows&255 == 0 {
 			if err := ctx.Err(); err != nil {
-				return 0, stats, err
+				return false, err
 			}
 		}
-		if err := decoder.append(cursor.Value()); err != nil {
-			return 0, stats, err
+		if err := decoder.append(encoded); err != nil {
+			return false, err
 		}
 		rows++
 		if decoder.batch.Rows == columnar.BatchRows {
 			if err := visit(decoder.batch); err != nil {
-				return 0, stats, err
+				return false, err
 			}
 			decoder.batch.Reset()
 		}
+		return false, nil
+	})
+	if observe {
+		stats = observed
 	}
-	if err := cursor.Err(); err != nil {
+	if err != nil {
 		return 0, stats, err
 	}
 	if decoder.batch.Rows != 0 {

@@ -72,10 +72,10 @@ func (main *mainImage) verifyContext(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				if previousLastKey != nil && bytes.Compare(previousLastKey, page.rows[0].key) >= 0 {
+				if previousLastKey != nil && bytes.Compare(previousLastKey, page.key(0)) >= 0 {
 					return corruptFileAt(main.path, main.blocks[blockIndex].offset, "generation segment page keys are not strictly increasing")
 				}
-				previousLastKey = page.rows[len(page.rows)-1].key
+				previousLastKey = page.key(len(page.rows) - 1)
 				mutations += uint64(len(page.rows))
 			}
 			if mutations != segment.mutations {
@@ -106,10 +106,10 @@ func (main *mainImage) verifyContext(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if previousLastKey != nil && bytes.Compare(previousLastKey, page.rows[0].key) >= 0 {
+		if previousLastKey != nil && bytes.Compare(previousLastKey, page.key(0)) >= 0 {
 			return corruptFileAt(main.path, main.blocks[blockIndex].offset, "main page keys are not strictly increasing")
 		}
-		previousLastKey = page.rows[len(page.rows)-1].key
+		previousLastKey = page.key(len(page.rows) - 1)
 		records += uint64(len(page.rows))
 	}
 	if records != main.records {

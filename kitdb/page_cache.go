@@ -13,11 +13,33 @@ type mainRow struct {
 	deleted bool
 }
 
+// Page-local positions avoid retaining two slice headers per decoded row.
+// Offsets are validated against the owned data buffer before publication.
+type pageRow struct {
+	keyStart   int
+	valueStart int
+	end        int
+	deleted    bool
+}
+
 type rowPage struct {
 	block  int
 	data   []byte
-	rows   []mainRow
+	rows   []pageRow
 	weight int64
+}
+
+func (page *rowPage) key(index int) []byte {
+	row := page.rows[index]
+	return page.data[row.keyStart:row.valueStart]
+}
+
+func (page *rowPage) row(index int) mainRow {
+	row := page.rows[index]
+	return mainRow{
+		key: page.data[row.keyStart:row.valueStart], value: page.data[row.valueStart:row.end],
+		deleted: row.deleted,
+	}
 }
 
 type rowPageCache struct {

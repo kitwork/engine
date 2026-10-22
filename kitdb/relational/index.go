@@ -457,7 +457,7 @@ func (transaction *Transaction) planRowAccess(
 			prefix = append(prefix, component...)
 			equalityPrefix++
 		}
-		orderCovered, reverse := indexCoversOrder(index, equalityPrefix, equality, orders)
+		orderCovered, reverse := indexCoversOrder(index, primary, equalityPrefix, equality, orders)
 		options := kitdbengine.RangeOptions{Prefix: bytes.Clone(prefix), Reverse: reverse}
 		rangeField := ""
 		if equalityPrefix < len(index.fields) {
@@ -552,6 +552,7 @@ func boundSecondaryIndexRange(options *kitdbengine.RangeOptions, field kitdbsql.
 
 func indexCoversOrder(
 	index secondaryIndex,
+	primary []kitdbsql.Field,
 	equalityPrefix int,
 	equality map[string]any,
 	orders []boundOrder,
@@ -569,19 +570,38 @@ func indexCoversOrder(
 	if len(remaining) == 0 {
 		return equalityPrefix == len(index.fields), false
 	}
+	// Ready ordered indexes append the primary tuple after declared members.
+	// A repeated primary member adds no ordering within its existing group.
+	fields := index.fields
+	for _, field := range primary {
+		present := false
+		for _, member := range index.fields {
+			if member.ID == field.ID {
+				present = true
+				break
+			}
+		}
+		if !present {
+			if len(fields) == len(index.fields) {
+				fields = make([]kitdbsql.Field, len(index.fields), len(index.fields)+len(primary))
+				copy(fields, index.fields)
+			}
+			fields = append(fields, field)
+		}
+	}
 	position := equalityPrefix
 	descending := remaining[0].descending
 	for _, order := range remaining {
 		if order.descending != descending {
 			return false, false
 		}
-		for position < len(index.fields) {
-			if _, fixed := equality[index.fields[position].Name]; !fixed {
+		for position < len(fields) {
+			if _, fixed := equality[fields[position].Name]; !fixed {
 				break
 			}
 			position++
 		}
-		if position >= len(index.fields) || index.fields[position].ID != order.field.ID {
+		if position >= len(fields) || fields[position].ID != order.field.ID {
 			return false, false
 		}
 		position++

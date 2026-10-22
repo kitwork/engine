@@ -22,6 +22,8 @@ type operation struct {
 }
 
 type rowMutation struct {
+	// Published values are kernel-owned and immutable. Updates replace the
+	// entry; snapshots may retain its bytes after checkpoint or overwrite.
 	value   []byte
 	deleted bool
 }

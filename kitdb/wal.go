@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
+	"github.com/kitwork/engine/kitdb/internal/storagetrace"
 )
 
 const (
@@ -241,7 +242,10 @@ func prepareWAL(path string, identity [16]byte, baseTx uint64, baseChecksum uint
 	if _, err := writeAll(file, header); err != nil {
 		return "", fmt.Errorf("kitdb: write WAL header: %w", err)
 	}
-	if err := file.Sync(); err != nil {
+	region := storagetrace.Start("kitdb.storage.wal_header_sync")
+	syncErr := file.Sync()
+	region.End()
+	if err := syncErr; err != nil {
 		return "", fmt.Errorf("kitdb: sync WAL header: %w", err)
 	}
 	if err := file.Close(); err != nil {
@@ -305,6 +309,7 @@ func readWALHeader(path string, file *os.File, size int64) (walHeader, error) {
 // rotateWALLocked requires commitMu. It prepares the replacement before
 // closing the active WAL, so pre-publication failures leave commits available.
 func (db *DB) rotateWALLocked(baseTx uint64, baseChecksum uint32) error {
+	defer storagetrace.Start("kitdb.checkpoint.rotate_wal").End()
 	if err := checkpointfault.Error(db.path, "rotate-prepare"); err != nil {
 		return err
 	}

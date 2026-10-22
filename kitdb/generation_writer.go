@@ -14,6 +14,7 @@ import (
 	"sort"
 
 	"github.com/kitwork/engine/kitdb/internal/checkpointfault"
+	"github.com/kitwork/engine/kitdb/internal/storagetrace"
 )
 
 type generationSegmentWriter struct {
@@ -66,7 +67,9 @@ func (writer *generationSegmentWriter) append(key []byte, mutation rowMutation) 
 	if recordSize > math.MaxInt64-writer.position {
 		return fmt.Errorf("kitdb: generation segment size overflow")
 	}
-	if writer.current == nil || writer.current.block.records >= mainIndexBlockRecords || writer.current.block.length >= mainIndexBlockBytes {
+	// Keep disjoint leading-byte ranges on separate pages. Their directory
+	// fences can reject unrelated point/range probes without decoding payloads.
+	if writer.current == nil || writer.current.block.firstKey[0] != key[0] || writer.current.block.records >= mainIndexBlockRecords || writer.current.block.length >= mainIndexBlockBytes {
 		writer.finishPage()
 		writer.current = &pendingMainPage{
 			block:    mainBlock{firstKey: bytes.Clone(key), offset: writer.position, mutations: true},
@@ -175,6 +178,7 @@ func (writer *generationSegmentWriter) finish(generation, transaction uint64) (g
 }
 
 func appendIncrementalGeneration(path string, main *mainImage, overlay map[string]rowMutation, transaction uint64, boundaryChecksum uint32, logicalRecords uint64) (*generationAppendResult, error) {
+	defer storagetrace.Start("kitdb.checkpoint.append").End()
 	if main == nil || main.formatVersion != mainFormatVersion || len(overlay) == 0 {
 		return nil, fmt.Errorf("kitdb: incremental checkpoint requires a generation main file and mutations")
 	}
@@ -262,6 +266,7 @@ func appendIncrementalGeneration(path string, main *mainImage, overlay map[strin
 }
 
 func openAppendedGeneration(path string, previous *mainImage, result *generationAppendResult, pageCacheBytes int64) (*mainImage, error) {
+	defer storagetrace.Start("kitdb.checkpoint.open_generation").End()
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("kitdb: open appended generation reader: %w", err)
@@ -298,6 +303,7 @@ func openAppendedGeneration(path string, previous *mainImage, result *generation
 }
 
 func prepareCompactedGeneration(path string, identity [16]byte, transaction uint64, boundaryChecksum uint32, generation uint64, walk func(emit func(key, value []byte) error) error) (stagingPath string, returnErr error) {
+	defer storagetrace.Start("kitdb.checkpoint.compact").End()
 	file, err := os.CreateTemp(filepath.Dir(path), ".kitdb-main-*.tmp")
 	if err != nil {
 		return "", fmt.Errorf("kitdb: create compacted generation staging: %w", err)

@@ -24,16 +24,14 @@ func newPhysicalKeySegmentIteratorFrom(
 	firstBlock, blockCount int,
 	start []byte,
 ) *physicalKeySegmentIterator {
-	blockOffset := 0
-	if len(start) != 0 {
-		blockOffset = sort.Search(blockCount, func(index int) bool {
-			lastKey := main.blocks[firstBlock+index].lastKey
-			return len(lastKey) == 0 || bytes.Compare(lastKey, start) >= 0
-		})
-	}
+	return newPhysicalKeySegmentIteratorRange(main, firstBlock, blockCount, start, nil)
+}
+
+func newPhysicalKeySegmentIteratorRange(main *mainImage, firstBlock, blockCount int, start, end []byte) *physicalKeySegmentIterator {
+	lo, hi := main.blockRange(firstBlock, blockCount, start, end)
 	return &physicalKeySegmentIterator{
-		main: main, block: firstBlock + blockOffset, blockEnd: firstBlock + blockCount,
-		initialBlock: firstBlock + blockOffset, seek: bytes.Clone(start),
+		main: main, block: lo, blockEnd: hi,
+		initialBlock: lo, seek: bytes.Clone(start),
 	}
 }
 
@@ -50,7 +48,7 @@ func (iterator *physicalKeySegmentIterator) next() (mainRow, bool, error) {
 		iterator.block++
 		if len(iterator.seek) != 0 {
 			iterator.row = sort.Search(len(iterator.page.rows), func(index int) bool {
-				return bytes.Compare(iterator.page.rows[index].key, iterator.seek) >= 0
+				return bytes.Compare(iterator.page.key(index), iterator.seek) >= 0
 			})
 			iterator.seek = nil
 		}
@@ -59,7 +57,7 @@ func (iterator *physicalKeySegmentIterator) next() (mainRow, bool, error) {
 			iterator.started = true
 		}
 	}
-	row := iterator.page.rows[iterator.row]
+	row := iterator.page.row(iterator.row)
 	iterator.row++
 	return mainRow{key: row.key, deleted: row.deleted}, true, nil
 }
@@ -112,10 +110,14 @@ type generationKeyMergeIterator struct {
 }
 
 func newGenerationKeyMergeIteratorFrom(main *mainImage, start []byte) *generationKeyMergeIterator {
+	return newGenerationKeyMergeIteratorRange(main, start, nil)
+}
+
+func newGenerationKeyMergeIteratorRange(main *mainImage, start, end []byte) *generationKeyMergeIterator {
 	iterator := &generationKeyMergeIterator{cursors: make([]generationKeyCursor, len(main.segments))}
 	for segmentIndex, segment := range main.segments {
-		cursor := generationKeyCursor{iterator: newPhysicalKeySegmentIteratorFrom(
-			main, segment.firstBlock, segment.blockCount, start,
+		cursor := generationKeyCursor{iterator: newPhysicalKeySegmentIteratorRange(
+			main, segment.firstBlock, segment.blockCount, start, end,
 		)}
 		row, found, err := cursor.iterator.next()
 		if err != nil {
@@ -195,11 +197,15 @@ type mainKeyIterator struct {
 }
 
 func newMainKeyIteratorFrom(main *mainImage, start []byte) *mainKeyIterator {
-	iterator := &mainKeyIterator{main: main, validate: len(start) == 0}
+	return newMainKeyIteratorRange(main, start, nil)
+}
+
+func newMainKeyIteratorRange(main *mainImage, start, end []byte) *mainKeyIterator {
+	iterator := &mainKeyIterator{main: main, validate: len(start) == 0 && len(end) == 0}
 	if main.formatVersion == mainFormatVersion {
-		iterator.merged = newGenerationKeyMergeIteratorFrom(main, start)
+		iterator.merged = newGenerationKeyMergeIteratorRange(main, start, end)
 	} else {
-		iterator.physical = newPhysicalKeySegmentIteratorFrom(main, 0, len(main.blocks), start)
+		iterator.physical = newPhysicalKeySegmentIteratorRange(main, 0, len(main.blocks), start, end)
 	}
 	return iterator
 }
@@ -262,16 +268,20 @@ type logicalKeyIterator struct {
 }
 
 func newLogicalKeyIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalKeyIterator {
+	return newLogicalKeyIteratorRange(main, overlay, start, nil)
+}
+
+func newLogicalKeyIteratorRange(main *mainImage, overlay map[string]rowMutation, start, end []byte) *logicalKeyIterator {
 	keys := make([]string, 0, len(overlay))
-	bound := string(start)
+	startKey, endKey := string(start), string(end)
 	for key := range overlay {
-		if len(start) == 0 || key >= bound {
+		if (len(start) == 0 || key >= startKey) && (len(end) == 0 || key < endKey) {
 			keys = append(keys, key)
 		}
 	}
 	sort.Strings(keys)
 	return &logicalKeyIterator{
-		main: newMainKeyIteratorFrom(main, start), overlay: overlay, keys: keys,
+		main: newMainKeyIteratorRange(main, start, end), overlay: overlay, keys: keys,
 	}
 }
 

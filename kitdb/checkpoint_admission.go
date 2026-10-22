@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/kitwork/engine/kitdb/internal/storagetrace"
 )
 
 // CheckpointContext queues new readers only when full compaction is required.
@@ -23,7 +25,10 @@ func (db *DB) CheckpointContext(ctx context.Context) (uint64, error) {
 		}
 	}()
 	for {
-		if err := db.lockCheckpointContext(waitCtx); err != nil {
+		lockRegion := storagetrace.Start("kitdb.checkpoint.commit_lock")
+		lockErr := db.lockCheckpointContext(waitCtx)
+		lockRegion.End()
+		if err := lockErr; err != nil {
 			if ctx.Err() != nil {
 				return 0, ctx.Err()
 			}
@@ -39,13 +44,17 @@ func (db *DB) CheckpointContext(ctx context.Context) (uint64, error) {
 			return 0, err
 		}
 		if !full || resume != nil {
+			region := storagetrace.Start("kitdb.checkpoint.execute")
 			transaction, err := db.checkpointLocked()
+			region.End()
 			db.commitMu.Unlock()
 			return transaction, err
 		}
 		// Existing SQL transactions need commitMu before releasing their snapshot.
 		db.commitMu.Unlock()
+		region := storagetrace.Start("kitdb.checkpoint.snapshot_drain")
 		resume, err = db.pauseSnapshotAdmission(waitCtx)
+		region.End()
 		if err != nil {
 			if ctx.Err() != nil {
 				return 0, ctx.Err()

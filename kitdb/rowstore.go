@@ -12,7 +12,7 @@ import (
 const (
 	mainIndexBlockRecords = 128
 	mainIndexBlockBytes   = 64 << 10
-	cachedRowOverhead     = 48
+	cachedRowOverhead     = 48 // Keep the conservative cache admission charge unchanged.
 )
 
 type mainBlock struct {
@@ -118,35 +118,53 @@ func (main *mainImage) getWithStats(key []byte, stats *CursorStats) ([]byte, boo
 }
 
 func (main *mainImage) getFromBlocks(key []byte, firstBlock, blockCount int) ([]byte, bool, bool, error) {
+	row, found, err := main.lookupFromBlocks(key, firstBlock, blockCount, nil)
+	if err != nil || !found {
+		return nil, false, false, err
+	}
+	return bytes.Clone(row.value), true, row.deleted, nil
+}
+
+// A checkpoint may supply one private scratch page for ordered existence probes.
+// Borrowed rows never escape the probe; scratch pages never enter the shared cache.
+func (main *mainImage) lookupFromBlocks(key []byte, firstBlock, blockCount int, scratch *rowPage) (mainRow, bool, error) {
 	if blockCount == 0 {
-		return nil, false, false, nil
+		return mainRow{}, false, nil
 	}
 	block := sort.Search(blockCount, func(index int) bool {
 		return bytes.Compare(main.blocks[firstBlock+index].firstKey, key) > 0
 	}) - 1
 	if block < 0 {
-		return nil, false, false, nil
+		return mainRow{}, false, nil
 	}
 	block += firstBlock
 	if len(main.blocks[block].lastKey) != 0 && bytes.Compare(key, main.blocks[block].lastKey) > 0 {
-		return nil, false, false, nil
+		return mainRow{}, false, nil
 	}
 	page, found := main.cache.get(block)
 	if !found {
-		decoded, err := main.readPage(block)
-		if err != nil {
-			return nil, false, false, err
+		if scratch != nil {
+			if scratch.block != block || len(scratch.data) == 0 {
+				if err := main.readPageInto(block, scratch); err != nil {
+					return mainRow{}, false, err
+				}
+			}
+			page = scratch
+		} else {
+			decoded, err := main.readPage(block)
+			if err != nil {
+				return mainRow{}, false, err
+			}
+			page = main.cache.addOrGet(decoded)
 		}
-		page = main.cache.addOrGet(decoded)
 	}
 	position := sort.Search(len(page.rows), func(index int) bool {
-		return bytes.Compare(page.rows[index].key, key) >= 0
+		return bytes.Compare(page.key(index), key) >= 0
 	})
-	if position == len(page.rows) || !bytes.Equal(page.rows[position].key, key) {
-		return nil, false, false, nil
+	if position == len(page.rows) || !bytes.Equal(page.key(position), key) {
+		return mainRow{}, false, nil
 	}
-	row := page.rows[position]
-	return bytes.Clone(row.value), true, row.deleted, nil
+	return page.row(position), true, nil
 }
 
 func (main *mainImage) getFromBlocksWithStats(
@@ -188,12 +206,12 @@ func (main *mainImage) getFromBlocksWithStats(
 		page = main.cache.addOrGet(decoded)
 	}
 	position := sort.Search(len(page.rows), func(index int) bool {
-		return bytes.Compare(page.rows[index].key, key) >= 0
+		return bytes.Compare(page.key(index), key) >= 0
 	})
-	if position == len(page.rows) || !bytes.Equal(page.rows[position].key, key) {
+	if position == len(page.rows) || !bytes.Equal(page.key(position), key) {
 		return nil, false, false, nil
 	}
-	row := page.rows[position]
+	row := page.row(position)
 	return bytes.Clone(row.value), true, row.deleted, nil
 }
 
@@ -243,10 +261,10 @@ func (main *mainImage) readPageInto(blockIndex int, page *rowPage) error {
 	page.data = data
 	page.rows = rows
 	page.weight = int64(len(data)) + int64(cap(rows))*cachedRowOverhead
-	if len(page.rows) == 0 || !bytes.Equal(page.rows[0].key, block.firstKey) {
+	if len(page.rows) == 0 || !bytes.Equal(page.key(0), block.firstKey) {
 		return corruptFileAt(main.path, block.offset, "main page %d first key does not match its directory entry", blockIndex)
 	}
-	if len(block.lastKey) != 0 && !bytes.Equal(page.rows[len(page.rows)-1].key, block.lastKey) {
+	if len(block.lastKey) != 0 && !bytes.Equal(page.key(len(page.rows)-1), block.lastKey) {
 		return corruptFileAt(main.path, block.offset, "main page %d last key does not match its directory entry", blockIndex)
 	}
 	return nil
@@ -266,13 +284,13 @@ func decodeMutationPageRows(
 	blockOffset int64,
 	data []byte,
 	records uint32,
-	rows []mainRow,
-) ([]mainRow, error) {
+	rows []pageRow,
+) ([]pageRow, error) {
 	if records > mainIndexBlockRecords {
 		return nil, corruptFileAt(path, blockOffset, "main mutation page has %d records above limit %d", records, mainIndexBlockRecords)
 	}
 	if cap(rows) < int(records) {
-		rows = make([]mainRow, 0, records)
+		rows = make([]pageRow, 0, records)
 	} else {
 		rows = rows[:0]
 	}
@@ -299,14 +317,15 @@ func decodeMutationPageRows(
 		if valueSize > maxValueSize || keySize > len(data)-position || valueSize > len(data)-position-keySize {
 			return nil, corruptFileAt(path, blockOffset+int64(recordOffset), "main mutation record body is invalid or truncated")
 		}
+		keyStart := position
 		key := data[position : position+keySize]
 		position += keySize
-		value := data[position : position+valueSize]
+		valueStart := position
 		position += valueSize
 		if previous != nil && bytes.Compare(previous, key) >= 0 {
 			return nil, corruptFileAt(path, blockOffset+int64(recordOffset), "main mutation page keys are not strictly increasing")
 		}
-		rows = append(rows, mainRow{key: key, value: value, deleted: kind == operationDelete})
+		rows = append(rows, pageRow{keyStart: keyStart, valueStart: valueStart, end: position, deleted: kind == operationDelete})
 		previous = key
 	}
 	if position != len(data) {
@@ -329,13 +348,13 @@ func decodeRowPageRows(
 	blockOffset int64,
 	data []byte,
 	records uint32,
-	rows []mainRow,
-) ([]mainRow, error) {
+	rows []pageRow,
+) ([]pageRow, error) {
 	if records > mainIndexBlockRecords {
 		return nil, corruptFileAt(path, blockOffset, "main block has %d records above limit %d", records, mainIndexBlockRecords)
 	}
 	if cap(rows) < int(records) {
-		rows = make([]mainRow, 0, records)
+		rows = make([]pageRow, 0, records)
 	} else {
 		rows = rows[:0]
 	}
@@ -355,14 +374,15 @@ func decodeRowPageRows(
 		if valueSize > maxValueSize || keySize > len(data)-position || valueSize > len(data)-position-keySize {
 			return nil, corruptFileAt(path, blockOffset+int64(recordOffset), "cached main record body is invalid or truncated")
 		}
+		keyStart := position
 		key := data[position : position+keySize]
 		position += keySize
-		value := data[position : position+valueSize]
+		valueStart := position
 		position += valueSize
 		if previous != nil && bytes.Compare(previous, key) >= 0 {
 			return nil, corruptFileAt(path, blockOffset+int64(recordOffset), "cached main block keys are not strictly increasing")
 		}
-		rows = append(rows, mainRow{key: key, value: value})
+		rows = append(rows, pageRow{keyStart: keyStart, valueStart: valueStart, end: position})
 		previous = key
 	}
 	if position != len(data) {

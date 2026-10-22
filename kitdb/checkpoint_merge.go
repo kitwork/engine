@@ -57,32 +57,66 @@ type logicalRowIterator struct {
 	initialized bool
 	pendingErr  error
 	reverse     bool
+	borrowed    bool
+	outputKey   []byte
+	outputValue []byte
+}
+
+// Only callback-scoped scans may reuse page and merge-output storage.
+func newScanRowIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalRowIterator {
+	return newScanRowIteratorRange(main, overlay, start, nil)
+}
+
+func newScanRowIteratorRange(main *mainImage, overlay map[string]rowMutation, start, end []byte) *logicalRowIterator {
+	iterator := newDirectionalLogicalRowIterator(main, overlay, start, end, false)
+	iterator.borrowed = true
+	if merged := iterator.main.merged; merged != nil {
+		merged.borrowed = true
+		for index := range merged.cursors {
+			physical := merged.cursors[index].iterator
+			if physical == nil {
+				continue // An initial page error leaves later cursors uninitialized.
+			}
+			physical.reusable = physical.page
+			if physical.reusable == nil {
+				physical.reusable = &rowPage{}
+			}
+		}
+	} else {
+		iterator.main.physical.reusable = &rowPage{}
+	}
+	return iterator
+}
+
+func (iterator *logicalRowIterator) currentMain() ([]byte, []byte) {
+	if !iterator.borrowed {
+		return iterator.mainKey, iterator.mainValue
+	}
+	// The main merge advances before returning the logical row.
+	iterator.outputKey = append(iterator.outputKey[:0], iterator.mainKey...)
+	iterator.outputValue = append(iterator.outputValue[:0], iterator.mainValue...)
+	return iterator.outputKey, iterator.outputValue
 }
 
 func newLogicalRowIterator(main *mainImage, overlay map[string]rowMutation, start []byte) *logicalRowIterator {
-	return newDirectionalLogicalRowIterator(main, overlay, start, false)
+	return newDirectionalLogicalRowIterator(main, overlay, start, nil, false)
 }
 
 func newReverseLogicalRowIterator(main *mainImage, overlay map[string]rowMutation, end []byte) *logicalRowIterator {
-	return newDirectionalLogicalRowIterator(main, overlay, end, true)
+	return newDirectionalLogicalRowIterator(main, overlay, nil, end, true)
 }
 
 func newDirectionalLogicalRowIterator(
 	main *mainImage,
 	overlay map[string]rowMutation,
-	bound []byte,
+	start, end []byte,
 	reverse bool,
 ) *logicalRowIterator {
 	keys := make([]string, 0, len(overlay))
-	boundKey := string(bound)
+	startKey, endKey := string(start), string(end)
 	for key := range overlay {
-		if len(bound) != 0 {
-			if reverse && key >= boundKey {
-				continue
-			}
-			if !reverse && key < boundKey {
-				continue
-			}
+		if len(start) != 0 && key < startKey || len(end) != 0 && key >= endKey {
+			continue
 		}
 		keys = append(keys, key)
 	}
@@ -90,10 +124,7 @@ func newDirectionalLogicalRowIterator(
 	if reverse {
 		sort.Sort(sort.Reverse(sort.StringSlice(keys)))
 	}
-	mainIterator := main.iteratorFrom(bound)
-	if reverse {
-		mainIterator = main.reverseIteratorFrom(bound)
-	}
+	mainIterator := main.rangeIterator(start, end, reverse)
 	return &logicalRowIterator{
 		main: mainIterator, overlay: overlay, keys: keys, reverse: reverse,
 	}
@@ -122,7 +153,7 @@ func (iterator *logicalRowIterator) next() ([]byte, []byte, bool, error) {
 			continue
 		}
 		if iterator.change == len(iterator.keys) {
-			key, value := iterator.mainKey, iterator.mainValue
+			key, value := iterator.currentMain()
 			if err := iterator.advanceMain(); err != nil {
 				iterator.pendingErr = err
 			}
@@ -132,7 +163,7 @@ func (iterator *logicalRowIterator) next() ([]byte, []byte, bool, error) {
 		changeKey := []byte(iterator.keys[iterator.change])
 		switch comparison := bytes.Compare(iterator.mainKey, changeKey); {
 		case comparison < 0 && !iterator.reverse, comparison > 0 && iterator.reverse:
-			key, value := iterator.mainKey, iterator.mainValue
+			key, value := iterator.currentMain()
 			if err := iterator.advanceMain(); err != nil {
 				iterator.pendingErr = err
 			}

@@ -26,8 +26,13 @@ Budgets are process-local; no storage-format migration is needed.
 A snapshot charge is 256 base bytes plus, for each current WAL-overlay entry,
 128 overhead bytes and the key/value byte lengths. Deleted entries charge a key
 and metadata but no value. Keys are charged even though immutable string bytes
-may be shared. This is conservative accounting for the copied overlay, not an
-allocator-exact prediction. The main file is not copied into each snapshot.
+may be shared. Each snapshot copies the overlay map, but shares immutable
+kernel-owned committed value bytes. A commit replaces entries instead of
+mutating published values. This is conservative accounting for all bytes a
+snapshot can retain, not an allocator-exact prediction or a deduction for
+sharing. The charge and limits are unchanged. The main file is not copied
+into each snapshot. `Get` and ordinary cursor reads still return caller-owned
+copies; callback-scoped `Scan` slices are read-only.
 
 Recovery calculates the current overlay cost once. Commit updates it from each
 mutation, including repeated overwrites/deletes in a single transaction.
@@ -46,7 +51,7 @@ returns `ErrSnapshotMemory` immediately; queued callers are also rejected when
 that condition is observed. Raw `Snapshot()` remains nonblocking.
 
 Checkpoint can shrink the cost of new snapshots but cannot reclaim the old
-copies that active readers still own. Closing those readers returns their exact
+maps and value bytes that active readers still retain. Closing those readers returns their exact
 accounted charge once; reservation cancellation and shutdown do likewise.
 
 ## Transaction Writes
@@ -72,6 +77,19 @@ reduced, checkpointed where appropriate, or given an explicitly larger owner
 budget, not retried indefinitely.
 
 ## What This Does Not Bound
+
+Forward relational scans with no own-write overlay and an explicit canonical
+or shadow KROW prefix reuse the kernel snapshot's private scan buffers. Each
+public relational visitor still receives its own key/value copies; unlike
+kernel `Snapshot.Scan`, it may retain or mutate those bytes. Reverse scans,
+index/metadata ranges and own-write merges retain the ordinary cursor path.
+No new cache, pool or shared mutable reader storage is introduced.
+
+These temporary pages and merge scratch live for one scan. A reusable page
+can retain its largest selected page capacity until that scan ends, including
+permitted large single-record pages. Lower cumulative allocation is not a
+promise of proportionally smaller peak RAM. Admission charges and all existing
+ceilings remain unchanged; this does not add scan buffers to the byte budgets.
 
 The budgets are not a whole-process RSS cap. They exclude the owning live WAL
 overlay, page cache (separately bounded), catalog graphs, query materialization,
@@ -124,6 +142,29 @@ These measurements motivated the metadata allowance. They are not proof of an
 upper physical-memory bound on every Go release or workload. Verification jobs
 overlapped the run, so timings are not used to claim a speedup. See the local
 ignored artifact `.artifacts/kitdb-snapshot-memory-bench-20261011.txt`.
+
+The 2026-10-17 immutable-value optimization supersedes those historical
+allocation figures, not their admission charges. A 2,048-entry/8 MiB overlay
+now allocates 230,321 bytes and 16 objects per capture in the bounded fixture;
+the full retained-byte charge remains unchanged. See the
+[write-pipeline measurements](../benchmarks/dbcompare/WRITE_PIPELINE_2026-10-17.md)
+for matched before/after binaries, ownership/recovery tests and limitations.
+
+Incremental checkpoint's logical-record count uses sorted overlay-key references,
+one resolution flag per key (a bool slice), and one private reusable
+decoded page. It does not copy row payloads for existence checks or enlarge the
+shared page cache. The key/resolution arrays are O(overlay entries); the page
+buffer is bounded by the largest selected on-disk page, including permitted
+large single records. This transient maintenance memory is not a new global RSS
+ceiling or a change to snapshot/transaction admission charges.
+
+Current v3 writers also separate leading-byte key ranges into different pages.
+This does not enlarge the LRU budget or add query-local buffers, but may retain
+more `mainBlock` directory entries outside that budget. At most 255 additional
+leading-byte boundaries occur per segment. Tiny raw keys distributed across
+many first bytes can therefore spend more space on directory metadata than on
+payload. The read-path optimization is not a claim of a smaller file or a hard
+process-memory ceiling for every workload.
 
 The real TCP campaign supports `KITDB_NETWORK_PAYLOAD_REPEATS=1..64` (default 8)
 to increase row payload size while keeping 10,000 rows. Its drain oracle now

@@ -257,7 +257,13 @@ func (transaction *Transaction) readMatchingRows(
 			rows:   make([]boundedOrderedRow, 0, offset+limit),
 		}
 	}
-	rows := make([]map[string]any, 0, min(limit, 256))
+	capacity := min(limit, 256)
+	if countMode || useTopN {
+		capacity = 0 // COUNT retains no rows; Top-N owns a separate bounded heap.
+	} else if access.kind == rowAccessPrimary || access.kind == rowAccessUnique {
+		capacity = min(capacity, 1)
+	}
+	rows := make([]map[string]any, 0, capacity)
 	matched := 0
 	overflow := false
 	decoder := newProjectedRowDecoder(
