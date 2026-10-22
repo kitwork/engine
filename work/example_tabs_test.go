@@ -17,26 +17,26 @@ var exampleCodeRe = regexp.MustCompile(`<code class="language-(work|ui)">([\s\S]
 // which must be 200 and link no warnings.
 func examplePage(t *testing.T, path string) (*Tenant, string) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(examplesRoot, "kitwork", "kitwork.localhost", "components", "content.ui")); err != nil {
+	if _, err := os.Stat(filepath.Join(examplesRoot, exampleIdentity, exampleHost, "components", "content.ui")); err != nil {
 		t.Skipf("no kitwork example beside the engine (%v)", err)
 	}
 	root := copyExamples(t)
 	saved := AllowLocal
 	AllowLocal = true // developing: a page with something to tell links its warnings
 	t.Cleanup(func() { AllowLocal = saved })
-	tenant := NewTenant(root, "kitwork.localhost")
+	tenant := NewTenant(root, exampleHost)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}
 	rec := httptest.NewRecorder()
-	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://kitwork.localhost"+path, nil))
+	tenant.Serve(rec, httptest.NewRequest(http.MethodGet, "http://"+exampleHost+path, nil))
 	page := rec.Body.String()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%s = %d:\n%.1500s", path, rec.Code, page)
 	}
 	if link := warningsScriptRe.FindStringSubmatch(page); link != nil {
 		r := httptest.NewRecorder()
-		tenant.Serve(r, httptest.NewRequest(http.MethodGet, "http://kitwork.localhost"+link[1], nil))
+		tenant.Serve(r, httptest.NewRequest(http.MethodGet, "http://"+exampleHost+link[1], nil))
 		t.Errorf("%s links warnings:\n%.2000s", path, r.Body.String())
 	}
 	return tenant, page

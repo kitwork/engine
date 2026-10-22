@@ -381,7 +381,7 @@ func TestCodeColoursAreMeasured(t *testing.T) {
 // stylesheet's code tests read them.
 func codeExamplePalettes(t *testing.T) map[string]*stylesheet.Palette {
 	t.Helper()
-	kitwork := map[string]stylesheet.Color{ // apps/kitwork/kitwork.localhost/router.work
+	kitwork := map[string]stylesheet.Color{ // apps/029w8decto4uabhpsmfjlxgknzqy7356riv1/kitwork.io/router.work
 		"brand": {Light: "#f5225f", Dark: "#ff6b6b"}, "canvas": {Light: "#ffeaec", Dark: "#16161e"},
 		"paper": {Light: "#ffffff", Dark: "#1e2030"}, "panel": {Light: "#f7eff1", Dark: "#181a26"},
 		"line": {Light: "#e5e3e5", Dark: "#2c3145"}, "ink": {Light: "#242442", Dark: "#c0caf5"},

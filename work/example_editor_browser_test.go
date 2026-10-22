@@ -64,7 +64,7 @@ func TestBrowserExampleEditor(t *testing.T) {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 	tenant, _ := examplePage(t, "/components/editor")
-	site := newEditorSite(tenant, "kitwork.localhost")
+	site := newEditorSite(tenant, exampleHost)
 	defer site.Close()
 	check := func(what, got, want string) {
 		t.Helper()

@@ -24,7 +24,7 @@ var exampleTextareaRe = regexp.MustCompile(`<textarea[^>]*name="body"[^>]*>([\s\
 
 // exampleRichtextOrigin is the origin the example is served on in these tests: what the richtext's
 // links are measured against.
-const exampleRichtextOrigin = "http://kitwork.localhost"
+const exampleRichtextOrigin = "http://" + exampleHost
 
 // exampleSend sends one request to the example with a form body, as a browser on the site's own page
 // sends it unless header says otherwise, and returns the answer, failing when it links warnings.

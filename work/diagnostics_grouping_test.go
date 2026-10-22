@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// kitworkColors is the palette of apps/kitwork's router.work, the surfaces and ink: a palette
+// kitworkColors is the palette of apps/029w8decto4uabhpsmfjlxgknzqy7356riv1's router.work, the surfaces and ink: a palette
 // with a dark look, where background="white" stays white.
 const kitworkColors = `router.colors({
   brand: { light: "#f5225f", dark: "#ff6b6b" },

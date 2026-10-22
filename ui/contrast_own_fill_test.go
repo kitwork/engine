@@ -74,7 +74,7 @@ func TestAdviceOnTheTextsOwnFill(t *testing.T) {
 	}
 }
 
-// kitworkPalette is the kitwork example's router.colors (apps/kitwork, router.work).
+// kitworkPalette is the kitwork example's router.colors (apps/029w8decto4uabhpsmfjlxgknzqy7356riv1, router.work).
 func kitworkPalette(t *testing.T) *stylesheet.Palette {
 	t.Helper()
 	return darkPalette(t, map[string]stylesheet.Color{

@@ -153,14 +153,14 @@ func TestBrowserLazySkipsWhatIsFar(t *testing.T) {
 // with ?control is the same page with every lazy class taken out of its HTML (the stylesheet unchanged).
 func colorsLazyServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(examplesRoot, "kitwork", "kitwork.localhost", "colors", "content.ui")); err != nil {
+	if _, err := os.Stat(filepath.Join(examplesRoot, exampleIdentity, exampleHost, "colors", "content.ui")); err != nil {
 		t.Skipf("no colour gallery beside the engine (%v)", err)
 	}
 	root := copyExamples(t)
 	saved := AllowLocal
 	AllowLocal = true
 	t.Cleanup(func() { AllowLocal = saved })
-	const host = "kitwork.localhost"
+	const host = exampleHost
 	tenant := NewTenant(root, host)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)

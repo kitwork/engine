@@ -463,7 +463,7 @@ func exampleServer(tenant *Tenant) *httptest.Server {
 	var serving sync.Mutex
 	return httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		forward := request.Clone(request.Context())
-		forward.Host = "kitwork.localhost"
+		forward.Host = exampleHost
 		serving.Lock()
 		defer serving.Unlock()
 		tenant.Serve(response, forward)

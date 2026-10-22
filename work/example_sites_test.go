@@ -20,6 +20,13 @@ import (
 // has nothing to read.
 const examplesRoot = "../../apps"
 
+// exampleIdentity and exampleHost name the kitwork example inside examplesRoot: the tenant id and the
+// domain the live kitwork.io has always had (22/10/2026), so the example is the site, not a copy of it.
+const (
+	exampleIdentity = "029w8decto4uabhpsmfjlxgknzqy7356riv1"
+	exampleHost     = "kitwork.io"
+)
+
 // tailwindClass matches the words of Tailwind's dialect a .ui page never carries: its width
 // prefixes, its utilities, its arbitrary values and its bare display words. A .ui class is the
 // attribute as written (padding-4, background-brand, medium:padding-6).
@@ -84,13 +91,20 @@ func TestExampleSitesCarryNoTailwindWord(t *testing.T) {
 	t.Cleanup(func() { AllowLocal = saved })
 	// the kitwork site at least (the coffee shop left the examples on 13/10/2026 and lives on as the
 	// conformance fixture): a missing site fails here instead of passing with nothing read
-	hosts, _ := filepath.Glob(filepath.Join(root, "*", "*.localhost"))
+	// a site is every folder of an identity that does not start with a dot (.shared, .database…)
+	var hosts []string
+	folders, _ := filepath.Glob(filepath.Join(root, "*", "*"))
+	for _, dir := range folders {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() && !strings.HasPrefix(filepath.Base(dir), ".") {
+			hosts = append(hosts, dir)
+		}
+	}
 	kitwork := false
 	for _, dir := range hosts {
-		kitwork = kitwork || filepath.Base(dir) == "kitwork.localhost"
+		kitwork = kitwork || (filepath.Base(dir) == exampleHost && filepath.Base(filepath.Dir(dir)) == exampleIdentity)
 	}
 	if !kitwork {
-		t.Fatalf("thiếu site ví dụ kitwork.localhost, chỉ thấy %v", hosts)
+		t.Fatalf("thiếu site ví dụ %s/%s, chỉ thấy %v", exampleIdentity, exampleHost, hosts)
 	}
 	pages := 0
 	for _, dir := range hosts {

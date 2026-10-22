@@ -96,7 +96,7 @@ func TestBrowserEditorTooltipsAndPopoverByTheMouse(t *testing.T) {
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 	tenant, _ := examplePage(t, "/components/editor")
-	site := newEditorSite(tenant, "kitwork.localhost")
+	site := newEditorSite(tenant, exampleHost)
 	defer site.Close()
 	d := openDevtools(t, browser, site.URL+"/components/editor", 1280, 1000, "")
 	d.loaded(exampleSettle)
@@ -225,7 +225,7 @@ func editorPlacePage(t *testing.T, width, height int, delay time.Duration) *devt
 		t.Skip("Chrome, Chromium, or Edge is not installed")
 	}
 	tenant, _ := examplePage(t, "/components/editor")
-	site := newEditorSite(tenant, "kitwork.localhost")
+	site := newEditorSite(tenant, exampleHost)
 	if delay > 0 {
 		served := site.Config.Handler
 		site.Config.Handler = http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {

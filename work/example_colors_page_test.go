@@ -13,7 +13,7 @@ import (
 	"github.com/kitwork/engine/ui/stylesheet"
 )
 
-// The colour gallery of the kitwork example (kitwork.localhost/colors) is served by the engine as
+// The colour gallery of the kitwork example (kitwork.io/colors) is served by the engine as
 // written: 200 while developing, no warning, every class's rule in the stylesheets it links, and a
 // swatch for every gradient of the standard set, every page backdrop, every gradient of the WebGradients
 // collection built in, every named colour the engine has, and each accent role made stronger (+15) and
@@ -22,14 +22,14 @@ import (
 // TestExampleSitesCarryNoTailwindWord did not read it, and a stale swatch was a 500 every test missed
 // (review of 12/10/2026). The gallery is read here whether a link reaches it or not.
 func TestExampleColorsPage(t *testing.T) {
-	if _, err := os.Stat(filepath.Join(examplesRoot, "kitwork", "kitwork.localhost", "colors", "content.ui")); err != nil {
+	if _, err := os.Stat(filepath.Join(examplesRoot, exampleIdentity, exampleHost, "colors", "content.ui")); err != nil {
 		t.Skipf("no colour gallery beside the engine (%v)", err)
 	}
 	root := copyExamples(t)
 	saved := AllowLocal
 	AllowLocal = true // developing: a page with something to tell links its warnings
 	t.Cleanup(func() { AllowLocal = saved })
-	const host = "kitwork.localhost"
+	const host = exampleHost
 	tenant := NewTenant(root, host)
 	if err := tenant.Run(); err != nil {
 		t.Fatalf("%s: %v", host, err)
