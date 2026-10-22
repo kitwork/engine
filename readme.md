@@ -241,15 +241,17 @@ with `safe`, it is data:
 import { router, http, safe } from "kitwork";
 
 router.get((ctx) => {
-  const { value: response, error } = safe(() => http.timeout(2000).get("https://example.com/feed"));
-  if (error) return ctx.status(502).json({ code: error.code, message: error.message });
+  const { ok, value: response, error } = safe(() => http.timeout(2000).get("https://example.com/feed"));
+  if (!ok) return ctx.status(502).json({ code: error.code, message: error.message });
   return ctx.json(response.json());
 });
 ```
 
-`error` is `null` or `{ message, code, at }`, where `code` comes from a closed set (`NETWORK`,
-`TIMEOUT`, `DATABASE`, `CONFLICT`, `DENIED`, …) and `at` is the file, line and column of the
-failure. The limits of the host, energy, cancellation and stack depth, cannot be caught.
+`ok` says whether the call went through, and is the check to write. `error` is `null` or
+`{ message, code, at, cause }`, where `code` comes from a closed set (`NETWORK`, `TIMEOUT`,
+`DATABASE`, `CONFLICT`, `DENIED`, `NOT_FOUND`, …), `at` is the file, line and column of the failure,
+and `cause` is the failure it wraps (`null` for now: nothing the engine returns wraps another yet).
+The limits of the host, energy, cancellation and stack depth, cannot be caught.
 
 The compiler and the `.ui` checker speak Vietnamese today. A `while` anywhere in a site stops that
 site from starting, at the line that wrote it:
@@ -362,7 +364,7 @@ router
 - `ctx` carries the request: `params`, `query`, `header`, `cookie`, `body`, `ip`, `method`,
   `path`; and the answer: `json`, `text`, `html`, `file`, `redirect`, `status`, `type`,
   `setCookie`; and for a page, `bind`, `title`, `meta`. The `error` hook receives
-  `{ message, code, at }`.
+  `{ message, code, at, cause }`, the error object of `safe`.
 
 Match precedence is exact, typed, regex, plain dynamic, then splat. Rate limits count per IP, per
 client, per user or site-wide, by second, minute, hour or day; loopback and private addresses are

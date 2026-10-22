@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"path/filepath"
 	"sort"
 
 	"github.com/kitwork/engine/runtime"
@@ -103,6 +104,8 @@ func (b *Bytecode) SourceFingerprint() string {
 
 // CacheKey combines source and compiler identity. A bytecode version,
 // instruction contract, compiler schema, or source change produces a new key.
+// It names the program whatever app compiled it (a cron's or a queue's stored
+// content_hash); the artifact a FileCache keeps is named CacheKeyInApp.
 func (b *Bytecode) CacheKey() string {
 	if b == nil || b.sourceFingerprint == "" {
 		return ""
@@ -110,8 +113,40 @@ func (b *Bytecode) CacheKey() string {
 	return cacheKeyForSource(b.sourceFingerprint)
 }
 
+// CacheKeyInApp is the name (without .kwbc) of this program's artifact in a
+// FileCache when it was compiled for the app whose folder is appRoot
+// (FileCache.CompileFileInApp): CacheKey for a file of no app (""), the key with
+// the app's folder otherwise. It is the one formula the cache writes under.
+func (b *Bytecode) CacheKeyInApp(appRoot string) string {
+	if b == nil || b.sourceFingerprint == "" {
+		return ""
+	}
+	return cacheKeyForApp(appRoot, b.sourceFingerprint)
+}
+
 func cacheKeyForSource(sourceFingerprint string) string {
 	return cacheKeyFor(Fingerprint(), sourceFingerprint)
+}
+
+// cacheKeyForApp is the cache file name of a source compiled for the app whose
+// folder is appRoot: the source's own key for a file of no app, and for a file of
+// an app that key with the app's absolute folder, so an artifact is only ever
+// read back for the app that compiled it.
+func cacheKeyForApp(appRoot, sourceFingerprint string) string {
+	key := cacheKeyForSource(sourceFingerprint)
+	if appRoot == "" {
+		return key
+	}
+	if absolute, err := filepath.Abs(appRoot); err == nil {
+		appRoot = absolute
+	}
+	hash := sha256.New()
+	hash.Write([]byte("kitwork-bytecode-cache-app"))
+	hash.Write([]byte{0})
+	hash.Write([]byte(key))
+	hash.Write([]byte{0})
+	hash.Write([]byte(filepath.Clean(appRoot)))
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 // cacheKeyFor is the cache file name a compiler with this fingerprint gives a

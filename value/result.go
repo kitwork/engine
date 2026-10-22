@@ -3,12 +3,13 @@ package value
 // safe(() => x) is how a program reads a failure (14/10/2026): it calls x's function with no arguments
 // and always gives a plain object,
 //
-//	{ value: <what the function returned>, error: null }                      it finished
-//	{ value: null, error: { message, code, at } }                             it failed, anywhere inside
+//	{ ok: true, value: <what the function returned>, error: null }            it finished
+//	{ ok: false, value: null, error: { message, code, at, cause } }           it failed, anywhere inside
 //
-// with error.progress as well for a PARTIAL failure (a bulk write that stopped midway). The object is
-// an ordinary map: ctx.json(found) writes it, a .ui page reads it, const { value, error } = … takes it
-// apart. It replaced x.safe(), whose result was a Go struct (SafeResult) that JSON wrote as null and a
+// ok is the main check (21/10/2026, if (!found.ok)); cause is null until a failure of the engine carries
+// the one it wraps; error.progress is there as well for a PARTIAL failure (a bulk write that stopped
+// midway). The object is an ordinary map: ctx.json(found) writes it, a .ui page reads it,
+// const { ok, value, error } = … takes it apart. It replaced x.safe(), whose result was a Go struct (SafeResult) that JSON wrote as null and a
 // view dropped; x.safe() is now a compile error that says how to write it.
 //
 // Failures a host attached to data without stopping the program (database.entity() returning [] with

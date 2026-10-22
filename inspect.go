@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -36,7 +37,8 @@ func InspectFile(path string) (InspectionReport, error) {
 		return InspectionReport{}, fmt.Errorf("inspect: source must end in .kitwork.js: %q", path)
 	}
 
-	compiled, err := compiler.CompileFile(path)
+	appRoot := inspectAppRoot(path)
+	compiled, err := compiler.CompileFileInApp(appRoot, path)
 	if err != nil {
 		return InspectionReport{}, fmt.Errorf("inspect %s: %w", filepath.ToSlash(path), err)
 	}
@@ -71,9 +73,46 @@ func InspectFile(path string) (InspectionReport, error) {
 		CompilerSchemaVersion: compiler.CompilerSchemaVersion,
 		CompilerFingerprint:   compiled.CompilerFingerprint(),
 		SourceFingerprint:     compiled.SourceFingerprint(),
-		CacheKey:              compiled.CacheKey(),
+		CacheKey:              compiled.CacheKeyInApp(appRoot),
 		Program:               program,
 	}, nil
+}
+
+// inspectAppRoot is the folder of the app the inspected file belongs to, where its `app/…` imports
+// resolve (22/10/2026), found by the names the host finds its root by when application.work names none
+// (resolveRootConfigAt): the first folder app/ (one app), or apps/<identity>/ under the first folder apps/
+// (many apps). It is counted from the current folder (the host's) when the file is inside it, so a folder
+// app or apps above the host is never taken, then from the top of the file's volume. "" when there is
+// neither: the file is no app's, and an `app/…` import says so.
+func inspectAppRoot(path string) string {
+	file, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	if working, err := os.Getwd(); err == nil {
+		if found := appRootBelow(working, file); found != "" {
+			return found
+		}
+	}
+	return appRootBelow(filepath.VolumeName(file)+string(filepath.Separator), file)
+}
+
+// appRootBelow is inspectAppRoot counted from base, "" when file is not inside base or names no app.
+func appRootBelow(base, file string) string {
+	relative, err := filepath.Rel(base, filepath.Dir(file))
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	segments := strings.Split(filepath.ToSlash(relative), "/")
+	for i, segment := range segments {
+		switch {
+		case strings.EqualFold(segment, "app"):
+			return filepath.Join(base, filepath.Join(segments[:i+1]...))
+		case strings.EqualFold(segment, "apps") && i+1 < len(segments):
+			return filepath.Join(base, filepath.Join(segments[:i+2]...))
+		}
+	}
+	return ""
 }
 
 func inspectionSourcePaths(entry string, files []string) []string {

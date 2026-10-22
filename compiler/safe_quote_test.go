@@ -11,10 +11,10 @@ import (
 // what a migration missed did not find them. CONTROL: with an argument it is an ordinary method call.
 func TestRemovedSafeMethodAfterOptionalChain(t *testing.T) {
 	for _, c := range []struct{ source, want string }{
-		{"const o = { a: 1 };\nconst r = o?.safe();", "<source>:2:14: .safe() đã bỏ (14/10/2026): viết safe(() => o), nhận { value, error }"},
-		{"const o = { a: 1 };\nconst r = o.safe?.();", "<source>:2:13: .safe() đã bỏ (14/10/2026): viết safe(() => o), nhận { value, error }"},
-		{"const r = { safe: () => 9 }?.safe();", "viết safe(() => ({ safe: () => 9 })), nhận { value, error }"},
-		{"const r = db.users?.first()?.safe();", "viết safe(() => db.users?.first()), nhận { value, error }"},
+		{"const o = { a: 1 };\nconst r = o?.safe();", "<source>:2:14: .safe() đã bỏ (14/10/2026): viết safe(() => o), nhận { ok, value, error }"},
+		{"const o = { a: 1 };\nconst r = o.safe?.();", "<source>:2:13: .safe() đã bỏ (14/10/2026): viết safe(() => o), nhận { ok, value, error }"},
+		{"const r = { safe: () => 9 }?.safe();", "viết safe(() => ({ safe: () => 9 })), nhận { ok, value, error }"},
+		{"const r = db.users?.first()?.safe();", "viết safe(() => db.users?.first()), nhận { ok, value, error }"},
 	} {
 		_, err := CompileSource(c.source)
 		if err == nil || !strings.Contains(err.Error(), c.want) {

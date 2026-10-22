@@ -8,12 +8,13 @@ import (
 
 // safe(f) is how a program reads a failure (14/10/2026). It calls f with no arguments, on this VM, in a
 // frame of its own, on the same energy budget and under the same rules for what stops a run, and always
-// gives a plain object:
+// gives a plain object (ok from 21/10/2026, the main check: if (!found.ok), as for an HTTP result):
 //
-//	{ value: <what f returned>, error: null }
-//	{ value: null, error: { message, code, at } }      f failed, anywhere inside, however deep
+//	{ ok: true, value: <what f returned>, error: null }
+//	{ ok: false, value: null, error: { message, code, at, cause } }      f failed, anywhere inside, however deep
 //
-// error.progress is there too for a PARTIAL failure. The frame gives the failure a floor: a failure in
+// error.progress is there too for a PARTIAL failure. cause is the failure this one wraps, of the same
+// shape; null while no failure of the engine carries the one it wraps. The frame gives the failure a floor: a failure in
 // f unwinds f's frames, running their defers, down to it and no further (ExecuteLambda), so the program
 // goes on after safe. What safe catches is a runtime error of the program, or of something the program
 // asked for (a query, a body read, a call): fail, a call of what is not a function, an operation on
@@ -57,6 +58,7 @@ func safeArgumentCountMessage(count int) string {
 func (vm *VM) safeResult(ip int, result value.Value) value.Value {
 	if result.K != value.Invalid {
 		return value.New(map[string]value.Value{
+			"ok":    value.TRUE,
 			"value": result,
 			"error": {K: value.Nil},
 		})
@@ -84,13 +86,15 @@ func (vm *VM) safeResult(ip int, result value.Value) value.Value {
 	return safeFailure(failure.Message, failure.Code, locationAt(vm.currentLocation(ip)), failure.Progress)
 }
 
-// safeFailure is { value: null, error: { message, code, at } }, with error.progress for PARTIAL.
+// safeFailure is { ok: false, value: null, error: { message, code, at, cause } }, with error.progress for
+// PARTIAL.
 func safeFailure(message, code, at string, progress value.Value) value.Value {
 	code = value.ClosedCode(code)
 	failure := map[string]value.Value{
 		"message": value.NewString(message),
 		"code":    value.NewString(code),
 		"at":      {K: value.Nil},
+		"cause":   {K: value.Nil},
 	}
 	if at != "" {
 		failure["at"] = value.NewString(at)
@@ -99,13 +103,14 @@ func safeFailure(message, code, at string, progress value.Value) value.Value {
 		failure["progress"] = progress
 	}
 	return value.New(map[string]value.Value{
+		"ok":    value.FALSE,
 		"value": {K: value.Nil},
 		"error": value.New(failure),
 	})
 }
 
 // FailureObject is the error object of a failure, the shape safe gives as error, for a host that
-// hands a failure to the program another way (a router's .error() handler): { message, code, at },
+// hands a failure to the program another way (a router's .error() handler): { message, code, at, cause },
 // error.progress for PARTIAL. code is the diagnostic's own for a failure safe never catches
 // (ENERGY_LIMIT, EXECUTION_CANCELLED…), since it is the end of the run that is being described.
 func FailureObject(failure value.Value) value.Value {

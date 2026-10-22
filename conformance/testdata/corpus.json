@@ -168,7 +168,7 @@
       "category": "rejected",
       "file": "rejected/safe-method-removed.kitwork.js",
       "kind": "reject",
-      "error_contains": "safe-method-removed.kitwork.js:1:20: .safe() đã bỏ (14/10/2026): viết safe(() => ({ a: 1 })), nhận { value, error }"
+      "error_contains": "safe-method-removed.kitwork.js:1:20: .safe() đã bỏ (14/10/2026): viết safe(() => ({ a: 1 })), nhận { ok, value, error }"
     },
     {
       "name": "safe-without-arrow",

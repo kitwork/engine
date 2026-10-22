@@ -270,7 +270,7 @@ func (t *Tenant) LoadCronFiles() {
 			continue
 		}
 		file := filepath.Join(dir, e.Name())
-		bc, err := compiler.CompileFile(file)
+		bc, err := compiler.CompileFileInApp(t.resolveApp(), file)
 		if err != nil {
 			fmt.Printf("[Cron] compile %s: %v\n", e.Name(), err)
 			continue

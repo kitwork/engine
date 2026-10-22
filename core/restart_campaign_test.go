@@ -260,11 +260,12 @@ func runRestartRecoveryCampaign(
 			if writeErr != nil {
 				return fmt.Errorf("revision %d: write route: %w", revision, writeErr)
 			}
-			expected, err = compiler.CompileFile(routerFile)
+			appRoot := restartCampaignAppRoot(root)
+			expected, err = compiler.CompileFileInApp(appRoot, routerFile)
 			if err != nil {
 				return fmt.Errorf("revision %d: compile expected artifact: %w", revision, err)
 			}
-			artifactPath = filepath.Join(cacheDirectory, expected.CacheKey()+".kwbc")
+			artifactPath = filepath.Join(cacheDirectory, expected.CacheKeyInApp(appRoot)+".kwbc")
 			if _, statErr := os.Stat(artifactPath); statErr == nil {
 				return fmt.Errorf("revision %d: new cache key already exists", revision)
 			} else if !os.IsNotExist(statErr) {
@@ -733,6 +734,13 @@ func restartCompatibility() DiagnosticCompatibilitySnapshot {
 		InstructionSetChecksum: kitruntime.InstructionSetChecksum(),
 		RuntimeLimits:          kitruntime.Limits(),
 	}
+}
+
+// restartCampaignAppRoot is the folder of the app writeRestartCampaignRoute writes, as the tenant that
+// serves it finds it (resolveApp: the identity "restart"); the engine's bytecode cache names the
+// route's artifact with it (compiler.Bytecode.CacheKeyInApp).
+func restartCampaignAppRoot(root string) string {
+	return filepath.Join(root, "restart")
 }
 
 func writeRestartCampaignRoute(root, source string) (string, error) {

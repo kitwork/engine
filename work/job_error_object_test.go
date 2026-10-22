@@ -41,8 +41,9 @@ func postErr(url string) string {
 	return `.error((job, err) => { http.post("` + url + `/err", { err: err, keys: Object.keys(err) }); })`
 }
 
-// checkJobErr reads what the handler posted: { message, code, at }, the shape a router's .error()
-// handler and safe give, the message alone (no place first, no stack after), at the place of the fail.
+// checkJobErr reads what the handler posted: { message, code, at, cause }, the shape a router's .error()
+// handler and safe give (cause from 21/10/2026, null when nothing is wrapped), the message alone (no place
+// first, no stack after), at the place of the fail.
 func checkJobErr(t *testing.T, posted, file string) {
 	t.Helper()
 	var got struct {
@@ -52,9 +53,10 @@ func checkJobErr(t *testing.T, posted, file string) {
 	if err := json.Unmarshal([]byte(posted), &got); err != nil {
 		t.Fatalf("the .error() handler posted %q (%v)", posted, err)
 	}
-	if len(got.Keys) != 3 || got.Err["message"] != "hỏng" || got.Err["code"] != value.FailCode ||
-		got.Err["at"] != file+":3:19" {
-		t.Fatalf("the .error() handler got %s, want { message: \"hỏng\", code: FAIL, at: %s:3:19 }", posted, file)
+	cause, hasCause := got.Err["cause"]
+	if len(got.Keys) != 4 || got.Err["message"] != "hỏng" || got.Err["code"] != value.FailCode ||
+		got.Err["at"] != file+":3:19" || !hasCause || cause != nil {
+		t.Fatalf("the .error() handler got %s, want { message: \"hỏng\", code: FAIL, at: %s:3:19, cause: null }", posted, file)
 	}
 }
 

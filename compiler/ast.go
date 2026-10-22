@@ -53,8 +53,10 @@ type ImportStatement struct {
 	Token      Token
 	Names      []ImportSpec // import có tên: import { a, b as c } from "..."
 	Default    *Identifier  // import mặc định: import x from "..." (nil nếu không có)
-	Source     string       // specifier (đường dẫn tương đối)
+	Source     string       // specifier (đường dẫn tương đối, hay app/… từ gốc app)
 	SideEffect bool         // import "..."  (không binding)
+	// SourceToken is the specifier's string, where an error about the path it names stands.
+	SourceToken Token
 }
 
 func (is *ImportStatement) statementNode() {}

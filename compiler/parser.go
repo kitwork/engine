@@ -538,8 +538,8 @@ func (p *Parser) assignmentTarget(target Expression, element *BindingElement) bo
      export const x = ...                      →  const x = ...   (export stripped)
      export default expr                       →  expr;           (evaluated)
      export { a, b }                           →  (no-op)
-   Anything the native path can't express (relative modules, `as` aliases, …)
-   records a parser error so script.Bytecode() falls back to esbuild bundling.
+     import { x } from "./x.work" / "app/.shared/x.work"  →  ImportStatement, resolved by the bundler
+   Anything the native path can't express records a parser error.
    ============================================================================= */
 
 func isKitworkSpecifier(s string) bool {
@@ -566,6 +566,65 @@ func isRelativeSpecifier(s string) bool {
 // tương đối cũ (`../_core` vẫn chạy y nguyên).
 func isAppSpecifier(s string) bool {
 	return strings.HasPrefix(s, "_")
+}
+
+// isAppRootSpecifier reports an import from the app's root, `app/…` (22/10/2026, KITWORK_UI.md mục 4):
+// the same in every folder of the app, resolved by the bundler from the folder of the app the file belongs
+// to (app/ for one app, apps/<identity>/ for many), never past it. Not the `_core` walk-up: a site's own
+// folder never shadows the app's.
+func isAppRootSpecifier(s string) bool {
+	// app\… is the same import written with Windows' separator: refused by name, not as a place unknown
+	return s == "app" || strings.HasPrefix(s, "app/") || strings.HasPrefix(s, `app\`)
+}
+
+// appRootSpecifierProblem is what is wrong with an app/… specifier as written, "" when nothing is. The
+// path after app/ goes down from the app's folder, written with "/", one name a step: it never leaves the
+// app (no "..", no absolute path) and never reaches the app's data (.database/). The bundler checks the
+// same on the disk, past links.
+func appRootSpecifierProblem(spec string) string {
+	if strings.Contains(spec, `\`) {
+		return fmt.Sprintf(`import %q: đường dẫn viết bằng "/", không dùng "\": "app/.shared/x.work"`, spec)
+	}
+	rest, _ := strings.CutPrefix(spec, "app/")
+	if spec == "app" || rest == "" {
+		return fmt.Sprintf(`import %q: sau app/ là đường dẫn của một file từ gốc app: "app/.shared/x.work"`, spec)
+	}
+	segments := strings.Split(rest, "/")
+	if segments[0] == "" || strings.Contains(segments[0], ":") {
+		return fmt.Sprintf(`import %q: sau app/ là đường dẫn từ gốc app, không phải đường dẫn tuyệt đối: "app/.shared/x.work"`, spec)
+	}
+	for _, segment := range segments {
+		switch {
+		case segment != "" && strings.Trim(segment, ".") == "":
+			// ".", "..", and a name of dots alone, which Windows trims to nothing
+			return fmt.Sprintf(`import %q ra ngoài lối của app/: đường dẫn đi thẳng từ gốc app xuống, không có "." hay "..": "app/.shared/x.work"`, spec)
+		case segment == "" || strings.Contains(segment, ":"):
+			return fmt.Sprintf(`import %q: mỗi đoạn giữa hai "/" là tên một thư mục hay file, không rỗng, không có ":"`, spec)
+		}
+	}
+	// Windows opens ".database." and ".database " as .database
+	if strings.EqualFold(strings.TrimRight(segments[0], ". "), ".database") {
+		return fmt.Sprintf(`import %q: .database/ là dữ liệu của app, không import được; code dùng chung đặt trong .shared/`, spec)
+	}
+	return ""
+}
+
+// unsupportedSpecifierMessage is the error of an import from a place the native path does not know.
+func unsupportedSpecifierMessage(spec string) string {
+	return fmt.Sprintf(`import %q: chỉ import được module của Kitwork ("kitwork", "kitwork/router"), file từ gốc app ("app/.shared/x.work") hay file tương đối ("./x.work")`, spec)
+}
+
+// moduleImport is the ImportStatement of a module the bundler resolves, or nil with the error recorded
+// when an app/… path is written wrong. tok is the specifier's string.
+func (p *Parser) moduleImport(statement *ImportStatement, tok Token) Statement {
+	if isAppRootSpecifier(statement.Source) {
+		if problem := appRootSpecifierProblem(statement.Source); problem != "" {
+			p.addErrorAt(tok, problem)
+			return nil
+		}
+	}
+	statement.SourceToken = tok
+	return statement
 }
 
 // hasAlias báo có ít nhất một binding đổi tên (`imported as local`).
@@ -673,10 +732,10 @@ func (p *Parser) parseImportStatement() Statement {
 	if p.peekTokenIs(String) {
 		p.nextToken() // cur: string
 		spec := p.curToken.Value.Text()
-		if isRelativeSpecifier(spec) || isAppSpecifier(spec) {
-			return &ImportStatement{Token: importTok, Source: spec, SideEffect: true}
+		if isRelativeSpecifier(spec) || isAppSpecifier(spec) || isAppRootSpecifier(spec) {
+			return p.moduleImport(&ImportStatement{Token: importTok, Source: spec, SideEffect: true}, p.curToken)
 		}
-		p.errors = append(p.errors, fmt.Sprintf("native import: unsupported side-effect specifier %q", spec))
+		p.addErrorAt(p.curToken, unsupportedSpecifierMessage(spec))
 		return nil
 	}
 
@@ -763,10 +822,10 @@ func (p *Parser) parseImportStatement() Statement {
 			}
 			return &GroupStatement{Statements: stmts}
 		}
-		if isRelativeSpecifier(spec) || isAppSpecifier(spec) {
-			return &ImportStatement{Token: importTok, Names: specs, Source: spec}
+		if isRelativeSpecifier(spec) || isAppSpecifier(spec) || isAppRootSpecifier(spec) {
+			return p.moduleImport(&ImportStatement{Token: importTok, Names: specs, Source: spec}, p.curToken)
 		}
-		p.errors = append(p.errors, fmt.Sprintf("native import: only 'kitwork', relative, or app-shared (_core/…) modules supported: %q", spec))
+		p.addErrorAt(p.curToken, unsupportedSpecifierMessage(spec))
 		return nil
 	}
 
@@ -837,10 +896,10 @@ func (p *Parser) parseImportStatement() Statement {
 				},
 			}
 		}
-		if isRelativeSpecifier(spec) {
-			return &ImportStatement{Token: importTok, Default: name, Source: spec}
+		if isRelativeSpecifier(spec) || isAppRootSpecifier(spec) {
+			return p.moduleImport(&ImportStatement{Token: importTok, Default: name, Source: spec}, p.curToken)
 		}
-		p.errors = append(p.errors, fmt.Sprintf("native import: only 'kitwork' or relative modules supported: %q", spec))
+		p.addErrorAt(p.curToken, unsupportedSpecifierMessage(spec))
 		return nil
 	}
 
@@ -2004,7 +2063,7 @@ func removedSafeMessage(receiver string) string {
 	if strings.HasPrefix(receiver, "{") {
 		receiver = "(" + receiver + ")"
 	}
-	return ".safe() đã bỏ (14/10/2026): viết safe(() => " + receiver + "), nhận { value, error }"
+	return ".safe() đã bỏ (14/10/2026): viết safe(() => " + receiver + "), nhận { ok, value, error }"
 }
 
 func (p *Parser) parseIndexExpression(left Expression) Expression {
@@ -2263,18 +2322,24 @@ func (p *Parser) addErrorAt(tok Token, msg string) {
 // theo ký tự như trình soạn thảo hiện, không theo byte (14/10/2026): chữ có dấu trước chỗ lỗi không làm
 // cột lệch. Thiếu nguồn thì lùi về vị trí byte.
 func (p *Parser) location(tok Token) string {
+	return textLocation(p.text, tok)
+}
+
+// textLocation is where tok starts in text, the source it was read from, as location writes it; the
+// bundler writes an import's place with it too.
+func textLocation(text []byte, tok Token) string {
 	pos := int(tok.Position)
-	if p.text == nil || pos < 0 || pos > len(p.text) {
+	if text == nil || pos < 0 || pos > len(text) {
 		return fmt.Sprintf("pos %d", pos)
 	}
 	line, lineStart := 1, 0
 	for index := 0; index < pos; index++ {
-		if p.text[index] == '\n' {
+		if text[index] == '\n' {
 			line++
 			lineStart = index + 1
 		}
 	}
-	where := fmt.Sprintf("%d:%d", line, utf8.RuneCount(p.text[lineStart:pos])+1)
+	where := fmt.Sprintf("%d:%d", line, utf8.RuneCount(text[lineStart:pos])+1)
 	if tok.Source != "" {
 		where = tok.Source + ":" + where
 	}

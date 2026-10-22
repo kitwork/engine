@@ -13,16 +13,16 @@ import (
 func TestRemovedSafeMethodSaysHowToWriteIt(t *testing.T) {
 	for _, c := range []struct{ source, want string }{
 		{"const r = db.users.first().safe();",
-			"<source>:1:28: .safe() đã bỏ (14/10/2026): viết safe(() => db.users.first()), nhận { value, error }"},
+			"<source>:1:28: .safe() đã bỏ (14/10/2026): viết safe(() => db.users.first()), nhận { ok, value, error }"},
 		// the receiver of a chain written one call a line is one line, without the breaks
 		{"const rows = db.table(\"article\")\n    .where(\"visible\", \"public\")\n    .list(200)\n    .safe();",
-			"<source>:4:6: .safe() đã bỏ (14/10/2026): viết safe(() => db.table(\"article\").where(\"visible\", \"public\").list(200)), nhận { value, error }"},
+			"<source>:4:6: .safe() đã bỏ (14/10/2026): viết safe(() => db.table(\"article\").where(\"visible\", \"public\").list(200)), nhận { ok, value, error }"},
 		// an object receiver is parenthesized, as an arrow returning an object must be
 		{"const r = { answer: 42 }.safe();",
-			"<source>:1:26: .safe() đã bỏ (14/10/2026): viết safe(() => ({ answer: 42 })), nhận { value, error }"},
+			"<source>:1:26: .safe() đã bỏ (14/10/2026): viết safe(() => ({ answer: 42 })), nhận { ok, value, error }"},
 		// a parenthesized receiver keeps its parentheses
 		{"const r = (a + b).safe();",
-			"<source>:1:19: .safe() đã bỏ (14/10/2026): viết safe(() => (a + b)), nhận { value, error }"},
+			"<source>:1:19: .safe() đã bỏ (14/10/2026): viết safe(() => (a + b)), nhận { ok, value, error }"},
 	} {
 		_, err := CompileSource(c.source)
 		if err == nil {
@@ -51,7 +51,7 @@ func TestRemovedSafeMethodShortensALongReceiver(t *testing.T) {
     .list(200)
     .safe();`
 	_, err := CompileSource(source)
-	want := `viết safe(() => db.table("article").select("slug", "name", "description", …orderBy("created_at", "desc").list(200)), nhận { value, error }`
+	want := `viết safe(() => db.table("article").select("slug", "name", "description", …orderBy("created_at", "desc").list(200)), nhận { ok, value, error }`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("long receiver = %v\nwant %s", err, want)
 	}

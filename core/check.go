@@ -233,10 +233,11 @@ func CheckWithLayout(
 		for _, file := range files {
 			var bytecode *compiler.Bytecode
 			var compileErr error
+			appRoot := profileAppRoot(root, layout, file)
 			if artifactCache != nil {
-				bytecode, compileErr = artifactCache.CompileFile(file)
+				bytecode, compileErr = artifactCache.CompileFileInApp(appRoot, file)
 			} else {
-				bytecode, compileErr = compiler.CompileFile(file)
+				bytecode, compileErr = compiler.CompileFileInApp(appRoot, file)
 			}
 			// Site preparation and app checks already report compilation
 			// failures with their owning runtime context.

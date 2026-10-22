@@ -80,7 +80,7 @@ func TestErrorHandlerReceivesTheErrorObject(t *testing.T) {
 	}
 	got = serve("/said")
 	if body := strings.TrimSpace(got.Body.String()); got.Code != http.StatusPaymentRequired ||
-		body != `{"at":null,"code":"FAIL","message":"Thanh toán không thành công"}` {
+		body != `{"at":null,"cause":null,"code":"FAIL","message":"Thanh toán không thành công"}` {
 		t.Fatalf("/said = %d %s", got.Code, body)
 	}
 }

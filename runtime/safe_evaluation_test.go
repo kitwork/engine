@@ -7,8 +7,8 @@ import (
 )
 
 // safeResult is what safe(() => x) gives for what its function returned (safe.go): a runtime error
-// becomes { value: null, error: { message, code, at } }; every failure the host puts on a program, and
-// the engine's integrity, passes through unchanged.
+// becomes { ok: false, value: null, error: { message, code, at, cause } }; every failure the host puts on a
+// program, and the engine's integrity, passes through unchanged.
 func TestSafeResultRescuesOnlyRuntimeErrors(t *testing.T) {
 	var vm *VM
 	runtimeFailure := diagnosticResult(&Diagnostic{
@@ -22,10 +22,15 @@ func TestSafeResultRescuesOnlyRuntimeErrors(t *testing.T) {
 	})
 	rescued := vm.safeResult(-1, runtimeFailure)
 	failure := rescued.Get("error")
-	if rescued.K != value.Map || rescued.Get("value").K != value.Nil ||
+	if rescued.K != value.Map || rescued.Get("value").K != value.Nil || rescued.Get("ok").K != value.Bool ||
+		rescued.Get("ok").Truthy() || len(rescued.Map()) != 3 ||
 		failure.Get("message").Text() != "boom" || failure.Get("code").Text() != value.FailCode ||
 		failure.Get("at").Text() != "router.kitwork.js:4:7" {
 		t.Fatalf("runtime failure was not rescued: %s", rescued.Text())
+	}
+	// cause is always a key, null while nothing wraps another failure (KITWORK_LANG.md mục 6)
+	if cause, has := failure.Map()["cause"]; !has || cause.K != value.Nil || len(failure.Map()) != 4 {
+		t.Fatalf("the error object is not { message, code, at, cause }: %s", failure.Text())
 	}
 	if _, has := failure.Map()["progress"]; has {
 		t.Fatalf("a failure that is not PARTIAL carries progress: %s", failure.Text())
@@ -56,15 +61,16 @@ func TestSafeResultRescuesOnlyRuntimeErrors(t *testing.T) {
 func TestSafeResultOfSuccessIsAPlainObject(t *testing.T) {
 	var vm *VM
 	success := vm.safeResult(-1, value.New(42))
-	if success.K != value.Map || success.Get("value").Int() != 42 || success.Get("error").K != value.Nil {
+	if success.K != value.Map || success.Get("value").Int() != 42 || success.Get("error").K != value.Nil ||
+		success.Get("ok").K != value.Bool || !success.Get("ok").Truthy() {
 		t.Fatalf("safe success = %s", success.Text())
 	}
-	if len(success.Map()) != 2 {
-		t.Fatalf("safe success has keys beyond value and error: %s", success.Text())
+	if len(success.Map()) != 3 {
+		t.Fatalf("safe success has keys beyond ok, value and error: %s", success.Text())
 	}
-	// a function that returns null is a success too: error, not value, says whether it failed
+	// a function that returns null is a success too: ok, not value, says whether it failed
 	empty := vm.safeResult(-1, value.Value{K: value.Nil})
-	if empty.Get("value").K != value.Nil || empty.Get("error").K != value.Nil {
+	if empty.Get("value").K != value.Nil || empty.Get("error").K != value.Nil || !empty.Get("ok").Truthy() {
 		t.Fatalf("safe of null = %s", empty.Text())
 	}
 }

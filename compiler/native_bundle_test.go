@@ -162,7 +162,7 @@ func TestNativeBundleDirectoryImport(t *testing.T) {
 	_, _, errFail := nativeBundle(entryFail, progFail)
 	if errFail == nil {
 		t.Error("expected directory import with bindings to fail, but it succeeded")
-	} else if !strings.Contains(errFail.Error(), "must be a side-effect import") {
+	} else if !strings.Contains(errFail.Error(), `import "./routes/" là một thư mục`) {
 		t.Errorf("expected side-effect error, got: %v", errFail)
 	}
 }

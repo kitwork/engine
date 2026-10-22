@@ -8,8 +8,8 @@ import (
 
 // The codes a failure carries: one closed set (14/10/2026), what safe(() => …) gives as error.code.
 // Upper case with underscores, no vendor prefix, and nothing an application chooses: fail("…") is
-// always FailCode. When two codes fit one failure the narrower wins: DENIED, TIMEOUT, CONFLICT and
-// PARTIAL before DATABASE, NETWORK and INVALID_INPUT.
+// always FailCode. When two codes fit one failure the narrower wins: DENIED, TIMEOUT, CONFLICT, PARTIAL,
+// NOT_FOUND and TOO_LARGE before DATABASE, NETWORK and INVALID_INPUT.
 const (
 	// FailCode is a program that stopped itself with fail("…").
 	FailCode = "FAIL"
@@ -41,6 +41,14 @@ const (
 	// DeniedCode is the engine refusing by policy: SSRF, a file outside the app's folder, an entity's
 	// rights.
 	DeniedCode = "DENIED"
+	// NotFoundCode is a thing named exactly that is not there, from a function that promised to give it:
+	// a file to read, copy or move, db.detail() finding no row (22/10/2026). A function that gives a thing
+	// only when there is one (file.info, a storage get, db.first) gives null instead.
+	NotFoundCode = "NOT_FOUND"
+	// TooLargeCode is past the quota or the size ceiling of a place that stores (a file, disk(),
+	// datastore()), or past the ceiling of a read into the VM's memory (22/10/2026). A ceiling of the
+	// argument itself stays INVALID_ARGUMENT ("x".repeat past 8 MB), a body past its limit INVALID_INPUT.
+	TooLargeCode = "TOO_LARGE"
 	// DefaultFailureCode is the fallback of a failure made without a code. A test counts the places
 	// that still make one (failure_ratchet_test.go) and only lets the count go down, to zero.
 	DefaultFailureCode = "ERROR"
@@ -65,6 +73,8 @@ var closedCodes = map[string]bool{
 	TimeoutCode:         true,
 	NetworkCode:         true,
 	DeniedCode:          true,
+	NotFoundCode:        true,
+	TooLargeCode:        true,
 	DefaultFailureCode:  true,
 }
 

@@ -32,15 +32,25 @@ func parseProgramSource(content, source string) (*Program, error) {
 // The hand-written parser is the single source of truth for the Kitwork language
 // subset: anything it can't express is a compile error (by design), not silently
 // normalized by a bundler.
+//
+// The file belongs to no app here, so an `app/…` import is a compile error: a file of an app is
+// compiled with CompileFileInApp.
 func CompileFile(paths ...string) (*Bytecode, error) {
-	prog, files, sources, err := prepareFile(paths...)
+	return CompileFileInApp("", paths...)
+}
+
+// CompileFileInApp compiles a file of an app. appRoot is the app's folder, app/ for one app,
+// apps/<identity>/ for many (22/10/2026, KITWORK_UI.md mục 4): `import { x } from "app/.shared/x.work"`
+// in any folder of the app resolves from it, never past it, and never into its .database/.
+func CompileFileInApp(appRoot string, paths ...string) (*Bytecode, error) {
+	prog, files, sources, err := prepareFile(appRoot, paths...)
 	if err != nil {
 		return nil, err
 	}
 	return compilePreparedFile(prog, files, sources)
 }
 
-func prepareFile(paths ...string) (*Program, []string, map[string]string, error) {
+func prepareFile(appRoot string, paths ...string) (*Program, []string, map[string]string, error) {
 	if paths == nil {
 		return nil, nil, nil, fmt.Errorf("path is required")
 	}
@@ -67,7 +77,7 @@ func prepareFile(paths ...string) (*Program, []string, map[string]string, error)
 	if hasRelativeImports(prog) {
 		var moduleFiles []string
 		var moduleSources map[string]string
-		prog, moduleFiles, moduleSources, err = nativeBundleWithSources(entryAbs, prog)
+		prog, moduleFiles, moduleSources, err = nativeBundleWithSources(entryAbs, prog, appRoot, sources)
 		if err != nil {
 			return nil, nil, nil, err
 		}

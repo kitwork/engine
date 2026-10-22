@@ -23,7 +23,7 @@ func TestFolderErrorHandlerAnswersItsRoutes(t *testing.T) {
 		status int
 		body   string
 	}{
-		"/folder":       {http.StatusServiceUnavailable, `{"seen":{"at":"router.kitwork.js:4:3","code":"FAIL","message":"hỏng"}}`},
+		"/folder":       {http.StatusServiceUnavailable, `{"seen":{"at":"router.kitwork.js:4:3","cause":null,"code":"FAIL","message":"hỏng"}}`},
 		"/parent/child": {http.StatusBadGateway, `{"parent":"FAIL"}`},
 		"/parent/own":   {http.StatusGatewayTimeout, `{"own":"riêng"}`},
 		"/parent/route": {http.StatusConflict, `{"route":"tuyến"}`},

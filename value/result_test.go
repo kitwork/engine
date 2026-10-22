@@ -16,7 +16,16 @@ import (
 func TestClosedCodeKeepsTheSetAndFoldsTheRest(t *testing.T) {
 	set := []string{FailCode, NotAFunctionCode, TypeCode, InvalidArgumentCode, InvalidInputCode,
 		UnavailableCode, UnsupportedCode, DatabaseCode, ConflictCode, PartialCode, TimeoutCode,
-		NetworkCode, DeniedCode, DefaultFailureCode}
+		NetworkCode, DeniedCode, NotFoundCode, TooLargeCode, DefaultFailureCode}
+	// the set as KITWORK_LANG.md mục 6 writes it, word for word (NOT_FOUND and TOO_LARGE from 22/10/2026)
+	written := []string{"FAIL", "NOT_A_FUNCTION", "TYPE", "INVALID_ARGUMENT", "INVALID_INPUT", "UNAVAILABLE",
+		"UNSUPPORTED", "DATABASE", "CONFLICT", "PARTIAL", "TIMEOUT", "NETWORK", "DENIED", "NOT_FOUND",
+		"TOO_LARGE", "ERROR"}
+	for index, code := range set {
+		if code != written[index] {
+			t.Errorf("code %d is %q, the spec writes %q", index, code, written[index])
+		}
+	}
 	for _, code := range set {
 		if got := ClosedCode(code); got != code {
 			t.Errorf("ClosedCode(%q) = %q, want itself", code, got)

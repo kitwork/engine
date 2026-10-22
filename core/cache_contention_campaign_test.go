@@ -248,7 +248,8 @@ func runCacheContentionCampaign(
 				return fmt.Errorf("%s: write route: %w", round.scenario, err)
 			}
 		}
-		expected, err := compiler.CompileFile(routerFile)
+		appRoot := restartCampaignAppRoot(root)
+		expected, err := compiler.CompileFileInApp(appRoot, routerFile)
 		if err != nil {
 			return fmt.Errorf("%s: compile expected artifact: %w", round.scenario, err)
 		}
@@ -258,7 +259,7 @@ func runCacheContentionCampaign(
 		}
 		expectedDigest := sha256.Sum256(expectedArtifact)
 		expectedHash := hex.EncodeToString(expectedDigest[:])
-		artifactPath := filepath.Join(cacheDirectory, expected.CacheKey()+".kwbc")
+		artifactPath := filepath.Join(cacheDirectory, expected.CacheKeyInApp(appRoot)+".kwbc")
 
 		before := restartArtifactBefore{}
 		switch round.scenario {

@@ -10,9 +10,9 @@ import (
 )
 
 // safe(() => x) is how a program reads a failure (14/10/2026): a global function the VM runs, giving
-// a plain object { value, error }, error null or { message, code, at } (error.progress too for
-// PARTIAL). It replaced x.safe(), a lowering whose result was a Go struct with ok/isError/value/
-// error/code getters, which JSON wrote as null.
+// a plain object { ok, value, error } (ok from 21/10/2026, the main check), error null or
+// { message, code, at, cause } (error.progress too for PARTIAL). It replaced x.safe(), a lowering whose
+// result was a Go struct with ok/isError/value/error/code getters, which JSON wrote as null.
 
 // runSafe compiles source and runs it with the global safe and globals, and gives the run's own
 // result and its `result` variable.
@@ -46,18 +46,37 @@ func TestSafeGivesThePlainObjectOfASuccess(t *testing.T) {
 const u = { id: 7, name: "ann" }
 const r = safe(() => u)
 const empty = safe(() => null)
-var result = [r.value.id, r.error, JSON.stringify(r.value), empty.value, empty.error, r.ok, r.isError, r.code]
+var result = [r.ok, r.value.id, r.error, JSON.stringify(r.value), empty.ok, empty.value, empty.error, r.isError, r.code]
 `, nil)
 	if returned.IsInvalid() {
 		t.Fatal(returned.Text())
 	}
-	// ok, isError and code are not keys of the result: one way to check, if (r.error)
-	if got := result.Text(); got != `[7, null, {"id":7,"name":"ann"}, null, null, null, null, null]` {
+	// ok is true for a function that returned, null included (null is "not there", not a failure);
+	// isError and code are not keys of the result: the outer layer has ok, value, error only
+	if got := result.Text(); got != `[true, 7, null, {"id":7,"name":"ann"}, true, null, null, null, null]` {
 		t.Fatalf("result = %s", got)
 	}
 	_, written := runSafe(t, `var result = JSON.stringify(safe(() => 1 + 2))`, nil)
-	if got := written.Text(); got != `{"error":null,"value":3}` {
-		t.Fatalf("JSON of a result = %s, want {\"error\":null,\"value\":3}", got)
+	if got := written.Text(); got != `{"error":null,"ok":true,"value":3}` {
+		t.Fatalf("JSON of a result = %s, want {\"error\":null,\"ok\":true,\"value\":3}", got)
+	}
+}
+
+// ok is false exactly when error is not null (21/10/2026, KITWORK_LANG.md mục 6): if (!found.ok) is the
+// check, and the error object is { message, code, at, cause }, cause null while nothing wraps another.
+func TestSafeOkIsFalseOnAFailure(t *testing.T) {
+	_, result := runSafe(t, `
+const found = safe(() => failHost())
+const { ok: userOk, value: user } = safe(() => failHost())
+var result = [found.ok, found.value, found.error.code, found.error.cause, userOk, user, !found.ok]
+`, failingHost(value.DatabaseCode))
+	if got := result.Text(); got != "[false, null, DATABASE, null, false, null, true]" {
+		t.Fatalf("result = %s", got)
+	}
+	// the whole shape, at set by hand: the place itself is TestSafeAtIsWhereTheFailureIs's
+	_, written := runSafe(t, "const failed = safe(() => failHost())\nfailed.error.at = \"chỗ\"\nvar result = JSON.stringify(failed)", failingHost(value.ConflictCode))
+	if got := written.Text(); got != `{"error":{"at":"chỗ","cause":null,"code":"CONFLICT","message":"host failed"},"ok":false,"value":null}` {
+		t.Fatalf("JSON of a failure = %s", got)
 	}
 }
 
@@ -75,6 +94,7 @@ var result = fn()
 // code is ERROR.
 func TestSafeRescuesAFailureAndKeepsItsCode(t *testing.T) {
 	for code, want := range map[string]string{"": value.DefaultFailureCode, value.ConflictCode: value.ConflictCode,
+		value.NotFoundCode: value.NotFoundCode, value.TooLargeCode: value.TooLargeCode,
 		"KITDB_TRANSACTION_CONFLICT": value.DefaultFailureCode} {
 		returned, result := runSafe(t, `
 const check = safe(() => failHost())
@@ -252,7 +272,7 @@ func TestSafeOfWhatIsNotAFunctionFailsOutsideItself(t *testing.T) {
 	}
 }
 
-// const { value, error } takes the result apart, with renaming.
+// const { ok, value, error } takes the result apart, with renaming.
 func TestSafeDestructures(t *testing.T) {
 	_, result := runSafe(t, `
 const { value: user, error: userError } = safe(() => ({ id: 1 }))

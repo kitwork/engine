@@ -302,9 +302,9 @@ func (t *Tenant) runClaimed(scheduler *cronRuntime, r claimedRow, job *CronJob) 
 }
 
 // jobErrorObject is the error a cron's or a queue's .error((run, err) => …) handler receives: the
-// shape a router's .error() handler and safe give, { message, code, at } (14/10/2026; it was
-// { message } with the place first and the stack after). A run that failed hands its diagnostic; any
-// other error (a job with no bytecode) has no place.
+// shape a router's .error() handler and safe give, { message, code, at, cause } (14/10/2026, cause
+// 22/10/2026; it was { message } with the place first and the stack after). A run that failed hands its
+// diagnostic; any other error (a job with no bytecode) has no place.
 func jobErrorObject(runErr error) value.Value {
 	var diagnostic *runtime.Diagnostic
 	if errors.As(runErr, &diagnostic) {

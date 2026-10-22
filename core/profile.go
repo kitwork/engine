@@ -87,7 +87,7 @@ func ProfileWithLayout(root string, layout work.RootLayout) ProfileReport {
 	var opcodeEnergy [256]uint64
 	var opcodeNames [256]string
 	for _, file := range files {
-		bytecode, compileErr := compiler.CompileFile(file)
+		bytecode, compileErr := compiler.CompileFileInApp(profileAppRoot(root, layout, file), file)
 		relative := profileRelativePath(root, file)
 		if compileErr != nil {
 			report.Issues = append(report.Issues, ProfileIssue{
@@ -351,6 +351,30 @@ func profileLegacyEntrypoints(root string) ([]string, error) {
 	})
 	sort.Strings(files)
 	return files, err
+}
+
+// profileAppRoot is the folder of the app file belongs to, where its `app/…` imports resolve, as the
+// tenant that runs it finds it (resolveApp): the root itself for one app (app/), apps/<identity>/ for
+// many. The legacy walk has no declared shape and takes the first folder under the root: the identity of
+// <identity>/<domain>/, the site of a flat <domain>/ (sites/<domain>/ for the sites folder).
+func profileAppRoot(root string, layout work.RootLayout, file string) string {
+	if layout.IsSingleApp() {
+		return root
+	}
+	relative, err := filepath.Rel(root, file)
+	if err != nil {
+		return root
+	}
+	first, rest, nested := strings.Cut(filepath.ToSlash(relative), "/")
+	if !nested || first == ".." {
+		return root
+	}
+	if layout == work.RootLayoutAuto && first == work.SitesDirName {
+		if domain, _, deeper := strings.Cut(rest, "/"); deeper {
+			return filepath.Join(root, first, domain)
+		}
+	}
+	return filepath.Join(root, first)
 }
 
 func profileRelativePath(root, file string) string {

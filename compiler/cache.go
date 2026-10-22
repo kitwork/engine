@@ -27,16 +27,24 @@ func NewFileCache(directory string) *FileCache {
 // parsing and native import discovery still run first so the cache key covers
 // the exact current dependency contents.
 func (c *FileCache) CompileFile(paths ...string) (*Bytecode, error) {
+	return c.CompileFileInApp("", paths...)
+}
+
+// CompileFileInApp is CompileFile for a file of the app whose folder is appRoot
+// (CompileFileInApp of the package). The artifact's name carries the app's
+// folder: one cache directory serves every app of a host, and two apps never
+// share what their `app/…` imports resolved to.
+func (c *FileCache) CompileFileInApp(appRoot string, paths ...string) (*Bytecode, error) {
 	if c == nil || c.directory == "" {
-		return CompileFile(paths...)
+		return CompileFileInApp(appRoot, paths...)
 	}
 
-	prog, files, sources, err := prepareFile(paths...)
+	prog, files, sources, err := prepareFile(appRoot, paths...)
 	if err != nil {
 		return nil, err
 	}
 	sourceFingerprint := fingerprintSources(sources)
-	filename := filepath.Join(c.directory, cacheKeyForSource(sourceFingerprint)+".kwbc")
+	filename := filepath.Join(c.directory, cacheKeyForApp(appRoot, sourceFingerprint)+".kwbc")
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

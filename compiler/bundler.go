@@ -23,23 +23,39 @@ import (
 // Bất kỳ trường hợp nào không xử lý được (cycle, không tìm thấy file, …) đều trả lỗi
 // để caller (Bytecode) rớt về esbuild — nên đây là đường đi AN TOÀN, additive.
 func nativeBundle(entryPath string, entryProg *Program) (*Program, []string, error) {
-	program, files, _, err := nativeBundleWithSources(entryPath, entryProg)
+	program, files, _, err := nativeBundleWithSources(entryPath, entryProg, "", nil)
 	return program, files, err
 }
 
+// nativeBundleWithSources is nativeBundle that also gives every module's source by its name. appRoot is
+// the folder of the app the entry belongs to, where an `app/…` import resolves ("" when the file is no
+// app's, as the host's manifest: an `app/…` import is then a compile error). sources holds the entry's
+// own source by its name (nil for none), so an error of an import written in it says where it stands.
 func nativeBundleWithSources(
 	entryPath string,
 	entryProg *Program,
+	appRoot string,
+	sources map[string]string,
 ) (*Program, []string, map[string]string, error) {
 	abs, err := filepath.Abs(entryPath)
 	if err != nil {
 		abs = entryPath
 	}
+	if appRoot != "" {
+		if absolute, err := filepath.Abs(appRoot); err == nil {
+			appRoot = absolute
+		}
+	}
+	known := make(map[string]string, len(sources))
+	for name, text := range sources {
+		known[name] = text
+	}
 	b := &bundler{
 		modules:   map[string]string{},
 		visiting:  map[string]bool{},
-		sources:   map[string]string{},
+		sources:   known,
 		debugRoot: filepath.Dir(abs),
+		appRoot:   appRoot,
 	}
 	body, err := b.rewriteStatements(entryProg.Statements, filepath.Dir(abs))
 	if err != nil {
@@ -66,6 +82,10 @@ type bundler struct {
 	visiting  map[string]bool   // phát hiện cycle
 	defs      []Statement
 	counter   int
+	// appRoot is the app's folder an `app/…` import resolves from, "" for a file of no app;
+	// appRootReal is it past links, found at the first app/ import.
+	appRoot     string
+	appRootReal string
 }
 
 // rewriteStatements thay mỗi ImportStatement tương đối bằng binding, và bảo đảm
@@ -78,7 +98,7 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 			out = append(out, s)
 			continue
 		}
-		absPath, err := resolveModulePath(imp.Source, fromDir)
+		absPath, err := b.resolve(imp, fromDir)
 		if err != nil {
 			return nil, err
 		}
@@ -87,9 +107,11 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 			return nil, err
 		}
 		if fi.IsDir() && !imp.SideEffect {
-			return nil, fmt.Errorf("native bundle: directory import %q cannot export bindings (must be a side-effect import)", imp.Source)
+			// said where the import stands, in the author's words, with the two forms that work (22/10/2026)
+			return nil, fmt.Errorf("%s: import %q là một thư mục, không có gì để lấy theo tên: lấy từ một file trong đó (%q), hay viết import %q không tên để chạy cả thư mục",
+				b.place(imp.SourceToken), imp.Source, strings.TrimSuffix(imp.Source, "/")+"/x.work", imp.Source)
 		}
-		modVar, err := b.ensureModule(imp.Source, fromDir)
+		modVar, err := b.ensureModule(absPath)
 		if err != nil {
 			return nil, err
 		}
@@ -106,13 +128,9 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 	return out, nil
 }
 
-// ensureModule resolve + parse + bọc IIFE một module (đệ quy cho import của nó),
+// ensureModule parse + bọc IIFE một module đã resolve (absPath, đệ quy cho import của nó),
 // trả về tên biến module. Dùng cache để dedupe.
-func (b *bundler) ensureModule(spec, fromDir string) (string, error) {
-	absPath, err := resolveModulePath(spec, fromDir)
-	if err != nil {
-		return "", err
-	}
+func (b *bundler) ensureModule(absPath string) (string, error) {
 	if v, ok := b.modules[absPath]; ok {
 		return v, nil
 	}
@@ -140,7 +158,7 @@ func (b *bundler) ensureModule(spec, fromDir string) (string, error) {
 		}
 		sort.Strings(files)
 		for _, f := range files {
-			_, err := b.ensureModule(f, "")
+			_, err := b.ensureModule(f)
 			if err != nil {
 				return "", err
 			}
@@ -188,6 +206,111 @@ func (b *bundler) sourceName(path string) string {
 		return filepath.Base(path)
 	}
 	return filepath.ToSlash(relative)
+}
+
+// resolve is the file an import names: an `app/…` path from the app's folder, any other from the
+// folder of the file that imports (fromDir).
+func (b *bundler) resolve(imp *ImportStatement, fromDir string) (string, error) {
+	if !isAppRootSpecifier(imp.Source) {
+		resolved, err := resolveModulePath(imp.Source, fromDir)
+		if err != nil {
+			return "", err
+		}
+		// nothing imports from an app's data, whatever the spelling (KITWORK_UI.md mục 4): a relative path into
+		// a .database/ is refused as app/.database/ is (22/10/2026)
+		if b.appRoot != "" && b.inAppData(resolved) {
+			return "", fmt.Errorf("%s: import %q: .database/ là dữ liệu của app, không import được; code dùng chung đặt trong .shared/", b.place(imp.SourceToken), imp.Source)
+		}
+		return resolved, nil
+	}
+	where := b.place(imp.SourceToken)
+	if b.appRoot == "" {
+		return "", fmt.Errorf("%s: import %q: file này không thuộc app nào nên không có app/; app/ là thư mục của app chứa file đang viết (app/ khi một app, apps/<identity>/ khi nhiều app)", where, imp.Source)
+	}
+	// the parser refused every spelling that leaves the app; a program built another way meets the rule here
+	if problem := appRootSpecifierProblem(imp.Source); problem != "" {
+		return "", fmt.Errorf("%s: %s", where, problem)
+	}
+	rest := strings.TrimPrefix(imp.Source, "app/")
+	resolved, ok := statModule(filepath.Join(b.appRoot, filepath.FromSlash(rest)))
+	if !ok {
+		return "", fmt.Errorf("%s: import %q: app không có file %s", where, imp.Source, rest)
+	}
+	// the same rule on the disk, past links: the file stays inside the app and out of its data
+	relative, err := b.appRelative(resolved)
+	if err != nil {
+		// a link the system does not let Go follow (a junction on Windows): refused, never guessed inside
+		return "", fmt.Errorf("%s: import %q: không lần được đường tới file qua liên kết; app/ chỉ trỏ tới file nằm trong gốc app", where, imp.Source)
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("%s: import %q ra ngoài app: file nó tới (qua liên kết) không nằm trong gốc app", where, imp.Source)
+	}
+	if first, _, _ := strings.Cut(filepath.ToSlash(relative), "/"); strings.EqualFold(first, ".database") {
+		return "", fmt.Errorf("%s: import %q: .database/ là dữ liệu của app, không import được; code dùng chung đặt trong .shared/", where, imp.Source)
+	}
+	return resolved, nil
+}
+
+// inAppData reports whether path lies in a .database/ folder of this app or of an app beside it (counted
+// from the folder that holds the app: apps/ for many apps, the host for one), as written or past links.
+func (b *bundler) inAppData(path string) bool {
+	holder := filepath.Dir(b.appRoot)
+	if hasDataSegment(holder, path) {
+		return true
+	}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	holderReal, err := filepath.EvalSymlinks(holder)
+	if err != nil {
+		return false
+	}
+	return hasDataSegment(holderReal, real)
+}
+
+// hasDataSegment reports a folder .database on the way from base to path (".database." and ".database "
+// too, which Windows opens as .database).
+func hasDataSegment(base, path string) bool {
+	relative, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(relative), "/") {
+		if strings.EqualFold(strings.TrimRight(segment, ". "), ".database") {
+			return true
+		}
+	}
+	return false
+}
+
+// appRelative is path from the app's folder, both past links.
+func (b *bundler) appRelative(path string) (string, error) {
+	if b.appRootReal == "" {
+		real, err := filepath.EvalSymlinks(b.appRoot)
+		if err != nil {
+			return "", err
+		}
+		b.appRootReal = real
+	}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Rel(b.appRootReal, real)
+}
+
+// place is where tok stands, file:line:column as the parser writes it, read from the source of the file it
+// is in; the file's name alone when the bundler does not hold that source.
+func (b *bundler) place(tok Token) string {
+	text, ok := b.sources[tok.Source]
+	if !ok {
+		if tok.Source != "" {
+			return tok.Source
+		}
+		return fmt.Sprintf("pos %d", tok.Position)
+	}
+	return textLocation([]byte(text), tok)
 }
 
 // resolveModulePath quy specifier tương đối về đường dẫn file tuyệt đối, thử các

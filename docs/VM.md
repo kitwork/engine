@@ -137,9 +137,11 @@ wrapped a nested run's `ENERGY_LIMIT` as a Go error) is that diagnostic.
 `safe` is a global function (`value.SafeFunction`) that `CALL` runs on the VM
 itself (`runtime/safe.go`): it calls its one argument with no arguments through
 `ExecuteLambda`, in a frame of its own on the same energy and limits, and gives a
-plain map `{ value, error }`, `error` null or `{ message, code, at }` (`at` is
+plain map `{ ok, value, error }` (22/10/2026: `ok` is `true` or `false`, the main
+check), `error` null or `{ message, code, at, cause }` (`at` is
 `file:line:column` of the innermost frame at the failing instruction, the column
-in characters), with `progress` for `PARTIAL`. It rescues only `RUNTIME_ERROR`.
+in characters; `cause` is null until a failure of the engine carries the one it
+wraps), with `progress` for `PARTIAL`. It rescues only `RUNTIME_ERROR`.
 Energy exhaustion, cancellation, stack overflow, Program mismatch, no Program,
 VM stop, unknown opcode, truncated bytecode and native panic remain terminal and
 pass through every `safe`. A diagnostic's text (message led by its place, then

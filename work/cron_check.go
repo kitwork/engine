@@ -30,7 +30,8 @@ func CheckQueueFiles(root, identity string) []CronCheckIssue {
 // checkAppSources compiles every .kitwork.js directly inside one app-level folder. It never
 // evaluates declarations, so nothing registers, connects, or starts.
 func checkAppSources(root, identity, folder string) []CronCheckIssue {
-	dir := filepath.Join(root, identity, folder)
+	appRoot := filepath.Join(root, identity)
+	dir := filepath.Join(appRoot, folder)
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -48,7 +49,7 @@ func checkAppSources(root, identity, folder string) []CronCheckIssue {
 			continue
 		}
 		file := filepath.Join(dir, entry.Name())
-		if _, compileErr := compiler.CompileFile(file); compileErr != nil {
+		if _, compileErr := compiler.CompileFileInApp(appRoot, file); compileErr != nil {
 			issues = append(issues, CronCheckIssue{File: file, Err: compileErr})
 		}
 	}

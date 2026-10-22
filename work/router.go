@@ -305,11 +305,11 @@ func isUncaught(err error) bool {
 }
 
 // errorObject is what the parameter err, error or e of a .error() handler receives: the error that
-// ended the request, in the shape safe(() => …) gives an error, { message, code, at } (14/10/2026;
-// until then the string of the whole diagnostic, stack included). A runtime failure keeps its code and
-// its place; a failure safe never catches (ENERGY_LIMIT…) shows its own code. An error the site set
-// (ctx.error("…")) is FAIL, a guard that rejected the request DENIED, an answer the engine could not
-// write ERROR; none of them has a place. null when nothing failed.
+// ended the request, in the shape safe(() => …) gives an error, { message, code, at, cause } (14/10/2026,
+// cause 22/10/2026; until then the string of the whole diagnostic, stack included). A runtime failure
+// keeps its code and its place; a failure safe never catches (ENERGY_LIMIT…) shows its own code. An
+// error the site set (ctx.error("…")) is FAIL, a guard that rejected the request DENIED, an answer the
+// engine could not write ERROR; none of them has a place. null when nothing failed.
 func (r *Router) errorObject() value.Value {
 	if r == nil || r.err == nil {
 		return value.Value{K: value.Nil}

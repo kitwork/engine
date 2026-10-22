@@ -992,13 +992,19 @@ func (t *Tenant) recordVMExecution(
 	}
 }
 
+// compileFile compiles a file of this tenant's app: its `app/…` imports resolve from the app's folder
+// (resolveApp: app/ for one app, apps/<identity>/ for many), never from the site's.
 func (t *Tenant) compileFile(paths ...string) (*compiler.Bytecode, error) {
+	appRoot := ""
+	if t != nil {
+		appRoot = t.resolveApp()
+	}
 	if t != nil && t.generation != nil {
 		if bytecodeCache := t.generation.BytecodeCache(); bytecodeCache != nil {
-			return bytecodeCache.CompileFile(paths...)
+			return bytecodeCache.CompileFileInApp(appRoot, paths...)
 		}
 	}
-	return compiler.CompileFile(paths...)
+	return compiler.CompileFileInApp(appRoot, paths...)
 }
 
 func (t *Tenant) CompileDynamicRoute(filePath string) error {

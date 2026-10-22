@@ -412,7 +412,7 @@ func (t *Tenant) LoadQueueFiles() {
 			continue
 		}
 		file := filepath.Join(dir, e.Name())
-		bc, compileErr := compiler.CompileFile(file)
+		bc, compileErr := compiler.CompileFileInApp(t.resolveApp(), file)
 		if compileErr != nil {
 			fmt.Printf("[Queue] compile %s: %v\n", e.Name(), compileErr)
 			continue
