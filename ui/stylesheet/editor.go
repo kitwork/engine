@@ -15,7 +15,7 @@ import (
 //   - the writing area (editor-area) is a block of text at least rows lines high (editor-rows-N, 4
 //     lines when rows is not written), its placeholder drawn from aria-placeholder while it is empty,
 //     its words at least 16px on a touch screen so a phone does not zoom in (!important: a size the
-//     author writes on <content>, size="small", is a class of the page layer, which outranks this one);
+//     author writes on <textarea>, size="small", is a class of the page layer, which outranks this one);
 //   - the field the form posts (editor-field, a <textarea>) stays a real control, so the browser's own
 //     check of required still holds: drawn as nothing under the area, never display:none;
 //   - a group of a toolbar's buttons (editor-group, <group>, toolbar v2) that follows another starts

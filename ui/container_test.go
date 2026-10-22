@@ -46,11 +46,11 @@ func TestContainerCapsAndCentresOnTheWidthScale(t *testing.T) {
 	mustNotContain(t, css, "max-inline-size", "margin-inline")
 }
 
-// On <page>, container is the width the regions line up on: each region inside gets it, <body> never
+// On <view>, container is the width the regions line up on: each region inside gets it, <body> never
 // does, so the page's background still spans the screen. A region that writes its own width keeps it.
 func TestPageContainerCapsEachRegionNotTheBody(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page container="wide" background="canvas"><header /><content /><footer /><overlay /></page>`,
+		"/site/view.ui":    `<view container="wide" background="canvas"><header /><content /><footer /><overlay /></view>`,
 		"/site/header.ui":  `<header flex="row" padding="4"><text>Quán</text><navbar /></header>`,
 		"/site/navbar.ui":  `<navbar flex="row" gap="6"><link value="/">Thực đơn</link></navbar>`,
 		"/site/content.ui": `<content padding="6"><text>Thực đơn</text></content>`,
@@ -82,14 +82,14 @@ func TestPageContainerCapsEachRegionNotTheBody(t *testing.T) {
 	}
 	mustContain(t, html, `data-kitwork-component="progressbar"`, `data-kitwork-component="reader"`) // they are on the page
 
-	// a region written in place in page.ui is a region too; what is not a region keeps the whole width
+	// a region written in place in view.ui is a region too; what is not a region keeps the whole width
 	inPlace := memorySite("", map[string]string{
-		"/site/page.ui":    `<page container="large"><header padding="4"><text>Quản lý</text></header><section background="panel"><text>Khuyến mãi</text></section><content /></page>`,
+		"/site/view.ui":    `<view container="large"><header padding="4"><text>Quản lý</text></header><section background="panel"><text>Khuyến mãi</text></section><content /></view>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	html = renderAt(t, inPlace, ".", "/", nil)
 	if got, want := openTag(html, "header"), `<header class="flex-column padding-4 container-large">`; got != want {
-		t.Errorf("header written in page.ui\n got  %s\n want %s", got, want)
+		t.Errorf("header written in view.ui\n got  %s\n want %s", got, want)
 	}
 	if got := openTag(html, "main"); !strings.Contains(got, "container-large") {
 		t.Errorf("content of a page with a header in place: %s", got)
@@ -110,13 +110,13 @@ func TestPageContainerCapsEachRegionNotTheBody(t *testing.T) {
 	}
 
 	// control: a page without container caps nothing
-	files["/site/page.ui"] = `<page background="canvas"><header /><content /><footer /><overlay /></page>`
+	files["/site/view.ui"] = `<view background="canvas"><header /><content /><footer /><overlay /></view>`
 	files["/site/content.ui"] = `<content padding="6"><text>Thực đơn</text></content>`
 	files["/site/footer.ui"] = `<footer padding="6"><text>Địa chỉ</text></footer>`
 	mustNotContain(t, renderAt(t, memorySite("", files), ".", "/", nil), "container-", "max-width-")
 }
 
-// Width prefixes work as for every presentation attribute: on an element and, through <page>, on
+// Width prefixes work as for every presentation attribute: on an element and, through <view>, on
 // each region. A target prefix is decided at build like any other.
 func TestContainerWidthPrefixes(t *testing.T) {
 	html := render(t, `<content><section container="large" huge:container="wide"><text>x</text></section></content>`, nil)
@@ -129,7 +129,7 @@ func TestContainerWidthPrefixes(t *testing.T) {
 	}
 
 	files := map[string]string{
-		"/site/page.ui":    `<page container="large" huge:container="wide"><header><text>Quán</text></header><content /></page>`,
+		"/site/view.ui":    `<view container="large" huge:container="wide"><header><text>Quán</text></header><content /></view>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	}
 	html = renderAt(t, memorySite("", files), ".", "/", nil)
@@ -170,12 +170,12 @@ func TestWidthWordsOutsideTheScaleAreErrors(t *testing.T) {
 		}
 	}
 
-	// on <page>, the width is one fixed word: data cannot move it onto <body>
+	// on <view>, the width is one fixed word: data cannot move it onto <body>
 	got := compileError(t, map[string]string{
-		"/site/page.ui":    "<page\n  container=\"{{ width }}\"><content /></page>",
+		"/site/view.ui":    "<view\n  container=\"{{ width }}\"><content /></view>",
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
-	if want := "page.ui:2:3: container của <page> là một chữ cố định (" + scale + "), không đổi theo dữ liệu"; got != want {
+	if want := "view.ui:2:3: container của <view> là một chữ cố định (" + scale + "), không đổi theo dữ liệu"; got != want {
 		t.Errorf("page container from data\n got  %s\n want %s", got, want)
 	}
 
@@ -188,7 +188,7 @@ func TestWidthWordsOutsideTheScaleAreErrors(t *testing.T) {
 // width its prefix starts at: the classes are only as good as the CSS they get on the page.
 func TestWidthClassesGetTheirCSS(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page container="large" huge:container="wide"><header><text>Quán</text></header><content /></page>`,
+		"/site/view.ui":    `<view container="large" huge:container="wide"><header><text>Quán</text></header><content /></view>`,
 		"/site/content.ui": `<content><section max-width="small"><text>x</text></section></content>`,
 	}
 	_, css := renderWithCSS(t, memorySite("", files), ".", "/", nil)

@@ -13,7 +13,7 @@ import (
 )
 
 // A link to a page that does not exist still moves without a reload: the not-found page is HTML in
-// the same frame (a Kitwork UI site's notfound.ui inside page.ui), so Drive swaps it in like any
+// the same frame (a Kitwork UI site's notfound.ui inside view.ui), so Drive swaps it in like any
 // other page. Drive used to refuse every status that was not 2xx and load the URL whole, so a
 // navbar link to a missing page dropped everything the swap keeps.
 //

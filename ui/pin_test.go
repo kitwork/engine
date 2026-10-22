@@ -34,13 +34,13 @@ func TestPinClassesAndRules(t *testing.T) {
 	mustNotContain(t, css, "sticky")
 }
 
-// A pinned element that writes no background takes the page's (<page background>, else canvas): the
+// A pinned element that writes no background takes the page's (<view background>, else canvas): the
 // content scrolling under it would show through. The region at the top of the page, written in its own
 // file, takes it too. CONTROL: one that writes a background keeps its own, with any prefix; one that
 // is not pinned (pin="none" alone) gets none.
 func TestPinnedElementTakesThePageBackground(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page background="paper"><header /><content /></page>`,
+		"/site/view.ui":    `<view background="paper"><header /><content /></view>`,
 		"/site/header.ui":  `<header pin="top" flex="row" padding="4"><text>Quán</text></header>`,
 		"/site/content.ui": `<content><box pin="bottom"><text>giỏ</text></box><box pin="top" medium:background="panel"><text>x</text></box><box pin="none"><text>y</text></box></content>`,
 	}
@@ -51,11 +51,11 @@ func TestPinnedElementTakesThePageBackground(t *testing.T) {
 		`<div class="flex-column pin-top medium:background-panel">`,
 		`<div class="flex-column pin-none">`)
 	// no page background: the canvas
-	files["/site/page.ui"] = `<page><header /><content /></page>`
+	files["/site/view.ui"] = `<view><header /><content /></view>`
 	html = renderAt(t, memorySite("", files), ".", "/", nil)
 	mustContain(t, html, `<header class="background-canvas pin-top flex-row padding-4">`)
 	// a page background from data is not known when the page compiles: the canvas too
-	files["/site/page.ui"] = `<page background="{{ theme }}"><header /><content /></page>`
+	files["/site/view.ui"] = `<view background="{{ theme }}"><header /><content /></view>`
 	html = renderAt(t, memorySite("", files), ".", "/", map[string]any{"theme": "panel"})
 	mustContain(t, html, `<header class="background-canvas pin-top flex-row padding-4">`)
 	// control: nothing pinned, no background added

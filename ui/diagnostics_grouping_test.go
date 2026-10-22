@@ -43,7 +43,7 @@ func groupedCompile(t *testing.T, palette *stylesheet.Palette, files map[string]
 // region and twice in the content. Each falls short in the dark only, and each reads once the white is
 // left out (on the canvas).
 var whitePage = map[string]string{
-	"/site/page.ui":    `<page background="white" color="ink"><header /><content /></page>`,
+	"/site/view.ui":    `<view background="white" color="ink"><header /><content /></view>`,
 	"/site/header.ui":  `<header><text color="ink-30">Quán</text></header>`,
 	"/site/content.ui": "<content><text>Cà phê</text>\n<text color=\"ink-30\">Trà</text>\n<text color=\"ink-30\">Bánh</text></content>",
 }
@@ -57,16 +57,16 @@ var whitePage = map[string]string{
 func TestContrastGroupsPairsByTheirBackground(t *testing.T) {
 	palette := darkPalette(t)
 	warned, strict := groupedCompile(t, palette, whitePage)
-	want := `page.ui:1:7: background="white" giữ màu trắng ở chế độ tối; chữ ở 4 chỗ trên nó khó đọc (ink-30 3.15:1, ink 1.59:1; chữ thường cần 4.5:1, chữ lớn 3:1): ` +
-		`header.ui:1:15, page.ui:1:26, content.ui:2:7, 3:7. Viết background="canvas" (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" cho chữ trên nó (21.00:1 sáng, 21.00:1 tối). ` +
+	want := `view.ui:1:7: background="white" giữ màu trắng ở chế độ tối; chữ ở 4 chỗ trên nó khó đọc (ink-30 3.15:1, ink 1.59:1; chữ thường cần 4.5:1, chữ lớn 3:1): ` +
+		`header.ui:1:15, view.ui:1:26, content.ui:2:7, 3:7. Viết background="canvas" (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" cho chữ trên nó (21.00:1 sáng, 21.00:1 tối). ` +
 		`router.contrast("strict") nêu từng chỗ với gợi ý riêng.`
 	if strings.Join(warned, "\n") != want {
 		t.Errorf("one line at the background:\n got  %q\n want %q", warned, want)
 	}
-	advice := ` Nền white là màu cố định, không đổi theo chế độ như chữ: viết background="canvas" ở page.ui:1:7 (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`
+	advice := ` Nền white là màu cố định, không đổi theo chế độ như chữ: viết background="canvas" ở view.ui:1:7 (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`
 	wantStrict := []string{
 		`header.ui:1:15: color="ink-30" trên nền white chỉ 3.15:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1).` + advice,
-		`page.ui:1:26: color="ink" trên nền white chỉ 1.59:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1). Nền white là màu cố định, không đổi theo chế độ như chữ: viết background="canvas" ở page.ui:1:7 (14.70:1 sáng, 11.26:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`,
+		`view.ui:1:26: color="ink" trên nền white chỉ 1.59:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1). Nền white là màu cố định, không đổi theo chế độ như chữ: viết background="canvas" ở view.ui:1:7 (14.70:1 sáng, 11.26:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`,
 		`content.ui:2:7: color="ink-30" trên nền white chỉ 3.15:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1).` + advice,
 		`content.ui:3:7: color="ink-30" trên nền white chỉ 3.15:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1).` + advice,
 	}
@@ -76,13 +76,13 @@ func TestContrastGroupsPairsByTheirBackground(t *testing.T) {
 
 	// CONTROL: the canvas follows the mode; nothing to tell
 	canvas := copyFiles(whitePage)
-	canvas["/site/page.ui"] = `<page background="canvas" color="ink"><header /><content /></page>`
+	canvas["/site/view.ui"] = `<view background="canvas" color="ink"><header /><content /></view>`
 	if warned, strict := groupedCompile(t, palette, canvas); len(warned) != 0 || len(strict) != 0 {
 		t.Errorf("CONTROL: on the canvas nothing falls short, got %q / %q", warned, strict)
 	}
 	// CONTROL: one place alone on the white is told alone, at its colour, as strict tells it
 	alone := map[string]string{
-		"/site/page.ui":    `<page background="white"><content /></page>`,
+		"/site/view.ui":    `<view background="white"><content /></view>`,
 		"/site/content.ui": `<content><text color="ink-30">Trà</text></content>`,
 	}
 	warned, strict = groupedCompile(t, palette, alone)
@@ -145,18 +145,18 @@ func TestContrastGroupsOnlyWhatTheBackgroundCauses(t *testing.T) {
 // A group's line suggests one X+N for every text on its background, and when that X+N goes 20 or more
 // past what one mode needs for all of them, the line carries the note a place told alone has (option B),
 // each mode's step the least that reads for every pair of the group, the role written as the line writes
-// its colour ("cho chữ trên nó"): the kitwork example's two brand+15 on <page background="cirrus-70">.
+// its colour ("cho chữ trên nó"): the kitwork example's two brand+15 on <view background="cirrus-70">.
 // strict tells each place with its own note. CONTROL: on Kit Design's band #3c3c3c, brand+15 for both is
 // 15 past light's brand, and the line has no note.
 func TestContrastGroupLineCarriesTheOvershootNote(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page background="cirrus-70" color="ink"><content /></page>`,
+		"/site/view.ui":    `<view background="cirrus-70" color="ink"><content /></view>`,
 		"/site/content.ui": "<content><text color=\"brand+15\">a</text>\n<text color=\"brand+15\">b</text></content>",
 	}
 	warned, strict := groupedCompile(t, kitworkExampleColors(t), files)
 	note := `brand+35 là một bậc cho cả hai chế độ: ở chế độ tối nó là #ffccc8, gần trắng, chỉ còn 32% sắc của brand, mà tối chỉ cần brand (5.96:1). ` +
 		`Muốn giữ sắc ở cả hai chế độ thì khai một vai trò riêng: router.colors({ "brand.text": { light: "#bb0042", dark: "#ff6b6b" } }) rồi viết color="brand.text"`
-	want := `page.ui:1:7: background="cirrus-70" ở chế độ sáng; chữ ở 2 chỗ trên nó khó đọc (brand+15 3.62:1; chữ thường cần 4.5:1, chữ lớn 3:1): content.ui:1:16, 2:7. ` +
+	want := `view.ui:1:7: background="cirrus-70" ở chế độ sáng; chữ ở 2 chỗ trên nó khó đọc (brand+15 3.62:1; chữ thường cần 4.5:1, chữ lớn 3:1): content.ui:1:16, 2:7. ` +
 		`Dùng color="brand+35" cho chữ trên nó (4.83:1 sáng, 11.60:1 tối). ` + note + ` cho chữ trên nó. router.contrast("strict") nêu từng chỗ với gợi ý riêng.`
 	if strings.Join(warned, "\n") != want {
 		t.Errorf("the group line carries the note:\n got  %q\n want %q", warned, want)
@@ -206,22 +206,22 @@ func TestContrastFixedSurfaceAdvice(t *testing.T) {
 }
 
 // A frame pinned to an edge with no background of its own takes the page's (the content scrolls under
-// it): its texts on the white stand on <page background="white">, and are grouped there with the
+// it): its texts on the white stand on <view background="white">, and are grouped there with the
 // content's; told alone, a pinned text is told to change that background, never to declare a token.
 func TestContrastPinnedFrameStandsOnThePageBackground(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page background="white" color="ink"><header /><content /></page>`,
+		"/site/view.ui":    `<view background="white" color="ink"><header /><content /></view>`,
 		"/site/header.ui":  `<header pin="top"><text color="ink-30">Quán</text></header>`,
 		"/site/content.ui": `<content><text color="ink-30">Trà</text></content>`,
 	}
 	warned, strict := groupedCompile(t, darkPalette(t), files)
-	want := `page.ui:1:7: background="white" giữ màu trắng ở chế độ tối; chữ ở 2 chỗ trên nó khó đọc (ink-30 3.15:1; chữ thường cần 4.5:1, chữ lớn 3:1): header.ui:1:25, content.ui:1:16. ` +
+	want := `view.ui:1:7: background="white" giữ màu trắng ở chế độ tối; chữ ở 2 chỗ trên nó khó đọc (ink-30 3.15:1; chữ thường cần 4.5:1, chữ lớn 3:1): header.ui:1:25, content.ui:1:16. ` +
 		`Viết background="canvas" (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" cho chữ trên nó (21.00:1 sáng, 21.00:1 tối). router.contrast("strict") nêu từng chỗ với gợi ý riêng.`
 	if strings.Join(warned, "\n") != want {
 		t.Errorf("the pinned text is grouped at the page's background:\n got  %q\n want %q", warned, want)
 	}
 	wantStrict := `header.ui:1:25: color="ink-30" trên nền white chỉ 3.15:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1). Nền white là màu cố định, không đổi theo chế độ như chữ: ` +
-		`viết background="canvas" ở page.ui:1:7 (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`
+		`viết background="canvas" ở view.ui:1:7 (6.24:1 sáng, 5.67:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`
 	if len(strict) == 0 || strict[0] != wantStrict || strings.Contains(strings.Join(strict, "\n"), "router.colors") {
 		t.Errorf("strict: the pinned text, told alone:\n got  %q\n want %q", strict, wantStrict)
 	}
@@ -234,13 +234,13 @@ func TestContrastGroupPlaces(t *testing.T) {
 	for _, p := range []struct {
 		file         string
 		line, column int
-	}{{"page.ui", 1, 26}, {"content.ui", 5, 12}, {"content.ui", 9, 4}, {"header.ui", 2, 3}, {"content.ui", 32, 8}, {"content.ui", 40, 1}} {
+	}{{"view.ui", 1, 26}, {"content.ui", 5, 12}, {"content.ui", 9, 4}, {"header.ui", 2, 3}, {"content.ui", 32, 8}, {"content.ui", 40, 1}} {
 		places = append(places, Warning{File: p.file, Line: p.line, Column: p.column})
 	}
-	if got, want := placesText(places), "page.ui:1:26, content.ui:5:12, 9:4, header.ui:2:3 và 2 chỗ khác"; got != want {
+	if got, want := placesText(places), "view.ui:1:26, content.ui:5:12, 9:4, header.ui:2:3 và 2 chỗ khác"; got != want {
 		t.Errorf("\n got  %s\n want %s", got, want)
 	}
-	if got, want := placesText(places[:2]), "page.ui:1:26, content.ui:5:12"; got != want {
+	if got, want := placesText(places[:2]), "view.ui:1:26, content.ui:5:12"; got != want {
 		t.Errorf("\n got  %s\n want %s", got, want)
 	}
 }

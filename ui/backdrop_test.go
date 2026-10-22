@@ -7,12 +7,12 @@ import (
 	"github.com/kitwork/engine/ui/stylesheet"
 )
 
-// backdropSite is a site whose page.ui writes the page's background, with a header pinned to the top
+// backdropSite is a site whose view.ui writes the page's background, with a header pinned to the top
 // and a glass one, and a dark look.
 func backdropSite(t *testing.T, page string, palette *stylesheet.Palette) *Page {
 	t.Helper()
 	s := memorySite("", map[string]string{
-		"/site/page.ui":    page,
+		"/site/view.ui":    page,
 		"/site/content.ui": `<content><text>Trà</text></content>`,
 	})
 	s.Reload = true
@@ -20,24 +20,24 @@ func backdropSite(t *testing.T, page string, palette *stylesheet.Palette) *Page 
 	return compiled(t, s)
 }
 
-// <page background="cirrus"> (decision D4 of 13/10/2026) paints the gradient on a layer fixed to the
-// screen: an element first in <body> carrying <page>'s background classes — a colour written for a
+// <view background="cirrus"> (decision D4 of 13/10/2026) paints the gradient on a layer fixed to the
+// screen: an element first in <body> carrying <view>'s background classes — a colour written for a
 // width with them, the classes cascading on the layer as they would on <body> — and <body> keeps none
 // (its own background would cover the layer). The page's stylesheet positions the layer (fixed, inset 0,
 // at least the large viewport tall, under everything, taking no pointer) and gives <html> the
 // gradient's first stop, the pair's custom property, so overscroll and the strip under a mobile
 // browser's bars match; cirrus lighter (cirrus-80) is the same layer with the mixed stops. A pinned
 // header with no background takes the canvas (a gradient on its own box is not the screen's), a
-// pinned glass none, so the backdrop shows through it. CONTROL: <page background="paper"> keeps its
+// pinned glass none, so the backdrop shows through it. CONTROL: <view background="paper"> keeps its
 // class on <body>, with no layer and no rule for one.
 func TestPageBackdropIsALayerFixedToTheScreen(t *testing.T) {
 	palette := darkPalette(t)
-	page := backdropSite(t, `<page background="cirrus" medium:background="paper" padding="4">`+
-		`<header pin="top"><text>Quán</text></header><header pin="top" material="glass"><text>Kính</text></header><content /></page>`, palette)
+	page := backdropSite(t, `<view background="cirrus" medium:background="paper" padding="4">`+
+		`<header pin="top"><text>Quán</text></header><header pin="top" material="glass"><text>Kính</text></header><content /></view>`, palette)
 	body := page.Render(Request{Path: "/"})
 	css := string(page.Stylesheet().CSS)
 	mustContain(t, body,
-		`<body class="flex-column padding-4" data-kitwork-layout="page.ui"><div class="page-backdrop background-cirrus medium:background-paper" aria-hidden="true" data-kitwork-backdrop></div>`,
+		`<body class="flex-column padding-4" data-kitwork-layout="view.ui"><div class="page-backdrop background-cirrus medium:background-paper" aria-hidden="true" data-kitwork-backdrop></div>`,
 		`<header class="flex-column background-canvas pin-top">`,
 		`<header class="flex-column pin-top material-glass">`)
 	mustContain(t, css,
@@ -51,14 +51,14 @@ func TestPageBackdropIsALayerFixedToTheScreen(t *testing.T) {
 		t.Errorf("a pinned frame never takes the backdrop's gradient on its own box, a glass takes nothing:\n%s", body)
 	}
 
-	shaded := backdropSite(t, `<page background="cirrus-80"><content /></page>`, palette)
+	shaded := backdropSite(t, `<view background="cirrus-80"><content /></view>`, palette)
 	mustContain(t, shaded.Render(Request{Path: "/"}), `<div class="page-backdrop background-cirrus-80" aria-hidden="true" data-kitwork-backdrop></div>`)
 	mustContain(t, string(shaded.Stylesheet().CSS),
 		":where(html){background-color:color-mix(in oklab,var(--kitwork-gradient-cirrus-1) 20%,var(--canvas))}")
 
-	control := backdropSite(t, `<page background="paper"><header pin="top"><text>Quán</text></header><content /></page>`, palette)
+	control := backdropSite(t, `<view background="paper"><header pin="top"><text>Quán</text></header><content /></view>`, palette)
 	controlBody, controlCSS := control.Render(Request{Path: "/"}), string(control.Stylesheet().CSS)
-	mustContain(t, controlBody, `<body class="flex-column background-paper" data-kitwork-layout="page.ui">`, `<header class="flex-column background-paper pin-top">`)
+	mustContain(t, controlBody, `<body class="flex-column background-paper" data-kitwork-layout="view.ui">`, `<header class="flex-column background-paper pin-top">`)
 	mustNotContain(t, controlBody, "page-backdrop", "data-kitwork-backdrop")
 	mustNotContain(t, controlCSS, "page-backdrop", ":where(html)", "--kitwork-gradient-")
 }
@@ -74,7 +74,7 @@ func TestPageBackdropIsALayerFixedToTheScreen(t *testing.T) {
 // backdrop, or with a colour background, has none.
 func TestPageBackdropThemeColor(t *testing.T) {
 	palette := darkPalette(t)
-	page := backdropSite(t, `<page background="cirrus"><content /></page>`, palette)
+	page := backdropSite(t, `<view background="cirrus"><content /></view>`, palette)
 	const modes = ` data-kitwork-light="#849cdd" data-kitwork-dark="#202f5e">` + "\n"
 	mustContain(t, page.Document(Request{Path: "/"}),
 		"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"+
@@ -85,52 +85,52 @@ func TestPageBackdropThemeColor(t *testing.T) {
 	if doc := page.Document(Request{Path: "/", Appearance: "dark"}); strings.Count(doc, "theme-color") != 1 {
 		t.Errorf("a fixed appearance has one theme-color:\n%s", doc)
 	}
-	light := backdropSite(t, `<page background="cirrus"><content /></page>`, nil)
+	light := backdropSite(t, `<view background="cirrus"><content /></view>`, nil)
 	if doc := light.Document(Request{Path: "/"}); !strings.Contains(doc, "<meta name=\"theme-color\" content=\"#849cdd\">\n") || strings.Count(doc, "theme-color") != 1 {
 		t.Errorf("a palette with no dark look has one theme-color, its light:\n%s", doc)
 	}
 	if light, dark, _ := palette.Value("canvas"); light != "#f6f9fc" || dark != "#0f1822" {
 		t.Fatalf("the canvas the mixes were done with is %s and %s", light, dark)
 	}
-	shaded := backdropSite(t, `<page background="cirrus-80"><content /></page>`, palette)
+	shaded := backdropSite(t, `<view background="cirrus-80"><content /></view>`, palette)
 	mustContain(t, shaded.Document(Request{Path: "/"}),
 		`<meta name="theme-color" media="(prefers-color-scheme: light)" content="#dee6f7" data-kitwork-light="#dee6f7" data-kitwork-dark="#121d2d">`,
 		`<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121d2d" data-kitwork-light="#dee6f7" data-kitwork-dark="#121d2d">`)
-	for _, source := range []string{`<page><content /></page>`, `<page background="paper"><content /></page>`} {
+	for _, source := range []string{`<view><content /></view>`, `<view background="paper"><content /></view>`} {
 		if doc := backdropSite(t, source, palette).Document(Request{Path: "/"}); strings.Contains(doc, "theme-color") {
 			t.Errorf("control: %s has no theme-color:\n%s", source, doc)
 		}
 	}
 }
 
-// A backdrop is written plainly: a background of <page> from data beside a gradient is an error at it,
+// A backdrop is written plainly: a background of <view> from data beside a gradient is an error at it,
 // since the layer is written once with the page's classes; so is a {{ }} that spells a gradient out (a
 // ternary of two backdrops), which would otherwise stay on <body>, stretched over the document, with no
 // layer, while the contrast check measured it as a backdrop. CONTROL: a background from data on a page
 // with no gradient, and a ternary of two colours, stay on <body> as before.
 func TestPageBackdropFromDataIsAnError(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page background="{{ tone }}" medium:background="cirrus"><content /></page>`,
+		"/site/view.ui":    `<view background="{{ tone }}" medium:background="cirrus"><content /></view>`,
 		"/site/content.ui": `<content><text>Trà</text></content>`,
 	}
-	want := `page.ui:1:7: background="{{ tone }}": <page> có nền gradient, vẽ trên một lớp cố định theo màn hình (nền trang); nền của trang viết thẳng, không lấy từ dữ liệu`
+	want := `view.ui:1:7: background="{{ tone }}": <view> có nền gradient, vẽ trên một lớp cố định theo màn hình (nền trang); nền của trang viết thẳng, không lấy từ dữ liệu`
 	if got := compileError(t, files); !strings.Contains(got, want) {
 		t.Errorf("\n got  %s\n want %s…", got, want)
 	}
-	files["/site/page.ui"] = `<page background="{{ night ? 'dusk' : 'cirrus' }}"><content /></page>`
-	want = `page.ui:1:7: background="{{ night ? 'dusk' : 'cirrus' }}": <page> có nền gradient, vẽ trên một lớp cố định theo màn hình (nền trang); nền của trang viết thẳng, không lấy từ dữ liệu`
+	files["/site/view.ui"] = `<view background="{{ night ? 'dusk' : 'cirrus' }}"><content /></view>`
+	want = `view.ui:1:7: background="{{ night ? 'dusk' : 'cirrus' }}": <view> có nền gradient, vẽ trên một lớp cố định theo màn hình (nền trang); nền của trang viết thẳng, không lấy từ dữ liệu`
 	if got := compileError(t, files); !strings.Contains(got, want) {
 		t.Errorf("a ternary of backdrops:\n got  %s\n want %s…", got, want)
 	}
-	files["/site/page.ui"] = `<page background="{{ tone }}"><content /></page>`
+	files["/site/view.ui"] = `<view background="{{ tone }}"><content /></view>`
 	s := memorySite("", files)
 	s.Reload = true
 	page := compiled(t, s)
-	mustContain(t, page.Render(Request{Path: "/", Scope: map[string]any{"tone": "paper"}}), `<body class="flex-column background-paper" data-kitwork-layout="page.ui">`)
-	files["/site/page.ui"] = `<page background="{{ night ? 'ink' : 'paper' }}"><content /></page>`
+	mustContain(t, page.Render(Request{Path: "/", Scope: map[string]any{"tone": "paper"}}), `<body class="flex-column background-paper" data-kitwork-layout="view.ui">`)
+	files["/site/view.ui"] = `<view background="{{ night ? 'ink' : 'paper' }}"><content /></view>`
 	s = memorySite("", files)
 	s.Reload = true
-	mustContain(t, compiled(t, s).Render(Request{Path: "/", Scope: map[string]any{"night": true}}), `<body class="flex-column background-ink" data-kitwork-layout="page.ui">`)
+	mustContain(t, compiled(t, s).Render(Request{Path: "/", Scope: map[string]any{"night": true}}), `<body class="flex-column background-ink" data-kitwork-layout="view.ui">`)
 }
 
 // Text and glass over a page backdrop are measured against the backdrop's samples (decision D4), each a
@@ -141,13 +141,13 @@ func TestPageBackdropFromDataIsAnError(t *testing.T) {
 func TestContrastOverAPageBackdrop(t *testing.T) {
 	site := func(page, source string) map[string]string {
 		files := content(source)
-		files["/site/page.ui"] = page
+		files["/site/view.ui"] = page
 		return files
 	}
-	contrastPasses(t, darkPalette(t), site(`<page background="cirrus"><content /></page>`,
+	contrastPasses(t, darkPalette(t), site(`<view background="cirrus"><content /></view>`,
 		`<content><text>Trà</text><card material="glass" padding="4"><text color="ink-30">Mô tả</text></card></content>`))
-	contrastFails(t, darkPalette(t), site(`<page background="cirrus"><content /></page>`, `<content><text color="ink-30">Mô tả</text></content>`), `color=`,
+	contrastFails(t, darkPalette(t), site(`<view background="cirrus"><content /></view>`, `<content><text color="ink-30">Mô tả</text></content>`), `color=`,
 		`color="ink-30" trên nền cirrus tại 0% chỉ 2.44:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color="ink-5" (5.12:1 sáng, 7.26:1 tối).`)
-	contrastFails(t, darkPalette(t), site(`<page background="cirrus-50"><content /></page>`, `<content><text color="ink-30">Mô tả</text></content>`), `color=`,
+	contrastFails(t, darkPalette(t), site(`<view background="cirrus-50"><content /></view>`, `<content><text color="ink-30">Mô tả</text></content>`), `color=`,
 		`color="ink-30" trên nền cirrus-50 tại 0% chỉ 4.02:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color="ink-25" (4.69:1 sáng, 5.54:1 tối).`)
 }

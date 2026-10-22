@@ -14,7 +14,7 @@ import (
 // tabsRouterCode and tabsPageCode are the two files the window shows, given by the view.
 const (
 	tabsRouterCode = "import { router } from \"kitwork\";\n\nrouter.view(() => {\n  const title = \"Menu\";\n});"
-	tabsPageCode   = "<page padding=\"6\">\n  <text heading=\"1\">{{ title }}</text>\n</page>"
+	tabsPageCode   = "<view padding=\"6\">\n  <text heading=\"1\">{{ title }}</text>\n</view>"
 )
 
 // tabsBrowserFiles is a site with a file-tabbed terminal — the tabs in the terminal's own bar, one
@@ -33,14 +33,14 @@ router.view(() => {
   const pageCode = ` + jsString(tabsPageCode) + `;
 });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <box id="window" max-width="640px">
     <terminal as="$code" typing="2s" background="panel" radius="medium">
       <box flex="row" align="center" gap="2" padding-x="3" padding-y="2">
         <tabs as="$files" persist="true" alt="Tệp" flex="row" gap="1">
           <button id="tab-router" click="select('router')">router.work</button>
-          <button id="tab-page" click="select('page')">page.ui</button>
+          <button id="tab-page" click="select('page')">view.ui</button>
         </tabs>
         <button id="copy" click="copy()">{{ copied ? 'Đã chép' : 'Chép' }}</button>
       </box>
@@ -157,7 +157,7 @@ const tabsGroups = `
 // kept between them. It runs where the parser meets it, at the end of <body>: after the engine's
 // pre-paint, before any of Kitwork's deferred scripts, so "before" is what a person sees before the
 // kernel runs.
-//  1. Nothing kept: typing starts on the router file, the one shown; a click on page.ui while it types
+//  1. Nothing kept: typing starts on the router file, the one shown; a click on view.ui while it types
 //     shows the page file at once (typing finished, no range left), flips aria-selected and tabindex,
 //     and $also follows (the same set, written the other way round) — not $other (the same tabs, no
 //     persist), not $partial (another set); kit.storage keeps "page" under page+router. The arrows, End
@@ -174,7 +174,7 @@ const tabsGroups = `
 //     page.
 //  5. The window starts far below; scrolled to and its router tab focused, it starts typing, and an
 //     arrow four frames later — inside typing's first wait, before the first character — chooses
-//     page.ui: the viewer's own switch, so the page file is there at once, untyped by nothing.
+//     view.ui: the viewer's own switch, so the page file is there at once, untyped by nothing.
 //  6. Two windows of the site, this one and a frame of the same page: a choice in one is followed in the
 //     other (a storage event), by every tabs kept under that name — not by $other, which keeps nothing,
 //     not by $partial, another set.
@@ -216,7 +216,7 @@ const tabsProbe = `<script>
 
   var phases = {
     "1": function () {
-      until(function () { return part["first typing"] && typed("window") !== "all" && caret("window") !== "" && typed("window").length > "router.workpage.uiChép".length + 2; }, 5000, function () {
+      until(function () { return part["first typing"] && typed("window") !== "all" && caret("window") !== "" && typed("window").length > "router.workview.uiChép".length + 2; }, 5000, function () {
         part.typing = where(rangeIn("kitwork-terminal-untyped", "window")) + " " + (typed("window") === "all" ? "done" : "typing");
         byId("tab-page").click();
         frames(function () {

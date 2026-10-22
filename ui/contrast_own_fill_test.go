@@ -13,7 +13,7 @@ import (
 // the fill staying ink/8), or to declare that colour anew, on the ground as it is shown (ink/8 phủ
 // trên canvas), never paper, the other end of the palette, "trên nền ink" — a ground no reader sees.
 // Measured as before: ink #717171 on ink/8 over a white canvas is #f4f4f4, 4.44:1; ink #6a6a6a on
-// ink/14 over white is #eaeaea, 4.49:1 (both by hand). The same for the ink a <page> writes over a
+// ink/14 over white is #eaeaea, 4.49:1 (both by hand). The same for the ink a <view> writes over a
 // backdrop (the kitwork example's ink on ink/14 over cirrus, 4.48:1). An ink already black, on a
 // canvas and a paper of mid grey #767676, has no stronger step that reads (ink+N is black too), nor
 // does paper: then the advice is to declare ink anew on the ground as shown. CONTROL: words in a
@@ -45,9 +45,9 @@ func TestAdviceOnTheTextsOwnFill(t *testing.T) {
 		{"a neutral button pressed, ink written on a box", grey("#6a6a6a"),
 			content(`<content><box color="ink"><button>Gửi</button></box></content>`),
 			[]string{`color="ink" trên nền ink/14 phủ trên canvas chỉ 4.49:1`, "khi pressed:", `Dùng color="ink+5" (4.99:1 sáng).`}},
-		{"a neutral button pressed on cirrus, ink written on <page>", kitworkPalette(t),
-			map[string]string{"/site/page.ui": `<page background="cirrus" color="ink"><content /></page>`, "/site/content.ui": `<content><button>Gửi</button></content>`},
-			[]string{`page.ui:1:27: color="ink" trên nền ink/14 phủ trên cirrus tại 0% chỉ 4.48:1`, "khi pressed:", `Dùng color="ink+5" (4.95:1 sáng, 6.37:1 tối).`}},
+		{"a neutral button pressed on cirrus, ink written on <view>", kitworkPalette(t),
+			map[string]string{"/site/view.ui": `<view background="cirrus" color="ink"><content /></view>`, "/site/content.ui": `<content><button>Gửi</button></content>`},
+			[]string{`view.ui:1:27: color="ink" trên nền ink/14 phủ trên cirrus tại 0% chỉ 4.48:1`, "khi pressed:", `Dùng color="ink+5" (4.95:1 sáng, 6.37:1 tối).`}},
 		// on the grey even the fills at rest fall short (a field's ink/5, a button's ink/6)
 		{"a field's words, a black ink on grey", black,
 			content(`<content><field><label>Tên</label><input></input></field></content>`),

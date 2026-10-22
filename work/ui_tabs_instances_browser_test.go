@@ -16,7 +16,7 @@ var tabsInstanceFiles = map[string]string{
 
 router.colors({ brand: "#c8742c" });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <box id="one"><code-window /></box>
   <box id="two"><code-window /></box>
@@ -24,7 +24,7 @@ router.colors({ brand: "#c8742c" });
 	"localhost/code-window.ui": `<box gap="2">
   <tabs as="$files" persist="true" alt="Files" flex="row" gap="1">
     <button click="select('router')" selected:underline="true">router.work</button>
-    <button click="select('page')" selected:underline="true">page.ui</button>
+    <button click="select('page')" selected:underline="true">view.ui</button>
   </tabs>
   <box show="$files.selected == 'router'"><text>router</text></box>
   <box show="$files.selected == 'page'"><text>page</text></box>

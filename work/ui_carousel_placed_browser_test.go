@@ -13,7 +13,7 @@ var carouselPlacedFiles = map[string]string{
 
 router.language("vi");
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4">
   <carousel as="$hero" alt="Ảnh" max-width="large">
     <box place="left" padding="3"><button id="before" click="previous()" background="white/85" color="black"><icon value="chevron-left" alt="Trước" /></button></box>

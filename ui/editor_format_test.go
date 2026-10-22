@@ -52,7 +52,7 @@ func editorSwitch(tab, value, label string, pressed bool) string {
 // leaving format on the host (editorWords then refuses it as the editor's state, so the page does not
 // compile) each turned this red.
 func TestEditorFormatSegmentWire(t *testing.T) {
-	s := memorySite("", map[string]string{"/site/content.ui": editorWithSegment(""), "/site/page.ui": `<page><content /></page>`})
+	s := memorySite("", map[string]string{"/site/content.ui": editorWithSegment(""), "/site/view.ui": `<view><content /></view>`})
 	s.Reload = true
 	page, warned := compileDiagnose(t, s)
 	if len(warned) > 0 {
@@ -78,8 +78,8 @@ func TestEditorFormatSegmentWire(t *testing.T) {
 	}
 
 	// it starts in markdown: the scope, the switch pressed, the alias outside, dropped inside
-	source := strings.Replace(editorWithSegment(` format="markdown"`), `<content name="body"`, `<text show="dropped.length">Đã bỏ {{ dropped.join(', ') }}</text>
-      <content name="body"`, 1)
+	source := strings.Replace(editorWithSegment(` format="markdown"`), `<textarea name="body"`, `<text show="dropped.length">Đã bỏ {{ dropped.join(', ') }}</text>
+      <textarea name="body"`, 1)
 	source = strings.Replace(source, `<text show="$body.unsaved">Chưa lưu</text>`, `<text show="$body.unsaved">Chưa lưu</text><text>Viết bằng {{ $body.format }}</text>`, 1)
 	html = editorQuiet(t, source, "GET", editorPost)
 	mustContain(t, html,
@@ -106,7 +106,7 @@ func TestEditorFormatSelect(t *testing.T) {
 	options := `<option value="rich">Rich</option><option value="markdown">Markdown</option><option value="html">HTML</option>`
 	source := `<content><form method="post"><field><label>Nội dung</label><editor as="$body" format="markdown">` +
 		`<box alt="Định dạng" flex="row"><button click="toggle('bold')">B</button><select value="{{ format }}" alt="Viết bằng">` + options + `</select></box>` +
-		`<content name="body" /></editor><hint>{{ $body.words }} từ</hint></field></form></content>`
+		`<textarea name="body" /></editor><hint>{{ $body.words }} từ</hint></field></form></content>`
 	html := editorQuiet(t, source, "GET", nil)
 	mustContain(t, html,
 		`<select aria-label="Viết bằng" data-kitwork-command="format" data-kitwork-bind="value: format"><option value="rich">Rich</option><option value="markdown" selected>Markdown</option><option value="html">HTML</option></select>`,
@@ -122,7 +122,7 @@ func TestEditorFormatSelect(t *testing.T) {
 	// in a field of its own inside the editor: that field's control, named by its label
 	own := `<content><form method="post"><field><label>Nội dung</label><editor>` +
 		`<box alt="Định dạng" flex="row"><button click="toggle('bold')">B</button><field><label>Viết bằng</label><select value="{{ format }}">` + options + `</select></field></box>` +
-		`<content name="body" /></editor></field></form></content>`
+		`<textarea name="body" /></editor></field></form></content>`
 	html = editorQuiet(t, own, "GET", nil)
 	mustContain(t, html, `<label for="kitwork-field-2">Viết bằng</label><select id="kitwork-field-2" data-kitwork-command="format" data-kitwork-bind="value: format"><option value="rich" selected>Rich</option>`,
 		`<textarea class="editor-field" id="kitwork-field-1" name="body"></textarea>`)
@@ -156,17 +156,17 @@ func TestEditorFormatSwitchesFindAToolbar(t *testing.T) {
 	}
 	options := `<option value="rich">Rich</option><option value="markdown">Markdown</option>`
 	for _, word := range []string{"readonly", "disabled"} {
-		html := editorQuiet(t, editorIn(``, switches+editorBar+editorLink+`<content name="body" alt="Nội dung" `+word+`="true" />`), "GET", nil)
+		html := editorQuiet(t, editorIn(``, switches+editorBar+editorLink+`<textarea name="body" alt="Nội dung" `+word+`="true" />`), "GET", nil)
 		mustContain(t, html, `aria-disabled="true" data-kitwork-event="click: toggle(&#39;bold&#39;)"`,
 			`data-kitwork-format-value="rich" aria-disabled="true" data-kitwork-bind="aria-pressed: format == &#39;rich&#39;" data-kitwork-event="click: format = &#39;rich&#39;" aria-pressed="true">`,
 			`data-kitwork-format-value="markdown" aria-disabled="true" data-kitwork-bind="aria-pressed: format == &#39;markdown&#39;" data-kitwork-event="click: format = &#39;markdown&#39;" aria-pressed="false">`)
 		// a select of format: disabled, aria-disabled, its option of the start still selected
 		chosen := editorQuiet(t, editorIn(``, `<box alt="V"><button click="toggle('italic')">I</button><select value="{{ format }}" alt="Viết bằng">`+options+`</select></box>`+
-			editorBar+editorLink+`<content name="body" alt="Nội dung" `+word+`="true" />`), "GET", nil)
+			editorBar+editorLink+`<textarea name="body" alt="Nội dung" `+word+`="true" />`), "GET", nil)
 		mustContain(t, chosen, `<select aria-label="Viết bằng" data-kitwork-command="format" disabled aria-disabled="true" data-kitwork-bind="value: format"><option value="rich" selected>Rich</option>`)
 		// written disabled by its author too: disabled once
 		twice := editorQuiet(t, editorIn(``, `<box alt="V"><button click="toggle('italic')">I</button><select value="{{ format }}" alt="Viết bằng" disabled="true">`+options+`</select></box>`+
-			editorBar+editorLink+`<content name="body" alt="Nội dung" `+word+`="true" />`), "GET", nil)
+			editorBar+editorLink+`<textarea name="body" alt="Nội dung" `+word+`="true" />`), "GET", nil)
 		tag := twice[strings.Index(twice, "<select"):]
 		tag = tag[:strings.Index(tag, ">")+1]
 		if n := strings.Count(tag, " disabled"); n != 1 || !strings.Contains(tag, `aria-disabled="true"`) {

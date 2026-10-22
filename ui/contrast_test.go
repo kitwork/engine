@@ -202,7 +202,7 @@ func TestContrastDarkOnly(t *testing.T) {
 // paper section, and reads.
 func TestContrastGlassOverThePage(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page background="ink"><content /></page>`,
+		"/site/view.ui":    `<view background="ink"><content /></view>`,
 		"/site/content.ui": `<content><section background="paper"><box pin="top" background="paper" material="glass/60"><text color="ink-30">Thanh ghim</text></box></section></content>`,
 	}
 	contrastFails(t, nil, files, `color=`,
@@ -222,7 +222,7 @@ func TestContrastGlassOverThePage(t *testing.T) {
 func TestContrastGlassFirstBackgroundSecond(t *testing.T) {
 	glass := func(background, material string) map[string]string {
 		return map[string]string{
-			"/site/page.ui":    `<page background="ink"><content /></page>`,
+			"/site/view.ui":    `<view background="ink"><content /></view>`,
 			"/site/content.ui": `<content><box pin="top" background="` + background + `" material="` + material + `"><text color="ink">Thanh ghim</text></box></content>`,
 		}
 	}
@@ -251,7 +251,7 @@ func TestContrastFallbackIsNamedWithoutAnAlpha(t *testing.T) {
 		contrastFails(t, nil, content(`<content><box background="`+background+`" material="glass/30"><text>Thanh ghim</text></box></content>`), `material=`, fallback(background))
 	}
 	files := map[string]string{
-		"/site/page.ui":    `<page background="ink"><content /></page>`,
+		"/site/view.ui":    `<view background="ink"><content /></view>`,
 		"/site/content.ui": `<content><box pin="top" background="paper" material="glass/30"><text color="ink">Thanh ghim</text></box></content>`,
 	}
 	contrastFails(t, nil, files, `color=`,
@@ -308,14 +308,14 @@ func TestContrastAtTheCallSite(t *testing.T) {
 	contrastPasses(t, nil, component)
 
 	region := map[string]string{
-		"/site/page.ui":    `<page background="ink"><header /><content /></page>`,
+		"/site/view.ui":    `<view background="ink"><header /><content /></view>`,
 		"/site/header.ui":  `<header><text color="ink-30">Quán</text></header>`,
 		"/site/content.ui": `<content><box background="paper"><text>a</text></box></content>`,
 	}
 	if got := contrastCompile(t, nil, region); !strings.HasPrefix(got, `header.ui:1:15: color="ink-30" trên nền ink chỉ 2.36:1`) {
 		t.Errorf("a region on an ink page: %q", got)
 	}
-	region["/site/page.ui"] = `<page><header /><content /></page>`
+	region["/site/view.ui"] = `<view><header /><content /></view>`
 	contrastPasses(t, nil, region)
 }
 

@@ -19,7 +19,7 @@ var driveStaleFiles = map[string]string{
 router.colors({ brand: "#c8742c" });
 router.bundle({ javascript: "split" });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content>
   <text id="title">Một</text>
   <dropdown><button id="open" click="toggle()" expanded="{{ open }}">Mở</button></dropdown>

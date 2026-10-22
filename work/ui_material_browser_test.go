@@ -29,7 +29,7 @@ router.colors({
   ink: { light: "#2b211b", dark: "#f3ece6" }
 });
 `,
-	"localhost/page.ui":   `<page><header /><content /></page>`,
+	"localhost/view.ui":   `<view><header /><content /></view>`,
 	"localhost/header.ui": `<header pin="top" padding="4" scrolled:material="glass"><text>Quán</text></header>`,
 	"localhost/content.ui": `<content>
   <box id="brand" background="brand" material="glass" padding="4" color="brand.on"><text>Kính màu nhãn</text></box>

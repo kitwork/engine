@@ -66,7 +66,7 @@ func TestGroupedGrammarBringsTheKernel(t *testing.T) {
 			t.Errorf("%s: want the kernel, got %v", body, roles)
 		}
 	}
-	transport := `<html><head><style data-kitwork-generated="css"></style></head><body data-kitwork-layout="page.ui">` +
+	transport := `<html><head><style data-kitwork-generated="css"></style></head><body data-kitwork-layout="view.ui">` +
 		`<a href="/" data-kitwork-current="">x</a><div data-kitwork-delay="0" data-kitwork-transition="fade"></div></body></html>`
 	if out := Deliver(transport, nil, Options{}); out != transport {
 		t.Errorf("transport markers are not grammar: the page must come back untouched, got\n%s", out)

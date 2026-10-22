@@ -29,7 +29,7 @@ var gradientBrowserFiles = map[string]string{
 router.colors({ brand: "#c8742c" });
 router.gradients({ ember: { type: "linear", direction: "to-right", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content>
   <box id="glow" background="glow" padding="4"><text>Quán</text></box>
   <box id="right" background="fade-right" padding="4"><text>Cuộn tiếp</text></box>
@@ -224,7 +224,7 @@ func TestBrowserGradientTextInForcedColours(t *testing.T) {
 	}
 	tenant := buildUISite(t, map[string]string{
 		"localhost/router.work": gradientBrowserFiles["localhost/router.work"],
-		"localhost/page.ui":     `<page><content /></page>`,
+		"localhost/view.ui":     `<view><content /></view>`,
 		"localhost/content.ui":  `<content padding="4"><text heading="1" size="huge" color="headline">MMMMMMMM</text></content>`,
 	})
 	var serving sync.Mutex

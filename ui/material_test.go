@@ -18,7 +18,7 @@ import (
 // 13/10/2026).
 func TestMaterialOnFrames(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":   `<page><header /><content /></page>`,
+		"/site/view.ui":   `<view><header /><content /></view>`,
 		"/site/header.ui": `<header pin="top" scrolled:material="glass" padding="4"><text>Quán</text></header>`,
 		"/site/content.ui": `<content><box background="brand-85" material="glass"><text>a</text></box>` +
 			`<card medium:material="glass/60" large:material="none"><text>b</text></card>` +
@@ -71,7 +71,7 @@ func TestMaterialFromData(t *testing.T) {
 }
 
 // material goes on a frame only: on text, an inline element, a control, an image or an icon it is a
-// warning at the attribute, in the author's language, naming the frames it goes on; on <page> it says
+// warning at the attribute, in the author's language, naming the frames it goes on; on <view> it says
 // nothing lies behind the page. A word it does not take names what it takes (an error); an old word
 // of the glass (glass.thin, 13/10/2026) and a coverage outside 10 to 95 are errors that name the
 // spelling to write.
@@ -87,9 +87,9 @@ func TestMaterialErrors(t *testing.T) {
 			mustFail(t, map[string]string{"/site/content.ui": c.content}, c.at, c.says)
 		})
 	}
-	// on <page> (and on what is no frame: diagnostics_compile_test.go) it is drawn as written and warned of
-	compileWarns(t, map[string]string{"/site/page.ui": `<page material="glass"><content /></page>`, "/site/content.ui": `<content><text>a</text></content>`},
-		"page.ui:1:7: ", frames+"; <page> là nền của cả trang, phía sau không có gì để nhìn qua")
+	// on <view> (and on what is no frame: diagnostics_compile_test.go) it is drawn as written and warned of
+	compileWarns(t, map[string]string{"/site/view.ui": `<view material="glass"><content /></view>`, "/site/content.ui": `<content><text>a</text></content>`},
+		"view.ui:1:7: ", frames+"; <view> là nền của cả trang, phía sau không có gì để nhìn qua")
 	// control: the same words on frames compile
 	mustCompile(t, map[string]string{"/site/content.ui": `<content><box material="glass/80"><text>a</text></box><grid columns="2" material="glass/60"><box /></grid>` +
 		`<list material="glass/88"><item material="none">x</item></list><form material="glass"><box /></form></content>`})
@@ -127,12 +127,12 @@ func TestMaterialAlphaBackgroundIsSilent(t *testing.T) {
 		"content.ui:1:15", "paper/180")
 }
 
-// A pinned frame that writes no background takes the page's, solid: on <page background="paper/80">
+// A pinned frame that writes no background takes the page's, solid: on <view background="paper/80">
 // it is paper, so the content scrolling under it does not show through, and its glass is paper at the
 // glass's own opacity, not paper/80 read by a glass. CONTROL: the page keeps the alpha it writes.
 func TestMaterialPinnedOnATranslucentPage(t *testing.T) {
 	s := memorySite("", map[string]string{
-		"/site/page.ui":    `<page background="paper/80"><header /><content /></page>`,
+		"/site/view.ui":    `<view background="paper/80"><header /><content /></view>`,
 		"/site/header.ui":  `<header pin="top" scrolled:material="glass" padding="4"><text>Quán</text></header>`,
 		"/site/content.ui": `<content><text>a</text></content>`,
 	})

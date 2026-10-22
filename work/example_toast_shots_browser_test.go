@@ -134,7 +134,7 @@ func screenShot(t *testing.T, d *devtools, x, y, width, height float64) ([]byte,
 //     screen: the stack scrolls inside, and its newest, at the bottom edge, is on screen;
 //   - Start saving shows one notice that works (the loader), Finish saving turns that same notice into
 //     Saved, with the success icon; Success pressed twice is one notice that counts ×2;
-//   - the notice with a title and an action shows both; its button chooses page.ui in the window above
+//   - the notice with a title and an action shows both; its button chooses content.ui in the window above
 //     (the tabs' $files) and closes the notice.
 //
 // The pictures differ where the scheme, the width or the notice do, and are saved to KITWORK_TOAST_SHOTS
@@ -295,10 +295,10 @@ func TestBrowserExampleToastShots(t *testing.T) {
 		t.Errorf("Success pressed twice: %q, want one notice that counts ×2", twice.Notices)
 	}
 
-	// a title and an action, which chooses page.ui in the window above
+	// a title and an action, which chooses content.ui in the window above
 	titled := say("With a title and an action")
 	shoot("title-action", titled)
-	if titled.Notices != "info-circle:Information|A page is two files|page.ui draws what router.work gives it.||Show page.ui" {
+	if titled.Notices != "info-circle:Information|A page is two files|content.ui draws what router.work gives it.||Show content.ui" {
 		t.Errorf("the notice with a title and an action: %q", titled.Notices)
 	}
 	chosen := d.evaluate(`(function () {
@@ -310,7 +310,7 @@ func TestBrowserExampleToastShots(t *testing.T) {
   }, 300); });
 })()`)
 	if chosen != "page 0" {
-		t.Errorf("the action chose %q, want page.ui chosen and the notice closed (page 0)", chosen)
+		t.Errorf("the action chose %q, want content.ui chosen and the notice closed (page 0)", chosen)
 	}
 
 	// the page with its stack, as a person sees it

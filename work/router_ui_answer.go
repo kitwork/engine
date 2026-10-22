@@ -93,7 +93,7 @@ func (t *Tenant) answerUIPage(reqRouter *Router, node *RouteNode) {
 
 // serveUIAnswer draws the folder's .ui page for a handler that answered with context.view({ … }) or
 // response.view({ … }) in router.work (20/10/2026): the page router.view draws (content.ui inside the
-// nearest page.ui, the engine's spelling today), with the names of the object the view was given — only
+// nearest view.ui), with the names of the object the view was given — only
 // those — and the page's text written before it in its head. The folder with no page of its own is an
 // error that says so. Called right after the handler, on the VM it ran on: the functions in the object
 // run there when the page calls them.

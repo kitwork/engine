@@ -39,7 +39,7 @@ const htmlFromData = ".ui không ghi HTML từ dữ liệu; bài đã lưu hiệ
 
 // refusedTags are the tags other systems show a saved post with, each told what .ui writes.
 var refusedTags = map[string]string{
-	"html":     "không có thẻ <html> (trang đã là <page>): HTML đã soạn, một bài viết hay một mô tả, hiện bằng " + richtextCall + ", làm sạch ở server",
+	"html":     "không có thẻ <html> (trang đã là <view>): HTML đã soạn, một bài viết hay một mô tả, hiện bằng " + richtextCall + ", làm sạch ở server",
 	"raw":      "không có thẻ <raw>: .ui không ghi HTML chưa làm sạch; bài đã lưu hiện bằng " + richtextCall,
 	"prose":    "không có thẻ <prose>: khối chữ của một bài đã lưu là " + richtextCall + ", khoảng cách, danh sách, link và trích dẫn là của engine",
 	"markdown": "không có thẻ <markdown>: bài đã lưu hiện bằng " + richtextCall + " (richtext đọc HTML hoặc chữ thường, không đọc markdown)",

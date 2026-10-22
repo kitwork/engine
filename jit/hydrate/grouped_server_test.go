@@ -30,7 +30,7 @@ func TestGroupedDirectivesAreTheGrammarAndTransportIsNot(t *testing.T) {
 	}
 	for _, body := range []string{
 		`<style data-kitwork-generated="css"></style>`,
-		`<main data-kitwork-layout="page.ui"></main>`,
+		`<main data-kitwork-layout="view.ui"></main>`,
 		`<a href="/" data-kitwork-current="">x</a>`,
 		`<div data-kitwork-delay="0"></div>`,
 		`<main data-kitwork-transition="fade"></main>`,

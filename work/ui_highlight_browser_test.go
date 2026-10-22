@@ -24,7 +24,7 @@ var highlightBrowserFiles = map[string]string{
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#16161e" }, paper: { light: "#ffffff", dark: "#1e2030" } });
 router.highlight({ keyword: { light: "#7c3aed", dark: "#bb9af7" }, string: "violet" });
 `,
-	"localhost/page.ui":    `<page><content /></page>`,
+	"localhost/view.ui":    `<view><content /></view>`,
 	"localhost/content.ui": "<content><code language=\"go\">package main\nfunc main() { println(\"x\") }</code></content>",
 }
 

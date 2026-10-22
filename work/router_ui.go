@@ -34,7 +34,7 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// View declares the page of this folder in Kitwork UI: its content.ui, inside the nearest page.ui,
+// View declares the page of this folder in Kitwork UI: its content.ui, inside the nearest view.ui,
 // filled with the names the view declares.
 //
 //	router.view((ctx) => {
@@ -821,7 +821,7 @@ func newUISite(base string, reload bool) *uiSite {
 }
 
 // logWarnings prints, while developing, the warnings of a page just compiled (ui.Page.Warnings): each
-// once per generation, "cảnh báo: file:line:col: message", so a page.ui every route shares says its
+// once per generation, "cảnh báo: file:line:col: message", so a view.ui every route shares says its
 // warning once and not once a route. Once is by the warning's head (ui.Warning.Head): the line of the
 // pairs short of contrast on one background, which lists each page's own places, is said for the first
 // page that has it; the browser's console of every page still says that page's own (warningsScript). A

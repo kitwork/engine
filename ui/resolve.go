@@ -23,7 +23,7 @@ type Site struct {
 	// color="ink-30"). nil is Kit Design's default palette alone.
 	Palette *stylesheet.Palette
 	// Reload is router.reload: true loads every page whole. By default (false) a link moves to the
-	// next page without a reload, and every page has a progressbar: the one page.ui writes, else one
+	// next page without a reload, and every page has a progressbar: the one view.ui writes, else one
 	// at the top.
 	Reload bool
 	// Contrast is router.contrast of the route: how a pair of colours short of WCAG 2.2 AA is told

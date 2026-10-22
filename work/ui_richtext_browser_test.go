@@ -35,7 +35,7 @@ router.post((ctx) => {
   return ctx.view({ source, post: richtext(source) });
 });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="3">
   <form id="write" method="post" gap="2">
     <field><label>Post</label><textarea name="body" rows="6" value="{{ source }}"></textarea></field>

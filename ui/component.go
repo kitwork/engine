@@ -339,6 +339,9 @@ func (c *compiler) checkComponentRoot(def *componentDef) error {
 		return errAt(root, "gốc của %s là <%s>: gốc là phần tử của chính %s, mà một phần tử một component; bọc <%s> trong một <box>",
 			path.Base(root.File), root.Tag, def.name, root.Tag)
 	}
+	if err := frameOrPageRoot(root, path.Base(root.File)); err != nil {
+		return err
+	}
 	if _, ok := catalog[root.Tag]; !ok {
 		return errAt(root, "gốc của %s là <%s>, không phải thẻ của Kitwork: gốc của component là một thẻ như box, card, list; bọc <%s /> trong thẻ đó",
 			path.Base(root.File), root.Tag, root.Tag)

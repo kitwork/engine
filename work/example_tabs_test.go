@@ -43,16 +43,16 @@ func examplePage(t *testing.T, path string) (*Tenant, string) {
 }
 
 // The kitwork example's /components shows the tabs at work: one terminal window of two files, the
-// router.work and the page.ui of a tiny site. The page is served with no warning. The terminal types
+// router.work and the content.ui of a tiny site. The page is served with no warning. The terminal types
 // (typing: 2000); its bar holds the window's dots (from small), a tablist of two tabs, router first,
 // each tab's look written with selected:, and one Copy beside the tablist, not in it; then the two files,
-// each a panel its tab shows (page.ui's painted hidden), with no prompt (a file's code), and the
+// each a panel its tab shows (content.ui's painted hidden), with no prompt (a file's code), and the
 // terminal's status region after them: both panels are the one terminal's, so its Copy copies the one
 // shown. One terminal, one copy(), no width show and no grid in the section: nothing stands side by
 // side. No persist, so the scope hands the instance no name to keep its choice under and the page
-// carries no pre-paint. And the two files it shows are real: written as a site of their own (with the
-// content.ui the route needs) they compile with no warning and serve the page they describe. CONTROL:
-// the same page.ui with a colour short of contrast is told, so "no warning" means something.
+// carries no pre-paint. And the two files it shows are real: written as a site of their own they
+// compile with no warning and serve the page they describe. CONTROL:
+// the same content.ui with a colour short of contrast is told, so "no warning" means something.
 func TestExampleTabsWindowShowsTwoFilesThatCompile(t *testing.T) {
 	_, page := examplePage(t, "/components")
 	start := strings.Index(page, `id="tabs"`)
@@ -68,7 +68,7 @@ func TestExampleTabsWindowShowsTwoFilesThatCompile(t *testing.T) {
 		`role="tab" aria-controls="kitwork-tabpanel-1-2" value="page"`,
 		`background-ink-80 color-ink-20 selected:background-panel selected:color-ink selected:underline-true" id="kitwork-tab-1-1"`,
 		`background-ink-80 color-ink-20 selected:background-panel selected:color-ink selected:underline-true" id="kitwork-tab-1-2"`,
-		`>page.ui</button></div></div><button class="flex-row background-ink/6 hover:background-ink/10 pressed:background-ink/14 disabled:background-ink/4 size-small padding-x-2 padding-y-1" type="button" data-kitwork-bind="text: copied ? &#39;Copied&#39; : &#39;Copy&#39;" data-kitwork-event="click: copy()">Copy</button></div>` +
+		`>content.ui</button></div></div><button class="flex-row background-ink/6 hover:background-ink/10 pressed:background-ink/14 disabled:background-ink/4 size-small padding-x-2 padding-y-1" type="button" data-kitwork-bind="text: copied ? &#39;Copied&#39; : &#39;Copy&#39;" data-kitwork-event="click: copy()">Copy</button></div>` +
 			`<div class="flex-column padding-4 background-panel radius-bottom-medium size-small" id="kitwork-tabpanel-1-1" role="tabpanel" aria-labelledby="kitwork-tab-1-1" tabindex="0" data-kitwork-bind="show: $files.selected == &#39;router&#39;"><pre><code class="language-work">`,
 		`</code></pre></div><div class="flex-column padding-4 background-panel radius-bottom-medium size-small" id="kitwork-tabpanel-1-2" role="tabpanel" aria-labelledby="kitwork-tab-1-2" tabindex="0" data-kitwork-bind="show: $files.selected == &#39;page&#39;" hidden><pre><code class="language-ui">`,
 		`</code></pre></div><span class="reader" role="status"></span></div>`,
@@ -98,15 +98,14 @@ func TestExampleTabsWindowShowsTwoFilesThatCompile(t *testing.T) {
 		files[m[1]] = textContent(m[2])
 	}
 	if files["work"] == "" || files["ui"] == "" {
-		t.Fatalf("/components shows no router.work and page.ui: %q", files)
+		t.Fatalf("/components shows no router.work and content.ui: %q", files)
 	}
 	site := func(page string) (string, *httptest.ResponseRecorder) {
 		var rec *httptest.ResponseRecorder
 		printed := captureBootOutput(t, func() {
 			tenant := buildUISite(t, map[string]string{
 				"localhost/router.work": files["work"],
-				"localhost/page.ui":     page,
-				"localhost/content.ui":  "<content></content>",
+				"localhost/content.ui":  page,
 			})
 			rec = serveUI(t, tenant, "http://localhost/")
 		})
@@ -114,7 +113,7 @@ func TestExampleTabsWindowShowsTwoFilesThatCompile(t *testing.T) {
 	}
 	warned, rec := site(files["ui"])
 	if warned != "" || rec.Code != http.StatusOK {
-		t.Fatalf("the files the example shows, as a site: %d, warnings %q\nrouter.work:\n%s\npage.ui:\n%s\n%.1500s", rec.Code, warned, files["work"], files["ui"], rec.Body.String())
+		t.Fatalf("the files the example shows, as a site: %d, warnings %q\nrouter.work:\n%s\ncontent.ui:\n%s\n%.1500s", rec.Code, warned, files["work"], files["ui"], rec.Body.String())
 	}
 	served := rec.Body.String()
 	for _, want := range []string{"<title>Today's menu</title>", `>Today&#39;s menu</h1>`, ">Espresso</p>", ">4.50</p>"} {
@@ -122,9 +121,9 @@ func TestExampleTabsWindowShowsTwoFilesThatCompile(t *testing.T) {
 			t.Errorf("the tiny site has no %s:\n%.2000s", want, served)
 		}
 	}
-	// CONTROL: the same page.ui with its price in a colour short of contrast is told
+	// CONTROL: the same content.ui with its price in a colour short of contrast is told
 	if warned, _ := site(strings.Replace(files["ui"], `color="ink-30"`, `color="ink-70"`, 1)); !strings.Contains(warned, `color="ink-70"`) {
-		t.Errorf("control: a colour short of contrast in the page.ui shown is not told: %q", warned)
+		t.Errorf("control: a colour short of contrast in the content.ui shown is not told: %q", warned)
 	}
 }
 

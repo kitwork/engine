@@ -146,7 +146,7 @@ router.view((ctx) => {
   if (productError) ctx.status(503);
 });
 `,
-		"localhost/page.ui":    `<page><content /></page>`,
+		"localhost/view.ui":    `<view><content /></view>`,
 		"localhost/content.ui": `<content><error>{{ productError.message }}</error><text>{{ productError.code }}</text></content>`,
 		"localhost/ok/router.work": `
 import { router } from "kitwork";

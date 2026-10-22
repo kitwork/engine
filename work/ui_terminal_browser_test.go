@@ -26,7 +26,7 @@ var terminalBrowserFiles = map[string]string{
 
 router.colors({ brand: "#c8742c" });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <box id="near">
     <terminal as="$install" typing="800ms" background="panel" radius="medium">

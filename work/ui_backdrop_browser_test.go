@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// backdropBrowserFiles is a site whose page has a backdrop (<page background="cirrus">, decision D4 of
+// backdropBrowserFiles is a site whose page has a backdrop (<view background="cirrus">, decision D4 of
 // 13/10/2026) and a document 4000px tall, with an anchor in its middle a URL can scroll to, the text
 // in it padded away from the corners. Its colours have a dark look, and the page follows the device.
 var backdropBrowserFiles = map[string]string{
@@ -20,7 +20,7 @@ var backdropBrowserFiles = map[string]string{
 
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#0f1822" } });
 `,
-	"localhost/page.ui":    `<page background="cirrus"><content /></page>`,
+	"localhost/view.ui":    `<view background="cirrus"><content /></view>`,
 	"localhost/content.ui": `<content><box height="2000px"></box><box id="middle" padding="16"><text>Giữa trang</text></box><box height="2000px"></box></content>`,
 }
 
@@ -231,7 +231,7 @@ func TestBrowserPageBackdropStaysOnTheScreen(t *testing.T) {
 	}
 	stretched := map[string]string{
 		"localhost/router.work": backdropBrowserFiles["localhost/router.work"],
-		"localhost/page.ui":     `<page><content /></page>`,
+		"localhost/view.ui":     `<view><content /></view>`,
 		"localhost/content.ui":  `<content><box background="cirrus"><box height="2000px"></box><box id="middle" padding="16"><text>Giữa trang</text></box><box height="2000px"></box></box></content>`,
 	}
 	control, where := screens(serve(stretched))

@@ -126,7 +126,7 @@
       "name": "an-alias-twice-on-a-page",
       "route": ".",
       "files": {
-        "page.ui": "<page><header /><content /></page>",
+        "view.ui": "<view><header /><content /></view>",
         "header.ui": "<header><dropdown as=\"$menu\"><button click=\"toggle()\">x</button></dropdown></header>",
         "content.ui": "<content><dropdown as=\"$menu\"><button click=\"toggle()\">y</button></dropdown></content>"
       },
@@ -144,11 +144,11 @@
       "name": "component-attribute-on-a-region",
       "route": ".",
       "files": {
-        "page.ui": "<page><header component=\"dropdown\" /><content /></page>",
+        "view.ui": "<view><header component=\"dropdown\" /><content /></view>",
         "header.ui": "<header><text>Quán</text></header>",
         "content.ui": "<content><text>x</text></content>"
       },
-      "error": { "at": "page.ui:1:15", "says": "component= đã bỏ: component là một thẻ, viết <dropdown /> bên trong <header>" }
+      "error": { "at": "view.ui:1:15", "says": "component= đã bỏ: component là một thẻ, viết <dropdown /> bên trong <header>" }
     },
     {
       "name": "a-name-the-component-and-the-view-both-declare",

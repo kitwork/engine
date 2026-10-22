@@ -47,7 +47,7 @@ func TestLazyClassesInThePage(t *testing.T) {
 func TestLazyOnScreenIsAWarning(t *testing.T) {
 	page := func(header, content string) map[string]string {
 		return map[string]string{
-			"/site/page.ui":               `<page><header /><content /></page>`,
+			"/site/view.ui":               `<view><header /><content /></view>`,
 			"/site/header.ui":             header,
 			"/site/content.ui":            content,
 			"/site/menu-band.ui":          `<box lazy="true"><text>menu</text></box>`,
@@ -77,7 +77,7 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 		{"a component's own .ui in the pinned header", page(`<header pin="top"><shop-cart /></header>`, plain),
 			"shop-cart.ui:1:11", `(nằm trong khung ghim vào mép màn hình, pin ở header.ui:1:9)`},
 		{"inside an overlay", map[string]string{
-			"/site/page.ui":    `<page><content /><overlay /></page>`,
+			"/site/view.ui":    `<view><content /><overlay /></view>`,
 			"/site/overlay.ui": `<overlay><box lazy="true"><text>thông báo</text></box></overlay>`,
 			"/site/content.ui": plain},
 			"overlay.ui:1:15", `(nằm trong <overlay> ở overlay.ui:1:1, lớp nổi trên màn hình)`},
@@ -85,8 +85,8 @@ func TestLazyOnScreenIsAWarning(t *testing.T) {
 			"content.ui:1:69", `(nằm trong <popover> ở content.ui:1:55, nổi trên màn hình khi mở)`},
 		{"on the content", content(`<content lazy="true"><text>a</text></content>`),
 			"content.ui:1:10", `lazy trên <content>: vùng nội dung luôn có phần ở trên màn hình, trình duyệt không bao giờ bỏ qua nó; đặt lazy trên từng phần ở xa màn hình bên trong (section, grid, card…)`},
-		{"on the page", map[string]string{"/site/page.ui": `<page lazy="true"><content /></page>`, "/site/content.ui": plain},
-			"page.ui:1:7", `lazy trên <page>: cả trang luôn ở trên màn hình`},
+		{"on the page", map[string]string{"/site/view.ui": `<view lazy="true"><content /></view>`, "/site/content.ui": plain},
+			"view.ui:1:7", `lazy trên <view>: cả trang luôn ở trên màn hình`},
 		{"on a text", content(`<content><text lazy="true">a</text></content>`),
 			"content.ui:1:16", `lazy bỏ qua một khung ở xa màn hình (section, box, card, grid, list, footer…); <text> không phải khung (trang vẫn vẽ lazy như đã viết)`},
 		{"on an image", content(`<content><image value="/a.png" alt="" lazy="true" /></content>`),

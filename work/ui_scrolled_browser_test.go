@@ -22,7 +22,7 @@ var scrolledBrowserFiles = map[string]string{
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b" });
 router.reload(false);
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content>
   <box id="bar" pin="top" padding="4" scrolled:shadow="small"><text>Thanh</text></box>
   <box id="plain" padding="4"><text>Hộp</text></box>

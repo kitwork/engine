@@ -19,7 +19,7 @@ func TestRouteCacheKeepsOnlyWhatMayBeShared(t *testing.T) {
 	}
 	tmp := writeSite(t, map[string]string{
 		"router.work":         `import * as router from "kitwork/router";`,
-		"page.ui":             "<page><content /></page>",
+		"view.ui":             "<view><content /></view>",
 		"notfound.ui":         "<content><text>KHONG-THAY</text></content>",
 		"ok/router.work":      route(`response.text("ok " + runs)`),
 		"gone/router.work":    route(`response.notFound()`),

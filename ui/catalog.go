@@ -153,7 +153,7 @@ var kitworkComponents = map[string]*kitworkComponent{
 			"show": nil, "info": nil, "success": nil, "warning": nil, "danger": nil, "loading": nil,
 			"update": nil, "dismiss": nil, "clear": nil, "act": nil},
 	},
-	// how far the move to the next page has got: first in page.ui, above the header
+	// how far the move to the next page has got: first in view.ui, above the header
 	"progressbar": {root: "box", state: map[string]any{"active": false, "value": 0.0, "top": nil}},
 	// commands the author draws a window around, <terminal typing="3s">: each <code>
 	// inside is a command (terminal.go). copy() puts them on the clipboard and copied is true for two

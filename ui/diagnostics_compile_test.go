@@ -66,7 +66,7 @@ func compileQuiet(t *testing.T, files map[string]string) string {
 // Accessibility (rows ui/compile.go 364, 366, 374, 1363, 2127, 2144; question 4): the page works but
 // some readers cannot use it, so it renders as written and warns. The empty badge is told what it is
 // ("Lời báo không khớp mã": it was told it held only an icon). CONTROL: a name, an alt, one reader in
-// page.ui warn of nothing.
+// view.ui warn of nothing.
 func TestCompileAccessibilityIsAWarning(t *testing.T) {
 	cases := []struct{ name, content, needle, says, renders string }{
 		{"a button with only an icon", `<content><button><icon value="x"></icon></button></content>`, "<button>",
@@ -99,19 +99,19 @@ func TestCompileAccessibilityIsAWarning(t *testing.T) {
 	}
 
 	// two readers both render, and a reader in the content renders where it is written
-	twice := map[string]string{"/site/page.ui": `<page><content /><reader /><reader as="$say" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
-	html := compileWarns(t, twice, where("page.ui", twice["/site/page.ui"], `<reader as`), "page chỉ có một reader")
+	twice := map[string]string{"/site/view.ui": `<view><content /><reader /><reader as="$say" /></view>`, "/site/content.ui": `<content><text>x</text></content>`}
+	html := compileWarns(t, twice, where("view.ui", twice["/site/view.ui"], `<reader as`), "page chỉ có một reader")
 	if got := strings.Count(html, `data-kitwork-component="reader`); got != 2 {
 		t.Errorf("two readers written, %d rendered:\n%s", got, html)
 	}
 	inside := `<content><text>x</text><reader as="$say" /></content>`
-	html = compileWarns(t, content(inside), where("content.ui", inside, "<reader"), "reader đặt trong page.ui, là con của <page>")
+	html = compileWarns(t, content(inside), where("content.ui", inside, "<reader"), "reader đặt trong view.ui, là con của <view>")
 	mustContain(t, html, `<p>x</p><div class="reader" data-kitwork-component="reader: $say"`)
 
 	// CONTROL
 	compileQuiet(t, content(`<content><button><icon value="x" alt="Đóng"></icon></button><link value="/">Trang chủ</link>`+
 		`<badge alt="Đang online"><icon value="point-fill"></icon></badge><image value="/a.jpg" alt="" /></content>`))
-	compileQuiet(t, map[string]string{"/site/page.ui": `<page><content /><reader as="$say" /></page>`, "/site/content.ui": `<content><text>x</text></content>`})
+	compileQuiet(t, map[string]string{"/site/view.ui": `<view><content /><reader as="$say" /></view>`, "/site/content.ui": `<content><text>x</text></content>`})
 }
 
 // A word of .ui on a tag that does not read it does nothing there (question 1: rows ui/compile.go 566,
@@ -146,13 +146,13 @@ func TestCompileWordOnTheWrongTagIsAWarning(t *testing.T) {
 			mustNotContain(t, html, c.never)
 		})
 	}
-	// a reader and a progressbar are written in page.ui
-	readerGap := map[string]string{"/site/page.ui": `<page><content /><reader gap="2" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
-	html := compileWarns(t, readerGap, where("page.ui", readerGap["/site/page.ui"], "gap="), "gap không có tác dụng trên reader")
+	// a reader and a progressbar are written in view.ui
+	readerGap := map[string]string{"/site/view.ui": `<view><content /><reader gap="2" /></view>`, "/site/content.ui": `<content><text>x</text></content>`}
+	html := compileWarns(t, readerGap, where("view.ui", readerGap["/site/view.ui"], "gap="), "gap không có tác dụng trên reader")
 	mustContain(t, html, `<div class="reader" data-kitwork-component="reader"`)
-	barPage := `<page><progressbar value="50" /><content /></page>`
-	bar := memorySite("", map[string]string{"/site/page.ui": barPage, "/site/content.ui": `<content><text>x</text></content>`})
-	html = compileWarnsOn(t, bar, where("page.ui", barPage, "value="), "value không có tác dụng trên progressbar")
+	barPage := `<view><progressbar value="50" /><content /></view>`
+	bar := memorySite("", map[string]string{"/site/view.ui": barPage, "/site/content.ui": `<content><text>x</text></content>`})
+	html = compileWarnsOn(t, bar, where("view.ui", barPage, "value="), "value không có tác dụng trên progressbar")
 	mustContain(t, html, `<div class="progressbar" data-kitwork-component="progressbar"`)
 	mustNotContain(t, html, `value="50"`)
 
@@ -171,8 +171,8 @@ func TestCompileWordOnTheWrongTagIsAWarning(t *testing.T) {
 		{content(`<content><fragment if="true" click="x(("><text>x</text></fragment></content>`), "content.ui:1:30", "biểu thức không hợp lệ: x(("},
 		{content(`<content>` + toastStack(` gap="bigg"`) + `</content>`), where("content.ui", `<content>`+toastStack(` gap="bigg"`), "gap="), `không có "bigg"`},
 		{content(`<content><box value="{{ x( }}"><text>a</text></box></content>`), "content.ui:1:15", "biểu thức không hợp lệ"},
-		{map[string]string{"/site/page.ui": `<page><content /><reader gap="bigg" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}, "page.ui:1:26", `không có "bigg"`},
-		{map[string]string{"/site/page.ui": `<page><content /><reader lang="vi" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}, "page.ui:1:26", "reader chỉ nhận as, không nhận lang"},
+		{map[string]string{"/site/view.ui": `<view><content /><reader gap="bigg" /></view>`, "/site/content.ui": `<content><text>x</text></content>`}, "view.ui:1:26", `không có "bigg"`},
+		{map[string]string{"/site/view.ui": `<view><content /><reader lang="vi" /></view>`, "/site/content.ui": `<content><text>x</text></content>`}, "view.ui:1:26", "reader chỉ nhận as, không nhận lang"},
 	} {
 		mustFail(t, c.files, c.at, c.says)
 	}
@@ -228,9 +228,9 @@ func TestCompilePlacementIsDrawnAsWritten(t *testing.T) {
 	} {
 		compileWarns(t, content(c.source), where("content.ui", c.source, c.needle), c.says)
 	}
-	page := map[string]string{"/site/page.ui": `<page material="glass" pin="top"><content /></page>`, "/site/content.ui": `<content><text>a</text></content>`}
-	html = compileWarns(t, page, "page.ui:1:7", "<page> là nền của cả trang, phía sau không có gì để nhìn qua")
-	compileWarns(t, page, "page.ui:1:24", "<page> không ghim được")
+	page := map[string]string{"/site/view.ui": `<view material="glass" pin="top"><content /></view>`, "/site/content.ui": `<content><text>a</text></content>`}
+	html = compileWarns(t, page, "view.ui:1:7", "<view> là nền của cả trang, phía sau không có gì để nhìn qua")
+	compileWarns(t, page, "view.ui:1:24", "<view> không ghim được")
 	mustContain(t, html, `material-glass`, `pin-top`)
 
 	both := `<content><box><box pin="top" place="top-right"><text>a</text></box></box></content>`
@@ -305,7 +305,7 @@ func TestCompileHouseStyleIsAWarning(t *testing.T) {
 	mustContain(t, page.Render(Request{Path: "/", Scope: map[string]any{"xs": []any{"a", "b"}}}), `<p>a</p>`, `<p>b</p>`)
 
 	// an empty region renders an empty element
-	empty := map[string]string{"/site/page.ui": `<page><header /><content /></page>`, "/site/header.ui": `<header></header>`, "/site/content.ui": `<content><text>x</text></content>`}
+	empty := map[string]string{"/site/view.ui": `<view><header /><content /></view>`, "/site/header.ui": `<header></header>`, "/site/content.ui": `<content><text>x</text></content>`}
 	html := compileWarns(t, empty, "header.ui:1:1", "<header> trong header.ui không có nội dung")
 	mustContain(t, html, `<header class="flex-column"></header>`)
 
@@ -334,44 +334,44 @@ func TestCompileHouseStyleIsAWarning(t *testing.T) {
 func TestCompileProgressbarIsDrawnAsWritten(t *testing.T) {
 	content := `<content><text>x</text></content>`
 	moves := func(pageUI string, files ...string) *Site {
-		all := map[string]string{"/site/page.ui": pageUI, "/site/content.ui": content}
+		all := map[string]string{"/site/view.ui": pageUI, "/site/content.ui": content}
 		for i := 0; i+1 < len(files); i += 2 {
 			all[files[i]] = files[i+1]
 		}
 		return memorySite("", all)
 	}
-	twice := `<page><progressbar /><progressbar /><content /></page>`
-	html := compileWarnsOn(t, moves(twice), where("page.ui", twice, `<progressbar /><content`), "page chỉ có một progressbar")
+	twice := `<view><progressbar /><progressbar /><content /></view>`
+	html := compileWarnsOn(t, moves(twice), where("view.ui", twice, `<progressbar /><content`), "page chỉ có một progressbar")
 	if got := strings.Count(html, `data-kitwork-component="progressbar"`); got != 2 {
 		t.Errorf("two bars written, %d rendered", got)
 	}
-	below := `<page><header /><progressbar /><content /></page>`
-	html = compileWarnsOn(t, moves(below, "/site/header.ui", `<header><text>Quán</text></header>`), "page.ui:1:17", "progressbar đứng đầu page, trên <header />")
+	below := `<view><header /><progressbar /><content /></view>`
+	html = compileWarnsOn(t, moves(below, "/site/header.ui", `<header><text>Quán</text></header>`), "view.ui:1:17", "progressbar đứng đầu page, trên <header />")
 	mustContain(t, html, `</header><div class="progressbar"`)
-	reloads := moves(`<page><progressbar /><content /></page>`)
+	reloads := moves(`<view><progressbar /><content /></view>`)
 	reloads.Reload = true
-	html = compileWarnsOn(t, reloads, "page.ui:1:7", "router.reload(true) tải lại cả trang mỗi lần chuyển nên progressbar không bao giờ chạy")
+	html = compileWarnsOn(t, reloads, "view.ui:1:7", "router.reload(true) tải lại cả trang mỗi lần chuyển nên progressbar không bao giờ chạy")
 	mustContain(t, html, `<div class="progressbar"`)
 
-	// the attribute stands after `<page><progressbar `: column 20
-	thick := moves(`<page><progressbar thickness="9" /><content /></page>`)
+	// the attribute stands after `<view><progressbar `: column 20
+	thick := moves(`<view><progressbar thickness="9" /><content /></view>`)
 	page, warned := compileDiagnose(t, thick)
-	if len(warned) != 1 || !strings.HasPrefix(warned[0], "page.ui:1:20: thickness của progressbar là số px từ 1 đến 8 (mặc định 1)") {
+	if len(warned) != 1 || !strings.HasPrefix(warned[0], "view.ui:1:20: thickness của progressbar là số px từ 1 đến 8 (mặc định 1)") {
 		t.Errorf("thickness=\"9\": want one warning at the attribute, got %q", warned)
 	}
 	mustContain(t, page.Render(Request{Path: "/"}), `class="thickness-9 background-brand"`)
 	mustContain(t, string(page.Stylesheet().CSS), `.thickness-9{block-size:9px}`)
-	html = compileWarnsOn(t, moves(`<page><progressbar delay="20000" /><content /></page>`), "page.ui:1:20", "delay là số mili giây từ 0 đến 10000")
+	html = compileWarnsOn(t, moves(`<view><progressbar delay="20000" /><content /></view>`), "view.ui:1:20", "delay là số mili giây từ 0 đến 10000")
 	mustContain(t, html, `data-kitwork-delay="20000"`)
 
 	// CONTROL
 	for _, bad := range []string{`thickness="0"`, `thickness="thin"`, `thickness="2px"`, `delay="-1"`, `delay="fast"`, `delay="1.5"`} {
-		s := moves(`<page><progressbar ` + bad + ` /><content /></page>`)
-		if _, err := s.Compile("/site"); err == nil || !strings.HasPrefix(err.Error(), "page.ui:1:20: ") {
+		s := moves(`<view><progressbar ` + bad + ` /><content /></view>`)
+		if _, err := s.Compile("/site"); err == nil || !strings.HasPrefix(err.Error(), "view.ui:1:20: ") {
 			t.Errorf("%s must stay an error at the attribute, got %v", bad, err)
 		}
 	}
-	quiet, warned := compileDiagnose(t, moves(`<page><progressbar thickness="8" delay="10000" /><content /></page>`))
+	quiet, warned := compileDiagnose(t, moves(`<view><progressbar thickness="8" delay="10000" /><content /></view>`))
 	if len(warned) > 0 {
 		t.Errorf("the house's own thickness and delay warn of nothing: %q", warned)
 	}
@@ -427,9 +427,9 @@ func TestCompileMessagesMatchWhatIsWritten(t *testing.T) {
 		t.Errorf("a list takes no option, the message must not offer one: %s", got)
 	}
 	// purpel: purple is a named colour now, so the word the palette lacks is a typo of it
-	bar := map[string]string{"/site/page.ui": `<page><progressbar color="purpel" /><content /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
+	bar := map[string]string{"/site/view.ui": `<view><progressbar color="purpel" /><content /></view>`, "/site/content.ui": `<content><text>x</text></content>`}
 	got := compileError(t, bar)
-	if !strings.HasPrefix(got, "page.ui:1:20: ") || !strings.Contains(got, `color="purpel"`) || strings.Contains(got, "background=") {
+	if !strings.HasPrefix(got, "view.ui:1:20: ") || !strings.Contains(got, `color="purpel"`) || strings.Contains(got, "background=") {
 		t.Errorf("a colour the palette lacks is named as written, color=: %s", got)
 	}
 	mustFail(t, content(`<content><appearance><icon value="{{ mode }}" alt="Chế độ"></icon></appearance></content>`), "content.ui:1:22",
@@ -447,15 +447,15 @@ func TestCompileRowsThatStayErrors(t *testing.T) {
 		at, says string
 	}{
 		// component= at the call of a region (question 5) is, since 18/10/2026, the error of component= anywhere
-		{map[string]string{"/site/page.ui": `<page><header component="menu" /><content /></page>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text},
-			"page.ui:1:15", "component= đã bỏ: component là một thẻ, viết <shop-menu /> bên trong <header>; tên component của site có gạch ngang, tên không gạch ngang là của Kitwork: đổi tên menu thành shop-menu"},
-		{map[string]string{"/site/page.ui": `<page><header gap="4" /><content /></page>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text},
-			"page.ui:1:15", "thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show"},
-		{map[string]string{"/site/page.ui": `<page><header /><content /></page>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/header.work": `export default {}`, "/site/content.ui": text},
+		{map[string]string{"/site/view.ui": `<view><header component="menu" /><content /></view>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text},
+			"view.ui:1:15", "component= đã bỏ: component là một thẻ, viết <shop-menu /> bên trong <header>; tên component của site có gạch ngang, tên không gạch ngang là của Kitwork: đổi tên menu thành shop-menu"},
+		{map[string]string{"/site/view.ui": `<view><header gap="4" /><content /></view>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text},
+			"view.ui:1:15", "thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show"},
+		{map[string]string{"/site/view.ui": `<view><header /><content /></view>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/header.work": `export default {}`, "/site/content.ui": text},
 			"header.work:1:1", "vùng không có file .work"},
-		{map[string]string{"/site/page.ui": `<page><content /><reader>x</reader></page>`, "/site/content.ui": text}, "page.ui:1:18", "reader không có nội dung con"},
+		{map[string]string{"/site/view.ui": `<view><content /><reader>x</reader></view>`, "/site/content.ui": text}, "view.ui:1:18", "reader không có nội dung con"},
 		{content(`<content><toast>x</toast></content>`), "content.ui:1:10", "toast cần một mẫu thông báo bên trong <toast>"},
-		{map[string]string{"/site/page.ui": `<page><progressbar>x</progressbar><content /></page>`, "/site/content.ui": text}, "page.ui:1:7", "progressbar không có nội dung con"},
+		{map[string]string{"/site/view.ui": `<view><progressbar>x</progressbar><content /></view>`, "/site/content.ui": text}, "view.ui:1:7", "progressbar không có nội dung con"},
 		{content(`<content><select><option>A</option></select></content>`), "content.ui:1:18", "option cần value"},
 		{content(`<content><time>hôm nay</time></content>`), "content.ui:1:10", "time cần value"},
 		{content(`<content><box id="{{ x }}">x</box></content>`), "content.ui:1:15", "id là chữ cố định"},

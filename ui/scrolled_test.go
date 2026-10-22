@@ -15,7 +15,7 @@ import (
 // takes no default background (KITWORK_UI §7, pin): transparent at the top, paper once scrolled.
 func TestScrolledPrefix(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui": `<page><header /><content /></page>`,
+		"/site/view.ui": `<view><header /><content /></view>`,
 		"/site/header.ui": `<header pin="top" scrolled:shadow="small" scrolled:background="paper" medium+scrolled:padding-y="2" flex="row" padding="4">` +
 			`<link value="/" scrolled:color="ink" hover:color="brand+15">Kitwork</link></header>`,
 		"/site/content.ui": `<content><text>a</text></content>`,

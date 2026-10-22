@@ -200,7 +200,7 @@ router.view((ctx) => {
   ctx.title("Thực đơn");
 });
 `,
-	"localhost/page.ui":     `<page><content /></page>`,
+	"localhost/view.ui":     `<view><content /></view>`,
 	"localhost/content.ui":  `<content><text heading="1">{{ greet("bạn") }}</text><list><item for="item of items"><text color="ink-30">{{ item.name }}</text></item></list><text>{{ count }} món, gấp đôi {{ twice(count) }}</text></content>`,
 	"localhost/notfound.ui": `<content><text>Không thấy trang</text></content>`,
 	"localhost/mon/{slug}/router.work": `

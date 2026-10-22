@@ -127,15 +127,15 @@ func TestPartsAsOnALayoutIsAWarning(t *testing.T) {
 }
 
 // A reader as the root of a layout (layout.go:378) renders: a warning, for the reader is written once,
-// straight in page.ui. A call that puts a word on the root the reader does not take stays an error:
+// straight in view.ui. A call that puts a word on the root the reader does not take stays an error:
 // the reader would drop it.
 func TestPartsReaderRootOfALayoutIsAWarning(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":           `<page><site-announcer /><content /></page>`,
+		"/site/view.ui":           `<view><site-announcer /><content /></view>`,
 		"/site/content.ui":        `<content><text>x</text></content>`,
 		"/site/site-announcer.ui": `<reader />`,
 	}
-	html := partsWarns(t, files, "site-announcer.ui:1:1: ", "gốc của site-announcer.ui là <reader>: reader đặt thẳng trong page.ui, một lần")
+	html := partsWarns(t, files, "site-announcer.ui:1:1: ", "gốc của site-announcer.ui là <reader>: reader đặt thẳng trong view.ui, một lần")
 	mustContain(t, html, `<div class="reader" data-kitwork-component="reader" data-kitwork-bind="text: text" aria-live="polite" aria-atomic="true"></div>`)
 
 	// called inside the content, the reader itself says where it goes (compile.go): one warning, not two
@@ -147,10 +147,10 @@ func TestPartsReaderRootOfALayoutIsAWarning(t *testing.T) {
 	mustContain(t, page.Render(Request{Path: "/"}), `data-kitwork-component="reader"`)
 
 	for _, call := range []string{`<site-announcer if="ready" />`, `<site-announcer show="false" />`, `<site-announcer medium:show="false" />`, `<site-announcer for="x of xs" />`} {
-		frame := `<page>` + call + `<content /></page>`
+		frame := `<view>` + call + `<content /></view>`
 		attr := call[len("<site-announcer "):strings.Index(call, "=")]
-		mustFail(t, map[string]string{"/site/page.ui": frame, "/site/content.ui": files["/site/content.ui"], "/site/site-announcer.ui": `<reader />`},
-			"site-announcer.ui:1:1: ", "reader không nhận "+attr+" mà chỗ gọi "+strings.TrimSuffix(where("page.ui", frame, attr+"="), ": ")+" đặt lên gốc")
+		mustFail(t, map[string]string{"/site/view.ui": frame, "/site/content.ui": files["/site/content.ui"], "/site/site-announcer.ui": `<reader />`},
+			"site-announcer.ui:1:1: ", "reader không nhận "+attr+" mà chỗ gọi "+strings.TrimSuffix(where("view.ui", frame, attr+"="), ": ")+" đặt lên gốc")
 	}
 }
 
@@ -227,9 +227,9 @@ func TestPartsRowsThatStayErrors(t *testing.T) {
 		// a .ui named like a component of Kitwork (component.go 325, 350 until 18/10/2026) is the same file
 		// that is never called as box.ui, at the site's root or in a branch; logic of the site under a name
 		// of Kitwork is never read either
-		{"component.go:325", cart(`<content><text>x</text></content>`, "/site/page.ui", `<page><progressbar /><content /></page>`, "/site/progressbar.ui", `<box><text>x</text></box>`),
+		{"component.go:325", cart(`<content><text>x</text></content>`, "/site/view.ui", `<view><progressbar /><content /></view>`, "/site/progressbar.ui", `<box><text>x</text></box>`),
 			"progressbar.ui:1:1: ", "progressbar.ui đặt tên trùng component <progressbar> của Kitwork: <progressbar> luôn là component của Kitwork nên file này không bao giờ được gọi"},
-		{"component.go:350", cart(`<content><shop-promo /></content>`, "/site/shop/content.ui", `<content><text>x</text></content>`, "/site/shop/page.ui", `<page><progressbar /><content /></page>`,
+		{"component.go:350", cart(`<content><shop-promo /></content>`, "/site/shop/content.ui", `<content><text>x</text></content>`, "/site/shop/view.ui", `<view><progressbar /><content /></view>`,
 			"/site/shop/progressbar.ui", `<box><text>x</text></box>`), "shop/progressbar.ui:1:1: ", "progressbar.ui đặt tên trùng component <progressbar> của Kitwork"},
 		{"component.go:340", cart(`<content><toast>`+toastNotice+`</toast></content>`, "/site/toast.work", `import { component } from "kitwork"; component.define("toast", () => { var open = false; });`),
 			"toast.work:1:1: ", `component.define("toast", …) đặt tên trùng thẻ <toast> của Kitwork: <toast> luôn là component của Kitwork nên logic này không bao giờ được đọc; tên component của site có gạch ngang (shop-toast)`},

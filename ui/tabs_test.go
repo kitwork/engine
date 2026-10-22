@@ -17,7 +17,7 @@ const tabsWindow = `<content>
   <box flex="row" gap="2">
     <tabs as="$files" persist="true" alt="Files" flex="row" gap="1"TABS_INPUT>
       <button click="select('router')">router.work</button>
-      <button click="select('page')">page.ui</button>
+      <button click="select('page')">view.ui</button>
     </tabs>
     <button click="copy()">Copy</button>
   </box>
@@ -54,7 +54,7 @@ func TestTabsWireTheTablistAndItsPanels(t *testing.T) {
 	mustContain(t, html,
 		`data-kitwork-component="tabs: $files" role="tablist" aria-label="Files" data-kitwork-scope="persist: &#39;page+router&#39;; selected: &#39;router&#39;"`,
 		`id="kitwork-tab-1-1" type="button" role="tab" aria-controls="kitwork-tabpanel-1-1" value="router" data-kitwork-bind="aria-selected: selected == &#39;router&#39;; tabindex: selected == &#39;router&#39; ? 0 : -1" data-kitwork-event="click: select(&#39;router&#39;)" aria-selected="true" tabindex="0">router.work</button>`,
-		`id="kitwork-tab-1-2" type="button" role="tab" aria-controls="kitwork-tabpanel-1-2" value="page" data-kitwork-bind="aria-selected: selected == &#39;page&#39;; tabindex: selected == &#39;page&#39; ? 0 : -1" data-kitwork-event="click: select(&#39;page&#39;)" aria-selected="false" tabindex="-1">page.ui</button>`,
+		`id="kitwork-tab-1-2" type="button" role="tab" aria-controls="kitwork-tabpanel-1-2" value="page" data-kitwork-bind="aria-selected: selected == &#39;page&#39;; tabindex: selected == &#39;page&#39; ? 0 : -1" data-kitwork-event="click: select(&#39;page&#39;)" aria-selected="false" tabindex="-1">view.ui</button>`,
 		`<div class="flex-column" id="kitwork-tabpanel-1-2" role="tabpanel" aria-labelledby="kitwork-tab-1-2" tabindex="0" data-kitwork-bind="show: $files.selected == &#39;page&#39;" hidden><pre><code class="language-ui">`,
 		`<div class="flex-column" id="kitwork-tabpanel-1-1" role="tabpanel" aria-labelledby="kitwork-tab-1-1" tabindex="0" data-kitwork-bind="show: $files.selected == &#39;router&#39;"><pre><code class="language-work">`,
 		`<p data-kitwork-bind="text: $files.selected">router</p>`)
@@ -143,7 +143,7 @@ func TestTabsInAComponentsOwnUIPaintTheFirstTab(t *testing.T) {
   <box flex="row">
     <tabs as="$files" alt="Files" flex="row">
       <button click="select('router')">router.work</button>
-      <button click="select('page')">page.ui</button>
+      <button click="select('page')">view.ui</button>
     </tabs>
     <button click="copy()">Copy</button>
   </box>
@@ -332,7 +332,7 @@ func TestTabsPersistSaysWhatToWrite(t *testing.T) {
 func TestTabsInAComponentUsedTwiceWireEachInstance(t *testing.T) {
 	window := `<tabs as="$files"PERSIST alt="Files" flex="row">
   <button click="select('router')">router.work</button>
-  <button click="select('page')">page.ui</button>
+  <button click="select('page')">view.ui</button>
 </tabs>
 <box show="$files.selected == 'router'"><text>router</text></box>
 <box show="$files.selected == 'page'"><text>page</text></box>`

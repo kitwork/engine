@@ -27,7 +27,7 @@ router.colors({ brand: "#f5225f", canvas: "#f6f9fc", paper: "#ffffff", line: "#e
 router.fonts({ body: "Outfit" });
 router.reload(false);
 `,
-		"localhost/page.ui": `<page background="cirrus-70" color="ink"><content /></page>`,
+		"localhost/view.ui": `<view background="cirrus-70" color="ink"><content /></view>`,
 		"localhost/content.ui": `<content gap="4">
   <text id="title">Một</text>
   <link id="next" value="/dai">Dài</link>

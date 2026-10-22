@@ -533,7 +533,7 @@ func TestCarouselThatPlaysNeedsAStop(t *testing.T) {
 		})
 	}
 	compileQuiet(t, map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><button click="$hero.toggle()">Dừng</button></header>`,
 		"/site/content.ui": `<content>` + carouselOf(` as="$hero" duration="5s"`, carouselSlides) + `</content>`,
 	})

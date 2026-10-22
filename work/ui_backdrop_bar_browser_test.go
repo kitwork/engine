@@ -10,7 +10,7 @@ import (
 )
 
 // backdropBarFiles is a site whose page has a backdrop (cirrus) and the light/dark toggle a Kitwork UI
-// page writes (<appearance>), with a second page under the same page.ui that Drive moves to
+// page writes (<appearance>), with a second page under the same view.ui that Drive moves to
 // without a reload (router.reload(false)). Its colours have a dark look; the page follows the device.
 var backdropBarFiles = map[string]string{
 	"localhost/router.work": `import { router } from "kitwork";
@@ -18,7 +18,7 @@ var backdropBarFiles = map[string]string{
 router.colors({ brand: "#c8742c", canvas: { light: "#f6f9fc", dark: "#0f1822" } });
 router.reload(false);
 `,
-	"localhost/page.ui":      `<page background="cirrus"><header><appearance click="toggle()">Đổi</appearance><link value="/b">Sang b</link></header><content /></page>`,
+	"localhost/view.ui":      `<view background="cirrus"><header><appearance click="toggle()">Đổi</appearance><link value="/b">Sang b</link></header><content /></view>`,
 	"localhost/content.ui":   `<content><text>Trang đầu</text></content>`,
 	"localhost/b/content.ui": `<content><text>Trang b</text></content>`,
 }
@@ -28,7 +28,7 @@ router.reload(false);
 // page shows, not only the device's (decision D4: the bar matches the page). On a light device:
 //   - at first the page and the bar are light, cirrus's light corner, #849cdd — the device decides;
 //   - the visitor turns dark with the page's toggle (kit.appearance): the bar turns #202f5e with it;
-//   - a move by Drive to /b, the same page.ui, keeps the page and the bar dark (no reload);
+//   - a move by Drive to /b, the same view.ui, keeps the page and the bar dark (no reload);
 //   - a reload keeps both dark from the first paint: the pre-paint reads the stored choice and sets the
 //     bar as it sets the page.
 //
@@ -93,7 +93,7 @@ func TestBrowserPageBackdropBarFollowsTheMode(t *testing.T) {
 }
 
 // TestBrowserPageBackdropThatFadesShowsTheCanvas looks at the pixels a real browser paints for a page
-// whose backdrop fades to transparent (<page background="glow">: brand-85 at the top, transparent from
+// whose backdrop fades to transparent (<view background="glow">: brand-85 at the top, transparent from
 // 70%). The see-through part of the fixed layer shows the canvas, as the contrast check composites it:
 // the screen's bottom-right corner is the canvas, #f6f9fc, and <html>'s ground is the canvas; the glow
 // is at the top of the screen; the page names no theme-color. CONTROL: the top of the screen is not the
@@ -108,7 +108,7 @@ func TestBrowserPageBackdropThatFadesShowsTheCanvas(t *testing.T) {
 	}
 	tenant := buildUISite(t, map[string]string{
 		"localhost/router.work": backdropBrowserFiles["localhost/router.work"],
-		"localhost/page.ui":     `<page background="glow"><content /></page>`,
+		"localhost/view.ui":     `<view background="glow"><content /></view>`,
 		"localhost/content.ui":  `<content><box height="2000px"></box></content>`,
 	})
 	var serving sync.Mutex

@@ -68,7 +68,7 @@ func TestServedUIPageAllowsTheTabsPrepaintInItsPolicy(t *testing.T) {
 		tenant := buildUISite(t, map[string]string{
 			"localhost/router.work": `import { router } from "kitwork";` + "\n" +
 				`router.guard((ctx, response) => { response.header("Content-Security-Policy", "` + policy + `"); });` + "\n",
-			"localhost/page.ui": `<page><content /></page>`,
+			"localhost/view.ui": `<view><content /></view>`,
 			"localhost/content.ui": `<content>
   <tabs as="$files"` + persist + ` alt="Files" flex="row">
     <button click="select('a')">a</button>

@@ -43,7 +43,7 @@ const exampleWindow = `(function () {
   }); }); });
 })()`
 
-// exampleFind is what find-in-page reaches: a word only router.work holds, then one only page.ui holds.
+// exampleFind is what find-in-page reaches: a word only router.work holds, then one only view.ui holds.
 const exampleFind = `(function () {
   var found = function (word) { getSelection().removeAllRanges(); return window.find(word, true, false, true); };
   var out = [found("ctx.title"), found("drink.price")].join(" ");
@@ -101,7 +101,7 @@ const exampleTypist = `
 
 // exampleTyping reads typing in the window with motion allowed, from a load with the window far below
 // the screen: what waits (the untyped range at the router file's first character), what types once the
-// window is scrolled to (the router file, some of it typed), what a click on page.ui shows two frames
+// window is scrolled to (the router file, some of it typed), what a click on view.ui shows two frames
 // later (the page file, every highlight range gone: all of it at once), the same 600ms later (typing
 // did not start again on it), and what a click back on router.work shows (the router file, all of it).
 // A range is told by the file it stands in and how many of that file's characters come before it.
@@ -134,7 +134,7 @@ const exampleTyping = `(function () {` + exampleTypist + `
 // examplePartly scrolls the window, from a load far above it, until its bar and a little of its first
 // panel are on screen — a third of it, less than the half typing waits for — and says, 600ms later
 // (twice typing's first wait), whether it is so and where typing stands, with the middle of the
-// page.ui tab (where a real click lands).
+// view.ui tab (where a real click lands).
 const examplePartly = `(function () {` + exampleTypist + `
   var box = win.getBoundingClientRect();
   scrollBy(0, box.top - (innerHeight - Math.round(box.height / 3)));
@@ -158,7 +158,7 @@ const exampleSeen = `(function () {` + exampleTypist + `
 
 // exampleRewind scrolls the window to the middle of a phone's screen and lets router.work type; once
 // its <pre> has scrolled sideways after the caret, typing still under way, it does then — "switch":
-// page.ui chosen, router.work again two frames later; "copy": Copy pressed — and says, two frames
+// view.ui chosen, router.work again two frames later; "copy": Copy pressed — and says, two frames
 // after, the file drawn, where typing stands and how far router.work's <pre> is scrolled.
 const exampleRewind = `(function (then) {` + exampleTypist + `
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: function () { return Promise.resolve(); } } });
@@ -182,19 +182,19 @@ const exampleRewind = `(function (then) {` + exampleTypist + `
 })`
 
 // The window of the kitwork example's /components — the two files of a tiny site, router.work and
-// page.ui, in one terminal — drawn by a real browser, light and dark, at a desktop's width and a
+// view.ui, in one terminal — drawn by a real browser, light and dark, at a desktop's width and a
 // phone's, on each tab:
 //   - one terminal: its bar holds the tablist and one Copy, beside the tablist, not in it; the tab
 //     chosen shows its file and hides the other, so find-in-page reaches only the one shown; the tab
 //     chosen is told by more than its fill (underlined, in its text's colour: WCAG 1.4.11);
-//   - the one Copy copies exactly the file shown: router.work's on the first tab, page.ui's once its
+//   - the one Copy copies exactly the file shown: router.work's on the first tab, view.ui's once its
 //     tab is chosen, never both;
 //   - with motion allowed, typing waits while the window is off screen, plays on router.work once it is
-//     on screen, and a click on page.ui shows that file at once (no highlight range left), and it is not
+//     on screen, and a click on view.ui shows that file at once (no highlight range left), and it is not
 //     typed afterwards; back on router.work, that file is all there too: typing plays once;
 //   - a switch the reader makes (a real click, a real key) while only the bar and a little of the window
-//     are on screen, typing still waiting, shows page.ui at once too, never typed; a switch nobody made
-//     (from a script, as a restore is) plans typing again on page.ui;
+//     are on screen, typing still waiting, shows view.ui at once too, never typed; a switch nobody made
+//     (from a script, as a restore is) plans typing again on view.ui;
 //   - on a phone, router.work's <pre>, scrolled sideways after the caret, reads from its first column
 //     again after a switch away and back while it types, as after a Copy;
 //   - 375, 320 and 280px (reflow, WCAG 1.4.10): the page does not scroll sideways, and every button of
@@ -293,10 +293,10 @@ func TestBrowserExampleTabsWindowShots(t *testing.T) {
 	}
 
 	// A switch before typing's clock has run, the window's bar and a little of its panel on screen (less
-	// than half: typing still waits). Made by the reader — a real click on page.ui, or ArrowRight on
-	// router.work focused without scrolling — it shows page.ui at once, and page.ui is not typed when the
-	// window is then scrolled to. Made by nobody — page.ui chosen from a script, no click, no key, as a
-	// tab the browser kept is restored as the kernel starts — it plans typing again on page.ui, which
+	// than half: typing still waits). Made by the reader — a real click on view.ui, or ArrowRight on
+	// router.work focused without scrolling — it shows view.ui at once, and view.ui is not typed when the
+	// window is then scrolled to. Made by nobody — view.ui chosen from a script, no click, no key, as a
+	// tab the browser kept is restored as the kernel starts — it plans typing again on view.ui, which
 	// types once the window is seen.
 	for _, early := range []struct{ by, want string }{
 		{"click", "switched language-ui all 0 | seen language-ui all 0"},

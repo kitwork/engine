@@ -12,11 +12,11 @@ import (
 // aria-hidden="true" data-kitwork-backdrop>, carrying every background class <page> writes (a colour
 // written for a width paints the same layer: the classes cascade on it as they would on <body>), and
 // <body> keeps none, so nothing of its own covers the layer. A real element, not a pseudo-element: Drive
-// sees it and keeps it on a move between pages of one page.ui (the same node, no repaint;
-// jit/hydrate/drive.js). Another backdrop is another page.ui, and a move between two layouts is a whole
+// sees it and keeps it on a move between pages of one view.ui (the same node, no repaint;
+// jit/hydrate/drive.js). Another backdrop is another view.ui, and a move between two layouts is a whole
 // load, as it always was: the browser keeps the old frame until the new page paints, so nothing
 // flashes. Drive's swapBackdrop also replaces or removes the layer, for a move that keeps the shell
-// with another backdrop; no .ui page makes one today, since a backdrop comes from page.ui alone, never
+// with another backdrop; no .ui page makes one today, since a backdrop comes from view.ui alone, never
 // from data. The layer's rule, the keyboard focus ring where the brand's falls short on the backdrop,
 // and, for a backdrop that paints solid everywhere, <html>'s ground in the gradient's first stop
 // (overscroll, the strip under a mobile browser's bars), are the page's stylesheet's
@@ -70,7 +70,7 @@ func (c *compiler) pageBackdrop(n *Node, p *attrPlan) (op, error) {
 		return nil, nil
 	}
 	if fromData != nil {
-		return nil, errAttr(n, fromData, "%s=\"%s\": <page> có nền gradient, vẽ trên một lớp cố định theo màn hình (nền trang); nền của trang viết thẳng, không lấy từ dữ liệu: lớp nền viết một lần với các class của trang, giá trị từ {{ }} chỉ đổi <body>",
+		return nil, errAttr(n, fromData, "%s=\"%s\": <view> có nền gradient, vẽ trên một lớp cố định theo màn hình (nền trang); nền của trang viết thẳng, không lấy từ dữ liệu: lớp nền viết một lần với các class của trang, giá trị từ {{ }} chỉ đổi <body>",
 			fromData.Name, strings.TrimSpace(fromData.Value))
 	}
 	var layer, rest []string

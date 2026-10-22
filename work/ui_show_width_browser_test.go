@@ -20,7 +20,7 @@ var showWidthFiles = map[string]string{
 
 router.colors({ brand: "#c8742c" });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <tabs as="$f" alt="F" flex="row" gap="1">
     <button id="tab-a" click="select('a')">a</button>
@@ -149,7 +149,7 @@ func TestBrowserWidthShowWarnsWhereItStaysHidden(t *testing.T) {
 	lines = append(lines, `</content>`)
 	tenant := buildUISite(t, map[string]string{
 		"localhost/router.work": showWidthFiles["localhost/router.work"],
-		"localhost/page.ui":     showWidthFiles["localhost/page.ui"],
+		"localhost/view.ui":     showWidthFiles["localhost/view.ui"],
 		"localhost/content.ui":  strings.Join(lines, "\n"),
 	})
 	rec := serveUI(t, tenant, "http://localhost/")

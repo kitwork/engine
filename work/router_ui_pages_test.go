@@ -12,7 +12,7 @@ func uiPagesSite(t *testing.T, extra map[string]string) *Tenant {
 	t.Helper()
 	files := map[string]string{
 		"router.work":      `import * as router from "kitwork/router";`,
-		"page.ui":          "<page><content /></page>",
+		"view.ui":          "<view><content /></view>",
 		"notfound.ui":      "<content><text>KHONG-THAY-GOC</text></content>",
 		"shop/notfound.ui": "<content><text>KHONG-THAY-SHOP</text></content>",
 		"error.ui":         "<content><text>LOI: {{ message }}</text></content>",

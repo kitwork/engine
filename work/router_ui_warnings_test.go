@@ -88,21 +88,21 @@ func TestUISiteLowContrastWarnsWhileDeveloping(t *testing.T) {
 		t.Errorf("/tinh has no warning and links no warnings file:\n%s", linesWith(quiet, "warnings"))
 	}
 
-	// a pair in the page.ui every route shares — the home, a branch, a static page, the not-found page
+	// a pair in the view.ui every route shares — the home, a branch, a static page, the not-found page
 	// — is one compile's warning of each of those pages, and the terminal hears it once, not once a route
-	shared := withFiles(map[string]string{"localhost/page.ui": "<page>\n<text color=\"ink-70\">Quán</text><content /></page>"})
+	shared := withFiles(map[string]string{"localhost/view.ui": "<view>\n<text color=\"ink-70\">Quán</text><content /></view>"})
 	printed = captureBootOutput(t, func() {
 		tenant = buildUISite(t, shared)
 		for _, target := range []string{"/", "/tinh", "/mon/ca-phe", "/khong-co"} {
 			page := serveUI(t, tenant, "http://localhost"+target).Body.String()
 			if !warningsScriptRe.MatchString(page) {
-				t.Errorf("%s shares page.ui's warning and links a warnings file", target)
+				t.Errorf("%s shares view.ui's warning and links a warnings file", target)
 			}
 		}
 	})
-	sharedTold := `cảnh báo: page.ui:2:7: color="ink-70" trên nền canvas chỉ 1.99:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color="ink-40" (4.61:1 sáng).`
+	sharedTold := `cảnh báo: view.ui:2:7: color="ink-70" trên nền canvas chỉ 1.99:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color="ink-40" (4.61:1 sáng).`
 	if got := warningLines(printed); len(got) != 1 || got[0] != sharedTold {
-		t.Errorf("page.ui's pair is said once for every route that shares it:\n got  %q\n want %q", got, sharedTold)
+		t.Errorf("view.ui's pair is said once for every route that shares it:\n got  %q\n want %q", got, sharedTold)
 	}
 
 	// CONTROL: production — the same page renders, nothing printed, nothing linked, no file

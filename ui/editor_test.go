@@ -19,7 +19,7 @@ import (
 const (
 	editorBar  = `<box alt="Định dạng"><button click="toggle('bold')"><icon value="bold" alt="Đậm" /></button><button click="link()"><icon value="link" alt="Liên kết" /></button></box>`
 	editorLink = `<popover><input value="{{ address }}" alt="Địa chỉ liên kết" /><button click="link(address)">Gắn</button><button click="close()">Huỷ</button></popover>`
-	editorArea = `<content name="body" alt="Nội dung" />`
+	editorArea = `<textarea name="body" alt="Nội dung" />`
 )
 
 // editorIn is a content.ui with an editor written with words and what is inside it, in a post form.
@@ -110,7 +110,7 @@ const editorCanonical = `<content>
         <button click="close()">Huỷ</button>
         <error>Chỉ nhận https://, http://, mailto:, tel: hay đường dẫn bắt đầu bằng /.</error>
       </popover>
-      <content name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12"
+      <textarea name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12"
                padding="4" radius="medium" border="line" />
     </editor>
     <hint>{{ $body.words }} từ</hint>
@@ -141,7 +141,7 @@ const editorNeutral = `<button class="flex-row background-ink/6 hover:background
 // engine's words, the error hidden with its id; the area, a richtext block named by the field's label,
 // described by its hint, holding the value cleaned, not editable until the component starts; the field
 // the form posts right after it, the same HTML escaped, the field's id and the label's for. The <content>
-// of content.ui around it is still the page's content region (<main>), and page.ui's <content /> too.
+// of content.ui around it is still the page's content region (<main>), and view.ui's <content /> too.
 // And it compiles with no warning: the trigger's bare toggle() is the dropdown's, by the engine's reading.
 // CONTROL: the editor's value written raw (editorValueOp without richtext.Clean), the area left a region
 // (element() without its editorContent), the popover keeping the field's id (generic without the field
@@ -151,7 +151,7 @@ const editorNeutral = `<button class="flex-row background-ink/6 hover:background
 // dropdown's calls through the alias, and the shadow warning of checkNames not told the trigger's
 // toggle() is the dropdown's (host.go) each turned this red.
 func TestEditorCanonicalWire(t *testing.T) {
-	s := memorySite("", map[string]string{"/site/content.ui": editorCanonical, "/site/page.ui": `<page><content /></page>`})
+	s := memorySite("", map[string]string{"/site/content.ui": editorCanonical, "/site/view.ui": `<view><content /></view>`})
 	s.Reload = true
 	page, warned := compileDiagnose(t, s)
 	if len(warned) > 0 {
@@ -276,7 +276,7 @@ func TestEditorCanonicalWire(t *testing.T) {
 // copies of editor.go).
 func TestEditorFirstPaintIsTheValueCleaned(t *testing.T) {
 	page := func(value string, after ...string) string {
-		return `<content><form method="post"><editor as="$body">` + editorBar + editorLink + `<content name="body" alt="Nội dung" ` + value + `/></editor>` +
+		return `<content><form method="post"><editor as="$body">` + editorBar + editorLink + `<textarea name="body" alt="Nội dung" ` + value + `/></editor>` +
 			`<text>{{ $body.words }}/{{ $body.characters }}/{{ $body.empty }}</text>` + strings.Join(after, "") + `</form></content>`
 	}
 	for _, c := range []struct {
@@ -304,8 +304,8 @@ func TestEditorFirstPaintIsTheValueCleaned(t *testing.T) {
 		}
 	}
 	// two editors, each its own value
-	two := `<content><form method="post"><editor as="$title">` + editorBar + editorLink + `<content name="title" alt="Tựa" value="{{ title }}" /></editor>` +
-		`<editor as="$body">` + `<box alt="Định dạng"><button click="toggle('italic')">I</button></box>` + `<content name="body" alt="Nội dung" value="{{ body }}" /></editor>` +
+	two := `<content><form method="post"><editor as="$title">` + editorBar + editorLink + `<textarea name="title" alt="Tựa" value="{{ title }}" /></editor>` +
+		`<editor as="$body">` + `<box alt="Định dạng"><button click="toggle('italic')">I</button></box>` + `<textarea name="body" alt="Nội dung" value="{{ body }}" /></editor>` +
 		`<text>{{ $title.words }} và {{ $body.words }}</text></form></content>`
 	html := editorQuiet(t, two, "GET", map[string]any{"title": "Một hai", "body": "<p>Ba bốn năm</p>"})
 	mustContain(t, html, `id="kitwork-editor-1-area"`, `id="kitwork-editor-2-area"`, `data-kitwork-name="title"><p>Một hai</p></div>`,
@@ -352,49 +352,49 @@ func TestEditorRefusalsAtTheirPlace(t *testing.T) {
 			`editor phải nằm trong <form method="post">: bài viết đi theo form khi gửi, router.post của trang nhận nó`, nil},
 		{"in a get form", `<content><form><editor>` + editorBar + editorLink + area + `</editor></form></content>`, "<editor",
 			`editor phải nằm trong <form method="post">: form GET đưa cả bài viết lên địa chỉ trang (<form> ở %s)`, []string{"<form"}},
-		{"inside another editor", editorIn(``, editorBar+editorLink+area+`<editor>`+area+`</editor>`), "<editor><content",
+		{"inside another editor", editorIn(``, editorBar+editorLink+area+`<editor>`+area+`</editor>`), "<editor><textarea",
 			`editor không lồng trong editor (editor ngoài ở %s)`, []string{"<editor"}},
-		{"inside another editor, through a box", editorIn(``, editorBar+editorLink+area+`<box><editor>`+area+`</editor></box>`), "<editor><content",
+		{"inside another editor, through a box", editorIn(``, editorBar+editorLink+area+`<box><editor>`+area+`</editor></box>`), "<editor><textarea",
 			`editor không lồng trong editor (editor ngoài ở %s)`, []string{"<editor"}},
 		{"inside a line", `<content><form method="post"><text><editor>` + area + `</editor></text></form></content>`, "<editor",
 			`editor là một khối: không đặt trong <text>, <link>, <button>, <label> (nó đang nằm trong <text> ở %s)`, []string{"<text"}},
 		{"in a for", `<content><form method="post"><box for="post of posts"><editor>` + area + `</editor></box></form></content>`, "for=",
 			`editor không lặp bằng for: vùng viết, thanh công cụ và khung liên kết của nó mang id riêng, mỗi trang sửa một bài (editor ở %s)`, []string{"<editor"}},
-		{"empty", editorIn(``, ``), "<editor", `editor rỗng: vẽ vùng viết bên trong, <editor><content name="body" alt="Nội dung" /></editor>`, nil},
+		{"empty", editorIn(``, ``), "<editor", `editor rỗng: vẽ vùng viết bên trong, <editor><textarea name="body" alt="Nội dung" /></editor>`, nil},
 		{"no area", editorIn(``, editorBar+editorLink), "<editor",
-			`editor cần một vùng viết bên trong, engine viết role="textbox" lên nó: <content name="body" value="{{ post.body }}" />`, nil},
-		{"two areas", editorIn(``, editorBar+editorLink+area+`<content name="other" alt="Khác" />`), `<content name="other"`,
-			`editor có một vùng viết: <content> ở %s đã là của nó; vùng viết thứ hai là một <editor> khác`, []string{`<content name="body"`}},
+			`editor cần một vùng viết bên trong, engine viết role="textbox" lên nó: <textarea name="body" value="{{ post.body }}" />`, nil},
+		{"two areas", editorIn(``, editorBar+editorLink+area+`<textarea name="other" alt="Khác" />`), `<textarea name="other"`,
+			`editor có một vùng viết: <textarea> ở %s đã là của nó; vùng viết thứ hai là một <editor> khác`, []string{`<textarea name="body"`}},
 		{"area in a for", editorIn(``, editorBar+editorLink+`<box for="x of xs">`+area+`</box>`), "for=",
-			`vùng viết của editor không lặp bằng for: for này lặp <content> ở %s; đặt <content> ngoài for`, []string{`<content name="body"`}},
+			`vùng viết của editor không lặp bằng for: for này lặp <textarea> ở %s; đặt <textarea> ngoài for`, []string{`<textarea name="body"`}},
 		{"area under an if", editorIn(``, editorBar+editorLink+`<box if="ok">`+area+`</box>`), "if=",
-			`vùng viết của editor luôn có mặt: if này có thể bỏ <content> ở %s; đặt <content> ngoài if`, []string{`<content name="body"`}},
-		{"area in a nested component", editorIn(``, editorBar+editorLink+`<dropdown>`+area+`</dropdown>`), "<content name",
+			`vùng viết của editor luôn có mặt: if này có thể bỏ <textarea> ở %s; đặt <textarea> ngoài if`, []string{`<textarea name="body"`}},
+		{"area in a nested component", editorIn(``, editorBar+editorLink+`<dropdown>`+area+`</dropdown>`), "<textarea name",
 			`vùng viết của editor viết thẳng trong <editor>, không trong <dropdown> lồng bên trong (ở %s): tên trần bên trong đó là của nó`, []string{"<dropdown"}},
-		{"area with words inside", editorIn(``, editorBar+editorLink+`<content name="body" alt="Nội dung"><text>x</text></content>`), "<content name",
+		{"area with words inside", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="Nội dung"><text>x</text></textarea>`), "<textarea name",
 			`vùng viết của editor không có nội dung bên trong: bài lúc đầu là value="{{ post.body }}"`, nil},
-		{"no name", editorIn(``, editorBar+editorLink+`<content alt="Nội dung" />`), "<content alt",
-			`<content> của editor cần name: không có name thì form không gửi bài lên server (name="body")`, nil},
-		{"name from data", editorIn(``, editorBar+editorLink+`<content name="{{ field }}" alt="x" />`), "name=",
+		{"no name", editorIn(``, editorBar+editorLink+`<textarea alt="Nội dung" />`), "<textarea alt",
+			`<textarea> của editor cần name: không có name thì form không gửi bài lên server (name="body")`, nil},
+		{"name from data", editorIn(``, editorBar+editorLink+`<textarea name="{{ field }}" alt="x" />`), "name=",
 			`name của vùng viết là chữ cố định, tên ô form gửi lên (name="body"), không lấy từ dữ liệu`, nil},
-		{"value written", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" value="Xin chào" />`), `value="Xin`,
+		{"value written", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" value="Xin chào" />`), `value="Xin`,
 			`value của vùng viết là bài đã lưu, một {{ }} đọc dữ liệu của trang: value="{{ post.body }}"`, nil},
-		{"value of its own state", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" value="{{ words }}" />`), `value="{{ words`,
+		{"value of its own state", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" value="{{ words }}" />`), `value="{{ words`,
 			`value của vùng viết dựng ở server: đọc dữ liệu của trang, không đọc words (trạng thái ở trình duyệt)`, nil},
-		{"rows not a number", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" rows="many" />`), "rows=",
+		{"rows not a number", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" rows="many" />`), "rows=",
 			`rows là số dòng thấp nhất của vùng viết, một số nguyên từ 1 tới 100 (rows="12"), không phải "many"`, nil},
-		{"required from data", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" required="{{ must }}" />`), "required=",
+		{"required from data", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" required="{{ must }}" />`), "required=",
 			`required của vùng viết là "true" hay "false" viết sẵn ở bản này, không lấy từ dữ liệu`, nil},
-		{"flex on the area", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" flex="row" />`), "flex=",
+		{"flex on the area", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" flex="row" />`), "flex=",
 			`vùng viết là một khối chữ, engine đặt cách các đoạn nằm: bỏ flex`, nil},
-		{"maxlength on the area", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" maxlength="500" />`), "maxlength=",
+		{"maxlength on the area", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" maxlength="500" />`), "maxlength=",
 			`maxlength không có trên vùng viết: độ dài bài kiểm ở server (richtext(…).characters)`, nil},
-		{"change on the area", editorIn(``, editorBar+editorLink+`<content name="body" alt="x" change="save()" />`), "change=",
-			`change viết trên <content> của editor chưa có ở bản này: bài đi theo form khi gửi, số chữ là {{ words }}`, nil},
-		{"an area nothing names", editorIn(``, editorBar+editorLink+`<content name="body" />`), "<content name",
-			`vùng viết chưa có tên đọc được: đặt editor trong <field> có <label>, hay viết alt trên <content>`, nil},
+		{"change on the area", editorIn(``, editorBar+editorLink+`<textarea name="body" alt="x" change="save()" />`), "change=",
+			`change viết trên <textarea> của editor chưa có ở bản này: bài đi theo form khi gửi, số chữ là {{ words }}`, nil},
+		{"an area nothing names", editorIn(``, editorBar+editorLink+`<textarea name="body" />`), "<textarea name",
+			`vùng viết chưa có tên đọc được: đặt editor trong <field> có <label>, hay viết alt trên <textarea>`, nil},
 		{"name on the host", editorIn(` name="body"`, editorBar+editorLink+area), "name=",
-			`name không có trên <editor>: name, value, placeholder, required, readonly, disabled, rows viết trên <content> bên trong`, nil},
+			`name không có trên <editor>: name, value, placeholder, required, readonly, disabled, rows viết trên <textarea> bên trong`, nil},
 		{"state on the host", editorIn(` as="$body" words="0"`, editorBar+editorLink+area), "words=",
 			`words là trạng thái của editor, không phải đầu vào: đọc {{ $body.words }}`, nil},
 		{"a method on the host", editorIn(` link="x"`, editorBar+editorLink+area), "link=",
@@ -469,11 +469,11 @@ func TestEditorRefusalsAtTheirPlace(t *testing.T) {
 			`toggle('heading', 4) trong <dropdown>: tên trần bên trong <dropdown> là của nó (toggle() mở và đóng nó); lệnh của editor ở đây gọi qua alias, đặt as trên <editor> (<editor as="$body">) rồi gọi $body.toggle('heading', 4)`, nil},
 		{"a dropdown calling through an alias, the editor without as", editorIn(``, `<box alt="F"><button click="toggle('bold')">B</button><dropdown><button click="toggle()">v</button><popover><button click="$body.toggle('heading', 4)">H4</button></popover></dropdown></box>`+area), `click="$body`,
 			`$body.toggle('heading', 4) trong <dropdown> của <editor> chưa có as: nút trong dropdown gọi editor bao quanh nó qua alias của nó; đặt as trên <editor> (<editor as="$body">) rồi gọi $body.toggle('heading', 4)`, nil},
-		{"a dropdown calling another editor", `<content><form method="post"><editor as="$a"><box alt="F"><button click="toggle('bold')">B</button><dropdown><button click="toggle()">v</button><popover><button click="$a.toggle('heading', 4)">H4</button><button click="$b.toggle('heading', 5)">H5</button></popover></dropdown></box><content name="a" alt="A" /></editor>` +
-			`<editor as="$b"><box alt="G"><button click="toggle('bold')">B</button></box><content name="b" alt="B" /></editor></form></content>`, `click="$b`,
+		{"a dropdown calling another editor", `<content><form method="post"><editor as="$a"><box alt="F"><button click="toggle('bold')">B</button><dropdown><button click="toggle()">v</button><popover><button click="$a.toggle('heading', 4)">H4</button><button click="$b.toggle('heading', 5)">H5</button></popover></dropdown></box><textarea name="a" alt="A" /></editor>` +
+			`<editor as="$b"><box alt="G"><button click="toggle('bold')">B</button></box><textarea name="b" alt="B" /></editor></form></content>`, `click="$b`,
 			`$b.toggle('heading', 5) trong <dropdown> của editor $a: nút trong dropdown gọi editor bao quanh nó, qua alias của nó ($a.toggle('heading', 5))`, nil},
-		{"a dropdown calling only another editor", `<content><form method="post"><editor as="$a"><box alt="F"><button click="toggle('bold')">B</button><dropdown><button click="toggle()">v</button><popover><button click="$b.toggle('heading', 5)">H5</button></popover></dropdown></box><content name="a" alt="A" /></editor>` +
-			`<editor as="$b"><box alt="G"><button click="toggle('bold')">B</button></box><content name="b" alt="B" /></editor></form></content>`, `click="$b`,
+		{"a dropdown calling only another editor", `<content><form method="post"><editor as="$a"><box alt="F"><button click="toggle('bold')">B</button><dropdown><button click="toggle()">v</button><popover><button click="$b.toggle('heading', 5)">H5</button></popover></dropdown></box><textarea name="a" alt="A" /></editor>` +
+			`<editor as="$b"><box alt="G"><button click="toggle('bold')">B</button></box><textarea name="b" alt="B" /></editor></form></content>`, `click="$b`,
 			`$b.toggle('heading', 5) trong <dropdown> của editor $a: nút trong dropdown gọi editor bao quanh nó, qua alias của nó ($a.toggle('heading', 5))`, nil},
 		{"a bare align in a dropdown", `<content><form method="post"><editor as="$body"><box alt="F"><dropdown><button click="toggle()">v</button><popover><button click="align('center')">C</button></popover></dropdown></box>` + area + `</editor></form></content>`, `click="align`,
 			`align('center') trong <dropdown>: tên trần bên trong <dropdown> là của nó (toggle() mở và đóng nó); lệnh của editor ở đây gọi qua alias, $body.align('center')`, nil},
@@ -517,7 +517,7 @@ func TestEditorRefusalsAtTheirPlace(t *testing.T) {
 			`thanh công cụ của editor cần alt: engine viết role="toolbar", alt là tên của thanh (<box alt="Định dạng">)`, nil},
 		{"a toolbar that is a list", editorIn(``, `<list alt="F"><item><button click="toggle('bold')">B</button></item><item><button click="toggle('italic')">I</button></item></list>`+area), "<list",
 			`thanh công cụ của editor là một <box>, <card> hay <section> có alt: các nút như nút ở %s nằm chung trong <list>`, []string{"<button"}},
-		{"two popovers", editorIn(``, editorBar+editorLink+editorLink+area), "<popover><input value=\"{{ address }}\" alt=\"Địa chỉ liên kết\" /><button click=\"link(address)\">Gắn</button><button click=\"close()\">Huỷ</button></popover><content",
+		{"two popovers", editorIn(``, editorBar+editorLink+editorLink+area), "<popover><input value=\"{{ address }}\" alt=\"Địa chỉ liên kết\" /><button click=\"link(address)\">Gắn</button><button click=\"close()\">Huỷ</button></popover><textarea",
 			`editor có một popover, khung của liên kết: <popover> ở %s đã là của nó`, []string{"<popover"}},
 		{"a popover without an input", editorIn(``, editorBar+`<popover><button click="close()">Huỷ</button></popover>`+area), "<popover",
 			`popover của editor cần đúng một <input> làm ô địa chỉ: <input value="{{ address }}" alt="Địa chỉ liên kết" />`, nil},
@@ -554,9 +554,9 @@ func TestEditorRefusalsAtTheirPlace(t *testing.T) {
 		{"a name it has not, through the alias", `<content><form method="post"><editor as="$body">` + editorBar + editorLink + area + `</editor><text>{{ $body.dirty }}</text></form></content>`, "{{ $body.dirty",
 			`editor không có dirty: chưa lưu là unsaved ($body.unsaved)`, nil},
 		{"contenteditable", `<content><box contenteditable="true"><text>x</text></box></content>`, "contenteditable=",
-			`contenteditable là chữ của web; vùng soạn chữ là <editor> có một <content name="body" /> bên trong, đặt trong <form method="post">`, nil},
+			`contenteditable là chữ của web; vùng soạn chữ là <editor> có một <textarea name="body" /> bên trong, đặt trong <form method="post">`, nil},
 		{"a wysiwyg", `<content><wysiwyg /></content>`, "<wysiwyg",
-			`không có thẻ <wysiwyg>: vùng soạn chữ là <editor> có một <content name="body" /> bên trong, đặt trong <form method="post">`, nil},
+			`không có thẻ <wysiwyg>: vùng soạn chữ là <editor> có một <textarea name="body" /> bên trong, đặt trong <form method="post">`, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			// told where it is written: a second part at the last place its needle is written
@@ -617,9 +617,9 @@ func TestEditorWarnings(t *testing.T) {
 			`<button click="$body.toggle('heading', 4)" pressed:color="brand">H4</button></popover></dropdown></box>` + editorLink + editorArea + `</editor></form></content>`, "pressed:",
 			`pressed: là lúc đang nhấn; nút đang bật định dạng tô bằng active: (active:color)`},
 		{"a submit kept while empty", `<content><form method="post"><editor as="$body">` + editorBar + editorLink + editorArea + `</editor><button type="submit" disabled="{{ $body.empty }}">Lưu</button></form></content>`, "disabled=",
-			`nút gửi khoá theo $body.empty: không có JavaScript thì không gửi được; required="true" trên <content> đã chặn bài rỗng`},
+			`nút gửi khoá theo $body.empty: không có JavaScript thì không gửi được; required="true" trên <textarea> đã chặn bài rỗng`},
 		{"alt beside the label", label, `alt="Nội dung"`,
-			`alt trên <content> không có tác dụng: <label> của <field> bao ngoài đã là tên của vùng viết (trang bỏ alt này)`},
+			`alt trên <textarea> không có tác dụng: <label> của <field> bao ngoài đã là tên của vùng viết (trang bỏ alt này)`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			compileWarns(t, content(c.source), where("content.ui", c.source, c.needle), c.says)
@@ -676,7 +676,7 @@ func TestEditorToolbarsAndTheirButtons(t *testing.T) {
 		{"readonly", ` readonly aria-label`, ` aria-readonly="true" translate`},
 		{"disabled", ` disabled aria-label`, ` aria-readonly="true" aria-disabled="true" translate`},
 	} {
-		source := editorIn(``, editorBar+editorLink+`<content name="body" alt="Nội dung" `+c.word+`="true" />`)
+		source := editorIn(``, editorBar+editorLink+`<textarea name="body" alt="Nội dung" `+c.word+`="true" />`)
 		html := editorQuiet(t, source, "GET", nil)
 		if commands, disabled := strings.Count(html, `data-kitwork-format=`)+strings.Count(html, `data-kitwork-command=`), strings.Count(html, `aria-disabled="true" data-kitwork-`); commands != 4 || disabled != commands {
 			t.Errorf("%s: %d command buttons, %d of them aria-disabled; want all 4:\n%s", c.word, commands, disabled, html)
@@ -684,7 +684,7 @@ func TestEditorToolbarsAndTheirButtons(t *testing.T) {
 		mustContain(t, html, `name="body"`+c.field, c.area)
 	}
 	// written false, the editor takes writing: only link, undo and redo start disabled
-	html = editorQuiet(t, editorIn(``, editorBar+editorLink+`<content name="body" alt="Nội dung" readonly="false" disabled="false" />`), "GET", nil)
+	html = editorQuiet(t, editorIn(``, editorBar+editorLink+`<textarea name="body" alt="Nội dung" readonly="false" disabled="false" />`), "GET", nil)
 	mustContain(t, html, `data-kitwork-format="bold" aria-pressed="false" aria-keyshortcuts="Control+B" data-kitwork-event`)
 	mustNotContain(t, html, ` readonly`, ` disabled `, `aria-disabled="true" translate`)
 }
@@ -701,7 +701,7 @@ func TestEditorToolbarsAndTheirButtons(t *testing.T) {
 // it was before the review of 20/10/2026), the textarea's row failed.
 func TestEditorFieldWiring(t *testing.T) {
 	source := `<content><form method="post"><field><label>Nội dung</label><editor>` + editorBar + editorLink +
-		`<content name="body" />` + `</editor><hint>Viết ngắn gọn.</hint><error>Bài cần nội dung.</error></field></form></content>`
+		`<textarea name="body" />` + `</editor><hint>Viết ngắn gọn.</hint><error>Bài cần nội dung.</error></field></form></content>`
 	html := editorQuiet(t, source, "GET", nil)
 	mustContain(t, html,
 		`<label for="kitwork-field-1" id="kitwork-field-1-label">Nội dung</label>`,
@@ -715,7 +715,7 @@ func TestEditorFieldWiring(t *testing.T) {
 	}
 	// a label deeper in the field names the area too
 	html = editorQuiet(t, `<content><form method="post"><field><box flex="row"><label>Nội dung</label></box><editor>`+editorBar+editorLink+
-		`<content name="body" /></editor></field></form></content>`, "GET", nil)
+		`<textarea name="body" /></editor></field></form></content>`, "GET", nil)
 	mustContain(t, html, `<label for="kitwork-field-1" id="kitwork-field-1-label">Nội dung</label>`, `aria-labelledby="kitwork-field-1-label"`)
 	// outside a field: the alt names the area and the field
 	html = editorQuiet(t, editorIn(``, editorBar+editorLink+editorArea), "GET", nil)
@@ -734,9 +734,9 @@ func TestEditorFieldWiring(t *testing.T) {
 // aria-current alone (values.go), this test failed (run 20/10/2026 on overlaid copies of
 // stylesheet/editor.go and stylesheet/values.go).
 func TestEditorStylesheet(t *testing.T) {
-	page := `<content><form method="post"><editor>` + editorBar + editorLink + `<content name="a" alt="A" rows="12" /></editor>` +
-		`<editor><box alt="F"><button click="toggle('bold')" active:background="brand/15">B</button></box><content name="b" alt="B" rows="6" /></editor>` +
-		`<editor><box alt="G"><button click="toggle('italic')">I</button></box><content name="c" alt="C" rows="12" /></editor></form></content>`
+	page := `<content><form method="post"><editor>` + editorBar + editorLink + `<textarea name="a" alt="A" rows="12" /></editor>` +
+		`<editor><box alt="F"><button click="toggle('bold')" active:background="brand/15">B</button></box><textarea name="b" alt="B" rows="6" /></editor>` +
+		`<editor><box alt="G"><button click="toggle('italic')">I</button></box><textarea name="c" alt="C" rows="12" /></editor></form></content>`
 	s := memorySite("", content(page))
 	s.Reload = true
 	html, css := renderWithCSS(t, s, ".", "/", nil)
@@ -821,7 +821,7 @@ func TestEditorFieldLabelIsAlwaysThere(t *testing.T) {
 		{"a label in an if", `<box if="named"><label>Nội dung</label></box>`, "if="},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			source := `<content><form method="post"><field>` + c.label + `<editor>` + editorBar + editorLink + `<content name="body" /></editor></field></form></content>`
+			source := `<content><form method="post"><field>` + c.label + `<editor>` + editorBar + editorLink + `<textarea name="body" /></editor></field></form></content>`
 			says := fmt.Sprintf(`if này có thể bỏ <label> ở %s, tên của vùng viết của editor (aria-labelledby trỏ vào nó): <label> của field có editor luôn có mặt`,
 				strings.TrimSuffix(where("content.ui", source, "<label"), ": "))
 			mustFailExactly(t, content(source), where("content.ui", source, c.needle)+says)
@@ -838,7 +838,7 @@ func TestEditorFieldLabelIsAlwaysThere(t *testing.T) {
 func TestEditorFieldSeesThroughALayout(t *testing.T) {
 	s := memorySite("", map[string]string{
 		"/site/content.ui":     `<content><form method="post"><field><label>Nội dung</label><post-editor /><error>Bài cần nội dung.</error></field></form></content>`,
-		"/site/post-editor.ui": `<box gap="2"><editor>` + editorBar + editorLink + `<content name="body" /></editor></box>`,
+		"/site/post-editor.ui": `<box gap="2"><editor>` + editorBar + editorLink + `<textarea name="body" /></editor></box>`,
 	})
 	s.Reload = true
 	page, err := s.Compile("/site")
@@ -944,7 +944,7 @@ func TestEditorToolbarDropdown(t *testing.T) {
 	mustNotContain(t, html, "kitwork-editor-1-menu")
 
 	// readonly: every command in a dropdown is disabled as the toolbar's are
-	readonly := strings.Replace(source, editorArea, `<content name="body" alt="Nội dung" readonly="true" />`, 1)
+	readonly := strings.Replace(source, editorArea, `<textarea name="body" alt="Nội dung" readonly="true" />`, 1)
 	html = editorQuiet(t, readonly, "GET", nil)
 	if commands, disabled := strings.Count(html, `data-kitwork-format=`)+strings.Count(html, `data-kitwork-command=`), strings.Count(html, `aria-disabled="true" data-kitwork-event`); commands != 7 || disabled != commands {
 		t.Errorf("readonly: %d command buttons, %d of them aria-disabled; want all 7:\n%s", commands, disabled, html)

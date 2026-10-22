@@ -16,7 +16,7 @@ var scrolledFiles = map[string]string{
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b" });
 `,
-	"localhost/page.ui":          `<page><content /></page>`,
+	"localhost/view.ui":          `<view><content /></view>`,
 	"localhost/content.ui":       `<content><box pin="top" scrolled:shadow="small" scrolled:background="paper"><text>Thanh</text></box></content>`,
 	"localhost/khong/content.ui": `<content><box pin="top" shadow="small"><text>Không cuộn</text></box></content>`,
 }

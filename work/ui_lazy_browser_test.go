@@ -22,7 +22,7 @@ var lazyBrowserFiles = map[string]string{
 
 router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b211b" });
 `,
-	"localhost/page.ui":   `<page><header /><content /></page>`,
+	"localhost/view.ui":   `<view><header /><content /></view>`,
 	"localhost/header.ui": `<header pin="top" padding="4"><text>Quán</text></header>`,
 	"localhost/content.ui": `<content gap="4">
   <section id="near" lazy="true" gap="2">` + strings.Repeat(`<text>Gần màn hình</text>`, 20) + `</section>

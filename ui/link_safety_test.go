@@ -74,7 +74,7 @@ func TestExternalLinksAreMarked(t *testing.T) {
 // removed), "/\evil.example" was marked as the site's own path and this test failed.
 func TestLinksABrowserReadsAsAnotherHost(t *testing.T) {
 	s := memorySite("", map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><link value="{{ url }}">Đi</link></header>`,
 		"/site/content.ui": `<content><link value="{{ url }}">Đi</link></content>`,
 	})

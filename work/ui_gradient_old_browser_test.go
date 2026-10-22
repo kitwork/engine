@@ -32,7 +32,7 @@ func TestBrowserGradientTextWithoutColorMix(t *testing.T) {
 router.colors({ brand: "#c8742c" });
 router.gradients({ ember: { type: "linear", direction: "to-right", stops: [ { color: "ink-10", at: 0 }, { color: "brand+15", at: 100 } ] } });
 `,
-		"localhost/page.ui":    `<page><content /></page>`,
+		"localhost/view.ui":    `<view><content /></view>`,
 		"localhost/content.ui": `<content padding="4"><text heading="1" size="huge" color="ember">MMMMMMMM</text></content>`,
 	})
 	older := false // serve the stylesheets as a browser without color-mix() reads them

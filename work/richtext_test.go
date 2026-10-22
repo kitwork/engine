@@ -49,7 +49,7 @@ func TestRichtextValueEditsBackUnchanged(t *testing.T) {
 	}
 	tn := NewTenant(writeSite(t, map[string]string{
 		"router.work": `import * as router from "kitwork/router";`,
-		"page.ui":     `<page><content /></page>`,
+		"view.ui":     `<view><content /></view>`,
 		"bai/router.work": "import * as router from \"kitwork/router\";\n" +
 			"import { richtext } from \"kitwork\";\n" +
 			"const saved = " + strconv.Quote(saved) + ";\n" +

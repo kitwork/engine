@@ -20,7 +20,7 @@ var terminalReachFiles = map[string]string{
 
 router.colors({ brand: "#c8742c" });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <button id="outside" click="$pick.copy()">Chép từ ngoài</button>
   <text id="state">{{ $pick.copied ? 'yes' : 'no' }}</text>
@@ -98,7 +98,7 @@ func terminalWordsFiles(language string) map[string]string {
 router.colors({ brand: "#c8742c" });
 router.language("` + language + `");
 `,
-		"localhost/page.ui": `<page><content /></page>`,
+		"localhost/view.ui": `<view><content /></view>`,
 		"localhost/content.ui": `<content padding="4" gap="4">
   <box id="ok"><terminal><code>echo ok</code><button id="copy-ok" click="copy()">Copy</button></terminal></box>
   <box id="no"><terminal><code>refuse me</code><button id="copy-no" click="copy()">Copy</button></terminal></box>

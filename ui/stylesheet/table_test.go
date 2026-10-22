@@ -45,7 +45,7 @@ func classes(t *testing.T, table *Table, r *Rules, intents ...Intent) string {
 	return strings.Join(out, " ")
 }
 
-// The header of the synthesis, inside <page container="wide">:
+// The header of the synthesis, inside <view container="wide">:
 // <header flex="row" align="center" space="between" gap="4" padding="4" medium:padding="6">
 // One class per written attribute, in the source's words, and its page.css exactly.
 func TestHeaderExample(t *testing.T) {
@@ -58,7 +58,7 @@ func TestHeaderExample(t *testing.T) {
 		Intent{Tag: "header", Name: "gap", Value: "4"},
 		Intent{Tag: "header", Name: "padding", Value: "4"},
 		Intent{Tag: "header", Width: "medium", Name: "padding", Value: "6"},
-		Intent{Tag: "header", Name: "container", Value: "wide"}, // passed down from <page>
+		Intent{Tag: "header", Name: "container", Value: "wide"}, // passed down from <view>
 	)
 	if want := "flex-row align-center space-between gap-4 padding-4 medium:padding-6 container-wide"; got != want {
 		t.Fatalf("class\n got %q\nwant %q", got, want)

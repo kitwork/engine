@@ -1659,7 +1659,7 @@ func groupNeed(g *pairGroup) string {
 }
 
 // placesText writes the first places of a group, file:line:col — a place in the file of the one before
-// it as line:col — then how many more: page.ui:1:26, content.ui:5:12, 9:4, 32:8 và 33 chỗ khác.
+// it as line:col — then how many more: view.ui:1:26, content.ui:5:12, 9:4, 32:8 và 33 chỗ khác.
 func placesText(places []Warning) string {
 	const shown = 4
 	var b strings.Builder

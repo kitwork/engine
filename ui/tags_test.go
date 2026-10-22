@@ -48,7 +48,7 @@ func TestComponentAttributeIsRemoved(t *testing.T) {
 	t.Run("on the root of a region's file", func(t *testing.T) {
 		header := `<header component="appearance"><text>x</text></header>`
 		mustFailExactly(t, map[string]string{
-			"/site/page.ui":    `<page><header /><content /></page>`,
+			"/site/view.ui":    `<view><header /><content /></view>`,
 			"/site/header.ui":  header,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		}, where("header.ui", header, `component=`)+removed+"viết <appearance>…</appearance> bên trong <header>")
@@ -344,13 +344,13 @@ func TestNamesNoComponentTakes(t *testing.T) {
 	t.Run("logic named like an element", func(t *testing.T) {
 		mustFailExactly(t, map[string]string{
 			"/site/content.ui":      `<content><text>a</text></content>`,
-			"/site/page.ui":         `<page><content /><reader as="$r" /></page>`,
+			"/site/view.ui":         `<view><content /><reader as="$r" /></view>`,
 			"/site/components.work": "import { component } from \"kitwork\";\n\ncomponent.define(\"reader\", () => {\n  var open = false;\n});\n",
 		}, `components.work:1:1: component.define("reader", …) đặt tên trùng phần tử <reader> của Kitwork: <reader> luôn là phần tử của Kitwork nên logic này không bao giờ được đọc; tên component của site có gạch ngang (shop-reader)`)
 	})
 	t.Run("as on an empty region call", func(t *testing.T) {
-		page := `<page><header as="$h" /><content /></page>`
-		mustFailExactly(t, map[string]string{"/site/page.ui": page, "/site/header.ui": `<header><text>a</text></header>`, "/site/content.ui": `<content><text>x</text></content>`},
-			where("page.ui", page, `as=`)+`as đặt tên cho một instance; vùng <header> là layout, không có instance để gọi: bỏ as, hoặc đặt nó trên một component bên trong header.ui (<dropdown as="$h">)`)
+		page := `<view><header as="$h" /><content /></view>`
+		mustFailExactly(t, map[string]string{"/site/view.ui": page, "/site/header.ui": `<header><text>a</text></header>`, "/site/content.ui": `<content><text>x</text></content>`},
+			where("view.ui", page, `as=`)+`as đặt tên cho một instance; vùng <header> là layout, không có instance để gọi: bỏ as, hoặc đặt nó trên một component bên trong header.ui (<dropdown as="$h">)`)
 	})
 }

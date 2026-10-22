@@ -227,7 +227,7 @@ func TestLayoutNamedLikeATag(t *testing.T) {
 	}
 	// control: the region files and a layout whose root is a card
 	mustCompile(t, map[string]string{
-		"/site/page.ui":         `<page><header /><content /></page>`,
+		"/site/view.ui":         `<view><header /><content /></view>`,
 		"/site/header.ui":       `<header><text>Quán</text></header>`,
 		"/site/content.ui":      `<content><product-card product="{{ x }}" /></content>`,
 		"/site/product-card.ui": productCard,
@@ -242,7 +242,7 @@ func TestLayoutRoot(t *testing.T) {
 		{`<card for="x of xs"><text>x</text></card>`, "for=", `gốc của shop-promo.ui không mang for: lặp mấy lần là việc của chỗ gọi (<shop-promo for="…" />)`},
 		{`<box component="dropdown"><button click="toggle()">x</button></box>`, "component=", `component= đã bỏ: component là một thẻ, viết <dropdown>…</dropdown>`},
 		{`<dropdown><button click="toggle()">x</button></dropdown>`, "<dropdown", `gốc của shop-promo.ui là <dropdown>, một component: chỗ gọi <shop-promo /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là một component; bọc <dropdown> trong một <box>`},
-		{`<page><content /></page>`, "<page", "gốc của shop-promo.ui là <page>: page là khung của trang"},
+		{`<view><content /></view>`, "<view", "gốc của shop-promo.ui là <view>: <view> là khung của trang, chỉ là gốc của view.ui"},
 		{`<navbar><link value="/">x</link></navbar>`, "<navbar", "gốc của shop-promo.ui là vùng <navbar>: vùng gọi bằng thẻ của nó"},
 		{`<fragment if="x"><text>x</text></fragment>`, "<fragment", "gốc của shop-promo.ui là <fragment>, không dựng phần tử nào"},
 		// promo-line is a layout (promo-line.ui, no logic), not a component
@@ -264,7 +264,7 @@ func TestLayoutRoot(t *testing.T) {
 // the server and never named on the wire.
 func TestLayoutLookupFromTheWritingFolder(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":             `<page><header /><content /></page>`,
+		"/site/view.ui":             `<view><header /><content /></view>`,
 		"/site/header.ui":           `<header><mini-cart /></header>`,
 		"/site/mini-cart.ui":        `<box><text>giỏ của site</text></box>`,
 		"/site/shop/mini-cart.ui":   `<box><text>giỏ của shop</text></box>`,

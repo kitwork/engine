@@ -222,8 +222,8 @@ type compiler struct {
 	seq      map[string]int
 	depth    int
 	files    map[string]bool
-	// layout is the page.ui the route uses (site-relative), written on <body> as data-kitwork-layout:
-	// a link to a page with another page.ui is not a content swap but a whole new page (Drive)
+	// layout is the view.ui the route uses (site-relative), written on <body> as data-kitwork-layout:
+	// a link to a page with another view.ui is not a content swap but a whole new page (Drive)
 	layout string
 
 	// components are the components and layout pieces resolved so far, by writing folder and value (a
@@ -250,7 +250,7 @@ type compiler struct {
 	wired  []aliasUse
 	strays []aliasUse
 	called map[string]*componentDef
-	// anchors are the ids written on this page (page.ui, its regions, layouts, the content), each with
+	// anchors are the ids written on this page (view.ui, its regions, layouts, the content), each with
 	// where it was written: an id names one place, so a second one is an error
 	anchors map[string]string
 	// tabHosts are the tabs hosts of the page and tabPanels the elements whose show compares an alias's
@@ -290,7 +290,7 @@ type compiler struct {
 	out *Page
 }
 
-// aliasFrame holds the aliases set in one place: the page (page.ui, its regions and the content),
+// aliasFrame holds the aliases set in one place: the page (view.ui, its regions and the content),
 // or one instance's own .ui, whose aliases are its own and unseen by the page.
 type aliasFrame struct {
 	owner  string                   // the component whose .ui these aliases are in; "" for the page
@@ -329,14 +329,24 @@ type aliasUse struct {
 	attr  *Attr
 }
 
-// Compile prepares the page of the route folder routeDir: its content.ui, the nearest page.ui going
+// The files of a route's page (22/10/2026, KITWORK_UI §4): view.ui is the frame, root <view>, with
+// <content /> where the route's page goes; content.ui is the route's page, root <content>, as are
+// notfound.ui and error.ui. Inside, the compiler calls the frame "page" (<body>), the name it had
+// before; readView turns <view> into it as the file is read, and c.hostTags keeps what the author
+// wrote, for messages (tagOf). A page.ui left from before that day stops the site at boot (OldNames).
+const (
+	ViewFile    = "view.ui"
+	ContentFile = "content.ui"
+)
+
+// Compile prepares the page of the route folder routeDir: its content.ui, the nearest view.ui going
 // up, and every region and component those reach (KITWORK_UI §6, §13).
 func (s *Site) Compile(routeDir string) (*Page, error) {
-	return s.compile(routeDir, filepath.Join(routeDir, "content.ui"))
+	return s.compile(routeDir, filepath.Join(routeDir, ContentFile))
 }
 
 // CompileNotFound prepares the not-found page seen from routeDir: the nearest notfound.ui walking
-// up takes the place of content.ui inside the same page frame. It returns nil when there is none.
+// up takes the place of content.ui inside the same frame. It returns nil when there is none.
 func (s *Site) CompileNotFound(routeDir string) (*Page, error) {
 	file := s.find(routeDir, "notfound")
 	if file == "" {
@@ -347,7 +357,7 @@ func (s *Site) CompileNotFound(routeDir string) (*Page, error) {
 
 // HasContent reports whether routeDir has a page of its own (content.ui).
 func (s *Site) HasContent(routeDir string) bool {
-	return s.exists(filepath.Join(routeDir, "content.ui"))
+	return s.exists(filepath.Join(routeDir, ContentFile))
 }
 
 func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
@@ -383,19 +393,18 @@ func (s *Site) compile(routeDir, contentFile string) (*Page, error) {
 	c.content = content
 
 	var page *Node
-	if pageFile := s.find(routeDir, "page"); pageFile != "" {
-		c.files[pageFile] = true
-		c.layout = filepath.ToSlash(rel(s, pageFile))
-		nodes, err := s.parseFile(pageFile)
+	if viewFile := s.find(routeDir, "view"); viewFile != "" {
+		c.files[viewFile] = true
+		c.layout = filepath.ToSlash(rel(s, viewFile))
+		nodes, err := s.parseFile(viewFile)
 		if err != nil {
 			return nil, err
 		}
-		if page, err = singleRoot(nodes, rel(s, pageFile)); err != nil {
+		if page, err = singleRoot(nodes, rel(s, viewFile)); err != nil {
 			return nil, err
 		}
-		if page.Tag != "page" {
-			return nil, &Error{File: page.File, Line: page.Line, Column: page.Column,
-				Message: "page.ui phải có gốc <page>; nội dung của route đặt trong content.ui"}
+		if err := c.readView(page); err != nil {
+			return nil, err
 		}
 	} else {
 		page = &Node{Tag: "page", Children: []*Node{{Tag: "content", Bare: true}}}
@@ -1128,7 +1137,7 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 		misplaced := ""
 		if base == "pin" {
 			if !pinnable(el.tag) {
-				misplaced = fmt.Sprintf("pin ghim một khung vào mép màn hình khi cuộn (box, section, card, list, header, footer…); <%s> không ghim được (trang vẫn ghim nó như đã viết)", el.tag)
+				misplaced = fmt.Sprintf("pin ghim một khung vào mép màn hình khi cuộn (box, section, card, list, header, footer…); <%s> không ghim được (trang vẫn ghim nó như đã viết)", writtenAs(el.tag))
 			}
 			if p.pin == nil {
 				p.pin = a
@@ -1163,7 +1172,7 @@ func (c *compiler) attributes(n *Node, el *element) (*attrPlan, error) {
 		}
 		if strings.Contains(a.Value, "{{") {
 			if base == "container" && el.tag == "page" {
-				return nil, errAttr(n, a, "container của <page> là một chữ cố định (%s), không đổi theo dữ liệu", widthScaleWords)
+				return nil, errAttr(n, a, "container của <view> là một chữ cố định (%s), không đổi theo dữ liệu", widthScaleWords)
 			}
 			in, err := parseInterpolation(a.Value, n, a)
 			if err != nil {
@@ -1335,7 +1344,7 @@ var lazyOnScreen = map[string]string{
 // (box, section, card, grid, list, form, footer…: where pin goes too). The page draws lazy as written.
 func lazyMisplaced(tag string) string {
 	if why, ok := lazyOnScreen[tag]; ok {
-		message := "lazy trên <" + tag + ">: " + why + ", trình duyệt không bao giờ bỏ qua nó"
+		message := "lazy trên <" + writtenAs(tag) + ">: " + why + ", trình duyệt không bao giờ bỏ qua nó"
 		if tag == "page" || tag == "content" {
 			message += "; đặt lazy trên từng phần ở xa màn hình bên trong (section, grid, card…)"
 		}
@@ -1363,7 +1372,7 @@ func materialFrame(tag string) bool {
 func materialRefused(tag string) string {
 	const frames = "material là chất liệu của một khung (box, card, section, header, footer, popover…)"
 	if tag == "page" {
-		return frames + "; <page> là nền của cả trang, phía sau không có gì để nhìn qua: đặt material trên một vùng hay một khung bên trong"
+		return frames + "; <view> là nền của cả trang, phía sau không có gì để nhìn qua: đặt material trên một vùng hay một khung bên trong"
 	}
 	return frames + "; <" + tag + "> không mang material được"
 }
@@ -3318,7 +3327,7 @@ func (c *compiler) withReader(page *Node) (*Node, error) {
 func (c *compiler) reader(n *Node, cx ctx) (op, error) {
 	if !cx.pageChild {
 		// it renders where it is written and works until a soft move replaces the content around it
-		c.warn(n.File, n.Line, n.Column, "reader đặt trong page.ui, là con của <page>; không đặt trong vùng hay nội dung (Drive thay nội dung khi chuyển trang nên câu đọc có thể mất)")
+		c.warn(n.File, n.Line, n.Column, "reader đặt trong view.ui, là con của <view>; không đặt trong vùng hay nội dung (Drive thay nội dung khi chuyển trang nên câu đọc có thể mất)")
 	}
 	if len(n.SignificantChildren()) > 0 {
 		return nil, errAt(n, "reader không có nội dung con; câu cần đọc gửi bằng $reader.say(…)")
@@ -3378,7 +3387,7 @@ func writeHost(w *strings.Builder, site *callSite) {
 	writeAttr(w, "data-kitwork-component", value)
 }
 
-// progressThickness is how thick the line is when page.ui does not say, and the most it may be: a
+// progressThickness is how thick the line is when view.ui does not say, and the most it may be: a
 // line width counts real units (px on the web, points on iOS, dp on Android), as border-width,
 // lineWidth and trackThickness do, not the spacing scale. Thickness, not height: the progressbar's
 // own box is 0 high so it takes no room, and the word stays right for a bar that is not horizontal.
@@ -3387,7 +3396,7 @@ const (
 	progressThickestLine = 8
 )
 
-// progressDelay is how long a move may take before the bar shows (ms) when page.ui does not say: the
+// progressDelay is how long a move may take before the bar shows (ms) when view.ui does not say: the
 // value Drive itself uses. progressLongestDelay is the longest the house writes: longer, the bar of
 // most moves never shows.
 const (
@@ -3401,14 +3410,14 @@ const (
 // edge and takes no room, so the header below it does not move.
 func (c *compiler) progressbar(n *Node, cx ctx) (op, error) {
 	if !cx.pageChild {
-		return nil, errAt(n, "progressbar đặt trong page.ui, ở đầu <page>, trên <header />; không đặt trong vùng hay nội dung")
+		return nil, errAt(n, "progressbar đặt trong view.ui, ở đầu <view>, trên <header />; không đặt trong vùng hay nội dung")
 	}
 	if len(n.SignificantChildren()) > 0 {
 		return nil, errAt(n, "progressbar không có nội dung con; viết <progressbar />")
 	}
 	color := "brand"
 	label := "" // the page's language says it unless alt does (progressNameOp)
-	delay := "" // Drive's own 120ms unless page.ui says otherwise
+	delay := "" // Drive's own 120ms unless view.ui says otherwise
 	thickness := progressThickness
 	for i := range n.Attrs {
 		a := &n.Attrs[i]
@@ -3474,7 +3483,7 @@ func (c *compiler) progressbar(n *Node, cx ctx) (op, error) {
 	return &elemOp{fragment: true, children: []op{&staticOp{s: head}, name, &staticOp{s: tail}}}, nil
 }
 
-// progressNameOp writes the bar's name when page.ui writes no alt, in the page's language like every
+// progressNameOp writes the bar's name when view.ui writes no alt, in the page's language like every
 // word the engine writes itself (newTabNote): Vietnamese for vi (vi-VN…) and a page that names none,
 // English for any other, as a template page's bar says it (render/progressbar.go).
 type progressNameOp struct{}

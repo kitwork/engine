@@ -1,7 +1,7 @@
-<page background="canvas" color="ink" container="wide">
+<view background="canvas" color="ink" container="wide">
   <progressbar color="brand" delay="0" thickness="1"></progressbar>
   <header />
   <content />
   <footer />
   <overlay />
-</page>
+</view>

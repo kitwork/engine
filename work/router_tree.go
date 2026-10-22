@@ -19,6 +19,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/kitwork/engine/ui"
 )
 
 // ── dynamic-segment matcher ────────────────────────────────────────────────
@@ -295,6 +297,11 @@ func (rt *RouteTree) Prepare() error {
 			rt.ui = node.folder != nil && node.folder.ui
 		}
 		if rt.ui {
+			// a page written in the names before 22/10/2026 (content.ui, a page.ui that is a frame) stops a
+			// Kitwork UI site at boot, rather than the page vanishing or losing its frame (ui.OldNames)
+			if err := ui.OldNames(node.diskPath()); err != nil {
+				return fmt.Errorf("thư mục /%s: %w", node.relPath(), err)
+			}
 			// a type it does not know or a regex that does not compile stops a Kitwork UI site at boot,
 			// not at the first request that reaches the folder
 			for _, child := range *children {

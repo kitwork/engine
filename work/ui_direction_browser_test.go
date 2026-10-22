@@ -15,7 +15,7 @@ func directionFiles(language string) map[string]string {
 router.colors({ brand: "#c8742c" });
 router.language("` + language + `");
 `,
-		"localhost/page.ui": `<page><content /></page>`,
+		"localhost/view.ui": `<view><content /></view>`,
 		"localhost/content.ui": `<content padding="4" gap="4">
   <box id="left" padding-left="4"><text>a</text></box>
   <box id="right" padding-right="4"><text>b</text></box>

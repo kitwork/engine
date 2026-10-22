@@ -17,7 +17,7 @@ func uiGetSite(t *testing.T) *Tenant {
 	t.Helper()
 	tn := NewTenant(writeSite(t, map[string]string{
 		"router.work":     `import * as router from "kitwork/router";`,
-		"page.ui":         "<page><content /></page>",
+		"view.ui":         "<view><content /></view>",
 		"notfound.ui":     "<content><text>KHONG-THAY</text></content>",
 		"error.ui":        "<content><text>LOI: {{ message }}</text></content>",
 		"menu/content.ui": `<content><text id="menu">MENU {{ note }} {{ money(2) }} {{ runs }}</text><link id="next" value="/old">Cũ</link></content>`,

@@ -80,16 +80,16 @@ var strictWhiteBox = []string{
 	`content.ui:5:7: color="ink-30" trên nền white chỉ 3.22:1 ở chế độ tối; chữ thường cần 4.5:1 (chữ lớn 3:1). Nền white là màu cố định, không đổi theo chế độ như chữ: viết background="paper" ở content.ui:2:6 (6.60:1 sáng, 5.00:1 tối), hoặc giữ nền trắng và viết color="black" (21.00:1 sáng, 21.00:1 tối).`,
 }
 
-// whitePageHead is what every page of a site whose page.ui is written background="white" says of it:
+// whitePageHead is what every page of a site whose view.ui is written background="white" says of it:
 // the head of its line (ui.Warning.Head), the places after it being each page's own.
-const whitePageHead = `page.ui:1:7: background="white" giữ màu trắng ở chế độ tối; `
+const whitePageHead = `view.ui:1:7: background="white" giữ màu trắng ở chế độ tối; `
 
-// A page.ui every route shares, written background="white": each page's line lists that page's own
+// A view.ui every route shares, written background="white": each page's line lists that page's own
 // places, so the lines differ, but the terminal says the white once a generation (by the line's head),
 // for the first page that has it; each page's console still says its own line, its places included.
 func TestUISiteSaysASharedBackgroundOnce(t *testing.T) {
 	files := withRootRouter(t, kitworkColors, map[string]string{
-		"localhost/page.ui":         `<page background="white" color="ink"><content /></page>`,
+		"localhost/view.ui":         `<view background="white" color="ink"><content /></view>`,
 		"localhost/content.ui":      "<content>\n<text color=\"ink-30\">Cà phê</text>\n<text color=\"ink-30\">Trà</text>\n</content>",
 		"localhost/tinh/content.ui": "<content>\n<text color=\"ink-30\">Bánh</text>\n<text color=\"ink-30\">Kem</text>\n</content>",
 	})

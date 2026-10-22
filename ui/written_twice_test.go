@@ -17,7 +17,7 @@ func twiceSays(file, source, first, second, what string) string {
 // It used to pass: on the host of a component the last one won (transition="fade" transition="none"
 // was none, place="top" place="bottom" bottom, delay="1s" delay="2s" 2000), on a tag both were kept
 // (gap="2" gap="3" wrote class="gap-2 gap-3" and the stylesheet's order decided). Every file is read
-// the same way (content.ui, page.ui, a layout's file, the call of a layout), on one line or across
+// the same way (content.ui, view.ui, a layout's file, the call of a layout), on one line or across
 // lines, and a bare attribute is one too.
 func TestAttributeWrittenTwiceIsAnError(t *testing.T) {
 	for _, c := range []struct{ name, file, source, first, second, what string }{
@@ -37,7 +37,7 @@ func TestAttributeWrittenTwiceIsAnError(t *testing.T) {
 			`title="a"`, `title="b"`, "title viết hai lần trên <product-card>"},
 		{"a layout's file", "product-card.ui", `<card gap="2" gap="3"><text>{{ title }}</text></card>`,
 			`gap="2"`, `gap="3"`, "gap viết hai lần trên <card>"},
-		{"page.ui", "page.ui", "<page>\n  <box gap=\"2\" gap=\"3\"><text>x</text></box>\n  <content />\n</page>",
+		{"view.ui", "view.ui", "<view>\n  <box gap=\"2\" gap=\"3\"><text>x</text></box>\n  <content />\n</view>",
 			`gap="2"`, `gap="3"`, "gap viết hai lần trên <box>"},
 		{"bare", "content.ui", `<content><input type="checkbox" alt="Nhận tin" required required /></content>`,
 			`required `, `required />`, "required viết hai lần trên <input>"},

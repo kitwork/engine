@@ -78,7 +78,7 @@ router.colors({ brand: "#c8742c", canvas: "#f6f3ee", paper: "#ffffff", ink: "#2b
 router.fonts({ body: "Outfit" });
 router.reload(false);
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content gap="4" padding="4">
   <text id="title" heading="1" color="brand">Một</text>
   <link id="next" value="/hai">Hai</link>
@@ -239,7 +239,7 @@ var driveScriptFiles = map[string]string{
 router.colors({ brand: "#c8742c" });
 router.bundle({ javascript: "inline" });
 `,
-	"localhost/page.ui":    `<page><content /></page>`,
+	"localhost/view.ui":    `<view><content /></view>`,
 	"localhost/content.ui": `<content><text id="title">Một</text><link id="next" value="/hai">Hai</link></content>`,
 	"localhost/hai/content.ui": `<content>
   <text id="title">Hai</text>

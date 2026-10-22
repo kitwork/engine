@@ -224,7 +224,7 @@ func TestAppIsolationStaticRefusesUISources(t *testing.T) {
 
 	appDir := filepath.Join(root, "acme", "localhost")
 	sources := map[string]string{
-		"page.ui":              "<page>" + victimMarker + "</page>",
+		"view.ui":              "<view>" + victimMarker + "</view>",
 		"router.work":          "// " + victimMarker,
 		"shop/content.ui":      "<content>" + victimMarker + "</content>",
 		"shop/cart.work":       "// " + victimMarker,
@@ -247,7 +247,7 @@ func TestAppIsolationStaticRefusesUISources(t *testing.T) {
 	}
 
 	for _, target := range []string{
-		"http://localhost/page.ui",
+		"http://localhost/view.ui",
 		"http://localhost/router.work",
 		"http://localhost/shop/content.ui",
 		"http://localhost/shop/cart.work",

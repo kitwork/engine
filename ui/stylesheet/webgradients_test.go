@@ -615,7 +615,7 @@ func TestWebGradientLighter(t *testing.T) {
 		t.Fatal("warm-flame is a gradient of the palette")
 	}
 	if backdrop := string(r.CSS()); !strings.Contains(backdrop, ":where(html){background-color:#ff9a9e}") || r.Backdrop() != "warm-flame" || strings.Contains(backdrop, "--kitwork-gradient-") {
-		t.Errorf("<page background=\"warm-flame\">: <html> on its first stop, no custom property (backdrop %q):\n%s", r.Backdrop(), backdrop)
+		t.Errorf("<view background=\"warm-flame\">: <html> on its first stop, no custom property (backdrop %q):\n%s", r.Backdrop(), backdrop)
 	}
 }
 

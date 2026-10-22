@@ -104,7 +104,7 @@ func componentWritten(n *Node, a *Attr) error {
 	}
 	message := fmt.Sprintf("component= đã bỏ: component là một thẻ, viết %s", call)
 	if info, ok := catalog[n.Tag]; ok && (info.region || n.Tag == "page") {
-		message += fmt.Sprintf(" bên trong <%s>", n.Tag) // a region is no component's host: it holds one
+		message += fmt.Sprintf(" bên trong <%s>", writtenAs(n.Tag)) // a region is no component's host: it holds one
 	} else if _, chosen := catalog[n.Tag]; chosen && kit != nil && kit.root == "" && n.Tag != kit.hostTag() {
 		message += fmt.Sprintf(" (<%s> dựng một <%s>; cần <%s> thì đặt nó bên trong)", name, kit.hostTag(), n.Tag)
 	}
@@ -451,7 +451,7 @@ func (c *compiler) componentCall(n *Node, cx ctx) (op, error) {
 	if countdown != nil {
 		countdown.alias, countdown.aliases, inside.countdown = site.alias, cx.aliases, countdown
 	}
-	// nor is its <content> the writing area of an editor around it, nor its button one of its commands
+	// nor is its <textarea> the writing area of an editor around it, nor its button one of its commands
 	inner.editor, inside.editor = editor, editor // nil for any other component (editor.go)
 	if editor != nil {
 		editor.alias, editor.aliases = site.alias, cx.aliases
@@ -714,7 +714,7 @@ func forbiddenHost(tag string) string {
 	return ""
 }
 
-// registerAlias records an as where it is written: page-wide in page.ui, a region file or the content,
+// registerAlias records an as where it is written: page-wide in view.ui, a region file or the content,
 // the instance's own inside a component's .ui. An as inside a for would name every row.
 func (c *compiler) registerAlias(n *Node, a *Attr, alias string, cx ctx, def *componentDef) error {
 	if err := aliasWritten(n, a, alias); err != nil {
@@ -866,7 +866,7 @@ func (c *compiler) route() string {
 
 // errUse is the error of an alias read where no host in reach sets it.
 func (c *compiler) errUse(use aliasUse) error {
-	message := fmt.Sprintf("%s chưa có trên trang này (route %s): không thẻ nào trong tầm đặt as=\"%s\"; alias đặt trong page.ui, vùng hay content.ui thì cả trang gọi được",
+	message := fmt.Sprintf("%s chưa có trên trang này (route %s): không thẻ nào trong tầm đặt as=\"%s\"; alias đặt trong view.ui, vùng hay content.ui thì cả trang gọi được",
 		use.name, c.route(), use.name)
 	if use.attr != nil {
 		return errAttr(use.node, use.attr, "%s", message)

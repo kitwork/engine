@@ -293,7 +293,7 @@ func TestNetworkInAnItemLeavesTheItemItsRole(t *testing.T) {
 // and a placed network floats, never the region it is in. Until 18/10/2026 a region refused
 // component="network" with its own error; since a component is its tag, component= on a region is the
 // error of component=, told to write <network> inside it: the root of sidebar.ui, a footer written in
-// page.ui with place, and every other region in a file of its own. CONTROL: <network> inside the
+// view.ui with place, and every other region in a file of its own. CONTROL: <network> inside the
 // region compiles, a status region inside the landmark (placed, it is the one that floats).
 func TestNetworkInsideARegion(t *testing.T) {
 	const notice = `<text show="!connected">Offline</text>`
@@ -302,22 +302,22 @@ func TestNetworkInsideARegion(t *testing.T) {
 	}
 	sidebar := `<sidebar component="network">` + notice + `</sidebar>`
 	mustFailExactly(t, map[string]string{
-		"/site/page.ui":    `<page><sidebar /><content /></page>`,
+		"/site/view.ui":    `<view><sidebar /><content /></view>`,
 		"/site/sidebar.ui": sidebar,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	}, where("sidebar.ui", sidebar, `component=`)+says("sidebar"))
 
-	page := `<page><content /><footer component="network" place="bottom">` + notice + `</footer></page>`
+	page := `<view><content /><footer component="network" place="bottom">` + notice + `</footer></view>`
 	mustFailExactly(t, map[string]string{
-		"/site/page.ui":    page,
+		"/site/view.ui":    page,
 		"/site/content.ui": `<content><text>x</text></content>`,
-	}, where("page.ui", page, `component=`)+says("footer"))
+	}, where("view.ui", page, `component=`)+says("footer"))
 
 	for _, region := range []string{"header", "navbar", "tabbar", "overlay"} {
 		t.Run(region, func(t *testing.T) {
 			source := `<` + region + ` component="network">` + notice + `</` + region + `>`
 			mustFailExactly(t, map[string]string{
-				"/site/page.ui":           `<page><` + region + ` /><content /></page>`,
+				"/site/view.ui":           `<view><` + region + ` /><content /></view>`,
 				"/site/" + region + ".ui": source,
 				"/site/content.ui":        `<content><text>x</text></content>`,
 			}, where(region+".ui", source, `component=`)+says(region))
@@ -326,13 +326,13 @@ func TestNetworkInsideARegion(t *testing.T) {
 
 	// CONTROL: inside the region, its tag
 	html := compileQuiet(t, map[string]string{
-		"/site/page.ui":    `<page><sidebar /><content /></page>`,
+		"/site/view.ui":    `<view><sidebar /><content /></view>`,
 		"/site/sidebar.ui": `<sidebar><network>` + notice + `</network></sidebar>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	mustContain(t, html, `<aside class="flex-column"><div class="flex-column" data-kitwork-component="network" role="status">`)
 	html = compileQuiet(t, map[string]string{
-		"/site/page.ui":    `<page><content /><footer><network place="bottom">` + notice + `</network></footer></page>`,
+		"/site/view.ui":    `<view><content /><footer><network place="bottom">` + notice + `</network></footer></view>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
 	mustContain(t, html, `<footer class="flex-column"><div class="flex-column network network-bottom" data-kitwork-component="network" role="status">`)

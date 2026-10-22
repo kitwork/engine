@@ -41,7 +41,7 @@ const editorBrowserCanonical = `<form method="post" gap="4">
         <button click="close()">Huỷ</button>
         <error>Chỉ nhận https://, http://, mailto:, tel: hay đường dẫn bắt đầu bằng /.</error>
       </popover>
-      <content name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12"
+      <textarea name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12"
                padding="4" radius="medium" border="line" />
     </editor>
     <hint>{{ $body.words }} từ</hint>
@@ -76,7 +76,7 @@ router.post((ctx) => {
   return ctx.view({ post: { body: sent }, sent, kept: richtext(sent) });
 });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="3">
 ` + editorBrowserCanonical + `
   <box id="shown"><richtext value="{{ kept.value }}" /></box>
@@ -851,7 +851,7 @@ router.view((ctx) => {
 	page := func(form string) string { return "<content padding=\"4\" gap=\"3\">\n" + form + "\n</content>" }
 	return map[string]string{
 		"localhost/router.work":       post(`<p>Đọc thêm ở <a href=\"/tiep\">trang tài liệu</a> nhé.</p><p>Một hai ba</p>`),
-		"localhost/page.ui":           `<page><content /></page>`,
+		"localhost/view.ui":           `<view><content /></view>`,
 		"localhost/content.ui":        page(editorBrowserCanonical),
 		"localhost/small/router.work": post(`<p>Một hai ba</p>`),
 		"localhost/small/content.ui":  page(strings.Replace(editorBrowserCanonical, `rows="12"`, `rows="12" size="small"`, 1)),
@@ -1049,7 +1049,7 @@ const editorBrowserCanonicalV2 = `<form method="post" gap="4">
         <button click="close()">Huỷ</button>
         <error>Chỉ nhận https://, http://, mailto:, tel: hay đường dẫn bắt đầu bằng /.</error>
       </popover>
-      <content name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12"
+      <textarea name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12"
                padding="4" radius="medium" border="line" />
     </editor>
     <hint>{{ $body.words }} từ</hint>
@@ -1082,7 +1082,7 @@ router.post((ctx) => {
   return ctx.view({ post: { body: sent }, sent, kept: richtext(sent) });
 });
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="3">
 ` + editorBrowserCanonicalV2 + `
   <box id="shown"><richtext value="{{ kept.value }}" /></box>

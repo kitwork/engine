@@ -10,7 +10,7 @@ import (
 // go back to with Shift+Tab, and one after it, to drag, beside plain text; /tiep is where the links go.
 var countdownBarReviewFiles = map[string]string{
 	"localhost/router.work": countdownBrowserFiles["localhost/router.work"],
-	"localhost/page.ui":     `<page><content /><overlay /></page>`,
+	"localhost/view.ui":     `<view><content /><overlay /></view>`,
 	"localhost/overlay.ui":  toastBrowserFiles["localhost/overlay.ui"],
 	"localhost/content.ui": `<content padding="4" gap="2">
   <link id="first" value="/tiep">Trước thanh</link>

@@ -41,7 +41,7 @@ var networkBrowserFiles = map[string]string{
 router.language("vi");
 router.reload(false);
 `,
-	"localhost/page.ui":    `<page><content /><overlay /></page>`,
+	"localhost/view.ui":    `<view><content /><overlay /></view>`,
 	"localhost/overlay.ui": strings.Replace(toastBrowserFiles["localhost/overlay.ui"], "</overlay>", networkHost+"</overlay>", 1),
 	"localhost/content.ui": `<content padding="4" gap="2">
   <text id="here">Một</text>
@@ -619,7 +619,7 @@ router.language("vi");
 router.reload(false);
 router.transition("slide");
 `,
-	"localhost/page.ui":    `<page><content /><overlay /></page>`,
+	"localhost/view.ui":    `<view><content /><overlay /></view>`,
 	"localhost/overlay.ui": networkBrowserFiles["localhost/overlay.ui"],
 	"localhost/content.ui": `<content padding="4" gap="2">
   <text id="here">Một</text>

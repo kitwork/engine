@@ -321,7 +321,7 @@ func TestGradientStronger(t *testing.T) {
 	table.Backdrop(&r, "cirrus+20")
 	if backdrop := string(r.CSS()); !strings.Contains(backdrop, ":where(html){background-color:var("+property(1)+")}") ||
 		!strings.Contains(backdrop, property(1)+":"+values[LightMode][property(1)]) || r.Backdrop() != "cirrus+20" {
-		t.Errorf("<page background=\"cirrus+20\">: <html> on the first stop's property, the property set:\n%s", backdrop)
+		t.Errorf("<view background=\"cirrus+20\">: <html> on the first stop's property, the property set:\n%s", backdrop)
 	}
 
 	if same := pageCSS(t, table, Intent{Name: "background", Value: "cirrus+0"}); !strings.Contains(same, `.background-cirrus\+0{background-image:linear-gradient(to bottom right,var(--kitwork-gradient-cirrus-1) 0%,`) {

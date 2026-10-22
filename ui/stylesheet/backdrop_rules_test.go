@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Table.Backdrop records what a page whose <page> paints a gradient needs besides its classes (decision
+// Table.Backdrop records what a page whose <view> paints a gradient needs besides its classes (decision
 // D4 of 13/10/2026), first in the page layer, before every class: <html>'s ground in the gradient's
 // first stop (the pair's custom property; lighter, the mixed one) and the layer's rule — fixed to
 // the screen, inset 0, at least the large viewport tall, under everything, taking no pointer. Rules

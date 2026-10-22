@@ -214,7 +214,7 @@ func TestRenderStrictPrefixOrigin(t *testing.T) {
 		`<button data-kitwork-click='["=","n",["+",["$","n"],["#",1]]]'>+</button>`,
 		`<b data-kitwork-text="n">0</b>`,
 		`<style data-kitwork-generated="css"></style>`,
-		`<main data-kitwork-layout="page.ui"></main>`,
+		`<main data-kitwork-layout="view.ui"></main>`,
 		`<a href="/" data-kitwork-current="page">x</a>`,
 		`<div data-kitwork-delay="0"></div>`,
 		`<div data-kitwork-transition="fade"></div>`,

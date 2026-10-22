@@ -197,7 +197,7 @@ func TestParseErrorsPointAtTheSource(t *testing.T) {
 // A region tag is replaced by the root of its file; the call site only says where and whether.
 func TestRegionReplacesItsCallSite(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header flex="row" gap="2"><text>Quán</text></header>`,
 		"/site/content.ui": `<content><text>Trang chủ</text></content>`,
 	}
@@ -205,8 +205,8 @@ func TestRegionReplacesItsCallSite(t *testing.T) {
 	mustContain(t, html, `<header class="flex-row gap-2"><p>Quán</p></header>`, "<main", "<p>Trang chủ</p>")
 	mustNotContain(t, html, "<header />", "<header><header")
 
-	// the nearest page.ui replaces (never nests in) the outer one
-	files["/site/shop/page.ui"] = `<page><content /></page>`
+	// the nearest view.ui replaces (never nests in) the outer one
+	files["/site/shop/view.ui"] = `<view><content /></view>`
 	files["/site/shop/content.ui"] = `<content><text>Cửa hàng</text></content>`
 	shop := renderAt(t, memorySite("", files), "shop", "/shop", nil)
 	mustContain(t, shop, "<p>Cửa hàng</p>")
@@ -214,7 +214,7 @@ func TestRegionReplacesItsCallSite(t *testing.T) {
 
 	// control: a region file with the wrong root, or layout on the call site, is an error
 	bad := map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<box><text>Quán</text></box>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	}
@@ -222,7 +222,7 @@ func TestRegionReplacesItsCallSite(t *testing.T) {
 		t.Errorf("wrong root: %s", got)
 	}
 	bad["/site/header.ui"] = `<header><text>Quán</text></header>`
-	bad["/site/page.ui"] = `<page><header gap="2" /><content /></page>`
+	bad["/site/view.ui"] = `<view><header gap="2" /><content /></view>`
 	if got := compileError(t, bad); !strings.Contains(got, "chỉ nhận source, if, show") {
 		t.Errorf("layout on call site: %s", got)
 	}
@@ -349,7 +349,7 @@ func TestHelpers(t *testing.T) {
 // navigation, so the engine marks them for the client to mark again. Links inside are re-rendered.
 func TestKeptLinksAreMarkedForTheClient(t *testing.T) {
 	html := renderAt(t, memorySite("", map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><link value="/">Thực đơn</link><link value="/gioi-thieu" exact="true">Giới thiệu</link><link value="https://example.com">Ngoài</link></header>`,
 		"/site/content.ui": `<content><link value="/san-pham">Sản phẩm</link></content>`,
 	}), ".", "/", nil)
@@ -376,11 +376,11 @@ func TestLinkReload(t *testing.T) {
 	}
 }
 
-// The move between pages has a bar on every page of a site that does not reload: the one page.ui
+// The move between pages has a bar on every page of a site that does not reload: the one view.ui
 // writes, else one at the top, above the header. A site that reloads every page has none.
 func TestProgressbarIsOnEveryPageThatDoesNotReload(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><link value="/">Quán</link></header>`,
 		"/site/content.ui": `<content><text>Thực đơn</text></content>`,
 	}
@@ -388,7 +388,7 @@ func TestProgressbarIsOnEveryPageThatDoesNotReload(t *testing.T) {
 	mustContain(t, html, `data-kitwork-component="progressbar"`, `role="progressbar"`, `aria-label="Đang chuyển trang"`,
 		`data-kitwork-bind="show: active; aria-valuenow: value" hidden`, `data-kitwork-style="top: top"`,
 		`<div class="progressbar" data-kitwork-component="progressbar"`,
-		`<div class="thickness-1 background-brand" data-kitwork-style="width: value + '%'"></div>`) // brand and 1px unless page.ui says otherwise
+		`<div class="thickness-1 background-brand" data-kitwork-style="width: value + '%'"></div>`) // brand and 1px unless view.ui says otherwise
 	// the grouped web form only: none of the hand-written data-kit-* spellings
 	mustNotContain(t, html, "data-kit-")
 	bar, header := strings.Index(html, `data-kitwork-component="progressbar"`), strings.Index(html, "<header")
@@ -403,15 +403,15 @@ func TestProgressbarIsOnEveryPageThatDoesNotReload(t *testing.T) {
 	reloading.Reload = true
 	mustNotContain(t, renderAt(t, reloading, ".", "/", nil), "progressbar")
 
-	// a page with no page.ui gets one too
+	// a page with no view.ui gets one too
 	bare := memorySite("", map[string]string{"/site/content.ui": `<content><text>x</text></content>`})
 	mustContain(t, renderAt(t, bare, ".", "/", nil), `data-kitwork-component="progressbar"`)
 }
 
-// Written in page.ui, the bar takes its colour and its name from there, and is not added twice.
+// Written in view.ui, the bar takes its colour and its name from there, and is not added twice.
 func TestProgressbarWrittenInPage(t *testing.T) {
 	s := memorySite("", map[string]string{
-		"/site/page.ui":    `<page><progressbar color="ink-30" alt="Đang mở trang" /><header /><content /></page>`,
+		"/site/view.ui":    `<view><progressbar color="ink-30" alt="Đang mở trang" /><header /><content /></view>`,
 		"/site/header.ui":  `<header><text>Quán</text></header>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	})
@@ -442,17 +442,17 @@ func TestProgressbarPlacementErrors(t *testing.T) {
 		want  string
 	}{
 		{"inside the header", map[string]string{
-			"/site/page.ui": `<page><header /><content /></page>`, "/site/content.ui": content,
+			"/site/view.ui": `<view><header /><content /></view>`, "/site/content.ui": content,
 			"/site/header.ui": `<header><progressbar /><text>Quán</text></header>`,
-		}, "progressbar đặt trong page.ui"},
+		}, "progressbar đặt trong view.ui"},
 		{"inside the content", map[string]string{
 			"/site/content.ui": `<content><progressbar /><text>x</text></content>`,
-		}, "progressbar đặt trong page.ui"},
+		}, "progressbar đặt trong view.ui"},
 		{"a word that is none of .ui", map[string]string{
-			"/site/page.ui": `<page><progressbar lang="vi" /><content /></page>`, "/site/content.ui": content,
+			"/site/view.ui": `<view><progressbar lang="vi" /><content /></view>`, "/site/content.ui": content,
 		}, "progressbar chỉ nhận color"},
 		{"content inside", map[string]string{
-			"/site/page.ui": `<page><progressbar>Đang tải</progressbar><content /></page>`, "/site/content.ui": content,
+			"/site/view.ui": `<view><progressbar>Đang tải</progressbar><content /></view>`, "/site/content.ui": content,
 		}, "progressbar không có nội dung con"},
 	}
 	for _, c := range cases {
@@ -462,10 +462,10 @@ func TestProgressbarPlacementErrors(t *testing.T) {
 	}
 	// below the header, twice, value= or a site that reloads: drawn as written and warned of
 	// (diagnostics_compile_test.go)
-	// control: the same page.ui compiles on a site that does not reload
-	s := memorySite("", map[string]string{"/site/page.ui": `<page><progressbar /><content /></page>`, "/site/content.ui": content})
+	// control: the same view.ui compiles on a site that does not reload
+	s := memorySite("", map[string]string{"/site/view.ui": `<view><progressbar /><content /></view>`, "/site/content.ui": content})
 	if _, err := s.Compile("/site"); err != nil {
-		t.Errorf("a bar first in page.ui must compile: %v", err)
+		t.Errorf("a bar first in view.ui must compile: %v", err)
 	}
 }
 
@@ -474,7 +474,7 @@ func TestProgressbarPlacementErrors(t *testing.T) {
 func TestProgressbarDelay(t *testing.T) {
 	page := func(bar string) string {
 		s := memorySite("", map[string]string{
-			"/site/page.ui":    `<page>` + bar + `<content /></page>`,
+			"/site/view.ui":    `<view>` + bar + `<content /></view>`,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		})
 		return renderAt(t, s, ".", "/", nil)
@@ -488,7 +488,7 @@ func TestProgressbarDelay(t *testing.T) {
 
 	for _, bad := range []string{`"-1"`, `"fast"`, `"1.5"`, `"{{ wait }}"`} { // "10001": a warning
 		s := memorySite("", map[string]string{
-			"/site/page.ui":    `<page><progressbar delay=` + bad + ` /><content /></page>`,
+			"/site/view.ui":    `<view><progressbar delay=` + bad + ` /><content /></view>`,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		})
 		if _, err := s.Compile("/site"); err == nil {
@@ -498,11 +498,11 @@ func TestProgressbarDelay(t *testing.T) {
 }
 
 // thickness is how thick the line is in px, as a line width is everywhere (border-width, lineWidth,
-// trackThickness): thickness="1" is 1px, and 1px unless page.ui says otherwise.
+// trackThickness): thickness="1" is 1px, and 1px unless view.ui says otherwise.
 func TestProgressbarThickness(t *testing.T) {
 	page := func(bar string) string {
 		s := memorySite("", map[string]string{
-			"/site/page.ui":    `<page>` + bar + `<content /></page>`,
+			"/site/view.ui":    `<view>` + bar + `<content /></view>`,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		})
 		html, css := renderWithCSS(t, s, ".", "/", nil)
@@ -516,7 +516,7 @@ func TestProgressbarThickness(t *testing.T) {
 	mustContain(t, page(``), `class="thickness-1 background-brand"`)
 	for _, bad := range []string{`"0"`, `"0.5"`, `"2px"`, `"thin"`} { // "9": drawn, a warning
 		s := memorySite("", map[string]string{
-			"/site/page.ui":    `<page><progressbar thickness=` + bad + ` /><content /></page>`,
+			"/site/view.ui":    `<view><progressbar thickness=` + bad + ` /><content /></view>`,
 			"/site/content.ui": `<content><text>x</text></content>`,
 		})
 		_, err := s.Compile("/site")
@@ -629,27 +629,27 @@ func TestBadgeTints(t *testing.T) {
 	mustNotContain(t, html, "/15")
 }
 
-// <body> names the page.ui it is built from: a link between pages of the same page.ui swaps only the
-// content, a link to a page with another page.ui is a whole new page (Drive compares the two).
+// <body> names the view.ui it is built from: a link between pages of the same view.ui swaps only the
+// content, a link to a page with another view.ui is a whole new page (Drive compares the two).
 func TestBodyNamesItsLayout(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":                 `<page><content /></page>`,
+		"/site/view.ui":                 `<view><content /></view>`,
 		"/site/content.ui":              `<content><text>Thực đơn</text></content>`,
-		"/site/quan-ly/page.ui":         `<page><content /></page>`,
+		"/site/quan-ly/view.ui":         `<view><content /></view>`,
 		"/site/quan-ly/content.ui":      `<content><text>Quản lý</text></content>`,
 		"/site/ve-chung-toi/content.ui": `<content><text>Về</text></content>`,
 	}
 	s := memorySite("", files)
-	mustContain(t, renderAt(t, s, ".", "/", nil), `data-kitwork-layout="page.ui"`)
-	mustContain(t, renderAt(t, s, "ve-chung-toi", "/ve-chung-toi", nil), `data-kitwork-layout="page.ui"`)
-	mustContain(t, renderAt(t, s, "quan-ly", "/quan-ly", nil), `data-kitwork-layout="quan-ly/page.ui"`)
-	// a site with no page.ui has one page for every route: nothing to tell apart
+	mustContain(t, renderAt(t, s, ".", "/", nil), `data-kitwork-layout="view.ui"`)
+	mustContain(t, renderAt(t, s, "ve-chung-toi", "/ve-chung-toi", nil), `data-kitwork-layout="view.ui"`)
+	mustContain(t, renderAt(t, s, "quan-ly", "/quan-ly", nil), `data-kitwork-layout="quan-ly/view.ui"`)
+	// a site with no view.ui has one page for every route: nothing to tell apart
 	mustNotContain(t, render(t, `<content><text>x</text></content>`, nil), "data-kitwork-layout")
 }
 
 // <reader /> is what a screen reader says aloud. A site that moves without a reload gets one on every
 // page that writes none (Drive says the new title through it); a page may write its own with an alias,
-// once, straight in <page>. A site that reloads every page gets none unless it writes one.
+// once, straight in <view>. A site that reloads every page gets none unless it writes one.
 func TestReaderOnEveryPageThatMovesWithoutAReload(t *testing.T) {
 	plain := map[string]string{"/site/content.ui": `<content><text>x</text></content>`}
 	html := renderAt(t, memorySite("", plain), ".", "/", nil)
@@ -668,24 +668,24 @@ func TestReaderOnEveryPageThatMovesWithoutAReload(t *testing.T) {
 	}
 
 	written := map[string]string{
-		"/site/page.ui":    `<page><content /><reader as="$reader" /></page>`,
+		"/site/view.ui":    `<view><content /><reader as="$reader" /></view>`,
 		"/site/content.ui": `<content><text>x</text></content>`,
 	}
 	html = renderAt(t, memorySite("", written), ".", "/", nil)
 	mustContain(t, html, `data-kitwork-component="reader: $reader"`)
 	if strings.Count(html, `data-kitwork-component="reader`) != 1 {
-		t.Errorf("the reader page.ui writes is the only one:\n%s", html)
+		t.Errorf("the reader view.ui writes is the only one:\n%s", html)
 	}
 	reloads = memorySite("", written)
 	reloads.Reload = true
 	mustContain(t, renderAt(t, reloads, ".", "/", nil), `data-kitwork-component="reader: $reader"`)
 
 	for source, want := range map[string]string{
-		`<page><content /><reader as="reader" /></page>`:          "as là $ và một tên",
-		`<page><content /><reader lang="vi" /></page>`:            "reader chỉ nhận as",
-		`<page><content /><reader><text>x</text></reader></page>`: "reader không có nội dung con",
+		`<view><content /><reader as="reader" /></view>`:          "as là $ và một tên",
+		`<view><content /><reader lang="vi" /></view>`:            "reader chỉ nhận as",
+		`<view><content /><reader><text>x</text></reader></view>`: "reader không có nội dung con",
 	} {
-		got := compileError(t, map[string]string{"/site/page.ui": source, "/site/content.ui": `<content><text>x</text></content>`})
+		got := compileError(t, map[string]string{"/site/view.ui": source, "/site/content.ui": `<content><text>x</text></content>`})
 		if !strings.Contains(got, want) {
 			t.Errorf("%s: got %q, want %q", source, got, want)
 		}

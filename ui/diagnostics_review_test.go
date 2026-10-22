@@ -16,8 +16,8 @@ import (
 // words read first (toast.go). The value is read first. CONTROL: a word that does nothing on the reader
 // stays a warning, and the toast draws what is written on its host.
 func TestReviewToastAndProgressbarHostsAreDrawn(t *testing.T) {
-	bar := map[string]string{"/site/page.ui": `<page><progressbar opacity="50" /><content /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
-	mustFail(t, bar, "page.ui:1:20", "progressbar chỉ nhận color (màu của vạch), thickness (độ dày), delay (chờ bao lâu mới hiện) và alt (tên đọc được), không nhận opacity")
+	bar := map[string]string{"/site/view.ui": `<view><progressbar opacity="50" /><content /></view>`, "/site/content.ui": `<content><text>x</text></content>`}
+	mustFail(t, bar, "view.ui:1:20", "progressbar chỉ nhận color (màu của vạch), thickness (độ dày), delay (chờ bao lâu mới hiện) và alt (tên đọc được), không nhận opacity")
 	// the value is read first: a typo is the table's error, on the toast's host as on any box; the words
 	// stand after `<content><toast `, column 17
 	mustFail(t, content(`<content>`+toastStack(` padding="bigg"`)+`</content>`), "content.ui:1:17", `padding theo thang khoảng cách, không có "bigg"`)
@@ -29,8 +29,8 @@ func TestReviewToastAndProgressbarHostsAreDrawn(t *testing.T) {
 	// region draws nothing
 	html := compileWarns(t, content(`<content>`+toastStack(` gap="8" padding="4" background="brand" medium:gap="2" place="top"`)+`</content>`), "content.ui:1:10", "toast không có as")
 	mustContain(t, html, `<div class="flex-column gap-8 padding-4 background-brand medium:gap-2 toast toast-top" data-kitwork-component="toast" role="region"`)
-	reader := map[string]string{"/site/page.ui": `<page><content /><reader padding="4" /></page>`, "/site/content.ui": `<content><text>x</text></content>`}
-	compileWarns(t, reader, "page.ui:1:26", "padding không có tác dụng trên reader")
+	reader := map[string]string{"/site/view.ui": `<view><content /><reader padding="4" /></view>`, "/site/content.ui": `<content><text>x</text></content>`}
+	compileWarns(t, reader, "view.ui:1:26", "padding không có tác dụng trên reader")
 }
 
 // show on a popover: "true" says what the popover does anyway (a warning, the page as written), but
@@ -181,7 +181,7 @@ func TestReviewIconNameIsLookedUp(t *testing.T) {
 func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 	text := `<content><text>x</text></content>`
 	region := func(call string) map[string]string {
-		return map[string]string{"/site/page.ui": `<page>` + call + `<content /></page>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text}
+		return map[string]string{"/site/view.ui": `<view>` + call + `<content /></view>`, "/site/header.ui": `<header><text>H</text></header>`, "/site/content.ui": text}
 	}
 	cart := func(call string) map[string]string {
 		return map[string]string{"/site/content.ui": `<content>` + call + `</content>`, "/site/shop-cart.ui": `<box><text>{{ count }}</text></box>`,
@@ -195,9 +195,9 @@ func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 		files    map[string]string
 		at, says string
 	}{
-		{region(`<header gpa="4" />`), "page.ui:1:15", "thuộc tính gpa không có trong .ui; thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show"},
-		{region(`<header class="x" />`), "page.ui:1:15", "class là chữ của web"},
-		{region(`<header background="papr" />`), "page.ui:1:15", `background="papr": "papr" không có trong bảng màu của trang`},
+		{region(`<header gpa="4" />`), "view.ui:1:15", "thuộc tính gpa không có trong .ui; thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show"},
+		{region(`<header class="x" />`), "view.ui:1:15", "class là chữ của web"},
+		{region(`<header background="papr" />`), "view.ui:1:15", `background="papr": "papr" không có trong bảng màu của trang`},
 		{cart(`<shop-cart background="papr" />`), "content.ui:1:21", `background="papr": "papr" không có trong bảng màu của trang`},
 		{cart(`<shop-cart click="x((" />`), "content.ui:1:21", "biểu thức không hợp lệ: x(("},
 		{cart(`<shop-cart alt="x" />`), "content.ui:1:21", "alt là thuộc tính của <box>, gốc của shop-cart: viết nó trong shop-cart.ui"},
@@ -211,8 +211,8 @@ func TestReviewCallsReadTheirWordsFirst(t *testing.T) {
 		files    map[string]string
 		at, says string
 	}{
-		{region(`<header background="paper" />`), "page.ui:1:15", "thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show; background đặt trên gốc của file header.ui"},
-		{region(`<header id="top" />`), "page.ui:1:15", "id đặt trên gốc của file header.ui"},
+		{region(`<header background="paper" />`), "view.ui:1:15", "thẻ vùng <header /> ở chỗ gọi chỉ nhận source, if, show; background đặt trên gốc của file header.ui"},
+		{region(`<header id="top" />`), "view.ui:1:15", "id đặt trên gốc của file header.ui"},
 		{cart(`<shop-cart background="paper" />`), "content.ui:1:21", "trình bày của shop-cart nằm trong shop-cart.ui"},
 		{cart(`<shop-cart click="add()" />`), "content.ui:1:21", "sự kiện click đặt trong shop-cart.ui"},
 		{promo(`<shop-promo background="paper" />`), "content.ui:1:22", "trình bày của shop-promo nằm trong shop-promo.ui"},

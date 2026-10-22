@@ -20,7 +20,7 @@ const dropdownUI = `<button click="toggle()">x</button>`
 // a component of the site in components.work whose name has no dash, told to take one (one in a file of
 // its own name: tags_test.go). Until 18/10/2026 a component written as its tag was an error that gave the
 // component= form; that is how a component is written now, so Kitwork's own written as their tags
-// compile, the progressbar of page.ui with them.
+// compile, the progressbar of view.ui with them.
 func TestTagThatNamesNothingIsAnError(t *testing.T) {
 	for _, c := range []struct {
 		content string
@@ -41,8 +41,8 @@ func TestTagThatNamesNothingIsAnError(t *testing.T) {
 		tag := c.content[len("<content>"):]
 		mustFail(t, files, where("content.ui", c.content, tag[:strings.IndexAny(tag, " >")]), c.says)
 	}
-	// control: the progressbar of page.ui written as its tag is Kitwork's, built on the box of its own UI
-	html := mustCompile(t, map[string]string{"/site/page.ui": `<page><progressbar color="brand" /><content /></page>`, "/site/content.ui": `<content><text>x</text></content>`})
+	// control: the progressbar of view.ui written as its tag is Kitwork's, built on the box of its own UI
+	html := mustCompile(t, map[string]string{"/site/view.ui": `<view><progressbar color="brand" /><content /></view>`, "/site/content.ui": `<content><text>x</text></content>`})
 	mustContain(t, html, `<div class="progressbar" data-kitwork-component="progressbar"`, `<div class="thickness-1 background-brand"`)
 	mustNotContain(t, html, "<progressbar")
 }
@@ -114,14 +114,14 @@ func TestKitworkComponentsWithTheirOwnUI(t *testing.T) {
 		{`<overlay><section component="toast">` + toastNotice + `</section></overlay>`, "component=",
 			`component= đã bỏ: component là một thẻ, viết <toast>…</toast> (<toast> dựng một <box>; cần <section> thì đặt nó bên trong)`},
 	} {
-		mustFail(t, map[string]string{"/site/page.ui": `<page><content /><overlay /></page>`, "/site/content.ui": `<content><text>x</text></content>`, "/site/overlay.ui": c.overlay},
+		mustFail(t, map[string]string{"/site/view.ui": `<view><content /><overlay /></view>`, "/site/content.ui": `<content><text>x</text></content>`, "/site/overlay.ui": c.overlay},
 			where("overlay.ui", c.overlay, c.needle), c.says)
 	}
-	mustFail(t, map[string]string{"/site/page.ui": `<page><content /><overlay /></page>`, "/site/content.ui": `<content><text>x</text></content>`,
+	mustFail(t, map[string]string{"/site/view.ui": `<view><content /><overlay /></view>`, "/site/content.ui": `<content><text>x</text></content>`,
 		"/site/overlay.ui": `<overlay>` + toastStack(` as="$toast"`) + `</overlay>`, "/site/toast.ui": `<box><text>x</text></box>`},
 		"toast.ui:1:1: ", "toast.ui đặt tên trùng component <toast> của Kitwork: <toast> luôn là component của Kitwork nên file này không bao giờ được gọi")
 	// control: the toast as it is written
-	html := mustCompile(t, map[string]string{"/site/page.ui": `<page><content /><overlay /></page>`, "/site/content.ui": `<content><text>x</text></content>`,
+	html := mustCompile(t, map[string]string{"/site/view.ui": `<view><content /><overlay /></view>`, "/site/content.ui": `<content><text>x</text></content>`,
 		"/site/overlay.ui": `<overlay>` + toastStack(` as="$toast"`) + `</overlay>`})
 	mustContain(t, html, `<div class="flex-column toast toast-bottom-right" data-kitwork-component="toast: $toast" role="region" aria-label="Thông báo (F8)" tabindex="-1"`)
 }
@@ -226,7 +226,7 @@ router.view((ctx) => {
 }
 
 // as names one instance: never a layout piece (layout_test.go), never once per row (on the element,
-// around it, or at the call that brings the file in), page-wide and unique in page.ui, the regions and the
+// around it, or at the call that brings the file in), page-wide and unique in view.ui, the regions and the
 // content, the instance's own inside a component's .ui. An alias read where nothing sets it is an
 // error where it is read.
 func TestAliasRules(t *testing.T) {
@@ -282,7 +282,7 @@ func TestAliasRules(t *testing.T) {
 
 	// control: an alias set in a region is read from the content
 	mustCompile(t, map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><dropdown as="$menu"><button click="toggle()">Menu</button></dropdown></header>`,
 		"/site/content.ui": `<content><button click="$menu.toggle()">Mở</button></content>`,
 	})
@@ -290,7 +290,7 @@ func TestAliasRules(t *testing.T) {
 	// so: written for the kernel, it would call nothing there (decision T2, 12/10/2026)
 	siteOnly := `<content><button click="$cart.add(1)">Thêm</button></content>`
 	mustFail(t, map[string]string{
-		"/site/page.ui":      `<page><header /><content /></page>`,
+		"/site/view.ui":      `<view><header /><content /></view>`,
 		"/site/header.ui":    `<header><shop-cart as="$cart" /></header>`,
 		"/site/content.ui":   siteOnly,
 		"/site/shop-cart.ui": `<box><text>giỏ</text></box>`, "/site/shop-cart.work": cartLogic,
@@ -303,21 +303,21 @@ func TestAliasRules(t *testing.T) {
 // no .work. CONTROL: a component written as its tag inside the region's file is read there.
 func TestRegionRules(t *testing.T) {
 	content := `<content><text>x</text></content>`
-	page := `<page><header component="dropdown" /><content /></page>`
-	mustFail(t, map[string]string{"/site/page.ui": page, "/site/header.ui": `<header><text>Quán</text></header>`, "/site/content.ui": content},
-		where("page.ui", page, "component="), "component= đã bỏ: component là một thẻ, viết <dropdown /> bên trong <header>")
+	page := `<view><header component="dropdown" /><content /></view>`
+	mustFail(t, map[string]string{"/site/view.ui": page, "/site/header.ui": `<header><text>Quán</text></header>`, "/site/content.ui": content},
+		where("view.ui", page, "component="), "component= đã bỏ: component là một thẻ, viết <dropdown /> bên trong <header>")
 
 	root := `<header component="dropdown" as="$menu" keydown:escape="close()"><button click="toggle()" expanded="{{ open }}">Menu</button></header>`
-	mustFail(t, map[string]string{"/site/page.ui": `<page><header /><content /></page>`, "/site/header.ui": root, "/site/content.ui": content},
+	mustFail(t, map[string]string{"/site/view.ui": `<view><header /><content /></view>`, "/site/header.ui": root, "/site/content.ui": content},
 		where("header.ui", root, "component="), `component= đã bỏ: component là một thẻ, viết <dropdown as="$menu">…</dropdown> bên trong <header>`)
 
-	mustFail(t, map[string]string{"/site/page.ui": `<page><header /><content /></page>`, "/site/header.ui": `<header><text>Quán</text></header>`,
+	mustFail(t, map[string]string{"/site/view.ui": `<view><header /><content /></view>`, "/site/header.ui": `<header><text>Quán</text></header>`,
 		"/site/header.work": `var open = false;`, "/site/content.ui": content}, "header.work:1:1: ",
 		"vùng không có file .work: điều header làm là một component bên trong header.ui, viết bằng thẻ của nó (<dropdown>, <shop-cart>)")
 
 	// control: the root of header.ui holds a component without a UI, read inside it
 	html := mustCompile(t, map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><dropdown as="$menu" keydown:escape="close()"><button click="toggle()" expanded="{{ open }}">Menu</button></dropdown></header>`,
 		"/site/content.ui": content,
 	})
@@ -334,7 +334,7 @@ func TestRegionRules(t *testing.T) {
 func TestForbiddenHosts(t *testing.T) {
 	logic := `import { component } from "kitwork"; component.define("site-menu", () => { var open = false; });`
 	for _, c := range []struct{ root, says string }{
-		{`<page><text>x</text></page>`, "gốc của site-menu.ui là <page>, mà page là khung của trang"},
+		{`<view><text>x</text></view>`, "gốc của site-menu.ui là <view>: <view> là khung của trang, chỉ là gốc của view.ui"},
 		{`<content><text>x</text></content>`, "gốc của site-menu.ui là vùng <content>"},
 		{`<empty><text>x</text></empty>`, "gốc của site-menu.ui là <empty>, mà empty là một phần của thẻ chứa nó, không đứng riêng"},
 		{`<popover><text>x</text></popover>`, "gốc của site-menu.ui là <popover>, mà popover là một phần của thẻ chứa nó"},
@@ -347,9 +347,9 @@ func TestForbiddenHosts(t *testing.T) {
 		mustFail(t, map[string]string{"/site/content.ui": `<content><site-menu /></content>`, "/site/site-menu.ui": c.root, "/site/site-menu.work": logic},
 			"site-menu.ui:1:1: ", c.says)
 	}
-	page := `<page component="site-menu"><content /></page>`
-	mustFail(t, map[string]string{"/site/page.ui": page, "/site/content.ui": `<content><text>x</text></content>`}, "page.ui:1:7: ",
-		"component= đã bỏ: component là một thẻ, viết <site-menu>…</site-menu> bên trong <page>")
+	page := `<view component="site-menu"><content /></view>`
+	mustFail(t, map[string]string{"/site/view.ui": page, "/site/content.ui": `<content><text>x</text></content>`}, "view.ui:1:7: ",
+		"component= đã bỏ: component là một thẻ, viết <site-menu>…</site-menu> bên trong <view>")
 	routeContent := `<content component="site-menu"><text>x</text></content>`
 	mustFail(t, map[string]string{"/site/content.ui": routeContent}, "content.ui:1:10: ",
 		"component= đã bỏ: component là một thẻ, viết <site-menu>…</site-menu> bên trong <content>")
@@ -385,7 +385,7 @@ func TestRemovedComponentValueNamesTheTag(t *testing.T) {
 func TestLookupFromTheWritingFolder(t *testing.T) {
 	logic := `import { component } from "kitwork"; component.define("mini-cart", () => { var open = false; });`
 	files := map[string]string{
-		"/site/page.ui":               `<page><header /><content /></page>`,
+		"/site/view.ui":               `<view><header /><content /></view>`,
 		"/site/header.ui":             `<header><mini-cart /></header>`,
 		"/site/mini-cart.ui":          `<box><text>giỏ của site</text></box>`,
 		"/site/shop/mini-cart.ui":     `<box><text>giỏ của shop</text></box>`,

@@ -58,7 +58,7 @@ router.favicon("/assets/icon.svg");
 router.appearance("dark");
 router.reload(false).transition("fade");
 `,
-		"localhost/page.ui":    `<page><content /></page>`,
+		"localhost/view.ui":    `<view><content /></view>`,
 		"localhost/content.ui": `<content gap="4"><text heading="1">Thực đơn</text><text color="ink-30">Cà phê, trà, bánh.</text></content>`,
 	}
 }
@@ -133,7 +133,7 @@ func TestRouterBundleAutoDecidesOnProductionsBytesWhileDeveloping(t *testing.T) 
 	page := func(length int) map[string]string {
 		return map[string]string{
 			"localhost/router.work": "import { router } from \"kitwork\";\n\nrouter.colors({ brand: \"#c8742c\" });\n",
-			"localhost/page.ui":     `<page><content /></page>`,
+			"localhost/view.ui":     `<view><content /></view>`,
 			"localhost/content.ui":  `<content><text color="ink-70">Chữ nhạt</text><text>` + digits.String()[:length] + `</text></content>`,
 		}
 	}

@@ -55,7 +55,7 @@ func TestAnchorErrors(t *testing.T) {
 // The page is one place: an id in a region and the same id in the content collide.
 func TestAnchorIsUniqueAcrossThePage(t *testing.T) {
 	files := map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header id="top"><text>Kitwork</text></header>`,
 		"/site/content.ui": `<content><section id="top"><text>a</text></section></content>`,
 	}

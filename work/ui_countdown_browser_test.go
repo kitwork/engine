@@ -20,7 +20,7 @@ var countdownBrowserFiles = map[string]string{
 router.language("vi");
 router.reload(false);
 `,
-	"localhost/page.ui":    `<page><content /><overlay /></page>`,
+	"localhost/view.ui":    `<view><content /><overlay /></view>`,
 	"localhost/overlay.ui": toastBrowserFiles["localhost/overlay.ui"],
 	"localhost/content.ui": `<content padding="4" gap="2">
   <countdown as="$tea" duration="3s" ready="play()" finish="$toast.success('Trà đã sẵn sàng')" flex="row" gap="3">
@@ -431,7 +431,7 @@ func TestBrowserCountdown(t *testing.T) {
 // more and less, toggle(), stop(); its end said through the toast of the toast test.
 var countdownSegmentsFiles = map[string]string{
 	"localhost/router.work": countdownBrowserFiles["localhost/router.work"],
-	"localhost/page.ui":     `<page><content /><overlay /></page>`,
+	"localhost/view.ui":     `<view><content /><overlay /></view>`,
 	"localhost/overlay.ui":  toastBrowserFiles["localhost/overlay.ui"],
 	"localhost/content.ui": `<content padding="4" gap="2">
   <countdown as="$tea" duration="5m" finish="$toast.success('Trà đã sẵn sàng')" flex="row" gap="3">
@@ -665,7 +665,7 @@ func TestBrowserCountdownTimeSegments(t *testing.T) {
 // whose one segment is the seconds.
 var countdownEditsFiles = map[string]string{
 	"localhost/router.work": countdownBrowserFiles["localhost/router.work"],
-	"localhost/page.ui":     `<page><content /><overlay /></page>`,
+	"localhost/view.ui":     `<view><content /><overlay /></view>`,
 	"localhost/overlay.ui":  toastBrowserFiles["localhost/overlay.ui"],
 	"localhost/content.ui": `<content padding="4" gap="2">
   <countdown as="$tea" duration="5m" finish="$toast.success('Trà đã sẵn sàng')" flex="row" gap="3">

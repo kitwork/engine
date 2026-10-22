@@ -16,7 +16,7 @@ func toastStack(words string) string {
 // toastSite is a site whose overlay.ui holds the toast written and whose content.ui is content.
 func toastSite(overlay, content string) map[string]string {
 	return map[string]string{
-		"/site/page.ui":    `<page><content /><overlay /></page>`,
+		"/site/view.ui":    `<view><content /><overlay /></view>`,
 		"/site/overlay.ui": `<overlay>` + overlay + `</overlay>`,
 		"/site/content.ui": content,
 	}

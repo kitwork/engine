@@ -216,7 +216,7 @@ func TestRichtextRefusalsAtTheirPlace(t *testing.T) {
 		{`<content><link value="/bai"><richtext value="{{ post.body }}" /></link></content>`, "<richtext", inline + `<link> ở content.ui:1:10)`},
 		{`<content><button><richtext value="{{ post.body }}" /></button></content>`, "<richtext", inline + `<button> ở content.ui:1:10)`},
 		{`<content><field><label><richtext value="{{ post.body }}" /></label><input /></field></content>`, "<richtext", inline + `<label> ở content.ui:1:17)`},
-		{`<content><html>{{ post.body }}</html></content>`, "<html", `không có thẻ <html> (trang đã là <page>): HTML đã soạn, một bài viết hay một mô tả, hiện bằng <richtext value="{{ post.body }}" />, làm sạch ở server`},
+		{`<content><html>{{ post.body }}</html></content>`, "<html", `không có thẻ <html> (trang đã là <view>): HTML đã soạn, một bài viết hay một mô tả, hiện bằng <richtext value="{{ post.body }}" />, làm sạch ở server`},
 		{`<content><raw>{{ post.body }}</raw></content>`, "<raw", `không có thẻ <raw>: .ui không ghi HTML chưa làm sạch; bài đã lưu hiện bằng <richtext value="{{ post.body }}" />`},
 		{`<content><prose>{{ post.body }}</prose></content>`, "<prose", `không có thẻ <prose>: khối chữ của một bài đã lưu là <richtext value="{{ post.body }}" />, khoảng cách, danh sách, link và trích dẫn là của engine`},
 		{`<content><markdown value="{{ post.body }}" /></content>`, "<markdown", `không có thẻ <markdown>: bài đã lưu hiện bằng <richtext value="{{ post.body }}" /> (richtext đọc HTML hoặc chữ thường, không đọc markdown)`},
@@ -296,7 +296,7 @@ func TestRichtextRefusedInsideALineHoweverDeep(t *testing.T) {
 	}
 }
 
-// The text scope is in the page's stylesheet only on a page that holds a richtext — in page.ui, a region
+// The text scope is in the page's stylesheet only on a page that holds a richtext — in view.ui, a region
 // or the content, however many — once, inside the elements layer, with the link's engine colour and the
 // weights of its headings and strong text, and the code face its code and code blocks take; a page
 // without one has none of it, and a page shown with its stylesheets inline carries it there.
@@ -324,13 +324,13 @@ func TestRichtextScopeOnlyOnItsPage(t *testing.T) {
 	}
 
 	two := richtextPage(t, map[string]string{
-		"/site/page.ui":    `<page><header /><content /></page>`,
+		"/site/view.ui":    `<view><header /><content /></view>`,
 		"/site/header.ui":  `<header><richtext value="{{ site.notice }}" /></header>`,
 		"/site/content.ui": `<content><richtext value="{{ post.lead }}" /><richtext value="{{ post.body }}" padding="4" /></content>`,
 	})
 	css = string(two.Stylesheet().CSS)
 	if strings.Count(css, ".richtext{") != 1 || strings.Count(css, "@layer elements{") != 1 || !strings.Contains(css, link+"@layer page{\n.padding-4{padding:1rem}\n}\n") {
-		t.Errorf("three richtexts in page.ui's region and the content: one scope, before the page layer:\n%s", css)
+		t.Errorf("three richtexts in view.ui's region and the content: one scope, before the page layer:\n%s", css)
 	}
 
 	without := richtextPage(t, map[string]string{"/site/content.ui": `<content><text padding="4">{{ post.body }}</text></content>`})

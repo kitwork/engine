@@ -28,7 +28,7 @@ func transitionSite(transition, toastPlace, networkPlace string) map[string]stri
 
 router.language("vi");
 `,
-		"localhost/page.ui": `<page><content /><overlay /></page>`,
+		"localhost/view.ui": `<view><content /><overlay /></view>`,
 		"localhost/overlay.ui": `<overlay>
   <toast as="$toast" place="` + toastPlace + `" transition="` + transition + `" gap="2">
     <card for="notice of notices; key: notice.id" flex="row" gap="3" padding="3" shadow="large">

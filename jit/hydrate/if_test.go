@@ -96,7 +96,7 @@ document.body.appendChild(legacy);
 var text = el("b", { "data-kitwork-text": "'ir'" });
 text.textContent = "authored";
 document.body.appendChild(text);
-var markers = el("div", { "data-kitwork-generated": "css", "data-kitwork-layout": "page.ui", "data-kitwork-current": "page",
+var markers = el("div", { "data-kitwork-generated": "css", "data-kitwork-layout": "view.ui", "data-kitwork-current": "page",
   "data-kitwork-delay": "0", "data-kitwork-transition": "fade" });
 markers.appendChild(el("span", { "data-marker-probe": "yes" }));
 document.body.appendChild(markers);

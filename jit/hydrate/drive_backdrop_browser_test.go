@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// A Kitwork UI page with a backdrop (<page background="cirrus">, decision D4 of 13/10/2026) paints it on
+// A Kitwork UI page with a backdrop (<view background="cirrus">, decision D4 of 13/10/2026) paints it on
 // a layer fixed to the screen, first in <body>, outside the <main> a move swaps, and names its colour
 // for the browser's bar in <meta name="theme-color">. A move shows what a whole load of the next page
 // would, without a flash: the walk / (cirrus) → /b (cirrus) → /c (dusk) → /d (none) → /e (dusk). After
@@ -54,7 +54,7 @@ func TestBrowserDriveKeepsTheBackdrop(t *testing.T) {
 			head += `<meta name="theme-color" media="(prefers-color-scheme: light)" content="` + grounds[backdrop] + `">`
 			layer = `<div class="page-backdrop background-` + backdrop + `" aria-hidden="true" data-kitwork-backdrop></div>`
 		}
-		return head + extra + pageRuntimeTags + `</head><body data-kitwork-layout="page.ui">` + layer +
+		return head + extra + pageRuntimeTags + `</head><body data-kitwork-layout="view.ui">` + layer +
 			`<header>Quán</header><main><h1>` + title + `</h1><a href="/b">b</a><a href="/c">c</a><a href="/d">d</a><a href="/e">e</a></main></body></html>`
 	}
 

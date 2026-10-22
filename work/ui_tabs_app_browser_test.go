@@ -20,11 +20,11 @@ var tabsAppFiles = map[string]string{
 router.colors({ brand: "#c8742c" });
 router.language("vi");
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content padding="4" gap="4">
   <tabs as="$files" persist="true" alt="Tệp" flex="row" gap="1">
     <button id="tab-router" click="select('router')">router.work</button>
-    <button id="tab-page" click="select('page')">page.ui</button>
+    <button id="tab-page" click="select('page')">view.ui</button>
   </tabs>
   <box id="file-router" show="$files.selected == 'router'"><text>router</text></box>
   <box id="file-page" show="$files.selected == 'page'"><text>page</text></box>

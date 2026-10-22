@@ -33,7 +33,7 @@ router.view((ctx) => {
   const title = "Thực đơn";
   ctx.title(title);
 });`)
-	write("page.ui", `<page><content /></page>`)
+	write("view.ui", `<view><content /></view>`)
 	write("content.ui", `<content><text heading="1">{{ title }}</text></content>`)
 	write("mon/{slug}/router.work", `import { router } from "kitwork";
 router.view((ctx) => {

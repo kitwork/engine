@@ -15,11 +15,11 @@ import (
 
 // A move without a reload shows what a whole load of the next page would: its tab icon (a Kitwork UI
 // branch may name its own with router.favicon), and, when the next page is built from another
-// page.ui, the whole page rather than the old frame around its content.
+// view.ui, the whole page rather than the old frame around its content.
 //
-// /  (page.ui, icon a)  →  /b  (page.ui, icon b): driven; the head links b, not a.
-// /b                    →  /c  (page.ui, no icon): driven; b stays, a shell that names no icon keeps it.
-// /c                    →  /admin (admin/page.ui): another frame; the browser loads it whole.
+// /  (view.ui, icon a)  →  /b  (view.ui, icon b): driven; the head links b, not a.
+// /b                    →  /c  (view.ui, no icon): driven; b stays, a shell that names no icon keeps it.
+// /c                    →  /admin (admin/view.ui): another frame; the browser loads it whole.
 //
 // The wire tells driven from whole loads, as in TestBrowserDriveSwapsNotFoundPage: Drive fetches with
 // X-Kitwork-Hydrate: 1, the browser's own navigation carries no such header.
@@ -63,13 +63,13 @@ func TestBrowserDriveIconAndLayout(t *testing.T) {
 			response.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 			_, _ = response.Write([]byte(pageRuntimeFile(request.URL.Path)))
 		case "/":
-			_, _ = response.Write([]byte(page("start", "/a.svg", "page.ui", follow("b"))))
+			_, _ = response.Write([]byte(page("start", "/a.svg", "view.ui", follow("b"))))
 		case "/b":
-			_, _ = response.Write([]byte(page("b", "/b.svg", "page.ui", follow("c"))))
+			_, _ = response.Write([]byte(page("b", "/b.svg", "view.ui", follow("c"))))
 		case "/c":
-			_, _ = response.Write([]byte(page("c", "", "page.ui", follow("admin"))))
+			_, _ = response.Write([]byte(page("c", "", "view.ui", follow("admin"))))
 		case "/admin":
-			_, _ = response.Write([]byte(page("admin", "/admin.svg", "admin/page.ui", `<p>quản lý</p>`)))
+			_, _ = response.Write([]byte(page("admin", "/admin.svg", "admin/view.ui", `<p>quản lý</p>`)))
 		default:
 			http.NotFound(response, request)
 		}
@@ -107,11 +107,11 @@ func TestBrowserDriveIconAndLayout(t *testing.T) {
 	}
 	for _, path := range []string{"/b", "/c"} {
 		if driven, whole := count(path); driven == 0 || whole != 0 {
-			t.Fatalf("%s is the same page.ui: it must be driven, not loaded whole (%d driven, %d whole); requests=%v", path, driven, whole, hits)
+			t.Fatalf("%s is the same view.ui: it must be driven, not loaded whole (%d driven, %d whole); requests=%v", path, driven, whole, hits)
 		}
 	}
 	if _, whole := count("/admin"); whole == 0 {
-		t.Fatalf("/admin is built from another page.ui: the browser must load it whole; requests=%v\n%.800s", hits, output)
+		t.Fatalf("/admin is built from another view.ui: the browser must load it whole; requests=%v\n%.800s", hits, output)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestBrowserDriveSwapsTheTabIcon(t *testing.T) {
 		if icon != "" {
 			head += `<link rel="icon" href="` + icon + `" type="image/svg+xml">`
 		}
-		return head + `</head><body data-kitwork-layout="page.ui"><main>` + body + `</main>` + pageRuntimeTags + `</body></html>`
+		return head + `</head><body data-kitwork-layout="view.ui"><main>` + body + `</main>` + pageRuntimeTags + `</body></html>`
 	}
 	follow := func(id string) string {
 		return `<a id="` + id + `" href="/` + id + `">` + id + `</a><script>

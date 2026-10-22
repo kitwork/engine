@@ -24,7 +24,7 @@ router.fonts({ body: "Outfit" });
 router.reload(false);
 router.bundle(false);
 `,
-	"localhost/page.ui": `<page><content /></page>`,
+	"localhost/view.ui": `<view><content /></view>`,
 	"localhost/content.ui": `<content gap="4" padding="4">
   <text id="title" heading="1" color="brand">Một</text>
   <icon value="coffee" alt="cà phê"></icon>

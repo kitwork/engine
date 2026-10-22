@@ -74,7 +74,7 @@ router.view(() => {
   ];
 });
 `,
-		"localhost/page.ui": `<page><content /></page>`,
+		"localhost/view.ui": `<view><content /></view>`,
 		"localhost/content.ui": `<content padding="4" gap="4">
   <carousel as="$written" alt="Ba trang" max-width="640px" gap="2">
     <list>

@@ -33,7 +33,7 @@ import (
 //	        <button click="close()">Huỷ</button>
 //	        <error>Chỉ nhận https://, http://, mailto:, tel: hay đường dẫn bắt đầu bằng /.</error>
 //	      </popover>
-//	      <content name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12" padding="4" border="line" />
+//	      <textarea name="body" value="{{ post.body }}" required="true" placeholder="Viết bài ở đây…" rows="12" padding="4" border="line" />
 //	    </editor>
 //	    <hint>{{ $body.words }} từ</hint>
 //	  </field>
@@ -44,8 +44,8 @@ import (
 //     data-kitwork-scope holds its first state, empty, words, characters (the value cleaned), unsaved
 //     (false; true when the page answers a request that is no GET, a refused save shown again), open
 //     (false) and address ('').
-//   - The one <content> inside it is the writing area (everywhere else <content> is still the page's
-//     content region). Its words are the field's: name (required), value (the saved post, the page's
+//   - The one <textarea> inside it is the writing area (22/10/2026; before, <content>): the same field a
+//     form has, made rich by the editor around it; without JavaScript it is that field. Its words are the field's: name (required), value (the saved post, the page's
 //     data), placeholder, required, readonly, disabled, rows (its least height in lines), alt (its name
 //     when no <label> of a <field> names it); the rest are presentation, the area's look. It becomes two
 //     elements: the area, <div class="richtext editor-area" role="textbox" …> holding the value cleaned
@@ -86,7 +86,7 @@ import (
 //   - Its names are read bare inside the host, through its alias outside ($body.words); its commands are
 //     its buttons' alone: called from anywhere else (an alias, another event, a button in a for) they
 //     would take the visitor's selection away first, and are told so. It sends no event of its own yet:
-//     input and change on <editor> or <content> are told so.
+//     input and change on <editor> or <textarea> are told so.
 //   - Its format (21/10/2026) is how the post is seen and typed: 'rich' (the area, written as it reads),
 //     'markdown' or 'html' (a text surface the component shows in the area's place). Whatever the format,
 //     one value goes with the form: the field holds the cleaned HTML. format="markdown" on the host is
@@ -146,7 +146,7 @@ func editorFormatProblem(value string, written func(string) string) string {
 
 // editorInstead is what other ways to let a person write rich text are told: contenteditable on a tag,
 // a <wysiwyg>.
-const editorInstead = `vùng soạn chữ là <editor> có một <content name="body" /> bên trong, đặt trong <form method="post">`
+const editorInstead = `vùng soạn chữ là <editor> có một <textarea name="body" /> bên trong, đặt trong <form method="post">`
 
 // editorFormatList is how the formats are named in a message.
 const editorFormatList = "bold, italic, underline, strikethrough, code, quote, heading 2 tới 6, list"
@@ -293,7 +293,7 @@ func (c *compiler) editorHost(n *Node, component *Attr, cx ctx) (*Node, *editorS
 		return nil, nil, err
 	}
 	if len(n.SignificantChildren()) == 0 {
-		return nil, nil, errAttr(n, component, `editor rỗng: vẽ vùng viết bên trong, <editor><content name="body" alt="Nội dung" /></editor>`)
+		return nil, nil, errAttr(n, component, `editor rỗng: vẽ vùng viết bên trong, <editor><textarea name="body" alt="Nội dung" /></editor>`)
 	}
 	if err := c.editorParts(n, s, cx); err != nil {
 		return nil, nil, err
@@ -395,14 +395,14 @@ var editorStrangers = func() map[string]string {
 			out[word] = message
 		}
 	}
-	add(`%s không có trên <editor>: name, value, placeholder, required, readonly, disabled, rows viết trên <content> bên trong`,
+	add(`%s không có trên <editor>: name, value, placeholder, required, readonly, disabled, rows viết trên <textarea> bên trong`,
 		"name", "value", "placeholder", "required", "readonly", "disabled", "rows")
-	add(`alt không có trên <editor>: tên của vùng viết là <label> của <field> bao ngoài, hay alt trên <content>`, "alt")
+	add(`alt không có trên <editor>: tên của vùng viết là <label> của <field> bao ngoài, hay alt trên <textarea>`, "alt")
 	add(`editor không có %s: editor không có giao diện dựng sẵn, vẽ nút bên trong (<button click="toggle('bold')">)`,
 		"toolbar", "buttons", "formats", "plugins", "extensions", "menu")
 	add(`editor không có %s: độ dài bài kiểm ở server (richtext(…).characters)`, "maxlength", "minlength", "limit", "max")
-	add(`contenteditable không có trên <editor>: vùng viết là <content> bên trong, engine bật soạn khi trang chạy`, "contenteditable")
-	add(`editor không có %s: bài lúc đầu là value của <content>, server vẽ sẵn`, "html", "content", "text", "initial")
+	add(`contenteditable không có trên <editor>: vùng viết là <textarea> bên trong, engine bật soạn khi trang chạy`, "contenteditable")
+	add(`editor không có %s: bài lúc đầu là value của <textarea>, server vẽ sẵn`, "html", "content", "text", "initial")
 	add(`editor không có %s: viết bằng Markdown lúc trang mở là format="markdown"; nút đổi cách viết là <button click="format = 'markdown'">`, "markdown")
 	add(`editor không có %s: cách viết là format, format="rich", format="markdown" hay format="html"`, "mode", "view", "syntax", "source")
 	add(`editor không có %s: lưu là việc của form, <button type="submit">, router.post nhận`, "save", "submit", "autosave", "draft", "persist")
@@ -422,7 +422,7 @@ var editorCallExample = map[string]string{
 }
 
 // editorWords refuses, on the host, the words an editor does not take: the field's words (they are
-// <content>'s), the state and the methods written as attributes, the words of other editors, a role,
+// <textarea>'s), the state and the methods written as attributes, the words of other editors, a role,
 // and input or change, which it does not send yet.
 func editorWords(n *Node) error {
 	alias := strings.TrimSpace(attrNamed(n, "as").Value)
@@ -480,7 +480,7 @@ type editorFound struct {
 
 // editorParts finds the parts of an editor in what is written inside its host, never inside a component
 // nested there (whose names are its own) but for a dropdown of a toolbar's commands (editorMenuOf): the
-// one <content>, its words, the one <popover> and its address input, the command buttons and the
+// one <textarea>, its words, the one <popover> and its address input, the command buttons and the
 // toolbars that hold them; then checks the area has a name.
 func (c *compiler) editorParts(n *Node, s *editorScope, cx ctx) error {
 	var contents, popovers, buttons, inputs, errorsFound, dropdowns, selects []editorFound
@@ -493,9 +493,15 @@ func (c *compiler) editorParts(n *Node, s *editorScope, cx ctx) error {
 			s.inside[editorKeyOf(ch)] = true
 			found := editorFound{node: ch, path: path, repeat: repeat, nested: nested, popover: popover}
 			switch {
-			case ch.Tag == "content":
+			case ch.Tag == "textarea" || ch.Tag == "content" && c.hostTags[ch] == "textarea":
+				// the writing area, written <textarea> (22/10/2026); the compiler names it "content" from
+				// here on (editorContent), and keeps what was written for its messages
+				ch.Tag = "content"
+				c.hostTags[ch] = "textarea"
 				contents = append(contents, found)
 				continue // what is written inside it is told by its words
+			case ch.Tag == "content":
+				return errAt(ch, "vùng viết của editor là <textarea> (trước 22/10/2026 viết <content>)")
 			case nested != nil:
 			case ch.Tag == "editor":
 				return errAt(ch, "editor không lồng trong editor (editor ngoài ở %s:%d:%d)", n.File, n.Line, n.Column)
@@ -543,7 +549,7 @@ func (c *compiler) editorParts(n *Node, s *editorScope, cx ctx) error {
 
 	// the writing area: one, written in the host itself, always there
 	if len(contents) == 0 {
-		return errAttr(n, s.component, `editor cần một vùng viết bên trong, engine viết role="textbox" lên nó: <content name="body" value="{{ post.body }}" />`)
+		return errAttr(n, s.component, `editor cần một vùng viết bên trong, engine viết role="textbox" lên nó: <textarea name="body" value="{{ post.body }}" />`)
 	}
 	area := contents[0]
 	for _, f := range contents {
@@ -554,17 +560,17 @@ func (c *compiler) editorParts(n *Node, s *editorScope, cx ctx) error {
 	}
 	if len(contents) > 1 {
 		second := contents[1].node
-		return errAt(second, "editor có một vùng viết: <content> ở %s:%d:%d đã là của nó; vùng viết thứ hai là một <editor> khác", area.node.File, area.node.Line, area.node.Column)
+		return errAt(second, "editor có một vùng viết: <textarea> ở %s:%d:%d đã là của nó; vùng viết thứ hai là một <editor> khác", area.node.File, area.node.Line, area.node.Column)
 	}
 	if area.popover != nil {
 		return errAt(area.node, "vùng viết của editor không đặt trong <popover>: popover là khung của liên kết, đóng khi không gắn liên kết")
 	}
 	if r := area.repeat; r != nil {
 		if a := attrNamed(r, "for"); a.Name == "for" {
-			return errAttr(r, a, "vùng viết của editor không lặp bằng for: for này lặp <content> ở %s:%d:%d; đặt <content> ngoài for", area.node.File, area.node.Line, area.node.Column)
+			return errAttr(r, a, "vùng viết của editor không lặp bằng for: for này lặp <textarea> ở %s:%d:%d; đặt <textarea> ngoài for", area.node.File, area.node.Line, area.node.Column)
 		}
 		a := attrNamed(r, "if")
-		return errAttr(r, a, "vùng viết của editor luôn có mặt: if này có thể bỏ <content> ở %s:%d:%d; đặt <content> ngoài if", area.node.File, area.node.Line, area.node.Column)
+		return errAttr(r, a, "vùng viết của editor luôn có mặt: if này có thể bỏ <textarea> ở %s:%d:%d; đặt <textarea> ngoài if", area.node.File, area.node.Line, area.node.Column)
 	}
 	s.area = area.node
 	if err := c.editorContentWords(area.node, s, cx); err != nil {
@@ -656,15 +662,15 @@ func (c *compiler) editorParts(n *Node, s *editorScope, cx ctx) error {
 	labelled := cx.field != nil && cx.field.label != ""
 	switch {
 	case !labelled && (s.alt == nil || strings.TrimSpace(s.alt.Value) == ""):
-		return errAt(s.area, "vùng viết chưa có tên đọc được: đặt editor trong <field> có <label>, hay viết alt trên <content>")
+		return errAt(s.area, "vùng viết chưa có tên đọc được: đặt editor trong <field> có <label>, hay viết alt trên <textarea>")
 	case labelled && s.alt != nil:
-		c.warn(s.area.File, s.alt.Line, s.alt.Column, "alt trên <content> không có tác dụng: <label> của <field> bao ngoài đã là tên của vùng viết (trang bỏ alt này)")
+		c.warn(s.area.File, s.alt.Line, s.alt.Column, "alt trên <textarea> không có tác dụng: <label> của <field> bao ngoài đã là tên của vùng viết (trang bỏ alt này)")
 		s.alt = nil
 	}
 	return nil
 }
 
-// editorContentRefused are the words other text areas take, written on <content> inside an editor,
+// editorContentRefused are the words other text areas take, written on <textarea> inside an editor,
 // each with what to write here; %s is the word as written.
 var editorContentRefused = map[string]string{
 	"maxlength":       "%s không có trên vùng viết: độ dài bài kiểm ở server (richtext(…).characters)",
@@ -679,7 +685,7 @@ var editorContentRefused = map[string]string{
 	"role":            `vai trò của vùng viết là việc của engine (role="textbox"): bỏ role`,
 }
 
-// editorContentWords reads the words of the writing area, written on <content>: the field's words
+// editorContentWords reads the words of the writing area, written on <textarea>: the field's words
 // (name, value, placeholder, required, readonly, disabled, rows, alt), and presentation; anything else
 // is told, and so is anything written inside it.
 func (c *compiler) editorContentWords(n *Node, s *editorScope, cx ctx) error {
@@ -693,10 +699,10 @@ func (c *compiler) editorContentWords(n *Node, s *editorScope, cx ctx) error {
 			head, _, _ := strings.Cut(a.Name, ":")
 			for _, event := range strings.Split(head, ",") {
 				if event = strings.TrimSpace(event); event == "input" || event == "change" {
-					return errAttr(n, a, "%s viết trên <content> của editor chưa có ở bản này: bài đi theo form khi gửi, số chữ là {{ words }}", event)
+					return errAttr(n, a, "%s viết trên <textarea> của editor chưa có ở bản này: bài đi theo form khi gửi, số chữ là {{ words }}", event)
 				}
 			}
-			return errAttr(n, a, `<content> của editor không nhận sự kiện %s ở bản này: lệnh của editor là nút trong thanh công cụ (<button click="toggle('bold')">)`, a.Name)
+			return errAttr(n, a, `<textarea> của editor không nhận sự kiện %s ở bản này: lệnh của editor là nút trong thanh công cụ (<button click="toggle('bold')">)`, a.Name)
 		}
 		chain, base := "", a.Name
 		if j := strings.LastIndex(a.Name, ":"); j >= 0 {
@@ -726,7 +732,7 @@ func (c *compiler) editorContentWords(n *Node, s *editorScope, cx ctx) error {
 			case strings.Contains(a.Value, "{{"):
 				return errAttr(n, a, `name của vùng viết là chữ cố định, tên ô form gửi lên (name="body"), không lấy từ dữ liệu`)
 			case value == "":
-				return errAttr(n, a, `<content> của editor cần name: không có name thì form không gửi bài lên server (name="body")`)
+				return errAttr(n, a, `<textarea> của editor cần name: không có name thì form không gửi bài lên server (name="body")`)
 			}
 			s.name = value
 		case "value":
@@ -768,11 +774,11 @@ func (c *compiler) editorContentWords(n *Node, s *editorScope, cx ctx) error {
 			if message := c.webWord(n, a); message != "" {
 				return errAttr(n, a, "%s", message)
 			}
-			return errAttr(n, a, "thuộc tính %s không có trên vùng viết <content>; vùng viết nhận name, value, placeholder, required, readonly, disabled, rows, alt và chữ trình bày", a.Name)
+			return errAttr(n, a, "thuộc tính %s không có trên vùng viết <textarea>; vùng viết nhận name, value, placeholder, required, readonly, disabled, rows, alt và chữ trình bày", a.Name)
 		}
 	}
 	if name == nil {
-		return errAt(n, `<content> của editor cần name: không có name thì form không gửi bài lên server (name="body")`)
+		return errAt(n, `<textarea> của editor cần name: không có name thì form không gửi bài lên server (name="body")`)
 	}
 	return nil
 }
@@ -1990,7 +1996,7 @@ var editorCallStrangers = func() map[string]string {
 	add("gắn liên kết là link(address), trong <popover> của editor", "applyLink")
 	add("đóng ô địa chỉ là close()", "cancelLink", "cancel")
 	add("bỏ liên kết là unlink()", "removeLink")
-	add("bài lúc đầu là value của <content>, server vẽ sẵn", "set", "clear", "insertHTML", "setContent")
+	add("bài lúc đầu là value của <textarea>, server vẽ sẵn", "set", "clear", "insertHTML", "setContent")
 	add(`lưu là việc của form: <button type="submit">, router.post nhận`, "save", "submit")
 	return out
 }()
@@ -2163,8 +2169,8 @@ func (c *compiler) editorAlias(ir any, frame *aliasFrame) (*editorScope, string,
 // editorReadStrangers are the names other editors' state has, read off the alias, each with what reads
 // it here.
 var editorReadStrangers = map[string]string{
-	"html": "bài lúc đầu là value của <content>, server vẽ sẵn; số chữ là words, số ký tự characters", "value": "bài là value của <content>, form gửi nó; số chữ là words",
-	"content": "bài là value của <content>, form gửi nó; số chữ là words", "text": "bài là value của <content>, form gửi nó; số chữ là words",
+	"html": "bài lúc đầu là value của <textarea>, server vẽ sẵn; số chữ là words, số ký tự characters", "value": "bài là value của <textarea>, form gửi nó; số chữ là words",
+	"content": "bài là value của <textarea>, form gửi nó; số chữ là words", "text": "bài là value của <textarea>, form gửi nó; số chữ là words",
 	"markdown": "cách viết đang chọn là format ('rich', 'markdown' hay 'html'); bài gửi đi luôn là HTML của richtext",
 	"mode":     "cách viết đang chọn là format ('rich', 'markdown' hay 'html')", "view": "cách viết đang chọn là format ('rich', 'markdown' hay 'html')",
 	"dirty": "chưa lưu là unsaved", "changed": "chưa lưu là unsaved",
@@ -2266,7 +2272,7 @@ func editorReadFix(name string) string {
 }
 
 // editorSubmitWarning tells a submit button whose disabled reads an editor's empty through its alias:
-// without JavaScript the button never gives way, and required on <content> already holds an empty post
+// without JavaScript the button never gives way, and required on <textarea> already holds an empty post
 // back.
 func (c *compiler) editorSubmitWarning(use aliasExpr) {
 	n, a := use.node, use.attr
@@ -2278,7 +2284,7 @@ func (c *compiler) editorSubmitWarning(use aliasExpr) {
 			return
 		}
 		if _, alias, ok := c.editorAlias(node[1], use.frame); ok {
-			c.warn(n.File, a.Line, a.Column, "nút gửi khoá theo "+alias+".empty: không có JavaScript thì không gửi được; required=\"true\" trên <content> đã chặn bài rỗng")
+			c.warn(n.File, a.Line, a.Column, "nút gửi khoá theo "+alias+".empty: không có JavaScript thì không gửi được; required=\"true\" trên <textarea> đã chặn bài rỗng")
 		}
 	})
 }
@@ -2324,12 +2330,12 @@ func (s *editorScope) bindings() []binding {
 // (Page.render): no name markup can write, so only an editor's unsaved reads it.
 const requestMethodName = "kitwork request method"
 
-// editorContent compiles the writing area, the <content> of the editor around: the area, then the field
+// editorContent compiles the writing area, the <textarea> of the editor around: the area, then the field
 // the form posts, each holding the value cleaned.
 func (c *compiler) editorContent(n *Node, cx ctx) (op, error) {
 	s := cx.editor
 	if editorKeyOf(n) != editorKeyOf(s.area) {
-		return nil, errAt(n, "editor có một vùng viết: <content> ở %s:%d:%d đã là của nó; vùng viết thứ hai là một <editor> khác", s.area.File, s.area.Line, s.area.Column)
+		return nil, errAt(n, "editor có một vùng viết: <textarea> ở %s:%d:%d đã là của nó; vùng viết thứ hai là một <editor> khác", s.area.File, s.area.Line, s.area.Column)
 	}
 	if err := c.checkReads(n, cx, nil); err != nil {
 		return nil, err

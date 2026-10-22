@@ -442,11 +442,11 @@ func (c *compiler) checkLayoutRoot(call *Node, def *componentDef, pageChild bool
 	case kitworkComponents[root.Tag] != nil || c.callsComponent(root):
 		return errAt(root, "gốc của %s là <%s>, một component: chỗ gọi <%s /> đặt for, if, show, span, place lên chính gốc này, nên gốc không là một component; bọc <%s> trong một <box>",
 			file, root.Tag, def.name, root.Tag)
+	case root.Tag == "view" || root.Tag == "page":
+		return frameOrPageRoot(root, file)
 	case !known:
 		return errAt(root, "gốc của %s là <%s>, không phải thẻ của Kitwork: chỗ gọi <%s /> đặt for, if, show, span, place lên gốc, nên gốc là một thẻ như box, card, list; bọc <%s /> trong thẻ đó",
 			file, root.Tag, def.name, root.Tag)
-	case root.Tag == "page":
-		return errAt(root, "gốc của %s là <page>: page là khung của trang, chỉ ở page.ui", file)
 	case info.region:
 		return errAt(root, "gốc của %s là vùng <%s>: vùng gọi bằng thẻ của nó (<%s /> lấy %s.ui, source= lấy file khác); layout dựng trên một thẻ như box, card, list",
 			file, root.Tag, root.Tag, root.Tag)
@@ -457,12 +457,12 @@ func (c *compiler) checkLayoutRoot(call *Node, def *componentDef, pageChild bool
 			a := &call.Attrs[i]
 			switch base := a.Name[strings.LastIndex(a.Name, ":")+1:]; base {
 			case "for", "if", "show", "span", "place":
-				return errAt(root, "gốc của %s là <reader>: reader đặt thẳng trong page.ui, một lần; reader không nhận %s mà chỗ gọi %s:%d:%d đặt lên gốc",
+				return errAt(root, "gốc của %s là <reader>: reader đặt thẳng trong view.ui, một lần; reader không nhận %s mà chỗ gọi %s:%d:%d đặt lên gốc",
 					file, a.Name, call.File, a.Line, a.Column)
 			}
 		}
 		if pageChild {
-			c.warn(root.File, root.Line, root.Column, fmt.Sprintf("gốc của %s là <reader>: reader đặt thẳng trong page.ui, một lần", file))
+			c.warn(root.File, root.Line, root.Column, fmt.Sprintf("gốc của %s là <reader>: reader đặt thẳng trong view.ui, một lần", file))
 		}
 	}
 	return nil
