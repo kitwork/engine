@@ -38,7 +38,7 @@ func jobErrorReceiver(t *testing.T) (url string, received func() string) {
 
 // postErr is the .error() handler of a job: it posts what it received, its keys included.
 func postErr(url string) string {
-	return `.error((job, err) => { http.post("` + url + `/err", { err: err, keys: Object.keys(err) }); })`
+	return `.error((job, err) => { http.post("` + url + `/err").send({ err: err, keys: Object.keys(err) }); })`
 }
 
 // checkJobErr reads what the handler posted: { message, code, at, cause }, the shape a router's .error()
@@ -64,9 +64,7 @@ func checkJobErr(t *testing.T, posted, file string) {
 // handler receives (14/10/2026): { message, code, at }. It was { message } alone, the message led by
 // the place and followed by the stack, with no code and no at.
 func TestCronErrorHandlerReceivesTheErrorObject(t *testing.T) {
-	savedLocal := AllowLocal
-	AllowLocal = true
-	defer func() { AllowLocal = savedLocal }()
+	reachLoopback(t) // handlers call an httptest server on loopback
 	url, received := jobErrorReceiver(t)
 
 	tmp := t.TempDir()
@@ -97,9 +95,7 @@ func TestCronErrorHandlerReceivesTheErrorObject(t *testing.T) {
 }
 
 func TestQueueErrorHandlerReceivesTheErrorObject(t *testing.T) {
-	savedLocal := AllowLocal
-	AllowLocal = true
-	defer func() { AllowLocal = savedLocal }()
+	reachLoopback(t) // handlers call an httptest server on loopback
 	url, received := jobErrorReceiver(t)
 
 	tenant := newQueueTenant(t, "boom", "import { queue, http } from \"kitwork\";\nqueue\n  .handle(() => { fail(\"hỏng\"); })\n  "+postErr(url)+";\n")

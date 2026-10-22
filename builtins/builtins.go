@@ -3,7 +3,6 @@ package builtins
 import (
 	"math"
 
-	"github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/value"
 )
 
@@ -24,8 +23,12 @@ var builtins = map[string]func() value.Value{
 	"parseFloat": ParseFloat,
 	"fail":       Fail,
 	"safe":       Safe,
+	// fetch(url) is gone (22/10/2026, KITWORK_HTTP.md): the name stays to say what to write instead
 	"fetch": func() value.Value {
-		return value.NewFunc(http.Fetch)
+		return value.NewFunc(func(...value.Value) value.Value {
+			return value.InvalidFailure(value.InvalidArgumentCode,
+				"fetch đã bỏ: viết http.get(url).send(), với import * as http from \"kitwork/http\"")
+		})
 	},
 	"testNotify": func() value.Value {
 		return value.NewFunc(func(args ...value.Value) value.Value {

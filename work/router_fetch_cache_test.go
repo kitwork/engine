@@ -11,12 +11,10 @@ import (
 )
 
 // The router-style chain on outbound HTTP, end to end through a real tenant VM:
-// http.cache("1m").persist("1m").get(url) — read-through RAM + per-tenant disk under
-// <tenant>/.persist/fetch/, and the fetch() builtin's { cache } option scoped to the same tenant.
+// http.get(url).cache("1m").persist("1m").send() — read-through RAM + per-tenant disk under
+// <tenant>/.persist/fetch/.
 func TestTreeOutboundFetchCache(t *testing.T) {
-	savedLocal := AllowLocal
-	AllowLocal = true // the upstream test server is loopback; SSRF guard would block it otherwise
-	defer func() { AllowLocal = savedLocal }()
+	reachLoopback(t) // the upstream test server is loopback
 
 	upstreamHits := 0
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +35,7 @@ func TestTreeOutboundFetchCache(t *testing.T) {
 	}
 	router := `import { router, http } from "kitwork";` + "\n" +
 		`router.get((ctx) => {` + "\n" +
-		`    const res = http.cache("1m").persist("1m").get("` + upstream.URL + `");` + "\n" +
+		`    const res = http.get("` + upstream.URL + `").cache("1m").persist("1m").send();` + "\n" +
 		`    return ctx.json({ body: res.text(), cached: res.cached });` + "\n" +
 		`});`
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {

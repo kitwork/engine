@@ -3,236 +3,125 @@ package http
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	stdhttp "net/http"
 	neturl "net/url"
 	"strings"
-	"time"
 
 	"github.com/kitwork/engine/value"
 )
 
-type HTTP struct {
-	timeout  time.Duration
-	headers  map[string]string
-	maxBytes int64
+// guardedClient sends every request to an absolute URL, through the SSRF guard. It has no time limit
+// of its own: each attempt carries its .timeout() as a context deadline.
+var guardedClient = &stdhttp.Client{Transport: guardedTransport}
 
-	// Outbound caching (see store.go): tiers injected per tenant; flags set by .cache()/.persist().
-	cacheStore   ResponseStore
-	persistStore ResponseStore
-	cacheOn      bool
-	persistOn    bool
-	cacheTTL     time.Duration
-	persistTTL   time.Duration
-	retry        int // .retry(n): re-attempt transient failures on idempotent reads (see request.go)
-}
+// attempt is one try of the request: its answer read whole (up to maxBytes), or why there was none.
+func (r *Request) attempt(ctx context.Context, target string, body []byte, contentType string) Outcome {
+	attemptContext, cancel := context.WithTimeout(ctx, r.timeout)
+	defer cancel()
 
-func (h *HTTP) Timeout(ms int) *HTTP {
-	next := h.clone()
-	next.timeout = time.Duration(ms) * time.Millisecond
-	return next
-}
-
-func (h *HTTP) Header(key, val string) *HTTP {
-	next := h.clone()
-	if next.headers == nil {
-		next.headers = make(map[string]string)
+	address, client, self := target, guardedClient, strings.HasPrefix(target, "/")
+	if self {
+		authority := selfAuthority()
+		address = "http://" + authority + target
+		client = selfClient(authority, r.selfHost())
 	}
-	next.headers[key] = val
-	return next
-}
-
-// MaxBytes bounds the decoded response body. A zero value keeps the historical
-// unbounded behavior for callers that have not opted into a limit.
-func (h *HTTP) MaxBytes(n int) *HTTP {
-	next := h.clone()
-	if n < 0 {
-		n = 0
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
 	}
-	const hardMax = 64 << 20
-	if n > hardMax {
-		n = hardMax
-	}
-	next.maxBytes = int64(n)
-	return next
-}
-
-// Retry sets how many extra attempts a transient failure (network error / 5xx) gets on a GET/HEAD.
-func (h *HTTP) Retry(n int) *HTTP {
-	next := h.clone()
-	next.retry = n
-	return next
-}
-
-// clone copies the configured template so a fired Request never mutates the shared builder.
-func (h *HTTP) clone() *HTTP {
-	c := *h
-	if h.headers != nil {
-		c.headers = make(map[string]string, len(h.headers))
-		for k, v := range h.headers {
-			c.headers[k] = v
-		}
-	}
-	return &c
-}
-
-// Get / Post create a deferred Request. Builder options are copied into the request, whose own
-// modifiers may continue configuring the same plan after the verb. COMMIT or response observation
-// executes the plan exactly once.
-func (h *HTTP) Get(url string) value.Value {
-	return newRequest(h.clone(), "GET", url, value.New(nil))
-}
-
-func (h *HTTP) Post(url string, body value.Value) value.Value {
-	return newRequest(h.clone(), "POST", url, body)
-}
-
-func (h *HTTP) do(method, url string, body value.Value) value.Value {
-	// Read-through caching: GET only. Check RAM first, then disk; on a live failure fall back to
-	// an expired disk copy (stale-on-error) so a third-party outage never breaks the page.
-	wantCache := h.cacheOn && h.cacheStore != nil
-	wantPersist := h.persistOn && h.persistStore != nil
-	key := ""
-	if method == "GET" && (wantCache || wantPersist) {
-		key = requestKey(url, h.headers)
-		if wantCache {
-			if snap, ok := h.cacheStore.Load(key); ok {
-				return storedResponse(snap, false)
-			}
-		}
-		if wantPersist {
-			if snap, ok := h.persistStore.Load(key); ok {
-				if wantCache { // promote a disk hit into RAM for the next reader
-					h.cacheStore.Save(key, snap, h.cacheTTL)
-				}
-				return storedResponse(snap, false)
-			}
-		}
-	}
-
-	timeout := h.timeout
-	if timeout == 0 {
-		timeout = 10 * time.Second
-	}
-
-	var bodyReader io.Reader
-	if !body.IsBlank() {
-		if body.K == value.String {
-			bodyReader = strings.NewReader(body.String())
-		} else {
-			b, _ := json.Marshal(body.Interface())
-			bodyReader = bytes.NewReader(b)
-		}
-	}
-
-	serverPort := 0
-	if GetServerPort != nil {
-		serverPort = GetServerPort()
-	}
-
-	var isLocalRequest bool
-	if strings.HasPrefix(url, "/") {
-		isLocalRequest = true
-		port := 8080
-		if serverPort > 0 {
-			port = serverPort
-		}
-		url = fmt.Sprintf("http://127.0.0.1:%d%s", port, url)
-	}
-
-	req, err := stdhttp.NewRequest(method, url, bodyReader)
+	request, err := stdhttp.NewRequestWithContext(attemptContext, r.method, address, reader)
 	if err != nil {
-		// a URL that is not one: the program's argument
-		return value.New(Response{Status: 0, Error: shownError(err), Code: value.InvalidArgumentCode})
+		return Outcome{Code: value.NetworkCode, Message: shownError(err)}
+	}
+	for name, values := range r.header {
+		request.Header[name] = append([]string(nil), values...)
+	}
+	if contentType != "" && request.Header.Get("Content-Type") == "" {
+		request.Header.Set("Content-Type", contentType)
+	}
+	if host := r.selfHost(); self && host != "" {
+		request.Host = host
 	}
 
-	for k, v := range h.headers {
-		req.Header.Set(k, v)
-	}
-
-	if method == "POST" && req.Header.Get("Content-Type") == "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	allowLocal := false
-	if IsLocalAllowed != nil {
-		allowLocal = IsLocalAllowed()
-	}
-
-	transport := sharedTransport
-	if isLocalRequest || allowLocal {
-		transport = localTransport
-	}
-
-	var client *stdhttp.Client
-	if h.timeout > 0 {
-		client = &stdhttp.Client{
-			Transport: transport,
-			Timeout:   h.timeout,
-		}
-	} else {
-		if isLocalRequest || allowLocal {
-			client = localClient
-		} else {
-			client = sharedClient
-		}
-	}
-
-	resp, err := client.Do(req)
+	response, err := client.Do(request)
 	if err != nil {
-		if snap, ok := staleFallback(key, wantPersist, h.persistStore); ok {
-			return storedResponse(snap, true)
-		}
-		return value.New(Response{Status: 0, Error: shownError(err), Code: failureCode(err)})
+		return noAnswer(err)
 	}
-	defer resp.Body.Close()
-
-	responseReader := io.Reader(resp.Body)
-	if h.maxBytes > 0 {
-		responseReader = io.LimitReader(resp.Body, h.maxBytes+1)
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, r.maxBytes+1))
+	if err != nil {
+		return noAnswer(err)
 	}
-	resBody, readErr := io.ReadAll(responseReader)
-	if readErr != nil {
-		return value.New(Response{Status: 0, Error: shownError(readErr), Code: failureCode(readErr)})
-	}
-	if h.maxBytes > 0 && int64(len(resBody)) > h.maxBytes {
-		// an answer from outside past the limit the program set
-		return value.New(Response{Status: 0, Error: "http: response body exceeds max bytes", Code: value.InvalidInputCode})
-	}
-	// Keep the upstream's media type: a cached/proxied copy must replay under the ORIGINAL type.
-	// Fall back to sniffing the bytes when the server sent none (stdlib, no dependency).
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" && len(resBody) > 0 {
-		contentType = stdhttp.DetectContentType(resBody)
-	}
-
-	if key != "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		snap := Snapshot{Status: resp.StatusCode, Body: resBody, ContentType: contentType}
-		if wantCache {
-			h.cacheStore.Save(key, snap, h.cacheTTL)
-		}
-		if wantPersist {
-			h.persistStore.Save(key, snap, h.persistTTL)
-		}
-	} else if resp.StatusCode >= 500 {
-		if snap, ok := staleFallback(key, wantPersist, h.persistStore); ok {
-			return storedResponse(snap, true)
+	if int64(len(data)) > r.maxBytes {
+		return Outcome{
+			Status: response.StatusCode, Header: response.Header, Code: value.TooLargeCode,
+			Message: fmt.Sprintf("Response body exceeds %s (.maxBytes)", sizeText(r.maxBytes)),
 		}
 	}
-
-	return value.New(Response{
-		Status:      resp.StatusCode,
-		Body:        value.New(resBody),
-		ContentType: contentType,
-	})
+	outcome := Outcome{Status: response.StatusCode, Header: response.Header, Body: data}
+	if !outcome.Ok() {
+		outcome.Message = stdhttp.StatusText(response.StatusCode)
+		if outcome.Message == "" {
+			outcome.Message = fmt.Sprintf("HTTP %d", response.StatusCode)
+		}
+	}
+	return outcome
 }
 
-// failureCode is the code of a request that got no answer (14/10/2026): DENIED when the SSRF guard
-// refused the address, EXECUTION_CANCELLED when the request was cancelled (nothing catches it),
-// TIMEOUT past its time limit, NETWORK for any other.
+// selfHost is the Host of this request's self-calls: its site's domain, or none for a Go request.
+func (r *Request) selfHost() string {
+	if r.module == nil {
+		return ""
+	}
+	return r.module.selfHost
+}
+
+// selfAuthority is where a self-call goes: this host's own port on 127.0.0.1 (8080 when none is set).
+func selfAuthority() string {
+	port := 8080
+	if GetServerPort != nil && GetServerPort() > 0 {
+		port = GetServerPort()
+	}
+	return fmt.Sprintf("127.0.0.1:%d", port)
+}
+
+// selfClient carries a self-call past the SSRF guard. A redirect is followed only on the same port,
+// and keeps the site's Host; one that leaves (to another host, or https://) is the answer itself, a
+// 3xx: the guard is not there to check where it goes.
+func selfClient(authority, host string) *stdhttp.Client {
+	return &stdhttp.Client{
+		Transport: selfTransport,
+		CheckRedirect: func(next *stdhttp.Request, via []*stdhttp.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if next.URL.Scheme != "http" || next.URL.Host != authority {
+				return stdhttp.ErrUseLastResponse
+			}
+			if host != "" {
+				next.Host = host
+			}
+			return nil
+		},
+	}
+}
+
+// noAnswer is the outcome of a request that got no answer: its code, and Kitwork's sentence for it.
+func noAnswer(err error) Outcome {
+	code := failureCode(err)
+	message := shownError(err)
+	if code == value.TimeoutCode {
+		message = "Request timed out"
+	}
+	return Outcome{Code: code, Message: message}
+}
+
+// failureCode is the code of a request that got no answer: DENIED when the SSRF guard refused the
+// address, value.CancelledCode when the caller's context was cancelled, TIMEOUT past its time limit,
+// NETWORK for any other (DNS, TLS, a refused or broken connection).
 func failureCode(err error) string {
 	var denied *deniedAddress
 	var timeout interface{ Timeout() bool }
@@ -247,7 +136,7 @@ func failureCode(err error) string {
 	return value.NetworkCode
 }
 
-// shownError is the text of a request's failure as the program reads it (error.message, which a site
+// shownError is the text of a request's failure as the program reads it (result.error, which a site
 // may hand a browser): Go names the URL in it, and a URL can carry a secret, so the URL loses its user
 // information, query and fragment ("Get \"https://api.example.com/v1\": dial tcp …").
 func shownError(err error) string {
@@ -277,12 +166,4 @@ func shownURL(raw string) string {
 		}
 	}
 	return raw
-}
-
-// staleFallback returns an expired-but-present disk copy when the live request failed.
-func staleFallback(key string, wantPersist bool, store ResponseStore) (Snapshot, bool) {
-	if key == "" || !wantPersist {
-		return Snapshot{}, false
-	}
-	return store.LoadStale(key)
 }

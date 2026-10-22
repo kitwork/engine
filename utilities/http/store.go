@@ -3,31 +3,31 @@ package http
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	stdhttp "net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/kitwork/engine/value"
 )
 
-// Outbound response caching — the same .cache()/.persist() the router speaks, applied to
-// fetch()/http.get(). A deferred request accepts these options on either side of the verb:
+// Outbound response caching: the same .cache()/.persist() a route speaks (KITWORK_HTTP.md mục 7), on a
+// GET only, after the method:
 //
-//	http.cache("5m").get(url)                  // RAM, read-through
-//	http.get(url).cache("5m")                  // equivalent request-position form
-//	http.persist("1d").get(url)                // disk — survives restarts
-//	http.cache("10m").persist("1d").get(url)   // both tiers
-//	fetch(url, { cache: "5m", persist: "1d" }) // the fetch spelling of the same thing
+//	http.get(url).cache("5m").send()               // RAM, read-through
+//	http.get(url).persist("1d").send()             // disk: survives restarts
+//	http.get(url).cache("5m").persist("1d").send() // both tiers
 //
-// Only GET responses are stored (2xx only). STALE-ON-ERROR: when the live request fails and a
-// persisted copy exists — even an expired one — that copy is served with `stale: true`, so a page
+// Only an ok answer is stored. STALE ON FAILURE: when the live request gets no answer or a 5xx and a
+// persisted copy exists, even an expired one, that copy is the result with `stale: true`, so a page
 // never breaks because a third party is down.
 //
-// The stores are INJECTED by the host per tenant (NewClient); this package stays pure. With no
-// store injected, .cache()/.persist() are quiet no-ops.
+// The stores are INJECTED by the host per site (NewModule); this package stays pure. With no store
+// injected, .cache()/.persist() store nothing.
 
-// Snapshot is the storable form of a response: status + raw body bytes + the upstream's media type.
-// ContentType is carried so a cached copy replays byte-identically — router.proxy() streams the
-// stored bytes back under the ORIGINAL type (an image must not come back as octet-stream).
+// Snapshot is the storable form of an answer: status, the body's bytes and the upstream's media type,
+// which a cached result gives back as its one header.
 type Snapshot struct {
 	Status      int
 	Body        []byte
@@ -35,73 +35,63 @@ type Snapshot struct {
 }
 
 // ResponseStore is one storage tier. Load returns a FRESH snapshot only; LoadStale may return an
-// expired-but-present snapshot (disk tier) for fail-open serving — a RAM tier just returns false.
+// expired-but-present snapshot (disk tier) for fail-open serving; a RAM tier just returns false.
 type ResponseStore interface {
 	Load(key string) (Snapshot, bool)
 	LoadStale(key string) (Snapshot, bool)
 	Save(key string, s Snapshot, ttl time.Duration)
 }
 
-// NewClient returns an HTTP builder wired to a tenant's cache tiers (either may be nil).
-func NewClient(cacheStore, persistStore ResponseStore) *HTTP {
-	return &HTTP{cacheStore: cacheStore, persistStore: persistStore}
-}
-
-// Cache opts this request chain into the RAM tier: http.cache("5m").get(url).
-// No argument (or true) = no expiry; a number = seconds; a string = duration ("5m", "1h", "1d").
-func (h *HTTP) Cache(args ...value.Value) *HTTP {
-	next := h.clone()
-	next.cacheOn = true
-	next.cacheTTL = ttlOf(args...)
-	return next
-}
-
-// Persist opts this request chain into the DISK tier (survives restarts): http.persist("1d").get(url).
-func (h *HTTP) Persist(args ...value.Value) *HTTP {
-	next := h.clone()
-	next.persistOn = true
-	next.persistTTL = ttlOf(args...)
-	return next
-}
-
-// ttlOf: no arg / true = 0 (forever), number = seconds, string = duration via parseDuration.
-func ttlOf(args ...value.Value) time.Duration {
+// ttlOf reads the expiry of .cache()/.persist() as a route reads one (KITWORK_ROUTER.md mục 9): no
+// argument is no expiry (RAM until the app is rebuilt), a number is milliseconds, a string a duration
+// ("30s", "5m", "1h", "7d"). Anything else, and a string that does not read, is the program's mistake.
+func ttlOf(modifier string, args []value.Value) (time.Duration, value.Value) {
 	if len(args) == 0 {
-		return 0
+		return 0, value.Value{}
+	}
+	if len(args) > 1 {
+		return 0, value.InvalidFailure(value.InvalidArgumentCode,
+			fmt.Sprintf(".%s() nhận một hạn: .%s(\"5m\")", modifier, modifier))
 	}
 	v := args[0]
-	if v.IsNumeric() {
-		return time.Duration(v.N) * time.Second
-	}
-	if v.K == value.String {
-		if d, err := parseDuration(v.String()); err == nil {
-			return d
+	switch {
+	case v.K == value.Number && v.N > 0:
+		return time.Duration(v.N) * time.Millisecond, value.Value{}
+	case v.K == value.String:
+		if d, err := parseDuration(v.String()); err == nil && d > 0 {
+			return d, value.Value{}
 		}
 	}
-	return 0
+	return 0, value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(
+		".%s(): không đọc được hạn %s: viết như \"30s\", \"5m\", \"1h\", \"7d\" hay một số mili giây; hạn theo lịch (\"hourly\", \"daily\") chưa có ở http",
+		modifier, written(v)))
 }
 
-// requestKey identifies a GET by URL + the headers the caller set (sorted, so order is irrelevant).
-func requestKey(url string, headers map[string]string) string {
+// requestKey identifies a GET by its final URL and the headers it carries (names sorted, so the order
+// they were set in is irrelevant).
+func requestKey(url string, header stdhttp.Header) string {
 	hash := sha256.New()
 	hash.Write([]byte(url))
-	if len(headers) > 0 {
-		keys := make([]string, 0, len(headers))
-		for k := range headers {
-			keys = append(keys, k)
+	if len(header) > 0 {
+		names := make([]string, 0, len(header))
+		for name := range header {
+			names = append(names, name)
 		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			hash.Write([]byte("|" + k + ":" + headers[k]))
+		sort.Strings(names)
+		for _, name := range names {
+			hash.Write([]byte("|" + name + ":" + strings.Join(header[name], ",")))
 		}
 	}
 	return hex.EncodeToString(hash.Sum(nil)[:16])
 }
 
-// storedResponse rebuilds a Response from a snapshot, flagged with its provenance.
-func storedResponse(s Snapshot, stale bool) value.Value {
-	return value.New(Response{
-		Status: s.Status, Body: value.New(s.Body), ContentType: s.ContentType,
-		Cached: true, Stale: stale,
-	})
+// storedOutcome rebuilds an answer from a snapshot, flagged with where it came from.
+func storedOutcome(s Snapshot, stale bool) Outcome {
+	var header stdhttp.Header
+	if s.ContentType != "" {
+		header = stdhttp.Header{"Content-Type": {s.ContentType}}
+	} else {
+		header = stdhttp.Header{}
+	}
+	return Outcome{Status: s.Status, Header: header, Body: s.Body, Cached: true, Stale: stale}
 }

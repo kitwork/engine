@@ -804,12 +804,24 @@ func (p *Parser) parseImportStatement() Statement {
 					}
 					kitworkSafe = kitworkSafe || globalSafe(s)
 				}
+				kitworkHTTP := ""
+				var kitworkHTTPVerbs []string
+				for _, s := range specs {
+					if kitworkSubpath(spec) == "" && s.Imported == "http" {
+						kitworkHTTP = s.Local
+					}
+					if kitworkSubpath(spec) == "http" && httpVerbs[s.Imported] {
+						kitworkHTTPVerbs = append(kitworkHTTPVerbs, s.Local)
+					}
+				}
 				return &VarStatement{
-					Token:        constToken(importTok),
-					Names:        names,
-					DestructMode: DestructObject,
-					Value:        p.kitworkModule(spec, importTok),
-					KitworkSafe:  kitworkSafe,
+					Token:            constToken(importTok),
+					Names:            names,
+					DestructMode:     DestructObject,
+					Value:            p.kitworkModule(spec, importTok),
+					KitworkSafe:      kitworkSafe,
+					KitworkHTTP:      kitworkHTTP,
+					KitworkHTTPVerbs: kitworkHTTPVerbs,
 				}
 			}
 			// có alias → nhóm `const local = kitwork().imported`
@@ -818,6 +830,12 @@ func (p *Parser) parseImportStatement() Statement {
 				stmts[i] = memberConst(s.Local, p.kitworkModule(spec, importTok), s.Imported, importTok)
 				if globalSafe(s) {
 					stmts[i].(*VarStatement).KitworkSafe = true
+				}
+				if kitworkSubpath(spec) == "" && s.Imported == "http" {
+					stmts[i].(*VarStatement).KitworkHTTP = s.Local
+				}
+				if kitworkSubpath(spec) == "http" && httpVerbs[s.Imported] {
+					stmts[i].(*VarStatement).KitworkHTTPVerbs = []string{s.Local}
 				}
 			}
 			return &GroupStatement{Statements: stmts}
@@ -855,12 +873,16 @@ func (p *Parser) parseImportStatement() Statement {
 			p.addErrorAt(importTok, fmt.Sprintf("import * as %s from %q: import * chỉ dùng với module của Kitwork (\"kitwork/router\"); module của site thì gọi tên từng thứ cần: import { a, b } from %q", name.Value, spec, spec))
 			return nil
 		}
-		return &VarStatement{
+		namespace := &VarStatement{
 			Token:        constToken(importTok),
 			Names:        []*Identifier{name},
 			DestructMode: DestructNone,
 			Value:        p.kitworkModule(spec, importTok),
 		}
+		if kitworkSubpath(spec) == "http" {
+			namespace.KitworkHTTP = name.Value
+		}
+		return namespace
 	}
 
 	// Default:  import name from "..."
@@ -882,9 +904,14 @@ func (p *Parser) parseImportStatement() Statement {
 				return nil
 			}
 			// → const name = kitwork().sub
+			kitworkHTTP := ""
+			if sub == "http" {
+				kitworkHTTP = name.Value
+			}
 			return &VarStatement{
 				Token:        constToken(importTok),
 				Names:        []*Identifier{name},
+				KitworkHTTP:  kitworkHTTP,
 				DestructMode: DestructNone,
 				Value: &MemberExpression{
 					Token:  tokenWithValue(importTok, Dot, value.Value{}),

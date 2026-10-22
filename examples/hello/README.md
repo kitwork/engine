@@ -14,4 +14,4 @@ go run .
 - `curl "http://localhost:8080/api/notes?text=first"` adds a row to `app/.data/app.db` and answers every row; the second call answers two rows.
 - `curl http://localhost:8080/router.work` is a 404: source files are never served.
 
-`app/api/upstream/router.work` is the `safe` listing from "The language": `/api/upstream` answers whatever the feed returns as JSON, or a 502 carrying the failure's code when the request itself fails.
+`app/api/upstream/router.work` is the listing from "The language": `/api/upstream` answers whatever the feed returns as JSON, or a 502 carrying the result's code (`NETWORK`, `TIMEOUT`, `DENIED`, `TOO_LARGE`) when the request got no usable answer, its HTTP reason (`"Not Found"`) when the feed answered with an error, and the failure's code when the body is not JSON.

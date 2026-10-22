@@ -10,8 +10,7 @@ import (
 )
 
 func TestRealAppHTTPContractFixture(t *testing.T) {
-	AllowLocal = true
-	defer func() { AllowLocal = false }()
+	reachLoopback(t) // the upstream is an httptest server on loopback
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -29,7 +28,7 @@ func TestRealAppHTTPContractFixture(t *testing.T) {
 import { router, http } from "kitwork";
 
 router.get((ctx) => {
-    const res = http.get("` + ts.URL + `").cache("5m").json();
+    const res = http.get("` + ts.URL + `").cache("5m").send().json();
     return ctx.json({ message: res.message });
 });
 `

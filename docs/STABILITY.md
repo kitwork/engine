@@ -536,18 +536,15 @@ paths and imports; it never guesses or rewrites application source.
   their completed value before leaving the expression boundary.
 - A committer must be idempotent. Repeated commits or later observations must
   reuse the first result and must not repeat external work.
-- The VM depends only on `value.Committer`; HTTP-specific policy remains in the
-  HTTP capability.
-- HTTP builders are copy-on-write. A modifier before the verb cannot leak into
-  another chain, while request-local modifiers after the verb configure the
-  same deferred plan.
-
-These two forms are contractually equivalent:
-
-```javascript
-http.retry(3).timeout(5000).get(url)
-http.get(url).retry(3).timeout(5000)
-```
+- The VM depends only on `value.Committer`. No value of the engine commits
+  today: since 22/10/2026 an HTTP request goes out only at `.send()`
+  (`http.get(url).retry(3).timeout("5s").send()`), never at `COMMIT` or on a
+  read. The contract stays for an effect that needs it.
+- HTTP requests are copy-on-write: each modifier returns a changed copy, so a
+  description kept in a variable and sent twice sends the same request twice.
+  Modifiers stand after the method; `http.retry(3).get(url)` is an error naming
+  that spelling, and a request described and dropped as a statement
+  (`http.get(url);`) is a compile error.
 
 ## 10. Failure boundaries
 

@@ -22,6 +22,7 @@ import (
 	"github.com/kitwork/engine/compiler"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
+	httputil "github.com/kitwork/engine/utilities/http"
 	"github.com/kitwork/engine/value"
 )
 
@@ -439,6 +440,11 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 		// `return response.json(data)`: the answer is already on the request's response; returning it
 		// says no more (19/10/2026), it is not data to send in its place
 		return value.Value{K: value.Nil}
+	}
+	if unsent, ok := httputil.UnsentFailure(result); ok {
+		// `return http.get(url)` sent the request at the return until 22/10/2026; now it would answer
+		// 200 with nothing, so it fails naming .send() (KITWORK_HTTP.md)
+		return unsent
 	}
 	return result
 }

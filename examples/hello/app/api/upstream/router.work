@@ -1,7 +1,10 @@
-import { router, http, safe } from "kitwork";
+import { router, safe } from "kitwork";
+import * as http from "kitwork/http";
 
 router.get((ctx) => {
-  const { ok, value: response, error } = safe(() => http.timeout(2000).get("https://example.com/feed"));
-  if (!ok) return ctx.status(502).json({ code: error.code, message: error.message });
-  return ctx.json(response.json());
+  const upstream = http.get("https://example.com/feed").timeout("2s").send();
+  if (!upstream.ok) return ctx.status(502).json({ code: upstream.code, error: upstream.error });
+  const { ok, value: feed, error } = safe(() => upstream.json());
+  if (!ok) return ctx.status(502).json({ code: error.code, error: error.message });
+  return ctx.json(feed);
 });

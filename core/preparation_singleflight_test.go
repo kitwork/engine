@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/internal/loopback"
 	"github.com/kitwork/engine/work"
 )
 
@@ -177,7 +178,7 @@ func writePreparationSite(t testing.TB, root, identity, domain, upstream string)
 	}
 	source := fmt.Sprintf(`
 import { router, http } from "kitwork";
-http.get(%q);
+http.get(%q).send();
 router.get((ctx) => ctx.text("ready"));
 `, upstream)
 	if err := os.WriteFile(filepath.Join(directory, work.RouterFileName), []byte(source), 0o644); err != nil {
@@ -189,7 +190,11 @@ func setPreparationTestAllowLocal(t testing.TB) func() {
 	t.Helper()
 	previous := work.AllowLocal
 	work.AllowLocal = true
-	return func() { work.AllowLocal = previous }
+	restoreLoopback := loopback.Open() // the upstream is an httptest server on loopback
+	return func() {
+		restoreLoopback()
+		work.AllowLocal = previous
+	}
 }
 
 func preparationRelease(t testing.TB) (<-chan struct{}, func()) {

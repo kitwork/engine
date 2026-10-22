@@ -432,6 +432,53 @@ func (c *Compiler) checkSafeCall(n *CallExpression) error {
 	return fmt.Errorf("%s: %s", locationText(c.getSourceLocation(callee.Token.Source, callee.Token.Position)), message)
 }
 
+// httpVerbs are the methods of the http module that describe a request.
+var httpVerbs = map[string]bool{
+	"get": true, "post": true, "put": true, "patch": true, "delete": true, "head": true, "options": true,
+}
+
+// checkUnsentRequest makes a request described and then dropped a compile error: until 22/10/2026 a
+// statement such as http.get(url); sent the request at its end, and .send() is now the only place a
+// request goes out (KITWORK_HTTP.md), so the statement would send nothing without a word. A chain is
+// checked when it starts at a method of a name bound to the http module (http.get(url)), or at a call
+// of a name bound to one of its methods (get(url) after import { get } from "kitwork/http" or
+// const { get } = http); a description kept in a variable or returned is not dropped.
+func (c *Compiler) checkUnsentRequest(e Expression) error {
+	for {
+		switch node := e.(type) {
+		case *MethodCallExpression:
+			if node.Method == nil || node.Method.Value == "send" {
+				return nil
+			}
+			root, isName := node.Object.(*Identifier)
+			if !isName {
+				e = node.Object
+				continue
+			}
+			if bound := c.variable(root); bound == nil || !bound.kitworkHTTP || !httpVerbs[node.Method.Value] {
+				return nil
+			}
+			return c.unsentRequest(root, root.Value+"."+node.Method.Value)
+		case *CallExpression:
+			if callee, isName := node.Function.(*Identifier); isName {
+				if bound := c.variable(callee); bound != nil && bound.kitworkHTTPVerb {
+					return c.unsentRequest(callee, callee.Value)
+				}
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+}
+
+// unsentRequest is the compile error of a request dropped unsent, at where its chain starts; callee is
+// how the source calls the method (http.get, or get).
+func (c *Compiler) unsentRequest(at *Identifier, callee string) error {
+	return fmt.Errorf("%s: request chưa gửi: .send() là chỗ duy nhất gửi request, viết %s(url).send()",
+		locationText(c.getSourceLocation(at.Token.Source, at.Token.Position)), callee)
+}
+
 // certainlyNotAFunction reports an expression that can never give a function: a call (its result is
 // computed before safe runs), a literal, an object, an array, arithmetic, a comparison, a negation.
 func certainlyNotAFunction(e Expression) bool {
@@ -507,6 +554,9 @@ func (c *Compiler) Compile(node Node) error {
 		}
 
 	case *ExpressionStatement:
+		if err := c.checkUnsentRequest(n.Expression); err != nil {
+			return err
+		}
 		if err := c.compileEffect(n.Expression); err != nil {
 			return err
 		}

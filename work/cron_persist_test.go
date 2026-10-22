@@ -115,9 +115,7 @@ func TestCronPersistSuccessAndHistory(t *testing.T) {
 // Scheduler-level retry (.retry(n)) + the .error() hook. A handler that always fails (energy limit)
 // must cycle attempts up to max, land in 'failed', and fire .error().
 func TestCronPersistRetryAndError(t *testing.T) {
-	savedLocal := AllowLocal
-	AllowLocal = true
-	defer func() { AllowLocal = savedLocal }()
+	reachLoopback(t) // handlers call an httptest server on loopback
 
 	savedBackoff := cronBackoff
 	cronBackoff = func(int) time.Duration { return 10 * time.Millisecond } // don't wait real 20s
@@ -152,7 +150,7 @@ func TestCronPersistRetryAndError(t *testing.T) {
 		`cron.every("1s")` + "\n" +
 		`  .handle(() => { for (let i = 0; i < 1000000; i++) {} })` + "\n" +
 		`  .retry(2)` + "\n" +
-		`  .error((ctx, err) => { http.get("` + srv.URL + `/errhit"); });`
+		`  .error((ctx, err) => { http.get("` + srv.URL + `/errhit").send(); });`
 	if err := os.WriteFile(filepath.Join(cronDir, "flap.kitwork.js"), []byte(flap), 0644); err != nil {
 		t.Fatal(err)
 	}

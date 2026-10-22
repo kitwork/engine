@@ -592,10 +592,6 @@ func (t *Tenant) Run() error {
 		t.limiter = ratelimit.New()
 	}
 
-	t.vm.Globals["fetch"] = value.NewFunc(func(args ...value.Value) value.Value {
-		return httphelper.FetchWith(httphelper.NewClient(t.fetchRAM(), t.fetchDisk()), args...)
-	})
-
 	if t.entity.Domain != "" {
 		tree := NewRouteTree(t)
 		if err := tree.Prepare(); err != nil {

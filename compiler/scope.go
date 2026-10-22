@@ -72,6 +72,12 @@ type binding struct {
 	constant bool
 	// kitworkSafe: import { safe } from "kitwork", which binds the global safe itself.
 	kitworkSafe bool
+	// kitworkHTTP: an import that binds the http module (checkUnsentRequest), or a const of it.
+	kitworkHTTP bool
+	// kitworkHTTPVerb: a name bound to a method of the http module, by an import (import { get } from
+	// "kitwork/http") or a const that reads one of the module (const { get } = http, const get =
+	// http.get), so get(url); is checked as http.get(url); is.
+	kitworkHTTPVerb bool
 }
 
 type lexicalScope struct {
@@ -258,6 +264,14 @@ func (r *resolver) hoist(statements []Statement) {
 				if declared != nil && node.KitworkSafe && name.Value == "safe" {
 					declared.kitworkSafe = true
 				}
+				if declared != nil && node.KitworkHTTP != "" && name.Value == node.KitworkHTTP {
+					declared.kitworkHTTP = true
+				}
+				for _, verb := range node.KitworkHTTPVerbs {
+					if declared != nil && name.Value == verb {
+						declared.kitworkHTTPVerb = true
+					}
+				}
 			}
 		case *GroupStatement:
 			r.hoist(node.Statements)
@@ -388,6 +402,7 @@ func (r *resolver) statement(statement Statement) {
 		if node.Pattern != nil {
 			r.patternDefaults(node.Pattern)
 		}
+		r.bindHTTP(node)
 	case *ExpressionStatement:
 		r.expression(node.Expression)
 	case *GroupStatement:
@@ -412,6 +427,44 @@ func (r *resolver) statement(statement Statement) {
 	default:
 		if expression, ok := statement.(Expression); ok {
 			r.expression(expression)
+		}
+	}
+}
+
+// bindHTTP marks a const that takes the http module, or one of its methods, from a name bound to the
+// module: const client = http; const { get } = http; const get = http.get. checkUnsentRequest then
+// checks a request dropped through it as through the module. A let may change later, so it is not.
+func (r *resolver) bindHTTP(node *VarStatement) {
+	if node.Token.Kind == Let {
+		return
+	}
+	module := func(e Expression) bool {
+		name, ok := e.(*Identifier)
+		if !ok {
+			return false
+		}
+		bound := r.result.slots[name]
+		return bound != nil && bound.kitworkHTTP
+	}
+	mark := func(name *Identifier, verb bool) {
+		if bound := r.result.slots[name]; bound != nil {
+			bound.kitworkHTTP = bound.kitworkHTTP || !verb
+			bound.kitworkHTTPVerb = bound.kitworkHTTPVerb || verb
+		}
+	}
+	switch {
+	case node.Pattern != nil && !node.Pattern.Array && module(node.Value):
+		for _, element := range node.Pattern.Elements {
+			if element.Name != nil && httpVerbs[element.Key] {
+				mark(element.Name, true)
+			}
+		}
+	case node.DestructMode == DestructNone && len(node.Names) == 1 && module(node.Value):
+		mark(node.Names[0], false)
+	case node.DestructMode == DestructNone && len(node.Names) == 1:
+		if member, ok := node.Value.(*MemberExpression); ok && member.Property != nil &&
+			httpVerbs[member.Property.Value] && module(member.Object) {
+			mark(node.Names[0], true)
 		}
 	}
 }

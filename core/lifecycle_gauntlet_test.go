@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/internal/loopback"
 	"github.com/kitwork/engine/work"
 )
 
@@ -126,6 +127,7 @@ func TestEngineLifecycleGauntlet(t *testing.T) {
 	savedAllowLocal := work.AllowLocal
 	work.AllowLocal = true
 	t.Cleanup(func() { work.AllowLocal = savedAllowLocal })
+	t.Cleanup(loopback.Open()) // the upstream is an httptest server on loopback
 
 	requestEntered := make(chan struct{})
 	releaseRequest := make(chan struct{})
@@ -151,7 +153,7 @@ router.get((ctx) => ctx.text("v1"));
 	writeLifecycleRoute(t, root, "hold", fmt.Sprintf(`
 import { router, http } from "kitwork";
 router.get((ctx) => {
-	const response = http.get(%q);
+	const response = http.get(%q).send();
 	return ctx.text(response.text());
 });
 `, upstream.URL))

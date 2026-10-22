@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/core"
+	"github.com/kitwork/engine/internal/loopback"
 	"github.com/kitwork/engine/work"
 )
 
@@ -147,6 +148,9 @@ type canaryTarget struct {
 	root         string
 	allowLocal   bool
 	restoreLocal bool
+	// restoreLoopback closes loopback to the SSRF guard again: the synthetic upstream is an httptest
+	// server on 127.0.0.1, which ALLOW_LOCAL no longer opens (22/10/2026).
+	restoreLoopback func()
 }
 
 func executeCanary(ctx context.Context, config canaryConfig) (canarySummary, error) {
@@ -434,10 +438,12 @@ func openCanaryTarget(config canaryConfig) (*canaryTarget, error) {
 func openSyntheticCanary(config canaryConfig) (*canaryTarget, error) {
 	allowLocal := work.AllowLocal
 	work.AllowLocal = true
+	restoreLoopback := loopback.Open()
 	cleanupAllowLocal := true
 	defer func() {
 		if cleanupAllowLocal {
 			work.AllowLocal = allowLocal
+			restoreLoopback()
 		}
 	}()
 
@@ -479,17 +485,18 @@ func openSyntheticCanary(config canaryConfig) (*canaryTarget, error) {
 	client.Timeout = config.RequestTimeout
 	cleanupAllowLocal = false
 	return &canaryTarget{
-		mode:         "synthetic",
-		url:          server.URL + "/",
-		client:       client,
-		verifyBody:   verifySyntheticCanaryBody,
-		reload:       writeSource,
-		engine:       engine,
-		server:       server,
-		upstream:     upstream,
-		root:         root,
-		allowLocal:   allowLocal,
-		restoreLocal: true,
+		mode:            "synthetic",
+		url:             server.URL + "/",
+		client:          client,
+		verifyBody:      verifySyntheticCanaryBody,
+		reload:          writeSource,
+		engine:          engine,
+		server:          server,
+		upstream:        upstream,
+		root:            root,
+		allowLocal:      allowLocal,
+		restoreLocal:    true,
+		restoreLoopback: restoreLoopback,
 	}, nil
 }
 
@@ -504,7 +511,7 @@ const make = (base) => (number) => base + number;
 router.get((ctx) => {
 	const functions = [1, 2, 3, 4].map((base) => make(base));
 	const rendered = functions.map((fn) => fn(10)).join(",");
-	const response = http.get(%q);
+	const response = http.get(%q).send();
 	return ctx.text(generation + ":" + rendered + ":" + response.text());
 });
 `, revision, strings.Repeat("x", 16<<10), upstream)
@@ -571,6 +578,9 @@ func (target *canaryTarget) Close() (bool, error) {
 	}
 	if target.restoreLocal {
 		work.AllowLocal = target.allowLocal
+	}
+	if target.restoreLoopback != nil {
+		target.restoreLoopback()
 	}
 	if target.root != "" {
 		if err := os.RemoveAll(target.root); err != nil {

@@ -2,12 +2,16 @@ package work
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // router.proxy(target).persist(): a folder answered from an UPSTREAM.
@@ -32,9 +36,8 @@ func TestTreeProxyPersist(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// The upstream is loopback; the SSRF transport blocks private space unless local is allowed.
-	AllowLocal = true
-	defer func() { AllowLocal = false }()
+	// The upstream is loopback; the SSRF transport blocks private space unless a test opens loopback.
+	reachLoopback(t)
 
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "test", "localhost") // <root>/<identity>/<domain>
@@ -105,5 +108,108 @@ func TestTreeProxyPersist(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
 		t.Errorf("handler-target content-type = %q, want text/plain*", ct)
+	}
+}
+
+// router.proxy reads the upstream through kitwork/http's Go request (22/10/2026): an upstream that sends
+// no Content-Type is sniffed (PNG bytes come back as image/png, not octet-stream), and a body past the
+// proxy's cap (the host's 64 MiB, lowered here) is TOO_LARGE, which .error() reads, and nothing of it
+// reaches the visitor.
+func TestProxySniffsTheTypeAndCapsTheBody(t *testing.T) {
+	reachLoopback(t)
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/large" {
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 2048))
+			return
+		}
+		w.Header()["Content-Type"] = nil // no Content-Type at all: Go's server would sniff one otherwise
+		_, _ = w.Write(png)
+	}))
+	defer upstream.Close()
+	saved := proxyMaxBytes
+	proxyMaxBytes = 1024
+	defer func() { proxyMaxBytes = saved }()
+
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work": `import * as router from "kitwork/router";`,
+		"logo/router.work": `import * as router from "kitwork/router";
+router.proxy("` + upstream.URL + `/logo");
+`,
+		"large/router.work": `import * as router from "kitwork/router";
+router.proxy("` + upstream.URL + `/large")
+  .error((context, error) => context.status(502).json({ code: error.code }));
+`,
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	rec := sendRequest(tn, http.MethodGet, "/logo", "", "", nil)
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), png) {
+		t.Fatalf("GET /logo = %d %q", rec.Code, rec.Body.Bytes())
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("an upstream with no Content-Type answered as %q, want the sniffed image/png", got)
+	}
+
+	rec = sendRequest(tn, http.MethodGet, "/large", "", "", nil)
+	var failed struct{ Code string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &failed); rec.Code != http.StatusBadGateway || err != nil || failed.Code != "TOO_LARGE" {
+		t.Errorf("GET /large (2048 bytes, a cap of 1024) = %d %s, want 502 with code TOO_LARGE", rec.Code, rec.Body.String())
+	}
+}
+
+// router.proxy's request ends with the visitor's (22/10/2026): when the visitor's request is cancelled
+// (the connection closed), the upstream sees its own request cancelled rather than the proxy holding it
+// until the upstream answers.
+func TestProxyEndsWithTheVisitor(t *testing.T) {
+	reachLoopback(t)
+	arrived := make(chan struct{})
+	var once sync.Once
+	saw := make(chan bool, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(arrived) })
+		select {
+		case <-r.Context().Done():
+			saw <- true
+		case <-time.After(3 * time.Second):
+			saw <- false
+		}
+	}))
+	defer upstream.Close()
+	tn := NewTenant(writeSite(t, map[string]string{
+		"router.work": `import * as router from "kitwork/router";`,
+		"mirror/router.work": `import * as router from "kitwork/router";
+router.proxy("` + upstream.URL + `/slow");
+`,
+	}), "localhost")
+	if err := tn.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	visitor, leave := context.WithCancel(context.Background())
+	defer leave()
+	served := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		tn.Serve(rec, httptest.NewRequest(http.MethodGet, "http://localhost/mirror", nil).WithContext(visitor))
+		served <- rec.Code
+	}()
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the proxy never reached its upstream")
+	}
+	leave()
+	if !<-saw {
+		t.Fatal("the upstream never saw its request cancelled: the proxy kept it after the visitor's request ended")
+	}
+	select {
+	case code := <-served:
+		if code == http.StatusOK {
+			t.Errorf("a proxy whose visitor left answered 200, want the failure of a cancelled request")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the proxy did not finish after its visitor left")
 	}
 }

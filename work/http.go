@@ -22,21 +22,18 @@ var Minify bool
 var NativeShell bool
 var ServerPort int
 
-type HTTP = httputil.HTTP
-type HTTPResponse = httputil.Response
-
-// HTTP is NOT served by the capability registry either, for the same kind of reason as Database.
-// capabilities/http builds its client as httputil.NewClient(nil, diskStore) — the RAM store is
-// nil — so delegating would leave .cache() with nowhere to keep a response and turn every cached
-// fetch into a live request, silently. The client below is given BOTH stores.
-//
-// The discarded w.Capability("http") call that used to sit here was a no-op dressed as
-// integration; removed. Reviving it means giving the adapter a RAM store first.
-func (w *KitWork) HTTP() *HTTP {
+// HTTP is the http module of this site (KITWORK_HTTP.md): `import * as http from "kitwork/http"`, and
+// the http of `import { http } from "kitwork"`, the same object. It is given both cache tiers of the
+// site, and the site's domain as the Host of a self-call ("/path"), so the call reaches this site.
+func (w *KitWork) HTTP() *httputil.Module {
 	if w == nil || w.tenant == nil {
-		return httputil.NewClient(nil, nil)
+		return httputil.NewModule(nil, nil, "")
 	}
-	return httputil.NewClient(w.tenant.fetchRAM(), w.tenant.fetchDisk())
+	domain := ""
+	if w.tenant.entity != nil {
+		domain = w.tenant.entity.Domain
+	}
+	return httputil.NewModule(w.tenant.fetchRAM(), w.tenant.fetchDisk(), domain)
 }
 
 func (t *Tenant) fetchRAM() httputil.ResponseStore  { return fetchRAMStore{t} }

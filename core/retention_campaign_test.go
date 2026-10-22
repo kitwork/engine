@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitwork/engine/internal/loopback"
 	"github.com/kitwork/engine/work"
 )
 
@@ -57,6 +58,7 @@ func TestEngineMemoryRetentionCampaign(t *testing.T) {
 	savedAllowLocal := work.AllowLocal
 	work.AllowLocal = true
 	t.Cleanup(func() { work.AllowLocal = savedAllowLocal })
+	t.Cleanup(loopback.Open()) // the upstream is an httptest server on loopback
 
 	upstream := httptest.NewServer(http.HandlerFunc(func(
 		writer http.ResponseWriter,
@@ -212,7 +214,7 @@ const make = (base) => (number) => base + number;
 router.get((ctx) => {
 	const functions = [1, 2, 3, 4].map((base) => make(base));
 	const rendered = functions.map((fn) => fn(10)).join(",");
-	const response = http.get(%q);
+	const response = http.get(%q).send();
 	return ctx.text(generation + ":" + rendered + ":" + response.text());
 });
 `, generation, padding, upstream)

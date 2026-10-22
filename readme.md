@@ -233,21 +233,27 @@ instead:
 - an unbounded program: a run has an energy budget, and the call stack is capped at 64 frames.
 
 A failure is a value. Anything that goes wrong inside a call, from a query the database refused
-to a request that got no answer, is a failure: unread, it stops the handler and is logged; read
-with `safe`, it is data:
+to a body that is not JSON, is a failure: unread, it stops the handler and is logged; read with
+`safe`, it is data. An HTTP request that gets no answer is not a failure: `.send()` returns the
+same result whatever happened on the network, and its `ok` says which:
 
 ```js
 // app/api/upstream/router.work
-import { router, http, safe } from "kitwork";
+import { router, safe } from "kitwork";
+import * as http from "kitwork/http";
 
 router.get((ctx) => {
-  const { ok, value: response, error } = safe(() => http.timeout(2000).get("https://example.com/feed"));
-  if (!ok) return ctx.status(502).json({ code: error.code, message: error.message });
-  return ctx.json(response.json());
+  const upstream = http.get("https://example.com/feed").timeout("2s").send();
+  if (!upstream.ok) return ctx.status(502).json({ code: upstream.code, error: upstream.error });
+  const { ok, value: feed, error } = safe(() => upstream.json());
+  if (!ok) return ctx.status(502).json({ code: error.code, error: error.message });
+  return ctx.json(feed);
 });
 ```
 
-`ok` says whether the call went through, and is the check to write. `error` is `null` or
+`upstream.code` is `NETWORK`, `TIMEOUT`, `DENIED` or `TOO_LARGE` when there was no usable answer,
+and `null` with an answer, a 404 or a 503 included. The `ok` of `safe` says whether the call went
+through, and is the check to write. `error` is `null` or
 `{ message, code, at, cause }`, where `code` comes from a closed set (`NETWORK`, `TIMEOUT`,
 `DATABASE`, `CONFLICT`, `DENIED`, `NOT_FOUND`, …), `at` is the file, line and column of the failure,
 and `cause` is the failure it wraps (`null` for now: nothing the engine returns wraps another yet).
@@ -261,7 +267,7 @@ compile router api/loop/router.work: router.work:5:3: Kitwork không hỗ trợ 
 ```
 
 What `"kitwork"` gives a `.work` file: `router` and `safe`; `database`, `sqlite` and `collection`
-for data; `http`, `fetch` and `webhook` for the network; `file`, `path` and `cache`; `env` and
+for data; `http` (also `import * as http from "kitwork/http"`) and `webhook` for the network; `file`, `path` and `cache`; `env` and
 `log`; `go` for detached work; `jwt`, `qrcode`, `napas`, `shortbase`, `insights`, `palette`,
 `pigment` and `playground` as helpers. The globals are the familiar ones: `Math`, `Date`, `JSON`,
 `console`, `Object`, `Number`, `BigInt`, `String`, `Boolean`, `Array`, `parseInt`, `parseFloat`,

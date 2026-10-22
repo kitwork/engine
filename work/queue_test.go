@@ -187,9 +187,7 @@ queue.handle((job) => { job.log("charged"); });`)
 // A handler that keeps failing must exhaust its attempts, land in the dead letter with its error
 // recorded, fire .error(), and then be replayable by queue.replay().
 func TestQueueRetryDeadLetterAndReplay(t *testing.T) {
-	savedLocal := AllowLocal
-	AllowLocal = true
-	defer func() { AllowLocal = savedLocal }()
+	reachLoopback(t) // handlers call an httptest server on loopback
 
 	savedBackoff := queueBackoff
 	queueBackoff = func(int) time.Duration { return 10 * time.Millisecond }
@@ -208,7 +206,7 @@ func TestQueueRetryDeadLetterAndReplay(t *testing.T) {
 queue
   .retry(2)
   .handle(() => { for (let i = 0; i < 1000000; i++) {} })
-  .error((job, err) => { http.get("`+srv.URL+`/errhit"); });`)
+  .error((job, err) => { http.get("`+srv.URL+`/errhit").send(); });`)
 	tenant.MaxEnergy = 3000
 	defer tenant.Close()
 

@@ -140,6 +140,13 @@ type VarStatement struct {
 	// KitworkSafe: an import of "kitwork" that binds the name safe to the module's safe, the global
 	// itself, so the bundle has no safe of its own and checkSafeCall stays on (14/10/2026).
 	KitworkSafe bool
+	// KitworkHTTP is the name this import binds to the http module ("kitwork/http", or http of
+	// "kitwork"), so a request described and dropped as a statement is a compile error
+	// (checkUnsentRequest, 22/10/2026); "" for any other statement.
+	KitworkHTTP string
+	// KitworkHTTPVerbs are the names this import binds to a method of the http module
+	// (import { get } from "kitwork/http"), checked as KitworkHTTP is.
+	KitworkHTTPVerbs []string
 }
 
 func (vs *VarStatement) statementNode() {}

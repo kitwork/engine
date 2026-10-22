@@ -1,7 +1,9 @@
 package work
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/kitwork/engine/compiler"
@@ -28,6 +30,10 @@ import (
 // This generalises past images: it is a reverse-proxy-with-cache (BFF / gateway) that happens to be
 // perfect for a remote image mount. A future .resize() would layer on top of the same bytes.
 
+// proxyMaxBytes caps the upstream body a proxy reads into memory: the host's 64 MiB, past which the
+// answer is TOO_LARGE (a 502). A variable so a test reaches the cap without 64 MiB.
+var proxyMaxBytes = httphelper.HostMaxBytes
+
 // serveProxy answers one proxy request. Errors are returned so the caller can map them to 502.
 func (t *Tenant) serveProxy(vm *runtime.VM, bc *compiler.Bytecode, method *FolderMethod, ctxObj *Context) error {
 	// 1. Resolve the upstream. A handler computes it per request (params/path); otherwise it is a
@@ -44,33 +50,37 @@ func (t *Tenant) serveProxy(vm *runtime.VM, bc *compiler.Bytecode, method *Folde
 		return fmt.Errorf("proxy: target resolved to an empty url")
 	}
 
-	// 2. Fetch. No cache tiers are wired into the client on purpose: the ROUTE's .cache()/.persist()
+	// 2. Fetch. No cache tiers are wired into the request on purpose: the ROUTE's .cache()/.persist()
 	//    is the tier the author declared, and storing in both would keep the same bytes twice. The
-	//    transport still blocks private/loopback space (SSRF backstop) regardless of the target.
-	// .Get() now returns a lazy *Request; .Fire() runs it and hands back the concrete Response.
-	req, ok := httphelper.NewClient(nil, nil).Get(url).V.(*httphelper.Request)
-	if !ok {
-		return fmt.Errorf("proxy %s: unexpected client result", url)
+	//    transport still blocks private/loopback space (SSRF backstop) regardless of the target. The
+	//    request ends with the visitor's: a closed connection cancels it.
+	request, err := httphelper.NewRequest("GET", url, proxyMaxBytes)
+	if err != nil {
+		return &stageFailure{text: fmt.Sprintf("proxy %s: %v", url, err), failure: value.InvalidFailure(value.InvalidArgumentCode, "proxy: "+err.Error())}
 	}
-	resp := req.Fire()
-	if resp.Error != "" {
+	var visitorContext context.Context
+	if visitor := ctxObj.Request(); visitor != nil && visitor.request() != nil {
+		visitorContext = visitor.request().Context()
+	}
+	answer := request.SendGo(visitorContext)
+	if answer.Status == 0 || answer.Code != "" {
 		// the log keeps the URL whole; a .error() handler reads the request's failure as a program
-		// reads one: its code (NETWORK, TIMEOUT, DENIED…), a message with no query string
-		code := resp.Code
-		if code == "" {
-			code = value.NetworkCode
-		}
-		return &stageFailure{text: fmt.Sprintf("proxy %s: %s", url, resp.Error), failure: value.InvalidFailure(code, "proxy: "+resp.Error)}
+		// reads one: its code (NETWORK, TIMEOUT, DENIED, TOO_LARGE…), a message with no query string
+		return &stageFailure{text: fmt.Sprintf("proxy %s: %s", url, answer.Message), failure: value.InvalidFailure(answer.Code, "proxy: "+answer.Message)}
 	}
 
 	// 3. Replay the upstream bytes under the upstream's OWN media type — an image must not come back
 	//    as octet-stream. "typed" is the response kind that carries an arbitrary Content-Type, and it
-	//    is exactly what tree_cache stores/serves, so a cached hit is byte-identical.
-	contentType := strings.TrimSpace(resp.ContentType)
+	//    is exactly what tree_cache stores/serves, so a cached hit is byte-identical. When the upstream
+	//    sent none, the bytes are sniffed (stdlib, no dependency).
+	contentType := strings.TrimSpace(answer.Header.Get("Content-Type"))
+	if contentType == "" && len(answer.Body) > 0 {
+		contentType = http.DetectContentType(answer.Body)
+	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	ctxObj.Response().setType(contentType)
-	ctxObj.Response().Return(resp.Body, "typed", resp.Status)
+	ctxObj.Response().Return(value.New(answer.Body), "typed", answer.Status)
 	return nil
 }

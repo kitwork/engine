@@ -4,23 +4,25 @@ import (
 	"fmt"
 	stdhttp "net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kitwork/engine/value"
 )
 
-// memStore is a test double for one tier: fresh map + a stale set for LoadStale.
+// memStore is a test double for one tier: fresh map + a stale set for LoadStale, and the expiry each
+// save asked for.
 type memStore struct {
 	mu    sync.Mutex
 	fresh map[string]Snapshot
 	stale map[string]Snapshot
+	ttls  map[string]time.Duration
 }
 
 func newMemStore() *memStore {
-	return &memStore{fresh: map[string]Snapshot{}, stale: map[string]Snapshot{}}
+	return &memStore{fresh: map[string]Snapshot{}, stale: map[string]Snapshot{}, ttls: map[string]time.Duration{}}
 }
 func (m *memStore) Load(key string) (Snapshot, bool) {
 	m.mu.Lock()
@@ -41,133 +43,163 @@ func (m *memStore) Save(key string, s Snapshot, ttl time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.fresh[key] = s
+	m.ttls[key] = ttl
+}
+func (m *memStore) size() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.fresh)
 }
 
-func respOf(t *testing.T, v value.Value) Response {
-	t.Helper()
-	// .get()/.post() are now lazy — they hand back a *Request that fires on demand.
-	if req, ok := v.V.(*Request); ok {
-		return req.Fire()
+// expire moves every fresh copy to the stale set, as time passing would.
+func (m *memStore) expire() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, s := range m.fresh {
+		m.stale[key] = s
+		delete(m.fresh, key)
 	}
-	if r, ok := v.Interface().(Response); ok {
-		return r
-	}
-	t.Fatalf("not a Response or *Request: %#v", v)
-	return Response{}
 }
 
+// RAM read-through: the first send goes to the network and stores an ok answer, the second is served
+// from RAM, flagged cached, with the stored Content-Type as its header. The key is the final URL (query
+// included) and the headers, so a different query or token is another entry.
 func TestCacheReadThrough(t *testing.T) {
-	savedLocal := IsLocalAllowed
-	IsLocalAllowed = func() bool { return true } // httptest is loopback
-	defer func() { IsLocalAllowed = savedLocal }()
-
-	hits := 0
+	openLoopback(t)
+	var hits int32
 	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		hits++
-		fmt.Fprintf(w, `{"n":%d}`, hits)
+		n := atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"n":%d}`, n)
 	}))
 	defer server.Close()
 
 	ram := newMemStore()
-	// First call goes to the network and stores; second is served from RAM.
-	r1 := respOf(t, NewClient(ram, nil).Cache(value.New("5m")).Get(server.URL))
-	r2 := respOf(t, NewClient(ram, nil).Cache(value.New("5m")).Get(server.URL))
+	module := value.New(NewModule(ram, nil, ""))
+	send := func(query map[string]any, token string) value.Value {
+		request := invoke(invoke(module, "get", server.URL), "cache", "5m")
+		if query != nil {
+			request = invoke(request, "query", query)
+		}
+		if token != "" {
+			request = invoke(request, "header", "Authorization", token)
+		}
+		return invoke(request, "send")
+	}
+
+	first, second := send(nil, ""), send(nil, "")
 	if hits != 1 {
 		t.Fatalf("network hits = %d, want 1 (read-through)", hits)
 	}
-	if r1.Cached || !r2.Cached {
-		t.Errorf("cached flags: first=%v second=%v, want false/true", r1.Cached, r2.Cached)
+	if first.Get("cached").Truthy() || !second.Get("cached").Truthy() || second.Get("stale").Truthy() {
+		t.Errorf("cached: first %v second %v, want false then true", first.Get("cached").Truthy(), second.Get("cached").Truthy())
 	}
-	if r2.Text() != `{"n":1}` {
-		t.Errorf("second body = %q, want the cached first body", r2.Text())
+	if got := invoke(second, "json").Get("n"); got.Int() != 1 {
+		t.Errorf("the cached body = %s, want the first", invoke(second, "text").Text())
+	}
+	if got := second.Get("headers").Get("content-type"); got.Text() != "application/json" {
+		t.Errorf("a cached result's content-type = %s", got.Text())
+	}
+	for _, ttl := range ram.ttls {
+		if ttl != 5*time.Minute {
+			t.Errorf(`.cache("5m") stored for %s`, ttl)
+		}
 	}
 
-	// A different URL is a different key.
-	respOf(t, NewClient(ram, nil).Cache(value.New("5m")).Get(server.URL+"/other"))
-	if hits != 2 {
-		t.Errorf("distinct URL should miss the cache, hits = %d", hits)
-	}
-
-	// POST is never cached.
-	respOf(t, NewClient(ram, nil).Cache(value.New("5m")).Post(server.URL, value.New("x")))
-	respOf(t, NewClient(ram, nil).Cache(value.New("5m")).Post(server.URL, value.New("x")))
+	send(map[string]any{"page": 2}, "")
+	send(nil, "Bearer a")
+	send(nil, "Bearer b")
 	if hits != 4 {
-		t.Errorf("POST must not cache, hits = %d, want 4", hits)
+		t.Errorf("another query or token should miss: hits = %d, want 4", hits)
 	}
 }
 
-func TestPersistStaleOnError(t *testing.T) {
-	savedLocal := IsLocalAllowed
-	IsLocalAllowed = func() bool { return true }
-	defer func() { IsLocalAllowed = savedLocal }()
-
+// Only an ok answer is stored: a 404 is sent each time.
+func TestCacheKeepsOnlyOkAnswers(t *testing.T) {
+	openLoopback(t)
+	var hits int32
 	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(stdhttp.StatusNotFound)
+	}))
+	defer server.Close()
+	ram := newMemStore()
+	module := value.New(NewModule(ram, nil, ""))
+	for i := 0; i < 2; i++ {
+		invoke(invoke(invoke(module, "get", server.URL), "cache", "5m"), "send")
+	}
+	if hits != 2 || ram.size() != 0 {
+		t.Fatalf("a 404 with .cache(): hits %d, stored %d, want 2 and 0", hits, ram.size())
+	}
+}
+
+// Disk: a hit refills RAM; when the live request fails (no answer or a 5xx) an expired disk copy is the
+// result, flagged stale.
+func TestPersistRefillsRAMAndServesStaleOnFailure(t *testing.T) {
+	openLoopback(t)
+	var failing atomic.Bool
+	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+		if failing.Load() {
+			w.WriteHeader(stdhttp.StatusServiceUnavailable)
+			return
+		}
 		fmt.Fprint(w, "live-data")
 	}))
 	url := server.URL
 
-	disk := newMemStore()
-	r1 := respOf(t, NewClient(nil, disk).Persist(value.New("1h")).Get(url))
-	if r1.Text() != "live-data" || r1.Cached {
-		t.Fatalf("first fetch should be live: %+v", r1)
+	ram, disk := newMemStore(), newMemStore()
+	module := value.New(NewModule(ram, disk, ""))
+	send := func() value.Value {
+		return invoke(invoke(invoke(invoke(module, "get", url), "cache", "1m"), "persist", "1h"), "send")
+	}
+	if first := send(); invoke(first, "text").Text() != "live-data" || first.Get("cached").Truthy() {
+		t.Fatalf("the first send should be live: %s", readOutcome(first))
+	}
+	if disk.ttls[requestKey(url, stdhttp.Header{})] != time.Hour {
+		t.Errorf(`.persist("1h") stored for %v`, disk.ttls)
 	}
 
-	// The third party dies; the persisted copy is EXPIRED (moved to the stale set) — the client
-	// must still serve it, flagged stale.
+	// RAM empty (a restart): the disk copy answers and goes back into RAM
+	ram = newMemStore()
+	module = value.New(NewModule(ram, disk, ""))
+	if again := send(); !again.Get("cached").Truthy() || ram.size() != 1 {
+		t.Fatalf("a disk hit: cached %v, RAM holds %d, want true and 1", again.Get("cached").Truthy(), ram.size())
+	}
+
+	// the copies expire and the upstream answers 503: the expired disk copy is the result, stale
+	ram.expire()
+	disk.expire()
+	failing.Store(true)
+	if stale := send(); !stale.Get("ok").Truthy() || !stale.Get("stale").Truthy() || invoke(stale, "text").Text() != "live-data" {
+		t.Errorf("stale on a 503: %s stale %v", readOutcome(stale), stale.Get("stale").Truthy())
+	}
+	// and when nothing answers at all
 	server.Close()
-	key := requestKey(url, nil)
-	disk.mu.Lock()
-	disk.stale[key] = disk.fresh[key]
-	delete(disk.fresh, key)
-	disk.mu.Unlock()
-
-	r2 := respOf(t, NewClient(nil, disk).Persist(value.New("1h")).Get(url))
-	if !r2.Stale || !r2.Cached || r2.Text() != "live-data" {
-		t.Errorf("stale-on-error: got %+v, want stale copy of live-data", r2)
+	if stale := send(); !stale.Get("stale").Truthy() || invoke(stale, "text").Text() != "live-data" {
+		t.Errorf("stale without an answer: %s", readOutcome(stale))
 	}
 }
 
-func TestNoStoreIsQuietNoop(t *testing.T) {
-	savedLocal := IsLocalAllowed
-	IsLocalAllowed = func() bool { return true }
-	defer func() { IsLocalAllowed = savedLocal }()
-
-	hits := 0
-	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		hits++
-		fmt.Fprint(w, "ok")
-	}))
-	defer server.Close()
-
-	// .cache() without an injected store must not break the request (tenantless builtin path).
-	h := &HTTP{}
-	r := respOf(t, h.Cache(value.New("5m")).Get(server.URL))
-	if !r.Ok() || r.Text() != "ok" {
-		t.Errorf("no-store chain broke the request: %+v", r)
-	}
-}
-
-func TestFetchWithOptions(t *testing.T) {
-	savedLocal := IsLocalAllowed
-	IsLocalAllowed = func() bool { return true }
-	defer func() { IsLocalAllowed = savedLocal }()
-
-	hits := 0
-	server := httptest.NewServer(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-		hits++
-		fmt.Fprint(w, "fetched")
-	}))
-	defer server.Close()
-
+// .cache() and .persist() are for GET; their expiry reads as a route's: a number is milliseconds, an
+// unreadable one is an error, never "forever".
+func TestCacheModifierRules(t *testing.T) {
 	ram := newMemStore()
-	opts := value.New(map[string]value.Value{"cache": value.New("5m")})
-	// fetch is lazy now — fire the first call (respOf) so it populates the cache tier.
-	respOf(t, FetchWith(NewClient(ram, nil), value.New(server.URL), opts))
-	r2 := respOf(t, FetchWith(NewClient(ram, nil), value.New(server.URL), opts))
-	if hits != 1 || !r2.Cached {
-		t.Errorf("fetch {cache} option: hits=%d cached=%v, want 1/true", hits, r2.Cached)
+	module := value.New(NewModule(ram, nil, ""))
+	for _, method := range []string{"post", "put", "delete", "head"} {
+		for _, modifier := range []string{"cache", "persist"} {
+			wantFailure(t, method+"."+modifier, invoke(invoke(module, method, "https://api.example.test"), modifier, "5m"),
+				value.InvalidArgumentCode, "."+modifier+"() chỉ cho GET")
+		}
 	}
-	if !strings.Contains(r2.Text(), "fetched") {
-		t.Errorf("body = %q", r2.Text())
+	for _, expiry := range []any{"soon", "hourly", true, -5} {
+		wantFailure(t, fmt.Sprintf(".cache(%v)", expiry), invoke(invoke(module, "get", "https://api.example.test"), "cache", expiry),
+			value.InvalidArgumentCode, "không đọc được hạn", `"5m"`)
+	}
+	request := invoke(invoke(module, "get", "https://api.example.test"), "cache", 1500).V.(*Request)
+	if request.cacheTTL != 1500*time.Millisecond {
+		t.Errorf(".cache(1500) = %s, want 1.5s (a number is milliseconds)", request.cacheTTL)
+	}
+	if request := invoke(invoke(module, "get", "https://api.example.test"), "cache").V.(*Request); !request.cache || request.cacheTTL != 0 {
+		t.Errorf(".cache() = %v %s, want no expiry", request.cache, request.cacheTTL)
 	}
 }

@@ -16,13 +16,11 @@ import (
 //   - tick.kitwork.js  → cron.every(...)   (name "tick" from the filename)
 //   - beat.kitwork.js  → cron.every(...)   (name "beat" from the filename)
 //
-// Each handler runs `http.get(url)` (a bare statement commits it) so a real httptest server
+// Each handler runs `http.get(url).send()` so a real httptest server
 // counts the ticks per path, which also proves kitwork()/http resolve inside a cron callback (own
 // bytecode FastReset + tenant Builtins).
 func TestCronLoadAndFire(t *testing.T) {
-	savedLocal := AllowLocal
-	AllowLocal = true // handlers hit loopback; SSRF guard would otherwise block it
-	defer func() { AllowLocal = savedLocal }()
+	reachLoopback(t) // handlers call an httptest server on loopback
 
 	var tickHits, beatHits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +57,7 @@ func TestCronLoadAndFire(t *testing.T) {
 	// name comes from the filename "tick" (one file = one cron)
 	tick := `import { cron, http } from "kitwork";` + "\n" +
 		`cron.every("1s").handle(() => {` + "\n" +
-		`  http.get("` + srv.URL + `/tick");` + "\n" +
+		`  http.get("` + srv.URL + `/tick").send();` + "\n" +
 		`});`
 	if err := os.WriteFile(filepath.Join(cronDir, "tick.kitwork.js"), []byte(tick), 0644); err != nil {
 		t.Fatal(err)
@@ -68,7 +66,7 @@ func TestCronLoadAndFire(t *testing.T) {
 	// UNNAMED — the filename "beat" is the identity
 	beat := `import { cron, http } from "kitwork";` + "\n" +
 		`cron.every("1s").handle(() => {` + "\n" +
-		`  http.get("` + srv.URL + `/beat");` + "\n" +
+		`  http.get("` + srv.URL + `/beat").send();` + "\n" +
 		`});`
 	if err := os.WriteFile(filepath.Join(cronDir, "beat.kitwork.js"), []byte(beat), 0644); err != nil {
 		t.Fatal(err)
