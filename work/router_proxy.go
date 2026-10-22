@@ -70,7 +70,7 @@ func (t *Tenant) serveProxy(vm *runtime.VM, bc *compiler.Bytecode, method *Folde
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	ctxObj.Response().Type(contentType)
+	ctxObj.Response().setType(contentType)
 	ctxObj.Response().Return(resp.Body, "typed", resp.Status)
 	return nil
 }

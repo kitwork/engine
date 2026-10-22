@@ -50,6 +50,7 @@ func (t *Tenant) serveTree(
 		request:        r,
 		responseWriter: w,
 		params:         match.Params,
+		numberParams:   match.Numbers,
 		response:       &Response{},
 		Method:         r.Method,
 		Path:           r.URL.Path,
@@ -95,22 +96,27 @@ func (t *Tenant) serveTree(
 	// savMethod (set once a cacheable method resolves) makes finalize persist the response.
 	var savMethod *FolderMethod
 	var savKey string
+	var savCookies int // the cookies the guards set before the handler: not the answer's
 
 	// finalize renders any deferred view builder (ctx.view/bind/…), saves it if the method opted
 	// into caching, then writes the response.
 	finalize := func() {
+		// notFound() or error(…) of a Kitwork UI handler: the nearest notfound.ui or error.ui
+		t.answerUIPage(reqRouter, reqRouter.node)
 		// Bridge the (request, response) => response.view({...}) / response.render() style: those set
 		// a "render"/"view" response, which in tree mode must render against the RESOLVED folder (not
 		// the flat render). Fold its data into a builder and render via treeRender.
-		if reqRouter.viewBuilder == nil && reqRouter.treeRender != nil {
+		// A builder may be there already: the page's text written before response.view({…}) went into
+		// it. The "render" marker is dropped in place, so the response keeps its status, its headers and
+		// cookies (until 19/10/2026 a fresh response lost all but the status).
+		if reqRouter.treeRender != nil {
 			if k := reqRouter.response.Kind(); k == "render" || k == "view" {
 				vb := ctxObj.viewBuilder()
 				if d := reqRouter.response.Data(); d.IsMap() {
 					vb.apply(d)
 				}
-				code := reqRouter.response.Code()
-				reqRouter.response = &Response{} // drop the "render" marker so the builder's HTML wins
-				reqRouter.response.code = code   // but keep the status (e.g. response.status(404).view())
+				reqRouter.response.data = value.Value{K: value.Nil}
+				reqRouter.response.kind = "" // the builder's HTML is the answer
 				vb.flush()
 			}
 		}
@@ -118,7 +124,7 @@ func (t *Tenant) serveTree(
 			reqRouter.viewBuilder.flush()
 		}
 		if savMethod != nil && reqRouter.err == nil {
-			t.saveResponse(savMethod, savKey, reqRouter.response)
+			t.saveResponse(savMethod, savKey, reqRouter.response, savCookies)
 		}
 		if reqRouter.response.Kind() == "sse" {
 			reqRouter.streamSSE(w, func() {
@@ -154,6 +160,18 @@ func (t *Tenant) serveTree(
 	if !match.Found {
 		notFound()
 		return
+	}
+
+	// A Kitwork UI route takes a request that may change something only from its own site's pages or
+	// from no browser at all (request_origin.go): refused before any limit, guard or handler. A
+	// template site is not checked.
+	ui := uiRoute(match.Node)
+	if ui {
+		if err := crossOriginRefusal(r); err != nil {
+			reqRouter.fail(err, http.StatusForbidden)
+			finalize()
+			return
+		}
 	}
 
 	// Folder-level rate limits (router.ratelimit), outside-in: ONE bucket per client per rule for
@@ -201,13 +219,37 @@ func (t *Tenant) serveTree(
 		method = leaf.methods[r.Method]
 	}
 
+	// A Kitwork UI site (KITWORK_ROUTER §2, 20/10/2026): HEAD runs as GET and drops the body; a method
+	// the folder did not declare is 405 with Allow, OPTIONS is Allow. A template site keeps its 404s.
+	asGet := r.Method == http.MethodGet
+	if ui && r.Method == http.MethodHead {
+		w = headOnly{w}
+		reqRouter.responseWriter = w
+		asGet = true
+		if method == nil {
+			method = leaf.methods[http.MethodGet]
+		}
+	}
+	if ui && method == nil && !asGet {
+		if allow := t.allowedMethods(match.Node, leaf); allow != "" {
+			reqRouter.response.setHeader("Allow", allow)
+			if r.Method == http.MethodOptions {
+				reqRouter.response.Return(value.New(""), "text", http.StatusNoContent)
+			} else {
+				reqRouter.response.Return(value.New("Method Not Allowed"), "text", http.StatusMethodNotAllowed)
+			}
+			finalize()
+			return
+		}
+	}
+
 	// No explicit method for this verb: a GET on a folder that has a page renders it; anything
-	// else is a not-found (method not allowed bubbles to the same 404 view for now).
+	// else is a not-found.
 	if method == nil {
-		if r.Method == http.MethodGet && t.folderHasPage(match.Node) {
+		if asGet && t.folderHasPage(match.Node) {
 			ctxObj.View()
 			finalize()
-		} else if r.Method == http.MethodGet && t.folderHasUIPage(match.Node) {
+		} else if asGet && t.folderHasUIPage(match.Node) {
 			t.respondUI(reqRouter, match.Node, nil) // a content.ui with no router.view: a page with no data
 			finalize()
 		} else {
@@ -218,7 +260,7 @@ func (t *Tenant) serveTree(
 
 	// Method-level rate limits (.limit/.ratelimit) — before any handler work, keyed per URL path.
 	for _, lim := range method.limits {
-		if !t.limiter.Allow(limitKey(lim, "path:"+r.URL.Path, r), lim.Rate, lim.Per) {
+		if !t.limiter.Allow(limitKey(lim, "path:"+normalizedPath(r.URL.Path), r), lim.Rate, lim.Per) {
 			w.Header().Set("Retry-After", fmt.Sprintf("%.0f", lim.Per.Seconds()))
 			reqRouter.response.Text(value.New("Too Many Requests"), 429)
 			finalize()
@@ -226,9 +268,20 @@ func (t *Tenant) serveTree(
 		}
 	}
 
-	// Response cache (.cache RAM / .persist disk). Invalid or disallowed projected query values
-	// execute normally but never read or write a cache entry.
-	if method.cacheExpiry != nil || method.persistExpiry != nil {
+	// Method-level guards run after all folder guards, in order — and before the response cache: a
+	// hit replays the bytes a request the guard let through got, so reading it first let any request
+	// past the guard (19/10/2026). A guard that answers or blocks is not cached (savMethod unset yet).
+	for _, g := range method.guards {
+		if !t.runStage(vm, leaf.bytecode, g, ctxObj, reqRouter, true) {
+			finalize()
+			return
+		}
+	}
+
+	// Response cache (.cache RAM / .persist disk), on the route only (20/10/2026: .cache() on an answer
+	// is gone). Only a GET (and its HEAD) reads or writes it. Invalid or disallowed projected query
+	// values execute normally but never read or write a cache entry.
+	if (method.cacheExpiry != nil || method.persistExpiry != nil) && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 		key, cacheable := cacheKey(r, method)
 		if cacheable {
 			savKey = key
@@ -240,17 +293,10 @@ func (t *Tenant) serveTree(
 				return
 			}
 			savMethod = method // finalize will save the fresh response
+			savCookies = len(reqRouter.response.cookies)
 		}
 		if t.runtimeHealth != nil {
 			t.runtimeHealth.RecordResponseCache(false)
-		}
-	}
-
-	// Method-level guards run after all folder guards, in order.
-	for _, g := range method.guards {
-		if !t.runStage(vm, leaf.bytecode, g, ctxObj, reqRouter, true) {
-			finalize()
-			return
 		}
 	}
 
@@ -277,6 +323,17 @@ func (t *Tenant) serveTree(
 			if res.K == value.Invalid {
 				t.recordRuntimeFailure(reqRouter, leaf.bytecode, "handler", res)
 				reqRouter.err = uncaught(res.Text())
+				if uiRoute(match.Node) {
+					// router.work: an answer the handler began before it failed is not the answer (an
+					// edit after it, a second one) — the request fails (20/10/2026). A template site
+					// keeps what it had.
+					reqRouter.response.data = value.Value{K: value.Nil}
+					reqRouter.response.kind = ""
+					reqRouter.viewBuilder = nil
+				}
+			} else if uiRoute(match.Node) && reqRouter.response.Kind() == "render" {
+				// router.work: the handler answered with context.view({ … }): the folder's .ui page
+				t.serveUIAnswer(vm, ctxObj, reqRouter, match.Node, method.handle)
 			} else if reqRouter.viewBuilder == nil && !reqRouter.response.IsSend() && res.Truthy() {
 				// A raw value (not a deferred view builder) → send it directly (JSON or HTML).
 				if res.K == value.Map || res.K == value.Array {
@@ -374,8 +431,15 @@ func (t *Tenant) execTree(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 	}
 	vm.FastResetPrepared(bc.Program)
 	started := time.Now()
-	result := vm.ExecuteLambda(l, ctxObj.arguments(l))
+	var result value.Value
+	// the site's program runs: in router.work the order of its response is checked (response_order.go)
+	ctxObj.Response().runProgram(func() { result = vm.ExecuteLambda(l, ctxObj.arguments(l)) })
 	t.recordVMExecution(bc.Program, vm, result, time.Since(started))
+	if response, ok := result.V.(*Response); ok && response == ctxObj.Response() {
+		// `return response.json(data)`: the answer is already on the request's response; returning it
+		// says no more (19/10/2026), it is not data to send in its place
+		return value.Value{K: value.Nil}
+	}
 	return result
 }
 
@@ -398,7 +462,11 @@ func (t *Tenant) runStage(vm *runtime.VM, bc *compiler.Bytecode, l *value.Lambda
 		return false // stage sent its own response (ctx.json / redirect / …)
 	}
 	if res.IsBool() && !res.Truthy() {
+		// a guard that says no is 403 (KITWORK_ROUTER §14, 20/10/2026; the error answered 500)
 		r.err = errRequestRejected
+		if r.response.code == 0 {
+			r.response.code = http.StatusForbidden
+		}
 		return false
 	}
 	if isGuard && !res.IsBlank() && !res.IsBool() {
@@ -450,7 +518,16 @@ func (t *Tenant) serveTreeStatic(w http.ResponseWriter, r *http.Request) bool {
 	if isUISource(clean) { // never expose Kitwork UI sources: *.ui (interface), *.work (logic)
 		return false
 	}
-	for _, seg := range strings.Split(clean, "/") { // any dot SEGMENT: .env, .persist/…, .git/…
+	ui := t.uiSite()
+	if ui && !uiStaticAllowed(clean) {
+		// a Kitwork UI site serves only its allowlist (KITWORK_UI §5): assets/, the catalog of root
+		// files, .well-known/; no other file under the app, whatever its name
+		return false
+	}
+	for i, seg := range strings.Split(clean, "/") { // any dot SEGMENT: .env, .persist/…, .git/…
+		if ui && i == 1 && seg == ".well-known" {
+			continue // the one dot folder a site serves: /.well-known/… (ACME, security.txt, app links)
+		}
 		if strings.HasPrefix(seg, ".") {
 			return false
 		}

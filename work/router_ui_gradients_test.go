@@ -17,15 +17,15 @@ import (
 func TestUISiteGradients(t *testing.T) {
 	files := withRootRouter(t,
 		`router.colors({ brand: "#c8742c" });
-router.gradients({ hero: { type: "linear", direction: "to-bottom-end", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] } });`,
+router.gradients({ hero: { type: "linear", direction: "to-bottom-right", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] } });`,
 		map[string]string{
 			"localhost/content.ui": `<content><box background="hero" padding="4"><text heading="1" color="headline">Quán</text></box></content>`,
 			"localhost/quan-ly/router.work": `import { router } from "kitwork";
-router.gradients({ hero: { type: "radial", position: "top-end", stops: [ { color: "brand-85", at: 0 }, { color: "brand-85/0", at: 70 } ] } });`,
+router.gradients({ hero: { type: "radial", position: "top-right", stops: [ { color: "brand-85", at: 0 }, { color: "brand-85/0", at: 70 } ] } });`,
 			"localhost/quan-ly/content.ui":          `<content><box background="hero" padding="4"><text>Quản lý</text></box></content>`,
 			"localhost/quan-ly/don-hang/content.ui": `<content><box background="hero" padding="4"><text>Đơn hàng</text></box></content>`,
 			"localhost/kho/router.work": `import { router } from "kitwork";
-router.gradients({ shelf: { type: "linear", direction: "to-end", stops: [ { color: "brnad", at: 0 }, { color: "paper", at: 100 } ] } });`,
+router.gradients({ shelf: { type: "linear", direction: "to-right", stops: [ { color: "brnad", at: 0 }, { color: "paper", at: 100 } ] } });`,
 			"localhost/kho/content.ui":  `<content><text>Kho</text></content>`,
 			"localhost/tinh/content.ui": `<content><box background="hero"><text>Tĩnh</text></box></content>`,
 		})
@@ -62,27 +62,32 @@ router.gradients({ shelf: { type: "linear", direction: "to-end", stops: [ { colo
 // router.gradients is checked when it is declared, and a boot that meets a gradient that cannot be read
 // stops naming it and what to write: the argument is one object of gradients; each an object of type,
 // direction or position and stops; the stops an array of { color, at }; the words and the order of the
-// stops (stylesheet.CheckGradient); the name, never a colour's or a standard gradient's. A name that is
-// a token of the route's palette is answered by its pages, which know the palette. CONTROL: the owner's
-// two examples boot, and several calls of one file add up.
+// stops (stylesheet.CheckGradient), a direction or a position written with start or end told the left
+// or right of today (decision of 19/10/2026); the name, never a colour's, a standard gradient's or a
+// standard gradient's name of before 19/10/2026 (fade-start). A name that is a token of the route's
+// palette is answered by its pages, which know the palette. CONTROL: the owner's two examples boot (the
+// hero to-bottom-right), and several calls of one file add up.
 func TestRouterGradientsIsValidated(t *testing.T) {
 	hero := `stops: [ { color: "brand", at: 0 }, { color: "brand+15", at: 100 } ]`
 	for written, want := range map[string]string{
-		`router.gradients();`:                                                                  `router.gradients nhận một object các gradient`,
-		`router.gradients("glow");`:                                                            `router.gradients nhận một object các gradient`,
-		`router.gradients({ hero: "brand" });`:                                                 `router.gradients({ hero: … }): một gradient là một object { type, direction hay position, stops }`,
-		`router.gradients({ hero: { direction: "to-end", ` + hero + ` } });`:                   `router.gradients: "hero" thiếu type: linear, radial hoặc conic`,
-		`router.gradients({ hero: { type: "linear", ` + hero + ` } });`:                        `router.gradients: "hero" là linear nên cần direction: to-top, to-bottom`,
-		`router.gradients({ hero: { type: "linear", direction: "to-right", ` + hero + ` } });`: `trái phải viết start và end, tự lật khi viết từ phải sang trái: to-end`,
-		`router.gradients({ hero: { type: "linear", direction: "to-end", stops: [ { color: "brand", at: 60 }, { color: "ink", at: 20 } ] } });`:    `router.gradients: "hero" điểm dừng 2 có at 20, nhỏ hơn at 60 của điểm dừng trước`,
-		`router.gradients({ hero: { type: "linear", direction: "to-end", stops: [ { color: "brand", at: 0 }, { color: "ink", at: 140 } ] } });`:    `"hero" điểm dừng 2 có at 140: at là vị trí trên gradient, từ 0 đến 100`,
-		`router.gradients({ hero: { type: "linear", direction: "to-end", stops: [ { color: "brand", at: 0 }, { color: "ink" } ] } });`:             `router.gradients({ hero: … }): điểm dừng 2 thiếu at, một số từ 0 đến 100`,
-		`router.gradients({ hero: { type: "linear", direction: "to-end", stops: [ { color: "brand", at: "0%" }, { color: "ink", at: 100 } ] } });`: `điểm dừng 1 thiếu at, một số từ 0 đến 100`,
-		`router.gradients({ hero: { type: "linear", direction: "to-end", stops: [ { colour: "brand", at: 0 } ] } });`:                              `điểm dừng 1 nhận color và at, không có "colour"`,
-		`router.gradients({ hero: { type: "linear", direction: "to-end", stops: "brand" } });`:                                                     `stops là một mảng các điểm dừng`,
-		`router.gradients({ hero: { type: "linear", angle: 45, ` + hero + ` } });`:                                                                 `một gradient nhận type, direction, position và stops, không có "angle"`,
-		`router.gradients({ glow: { type: "radial", ` + hero + ` } });`:                                                                            `router.gradients: "glow" là tên một gradient chuẩn của Kitwork, có sẵn`,
-		`router.gradients({ violet: { type: "radial", ` + hero + ` } });`:                                                                          `router.gradients: "violet" đã là tên một màu (#ee82ee)`,
+		`router.gradients();`:                  `router.gradients nhận một object các gradient`,
+		`router.gradients("glow");`:            `router.gradients nhận một object các gradient`,
+		`router.gradients({ hero: "brand" });`: `router.gradients({ hero: … }): một gradient là một object { type, direction hay position, stops }`,
+		`router.gradients({ hero: { direction: "to-right", ` + hero + ` } });`: `router.gradients: "hero" thiếu type: linear, radial hoặc conic`,
+		`router.gradients({ hero: { type: "linear", ` + hero + ` } });`:        `router.gradients: "hero" là linear nên cần direction: to-top, to-bottom`,
+		// start and end, the words of before 19/10/2026, are left and right now
+		`router.gradients({ hero: { type: "linear", direction: "to-end", ` + hero + ` } });`:                                                         `router.gradients: "hero", direction="to-end": start và end nay là left và right, viết direction="to-right" (tự lật khi trang viết từ phải sang trái)`,
+		`router.gradients({ hero: { type: "radial", position: "top-start", ` + hero + ` } });`:                                                       `router.gradients: "hero", position="top-start": start và end nay là left và right, viết position="top-left" (tự lật khi trang viết từ phải sang trái)`,
+		`router.gradients({ "fade-start": { type: "linear", direction: "to-left", ` + hero + ` } });`:                                                `router.gradients: fade-start nay là fade-left: start và end nay là left và right (tự lật khi trang viết từ phải sang trái)`,
+		`router.gradients({ hero: { type: "linear", direction: "to-right", stops: [ { color: "brand", at: 60 }, { color: "ink", at: 20 } ] } });`:    `router.gradients: "hero" điểm dừng 2 có at 20, nhỏ hơn at 60 của điểm dừng trước`,
+		`router.gradients({ hero: { type: "linear", direction: "to-right", stops: [ { color: "brand", at: 0 }, { color: "ink", at: 140 } ] } });`:    `"hero" điểm dừng 2 có at 140: at là vị trí trên gradient, từ 0 đến 100`,
+		`router.gradients({ hero: { type: "linear", direction: "to-right", stops: [ { color: "brand", at: 0 }, { color: "ink" } ] } });`:             `router.gradients({ hero: … }): điểm dừng 2 thiếu at, một số từ 0 đến 100`,
+		`router.gradients({ hero: { type: "linear", direction: "to-right", stops: [ { color: "brand", at: "0%" }, { color: "ink", at: 100 } ] } });`: `điểm dừng 1 thiếu at, một số từ 0 đến 100`,
+		`router.gradients({ hero: { type: "linear", direction: "to-right", stops: [ { colour: "brand", at: 0 } ] } });`:                              `điểm dừng 1 nhận color và at, không có "colour"`,
+		`router.gradients({ hero: { type: "linear", direction: "to-right", stops: "brand" } });`:                                                     `stops là một mảng các điểm dừng`,
+		`router.gradients({ hero: { type: "linear", angle: 45, ` + hero + ` } });`:                                                                   `một gradient nhận type, direction, position và stops, không có "angle"`,
+		`router.gradients({ glow: { type: "radial", ` + hero + ` } });`:                                                                              `router.gradients: "glow" là tên một gradient chuẩn của Kitwork, có sẵn`,
+		`router.gradients({ violet: { type: "radial", ` + hero + ` } });`:                                                                            `router.gradients: "violet" đã là tên một màu (#ee82ee)`,
 		// a name never ends in -<digits>: hero-2 would read as hero 2% lighter (13/10/2026)
 		`router.gradients({ "hero-2": { type: "radial", ` + hero + ` } });`: `router.gradients: "hero-2" kết thúc bằng -2`,
 	} {
@@ -92,7 +97,7 @@ func TestRouterGradientsIsValidated(t *testing.T) {
 		}
 	}
 	controls := sitePalette + `
-router.gradients({ hero: { type: "linear", direction: "to-bottom-end", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] } });
+router.gradients({ hero: { type: "linear", direction: "to-bottom-right", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] } });
 router.gradients({ halo: { type: "radial", position: "top", stops: [ { color: "brand/40", at: 0 }, { color: "brand/0", at: 70 } ] } });`
 	files := withRootRouter(t, controls, map[string]string{
 		"localhost/content.ui": `<content><box background="hero"><text>Quán</text></box><box background="halo"><text>Trà</text></box></content>`,
@@ -105,7 +110,7 @@ router.gradients({ halo: { type: "radial", position: "top", stops: [ { color: "b
 		t.Errorf("control: two calls of one file add up:\n%s", linesWith(page, "background-h"))
 	}
 	// a gradient named like a token of the palette: the page answers it
-	files = withRootRouter(t, sitePalette+"\n"+`router.gradients({ panel: { type: "linear", direction: "to-end", `+hero+` } });`, nil)
+	files = withRootRouter(t, sitePalette+"\n"+`router.gradients({ panel: { type: "linear", direction: "to-right", `+hero+` } });`, nil)
 	tenant = buildUISite(t, files)
 	if rec := serveUI(t, tenant, "http://localhost/"); rec.Code != http.StatusInternalServerError ||
 		!strings.Contains(htmlUnescape(rec.Body.String()), `router.gradients: "panel" đã là token màu của bảng màu`) {

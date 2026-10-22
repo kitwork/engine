@@ -53,6 +53,9 @@ func appendLambdas(dst []*value.Lambda, args ...value.Value) []*value.Lambda {
 type FolderMethod struct {
 	method     string
 	handle     *value.Lambda
+	folder     *FolderRouter   // the folder whose router file declared it
+	declaredBy string          // the call that declared it: router.get, router.view, router.proxy…
+	declaredAt int             // its line in the router file, 0 when not known (declared outside the boot run)
 	guards     []*value.Lambda // the before-chain: runs in order; each may block / respond / prepare
 	success    *value.Lambda   // runs after a clean handler (canonical name for the old `then`)
 	errorH     *value.Lambda   // runs when the method errored (canonical name for the old `catch`)
@@ -134,6 +137,7 @@ func (m *FolderMethod) View(args ...value.Value) *FolderMethod {
 //	router.get(...).cache("5m", { page: true, category: ["new", "click"] })
 func (m *FolderMethod) Cache(args ...value.Value) *FolderMethod {
 	m.cacheExpiry = expiryOf(args...)
+	m.checkExpiry("cache", m.cacheExpiry, args)
 	m.configureResponseCacheKey(args...)
 	return m
 }
@@ -147,6 +151,7 @@ func (m *FolderMethod) Cache(args ...value.Value) *FolderMethod {
 //	router.get(...).persist("1d", ["page", "category"])
 func (m *FolderMethod) Persist(args ...value.Value) *FolderMethod {
 	m.persistExpiry = expiryOf(args...)
+	m.checkExpiry("persist", m.persistExpiry, args)
 	m.configureResponseCacheKey(args...)
 	return m
 }
@@ -168,6 +173,9 @@ func (m *FolderMethod) Limit(args ...value.Value) *FolderMethod {
 		if d, ok := mp["type"]; ok && d.Text() != "" {
 			lim.Dim = d.Text()
 		}
+		if d, ok := mp["by"]; ok && d.Text() != "" {
+			lim.Dim = d.Text()
+		}
 	} else {
 		if len(args) > 0 {
 			lim.Rate = int(args[0].N)
@@ -180,6 +188,7 @@ func (m *FolderMethod) Limit(args ...value.Value) *FolderMethod {
 		}
 	}
 	if lim.Rate > 0 && lim.Per > 0 {
+		m.folder.checkLimitBy(lim.Dim)
 		m.limits = append(m.limits, lim)
 	}
 	return m
@@ -222,9 +231,12 @@ func ratelimitRules(args ...value.Value) []methodLimit {
 				rules = append(rules, methodLimit{Dim: dim, Rate: int(rv.N), Per: per})
 			}
 		}
-		if rv, ok := mp["rate"]; ok && int(rv.N) > 0 { // legacy shape
+		if rv, ok := mp["rate"]; ok && int(rv.N) > 0 { // legacy shape, and { rate, per, by }
 			dim := "ip"
 			if d, ok := mp["type"]; ok && d.Text() != "" {
+				dim = d.Text()
+			}
+			if d, ok := mp["by"]; ok && d.Text() != "" {
 				dim = d.Text()
 			}
 			rules = append(rules, methodLimit{Dim: dim, Rate: int(rv.N), Per: per})
@@ -278,7 +290,16 @@ type FolderRouter struct {
 	jsonld   []value.Value          // router.jsonld() nodes — inherited down the chain, accumulated
 	limits   []methodLimit          // router.ratelimit() rules — this folder AND every descendant
 	assetErr error                  // first fatal .assets() conflict, surfaced as a generation error
-	unknown  []string               // methods the chain called that this engine does not have
+	// redeclared is the first method the router file declared twice (declare), a boot error
+	redeclared error
+	// limitErr is the first rate limit of router.work counting what it may not (checkLimitBy), a boot
+	// error; limitWarning the line a template site's file prints for one (router_limit_by.go)
+	limitErr     error
+	limitWarning string
+	// expiryWarning is the line a template site's file prints for a cache expiry it cannot read
+	// (checkExpiry, router_limit_by.go)
+	expiryWarning string
+	unknown       []string // methods the chain called that this engine does not have
 
 	// router.transition(): how <content /> changes on a move between pages; inherited down the chain
 	transition string
@@ -385,17 +406,50 @@ func (f *FolderRouter) removedMethodWarnings() []string {
 	return lines
 }
 
-func (f *FolderRouter) declare(name string, args ...value.Value) *FolderMethod {
-	m := &FolderMethod{method: name}
+// declare adds the HTTP method name to the folder, by the call the router file wrote (router.get,
+// router.view, router.proxy…). A method is declared once in a router file: a second declaration is a
+// boot error naming the line of the first, not a silent replacement of it (19/10/2026). The second
+// gets a method of its own, kept nowhere, so the rest of its chain still reads.
+func (f *FolderRouter) declare(call, name string, args ...value.Value) *FolderMethod {
+	m := &FolderMethod{method: name, declaredBy: call, folder: f}
+	if f.callSite != nil {
+		m.declaredAt = int(f.callSite().Line)
+	}
 	if len(args) > 0 && args[0].K == value.Func { // router.get(handler) shorthand
 		m.handle = lambdaOf(args[0])
+	}
+	if first := f.methods[name]; first != nil {
+		if f.redeclared == nil {
+			f.redeclared = redeclaredMethod(first, m)
+		}
+		return m
 	}
 	f.methods[name] = m
 	return m
 }
 
-func (f *FolderRouter) Get(args ...value.Value) *FolderMethod  { return f.declare("GET", args...) }
-func (f *FolderRouter) Post(args ...value.Value) *FolderMethod { return f.declare("POST", args...) }
+// redeclaredMethod is the boot error of a method declared a second time in one router file.
+func redeclaredMethod(first, second *FolderMethod) error {
+	where := func(line int) string {
+		if line <= 0 {
+			return "ở trên"
+		}
+		return fmt.Sprintf("ở dòng %d", line)
+	}
+	if first.declaredBy == second.declaredBy {
+		return fmt.Errorf("%s đã khai %s; khai lại %s: một router file khai mỗi method một lần, gộp hai lần vào một %s(…)",
+			first.declaredBy, where(first.declaredAt), where(second.declaredAt), first.declaredBy)
+	}
+	return fmt.Errorf("%s %s khai lại %s mà %s đã khai %s: một router file khai mỗi method một lần, giữ một trong hai",
+		second.declaredBy, where(second.declaredAt), first.method, first.declaredBy, where(first.declaredAt))
+}
+
+func (f *FolderRouter) Get(args ...value.Value) *FolderMethod {
+	return f.declare("router.get", "GET", args...)
+}
+func (f *FolderRouter) Post(args ...value.Value) *FolderMethod {
+	return f.declare("router.post", "POST", args...)
+}
 
 // Proxy answers this folder from an UPSTREAM url instead of a page — a reverse proxy mounted at the
 // folder. The target is a fixed URL, or a handler that computes one per request (params/path):
@@ -410,16 +464,22 @@ func (f *FolderRouter) Post(args ...value.Value) *FolderMethod { return f.declar
 // SSRF: the TENANT owns the target (it computes it) — the engine still blocks private/loopback space
 // at the transport as a backstop. Never build the target straight from untrusted input.
 func (f *FolderRouter) Proxy(args ...value.Value) *FolderMethod {
-	m := f.declare("GET") // declare WITHOUT args so a handler-target never becomes the page handler
+	m := f.declare("router.proxy", "GET") // declare WITHOUT args so a handler-target never becomes the page handler
 	m.isProxy = true
 	if len(args) > 0 {
 		m.proxyTarget = args[0]
 	}
 	return m
 }
-func (f *FolderRouter) Put(args ...value.Value) *FolderMethod    { return f.declare("PUT", args...) }
-func (f *FolderRouter) Patch(args ...value.Value) *FolderMethod  { return f.declare("PATCH", args...) }
-func (f *FolderRouter) Delete(args ...value.Value) *FolderMethod { return f.declare("DELETE", args...) }
+func (f *FolderRouter) Put(args ...value.Value) *FolderMethod {
+	return f.declare("router.put", "PUT", args...)
+}
+func (f *FolderRouter) Patch(args ...value.Value) *FolderMethod {
+	return f.declare("router.patch", "PATCH", args...)
+}
+func (f *FolderRouter) Delete(args ...value.Value) *FolderMethod {
+	return f.declare("router.delete", "DELETE", args...)
+}
 
 func (f *FolderRouter) output(kind, defaultPath string, args ...value.Value) *FolderMethod {
 	m := &FolderMethod{method: "GET", outputKind: kind, outputData: value.New(map[string]value.Value{})}
@@ -585,7 +645,11 @@ func (f *FolderRouter) Meta(v value.Value) *FolderRouter {
 // chain, outside-in — declare site-wide ceilings once at the root). Calls stack; see ratelimitRules
 // for the shape. One bucket per client per rule for the whole subtree.
 func (f *FolderRouter) Ratelimit(args ...value.Value) *FolderRouter {
-	f.limits = append(f.limits, ratelimitRules(args...)...)
+	rules := ratelimitRules(args...)
+	for _, rule := range rules {
+		f.checkLimitBy(rule.Dim)
+	}
+	f.limits = append(f.limits, rules...)
 	return f
 }
 
@@ -875,6 +939,17 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("initialize router %s: %w", relative, err)
 		}
+		if fr.redeclared != nil {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			return fmt.Errorf("router %s: %w", relative, fr.redeclared)
+		}
+		if fr.limitErr != nil {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			return fmt.Errorf("router %s: %w", relative, fr.limitErr)
+		}
+		if err := fr.handlerDestructureError(); err != nil {
+			return fmt.Errorf("router: %w", err)
+		}
 		if err := fr.responseCacheConfigurationError(); err != nil {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			return fmt.Errorf("router %s: %w", relative, err)
@@ -886,6 +961,14 @@ func (n *RouteNode) compileFolder(t *Tenant) error {
 		if warning := fr.unknownMethodWarning(); warning != "" {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
 			fmt.Printf("[router] %s: %s\n", relative, warning)
+		}
+		if fr.expiryWarning != "" {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			fmt.Printf("[router] %s: %s\n", relative, fr.expiryWarning)
+		}
+		if fr.limitWarning != "" {
+			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))
+			fmt.Printf("[router] %s: %s\n", relative, fr.limitWarning)
 		}
 		for _, warning := range fr.removedMethodWarnings() {
 			relative := strings.TrimPrefix(routerFile, t.resolve()+string(filepath.Separator))

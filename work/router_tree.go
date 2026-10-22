@@ -10,6 +10,7 @@ package work
 // before publication, so request-time resolution only reads immutable nodes.
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -37,6 +38,12 @@ type segMatcher struct {
 	kind segKind
 	typ  string // for segTyped: the declared type name ("number", "string", …)
 	re   *regexp.Regexp
+	// anchored is the regex held to the whole segment, ^(?:…)$: how a Kitwork UI site matches it
+	// (20/10/2026); a template site keeps re, which may match a part
+	anchored *regexp.Regexp
+	// err is what a Kitwork UI site refuses at boot: a type it does not know, a regex that does not
+	// compile (KITWORK_ROUTER §2). A template site reads the first as [string], the second as {name}.
+	err error
 }
 
 // parseSegment turns a folder name into a matcher, or nil if it is a static (exact) folder.
@@ -58,19 +65,32 @@ func parseSegment(seg string) *segMatcher {
 		if in[len(in)-1] == ']' {
 			typ = in[br+1 : len(in)-1]
 		}
-		return &segMatcher{name: in[:br], kind: segTyped, typ: typ}
-	case par >= 0: // {slug(regex)}
-		re, err := regexp.Compile(in[par+1 : len(in)-1])
-		if err != nil {
-			return &segMatcher{name: in[:par], kind: segPlain} // malformed → treat as plain
+		m := &segMatcher{name: in[:br], kind: segTyped, typ: typ}
+		if typ != "number" && typ != "string" {
+			m.err = fmt.Errorf("kiểu %q không có: kiểu của một đoạn là [number] hay [string]", typ)
 		}
-		return &segMatcher{name: in[:par], kind: segRegex, re: re}
+		return m
+	case par >= 0: // {slug(regex)}
+		source := strings.TrimSuffix(in[par+1:], ")")
+		re, err := regexp.Compile(source)
+		if err != nil || !strings.HasSuffix(in, ")") {
+			if err == nil {
+				err = fmt.Errorf("thiếu dấu ) đóng regex")
+			}
+			// malformed → treat as plain, the way of a template site
+			return &segMatcher{name: in[:par], kind: segPlain, err: fmt.Errorf("regex %q không đọc được: %v", source, err)}
+		}
+		anchored, _ := regexp.Compile("^(?:" + source + ")$")
+		return &segMatcher{name: in[:par], kind: segRegex, re: re, anchored: anchored}
 	default:
 		return &segMatcher{name: in, kind: segPlain}
 	}
 }
 
-func (m *segMatcher) test(v string) bool {
+func (m *segMatcher) test(v string, ui bool) bool {
+	if ui && m.kind == segRegex {
+		return m.anchored != nil && m.anchored.MatchString(v)
+	}
 	switch m.kind {
 	case segTyped:
 		if v == "" {
@@ -171,7 +191,7 @@ func (n *RouteNode) ensureChildren() {
 }
 
 // child resolves ONE path segment against this node — exact-then-dynamic, in one scan.
-func (n *RouteNode) child(seg string, params map[string]string) *RouteNode {
+func (n *RouteNode) child(seg string, params map[string]string, ui bool) *RouteNode {
 	kids := n.children.Load()
 	if kids == nil {
 		return nil
@@ -181,7 +201,7 @@ func (n *RouteNode) child(seg string, params map[string]string) *RouteNode {
 			if c.seg == seg {
 				return c
 			}
-		} else if c.matcher.test(seg) {
+		} else if c.matcher.test(seg, ui) {
 			params[c.matcher.name] = seg
 			return c
 		}
@@ -194,6 +214,9 @@ func (n *RouteNode) child(seg string, params map[string]string) *RouteNode {
 type RouteTree struct {
 	tenant *Tenant
 	root   *RouteNode
+	// ui says the site is a Kitwork UI site (its root's router file is router.work): its folders match
+	// by its rules (KITWORK_ROUTER §2), set when the tree is prepared
+	ui bool
 }
 
 func NewRouteTree(t *Tenant) *RouteTree {
@@ -268,6 +291,18 @@ func (rt *RouteTree) Prepare() error {
 		if children == nil {
 			return nil
 		}
+		if node.parent == nil {
+			rt.ui = node.folder != nil && node.folder.ui
+		}
+		if rt.ui {
+			// a type it does not know or a regex that does not compile stops a Kitwork UI site at boot,
+			// not at the first request that reaches the folder
+			for _, child := range *children {
+				if child.matcher != nil && child.matcher.err != nil {
+					return fmt.Errorf("thư mục %s: %w", child.relPath(), child.matcher.err)
+				}
+			}
+		}
 		for _, child := range *children {
 			if rt.isAssetDirectory(child) {
 				continue
@@ -304,6 +339,8 @@ type RouteMatch struct {
 	Chain  []*RouteNode      // root → Node: guards run DOWN this, views resolve UP it
 	Params map[string]string // {user}=quoc, {id}=123
 	Found  bool              // false = a segment had no matching folder (→ notfound)
+	// Numbers are the params of a [number] folder in a Kitwork UI site: request.params gives a number
+	Numbers map[string]bool
 }
 
 func (rt *RouteTree) Resolve(urlPath string) *RouteMatch {
@@ -311,14 +348,28 @@ func (rt *RouteTree) Resolve(urlPath string) *RouteMatch {
 		return &RouteMatch{Params: map[string]string{}, Found: false}
 	}
 	m := &RouteMatch{Node: rt.root, Chain: []*RouteNode{rt.root}, Params: map[string]string{}, Found: true}
-	for _, seg := range splitPath(urlPath) {
-		c := m.Node.child(seg, m.Params)
+	segments := splitPath(urlPath)
+	for i, seg := range segments {
+		c := m.Node.child(seg, m.Params, rt.ui)
 		if c == nil {
 			m.Found = false
 			return m
 		}
 		m.Node = c
 		m.Chain = append(m.Chain, c)
+		if rt.ui && c.matcher != nil {
+			switch {
+			case c.matcher.kind == segSplat:
+				// {...rest} takes the rest of the path, one segment or more (KITWORK_ROUTER §2)
+				m.Params[c.matcher.name] = strings.Join(segments[i:], "/")
+				return m
+			case c.matcher.kind == segTyped && c.matcher.typ == "number":
+				if m.Numbers == nil {
+					m.Numbers = map[string]bool{}
+				}
+				m.Numbers[c.matcher.name] = true
+			}
+		}
 	}
 	return m
 }

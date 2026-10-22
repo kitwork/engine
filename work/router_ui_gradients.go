@@ -13,7 +13,7 @@ import (
 // (decision of 12/10/2026, ui/stylesheet/gradients.go):
 //
 //	router.gradients({
-//	  hero: { type: "linear", direction: "to-bottom-end", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] },
+//	  hero: { type: "linear", direction: "to-bottom-right", stops: [ { color: "brand", at: 0 }, { color: "violet", at: 100 } ] },
 //	  halo: { type: "radial", position: "top", stops: [ { color: "brand/40", at: 0 }, { color: "brand/0", at: 70 } ] },
 //	  sky: { type: "linear", direction: "to-bottom", stops: [ { color: { light: "#849cdd", dark: "#202f5e" }, at: 0 }, { color: "canvas", at: 100 } ] }
 //	});
@@ -31,7 +31,7 @@ import (
 // name is a token of it, is answered by the route's pages, as a router.colors value is.
 func (f *FolderRouter) Gradients(args ...value.Value) (*FolderRouter, error) {
 	if len(args) != 1 || !args[0].IsMap() {
-		return f, fmt.Errorf(`router.gradients nhận một object các gradient: router.gradients({ hero: { type: "linear", direction: "to-bottom-end", stops: [ { color: "brand", at: 0 }, { color: "brand+15", at: 100 } ] } })`)
+		return f, fmt.Errorf(`router.gradients nhận một object các gradient: router.gradients({ hero: { type: "linear", direction: "to-bottom-right", stops: [ { color: "brand", at: 0 }, { color: "brand+15", at: 100 } ] } })`)
 	}
 	declared := args[0].Map()
 	names := make([]string, 0, len(declared))

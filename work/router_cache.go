@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -210,11 +211,13 @@ func cacheKey(r *http.Request, methodPolicy *FolderMethod) (string, bool) {
 	if method == http.MethodHead {
 		method = http.MethodGet
 	}
+	// a move by Drive (X-Kitwork-Hydrate, the old KitJS X-KitJS-Drive) is its own key, apart from the
+	// load of the page
 	drive := "0"
-	if r.Header.Get("X-KitJS-Drive") == "1" {
+	if r.Header.Get("X-KitJS-Drive") == "1" || r.Header.Get("X-Kitwork-Hydrate") == "1" {
 		drive = "1"
 	}
-	key := method + "\x00" + r.URL.EscapedPath() + "\x00drive=" + drive
+	key := method + "\x00" + normalizedPath(r.URL.EscapedPath()) + "\x00drive=" + drive
 	if r.URL.RawQuery == "" {
 		return key, true
 	}
@@ -252,6 +255,12 @@ func cacheKey(r *http.Request, methodPolicy *FolderMethod) (string, bool) {
 	return key, true
 }
 
+// normalizedPath is the path a route answers, as the cache and the rate limits key it (KITWORK_ROUTER
+// §2, 20/10/2026): a trailing slash and a doubled one change nothing, /a/ and /a//b are /a and /a/b.
+func normalizedPath(p string) string {
+	return path.Clean("/" + p)
+}
+
 func hashKey(s string) string {
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
@@ -265,16 +274,16 @@ func responseBytes(resp *Response) (body []byte, contentType string, status int,
 	if status == 0 {
 		status = http.StatusOK
 	}
-	headers = resp.Headers()
+	headers = resp.headerMap()
 	switch resp.Kind() {
 	case "html", "":
-		return []byte(resp.Data().String()), "text/html; charset=utf-8", status, headers, true
+		return []byte(resp.Data().String()), resp.mediaType("text/html; charset=utf-8"), status, headers, true
 	case "text":
-		return []byte(resp.Data().String()), "text/plain; charset=utf-8", status, headers, true
+		return []byte(resp.Data().String()), resp.mediaType("text/plain; charset=utf-8"), status, headers, true
 	case "css":
-		return []byte(resp.Data().String()), "text/css; charset=utf-8", status, headers, true
+		return []byte(resp.Data().String()), resp.mediaType("text/css; charset=utf-8"), status, headers, true
 	case "svg":
-		return []byte(resp.Data().String()), "image/svg+xml; charset=utf-8", status, headers, true
+		return []byte(resp.Data().String()), resp.mediaType("image/svg+xml; charset=utf-8"), status, headers, true
 	case "typed":
 		return []byte(resp.Data().String()), resp.ContentType(), status, headers, true
 	case "json":
@@ -282,11 +291,11 @@ func responseBytes(resp *Response) (body []byte, contentType string, status int,
 		if err != nil {
 			return nil, "", 0, nil, false
 		}
-		return data, "application/json; charset=utf-8", status, headers, true
+		return data, resp.mediaType("application/json; charset=utf-8"), status, headers, true
 	case "image":
-		return resp.Data().Bytes(), "image/png", status, headers, true
+		return resp.Data().Bytes(), resp.mediaType("image/png"), status, headers, true
 	case "bytes":
-		return resp.Data().Bytes(), "application/octet-stream", status, headers, true
+		return resp.Data().Bytes(), resp.mediaType("application/octet-stream"), status, headers, true
 	default:
 		return nil, "", 0, nil, false
 	}
@@ -326,6 +335,9 @@ func serveCached(
 	}
 }
 
+// cachedResponse reads the route's cache, RAM then disk (KITWORK_ROUTER §9, 20/10/2026). A disk entry
+// still fresh when RAM has none fills RAM again, for no longer than what is left of the disk entry: a
+// read never stretches the first expiry.
 func (t *Tenant) cachedResponse(
 	method *FolderMethod,
 	key string,
@@ -337,15 +349,62 @@ func (t *Tenant) cachedResponse(
 	}
 	if method.persistExpiry != nil {
 		if record, hit := t.persistStore.Get(hashKey(key)); hit {
+			if method.cacheExpiry != nil {
+				now := time.Now()
+				t.respCache.Set(key, cache.Entry{
+					Body: record.Body, ContentType: record.ContentType, Status: record.Status, Headers: record.Headers,
+				}, refillExpiry(method.cacheExpiry(now), record.ExpireAt, now))
+			}
 			return record.Body, record.ContentType, record.Status, record.Headers, true
 		}
 	}
 	return nil, "", 0, nil, false
 }
 
-func (t *Tenant) saveResponse(method *FolderMethod, key string, response *Response) {
+// refillExpiry is how long RAM keeps a disk entry it is filled from: its own span, cut to what is left
+// of the disk entry (0, forever, takes what is left; a disk entry with no expiry leaves RAM its own).
+func refillExpiry(ram time.Duration, diskExpireAt, now time.Time) time.Duration {
+	if diskExpireAt.IsZero() {
+		return ram
+	}
+	left := diskExpireAt.Sub(now)
+	if left <= 0 {
+		left = time.Millisecond
+	}
+	if ram <= 0 || ram > left {
+		return left
+	}
+	return ram
+}
+
+// cacheableStatus are the statuses HTTP caches by default (RFC 9111): only these are kept; never 5xx.
+var cacheableStatus = map[int]bool{200: true, 203: true, 204: true, 300: true, 301: true, 308: true, 404: true, 405: true, 410: true, 414: true}
+
+// sharedCacheable reports whether an answer may be kept for everyone the guards let through
+// (KITWORK_ROUTER §9): a status HTTP caches, no Set-Cookie of the answer, no Cache-Control private or
+// no-store. cookiesBefore is how many cookies the guards set: they run on every request, a hit included
+// (serveCached), so theirs are not the answer's.
+func sharedCacheable(response *Response, cookiesBefore int, status int, headers map[string]string) bool {
+	if !cacheableStatus[status] || len(response.cookies) > cookiesBefore {
+		return false
+	}
+	for name, data := range headers {
+		switch strings.ToLower(name) {
+		case "set-cookie":
+			return false
+		case "cache-control":
+			directives := strings.ToLower(data)
+			if strings.Contains(directives, "private") || strings.Contains(directives, "no-store") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (t *Tenant) saveResponse(method *FolderMethod, key string, response *Response, cookiesBefore int) {
 	body, contentType, status, headers, ok := responseBytes(response)
-	if !ok || status < 200 || status >= 300 {
+	if !ok || !sharedCacheable(response, cookiesBefore, status, headers) {
 		return
 	}
 	now := time.Now()

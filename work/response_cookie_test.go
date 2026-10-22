@@ -56,14 +56,14 @@ func TestContextCookieShorthand(t *testing.T) {
 	router := &Router{request: request, response: &Response{}}
 	ctx := &Context{request: &Request{router: router}}
 
-	if got := ctx.Cookie("existing").String(); got != "read-me" {
+	if got := cookieValue(t)(ctx.Cookie("existing")).String(); got != "read-me" {
 		t.Fatalf("ctx.cookie(name) = %q, want read-me", got)
 	}
 
-	setValue := ctx.Cookie("studio", value.New("signed-token"), value.New(map[string]any{
+	setValue := cookieValue(t)(ctx.Cookie("studio", value.New("signed-token"), value.New(map[string]any{
 		"path":     "/studio",
 		"sameSite": "strict",
-	}))
+	})))
 	if setValue.String() != "signed-token" {
 		t.Fatalf("ctx.cookie(name, value) returned %q", setValue.String())
 	}
@@ -71,11 +71,23 @@ func TestContextCookieShorthand(t *testing.T) {
 		t.Fatalf("ctx.cookie did not queue the set cookie: %#v", router.response.cookies)
 	}
 
-	deleted := ctx.Cookie("studio", value.NewNil(), value.New(map[string]any{"path": "/studio"}))
+	deleted := cookieValue(t)(ctx.Cookie("studio", value.NewNil(), value.New(map[string]any{"path": "/studio"})))
 	if deleted.K != value.Nil {
 		t.Fatalf("ctx.cookie(name, null) returned %s, want nil", deleted.K.String())
 	}
 	if len(router.response.cookies) != 2 || router.response.cookies[1].MaxAge != -1 {
 		t.Fatalf("ctx.cookie(name, null) did not queue deletion: %#v", router.response.cookies)
+	}
+}
+
+// cookieValue reads what context.cookie gave a template site: a value (20/10/2026: the Go method also
+// gives an error, for router.work's order).
+func cookieValue(t *testing.T) func(any, error) value.Value {
+	return func(got any, err error) value.Value {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("ctx.cookie: %v", err)
+		}
+		return got.(value.Value)
 	}
 }

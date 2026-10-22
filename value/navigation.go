@@ -158,6 +158,28 @@ type MissingMember interface {
 	MissingMember(name string) Value
 }
 
+// HiddenMembers lets a native object keep Go methods the engine reads from a program: a member it
+// hides reads as one the object does not have, so Go keeps its getter (Response.Data, Kind, Code) and
+// a program never sees it (19/10/2026).
+type HiddenMembers interface {
+	HiddenMember(name string) bool
+}
+
+// OwnMember lets a native object answer a member its own way before reflection reads its methods:
+// request.json is a property of a template site (request.json || {}) and a function with choices in
+// router.work (request.json({ limit: "4mb" })), one Go type for both (20/10/2026).
+type OwnMember interface {
+	Member(name string) (Value, bool)
+}
+
+// CallOnly marks a native object's methods of no argument that act — answer the request, write
+// something — as ones that run only when called: read, such a member is the function, not its run
+// (19/10/2026: reading response.notFound answered 404). A method of no argument that only reads stays
+// a getter (context.method, request.path).
+type CallOnly interface {
+	CallOnly(name string) bool
+}
+
 func (v Value) Get(key string) Value {
 	if v.K == Invalid {
 		// A failure (a failed db query, fail("…")) is K==Invalid carrying its message in .V. A program
@@ -206,6 +228,14 @@ func (v Value) Get(key string) Value {
 
 	// ƯU TIÊN 1: Tra cứu Dynamic (Struct/Func) - Cho phép gọi field của một Hàm (Object-like Function)
 	if v.K == Struct || v.K == Func {
+		if own, ok := v.V.(OwnMember); ok {
+			if member, found := own.Member(key); found {
+				return member
+			}
+		}
+		if hidden, ok := v.V.(HiddenMembers); ok && hidden.HiddenMember(key) {
+			return Value{K: Nil}
+		}
 		res := v.reflect(key)
 		if res.K != Nil {
 			return res
@@ -320,6 +350,12 @@ func membersFor(reflectedType reflect.Type) *reflectedMembers {
 	return actual.(*reflectedMembers)
 }
 
+// callOnly reports whether host marks its method name (folded to lower case) as CallOnly.
+func callOnly(host any, name string) bool {
+	marked, ok := host.(CallOnly)
+	return ok && marked.CallOnly(name)
+}
+
 func (v Value) reflect(key string) Value {
 	if v.V == nil {
 		return Value{K: Nil}
@@ -332,7 +368,7 @@ func (v Value) reflect(key string) Value {
 
 	if descriptor, ok := members.methods[foldedKey]; ok {
 		method := ptrRv.Method(descriptor.index)
-		if descriptor.getter {
+		if descriptor.getter && !callOnly(v.V, foldedKey) {
 			// a method read as a field still has its error channel: a Go method of no argument that
 			// returns only an error (napas.validate()) fails with it, as a call of it does
 			return reflectedCallResult(key, method.Call(nil))

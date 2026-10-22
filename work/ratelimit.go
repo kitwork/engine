@@ -78,22 +78,8 @@ func (lim *RateLimiter) LastRefill() time.Time {
 // behind a reverse proxy you control (config `trust_proxy: true` / `.trustProxy(true)`).
 var TrustProxyHeaders bool
 
-func GetClientIP(r *http.Request) string {
-	if TrustProxyHeaders {
-		if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-			parts := strings.Split(ip, ",")
-			return strings.TrimSpace(parts[0])
-		}
-		if ip := r.Header.Get("X-Real-IP"); ip != "" {
-			return ip
-		}
-	}
-	ip := r.RemoteAddr
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
-	}
-	return ip
-}
+// GetClientIP is the client's address by the one rule every reader keeps (clientIP).
+func GetClientIP(r *http.Request) string { return clientIP(r) }
 
 func GetClientBrowserFingerprint(r *http.Request) string {
 	if cookie, err := r.Cookie("__device_id"); err == nil && cookie.Value != "" {

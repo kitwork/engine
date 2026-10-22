@@ -654,6 +654,10 @@ func (ol *ObjectLiteral) String() string {
 type ParameterList struct {
 	Token      Token
 	Parameters []*Identifier
+	// Prelude holds what a destructured parameter lowers to: ({ request, response }) => … is the
+	// parameter named "{ request, response }" and `let { request, response } = <it>` first in the body
+	// (19/10/2026). The name, which no source can write, says the pattern to whoever reads Params.
+	Prelude []Statement
 }
 
 func (pl *ParameterList) expressionNode() {}

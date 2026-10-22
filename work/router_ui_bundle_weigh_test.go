@@ -70,7 +70,7 @@ func compiledHome(t *testing.T, tenant *Tenant) (*uiSite, *uiCompiled) {
 	if plan == nil || plan.ui == nil {
 		t.Fatal("the site has no Kitwork UI pages")
 	}
-	compiled, err := plan.ui.page("", false)
+	compiled, err := plan.ui.page("", uiOwnPage)
 	if err != nil || compiled.page == nil {
 		t.Fatalf("the home page: %v", err)
 	}

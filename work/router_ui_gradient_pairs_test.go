@@ -52,7 +52,7 @@ func TestRouterGradientsTakePairs(t *testing.T) {
 			t.Errorf("%s:\n want a boot error naming %q\n got %v", first, want, err)
 		}
 	}
-	files = withRootRouter(t, colours+"\n"+`router.gradients({ dusk: { type: "linear", direction: "to-end", stops: [ { color: "brand", at: 0 }, { color: "ink", at: 100 } ] } });`, nil)
+	files = withRootRouter(t, colours+"\n"+`router.gradients({ dusk: { type: "linear", direction: "to-right", stops: [ { color: "brand", at: 0 }, { color: "ink", at: 100 } ] } });`, nil)
 	if _, err := bootUISite(t, files, true); err == nil || !strings.Contains(err.Error(), `router.gradients: "dusk" là tên một nền trang của Kitwork, có sẵn`) {
 		t.Errorf("a site's gradient named like a backdrop: %v", err)
 	}

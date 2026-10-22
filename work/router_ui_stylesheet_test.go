@@ -249,7 +249,8 @@ func TestPageStylesheetIsAnEngineFile(t *testing.T) {
 	files["localhost/_kitwork/page."+stale+".css"] = "TENANT-SECRET"
 	files["localhost/_kitwork/fonts."+stale+".css"] = "TENANT-SECRET"
 	files["localhost/_kitwork/reboot."+stale+".css"] = "TENANT-SECRET"
-	files["localhost/_kitworks/page."+stale+".css"] = "TENANT-SECRET control"
+	// the site's own file, in assets/: a Kitwork UI site serves files only by its allowlist (20/10/2026)
+	files["localhost/assets/_kitworks/page."+stale+".css"] = "TENANT-SECRET control"
 	tenant := buildFilesSite(t, files)
 	page := serveUI(t, tenant, "http://localhost/giau").Body.String()
 	sheets := stylesheetsOf(t, tenant, page)
@@ -317,7 +318,7 @@ func TestPageStylesheetIsAnEngineFile(t *testing.T) {
 	if response := serveEngine(tenant, http.MethodGet, face[1]); response.Code != http.StatusOK || response.Header().Get("Content-Type") != "font/woff2" {
 		t.Errorf("%s: %d %q — the folder beside fonts.<hash>.css serves the face", face[1], response.Code, response.Header().Get("Content-Type"))
 	}
-	if control := serveEngine(tenant, http.MethodGet, "/_kitworks/page."+stale+".css"); control.Code != http.StatusOK || control.Body.String() != "TENANT-SECRET control" {
+	if control := serveEngine(tenant, http.MethodGet, "/assets/_kitworks/page."+stale+".css"); control.Code != http.StatusOK || control.Body.String() != "TENANT-SECRET control" {
 		t.Fatalf("CONTROL: a folder of another name is the tenant's own and is served: %d %.40q", control.Code, control.Body.String())
 	}
 }
@@ -349,7 +350,7 @@ router.view((ctx) => {
 	}
 
 	plan := tenant.renderPlan()
-	compiled, err := plan.ui.page("du-lieu", false)
+	compiled, err := plan.ui.page("du-lieu", uiOwnPage)
 	if err != nil {
 		t.Fatal(err)
 	}

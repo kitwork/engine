@@ -6,8 +6,8 @@ import (
 
 // Javascript is gone (11/10/2026), with everything it took: drive (moving between pages is
 // router.reload(false)), prerender (the server no longer fills a template page's page-scope answers
-// on request) and the component version pins (a component is found by name — component="…" in a
-// .ui file, data-kit-component on a template page — and the engine ships the latest; a version written
+// on request) and the component version pins (a component is found by name — its tag in a .ui
+// file, data-kit-component on a template page — and the engine ships the latest; a version written
 // in a template page's own markup still names one).
 //
 // It never decided WHETHER a page gets JavaScript — a page that uses the grammar gets the kernel and

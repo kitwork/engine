@@ -1,8 +1,8 @@
 package work
 
 import (
-	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,15 @@ import (
 
 type Request struct {
 	router *Router
+
+	// the body, read once up to its ceiling (readBody, request_limits.go)
+	bodyRead bool
+	body     []byte
+	bodyErr  error
+
+	// the fields of the form the body carries, read once (request.form, request_form.go)
+	formRead   bool
+	formFields url.Values
 }
 
 func (r *Request) request() *http.Request {
@@ -52,6 +62,11 @@ func (r *Request) Screenshot() value.Value {
 
 func (r *Request) Params(key string) value.Value {
 	if v, ok := r.router.params[key]; ok {
+		if r.router.numberParams[key] {
+			if number, err := strconv.ParseFloat(v, 64); err == nil {
+				return value.New(number)
+			}
+		}
 		return value.New(v)
 	}
 	return value.Value{K: value.Nil}
@@ -176,12 +191,8 @@ func (r *Request) IP() value.Value {
 	if req == nil {
 		return value.Value{K: value.Nil}
 	}
-	// Try X-Forwarded-For first
-	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return value.New(strings.TrimSpace(parts[0]))
-	}
-	return value.New(req.RemoteAddr)
+	// the connection's address, or the proxy's header when the app trusts its proxy (clientIP)
+	return value.New(clientIP(req))
 }
 
 func (r *Request) UserAgent() value.Value {
@@ -235,13 +246,8 @@ func (r *Request) Scheme() value.Value {
 	if req == nil {
 		return value.Value{K: value.Nil}
 	}
-	if req.TLS != nil {
-		return value.New("https")
-	}
-	if proto := r.Header("X-Forwarded-Proto").String(); proto != "" {
-		return value.New(proto)
-	}
-	return value.New("http")
+	// TLS of the connection, or the proxy's header when the app trusts its proxy (requestScheme)
+	return value.New(requestScheme(req))
 }
 
 func (r *Request) Protocol() value.Value {
@@ -376,35 +382,23 @@ func (r *Request) Benchmark(vals ...value.Value) value.Value {
 	return value.New(res)
 }
 
+// Body is the request's body as text, read up to 1 MiB (request_limits.go): past it the request answers
+// 413. Read twice, the same text.
 func (r *Request) Body() value.Value {
-	req := r.request()
-	if req == nil || req.Body == nil {
-		return value.Value{K: value.Nil}
-	}
-
-	body, err := io.ReadAll(req.Body)
+	body, err := r.readBody(DefaultBodyLimit)
 	if err != nil {
+		return bodyFailure(err, DefaultBodyLimit)
+	}
+	if body == nil {
 		return value.Value{K: value.Nil}
 	}
-
-	// Restore body
-	req.Body = io.NopCloser(bytes.NewBuffer(body))
-
 	return value.New(string(body))
 }
 
+// JSON is the body as JSON, read up to 1 MiB; request.json({ limit: "4mb" }) of router.work reads more,
+// up to the host's ceiling (Member). A template site reads it as a property, request.json || {}.
 func (r *Request) JSON() value.Value {
-	body := r.Body().String()
-	if body == "" {
-		return value.Value{K: value.Nil}
-	}
-
-	var data interface{}
-	if err := json.Unmarshal([]byte(body), &data); err != nil {
-		return value.Value{K: value.Nil}
-	}
-
-	return value.New(data)
+	return r.jsonBody(DefaultBodyLimit)
 }
 
 // JSONLimit decodes one request body without buffering more than the caller's explicit ceiling.
@@ -412,23 +406,19 @@ func (r *Request) JSON() value.Value {
 // exactly once and pass the resulting value onward. The host ceiling prevents tenant code from
 // accidentally turning this optional guard back into an unbounded allocation.
 func (r *Request) JSONLimit(limit int) value.Value {
-	const hostLimit = 1 << 20
-	if limit <= 0 || limit > hostLimit {
-		return value.InvalidFailure(value.InvalidArgumentCode, "json body limit must be between 1 byte and 1 MiB")
+	if limit <= 0 || int64(limit) > MaxBodyBytes {
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("json body limit must be between 1 byte and the host's %d", MaxBodyBytes))
 	}
 	req := r.request()
 	if req == nil || req.Body == nil {
 		return value.InvalidFailure(value.InvalidInputCode, "request body is empty")
 	}
-	if req.ContentLength > int64(limit) {
+	body, err := r.readBody(int64(limit))
+	if errors.Is(err, errBodyTooLarge) {
 		return value.InvalidFailure(value.InvalidInputCode, "request body exceeds its limit")
 	}
-	body, err := io.ReadAll(io.LimitReader(req.Body, int64(limit)+1))
 	if err != nil {
 		return value.InvalidFailure(value.InvalidInputCode, "request body could not be read")
-	}
-	if len(body) > limit {
-		return value.InvalidFailure(value.InvalidInputCode, "request body exceeds its limit")
 	}
 	var data any
 	if len(body) == 0 || json.Unmarshal(body, &data) != nil {

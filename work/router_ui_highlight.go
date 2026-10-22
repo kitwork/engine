@@ -154,13 +154,13 @@ var legacyHighlightKeys = map[string]func(written string) string{
 		return "flag là cờ dòng lệnh (-x, --long) ở trang template; ở trang .ui đó là attribute (tên thuộc tính trong markup hay cờ dòng lệnh): attribute: " + v + "."
 	},
 	"argument": func(string) string {
-		return "argument là đối số của lệnh ở trang template; ở trang .ui đối số là chữ thường, theo màu chữ của <code>: viết color= trên <code> hay trên thẻ chủ terminal."
+		return "argument là đối số của lệnh ở trang template; ở trang .ui đối số là chữ thường, theo màu chữ của <code>: viết color= trên <code> hay trên <terminal>."
 	},
 	"text": func(string) string {
-		return "text là chữ của khung ở trang template; ở trang .ui chữ thường của khối mã theo màu chữ của <code>: viết color= trên <code> hay trên thẻ chủ terminal."
+		return "text là chữ của khung ở trang template; ở trang .ui chữ thường của khối mã theo màu chữ của <code>: viết color= trên <code> hay trên <terminal>."
 	},
 	"DEFAULT": func(string) string {
-		return "DEFAULT là nền của khung terminal ở trang template; ở trang .ui khung là markup của người viết: viết background= trên thẻ chủ terminal."
+		return "DEFAULT là nền của khung terminal ở trang template; ở trang .ui khung là markup của người viết: viết background= trên <terminal>."
 	},
 	"bar": func(string) string {
 		return "bar là thanh tiêu đề của khung ở trang template; ở trang .ui thanh là một <box> của người viết: viết background= trên nó."

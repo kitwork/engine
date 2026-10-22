@@ -48,7 +48,7 @@ func TestTreeMetaInheritanceAndBuilder(t *testing.T) {
 			`const notes = { 'alpha': { title: 'Ghi chú Alpha', body: 'thân bài alpha' } };`+"\n"+
 			`router.get((ctx) => {`+"\n"+
 			`  const note = notes[ctx.params('slug')];`+"\n"+
-			`  return note ? ctx.bind({ note }).title(note.title).type("article") : ctx.notfound();`+"\n"+
+			`  return note ? ctx.bind({ note }).title(note.title).meta({ type: "article" }) : ctx.notfound();`+"\n"+
 			`});`)
 
 	tenant := NewTenant(tmp, "localhost")

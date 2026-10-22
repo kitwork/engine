@@ -1,6 +1,7 @@
 package work
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +23,18 @@ type Response struct {
 
 	page    *page
 	cookies []*http.Cookie
+
+	// ctx is the request's context, whose deferred view the head methods (.title(), .image(), …)
+	// write to; nil for a response no request holds
+	ctx *Context
+
+	// uiPage is the page notFound() or error(…) asks for, and uiMessage what error(…) said: in a
+	// Kitwork UI site the end of the request draws the nearest notfound.ui or error.ui (answerUIPage)
+	uiPage    string
+	uiMessage string
+
+	// order is where the response stands in a router.work chain (response_order.go)
+	order responseOrder
 }
 
 func (r *Response) IsSend() bool {
@@ -30,8 +43,36 @@ func (r *Response) IsSend() bool {
 
 func (r *Response) IsError() bool { return r.kind == "error" }
 
-func (r *Response) JSON(data value.Value, code ...int) {
-	r.Return(data, "json", code...)
+// Every edit stands before the answer (KITWORK_ROUTER §6, 20/10/2026): context.title("…").status(201)
+// .type("image/png") … edit the response and return it; an answer — json, view, html, text, svg,
+// file, redirect, notFound, error — makes it and ends the chain, and returns the response too, so
+// `return context.json(data)` is the answer. In router.work the order is checked (response_order.go):
+// an edit after the answer, two answers, the page's text before an answer other than view, a .type()
+// against json or view, are errors. A template site keeps every way it has.
+//
+// A number after the value is the status, the old way of a template site (context.json(data, 201)).
+func (r *Response) answer(data value.Value, kind string, options []any) *Response {
+	r.Return(data, kind)
+	for _, option := range options {
+		switch choice := option.(type) {
+		case int:
+			r.code = choice
+		case float64: // a program's number (value.transformArg)
+			r.code = int(choice)
+		case value.Value:
+			if choice.IsNumber() {
+				r.code = int(choice.N)
+			}
+		}
+	}
+	return r
+}
+
+func (r *Response) JSON(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("json"); err != nil {
+		return r, err
+	}
+	return r.answer(data, "json", options), nil
 }
 
 func (r *Response) Return(data value.Value, kind string, code ...int) {
@@ -42,7 +83,7 @@ func (r *Response) Return(data value.Value, kind string, code ...int) {
 	}
 }
 
-func (r *Response) Send(data value.Value, options ...interface{}) {
+func (r *Response) Send(data value.Value, options ...interface{}) *Response {
 	r.data = data
 	if len(options) == 0 {
 		if !data.IsBlank() {
@@ -52,16 +93,17 @@ func (r *Response) Send(data value.Value, options ...interface{}) {
 				r.kind = "" // Clear kind to let responder guess from data
 			}
 		}
-		return
+		return r
 	}
 	for _, opt := range options {
 		switch v := opt.(type) {
 		case int:
 			r.code = v
+		case float64:
+			r.code = int(v)
 		case string:
 			r.kind = v
 		case value.Value:
-			// Xử lý nếu tham số đến từ JavaScript VM
 			if v.IsNumber() {
 				r.code = int(v.N)
 			} else if v.IsString() {
@@ -69,104 +111,238 @@ func (r *Response) Send(data value.Value, options ...interface{}) {
 			}
 		}
 	}
+	return r
 }
 
-func (r *Response) String(data string, code ...int) {
+func (r *Response) String(data string, code ...int) *Response {
 	r.Return(value.New(data), "text", code...)
+	return r
 }
 
-func (r *Response) File(path string, code ...int) {
-	r.Return(value.New(path), "file", code...)
+// File answers with bytes the handler made, in the media type .type() set, else
+// application/octet-stream: context.type("image/png").file(bytes). A template site may also give a
+// path of the app; router.work takes bytes only.
+func (r *Response) File(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("file"); err != nil {
+		return r, err
+	}
+	if data.K == value.Bytes {
+		return r.answer(data, "bytes", options), nil
+	}
+	if r.ordered() {
+		return r, fmt.Errorf("`.file()` nhận bytes: `context.type(\"image/png\").file(bytes)`; trả lời bằng chữ thì `.text(…)`")
+	}
+	return r.answer(value.New(data.Text()), "file", options), nil
 }
 
-func (r *Response) Directory(path string, code ...int) {
+func (r *Response) Directory(path string, code ...int) *Response {
 	r.Return(value.New(path), "directory", code...)
+	return r
 }
 
-func (r *Response) Redirect(url value.Value, code ...int) {
-	r.Return(url, "redirect", code...)
+// Redirect sends to url; in router.work with 302 when no .status() came before (the responder turns
+// any other into 303, the way of a template site).
+func (r *Response) Redirect(url value.Value, options ...any) (*Response, error) {
+	if err := r.answering("redirect"); err != nil {
+		return r, err
+	}
+	if r.ordered() {
+		if r.code != 0 && (r.code < 300 || r.code > 399) {
+			// router.work: a status that is not a redirect's is an error, not a quiet 303 (§6)
+			return r, fmt.Errorf("`.status(%d)` trước `.redirect()`: chuyển hướng là 3xx, `context.status(301).redirect(…)` (301, 302, 303, 307, 308); không có `.status()` thì 302", r.code)
+		}
+		if r.code == 0 {
+			r.code = http.StatusFound
+		}
+	}
+	return r.answer(url, "redirect", options), nil
 }
 
-func (r *Response) HTML(data value.Value, code ...int) {
-	r.Return(data, "html", code...)
+func (r *Response) HTML(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("html"); err != nil {
+		return r, err
+	}
+	return r.answer(data, "html", options), nil
 }
 
-func (r *Response) Image(data []byte, code ...int) {
-	r.Return(value.New(data), "image", code...)
-}
-
-func (r *Response) SVG(data value.Value, code ...int) {
-	r.Return(data, "svg", code...)
+func (r *Response) SVG(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("svg"); err != nil {
+		return r, err
+	}
+	return r.answer(data, "svg", options), nil
 }
 
 // CSS responds with Content-Type: text/css — pair with render.css() to serve a stylesheet
 // from a handler: res.css(render.css()). Works with .cache()/.static() like any response.
-func (r *Response) CSS(data value.Value, code ...int) {
-	r.Return(data, "css", code...)
+func (r *Response) CSS(data value.Value, options ...any) *Response {
+	return r.answer(data, "css", options)
 }
 
-func (r *Response) Bytes(data []byte, code ...int) {
-	r.Return(value.New(data), "bytes", code...)
+func (r *Response) Bytes(data []byte, options ...any) *Response {
+	return r.answer(value.New(data), "bytes", options)
 }
 
-func (r *Response) Text(data value.Value, code ...int) {
-	r.Return(data, "text", code...)
+func (r *Response) Text(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("text"); err != nil {
+		return r, err
+	}
+	return r.answer(data, "text", options), nil
 }
 
-func (r *Response) Render(data value.Value, code ...int) {
-	r.Return(data, "render", code...)
+func (r *Response) Render(data value.Value, options ...any) *Response {
+	return r.answer(data, "render", options)
 }
 
-func (r *Response) Error(data value.Value, code ...int) {
+func (r *Response) Error(data value.Value, code ...int) (*Response, error) {
+	if err := r.answering("error"); err != nil {
+		return r, err
+	}
 	r.ErrorString(data.String(), code...)
+	r.uiPage, r.uiMessage = uiErrorPage, errorMessage(data)
+	return r, nil
 }
 
-func (r *Response) ErrorString(data string, code ...int) {
+func (r *Response) ErrorString(data string, code ...int) *Response {
 	r.Return(value.New(data), "error", code...)
-}
-
-func (r *Response) HelloWorld() {
-	r.String("Hello World")
-}
-
-func (r *Response) View(data value.Value, code ...int) {
-	r.Return(data, "render", code...)
-}
-
-func (r *Response) NotFound() {
-	r.Error(value.New("404 Not Found"), 404)
-}
-
-func (r *Response) Status(code int) *Response {
-	r.code = code
 	return r
 }
 
-// Type selects the media type used by Send. XML, CSV, calendar, and vendor formats all share
-// this path instead of growing one response method per representation.
-func (r *Response) Type(mediaType string) *Response {
+func (r *Response) HelloWorld() *Response {
+	r.String("Hello World")
+	return r
+}
+
+func (r *Response) View(data value.Value, options ...any) (*Response, error) {
+	if err := r.answering("view"); err != nil {
+		return r, err
+	}
+	return r.answer(data, "render", options), nil
+}
+
+func (r *Response) NotFound() (*Response, error) {
+	if err := r.answering("notFound"); err != nil {
+		return r, err
+	}
+	r.ErrorString("404 Not Found", 404)
+	r.uiPage = uiNotFoundPage
+	return r, nil
+}
+
+func (r *Response) Status(code int) (*Response, error) {
+	if err := r.editing("status"); err != nil {
+		return r, err
+	}
+	r.code = code
+	return r, nil
+}
+
+// setType sets the media type an answer goes out with (.type()). XML, CSV, calendar, and vendor
+// formats all share this path instead of growing one response method per representation.
+func (r *Response) setType(mediaType string) {
 	mediaType = strings.TrimSpace(mediaType)
 	if mediaType != "" && strings.Contains(mediaType, "/") && !strings.ContainsAny(mediaType, "\r\n") {
 		r.contentType = mediaType
 	}
+}
+
+// mediaType is the Content-Type the answer goes out with: what .type() set when it did, else its
+// kind's own.
+func (r *Response) mediaType(kind string) string {
+	if r.contentType != "" {
+		return r.contentType
+	}
+	return kind
+}
+
+// The page's text — title, description, image, meta, and the head names the engine has (url,
+// language, jsonld) — goes to the deferred view the answer draws. Each is an edit: it returns the
+// response and stands before the answer, which in router.work is .view() (response_order.go).
+// og:type is .meta({ type: "article" }).
+func (r *Response) viewOf() *ViewBuilder {
+	if r.ctx == nil {
+		return nil
+	}
+	return r.ctx.viewBuilder()
+}
+
+func (r *Response) head(name string, set func(*ViewBuilder)) (*Response, error) {
+	if err := r.editing(name); err != nil {
+		return r, err
+	}
+	if builder := r.viewOf(); builder != nil {
+		set(builder)
+	}
+	return r, nil
+}
+
+func (r *Response) Title(v value.Value) (*Response, error) {
+	return r.head("title", func(b *ViewBuilder) { b.Title(v) })
+}
+func (r *Response) Description(v value.Value) (*Response, error) {
+	return r.head("description", func(b *ViewBuilder) { b.Description(v) })
+}
+
+// Image is the page's head image (og:image, twitter:image), not an answer: bytes go out with
+// context.type("image/png").file(bytes).
+func (r *Response) Image(v value.Value) (*Response, error) {
+	return r.head("image", func(b *ViewBuilder) { b.Image(v) })
+}
+func (r *Response) Url(v value.Value) (*Response, error) {
+	return r.head("url", func(b *ViewBuilder) { b.Url(v) })
+}
+func (r *Response) Language(v value.Value) (*Response, error) {
+	return r.head("language", func(b *ViewBuilder) { b.Language(v) })
+}
+func (r *Response) Meta(v value.Value) (*Response, error) {
+	return r.head("meta", func(b *ViewBuilder) { b.Meta(v) })
+}
+func (r *Response) Bind(v value.Value) *Response {
+	if builder := r.viewOf(); builder != nil {
+		builder.Bind(v)
+	}
 	return r
+}
+func (r *Response) Jsonld(args ...value.Value) (*Response, error) {
+	return r.head("jsonld", func(b *ViewBuilder) { b.Jsonld(args...) })
 }
 
 // Header sets a response header. Request headers remain available through ctx.header(name).
-func (r *Response) Header(name, data string) *Response {
+func (r *Response) Header(name, data string) (*Response, error) {
+	if err := r.editing("header"); err != nil {
+		return r, err
+	}
+	r.setHeader(name, data)
+	return r, nil
+}
+
+// Headers sets the headers of an object, one Header each: context.headers({ "X-A": "1", … }).
+func (r *Response) Headers(headers value.Value) (*Response, error) {
+	if err := r.editing("headers"); err != nil {
+		return r, err
+	}
+	if !headers.IsMap() {
+		return r, fmt.Errorf("`.headers()` nhận một object tên → giá trị: `context.headers({ \"Cache-Control\": \"no-store\" })`")
+	}
+	for name, data := range headers.Map() {
+		r.setHeader(name, data.Text())
+	}
+	return r, nil
+}
+
+func (r *Response) setHeader(name, data string) {
 	name = http.CanonicalHeaderKey(strings.TrimSpace(name))
 	data = strings.TrimSpace(data)
 	if name == "" || strings.ContainsAny(name+data, "\r\n") {
-		return r
+		return
 	}
 	if r.headers == nil {
 		r.headers = make(map[string]string)
 	}
 	r.headers[name] = data
-	return r
 }
 
-func (r *Response) Headers() map[string]string {
+// headerMap is a copy of the headers set, for the engine (the cache keeps them).
+func (r *Response) headerMap() map[string]string {
 	out := make(map[string]string, len(r.headers))
 	for name, data := range r.headers {
 		out[name] = data
@@ -183,10 +359,32 @@ func (r *Response) SetCookie(name string, data value.Value, options ...value.Val
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   r.overHTTPS(), // Secure when the request came over https (KITWORK_ROUTER §6)
 	}
 	applyCookieOptions(cookie, options...)
 	r.cookies = append(r.cookies, cookie)
 	return r
+}
+
+// Cookie sets a cookie on the response and returns it, an edit before the answer:
+// response.cookie("seen", "1").json(data) — and response.cookie("seen", null) deletes it. Reading a
+// cookie is the request's (request.cookie("seen")).
+func (r *Response) Cookie(name string, args ...value.Value) (*Response, error) {
+	if err := r.editing("cookie"); err != nil {
+		return r, err
+	}
+	if len(args) == 0 {
+		return r, nil
+	}
+	if r.inUISite() {
+		if err := r.checkCookieOptions(name, args[1:]); err != nil {
+			return r, err
+		}
+	}
+	if args[0].K == value.Nil {
+		return r.DeleteCookie(name, args[1:]...), nil
+	}
+	return r.SetCookie(name, args[0], args[1:]...), nil
 }
 
 // DeleteCookie expires a cookie immediately while preserving path/domain matching options.
@@ -198,6 +396,7 @@ func (r *Response) DeleteCookie(name string, options ...value.Value) *Response {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 		Expires:  time.Unix(1, 0).UTC(),
+		Secure:   r.overHTTPS(),
 	}
 	applyCookieOptions(cookie, options...)
 	cookie.Value = ""
@@ -224,8 +423,17 @@ func applyCookieOptions(cookie *http.Cookie, options ...value.Value) {
 	if v, ok := opts["httpOnly"]; ok {
 		cookie.HttpOnly = v.Truthy()
 	}
-	if v, ok := opts["maxAge"]; ok && v.IsNumber() {
-		cookie.MaxAge = int(v.N)
+	if v, ok := opts["maxAge"]; ok {
+		if v.IsNumber() {
+			cookie.MaxAge = int(v.N) // seconds
+		} else if span, err := ParseDuration(v.Text()); err == nil && span > 0 {
+			cookie.MaxAge = int(span / time.Second) // a span: "30d"
+		}
+	}
+	if v, ok := opts["expires"]; ok {
+		if at, ok := cookieExpires(v); ok {
+			cookie.Expires = at
+		}
 	}
 	if v, ok := opts["sameSite"]; ok {
 		switch strings.ToLower(v.String()) {

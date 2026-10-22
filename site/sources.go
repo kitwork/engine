@@ -511,7 +511,7 @@ func fingerprintTemplateTree(root string) (sourceFingerprint, error) {
 		}
 		name := strings.ToLower(entry.Name())
 		// templates (*.html), Kitwork UI interface files (*.ui) and the logic of a component (*.work:
-		// cart.work, whose declared names cover the page's inside <box component="cart" />) all shape the rendered page
+		// shop-cart.work, whose declared names cover the page's inside <shop-cart />) all shape the rendered page
 		if entry.Type()&os.ModeSymlink != 0 || entry.IsDir() ||
 			!(strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".ui") || strings.HasSuffix(name, ".work")) {
 			return nil

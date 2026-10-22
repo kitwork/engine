@@ -309,10 +309,13 @@ its key in the same attribute. A prefix in front of an attribute makes it condit
 `disabled:` `scrolled:`): `scrolled:shadow="small"` on a pinned header is a shadow that appears
 once the page has scrolled.
 
-Three forms of markup, and only three: an element of Kitwork is written by its tag; a piece with no
-logic is a `.ui` file of the site, called by its file name as a tag and reading the context where it
-is called; a thing with logic is a component, written as `component="name"` on an element
-(`<box component="dropdown" as="$menu">`). Has logic, then component; only markup, then layout.
+Markup is only tags, and a tag's name says whose it is. A name without a dash is Kitwork's: an
+element (`<text>`, `<list>`, `<dialog>`) or one of its components (`<dropdown as="$menu">…</dropdown>`,
+`<tabs>`, `<appearance>`). A name with a dash is the site's: a `.ui` file with no logic is a layout,
+called by its file name as a tag and reading the context where it is called (`<product-card />`);
+give it logic with `component.define` and it is a component, called the same way
+(`<shop-cart as="$cart" />`). The tag of a component builds one element; there is no `component=`
+attribute.
 
 The folder's `router.work` sets what flows down to every page under it: `router.colors` (the
 palette as tokens, each a colour or a `{ light, dark }` pair), `router.fonts` (typefaces by role),

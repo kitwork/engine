@@ -43,7 +43,7 @@ import (
 //	  ctx.title(product.name);
 //	});
 func (f *FolderRouter) View(args ...value.Value) *FolderMethod {
-	m := f.declare("GET")
+	m := f.declare("router.view", "GET")
 	m.uiView = true
 	if len(args) > 0 && args[0].K == value.Func {
 		m.handle = lambdaOf(args[0])
@@ -851,10 +851,13 @@ func (u *uiSite) logWarnings(page *ui.Page, route string) {
 
 // routeLabel names the page of a route folder in a line of the terminal: "/", "/docs", or the
 // not-found page of one.
-func routeLabel(relative string, notFound bool) string {
+func routeLabel(relative string, kind string) string {
 	route := "/" + strings.Trim(relative, "/")
-	if notFound {
+	switch kind {
+	case uiNotFoundPage:
 		return "không tìm thấy ở " + route
+	case uiErrorPage:
+		return "trang lỗi ở " + route
 	}
 	return route
 }
@@ -926,12 +929,12 @@ func (u *uiSite) compileAll(routes []string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	var compiled []*uiCompiled
-	for _, notFound := range []bool{false, true} {
+	for _, kind := range []string{uiOwnPage, uiNotFoundPage, uiErrorPage} {
 		for _, relative := range routes {
-			if !notFound && !u.hasPage(relative) {
+			if kind == uiOwnPage && !u.hasPage(relative) {
 				continue
 			}
-			if page := u.compile(relative, notFound); page.err == nil && page.page != nil {
+			if page := u.compile(relative, kind); page.err == nil && page.page != nil {
 				compiled = append(compiled, page)
 			}
 		}
@@ -1112,13 +1115,21 @@ func (u *uiSite) dir(relative string) string {
 	return filepath.Join(u.site.Root, filepath.FromSlash(relative))
 }
 
-// page returns the compiled page of a route folder, or its not-found page, with its head. A page no
-// route listed (compileAll) is compiled on first use the same way. A nil page with no error means the
-// site has no notfound.ui for that place.
-func (u *uiSite) page(relative string, notFound bool) (*uiCompiled, error) {
+// The pages a route folder answers with: its own (content.ui), the nearest notfound.ui, the nearest
+// error.ui (20/10/2026: error(…) in router.work draws it with 500, as notFound() draws notfound.ui).
+const (
+	uiOwnPage      = ""
+	uiNotFoundPage = "notfound"
+	uiErrorPage    = "error"
+)
+
+// page returns the compiled page of a route folder, or its not-found or error page, with its head. A
+// page no route listed (compileAll) is compiled on first use the same way. A nil page with no error
+// means the site has no notfound.ui (or error.ui) for that place.
+func (u *uiSite) page(relative string, kind string) (*uiCompiled, error) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	compiled := u.compile(relative, notFound)
+	compiled := u.compile(relative, kind)
 	if compiled.err == nil && compiled.page != nil && compiled.head == "" {
 		compiled.head = u.buildHead(compiled)
 	}
@@ -1126,10 +1137,10 @@ func (u *uiSite) page(relative string, notFound bool) (*uiCompiled, error) {
 }
 
 // compile compiles a page once, without its head; u.mu is held.
-func (u *uiSite) compile(relative string, notFound bool) *uiCompiled {
+func (u *uiSite) compile(relative string, kind string) *uiCompiled {
 	key := relative
-	if notFound {
-		key += "\x00notfound"
+	if kind != uiOwnPage {
+		key += "\x00" + kind
 	}
 	if compiled, ok := u.pages[key]; ok {
 		return compiled
@@ -1141,12 +1152,14 @@ func (u *uiSite) compile(relative string, notFound bool) *uiCompiled {
 	switch {
 	case compiled.style.err != nil:
 		compiled.err = compiled.style.err
-	case notFound:
+	case kind == uiNotFoundPage:
 		compiled.page, compiled.err = u.siteFor(relative).CompileNotFound(u.dir(relative))
+	case kind == uiErrorPage:
+		compiled.page, compiled.err = u.siteFor(relative).CompileError(u.dir(relative))
 	default:
 		compiled.page, compiled.err = u.siteFor(relative).Compile(u.dir(relative))
 	}
-	u.logWarnings(compiled.page, routeLabel(relative, notFound))
+	u.logWarnings(compiled.page, routeLabel(relative, kind))
 	u.pages[key] = compiled
 	return compiled
 }
@@ -1163,11 +1176,16 @@ func (t *Tenant) folderHasUIPage(n *RouteNode) bool {
 
 // hasUINotFound reports whether a not-found reached at this folder has a notfound.ui to show.
 func (t *Tenant) hasUINotFound(n *RouteNode) bool {
+	return t.hasUIPage(n, uiNotFoundPage)
+}
+
+// hasUIPage reports whether this folder has a page of that kind to show, its own or the nearest above.
+func (t *Tenant) hasUIPage(n *RouteNode, kind string) bool {
 	plan := t.renderPlan()
 	if n == nil || plan == nil || plan.ui == nil {
 		return false
 	}
-	compiled, err := plan.ui.page(n.relPath(), true)
+	compiled, err := plan.ui.page(n.relPath(), kind)
 	return compiled.page != nil || err != nil
 }
 
@@ -1181,7 +1199,11 @@ func (t *Tenant) serveUIView(vm *runtime.VM, leaf *FolderRouter, method *FolderM
 		bc := leaf.bytecode
 		vm.FastResetPrepared(bc.Program)
 		started := time.Now()
-		result, locals := vm.ExecuteLambdaScope(method.handle, ctxObj.arguments(method.handle))
+		var result value.Value
+		var locals map[string]value.Value
+		ctxObj.Response().runProgram(func() {
+			result, locals = vm.ExecuteLambdaScope(method.handle, ctxObj.arguments(method.handle))
+		})
 		t.recordVMExecution(bc.Program, vm, result, time.Since(started))
 		if result.K == value.Invalid {
 			// the view failed: the page answers that, as it answers a compile error (respondUI), and never
@@ -1222,9 +1244,16 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		return
 	}
 	notFound := reqRouter.isNotfound
+	kind := uiOwnPage
 	status := http.StatusOK
 	if notFound {
+		kind = uiNotFoundPage
 		status = http.StatusNotFound
+	} else if reqRouter.response.uiPage == uiErrorPage {
+		// error(…): the nearest error.ui with 500, reading the message the handler gave (answerUIPage)
+		kind = uiErrorPage
+		status = http.StatusInternalServerError
+		scope = map[string]any{"message": reqRouter.response.uiMessage}
 	} else if code := reqRouter.response.Code(); code >= 100 && code <= 999 {
 		// the status the view set with ctx.status(503) (14/10/2026: until then the page always
 		// answered 200), so a view that read a failure with safe(() => …) can say so
@@ -1243,7 +1272,8 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		vb.rendered = true // this page is the response; the template view must not render too
 	}
 
-	compiled, err := plan.ui.page(node.relPath(), notFound)
+	reqRouter.uiAnswered = true
+	compiled, err := plan.ui.page(node.relPath(), kind)
 	if err != nil {
 		// file:line:column and what is wrong while developing; in production the status and the request id
 		t.recordFailure(reqRouter, "page", err)
@@ -1251,6 +1281,10 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		return
 	}
 	if compiled.page == nil {
+		if kind == uiErrorPage {
+			reqRouter.response.Text(value.New(errorText(reqRouter.response.uiMessage)), http.StatusInternalServerError)
+			return
+		}
 		reqRouter.response.Text(value.New("Not Found"), http.StatusNotFound)
 		return
 	}
@@ -1260,6 +1294,7 @@ func (t *Tenant) respondUI(reqRouter *Router, node *RouteNode, scope map[string]
 		Path:        r.URL.Path,
 		Origin:      requestOrigin(r),
 		Scope:       scope,
+		Method:      r.Method,
 		Title:       metaText(meta, "title"),
 		Description: metaText(meta, "description"),
 		Language:    metaText(meta, "language"),
@@ -1304,11 +1339,7 @@ func metaText(meta map[string]value.Value, key string) string {
 }
 
 func requestOrigin(r *http.Request) string {
-	scheme := "http"
-	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	return scheme + "://" + r.Host
+	return requestScheme(r) + "://" + r.Host
 }
 
 // viewScope is what the page reads: the names the view declared, over the names its file declared or

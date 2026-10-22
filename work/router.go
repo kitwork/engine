@@ -67,6 +67,9 @@ type Router struct {
 	responseWriter http.ResponseWriter
 
 	params map[string]string
+	// numberParams are the params of a [number] folder in a Kitwork UI site: request.params gives a
+	// number (KITWORK_ROUTER §2)
+	numberParams map[string]bool
 	err    error // Biến lưu lỗi để truyền giữa các công đoạn
 	// failure is the runtime failure behind err when a run ended in one (failed), what a .error()
 	// handler's error parameter describes (errorObject).
@@ -101,6 +104,11 @@ type Router struct {
 	// viewBuilder is the DEFERRED view result for a filesystem-routed request (see viewbuilder.go).
 	// Handlers accumulate binding + meta on it; the tree lifecycle renders it once at the end.
 	viewBuilder *ViewBuilder
+	// bodyTooLarge says the request's body went past its ceiling: the failure it made answers 413
+	bodyTooLarge bool
+	// uiAnswered says a Kitwork UI page answered the request (respondUI): its own, its not-found or its
+	// error page, so the end of the request does not draw another (answerUIPage)
+	uiAnswered bool
 	// chainMeta is the meta declared via router.meta() merged down the folder chain (root→leaf),
 	// the inherited base every page's $.meta starts from.
 	chainMeta map[string]value.Value
@@ -163,6 +171,10 @@ func (r *Router) responder(w http.ResponseWriter) {
 	}
 	r.response.writeCookies(w)
 	r.response.writeHeaders(w)
+	if kind == "failure" && r.bodyTooLarge {
+		// a body past its ceiling (request_limits.go): 413, whatever failed reading it
+		r.response.code = http.StatusRequestEntityTooLarge
+	}
 	if kind == "failure" {
 		r.writeFailure(w, r.response.Code())
 		return
@@ -196,7 +208,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 		}
 		http.Redirect(w, request, data.String(), code)
 	case "text":
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Type", r.response.mediaType("text/plain; charset=utf-8"))
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
 	case "file":
@@ -221,16 +233,16 @@ func (r *Router) responder(w http.ResponseWriter) {
 		prefix := strings.TrimSuffix(r.Path, "*")
 		http.StripPrefix(prefix, http.FileServer(http.Dir(dirPath))).ServeHTTP(w, request)
 	case "bytes":
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Type", r.response.mediaType("application/octet-stream"))
 		w.WriteHeader(r.response.Code())
 		w.Write(data.Bytes())
 	case "image":
 		// TODO: Tự động nhận diện mime-type từ bytes
-		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Type", r.response.mediaType("image/png"))
 		w.WriteHeader(r.response.Code())
 		w.Write(data.Bytes())
 	case "svg":
-		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+		w.Header().Set("Content-Type", r.response.mediaType("image/svg+xml; charset=utf-8"))
 		w.WriteHeader(r.response.Code())
 		w.Write([]byte(data.String()))
 	case "typed":
@@ -240,7 +252,7 @@ func (r *Router) responder(w http.ResponseWriter) {
 			w.Write(r.response.toBytes())
 		}
 	case "css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Content-Type", r.response.mediaType("text/css; charset=utf-8"))
 		w.WriteHeader(r.response.Code())
 		w.Write(r.response.toBytes())
 	case "json":
@@ -258,11 +270,11 @@ func (r *Router) responder(w http.ResponseWriter) {
 			r.writeFailure(w, http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Type", r.response.mediaType("application/json; charset=utf-8"))
 		w.WriteHeader(r.response.Code())
 		w.Write(b)
 	case "html":
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", r.response.mediaType("text/html; charset=utf-8"))
 		html := r.response.toBytes()
 		allowThemePrepaint(w.Header(), html)
 		w.WriteHeader(r.response.Code())

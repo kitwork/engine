@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/value"
 )
 
@@ -16,29 +17,62 @@ type Context struct {
 func (c *Context) router() *Router { return c.request.router }
 func (c *Context) tenant() *Tenant { return c.router().tenant }
 
-func (c *Context) Request() *Request   { return c.request }
-func (c *Context) Response() *Response { return c.router().response }
+func (c *Context) Request() *Request { return c.request }
+func (c *Context) Response() *Response {
+	response := c.router().response
+	if response.ctx == nil {
+		response.ctx = c // its head methods (.title(), .image()) write to this request's view
+	}
+	return response
+}
 
 func (c *Context) Req() *Request  { return c.Request() }
 func (c *Context) Res() *Response { return c.Response() }
 
 // --- SHORTCUTS CHO JAVASCRIPT (Fluid API) ---
 
-func (c *Context) JSON(v value.Value, code ...int) { c.Response().JSON(v, code...) }
-func (c *Context) HTML(v value.Value, code ...int) { c.Response().HTML(v, code...) }
-func (c *Context) Text(v value.Value, code ...int) { c.Response().Text(v, code...) }
-func (c *Context) CSS(v value.Value, code ...int)  { c.Response().CSS(v, code...) }
-func (c *Context) Status(code int) *Response       { return c.Response().Status(code) }
-func (c *Context) Type(mediaType string) *Response { return c.Response().Type(mediaType) }
-func (c *Context) Redirect(url string, code ...int) {
-	c.Response().Redirect(value.New(url), code...)
+// The shortcuts are the request's one response's: context.json(data) is context.response.json(data),
+// context.status(201) is context.response.status(201), the same response and the same order
+// (response_order.go).
+func (c *Context) JSON(v value.Value, options ...any) (*Response, error) {
+	return c.Response().JSON(v, options...)
 }
-func (c *Context) File(path string, code ...int) {
-	c.Response().File(c.tenant().resolve(path), code...)
+func (c *Context) HTML(v value.Value, options ...any) (*Response, error) {
+	return c.Response().HTML(v, options...)
+}
+func (c *Context) Text(v value.Value, options ...any) (*Response, error) {
+	return c.Response().Text(v, options...)
+}
+func (c *Context) SVG(v value.Value, options ...any) (*Response, error) {
+	return c.Response().SVG(v, options...)
+}
+func (c *Context) CSS(v value.Value, options ...any) *Response {
+	return c.Response().CSS(v, options...)
+}
+func (c *Context) Status(code int) (*Response, error) { return c.Response().Status(code) }
+func (c *Context) Redirect(url string, options ...any) (*Response, error) {
+	return c.Response().Redirect(value.New(url), options...)
 }
 
-func (c *Context) Error(v value.Value) {
+// File answers with bytes (context.type("image/png").file(bytes)), or, on a template site, with a
+// file of the app by its path, resolved in the app.
+func (c *Context) File(data value.Value, options ...any) (*Response, error) {
+	if data.K == value.Bytes {
+		return c.Response().File(data, options...)
+	}
+	return c.Response().File(value.New(c.tenant().resolve(data.Text())), options...)
+}
+
+// Error answers the request with an error of the site's: its .error() hook, or in router.work the
+// nearest error.ui with 500 (answerUIPage).
+func (c *Context) Error(v value.Value) (*Response, error) {
+	response := c.Response()
+	if err := response.answering("error"); err != nil {
+		return response, err
+	}
 	c.request.router.err = fmt.Errorf("%s", v.String())
+	response.uiPage, response.uiMessage = uiErrorPage, errorMessage(v)
+	return response, nil
 }
 
 func (c *Context) Params(key string) value.Value { return c.request.Params(key) }
@@ -53,11 +87,27 @@ func (c *Context) JSONBody() value.Value { return c.request.JSON() }
 func (c *Context) JSONBodyLimit(limit int) value.Value {
 	return c.request.JSONLimit(limit)
 }
-func (c *Context) Header(k string) value.Value { return c.request.Header(k) }
-func (c *Context) Headers() value.Value        { return c.request.Headers() }
-func (c *Context) UserAgent() value.Value      { return c.request.UserAgent() }
-func (c *Context) IsAJAX() value.Value         { return c.request.IsAJAX() }
-func (c *Context) IsJSON() value.Value         { return c.request.IsJSON() }
+
+// Header reads a header of the request (context.header("Authorization")), or, with a value, sets one
+// on the response, an edit before the answer (context.header("X-A", "1").json(data)).
+func (c *Context) Header(k string, v ...value.Value) (any, error) {
+	if len(v) == 0 {
+		return c.request.Header(k), nil
+	}
+	return c.Response().Header(k, v[0].Text())
+}
+
+// Headers reads the request's headers, or, given an object, sets each on the response, an edit
+// before the answer (context.headers({ "Cache-Control": "no-store" }).json(data)).
+func (c *Context) Headers(v ...value.Value) (any, error) {
+	if len(v) == 0 {
+		return c.request.Headers(), nil
+	}
+	return c.Response().Headers(v[0])
+}
+func (c *Context) UserAgent() value.Value { return c.request.UserAgent() }
+func (c *Context) IsAJAX() value.Value    { return c.request.IsAJAX() }
+func (c *Context) IsJSON() value.Value    { return c.request.IsJSON() }
 
 // Cookie is the context-level cookie shorthand:
 //
@@ -67,18 +117,25 @@ func (c *Context) IsJSON() value.Value         { return c.request.IsJSON() }
 //	ctx.cookie("name", null, options)  delete
 //
 // Request.Cookie remains read-only. SetCookie and DeleteCookie stay as explicit aliases.
-func (c *Context) Cookie(name string, args ...value.Value) value.Value {
+//
+// In router.work setting one is an edit of the response, before the answer, and gives the response
+// to go on with: context.cookie("seen", "1").json(data).
+func (c *Context) Cookie(name string, args ...value.Value) (any, error) {
 	if len(args) == 0 {
-		return c.request.Cookie(name)
+		return c.request.Cookie(name), nil
+	}
+	response := c.Response()
+	if response.inUISite() {
+		return response.Cookie(name, args...)
 	}
 	data := args[0]
 	options := args[1:]
 	if data.K == value.Nil {
-		c.Response().DeleteCookie(name, options...)
-		return value.NewNil()
+		response.DeleteCookie(name, options...)
+		return value.NewNil(), nil
 	}
-	c.Response().SetCookie(name, data, options...)
-	return data
+	response.SetCookie(name, data, options...)
+	return data, nil
 }
 
 func (c *Context) Cookies() value.Value { return c.request.Cookies() }
@@ -106,6 +163,11 @@ func (c *Context) arguments(lambda *value.Lambda) []value.Value {
 	args := make([]value.Value, 0, len(lambda.Params))
 
 	for _, name := range lambda.Params {
+		if compiler.DestructuredEntries(name) != nil {
+			// ({ request, response }) => …: the parameter is the context, taken apart in the body
+			args = append(args, ctxVal)
+			continue
+		}
 		lower := strings.ToLower(name)
 		switch lower {
 		case "ctx", "context":

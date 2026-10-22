@@ -1,9 +1,11 @@
 package compiler
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/kitwork/engine/value"
@@ -76,6 +78,7 @@ type Parser struct {
 	// Module metadata thu thập khi parse (cho bundler native ở package script).
 	exports    []string // tên export qua `export const/function` / `export { }`
 	hasDefault bool     // có `export default …` (đã hạ về const DefaultExportName)
+	defaultAt  Token    // chữ default của export default đầu tiên: lần thứ hai báo dòng của cả hai
 	breakDepth int      // switch/loop nesting; function bodies reset this boundary
 	loopDepth  int      // loop nesting, what continue needs; function bodies reset it too
 
@@ -767,6 +770,40 @@ func (p *Parser) parseImportStatement() Statement {
 		return nil
 	}
 
+	// Namespace:  import * as router from "kitwork/router"  →  const router = kitwork().router
+	// The name is the object a default import of the same specifier gives (19/10/2026: the spelling of
+	// router.work); the bare "kitwork" gives kitwork() itself.
+	if p.peekTokenIs(Star) {
+		p.nextToken() // cur: *
+		if !isContextualToken(p.peekToken, "as") {
+			p.addErrorAt(p.peekToken, "import * cần một tên: import * as router from \"kitwork/router\"")
+			return nil
+		}
+		p.nextToken() // cur: as
+		if word, reserved := p.reservedWord(p.peekToken); reserved {
+			p.reservedImportError(p.peekToken, word, "import * as tên_khác from …")
+			return nil
+		}
+		if !p.expectPeek(Ident) {
+			return nil
+		}
+		name := &Identifier{Token: p.curToken, Value: p.curToken.Value.Text()}
+		spec, ok := p.parseFromSpecifier()
+		if !ok {
+			return nil
+		}
+		if !isKitworkSpecifier(spec) {
+			p.addErrorAt(importTok, fmt.Sprintf("import * as %s from %q: import * chỉ dùng với module của Kitwork (\"kitwork/router\"); module của site thì gọi tên từng thứ cần: import { a, b } from %q", name.Value, spec, spec))
+			return nil
+		}
+		return &VarStatement{
+			Token:        constToken(importTok),
+			Names:        []*Identifier{name},
+			DestructMode: DestructNone,
+			Value:        p.kitworkModule(spec, importTok),
+		}
+	}
+
 	// Default:  import name from "..."
 	if word, reserved := p.reservedWord(p.peekToken); reserved {
 		p.reservedImportError(p.peekToken, word, "import tên_khác from …")
@@ -818,11 +855,19 @@ func (p *Parser) parseExportStatement() Statement {
 	// (giữ side-effect; bundler đưa __kw_default vào object export dưới khóa "default")
 	if p.peekTokenIs(Ident) && p.peekToken.Value.Text() == "default" {
 		p.nextToken() // cur: default
+		defaultTok := p.curToken
+		if p.hasDefault {
+			// said here, by the author's words: left to the resolver it is a second const of the
+			// internal name with no place (19/10/2026)
+			p.addErrorAt(defaultTok, fmt.Sprintf("một file chỉ có một export default: export default thứ hai ở dòng %d, lần đầu ở dòng %d", p.lineOf(defaultTok), p.lineOf(p.defaultAt)))
+			return nil
+		}
 		p.nextToken() // cur: start of expression
 		p.hasDefault = true
+		p.defaultAt = defaultTok
 		return &VarStatement{
-			Token:        constToken(),
-			Names:        []*Identifier{{Token: Token{Kind: Ident, Value: value.NewString(DefaultExportName)}, Value: DefaultExportName}},
+			Token:        constToken(defaultTok),
+			Names:        []*Identifier{{Token: tokenWithValue(defaultTok, Ident, value.NewString(DefaultExportName)), Value: DefaultExportName}},
 			DestructMode: DestructNone,
 			Value:        p.parseExpression(LOWEST),
 		}
@@ -1985,7 +2030,17 @@ func (p *Parser) parseGroupedExpression() Expression {
 	// Nếu tiếp sau là =>, biến list này thành ParameterList
 	if p.peekTokenIs(FatArrow) {
 		params := make([]*Identifier, len(exps))
+		var prelude []Statement
 		for i, e := range exps {
+			if object, ok := e.(*ObjectLiteral); ok {
+				parameter, statement := p.objectParameter(object)
+				if parameter == nil {
+					return &ParameterList{Token: p.curToken}
+				}
+				params[i] = parameter
+				prelude = append(prelude, statement)
+				continue
+			}
 			id, reserved := p.parameterName(e)
 			if reserved {
 				return &ParameterList{Token: p.curToken}
@@ -1998,7 +2053,7 @@ func (p *Parser) parseGroupedExpression() Expression {
 			}
 			params[i] = id
 		}
-		return &ParameterList{Token: p.curToken, Parameters: params}
+		return &ParameterList{Token: p.curToken, Parameters: params, Prelude: prelude}
 	}
 
 	if len(exps) == 0 {
@@ -2018,6 +2073,29 @@ func (p *Parser) parseGroupedExpression() Expression {
 		p.grouped[exps[0]] = true
 	}
 	return exps[0]
+}
+
+// objectParameter lowers a destructured parameter, ({ request, response }) => …, the way JavaScript
+// binds it: one parameter, then its names read off it, as (o) => { let { request, response } = o; … }
+// (19/10/2026). The parameter's name is the pattern as written, a name no source can declare, so it
+// never meets one of the body's; a host that passes arguments by name (Context.arguments) reads it as
+// the whole value, and the router reads which names were taken (DestructuredNames).
+func (p *Parser) objectParameter(object *ObjectLiteral) (*Identifier, Statement) {
+	pattern, ok := p.assignmentPattern(object)
+	if !ok || pattern == nil {
+		return nil, nil
+	}
+	name := patternParameterName(pattern)
+	at := tokenWithValue(object.Token, Ident, value.NewString(name))
+	at.Position = startPosition(object)
+	parameter := &Identifier{Token: at, Value: name}
+	return parameter, &VarStatement{
+		Token:        tokenWithValue(at, Let, value.NewString("let")),
+		Names:        pattern.Names(),
+		DestructMode: DestructObject,
+		Pattern:      pattern,
+		Value:        &Identifier{Token: at, Value: parameter.Value},
+	}
 }
 
 // patternParameterError reports a destructuring parameter, ({ id }) => … or ([a, b]) => …, which
@@ -2058,8 +2136,10 @@ func (p *Parser) parseArrowFunction(left Expression) Expression {
 	p.nextToken()
 
 	var params []*Identifier
+	var prelude []Statement
 	if pl, ok := left.(*ParameterList); ok {
 		params = pl.Parameters
+		prelude = pl.Prelude
 	} else if id, reserved := p.parameterName(left); reserved {
 		return nil
 	} else if id != nil {
@@ -2071,20 +2151,22 @@ func (p *Parser) parseArrowFunction(left Expression) Expression {
 
 	// Xử lý block { } hoặc single expression
 	if p.curTokenIs(LeftBrace) {
+		body := p.parseFunctionBlock()
+		if body != nil && len(prelude) > 0 {
+			body.Statements = append(append([]Statement{}, prelude...), body.Statements...)
+		}
 		return &FunctionLiteral{
 			Token:      tok,
 			Parameters: params,
-			Body:       p.parseFunctionBlock(),
+			Body:       body,
 		}
 	}
 
 	// Single expression body: a => a * 2 -> { return a * 2 }
 	body := &BlockStatement{
-		Statements: []Statement{
-			&ReturnStatement{
-				ReturnValue: p.parseExpression(LOWEST),
-			},
-		},
+		Statements: append(append([]Statement{}, prelude...), &ReturnStatement{
+			ReturnValue: p.parseExpression(LOWEST),
+		}),
 	}
 
 	return &FunctionLiteral{
@@ -2197,6 +2279,15 @@ func (p *Parser) location(tok Token) string {
 		where = tok.Source + ":" + where
 	}
 	return where
+}
+
+// lineOf is the line tok starts on, counted from 1; 0 when the parser has no source text.
+func (p *Parser) lineOf(tok Token) int {
+	pos := int(tok.Position)
+	if p.text == nil || pos < 0 || pos > len(p.text) {
+		return 0
+	}
+	return bytes.Count(p.text[:pos], []byte{'\n'}) + 1
 }
 
 /* =============================================================================
@@ -2409,4 +2500,127 @@ func (p *Parser) parseFunctionExpression() Expression {
 		Parameters: params,
 		Body:       body,
 	}
+}
+
+// patternParameterName spells a pattern as the name of the parameter it lowers to: its keys and
+// targets, nested ones in place, without the defaults (their text is not the parameter's), a key that
+// is not a plain word in quotes, so DestructuredEntries reads it back whole.
+func patternParameterName(bp *BindingPattern) string {
+	open, close := "{ ", " }"
+	if bp.Array {
+		open, close = "[ ", " ]"
+	}
+	parts := make([]string, 0, len(bp.Elements))
+	for _, element := range bp.Elements {
+		target := ""
+		if element.Pattern != nil {
+			target = patternParameterName(element.Pattern)
+		} else if element.Name != nil {
+			target = element.Name.Value
+		}
+		if bp.Array {
+			parts = append(parts, target)
+			continue
+		}
+		key := element.Key
+		if !isPlainWord(key) {
+			key = strconv.Quote(key)
+		}
+		if element.Name != nil && element.Name.Value == element.Key {
+			parts = append(parts, key)
+		} else {
+			parts = append(parts, key+": "+target)
+		}
+	}
+	return open + strings.Join(parts, ", ") + close
+}
+
+func isPlainWord(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, char := range s {
+		if char == '_' || char == '$' || unicode.IsLetter(char) || (i > 0 && unicode.IsDigit(char)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// DestructuredEntry is one top-level name of a destructured parameter: the key it reads, and whether
+// it is taken apart further ({ request: { body } }).
+type DestructuredEntry struct {
+	Key    string
+	Nested bool
+	Target string // what the key is taken into: its name, or the nested pattern ("{ body }")
+}
+
+// DestructuredEntries reads back the pattern a destructured parameter's name spells (objectParameter):
+// its top-level keys in order; nil when the name is a plain one.
+func DestructuredEntries(parameter string) []DestructuredEntry {
+	if !strings.HasPrefix(parameter, "{ ") || !strings.HasSuffix(parameter, " }") {
+		return nil
+	}
+	inner := parameter[2 : len(parameter)-2]
+	var entries []DestructuredEntry
+	depth, start := 0, 0
+	flush := func(part string) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return
+		}
+		key, rest := part, ""
+		if strings.HasPrefix(part, "\"") {
+			if quoted, err := strconv.QuotedPrefix(part); err == nil {
+				key, rest = quoted, strings.TrimSpace(part[len(quoted):])
+				key, _ = strconv.Unquote(key)
+			}
+		} else if cut := strings.Index(part, ":"); cut >= 0 {
+			key, rest = strings.TrimSpace(part[:cut]), strings.TrimSpace(part[cut:])
+		}
+		target := ""
+		if strings.HasPrefix(rest, ":") {
+			target = strings.TrimSpace(rest[1:])
+		}
+		nested := strings.HasPrefix(target, "{") || strings.HasPrefix(target, "[")
+		if target == "" {
+			target = key
+		}
+		entries = append(entries, DestructuredEntry{Key: key, Nested: nested, Target: target})
+	}
+	var quote rune
+	for i, char := range inner {
+		if quote != 0 {
+			if char == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch char {
+		case '"', '\'', '`':
+			quote = char
+		case '{', '[', '(':
+			depth++
+		case '}', ']', ')':
+			depth--
+		case ',':
+			if depth == 0 {
+				flush(inner[start:i])
+				start = i + 1
+			}
+		}
+	}
+	flush(inner[start:])
+	return entries
+}
+
+// DestructuredNames is the keys of DestructuredEntries.
+func DestructuredNames(parameter string) []string {
+	entries := DestructuredEntries(parameter)
+	names := make([]string, len(entries))
+	for i, entry := range entries {
+		names[i] = entry.Key
+	}
+	return names
 }

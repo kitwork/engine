@@ -65,7 +65,8 @@ func (t *Tenant) executeGeneratedOutput(
 		if err != nil {
 			return err
 		}
-		response := ctx.Type(publishing.RSSMediaType)
+		response := ctx.Response()
+		response.setType(publishing.RSSMediaType)
 		response.Header("ETag", publishing.ETag(document))
 		if modified := publishing.LastModified(data); !modified.IsZero() {
 			response.Header("Last-Modified", modified.Format(http.TimeFormat))
@@ -76,7 +77,8 @@ func (t *Tenant) executeGeneratedOutput(
 		if err != nil {
 			return err
 		}
-		response := ctx.Type(publishing.SitemapMediaType)
+		response := ctx.Response()
+		response.setType(publishing.SitemapMediaType)
 		response.Header("ETag", publishing.ETag(document))
 		if modified := publishing.LastModified(data); !modified.IsZero() {
 			response.Header("Last-Modified", modified.Format(http.TimeFormat))
@@ -84,12 +86,14 @@ func (t *Tenant) executeGeneratedOutput(
 		response.Send(value.New(document))
 	case "robots":
 		document := publishing.Robots(data, base)
-		response := ctx.Type(publishing.RobotsMediaType)
+		response := ctx.Response()
+		response.setType(publishing.RobotsMediaType)
 		response.Header("ETag", publishing.ETag(document))
 		response.Send(value.New(document))
 	case "llms":
 		document := publishing.Llms(data, base)
-		response := ctx.Type(publishing.LlmsMediaType)
+		response := ctx.Response()
+		response.setType(publishing.LlmsMediaType)
 		response.Header("ETag", publishing.ETag(document))
 		response.Send(value.New(document))
 	case "manifest":
@@ -97,7 +101,8 @@ func (t *Tenant) executeGeneratedOutput(
 		if err != nil {
 			return err
 		}
-		response := ctx.Type(publishing.ManifestMediaType)
+		response := ctx.Response()
+		response.setType(publishing.ManifestMediaType)
 		response.Header("ETag", publishing.ETag(document))
 		response.Send(value.New(document))
 	default:

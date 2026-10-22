@@ -108,7 +108,6 @@ func TestDestructuringNotYetSaysHowToWriteIt(t *testing.T) {
 		{"const o = {}\nconst { \"a-b\" } = o", "<source>:2:9: khoá chuỗi cần một tên đích: { \"a-b\": tên }"},
 		{"const o = {}\nconst { a b } = o", "<source>:2:11: các phần của mẫu tách ngăn bằng dấu phẩy"},
 		{"const o = {}\nconst { default } = o", "<source>:2:9: default là từ khoá của ngôn ngữ, không làm tên biến được"},
-		{"const f = ({ id }) => id", "<source>:1:12: Kitwork chưa có tách object trong tham số; nhận cả giá trị rồi tách trong thân"},
 		{"const f = ([a, b]) => a", "<source>:1:13: Kitwork chưa có tách mảng trong tham số"},
 		{"function f({ id }) { return id }", "<source>:1:12: Kitwork chưa có tách object trong tham số"},
 		{"const f = (a = 1) => a", "<source>:1:12: Kitwork chưa có giá trị mặc định cho tham số ((a = 1))"},
