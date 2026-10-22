@@ -38,7 +38,7 @@ func TestBackdropThatFadesKeepsTheCanvas(t *testing.T) {
 	}
 }
 
-// kitworkExample is the palette of the kitwork example site (docs/examples/kitwork, router.work): its
+// kitworkExample is the palette of the kitwork example site (apps/kitwork, router.work): its
 // brand, #f5225f, reaches 3:1 on its canvas and its paper, so its focus ring is the brand.
 func kitworkExample(t *testing.T) *Palette {
 	t.Helper()

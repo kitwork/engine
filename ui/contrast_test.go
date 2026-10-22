@@ -70,7 +70,7 @@ func darkPalette(t *testing.T, chain ...map[string]stylesheet.Color) *stylesheet
 }
 
 // kitworkExampleColors is the kitwork example's router.colors as it is today
-// (docs/examples/kitwork/kitwork.localhost/router.work, canvas #f6f9fc), with its four accents.
+// (apps/kitwork/kitwork.localhost/router.work, canvas #f6f9fc), with its four accents.
 func kitworkExampleColors(t *testing.T) *stylesheet.Palette {
 	t.Helper()
 	return darkPalette(t, map[string]stylesheet.Color{
@@ -579,7 +579,7 @@ func TestContrastAdviceItCanFollow(t *testing.T) {
 		`chữ ink mặc định của trang trên nền ink chỉ 1.00:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Chữ này engine tô theo router.colors: viết color="paper" (15.54:1 sáng).`)
 	contrastFails(t, nil, content(`<content><section background="ink"><text color="ink-30">x</text></section></content>`), `color=`,
 		`color="ink-30" trên nền ink chỉ 2.36:1 ở chế độ sáng; chữ thường cần 4.5:1 (chữ lớn 3:1). Dùng color="paper" (15.54:1 sáng).`)
-	kitwork := darkPalette(t, map[string]stylesheet.Color{ // docs/examples/kitwork/kitwork.localhost/router.work
+	kitwork := darkPalette(t, map[string]stylesheet.Color{ // apps/kitwork/kitwork.localhost/router.work
 		"brand": {Light: "#f5225f", Dark: "#ff6b6b"}, "canvas": {Light: "#ffeaec", Dark: "#16161e"},
 		"paper": {Light: "#ffffff", Dark: "#1e2030"}, "panel": {Light: "#f7eff1", Dark: "#181a26"},
 		"line": {Light: "#e5e3e5", Dark: "#2c3145"}, "ink": {Light: "#242442", Dark: "#c0caf5"},

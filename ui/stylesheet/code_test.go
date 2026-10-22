@@ -14,7 +14,7 @@ import (
 // brand — the five the code colours were measured on (operators of 13/10/2026).
 func codePalettes(t *testing.T) map[string]*Palette {
 	t.Helper()
-	// docs/examples/kitwork/kitwork.localhost/router.work
+	// apps/kitwork/kitwork.localhost/router.work
 	kitwork := map[string]Color{
 		"brand": {Light: "#f5225f", Dark: "#ff6b6b"}, "canvas": {Light: "#f6f9fc", Dark: "#16161e"},
 		"paper": {Light: "#ffffff", Dark: "#1e2030"}, "panel": {Light: "#eff3f8", Dark: "#181a26"},

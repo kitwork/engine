@@ -9,7 +9,7 @@ import (
 )
 
 // operatorPalettes are the palettes the operators are measured on: Kit Design's default (dark look
-// derived), the kitwork example's (docs/examples/kitwork/kitwork.localhost/router.work, 13/10/2026),
+// derived), the kitwork example's (apps/kitwork/kitwork.localhost/router.work, 13/10/2026),
 // the quancaphe conformance fixture's site root (examplePalette) and its /quan-ly branch.
 func operatorPalettes(t *testing.T) []struct {
 	name    string

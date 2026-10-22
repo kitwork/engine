@@ -15,9 +15,10 @@ import (
 	"github.com/kitwork/engine/ui/stylesheet"
 )
 
-// examplesRoot is the Kitwork UI examples beside the engine (docs/examples of the repository the
-// engine lives in): a checkout of the engine alone has none, and the test then has nothing to read.
-const examplesRoot = "../../docs/examples"
+// examplesRoot is the apps beside the engine (apps/ of the repository the engine lives in, where the
+// kitwork example lives since 22/10/2026): a checkout of the engine alone has none, and the test then
+// has nothing to read.
+const examplesRoot = "../../apps"
 
 // tailwindClass matches the words of Tailwind's dialect a .ui page never carries: its width
 // prefixes, its utilities, its arbitrary values and its bare display words. A .ui class is the
@@ -81,7 +82,7 @@ func TestExampleSitesCarryNoTailwindWord(t *testing.T) {
 	saved := AllowLocal
 	AllowLocal = true
 	t.Cleanup(func() { AllowLocal = saved })
-	// the kitwork site at least (the coffee shop left docs/examples on 13/10/2026 and lives on as the
+	// the kitwork site at least (the coffee shop left the examples on 13/10/2026 and lives on as the
 	// conformance fixture): a missing site fails here instead of passing with nothing read
 	hosts, _ := filepath.Glob(filepath.Join(root, "*", "*.localhost"))
 	kitwork := false

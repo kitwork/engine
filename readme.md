@@ -604,7 +604,7 @@ rotation and screenshots.
 
 The Kitwork repository holds the `.ui` specification (`docs/KITWORK_UI.md`), the type definitions
 for editors (`kitwork.d.ts`), the task-specific guides under `.claude/skills/`, an example site
-written in `.ui` (`docs/examples/kitwork`), and the author's sites. The ideas behind the engine,
+written in `.ui` (`apps/kitwork`), and the author's sites. The ideas behind the engine,
 thirty of them in reading order, are published at huynhnhanquoc.com/concepts.
 
 ## License
