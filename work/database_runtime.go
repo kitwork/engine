@@ -50,18 +50,27 @@ func (t *Tenant) openDatabase(config *database.Config) (*sql.DB, error) {
 	lockPath, guarded := lockableDBPath(config)
 	// A local file backend is single-process: take the single-instance lock BEFORE opening it, so a
 	// second kitwork process fails loudly here instead of silently diverging (see dblock.go). Wrapped
-	// inside the connector so it runs exactly once per file (manager.Open calls it only on a cache miss).
+	// inside the connector so it runs exactly once per file and app (manager.Open calls it only on a cache
+	// miss, under its lock), and a connection that does not open gives its hold back.
+	acquired := false
 	if guarded {
 		connect = func() (*sql.DB, error) {
 			if err := acquireDBLock(lockPath); err != nil {
 				return nil, err
 			}
-			return config.Connect()
+			pool, err := config.Connect()
+			if err != nil {
+				releaseDBLock(lockPath)
+				return nil, err
+			}
+			acquired = true
+			return pool, nil
 		}
 	}
 	conn, err := manager.Open(key, connect)
-	if err == nil && guarded {
-		// Release the lock when this app's connections are torn down (Runtime.Close / hot-reload).
+	if acquired {
+		// One release for the one acquire, when this app's connections are torn down (Runtime.Close /
+		// hot-reload); another app on the same file keeps its own hold.
 		manager.SetCleanup(key, func() { releaseDBLock(lockPath) })
 	}
 	return conn, err

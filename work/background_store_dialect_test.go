@@ -52,3 +52,11 @@ func TestBackgroundStoresFollowSystemDialect(t *testing.T) {
 		t.Errorf("cron store for a Postgres system database is %q, want \"postgres\"", got)
 	}
 }
+
+// tenantFor is a tenant of the app identity, with nothing else set up.
+func tenantFor(identity string) *Tenant {
+	return &Tenant{AppScope: AppScope{
+		config: &Config{},
+		entity: &Entity{Identity: identity},
+	}}
+}

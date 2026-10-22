@@ -1,7 +1,9 @@
-import { router, sqlite } from "kitwork";
+import { router } from "kitwork";
+import { asc } from "kitwork/database";
+import { db } from "app/.shared/schema/notes.work";
 
 router.get((ctx) => {
-  sqlite.exec("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT)");
-  sqlite.table("notes").create({ text: ctx.query("text") || "hello" });
-  return ctx.json(sqlite.table("notes").sort("id", "asc").list());
+  const text = ctx.query("text") || "hello";
+  db.insert((notes) => ({ text }));
+  return ctx.json(db.orderBy((notes) => asc(notes.createdAt) && asc(notes.id)).list());
 });

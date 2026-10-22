@@ -166,14 +166,15 @@ Hello from the benchmark corpus.
 		{
 			name: "sqlite-callback",
 			router: `
-import { router, sqlite } from "kitwork";
+import { router, internals } from "kitwork";
 
-sqlite.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)");
-sqlite.table("items").create({ name: "camera", price: 900 });
+// a query lambda on a SQLite file of the site, through the test-only module (storage_internals_test.go)
+const { sqlite, struct, int, text } = internals;
+const db = sqlite("app.db", { items: struct({ id: int().primaryKey(), name: text(), price: int() }) });
+db.items.create({ name: "camera", price: 900 });
 
 router.get((ctx) => {
-	const item = sqlite
-		.table("items")
+	const item = db.items
 		.where((row) => row.name == "camera")
 		.first();
 	return ctx.json({ name: item.name, price: item.price });

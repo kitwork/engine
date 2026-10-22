@@ -1,438 +1,27 @@
 package work
 
 import (
-	"context"
-	"database/sql/driver"
-	"encoding/base64"
-	"errors"
-	"fmt"
-	"math"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/kitwork/engine/database"
 	requestscope "github.com/kitwork/engine/request"
-	"github.com/kitwork/engine/value"
 )
 
-// SQLite is the per-tenant embedded database entry — import { sqlite } from "kitwork".
+// SQLite is one SQLite file the engine opens for its own tables: a site's file under .data/ (the SQLite
+// backend of a schema'd database, SchemaTable), the app's scheduler.db (appSqliteFor), or the host's file
+// of connection("tên") (hostSQLite). It is a BLUEPRINT, not a connection: nothing touches the disk until
+// the first query (Database's preset path opens lazily and caches the handle in the app's pool), and the
+// ENGINE owns the connection lifecycle.
 //
-// It is a BLUEPRINT, not a connection: sqlite / sqlite.open("x.db") only NAME a file; nothing touches
-// the disk until the first query (Database.Connect's preset path opens lazily and caches the handle in
-// tenant.databases). There is deliberately no close() — the ENGINE owns the connection lifecycle, the
-// same way http owns its transport. The query surface (table/where/find/create/…) is the ordinary
-// query builder, promoted from the embedded *Database — ONE builder, one security audit surface
-// (parameterized queries, mandatory WHERE), two backends.
+// App code no longer reaches it: import { sqlite } from "kitwork" (sqlite.table/open/memory/exec, and the
+// inspector's readQuery/readCatalog/readTablePage) was removed on 22/10/2026. SQLite is connection("tên")
+// with { sqlite: path } in the host's app.databases (KITWORK_DATABASE.md mục 1).
 //
-//	sqlite.table("users").where("age", ">", 18).find()   // default file: .data/app.db
-//	sqlite.open("analytics.db").table("events").find()   // named file:  .data/analytics.db
-//	sqlite.memory().exec("CREATE TABLE t (x)")           // :memory: — tests, scratch
-//
-// Every file lives under the tenant's .data/ folder BY CONSTRUCTION: the static server refuses any
-// dot segment (tree_serve), so a tenant database can never be downloaded over HTTP — unlike a
-// database file at the tenant root, which would be served like any other static file.
+// A site's file lives under its .data/ folder BY CONSTRUCTION: the static server refuses any dot
+// segment (tree_serve), so a site's database can never be downloaded over HTTP.
 type SQLite struct {
 	*Database
-}
-
-const (
-	sqliteReadQueryMaxSQLBytes    = 32 << 10
-	sqliteReadQueryMaxRows        = 120
-	sqliteReadQueryMaxColumns     = 128
-	sqliteReadQueryMaxCellBytes   = 256 << 10
-	sqliteReadQueryMaxResultBytes = 2 << 20
-	sqliteReadQueryTimeout        = 2 * time.Second
-	sqliteReadQueryResetTimeout   = 250 * time.Millisecond
-	sqliteJavaScriptMaxSafeInt    = int64(1<<53 - 1)
-)
-
-// Sqlite is what `import { sqlite } from "kitwork"` resolves to (0-arg getter, auto-called): the
-// tenant's default database at .data/app.db.
-func (w *KitWork) Sqlite() *SQLite {
-	return sqliteForRequest(w.tenant, "app.db", w.requestScope)
-}
-
-// Open names another database file inside the tenant's .data/ folder — a blueprint, zero I/O.
-// Subfolders are fine ("archive/2026.db"); traversal is not (see sqliteRel).
-func (s *SQLite) Open(path string) *SQLite {
-	return sqliteForRequest(s.tenant, path, s.requestScope)
-}
-
-// Memory returns the tenant's in-memory database (:memory:, one shared connection) — for tests and
-// scratch work. It vanishes with the process.
-func (s *SQLite) Memory() *SQLite {
-	preset := &database.Config{Alias: "sqlite::memory:", Type: "sqlite", Name: ":memory:"}
-	return &SQLite{Database: &Database{
-		tenant:       s.tenant,
-		requestScope: s.requestScope,
-		config:       &database.Config{},
-		preset:       preset,
-	}}
-}
-
-// Exec runs raw SQL — the escape hatch for DDL (CREATE TABLE / CREATE INDEX / migrations), which a
-// query builder cannot express. Data access should stay on the builder (parameterized, mandatory
-// WHERE); args here are still bound as parameters, never interpolated. An error is the failure of a
-// failed query (DATABASE), read with safe(() => …).
-func (s *SQLite) Exec(sqlText string, args ...value.Value) value.Value {
-	conn := s.db()
-	if conn == nil {
-		return value.InvalidFailure(value.UnavailableCode, "sqlite: connection unavailable")
-	}
-	goArgs := make([]any, len(args))
-	for i, a := range args {
-		goArgs[i] = a.Interface()
-	}
-	res, err := conn.Exec(sqlText, goArgs...)
-	if err != nil {
-		return value.InvalidFailure(value.DatabaseCode, err.Error())
-	}
-	affected, _ := res.RowsAffected()
-	return value.New(map[string]value.Value{"rowsAffected": value.New(int(affected))})
-}
-
-// ReadQuery executes one bounded SELECT against this already-confined SQLite blueprint. It is the
-// deliberately narrow escape hatch used by database inspectors: the caller may choose SQL, but it
-// can never choose a path/DSN, mutate the database, attach another file, or retain an engine-owned
-// connection. The lexical single-SELECT gate and SQLite's per-connection query_only flag are both
-// required; neither is treated as a substitute for the other.
-func (s *SQLite) ReadQuery(input value.Value) (result value.Value) {
-	if input.K != value.String {
-		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Enter one SELECT statement")
-	}
-	sqlText := input.String()
-	if len(sqlText) > sqliteReadQueryMaxSQLBytes {
-		return sqliteReadQueryFailure(value.InvalidArgumentCode, "SELECT statement exceeds the 32 KiB limit")
-	}
-	if strings.TrimSpace(sqlText) == "" || strings.ContainsRune(sqlText, '\x00') {
-		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Enter one SELECT statement")
-	}
-	if !sqliteSingleReadStatement(sqlText) {
-		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Only one SELECT statement is allowed")
-	}
-
-	parent := context.Background()
-	if s.requestScope != nil {
-		parent = s.requestScope.Context()
-	}
-	ctx, cancel := context.WithTimeout(parent, sqliteReadQueryTimeout)
-	defer cancel()
-
-	db := s.db()
-	if db == nil {
-		return sqliteReadQueryFailure(value.UnavailableCode, "SQLite database is unavailable")
-	}
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return s.sqliteReadQueryContextFailure(err)
-	}
-	defer conn.Close()
-
-	queryOnly := false
-	defer func() {
-		if !queryOnly {
-			return
-		}
-		resetCtx, resetCancel := context.WithTimeout(context.Background(), sqliteReadQueryResetTimeout)
-		_, resetErr := conn.ExecContext(resetCtx, "PRAGMA query_only=OFF")
-		resetCancel()
-		if resetErr == nil {
-			return
-		}
-		// Never return a connection whose write policy is unknown to the shared pool.
-		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
-		result = sqliteReadQueryFailure(value.UnavailableCode, "SQLite connection could not be reset safely")
-	}()
-
-	if _, err = conn.ExecContext(ctx, "PRAGMA query_only=ON"); err != nil {
-		return s.sqliteReadQueryContextFailure(err)
-	}
-	queryOnly = true
-	started := time.Now()
-	rows, err := conn.QueryContext(ctx, sqlText)
-	if err != nil {
-		return s.sqliteReadQueryContextFailure(err)
-	}
-	defer rows.Close()
-
-	names, err := rows.Columns()
-	if err != nil {
-		return s.sqliteReadQueryContextFailure(err)
-	}
-	if len(names) == 0 || len(names) > sqliteReadQueryMaxColumns {
-		return sqliteReadQueryFailure(value.InvalidArgumentCode, "Query result exceeds the 128 column limit")
-	}
-	types, err := rows.ColumnTypes()
-	if err != nil {
-		return s.sqliteReadQueryContextFailure(err)
-	}
-	columns := make([]map[string]any, len(names))
-	resultBytes := 0
-	for index, name := range names {
-		if len(name) > 1024 {
-			return sqliteReadQueryFailure(value.InvalidArgumentCode, "Query result contains an oversized column name")
-		}
-		typeName := "UNKNOWN"
-		if index < len(types) && strings.TrimSpace(types[index].DatabaseTypeName()) != "" {
-			typeName = strings.ToUpper(strings.TrimSpace(types[index].DatabaseTypeName()))
-		}
-		columns[index] = map[string]any{"name": name, "type": typeName}
-		resultBytes += len(name) + len(typeName)
-	}
-
-	resultRows := make([][]any, 0, sqliteReadQueryMaxRows)
-	truncated := false
-	for rows.Next() {
-		if len(resultRows) == sqliteReadQueryMaxRows {
-			truncated = true
-			break
-		}
-		values := make([]any, len(names))
-		pointers := make([]any, len(names))
-		for index := range values {
-			pointers[index] = &values[index]
-		}
-		if err := rows.Scan(pointers...); err != nil {
-			return s.sqliteReadQueryContextFailure(err)
-		}
-		for index, raw := range values {
-			cell, size, ok := sqliteReadQueryCell(raw)
-			if !ok || resultBytes+size > sqliteReadQueryMaxResultBytes {
-				return sqliteReadQueryFailure(value.InvalidArgumentCode, "Query result exceeds the 2 MiB limit")
-			}
-			values[index] = cell
-			resultBytes += size
-		}
-		resultRows = append(resultRows, values)
-	}
-	if err := rows.Err(); err != nil {
-		return s.sqliteReadQueryContextFailure(err)
-	}
-	duration := time.Since(started).Milliseconds()
-	return value.New(map[string]any{
-		"ok":           true,
-		"columns":      columns,
-		"rows":         resultRows,
-		"rowCount":     len(resultRows),
-		"returnedRows": len(resultRows),
-		"truncated":    truncated,
-		"durationMs":   duration,
-	})
-}
-
-// sqliteReadQueryFailure is a read of the database inspector that failed: a failure (14/10/2026) the
-// program reads with safe(() => …), no longer data shaped { ok: false, code, message }. A statement the
-// reader may not run, or a result past a bound, is INVALID_ARGUMENT, the database out of reach
-// UNAVAILABLE, the 2 second limit TIMEOUT, an error of SQLite DATABASE, a catalog that changed since the
-// page asked CONFLICT; the request's cancellation is EXECUTION_CANCELLED, which nothing catches.
-func sqliteReadQueryFailure(code, message string) value.Value {
-	return value.InvalidFailure(code, message)
-}
-
-func (s *SQLite) sqliteReadQueryContextFailure(err error) value.Value {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return sqliteReadQueryFailure(value.TimeoutCode, "Query exceeded the 2 second time limit")
-	}
-	if errors.Is(err, context.Canceled) {
-		return sqliteReadQueryFailure(value.CancelledCode, "Query was cancelled")
-	}
-	message := strings.Join(strings.Fields(err.Error()), " ")
-	if s != nil && s.preset != nil && s.preset.Name != "" {
-		message = strings.ReplaceAll(message, s.preset.Name, "[database]")
-		message = strings.ReplaceAll(message, filepath.ToSlash(s.preset.Name), "[database]")
-	}
-	if len(message) > 320 {
-		message = message[:320]
-	}
-	if message == "" {
-		message = "SQLite could not execute this SELECT statement"
-	}
-	return sqliteReadQueryFailure(value.DatabaseCode, message)
-}
-
-func sqliteReadQueryCell(raw any) (any, int, bool) {
-	switch cell := raw.(type) {
-	case nil:
-		return nil, 4, true
-	case []byte:
-		if len(cell) > sqliteReadQueryMaxCellBytes {
-			return nil, 0, false
-		}
-		encoded := base64.StdEncoding.EncodeToString(cell)
-		return map[string]any{"type": "blob", "base64": encoded, "bytes": len(cell)}, len(encoded) + 32, true
-	case string:
-		if len(cell) > sqliteReadQueryMaxCellBytes || !utf8.ValidString(cell) {
-			return nil, 0, false
-		}
-		return cell, len(cell), true
-	case int64:
-		if cell > sqliteJavaScriptMaxSafeInt || cell < -sqliteJavaScriptMaxSafeInt {
-			text := strconv.FormatInt(cell, 10)
-			return text, len(text), true
-		}
-		return cell, 8, true
-	case float64:
-		if math.IsNaN(cell) || math.IsInf(cell, 0) {
-			return nil, 0, false
-		}
-		return cell, 8, true
-	case bool:
-		return cell, 1, true
-	case time.Time:
-		text := cell.UTC().Format(time.RFC3339Nano)
-		return text, len(text), true
-	default:
-		text := fmt.Sprint(cell)
-		if len(text) > sqliteReadQueryMaxCellBytes || !utf8.ValidString(text) {
-			return nil, 0, false
-		}
-		return text, len(text), true
-	}
-}
-
-// sqliteSingleReadStatement accepts one SELECT (with optional leading/trailing comments and one
-// trailing semicolon). It understands SQLite's string/comment/quoted-identifier delimiters so a
-// semicolon inside data is not mistaken for a stacked statement. WITH/EXPLAIN/PRAGMA/ATTACH are
-// intentionally outside this first read-only profile.
-func sqliteSingleReadStatement(text string) bool {
-	start, ok := sqliteSkipSpaceAndComments(text, 0)
-	if !ok || start+6 > len(text) || !strings.EqualFold(text[start:start+6], "select") {
-		return false
-	}
-	if start+6 < len(text) && sqliteIdentifierByte(text[start+6]) {
-		return false
-	}
-	for index := start + 6; index < len(text); {
-		switch text[index] {
-		case '\'', '"', '`':
-			quote := text[index]
-			index++
-			contentStart := index
-			closed := false
-			for index < len(text) {
-				if text[index] != quote {
-					index++
-					continue
-				}
-				if index+1 < len(text) && text[index+1] == quote {
-					index += 2
-					continue
-				}
-				content := text[contentStart:index]
-				if quote != '\'' {
-					content = strings.ReplaceAll(content, string([]byte{quote, quote}), string(quote))
-					if sqliteForbiddenReadIdentifier(content) {
-						return false
-					}
-				}
-				index++
-				closed = true
-				break
-			}
-			if !closed {
-				return false
-			}
-		case '[':
-			index++
-			contentStart := index
-			for index < len(text) && text[index] != ']' {
-				index++
-			}
-			if index == len(text) {
-				return false
-			}
-			if sqliteForbiddenReadIdentifier(text[contentStart:index]) {
-				return false
-			}
-			index++
-		case '-':
-			if index+1 < len(text) && text[index+1] == '-' {
-				for index < len(text) && text[index] != '\n' {
-					index++
-				}
-				continue
-			}
-			index++
-		case '/':
-			if index+1 < len(text) && text[index+1] == '*' {
-				var commentOK bool
-				index, commentOK = sqliteSkipBlockComment(text, index)
-				if !commentOK {
-					return false
-				}
-				continue
-			}
-			index++
-		case ';':
-			end, tailOK := sqliteSkipSpaceAndComments(text, index+1)
-			return tailOK && end == len(text)
-		default:
-			if sqliteIdentifierByte(text[index]) {
-				start := index
-				for index < len(text) && sqliteIdentifierByte(text[index]) {
-					index++
-				}
-				if sqliteForbiddenReadIdentifier(text[start:index]) {
-					return false
-				}
-				continue
-			}
-			index++
-		}
-	}
-	return true
-}
-
-func sqliteSkipSpaceAndComments(text string, index int) (int, bool) {
-	for index < len(text) {
-		if strings.ContainsRune(" \t\r\n\f\v", rune(text[index])) {
-			index++
-			continue
-		}
-		if index+1 < len(text) && text[index] == '-' && text[index+1] == '-' {
-			for index < len(text) && text[index] != '\n' {
-				index++
-			}
-			continue
-		}
-		if index+1 < len(text) && text[index] == '/' && text[index+1] == '*' {
-			var ok bool
-			index, ok = sqliteSkipBlockComment(text, index)
-			if !ok {
-				return index, false
-			}
-			continue
-		}
-		break
-	}
-	return index, true
-}
-
-func sqliteSkipBlockComment(text string, index int) (int, bool) {
-	index += 2
-	for index+1 < len(text) {
-		if text[index] == '*' && text[index+1] == '/' {
-			return index + 2, true
-		}
-		index++
-	}
-	return len(text), false
-}
-
-func sqliteIdentifierByte(char byte) bool {
-	return char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '_' || char == '$'
-}
-
-func sqliteForbiddenReadIdentifier(identifier string) bool {
-	switch strings.ToLower(identifier) {
-	case "load_extension", "readfile", "writefile":
-		return true
-	default:
-		return false
-	}
 }
 
 // sqliteFor builds the blueprint for one tenant database file: resolve the path under .data/,
@@ -451,7 +40,22 @@ func sqliteForRequest(t *Tenant, rel string, requestScope *requestscope.Scope) *
 	return &SQLite{Database: &Database{
 		tenant:       t,
 		requestScope: requestScope,
-		config:       &database.Config{},
+		preset:       preset,
+	}}
+}
+
+// hostSQLite is the host's SQLite file of connection("tên"): app.databases({ tên: { sqlite: path } }) in
+// application.work, the path read from the manifest's folder. The host chose it; it may lie outside every
+// app, and every app that names it shares it.
+func hostSQLite(t *Tenant, name, path string, requestScope *requestscope.Scope) *SQLite {
+	preset := &database.Config{
+		Alias: "sqlite:" + name,
+		Type:  "sqlite",
+		Name:  path,
+	}
+	return &SQLite{Database: &Database{
+		tenant:       t,
+		requestScope: requestScope,
 		preset:       preset,
 	}}
 }
@@ -466,12 +70,12 @@ func appSqliteFor(t *Tenant, rel string) *SQLite {
 		Type:  "sqlite",
 		Name:  t.resolveApp(".data", filepath.FromSlash(rel)),
 	}
-	return &SQLite{Database: &Database{tenant: t, config: &database.Config{}, preset: preset}}
+	return &SQLite{Database: &Database{tenant: t, preset: preset}}
 }
 
-// sqliteRel normalises a user-supplied database name to a safe path RELATIVE to .data/. Anything that
-// tries to escape (.. segments, absolute paths, drive letters) is flattened to its base name — the
-// file always lands inside the tenant's .data/, no exceptions.
+// sqliteRel normalises a database name to a safe path RELATIVE to .data/. Anything that tries to escape
+// (.. segments, absolute paths, drive letters) is flattened to its base name — the file always lands
+// inside the tenant's .data/, no exceptions.
 func sqliteRel(rel string) string {
 	rel = strings.TrimSpace(strings.ReplaceAll(rel, "\\", "/"))
 	rel = strings.TrimPrefix(rel, "/")

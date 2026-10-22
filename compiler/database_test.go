@@ -337,9 +337,17 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 		{"bigint", schema("id: id(), total: bigint()", exported), "bigint()", "bigint() chưa có trong engine hôm nay (lát 9)"},
 		{"computed", schema("id: id(), total: computed((orders) => 1)", exported), "computed(", "computed() chưa có trong engine hôm nay (lát 9)"},
 		{"foreign key", schema("id: id(), userId: users.id", exported), ".id", "khoá ngoại users.id chưa có trong engine hôm nay (lát 5)"},
-		{"named connection", schema(columns, `export const db = connection("warehouse").schema({ orders });`), `connection("`, `connection("tên") chưa có trong engine hôm nay (lát 8`},
+		{"connection(application)", schema(columns, `export const db = connection("application").schema({ orders });`), `"application"`, `connection("application") không có: database của app là connection() không tên`},
+		{"connection(storage)", schema(columns, `export const db = connection("storage").schema({ orders });`), `"storage"`, `"storage" là tên dành cho datastore()`},
+		{"connection(files)", schema(columns, `export const db = connection("files").schema({ orders });`), `"files"`, `"files" là tên dành cho nơi lưu file dùng chung`},
+		{"connection(name) not a string", schema(columns, "export const db = connection(`w`).schema({ orders });"), "connection(`", `connection nhận tên database viết bằng chuỗi`},
+		{"connection with two names", schema(columns, `export const db = connection("a", "b").schema({ orders });`), `connection("a"`, `connection nhận một tên`},
 		{"policy", schema(columns, `export const db = connection().policy((orders, session) => true).schema({ orders });`), "policy", ".policy(…) chưa có trong engine hôm nay (lát 6)"},
-		{"connect", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ postgresql: \"x\" });"), "connect({", "connect(…) chưa có trong engine hôm nay (lát 8)"},
+		{"connect sqlite", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ sqlite: \"x\" });"), "sqlite:", "connect({ sqlite: … }) không có"},
+		{"connect unknown connector", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ redis: \"x\" });"), "redis:", "connect({ redis: … }): connect nhận một object có một bộ nối"},
+		{"connect two connectors", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ postgresql: \"x\", mysql: \"y\" });"), "connect({", "connect nhận một object có một bộ nối"},
+		{"connect with a schema", schema(columns, "export const db = connection().schema({ orders });\nexport const crm = connect({ postgresql: \"x\" }).schema({ users });"), "schema({ users })", "connect(…) không có .schema: database ngoài là của người khác, chỉ có crm.query(sql, [giá trị])"},
+		{"connect not exported", schema(columns, "export const db = connection().schema({ orders });\nconst crm = connect({ postgresql: \"x\" });"), "crm = connect", "database crm khai mà không export"},
 		{"not exported", schema(columns, `const db = connection().schema({ orders });`), "db = connection", "database db khai mà không export"},
 		{"session table", schema(columns, `export const db = connection().schema({ session: orders });`), "session:", "session là tên dành riêng"},
 		{"kitwork_ table", schema(columns, `export const db = connection().schema({ kitwork_x: orders });`), "kitwork_x", "tiền tố kitwork_ là của bảng engine"},
@@ -392,9 +400,10 @@ func TestDatabaseSchemaModuleRules(t *testing.T) {
 			}
 		}
 	}
-	// what else the module holds is read as before
+	// what else the module holds is read as before (its older words are compile errors:
+	// TestDatabaseOldSpellingsAreCompileErrors)
 	for _, source := range []string{
-		"import { database } from \"kitwork\";\nconst k = database.kitdb;\n",
+		"import { database } from \"kitwork\";\nconst k = database.desc;\n",
 		"import * as database from \"kitwork/database\";\nconst connection = 1;\nconst c = { connection };\nconst n = c.connection;\n",
 	} {
 		if _, err := compileRoute(t, source); err != nil {
@@ -606,7 +615,7 @@ func TestDatabaseFileCacheSeesSchemaEdits(t *testing.T) {
 // The template's format is part of the compiler's schema: a change of one without the other would give
 // an artifact the engine reads another way.
 func TestStatementVersionPairsWithSchema(t *testing.T) {
-	if statement.Version != 1 || CompilerSchemaVersion != 12 {
+	if statement.Version != 1 || CompilerSchemaVersion != 13 {
 		t.Fatalf("statement format %d with compiler schema %d: a change of the format bumps the schema (fingerprint.go) and this pair",
 			statement.Version, CompilerSchemaVersion)
 	}

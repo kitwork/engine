@@ -91,16 +91,16 @@ func TestErrorHandlerReceivesTheErrorObject(t *testing.T) {
 func TestQueryLambdaFailureIsTheQuerysFailure(t *testing.T) {
 	routes := `
 router.get((ctx) => {
-    const failed = safe(() => sqlite.table("items").where(row => {
+    const failed = safe(() => file.table("items").where(row => {
         fail("điều kiện hỏng");
         return row.id == 1;
     }).list());
-    const kept = safe(() => sqlite.table("items").where(row => row.id == 1).toSQL());
+    const kept = safe(() => file.table("items").where(row => row.id == 1).toSQL());
     return ctx.json({ code: failed.error.code, message: failed.error.message, at: failed.error.at, kept: kept.error });
 });
 `
 	body := serveNesting(t, newNestingTenant(t, routes, 10_000_000), context.Background())
-	for _, want := range []string{`"code":"FAIL"`, `"message":"điều kiện hỏng"`, `"at":"router.kitwork.js:14:9"`, `"kept":null`} {
+	for _, want := range []string{`"code":"FAIL"`, `"message":"điều kiện hỏng"`, `"at":"router.kitwork.js:20:9"`, `"kept":null`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s lacks %s", body, want)
 		}
@@ -111,8 +111,8 @@ router.get((ctx) => {
 // the predicate's failure (SchemaTable.failWith). CONTROL: a predicate that works lists the row.
 func TestKitDBQueryLambdaFailureIsTheQuerysFailure(t *testing.T) {
 	serve := safeSite(t, map[string]string{
-		"": `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+		"": `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const items = struct({ id: text().key(), label: text() });
 const db = kitdb("lambda-failure.kitdb", { items });
 router.get((ctx) => {

@@ -114,8 +114,8 @@ func prepareKitDBImportFaultRoot(t *testing.T) string {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique(),

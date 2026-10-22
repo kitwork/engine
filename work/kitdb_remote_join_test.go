@@ -20,8 +20,8 @@ func TestKitDBRemoteSQLIndexedInnerAndLeftJoin(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int, bool, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int, bool, ref } = internals;
 const users = struct({
   id: id(),
   email: text().notNull().unique(),

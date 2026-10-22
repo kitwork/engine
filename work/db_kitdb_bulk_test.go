@@ -18,8 +18,8 @@ func TestKitDBCreateManyCommitsBoundedBatchesThroughRelationalPath(t *testing.T)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int, choice } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int, choice } = internals;
 const products = struct({
   id: text().key(),
   sku: text().notNull().unique(),
@@ -71,8 +71,8 @@ func TestKitDBCreateManyReportsDurableResumeOffsetAfterBatchFailure(t *testing.T
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const products = struct({ id: text().key(), sku: text().notNull().unique() });
 const db = kitdb("bulk-resume.kitdb", { products });
 router.get((ctx) => {

@@ -135,8 +135,8 @@ func TestSchemaTableSearchStaleOnSameLengthEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { sqlite, text } = database;` + "\n" +
+	router := `import { router, internals } from "kitwork";` + "\n" +
+		`const { sqlite, text } = internals;` + "\n" +
 		`const db = sqlite("notes.db", { notes: { id: text().key(), body: text().searchable() } });` + "\n" +
 		`router.get((ctx) => {` + "\n" +
 		`  db.notes.create({ id: "n1", body: "học react ngay" });` + "\n" +

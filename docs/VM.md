@@ -111,10 +111,10 @@ Host capabilities represent application failures with the bounded
 midway. They construct it through `value.InvalidFailure` (or
 `value.PartialFailure`); a failure ends the run unless the program reads it with
 `safe(() => …)`. Since 14/10/2026 no value carries a failure attached to its
-data (`value.WithFailure` is gone): `database.entity()` failing is `DATABASE`,
+data (`value.WithFailure` is gone): a failed database statement is `DATABASE`,
 `createMany` stopping midway `PARTIAL`, an HTTP request that got no answer
-`NETWORK`, `TIMEOUT` or `DENIED`, a failed SQLite inspector read `DATABASE`,
-`TIMEOUT`, `UNAVAILABLE`, `CONFLICT`, `INVALID_ARGUMENT` or `UNSUPPORTED`. New capability code must not assign `Value.ErrorVal`
+`NETWORK`, `TIMEOUT` or `DENIED`, a query of a `connect()` database `DATABASE`,
+`TIMEOUT`, `UNAVAILABLE`, `DENIED`, `TOO_LARGE` or `INVALID_ARGUMENT`. New capability code must not assign `Value.ErrorVal`
 directly.
 
 The closed set is `FAIL` (`fail("…")`, the only code a program can raise),

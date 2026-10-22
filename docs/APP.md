@@ -1189,13 +1189,10 @@ app.database({
 });
 ```
 
-Tenant code selects it by declared alias:
-
-```javascript
-const shop = database.connection("shop");
-```
-
-Without an explicit alias, a single file is published as `default`.
+The alias names the file among the host's own databases. App code does not reach a host alias: since
+22/10/2026 an app declares its databases in its `.shared/schema/` (`connection()` for its own KitDB,
+`connection("name")` for a name of `app.databases`), and `database.connection(alias)` is an error that
+says so. Without an explicit alias, a single file is published as `default`.
 
 ### Managed database root
 
@@ -1343,16 +1340,35 @@ engine distribution. PostgreSQL, KitSQL, and SQLite are included in the current
 engine; an unavailable connector fails clearly rather than pretending to be
 connected.
 
-Tenant code uses the alias only:
+These connections are the host's own: the `system` alias holds the queue's and
+the scheduler's tables. App code does not reach them (`database.connection`,
+`router.connection` and `ctx.database` were removed on 22/10/2026). Owned KitDB
+databases and external connections share one case-insensitive alias namespace.
+Duplicate aliases fail during startup.
+
+### Named databases for apps
+
+`app.databases()` is the catalogue an app reads by name (docs/KITWORK_DATABASE.md
+in the Kitwork repository, section 1):
 
 ```javascript
-const system = database.connection("system");
-const available = database.connected("system");
+app.databases({
+  warehouse: { sqlite: "./data/warehouse.db" },
+  crm: { postgresql: env.CRM_URL }
+});
+app.policy({ tenantConnections: false });
 ```
 
-Owned KitDB databases and external connections share one case-insensitive
-alias namespace. Duplicate aliases fail during startup. A managed KitDB root
-checks dynamic member-name collisions when the alias is resolved.
+An app's `.shared/schema/` declares `connection("warehouse").schema({ … })` on a
+name of the catalogue; a name the host did not declare stops that app's boot,
+listing the names there are. Each entry is one connector: `postgresql` or
+`mysql` with a URL, `sqlite` with a path read from the manifest's folder.
+`application`, `storage` and `files` are names the spec keeps and stop the boot.
+Every app on the host may name every entry. Today a named database runs its
+tables on SQLite; an app that names a PostgreSQL or MySQL entry does not boot
+(UNSUPPORTED), and no other app path reaches that database: the app never sees
+the host's URL, and `connect({ … })` refuses loopback and private addresses.
+`app.policy({ tenantConnections: false })` stops every app's `connect({ … })`.
 
 ## Gateway
 
@@ -1700,7 +1716,7 @@ the canonical forms above.
 | `app.chrome(mode)` | `app.desktop({ native: mode === "native" })` |
 | `app.window(options)` | Flat fields inside `app.desktop(options)` |
 | `desktop({ chrome, window })` | Flat `desktop({ native, width, ... })` |
-| `app.databases(list)` | Provider methods or owned `app.database(...)` |
+| `app.databases(list)` | Provider methods or owned `app.database(...)`; `app.databases({ name: … })` is now the catalogue |
 | `app.database({ alias, type, ... })` | `app.postgresql`, `sqlite`, or `connect` |
 | `server.run(...)` | `app.run(...)` |
 

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/value"
 	_ "modernc.org/sqlite"
 )
@@ -32,8 +31,8 @@ func TestSchemaDbTenantEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { sqlite, kitid, text, int, datetime } = database;` + "\n" +
+	router := `import { router, internals } from "kitwork";` + "\n" +
+		`const { sqlite, kitid, text, int, datetime } = internals;` + "\n" +
 		`const vouchers = {` + "\n" +
 		`  id: kitid().primaryKey(),` + "\n" +
 		`  code: text().notNull().unique(),` + "\n" +
@@ -107,62 +106,6 @@ func TestSchemaColumnValidationRejectsUnknown(t *testing.T) {
 	}
 }
 
-// database.define(...) — the SHARED world: two apps write to ONE physical table, each sees only its
-// own rows (identity scope), and the schema still fills kitid + defaults on top. Uses in-memory sqlite
-// as database.System, exactly as entity_scope_test.go does (the builder emits the same SQL for the
-// shared Postgres).
-func TestEntitySchemaSharedTableIsolatesByIdentity(t *testing.T) {
-	shared, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	shared.SetMaxOpenConns(1) // one in-memory database across every op
-	prev := database.System
-	database.System = shared
-	t.Cleanup(func() { database.System = prev; shared.Close() })
-
-	columns := map[string]*ColumnSpec{
-		"id":     {kind: "kitid", primary: true},
-		"code":   {kind: "text", notNull: true},
-		"status": {kind: "text", hasDefault: true, def: value.New("active")},
-	}
-	table := func(identity string) *EntityTable {
-		return &EntityTable{tenant: tenantFor(identity), table: "vouchers", columns: columns}
-	}
-	row := func(code string) value.Value {
-		return value.New(map[string]value.Value{"code": value.New(code)})
-	}
-
-	// Two apps write to the SAME physical table.
-	table("acme").Create(row("A1"))
-	table("acme").Create(row("A2"))
-	table("victim").Create(row("V1"))
-
-	// Each app reads only its own rows.
-	acme := table("acme").List().String()
-	if strings.Contains(acme, "V1") {
-		t.Fatalf("cross-tenant leak: acme saw victim's row:\n%s", acme)
-	}
-	if !strings.Contains(acme, "A1") || !strings.Contains(acme, "A2") {
-		t.Errorf("acme did not see its own rows:\n%s", acme)
-	}
-	if n := int(table("acme").Count().N); n != 2 {
-		t.Errorf("acme count = %d, want 2", n)
-	}
-	if n := int(table("victim").Count().N); n != 1 {
-		t.Errorf("victim count = %d, want 1", n)
-	}
-
-	// Schema still fills defaults + kitid on the shared table.
-	first := table("acme").Where(value.New("code"), value.New("="), value.New("A1")).First()
-	if got := first.Get("status").String(); got != "active" {
-		t.Errorf("schema default not applied on shared create: status = %q", got)
-	}
-	if first.Get("id").String() == "" {
-		t.Error("kitid not generated on shared create")
-	}
-}
-
 // Real migration, the headline: a table created under schema v1 + a seeded row, then migrated to a v2
 // schema that ADDS columns → the new columns appear (ALTER ADD), the OLD ROW SURVIVES, and the history
 // is recorded. This is what makes it a migration and not blind CREATE IF NOT EXISTS.
@@ -182,7 +125,7 @@ func TestSchemaMigrationEvolvesTable(t *testing.T) {
 		"code": {kind: "text", notNull: true},
 	}
 	db1 := open()
-	migrate(db1, "vouchers", v1, false, false)
+	migrate(db1, "vouchers", v1, false)
 	if _, err := db1.Exec(`INSERT INTO vouchers (id, code) VALUES ('x1', 'A1')`); err != nil {
 		t.Fatalf("seed v1 row: %v", err)
 	}
@@ -197,7 +140,7 @@ func TestSchemaMigrationEvolvesTable(t *testing.T) {
 	}
 	db2 := open()
 	defer db2.Close()
-	migrate(db2, "vouchers", v2, false, false)
+	migrate(db2, "vouchers", v2, false)
 
 	// 1) old data survives.
 	var code string
@@ -250,7 +193,7 @@ func TestSchemaMigrationNeverDropsColumn(t *testing.T) {
 		"id":   {kind: "kitid", primary: true},
 		"code": {kind: "text"},
 	}
-	migrate(db, "vouchers", schema, false, false)
+	migrate(db, "vouchers", schema, false)
 
 	var secret string
 	if err := db.QueryRow(`SELECT secret FROM vouchers WHERE id='x1'`).Scan(&secret); err != nil {
@@ -279,7 +222,7 @@ func TestSchemaMigrationRebuildsOnTypeChange(t *testing.T) {
 		"discount": {kind: "text"},
 	}
 	db1 := open()
-	migrate(db1, "prices", v1, false, false)
+	migrate(db1, "prices", v1, false)
 	if _, err := db1.Exec(`INSERT INTO prices (id, discount) VALUES ('x1', '40000')`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -293,7 +236,7 @@ func TestSchemaMigrationRebuildsOnTypeChange(t *testing.T) {
 	}
 	db2 := open()
 	defer db2.Close()
-	migrate(db2, "prices", v2, false, true) // allowDrop=true opts into the destructive rebuild
+	migrate(db2, "prices", v2, true) // allowDrop=true opts into the destructive rebuild
 
 	// The column is now INTEGER...
 	types, err := tableColumns(db2, "prices")
@@ -332,7 +275,7 @@ func TestSchemaMigrationRefusesTypeChangeWithoutFlag(t *testing.T) {
 
 	v1 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "note": {kind: "text"}}
 	db1 := open()
-	migrate(db1, "notes", v1, false, false)
+	migrate(db1, "notes", v1, false)
 	if _, err := db1.Exec(`INSERT INTO notes (id, note) VALUES ('x1', 'keep-me')`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -342,7 +285,7 @@ func TestSchemaMigrationRefusesTypeChangeWithoutFlag(t *testing.T) {
 	v2 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "note": {kind: "integer"}}
 	db2 := open()
 	defer db2.Close()
-	migrate(db2, "notes", v2, false, false)
+	migrate(db2, "notes", v2, false)
 
 	types, err := tableColumns(db2, "notes")
 	if err != nil {
@@ -378,7 +321,7 @@ func TestSchemaMigrationBackfillsDefaultOnAddColumn(t *testing.T) {
 
 	v1 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "code": {kind: "text"}}
 	db1 := open()
-	migrate(db1, "vouchers", v1, false, false)
+	migrate(db1, "vouchers", v1, false)
 	if _, err := db1.Exec(`INSERT INTO vouchers (id, code) VALUES ('x1', 'A1')`); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -392,7 +335,7 @@ func TestSchemaMigrationBackfillsDefaultOnAddColumn(t *testing.T) {
 	}
 	db2 := open()
 	defer db2.Close()
-	migrate(db2, "vouchers", v2, false, false)
+	migrate(db2, "vouchers", v2, false)
 
 	var status string
 	if err := db2.QueryRow(`SELECT status FROM vouchers WHERE id='x1'`).Scan(&status); err != nil {
@@ -413,12 +356,12 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	}
 
 	// Fresh table → one "create" step.
-	if steps := planMigration(map[string]string{}, schema, false, false); len(steps) != 1 || steps[0].Action != "create" {
+	if steps := planMigration(map[string]string{}, schema, false); len(steps) != 1 || steps[0].Action != "create" {
 		t.Fatalf("fresh: want [create], got %+v", steps)
 	}
 	// Exact match → no steps.
 	upToDate := map[string]string{"id": "TEXT", "code": "TEXT", "amount": "INTEGER"}
-	if steps := planMigration(upToDate, schema, false, false); len(steps) != 0 {
+	if steps := planMigration(upToDate, schema, false); len(steps) != 0 {
 		t.Errorf("up-to-date: want no steps, got %+v", steps)
 	}
 
@@ -433,7 +376,7 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	}
 
 	// Without the flag: destructive steps are planned but NOT WillApply.
-	noFlag := byCol(planMigration(current, schema, false, false))
+	noFlag := byCol(planMigration(current, schema, false))
 	if s := noFlag["retype:amount"]; s.From != "TEXT" || s.To != "INTEGER" || !s.Destructive || s.WillApply {
 		t.Errorf("retype:amount (no flag) = %+v", s)
 	}
@@ -442,7 +385,7 @@ func TestMigrationPlanClassifies(t *testing.T) {
 	}
 
 	// With the flag: destructive steps WillApply.
-	for _, s := range planMigration(current, schema, false, true) {
+	for _, s := range planMigration(current, schema, true) {
 		if s.Destructive && !s.WillApply {
 			t.Errorf("with flag, destructive step should WillApply: %+v", s)
 		}
@@ -450,7 +393,7 @@ func TestMigrationPlanClassifies(t *testing.T) {
 
 	// A new column → an "add" step that always applies.
 	addSteps := planMigration(map[string]string{"id": "TEXT"},
-		map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "brand": {kind: "text"}}, false, false)
+		map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "brand": {kind: "text"}}, false)
 	if len(addSteps) != 1 || addSteps[0].Action != "add" || addSteps[0].Column != "brand" || !addSteps[0].WillApply {
 		t.Fatalf("add: want [add brand], got %+v", addSteps)
 	}
@@ -469,8 +412,8 @@ func TestSchemaColumnTypesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { sqlite, id, text, int, float, bool, choice, now, year, jsonb, array } = database;` + "\n" +
+	router := `import { router, internals } from "kitwork";` + "\n" +
+		`const { sqlite, id, text, int, float, bool, choice, now, year, jsonb, array } = internals;` + "\n" +
 		`const items = {` + "\n" +
 		`  id: id(),` + "\n" +
 		`  name: text().notNull(),` + "\n" +
@@ -556,7 +499,7 @@ func TestSchemaChoiceRejectsInvalid(t *testing.T) {
 }
 
 func TestChoiceDeclarationRejectsInvalidValues(t *testing.T) {
-	database := &Database{}
+	database := &storageInternals{}
 	tests := []struct {
 		name string
 		args []value.Value
@@ -599,8 +542,8 @@ func TestMigrationPlansForPreviewsSchema(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { sqlite, kitid, text } = database;` + "\n" +
+	router := `import { router, internals } from "kitwork";` + "\n" +
+		`const { sqlite, kitid, text } = internals;` + "\n" +
 		`const vouchers = { id: kitid().primaryKey(), code: text() };` + "\n" +
 		`const db = sqlite("app.db", { vouchers });` + "\n" +
 		`router.get((ctx) => ctx.json({ ok: 1 }));`
@@ -640,7 +583,7 @@ func TestMigrationPlanDoesNotMutate(t *testing.T) {
 	}
 	defer db.Close()
 
-	migrate(db, "t", map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "amount": {kind: "text"}}, false, false)
+	migrate(db, "t", map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "amount": {kind: "text"}}, false)
 	if _, err := db.Exec(`INSERT INTO t (id, amount) VALUES ('x1','40000')`); err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +591,7 @@ func TestMigrationPlanDoesNotMutate(t *testing.T) {
 	// Plan an evolved schema (retype amount) WITHOUT applying.
 	v2 := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "amount": {kind: "integer"}}
 	current, _ := tableColumns(db, "t")
-	_ = planMigration(current, v2, false, true) // even with the flag, planning must not apply
+	_ = planMigration(current, v2, true) // even with the flag, planning must not apply
 
 	after, _ := tableColumns(db, "t")
 	if after["amount"] != "TEXT" {
@@ -682,7 +625,7 @@ func TestSchemaMigrationDropsColumnOnlyWithFlag(t *testing.T) {
 		"id":   {kind: "kitid", primary: true},
 		"code": {kind: "text"},
 	}
-	migrate(db, "vouchers", schema, false, true) // allowDrop = true
+	migrate(db, "vouchers", schema, true) // allowDrop = true
 
 	// secret is gone from the schema of the rebuilt table...
 	types, err := tableColumns(db, "vouchers")
@@ -714,8 +657,8 @@ func TestSchemaTableWritePathThroughVM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitid, text, int, datetime } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitid, text, int, datetime } = internals;
 const links = {
   id: kitid().primaryKey(),
   code: text().notNull().unique(),
@@ -789,7 +732,7 @@ func TestMigrateReturnsErrorOnFailure(t *testing.T) {
 	schema := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "a": {kind: "text"}, "b": {kind: "text"}}
 
 	// Happy path: migrate returns nil and the ADD lands.
-	if err := migrate(db, "t", schema, false, false); err != nil {
+	if err := migrate(db, "t", schema, false); err != nil {
 		t.Fatalf("healthy migrate should return nil, got: %v", err)
 	}
 	cols, _ := tableColumns(db, "t")
@@ -800,7 +743,7 @@ func TestMigrateReturnsErrorOnFailure(t *testing.T) {
 	// Failure path: a CLOSED connection must yield a non-nil error, not a silent no-op.
 	db.Close()
 	schema["c"] = &ColumnSpec{kind: "text"}
-	if err := migrate(db, "t", schema, false, false); err == nil {
+	if err := migrate(db, "t", schema, false); err == nil {
 		t.Fatal("migrate on a closed db returned nil — the failure was swallowed")
 	} else {
 		t.Logf("migrate surfaced the failure: %v", err)
@@ -822,8 +765,8 @@ func TestSchemaMigrationFailureSurfacesToHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitid, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitid, text } = internals;
 const notes = { id: kitid().primaryKey(), body: text() };
 const db = sqlite("app.db", { notes: notes });
 router.get((ctx) => ctx.json({ n: db.notes.count() }));`
@@ -861,8 +804,8 @@ func TestSchemaNowOnUpdateAutoTouch(t *testing.T) {
 	// The trick that makes this deterministic despite second-granularity timestamps: first PIN
 	// updated_at to the year 2000 explicitly (caller-provided value must win — touch skips it), then
 	// do a normal update that never mentions updated_at. Auto-touch must move it OFF 2000 to now().
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitid, text, int, now } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitid, text, int, now } = internals;
 const posts = {
   id: kitid().primaryKey(),
   title: text(),
@@ -944,7 +887,7 @@ func TestMigrationCheckpointsWALToMainFile(t *testing.T) {
 	}
 
 	schema := map[string]*ColumnSpec{"id": {kind: "kitid", primary: true}, "code": {kind: "text"}}
-	if err := migrate(db, "t", schema, false, false); err != nil {
+	if err := migrate(db, "t", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 50; i++ { // enough writes to grow the WAL
@@ -954,7 +897,7 @@ func TestMigrationCheckpointsWALToMainFile(t *testing.T) {
 	}
 	// The LAST operation is a DDL migration — its checkpoint must truncate the WAL.
 	schema["extra"] = &ColumnSpec{kind: "text"}
-	if err := migrate(db, "t", schema, false, false); err != nil {
+	if err := migrate(db, "t", schema, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -993,8 +936,8 @@ func TestSchemaColumnDeclarationOrder(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitid, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitid, text } = internals;
 const things = { id: kitid().primaryKey(), zebra: text(), apple: text(), mango: text() };
 const db = sqlite("app.db", { things: things }, { token: "tok", access: "readwrite" });
 router.get((ctx) => { db.things.create({ zebra: "z", apple: "a", mango: "m" }); return ctx.json({ ok: true }); });`
@@ -1048,7 +991,7 @@ func TestSchemaMigrationReordersToDeclared(t *testing.T) {
 		"zebra": {kind: "text", seq: 2},
 		"apple": {kind: "text", seq: 3},
 	}
-	if err := migrate(db, "t", schema, false, false); err != nil {
+	if err := migrate(db, "t", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	order, err := tableColumnsOrdered(db, "t")
@@ -1098,7 +1041,7 @@ func TestSchemaPrimaryKeyIsNotNull(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fresh.Close()
-	if err := migrate(fresh, "t", schema, false, false); err != nil {
+	if err := migrate(fresh, "t", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	if nn, ok := pkNotNull(fresh, "t"); !ok || !nn {
@@ -1116,7 +1059,7 @@ func TestSchemaPrimaryKeyIsNotNull(t *testing.T) {
 	if nn, _ := pkNotNull(old, "t"); nn {
 		t.Fatal("precondition: the PK should start nullable")
 	}
-	if err := migrate(old, "t", schema, false, false); err != nil {
+	if err := migrate(old, "t", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	if nn, _ := pkNotNull(old, "t"); !nn {
@@ -1145,7 +1088,7 @@ func TestSchemaIndexDefinitions(t *testing.T) {
 		"a":      {kind: "text", seq: 5, indexes: []colIndexRef{{name: "ab", pos: 2}}},
 		"b":      {kind: "text", seq: 6, indexes: []colIndexRef{{name: "ab", pos: 1}}},
 	}
-	if err := migrate(db, "links", schema, false, false); err != nil {
+	if err := migrate(db, "links", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	cols := func(name string) string {
@@ -1177,7 +1120,7 @@ func TestSchemaIndexSurvivesRebuild(t *testing.T) {
 		"id":   {kind: "kitid", primary: true, seq: 1},
 		"code": {kind: "text", seq: 2, indexes: []colIndexRef{{name: "idx_code"}}},
 	}
-	if err := migrate(db, "t", schema, false, false); err != nil {
+	if err := migrate(db, "t", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	if c, _ := liveIndexColumns(db, "idx_code"); strings.Join(c, ",") != "code" {
@@ -1197,8 +1140,8 @@ func TestSchemaIndexThroughVM(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitid, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitid, text } = internals;
 const links = {
   id: kitid().primaryKey(),
   slug: text().index(),
@@ -1253,7 +1196,7 @@ func TestSchemaIndexPartialFilter(t *testing.T) {
 			{col: "deleted_at", val: value.Value{K: value.Nil}},
 		}}}},
 	}
-	if err := migrate(db, "links", schema, false, false); err != nil {
+	if err := migrate(db, "links", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	// The object filter renders to a real partial predicate — equality quoted, null → IS NULL.
@@ -1264,7 +1207,7 @@ func TestSchemaIndexPartialFilter(t *testing.T) {
 
 	// Change detection: drop the filter → index rebuilt to a full index.
 	schema["created_at"].indexes = []colIndexRef{{name: "active_recent"}}
-	if err := migrate(db, "links", schema, false, false); err != nil {
+	if err := migrate(db, "links", schema, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(sqlOf("active_recent"), "WHERE") {
@@ -1283,7 +1226,7 @@ func TestSchemaChoiceDefaultValidated(t *testing.T) {
 		"id":     {kind: "kitid", primary: true, seq: 1},
 		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New("archived"), seq: 2},
 	}
-	if err := migrate(db, "t", bad, false, false); err == nil {
+	if err := migrate(db, "t", bad, false); err == nil {
 		t.Error("a choice default outside the declared values must be rejected")
 	} else if !strings.Contains(err.Error(), "archived") {
 		t.Errorf("error should name the bad default, got: %v", err)
@@ -1292,14 +1235,14 @@ func TestSchemaChoiceDefaultValidated(t *testing.T) {
 		"id":     {kind: "kitid", primary: true, seq: 1},
 		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New("active"), seq: 2},
 	}
-	if err := migrate(db, "t2", good, false, false); err != nil {
+	if err := migrate(db, "t2", good, false); err != nil {
 		t.Errorf("a valid choice default should be accepted: %v", err)
 	}
 	badType := map[string]*ColumnSpec{
 		"id":     {kind: "kitid", primary: true, seq: 1},
 		"status": {kind: "enum", enumVals: []string{"active", "disabled"}, hasDefault: true, def: value.New(1), seq: 2},
 	}
-	if err := migrate(db, "t3", badType, false, false); err == nil || !strings.Contains(err.Error(), "string or null") {
+	if err := migrate(db, "t3", badType, false); err == nil || !strings.Contains(err.Error(), "string or null") {
 		t.Fatalf("numeric choice default = %v, want a type error", err)
 	}
 }
@@ -1313,8 +1256,8 @@ func TestSchemaRefForeignKey(t *testing.T) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, id, text, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, id, text, ref } = internals;
 const users = { id: id(), email: text().notNull().unique() };
 const links = {
   id: id(),
@@ -1398,7 +1341,7 @@ func TestSchemaRefValidation(t *testing.T) {
 		col.seq = 2
 		schema := map[string]*ColumnSpec{"id": pk, "user_id": col}
 		db := open()
-		err := migrate(db, "t", schema, false, false)
+		err := migrate(db, "t", schema, false)
 		db.Close()
 		if err == nil {
 			t.Errorf("%s: expected a validation error", c.name)

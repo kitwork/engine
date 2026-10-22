@@ -60,16 +60,19 @@ func TestRealAppDatabaseContractFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// the engine's storage through the test-only module (storage_internals_test.go): a KitDB table, a
+	// write inside a transaction callback, a query lambda
 	routerScript := `
-import { router, sqlite } from "kitwork";
+import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
+const db = kitdb("contract.kitdb", { items: struct({ id: id(), name: text(), price: int() }) });
 
 router.get((ctx) => {
-    sqlite.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)");
-    sqlite.table("items").create({ name: "laptop", price: 1200 });
-    sqlite.atomic((tx) => {
-        tx.table("items").create({ name: "camera", price: 900 });
+    db.items.create({ name: "laptop", price: 1200 });
+    db.transaction((tx) => {
+        tx.items.create({ name: "camera", price: 900 });
     });
-    const item = sqlite.table("items").where(row => row.name == "camera").first();
+    const item = db.items.where(row => row.name == "camera").first();
     return ctx.json({ name: item.name, price: item.price });
 });
 `
@@ -78,6 +81,7 @@ router.get((ctx) => {
 	}
 
 	tenant := NewTenant(tmp, "localhost")
+	t.Cleanup(tenant.Close)
 	if err := tenant.Run(); err != nil {
 		t.Fatal(err)
 	}

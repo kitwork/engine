@@ -22,8 +22,8 @@ func TestKitDBCompositeForeignDSLReadsParentWriteInSameTransaction(t *testing.T)
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, ref } = internals;
 const accounts = struct({
   id: text().key(),
   tenant: text().notNull().unique("accounts_tenant_code", 1),
@@ -95,8 +95,8 @@ func TestKitDBRemoteSQLCompositeForeignKeyIsAtomicAndSurvivesRestart(t *testing.
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const db = database.kitdb("foreign-sql.kitdb", {}, { token: "foreign-secret", access: "readwrite" });
+	router := `import { router, internals } from "kitwork";
+const db = internals.kitdb("foreign-sql.kitdb", {}, { token: "foreign-secret", access: "readwrite" });
 router.get(() => 1);`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)
@@ -329,8 +329,8 @@ func TestKitDBCompositeForeignMigrationValidatesExistingRowsBeforePublication(t 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	versionOne := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	versionOne := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const accounts = struct({
   id: text().key(),
   tenant: text().notNull().unique("accounts_tenant_code", 1),
@@ -350,8 +350,8 @@ router.get((ctx) => {
   if (action === "clean") return ctx.json({ removed: db.orders.where("id", "=", "invalid").delete() });
   return ctx.json({ count: db.orders.count() });
 });`
-	versionTwo := `import { router, database } from "kitwork";
-const { kitdb, struct, text, ref } = database;
+	versionTwo := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, ref } = internals;
 const accounts = struct({
   id: text().key(),
   tenant: text().notNull().unique("accounts_tenant_code", 1),
@@ -464,10 +464,10 @@ func TestCompositeForeignSchemaContractLowersToSQLite(t *testing.T) {
 	if _, err := database.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate(database, "accounts", parent, false, false); err != nil {
+	if err := migrate(database, "accounts", parent, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := migrate(database, "orders", child, false, false); err != nil {
+	if err := migrate(database, "orders", child, false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`INSERT INTO accounts (id, tenant, code) VALUES ('a1', 'north', 'A'), ('a2', 'south', 'B')`); err != nil {

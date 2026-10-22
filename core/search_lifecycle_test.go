@@ -3,52 +3,46 @@ package core
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/kitwork/engine/search"
 )
 
+// The engine owns one bounded search manager for every site: a site's search opens its index there, never a
+// manager of its own; the manager is not reconfigured once a site loaded; it outlives a hot reload, an index
+// closes when its site is proven evicted, and it closes with the engine. A site reached it through
+// db.<table>.search(…) until 22/10/2026, when that spelling was removed (the spec's search() is slice 2 of
+// KITWORK_DATABASE.md); the collection search reaches the same manager, so the test searches a collection.
 func TestEngineOwnsDatabaseSearchManager(t *testing.T) {
 	root := t.TempDir()
 	siteDirectory := filepath.Join(root, "test", "localhost")
-	if err := os.MkdirAll(siteDirectory, 0o755); err != nil {
+	posts := filepath.Join(siteDirectory, "_collection", "posts")
+	if err := os.MkdirAll(posts, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, text } = database;
-const db = sqlite("shop.db", {
-  products: { id: text().key(), title: text().searchable() }
-});
-router.get((ctx) => {
-  db.products.create({ id: "p1", title: "Kitwork search" });
-  return ctx.json(db.products.search("kitwork").list());
-});`
-	reloadedRouter := `import { router, database } from "kitwork";
-const { sqlite, text } = database;
-const db = sqlite("shop.db", {
-  products: { id: text().key(), title: text().searchable() }
-});
-router.get((ctx) => ctx.json(db.products.search("kitwork").list()));`
-	if err := os.WriteFile(filepath.Join(siteDirectory, "router.kitwork.js"), []byte(router), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(posts, "kitwork.md"), []byte("---\ntitle: Kitwork Search\n---\nMột hệ thống của Nguyễn."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	router := `import { router, collection } from "kitwork";
+router.get((ctx) => ctx.json(collection.open("posts").search("nguyen")));`
+	routerPath := filepath.Join(siteDirectory, "router.kitwork.js")
+	if err := os.WriteFile(routerPath, []byte(router), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	engine := New(root, 0, true, "")
-	if err := engine.SetSearchManagerOptions(search.ManagerOptions{MaxOpenIndexes: 2}); err != nil {
+	if err := engine.SetSearchManagerOptions(search.ManagerOptions{MaxOpenIndexes: 2, DisableAutoCompact: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := engine.SetCollectionSearchCanary(true); err != nil {
 		t.Fatal(err)
 	}
 	manager := engine.searchManager
-	response := httptest.NewRecorder()
-	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"id":"p1"`) {
-		t.Fatalf("search response = %d %q", response.Code, response.Body.String())
-	}
+	serveCollectionCanaryRequest(t, engine)
+	waitForEngineSearches(t, engine, 1)
 	if manager == nil || engine.SearchStats().OpenIndexes != 1 {
 		t.Fatalf("host search manager stats = %#v", engine.SearchStats())
 	}
@@ -62,31 +56,25 @@ router.get((ctx) => ctx.json(db.products.search("kitwork").list()));`
 		t.Fatalf("site opened a second search manager: %v", err)
 	}
 	loaded := engine.cache["localhost"].current()
-	if err := os.WriteFile(
-		filepath.Join(siteDirectory, "router.kitwork.js"), []byte(reloadedRouter), 0o644,
-	); err != nil {
+	if err := os.WriteFile(routerPath, []byte(router+"\n// reload\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cached := engine.cache["localhost"]
 	cached.mu.Lock()
 	cached.lastChecked = time.Time{}
 	cached.mu.Unlock()
-	reloadedResponse := httptest.NewRecorder()
-	engine.ServeHTTP(reloadedResponse, httptest.NewRequest(http.MethodGet, "http://localhost/", nil))
-	if reloadedResponse.Code != http.StatusOK || !strings.Contains(reloadedResponse.Body.String(), `"id":"p1"`) {
-		t.Fatalf("reloaded search response = %d %q", reloadedResponse.Code, reloadedResponse.Body.String())
-	}
+	serveCollectionCanaryRequest(t, engine)
+	waitForEngineSearches(t, engine, 2)
 	reloaded := engine.cache["localhost"].current()
 	if reloaded == loaded {
 		t.Fatal("hot reload did not replace the tenant facade")
 	}
-	if len(reloaded.SearchIndexKeys()) != 1 || engine.SearchStats().OpenIndexes != 1 ||
+	if engine.searchManager != manager || len(reloaded.SearchIndexKeys()) != 1 || engine.SearchStats().OpenIndexes != 1 ||
 		engine.SearchStats().Commits != 1 {
 		t.Fatalf("search ownership changed across hot reload: keys=%v stats=%#v",
 			reloaded.SearchIndexKeys(), engine.SearchStats())
 	}
-	loaded = reloaded
-	engine.closeTenantSearch(loaded)
+	engine.closeTenantSearch(reloaded)
 	if stats := engine.SearchStats(); stats.OpenIndexes != 0 {
 		t.Fatalf("search index remained open after proven site eviction: %#v", stats)
 	}

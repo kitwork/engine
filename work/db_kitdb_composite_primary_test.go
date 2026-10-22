@@ -17,8 +17,8 @@ func TestKitDBCompositePrimaryKeyIsThePhysicalRowIdentity(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const anchor = struct({ id: text().key() });
 const db = kitdb("composite-primary.kitdb", { anchor }, { token: "test", access: "readwrite" });
 router.get(() => db.anchor.count());`

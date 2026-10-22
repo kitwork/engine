@@ -113,18 +113,29 @@ func (reader *schemaReader) kitworkImport(node Statement) bool {
 				if node.DestructMode == DestructObject {
 					imported = name.Value
 				}
+				reader.removedImport(name.Token, module, imported)
 				reader.words[name.Value] = kitworkWord{module: module, imported: imported}
 			}
 			return true
 		}
 		if member, ok := node.Value.(*MemberExpression); ok && node.DestructMode == DestructNone && len(node.Names) == 1 {
 			if module, ok := kitworkModulePath(member.Object); ok && member.Property != nil {
+				reader.removedImport(member.Property.Token, module, member.Property.Value)
 				reader.words[node.Names[0].Value] = kitworkWord{module: module, imported: member.Property.Value}
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// removedImport refuses an older word of the database module imported into a schema file (import { kitdb }
+// from "kitwork/database"), with what the spec writes instead: the file would otherwise fail later, at the
+// line that calls it, saying only that it declares neither struct nor connection.
+func (reader *schemaReader) removedImport(token Token, module, imported string) {
+	if refused := removedImportMessage(module, imported); refused != "" {
+		reader.fail(token, refused)
+	}
 }
 
 // kitworkModulePath reports e as kitwork() ("") or kitwork().<sub> (sub).
@@ -397,11 +408,24 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 	}
 	word, token, arguments, _ := reader.callee(base)
 	if word.imported == "connect" {
-		reader.fail(token, "connect(…) chưa có trong engine hôm nay (lát 8); database của app là connection().schema({ … })")
-		return nil
+		return reader.readConnect(name, token, arguments, links)
 	}
-	if len(arguments) != 0 {
-		reader.fail(token, "connection(\"tên\") chưa có trong engine hôm nay (lát 8, cùng app.databases của host); database của app là connection() không tên")
+	connectionName := ""
+	switch len(arguments) {
+	case 0:
+	case 1:
+		literal, isLiteral := arguments[0].(*Literal)
+		if !isLiteral || literal.Value.K != value.String || strings.TrimSpace(literal.Value.Text()) == "" {
+			reader.fail(token, `connection nhận tên database viết bằng chuỗi: connection("warehouse"), tên có trong app.databases({ … }) của application.work`)
+			return nil
+		}
+		connectionName = literal.Value.Text()
+		if reserved := statement.ReservedConnection(connectionName); reserved != "" {
+			reader.fail(literal.Token, reserved)
+			return nil
+		}
+	default:
+		reader.fail(token, `connection nhận một tên: connection() là database của app, connection("warehouse") là tên host khai trong app.databases({ … })`)
 		return nil
 	}
 	if len(links) == 0 || links[len(links)-1].Method.Value != "schema" {
@@ -429,7 +453,7 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		reader.fail(schema.Method.Token, "schema nhận một object bảng viết ngay trong lời gọi: .schema({ orders })")
 		return nil
 	}
-	database := &statement.Database{Export: name.Value}
+	database := &statement.Database{Export: name.Value, Connection: connectionName}
 	seen := map[string]bool{}
 	used := map[string]string{}
 	for _, entry := range tables.Entries {
@@ -487,6 +511,41 @@ func (reader *schemaReader) readDeclaration(name *Identifier, e Expression) *sta
 		return nil
 	}
 	return database
+}
+
+// readConnect reads connect({ postgresql: … }): a database outside the app, which has no schema, policy,
+// before or after (it is someone else's) and answers only query(). The value of the connector is code the
+// file runs when it loads (environment.CRM_URL), never read here, so nothing of the connection is in the
+// compiled program.
+func (reader *schemaReader) readConnect(name *Identifier, token Token, arguments []Expression, links []*MethodCallExpression) *statement.Database {
+	if len(links) != 0 {
+		link := links[0]
+		reader.fail(link.Method.Token, fmt.Sprintf("connect(…) không có .%s: database ngoài là của người khác, chỉ có %s.query(sql, [giá trị])", link.Method.Value, name.Value))
+		return nil
+	}
+	shape := "connect nhận một object có một bộ nối: connect({ postgresql: environment.CRM_URL }), bộ nối là postgresql hay mysql"
+	if len(arguments) != 1 {
+		reader.fail(token, shape)
+		return nil
+	}
+	source, ok := arguments[0].(*ObjectLiteral)
+	if !ok || len(source.Entries) != 1 || source.Entries[0].IsSpread {
+		reader.fail(token, shape)
+		return nil
+	}
+	connector, at, ok := objectKeyName(source.Entries[0].Key)
+	switch {
+	case !ok:
+		reader.fail(token, shape)
+		return nil
+	case connector == "sqlite":
+		reader.fail(at, `connect({ sqlite: … }) không có: connect nối ra database ngoài (postgresql, mysql); SQLite là connection("tên") với { sqlite: đường_dẫn } trong app.databases({ … }) của application.work`)
+		return nil
+	case !statement.Connectors[connector]:
+		reader.fail(at, fmt.Sprintf("connect({ %s: … }): %s", connector, shape))
+		return nil
+	}
+	return &statement.Database{Export: name.Value, External: connector}
 }
 
 // objectKeyName is the name of an object's key written as a name or a string.

@@ -31,8 +31,8 @@ func TestKitDBSchemaTableSkipAndOffsetPagination(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
 const items = struct({ id: id(), title: text().notNull(), rank: int().notNull().index() });
 const db = kitdb("pagination.kitdb", { items });
 router.get((ctx) => {
@@ -83,8 +83,8 @@ func TestKitDBTenantEntryAndRuntimeLifecycle(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int, choice, now, updated } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int, choice, now, updated } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique().index(),
@@ -190,8 +190,8 @@ router.get((ctx) => {
 
 	// A fresh generation deliberately declares no struct. ORM and remote SQL
 	// both hydrate the durable definition from catalog.kitdb itself.
-	reopenRouter := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	reopenRouter := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 const db = kitdb("catalog.kitdb");
 router.get((ctx) => ctx.json({ title: db.products.where("sku", "=", "A").first().title, count: db.products.count() }));`
 	if err := os.WriteFile(filepath.Join(dir, RouterFileName), []byte(reopenRouter), 0o644); err != nil {
@@ -231,8 +231,8 @@ func TestKitDBStructConstraintsFailClosed(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, ref } = internals;
 const users = struct({ id: id(), email: text().notNull().unique() });
 const links = struct({
   id: id(),
@@ -300,8 +300,8 @@ func TestKitDBStructIsRequired(t *testing.T) {
 	}{
 		{
 			name: "plain schema object",
-			router: `import { router, database } from "kitwork";
-const { kitdb, id, text } = database;
+			router: `import { router, internals } from "kitwork";
+const { kitdb, id, text } = internals;
 const items = { id: id(), name: text() };
 const db = kitdb("plain.kitdb", { items });
 router.get(() => db.items.count());`,
@@ -342,8 +342,8 @@ func TestStructORMIsBackendNeutralAcrossSQLiteAndKitDB(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitdb, struct, id, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitdb, struct, id, text, int } = internals;
 const items = struct({ id: id(), code: text().notNull().unique().index(), amount: int().default(0) });
 const sql = sqlite("same-api.db", { items });
 const native = kitdb("same-api.kitdb", { items });
@@ -386,8 +386,8 @@ func TestKitDBAggregatesAndExplainMatchSQLite(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitdb, struct, id, text, int, float } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitdb, struct, id, text, int, float } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique(),
@@ -499,8 +499,8 @@ func TestKitDBAggregateStreamsPastListLimit(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const items = struct({ id: text().key(), amount: int() });
 const db = kitdb("aggregate-limit.kitdb", { items });
 router.get((ctx) => {
@@ -535,8 +535,8 @@ func TestKitDBTransactionConflictHasStableSafeCode(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const items = struct({ id: text().key(), value: text() });
 const db = kitdb("conflict-code.kitdb", { items });
 router.get((ctx) => {
@@ -581,8 +581,8 @@ func TestKitDBStructChangeRequiresExplicitMigration(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	v1 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	v1 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const products = struct({ id: id(), title: text().notNull() });
 const db = kitdb("migration.kitdb", { products });
 router.get((ctx) => ctx.json(db.products.create({ title: "kept" })));`
@@ -601,8 +601,8 @@ router.get((ctx) => ctx.json(db.products.create({ title: "kept" })));`
 	}
 	tenant.Close()
 
-	v2 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	v2 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const products = struct({ id: id(), title: text().notNull(), description: text() });
 const db = kitdb("migration.kitdb", { products });
 router.get(() => db.products.count());`
@@ -660,8 +660,8 @@ func TestKitDBRecordTransactionCommitsRollsBackAndReopens(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, choice, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, choice, ref } = internals;
 const users = struct({ id: id(), email: text().notNull().unique() });
 const orders = struct({
   id: id(),
@@ -748,8 +748,8 @@ func TestKitDBCapabilitySerializesConcurrentWrites(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const items = struct({ id: id(), code: text().notNull().unique().index() });
 const db = kitdb("concurrent.kitdb", { items });
 router.get((ctx) => {
@@ -809,8 +809,8 @@ func TestKitDBCapabilityRejectsSymlinkEscape(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(dataDir, "link")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const items = struct({ id: id(), value: text() });
 const db = kitdb("link/escape.kitdb", { items });
 router.get(() => db.items.create({ value: "secret" }));`

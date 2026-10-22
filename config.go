@@ -41,6 +41,12 @@ type Config struct {
 	// Minify is MINIFY=true of the host env: minify HTML and JavaScript as production does while
 	// AllowLocal stays true (minifies). Production always minifies.
 	Minify bool `json:"-" yaml:"-"`
+
+	// DatabaseCatalog is app.databases({ … }): the named databases an app reaches with connection("tên").
+	DatabaseCatalog map[string]database.Config `json:"-" yaml:"-"`
+	// TenantConnections is app.policy({ tenantConnections }): whether app code may connect({ … }); true
+	// unless the manifest says false.
+	TenantConnections bool `json:"-" yaml:"-"`
 }
 
 // RateLimitConfig is the HOST-level (server-wide) rate-limit block — the first gate every request
@@ -60,9 +66,10 @@ type RateLimitConfig struct {
 
 func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	cfg := &Config{
-		Port:      8080,
-		Root:      ".",
-		MaxEnergy: 10000000,
+		Port:              8080,
+		Root:              ".",
+		MaxEnergy:         10000000,
+		TenantConnections: true,
 	}
 
 	if val, ok := raw["port"]; ok {
@@ -252,6 +259,20 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 	if err := validateDeclaredDatabaseAliases(cfg.Databases, cfg.AppDatabases); err != nil {
 		return nil, err
 	}
+	if value, ok := raw["database_catalog"]; ok {
+		catalog, err := parseDatabaseCatalog(value)
+		if err != nil {
+			return nil, err
+		}
+		cfg.DatabaseCatalog = catalog
+	}
+	if value, ok := raw["tenant_connections"]; ok {
+		allowed, isBool := value.(bool)
+		if !isBool {
+			return nil, fmt.Errorf("app.policy: tenantConnections is true or false")
+		}
+		cfg.TenantConnections = allowed
+	}
 	if value, ok := raw["gateway"]; ok {
 		targets, err := parseGatewayTargets(value)
 		if err != nil {
@@ -312,6 +333,33 @@ func validateDeclaredDatabaseAliases(external []database.Config, owned []AppData
 		seen[key] = "app.database"
 	}
 	return nil
+}
+
+// parseDatabaseCatalog reads app.databases({ … }) as the builder wrote it: each name to one connector,
+// { type, url } or { type: "sqlite", name: path }.
+func parseDatabaseCatalog(raw interface{}) (map[string]database.Config, error) {
+	entries, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("app.databases: the catalogue is an object of named databases")
+	}
+	catalog := make(map[string]database.Config, len(entries))
+	for name, entry := range entries {
+		fields, ok := entry.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("app.databases: %s is one connector", name)
+		}
+		kind, _ := fields["type"].(string)
+		url, _ := fields["url"].(string)
+		path, _ := fields["name"].(string)
+		switch {
+		case kind == "sqlite" && path != "":
+		case (kind == "postgres" || kind == "mysql") && url != "":
+		default:
+			return nil, fmt.Errorf("app.databases: %s is one connector, { postgresql: url }, { mysql: url } or { sqlite: path }", name)
+		}
+		catalog[name] = database.Config{Alias: name, Type: kind, URL: url, Name: path}
+	}
+	return catalog, nil
 }
 
 func coerceIntErr(val interface{}) (int, error) {

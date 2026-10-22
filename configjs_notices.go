@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 
 	"github.com/kitwork/engine/database"
 )
@@ -34,6 +35,23 @@ func (b *ServerBuilder) unlinkedConnectionWarnings() []string {
 			"%s(%q)%s: no driver linked in this build — the alias is declared, but nothing can open it",
 			connection.method, connection.alias, kind,
 		))
+	}
+	if catalog, declared := b.config["database_catalog"]; declared && catalog.IsMap() {
+		names := make([]string, 0, len(catalog.Map()))
+		for name := range catalog.Map() {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			provider := catalog.Map()[name].Get("type").Text()
+			if database.DriverLinked(provider) {
+				continue
+			}
+			warnings = append(warnings, fmt.Sprintf(
+				"app.databases: %s (%s): no driver linked in this build — connection(%q) cannot open it",
+				name, provider, name,
+			))
+		}
 	}
 	return warnings
 }

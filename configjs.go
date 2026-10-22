@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -75,6 +76,9 @@ type ServerBuilder struct {
 	// minify is MINIFY=true of the host env (root .env or the real environment): the engine minifies
 	// what it serves as production does while ALLOW_LOCAL stays true (Config.Minify, minifies).
 	minify bool
+	// manifestDir is the manifest's folder, which a path the manifest writes is read from
+	// (app.databases({ archive: { sqlite: "./data/archive.db" } })).
+	manifestDir string
 }
 
 // MissingMember is called for a manifest method this engine does not have — app.postgresql() on a
@@ -392,8 +396,123 @@ func (b *ServerBuilder) TrustProxy(v value.Value) *ServerBuilder {
 	return b
 }
 
-func (b *ServerBuilder) Databases(v value.Value) *ServerBuilder {
-	b.config["databases"] = v
+// Databases declares the host's catalogue of named databases (KITWORK_DATABASE.md mục 1, "Host và tên
+// database"); an app picks one by its name with connection("warehouse") in its .shared/schema/:
+//
+//	app.databases({ warehouse: { postgresql: env.WAREHOUSE_URL }, archive: { sqlite: "./data/archive.db" } });
+//
+// Each entry is one connector: postgresql or mysql with its URL, sqlite with a path read from this
+// manifest's folder. application, storage and files are the spec's names for the app's own database,
+// datastore() and the shared file store, which this engine cannot move yet: declaring one stops the boot
+// instead of being ignored. The host's own connections (app.postgresql, app.connect: the system database of
+// the queue and the scheduler) are not in the catalogue, so no app reaches them.
+func (b *ServerBuilder) Databases(values ...value.Value) *ServerBuilder {
+	const shape = "app.databases expects one object of named databases: app.databases({ warehouse: { postgresql: env.WAREHOUSE_URL } })"
+	if len(values) != 1 || !values[0].IsMap() {
+		b.err = shape + "; the host's own connections are app.postgresql(…) and app.connect(…)"
+		return b
+	}
+	catalog := map[string]value.Value{}
+	if declared, ok := b.config["database_catalog"]; ok && declared.IsMap() {
+		for name, entry := range declared.Map() {
+			catalog[name] = entry
+		}
+	}
+	names := make([]string, 0, len(values[0].Map()))
+	for name := range values[0].Map() {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		entry := values[0].Map()[name]
+		switch {
+		case strings.TrimSpace(name) == "" || strings.TrimSpace(name) != name:
+			b.err = fmt.Sprintf("app.databases: %q is not a database name", name)
+			return b
+		case name == "application":
+			b.err = "app.databases: application is the app's own database, KitDB in the app's folder (app/.database/application/); moving it to another database is not in this engine yet"
+			return b
+		case name == "storage":
+			b.err = "app.databases: storage is the name of datastore()'s store (KITWORK_STORAGE.md), which is not in this engine yet"
+			return b
+		case name == "files":
+			b.err = "app.databases: files is the name of the shared file store (KITWORK_FILE.md), which is not in this engine yet"
+			return b
+		}
+		if _, twice := catalog[name]; twice {
+			b.err = fmt.Sprintf("app.databases: %s is declared twice", name)
+			return b
+		}
+		if !entry.IsMap() || len(entry.Map()) != 1 {
+			b.err = fmt.Sprintf("app.databases: %s is one connector, { postgresql: url }, { mysql: url } or { sqlite: path }", name)
+			return b
+		}
+		for connector, source := range entry.Map() {
+			if source.K != value.String || strings.TrimSpace(source.Text()) == "" {
+				// the value is not repeated: it holds the credentials
+				b.err = fmt.Sprintf("app.databases: %s.%s needs a non-empty string (an environment variable that is not set gives none)", name, connector)
+				return b
+			}
+			text := strings.TrimSpace(source.Text())
+			declared := map[string]value.Value{}
+			switch connector {
+			case "postgresql", "mysql":
+				if separator := strings.Index(text, "://"); separator > 0 {
+					if canonicalConnectionType(text[:separator]) != canonicalConnectionType(connector) {
+						b.err = fmt.Sprintf("app.databases: %s.%s has a URL of another connector", name, connector)
+						return b
+					}
+				}
+				declared["type"] = value.New(canonicalConnectionType(connector))
+				declared["url"] = value.New(text)
+			case "sqlite":
+				path := text
+				if !filepath.IsAbs(path) {
+					path = filepath.Join(b.manifestDir, path)
+				}
+				if absolute, err := filepath.Abs(path); err == nil {
+					path = absolute
+				}
+				declared["type"] = value.New("sqlite")
+				declared["name"] = value.New(path)
+			default:
+				b.err = fmt.Sprintf("app.databases: %s.%s is not a connector: postgresql, mysql or sqlite", name, connector)
+				return b
+			}
+			catalog[name] = value.New(declared)
+		}
+	}
+	b.config["database_catalog"] = value.New(catalog)
+	return b
+}
+
+// Policy is the host's policy for the apps it serves (KITWORK_DATABASE.md mục 1):
+//
+//	app.policy({ tenantConnections: false });   // no app may connect({ … }) to a database of its own
+//
+// requirePolicy needs the schema's policy(), which this engine does not have yet: it stops the boot
+// instead of promising a check nothing makes.
+func (b *ServerBuilder) Policy(values ...value.Value) *ServerBuilder {
+	if len(values) != 1 || !values[0].IsMap() {
+		b.err = "app.policy expects one object: app.policy({ tenantConnections: false })"
+		return b
+	}
+	for key, item := range values[0].Map() {
+		switch key {
+		case "tenantConnections":
+			if item.K != value.Bool {
+				b.err = "app.policy: tenantConnections is true or false"
+				return b
+			}
+			b.config["tenant_connections"] = item
+		case "requirePolicy":
+			b.err = "app.policy: requirePolicy needs policy() in .shared/schema/, which this engine does not have yet (KITWORK_DATABASE.md slice 6)"
+			return b
+		default:
+			b.err = fmt.Sprintf("app.policy: %s is not a policy of this engine; it has tenantConnections", key)
+			return b
+		}
+	}
 	return b
 }
 
@@ -1037,6 +1156,7 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 	vm.MaxEnergy = 100_000_000 // rộng tay: setup chạy đúng 1 lần, không phải hot path
 
 	builder := NewServerBuilder()
+	builder.manifestDir = filepath.Dir(file)
 	serverObj := value.New(builder)
 
 	// HOST env: root .env (cạnh file config) phủ bởi biến môi trường THẬT (OS thắng).

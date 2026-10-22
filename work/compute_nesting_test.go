@@ -22,7 +22,13 @@ import (
 // same route with room to finish, which proves the fixture and makes the failure the budget's.
 
 const nestingPreamble = `
-import { router, sqlite } from "kitwork";
+import { router, internals } from "kitwork";
+
+// the query builder over a SQLite file of the site, and a KitDB of it with a transaction: the engine's
+// storage, through the test-only module (storage_internals_test.go)
+const file = internals.file("app.db");
+const { kitdb, struct, id, text } = internals;
+const db = kitdb("nest.kitdb", { items: struct({ id: id(), name: text() }) });
 
 const burn = (n) => {
     let total = 0;
@@ -72,7 +78,7 @@ func TestQueryLambdasShareTheRequestEnergy(t *testing.T) {
 router.get((ctx) => {
     let rounds = 0;
     for (let k = 0; k < 20; k++) {
-        sqlite.table("items").where(row => {
+        file.table("items").where(row => {
             burn(2000);
             return row.id == 1;
         });
@@ -97,12 +103,11 @@ router.get((ctx) => {
 func TestNestedTransactionsShareTheRequestEnergy(t *testing.T) {
 	routes := `
 router.get((ctx) => {
-    sqlite.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)");
     let rounds = 0;
     for (let k = 0; k < 10; k++) {
-        sqlite.atomic((tx) => {
+        db.transaction((tx) => {
             burn(2000);
-            tx.table("items").where(row => {
+            tx.items.where(row => {
                 burn(2000);
                 return row.id == 1;
             });
@@ -130,7 +135,7 @@ func TestNestedLambdasShareTheFrameCeiling(t *testing.T) {
 const dig = (level, limit) => {
     let reached = level;
     if (level < limit) {
-        sqlite.table("items").where(row => {
+        file.table("items").where(row => {
             reached = dig(level + 1, limit);
             return row.id == 1;
         });
@@ -158,7 +163,7 @@ router.get((ctx) => ctx.text("deepest:" + dig(1, LIMIT)));
 func TestCancellationInsideQueryLambdaEndsTheRequest(t *testing.T) {
 	routes := `
 router.get((ctx) => {
-    sqlite.table("items").where(row => {
+    file.table("items").where(row => {
         cancelRequest();
         burn(100000);
         return row.id == 1;
@@ -192,7 +197,7 @@ router.get((ctx) => {
 func TestPanicInsideQueryLambdaIsNativePanic(t *testing.T) {
 	routes := `
 router.get((ctx) => {
-    const attempt = safe(() => sqlite.table("items").where(row => {
+    const attempt = safe(() => file.table("items").where(row => {
         hostCall();
         return row.id == 1;
     }));
@@ -217,8 +222,8 @@ router.get((ctx) => {
 	}
 }
 
-// The capability compute seam (Tenant.Execute) nests too, as capabilities/database runs an atomic
-// callback through it: each callback fits the ceiling, twenty do not, and safe(() => …) cannot catch
+// The capability compute seam (Tenant.Execute) nests too, as a capability that runs a callback through
+// it does: each callback fits the ceiling, twenty do not, and safe(() => …) cannot catch
 // the energy limit although the capability turns the failure into a plain value. The callback reaches the
 // host as a function argument (CALL), the query lambdas above as a method argument (INVOKE).
 func TestExecuteSeamSharesTheRequestEnergy(t *testing.T) {

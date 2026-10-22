@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"math"
@@ -15,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/database/statement"
 	"github.com/kitwork/engine/id"
 	kitdbengine "github.com/kitwork/engine/kitdb"
@@ -25,36 +25,24 @@ import (
 	"github.com/kitwork/engine/value"
 )
 
-// Schema-aware `db.<table>` surface under the `database` capability: a schema maps table names to
-// column specs; the engine auto-migrates the table to match and hands back a validated query builder.
-//
-//	import { database } from "kitwork";
-//	const { sqlite, kitid, text, int, datetime } = database;
-//	const vouchers = {
-//	  id: kitid().primaryKey(),
-//	  code: text().notNull().unique(),
-//	  discount: int().default(0),
-//	  status: text().default("active"),
-//	  created_at: datetime().defaultNow(),
-//	};
-//	export const db = sqlite("app.db", { vouchers });
-//
-//	// handler
-//	db.vouchers.where("status", "=", "active").orderBy("created_at", "desc").limit(10).list();
-//	db.vouchers.find("voucher_123");
-//	db.vouchers.create({ code: "HD169K40", discount: 40000 });  // id/status/created_at auto-filled
+// The schema'd database machinery: a schema maps table names to column specs (ColumnSpec, StructDef); the
+// engine migrates each table to match on first use and hands back a validated query on it (SchemaTable),
+// over SQLite or KitDB. The spec's handle runs on it: connection().schema({ … }) of an app's
+// .shared/schema/ is a dbProxy, and every translated statement runs on one of its SchemaTables
+// (ManagedDatabase, database_managed.go). App code wrote this surface itself until 22/10/2026
+// (database.sqlite/kitdb with the older column builders, db.<table>.where(…)); those spellings are errors
+// now, and the engine's tests reach the machinery through a test-only module (storage_internals_test.go).
 //
 // How it works:
 //   - db.<table> resolves via the VM's Proxy.OnGet — no VM changes.
 //   - create() generates the kitid PK + applies defaults; where()/orderBy() validate columns.
 //   - the table is migrated on first use, cached by schema hash — not re-checked per request.
-//   - database.sqlite → modernc; database.define(alias) → entity-scoped
-//     shared tables (rows partitioned by identity).
+//   - the SQLite engine is modernc.
 //
 // Migration (see migrate() below): additive ADD COLUMN with default backfill runs automatically; type
-// changes and column drops are DESTRUCTIVE (rebuild + CAST / drop) and run ONLY with { drop: true }.
-// Known limits: the rebuild does not restore indexes/triggers/FKs (the DSL declares none), and the
-// shared (entity) migration is not yet coordinated across nodes.
+// changes and column drops are DESTRUCTIVE (rebuild + CAST / drop) and run ONLY on a proxy that allows them
+// (allowDrop); the spec's handle never does, so a destructive change is refused (`kitwork migrate` is open).
+// Known limits: the rebuild does not restore indexes/triggers/FKs (the DSL declares none).
 
 // ---- column DSL: kitid()/text()/integer()/datetime() + chainable modifiers ----
 
@@ -428,179 +416,6 @@ func (c *ColumnSpec) From(args ...value.Value) *ColumnSpec {
 	return c
 }
 
-func columnFunc(kind string) value.Value {
-	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: kind, seq: nextColSeq()})
-	})
-}
-
-// The WHOLE DB surface lives under `database`: column builders (text/int/kitid/datetime), the local
-// engine factories (sqlite/kitdb), and the shared world (define/entity). One import, destructure what
-// you need:
-//
-//	import { database } from "kitwork";
-//	const { sqlite, kitid, text, int, datetime } = database;
-//	const db = sqlite("app.db", { vouchers });   // === database.sqlite("app.db", { vouchers })
-//
-// Putting the column DSL here (member access on `database`) also sidesteps the parser's named-import
-// subpath limitation entirely — no `kitwork/db` namespace, no parser change needed.
-//
-// Each column builder is a 0-arg getter returning a callable Func, so `const { text } = database`
-// binds `text` to a function and `text()` builds a column spec.
-// Identifiers
-func (d *Database) Kitid() value.Value  { return columnFunc("kitid") }
-func (d *Database) Uuid() value.Value   { return columnFunc("uuid") }
-func (d *Database) Serial() value.Value { return columnFunc("serial") } // INTEGER; auto-increment not wired yet
-
-// Text
-func (d *Database) Text() value.Value    { return columnFunc("text") }
-func (d *Database) Varchar() value.Value { return paramFunc("varchar") } // length is metadata (no-op on sqlite)
-func (d *Database) Char() value.Value    { return paramFunc("char") }
-
-// Numbers
-func (d *Database) Integer() value.Value { return columnFunc("integer") }
-func (d *Database) Int() value.Value     { return columnFunc("integer") } // alias
-func (d *Database) Float() value.Value   { return columnFunc("float") }
-func (d *Database) Real() value.Value    { return columnFunc("float") }  // alias
-func (d *Database) Double() value.Value  { return columnFunc("float") }  // doublePrecision alias
-func (d *Database) Decimal() value.Value { return paramFunc("decimal") } // stored as TEXT (exact), read as number
-
-// Boolean
-func (d *Database) Bool() value.Value    { return columnFunc("bool") }
-func (d *Database) Boolean() value.Value { return columnFunc("bool") } // alias
-
-// Choice declares one string selected from a finite set. The internal "enum"
-// kind is retained so existing catalogs and database files need no migration.
-func (d *Database) Choice() value.Value {
-	return value.NewFunc(func(args ...value.Value) value.Value {
-		c := &ColumnSpec{kind: "enum", seq: nextColSeq()}
-		if len(args) == 0 {
-			c.declareErr = "choice() needs at least one string value"
-			return value.New(c)
-		}
-		seen := make(map[string]struct{}, len(args))
-		for index, a := range args {
-			if a.K != value.String {
-				if c.declareErr == "" {
-					c.declareErr = fmt.Sprintf("choice() value %d must be a string", index+1)
-				}
-				continue
-			}
-			choice := a.String()
-			if strings.TrimSpace(choice) == "" {
-				if c.declareErr == "" {
-					c.declareErr = fmt.Sprintf("choice() value %d cannot be empty", index+1)
-				}
-				continue
-			}
-			if _, duplicate := seen[choice]; duplicate {
-				if c.declareErr == "" {
-					c.declareErr = fmt.Sprintf("choice() value %q is declared more than once", choice)
-				}
-				continue
-			}
-			seen[choice] = struct{}{}
-			c.enumVals = append(c.enumVals, choice)
-		}
-		return value.New(c)
-	})
-}
-
-// Time — datetime/date/time are MANUAL; now() is the auto-timestamp preset.
-func (d *Database) Datetime() value.Value { return columnFunc("datetime") }
-func (d *Database) Date() value.Value     { return columnFunc("date") }
-func (d *Database) Time() value.Value     { return columnFunc("time") }
-func (d *Database) Year() value.Value     { return columnFunc("year") }  // INTEGER, auto current year on insert
-func (d *Database) Month() value.Value    { return columnFunc("month") } // INTEGER, auto current month
-func (d *Database) Day() value.Value      { return columnFunc("day") }   // INTEGER, auto current day
-
-// Structured
-func (d *Database) Json() value.Value  { return columnFunc("json") }
-func (d *Database) Jsonb() value.Value { return columnFunc("jsonb") } // ≡ json on sqlite (both TEXT)
-func (d *Database) Array() value.Value { return columnFunc("array") } // JSON array in TEXT
-func (d *Database) Blob() value.Value  { return columnFunc("blob") }
-func (d *Database) Bytes() value.Value { return columnFunc("blob") } // alias
-
-// Networking & AI
-func (d *Database) Ip() value.Value     { return columnFunc("ip") }  // TEXT (no native type)
-func (d *Database) Mac() value.Value    { return columnFunc("mac") } // TEXT
-func (d *Database) Vector() value.Value { return paramFunc("vector") }
-
-// Presets — the two universal patterns get a one-word name; compose the rest with modifiers.
-func (d *Database) Id() value.Value { // = kitid().primaryKey()
-	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: "kitid", primary: true, seq: nextColSeq()})
-	})
-}
-func (d *Database) Now() value.Value { // = datetime().defaultNow()
-	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true, seq: nextColSeq()})
-	})
-}
-func (d *Database) Updated() value.Value { // = now().onUpdate() — stamped on insert AND every update
-	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: "datetime", defaultNow: true, touch: true, seq: nextColSeq()})
-	})
-}
-
-// Ref declares a foreign key: ref(users.id, { onDelete: "cascade" }). Composite references share a
-// constraint name and optionally pin their order: ref(accounts.tenant, "orders_account", 1). The
-// column inherits ONLY the
-// target's storage type — not its primary-key/unique/default/auto-gen — so a ref to a kitid never
-// auto-generates a random id when left blank. Target/column names are resolved by pointer identity when
-// the schema is registered (see newDbProxy).
-func (d *Database) Ref() value.Value {
-	return value.NewFunc(func(args ...value.Value) value.Value {
-		spec := &ColumnSpec{seq: nextColSeq()}
-		fk := &fkRef{}
-		if len(args) > 0 {
-			if target, ok := args[0].V.(*ColumnSpec); ok {
-				fk.target = target
-				spec.kind = plainKindFor(target.kind) // same storage class, no auto-gen
-			}
-		}
-		for _, argument := range args[1:] {
-			switch argument.K {
-			case value.String:
-				if fk.name != "" {
-					spec.declareErr = "ref() accepts at most one constraint name"
-					break
-				}
-				fk.name = strings.TrimSpace(argument.String())
-				if fk.name == "" {
-					spec.declareErr = "ref() composite constraint needs a non-empty name"
-				}
-			case value.Number:
-				position := int(argument.N)
-				if argument.N != float64(position) || position < 1 {
-					spec.declareErr = "ref() position must be a positive integer"
-					break
-				}
-				if fk.pos != 0 {
-					spec.declareErr = "ref() accepts at most one position"
-					break
-				}
-				fk.pos = position
-			case value.Map:
-				opts := argument.Map()
-				if v, ok := opts["onDelete"]; ok && v.K == value.String {
-					fk.onDelete = v.String()
-				}
-				if v, ok := opts["onUpdate"]; ok && v.K == value.String {
-					fk.onUpdate = v.String()
-				}
-			default:
-				spec.declareErr = "ref() accepts a target, constraint name, position, and action options"
-			}
-		}
-		if fk.pos != 0 && fk.name == "" && spec.declareErr == "" {
-			spec.declareErr = "ref() position requires a composite constraint name"
-		}
-		spec.fk = fk
-		return value.New(spec)
-	})
-}
-
 // plainKindFor maps a target column's kind to a plain kind with the SAME storage class but no auto-gen,
 // so a foreign key stores compatible values without inheriting the target's id generation.
 func plainKindFor(targetKind string) string {
@@ -658,15 +473,6 @@ func validFKActionName(action string) bool {
 	default:
 		return false
 	}
-}
-
-// paramFunc builds a column whose first arg is a size/precision/dimension hint (varchar(50),
-// decimal(10,2), vector(1536)). The hint is metadata for v1 — sqlite ignores length/precision, and the
-// vector is stored as a JSON array — but it is accepted so schemas read the same across engines.
-func paramFunc(kind string) value.Value {
-	return value.NewFunc(func(_ ...value.Value) value.Value {
-		return value.New(&ColumnSpec{kind: kind, seq: nextColSeq()})
-	})
 }
 
 // ---- storage classes + coercion ----
@@ -803,14 +609,6 @@ func coerceRowInPlace(columns map[string]*ColumnSpec, row value.Value) {
 	}
 }
 
-// Sqlite and Kitdb are local per-tenant factories. They are variadic (not 0-arg getters), so a
-// destructured factory and database.<factory>(...) are the same call. SQLite renders the shared
-// ORM state to SQL; KitDB executes its storage-neutral plan directly. All files remain confined to
-// the tenant's .data directory and are owned by the app runtime.
-func (d *Database) Sqlite(args ...value.Value) value.Value {
-	return newDbProxy(d.tenant, d.requestScope, "sqlite", args...)
-}
-
 // ---- defineDb("app.db", { vouchers, categories }) → a Proxy whose db.<table> is schema-aware ----
 
 type dbProxy struct {
@@ -818,6 +616,7 @@ type dbProxy struct {
 	scope            *requestscope.Scope
 	engine           string // "sqlite" | "kitdb"
 	dbName           string
+	sqlitePath       string                             // the host's SQLite file of connection("tên") (app.databases); "" for a file of the site's .data/
 	databaseID       string                             // expected durable identity for node-catalog managed databases
 	allowDrop        bool                               // opt-in via sqlite("app.db", schema, { drop: true }) — enables destructive migration
 	migrate          bool                               // KitDB-only opt-in for planner-approved, non-destructive schema migration
@@ -1182,7 +981,9 @@ func registerSchema(p *dbProxy) {
 
 // ---- serve registry: which tenant dbs are exposed over libSQL/HTTP, and how ----
 //
-// Populated by sqlite(...) or kitdb(...) with { token, access } at declare time. The Hrana
+// Populated by a proxy declared with { token, access } (the removed kitdb(…, { token, access }); the
+// engine's tests build one through the Go API, and app code opens a KitDB to the outside with the
+// host's app.database(path, { port })). The Hrana
 // and /_db handlers consult this registry instead of environment variables: exposure is a declared
 // application capability, not the side effect of a secret existing.
 
@@ -1475,7 +1276,7 @@ func (p *dbProxy) table(key string) (*SchemaTable, value.Value) {
 		return nil, value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: no table %q defined in this database", key))
 	}
 	return &SchemaTable{
-		tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName,
+		tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName, sqlitePath: p.sqlitePath,
 		allowDrop: p.allowDrop, migrate: p.migrate, table: key, columns: cols, siblings: tables,
 		definition: definitions[key], definitions: definitions, transaction: p.transaction,
 	}, value.Value{}
@@ -1499,6 +1300,7 @@ type SchemaTable struct {
 	scope           *requestscope.Scope
 	engine          string // "sqlite" | "kitdb"
 	dbName          string
+	sqlitePath      string // the host's SQLite file of connection("tên"); "" for a file of the site's .data/
 	allowDrop       bool
 	migrate         bool
 	table           string
@@ -1562,7 +1364,19 @@ func (t *SchemaTable) source() *SQLite {
 	if t.engine == "kitdb" {
 		return nil
 	}
+	if t.sqlitePath != "" {
+		return hostSQLite(t.tenant, t.dbName, t.sqlitePath, t.scope)
+	}
 	return sqliteForRequest(t.tenant, t.dbName, t.scope)
+}
+
+// sqliteFile is the file this table's SQLite database is: the host's of connection("tên"), or one of the
+// site's .data/.
+func (t *SchemaTable) sqliteFile() string {
+	if t.sqlitePath != "" {
+		return t.sqlitePath
+	}
+	return t.tenant.resolve(".data", t.dbName)
 }
 
 func (t *SchemaTable) builder() *query.Query {
@@ -1585,6 +1399,10 @@ func (t *SchemaTable) ready() (value.Value, bool) {
 		return t.failVal(), false
 	}
 	if err := t.ensureTable(); err != nil {
+		var destructive *destructiveMigrationError
+		if errors.As(err, &destructive) {
+			return value.InvalidFailure(value.DatabaseCode, destructive.Error()), false
+		}
 		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: table %q migration failed: %v", t.table, err)), false
 	}
 	return value.Value{}, true
@@ -1867,7 +1685,7 @@ func (t *SchemaTable) Plan(_ ...value.Value) value.Value {
 	if err != nil {
 		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db.plan: %v", err))
 	}
-	steps := planMigration(current, t.columns, false, t.allowDrop)
+	steps := planMigration(current, t.columns, t.allowDrop)
 	out := make([]value.Value, 0, len(steps))
 	for _, s := range steps {
 		out = append(out, value.New(map[string]value.Value{
@@ -1899,13 +1717,20 @@ func (t *SchemaTable) ensureTable() error {
 	}
 	for _, name := range sortedTableNames(tables) {
 		cols := tables[name]
-		key := t.engine + ":" + t.tenant.resolve(".data", t.dbName) + "::" + name + "::" + schemaHash(cols)
+		key := t.engine + ":" + t.sqliteFile() + "::" + name + "::" + schemaHash(cols)
 		if _, done := ensuredTables.Load(key); done {
 			continue
 		}
+		// The host's database of connection("tên") applies no change that loses data: the statement fails
+		// naming it, and nothing applies (the app's KitDB refuses the same way).
+		if t.sqlitePath != "" {
+			if err := refuseDestructiveMigration(t.source().db(), t.dbName, name, cols); err != nil {
+				return err
+			}
+		}
 		// Do NOT cache on failure: a migration that could not apply (e.g. the ALTER did not take because
 		// another process held the database) must be RETRIED on the next request, not silently marked done.
-		if err := migrate(t.source().db(), name, cols, false, t.allowDrop); err != nil {
+		if err := migrate(t.source().db(), name, cols, t.allowDrop); err != nil {
 			fmt.Printf("[db.migrate] ERROR table %q: %v — not applied; will retry next request\n", name, err)
 			return err
 		}
@@ -1914,11 +1739,9 @@ func (t *SchemaTable) ensureTable() error {
 	return nil
 }
 
-// schemaDDL builds CREATE TABLE IF NOT EXISTS from the schema. `extra` prepends raw column definitions
-// (the entity world passes `"identity" TEXT NOT NULL` so shared rows can be scoped).
-func schemaDDL(table string, columns map[string]*ColumnSpec, extra ...string) string {
-	defs := make([]string, 0, len(columns)+len(extra))
-	defs = append(defs, extra...)
+// schemaDDL builds CREATE TABLE IF NOT EXISTS from the schema.
+func schemaDDL(table string, columns map[string]*ColumnSpec) string {
+	defs := make([]string, 0, len(columns))
 	for _, n := range orderedColumns(columns) { // lay the table out AS DECLARED, not alphabetically
 		defs = append(defs, columnSQL(n, columns[n]))
 	}
@@ -2176,239 +1999,6 @@ func syncIndexes(db *sql.DB, table string, want []indexDef) error {
 }
 
 // ============================================================================
-// database.define(alias, { … }) → the SHARED world: schema-aware tables that
-// ride on database.entity(), so rows are identity-scoped across tenants.
-// This is where schema meets the multi-tenant sharing story: one physical table,
-// each app sees only its own rows, and the schema fills kitid/defaults on top.
-// ============================================================================
-
-// Define hangs off the `database` capability (import { database } from "kitwork"). The first arg is an
-// ALIAS in spirit (the entity scope binds to database.System either way in this sketch); the second is
-// the schema. Returns a Proxy whose db.<table> is an identity-scoped, schema-aware handle.
-func (d *Database) Define(args ...value.Value) value.Value {
-	return newEntityProxy(d.tenant, d.requestScope, args...)
-}
-
-type entityProxy struct {
-	tenant *Tenant
-	scope  *requestscope.Scope
-	tables map[string]map[string]*ColumnSpec
-}
-
-func newEntityProxy(tenant *Tenant, scope *requestscope.Scope, args ...value.Value) value.Value {
-	p := &entityProxy{tenant: tenant, scope: scope, tables: map[string]map[string]*ColumnSpec{}}
-	// Accept both define("alias", { schema }) and define({ schema }).
-	schemaArg := len(args) - 1
-	if schemaArg >= 0 && args[schemaArg].K == value.Map {
-		for tableName, tableVal := range args[schemaArg].Map() {
-			cols := map[string]*ColumnSpec{}
-			if tableVal.K == value.Map {
-				for colName, colVal := range tableVal.Map() {
-					if spec, ok := colVal.V.(*ColumnSpec); ok {
-						cols[colName] = spec
-					}
-				}
-			}
-			p.tables[tableName] = cols
-		}
-	}
-	return value.Value{K: value.Proxy, V: p}
-}
-
-func (p *entityProxy) OnGet(key string) value.Value {
-	cols, ok := p.tables[key]
-	if !ok {
-		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: no table %q defined in this database", key))
-	}
-	return value.New(&EntityTable{tenant: p.tenant, scope: p.scope, table: key, columns: cols})
-}
-
-func (p *entityProxy) OnCompare(_ string, _ value.Value) value.Value {
-	return value.Value{K: value.Nil}
-}
-func (p *entityProxy) OnInvoke(method string, _ ...value.Value) value.Value { return p.OnGet(method) }
-
-// EntityTable is the shared-world twin of SchemaTable. It wraps *Entities (database.entity().table),
-// so every read is auto-scoped `WHERE identity = <this app>` and every create stamps the identity —
-// schema-awareness (kitid PK, defaults, column validation) rides on top of that, reusing fillRow.
-type EntityTable struct {
-	tenant  *Tenant
-	scope   *requestscope.Scope
-	table   string
-	columns map[string]*ColumnSpec
-
-	e       *Entities
-	failed  bool
-	failMsg string
-}
-
-func (t *EntityTable) fail(msg string) *EntityTable { t.failed = true; t.failMsg = msg; return t }
-
-// failVal is the chain's failure: a use of the table it does not take, INVALID_ARGUMENT. A lambda's
-// failure is the terminal's own (Entities: the query answers it).
-func (t *EntityTable) failVal() value.Value {
-	return value.InvalidFailure(value.InvalidArgumentCode, t.failMsg)
-}
-func (t *EntityTable) known(col string) bool { _, ok := t.columns[col]; return ok }
-
-func (t *EntityTable) builder() *Entities {
-	if t.e == nil {
-		t.e = (&Database{tenant: t.tenant, requestScope: t.scope}).Entity().Table(t.table)
-	}
-	return t.e
-}
-
-// ready runs the shared-world migration lazily and surfaces a failure as an in-band Invalid — the
-// EntityTable mirror of SchemaTable.ready (see there).
-func (t *EntityTable) ready() (value.Value, bool) {
-	if t.failed {
-		return t.failVal(), false
-	}
-	if err := t.ensureTable(); err != nil {
-		return value.InvalidFailure(value.DatabaseCode, fmt.Sprintf("db: table %q migration failed: %v", t.table, err)), false
-	}
-	return value.Value{}, true
-}
-
-func (t *EntityTable) Where(args ...value.Value) *EntityTable {
-	if t.failed {
-		return t
-	}
-	if len(args) > 0 && args[0].K == value.String && !t.known(args[0].String()) {
-		return t.fail(fmt.Sprintf("db: table %q has no column %q", t.table, args[0].String()))
-	}
-	t.e = t.builder().Where(args...)
-	return t
-}
-
-func (t *EntityTable) OrderBy(col string, dir ...string) *EntityTable {
-	if t.failed {
-		return t
-	}
-	if !t.known(col) {
-		return t.fail(fmt.Sprintf("db: table %q has no column %q", t.table, col))
-	}
-	t.e = t.builder().OrderBy(col, dir...)
-	return t
-}
-
-func (t *EntityTable) Sort(col string, dir ...string) *EntityTable { return t.OrderBy(col, dir...) }
-
-func (t *EntityTable) Limit(n int) *EntityTable {
-	if t.failed {
-		return t
-	}
-	t.e = t.builder().Limit(n)
-	return t
-}
-
-func (t *EntityTable) Offset(n int) *EntityTable {
-	if t.failed {
-		return t
-	}
-	if n < 0 {
-		n = 0
-	}
-	t.e = t.builder().Skip(n)
-	return t
-}
-
-func (t *EntityTable) Skip(n int) *EntityTable { return t.Offset(n) }
-
-func (t *EntityTable) List(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	return coerceResult(t.columns, t.builder().List(args...))
-}
-
-func (t *EntityTable) First(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	return coerceResult(t.columns, t.builder().First(args...))
-}
-
-func (t *EntityTable) Find(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	return coerceResult(t.columns, t.builder().Find(args...))
-}
-
-func (t *EntityTable) Count(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	return t.builder().Count(args...)
-}
-
-func (t *EntityTable) Exists(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	return t.builder().Exists(args...)
-}
-
-func (t *EntityTable) Create(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	if len(args) == 0 || args[0].K != value.Map {
-		return value.InvalidFailure(value.InvalidArgumentCode, "db.create: expects an object")
-	}
-	row, errMsg := fillRow(t.columns, args[0].Map())
-	if errMsg != "" {
-		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.create: table %q %s", t.table, errMsg))
-	}
-	// Entities.Create stamps the `identity` column itself — we never set it here.
-	return coerceResult(t.columns, t.builder().Create(value.New(row)))
-}
-
-func (t *EntityTable) Update(args ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	if len(args) > 0 && args[0].K == value.Map {
-		row, errMsg := coerceWriteRow(t.columns, args[0].Map())
-		if errMsg != "" {
-			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.update: table %q %s", t.table, errMsg))
-		}
-		applyTouch(t.columns, row) // now().onUpdate() columns refresh on every update
-		args[0] = value.New(row)
-	}
-	return t.builder().Update(args...)
-}
-
-// Delete is a hard delete (see SchemaTable.Delete) — but still bounded by the identity predicate the
-// EntityTable's builder carries, so one app can never delete another app's rows in the shared table.
-func (t *EntityTable) Delete(_ ...value.Value) value.Value {
-	if v, ok := t.ready(); !ok {
-		return v
-	}
-	return t.builder().Remove()
-}
-
-func (t *EntityTable) Remove(args ...value.Value) value.Value { return t.Delete(args...) }
-
-// ensureTable migrates the shared table on database.System, with the extra `identity` column.
-func (t *EntityTable) ensureTable() error {
-	if database.System == nil {
-		return nil
-	}
-	key := fmt.Sprintf("system:%p:%s:%s", database.System, t.table, schemaHash(t.columns))
-	if _, done := ensuredTables.Load(key); done {
-		return nil
-	}
-	if err := migrate(database.System, t.table, t.columns, true, false); err != nil {
-		fmt.Printf("[db.migrate] ERROR shared table %q: %v — not applied; will retry next request\n", t.table, err)
-		return err
-	}
-	ensuredTables.Store(key, true)
-	return nil
-}
-
-// ============================================================================
 // Migration engine: introspect → diff → apply-safe → record. Real migration,
 // not blind CREATE IF NOT EXISTS.
 //   - table absent                → CREATE (full DDL, constraints and all)
@@ -2440,7 +2030,7 @@ type planStep struct {
 // planMigration computes what migrate() would do WITHOUT touching the database — the single classifier
 // shared by the dry-run (db.<table>.plan()) and the applier (migrate). Pure: (current, schema) in, plan
 // out. Destructive steps (retype/drop) are marked WillApply only when allowDrop is set.
-func planMigration(current map[string]string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) []planStep {
+func planMigration(current map[string]string, columns map[string]*ColumnSpec, allowDrop bool) []planStep {
 	if len(current) == 0 {
 		return []planStep{{Action: "create", WillApply: true}}
 	}
@@ -2458,9 +2048,6 @@ func planMigration(current map[string]string, columns map[string]*ColumnSpec, wi
 	var drops []string
 	for col := range current {
 		if _, want := columns[col]; want {
-			continue
-		}
-		if withIdentity && col == identityColumn {
 			continue
 		}
 		drops = append(drops, col)
@@ -2502,12 +2089,12 @@ func (s planStep) describe() string {
 		if s.WillApply {
 			return fmt.Sprintf("retype %s %s→%s (rebuild + CAST)", s.Column, s.From, s.To)
 		}
-		return fmt.Sprintf("retype %s %s→%s REFUSED (pass { drop: true }; may lose data)", s.Column, s.From, s.To)
+		return fmt.Sprintf("retype %s %s→%s REFUSED (may lose data; kitwork migrate is not in this engine yet)", s.Column, s.From, s.To)
 	case "drop":
 		if s.WillApply {
 			return fmt.Sprintf("drop column %s", s.Column)
 		}
-		return fmt.Sprintf("extra column %s kept (pass { drop: true } to drop)", s.Column)
+		return fmt.Sprintf("extra column %s REFUSED (dropping it loses data; kitwork migrate is not in this engine yet)", s.Column)
 	case "primary":
 		if s.WillApply {
 			return fmt.Sprintf("change primary-key role for %s (empty struct)", s.Column)
@@ -2650,8 +2237,9 @@ func MigrationPlansFor(t *Tenant) []TablePlan {
 		}
 		// Introspect the live DB only if it already exists — never create a file during a preflight.
 		live := map[string]map[string]string{}
-		if _, err := os.Stat(p.tenant.resolve(".data", p.dbName)); err == nil {
-			if db := (&SchemaTable{tenant: p.tenant, engine: p.engine, dbName: p.dbName}).source().db(); db != nil {
+		table := &SchemaTable{tenant: p.tenant, engine: p.engine, dbName: p.dbName, sqlitePath: p.sqlitePath}
+		if _, err := os.Stat(table.sqliteFile()); err == nil {
+			if db := table.source().db(); db != nil {
 				for name := range tables {
 					if cols, err := tableColumns(db, name); err == nil {
 						live[name] = cols
@@ -2660,7 +2248,7 @@ func MigrationPlansFor(t *Tenant) []TablePlan {
 			}
 		}
 		for _, name := range sortedTableNames(tables) {
-			steps := planMigration(live[name], tables[name], false, p.allowDrop)
+			steps := planMigration(live[name], tables[name], p.allowDrop)
 			plans = append(plans, TablePlan{Engine: p.engine, DB: p.dbName, Table: name, Steps: steps})
 		}
 	}
@@ -2780,7 +2368,47 @@ func checkpointWAL(db *sql.DB) {
 	_, _ = db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 }
 
-func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdentity, allowDrop bool) (err error) {
+// destructiveMigrationError is a change of a host's database of connection("tên") that would lose data:
+// a column the struct no longer has, or one whose type it changed. Nothing of the migration applies.
+type destructiveMigrationError struct {
+	connection string // the host's name of the database
+	table      string
+	changes    []string
+}
+
+func (e *destructiveMigrationError) Error() string {
+	return fmt.Sprintf(`bảng %s trên connection("%s"): %s làm mất dữ liệu nên không chạy, database giữ nguyên; `+
+		`đưa struct về như database đang có (mọi app gọi tên %s cùng khai một bảng); đổi mất dữ liệu là việc của kitwork migrate, chưa có trong engine hôm nay (lát 7)`,
+		e.table, e.connection, strings.Join(e.changes, ", "), e.connection)
+}
+
+// refuseDestructiveMigration checks a table of a host's database of connection("tên") against the live file
+// before migrate() runs (KITWORK_DATABASE.md mục 6: what loses data never applies by itself). An addition
+// passes, to migrate as on the app's own database; a column dropped or retyped is the error.
+func refuseDestructiveMigration(db *sql.DB, name, table string, columns map[string]*ColumnSpec) error {
+	if db == nil {
+		return fmt.Errorf("connection unavailable")
+	}
+	current, err := tableColumns(db, table)
+	if err != nil {
+		return fmt.Errorf("introspect %q: %w", table, err)
+	}
+	var changes []string
+	for _, step := range planMigration(current, columns, false) {
+		switch {
+		case step.Action == "retype":
+			changes = append(changes, fmt.Sprintf("đổi kiểu cột %s %s→%s", step.Column, step.From, step.To))
+		case step.Action == "drop":
+			changes = append(changes, fmt.Sprintf("bỏ cột %s", step.Column))
+		}
+	}
+	if len(changes) == 0 {
+		return nil
+	}
+	return &destructiveMigrationError{connection: strings.TrimPrefix(name, catalogDatabasePrefix), table: table, changes: changes}
+}
+
+func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, allowDrop bool) (err error) {
 	if db == nil {
 		return fmt.Errorf("connection unavailable")
 	}
@@ -2807,16 +2435,12 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 		return fmt.Errorf("introspect %q: %w", table, err)
 	}
 
-	steps := planMigration(current, columns, withIdentity, allowDrop)
+	steps := planMigration(current, columns, allowDrop)
 	logPlan(table, steps) // announce the plan (including any refused destructive step) before applying
 
 	// New table → straight CREATE.
 	if len(current) == 0 {
-		var extra []string
-		if withIdentity {
-			extra = append(extra, fmt.Sprintf("%q TEXT NOT NULL", identityColumn))
-		}
-		ddl := schemaDDL(table, columns, extra...)
+		ddl := schemaDDL(table, columns)
 		if _, err := db.Exec(ddl); err != nil {
 			return fmt.Errorf("create %q: %w", table, err)
 		}
@@ -2840,7 +2464,7 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 
 	// A type change or an allowed drop → full table rebuild.
 	if len(typeChanged) > 0 || len(extras) > 0 {
-		if err := rebuild(db, table, columns, current, withIdentity, allowDrop, extras, typeChanged); err != nil {
+		if err := rebuild(db, table, columns, current, allowDrop, extras, typeChanged); err != nil {
 			return err
 		}
 		checkpointWAL(db)
@@ -2851,48 +2475,46 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 	// declared layout differs from what appending would produce (an existing table whose columns sit in
 	// a different order, or a new column declared in the middle), rebuild to match the declared order.
 	// The rebuild preserves ALL data and drops nothing — extras (live columns not in the schema) are
-	// kept, appended at the end. The shared/entity world (withIdentity) stays append-only.
+	// kept, appended at the end.
 	addOrder := newCols
-	if !withIdentity {
-		live, err := tableColumnsOrdered(db, table)
-		if err != nil {
-			return fmt.Errorf("introspect order %q: %w", table, err)
-		}
-		desired := orderedColumns(columns)
-		nullablePK, err := liveNullablePK(db, table, columns)
-		if err != nil {
-			return fmt.Errorf("introspect pk %q: %w", table, err)
-		}
-		if reorderNeeded(live, desired) || nullablePK {
-			// Existing columns are out of declared order, or the primary key is nullable → rebuild to fix
-			// the layout / constraint (data preserved, extras kept). rebuild lays every column out via
-			// orderedColumns with the current DDL, so new columns land in their declared position and the
-			// primary key comes out NOT NULL.
-			var keptExtras []string
-			for _, name := range live {
-				if _, inSchema := columns[name]; !inSchema {
-					keptExtras = append(keptExtras, name)
-				}
-			}
-			if err := rebuild(db, table, columns, current, false, false, keptExtras, nil); err != nil {
-				return err
-			}
-			checkpointWAL(db)
-			return nil
-		}
-		// Order is fine — append any new columns in DECLARED order.
-		newSet := map[string]bool{}
-		for _, n := range newCols {
-			newSet[n] = true
-		}
-		orderedNew := make([]string, 0, len(newCols))
-		for _, n := range desired {
-			if newSet[n] {
-				orderedNew = append(orderedNew, n)
-			}
-		}
-		addOrder = orderedNew
+	live, err := tableColumnsOrdered(db, table)
+	if err != nil {
+		return fmt.Errorf("introspect order %q: %w", table, err)
 	}
+	desired := orderedColumns(columns)
+	nullablePK, err := liveNullablePK(db, table, columns)
+	if err != nil {
+		return fmt.Errorf("introspect pk %q: %w", table, err)
+	}
+	if reorderNeeded(live, desired) || nullablePK {
+		// Existing columns are out of declared order, or the primary key is nullable → rebuild to fix
+		// the layout / constraint (data preserved, extras kept). rebuild lays every column out via
+		// orderedColumns with the current DDL, so new columns land in their declared position and the
+		// primary key comes out NOT NULL.
+		var keptExtras []string
+		for _, name := range live {
+			if _, inSchema := columns[name]; !inSchema {
+				keptExtras = append(keptExtras, name)
+			}
+		}
+		if err := rebuild(db, table, columns, current, false, keptExtras, nil); err != nil {
+			return err
+		}
+		checkpointWAL(db)
+		return nil
+	}
+	// Order is fine — append any new columns in DECLARED order.
+	newSet := map[string]bool{}
+	for _, n := range newCols {
+		newSet[n] = true
+	}
+	orderedNew := make([]string, 0, len(newCols))
+	for _, n := range desired {
+		if newSet[n] {
+			orderedNew = append(orderedNew, n)
+		}
+	}
+	addOrder = orderedNew
 
 	// Otherwise purely additive: ADD the new columns (static defaults backfill existing rows).
 	for _, name := range addOrder {
@@ -2928,18 +2550,11 @@ func migrate(db *sql.DB, table string, columns map[string]*ColumnSpec, withIdent
 // a failure rolls back to the untouched original. With allowDrop=false, extra columns (in the DB, not
 // the schema) are PRESERVED in the new table; with allowDrop=true they are dropped.
 func rebuild(db *sql.DB, table string, columns map[string]*ColumnSpec, current map[string]string,
-	withIdentity, allowDrop bool, extras, typeChanged []string) error {
+	allowDrop bool, extras, typeChanged []string) error {
 
 	tmp := table + "__kwrebuild"
 	var defs, intoCols, selectExprs []string
 
-	if withIdentity {
-		defs = append(defs, fmt.Sprintf("%q TEXT NOT NULL", identityColumn))
-		if _, ok := current[identityColumn]; ok {
-			intoCols = append(intoCols, fmt.Sprintf("%q", identityColumn))
-			selectExprs = append(selectExprs, fmt.Sprintf("%q", identityColumn))
-		}
-	}
 	for _, name := range orderedColumns(columns) { // rebuild lays columns out AS DECLARED
 		defs = append(defs, columnSQL(name, columns[name]))
 		if curType, ok := current[name]; ok {

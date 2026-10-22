@@ -21,8 +21,8 @@ func servedTenant(t *testing.T, dbName, token, access string) *Tenant {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	router := fmt.Sprintf(`import { router, database } from "kitwork";
-const { sqlite, kitid } = database;
+	router := fmt.Sprintf(`import { router, internals } from "kitwork";
+const { sqlite, kitid } = internals;
 export const db = sqlite(%q, { seed: { id: kitid().primaryKey() } }, { token: %q, access: %q });
 router.get((ctx) => ctx.json({ ok: true }));`, dbName, token, access)
 	if err := os.WriteFile(filepath.Join(dir, "router.kitwork.js"), []byte(router), 0644); err != nil {

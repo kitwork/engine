@@ -234,8 +234,8 @@ func TestKitDBPostgresNodeCatalogProtectsCapabilitySource(t *testing.T) {
 	if err := os.MkdirAll(dataDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 kitdb("authority.kitdb", {}, { token: "authority-secret", access: "readwrite" });
 router.get(() => "ok");`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
@@ -369,8 +369,8 @@ func TestKitDBNodeCatalogRejectsSwappedDatabaseIdentity(t *testing.T) {
 	if err := os.MkdirAll(dataDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id } = internals;
 const products = struct({ id: id() });
 const db = kitdb("products.kitdb", { products }, { token: "identity-secret", access: "readwrite" });
 router.get(() => db.products.count());`
@@ -428,8 +428,8 @@ func TestKitDBNodeCatalogConflictNeverDropsSourceDatabase(t *testing.T) {
 	if err := os.MkdirAll(dataDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id } = internals;
 const products = struct({ id: id() });
 const db = kitdb("products.kitdb", { products }, { token: "conflict-secret", access: "readwrite" });
 kitdb("conflict.kitdb", {}, { token: "conflict-secret", access: "readwrite" });
@@ -484,8 +484,8 @@ func TestKitDBNodeCatalogReconcilesInterruptedLifecycle(t *testing.T) {
 	if err := os.MkdirAll(dataDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const products = struct({ id: id(), title: text().notNull() });
 const db = kitdb("products.kitdb", { products }, { token: "catalog-secret", access: "readwrite", recovery: true });
 router.get(() => db.products.count());`
@@ -581,8 +581,8 @@ func TestKitDBPostgresCreateEmptyDatabaseLifecycle(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const products = struct({ id: id(), title: text().notNull() });
 const source = kitdb("products.kitdb", { products }, { token: "create-secret", access: "readwrite" });
 router.get(() => source.products.count());`
@@ -730,8 +730,8 @@ func TestKitDBPostgresRenameDatabasePreservesStorageIdentityAndRestart(t *testin
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 const source = kitdb("products.kitdb", {}, { token: "rename-secret", access: "readwrite" });
 router.get(() => 1);`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
@@ -878,8 +878,8 @@ func TestKitDBPostgresCreateEmptyDatabaseCapabilitySelection(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 const products = kitdb("products.kitdb", {}, { token: "shared-secret", access: "readwrite" });
 const analytics = kitdb("analytics.kitdb", {}, { token: "shared-secret", access: "readwrite" });
 router.get(() => 1);`
@@ -939,8 +939,8 @@ func TestKitDBPostgresCreateEmptyDatabaseRejectsReadOnlyAuthority(t *testing.T) 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 const source = kitdb("source.kitdb", {}, { token: "readonly-secret", access: "readonly" });
 router.get(() => 1);`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
@@ -968,8 +968,8 @@ func TestKitDBPostgresNodeCatalogSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const products = struct({ id: id(), title: text().notNull() });
 const db = kitdb("products.kitdb", { products }, { token: "restart-secret", access: "readwrite", recovery: true });
 router.get(() => db.products.count());`

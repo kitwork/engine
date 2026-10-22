@@ -282,8 +282,8 @@ func newKitDBRemoteSearchTest(
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const products = struct({
   id: text().key(),
   name: text().notNull().searchable({ weight: 5 }),
@@ -324,8 +324,8 @@ func newKitDBRemoteCompositeSearchTest(
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const shopping = struct({
   merchant: text().key(1),
   id: int().key(2),

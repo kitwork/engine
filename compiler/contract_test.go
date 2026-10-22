@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV12GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 12 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v12", CompilerSchemaVersion)
+func TestCompilerV13GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 13 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v13", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -17,10 +17,17 @@ func TestCompilerV12GoldenContract(t *testing.T) {
 	// item through a call or an update, or breaks a line before ++. Schema 11 on bytecode 4 (15/10/2026,
 	// STEP) moved the fingerprint and every checksum with the version; the fixtures with ++ or -- hold
 	// STEP where they held PUSH 1; ADD. Schema 12 (22/10/2026, database statements translated when they
-	// compile) moved the fingerprint alone: no fixture imports a database.
-	const expectedFingerprint = "9b101149799e891bcf601468edd50f9533c3dbe0896f9ea380220ebcc423abb3"
+	// compile) moved the fingerprint alone: no fixture imports a database. Schema 13 (22/10/2026, the older
+	// database spellings removed) moved the fingerprint alone: no fixture imports one.
+	const expectedFingerprint = "89008e01476efea5799b15e8c346b46f275806b5aaafff5275763c3b70672c9b"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 12 still compiled the older spellings of the database module, which now fail only where they
+	// are read: its artifacts are not reused
+	const schema12 = "9b101149799e891bcf601468edd50f9533c3dbe0896f9ea380220ebcc423abb3"
+	if stamped := compilerFingerprintFor(12); hex.EncodeToString(stamped[:]) != schema12 || Fingerprint() == schema12 {
+		t.Fatalf("schema 12 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema12)
 	}
 	// schema 11 on bytecode 4 compiled a statement's lambdas, which the database handle refuses: its
 	// artifacts are not reused

@@ -21,8 +21,8 @@ func TestKitDBCompositeUniqueDSLIsAtomicAndSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const links = struct({
   id: text().key(),
   domain: text().unique("links_domain_code", 1),
@@ -196,8 +196,8 @@ func TestKitDBRemoteSQLCompositeUniqueDDLUpsertAndMigration(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const db = database.kitdb("composite-sql.kitdb", {}, { token: "composite-secret", access: "readwrite" });
+	router := `import { router, internals } from "kitwork";
+const db = internals.kitdb("composite-sql.kitdb", {}, { token: "composite-secret", access: "readwrite" });
 router.get(() => 1);`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)

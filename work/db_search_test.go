@@ -27,8 +27,8 @@ func TestSchemaTableSearchE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { sqlite, text } = database;` + "\n" +
+	router := `import { router, internals } from "kitwork";` + "\n" +
+		`const { sqlite, text } = internals;` + "\n" +
 		`const db = sqlite("shop.db", {` + "\n" +
 		`  products: {` + "\n" +
 		`    id: text().key(),` + "\n" +
@@ -141,8 +141,8 @@ func TestSchemaTableSearchSkipsOversizedLexicalNoise(t *testing.T) {
 		t.Fatal(err)
 	}
 	noise := strings.Repeat("x", 300)
-	router := `import { router, database } from "kitwork";` + "\n" +
-		`const { sqlite, text } = database;` + "\n" +
+	router := `import { router, internals } from "kitwork";` + "\n" +
+		`const { sqlite, text } = internals;` + "\n" +
 		`const db = sqlite("shop.db", { products: { id: text().key(), body: text().searchable() } });` + "\n" +
 		`router.get((ctx) => {` + "\n" +
 		`  db.products.create({ id: "p1", body: "useful ` + noise + ` searchable" });` + "\n" +

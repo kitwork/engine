@@ -127,14 +127,19 @@ func TestAppIsolationReadSinksAllowOwnFile(t *testing.T) {
 	}
 }
 
-// ── Write sink: sqlite names a file, and a database landing outside the app is persistent ──────
+// ── Write sink: a SQLite file named from a request, and a database landing outside the app is persistent ──
+//
+// App code can no longer name a SQLite file (import { sqlite } and kitdb(…) were removed on 22/10/2026; a
+// named database is the host's, connection("tên") with app.databases). The engine still builds a site's
+// SQLite file by name (newDbProxy, sqliteRel), so the confinement is checked through the test-only module.
 
 const sqliteSinkRouter = `
-import { router, sqlite } from "kitwork";
+import { router, internals } from "kitwork";
+const { sqlite, struct, int } = internals;
 
 router.get((ctx) => {
-    const handle = sqlite.open(ctx.query("p"));
-    handle.exec("CREATE TABLE IF NOT EXISTS probe (id INTEGER)");
+    const handle = sqlite(ctx.query("p"), { probe: struct({ id: int().primaryKey() }) });
+    handle.probe.count();
     return ctx.text("ok");
 });
 `

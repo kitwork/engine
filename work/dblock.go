@@ -29,8 +29,16 @@ import (
 
 var (
 	dbLocksMu sync.Mutex
-	dbLocks   = map[string]*dbLockHandle{} // absolute db path -> held OS lock (process-global, never re-taken)
+	dbLocks   = map[string]*heldDBLock{} // absolute db path -> held OS lock (process-global)
 )
+
+// heldDBLock is the OS lock of one file and how many app pools hold it: a host's database of
+// connection("tên") is opened by every app that names it, each in its own pool, and the lock stays until
+// the last of them closes.
+type heldDBLock struct {
+	handle  *dbLockHandle
+	holders int
+}
 
 // lockFilePath maps a database's absolute path to its lock file, kept in the OS temp dir (named by a
 // hash of the db path) rather than beside the db. That keeps .data/ clean and, crucially, never leaves
@@ -64,13 +72,14 @@ func lockableDBPath(config *database.Config) (string, bool) {
 	return path, true
 }
 
-// acquireDBLock takes the exclusive lock for dbPath. Idempotent per process: a path this process
-// already holds returns nil (so re-opening across hot-reloads is fine). A path held by ANOTHER process
-// returns an actionable error.
+// acquireDBLock takes the exclusive lock for dbPath, or one more hold on it: a path this process already
+// holds returns nil (so re-opening across hot-reloads, and a second app on a shared file, is fine), and
+// each acquire is paired with one releaseDBLock. A path held by ANOTHER process returns an actionable error.
 func acquireDBLock(dbPath string) error {
 	dbLocksMu.Lock()
 	defer dbLocksMu.Unlock()
-	if _, held := dbLocks[dbPath]; held {
+	if held, ok := dbLocks[dbPath]; ok {
+		held.holders++
 		return nil
 	}
 	handle, err := lockFile(lockFilePath(dbPath))
@@ -81,16 +90,23 @@ func acquireDBLock(dbPath string) error {
 			filepath.Base(dbPath),
 		)
 	}
-	dbLocks[dbPath] = handle
+	dbLocks[dbPath] = &heldDBLock{handle: handle, holders: 1}
 	return nil
 }
 
-// releaseDBLock drops a held lock (used on clean shutdown; the OS also releases on process exit).
+// releaseDBLock drops one hold, and the OS lock with the last (used on clean shutdown; the OS also
+// releases on process exit).
 func releaseDBLock(dbPath string) {
 	dbLocksMu.Lock()
 	defer dbLocksMu.Unlock()
-	if handle, held := dbLocks[dbPath]; held {
-		handle.close()
-		delete(dbLocks, dbPath)
+	held, ok := dbLocks[dbPath]
+	if !ok {
+		return
 	}
+	held.holders--
+	if held.holders > 0 {
+		return
+	}
+	held.handle.close()
+	delete(dbLocks, dbPath)
 }

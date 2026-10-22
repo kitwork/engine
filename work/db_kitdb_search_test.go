@@ -68,8 +68,8 @@ func TestKitDBSearchBuildsFromKernelSnapshotAndSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const products = struct({
   id: text().key(),
   title: text().notNull().searchable({ weight: 3 }),
@@ -146,8 +146,8 @@ func TestKitDBSearchHydratesNativeCompositePrimaryRows(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const shopping = struct({
   merchant: text().key(1),
   id: int().key(2),
@@ -207,8 +207,8 @@ func TestKitDBSearchAdoptsLegacyCompositeProjectionWithoutRebuild(t *testing.T) 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const shopping = struct({
   merchant: text().key(1),
   id: int().key(2),
@@ -306,8 +306,8 @@ func TestKitDBSearchCatchesUpMutationsAndRebuildsCorruptWatermark(t *testing.T) 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const products = struct({
   id: text().key(),
   title: text().notNull().searchable()
@@ -541,8 +541,8 @@ func TestKitDBSearchDoesNotRebuildForSecondaryIndexCatalogChange(t *testing.T) {
 		if indexed {
 			index = `.index("products_category_idx")`
 		}
-		source := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+		source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const products = struct({
   id: text().key(),
   title: text().notNull().searchable(),

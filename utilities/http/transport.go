@@ -54,6 +54,11 @@ func deniedIP(ip net.IP) bool {
 		sharedAddressSpace.Contains(ip) || thisNetwork.Contains(ip)
 }
 
+// DeniedIP reports an address the SSRF guard refuses, by the rule of kitwork/http (deniedIP). connect({ … })
+// of kitwork/database dials its database through the same rule: an app's code reaches no address in
+// private or local space, the host's own databases among them.
+func DeniedIP(ip net.IP) bool { return deniedIP(ip) }
+
 // guardDial runs for every connection the guarded transport opens, after DNS and after every redirect:
 // address is the IP being dialled.
 func guardDial(network, address string, _ syscall.RawConn) error {

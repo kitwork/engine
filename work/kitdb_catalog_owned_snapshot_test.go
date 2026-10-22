@@ -65,8 +65,8 @@ func kitDBCatalogOwnedFields(t *testing.T, database *dbProxy, table string) map[
 }
 
 func TestKitDBStaleSnapshotKeepsConcurrentlyAddedColumn(t *testing.T) {
-	database := startKitDBCatalogOwnedSnapshotTenant(t, `import { router, database } from "kitwork";
-const db = database.kitdb("owned.kitdb", {}, { token: "owned-secret", access: "readwrite" });
+	database := startKitDBCatalogOwnedSnapshotTenant(t, `import { router, internals } from "kitwork";
+const db = internals.kitdb("owned.kitdb", {}, { token: "owned-secret", access: "readwrite" });
 router.get(() => db.items.count());`)
 	runKitDBCatalogOwnedSQL(t, database, `CREATE TABLE IF NOT EXISTS items (id KITID PRIMARY KEY, name TEXT NOT NULL)`)
 
@@ -97,8 +97,8 @@ router.get(() => db.items.count());`)
 }
 
 func TestKitDBStaleSnapshotDoesNotResurrectDroppedSibling(t *testing.T) {
-	database := startKitDBCatalogOwnedSnapshotTenant(t, `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	database := startKitDBCatalogOwnedSnapshotTenant(t, `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const products = struct({ id: text().key(), title: text() });
 const db = kitdb("owned.kitdb", { products }, { token: "owned-secret", access: "readwrite" });
 router.get(() => db.products.count());`)

@@ -1000,13 +1000,14 @@ func TestKitDBOrderedScanSortsInBatches(t *testing.T) {
 	}
 }
 
-// The name of the app's database is the engine's: a site's kitdb("…") cannot open it, however the name is
-// written (a read opens a name as kitDBRel reads it, so "./@application" is "@application"). The site would
+// The name of the app's database is the engine's: a site-local proxy built by name (newDbProxy, what the
+// removed kitdb("…") built and the engine's internals still build) cannot open it, however the name is
+// written (a read opens a name as kitDBRel reads it, so "./@application" is "@application"). It would
 // otherwise open the app's database with its own schema and options, drop and token among them.
 func TestKitDBApplicationNameIsReserved(t *testing.T) {
 	shop := newManagedApp(t, map[string]string{"shop.example/router.work": `import * as router from "kitwork/router";`})
 	tenant := shop.site("shop.example")
-	legacy := &Database{tenant: tenant}
+	legacy := &storageInternals{tenant: tenant}
 	users := goStruct(t, goColumn{name: "id", builder: "id"}, goColumn{name: "email", builder: "text"})
 	for _, name := range []string{"@application", "/@application", "./@application", `\@application`, "x/../@application", " @application", "@other"} {
 		declared := legacy.Kitdb(value.New(name), value.New(map[string]value.Value{"users": users}),

@@ -21,8 +21,8 @@ func TestDataAPIQueryOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The db is DECLARED served in JS (token + access) — that is what turns the endpoint on, not a .env.
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitid, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitid, text, int } = internals;
 const links = { id: kitid().primaryKey(), code: text().notNull().unique(), clicks: int().default(0) };
 const db = sqlite("kiturl.db", { links: links }, { token: "secret-token-123", access: "readwrite" });
 router.get((ctx) => {

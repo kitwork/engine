@@ -137,19 +137,7 @@ type columnForeignGroup struct {
 	references []*fkRef
 }
 
-// Struct is the single canonical schema authoring form:
-//
-//	const products = struct({ id: id(), title: text().notNull() });
-//
-// The enclosing database declaration supplies the persistent struct name, so
-// application code does not repeat "products" in two places.
-func (d *Database) Struct() value.Value {
-	return value.NewFunc(func(args ...value.Value) value.Value {
-		return newStructDef(args, false)
-	})
-}
-
-// newStructDef is struct({ … }) of both spellings. With vocabulary (kitwork/schema), every column refuses
+// newStructDef is struct({ … }). With vocabulary (kitwork/schema), every column refuses
 // null unless .nullable() (it reads each column after its modifiers ran), and a column belongs to one
 // table: a column of another struct (userId: users.id) is the foreign key the engine does not have yet,
 // never a silent second name of the other table's column.
@@ -212,18 +200,6 @@ func (definition *StructDef) OnCompare(_ string, _ value.Value) value.Value {
 
 func (definition *StructDef) OnInvoke(_ string, _ ...value.Value) value.Value {
 	return value.InvalidFailure(value.NotAFunctionCode, "db.struct: a definition is not callable")
-}
-
-// Kitdb binds named structs to KitDB while preserving the same db.<name> ORM
-// used by the SQLite schema backend.
-func (d *Database) Kitdb(args ...value.Value) value.Value {
-	return newDbProxy(d.tenant, d.requestScope, "kitdb", args...)
-}
-
-// Open is the storage-neutral name for opening an embedded KitDB file. Kitdb
-// remains as a compatibility spelling while application code migrates.
-func (d *Database) Open(args ...value.Value) value.Value {
-	return d.Kitdb(args...)
 }
 
 func bindStructDef(name string, source *StructDef, columns map[string]*ColumnSpec) *StructDef {

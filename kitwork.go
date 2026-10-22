@@ -155,6 +155,8 @@ func Run(configFile ...string) (err error) {
 		"layout", cfg.RootLayout.String(),
 	)
 
+	applyDatabaseManifest(cfg)
+
 	var systemConnected bool
 	for i := range cfg.Databases {
 		dbCfg := cfg.Databases[i]
@@ -453,6 +455,7 @@ func Check(configFile ...string) (core.CheckReport, error) {
 		}
 		database.Configs[alias] = dbConfig
 	}
+	applyDatabaseManifest(cfg)
 	work.AllowLocal = cfg.AllowLocal
 	return core.CheckWithLayout(
 		cfg.Root,
@@ -460,6 +463,15 @@ func Check(configFile ...string) (core.CheckReport, error) {
 		cfg.RootLayout,
 		bytecodeCacheDirectory(cfg),
 	), nil
+}
+
+// applyDatabaseManifest hands the engine what application.work says an app's .shared/schema/ may reach
+// (KITWORK_DATABASE.md mục 1): the app.databases catalogue, which connection("tên") picks from, and
+// app.policy({ tenantConnections }), which turns connect() off. Run and Check both call it, so a check sees
+// the databases the server would.
+func applyDatabaseManifest(cfg *Config) {
+	database.SetCatalog(cfg.DatabaseCatalog)
+	work.SetTenantConnections(cfg.TenantConnections)
 }
 
 // ProfileReport is the static bytecode report returned by Profile.

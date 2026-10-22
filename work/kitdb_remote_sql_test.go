@@ -267,8 +267,8 @@ func TestKitDBRemoteSQLCoreExpressionsAndAtomicMultiInsert(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique().index(),
@@ -935,8 +935,8 @@ func TestKitDBHranaOverRealURLAndBearerAuth(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int, choice } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int, choice } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique().index(),
@@ -1206,8 +1206,8 @@ func TestKitDBRemoteCreateTablePersistsAndPublishesToORM(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 const db = kitdb("dynamic.kitdb", {}, { token: "dynamic-secret", access: "readwrite" });
 router.get(() => db.products.count());`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
@@ -1346,8 +1346,8 @@ func TestKitDBRemoteCreateTableConcurrentPublication(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const db = database.kitdb("concurrent.kitdb", {}, { token: "concurrent-secret", access: "readwrite" });
+	router := `import { router, internals } from "kitwork";
+const db = internals.kitdb("concurrent.kitdb", {}, { token: "concurrent-secret", access: "readwrite" });
 router.get(() => db.items.count());`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)
@@ -1520,8 +1520,8 @@ func TestKitDBHranaBatchTransactionIsAtomicAndBounded(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, ref } = internals;
 const users = struct({ id: id(), email: text().notNull().unique() });
 const products = struct({
   id: id(),
@@ -1758,8 +1758,8 @@ func TestKitDBOfficialLibSQLClient(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
 const products = struct({ id: id(), sku: text().notNull().unique().index(), title: text().notNull(), price: int().default(0) });
 const db = kitdb("official.kitdb", { products }, { token: "official-secret", access: "readwrite" });
 router.get(() => db.products.count());`

@@ -20,8 +20,8 @@ func TestKitDBRemoteSQLGroupByHaving(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int, bool } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int, bool } = internals;
 const sales = struct({
   id: id(),
   region: text().notNull().index(),

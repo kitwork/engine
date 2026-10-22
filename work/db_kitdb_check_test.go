@@ -18,8 +18,8 @@ func TestKitDBRemoteSQLCheckConstraintsAreAtomicAndSurviveRestart(t *testing.T) 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const db = database.kitdb("checks.kitdb", {}, { token: "checks-secret", access: "readwrite" });
+	router := `import { router, internals } from "kitwork";
+const db = internals.kitdb("checks.kitdb", {}, { token: "checks-secret", access: "readwrite" });
 router.get(() => 1);`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)
@@ -139,8 +139,8 @@ func TestKitDBDSLCheckMigrationValidatesExistingRows(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	versionOne := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	versionOne := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const products = struct({ id: text().key(), stock: int() });
 const db = kitdb("check-migration.kitdb", { products });
 router.get((ctx) => {
@@ -149,8 +149,8 @@ router.get((ctx) => {
   if (action === "clean") return ctx.json(db.products.where("id", "=", "p1").update({ stock: 1 }));
   return ctx.json({ count: db.products.count() });
 });`
-	versionTwo := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	versionTwo := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const products = struct({
   id: text().key(),
   stock: int().check("stock_nonnegative", ">=", 0)

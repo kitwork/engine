@@ -257,8 +257,8 @@ func TestKitDBPlannerV2MatchesSQLiteAndReadsTransactionalRanges(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { sqlite, kitdb, struct, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { sqlite, kitdb, struct, text, int } = internals;
 const products = struct({
   id: text().key(),
   status: text().notNull().index("status_price"),

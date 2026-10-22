@@ -12,7 +12,13 @@ import (
 type Database struct {
 	// Export is the name the schema file exports it under (db); "" when it is not known.
 	Export string
-	Tables []Table
+	// Connection is the name connection("warehouse") picks in the host's catalogue (app.databases of
+	// application.work); "" for connection(), the app's own database.
+	Connection string
+	// External is the connector of connect({ postgresql: … }), a database outside the app that has no
+	// tables here and answers only query(sql, [giá trị]); "" for a database declared with connection().
+	External string
+	Tables   []Table
 }
 
 // Table is one table of a database.

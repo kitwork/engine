@@ -2,8 +2,8 @@ package value
 
 import "testing"
 
-// callableHandle is a proxy a host object hands out through a getter, which is also callable:
-// ctx.database is one (work.RequestDatabase).
+// callableHandle is a proxy a host object hands out through a getter, which is also callable (ctx.database
+// was the first, until it was removed on 22/10/2026).
 type callableHandle struct{ calls []Value }
 
 func (h *callableHandle) OnGet(key string) Value { return New("got " + key) }

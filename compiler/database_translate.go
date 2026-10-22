@@ -30,6 +30,7 @@ import (
 // module's own name counts as the module: import { schema } from "kitwork" is refused as kitwork/schema
 // is, and const { connection } = database, database a name of kitwork/database, as database.connection.
 func (r *resolver) declarationSite(node *VarStatement) {
+	r.removedImports(node)
 	if r.inSchemaModule {
 		return
 	}
@@ -83,6 +84,51 @@ func (r *resolver) declarationSite(node *VarStatement) {
 	}
 }
 
+// removedImports refuses an import of an older word of the database module, in any file (KITWORK_DATABASE.md
+// mục 9): import { kitdb, text } from "kitwork/database", import { sqlite } from "kitwork". The words were
+// removed on 22/10/2026; each error says what the spec writes instead. It runs for every program and only
+// ever fails, so a program that imports none of them keeps its bytes.
+func (r *resolver) removedImports(node *VarStatement) {
+	if node.Pattern != nil {
+		return
+	}
+	module, ok := kitworkModulePath(node.Value)
+	var names []*Identifier
+	if ok {
+		if node.DestructMode == DestructObject {
+			names = node.Names
+		}
+	} else if member, isMember := node.Value.(*MemberExpression); isMember && member.Property != nil {
+		module, ok = kitworkModulePath(member.Object)
+		names = []*Identifier{member.Property}
+	}
+	if !ok {
+		return
+	}
+	for _, name := range names {
+		if refused := removedImportMessage(module, name.Value); refused != "" {
+			r.fail(fmt.Errorf("%s: %s", r.where(name.Token), refused))
+			return
+		}
+	}
+}
+
+// removedImportMessage is the error of importing word from the Kitwork module module ("database" for
+// kitwork/database, "" for kitwork), "" when the word was not removed.
+func removedImportMessage(module, word string) string {
+	switch module {
+	case "database":
+		if spelling, removed := statement.RemovedWord(word); removed {
+			return fmt.Sprintf(`import { %s } from "kitwork/database" đã bỏ: %s`, word, spelling)
+		}
+	case "":
+		if spelling, removed := statement.RemovedKitworkWord(word); removed {
+			return fmt.Sprintf(`import { %s } from "kitwork" đã bỏ: %s`, word, spelling)
+		}
+	}
+	return ""
+}
+
 // databaseModule reports a const bound to kitwork/database itself: import * as database from
 // "kitwork/database" (const database = kitwork().database), import { database } from "kitwork".
 func databaseModule(node *VarStatement, name *Identifier) bool {
@@ -105,7 +151,12 @@ func databaseModule(node *VarStatement, name *Identifier) bool {
 // app's .shared/schema/ (database.connection()), as declarationSite refuses their import. It runs for every
 // program and only ever fails.
 func (r *resolver) namespaceDeclaration(object Expression, property *Identifier) bool {
-	if r.inSchemaModule || property == nil || (property.Value != "connection" && property.Value != "connect") {
+	if property == nil {
+		return false
+	}
+	_, removed := statement.RemovedWord(property.Value)
+	declaration := !r.inSchemaModule && (property.Value == "connection" || property.Value == "connect")
+	if !removed && !declaration {
 		return false
 	}
 	namespace, ok := object.(*Identifier)
@@ -114,6 +165,12 @@ func (r *resolver) namespaceDeclaration(object Expression, property *Identifier)
 	}
 	if found := r.lookup(namespace.Value); found == nil || !found.databaseModule {
 		return false
+	}
+	if removed {
+		// database.kitdb(…), const { text } = database: an older word of the module, in any file
+		spelling, _ := statement.RemovedWord(property.Value)
+		r.fail(fmt.Errorf("%s: %s.%s đã bỏ: %s", r.where(property.Token), namespace.Value, property.Value, spelling))
+		return true
 	}
 	r.fail(fmt.Errorf("%s: %s.%s chỉ có trong .shared/schema/ của app: struct(), connection(), connect() chỉ khai ở đó (KITWORK_DATABASE.md mục 1); file khác dùng database bằng import { db } from \"app/.shared/schema/<tên>.work\"",
 		r.where(property.Token), namespace.Value, property.Value))
@@ -202,6 +259,10 @@ func (r *resolver) handleMember(object Expression, token Token, property *Identi
 		what = root.Value + "." + property.Value
 		token = property.Token
 	}
+	if found.database.Database.External != "" {
+		r.fail(fmt.Errorf("%s: %s không có: %s là database ngoài khai bằng connect(…), chỉ có %s.query(sql, [giá trị])", r.where(token), what, root.Value, root.Value))
+		return true
+	}
 	r.fail(fmt.Errorf("%s: %s không có: câu viết %s.list((bảng) => …), bảng là tham số của lambda", r.where(token), what, root.Value))
 	return true
 }
@@ -228,6 +289,9 @@ func (r *resolver) databaseStatement(node *MethodCallExpression) bool {
 	if found == nil || found.database == nil {
 		return false
 	}
+	if found.database.Database.External != "" {
+		return r.externalQuery(root, links)
+	}
 	for index, link := range links {
 		word := link.Method.Value
 		at := r.where(link.Method.Token)
@@ -236,6 +300,9 @@ func (r *resolver) databaseStatement(node *MethodCallExpression) bool {
 			return true
 		}
 		switch {
+		case word == "query":
+			r.fail(fmt.Errorf("%s: %s.%s", at, root.Value, statement.ManagedQuery))
+			return true
 		case statement.Descriptions[word]:
 			if index == len(links)-1 {
 				r.fail(fmt.Errorf("%s: câu chưa kết thúc: cần list, first, count hay insert ở cuối; chỉ hành động mới chạy câu", at))
@@ -264,6 +331,34 @@ func (r *resolver) databaseStatement(node *MethodCallExpression) bool {
 		}
 	}
 	return false
+}
+
+// externalQuery takes a call on a handle of connect({ … }), a database outside the app: query(sql, [giá
+// trị]) is its one method, called as it is written (nothing to translate, the SQL is the author's and its
+// values are bound by the driver); a method of query's result is ordinary code. Any other word is refused.
+func (r *resolver) externalQuery(root *Identifier, links []*MethodCallExpression) bool {
+	query := links[0]
+	if query.Method.Value != "query" || query.Optional || query.OptionalCall {
+		r.fail(fmt.Errorf("%s: %s.%s không có: %s là database ngoài khai bằng connect(…), chỉ có %s.query(sql, [giá trị])",
+			r.where(query.Method.Token), root.Value, query.Method.Value, root.Value, root.Value))
+		return true
+	}
+	if len(query.Arguments) < 1 || len(query.Arguments) > 2 {
+		r.fail(fmt.Errorf("%s: %s.query nhận câu SQL và mảng giá trị: %s.query(\"SELECT … WHERE id = $1\", [id])",
+			r.where(query.Method.Token), root.Value, root.Value))
+		return true
+	}
+	if len(links) > 1 {
+		// crm.query(…).map(…): the resolver reads the outer calls and comes back to query
+		return false
+	}
+	r.handleUse = true
+	r.reference(root, false)
+	r.handleUse = false
+	for _, argument := range query.Arguments {
+		r.expression(argument)
+	}
+	return true
 }
 
 // translator translates one statement.

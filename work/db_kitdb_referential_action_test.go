@@ -18,8 +18,8 @@ func TestKitDBDSLReferentialActionsUseORMPipeline(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text, ref } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, ref } = internals;
 const parents = struct({ id: text().key(), code: text().notNull().unique() });
 const children = struct({
   id: text().key(),
@@ -74,8 +74,8 @@ func TestKitDBReferentialActionsAreAtomicAndSurviveRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const db = database.kitdb("actions.kitdb", {}, { token: "actions-secret", access: "readwrite" });
+	router := `import { router, internals } from "kitwork";
+const db = internals.kitdb("actions.kitdb", {}, { token: "actions-secret", access: "readwrite" });
 router.get(() => 1);`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)

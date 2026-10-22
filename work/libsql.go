@@ -74,7 +74,9 @@ func startStreamReaper() {
 //	client = createClient({ url: "http://localhost:8080", authToken: "<token>" })   // Host selects the tenant
 //	client = createClient({ url: "http://localhost:8080/kiturl.db", authToken: "..." }) // path selects the db file
 //
-// The db is exposed by declaring sqlite(...) or kitdb(...) with { token, access }. SQL backends run
+// The db is exposed by a proxy declared with { token, access } (the serve registry, db.schema.go); app code
+// no longer declares one (kitdb(…, { token, access }) was removed on 22/10/2026: a KitDB opened to the
+// outside is the host's app.database(path, { port })). SQL backends run
 // Hrana against one pinned connection. KitDB uses a deliberately bounded SQL-light adapter over its
 // Schema IR and ORM; it does not open the .kitdb file through SQLite. Multi-request transactions are
 // remain a SQL-backend feature. KitDB accepts transaction controls only when a

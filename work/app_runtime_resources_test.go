@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/kitwork/engine/app"
-	"github.com/kitwork/engine/database"
-	"github.com/kitwork/engine/value"
 )
 
 func TestSiblingSitesShareAppDatabaseUntilAppShutdown(t *testing.T) {
@@ -19,24 +17,10 @@ func TestSiblingSitesShareAppDatabaseUntilAppShutdown(t *testing.T) {
 	first := NewTenantWithRuntime("", "first.example", runtime, firstSite, firstGeneration)
 	second := NewTenantWithRuntime("", "second.example", runtime, secondSite, secondGeneration)
 
-	alias := "shared-app-test"
-	config := database.Config{
-		Alias: alias,
-		Type:  "sqlite",
-		Name:  filepath.Join(t.TempDir(), "shared.db"),
-	}
-	previous, hadPrevious := database.Configs[alias]
-	database.Configs[alias] = config
-	t.Cleanup(func() {
-		if hadPrevious {
-			database.Configs[alias] = previous
-		} else {
-			delete(database.Configs, alias)
-		}
-	})
-
-	firstDB := (&KitWork{tenant: first}).legacyDatabase().Connection(value.New(alias)).sqlDB
-	secondDB := (&KitWork{tenant: second}).legacyDatabase().Connection(value.New(alias)).sqlDB
+	// the host's SQLite file of connection("shared"): every site of the app opens it into the app's pool
+	path := filepath.Join(t.TempDir(), "shared.db")
+	firstDB := hostSQLite(first, "shared", path, nil).db()
+	secondDB := hostSQLite(second, "shared", path, nil).db()
 	if firstDB == nil || firstDB != secondDB {
 		t.Fatal("sibling sites did not share the app-owned configured database")
 	}

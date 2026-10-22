@@ -409,9 +409,9 @@ func reopenKitDBReleaseRestore(journey *kitDBReleaseJourney, evidence *kitDBRele
 }
 
 func (journey *kitDBReleaseJourney) writeRouter(databaseName string, declared bool) error {
-	declaration := `const db = database.kitdb("` + databaseName + `", {}, { token: "release-secret", access: "readwrite" });`
+	declaration := `const db = internals.kitdb("` + databaseName + `", {}, { token: "release-secret", access: "readwrite" });`
 	if declared {
-		declaration = `const { kitdb, struct, id, text, int, choice } = database;
+		declaration = `const { kitdb, struct, id, text, int, choice } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique(),
@@ -422,7 +422,7 @@ const products = struct({
 });
 const db = kitdb("` + databaseName + `", { products }, { token: "release-secret", access: "readwrite" });`
 	}
-	source := `import { router, database } from "kitwork";
+	source := `import { router, internals } from "kitwork";
 ` + declaration + `
 router.get((ctx) => {
   const action = ctx.query("action");

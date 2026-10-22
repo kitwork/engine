@@ -36,8 +36,8 @@ func TestKitDBRemoteAlterPrimaryKeyRewritesRowsAndSurvivesRestart(t *testing.T) 
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const db = database.kitdb("alter.kitdb", {}, { token: "rekey-secret", access: "readwrite" });
+	router := `import { router, internals } from "kitwork";
+const db = internals.kitdb("alter.kitdb", {}, { token: "rekey-secret", access: "readwrite" });
 router.get(() => db.products.count());`
 	if err := os.WriteFile(filepath.Join(directory, RouterFileName), []byte(router), 0o644); err != nil {
 		t.Fatal(err)

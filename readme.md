@@ -61,9 +61,10 @@ app/
   page.ui                     the frame around every page
   content.ui                  the page at /
   api/hello/router.work       the route /api/hello, JSON only
-  api/notes/router.work       the route /api/notes, writes to the site's own database
+  api/notes/router.work       the route /api/notes, writes to the app's own database
+  .shared/schema/notes.work   the app's database: its tables, declared once
   assets/                     static files, served as they are at /assets/…
-  .data/                      made by the engine: app.db and whatever else the site keeps
+  .database/                  made by the engine: the app's own database, never served
 ```
 
 The folder tree is the URL space. A folder is a route; a `router.work` inside it says what the
@@ -91,13 +92,25 @@ router.view((ctx) => {
 ```
 
 ```js
+// app/.shared/schema/notes.work
+import { struct, id, text, timestamp } from "kitwork/schema";
+import { connection } from "kitwork/database";
+
+const notes = struct({ id: id(), text: text(), createdAt: timestamp().created() });
+
+export const db = connection().schema({ notes });
+```
+
+```js
 // app/api/notes/router.work
-import { router, sqlite } from "kitwork";
+import { router } from "kitwork";
+import { asc } from "kitwork/database";
+import { db } from "app/.shared/schema/notes.work";
 
 router.get((ctx) => {
-  sqlite.exec("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, text TEXT)");
-  sqlite.table("notes").create({ text: ctx.query("text") || "hello" });
-  return ctx.json(sqlite.table("notes").sort("id", "asc").list());
+  const text = ctx.query("text") || "hello";
+  db.insert((notes) => ({ text }));
+  return ctx.json(db.orderBy((notes) => asc(notes.createdAt) && asc(notes.id)).list());
 });
 ```
 
@@ -106,8 +119,10 @@ script. The `.ui` file names elements by what they are (`content`, `text`, `butt
 describes them by intent (`padding`, `gap`, `heading`, `color`); the engine chooses the HTML tag,
 writes the CSS those attributes need and nothing else, and checks at compile time that every text
 reads against its background. A `page.ui` with `<content />` in it is the frame every page is
-placed in. The database the notes route writes to is `app/.data/app.db`, made on first use: copy the
-folder and the data goes with it.
+placed in. A statement on `db` is read when it compiles, never run as a function: the lambda's
+parameter is the table, a name the schema does not have is a compile error at its line, and every value
+from outside the lambda is a parameter of the query. The database the notes route writes to is
+`app/.database/application/`, made on first use: copy the folder and the data goes with it.
 
 Source files are never served. Asking for `/router.work` or `/content.ui` is a 404.
 
@@ -150,7 +165,7 @@ go run .
 
 ```text
 $ curl "http://localhost:8080/api/notes?text=first"
-[{"id":1,"text":"first"}]
+[{"createdAt":"2026-10-23T08:00:00Z","id":"03dvr1yetlo4gu67i2khcwxsaq8zmp5n9fbj","text":"first"}]
 ```
 
 With `allowLocal` on there is no TLS, `localhost` means the configured hostname, and
@@ -187,6 +202,7 @@ app
     bytecodeCache: true
   })
   .database("./.database/", { memory: "64mb", warm: ["shop"] })
+  .databases({ warehouse: { sqlite: "./data/warehouse.db" } })
   .postgresql("system", { host: env.DB_HOST, port: 5432, user: env.DB_USER, password: env.DB_PASSWORD, name: "kitwork" })
   .desktop({ name: "Example", width: 1200, height: 820 })
   .prewarm("*")
@@ -199,8 +215,13 @@ app
   or a managed root the app owns, optionally on a PostgreSQL wire port), `desktop` and `mobile`
   (declared here, opened by a separate shell), `gateway` (weighted reverse-proxy targets), `proxy`
   (HTTP or SOCKS5 forward-proxy listeners).
-- Connections, what the app consumes, always alias first: `postgresql`, `sqlite`, `connect`; `mysql`
-  and `redis` are accepted by the manifest but have no driver linked in this build.
+- Databases an app reaches by name: `databases({ warehouse: { sqlite: path } })` (read from the
+  manifest's folder); an app's `.shared/schema/` writes `connection("warehouse")`. A `{ postgresql: url }`
+  entry is accepted, but no app reaches it in this build. `policy({ tenantConnections: false })` stops
+  apps from connecting to a database of their own with `connect({ … })`.
+- The host's own connections, always alias first: `postgresql`, `sqlite`, `connect` (the system
+  database of the queue and the scheduler); no app code reaches them. `mysql` and `redis` are
+  accepted by the manifest but have no driver linked in this build.
 - Lifecycle: `prewarm` (the primary hostname by default, named domains, or `"*"` for every site) and
   `run`, the last call, which opens the listener.
 
@@ -211,8 +232,8 @@ no listener: a `database` surface alone is a complete manifest.
 
 Three layouts are recognised: one site at the root (`app/router.work`), one application with a
 folder per domain (`app/<domain>/`), or many tenants (`apps/<identity>/<domain>/`). Within an
-application the domains share its declared connections and background work; each domain keeps its
-own `.data` and its own `.env`. `docs/APP.md` lists every option.
+application the domains share its database (`.database/` of the application) and background work;
+each domain keeps its own `.data` and its own `.env`. `docs/APP.md` lists every option.
 
 ## The language
 
@@ -266,8 +287,8 @@ site from starting, at the line that wrote it:
 compile router api/loop/router.work: router.work:5:3: Kitwork không hỗ trợ vòng điều kiện tuỳ ý 'while' …
 ```
 
-What `"kitwork"` gives a `.work` file: `router` and `safe`; `database`, `sqlite` and `collection`
-for data; `http` (also `import * as http from "kitwork/http"`) and `webhook` for the network; `file`, `path` and `cache`; `env` and
+What `"kitwork"` gives a `.work` file: `router` and `safe`; `collection` for data (databases come
+from `kitwork/schema` and `kitwork/database`, declared in `.shared/schema/`); `http` (also `import * as http from "kitwork/http"`) and `webhook` for the network; `file`, `path` and `cache`; `env` and
 `log`; `go` for detached work; `jwt`, `qrcode`, `napas`, `shortbase`, `insights`, `palette`,
 `pigment` and `playground` as helpers. The globals are the familiar ones: `Math`, `Date`, `JSON`,
 `console`, `Object`, `Number`, `BigInt`, `String`, `Boolean`, `Array`, `parseInt`, `parseFloat`,
@@ -351,10 +372,11 @@ A folder's `router.work` declares the methods of its own path: `get`, `post`, `p
 `delete`, `notfound`, `proxy`, and `view` for a page. Each method is a chain, read top to bottom:
 
 ```js
-import { router, sqlite } from "kitwork";
+import { router } from "kitwork";
+import { db } from "app/.shared/schema/shop.work";
 
 router
-  .get((ctx) => ctx.json({ items: sqlite.table("items").list() }))
+  .get((ctx) => ctx.json({ items: db.list((items) => items) }))
   .guard((ctx) => Boolean(ctx.cookie("session")))
   .cache("5m")
   .limit({ rate: 30, per: "1m" });
@@ -365,8 +387,8 @@ router
   generation; `persist(expiry)` keeps it on disk for the site; both are keyed by method, path and
   query, so neither suits a personalised page; `limit` adds a rate rule.
 - On a folder, inherited by everything below it: `guard`, `error`, `notfound`, `meta`, `title`,
-  `description`, `language`, `favicon`, `assets`, `rateLimit`, `database` (the alias `ctx.database`
-  reads), and the cached declarations `rss`, `sitemap` and `proxy`.
+  `description`, `language`, `favicon`, `assets`, `rateLimit`, and the cached declarations `rss`,
+  `sitemap` and `proxy`.
 - `ctx` carries the request: `params`, `query`, `header`, `cookie`, `body`, `ip`, `method`,
   `path`; and the answer: `json`, `text`, `html`, `file`, `redirect`, `status`, `type`,
   `setCookie`; and for a page, `bind`, `title`, `meta`. The `error` hook receives
@@ -379,21 +401,25 @@ public.
 
 ## Data
 
-Four doors, each explicit:
+An app's databases are declared in one folder, `.shared/schema/` of the app, and imported where they
+are used (`docs/KITWORK_DATABASE.md` in the Kitwork repository is the spec):
 
-- `sqlite`: the site's own file at `.data/app.db`, confined to `.data`; `sqlite.open("other.db")`
-  for another file there, `sqlite.memory()` for none; `exec` for DDL, `table(name)` for the builder.
-- `database.connect("alias")` or `router.database("alias")` with `ctx.database`: a connection the
-  manifest declared, PostgreSQL or SQLite, or a database inside the KitDB root the app owns. A site
-  never supplies a connection string.
-- `database.entity()`: the system database, every query scoped to the app's identity by the engine.
+- `connection().schema({ orders })`: the app's own database, KitDB in the app's folder
+  (`.database/application/`), one for every site of the app.
+- `connection("warehouse").schema({ stocks })`: a database the host named in the manifest's
+  `databases({ … })`; today a SQLite file of the host.
+- `connect({ postgresql: env.CRM_URL })`: a database outside the app, someone else's; it has only
+  `query(sql, [values])`, its values bound by the driver, and it dials through the same guard as
+  outbound HTTP.
 - `collection.open("name")`: Markdown documents under `_collection/<name>`, with a full-text index.
 
-The query builder is the same on every door: `table`, `select`, `where` (`("age", ">", 18)`, an
-object, or a lambda), `and`, `or`, `in`, `isNull`, `orderBy` or `sort`, `limit`, `skip`, joins,
-`groupBy`, `having`; terminals `first`, `find`, `list`, `count`, `sum`, `avg`, `max`, `exists`;
-writes `create`, `update`, `delete` and `remove`. Values travel as parameters. An update or a delete
-that names no row is refused.
+A statement on a declared database is translated when it compiles: `db.list((orders) => orders.day
+=== today)`, `db.where(…).orderBy((orders) => desc(orders.amount)).list(10)`, `db.first(…)`,
+`db.count(…)`, `db.insert((orders) => ({ email, item }))`. The lambda's parameter is the table and is
+never run; a table, a column or an insert key the schema does not have is a compile error at its line;
+a value from outside the lambda is a parameter, never part of the SQL. The older doors (`sqlite`,
+`database.kitdb(…)`, `database.entity()`, `ctx.database`, `router.connection`, the string forms of the
+query builder) were removed on 22/10/2026: each is now an error that says what to write instead.
 
 KitDB is an embedded relational database written in Go and incubated in this repository, with its
 own storage, write-ahead log, checkpoints, verified backup and point-in-time recovery, one writer
@@ -480,10 +506,13 @@ What a stranger's code cannot do, and the mechanism that stops it:
 - Keep anything between requests: the machine is wiped before it goes back to the pool, and
   retention is measured by a campaign in the release gate.
 - Read another site's files, environment or database file: paths are resolved inside the site,
-  `.env` is per site, SQLite is confined to `.data`, and a connection exists only under an alias
-  the host declared.
-- Reach the host's own network: outbound requests to loopback, private and link-local addresses
-  are refused at dial time.
+  `.env` is per site, an app's database lives in its own folder, and a named database is one the
+  host declared.
+- Reach the host's own network: outbound requests and `connect({ … })` databases on loopback,
+  private and link-local addresses are refused at dial time.
+- Borrow the host's database credentials: a `connect({ … })` connection carries only what its URL
+  says; nothing comes from the host's `PG*` environment, `~/.pgpass` or `~/.postgresql/`, and a URL
+  that names a certificate or password file is refused.
 - Inject SQL: values are bound as parameters; an update or a delete with no condition is refused.
 - Serve its own source: `.work`, `.ui`, `.kitwork.js` and `.kitwork.html` are never served.
 - Flood the host: rate limits per IP, client, user or site; one request id per response for the
@@ -491,8 +520,7 @@ What a stranger's code cannot do, and the mechanism that stops it:
 
 What it does not do yet, said plainly: there is no authorization policy on a request (the seam
 exists, nothing ships with it); the PostgreSQL wire profile of KitDB is loopback-only and
-cleartext; identifiers in the query builder are quoted, not validated, so a table or column name
-must come from your code, never from a request; and the whole design treats a volumetric attack as
+cleartext; and the whole design treats a volumetric attack as
 the job of the layer in front, not of the engine.
 
 ## What decides every choice

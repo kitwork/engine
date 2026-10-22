@@ -22,8 +22,8 @@ func TestKitDBPostgresCreateDatabaseAsOfTimestamp(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
 const products = struct({
   id: id(),
   title: text().notNull(),

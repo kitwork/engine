@@ -1,0 +1,6 @@
+import { struct, id, text, timestamp } from "kitwork/schema";
+import { connection } from "kitwork/database";
+
+const notes = struct({ id: id(), text: text(), createdAt: timestamp().created() });
+
+export const db = connection().schema({ notes });

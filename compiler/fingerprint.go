@@ -82,7 +82,15 @@ import (
 // the handle refuses: the bump retires it. A program that imports no database compiles as before, byte for
 // byte. The template's format (database/statement.Version 1) pairs with this schema: a change of the
 // format bumps both (TestStatementVersionPairsWithSchema). No opcode or operand changed.
-const CompilerSchemaVersion uint16 = 12
+//
+// 13 (22/10/2026, KITWORK_DATABASE.md, the older spellings removed): an import of an older word of the
+// database module (import { kitdb, text } from "kitwork/database", import { sqlite } from "kitwork") and a
+// read of one off the module's name (database.where) are compile errors; connection("tên") and
+// connect({ … }) of .shared/schema/ compile, and a handle of connect() answers query() as written. A
+// cached artifact of schema 12 that uses an older word would still run until the word fails where it is
+// read, instead of the file failing where it is written: the bump retires it. A program that uses none of
+// them compiles as before, byte for byte; the template's format is unchanged. No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 13
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

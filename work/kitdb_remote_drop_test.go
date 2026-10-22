@@ -18,8 +18,8 @@ func TestKitDBRemoteDropTableIsAtomicAndSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const protected_records = struct({ id: text().key(), title: text().index() });
 const db = kitdb("drop.kitdb", { protected_records }, { token: "drop-secret", access: "readwrite" });
 router.get(() => db.protected_records.count());`
@@ -101,8 +101,8 @@ func TestKitDBRemoteDropIndexUsesResumableRetirementAndSurvivesRestart(t *testin
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const protected_records = struct({ id: text().key(), title: text().index() });
 const db = kitdb("drop.kitdb", { protected_records }, { token: "drop-secret", access: "readwrite" });
 router.get(() => db.protected_records.count());`
@@ -182,8 +182,8 @@ func TestKitDBRemoteDropConstraintIsAtomicAndSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const protected_records = struct({ id: text().key(), code: text().unique() });
 const db = kitdb("drop.kitdb", { protected_records }, { token: "drop-secret", access: "readwrite" });
 router.get(() => db.protected_records.count());`
@@ -318,8 +318,8 @@ func TestKitDBRemoteAddConstraintIsAtomicAndSurvivesRestart(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const protected_records = struct({ id: text().key(), code: text() });
 const db = kitdb("drop.kitdb", { protected_records }, { token: "drop-secret", access: "readwrite" });
 router.get(() => db.protected_records.count());`

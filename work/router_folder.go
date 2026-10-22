@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/compiler"
-	"github.com/kitwork/engine/database"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/site"
 	"github.com/kitwork/engine/ui/stylesheet"
@@ -339,12 +338,6 @@ type FolderRouter struct {
 	// router.bundle(): how this folder's .ui pages deliver their CSS and their JavaScript, per part; ""
 	// for a part it does not name (routeBundle: the nearest folder that names it wins, router_ui_bundle.go)
 	bundle bundleChoice
-	// router.connection() or router.connect(): what this folder plugged ctx.database into, nil when it
-	// did not (the application's own, or the nearest folder above that plugged); connections are the
-	// router.connect("tên", { … }) of this folder, reachable as ctx.database("tên") here and below
-	// (routeConnection, router_connection.go)
-	connection  *folderConnection
-	connections map[string]*database.Config
 }
 
 // MissingMember is called for a member the folder router does not have. The chain must not break

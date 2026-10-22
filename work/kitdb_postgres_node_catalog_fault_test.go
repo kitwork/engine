@@ -152,8 +152,8 @@ func prepareKitDBNodeCatalogFaultTopology(
 	if err := os.MkdirAll(data, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	router := `import { router, database } from "kitwork";
-const { kitdb } = database;
+	router := `import { router, internals } from "kitwork";
+const { kitdb } = internals;
 kitdb("source.kitdb", {}, {
   token: "node-catalog-fault-secret",
   access: "readwrite",

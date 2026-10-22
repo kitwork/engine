@@ -19,8 +19,8 @@ func TestKitDBSafeMigrationSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v1 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, choice } = database;
+	v1 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, choice } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique(),
@@ -37,8 +37,8 @@ router.get((ctx) => ctx.json(db.products.create({ sku: "KIT-1", title: "kept" })
 	}
 	tenant.Close()
 
-	v2 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, choice } = database;
+	v2 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, choice } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique().index(),
@@ -74,8 +74,8 @@ router.get((ctx) => {
 
 	// The rename hint is needed only for the transition. The persisted identity
 	// is reconciled by the new name on every later open.
-	v3 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, choice } = database;
+	v3 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, choice } = internals;
 const products = struct({
   id: id(),
   sku: text().notNull().unique().index(),
@@ -105,8 +105,8 @@ func TestKitDBUnsafeMigrationIsAtomicAndRefused(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	v1 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text, int } = database;
+	v1 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text, int } = internals;
 const products = struct({ id: id(), title: text().notNull(), price: int().default(0) });
 const db = kitdb("refuse.kitdb", { products });
 router.get((ctx) => {
@@ -121,8 +121,8 @@ router.get((ctx) => {
 	}
 	tenant.Close()
 
-	v2 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	v2 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const products = struct({ id: id(), title: text().notNull() });
 const db = kitdb("refuse.kitdb", { products }, { migrate: true });
 router.get(() => db.products.count());`
@@ -154,8 +154,8 @@ func TestKitDBMigrationValidatesNewUniqueConstraintBeforeCommit(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	v1 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	v1 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const items = struct({ id: id(), code: text().notNull() });
 const db = kitdb("unique.kitdb", { items });
 router.get((ctx) => {
@@ -171,8 +171,8 @@ router.get((ctx) => {
 	}
 	tenant.Close()
 
-	v2 := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	v2 := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const items = struct({ id: id(), code: text().notNull().unique() });
 const db = kitdb("unique.kitdb", { items }, { migrate: true });
 router.get(() => db.items.count());`
@@ -184,8 +184,8 @@ router.get(() => db.items.count());`
 	}
 	tenant.Close()
 
-	v1Read := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
+	v1Read := `import { router, internals } from "kitwork";
+const { kitdb, struct, id, text } = internals;
 const items = struct({ id: id(), code: text().notNull() });
 const db = kitdb("unique.kitdb", { items });
 router.get((ctx) => ctx.json({ count: db.items.count() }));`

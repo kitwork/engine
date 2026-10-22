@@ -92,10 +92,14 @@ var NotYet = map[string]int{
 	"update": 3, "delete": 3, "upsert": 3,
 	"transaction": 4,
 	"select":      5, "join": 5, "groupBy": 5,
-	"query":   8,
 	"at":      9,
 	"history": 9,
 }
+
+// ManagedQuery is the error of query() on a database the app declared with connection(): the spec lets it
+// run only when application.work allows it, and how application.work allows it is open
+// (KITWORK_DATABASE.md mục 8.9), so the engine has no way to allow it yet.
+const ManagedQuery = "query(…) trên database được quản lý chỉ chạy khi application.work cho phép, và cách cho phép còn mở (KITWORK_DATABASE.md mục 8.9): chưa có trong engine hôm nay; SQL thô trên database ngoài là connect({ … }).query(sql, [giá trị])"
 
 // Absent are words the spec has not, with what it writes instead (KITWORK_DATABASE.md mục 9).
 var Absent = map[string]string{

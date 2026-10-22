@@ -66,8 +66,8 @@ func TestKitDBAnalyzeMakesPlannerEstimatesUsefulAndInvalidatesOnWrite(t *testing
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const products = struct({
   id: text().key(),
   category: text().notNull().index(),
@@ -148,8 +148,8 @@ func TestKitDBSQLAnalyzeAndStatisticsPragmaUseTheSamePlannerMetadata(t *testing.
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text, int } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text, int } = internals;
 const products = struct({
   id: text().key(),
   category: text().notNull().index(),
@@ -276,8 +276,8 @@ func TestKitDBAnalyzeConflictCannotPublishOldStatisticsAsCurrent(t *testing.T) {
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+	source := `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const products = struct({ id: text().key(), category: text().notNull().index() });
 const db = kitdb("statistics-conflict.kitdb", { products }, { token: "statistics-secret", access: "readwrite" });
 router.get(() => db.products.count());`

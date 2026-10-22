@@ -80,7 +80,7 @@ type Router struct {
 	// node is the route folder this request resolved to (serveTree). The folder rules ctx reads at
 	// request time, router.database among them, are resolved from it up to the site root.
 	node *RouteNode
-	// requestScope owns the request: a database handle made for it (ctx.database) is bound to it.
+	// requestScope owns the request: what a host call makes for it is bound to it.
 	requestScope *requestscope.Scope
 
 	// Cache configuration

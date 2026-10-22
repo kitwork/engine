@@ -12,8 +12,8 @@ import (
 // down". CONTROL: a write that meets nothing has no error.
 func TestKitDBUniqueViolationIsAConflict(t *testing.T) {
 	serve := safeSite(t, map[string]string{
-		"": `import { router, database } from "kitwork";
-const { kitdb, struct, text } = database;
+		"": `import { router, internals } from "kitwork";
+const { kitdb, struct, text } = internals;
 const items = struct({
   id: text().key(),
   label: text().unique(),

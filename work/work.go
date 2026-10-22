@@ -1,10 +1,12 @@
 package work
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/kitwork/engine/app"
 	"github.com/kitwork/engine/capabilities"
+	"github.com/kitwork/engine/database/statement"
 	requestscope "github.com/kitwork/engine/request"
 	"github.com/kitwork/engine/runtime"
 	"github.com/kitwork/engine/value"
@@ -87,6 +89,16 @@ type KitWork struct {
 	tenant       *Tenant
 	vm           *runtime.VM
 	requestScope *requestscope.Scope
+}
+
+// MissingMember is a word the module kitwork has not. An older word of it (sqlite, removed on 22/10/2026)
+// is the error that says what the spec writes instead; the compiler refuses its import in the same words.
+// Any other word is nothing, as it was.
+func (w *KitWork) MissingMember(name string) value.Value {
+	if spelling, removed := statement.RemovedKitworkWord(name); removed {
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`%s của "kitwork" đã bỏ: %s`, name, spelling))
+	}
+	return value.Value{K: value.Nil}
 }
 
 func (w *KitWork) Capability(name string) value.Value {

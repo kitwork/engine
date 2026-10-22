@@ -15,29 +15,38 @@ import (
 	kitdbnode "github.com/kitwork/engine/kitdb/node"
 )
 
+// Two apps, each with its database declared in its .shared/schema/ (KITWORK_DATABASE.md mục 1): two KitDB
+// files, app/.database/application/application.kitdb, opened through the host's one bounded node manager.
+// With room for one open database, the second request evicts the first app's file.
 func TestEngineOwnsOneBoundedKitDBNodeManager(t *testing.T) {
 	root := t.TempDir()
-	directory := filepath.Join(root, "test", "localhost")
-	if err := os.MkdirAll(directory, 0o755); err != nil {
-		t.Fatal(err)
+	app := func(identity, domain, table, answer string) {
+		files := map[string]string{
+			filepath.Join(identity, ".shared", "schema", "data.work"): `import { struct, id, text } from "kitwork/schema";
+import { connection } from "kitwork/database";
+const ` + table + ` = struct({ id: id(), name: text() });
+export const db = connection().schema({ ` + table + ` });
+`,
+			filepath.Join(identity, domain, "router.work"): `import * as router from "kitwork/router";
+import { db } from "app/.shared/schema/data.work";
+router.get((context) => {
+  const name = "` + answer + `";
+  db.insert((` + table + `) => ({ name }));
+  return context.text(name);
+});
+`,
+		}
+		for name, source := range files {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, name), []byte(source), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
-	source := `import { router, database } from "kitwork";
-const { kitdb, struct, id, text } = database;
-const alpha = struct({ id: id(), name: text().notNull() });
-const beta = struct({ id: id(), name: text().notNull() });
-const first = kitdb("first.kitdb", { alpha });
-const second = kitdb("second.kitdb", { beta });
-router.get((ctx) => {
-  if (ctx.query("db") === "second") {
-    second.beta.create({ name: "second" });
-    return ctx.text("second");
-  }
-  first.alpha.create({ name: "first" });
-  return ctx.text("first");
-});`
-	if err := os.WriteFile(filepath.Join(directory, "router.kitwork.js"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	app("alpha", "localhost", "alpha", "first")
+	app("beta", "second.localhost", "beta", "second")
 
 	engine := New(root, 0, false, "")
 	if err := engine.SetKitDBNodeLimits(kitdbnode.Limits{
@@ -48,21 +57,21 @@ router.get((ctx) => {
 		t.Fatal(err)
 	}
 
-	requestKitDBNodeRoute(t, engine, "/", "first")
+	requestKitDBNodeRoute(t, engine, "localhost", "first")
 	stats := engine.KitDBNodeStats()
 	if stats.ManagedDatabases != 1 || stats.IdleDatabases != 1 || stats.ActiveLeases != 0 ||
 		stats.ReservedPageCacheBytes != 64<<10 || stats.Opens != 1 {
 		engine.Close()
 		t.Fatalf("first request node stats = %#v", stats)
 	}
-	requestKitDBNodeRoute(t, engine, "/?db=second", "second")
+	requestKitDBNodeRoute(t, engine, "second.localhost", "second")
 	stats = engine.KitDBNodeStats()
 	if stats.ManagedDatabases != 1 || stats.IdleDatabases != 1 || stats.Evictions != 1 || stats.Opens != 2 {
 		engine.Close()
 		t.Fatalf("second request node stats = %#v", stats)
 	}
 
-	firstPath := filepath.Join(directory, ".data", "first.kitdb")
+	firstPath := filepath.Join(root, "alpha", ".database", "application", "application.kitdb")
 	first, err := kitdbengine.Open(firstPath)
 	if err != nil {
 		engine.Close()
@@ -77,7 +86,7 @@ router.get((ctx) => {
 		t.Fatalf("late node limit change error = %v", err)
 	}
 
-	secondPath := filepath.Join(directory, ".data", "second.kitdb")
+	secondPath := filepath.Join(root, "beta", ".database", "application", "application.kitdb")
 	if _, err := kitdbengine.Open(secondPath); !errors.Is(err, kitdbengine.ErrWriterLocked) {
 		engine.Close()
 		t.Fatalf("active host manager did not retain second writer lock: %v", err)
@@ -377,11 +386,11 @@ func TestEngineOwnsHostTrustedKitDBProductionSupervisor(t *testing.T) {
 	}
 }
 
-func requestKitDBNodeRoute(t *testing.T, engine *Engine, target, body string) {
+func requestKitDBNodeRoute(t *testing.T, engine *Engine, host, body string) {
 	t.Helper()
 	recorder := httptest.NewRecorder()
-	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://localhost"+target, nil))
+	engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://"+host+"/", nil))
 	if recorder.Code != http.StatusOK || strings.TrimSpace(recorder.Body.String()) != body {
-		t.Fatalf("GET %s = %d %q, want 200 %q", target, recorder.Code, recorder.Body.String(), body)
+		t.Fatalf("GET %s = %d %q, want 200 %q", host, recorder.Code, recorder.Body.String(), body)
 	}
 }

@@ -12,7 +12,8 @@ package value
 // const { ok, value, error } = … takes it apart. It replaced x.safe(), whose result was a Go struct (SafeResult) that JSON wrote as null and a
 // view dropped; x.safe() is now a compile error that says how to write it.
 //
-// Failures a host attached to data without stopping the program (database.entity() returning [] with
+// Failures a host attached to data without stopping the program (database.entity(), removed since,
+// returning [] with
 // DATABASE_ERROR, createMany returning its progress with KITDB_CREATE_MANY_PARTIAL) are gone with it:
 // they are failures like any other now, DATABASE and PARTIAL, so a page that forgets safe answers 500
 // and logs it rather than showing an empty list while the database is down.
