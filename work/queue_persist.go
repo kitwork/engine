@@ -357,6 +357,9 @@ func (t *Tenant) runInQueueVM(handler *QueueHandler, lambda *value.Lambda, args 
 	if lambda == nil {
 		return 0, fmt.Errorf("queue %q has no handler", handler.Name)
 	}
+	if len(args) > 0 {
+		args = append([]value.Value{jobArgument(lambda, args[0])}, args[1:]...)
+	}
 	return t.Execute(handler.Bytecode.Program, lambda, args)
 }
 

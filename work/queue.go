@@ -463,5 +463,17 @@ func (t *Tenant) runQueueFile(worker *queueRuntime, bc *compiler.Bytecode, stem,
 		registered[i].ContentHash = contentHash
 		registered[i].Name = stem // the file IS the queue's identity
 	}
+	// a handler that takes apart a function of its context is refused, as a compile error refuses the
+	// file: said, and the queue not kept
+	for i := len(registered) - 1; i >= 0; i-- {
+		handler := registered[i]
+		for _, l := range []*value.Lambda{handler.Callback, handler.OnSuccess, handler.OnError} {
+			if err := destructureError(l, jobDestructurable, jobSide); err != nil {
+				fmt.Printf("[Queue] %v\n", err)
+				worker.handlers = append(worker.handlers[:before+i], worker.handlers[before+i+1:]...)
+				break
+			}
+		}
+	}
 	worker.mu.Unlock()
 }

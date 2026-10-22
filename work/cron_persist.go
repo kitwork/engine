@@ -344,6 +344,9 @@ func (t *Tenant) runInJobVM(job *CronJob, lambda *value.Lambda, args []value.Val
 	}
 	// The generic compute seam (capabilities.Runtime, see compute.go) IS this runner — cron dogfoods
 	// it, so every cron test also exercises the seam a migrated cron capability would use.
+	if len(args) > 0 {
+		args = append([]value.Value{jobArgument(lambda, args[0])}, args[1:]...)
+	}
 	return t.Execute(job.Bytecode.Program, lambda, args)
 }
 

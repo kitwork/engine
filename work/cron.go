@@ -329,6 +329,18 @@ func (t *Tenant) runCronFile(scheduler *cronRuntime, bc *compiler.Bytecode, stem
 		registered[i].ContentHash = contentHash
 		registered[i].Name = stem // the file IS the cron's identity
 	}
+	// a handler that takes apart a function of its context is refused, as a compile error refuses the
+	// file: said, and the cron not kept
+	for i := len(registered) - 1; i >= 0; i-- {
+		job := registered[i]
+		for _, l := range []*value.Lambda{job.Callback, job.OnSuccess, job.OnError} {
+			if err := destructureError(l, jobDestructurable, jobSide); err != nil {
+				fmt.Printf("[Cron] %v\n", err)
+				scheduler.jobs = append(scheduler.jobs[:before+i], scheduler.jobs[before+i+1:]...)
+				break
+			}
+		}
+	}
 	scheduler.mu.Unlock()
 }
 
