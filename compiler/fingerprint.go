@@ -74,7 +74,15 @@ import (
 // fingerprint already; the schema moves with it because the lowering changed too, so an artifact of
 // schema 10 is retired by both. Division by zero (Infinity, NaN) and a write through null or a string
 // (the runtime error TYPE) are the VM's and need no recompile.
-const CompilerSchemaVersion uint16 = 11
+//
+// 12 (22/10/2026, KITWORK_DATABASE.md slice 1, "dịch lúc biên dịch"): a bundle that imports a database
+// from an app's .shared/schema/ lowers every statement on it (db.where(…).list(…)) to one call of the
+// handle, LOAD db; PUSH "<template>"; holes…; PUSH "#statement"; INVOKE 1+n (database_translate.go), and
+// its query lambdas are no longer compiled. A cached artifact of schema 11 holds the lambda form, which
+// the handle refuses: the bump retires it. A program that imports no database compiles as before, byte for
+// byte. The template's format (database/statement.Version 1) pairs with this schema: a change of the
+// format bumps both (TestStatementVersionPairsWithSchema). No opcode or operand changed.
+const CompilerSchemaVersion uint16 = 12
 
 var currentCompilerFingerprint = compilerFingerprintFor(CompilerSchemaVersion)
 

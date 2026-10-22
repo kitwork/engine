@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"math"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kitwork/engine/database"
+	"github.com/kitwork/engine/database/statement"
 	"github.com/kitwork/engine/id"
 	kitdbengine "github.com/kitwork/engine/kitdb"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
@@ -82,6 +82,72 @@ type ColumnSpec struct {
 	seq          uint64         // creation order — the VM evaluates the column builders in source order, so
 	// sorting a schema's columns by seq reproduces the DECLARED order (the alternative, a plain Go map,
 	// loses it, and DDL sorted by name would show columns alphabetically instead of as written).
+
+	// vocabulary marks a column of kitwork/schema (schema_module.go): its builder is the spec's word
+	// (Builder), it refuses null unless .nullable(), and a modifier of the older spellings is an error
+	// naming the spec's. The Go DDL paths keep the fields above as they are.
+	vocabulary bool
+	builder    string // the kitwork/schema builder: id, text, integer, float, decimal, boolean, date, json, timestamp
+	nullable   bool
+	// writeProtected: timestamp().created() or .updated(), which the engine fills and data never writes.
+	writeProtected bool
+	timestamp      bool
+	precision      int
+	scale          int
+	// owner is the kitwork/schema struct the column was given to; a column belongs to one table.
+	owner *StructDef
+}
+
+// legacyModifier refuses, on a column of kitwork/schema, a modifier of the older spellings, naming the
+// spec's; it reports whether it refused.
+func (c *ColumnSpec) legacyModifier(name string) bool {
+	if !c.vocabulary {
+		return false
+	}
+	if c.declareErr == "" {
+		c.declareErr = fmt.Sprintf(".%s() là cách viết cũ: %s", name, statement.LegacyModifiers[name])
+	}
+	return true
+}
+
+// Nullable lets a column of kitwork/schema hold null: every column refuses it otherwise
+// (KITWORK_DATABASE.md mục 1).
+func (c *ColumnSpec) Nullable(_ ...value.Value) *ColumnSpec {
+	c.nullable = true
+	c.notNull = false
+	return c
+}
+
+// Search puts the column in the table's full-text index: the spec's spelling of .searchable().
+func (c *ColumnSpec) Search(_ ...value.Value) *ColumnSpec {
+	c.searchable = true
+	if c.searchWt == 0 {
+		c.searchWt = 1
+	}
+	return c
+}
+
+// Created fills a timestamp() at insert: timestamp().created(). Data never writes it.
+func (c *ColumnSpec) Created(_ ...value.Value) *ColumnSpec {
+	if !c.timestamp {
+		c.declareErr = ".created() chỉ đi sau timestamp(): timestamp().created()"
+		return c
+	}
+	c.defaultNow = true
+	c.writeProtected = true
+	return c
+}
+
+// Updated fills a timestamp() at insert and at every update: timestamp().updated(). Data never writes it.
+func (c *ColumnSpec) Updated(_ ...value.Value) *ColumnSpec {
+	if !c.timestamp {
+		c.declareErr = ".updated() chỉ đi sau timestamp(): timestamp().updated()"
+		return c
+	}
+	c.defaultNow = true
+	c.touch = true
+	c.writeProtected = true
+	return c
 }
 
 // colIndexRef records that a column takes part in an index. name "" means an auto-named single-column
@@ -134,12 +200,20 @@ func nextColSeq() uint64 { return colSeqCounter.Add(1) }
 
 // The modifiers are variadic so the VM does NOT auto-call them as getters (a 0-in/1-out method is a
 // getter here; a variadic method stays a callable).
-func (c *ColumnSpec) PrimaryKey(args ...value.Value) *ColumnSpec { return c.Key(args...) }
+func (c *ColumnSpec) PrimaryKey(args ...value.Value) *ColumnSpec {
+	if c.legacyModifier("primaryKey") {
+		return c
+	}
+	return c.Key(args...)
+}
 
 // Key is the preferred spelling of PrimaryKey: text().key() / uuid().key() make any column the primary
 // key. A key is PRIMARY KEY + NOT NULL (columnSQL emits both) and unique by nature — no extra unique
 // index needed. .primaryKey() stays as a compatibility alias.
 func (c *ColumnSpec) Key(args ...value.Value) *ColumnSpec {
+	if c.legacyModifier("key") {
+		return c
+	}
 	c.primary = true
 	if len(args) == 0 {
 		return c
@@ -156,7 +230,13 @@ func (c *ColumnSpec) Key(args ...value.Value) *ColumnSpec {
 	c.primaryOrder = position
 	return c
 }
-func (c *ColumnSpec) NotNull(_ ...value.Value) *ColumnSpec { c.notNull = true; return c }
+func (c *ColumnSpec) NotNull(_ ...value.Value) *ColumnSpec {
+	if c.legacyModifier("notNull") {
+		return c
+	}
+	c.notNull = true
+	return c
+}
 func (c *ColumnSpec) Unique(args ...value.Value) *ColumnSpec {
 	if len(args) == 0 {
 		c.unique = true
@@ -194,12 +274,24 @@ func (c *ColumnSpec) Unique(args ...value.Value) *ColumnSpec {
 	c.uniques = append(c.uniques, ref)
 	return c
 }
-func (c *ColumnSpec) DefaultNow(_ ...value.Value) *ColumnSpec { c.defaultNow = true; return c }
+func (c *ColumnSpec) DefaultNow(_ ...value.Value) *ColumnSpec {
+	if c.legacyModifier("defaultNow") {
+		return c
+	}
+	c.defaultNow = true
+	return c
+}
 
 // OnUpdate marks an "updated_at" column: it is re-stamped with the current time on EVERY update()
 // (unless the caller passes the column explicitly). Pair it with now() — now().onUpdate() stamps on
 // both insert (defaultNow) and update (touch); datetime().onUpdate() stamps on update only.
-func (c *ColumnSpec) OnUpdate(_ ...value.Value) *ColumnSpec { c.touch = true; return c }
+func (c *ColumnSpec) OnUpdate(_ ...value.Value) *ColumnSpec {
+	if c.legacyModifier("onUpdate") {
+		return c
+	}
+	c.touch = true
+	return c
+}
 
 // Index adds this column to an index. Args are matched by type in any order: a string is the index
 // name, a number is the column's position in a composite, an object is options { pos, unique, where }.
@@ -238,6 +330,9 @@ func (c *ColumnSpec) Index(args ...value.Value) *ColumnSpec {
 // process search manager; the relational database remains the source of truth and is never opened as
 // a search-index file.
 func (c *ColumnSpec) Searchable(args ...value.Value) *ColumnSpec {
+	if c.legacyModifier("searchable") {
+		return c
+	}
 	c.searchable = true
 	c.searchWt = 1
 	for _, a := range args {
@@ -747,6 +842,18 @@ type dbProxy struct {
 // schema removed AND rebuilding for type changes (CAST may lose data). Without it, both are refused
 // and the data is left untouched.
 func newDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
+	// a name starting with @ is the engine's own (kitDBApplicationName: the app's database in
+	// .database/application/), which only connection().schema({ … }) declares. The name is checked as a
+	// read opens it, after kitDBRel: "./@application", "/@application", "x/../@application" are the app's
+	// database too (22/10/2026; the raw name alone was checked, so they opened it with this declaration's
+	// schema and options, drop and token among them)
+	if len(args) > 0 && args[0].K == value.String && strings.HasPrefix(kitDBRel(args[0].String()), "@") {
+		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: tên %q dành cho database của app; database của app khai export const db = connection().schema({ … }) trong .shared/schema/", args[0].String()))
+	}
+	return declareDbProxy(tenant, scope, engine, args...)
+}
+
+func declareDbProxy(tenant *Tenant, scope *requestscope.Scope, engine string, args ...value.Value) value.Value {
 	if engine != "sqlite" && engine != "kitdb" {
 		return value.InvalidFailure(value.InvalidArgumentCode, "db: unsupported storage engine")
 	}
@@ -1349,19 +1456,29 @@ func isWriteSQL(text string) bool {
 // OnGet is the whole point: db.vouchers routes here. A known table → a schema-aware handle; an unknown
 // name → an in-band error (so a typo fails loudly, not as an empty result).
 func (p *dbProxy) OnGet(key string) value.Value {
+	table, failure := p.table(key)
+	if table == nil {
+		return failure
+	}
+	return value.New(table)
+}
+
+// table is a fresh query on one table of the database: every statement builds its own, so statements
+// running at once share nothing but the schema.
+func (p *dbProxy) table(key string) (*SchemaTable, value.Value) {
 	if err := p.refreshKitDBCatalogDefinitions(); err != nil {
-		return kitDBError(err)
+		return nil, kitDBError(err)
 	}
 	tables, definitions := p.schemaSnapshot()
 	cols, ok := tables[key]
 	if !ok {
-		return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: no table %q defined in this database", key))
+		return nil, value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db: no table %q defined in this database", key))
 	}
-	return value.New(&SchemaTable{
+	return &SchemaTable{
 		tenant: p.tenant, scope: p.scope, engine: p.engine, dbName: p.dbName,
 		allowDrop: p.allowDrop, migrate: p.migrate, table: key, columns: cols, siblings: tables,
 		definition: definitions[key], definitions: definitions, transaction: p.transaction,
-	})
+	}, value.Value{}
 }
 
 // OnCompare and OnInvoke complete the ProxyHandler interface (a dbProxy that only implemented OnGet
@@ -2498,7 +2615,7 @@ func MigrationPlansFor(t *Tenant) []TablePlan {
 	for _, p := range proxies {
 		tables, definitions := p.schemaSnapshot()
 		if p.engine == "kitdb" {
-			path := p.tenant.resolve(".data", filepath.FromSlash(kitDBRel(p.dbName)))
+			path, _ := kitDBPath(p.tenant, kitDBRel(p.dbName))
 			_, statErr := os.Stat(path)
 			var managed *managedKitDB
 			var openErr error

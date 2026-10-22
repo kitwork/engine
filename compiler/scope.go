@@ -78,6 +78,17 @@ type binding struct {
 	// "kitwork/http") or a const that reads one of the module (const { get } = http, const get =
 	// http.get), so get(url); is checked as http.get(url); is.
 	kitworkHTTPVerb bool
+	// database: an import of a database from .shared/schema/ (import { db } from "app/.shared/schema/
+	// shop.work"), or a const of one (const d = db); a statement written on it is translated
+	// (database_translate.go). nil for any other variable.
+	database *DatabaseImport
+	// word: a name bound to a word of kitwork/database that means something only in a statement's
+	// lambda (desc, one); "" for any other variable.
+	word string
+	// databaseModule: a name bound to the module kitwork/database itself (import * as database from
+	// "kitwork/database", import { database } from "kitwork"), whose connection and connect are refused
+	// outside the app's .shared/schema/ (namespaceDeclaration).
+	databaseModule bool
 }
 
 type lexicalScope struct {
@@ -129,6 +140,9 @@ type resolution struct {
 	// more than read (a[i++]++, get().n += 1) the slots they are kept in, so each runs once
 	// (evaluateOnce, 15/10/2026).
 	once map[*AssignmentExpression]onceSlots
+	// statements maps a database statement's action (db.list(…)) to the call the compiler emits in its
+	// place: db.#statement(template, holes…) (database_translate.go).
+	statements map[*MethodCallExpression]*MethodCallExpression
 }
 
 // onceSlots are the slots of an assignment's object and key; "" for one that is compiled where it is.
@@ -151,6 +165,18 @@ type resolver struct {
 	// observe, when set, sees every name read or written, where, and what it resolved to (nil: no
 	// declaration around). Scans of the apps use it; compiling does not.
 	observe func(name *Identifier, write bool, found *binding, scope *lexicalScope)
+	// bundle is what the bundler found of the app's databases; nil for a program that imports none.
+	bundle *DatabaseBundle
+	// databases: the program imports a database, so statements are translated and handles checked. A
+	// program without one resolves as it did before them, byte for byte.
+	databases bool
+	// inSchemaModule: the code being read is a file of .shared/schema/, where struct() and connection()
+	// are declared.
+	inSchemaModule bool
+	// handleUse lets the next reference of a handle through: the root of a statement, or the value of a
+	// const that names the handle again (aliases).
+	handleUse bool
+	aliases   map[*Identifier]bool
 }
 
 // resolveProgram resolves every name of a program and gives each variable its slot.
@@ -172,8 +198,12 @@ func (c *Compiler) resolveObserved(
 			copies:       map[*FunctionLiteral][]*binding{},
 			temps:        map[*Identifier]string{},
 			once:         map[*AssignmentExpression]onceSlots{},
+			statements:   map[*MethodCallExpression]*MethodCallExpression{},
 		},
+		bundle:  program.Database,
+		aliases: map[*Identifier]bool{},
 	}
+	r.databases = r.bundle != nil && len(r.bundle.Imports) > 0
 	r.enterFunction(nil)
 	r.hoist(program.Statements)
 	for _, statement := range program.Statements {
@@ -256,8 +286,11 @@ func (r *resolver) hoist(statements []Statement) {
 			if node.Token.Kind == Let {
 				kind = bindingLet
 			}
+			r.declarationSite(node)
+			alias := r.databaseAlias(node)
 			for _, name := range node.Names {
 				declared := r.declare(name, kind)
+				r.markDatabase(node, name, declared, alias)
 				if declared != nil && node.Function {
 					declared.constant = false
 				}
@@ -363,6 +396,9 @@ func (r *resolver) reference(name *Identifier, write bool) {
 	}
 	if previous, ok := r.result.slots[name]; ok && previous != found {
 		r.fail(fmt.Errorf("%s: compiler: tên %s trỏ tới hai biến", r.where(name.Token), name.Value))
+		return
+	}
+	if r.databases && !r.databaseReference(name, found) {
 		return
 	}
 	r.result.slots[name] = found
@@ -570,8 +606,17 @@ func (r *resolver) expression(expression Expression) {
 			r.expression(argument)
 		}
 	case *MemberExpression:
+		if r.databases && r.handleMember(node.Object, node.Token, node.Property) {
+			return
+		}
+		if r.namespaceDeclaration(node.Object, node.Property) {
+			return
+		}
 		r.expression(node.Object)
 	case *IndexExpression:
+		if r.databases && r.handleMember(node.Left, node.Token, nil) {
+			return
+		}
 		r.expression(node.Left)
 		r.expression(node.Index)
 	case *ChainExpression:
@@ -614,6 +659,12 @@ func (r *resolver) expression(expression Expression) {
 	case *FunctionLiteral:
 		r.functionLiteral(node)
 	case *MethodCallExpression:
+		if r.databases && r.databaseStatement(node) {
+			return
+		}
+		if r.namespaceDeclaration(node.Object, node.Method) {
+			return
+		}
 		r.expression(node.Object)
 		for _, argument := range node.Arguments {
 			r.expression(argument)
@@ -655,6 +706,11 @@ func (r *resolver) target(target Expression) {
 func (r *resolver) functionLiteral(literal *FunctionLiteral) {
 	outerLoop := r.loop
 	r.loop = nil
+	if r.bundle != nil && r.bundle.SchemaModules[literal] != "" {
+		outer := r.inSchemaModule
+		r.inSchemaModule = true
+		defer func() { r.inSchemaModule = outer }()
+	}
 	r.enterFunction(literal)
 	for _, parameter := range literal.Parameters {
 		r.declare(parameter, bindingParameter)

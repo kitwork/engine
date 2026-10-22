@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kitwork/engine/database/statement"
 	kitdbsql "github.com/kitwork/engine/kitdb/sql"
 	"github.com/kitwork/engine/value"
 )
@@ -144,22 +145,54 @@ type columnForeignGroup struct {
 // application code does not repeat "products" in two places.
 func (d *Database) Struct() value.Value {
 	return value.NewFunc(func(args ...value.Value) value.Value {
-		if len(args) != 1 || args[0].K != value.Map {
-			return value.InvalidFailure(value.InvalidArgumentCode, "db.struct: expects one field object")
-		}
-		columns := make(map[string]*ColumnSpec, len(args[0].Map()))
-		for name, field := range args[0].Map() {
-			spec, ok := field.V.(*ColumnSpec)
-			if !ok || spec == nil {
-				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.struct: field %q is not a column type", name))
-			}
-			columns[name] = spec
-		}
-		if len(columns) == 0 {
-			return value.InvalidFailure(value.InvalidArgumentCode, "db.struct: needs at least one field")
-		}
-		return value.Value{K: value.Proxy, V: &StructDef{Version: structIRVersion, columns: columns}}
+		return newStructDef(args, false)
 	})
+}
+
+// newStructDef is struct({ … }) of both spellings. With vocabulary (kitwork/schema), every column refuses
+// null unless .nullable() (it reads each column after its modifiers ran), and a column belongs to one
+// table: a column of another struct (userId: users.id) is the foreign key the engine does not have yet,
+// never a silent second name of the other table's column.
+func newStructDef(args []value.Value, vocabulary bool) value.Value {
+	if len(args) != 1 || args[0].K != value.Map {
+		if vocabulary {
+			return value.InvalidFailure(value.InvalidArgumentCode, "struct nhận một object cột: struct({ id: id(), name: text() })")
+		}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.struct: expects one field object")
+	}
+	columns := make(map[string]*ColumnSpec, len(args[0].Map()))
+	for name, field := range args[0].Map() {
+		spec, ok := field.V.(*ColumnSpec)
+		if !ok || spec == nil {
+			if vocabulary {
+				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("struct: cột %s không phải một kiểu của kitwork/schema", name))
+			}
+			return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf("db.struct: field %q is not a column type", name))
+		}
+		if vocabulary {
+			if !spec.vocabulary {
+				return value.InvalidFailure(value.InvalidArgumentCode, fmt.Sprintf(`struct: cột %s viết bằng kiểu của kitwork/schema: import { text } from "kitwork/schema"`, name))
+			}
+			if spec.owner != nil {
+				return value.InvalidFailure(value.UnsupportedCode, fmt.Sprintf("struct: cột %s là cột của bảng khác: khoá ngoại bảng.cột chưa có trong engine hôm nay (lát 5)", name))
+			}
+		}
+		columns[name] = spec
+	}
+	if len(columns) == 0 {
+		if vocabulary {
+			return value.InvalidFailure(value.InvalidArgumentCode, "struct cần ít nhất một cột")
+		}
+		return value.InvalidFailure(value.InvalidArgumentCode, "db.struct: needs at least one field")
+	}
+	definition := &StructDef{Version: structIRVersion, columns: columns}
+	if vocabulary {
+		for _, spec := range columns {
+			spec.owner = definition
+			spec.notNull = statement.RequiredByDefault(statement.Column{Nullable: spec.nullable})
+		}
+	}
+	return value.Value{K: value.Proxy, V: definition}
 }
 
 // OnGet exposes stable field objects, so ref(users.id) keeps working when a

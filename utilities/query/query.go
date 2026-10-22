@@ -844,7 +844,7 @@ func (q *Query) getSQL() (string, []any) {
 		query += fmt.Sprintf(" %s \"%s\" ON %s", join.Type, join.Table, join.On)
 	}
 
-	whereSQL, whereArgs := q.buildConditions(q.conditions, 1)
+	whereSQL, whereArgs := q.whereClause(1)
 	if whereSQL != "" {
 		query += " WHERE " + whereSQL
 	}
@@ -915,6 +915,97 @@ func quoteCol(col string) string {
 		return fmt.Sprintf("\"%s\".\"%s\"", parts[0], parts[1])
 	}
 	return fmt.Sprintf("\"%s\"", col)
+}
+
+// whereClause is the WHERE of every statement the query renders (a read, an update, a delete): its flat
+// conditions and its grouped predicate (WherePredicate), joined by AND as ExecutionPlan joins them, every
+// value a $n argument from argOffset on. Until 22/10/2026 the SQL backends rendered the flat conditions
+// alone, so a predicate a SQLite query was given filtered nothing, and an update with one alone touched
+// every row.
+func (q *Query) whereClause(argOffset int) (string, []any) {
+	conditions, args := q.buildConditions(q.conditions, argOffset)
+	if q.predicate == nil {
+		return conditions, args
+	}
+	predicate := buildPredicate(*q.predicate, &args, argOffset)
+	if conditions == "" {
+		return predicate, args
+	}
+	return "(" + conditions + ") AND " + predicate, args
+}
+
+// buildPredicate renders a grouped predicate: parentheses for AND and OR, NOT, IS [NOT] NULL only for
+// those operators (a null value compares unknown, as SQL), IN and NOT IN (an empty list is 1=0 and 1=1),
+// identifiers quoted and every value an argument appended to args.
+func buildPredicate(predicate Predicate, args *[]any, argOffset int) string {
+	switch predicate.Kind {
+	case PredicateAnd, PredicateOr:
+		joiner := " AND "
+		if predicate.Kind == PredicateOr {
+			joiner = " OR "
+		}
+		parts := make([]string, 0, len(predicate.Children))
+		for _, child := range predicate.Children {
+			parts = append(parts, buildPredicate(child, args, argOffset))
+		}
+		return "(" + strings.Join(parts, joiner) + ")"
+	case PredicateNot:
+		if len(predicate.Children) != 1 {
+			return "1=0"
+		}
+		return "NOT (" + buildPredicate(predicate.Children[0], args, argOffset) + ")"
+	}
+	condition := predicate.Condition
+	column := quoteCol(condition.Column)
+	argument := func(item any) string {
+		if v, ok := item.(value.Value); ok {
+			item = v.Interface()
+		}
+		*args = append(*args, item)
+		return fmt.Sprintf("$%d", len(*args)+argOffset-1)
+	}
+	operator := strings.ToLower(strings.TrimSpace(condition.Operator))
+	switch operator {
+	case "is null":
+		return column + " IS NULL"
+	case "is not null":
+		return column + " IS NOT NULL"
+	case "in", "not in":
+		items := condition.Value
+		if v, ok := items.(value.Value); ok {
+			items = v.Interface()
+		}
+		var list []any
+		if reflected := reflect.ValueOf(items); reflected.Kind() == reflect.Slice || reflected.Kind() == reflect.Array {
+			for index := 0; index < reflected.Len(); index++ {
+				list = append(list, reflected.Index(index).Interface())
+			}
+		} else {
+			list = []any{items}
+		}
+		if len(list) == 0 {
+			if operator == "in" {
+				return "1=0"
+			}
+			return "1=1"
+		}
+		placeholders := make([]string, 0, len(list))
+		for _, item := range list {
+			placeholders = append(placeholders, argument(item))
+		}
+		return fmt.Sprintf("%s %s (%s)", column, strings.ToUpper(operator), strings.Join(placeholders, ", "))
+	case "", "=", "==", "===":
+		operator = "="
+	case "!=", "!==", "<>":
+		operator = "<>"
+	case "<", "<=", ">", ">=":
+	default:
+		operator = strings.ToUpper(operator)
+	}
+	if condition.IsColumn {
+		return fmt.Sprintf("%s %s %s", column, operator, quoteCol(fmt.Sprint(condition.Value)))
+	}
+	return fmt.Sprintf("%s %s %s", column, operator, argument(condition.Value))
 }
 
 func (q *Query) buildConditions(conditions []Condition, argOffset int) (string, []any) {
@@ -1179,7 +1270,7 @@ func (q *Query) update(val map[string]value.Value) value.Value {
 		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 
-	if len(q.conditions) == 0 {
+	if len(q.conditions) == 0 && q.predicate == nil {
 		fmt.Printf("[DB] Update Error: Missing WHERE clause. Bulk updates are blocked for safety.\n")
 		return value.InvalidFailure(value.InvalidArgumentCode, "missing WHERE clause for update")
 	}
@@ -1193,7 +1284,7 @@ func (q *Query) update(val map[string]value.Value) value.Value {
 		i++
 	}
 
-	whereSQL, whereArgs := q.buildConditions(q.conditions, i)
+	whereSQL, whereArgs := q.whereClause(i)
 	args = append(args, whereArgs...)
 
 	returningClause := "RETURNING *"
@@ -1255,12 +1346,12 @@ func (q *Query) remove() value.Value {
 		return value.InvalidFailure(value.UnavailableCode, "database not connected")
 	}
 
-	if len(q.conditions) == 0 {
+	if len(q.conditions) == 0 && q.predicate == nil {
 		fmt.Printf("[DB] WARNING: Attempting hard REMOVE without WHERE on table %s. Blocked for safety.\n", q.tables[0])
 		return value.InvalidFailure(value.InvalidArgumentCode, "missing WHERE clause for delete")
 	}
 
-	whereSQL, whereArgs := q.buildConditions(q.conditions, 1)
+	whereSQL, whereArgs := q.whereClause(1)
 	query := fmt.Sprintf("DELETE FROM \"%s\" WHERE %s", q.tables[0], whereSQL)
 
 	if q.debug {

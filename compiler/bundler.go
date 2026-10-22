@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kitwork/engine/database/statement"
 	"github.com/kitwork/engine/value"
 )
 
@@ -61,7 +62,7 @@ func nativeBundleWithSources(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	combined := &Program{}
+	combined := &Program{Database: b.database}
 	combined.Statements = append(combined.Statements, b.defs...) // IIFE const của module (thứ tự phụ thuộc)
 	combined.Statements = append(combined.Statements, body...)   // thân entry (chạy ở top-level)
 
@@ -86,6 +87,81 @@ type bundler struct {
 	// appRootReal is it past links, found at the first app/ import.
 	appRoot     string
 	appRootReal string
+	// schemas holds, per schema file of .shared/schema/ (by its absolute path), the databases it
+	// exports, read from its source (database_catalog.go); exports the names every module exports.
+	schemas map[string]map[string]*statement.Database
+	exports map[string][]string
+	// database is what the resolver needs of the schema files: nil while no module is one.
+	database *DatabaseBundle
+}
+
+// schemaModule reports a file of the app's .shared/schema/, and its name from the app's folder. The
+// folder's spelling is exact: .Shared/Schema is not one, and its struct() is refused where it is imported.
+// A file of no app has no schema folder.
+func (b *bundler) schemaModule(absPath string) (string, bool) {
+	if b.appRoot == "" {
+		return "", false
+	}
+	relative, err := b.appRelative(absPath)
+	if err != nil {
+		return "", false
+	}
+	relative = filepath.ToSlash(relative)
+	segments := strings.Split(relative, "/")
+	if len(segments) < 3 || segments[0] != ".shared" || segments[1] != "schema" {
+		return "", false
+	}
+	return relative, true
+}
+
+func (b *bundler) databaseBundle() *DatabaseBundle {
+	if b.database == nil {
+		b.database = &DatabaseBundle{
+			Imports:       map[*Identifier]*DatabaseImport{},
+			SchemaModules: map[*FunctionLiteral]string{},
+		}
+	}
+	return b.database
+}
+
+// databaseImports records the bindings of an import of a schema file: a database it exports becomes a
+// handle the resolver translates statements on. A name the file does not export, and a default import,
+// are compile errors: the handle would be null and every statement on it would fail when it runs.
+func (b *bundler) databaseImports(imp *ImportStatement, absPath string, bindings []Statement) error {
+	databases, isSchema := b.schemas[absPath]
+	if !isSchema {
+		return nil
+	}
+	relative, _ := b.schemaModule(absPath)
+	name := filepath.Base(absPath)
+	if imp.Default != nil {
+		return fmt.Errorf("%s: %s không có export default: import { %s } from %q", b.place(imp.Token), name, firstOr(b.exports[absPath], "db"), imp.Source)
+	}
+	for index, spec := range imp.Names {
+		exported := false
+		for _, export := range b.exports[absPath] {
+			exported = exported || export == spec.Imported
+		}
+		if !exported {
+			return fmt.Errorf("%s: %s không export %s; có: %s", b.place(imp.Token), name, spec.Imported, sortedExports(b.exports[absPath]))
+		}
+		database := databases[spec.Imported]
+		if database == nil {
+			continue
+		}
+		local := bindings[index].(*VarStatement).Names[0]
+		b.databaseBundle().Imports[local] = &DatabaseImport{Module: relative, Export: spec.Imported, Database: database}
+	}
+	return nil
+}
+
+func firstOr(names []string, otherwise string) string {
+	for _, name := range names {
+		if name != DefaultExportName {
+			return name
+		}
+	}
+	return otherwise
 }
 
 // rewriteStatements thay mỗi ImportStatement tương đối bằng binding, và bảo đảm
@@ -121,9 +197,14 @@ func (b *bundler) rewriteStatements(stmts []Statement, fromDir string) ([]Statem
 		if imp.Default != nil {
 			out = append(out, memberBinding(imp.Default.Value, modVar, "default", imp.Token))
 		}
+		bindings := make([]Statement, 0, len(imp.Names))
 		for _, spec := range imp.Names {
-			out = append(out, memberBinding(spec.Local, modVar, spec.Imported, imp.Token))
+			bindings = append(bindings, memberBinding(spec.Local, modVar, spec.Imported, imp.Token))
 		}
+		if err := b.databaseImports(imp, absPath, bindings); err != nil {
+			return nil, err
+		}
+		out = append(out, bindings...)
 	}
 	return out, nil
 }
@@ -178,9 +259,28 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if b.exports == nil {
+		b.exports = map[string][]string{}
+	}
+	b.exports[absPath] = prog.Exports
+	schema, isSchema := b.schemaModule(absPath)
+	if isSchema {
+		// a database is read from the file's own source, before anything is bundled into it
+		databases, err := readSchemaModule(prog, b.place)
+		if err != nil {
+			return "", err
+		}
+		if b.schemas == nil {
+			b.schemas = map[string]map[string]*statement.Database{}
+		}
+		b.schemas[absPath] = databases
+	}
 	// Đệ quy: import tương đối của module này → binding + append IIFE con trước.
 	body, err := b.rewriteStatements(prog.Statements, filepath.Dir(absPath))
 	if err != nil {
+		return "", err
+	}
+	if err := b.refuseDatabaseReexport(prog, body); err != nil {
 		return "", err
 	}
 	origin := Token{
@@ -193,8 +293,39 @@ func (b *bundler) ensureModule(absPath string) (string, error) {
 	b.counter++
 	name := fmt.Sprintf("__kw_mod_%d", b.counter)
 	b.modules[absPath] = name
-	b.defs = append(b.defs, moduleIIFE(name, body)) // append SAU các module con → đúng thứ tự
+	definition := moduleIIFE(name, body)
+	if isSchema {
+		function := definition.(*VarStatement).Value.(*CallExpression).Function.(*FunctionLiteral)
+		b.databaseBundle().SchemaModules[function] = schema
+	}
+	b.defs = append(b.defs, definition) // append SAU các module con → đúng thứ tự
 	return name, nil
+}
+
+// refuseDatabaseReexport refuses a module that exports a database it imported (export { db }): a
+// statement is translated only on a name imported straight from the schema file, so a handle passed on
+// would reach files that cannot use it.
+func (b *bundler) refuseDatabaseReexport(prog *Program, body []Statement) error {
+	if b.database == nil || len(prog.Exports) == 0 {
+		return nil
+	}
+	for _, node := range body {
+		binding, ok := node.(*VarStatement)
+		if !ok || len(binding.Names) != 1 {
+			continue
+		}
+		imported := b.database.Imports[binding.Names[0]]
+		if imported == nil {
+			continue
+		}
+		for _, export := range prog.Exports {
+			if export == binding.Names[0].Value {
+				return fmt.Errorf("%s: export lại %s chưa có trong engine hôm nay: file dùng database import thẳng từ app/%s",
+					b.place(binding.Token), export, imported.Module)
+			}
+		}
+	}
+	return nil
 }
 
 // sourceName is how a module's file is named in the debug table, and so in an error's at: relative to

@@ -974,6 +974,13 @@ func (c *Compiler) Compile(node Node) error {
 		c.emit(runtime.GET)
 
 	case *MethodCallExpression:
+		// a database statement's action compiles as the call that replaces its chain: db.#statement(template,
+		// holes…) (database_translate.go); the chain's lambdas are never compiled
+		if c.scopes != nil {
+			if replacement := c.scopes.statements[n]; replacement != nil {
+				n = replacement
+			}
+		}
 		// x.safe() is gone (14/10/2026): the parser reports it with the new spelling, so it never gets here
 		// as a protected evaluation; with arguments it is an ordinary call of a method named safe.
 		if err := c.Compile(n.Object); err != nil {

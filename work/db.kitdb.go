@@ -89,15 +89,38 @@ type kitDatabaseHandle struct {
 	path         string
 	options      kitdbengine.OpenOptions
 	expectedID   string
+	// appScoped: the app's own database (kitDBApplicationName), which lives in the app's folder, not the
+	// site's, and every site of the app shares.
+	appScoped bool
+}
+
+// kitDBApplicationName is the name of the app's database, connection().schema({ … }) of
+// .shared/schema/ (KITWORK_DATABASE.md mục 1). Its file is in the app's folder,
+// app/.database/application/ (apps/<identity>/.database/application/ for a host of many apps), never in a
+// site's .data/. A tenant's own kitdb("…") cannot name it: newDbProxy refuses a name that starts with @
+// once kitDBRel has read it, as every open reads it ("./@application" is "@application").
+const kitDBApplicationName = "@application"
+
+// kitDBApplicationFile is the file of the app's database inside .database/application/.
+const kitDBApplicationFile = "application.kitdb"
+
+// kitDBPath is where a database name lives, and whether that is the app's folder.
+func kitDBPath(tenant *Tenant, relative string) (string, bool) {
+	if relative == kitDBApplicationName {
+		return tenant.resolveApp(".database", "application", kitDBApplicationFile), true
+	}
+	return tenant.resolve(".data", filepath.FromSlash(relative)), false
 }
 
 func kitDBForRequest(tenant *Tenant, relative string, scope *requestscope.Scope) *kitDatabaseHandle {
 	relative = kitDBRel(relative)
 	options, expectedID := registeredKitDBOpenSettings(tenant, relative)
+	path, appScoped := kitDBPath(tenant, relative)
 	return &kitDatabaseHandle{
 		tenant: tenant, requestScope: scope,
-		path:    tenant.resolve(".data", filepath.FromSlash(relative)),
+		path:    path,
 		options: options, expectedID: expectedID,
+		appScoped: appScoped,
 	}
 }
 
@@ -142,7 +165,11 @@ func (handle *kitDatabaseHandle) database() (*managedKitDB, error) {
 	if handle == nil || handle.tenant == nil {
 		return nil, fmt.Errorf("kitdb: tenant is unavailable")
 	}
-	if !handle.tenant.insideSiteRoot(handle.path) {
+	if handle.appScoped {
+		if !handle.tenant.insideAppRoot(handle.path) {
+			return nil, fmt.Errorf("kitdb: database path escapes the app")
+		}
+	} else if !handle.tenant.insideSiteRoot(handle.path) {
 		return nil, fmt.Errorf("kitdb: database path escapes the tenant site")
 	}
 	runtime := handle.tenant.AppRuntime()

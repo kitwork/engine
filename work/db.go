@@ -32,7 +32,10 @@ import (
 // wiring that was nearly finished. It was not: it was a no-op in front of the real implementation
 // below. Removed so the code states the truth. Reviving the delegation means teaching the adapter
 // about database.Configs and giving it the tenant VM first.
-func (w *KitWork) Database() *Database {
+//
+// It is the module of the older spellings since kitwork/database became DatabaseModule
+// (database_module.go), which hands it every name it does not answer itself.
+func (w *KitWork) legacyDatabase() *Database {
 	return &Database{
 		tenant:       w.tenant,
 		requestScope: w.requestScope,

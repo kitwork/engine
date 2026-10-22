@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestCompilerV11GoldenContract(t *testing.T) {
-	if CompilerSchemaVersion != 11 {
-		t.Fatalf("CompilerSchemaVersion = %d, want schema v11", CompilerSchemaVersion)
+func TestCompilerV12GoldenContract(t *testing.T) {
+	if CompilerSchemaVersion != 12 {
+		t.Fatalf("CompilerSchemaVersion = %d, want schema v12", CompilerSchemaVersion)
 	}
 	// Bytecode 3 (14/10/2026) moved the fingerprint and every checksum below with the version alone: each
 	// fixture's instructions, constants and debug table are those bytecode 2 wrote (none needs a wide
@@ -16,10 +16,17 @@ func TestCompilerV11GoldenContract(t *testing.T) {
 	// Schema 10 (15/10/2026) moved the fingerprint alone too: no fixture before it updates a member or an
 	// item through a call or an update, or breaks a line before ++. Schema 11 on bytecode 4 (15/10/2026,
 	// STEP) moved the fingerprint and every checksum with the version; the fixtures with ++ or -- hold
-	// STEP where they held PUSH 1; ADD.
-	const expectedFingerprint = "de39cf778611ad4470b339dda95d37586b7c0e91f6d64989877df3b34e791450"
+	// STEP where they held PUSH 1; ADD. Schema 12 (22/10/2026, database statements translated when they
+	// compile) moved the fingerprint alone: no fixture imports a database.
+	const expectedFingerprint = "9b101149799e891bcf601468edd50f9533c3dbe0896f9ea380220ebcc423abb3"
 	if got := Fingerprint(); got != expectedFingerprint {
 		t.Fatalf("compiler fingerprint = %q, want %q", got, expectedFingerprint)
+	}
+	// schema 11 on bytecode 4 compiled a statement's lambdas, which the database handle refuses: its
+	// artifacts are not reused
+	const schema11 = "de39cf778611ad4470b339dda95d37586b7c0e91f6d64989877df3b34e791450"
+	if stamped := compilerFingerprintFor(11); hex.EncodeToString(stamped[:]) != schema11 || Fingerprint() == schema11 {
+		t.Fatalf("schema 11 on bytecode 4 stamps %x, the current compiler %s: want %s and another", stamped, Fingerprint(), schema11)
 	}
 	// schema 10 on bytecode 3 made x++ x = x + 1, which joins "5"++ into "51": its artifacts are not reused
 	const schema10 = "308eee4d8c849346f04f0b247289f1327411c01686ee1e12c5da91bc27a3eeb9"

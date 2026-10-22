@@ -33,6 +33,9 @@ type Program struct {
 	Statements []Statement
 	Exports    []string // tên export qua `export const/function` hoặc `export { }`
 	HasDefault bool     // true nếu có `export default …` (đã hạ về const DefaultExportName)
+	// Database is what the bundler found of the app's databases (database.go); nil for a program that
+	// imports no schema file.
+	Database *DatabaseBundle
 }
 
 // DefaultExportName là biến tổng hợp mà `export default <expr>` được hạ xuống.

@@ -1413,33 +1413,107 @@ func (t *SchemaTable) readKitDBRows(plan query.ExecutionPlan, forceLimit int) ([
 	if offset < 0 {
 		offset = 0
 	}
-	needed := limit + offset
-	rows := make([]kitDBStoredRow, 0, needed)
-	needsSort := len(plan.Orders) != 0 && !access.orderCovered
-	err = t.scanKitDBRowsUsing(plan, access, func(row kitDBStoredRow) (bool, error) {
-		rows = append(rows, row)
-		if needsSort {
-			sort.SliceStable(rows, func(left, right int) bool {
-				return t.compareKitDBRows(rows[left], rows[right], plan.Orders) < 0
-			})
-			if len(rows) > needed {
-				rows = rows[:needed]
-			}
-			return false, nil
+	var less func(left, right kitDBStoredRow) bool
+	if len(plan.Orders) != 0 && !access.orderCovered {
+		less = func(left, right kitDBStoredRow) bool {
+			return t.compareKitDBRows(left, right, plan.Orders) < 0
 		}
-		return len(rows) >= needed, nil
-	})
-	if err != nil {
+	}
+	collector := newKitDBRowCollector(limit, offset, less)
+	if err := t.scanKitDBRowsUsing(plan, access, collector.add); err != nil {
 		return nil, err
 	}
-	if offset >= len(rows) {
-		return []kitDBStoredRow{}, nil
+	return collector.result(), nil
+}
+
+// kitDBRowCollector keeps, of the rows a scan reads, those a read gives back: past offset, at most limit,
+// in order. Nothing is set aside before a row is read: a read used to make room for limit+offset rows up
+// front, so a page from the request (list({ page, limit }), page 2000000000) asked for terabytes on an
+// empty table and the process died, out of memory, past any recover (22/10/2026). Rows in the scan's order
+// are skipped up to offset and never kept; rows in an order no index covers go through kitDBBestRows, so
+// what is kept grows with the rows read, never with the numbers asked for.
+type kitDBRowCollector struct {
+	limit, offset int
+	skipped       int
+	rows          []kitDBStoredRow
+	// best keeps the rows when the scan does not give them in order; nil when it does.
+	best *kitDBBestRows
+}
+
+// newKitDBRowCollector collects a read of limit rows past offset; less is the order the rows are sorted
+// by, nil when the scan gives them in order.
+func newKitDBRowCollector(limit, offset int, less func(left, right kitDBStoredRow) bool) *kitDBRowCollector {
+	collector := &kitDBRowCollector{limit: limit, offset: offset}
+	if less != nil {
+		collector.best = &kitDBBestRows{needed: limit + offset, less: less}
 	}
-	rows = rows[offset:]
-	if len(rows) > limit {
-		rows = rows[:limit]
+	return collector
+}
+
+// add takes the next row of the scan; true when the read has all it needs.
+func (collector *kitDBRowCollector) add(row kitDBStoredRow) (bool, error) {
+	if collector.best != nil {
+		collector.best.add(row)
+		return false, nil
 	}
-	return rows, nil
+	if collector.skipped < collector.offset {
+		collector.skipped++
+		return false, nil
+	}
+	collector.rows = append(collector.rows, row)
+	return len(collector.rows) >= collector.limit, nil
+}
+
+// result is the rows of the read, in order; never nil.
+func (collector *kitDBRowCollector) result() []kitDBStoredRow {
+	rows := collector.rows
+	if collector.best != nil {
+		rows = collector.best.sorted()
+		if collector.offset >= len(rows) {
+			return []kitDBStoredRow{}
+		}
+		rows = rows[collector.offset:]
+	}
+	if len(rows) > collector.limit {
+		rows = rows[:collector.limit]
+	}
+	if rows == nil {
+		return []kitDBStoredRow{}
+	}
+	return rows
+}
+
+// kitDBBestRows keeps, of the rows an order no index covers is read through, the first needed in that
+// order. It collects up to twice what it needs, then sorts and keeps what it needs, and sorts once at the
+// end: O(N log K) comparisons for N rows scanned and K kept (22/10/2026; the scan sorted every row it kept
+// after each row it read, O(N·K log K)). less is a total order (compareKitDBRows ends at the row key), so
+// the rows are those a full sort gives.
+type kitDBBestRows struct {
+	rows   []kitDBStoredRow
+	needed int
+	less   func(left, right kitDBStoredRow) bool
+}
+
+func (best *kitDBBestRows) add(row kitDBStoredRow) {
+	best.rows = append(best.rows, row)
+	if len(best.rows) >= 2*best.needed {
+		best.trim()
+	}
+}
+
+func (best *kitDBBestRows) trim() {
+	sort.SliceStable(best.rows, func(left, right int) bool {
+		return best.less(best.rows[left], best.rows[right])
+	})
+	if len(best.rows) > best.needed {
+		best.rows = best.rows[:best.needed]
+	}
+}
+
+// sorted is the rows kept, in order.
+func (best *kitDBBestRows) sorted() []kitDBStoredRow {
+	best.trim()
+	return best.rows
 }
 
 func kitDBEffectiveLimit(plan query.ExecutionPlan, forceLimit int) int {
@@ -1470,7 +1544,11 @@ func (t *SchemaTable) compareKitDBRows(left, right kitDBStoredRow, orders []quer
 		if !rightFound {
 			rightValue = value.NewNil()
 		}
-		comparison := kitDBCompareValues(leftValue, rightValue)
+		kind := ""
+		if spec := t.columns[kitDBColumnName(order.Column)]; spec != nil {
+			kind = spec.kind
+		}
+		comparison := kitDBCompareKind(kind, leftValue, rightValue)
 		if comparison != 0 {
 			if strings.EqualFold(order.Direction, "desc") {
 				return -comparison
@@ -1965,6 +2043,13 @@ func kitDBTightenUpperBound(constraint *kitDBColumnConstraint, item value.Value,
 }
 
 func kitDBIndexValueCompatible(field StructFieldDef, item value.Value) bool {
+	// an index finds a decimal by its stored text, a condition compares it as a number
+	// (kitDBCompareKind): "35000" and "35000.00" are one value to the scan and two keys to the index, so a
+	// decimal is never looked up through one; the condition reads every row (22/10/2026). Until a write
+	// keeps a decimal in one form (KITWORK_DATABASE.md mục 8.2), a decimal index serves no equality.
+	if field.Kind == "decimal" {
+		return false
+	}
 	if item.IsNil() {
 		return true
 	}
@@ -2040,17 +2125,17 @@ func (t *SchemaTable) kitDBConditionMatches(row map[string]value.Value, conditio
 	}
 	switch operator {
 	case "", "=", "==", "===":
-		return kitDBCompareValues(left, right) == 0, nil
+		return kitDBCompareKind(spec.kind, left, right) == 0, nil
 	case "!=", "!==", "<>":
-		return kitDBCompareValues(left, right) != 0, nil
+		return kitDBCompareKind(spec.kind, left, right) != 0, nil
 	case ">":
-		return kitDBCompareValues(left, right) > 0, nil
+		return kitDBCompareKind(spec.kind, left, right) > 0, nil
 	case ">=":
-		return kitDBCompareValues(left, right) >= 0, nil
+		return kitDBCompareKind(spec.kind, left, right) >= 0, nil
 	case "<":
-		return kitDBCompareValues(left, right) < 0, nil
+		return kitDBCompareKind(spec.kind, left, right) < 0, nil
 	case "<=":
-		return kitDBCompareValues(left, right) <= 0, nil
+		return kitDBCompareKind(spec.kind, left, right) <= 0, nil
 	case "like":
 		return kitDBLike(left.Text(), right.Text()), nil
 	case "not like":

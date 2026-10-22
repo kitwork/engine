@@ -72,7 +72,8 @@ func TestExampleSitesCarryNoTailwindWord(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(examplesRoot, path)
 		if d.IsDir() {
-			if d.Name() == ".data" || d.Name() == ".persist" {
+			// data is never source: an app's .database/ (the /database demo's KitDB) stays where it is
+			if d.Name() == ".data" || d.Name() == ".persist" || d.Name() == ".database" {
 				return filepath.SkipDir
 			}
 			return os.MkdirAll(filepath.Join(root, rel), 0o755)
@@ -110,6 +111,9 @@ func TestExampleSitesCarryNoTailwindWord(t *testing.T) {
 	for _, dir := range hosts {
 		host := filepath.Base(dir)
 		tenant := NewTenant(root, host)
+		// a page may open its app's database (the /database demo): closed before the copy is removed, which
+		// Windows refuses for a file still open
+		t.Cleanup(tenant.Close)
 		if err := tenant.Run(); err != nil {
 			t.Fatalf("%s: %v", host, err)
 		}

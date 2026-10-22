@@ -2,6 +2,8 @@ package work
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/kitwork/engine/utilities/query"
@@ -142,7 +144,7 @@ func kitDBEvaluatePredicateCondition(condition query.Condition, resolve kitDBPre
 			return kitDBTrue, nil
 		}
 	}
-	comparison := kitDBCompareValues(left, right)
+	comparison := kitDBCompareKind(kind, left, right)
 	switch operator {
 	case "", "=", "==", "===":
 		return kitDBBooleanTruth(comparison == 0), nil
@@ -181,7 +183,7 @@ func kitDBEvaluateIn(left value.Value, kind string, collection value.Value) (kit
 		if kind != "" {
 			candidate = coerceWrite(kind, candidate)
 		}
-		if kitDBSame(left, candidate) {
+		if !kitDBUnordered(left, candidate) && kitDBCompareKind(kind, left, candidate) == 0 {
 			return kitDBTrue, nil
 		}
 	}
@@ -208,8 +210,145 @@ func kitDBEvaluateBetween(left value.Value, kind string, bounds value.Value) (ki
 	}
 	return kitDBBooleanTruth(
 		!kitDBUnordered(left, lower) && !kitDBUnordered(left, upper) &&
-			kitDBCompareValues(left, lower) >= 0 && kitDBCompareValues(left, upper) <= 0,
+			kitDBCompareKind(kind, left, lower) >= 0 && kitDBCompareKind(kind, left, upper) <= 0,
 	), nil
+}
+
+// kitDBCompareKind compares two stored values of a column of that kind. A decimal is stored as its exact
+// text ("35000", "100.5"), which compares as a number, never as text: "35000" > "5" is false as text,
+// so amount > 5 and orderBy(desc(amount)) gave wrong rows without a word (22/10/2026). Any other kind,
+// and a decimal text that does not read as a number, compares as kitDBCompareValues does.
+//
+// The two texts are compared digit by digit, never made into numbers: a comparison costs the length of
+// the texts, whatever their exponent. Read as big.Rat, the fix's first form, "1e999999" built 10^999999,
+// about 19 ms a comparison, so one such value in a filter or a row made every scan pay that for each row
+// it read.
+func kitDBCompareKind(kind string, left, right value.Value) int {
+	if kind == "decimal" {
+		if leftNumber, ok := kitDBDecimal(left); ok {
+			if rightNumber, ok := kitDBDecimal(right); ok {
+				return leftNumber.compare(rightNumber)
+			}
+		}
+	}
+	return kitDBCompareValues(left, right)
+}
+
+// kitDBDecimalNumber is a decimal read from its text: sign × 0.digits × 10^exponent, its digits without a
+// zero in front or behind ("35000" is 0.35 × 10^5, "0.05" is 0.5 × 10^-1); zero has sign 0 and no digits.
+type kitDBDecimalNumber struct {
+	sign     int
+	digits   string
+	exponent int64
+}
+
+// kitDBDecimalExponentLimit bounds the exponent a decimal text is read with: past it the text is not read
+// as a number and compares as text.
+const kitDBDecimalExponentLimit = 1 << 40
+
+// kitDBDecimal reads a stored decimal exactly: its text (validKitDBDecimal's form), or a number of the VM
+// by the text a write stores it as (numText).
+func kitDBDecimal(item value.Value) (kitDBDecimalNumber, bool) {
+	switch item.K {
+	case value.String:
+		return kitDBParseDecimal(item.String())
+	case value.Number:
+		if math.IsNaN(item.N) || math.IsInf(item.N, 0) {
+			return kitDBDecimalNumber{}, false
+		}
+		return kitDBParseDecimal(strconv.FormatFloat(item.N, 'g', -1, 64))
+	}
+	return kitDBDecimalNumber{}, false
+}
+
+// kitDBParseDecimal reads [+-]digits[.digits][e[+-]digits], with a digit on at least one side of the point.
+func kitDBParseDecimal(text string) (kitDBDecimalNumber, bool) {
+	position, sign := 0, 1
+	if position < len(text) && (text[position] == '+' || text[position] == '-') {
+		if text[position] == '-' {
+			sign = -1
+		}
+		position++
+	}
+	integerStart := position
+	for position < len(text) && text[position] >= '0' && text[position] <= '9' {
+		position++
+	}
+	integer := text[integerStart:position]
+	fraction := ""
+	if position < len(text) && text[position] == '.' {
+		position++
+		fractionStart := position
+		for position < len(text) && text[position] >= '0' && text[position] <= '9' {
+			position++
+		}
+		fraction = text[fractionStart:position]
+	}
+	if integer == "" && fraction == "" {
+		return kitDBDecimalNumber{}, false
+	}
+	var exponent int64
+	if position < len(text) && (text[position] == 'e' || text[position] == 'E') {
+		position++
+		exponentSign := int64(1)
+		if position < len(text) && (text[position] == '+' || text[position] == '-') {
+			if text[position] == '-' {
+				exponentSign = -1
+			}
+			position++
+		}
+		exponentStart := position
+		for position < len(text) && text[position] >= '0' && text[position] <= '9' {
+			if exponent > kitDBDecimalExponentLimit {
+				return kitDBDecimalNumber{}, false
+			}
+			exponent = exponent*10 + int64(text[position]-'0')
+			position++
+		}
+		if position == exponentStart {
+			return kitDBDecimalNumber{}, false
+		}
+		exponent *= exponentSign
+	}
+	if position != len(text) {
+		return kitDBDecimalNumber{}, false
+	}
+	// the digits of both sides without the zeros in front; the exponent counts the integer's digits left
+	leading := len(integer) - len(strings.TrimLeft(integer, "0"))
+	digits := integer[leading:] + fraction
+	if len(digits) == len(fraction) {
+		trimmed := strings.TrimLeft(fraction, "0")
+		leading += len(fraction) - len(trimmed)
+		digits = trimmed
+	}
+	digits = strings.TrimRight(digits, "0")
+	if digits == "" {
+		return kitDBDecimalNumber{}, true
+	}
+	return kitDBDecimalNumber{sign: sign, digits: digits, exponent: int64(len(integer)-leading) + exponent}, true
+}
+
+// compare is -1, 0 or 1 as number is less than, equal to or more than other.
+func (number kitDBDecimalNumber) compare(other kitDBDecimalNumber) int {
+	if number.sign != other.sign {
+		if number.sign < other.sign {
+			return -1
+		}
+		return 1
+	}
+	if number.sign == 0 {
+		return 0
+	}
+	magnitude := 0
+	switch {
+	case number.exponent < other.exponent:
+		magnitude = -1
+	case number.exponent > other.exponent:
+		magnitude = 1
+	default:
+		magnitude = strings.Compare(number.digits, other.digits)
+	}
+	return magnitude * number.sign
 }
 
 func kitDBNegateTruth(truth kitDBTruth) kitDBTruth {
