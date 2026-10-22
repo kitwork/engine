@@ -1,8 +1,6 @@
 package env
 
 import (
-	"path/filepath"
-
 	"github.com/kitwork/engine/capabilities"
 	envhelper "github.com/kitwork/engine/utilities/env"
 	"github.com/kitwork/engine/value"
@@ -49,11 +47,9 @@ func (e *envVars) OnInvoke(method string, args ...value.Value) value.Value {
 
 func init() {
 	capabilities.DefaultRegistry.Register("env", func(scope capabilities.Scope) value.Value {
-		envPath := scope.ResolvePath(".env")
-		vars := envhelper.ParseDotEnv(envPath)
-		if len(vars) == 0 {
-			vars = envhelper.ParseDotEnv(filepath.Join(scope.ResolvePath(), "..", ".env"))
-		}
+		// The app's own .env and nothing above it (docs/KITWORK_ENVIRONMENT.md §1, 22/10/2026): no
+		// fallback to ../.env, which for apps/<identity>/ is apps/.env, a file every app would read.
+		vars := envhelper.ParseDotEnv(scope.ResolvePath(".env"))
 		return value.Value{K: value.Proxy, V: &envVars{vars: vars}}
 	})
 }

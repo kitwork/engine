@@ -31,26 +31,22 @@ func Run(configFile ...string) (err error) {
 	// chung env, rò secret). env là SCOPED: host đọc root .env trong evalConfigJS;
 	// mỗi tenant đọc .env riêng của nó (work.Tenant.Run → kitwork().env).
 
-	// Manifest DUY NHẤT là một file .kitwork.js chạy được: app.kitwork.js (mặc định mới),
-	// hoặc server.kitwork.js (tên cũ, vẫn đọc). YAML/JSON KHÔNG nạp trực tiếp ở đây — muốn
-	// dùng chúng thì trỏ từ manifest: server.run("config.kitwork.yaml").
+	// Manifest DUY NHẤT là một file chạy được: application.work (22/10/2026), hay app.kitwork.js,
+	// server.kitwork.js (tên cũ, vẫn đọc khi đứng một mình). YAML/JSON KHÔNG nạp trực tiếp ở đây —
+	// muốn dùng chúng thì trỏ từ manifest: server.run("config.kitwork.yaml").
 	file := ""
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
 	} else {
-		for _, candidate := range []string{"app.kitwork.js", "server.kitwork.js"} {
-			if _, statErr := os.Stat(candidate); statErr == nil {
-				file = candidate
-				break
-			}
+		found, findErr := findManifest(".")
+		if findErr != nil {
+			return findErr
 		}
-		if file == "" {
-			return fmt.Errorf("không tìm thấy manifest: cần app.kitwork.js (hoặc server.kitwork.js)")
-		}
+		file = found
 	}
 
-	if !strings.HasSuffix(strings.ToLower(file), ".js") {
-		return fmt.Errorf("engine.Run chỉ nhận manifest .kitwork.js, nhận %q — "+
+	if !isManifestFile(file) {
+		return fmt.Errorf("engine.Run chỉ nhận manifest application.work (hay .kitwork.js cũ), nhận %q — "+
 			"muốn dùng YAML/JSON thì trỏ từ manifest: server.run(\"config.kitwork.yaml\")", file)
 	}
 
@@ -326,6 +322,11 @@ func Run(configFile ...string) (err error) {
 	// Client-IP source: as the edge server Kitwork ignores X-Forwarded-For by default (spoofable);
 	// trust_proxy: true opts in when running behind your own reverse proxy.
 	work.TrustProxyHeaders = cfg.TrustProxy
+	// The host's ceiling on a request body (app.web({ maxBody: "32mb" }), max_body): the server stops
+	// reading past it, and no request.json({ limit }) asks for more (work/request_limits.go).
+	if cfg.MaxBody > 0 {
+		work.MaxBodyBytes = cfg.MaxBody
+	}
 
 	// Host-level rate limits (first gate in ServeHTTP, before tenant resolution). Configured via
 	// server.kitwork.js .rateLimit({...}) or the YAML rate_limit: block; absent = off.
@@ -358,7 +359,7 @@ func Run(configFile ...string) (err error) {
 	// site measured 174 KB uncompressed — and while the render costs microseconds, shipping those
 	// bytes costs hundreds of milliseconds. The middleware leaves live streams, already-compressed
 	// formats and tiny bodies alone; see utilities/compress.
-	var baseHandler http.Handler = handler
+	var baseHandler http.Handler = http.MaxBytesHandler(handler, work.MaxBodyBytes)
 	baseHandler, err = newAppDatabaseKitSQLHandler(
 		appDatabaseRuntimes,
 		baseHandler,
@@ -374,9 +375,10 @@ func Run(configFile ...string) (err error) {
 		tlsConfig := domain.AutoSSL(cfg.Domains)
 
 		httpsServer := &http.Server{
-			Addr:      ":443",
-			Handler:   srvHandler,
-			TLSConfig: tlsConfig,
+			Addr:              ":443",
+			Handler:           srvHandler,
+			TLSConfig:         tlsConfig,
+			ReadHeaderTimeout: readHeaderTimeout,
 		}
 		servers = append(servers, httpsServer)
 		go func() {
@@ -387,8 +389,9 @@ func Run(configFile ...string) (err error) {
 	printBanner(cfg, host.IsLocalhost(), true)
 
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: srvHandler,
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           srvHandler,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	servers = append(servers, httpServer)
 	go func() {
@@ -488,26 +491,47 @@ func bytecodeCacheDirectory(cfg *Config) string {
 	return filepath.Join(cfg.Root, cfg.BytecodeCacheDir)
 }
 
+// manifestNames are the manifests a folder may hold, the new one first. Only one may be there.
+var manifestNames = []string{"application.work", "app.kitwork.js", "server.kitwork.js"}
+
+// findManifest returns the one manifest in dir. application.work beside an old app.kitwork.js or
+// server.kitwork.js stops the boot naming both: which one the author means is not the engine's guess.
+func findManifest(dir string) (string, error) {
+	var found []string
+	for _, name := range manifestNames {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
+			found = append(found, name)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("không tìm thấy manifest: cần application.work")
+	case 1:
+		return filepath.Join(dir, found[0]), nil
+	}
+	return "", fmt.Errorf("có %s cùng một thư mục: giữ một manifest, application.work là tên mới", strings.Join(found, " và "))
+}
+
+// isManifestFile reports whether file has a manifest's extension: .work, or .js for the old names.
+func isManifestFile(file string) bool {
+	lower := strings.ToLower(file)
+	return strings.HasSuffix(lower, ".work") || strings.HasSuffix(lower, ".js")
+}
+
 func commandConfig(configFile ...string) (*Config, error) {
 	file := ""
 	if len(configFile) > 0 && configFile[0] != "" {
 		file = configFile[0]
 	} else {
-		for _, candidate := range []string{"app.kitwork.js", "server.kitwork.js"} {
-			if _, err := os.Stat(candidate); err == nil {
-				file = candidate
-				break
-			}
+		found, err := findManifest(".")
+		if err != nil {
+			return nil, err
 		}
+		file = found
 	}
-	if file == "" {
+	if !isManifestFile(file) {
 		return nil, fmt.Errorf(
-			"không tìm thấy manifest: cần app.kitwork.js (hoặc server.kitwork.js)",
-		)
-	}
-	if !strings.HasSuffix(strings.ToLower(file), ".js") {
-		return nil, fmt.Errorf(
-			"engine command chỉ nhận manifest .kitwork.js, nhận %q",
+			"engine command chỉ nhận manifest application.work (hay .kitwork.js cũ), nhận %q",
 			file,
 		)
 	}
@@ -646,3 +670,7 @@ func rootLayoutLabel(layout work.RootLayout) string {
 func minifies(cfg *Config) bool {
 	return cfg != nil && (!cfg.AllowLocal || cfg.Minify)
 }
+
+// readHeaderTimeout is how long the server waits for a request's headers: a client that sends them a
+// byte at a time does not hold a connection open forever (Slowloris).
+const readHeaderTimeout = 10 * time.Second

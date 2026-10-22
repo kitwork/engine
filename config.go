@@ -30,6 +30,7 @@ type Config struct {
 	Hostname         string              `json:"hostname" yaml:"hostname"`
 	AllowLocal       bool                `json:"allow_local" yaml:"allow_local"`
 	TrustProxy       bool                `json:"trust_proxy" yaml:"trust_proxy"` // trust X-Forwarded-For — ONLY behind your own proxy
+	MaxBody          int64               `json:"max_body" yaml:"max_body"`       // the host's ceiling on a request body, bytes; 0 = 32 MiB
 	Logger           logger.Config       `json:"logger" yaml:"logger"`
 	RateLimit        *RateLimitConfig    `json:"rate_limit" yaml:"rate_limit"` // host-level limits; nil = off
 	AppDatabases     []AppDatabaseConfig `json:"-" yaml:"-"`
@@ -117,6 +118,13 @@ func ParseConfig(raw map[string]interface{}) (*Config, error) {
 		if b, ok := val.(bool); ok {
 			cfg.TrustProxy = b
 		}
+	}
+	if val, ok := raw["max_body"]; ok {
+		size, err := work.ParseByteSizeOf(val)
+		if err != nil {
+			return nil, fmt.Errorf("max_body: %w", err)
+		}
+		cfg.MaxBody = size
 	}
 	if value, ok := raw["prewarm"]; ok {
 		prewarm, err := parsePrewarmConfig(value)

@@ -804,7 +804,7 @@ func TestReadMobileManifestKeepsLegacyDeclaration(t *testing.T) {
 func TestRepositoryAppManifestUsesWebsiteRun(t *testing.T) {
 	t.Setenv("SITE_HOSTNAME", "kitwork.io")
 	t.Setenv("PORT", "8080")
-	raw, err := evalConfigJS(filepath.Join("..", "app.kitwork.js"))
+	raw, err := evalConfigJS(filepath.Join("..", "application.work"))
 	if err != nil {
 		t.Fatalf("repository app manifest: %v", err)
 	}

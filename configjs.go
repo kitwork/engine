@@ -11,6 +11,7 @@ import (
 	"github.com/kitwork/engine/compiler"
 	"github.com/kitwork/engine/manifest"
 	"github.com/kitwork/engine/runtime"
+	"github.com/kitwork/engine/utilities/safepath"
 	"github.com/kitwork/engine/value"
 	"github.com/kitwork/engine/work"
 	"gopkg.in/yaml.v3"
@@ -150,6 +151,8 @@ func (b *ServerBuilder) Web(args ...value.Value) *ServerBuilder {
 			b.config["allow_local"] = val
 		case "trustProxy":
 			b.config["trust_proxy"] = val
+		case "maxBody":
+			b.config["max_body"] = val
 		case "hotReload":
 			b.config["hot_reload"] = val
 		case "bytecodeCache":
@@ -218,6 +221,8 @@ func (b *ServerBuilder) Website(args ...value.Value) *ServerBuilder {
 			b.config["allow_local"] = item
 		case "trustProxy":
 			b.config["trust_proxy"] = item
+		case "maxBody":
+			b.config["max_body"] = item
 		case "hotReload":
 			b.config["hot_reload"] = item
 		case "bytecodeCache":
@@ -1051,13 +1056,31 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 	var missingEnv []string
 	envObj := work.NewEnvWithMissing(envMap, &missingEnv)
 
-	// kitwork() trong context setup trả về {app, server, env} (KHÔNG phải tenant runtime).
-	// `app` là tên chính thức (app.website/.desktop/.mobile — manifest khai báo surface);
-	// `server` giữ làm ALIAS tương thích ngược cho config cũ (server.run/.port/...).
+	// file.env(path): the manifest names the file its environment comes from, relative to its own
+	// folder and never outside it, with the real environment on top (the OS wins), so production with
+	// no .env still boots (docs/KITWORK_ENVIRONMENT.md, 22/10/2026). A wrong path stops the boot.
+	var fileEnvErrors []string
+	manifestDir := filepath.Dir(file)
+	fileObj := value.New(map[string]value.Value{
+		"env": value.NewFunc(func(args ...value.Value) value.Value {
+			vars, err := manifestFileEnv(manifestDir, args)
+			if err != nil {
+				fileEnvErrors = append(fileEnvErrors, err.Error())
+				return work.NewEnv(nil)
+			}
+			return work.NewEnvWithMissing(vars, &missingEnv)
+		}),
+	})
+
+	// kitwork() trong context setup trả về {application, file, app, server, env} (KHÔNG phải tenant
+	// runtime). application.work viết `import * as app from "kitwork/application"` (= kitwork().application)
+	// và `import * as file from "kitwork/file"`; `app`, `server`, `env` giữ cho manifest .kitwork.js cũ.
 	setupRoot := value.New(map[string]value.Value{
-		"app":    serverObj,
-		"server": serverObj,
-		"env":    envObj,
+		"application": serverObj,
+		"file":        fileObj,
+		"app":         serverObj,
+		"server":      serverObj,
+		"env":         envObj,
 	})
 	kitworkFunc := value.NewFunc(func(args ...value.Value) value.Value { return setupRoot })
 	vm.Builtins = []value.Value{kitworkFunc}
@@ -1067,10 +1090,38 @@ func evalServerBuilder(file string) (*ServerBuilder, error) {
 	if res.K == value.Invalid {
 		return nil, fmt.Errorf("config runtime error: %v", res.V)
 	}
+	if len(fileEnvErrors) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(fileEnvErrors, "; "))
+	}
 	if len(missingEnv) > 0 {
 		return nil, fmt.Errorf("missing required env var(s): %s", strings.Join(missingEnv, ", "))
 	}
 	return builder, nil
+}
+
+// manifestFileEnv reads the file a manifest's file.env(path) names: a path relative to the manifest's
+// folder that stays inside it, a file rather than a folder; a missing file is no error (the real
+// environment may hold everything). The real environment lies on top: the OS wins. Errors name the
+// path as written, never a value.
+func manifestFileEnv(manifestDir string, args []value.Value) (map[string]string, error) {
+	if len(args) == 0 || args[0].K != value.String {
+		return nil, fmt.Errorf(`file.env cần đường dẫn tới một file, tính từ thư mục của manifest: file.env("./.env")`)
+	}
+	written := args[0].Text()
+	path, err := safepath.Resolve(manifestDir, written)
+	if err != nil {
+		return nil, fmt.Errorf("file.env(%q): đường dẫn nằm ngoài thư mục của manifest", written)
+	}
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return nil, fmt.Errorf("file.env(%q) là một thư mục, cần một file", written)
+	}
+	vars := work.ParseDotEnv(path)
+	for _, kv := range os.Environ() {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			vars[kv[:i]] = kv[i+1:]
+		}
+	}
+	return vars, nil
 }
 
 // parseMinifyEnv reads MINIFY of the host env: "true" turns production minification on while
