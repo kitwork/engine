@@ -84,7 +84,7 @@ type releaseReport struct {
 }
 
 func main() {
-	mode := flag.String("mode", "verify", "verification mode: verify, release, kitdb-verify, kitdb-release, or kitdb-auth")
+	mode := flag.String("mode", "verify", "verification mode: verify, release, kitdb-verify, kitdb-release, kitdb-auth, or kitdb-lifecycle")
 	reportPath := flag.String("report", "", "optional JSON report path")
 	requireClean := flag.Bool("require-clean", false, "fail before running when git has changes")
 	dryRun := flag.Bool("dry-run", false, "print the plan without executing it")
@@ -188,8 +188,20 @@ func main() {
 }
 
 func releasePlan(mode string) ([]gateStep, error) {
+	plan, err := releaseModePlan(mode)
+	if err != nil {
+		return nil, err
+	}
+	for index := range plan {
+		plan[index].Env = withoutKitDBDiagnostics(plan[index].Env)
+	}
+	return plan, nil
+}
+
+func releaseModePlan(mode string) ([]gateStep, error) {
 	verify := []gateStep{
 		kitDBCompatibilityStep(),
+		kitDBLifecycleStep(false),
 		kitDBAuthorizationStep(false),
 		kitDBWriteCampaignStep(false),
 		kitDBProcessCrashStep(false),
@@ -244,6 +256,8 @@ func releasePlan(mode string) ([]gateStep, error) {
 		return append(plan, kitDBReleaseCampaigns()...), nil
 	case "kitdb-auth":
 		return []gateStep{kitDBAuthorizationStep(false), kitDBWriteCampaignStep(false), kitDBProcessCrashStep(false), kitDBSQLAuthorizationCanaryStep(false), kitDBAuthorizationStep(true), kitDBWriteCampaignStep(true), kitDBProcessCrashStep(true), kitDBSQLAuthorizationCanaryStep(true)}, nil
+	case "kitdb-lifecycle":
+		return []gateStep{kitDBLifecycleStep(false), kitDBLifecycleStep(true)}, nil
 	case "release":
 		plan := append(verify,
 			gateStep{
@@ -299,7 +313,7 @@ func releasePlan(mode string) ([]gateStep, error) {
 		return append(plan, kitDBReleaseCampaigns()...), nil
 	default:
 		return nil, fmt.Errorf(
-			"unknown mode %q; use verify, release, kitdb-verify, kitdb-release, or kitdb-auth",
+			"unknown mode %q; use verify, release, kitdb-verify, kitdb-release, kitdb-auth, or kitdb-lifecycle",
 			mode,
 		)
 	}
@@ -338,6 +352,7 @@ func kitDBCommerceJourneyStep() gateStep {
 func kitDBVerifyPlan() []gateStep {
 	return []gateStep{
 		kitDBCompatibilityStep(),
+		kitDBLifecycleStep(false),
 		kitDBAuthorizationStep(false),
 		kitDBWriteCampaignStep(false),
 		kitDBProcessCrashStep(false),
@@ -387,6 +402,7 @@ func kitDBVerifyPlan() []gateStep {
 
 func kitDBReleaseCampaigns() []gateStep {
 	return []gateStep{
+		kitDBLifecycleStep(true),
 		kitDBAuthorizationStep(true),
 		kitDBWriteCampaignStep(true),
 		kitDBProcessCrashStep(true),

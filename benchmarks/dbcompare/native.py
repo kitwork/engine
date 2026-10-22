@@ -99,6 +99,9 @@ def run(args):
         result["phases"].extend([
             dict(name="ingest_wall", ms=(time.perf_counter_ns() - start) / 1e6),
             dict(name="insert_sql", ms=insert_ns / 1e6), dict(name="checkpoints", ms=checkpoint_ns / 1e6)])
+        tick = time.perf_counter_ns()
+        connection.execute("ANALYZE products").fetchall()
+        result["phases"].append(dict(name="analyze", ms=(time.perf_counter_ns() - tick) / 1e6))
         for case in w["queries"]:
             prefix = "EXPLAIN " if args.engine == "duckdb" else "EXPLAIN QUERY PLAN "
             result["plans"][case["name"]] = connection.execute(prefix + case["sql"]).fetchall()

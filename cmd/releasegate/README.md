@@ -5,6 +5,7 @@ not push commits or schedule CI. `--require-clean` is for a committed candidate;
 omit it for development, where the JSON explicitly records a dirty worktree.
 
 ```text
+go run ./cmd/releasegate --mode kitdb-lifecycle --report .artifacts/kitdb-lifecycle.json --timeout 10m
 go run ./cmd/releasegate --mode kitdb-auth --report .artifacts/kitdb-auth.json --timeout 20m
 go run ./cmd/releasegate --mode kitdb-verify --report .artifacts/kitdb-verify.json --timeout 45m
 go run ./cmd/releasegate --mode kitdb-release --require-clean --report .artifacts/kitdb-release.json --timeout 90m
@@ -23,6 +24,33 @@ and closed/reopened ownership; see `kitdb/kitsql/SQL_CANARY_AUTH.md`.
 
 Existing storage, backup/restore, projection, search, operator and compatibility
 gates remain in the broader profiles. See `kitdb/RELEASE_1_0.md` for their scope.
+
+## Lifecycle And WAL Regression
+
+`kitdb-lifecycle` is a short two-step development gate: normal and race execution
+of the same required lifecycle, ACK-model and copy/reopen tests. Windows also
+requires both real no-delete-share WAL denial subcases: close/reopen without
+another checkpoint, and an explicit successful checkpoint after releasing the
+blocker. Publication failure must remain visible, subsequent ACKs must survive,
+and kernel/node resources must drain. Other platforms omit these Windows-only
+requirements, rather than counting a skipped Windows test as evidence.
+
+`verify` and `kitdb-verify` include the normal step; `release` and `kitdb-release`
+also include its race step. Each selected root and both Windows recovery
+subcases must emit PASS through the existing JSON evidence observer. Missing or
+skipped requirements fail the step even if `go test` exits zero.
+
+Every plan explicitly sets `KITDB_LIFECYCLE_CAMPAIGN`, `KITDB_MIXED_CAMPAIGN`,
+`KITDB_THREAD_ATTRIBUTION`, `KITDB_WAL_FORENSIC` and `KITDB_WAL_LOCK_CAPTURE` to
+`0`, including broad package suites. Inherited shell opt-ins cannot silently
+start a long diagnostic, access a retained fixture path, or invoke Restart
+Manager. These flags are recorded in planned and executed environments. Other
+reviewed gate-owned opt-ins, such as the authorization crash matrix, remain
+unchanged. Run manual diagnostics directly as documented in
+[`kitdb/relational/LIFECYCLE.md`](../../kitdb/relational/LIFECYCLE.md).
+
+This gate is not a production fix for an unexplained Windows denial, a clean
+candidate, a no-leak certification, a 24-hour soak or a stable release decision.
 
 ## Evidence Contract (Schema 3)
 

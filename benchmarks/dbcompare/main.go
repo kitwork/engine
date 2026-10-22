@@ -247,6 +247,11 @@ func ingest(ctx context.Context, d database, w workload) ([]phase, error) {
 	err = d.checkpoint(ctx)
 	checkpointTime += benchmarkSince(t)
 	result = append(result, phase{Name: "ingest_wall", MS: millis(benchmarkSince(start))}, phase{Name: "insert_sql", MS: millis(insertTime)}, phase{Name: "checkpoints", MS: millis(checkpointTime)})
+	if err == nil {
+		t = benchmarkNow()
+		_, err = d.execute(ctx, "ANALYZE products")
+		result = append(result, phase{Name: "analyze", MS: millis(benchmarkSince(t))})
+	}
 	return result, err
 }
 
@@ -490,7 +495,13 @@ func run() error {
 	updated := flag.Bool("updated", false, "replay expects the fixture's midpoint UPDATE")
 	queries := flag.String("queries", "indexed_page", "comma-separated fixture query names for replay")
 	profile := flag.Bool("profile", false, "write CPU/allocation profiles during replay")
+	postgres := flag.Bool("postgres", false, "include isolated local PostgreSQL from DBCOMPARE_POSTGRES_DSN")
 	flag.Parse()
+	if *postgres {
+		if err := validatePostgresDSN(os.Getenv("DBCOMPARE_POSTGRES_DSN")); err != nil {
+			return err
+		}
+	}
 	if *batch < 1 || *batch > 128 || *repetitions < 1 || *repetitions > 100 || *checkpoint < *batch || *cache < 1 || *cache > 1024 || *timeout <= 0 {
 		return fmt.Errorf("invalid benchmark limits")
 	}
@@ -593,6 +604,17 @@ func run() error {
 				if err = writeJSON(filepath.Join(dir, engine+".json"), r); err != nil {
 					return err
 				}
+			}
+		}
+		if *postgres {
+			r, e := runPostgres(ctx, os.Getenv("DBCOMPARE_POSTGRES_DSN"), w)
+			if e != nil {
+				r.Error = e.Error()
+				failures = append(failures, fmt.Errorf("%d postgres: %w", n, e))
+			}
+			reports = append(reports, r)
+			if err = writeJSON(filepath.Join(dir, "postgres.json"), r); err != nil {
+				return err
 			}
 		}
 	}

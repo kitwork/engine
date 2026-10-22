@@ -15,6 +15,7 @@ KitDB never delegates a query to the comparison engines.
 | `sqlite-go` | Existing `modernc.org/sqlite` dependency, `database/sql` |
 | `sqlite-native` | Python stdlib SQLite, native C SQLite |
 | `duckdb` | Optional Python DuckDB wheel, native DuckDB |
+| `postgres` | Optional real PostgreSQL over loopback TCP, existing `lib/pq` driver |
 
 No dependency is added to the engine's `go.mod`. The Python comparators are
 separate child processes, run sequentially, and time SQL inside their own
@@ -143,6 +144,7 @@ not physical filesystem allocation or peak construction disk usage.
     sqlite-go.json
     sqlite-native.json
     duckdb.json
+    postgres.json           optional isolated loopback PostgreSQL
     kitdb/data.kitdb...    canonical file, WAL, lock, optional projections/history
     sqlite-go/data.sqlite...
     sqlite-native/data.sqlite...
@@ -198,6 +200,33 @@ reporting, profile output and refusal to overwrite or run arbitrary SQL.
 See [the index-range follow-up](INDEX_RANGE_2026-08-31.md) for the measured
 standalone planner correction after the original comparison.
 See [the grouped batch follow-up](GROUP_BATCH_2026-08-31.md) for grouped analytics.
+See [the reusable KROW scan follow-up](KROW_SCAN_2026-10-17.md) for measured
+scan-allocation reductions on the one-million-row fixture.
+See [the write-pipeline follow-up](WRITE_PIPELINE_2026-10-17.md) for durable
+write/checkpoint component measurements and immutable snapshot-value sharing.
+See [the mixed database campaign](MIXED_2026-10-18.md) for 1/4/16-database
+latency distributions, noisy-neighbor cohorts, memory and drain/reopen evidence.
+See [checkpoint phase diagnostics](CHECKPOINT_2026-10-18.md) for separated
+queue/service timings, workload-window profiles and ordered existence probes.
+See [prefix-fenced read paths](READ_PATHS_2026-10-18.md) for isolated point/index
+measurements, the page-packing tradeoff and mixed SQL before/after comparisons.
+See [bounded range reads](RANGE_BOUNDS_2026-10-18.md) for two-sided page pruning,
+reverse-initialization savings and mixed SQL results including the regressions.
+See [SQL primary-suffix ordering](SQL_ORDER_2026-10-19.md) for the profiled
+planner correction, early row-hydration stop and mixed-workload limitations.
+See [the noisy sixteen-database follow-up](NOISY_2026-10-19.md) for six paired
+repeats, separate workload-window profiles and limits of short-run conclusions.
+See [relational scan buffers](SCAN_BUFFERS_2026-10-19.md) for fixed-work page
+counters, caller-owned visitor bytes and the KROW-only allocation reduction.
+See [SQL source-row capacity](SELECT_CAPACITY_2026-10-21.md) for the small
+point-allocation reduction, separate Windows timer-test correction, and retained
+failed and successful lifecycle gate evidence.
+See [private page-row positions](PAGE_ROWS_2026-10-22.md) for smaller decoded
+metadata, separated read/checksum/decode measurements, SQL allocation results,
+and the slower timing cases retained alongside improvements.
+See [page latency qualification](PAGE_LATENCY_2026-10-22.md) for paired CPU-only
+decode/row/key measurements, separate CPU profiles, the row-view tradeoff and a
+rejected shared-bounds refinement. No general non-regression claim is made.
 See [the 13M dictionary text follow-up](TEXT_ANALYTICS_13M_2026-09-04.md) for
 the separate opt-in real-data KitDB paths and remote read-only PostgreSQL
 baseline; those measurements are not produced by this synthetic runner.
@@ -205,11 +234,61 @@ See [the 13M fleet workload](SHOPPING_13M_FLEET_2026-09-04.md) for the separate
 pgwire admission, warm-residency and noisy-neighbor canary using one large
 read-only database beside mutable disposable tenants.
 
+For the isolated Windows development snapshot and its retained release-gate
+failure, see [candidate consolidation](CANDIDATE_2026-10-20.md). Benchmark gains
+do not qualify a candidate when the whole-suite gate fails.
+See the [cancellation barrier follow-up](CANCELLATION_2026-10-20.md) for the
+controlled interleaving, test-only correction and separately frozen r2 evidence.
+See [Windows lifecycle diagnostics](LIFECYCLE_2026-10-20.md) for the subsequent
+failed WAL-publication window, retained evidence and controlled recovery tests.
+
 ## Not Measured
 
-PostgreSQL/Turso, FTS ranking, joins, time partitions, multi-tenant concurrency,
+Remote PostgreSQL/Turso, FTS ranking, joins, time partitions, multi-tenant concurrency,
 read/write contention, cold OS cache, disk failure, crash durability, long-term
 compaction, arbitrary SQL and 13-million-row real data are **not** covered.
 This runner must not be used to claim production readiness or general parity
 with SQLite/DuckDB. Its purpose is to reveal the next bottleneck without hiding
 fallbacks or build/refresh cost.
+The optional isolated local PostgreSQL profile is described below.
+
+## Isolated PostgreSQL Comparison
+
+The optional `-postgres` profile requires an explicit `DBCOMPARE_POSTGRES_DSN`
+PostgreSQL URL. It refuses non-loopback hosts, databases without the
+`kitdb_benchmark_` prefix and a nonempty safe suffix, and URL options which can
+override the destination or inject server settings. It never reads application
+credentials, connects to a configured application database, or creates/drops a
+database automatically. Create a disposable local cluster and database first.
+Each scale creates a new `dbcompare_<rows>` schema without `IF NOT EXISTS` and
+refuses reuse. Schemas and data remain for inspection; stopping the temporary
+server is the campaign launcher's responsibility.
+
+```powershell
+# Set DBCOMPARE_POSTGRES_DSN privately to the disposable local database URL.
+go run ./benchmarks/dbcompare -rows 100000,1000000 -repetitions 7 -postgres `
+  -python python -python-site ../.tmp/dbcompare-python `
+  -out .artifacts/dbcompare-four-new
+```
+
+The adapter verifies a real PostgreSQL version and exact database name, requires
+`fsync=on` and `full_page_writes=on`, and sets synchronous commit on, parallel
+query off, JIT off and `work_mem=64MB`. It uses one connection, no explicit
+prepared-statement reuse, identical multi-row SQL INSERTs and the same explicit
+checkpoint cadence. The account needs checkpoint and schema-creation rights
+only in the disposable benchmark cluster. No production account should be used.
+
+All fresh profiles now execute `ANALYZE products` after ingestion, recorded as a
+separate phase outside ingestion/query timings. Existing historical reports are
+not relabeled as having this policy. PostgreSQL timings include local TCP,
+protocol and client materialization; embedded profiles do not. This is an
+application-facing comparison, not a protocol-normalized kernel comparison.
+PostgreSQL client Go allocations are not PostgreSQL server memory. Its reported
+`products_total_relation_bytes_not_cluster_or_WAL` includes the table, TOAST and
+indexes, not shared cluster files or WAL; never compare it to another engine's
+entire file set as if storage accounting were equal.
+
+`postgres.json` is written beside the other per-scale reports and included in
+`results.json`. Every query, including post-update values, is checked against the
+same independent fixture oracle. Remote PostgreSQL, concurrent transactions,
+cluster behavior and bulk COPY/appender ingestion are still not measured.
